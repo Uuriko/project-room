@@ -10,7 +10,6 @@ import { randomUUID } from "node:crypto";
 import { chromium } from "playwright";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
-import { expandSigninMore } from "./auth-signin.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
 
 const post = (origin, path, body, secret = null) => fetch(`${origin}${path}`, {
@@ -87,7 +86,7 @@ test("People Friend control proposes without scopes, accepts, messages, and refu
     page.on("pageerror", error => errors.push(String(error?.message ?? error)));
     await page.goto(origin);
     await page.locator("#auth-panel").waitFor({ state: "visible" });
-    await expandSigninMore(page);
+    await page.locator("#agent-signin-button").click();
     await page.locator('[name="identityId"]').fill(identity.identityId);
     await page.locator('[name="secret"]').fill(identity.secret);
     await page.locator('[data-agent-form="credentials"] button[type="submit"]').click();
@@ -220,7 +219,7 @@ test("Enter on Friend does not revoke a bond the peer just accepted", { timeout:
   });
   await page.goto(origin);
   await page.locator("#auth-panel").waitFor({ state: "visible" });
-  await expandSigninMore(page);
+  await page.locator("#agent-signin-button").click();
   await page.locator('[name="identityId"]').fill(muse.identityId);
   await page.locator('[name="secret"]').fill(muse.secret);
   await page.locator('[data-agent-form="credentials"] button[type="submit"]').click();

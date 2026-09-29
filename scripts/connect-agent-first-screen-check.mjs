@@ -65,11 +65,6 @@ for (const touch of [false, true]) {
     //    to. A Copy button that only copies is useless without one.
     assert.equal(await prompt.getAttribute('readonly'), '', 'shown, not editable');
 
-    // 5. The explanation is behind the disclosure, closed on arrival.
-    const help = page.locator('#join-agent-help');
-    assert.equal(await help.evaluate(node => node.open), false, 'docs start collapsed');
-    assert.equal(await page.locator('#join-agent-help p').first().isVisible(), false);
-
     // 6. None of this is an error state on a normal signed-out arrival.
     assert.equal(await page.locator('#join-agent-status').textContent(), '');
 
@@ -78,9 +73,6 @@ for (const touch of [false, true]) {
     await page.locator('#join-agent-status').filter({ hasText: 'Copied' }).waitFor();
     assert.equal(await page.evaluate(() => navigator.clipboard.readText()), text, 'the clipboard holds what was shown');
 
-    await page.locator('#join-agent-help summary').click();
-    assert.equal(await help.evaluate(node => node.open), true);
-    assert.ok(await page.locator('#join-agent-help p').first().isVisible(), 'the docs are there once asked for');
     assert.equal(await page.locator('#join-agent-packet').getAttribute('href'), `${origin}/llms.txt`);
 
     // The packet the prompt sends an agent to has to actually answer.

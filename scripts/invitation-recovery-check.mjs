@@ -2,7 +2,7 @@ import { clickChrome } from "./room-chrome.mjs";
 // Synthetic recovery regressions in disposable loopback rooms, not human-study evidence.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { mkdirSync, rmSync } from 'node:fs';
 import { chromium } from 'playwright';
 import { createAcceptanceFixture } from './acceptance-fixture.mjs';
@@ -211,12 +211,7 @@ for (const failure of ['malformed', 'expired']) {
       if (new URL(request.url()).pathname === '/api/share-links/join') joins++;
     });
     await page.goto(`${origin}/#join/${failure === 'expired' ? fixture.links.expired : 'invalid-invitation'}`);
-    await page.waitForFunction(() => /incomplete|Unable to open/.test(document.querySelector('#join-link-scope').textContent));
-    assert.equal(await page.locator('#join-link-recover').isVisible(), true);
-    assert.equal(await page.locator('#join-link-recover a[href="/room"]').count(), 1);
-    assert.equal(await page.locator('#join-link-recover a[href="/room#join-code"]').count(), 1);
-    assert.equal(await page.locator('#join-link-recover a[href="/room#join-agent"]').count(), 1);
-    assert.equal(await page.locator('#join-link-recover a[href="/room#mcp-join"]').count(), 1);
+    await page.waitForFunction(() => /invalid|incomplete|Unable to open/.test(document.querySelector('#join-link-scope').textContent));
     assert.equal(await page.locator('#join-link-retry').isVisible(), false);
     assert.equal(await page.locator('#join-link-form').isVisible(), false);
     assert.equal(new URL(page.url()).hash, '');
@@ -329,5 +324,45 @@ for (const touch of [false, true]) test(`purpose join ${touch ? 'mobile' : 'desk
   assert.equal(new Set(redemptions).size, 1, 'the original redemption is retried unchanged');
   assert.equal(fixture.store.db.prepare('SELECT count(*) AS n FROM share_link_joins WHERE link_id = ?').get(invitation.link.id).n, 1, 'one committed membership consumes one place');
   await capture(page, `purpose-restored-${touch ? 'mobile' : 'desktop'}`);
+  assert.deepEqual(errors, []);
+});
+
+// A historical alias is a persisted invitation capability, not a new manual
+// code-entry UI. Its original redemption must survive a lost real response.
+test('legacy alias link: lost committed join survives close and reload unchanged', { timeout: 45000 }, async t => {
+  const { fixture, origin, page, errors } = await setup(t);
+  const token = randomBytes(32).toString('base64url');
+  const invitation = fixture.store.shareLinks.create(fixture.keys.owner, 'commons', {
+    requestId: randomUUID(), linkToken: token, expiresAt: Date.now() + 3600000,
+    maxJoins: 1, expectedMemberRevision: 0
+  }, null);
+  const legacyAlias = 'ABC-DEF-GHJ';
+  const aliasHash = createHash('sha256').update('ABCDEFGHJ').digest('hex');
+  fixture.store.db.prepare('INSERT INTO share_link_codes(code_hash,link_id,created_at) VALUES(?,?,?)')
+    .run(aliasHash, invitation.link.id, Date.now());
+  let loseResponse = true;
+  const redemptions = [];
+  await page.route('**/api/share-links/join', async route => {
+    redemptions.push(route.request().postDataJSON().redemptionId);
+    if (loseResponse) { await route.fetch(); await route.abort('failed'); }
+    else await route.continue();
+  });
+  await page.goto(`${origin}/#code/${legacyAlias}`);
+  await page.waitForFunction(() => document.querySelector("#join-link-scope").textContent !== "Checking your invitation…");
+  assert.doesNotMatch(await page.locator("#join-link-scope").textContent(), /invalid/i, "a persisted legacy alias is still an invitation");
+  assert.equal(await page.locator("#shared-agent-details").isVisible(), false, "legacy aliases do not advertise a new agent URL");
+  assert.equal(await page.locator("#shared-agent-instructions").inputValue(), "");
+  await page.locator('#join-link-name').fill('Historical invitation guest');
+  await page.locator('#join-link-submit').click();
+  await page.locator('#join-link-status').filter({ hasText: "couldn't confirm whether you joined" }).waitFor();
+  await page.locator('#join-link-close:enabled').click();
+  await page.waitForFunction(() => location.hash.startsWith('#join/') || location.hash.startsWith('#code/'));
+  loseResponse = false;
+  await page.reload();
+  await page.locator('#main').waitFor({ state: 'visible' });
+  assert.equal(await page.locator('#identity-label').textContent(), 'Historical invitation guest');
+  assert.equal(new Set(redemptions).size, 1, 'historical invitation retries the original redemption');
+  assert.equal(fixture.store.db.prepare('SELECT count(*) AS n FROM share_link_joins WHERE link_id=?').get(invitation.link.id).n, 1);
+  assert.equal(fixture.store.db.prepare('SELECT count(*) AS n FROM share_link_codes').get().n, 1, 'no replacement alias is minted');
   assert.deepEqual(errors, []);
 });

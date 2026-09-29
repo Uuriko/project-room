@@ -18,7 +18,6 @@ test("unlisted entry opens the isolated Room without forwarding input or embeddi
   assert.match(html, new RegExp(`class="open" href="${START_ROOM_URL.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}">Start a room<`));
   assert.match(html, /Open Project Room/);
   // Plain-language door copy: first-time visitors should not need to decode shorthand.
-  assert.match(html, /Joining as a person or an agent is free\./);
   assert.match(html, /href="#join-agent"/);
   assert.match(html, />Paste a prompt</);
   assert.match(html, /Join from your favorite agent app/);
@@ -29,23 +28,12 @@ test("unlisted entry opens the isolated Room without forwarding input or embeddi
   assert.match(html, /Add Room as MCP/);
   assert.match(html, /https:\/\/www\.getdasha\.com\/room\/mcp/);
   assert.match(html, /claude mcp add --transport http/);
-  assert.match(html, /Join with code/);
-  assert.match(html, /ABC-DEF-GHJ/);
+  assert.doesNotMatch(html, /Join with code/);
+  assert.doesNotMatch(html, /ABC-DEF-GHJ/);
   assert.match(html, /Connect an agent/);
-  assert.match(html, /Invite teammates and AI agents to work on the same items together\./);
   assert.match(html, /Rooms are private by default\. Adding an agent never lists the room publicly\./);
-  assert.match(html, /Agents keep a visible @handle, and finished work lands as a receipt\./);
   assert.match(html, /Conversations, shared work, and a private Inbox\./);
-  assert.match(html, /<strong>Create Room<\/strong>/);
-  assert.match(html, /bootstrap-agent-room/);
-  assert.match(html, /local-only/);
-  assert.match(html, /no <code>POST \/api\/bootstrap-agent-room<\/code>/);
-  assert.doesNotMatch(html, /project-room-staging\.getdasha\.workers\.dev/);
-  assert.match(html, /POST \/room\/api\/agent-rooms/);
-  assert.match(html, /kind: personal\|organization/);
-  assert.match(html, /<strong>Invite agents<\/strong>/);
-  assert.match(html, /invite_member/);
-  assert.match(html, /collaborate\/contribute/);
+  assert.doesNotMatch(html, /id="join-code"|href="#join-code"/);
   assert.match(html, /Start with a prompt/);
   assert.doesNotMatch(html, /Genie/);
   assert.match(html, /<strong>Paste the packet<\/strong>/);
@@ -54,8 +42,6 @@ test("unlisted entry opens the isolated Room without forwarding input or embeddi
   assert.match(html, /Never paste a room key into a chat\./);
   assert.match(html, /The room owner issues a short-lived guest invite for a one-off helper\./);
   assert.match(html, /enrolls a lasting agent with its own key\./);
-  assert.match(html, /Connect tools as separate agents — one to research, one to edit, one to plan/);
-  assert.match(html, /Planning agents propose; working agents do; a mid-task steer becomes a handoff note, not a cancellation\./);
   assert.match(html, /Works with Claude Code, Codex, OpenCode, Cursor/);
   assert.match(html, /id="agent-type-catalog"/);
   assert.match(html, /Types for this Room only/);
@@ -131,13 +117,10 @@ test("getdasha public door is a quiet Join + Connect page, not the llms packet",
   assert.match(html, /<title>Project Room<\/title>/);
   assert.match(html, /A shared place for people and AI agents to build together\./);
   assert.equal([...html.matchAll(/class="lead"/g)].length, 1);
-  assert.match(html, /class="join-note"/);
+  assert.doesNotMatch(html, /href="[^" ]*\/#join\/"/);
   assert.match(html, new RegExp(`href="${origin}"`));
-  assert.match(html, />Open</);
-  assert.match(html, new RegExp(`href="${origin}/#join/"`));
-  assert.match(html, />Join</);
+  assert.match(html, />Open Room</);
   // Plain-language door copy (same sentences as the Demigod entry).
-  assert.match(html, /Joining as a person or an agent is free\./);
   assert.match(html, /href="#join-agent"/);
   assert.match(html, />Paste a prompt</);
   assert.match(html, /id="join-agent"/);
@@ -149,18 +132,14 @@ test("getdasha public door is a quiet Join + Connect page, not the llms packet",
   assert.match(html, /Add Room as MCP/);
   assert.match(html, /https:\/\/www\.getdasha\.com\/room\/mcp/);
   assert.match(html, /claude mcp add --transport http/);
-  assert.match(html, /Join with code/);
-  assert.match(html, /id="join-code"/);
+  assert.doesNotMatch(html, /Join with code/);
+  assert.doesNotMatch(html, /id="join-code"/);
   assert.match(html, /id="join-empty"/);
   assert.match(html, /id="join-empty-recover"/);
   assert.match(html, />Open room door</);
-  assert.match(html, /href="#join-code">Join with code</);
   assert.match(html, /href="#join-agent">Paste a prompt</);
   assert.match(html, /href="#mcp-join">Add Room as MCP</);
-  assert.match(html, /id="join-code-status"/);
   assert.doesNotMatch(html, /project-room-staging\.getdasha\.workers\.dev/);
-  assert.match(html, new RegExp(`data-room-origin="${origin}"`));
-  assert.match(html, /class="whisper"[^>]*href="#join-code"/);
   assert.match(html, /id="connect"/);
   assert.match(html, /id="connect-title">Connect</);
   assert.match(html, /class="connect-paths"/);
@@ -168,43 +147,18 @@ test("getdasha public door is a quiet Join + Connect page, not the llms packet",
   assert.match(html, new RegExp(`href="${HOSTED_MCP_JOIN_PUBLIC_URL.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"`));
   assert.match(html, /id="mcp-join-url"/);
   assert.match(html, new RegExp(`value="${HOSTED_MCP_JOIN_PUBLIC_URL.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"`));
-  assert.match(html, /GET snippets\. No OAuth\. No keys\./);
   assert.match(html, /href="\/room\/mcp"/);
   assert.match(connectMcpPathHtml(), /Add Room as MCP/);
-  assert.match(connectMcpPathHtml(), /No OAuth/);
-  assert.match(html, /<strong>Invite code<\/strong>/);
   assert.match(html, /Automatic replies depend on its host and connection/);
   assert.match(html, /Conversations, shared work, and a private Inbox\./);
   assert.match(html, /href="#people"/);
-  assert.match(html, />People</);
+  assert.match(html, />People and agents</);
   assert.match(html, /id="people"/);
-  assert.match(html, /Open this invite link to join as a person/);
-  assert.match(html, /Open and People honor <code>#room\/\{roomId\}<\/code> for members already in the room/);
-  assert.match(html, /that is not a shareable invite/);
   assert.doesNotMatch(html, /Share <code>https:\/\/www\.getdasha\.com\/room#room\/\{roomId\}<\/code>/);
   assert.equal(ROOM_PUBLIC_WWW, "https://www.getdasha.com/room");
-  assert.match(html, /Invite teammates and AI agents to work on the same items together\./);
   assert.match(html, /Rooms are private by default\. Adding an agent never lists the room publicly\./);
-  assert.match(html, /Agents keep a visible @handle, and finished work lands as a receipt\./);
-  assert.match(html, /<strong>Create Room<\/strong>/);
-  assert.match(html, /bootstrap-agent-room/);
-  assert.match(html, /local-only/);
-  assert.match(html, /no <code>POST \/api\/bootstrap-agent-room<\/code>/);
-  assert.doesNotMatch(html, /project-room-staging\.getdasha\.workers\.dev/);
-  assert.match(html, /POST \/room\/api\/agent-rooms/);
-  assert.match(html, /kind: personal\|organization/);
-  assert.match(html, /<strong>Invite agents<\/strong>/);
-  assert.match(html, /invite_member/);
-  assert.match(html, /collaborate\/contribute/);
-  assert.match(html, /<strong>Paste the packet<\/strong>/);
-  assert.match(html, /<strong>Guest invite<\/strong>/);
-  assert.match(html, /The room owner issues a short-lived guest invite for a one-off helper\./);
-  assert.match(html, /<strong>Add agent<\/strong>/);
-  assert.match(html, /enrolls a lasting agent with its own key\./);
-  assert.match(html, /<strong>Kits<\/strong> — Members can attach a kit/);
+  assert.doesNotMatch(html, /id="join-code"|href="#join-code"/);
   assert.match(html, /Start with a prompt/);
-  assert.match(html, /Connect tools as separate agents — one to research, one to edit, one to plan/);
-  assert.match(html, /Planning agents propose; working agents do; a mid-task steer becomes a handoff note, not a cancellation\./);
   assert.match(html, /<a href="\/room\/llms.txt">Read the agent packet \(llms\.txt\)<\/a>/);
   assert.equal([...html.matchAll(/href="\/room\/llms\.txt"/g)].length, 1, "llms.txt is linked once");
   assert.match(html, /<a href="\/room\/llms-full.txt">Full packet<\/a>/);
@@ -233,12 +187,12 @@ test("getdasha public door is a quiet Join + Connect page, not the llms packet",
   assert.match(ROOM_DEEP_LINK_SCRIPT, /searchParams\.set\("room"/);
   assert.match(ROOM_DEEP_LINK_SCRIPT, /click/);
   assert.match(ROOM_DEEP_LINK_SCRIPT, /location\.replace/);
-  assert.match(html, /class="whisper join"/);
+  assert.doesNotMatch(html, /class="whisper join"/);
   // Start a room is the one primary action; Open signs in to an existing room.
   assert.match(html, new RegExp(`class="start" href="${START_ROOM_URL.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}">Start a room<`));
   assert.match(html, /class="ghost open"/);
   assert.match(html, /class="whisper people"/);
-  assert.equal([...html.matchAll(/class="ghost[^"]*"/g)].length, 1, "Join is the only ghost CTA");
+  assert.equal([...html.matchAll(/class="ghost[^"]*"/g)].length, 1, "Open Room is the only secondary action");
   assert.doesNotMatch(html, /href="#connect"/);
   assert.equal((html.match(/<script>/g) || []).length, 1);
   assert.ok(html.includes(`<script>${ROOM_DEEP_LINK_SCRIPT}</script>`));
@@ -289,7 +243,7 @@ function runDoorHash(hash) {
 test("www /room #join/<token> writes the token onto Join and leaves the wrapper", () => {
   const token = "A".repeat(43);
   const result = runDoorHash(`#join/${token}`);
-  assert.equal(result.hrefs["a.join"], `${ROOM_ORIGIN}/#join/${token}`);
+  assert.equal(result.hrefs["a.join"], `${ROOM_ORIGIN}/#join/`, "no incomplete Join control is needed");
   assert.equal(result.replaced, `${ROOM_ORIGIN}/#join/${token}`);
   assert.equal(result.hrefs["a.open"], ROOM_ORIGIN);
 });
@@ -298,14 +252,13 @@ test("www /room #join/<token>/work/<id> keeps the purpose path on the forwarded 
   const token = "B".repeat(43);
   const hash = `#join/${token}/work/item-1`;
   const result = runDoorHash(hash);
-  assert.equal(result.hrefs["a.join"], `${ROOM_ORIGIN}/${hash}`);
+  assert.equal(result.hrefs["a.join"], `${ROOM_ORIGIN}/#join/`);
   assert.equal(result.replaced, `${ROOM_ORIGIN}/${hash}`);
 });
 
-test("www /room #code/ABC-DEF-GHJ stays on the door instead of a silent leave", () => {
+test("www /room legacy #code/ links forward for app redemption", () => {
   const result = runDoorHash("#code/abc-def-ghj");
-  assert.equal(result.hrefs["a.join"], `${ROOM_ORIGIN}/#join/`);
-  assert.equal(result.replaced, "");
+  assert.equal(result.replaced, `${ROOM_ORIGIN}/#code/abc-def-ghj`);
 });
 
 test("www /room #join/ stub does not auto-leave the wrapper", () => {

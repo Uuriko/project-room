@@ -171,7 +171,12 @@ test("a room-key owner session opens its existing identity through a link withou
 
 test("link creation retries preserve scope and guests cannot administer invitation links", t => {
   const f = fixture(t);
-  assert.equal(f.store.shareLinks.create(f.ownerKey, "commons", f.details, null).duplicate, true);
+  assert.equal(Object.hasOwn(f.result, "code"), false, "new invitations advertise only their link");
+  const retry = f.store.shareLinks.create(f.ownerKey, "commons", f.details, null);
+  assert.equal(retry.duplicate, true);
+  assert.equal(Object.hasOwn(retry, "code"), false);
+  assert.equal(retry.link.id, f.result.link.id);
+  assert.equal(f.store.db.prepare("SELECT COUNT(*) AS n FROM share_link_codes").get().n, 0, "fresh issuance and exact retry mint no short-code alias");
   assert.throws(() => f.store.shareLinks.create(f.ownerKey, "commons", { ...f.details, maxJoins: 4 }, null), { code: "idempotency_conflict" });
   const guest = f.guest(), accepted = guest.accept();
   assert.throws(() => f.store.shareLinks.list(guest.slot.token, "commons", accepted.session.sessionBinding), { code: "access_denied" });

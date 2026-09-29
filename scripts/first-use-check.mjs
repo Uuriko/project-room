@@ -70,7 +70,6 @@ for (const touch of [false, true]) {
     await guest.locator('#main').waitFor({ state: 'visible' });
     assert.equal(await guest.locator('#identity-label').textContent(), 'Maya');
     assert.equal(await guest.locator('#new-work-button').isVisible(), false);
-    assert.equal(await guest.locator('#composer-work-button').isVisible(), false);
     await clickChrome(guest, '#topbar-settings');
     assert.match(await guest.locator('#room-results-list').textContent(), /No completed results yet/);
     await guest.locator('#settings-close').click();

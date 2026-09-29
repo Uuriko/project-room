@@ -204,7 +204,6 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(html, /id="inbox-heading"/);
   assert.match(html, /id="auth-kind-room"/);
   assert.match(html, /id="access-key-reveal"/);
-  assert.match(html, /id="invite-link"/);
   assert.match(html, /Paste your key/);
   assert.doesNotMatch(html, /id="people-hint"/);
   assert.doesNotMatch(html, /id="people-wake-hint"/);
@@ -215,7 +214,6 @@ test("Add agent markup lists the four roster names", () => {
   // UI calming: the sidebar Create Room block was de-jargoned — the one-shot
   // CLI / HTTP route disclosure (bootstrap-agent-room) no longer ships in the UI,
   // along with the #room/{roomId} fragment explanation and the
-  // "Open this invite link to invite a person" sentence.
   assert.match(html, /Message #general/);
   assert.match(html, /id="google-signin"/);
   assert.match(html, /Continue with Google/);
@@ -225,18 +223,11 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(html, />Agent sign in</);
   assert.doesNotMatch(html, /More options/);
   assert.ok(html.indexOf('id="agent-signin-button"') < html.indexOf('id="signin-extra"'), "agent entry is outside the other-methods panel");
-  assert.ok(html.indexOf('id="guest-entry"') < html.indexOf('id="signin-extra"'), "invitation entry is outside the other-methods panel");
   assert.match(html, /id="signin-extra"/);
-  assert.match(html, /id="invite-redeem"/);
-  assert.match(html, />Open this invite link</);
-  assert.match(html, /Have an invitation\?/);
-  assert.match(html, /Open this invite link/);
   assert.doesNotMatch(html, /share <code>https:\/\/www\.getdasha\.com\/room#room\/\{roomId\}/);
   assert.match(html, /id="auth-room-hint"/);
   assert.match(html, /id="auth-kind-hint"/);
   assert.match(html, /id="clear-session-menu"/);
-  assert.match(html, /id="share-link-intro"/);
-  assert.match(html, /Open this invite link/);
   assert.match(html, /id="room-sidebar"/);
   assert.match(html, /id="channel-list"/);
   assert.match(html, /id="catchup-dialog"/);
@@ -258,7 +249,6 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(app, /authPanelTitle/);
   assert.match(app, /Open room/);
   assert.match(app, /data-empty-write/);
-  assert.match(app, /data-empty-work/);
   assert.match(app, /No completed results yet/);
   assert.match(html, /id="mention-list"/);
   assert.match(html, />Add agent</);

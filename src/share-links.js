@@ -4,6 +4,8 @@ import { parseShareInviteCode } from "./share-invite-code.js";
 
 const $ = selector => document.querySelector(selector);
 const tokenPattern = /^[A-Za-z0-9_-]{43}$/;
+// Legacy aliases are accepted only to recover previously issued invitations.
+const validInvitation = value => typeof value === "string" && (tokenPattern.test(value) || Boolean(parseShareInviteCode(value)));
 
 // Human #join/ links must keep the app path. `location.origin` alone drops `/room`
 // on www.getdasha.com and produces an incomplete join URL.
@@ -34,7 +36,8 @@ export function consumeJoinFragment() {
   if (segments.length === 3 && ["work", "message"].includes(segments[1])) {
     try { focus = { kind: segments[1], id: decodeURIComponent(segments[2]) }; } catch { focus = null; }
   }
-  return { token: tokenPattern.test(segments[0]) ? segments[0] : null, focus };
+  const accepted = validInvitation(segments[0]) ? segments[0] : null;
+  return { token: accepted, focus };
 }
 const newToken = () => btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
 const date = value => new Date(value).toLocaleString();
@@ -82,7 +85,7 @@ export function readUncertainJoin(storage = globalThis.localStorage, now = Date.
     const raw = storage?.getItem(UNCERTAIN_JOIN_KEY);
     if (!raw) return null;
     const record = JSON.parse(raw);
-    if (!record || typeof record !== "object" || !tokenPattern.test(record.linkToken)
+    if (!record || typeof record !== "object" || !validInvitation(record.linkToken)
       || typeof record.redemptionId !== "string" || typeof record.displayName !== "string"
       || !Number.isSafeInteger(record.at) || now - record.at > UNCERTAIN_JOIN_TTL_MS) return null;
     return record;
@@ -177,7 +180,6 @@ export function installShareLinks({ client, accountClient, getState, getSession,
   }
   function updateCopyControls() {
     $("#share-link-copy").disabled = copying || !currentLink;
-    if ($("#share-link-code-copy")) $("#share-link-code-copy").disabled = copying || !currentLink || !$("#share-link-code")?.value;
     $("#share-note-copy").disabled = copying || !currentLink || !$("#share-note-text").value.trim()
       || !$("#share-note-preview").value;
   }
@@ -185,7 +187,6 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     const heldFocus = $("#share-link-result").contains(document.activeElement);
     copyRevision++; currentLink = null; clearTimeout(expiryTimer); expiryTimer = null;
     $("#share-link-url").value = ""; delete $("#share-link-url").dataset.linkId;
-    if ($("#share-link-code")) $("#share-link-code").value = "";
     $("#share-note-text").value = ""; $("#share-note-preview").value = "";
     $("#share-note").open = false; $("#share-note-result").hidden = true;
     $("#share-purpose-note").hidden = true;
@@ -213,7 +214,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
   function creationBusy(value) {
     creating = value;
     // The close control is held too: dismissing mid-request would orphan a shown-once link.
-    for (const id of ["share-link-create", "share-link-expiry", "share-link-limit", "share-link-close", "share-link-admins"]) $("#" + id).disabled = value;
+    for (const id of ["share-link-create", "share-link-expiry", "share-link-limit", "share-link-close"]) $("#" + id).disabled = value;
   }
   function updateSwitchWarning() {
     const currentRoom = getSession()?.roomId ?? getState()?.room?.id;
@@ -325,7 +326,6 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       const inviteUrl = publicJoinInviteHref(request.linkToken, purposeItem ? `/work/${encodeURIComponent(purposeItem.id)}` : "")
         || humanJoinShareUrl(request.linkToken, purposeItem ? `/work/${encodeURIComponent(purposeItem.id)}` : "");
       $("#share-link-url").value = inviteUrl;
-      if ($("#share-link-code")) $("#share-link-code").value = result.code || "";
       $("#share-purpose-note").hidden = !purposeItem;
       if (purposeItem) $("#share-purpose-note").textContent = `Opens "${purposeItem.title}" after they join. Guests can read the room and its history, post messages, and react.`;
       $("#share-link-url").dataset.linkId = result.link.id;
@@ -341,19 +341,11 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       creationBusy(false);
       list(version, generation).catch(() => {});
       const clipboard = globalThis.navigator?.clipboard;
-      const joinCode = result.code || "";
-      if (!copying && joinCode && clipboard?.writeText) {
-        try {
-          await clipboard.writeText(joinCode);
-          if (managementCurrent(version, generation) && currentLink && $("#share-link-code")?.value === joinCode) {
-            status("Copied join code. They can also open the invite link.");
-          }
-        } catch { /* Copy buttons remain */ }
-      } else if (!copying && inviteUrl && clipboard?.writeText) {
+      if (!copying && inviteUrl && clipboard?.writeText) {
         try {
           await clipboard.writeText(inviteUrl);
           if (managementCurrent(version, generation) && currentLink && $("#share-link-url").value === inviteUrl) {
-            status("Copied. They open this invite link.");
+            status("Link copied.");
           }
         } catch { /* Copy button remains */ }
       }
@@ -387,26 +379,6 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       }
     } finally { copying = false; sync(); updateCopyControls(); }
   }
-  $("#share-link-code-copy")?.addEventListener("click", async () => {
-    sync();
-    const version = managementVersion, generation = client.generation;
-    const value = $("#share-link-code")?.value;
-    if (copying || !managementCurrent(version, generation) || !checkResult() || !value) return;
-    copying = true; updateCopyControls();
-    status("Copying join code…");
-    try {
-      await navigator.clipboard.writeText(value);
-      if (managementCurrent(version, generation) && checkResult() && $("#share-link-code").value === value) {
-        status("Copied join code. They can also open the invite link.");
-      }
-    } catch {
-      if (managementCurrent(version, generation)) {
-        $("#share-link-code").focus();
-        $("#share-link-code").select?.();
-        status("Select and copy the join code above.");
-      }
-    } finally { copying = false; sync(); updateCopyControls(); }
-  });
   $("#share-link-copy").addEventListener("click", () => copy(false));
   $("#share-note-copy").addEventListener("click", () => copy(true));
   async function open(fragment) {
@@ -427,7 +399,6 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     $("#shared-agent-details").hidden = true; $("#shared-agent-details").open = false; $("#shared-agent-instructions").value = "";
     $("#join-link-retry").hidden = true;
     $("#join-link-retry").textContent = "Retry";
-    $("#join-link-recover").hidden = true;
     $("#join-access-details").open = false; $("#join-switch-warning").hidden = true;
     $("#join-link-permissions").textContent = ""; $("#join-link-expiry").textContent = "";
     $("#join-link-submit").textContent = "Join room"; $("#join-link-signout").hidden = true;
@@ -435,12 +406,10 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     joinStatus(""); if (!joinDialog.open) joinDialog.showModal();
     if (!joinSecret) {
       $("#join-link-scope").textContent = "This invitation link is incomplete. Ask for a new link.";
-      $("#join-link-recover").hidden = false;
       return;
     }
-    if (!tokenPattern.test(joinSecret)) {
-      $("#join-link-scope").textContent = "This isn't a live invite. Ask for a full #join/… link or a real join code from the person who invited you.";
-      $("#join-link-recover").hidden = false;
+    if (!validInvitation(joinSecret)) {
+      $("#join-link-scope").textContent = "This invitation is invalid. Ask for a new link.";
       return;
     }
     try {
@@ -454,9 +423,9 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       $("#join-link-scope").textContent = returning ? "You already belong to this room. Open it without using another invitation place." : "Read history and join the conversation. Everyone in the room can read your messages.";
       $("#join-link-permissions").textContent = preview.access;
       $("#join-link-expiry").textContent = `Invitation expires ${date(preview.link.expiresAt)} · ${preview.link.remainingJoins} guest places left.`;
-      $("#shared-agent-details").hidden = false;
       const sharedUrl = publicJoinInviteHref(joinSecret);
-      $("#shared-agent-instructions").value = `Join ${preview.room.title}: ${sharedUrl}\nDownload and verify the agent runtime from https://github.com/Uuriko/project-room/releases/latest (Node 24.19+). From its folder run:\nnode scripts/agent-inbox.mjs join ${JSON.stringify(sharedUrl)} ./room-connection --name "My agent"\nReview the destination and read/chat access, then repeat with --accept when authorized. Reuse room-connection to resume. Import the returned host configuration into your MCP client. A running host is required to answer requests.`;
+      $("#shared-agent-details").hidden = !sharedUrl;
+      $("#shared-agent-instructions").value = sharedUrl ? `Join ${preview.room.title}: ${sharedUrl}\nDownload and verify the agent runtime from https://github.com/Uuriko/project-room/releases/latest (Node 24.19+). From its folder run:\nnode scripts/agent-inbox.mjs join ${JSON.stringify(sharedUrl)} ./room-connection --name "My agent"\nReview the destination and read/chat access, then repeat with --accept when authorized. Reuse room-connection to resume. Import the returned host configuration into your MCP client. A running host is required to answer requests.` : "";
       updateSwitchWarning();
       $("#join-account-choices").hidden = Boolean(account.authenticated) || Boolean(resume);
       $("#join-guest-note").hidden = Boolean(account.authenticated);
@@ -489,7 +458,6 @@ export function installShareLinks({ client, accountClient, getState, getSession,
         return;
       }
       $("#join-link-scope").textContent = "Unable to open this invitation.";
-      $("#join-link-recover").hidden = false;
       needsSessionReview = Boolean(fragment.reviewSession) || changedJoinSession(error);
       const retryable = needsSessionReview || canRetryInvitation(error);
       $("#join-link-retry").hidden = !retryable;
@@ -632,7 +600,6 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     joinAttempted = false; joinLanded = false;
     $("#join-link-form").reset();
     $("#join-link-retry").hidden = true;
-    $("#join-link-recover").hidden = true;
     if (pendingToken && attempted && !landed) {
       // #657 defect 4: never strand the guest on an unrelated page. The address
       // bar keeps the invitation, so reopening it (or reloading) resumes the

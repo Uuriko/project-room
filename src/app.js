@@ -12,7 +12,6 @@ import { attemptReceipts, attemptLedger, cancellationState, workContinuity, spen
 import { consumeJoinFragment, installShareLinks, canRetryInvitation, requestFailureMessage } from "./share-links.js";
 import { dmConsentPeerSummary, incomingDmRequests, dmConsentPairDescription, dmConsentActionsForPeer, fetchDmConsents, requestDmConsent, decideDmConsent, revokeDmConsent, blockDmMember, unblockDmMember, dmConsentFailureMessage, DM_CONSENT_REFUSAL_CODES } from "./dm-consents.js";
 import { identityIdOf, mergeFriendBonds, bondWithPeer, friendChrome, friendBondCommand, friendFailureMessage, friendFocusTarget } from "./friend-bond.js";
-import { shareJoinSecretFromText } from "./share-invite-code.js";
 import { installAgentConnections } from "./agent-connections.js";
 import { catalogById } from "./room-roster.js";
 import { installRoomInstructions } from "./room-instructions.js";
@@ -29,7 +28,7 @@ import { createAgentSigninUI } from "./agent-signin-ui.js";
 import { stashPendingInvite, clearPendingInvite, takeRestoredInvite, stashPendingJoin, clearPendingJoin, takeRestoredJoin, inviteRequestDoor, defaultRequestPermissions, validateAccessRequestForm, newAccessRequestId, stashAccessRequest, readAccessRequest } from "./invite-context.js";
 import { selectedRoomFromLocation as roomFromLocation, roomIdFromHash, authPanelTitle, KEY_KIND_HINT, roomIdFromNext, ROOM_ACCESS_NOTICE } from "./room-deep-link.js";
 import { installAgentInvites } from "./agent-invite-ui.js";
-import { rememberLastRoom, rememberAccountHint, readLastRoom, readLastRoomTitle, readAccountHint, hasSessionHint, clearBrowserSessionHints, SESSION_HINT_COPY, rememberMemberRoom, readMemberRoom, clearStoredPasswords, signInRoomTarget } from "./browser-session.js";
+import { rememberLastRoom, rememberAccountHint, readLastRoom, readLastRoomTitle, readAccountHint, hasSessionHint, clearBrowserSessionHints, rememberMemberRoom, readMemberRoom, clearStoredPasswords, signInRoomTarget } from "./browser-session.js";
 import { attachmentFromBytes, composerAudienceNote, COMPOSER_FILE_BYTES, fileChipLabel } from "./composer-files.js";
 import { formatSessionExpiry } from "./session-expiry.js";
 import { handoffEnvelopeListHtml, envelopesForWork } from "./handoff-envelope-ui.js";
@@ -536,7 +535,7 @@ const signinUI = createAuthSigninUI({
   }
 });
 signinUI.mount($("#auth-signin-ui"));
-if ($("#session-hint")) $("#session-hint").textContent = SESSION_HINT_COPY;
+
 // Agent sign-in (RC-2026-09-23): agents choose their own account (identity
 // ID + secret) or fall back to human account sign-in. On success the room
 // cookie is set, so restore the client session for that room.
@@ -558,12 +557,6 @@ const agentSigninUI = createAgentSigninUI({
     greet: () => $("#message-input")?.focus(),
     discover: () => { const panel = $("#people-panel"); if (panel) panel.open = true; },
     baseUrl: location.origin
-  },
-  onUseHumanAccount: () => {
-    // Agent chose the human path: hide agent UI, ensure human UI visible.
-    // The human sign-in UI (signinUI) is already mounted; just scroll to it.
-    showSigninMethods();
-    $("#google-signin")?.focus();
   }
 });
 agentSigninUI.mount($("#agent-signin-ui"));
@@ -1186,15 +1179,7 @@ function syncComposerChrome() {
       note.hidden = false;
     } else note.hidden = true;
   }
-  const work = $("#composer-work-button");
-  if (work) work.hidden = true;
   syncAlsoSend();
-}
-function inviteSecretFromText(value) {
-  const text = String(value ?? "").trim();
-  const fromLink = /#invite\/([A-Za-z0-9_-]{43})/.exec(text);
-  if (fromLink) return fromLink[1];
-  return invitationTokenPattern.test(text) ? text : null;
 }
 function renderInvitation() {
   const preview = invitation.preview;
@@ -1815,7 +1800,7 @@ function render() {
   const agents = members.filter(m => m.kind === "agent").sort(byPresence);
   renderContent("#presence-list", `${dmRequestInbox()}${people.length ? `<p class="presence-heading">People</p>${people.map(presenceRow).join("")}` : ""}${agents.length ? `<p class="presence-heading">Agents</p>${agents.map(presenceRow).join("")}` : ""}`);
   const proposing = can("steer") && !isRoomArchived(state); // Issue #6 A2: no new work in an archived room.
-  for (const id of ["new-work-button", "composer-work-button"]) {
+  for (const id of ["new-work-button"]) {
     $("#" + id).hidden = !proposing; $("#" + id).disabled = !proposing;
   }
   syncComposerChrome();
@@ -3125,7 +3110,7 @@ $("#invitation-accept").addEventListener("click", async () => {
   }
 });
 function focusSignin() {
-  const keyVisible = !$("#signin-support-root").hidden && $("#signin-support-root").open && $("#key-signin").open;
+  const keyVisible = !$("#signin-support-root").hidden && $("#signin-support-root").open;
   const emailVisible = !$("#email-auth-step").hidden;
   const target = keyVisible ? $("#access-key") : emailVisible ? $("#email-auth-panel [name=email]") : $("#google-signin");
   target?.focus({ preventScroll: true });
@@ -3148,7 +3133,6 @@ $("#signin-more")?.addEventListener("click", () => {
   setSigninExtra(open);
 });
 function showSigninMethods() {
-  $("#guest-entry").open = false;
   $("#agent-auth-step").hidden = true;
   $("#agent-signin-button").setAttribute("aria-expanded", "false");
   $("#signin-entry-routes").hidden = false;
@@ -3163,7 +3147,6 @@ function openEmailAuth(mode) {
   if (!signinUI.openEmail(mode, panel)) return;
   $("#agent-auth-step").hidden = true;
   $("#agent-signin-button").setAttribute("aria-expanded", "false");
-  $("#guest-entry").open = false;
   $("#signin-entry-routes").hidden = true;
   $("#signin-methods").hidden = true;
   $("#email-auth-step").hidden = false;
@@ -3178,7 +3161,6 @@ function openAgentSignin() {
   if (!signinUI.closeEmail()) return;
   showSigninMethods();
   setSigninExtra(false);
-  $("#guest-entry").open = false;
   $("#signin-methods").hidden = true;
   $("#signin-entry-routes").hidden = true;
   $("#signin-more").hidden = true;
@@ -3192,18 +3174,6 @@ $("#agent-auth-back").addEventListener("click", () => {
   if (!agentSigninUI.canLeave()) return;
   showSigninMethods();
   $("#agent-signin-button").focus();
-});
-$("#guest-entry").addEventListener("toggle", () => {
-  if ($("#guest-entry").open) {
-    if (!signinUI.closeEmail()) return;
-    $("#agent-auth-step").hidden = true;
-    $("#email-auth-step").hidden = true;
-    $("#agent-signin-button").setAttribute("aria-expanded", "false");
-    setSigninExtra(false);
-    $("#signin-methods").hidden = true;
-  } else if ($("#agent-auth-step").hidden && $("#email-auth-step").hidden) {
-    $("#signin-methods").hidden = false;
-  }
 });
 $("#email-auth-back")?.addEventListener("click", () => {
   if (!signinUI.closeEmail()) return;
@@ -3232,7 +3202,7 @@ function fillJoinAgent() {
   const field = $("#join-agent-prompt");
   if (!field) return;
   field.value = joinAgentPrompt();
-  for (const [id, path] of [["#join-agent-packet", "/llms.txt"], ["#join-agent-card", "/.well-known/agent.json"], ["#join-agent-kits", "/kits.txt"]]) {
+  for (const [id, path] of [["#join-agent-card", "/.well-known/agent.json"], ["#join-agent-kits", "/kits.txt"]]) {
     const link = $(id);
     if (link) link.href = `${location.origin}${path}`;
   }
@@ -3262,65 +3232,6 @@ $("#access-key-reveal")?.addEventListener("click", () => {
   field.type = show ? "text" : "password";
   $("#access-key-reveal").textContent = show ? "Hide" : "Show";
   $("#access-key-reveal").setAttribute("aria-pressed", show ? "true" : "false");
-});
-function openShareOrTargetedInvite(text) {
-  const share = shareJoinSecretFromText(text);
-  if (share && shareLinksUI) {
-    shareLinksUI.open({ token: share });
-    return true;
-  }
-  const secret = inviteSecretFromText(text);
-  if (!secret) return false;
-  openInvitation({ valid: true, secret });
-  return true;
-}
-$("#invite-link")?.addEventListener("change", () => {
-  const field = $("#invite-link"), err = $("#invite-error");
-  const text = field?.value ?? "";
-  if (!text.trim()) { if (err) setFormStatus(err, ""); return; }
-  if (!openShareOrTargetedInvite(text)) {
-    // Same silent failure the redeem button had (QA 2026-09-29): an
-    // unresolvable value left in the field with no feedback. Say so.
-    if (err) setFormStatus(err, INVITE_INPUT_ERROR, true);
-    return;
-  }
-  if (err) setFormStatus(err, "");
-  field.value = "";
-});
-$("#invite-link")?.addEventListener("paste", event => {
-  const text = event.clipboardData?.getData("text") ?? $("#invite-link").value;
-  if (!openShareOrTargetedInvite(text)) {
-    // Let the pasted text land so it can be read and edited; the error
-    // explains why it didn't open as an invite.
-    const err = $("#invite-error");
-    if (err) setFormStatus(err, INVITE_INPUT_ERROR, true);
-    return;
-  }
-  event.preventDefault();
-  $("#invite-link").value = "";
-  const err = $("#invite-error");
-  if (err) setFormStatus(err, "");
-});
-// One vocabulary for every invite door: the sign-in box takes share links,
-// 9-character share codes, and invitation tokens. Agent invite links
-// (/join/...) open on their own join page — the error says so instead of
-// failing silently.
-const INVITE_INPUT_ERROR = "That doesn't look like an invite link or join code. Paste the full invite link or ABC-DEF-GHJ. If your link ends with /join/ and a code, open it directly — it has its own join page.";
-function redeemInviteInput() {
-  const input = $("#invite-link");
-  const err = $("#invite-error");
-  if (openShareOrTargetedInvite(input?.value ?? "")) {
-    if (err) setFormStatus(err, "");
-    if (input) input.value = "";
-    return;
-  }
-  // #invite-error is display:none until the shared form-status contract adds
-  // .visible — the old direct textContent assignment failed silently here.
-  if (err) setFormStatus(err, INVITE_INPUT_ERROR, true);
-}
-$("#invite-redeem")?.addEventListener("click", redeemInviteInput);
-$("#invite-link")?.addEventListener("keydown", e => {
-  if (e.key === "Enter") { e.preventDefault(); redeemInviteInput(); }
 });
 $("#auth-form").addEventListener("submit", async e => {
   if (signoutLoading) { e.preventDefault(); return; }
@@ -3936,15 +3847,6 @@ async function refreshAgentPauses() {
   } catch { /* the roster stays as last read; the next action re-reads it */ }
 }
 $("#people-panel").addEventListener("toggle", () => { if ($("#people-panel").open) { refreshAgentPauses(); void refreshDmConsents(); void refreshFriendBonds(); void refreshPresenceStates(); } });
-$("#share-link-admins").addEventListener("click", e => {
-  e.preventDefault(); e.stopPropagation();
-  if (!ownsRoomActions(null)) return;
-  $("#share-link-dialog").addEventListener("close", () => {
-    if (!ownsRoomActions(null)) return;
-    revealPeopleChrome(); $("#people-panel > summary").focus();
-  }, { once: true });
-  $("#share-link-dialog").close();
-});
 $("#presence-list").addEventListener("click", async e => {
   const button = e.target.closest("[data-member-work]");
   if (!button || !ownsRoomActions(null) || memberActionBusy || state.room.ownerId !== session.member.id) return;
@@ -4836,7 +4738,7 @@ function closeWorkForm({ returnFocus = true } = {}) {
     if (epoch !== workFormEpoch || !sameSession(generation, roomId, memberId) || !$("#new-work-form").hidden || document.activeElement !== focusAtClose) return;
     const usable = node => node?.isConnected && !node.disabled && !node.hidden && node.getClientRects().length > 0;
     const replacement = opener?.key ? [...document.querySelectorAll("[data-focus-key]")].find(node => node.dataset.focusKey === opener.key) : null;
-    const target = [opener?.node, replacement, $("#new-work-button"), $("#composer-work-button"), $("#composer-options-toggle")].find(usable) || $("#conversation-title");
+    const target = [opener?.node, replacement, $("#new-work-button"), $("#composer-options-toggle")].find(usable) || $("#conversation-title");
     target.focus({ preventScroll: true });
   }, 0);
 }
@@ -4861,7 +4763,6 @@ $("#work-recipe-select").addEventListener("change", event => {
   } catch { /* Definition changed since the list was built; leave the fields as they are. */ }
 });
 $("#new-work-button").addEventListener("click", () => openWork());
-$("#composer-work-button").addEventListener("click", () => openWork());
 $("#review-settings-button").addEventListener("click", () => {
   $("#work-options").open = true;
   $("#require-verification").focus();

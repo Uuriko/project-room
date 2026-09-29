@@ -72,6 +72,12 @@ export function installAgentInvites({ client, getState, getSession }) {
     if (result) result.hidden = !minted;
     const single = Boolean(minted) && minted.length === 1;
     const bulk = Boolean(minted) && minted.length > 1;
+    const link = $("#agent-invite-link");
+    if (link) {
+      link.textContent = single ? minted[0].link : "";
+      if (single) link.href = minted[0].link;
+      else link.removeAttribute("href");
+    }
     if ($("#agent-invite-single")) $("#agent-invite-single").hidden = !single;
     if ($("#agent-invite-bulk")) $("#agent-invite-bulk").hidden = !bulk;
     for (const input of form.querySelectorAll("input,select,button")) input.disabled = busy;
@@ -101,7 +107,6 @@ export function installAgentInvites({ client, getState, getSession }) {
     form.reset();
     if ($("#agent-invite-profile")) $("#agent-invite-profile").value = "contribute";
     if ($("#agent-invite-count")) $("#agent-invite-count").value = "1";
-    if ($("#agent-invite-code")) $("#agent-invite-code").value = "";
     if ($("#agent-invite-share")) $("#agent-invite-share").textContent = "";
     renderLinks();
     status("");
@@ -161,7 +166,6 @@ export function installAgentInvites({ client, getState, getSession }) {
       if (!owns()) return;
       minted = links;
       if (count === 1) {
-        if ($("#agent-invite-code")) $("#agent-invite-code").value = links[0].link;
         if ($("#agent-invite-share")) $("#agent-invite-share").textContent = agentInviteHandoff(links[0].code).text;
       } else {
         renderLinks();
@@ -174,7 +178,6 @@ export function installAgentInvites({ client, getState, getSession }) {
       if (links.length) {
         minted = links;
         if (count === 1) {
-          if ($("#agent-invite-code")) $("#agent-invite-code").value = links[0].link;
           if ($("#agent-invite-share")) $("#agent-invite-share").textContent = agentInviteHandoff(links[0].code).text;
         } else {
           renderLinks();
@@ -184,7 +187,7 @@ export function installAgentInvites({ client, getState, getSession }) {
       } else {
         status(typeof error.message === "string" && error.message.length <= 180
           ? error.message
-          : "Could not mint. Owner or invite_member; codes stay agent-safe.");
+          : "Could not create an invite. Check your room permissions.");
       }
     } finally { if (owns()) { busy = false; render(); } }
   }

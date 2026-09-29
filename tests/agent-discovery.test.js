@@ -88,7 +88,7 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
   assert.match(text, /\/room\/api\/agent-invites\/redeem/);
   assert.match(text, /hosted-mcp \(live, no account\)/);
   assert.match(text, /https:\/\/www\.getdasha\.com\/room\/mcp/);
-  assert.match(text, /human-join-code \(live\)/);
+  assert.doesNotMatch(text, /human-join-code \(live\)/);
   assert.match(text, /www.getdasha.com \(no \/room path\)/);
   assert.match(text, /room_check_access/);
   assert.match(text, /orient/);

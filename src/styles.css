@@ -457,10 +457,6 @@ details[open] > .section-summary::before { transform: rotate(45deg); }
 #signin-more { display: block; margin: 1.25rem auto 0; min-height: 44px; font-size: .8rem; font-weight: 500; color: var(--muted); }
 #signin-more:hover { color: var(--text); }
 #signin-extra { margin-top: .5rem; }
-#guest-entry { margin-top: .75rem; }
-#guest-entry > summary { padding: .7rem 0; min-height: 44px; color: var(--muted); }
-#guest-entry[open] > summary { margin-bottom: .75rem; }
-#guest-entry .invite-row { display: grid; }
 .auth-methods { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 8rem), 1fr)); gap: .5rem; margin-top: .5rem; }
 .auth-methods .button { min-width: 0; }
 .auth-oauth-row .button { width: 100%; }
@@ -474,13 +470,10 @@ details[open] > .section-summary::before { transform: rotate(45deg); }
 .auth-kind .button.suggested { box-shadow: inset 0 0 0 1px var(--amber); }
 .key-field { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .45rem; align-items: center; width: 100%; min-width: 0; }
 #access-key-reveal { width: auto; }
-#invite-link { width: 100%; max-width: 100%; margin: .35rem 0 0; box-sizing: border-box; }
 .app-shell:has(#auth-panel:not([hidden])) #identity-label,
 .app-shell:has(#auth-panel:not([hidden])) .connection-bar:has([data-state="signed-out"]) { display: none; }
 .auth-panel h1 { margin-bottom: 1.5rem; overflow-wrap: anywhere; }
 .auth-panel h1 { font-size: clamp(1.7rem, 4vw, 1.9rem); line-height: 1.2; text-wrap: balance; }
-.auth-panel h1:has(+ .auth-tagline) { margin-bottom: .5rem; }
-.auth-tagline { margin: 0 0 1.5rem; color: var(--muted); font-size: .95rem; }
 .auth-panel p, dialog p { line-height: 1.6; }
 #invitation-summary:empty { display: none; }
 .auth-panel form, #action-fields, #action-form, #invitation-account-form, .invitation-shell { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem; }
@@ -682,9 +675,6 @@ button:disabled { cursor: wait; opacity: .6; }
 #share-link-form > .button { width: 100%; }
 #share-management { border-top: 1px solid var(--line-soft); padding-top: .35rem; }
 #share-link-status:empty, #share-management-status:empty { display: none; }
-.join-link-recover { display: flex; flex-wrap: wrap; gap: .65rem 1.1rem; margin: .35rem 0 1rem; }
-.join-link-recover[hidden] { display: none; }
-.join-link-recover a { color: var(--accent, inherit); }
 #share-link-url { font-family: inherit; }
 @media (max-width: 480px) { .share-settings { grid-template-columns: 1fr; gap: 0; } }
 
@@ -1113,8 +1103,6 @@ summary { overflow-wrap: anywhere; }
 #google-signin { display: block; text-align: center; text-decoration: none; margin-bottom: .2rem; font-size: 1.05rem; padding: .95rem 1.15rem; }
 #email-auth-panel { margin-top: .75rem; }
 #email-auth-panel form { display: grid; gap: .75rem; }
-.invite-row { display: flex; gap: .5rem; margin-top: .5rem; }
-.invite-row #invite-link { flex: 1; }
 .invite-help, .access-help { margin-top: .8rem; }
 .invite-help { opacity: .82; }
 .invite-help summary, .access-help summary { cursor: pointer; color: var(--muted); font-size: .8rem; }
@@ -1162,6 +1150,7 @@ summary { overflow-wrap: anywhere; }
 .friend-dm-empty { color: var(--muted); font-size: .85rem; }
 
 .agent-invite-instructions { margin-top: 16px; }
+#agent-invite-link { overflow-wrap: anywhere; }
 .agent-invite-instructions pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 13px; }
 
 /* Reactions are conversation content; the picker lives in a long-press /
@@ -1504,8 +1493,6 @@ summary { overflow-wrap: anywhere; }
 
 /* Visible entry routes, each opening a focused sign-in flow. */
 .signin-entry-routes { display: grid; gap: .5rem; margin-top: 1.25rem; }
-.signin-entry-routes #guest-entry { margin: 0; }
-.signin-entry-routes #guest-entry > summary { color: var(--text); font-size: 1rem; }
 .signin-entry-routes #agent-signin-button { justify-self: start; min-height: 44px; font-size: .9rem; color: var(--text); text-decoration: underline; text-underline-offset: .2em; }
 #agent-auth-step { margin-top: 1rem; }
 #agent-auth-back { min-height: 44px; }

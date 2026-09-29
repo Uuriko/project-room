@@ -7,7 +7,7 @@ import { ServiceError, PILOT_LIMITS, activeMemberCount } from "./store.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { refuseArchivedWrite } from "./room-lifecycle.mjs";
 import { classifyJoinToken } from "./guest-agent-links.mjs";
-import { formatShareInviteCode, normalizeShareInviteCode, parseShareInviteCode, SHARE_CODE_ALPHABET, SHARE_INVITE_CODE_LENGTH } from "../src/share-invite-code.js";
+import { normalizeShareInviteCode, parseShareInviteCode } from "../src/share-invite-code.js";
 
 // Agent admissions reuse the durable membership event as their receipt. The
 // link ID is public metadata; neither the invitation token nor its hash is exposed.
@@ -15,16 +15,6 @@ const agentJoinPrefix = row => `sj_${row.id.replaceAll("-", "")}_`;
 const hash = value => createHash("sha256").update(value).digest("hex");
 const tokenPattern = /^[A-Za-z0-9_-]{43}$/;
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
-const randomSymbols = (length, alphabet) => {
-  const limit = Math.floor(256 / alphabet.length) * alphabet.length;
-  let out = "";
-  while (out.length < length) {
-    for (const b of randomBytes(length - out.length)) {
-      if (b < limit && out.length < length) out += alphabet[b % alphabet.length];
-    }
-  }
-  return out;
-};
 const unavailable = () => fail(410, "link_unavailable", "This invite link has expired, been cancelled, or reached its join limit. Ask for a new invite link.");
 export const shareLinkSchema = `
   CREATE TABLE IF NOT EXISTS share_links (
@@ -52,7 +42,8 @@ export const shareLinkSchema = `
   CREATE TRIGGER IF NOT EXISTS share_link_joins_no_delete BEFORE DELETE ON share_link_joins BEGIN SELECT RAISE(ABORT,'join history is retained'); END;
 `;
 
-// Short human invite codes alias existing share_links rows. Purely additive
+// Retained legacy human invite codes alias existing share_links rows. New
+// invitations issue links only. Preserve historical alias redemption. Purely additive
 // and unfenced (older writers have no code path here). The plaintext code is
 // shown once at mint; only the hash is stored.
 export const shareLinkCodeSchema = `
@@ -120,16 +111,6 @@ export class ShareLinks {
       : !this.authority(row) ? "authority_changed" : joins >= row.max_joins ? "full" : "active";
     return { id: row.id, roomId: row.room_id, role: "guest", permissions: [], createdAt: row.created_at,
       expiresAt: row.expires_at, maxJoins: row.max_joins, joins, remainingJoins: Math.max(0, row.max_joins - joins), status };
-  }
-  mintCode(linkId, now) {
-    for (let attempt = 0; attempt < 8; attempt++) {
-      const formatted = formatShareInviteCode(randomSymbols(SHARE_INVITE_CODE_LENGTH, SHARE_CODE_ALPHABET));
-      const codeHash = hash(normalizeShareInviteCode(formatted));
-      if (this.db.prepare("SELECT 1 FROM share_link_codes WHERE code_hash=?").get(codeHash)) continue;
-      this.db.prepare("INSERT INTO share_link_codes(code_hash,link_id,created_at) VALUES(?,?,?)").run(codeHash, linkId, now);
-      return formatted;
-    }
-    fail(409, "token_conflict", "Generate a new link");
   }
   find(token) {
     if (classifyJoinToken(token) === "guest-agent") fail(422, "wrong_link_kind", "Guest invites are not human invite links.");
@@ -235,8 +216,7 @@ export class ShareLinks {
       const id = randomUUID();
       this.db.prepare(`INSERT INTO share_links(id,token_hash,room_id,issuer_account_id,issuer_member_id,issuer_auth_epoch,issuer_member_revision,request_id,fingerprint,created_at,expires_at,max_joins)
         VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`).run(id, tokenHash, roomId, auth.account?.id ?? null, auth.member.id, auth.account?.authEpoch ?? null, auth.member.revision, requestId, fingerprint, now, expiresAt, maxJoins);
-      const code = this.mintCode(id, now);
-      return { link: this.view(this.db.prepare("SELECT * FROM share_links WHERE id=?").get(id)), code, duplicate: false };
+      return { link: this.view(this.db.prepare("SELECT * FROM share_links WHERE id=?").get(id)), duplicate: false };
     });
   }
   cancel(token, roomId, id, binding) {

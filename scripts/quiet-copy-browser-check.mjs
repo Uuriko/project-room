@@ -30,7 +30,7 @@ for (const [label, viewport] of [["desktop", { width: 1280, height: 900 }], ["na
     const { fixture, page, errors, origin } = await setup(t, viewport);
     await page.goto(origin);
     await page.locator("#auth-panel").waitFor({ state: "visible" });
-    // Auth first paint is the wordmark + Google/email + More options. Keys, invite,
+    // Auth first paint is the wordmark and sign-in choices. Keys and
     // GitHub/email/magic/passkey/recovery, and session restore stay collapsed.
     assert.equal(await page.locator("#auth-title").textContent(), "PROJECT ROOM");
     assert.equal(await page.locator("#google-signin").isVisible(), true);
@@ -48,27 +48,25 @@ for (const [label, viewport] of [["desktop", { width: 1280, height: 900 }], ["na
     assert.equal(await page.locator("#identity-label").isVisible(), false);
     assert.equal(await page.locator("#auth-error").textContent(), "");
     assert.equal(await page.getByLabel("Room key", { exact: true }).isVisible(), false);
-    assert.equal(await page.locator("#guest-entry > summary").isVisible(), false);
     await page.locator("#signin-more").click();
     await page.locator("#signin-support-root > summary").click();
-    await page.locator("#key-signin > summary").click();
     assert.equal(await page.locator("#auth-description").isVisible(), false);
     assert.equal(await page.locator("#auth-guest-note").count(), 0, "guest-duration note removed in streamlined login");
     assert.equal(await page.locator(".topbar").isVisible(), false, "healthy signed-out entry has no utility-only navbar");
     await page.reload();
     await page.locator("#auth-panel").waitFor({ state: "visible" });
     await page.locator("#signin-support-root > summary").click();
-    await page.locator("#key-signin > summary").click();
     await page.waitForFunction(() => document.querySelector("#connection-status").dataset.state === "signed-out");
     assert.equal(await page.locator("#auth-error").textContent(), "", "normal signed-out refresh is not an error");
     await page.locator("#skip-link").focus(); await page.keyboard.press("Enter");
     assert.equal(await page.evaluate(() => document.activeElement.id), "auth-title");
-    const help = page.locator("#signin-help > summary");
+    const help = page.locator("#signin-support-root > summary");
     await help.focus(); await page.keyboard.press("Enter");
     const helpBody = page.locator(".access-help > p").first();
+    assert.equal(await helpBody.isVisible(), false);
+    await page.keyboard.press("Enter");
     assert.equal(await helpBody.isVisible(), true);
     assert.match(await helpBody.textContent(), /keep your key private/i);
-    await page.keyboard.press("Enter");
     await page.screenshot({ path: `test-results/quiet-copy-${label}-login.png` });
     await page.getByLabel("Room key", { exact: true }).fill("invalid-key");
     await page.getByLabel("Room key", { exact: true }).press("Enter");
@@ -94,7 +92,7 @@ for (const [label, viewport] of [["desktop", { width: 1280, height: 900 }], ["na
     assert.equal(await page.evaluate(() => document.activeElement.id), "conversation-title");
     await page.screenshot({ path: `test-results/quiet-copy-${label}-room.png`, fullPage: true });
     await clickChrome(page, "#invite-people-button");
-    assert.equal(await page.locator("#share-local-note").isVisible(), true);
+    await page.locator("#share-link-dialog").waitFor({ state: "visible" });
     assert.match(await page.locator("#share-link-dialog").innerText(), /Share one link with people or AI agents/);
     await page.screenshot({ path: `test-results/quiet-copy-${label}-invite.png` });
     await page.locator("#share-link-close").click();
@@ -119,7 +117,6 @@ test("quiet copy: account entry is not an error, actual service failure remains 
   assert.equal(await page.locator("#google-signin").isVisible(), true);
   assert.equal(await page.locator("#signin-extra").isVisible(), false);
   await page.locator("#signin-support-root > summary").click();
-  await page.locator("#key-signin > summary").click();
   assert.equal(await page.locator("#auth-kind-room").evaluate(node => node.classList.contains("suggested")), true);
   assert.equal(await page.locator("#auth-panel").getByLabel("Account key", { exact: true }).isVisible(), true);
   assert.equal(await page.getByRole("button", { name: "Open room", exact: true }).isVisible(), true);

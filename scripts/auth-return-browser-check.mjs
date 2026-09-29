@@ -37,7 +37,7 @@ test("sign-out clears the email form, sign-in returns to the last room, and the 
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 }, reducedMotion: "reduce" });
   page.setDefaultTimeout(15000);
   const errors = [];
-  page.on("pageerror", error => errors.push(error.message));
+  page.on("pageerror", error => errors.push(error.stack || error.message));
   page.on("dialog", dialog => dialog.accept());
   const email = `return-${Date.now()}@example.invalid`;
   const password = "tenletters"; // Backend minimum: ten characters, no complexity rule.
@@ -48,7 +48,6 @@ test("sign-out clears the email form, sign-in returns to the last room, and the 
   assert.equal(await page.locator("#email-auth-panel").isVisible(), false);
   assert.equal(await page.locator("#email-signin").isVisible(), true);
   assert.equal(await page.locator("#signin-extra").isVisible(), false);
-  assert.equal(await page.locator("#guest-entry").evaluate(node => node.open), false);
 
   // A pending alternate sign-in must not let another method hide its status.
   let releaseMagic;
@@ -70,7 +69,6 @@ test("sign-out clears the email form, sign-in returns to the last room, and the 
   await page.locator("#email-signin").click();
   assert.equal(await page.locator("#google-signin").isVisible(), false);
   assert.equal(await page.locator("#email-signin").isVisible(), false);
-  assert.equal(await page.locator("#guest-entry").isVisible(), false);
   assert.equal(await page.locator("#join-agent").isVisible(), false);
   assert.equal(await page.locator("#signin-more").isVisible(), false);
   assert.equal(await page.getByRole("button", { name: "Back to sign-in methods" }).isVisible(), true);

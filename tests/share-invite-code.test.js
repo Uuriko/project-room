@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -17,8 +17,9 @@ function fixture(t) {
   const store = new RoomStore(join(directory, "room.sqlite"));
   store.initialize(initialRoom());
   const ownerKey = store.issueAccessKey("commons", "owner");
-  t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
-  return { store, ownerKey };
+  const f = { store, ownerKey, filename: join(directory, "room.sqlite") };
+  t.after(() => { f.store.close(); rmSync(directory, { recursive: true, force: true }); });
+  return f;
 }
 
 test("short invite codes fold confusable letters and reject lookalikes", () => {
@@ -33,29 +34,37 @@ test("short invite codes fold confusable letters and reject lookalikes", () => {
   assert.equal(shareJoinSecretFromText("abc def ghj"), "ABC-DEF-GHJ");
 });
 
-test("share-link mint returns a one-time short code that previews and joins", t => {
-  const { store, ownerKey } = fixture(t);
+test("persisted legacy invite aliases still preview and redeem without issuing new codes", t => {
+  const f = fixture(t);
+  const { store, ownerKey } = f;
   const linkToken = randomBytes(32).toString("base64url");
   const requestId = randomUUID();
   const expiresAt = Date.now() + 3600000;
   const created = store.shareLinks.create(ownerKey, "commons", {
     requestId, linkToken, expiresAt, maxJoins: 2, expectedMemberRevision: 0
   }, null);
-  assert.match(created.code, /^[0-9A-HJKMNP-TV-Z]{3}-[0-9A-HJKMNP-TV-Z]{3}-[0-9A-HJKMNP-TV-Z]{3}$/);
-  const preview = store.shareLinks.preview(created.code);
+  const legacyCode = "ABC-DEF-GHJ";
+  const codeHash = createHash("sha256").update("ABCDEFGHJ").digest("hex");
+  // Historical persisted alias: neither creation nor its retry may replace it.
+  store.db.prepare("INSERT INTO share_link_codes(code_hash,link_id,created_at) VALUES(?,?,?)").run(codeHash, created.link.id, Date.now());
+  store.close();
+  f.store = new RoomStore(f.filename);
+  const reopened = f.store;
+  const preview = reopened.shareLinks.preview(legacyCode);
   assert.equal(preview.room.id, "commons");
-  assert.equal(store.shareLinks.preview(created.code.replaceAll("-", "")).room.id, "commons");
-  assert.equal(JSON.stringify(store.shareLinks.list(ownerKey, "commons", null)).includes(created.code), false);
-  const again = store.shareLinks.create(ownerKey, "commons", {
+  assert.equal(reopened.shareLinks.preview("ABCDEFGHJ").room.id, "commons");
+  assert.equal(JSON.stringify(reopened.shareLinks.list(ownerKey, "commons", null)).includes(legacyCode), false);
+  const again = reopened.shareLinks.create(ownerKey, "commons", {
     requestId, linkToken, expiresAt, maxJoins: 2, expectedMemberRevision: 0
   }, null);
   assert.equal(again.duplicate, true);
-  assert.equal(again.code, undefined);
-  const slot = store.createAccountSessionSlot();
-  const joined = store.shareLinks.join(slot.token, created.code, {
+  assert.equal(Object.hasOwn(again, "code"), false);
+  assert.equal(reopened.db.prepare("SELECT COUNT(*) AS n FROM share_link_codes").get().n, 1);
+  const slot = reopened.createAccountSessionSlot();
+  const joined = reopened.shareLinks.join(slot.token, legacyCode, {
     displayName: "Code Guest", redemptionId: randomUUID(),
-    expectedSessionRevision: store.accountSessionSlot(slot.token).sessionRevision,
-    expectedSessionBinding: store.accountSessionSlot(slot.token).sessionBinding
+    expectedSessionRevision: reopened.accountSessionSlot(slot.token).sessionRevision,
+    expectedSessionBinding: reopened.accountSessionSlot(slot.token).sessionBinding
   });
   assert.equal(joined.session.member.displayName, "Code Guest");
   assert.equal(joined.session.member.role, "guest");

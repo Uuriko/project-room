@@ -1,6 +1,4 @@
-// Auth first paint collapses key sign-in and extra methods behind the
-// "More options" toggle. Browser checks must expand it first, exactly as
-// a human visitor does.
+// Browser checks open the same secondary sign-in controls as a visitor.
 export async function expandSigninMore(page) {
   const more = page.locator('#signin-more');
   const extra = page.locator('#signin-extra');
@@ -21,8 +19,6 @@ export async function fillAccessKey(page, value) {
   const support = page.locator("#signin-support-root");
   if (await support.isHidden()) await page.locator("#signin-more").click();
   if (await support.count() && !(await support.evaluate(node => node.open))) await support.locator(":scope > summary").click();
-  const keys = page.locator("#key-signin");
-  if ((await keys.getAttribute("open")) === null) await keys.locator("summary").click();
   await key.waitFor({ state: 'visible' });
   await key.fill(value);
 }

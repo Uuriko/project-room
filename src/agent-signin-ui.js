@@ -1,6 +1,5 @@
 // Agent sign-in UI (RC-2026-09-23): gives agents a choice at sign-in time —
-// sign in on their own agent account (identity ID + secret), or fall back
-// to the human account sign-in flows. Mounts into the auth panel alongside
+// sign in on their own agent account (identity ID + secret), with a saved identity. Mounts into the auth panel alongside
 // the human sign-in UI.
 //
 // Flow:
@@ -14,14 +13,14 @@
 // verification. The secret (and the Ed25519 claim-signing private key) is
 // shown exactly once with copy/save language; it is never logged or
 // persisted by the page. From there the agent can create its own room
-// (POST /api/agent-rooms — no human owner needed) or redeem an invite code,
-// then the browser session is created and the room opens.
+// (POST /api/agent-rooms — no human owner needed). Existing rooms use
+// invitation links; agents follow the packet with their saved identity.
 import { escapeHtml } from "./account-settings-ui.js";
 import { mountAgentFirstRun } from "./agent-first-run.js";
 
-export function createAgentSigninUI({ onSignedIn, onUseHumanAccount, firstRunActions }) {
+export function createAgentSigninUI({ onSignedIn, firstRunActions }) {
   let container = null;
-  let phase = "credentials"; // or "rooms" | "create" | "created" | "make-room" | "invite"
+  let phase = "credentials"; // or "rooms" | "create" | "created" | "make-room"
   let identityId = "";
   let secret = "";
   let rooms = [];
@@ -58,7 +57,6 @@ export function createAgentSigninUI({ onSignedIn, onUseHumanAccount, firstRunAct
     if (phase === "create") return createHtml();
     if (phase === "created") return createdHtml();
     if (phase === "make-room") return makeRoomHtml();
-    if (phase === "invite") return inviteHtml();
     return credentialsHtml();
   }
 
@@ -97,7 +95,6 @@ export function createAgentSigninUI({ onSignedIn, onUseHumanAccount, firstRunAct
         <button type="button" class="button secondary" data-agent-copy>Copy</button></span></label>
       <div class="auth-methods" role="group" aria-label="What next">
         <button type="button" class="button primary" data-agent-create-room>Create my own room</button>
-        <button type="button" class="button secondary" data-agent-have-invite>I have an invite code</button>
       </div>
       <p class="form-hint"><button type="button" class="text-button" data-agent-saved>I've saved them — sign me in</button></p>
     </div>`;
@@ -115,23 +112,12 @@ export function createAgentSigninUI({ onSignedIn, onUseHumanAccount, firstRunAct
     </form>`;
   }
 
-  function inviteHtml() {
-    return `<form data-agent-form="invite" autocomplete="off">
-      <p class="form-hint"><strong>Redeem an invite code.</strong> One-time code from a room member — it joins you to their room.</p>
-      <label>Invite code <input name="inviteCode" type="text" required autocomplete="off" spellcheck="false" maxlength="64" placeholder="Paste the code"></label>
-      <label>Display name <input name="inviteName" type="text" required autocomplete="off" spellcheck="false" maxlength="80" value="${escapeHtml(displayName)}"></label>
-      <button class="button primary" type="submit" ${busy ? "disabled" : ""}>${busy ? "Redeeming…" : "Join room"}</button>
-      <button type="button" class="text-button" data-agent-back-to-created>Back</button>
-    </form>`;
-  }
-
   function roomsHtml() {
     if (rooms.length === 0) {
-      return `<p class="form-hint">Signed in as ${escapeHtml(displayName)}, but this identity isn’t linked to any rooms yet. Create your own room or redeem an invite below.</p>
+      return `<p class="form-hint">No rooms yet.</p>
         <div class="auth-methods" role="group" aria-label="What next">
           <button type="button" class="button primary" data-agent-create-room>Create my own room</button>
-          <button type="button" class="button secondary" data-agent-have-invite>I have an invite code</button>
-        </div>
+          </div>
         <button type="button" class="text-button" data-agent-back>Use a different identity</button>`;
     }
     return `<form data-agent-form="rooms">
@@ -195,21 +181,10 @@ export function createAgentSigninUI({ onSignedIn, onUseHumanAccount, firstRunAct
 
   const onClick = async (event) => {
     if (busy) return;
-    const tab = event.target?.closest?.("[data-agent-tab]");
-    if (tab) {
-      if (tab.dataset.agentTab === "human") {
-        onUseHumanAccount?.();
-      } else {
-        phase = "credentials";
-        render();
-      }
-      return;
-    }
     const t = event.target;
     if (t?.closest?.("[data-agent-new]")) { phase = "create"; render(); return; }
     if (t?.closest?.("[data-agent-back-to-signin]")) { phase = "credentials"; render(); return; }
     if (t?.closest?.("[data-agent-back-to-created]")) { phase = "created"; render(); return; }
-    if (t?.closest?.("[data-agent-have-invite]")) { phase = "invite"; render(); return; }
     if (t?.closest?.("[data-agent-create-room]")) { phase = "make-room"; render(); return; }
     if (t?.closest?.("[data-agent-back]")) {
       phase = "credentials";
@@ -349,32 +324,7 @@ export function createAgentSigninUI({ onSignedIn, onUseHumanAccount, firstRunAct
       return;
     }
 
-    if (kind === "invite") {
-      const code = (data.inviteCode || "").trim();
-      const name = (data.inviteName || "").trim() || displayName;
-      if (!code) { setError("Paste your invite code."); return; }
-      if (!name) { setError("Give your agent a display name."); return; }
-      await withBusy(async () => {
-        const headers = { "Content-Type": "application/json" };
-        const savedSecret = createdIdentity?.secret ?? secret;
-        if (savedSecret) headers["Authorization"] = `Bearer ${savedSecret}`;
-        const res = await fetch("/api/agent-invites/redeem", {
-          method: "POST",
-          headers,
-          body: JSON.stringify({ code, displayName: name }),
-          credentials: "same-origin"
-        });
-        if (!res.ok) throw await apiError(res, "Couldn't redeem the invite");
-        const redeemed = await res.json();
-        // A fresh redemption mints an identity: its secret comes back once.
-        // Otherwise reuse the saved identity secret (created or signed-in).
-        const signinIdentityId = redeemed.identityId;
-        const signinSecret = redeemed.secret ?? savedSecret;
-        if (!signinSecret) throw new Error("Redeemed, but no credential came back — sign in with your saved identity.");
-        await startSession(signinIdentityId, redeemed.roomId, signinSecret);
-      });
-      return;
-    }
+
   };
 
   return {
