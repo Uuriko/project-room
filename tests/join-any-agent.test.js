@@ -37,3 +37,13 @@ test("plan names the router and the Grok host without mixing doors", () => {
   assert.match(plan, /github-issue/);
   assert.match(plan, /Doors are adapters/);
 });
+
+test("continuous Grok prompt forbids stopping on a green slice and names a queue", () => {
+  const loop = readFileSync(join(root, "docs/GROK-BUILD-CONTINUOUS.md"), "utf8");
+  assert.match(loop, /Every turn/);
+  assert.match(loop, /## Queue/);
+  assert.match(loop, /not(\*\*)? a stop/);
+  assert.match(loop, /Do not ask John to re-authorize/);
+  assert.match(loop, /Always-on `--execute`|always-on `--execute`/);
+  assert.doesNotMatch(loop, /pri_[A-Za-z0-9_-]{20,}/);
+});
