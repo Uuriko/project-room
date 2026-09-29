@@ -170,3 +170,15 @@ export function assertPlanSafe(plan, secrets = []) {
   }
   return plan;
 }
+
+// Child Grok processes need the hosted MCP bearer in the environment
+// (plugins/project-room/.mcp.json reads PROJECT_ROOM_SECRET). Never put it
+// in the prompt.
+export function childEnvFor(base, connection) {
+  if (!connection || typeof connection.token !== "string" || !connection.token) fail("config_not_found");
+  return {
+    ...base,
+    PROJECT_ROOM_SECRET: connection.token,
+    ...(typeof connection.origin === "string" && connection.origin ? { ROOM_AGENT_ORIGIN: connection.origin } : {})
+  };
+}

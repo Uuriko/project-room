@@ -6,7 +6,7 @@ import { join } from "node:path";
 import {
   GrokHostError, parseNeedsMeBody, parseWakePing, wakeToAttentionItem,
   pendingWakeToItem, attentionKey, selectUnhandled, markHandled, emptyJournal,
-  loadJournal, buildRunPlan, assertPlanSafe, parseAttentionItem
+  loadJournal, buildRunPlan, assertPlanSafe, parseAttentionItem, childEnvFor
 } from "../client/grok-host.mjs";
 import { pull, doctor, ingestWake, writeJournalFile, readJournalFile } from "../scripts/grok-room-host.mjs";
 import { saveAgentConnection } from "../client/agent-connection.mjs";
@@ -70,6 +70,14 @@ test("run plan never includes the identity secret", () => {
   assert.match(plan.prompt, /id=msg-1/);
   assert.equal(plan.prompt.includes(secret), false);
   assert.throws(() => assertPlanSafe({ prompt: `hi ${secret}` }, [secret]), /secret_in_plan/);
+});
+
+test("childEnvFor puts the bearer in PROJECT_ROOM_SECRET for hosted MCP", () => {
+  const env = childEnvFor({ PATH: "/bin" }, { token: secret, origin: "https://room.example" });
+  assert.equal(env.PROJECT_ROOM_SECRET, secret);
+  assert.equal(env.ROOM_AGENT_ORIGIN, "https://room.example");
+  assert.equal(env.PATH, "/bin");
+  assert.equal(buildRunPlan(mention()).prompt.includes(secret), false);
 });
 
 test("malformed needs-me and wake payloads fail closed", () => {
@@ -215,6 +223,28 @@ test("pull merges heartbeat pendingWakes and acks their signal ids", async t => 
   });
   assert.equal(result.planned[0].item.id, "msg-9");
   assert.deepEqual(handlers.acks[0].signalIds, ["sig-1"]);
+});
+
+test("pull follows needs-me hasMore for a bounded number of pages", async t => {
+  const directory = fixtureDir();
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  let pages = 0;
+  const fetchImpl = async (url, opts = {}) => {
+    const path = String(url);
+    if (path.includes("/api/agent-heartbeats")) {
+      return new Response(JSON.stringify({ host: { hostId: "grok-build" }, pendingWakes: [], acknowledged: [] }), { status: 200 });
+    }
+    pages += 1;
+    if (pages === 1) {
+      return new Response(JSON.stringify(needsMe([mention()], { hasMore: true, cursor: { rooms: { den: 4 } } })), { status: 200 });
+    }
+    return new Response(JSON.stringify(needsMe([mention({ id: "msg-2", seq: 5 })], { hasMore: false, cursor: { rooms: { den: 5 } } })), { status: 200 });
+  };
+  const result = await pull({ env: { ROOM_AGENT_CONFIG: directory }, fetchImpl, now: () => 8 });
+  assert.equal(pages, 2);
+  assert.equal(result.pages, 2);
+  assert.equal(result.hasMore, false);
+  assert.deepEqual(result.planned.map(plan => plan.item.id), ["msg-1", "msg-2"]);
 });
 
 test("ingestWake journals an agent.wake once", async t => {

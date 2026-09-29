@@ -6,7 +6,7 @@ import { readAgentConnection, ConnectionError } from "../client/agent-connection
 import {
   GrokHostError, parseNeedsMeBody, parseWakePing, wakeToAttentionItem,
   pendingWakeToItem, selectUnhandled, markHandled, setCursor, loadJournal,
-  emptyJournal, buildRunPlan, assertPlanSafe
+  emptyJournal, buildRunPlan, assertPlanSafe, childEnvFor
 } from "../client/grok-host.mjs";
 
 function fail(code, message) {
@@ -148,7 +148,7 @@ async function planAndJournal({ connection, items, env, execute, runner, now, ex
     journal = markHandled(journal, plan.item, now());
     writeJournalFile(filename, journal);
     if (execute) {
-      const result = await (runner ?? defaultRunner)(plan, env);
+      const result = await (runner ?? defaultRunner)(plan, env, connection);
       executed.push({ key: plan.key, result });
     }
   }
@@ -162,22 +162,34 @@ async function planAndJournal({ connection, items, env, execute, runner, now, ex
 export async function pull({ env = process.env, fetchImpl = fetch, execute = false, runner, now = Date.now } = {}) {
   const connection = connectionFromEnv(env);
   const filename = journalPathFor(env);
-  const journal = readJournalFile(filename);
+  let journal = readJournalFile(filename);
   const beat = await beatPullOnly(connection, { fetchImpl, env });
-  const attention = await readNeedsMe(connection, { fetchImpl, since: journal.cursor ?? undefined });
-  const items = [...beat.items, ...attention.items];
+  const items = [...beat.items];
+  let cursor = journal.cursor ?? undefined;
+  let identityId = null;
+  let hasMore = false;
+  let pages = 0;
+  do {
+    const attention = await readNeedsMe(connection, { fetchImpl, since: cursor });
+    items.push(...attention.items);
+    identityId = attention.identityId;
+    cursor = attention.cursor;
+    hasMore = attention.hasMore === true;
+    pages += 1;
+  } while (hasMore && pages < 5);
   const result = await planAndJournal({
-    connection, items, env, execute, runner, now, extra: { cursor: attention.cursor }
+    connection, items, env, execute, runner, now, extra: { cursor: cursor ?? null }
   });
   await ackWakes(connection, beat.signalIds, { fetchImpl });
   return {
     ok: true,
-    identityId: attention.identityId,
+    identityId,
     seen: items.length,
     planned: result.plans,
     executed: result.executed,
-    hasMore: attention.hasMore,
-    cursor: attention.cursor,
+    hasMore,
+    pages,
+    cursor: cursor ?? null,
     pendingWakes: beat.pendingWakes.length,
     hostId: beat.hostId
   };
@@ -192,11 +204,12 @@ export async function ingestWake({ env = process.env, body, execute = false, run
   return { ok: true, planned: result.plans, executed: result.executed, key: result.plans[0]?.key ?? null };
 }
 
-async function defaultRunner(plan, env) {
+async function defaultRunner(plan, env, connection) {
   const bin = env.GROK_BIN?.trim() || "grok";
   const cwd = env.GROK_ROOM_CWD?.trim() || process.cwd();
+  const childEnv = childEnvFor({ ...process.env, ...env }, connection);
   return await new Promise((resolve, reject) => {
-    const child = spawn(bin, ["-p", plan.prompt], { cwd, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(bin, ["-p", plan.prompt], { cwd, env: childEnv, stdio: ["ignore", "pipe", "pipe"] });
     const stdout = [], stderr = [];
     child.stdout.on("data", chunk => stdout.push(chunk));
     child.stderr.on("data", chunk => stderr.push(chunk));
