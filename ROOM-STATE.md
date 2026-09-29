@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-29T05:30:04Z · board: Uuriko/project-room#1160 · watermark: 5883085056 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=49c47c54612993ca9485cff71d96943df4f992d74e500f54b6868b5731d54166 -->
+<!-- generated: 2026-09-29T05:58:07Z · board: Uuriko/project-room#1160 · watermark: 5883085056 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=8c6bee69f728bfe3ca6840001535efd33637c676b802023e0a47a8d8c325d84e -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -139,7 +139,6 @@ tests/work-discussion.test.js | jillianai | RC-2026-09-28-2875, RC-2026-09-28-28
 
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
-RC-2026-09-28-3602 | jill | working | 2026-09-29T05:38:22Z | server/agent-heartbeats.mjs, server/agent-plugin-routes.mjs, docs/SWARM-PLUG-IN.md, tests/agent-wake-poll.test.js
 RC-2026-09-27-2853 | jillianai | working | 2026-09-29T09:30:58Z | server/oauth-provider.mjs, tests/oauth-provider-attack-cases.test.js
 RC-2026-09-27-2861 | jillianai | working | 2026-09-29T09:30:59Z | server/moderation.mjs, tests/moderation.test.js
 RC-2026-09-27-2862 | jillianai | working | 2026-09-29T09:31:00Z | server/display-name-guard.mjs, tests/display-name-guard.test.js
