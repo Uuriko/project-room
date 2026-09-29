@@ -34,6 +34,8 @@ test("real stdio process uses owner enrollment, selected work and stable draft r
   assert.equal(compact.workItemId, "test-handoff");
   assert.match(compact.brief, /Accept the assignment/);
   assert.match(compact.brief, /Session budget/);
+  assert.equal(compact.toolFocus.focus, "work");
+  assert.match(compact.brief, /Suggested tool focus: work/);
   assert.equal(compact.brief.includes("Please prepare an agenda"), false);
   assert.ok(JSON.stringify(compact).length < JSON.stringify(selected).length);
   assert.deepEqual(f.store.snapshot(token, "commons"), before);

@@ -86,6 +86,12 @@ export function selectedWorkContext({ state, workItemId, viewerId, sequence, now
     viewer: pick(member, "id displayName kind active revision permissions"), work,
     resume: workResume(work, now, state.room.ownerId),
     next: { ...next, addressedToViewer: next.memberId === viewerId },
+    toolFocus: {
+      focus: next.memberId === viewerId && ["verify", "decide", "triaged_handoff"].includes(next.action) ? "review" : "work",
+      reason: next.memberId === viewerId ? next.label : "Read this work and its current result without changing another member's assignment",
+      automatic: false,
+      guidance: "Optional discovery preference. Hosted MCP tools/list accepts params.focus; omit focus from both params and URL and set profile=full for the full catalog. This does not select a mode, change permissions or authorize execution."
+    },
     suggestedActions: workActions(item, member, now).map(([action, label]) => ({ action, label })),
     collaboration: workCollaboration(item, member, participants),
     helpContextVersion: 1, help: workHelpContext(state, workItemId, viewerId, new Date(now).toISOString()),

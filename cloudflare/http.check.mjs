@@ -146,6 +146,23 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     assert.match(cookie, /HttpOnly; SameSite=Strict;.*Secure/);
     const owner = await json(login, 201);
     const ownerHeaders = { Cookie: cookie.split(';')[0], 'X-CSRF-Token': owner.csrf, 'X-Session-Binding': owner.sessionBinding };
+    // Work delivery crosses the actual HTTP + Durable Object SQLite boundary.
+    await json(await call('/api/rooms/commons/identity-links', { headers: ownerHeaders,
+      data: { identityId: identity.identityId, memberId: 'work-wake-worker', permissions: ['accept_work'] } }), 201);
+    const beatWork = () => call('/api/agent-heartbeats', { headers: identityHeaders,
+      data: { hostId: 'worker-work-test', mode: 'pull-only', workWakes: true } });
+    assert.equal((await json(await beatWork())).host.workWakes, true);
+    const wakeAssignmentCommand = { id: randomUUID(), type: 'work.proposed', data: { workItemId: 'worker-work-wake', title: 'Wake test',
+      definitionOfDone: 'Review pointer', mode: 'read', accountableMemberId: 'work-wake-worker' } };
+    await json(await call('/api/rooms/commons/commands', { headers: ownerHeaders, data: wakeAssignmentCommand }), 201);
+    await json(await call('/api/rooms/commons/commands', { headers: ownerHeaders, data: wakeAssignmentCommand }));
+    const workSignals = (await json(await beatWork())).pendingWakes;
+    assert.deepEqual(workSignals.map(w => [w.kind, w.workItemId, w.workRevision]), [['work', 'worker-work-wake', 0]]);
+    const ackWork = await json(await call('/api/agent-heartbeats/ack', { headers: identityHeaders,
+      data: { signalIds: workSignals.map(w => w.signalId) } }));
+    assert.deepEqual(ackWork.acknowledged, workSignals.map(w => w.signalId));
+    assert.deepEqual((await json(await beatWork())).pendingWakes, []);
+
     const mailSlotResponse = await call('/api/account-session', { ip: '192.0.2.20' });
     const mailCookie = mailSlotResponse.headers.get('set-cookie').split(';')[0], mailSlot = await json(mailSlotResponse);
     const mailLoginResponse = await call('/api/account-session', { method: 'POST', ip: '192.0.2.20',

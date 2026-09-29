@@ -137,7 +137,7 @@ async function callTool(client, identity, name, args, signal) {
     const context = args.includeDiscussion ? await prepareWork(client, args.workItemId, { ...options, discussionSince: args.discussionSince })
       : await client.workContext(args.workItemId, options);
     return args.brief ? { roomId: context.roomId, workItemId: context.work.id, revision: context.work.revision,
-      evaluatedThrough: context.evaluatedThrough, brief: workContextMarkdown(context), ...(context.preparation ? { preparation: context.preparation } : {}) } : context;
+      evaluatedThrough: context.evaluatedThrough, ...(context.toolFocus ? { toolFocus: context.toolFocus } : {}), brief: workContextMarkdown(context), ...(context.preparation ? { preparation: context.preparation } : {}) } : context;
   }
   if (name === "room_read_result") {
     const { workItemId, ...options } = args; return client.workResult(workItemId, { ...options, signal });

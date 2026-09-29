@@ -194,7 +194,7 @@ export async function callHostedStdioTool(store, secret, name, args) {
     if (!rest.brief) return { value: context, isError: false };
     return { value: {
       roomId: context.roomId, workItemId: context.work.id, revision: context.work.revision,
-      evaluatedThrough: context.evaluatedThrough, brief: workContextMarkdown(context),
+      evaluatedThrough: context.evaluatedThrough, ...(context.toolFocus ? { toolFocus: context.toolFocus } : {}), brief: workContextMarkdown(context),
       ...(context.preparation ? { preparation: context.preparation } : {})
     }, isError: false };
   }

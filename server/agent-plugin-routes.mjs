@@ -680,10 +680,10 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     const data = await body(req);
     // RC-2026-09-24-203: the body stays backward-compatible — hostId + mode
     // are required, wakeUrl / cadenceSeconds / pushNotification are optional.
-    const heartbeatFields = ["hostId", "mode", "wakeUrl", "cadenceSeconds", "pushNotification"];
+    const heartbeatFields = ["hostId", "mode", "wakeUrl", "cadenceSeconds", "pushNotification", "workWakes"];
     if (!data || !Object.keys(data).every(field => heartbeatFields.includes(field))
         || !Object.hasOwn(data, "hostId") || !Object.hasOwn(data, "mode"))
-      reject(422, "invalid_heartbeat", "hostId and mode (wakeable|pull-only) are required; wakeUrl, cadenceSeconds, and pushNotification are optional");
+      reject(422, "invalid_heartbeat", "hostId and mode (wakeable|pull-only) are required; wakeUrl, cadenceSeconds, pushNotification and workWakes are optional");
     if (roomKey) assertRoomKeyPullOnly(store, auth.identityId, data);
     // Subscribe-time SSRF guard: the push url's hostname must resolve to a
     // public address BEFORE the sync heartbeat() upsert stores anything.
@@ -704,8 +704,8 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
       const result = store.agentHeartbeats.heartbeat({
         agentId: auth.identityId, hostId, mode: data.mode,
         wakeUrl: data.wakeUrl ?? null, cadenceSeconds: data.cadenceSeconds ?? null,
-        pushNotification: data.pushNotification ?? null });
-      return roomKey ? { ...result, pendingWakes: store.agentHeartbeats.pendingWakes(auth.identityId, { roomId: auth.roomId }) } : result;
+        pushNotification: data.pushNotification ?? null, workWakes: data.workWakes, workScopeRoomId: roomKey ? auth.roomId : null });
+      return result;
     });
     // A suspended push subscription tells the agent how to re-arm it: POST
     // a fresh pushNotification on the next heartbeat.

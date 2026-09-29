@@ -196,6 +196,7 @@ optional.push("server/agent-plugin-store.mjs"); // Lane D: plug-in sub-store, SQ
 optional.push("server/agent-plugin-routes.mjs"); // Lane D: plug-in HTTP routes (imported by server/http.mjs)
 optional.push("server/room-key-presence.mjs"); // Scoped pull-only room credential presence.
 optional.push("server/agent-heartbeats.mjs"); // RC-2026-09-18-051: wakeable agent presence (imported by server/store.mjs; imports outbound-webhooks.mjs)
+optional.push("server/work-wakes.mjs"); // Opt-in pointer-only work delivery on heartbeat reads (imported by server/store.mjs; pure work-pointer journal)
 optional.push("server/members-directory.mjs"); // RC-2026-09-24-202: members directory + skill cards (imported by server/store.mjs)
 optional.push("server/mentions.mjs"); // RC-2026-09-18-051: mention parser (imported by server/store.mjs for wake-on-mention; pure, no imports)
 optional.push("server/gmail-content.mjs","server/gmail-import-authority.mjs","server/gmail-sync.mjs","server/vendor/gmail-html-sanitizer.mjs","server/vendor/gmail-html-LICENSES.txt", "server/gmail-mailbox.mjs", "server/gmail-actions.mjs", "src/account-setup-ui.js", "src/gmail-ui.js");

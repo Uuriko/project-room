@@ -42,6 +42,8 @@ test("selected context is one authenticated read with current actor/gates and ex
   assert.equal(reads, 1);
   assert.equal(context.viewer.id, "producer"); assert.equal(context.viewerId, "producer");
   assert.equal(context.next.action, "accept"); assert.equal(context.next.addressedToViewer, true);
+  assert.equal(context.toolFocus.focus, "work");
+  assert.equal(context.toolFocus.automatic, false);
   assert.deepEqual(context.suggestedActions.map(action => action.action), ["accept"]);
   assert.equal(context.context.source.status, "not_requested"); assert.equal(context.context.source.message, null);
   for (const key of ["receiptHistory", "verificationHistory", "decisionHistory"]) assert.equal(Object.hasOwn(context.work, key), false);
@@ -145,6 +147,8 @@ test("selected handoff tracks exact corrections/reviews while preserving human d
   assert.match(workContextMarkdown(context), /Session display status: done/);
   assert.match(workContextMarkdown(context), /Recorded session controls[^\n]+"status":"queued"/);
   assert.equal(context.next.action, "verify"); assert.equal(context.next.addressedToViewer, true);
+  assert.equal(context.toolFocus.focus, "review");
+  assert.equal((await producer.workContext("test-handoff")).toolFocus.focus, "work", "another member reviewing does not change the producer catalog recommendation");
   await mutate(reviewer, T.VERIFICATION_RECORDED, { result: "fail", completionEventId: context.work.receipt.eventId, evidenceVersion: "v1", summary: "Synthetic correction needed", nextAction: "Revise" });
   assert.equal((await producer.workContext("test-handoff")).work.blocker.reason, "Synthetic correction needed");
   await mutate(producer, T.WORK_BLOCKER_RESOLVED, { resolution: "Understood" }); await complete("v2");
@@ -154,6 +158,7 @@ test("selected handoff tracks exact corrections/reviews while preserving human d
   await mutate(reviewer, T.VERIFICATION_RECORDED, { result: "pass", completionEventId: context.work.receipt.eventId, evidenceVersion: "v2", summary: "Synthetic current check" });
   const ownerView = await f.client("owner").workContext("test-handoff");
   assert.equal(ownerView.next.action, "decide"); assert.equal(ownerView.next.addressedToViewer, true);
+  assert.equal(ownerView.toolFocus.focus, "review");
   assert.equal(ownerView.work.decision, null);
   assert.equal((await reviewer.workContext("test-handoff")).suggestedActions.some(action => action.action === "decide"), false);
   await mutate(producer, T.WORK_BLOCKED, { reason: "Explicit new correction", nextAction: "Revise again" });

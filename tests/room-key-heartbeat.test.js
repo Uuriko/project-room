@@ -47,12 +47,13 @@ test("room access key registers pull-only presence and a stale mention queues a 
   const origin = await startServer(t, f);
 
   const registered = await post(origin, "/api/agent-heartbeats", {
-    hostId: "grok-home-1", mode: "pull-only", cadenceSeconds: 60,
+    hostId: "grok-home-1", mode: "pull-only", cadenceSeconds: 60, workWakes: true,
   }, roomKey);
   assert.equal(registered.status, 200);
   const doc = await registered.json();
   assert.equal(doc.agentId, identity.identityId);
   assert.equal(doc.host.mode, "pull-only");
+  assert.equal(doc.host.workWakes, true);
   assert.equal(doc.host.wakeUrl, null);
   assert.match(doc.host.hostId, /^rk_[a-f0-9]+_[a-f0-9]+$/);
   assert.deepEqual(doc.pendingWakes, []);
@@ -73,6 +74,14 @@ test("room access key registers pull-only presence and a stale mention queues a 
   assert.equal(after.pendingWakes[0].kind, "mention");
   assert.equal(after.pendingWakes[0].roomId, "commons");
   assert.equal(after.pendingWakes[0].messageId, "mention-pull-seat");
+  await post(origin, "/api/agent-heartbeats/ack", { signalIds: after.pendingWakes.map(w => w.signalId) }, roomKey);
+  f.store.command(f.keys.owner, "commons", { id: randomUUID(), type: "work.proposed", data: {
+    workItemId: "room-key-work", title: "Scoped assignment", definitionOfDone: "Scoped test", mode: "read", accountableMemberId: identity.identityId
+  } });
+  const work = await (await post(origin, "/api/agent-heartbeats", { hostId: "grok-home-1", mode: "pull-only" }, roomKey)).json();
+  assert.deepEqual(work.pendingWakes.map(w => [w.kind, w.roomId, w.workItemId]), [["work", "commons", "room-key-work"]]);
+  const workAck = await (await post(origin, "/api/agent-heartbeats/ack", { signalIds: work.pendingWakes.map(w => w.signalId) }, roomKey)).json();
+  assert.deepEqual(workAck.acknowledged, work.pendingWakes.map(w => w.signalId));
 });
 
 test("room access key cannot install a wake URL or replace a wakeable host", async t => {
