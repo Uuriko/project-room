@@ -4,7 +4,8 @@ import { pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
 import { readAgentConnection, ConnectionError } from "../client/agent-connection.mjs";
 import {
-  GrokHostError, parseNeedsMeBody, selectUnhandled, markHandled, loadJournal,
+  GrokHostError, parseNeedsMeBody, parseWakePing, wakeToAttentionItem,
+  pendingWakeToItem, selectUnhandled, markHandled, setCursor, loadJournal,
   emptyJournal, buildRunPlan, assertPlanSafe
 } from "../client/grok-host.mjs";
 
@@ -43,22 +44,66 @@ export function writeJournalFile(filename, journal) {
   chmodSync(filename, 0o600);
 }
 
-async function readNeedsMe(connection, { fetchImpl = fetch, since } = {}) {
-  const url = new URL("/api/needs-me", connection.origin);
-  if (since !== undefined) url.searchParams.set("since", typeof since === "string" ? since : JSON.stringify(since));
+function hostIdFor(env = process.env) {
+  const value = env.GROK_HOST_ID?.trim() || "grok-build";
+  if (!/^[A-Za-z0-9._-]{1,128}$/.test(value)) fail("invalid_host_id");
+  return value;
+}
+
+async function jsonRequest(connection, path, { fetchImpl = fetch, method = "GET", body } = {}) {
+  const url = new URL(path, connection.origin);
   const response = await fetchImpl(url, {
-    method: "GET",
-    headers: { Authorization: `Bearer ${connection.token}`, Accept: "application/json" }
+    method,
+    headers: {
+      Authorization: `Bearer ${connection.token}`,
+      Accept: "application/json",
+      ...(body !== undefined ? { "Content-Type": "application/json" } : {})
+    },
+    ...(body !== undefined ? { body: JSON.stringify(body) } : {})
   });
   const text = await response.text();
-  let body;
-  try { body = JSON.parse(text); }
-  catch { fail("invalid_needs_me", `needs-me returned non-JSON (${response.status})`); }
-  if (response.status !== 200) {
-    const code = typeof body?.code === "string" ? body.code : "needs_me_failed";
-    fail(code, typeof body?.message === "string" ? body.message : `needs-me HTTP ${response.status}`);
+  let parsed;
+  try { parsed = JSON.parse(text); }
+  catch { fail("invalid_response", `${path} returned non-JSON (${response.status})`); }
+  if (response.status < 200 || response.status >= 300) {
+    const code = typeof parsed?.code === "string" ? parsed.code
+      : typeof parsed?.error?.code === "string" ? parsed.error.code
+        : "request_failed";
+    const message = typeof parsed?.message === "string" ? parsed.message
+      : typeof parsed?.error?.message === "string" ? parsed.error.message
+        : `${path} HTTP ${response.status}`;
+    fail(code, message);
   }
-  return parseNeedsMeBody(body);
+  return parsed;
+}
+
+async function readNeedsMe(connection, { fetchImpl = fetch, since } = {}) {
+  const url = new URL("/api/needs-me", connection.origin);
+  if (since != null) url.searchParams.set("since", typeof since === "string" ? since : JSON.stringify(since));
+  const parsed = await jsonRequest(connection, `${url.pathname}${url.search}`, { fetchImpl });
+  return parseNeedsMeBody(parsed);
+}
+
+async function beatPullOnly(connection, { fetchImpl = fetch, env = process.env } = {}) {
+  const hostId = hostIdFor(env);
+  const parsed = await jsonRequest(connection, "/api/agent-heartbeats", {
+    fetchImpl, method: "POST",
+    body: { hostId, mode: "pull-only", cadenceSeconds: 60, workWakes: true }
+  });
+  const pending = Array.isArray(parsed.pendingWakes) ? parsed.pendingWakes : [];
+  return {
+    hostId: parsed.host?.hostId ?? hostId,
+    pendingWakes: pending,
+    items: pending.map(pendingWakeToItem),
+    signalIds: pending.map(row => row.signalId).filter(id => typeof id === "string" && id.length > 0)
+  };
+}
+
+async function ackWakes(connection, signalIds, { fetchImpl = fetch } = {}) {
+  if (!signalIds.length) return { acknowledged: [] };
+  return await jsonRequest(connection, "/api/agent-heartbeats/ack", {
+    fetchImpl, method: "POST", body: { signalIds }
+  });
 }
 
 export async function doctor({ env = process.env, fetchImpl = fetch } = {}) {
@@ -91,12 +136,11 @@ function nextFor(code) {
   return "See docs/GROK-DEEP-PLUG-PLAN-2026-09-29.md";
 }
 
-export async function pull({ env = process.env, fetchImpl = fetch, execute = false, runner, now = Date.now } = {}) {
-  const connection = connectionFromEnv(env);
+async function planAndJournal({ connection, items, env, execute, runner, now, extra = {} }) {
   const filename = journalPathFor(env);
   let journal = readJournalFile(filename);
-  const attention = await readNeedsMe(connection, { fetchImpl });
-  const fresh = selectUnhandled(attention.items, journal);
+  if (extra.cursor !== undefined) journal = setCursor(journal, extra.cursor);
+  const fresh = selectUnhandled(items, journal);
   const secrets = [connection.token];
   const plans = fresh.map(item => assertPlanSafe(buildRunPlan(item, { origin: connection.origin }), secrets));
   const executed = [];
@@ -108,15 +152,44 @@ export async function pull({ env = process.env, fetchImpl = fetch, execute = fal
       executed.push({ key: plan.key, result });
     }
   }
+  if (extra.cursor !== undefined) {
+    journal = setCursor(journal, extra.cursor);
+    writeJournalFile(filename, journal);
+  }
+  return { journal, plans, executed, filename };
+}
+
+export async function pull({ env = process.env, fetchImpl = fetch, execute = false, runner, now = Date.now } = {}) {
+  const connection = connectionFromEnv(env);
+  const filename = journalPathFor(env);
+  const journal = readJournalFile(filename);
+  const beat = await beatPullOnly(connection, { fetchImpl, env });
+  const attention = await readNeedsMe(connection, { fetchImpl, since: journal.cursor ?? undefined });
+  const items = [...beat.items, ...attention.items];
+  const result = await planAndJournal({
+    connection, items, env, execute, runner, now, extra: { cursor: attention.cursor }
+  });
+  await ackWakes(connection, beat.signalIds, { fetchImpl });
   return {
     ok: true,
     identityId: attention.identityId,
-    seen: attention.items.length,
-    planned: plans,
-    executed,
+    seen: items.length,
+    planned: result.plans,
+    executed: result.executed,
     hasMore: attention.hasMore,
-    cursor: attention.cursor
+    cursor: attention.cursor,
+    pendingWakes: beat.pendingWakes.length,
+    hostId: beat.hostId
   };
+}
+
+export async function ingestWake({ env = process.env, body, execute = false, runner, now = Date.now } = {}) {
+  const connection = connectionFromEnv(env);
+  const item = wakeToAttentionItem(parseWakePing(body));
+  const result = await planAndJournal({
+    connection, items: [item], env, execute, runner, now
+  });
+  return { ok: true, planned: result.plans, executed: result.executed, key: result.plans[0]?.key ?? null };
 }
 
 async function defaultRunner(plan, env) {
@@ -140,25 +213,31 @@ async function defaultRunner(plan, env) {
 
 function parseArgs(argv) {
   const args = argv.slice(2);
-  const command = args[0] === "doctor" || args[0] === "pull" ? args[0] : null;
+  const command = args[0] === "doctor" || args[0] === "pull" || args[0] === "wake" ? args[0] : null;
   if (!command) return null;
   const execute = args.includes("--execute");
-  if (execute && command !== "pull") return null;
+  if (execute && command === "doctor") return null;
   if (args.some((word, i) => i > 0 && word !== "--execute")) return null;
   return { command, execute };
+}
+
+function readWakeBody() {
+  const text = readFileSync(0, "utf8");
+  try { return JSON.parse(text); }
+  catch { fail("invalid_wake_ping", "stdin must be one agent.wake JSON object"); }
 }
 
 export async function main(argv = process.argv, env = process.env, io = { log: console.log, error: console.error }) {
   const parsed = parseArgs(argv);
   if (!parsed) {
-    io.error("Usage: node scripts/grok-room-host.mjs doctor | pull [--execute]");
+    io.error("Usage: node scripts/grok-room-host.mjs doctor | pull [--execute] | wake [--execute]");
     process.exitCode = 2;
     return;
   }
   try {
-    const result = parsed.command === "doctor"
-      ? await doctor({ env })
-      : await pull({ env, execute: parsed.execute });
+    const result = parsed.command === "doctor" ? await doctor({ env })
+      : parsed.command === "wake" ? await ingestWake({ env, body: readWakeBody(), execute: parsed.execute })
+        : await pull({ env, execute: parsed.execute });
     io.log(JSON.stringify(result));
     if (parsed.command === "doctor" && result.ok === false) process.exitCode = 1;
   } catch (error) {

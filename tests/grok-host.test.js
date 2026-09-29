@@ -5,10 +5,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   GrokHostError, parseNeedsMeBody, parseWakePing, wakeToAttentionItem,
-  attentionKey, selectUnhandled, markHandled, emptyJournal, loadJournal,
-  buildRunPlan, assertPlanSafe, parseAttentionItem
+  pendingWakeToItem, attentionKey, selectUnhandled, markHandled, emptyJournal,
+  loadJournal, buildRunPlan, assertPlanSafe, parseAttentionItem
 } from "../client/grok-host.mjs";
-import { pull, doctor, writeJournalFile, readJournalFile } from "../scripts/grok-room-host.mjs";
+import { pull, doctor, ingestWake, writeJournalFile, readJournalFile } from "../scripts/grok-room-host.mjs";
 import { saveAgentConnection } from "../client/agent-connection.mjs";
 
 const secret = "pri_abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG";
@@ -154,6 +154,83 @@ test("journal file round-trip stays 0600-shaped JSON without the secret", t => {
   const loaded = readJournalFile(filename);
   assert.equal(loaded.handled["mention:den:msg-1"], 9);
   assert.equal(JSON.stringify(loaded).includes(secret), false);
+});
+
+function roomFetch(handlers) {
+  return async (url, opts = {}) => {
+    const path = String(url);
+    const method = opts.method || "GET";
+    if (path.includes("/api/agent-heartbeats/ack") && method === "POST") {
+      const body = JSON.parse(opts.body || "{}");
+      handlers.acks?.push(body);
+      return new Response(JSON.stringify({ acknowledged: body.signalIds || [] }), { status: 200 });
+    }
+    if (path.includes("/api/agent-heartbeats") && method === "POST") {
+      handlers.beats = (handlers.beats || 0) + 1;
+      return new Response(JSON.stringify({
+        host: { hostId: "grok-build", mode: "pull-only" },
+        pendingWakes: handlers.pendingWakes || []
+      }), { status: 200 });
+    }
+    handlers.needs = handlers.needs || [];
+    handlers.needs.push(path);
+    return new Response(JSON.stringify(handlers.needsMe || needsMe([])), { status: 200 });
+  };
+}
+
+test("pending wake prefers messageId and workItemId", () => {
+  const mention = pendingWakeToItem({ signalId: "sig-1", kind: "mention", roomId: "den", messageId: "msg-9" });
+  assert.equal(mention.id, "msg-9");
+  assert.equal(mention.next.arguments.replyToId, "msg-9");
+  const work = pendingWakeToItem({ signalId: "sig-2", kind: "work", roomId: "den", workItemId: "wi-1", workRevision: 3 });
+  assert.equal(work.id, "wi-1");
+  assert.equal(work.seq, 3);
+  assert.equal(work.next.tool, "room_read_work");
+});
+
+test("pull sends the saved needs-me cursor on the next pass", async t => {
+  const directory = fixtureDir();
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const handlers = { needsMe: needsMe([mention()]), acks: [] };
+  const fetchImpl = roomFetch(handlers);
+  await pull({ env: { ROOM_AGENT_CONFIG: directory }, fetchImpl, now: () => 1 });
+  handlers.needsMe = needsMe([]);
+  await pull({ env: { ROOM_AGENT_CONFIG: directory }, fetchImpl, now: () => 2 });
+  assert.equal(handlers.beats, 2);
+  assert.match(handlers.needs[1], /since=/);
+  const journal = readJournalFile(join(directory, "grok-host-journal.json"));
+  assert.deepEqual(journal.cursor, { rooms: { den: 4 } });
+});
+
+test("pull merges heartbeat pendingWakes and acks their signal ids", async t => {
+  const directory = fixtureDir();
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const handlers = {
+    needsMe: needsMe([]),
+    acks: [],
+    pendingWakes: [{ signalId: "sig-1", kind: "mention", roomId: "den", messageId: "msg-9" }]
+  };
+  const result = await pull({
+    env: { ROOM_AGENT_CONFIG: directory }, fetchImpl: roomFetch(handlers), now: () => 3
+  });
+  assert.equal(result.planned[0].item.id, "msg-9");
+  assert.deepEqual(handlers.acks[0].signalIds, ["sig-1"]);
+});
+
+test("ingestWake journals an agent.wake once", async t => {
+  const directory = fixtureDir();
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const env = { ROOM_AGENT_CONFIG: directory };
+  const body = {
+    event: "agent.wake", agentId: "ai_x",
+    signal: { signalId: "sig-9", messageId: "msg-1", roomId: "den", kind: "mention", seq: 4 }
+  };
+  const first = await ingestWake({ env, body, now: () => 4 });
+  assert.equal(first.key, "mention:den:msg-1");
+  assert.equal(first.planned.length, 1);
+  const second = await ingestWake({ env, body, now: () => 5 });
+  assert.equal(second.planned.length, 0);
+  assert.equal(JSON.stringify(first).includes(secret), false);
 });
 
 test("unauthenticated needs-me becomes a machine-readable failure", async t => {

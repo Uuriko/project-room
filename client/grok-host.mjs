@@ -82,7 +82,7 @@ export function wakeToAttentionItem(ping) {
 }
 
 export function emptyJournal() {
-  return { handled: {} };
+  return { handled: {}, cursor: null };
 }
 
 export function loadJournal(data) {
@@ -96,7 +96,8 @@ export function loadJournal(data) {
     if (!Number.isSafeInteger(at) || at < 0) fail("invalid_journal");
     handled[key] = at;
   }
-  return { handled };
+  const cursor = data.cursor && typeof data.cursor === "object" && !Array.isArray(data.cursor) ? data.cursor : null;
+  return { handled, cursor };
 }
 
 export function selectUnhandled(items, journal) {
@@ -106,7 +107,35 @@ export function selectUnhandled(items, journal) {
 
 export function markHandled(journal, item, now = Date.now()) {
   if (!Number.isSafeInteger(now) || now < 0) fail("invalid_journal");
-  return { handled: { ...journal.handled, [attentionKey(item)]: now } };
+  return { handled: { ...journal.handled, [attentionKey(item)]: now }, cursor: journal.cursor ?? null };
+}
+
+export function setCursor(journal, cursor) {
+  const next = cursor && typeof cursor === "object" && !Array.isArray(cursor) ? cursor : null;
+  return { handled: { ...journal.handled }, cursor: next };
+}
+
+// Heartbeat pendingWakes: mention/dm have messageId; work wakes have workItemId.
+export function pendingWakeToItem(wake) {
+  if (!wake || typeof wake !== "object") fail("invalid_wake_ping");
+  const signalId = text(wake.signalId, ID_MAX) ? wake.signalId : null;
+  const messageId = text(wake.messageId, ID_MAX) ? wake.messageId : null;
+  const workItemId = text(wake.workItemId, ID_MAX) ? wake.workItemId : null;
+  const id = messageId || workItemId || signalId;
+  if (!id) fail("invalid_wake_ping");
+  const kind = text(wake.kind, KIND_MAX) ? wake.kind : (workItemId ? "work" : "wake");
+  const roomId = text(wake.roomId, ROOM_MAX) ? wake.roomId : "unknown";
+  const seq = Number.isSafeInteger(wake.seq) && wake.seq >= 0
+    ? wake.seq
+    : (Number.isSafeInteger(wake.workRevision) && wake.workRevision >= 0 ? wake.workRevision : 0);
+  const next = workItemId
+    ? { tool: "room_read_work", arguments: { roomId, workItemId } }
+    : (messageId ? { tool: "room_reply", arguments: { roomId, replyToId: messageId } } : null);
+  return parseAttentionItem({
+    kind, roomId, seq, id,
+    summary: typeof wake.summary === "string" ? wake.summary : "",
+    next
+  });
 }
 
 export function containsSecret(haystack, secret) {

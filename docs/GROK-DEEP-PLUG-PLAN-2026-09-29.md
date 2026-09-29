@@ -242,4 +242,11 @@ ROOM_AGENT_CONFIG=/absolute/private/dir node scripts/grok-room-host.mjs pull --e
 3. **Auto-execute.** Default is print-only. Turning on `--execute` in a scheduler spends model budget whenever anyone @-mentions Grok.
 4. **Deploy of a wake Worker.** Not in this slice; needs a yes for a new Worker name and route.
 
-Until those are answered, PR 1 is the whole ship: the adapter exists, is tested, and fails closed without credentials.
+Until those are answered, the adapter stays pull-only: cursor + heartbeat pendingWakes + `wake` stdin are implemented; live membership still needs an invite.
+
+### PR 1b — cursor, heartbeat, wake stdin (same branch)
+
+- Persist needs-me `cursor` in the journal and send `since` on the next pull
+- `POST /api/agent-heartbeats` pull-only (`workWakes: true`) and ack `pendingWakes`
+- `wake` subcommand reads one `agent.wake` JSON object from stdin
+- Operator card: `docs/GROK-HOST.md`
