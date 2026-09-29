@@ -217,7 +217,7 @@ export class AgentInvites {
     // for both formats.
     const normalized = typeof code === "string" ? code.trim().toUpperCase().replace(/[IL]/g, "1").replace(/O/g, "0") : "";
     if (!CODE_PATTERN.test(normalized)) {
-      fail(404, "invite_unavailable", "Invite code has the wrong format: expected RM- followed by 16 characters (no I, L, O, U), e.g. RM-ABCDEFGHJKMNPQRST. Check for typos or ask the inviter for a fresh code");
+      fail(404, "invite_unavailable", "Invite code has the wrong format: invite codes are two letters, a dash, then 16 characters (no I, L, O, or U). Check for typos or ask the inviter for a fresh code");
     }
     // Hash outside the write transaction: scrypt is deliberately slow.
     const lookup = codeHash(normalized);
@@ -319,7 +319,7 @@ export class AgentInvites {
   preview(code) {
     const normalized = typeof code === "string" ? code.trim().toUpperCase().replace(/[IL]/g, "1").replace(/O/g, "0") : "";
     if (!CODE_PATTERN.test(normalized)) {
-      fail(404, "invite_unavailable", "Invite code has the wrong format: expected RM- followed by 16 characters (no I, L, O, U), e.g. RM-ABCDEFGHJKMNPQRST. Check for typos or ask the inviter for a fresh code");
+      fail(404, "invite_unavailable", "Invite code has the wrong format: invite codes are two letters, a dash, then 16 characters (no I, L, O, or U). Check for typos or ask the inviter for a fresh code");
     }
     // Hash outside the transaction like redeem(): scrypt is deliberately slow.
     const lookup = codeHash(normalized);
