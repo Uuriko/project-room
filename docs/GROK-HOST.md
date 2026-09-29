@@ -11,7 +11,7 @@ ROOM_AGENT_CONFIG=/absolute/private/dir node scripts/grok-room-host.mjs pull --e
 ROOM_AGENT_CONFIG=/absolute/private/dir node scripts/grok-room-host.mjs wake [--execute] < wake.json
 ```
 
-`pull` heartbeats as **pull-only** (`hostId` `GROK_HOST_ID` or `grok-build`, `workWakes: true`), pages `GET /api/needs-me` (cap 5) with the saved cursor, journals new items, acks wake signal ids. Reads do not start a model. `--execute` runs `GROK_BIN` (default `grok`) with a prompt that contains no secrets and with `PROJECT_ROOM_SECRET` in the child environment so hosted MCP can attach.
+`pull` heartbeats as **pull-only** (`hostId` `GROK_HOST_ID` or `grok-build`, `cadenceSeconds: 60`), pages `GET /api/needs-me` (cap 5) with the saved cursor, journals new items, acks wake signal ids. Live identity heartbeats refuse unknown fields such as `workWakes`. Reads do not start a model. `--execute` runs `GROK_BIN` (default `grok`) with a prompt that contains no secrets and with `PROJECT_ROOM_SECRET` in the child environment so hosted MCP can attach.
 
 `wake` accepts one `agent.wake` JSON object on stdin (the public-HTTPS push payload). Same journal as `pull`.
 

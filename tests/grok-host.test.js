@@ -175,6 +175,8 @@ function roomFetch(handlers) {
     }
     if (path.includes("/api/agent-heartbeats") && method === "POST") {
       handlers.beats = (handlers.beats || 0) + 1;
+      handlers.beatBodies = handlers.beatBodies || [];
+      if (opts.body) handlers.beatBodies.push(JSON.parse(opts.body));
       return new Response(JSON.stringify({
         host: { hostId: "grok-build", mode: "pull-only" },
         pendingWakes: handlers.pendingWakes || []
@@ -205,6 +207,8 @@ test("pull sends the saved needs-me cursor on the next pass", async t => {
   handlers.needsMe = needsMe([]);
   await pull({ env: { ROOM_AGENT_CONFIG: directory }, fetchImpl, now: () => 2 });
   assert.equal(handlers.beats, 2);
+  assert.equal(handlers.beatBodies[0].mode, "pull-only");
+  assert.equal(handlers.beatBodies[0].workWakes, undefined);
   assert.match(handlers.needs[1], /since=/);
   const journal = readJournalFile(join(directory, "grok-host-journal.json"));
   assert.deepEqual(journal.cursor, { rooms: { den: 4 } });

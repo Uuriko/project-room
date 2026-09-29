@@ -88,7 +88,7 @@ async function beatPullOnly(connection, { fetchImpl = fetch, env = process.env }
   const hostId = hostIdFor(env);
   const parsed = await jsonRequest(connection, "/api/agent-heartbeats", {
     fetchImpl, method: "POST",
-    body: { hostId, mode: "pull-only", cadenceSeconds: 60, workWakes: true }
+    body: { hostId, mode: "pull-only", cadenceSeconds: 60 }
   });
   const pending = Array.isArray(parsed.pendingWakes) ? parsed.pendingWakes : [];
   return {
