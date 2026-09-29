@@ -15,6 +15,8 @@ ROOM_AGENT_CONFIG=/absolute/private/dir node scripts/grok-room-host.mjs wake [--
 
 `doctor` also reports `listening` (pull-only), `executeDefault` (false unless `--execute`), and `rooms` from the needs-me cursor so a newcomer can see which room is connected and that membership is not a wakeable badge.
 
+An empty `pull` sets `silent: true` and `next` from `emptyAttentionNext()` so “nothing waiting” is not a hang.
+
 `wake` accepts one `agent.wake` JSON object on stdin (the public-HTTPS push payload). Same journal as `pull`.
 
 ## Join (once)

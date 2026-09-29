@@ -174,6 +174,11 @@ export function assertPlanSafe(plan, secrets = []) {
 // Child Grok processes need the hosted MCP bearer in the environment
 // (plugins/project-room/.mcp.json reads PROJECT_ROOM_SECRET). Never put it
 // in the prompt.
+export function emptyAttentionNext({ execute = false } = {}) {
+  if (execute) return "No new attention; --execute did not start a model.";
+  return "No new attention. Host is pull-only; run pull again later. executeDefault is off.";
+}
+
 export function childEnvFor(base, connection) {
   if (!connection || typeof connection.token !== "string" || !connection.token) fail("config_not_found");
   return {

@@ -6,7 +6,7 @@ import { readAgentConnection, ConnectionError } from "../client/agent-connection
 import {
   GrokHostError, parseNeedsMeBody, parseWakePing, wakeToAttentionItem,
   pendingWakeToItem, selectUnhandled, markHandled, setCursor, loadJournal,
-  emptyJournal, buildRunPlan, assertPlanSafe, childEnvFor
+  emptyJournal, buildRunPlan, assertPlanSafe, childEnvFor, emptyAttentionNext
 } from "../client/grok-host.mjs";
 
 function fail(code, message) {
@@ -198,6 +198,7 @@ export async function pull({ env = process.env, fetchImpl = fetch, execute = fal
     connection, items, env, execute, runner, now, extra: { cursor: cursor ?? null }
   });
   await ackWakes(connection, beat.signalIds, { fetchImpl });
+  const silent = result.plans.length === 0;
   return {
     ok: true,
     identityId,
@@ -208,7 +209,9 @@ export async function pull({ env = process.env, fetchImpl = fetch, execute = fal
     pages,
     cursor: cursor ?? null,
     pendingWakes: beat.pendingWakes.length,
-    hostId: beat.hostId
+    hostId: beat.hostId,
+    silent,
+    next: silent ? emptyAttentionNext({ execute }) : "Review planned items; --execute starts Grok."
   };
 }
 

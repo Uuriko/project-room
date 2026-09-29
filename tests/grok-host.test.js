@@ -6,7 +6,7 @@ import { join } from "node:path";
 import {
   GrokHostError, parseNeedsMeBody, parseWakePing, wakeToAttentionItem,
   pendingWakeToItem, attentionKey, selectUnhandled, markHandled, emptyJournal,
-  loadJournal, buildRunPlan, assertPlanSafe, parseAttentionItem, childEnvFor
+  loadJournal, buildRunPlan, assertPlanSafe, parseAttentionItem, childEnvFor, emptyAttentionNext
 } from "../client/grok-host.mjs";
 import { pull, doctor, ingestWake, writeJournalFile, readJournalFile } from "../scripts/grok-room-host.mjs";
 import { saveAgentConnection } from "../client/agent-connection.mjs";
@@ -70,6 +70,14 @@ test("run plan never includes the identity secret", () => {
   assert.match(plan.prompt, /id=msg-1/);
   assert.equal(plan.prompt.includes(secret), false);
   assert.throws(() => assertPlanSafe({ prompt: `hi ${secret}` }, [secret]), /secret_in_plan/);
+});
+
+test("emptyAttentionNext is honest and secret-free", () => {
+  const next = emptyAttentionNext({ execute: false });
+  assert.match(next, /No new attention/);
+  assert.match(next, /pull-only/);
+  assert.equal(next.includes(secret), false);
+  assert.match(emptyAttentionNext({ execute: true }), /did not start a model/);
 });
 
 test("childEnvFor puts the bearer in PROJECT_ROOM_SECRET for hosted MCP", () => {
@@ -253,6 +261,20 @@ test("pull sends the saved needs-me cursor on the next pass", async t => {
   assert.match(handlers.needs[1], /since=/);
   const journal = readJournalFile(join(directory, "grok-host-journal.json"));
   assert.deepEqual(journal.cursor, { rooms: { den: 4 } });
+});
+
+test("empty pull is silent and points at emptyAttentionNext", async t => {
+  const directory = fixtureDir();
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const handlers = { needsMe: needsMe([]), acks: [] };
+  const result = await pull({
+    env: { ROOM_AGENT_CONFIG: directory }, fetchImpl: roomFetch(handlers), now: () => 7
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.silent, true);
+  assert.equal(result.planned.length, 0);
+  assert.equal(result.next, emptyAttentionNext({ execute: false }));
+  assert.equal(JSON.stringify(result).includes(secret), false);
 });
 
 test("pull merges heartbeat pendingWakes and acks their signal ids", async t => {
