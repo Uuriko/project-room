@@ -46,6 +46,9 @@ jobs:
     # designed; this proposal leaves them alone).
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -79,6 +82,25 @@ jobs:
       - name: Verify automatic host namespace support without operator input
         run: node scripts/host-isolation-preflight.mjs
       - run: npm test 2>&1 | tee /tmp/test-output.log; test ${PIPESTATUS[0]} -eq 0
+      - name: Report failures to PR
+        if: failure()
+        run: |
+          FAILS=$(grep -E "^✖" /tmp/test-output.log | head -10 || echo "no ✖ lines")
+          DETAILS=$(grep -B3 -A20 "^✖" /tmp/test-output.log | head -80 || echo "no details")
+          BODY="## Unit test failures (debug)
+          
+          Failing files:
+          \`\`\`
+          $FAILS
+          \`\`\`
+          
+          Details:
+          \`\`\`
+          $DETAILS
+          \`\`\`"
+          gh pr comment 1207 --repo Uuriko/project-room --body "$BODY" || echo "comment failed"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }} 2>&1 | tee /tmp/test-output.log; test ${PIPESTATUS[0]} -eq 0
       - name: Upload test output on failure
         if: failure()
         uses: actions/upload-artifact@v4
