@@ -3225,25 +3225,48 @@ function openShareOrTargetedInvite(text) {
   return true;
 }
 $("#invite-link")?.addEventListener("change", () => {
-  const text = $("#invite-link").value;
-  if (!openShareOrTargetedInvite(text)) return;
-  $("#invite-link").value = "";
+  const field = $("#invite-link"), err = $("#invite-error");
+  const text = field?.value ?? "";
+  if (!text.trim()) { if (err) setFormStatus(err, ""); return; }
+  if (!openShareOrTargetedInvite(text)) {
+    // Same silent failure the redeem button had (QA 2026-09-29): an
+    // unresolvable value left in the field with no feedback. Say so.
+    if (err) setFormStatus(err, INVITE_INPUT_ERROR, true);
+    return;
+  }
+  if (err) setFormStatus(err, "");
+  field.value = "";
 });
 $("#invite-link")?.addEventListener("paste", event => {
   const text = event.clipboardData?.getData("text") ?? $("#invite-link").value;
-  if (!openShareOrTargetedInvite(text)) return;
+  if (!openShareOrTargetedInvite(text)) {
+    // Let the pasted text land so it can be read and edited; the error
+    // explains why it didn't open as an invite.
+    const err = $("#invite-error");
+    if (err) setFormStatus(err, INVITE_INPUT_ERROR, true);
+    return;
+  }
   event.preventDefault();
   $("#invite-link").value = "";
+  const err = $("#invite-error");
+  if (err) setFormStatus(err, "");
 });
+// One vocabulary for every invite door: the sign-in box takes share links,
+// 9-character share codes, and invitation tokens. Agent invite links
+// (/join/...) open on their own join page — the error says so instead of
+// failing silently.
+const INVITE_INPUT_ERROR = "That doesn't look like an invite link or join code. Paste the full invite link or ABC-DEF-GHJ. If your link ends with /join/ and a code, open it directly — it has its own join page.";
 function redeemInviteInput() {
   const input = $("#invite-link");
   const err = $("#invite-error");
   if (openShareOrTargetedInvite(input?.value ?? "")) {
-    if (err) err.textContent = "";
-    input.value = "";
+    if (err) setFormStatus(err, "");
+    if (input) input.value = "";
     return;
   }
-  if (err) err.textContent = "That doesn't look like an invite link or join code. Paste the full invite link or ABC-DEF-GHJ.";
+  // #invite-error is display:none until the shared form-status contract adds
+  // .visible — the old direct textContent assignment failed silently here.
+  if (err) setFormStatus(err, INVITE_INPUT_ERROR, true);
 }
 $("#invite-redeem")?.addEventListener("click", redeemInviteInput);
 $("#invite-link")?.addEventListener("keydown", e => {

@@ -479,6 +479,8 @@ details[open] > .section-summary::before { transform: rotate(45deg); }
 .app-shell:has(#auth-panel:not([hidden])) .connection-bar:has([data-state="signed-out"]) { display: none; }
 .auth-panel h1 { margin-bottom: 1.5rem; overflow-wrap: anywhere; }
 .auth-panel h1 { font-size: clamp(1.7rem, 4vw, 1.9rem); line-height: 1.2; text-wrap: balance; }
+.auth-panel h1:has(+ .auth-tagline) { margin-bottom: .5rem; }
+.auth-tagline { margin: 0 0 1.5rem; color: var(--muted); font-size: .95rem; }
 .auth-panel p, dialog p { line-height: 1.6; }
 #invitation-summary:empty { display: none; }
 .auth-panel form, #action-fields, #action-form, #invitation-account-form, .invitation-shell { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem; }
@@ -720,6 +722,7 @@ button:disabled { cursor: wait; opacity: .6; }
 .icon-button svg { pointer-events: none; }
 .icon-button:hover { color: var(--text); background: rgb(255 255 255 / 6%); }
 @media (pointer: coarse) { .icon-button { min-width: 44px; min-height: 44px; width: 44px; height: 44px; } }
+@media (pointer: coarse) { .button, .topbar-button, .people-actions .button, .search-row .button { min-height: 44px; } }
 #conversation-title, #return-brief-panel { scroll-margin-top: 1rem; }
 @media (max-width: 1020px) {
   #return-brief-panel, #conversation-title, #people-panel { scroll-margin-top: 3.5rem; }
