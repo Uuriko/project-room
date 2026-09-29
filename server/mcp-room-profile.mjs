@@ -17,7 +17,7 @@ import { EVENT_CATALOG, WebhookSubscriptionError } from "./agent-webhook-subscri
 import { BOND_SCOPES } from "./bonds.mjs";
 import { buildActivationPack } from "./room-activation-pack.mjs";
 import { randomUUID } from "node:crypto";
-import { validId, ROOM_KINDS } from "../src/events.js";
+import { validId, ROOM_KINDS, MAX_MESSAGE_BODY_CHARS } from "../src/events.js";
 import { nextWorkStep } from "../src/workflow.js";
 import { completedResults, searchWork } from "../src/work-selectors.js";
 import { workHelpContext } from "../src/work-help.js";
@@ -131,7 +131,7 @@ function validRoomArgs(name, args) {
     const messageOk = args.messageId === undefined || validId(args.messageId);
     const replyOk = args.replyToId === undefined || validId(args.replyToId);
     return idOk && messageOk && replyOk
-      && typeof args.body === "string" && args.body.trim().length > 0 && args.body.length <= 4096;
+      && typeof args.body === "string" && args.body.trim().length > 0 && args.body.length <= MAX_MESSAGE_BODY_CHARS;
   }
   if (name === "room_react") {
     const idOk = args.id === undefined || validId(args.id);
@@ -152,7 +152,7 @@ function validRoomArgs(name, args) {
   if (name === "bond_list") return args.id === undefined || validId(args.id);
   if (name === "dm_posted") {
     return validId(args.id) && validId(args.to) && validId(args.messageId)
-      && typeof args.body === "string" && args.body.trim().length > 0 && args.body.length <= 4096;
+      && typeof args.body === "string" && args.body.trim().length > 0 && args.body.length <= MAX_MESSAGE_BODY_CHARS;
   }
   if (name === "room_list_peer_dms") return args.threadId === undefined || validThreadId(args.threadId);
   if (name === "room_put_file") {

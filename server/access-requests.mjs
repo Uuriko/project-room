@@ -14,8 +14,9 @@
 // loop. An incoming request whose requested permissions are a non-empty
 // subset of the configured set is approved and linked inline, synchronously,
 // in the same call that files it; anything else stays pending for the owner
-// queue. Auto-approve can never confer administration (manage_members,
-// decide, and manage_claims are rejected from the config), never fires in
+// queue. Auto-approve can never confer admin powers, external-write access,
+// or admission authority (manage_members, decide, manage_claims,
+// write_external, and invite_member are rejected from the config), never fires in
 // rooms that require verified agents, and stops admitting the moment its
 // authorizing configurer loses membership administration — fail-closed to
 // pending. Auto-approvals are audit-logged as member.added events whose
@@ -120,10 +121,15 @@ const countActiveMembers = members =>
   Object.values(members ?? {}).filter(member => member?.active !== false).length;
 
 // Permissions an auto-approve config may never include. A standing rule that
-// admits guests must not be able to mint managers, deciders, or claim
-// arbiters: the guest tier never gets admin powers. Kill criterion from the
-// safety review — rejected with a teaching 422 at config time.
-const AUTO_APPROVE_FORBIDDEN_PERMISSIONS = Object.freeze(["manage_members", "decide", "manage_claims"]);
+// admits guests must not be able to mint managers, deciders, claim arbiters,
+// external-write access, or further admission authority: the guest tier never
+// gets admin powers. write_external gates write-mode work items (the room's
+// external-write boundary); invite_member lets a holder mint invite codes for
+// other identities (transitive admission the owner's rule never granted).
+// Kill criterion from the safety review — rejected with a teaching 422 at
+// config time.
+const AUTO_APPROVE_FORBIDDEN_PERMISSIONS = Object.freeze(
+  ["manage_members", "decide", "manage_claims", "write_external", "invite_member"]);
 
 export class AccessRequests {
   constructor(store, { rateLimiter } = {}) {
@@ -339,7 +345,7 @@ export class AccessRequests {
       const forbidden = permissions.filter(p => AUTO_APPROVE_FORBIDDEN_PERMISSIONS.includes(p));
       if (forbidden.length) {
         fail(422, "invalid_request",
-          `auto-approve may never grant administration (${forbidden.join(", ")}): a standing rule that admits guests cannot mint managers, deciders, or claim arbiters`);
+          `auto-approve may never grant elevated permissions (${forbidden.join(", ")}): a standing rule that admits guests cannot mint admin powers, external-write access, claim arbitration, or further admission authority`);
       }
       const now = this.store.now();
       this.db.prepare(`INSERT INTO room_access_auto_approve(room_id, permissions, updated_at, updated_by)

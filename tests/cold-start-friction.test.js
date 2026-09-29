@@ -15,7 +15,7 @@ import { handleMcpJoinRpc } from "../server/mcp-http.mjs";
 import { CORE_MCP_TOOLS, MCP_TOOL_NAME_RE } from "../src/room-mcp-join.js";
 import { agentErrorAx, errorCategory } from "../src/agent-error.mjs";
 import { discoveryDoc, llmsTxt, wellKnownMcpJson } from "../deploy/agent-discovery.mjs";
-import { EVENT_TYPES as T, ROOM_KINDS } from "../src/events.js";
+import { EVENT_TYPES as T, ROOM_KINDS, MAX_MESSAGE_BODY_CHARS } from "../src/events.js";
 
 function setup(t) {
   const directory = mkdtempSync(join(tmpdir(), "project-room-cold-"));
@@ -70,7 +70,11 @@ test("authenticated MCP reports field reasons and serves room_react plus replyTo
   assert.equal(full.result.tools.some(tool => tool.name === "room_read_board"), true);
   assert.equal(full.result.tools.some(tool => tool.name === "bond.list"), false);
 
-  const longBody = await call("room_post_message", { roomId: created.roomId, body: "x".repeat(65537) });
+  // PR #1210 raised the MCP body cap to the room ceiling (MAX_MESSAGE_BODY_CHARS):
+  // a 4097-char body is now accepted, and only bodies past the ceiling are rejected.
+  const nowAccepted = await call("room_post_message", { roomId: created.roomId, body: "x".repeat(4097) });
+  assert.equal(nowAccepted.error, undefined);
+  const longBody = await call("room_post_message", { roomId: created.roomId, body: "x".repeat(MAX_MESSAGE_BODY_CHARS + 1) });
   assert.equal(longBody.error.message, "invalid_arguments");
   assert.equal(longBody.error.data.invalid.body, "too long");
 
