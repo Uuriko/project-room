@@ -157,6 +157,18 @@ for (const touch of [false, true]) {
     assert.equal(page.url(), `${ROOM_ORIGIN}/#join/${joinToken}`);
     await page.goto(`${origin}/room#code/abc-def-ghj`);
     await page.locator("#join-empty").waitFor();
+    // The door resolves a well-formed code asynchronously (POST
+    // /room/api/share-links/preview): the message first shows the "Checking
+    // your code…" loading text, then the verdict. Wait for the verdict.
+    await page.waitForFunction(
+      (sel) => {
+        const el = document.querySelector(sel);
+        const text = (el && el.textContent) || "";
+        return el && !el.hasAttribute("hidden") && text && !/checking your code/i.test(text);
+      },
+      "#join-empty-message",
+      { timeout: 15000 }
+    );
     assert.equal(await page.locator("#join-empty").getAttribute("hidden"), null);
     assert.match(await page.locator("#join-empty-message").innerText(), /invalid, already used, or expired/i);
     assert.equal(await page.locator("#join-empty-recover a[href='#join-code']").count(), 1);
@@ -168,6 +180,15 @@ for (const touch of [false, true]) {
     await page.locator("#join-code").fill("ABC-DEF-GHJ");
     await page.locator("#join-code-form button").click();
     await page.locator("#join-code-status").waitFor();
+    await page.waitForFunction(
+      (sel) => {
+        const el = document.querySelector(sel);
+        const text = (el && el.textContent) || "";
+        return el && !el.hasAttribute("hidden") && text && !/checking your code/i.test(text);
+      },
+      "#join-code-status",
+      { timeout: 15000 }
+    );
     assert.match(await page.locator("#join-code-status").innerText(), /invalid, already used, or expired/i);
     assert.equal(await page.locator("#join-code").getAttribute("aria-invalid"), "true");
     assert.match(await page.locator("#join-empty-message").innerText(), /invalid, already used, or expired/i);
