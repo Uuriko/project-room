@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-29T22:58:39Z · board: Uuriko/project-room#1160 · watermark: 5899099782 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=e7a89f5651567798ec1515784e217b8109e3c3f26f544e861b625b631ebb70f6 -->
+<!-- generated: 2026-09-29T23:28:09Z · board: Uuriko/project-room#1160 · watermark: 5900732465 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=2bfa3c54f7b973dfabbb4eab0a550755c1324bd2446d386747f01f35208c9f5a -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -28,9 +28,11 @@ RC-2026-09-28-2877 | jillianai | working | 2026-09-30T03:11:15Z | src/events.js,
 RC-2026-09-28-2874 | jillianai | working | 2026-09-30T03:11:16Z | src/events.js, tests/dm-privacy.test.js
 RC-2026-09-28-2878 | jillianai | working | 2026-09-30T03:11:17Z | server/dm-event-visibility.mjs, server/http.mjs, tests/dm-privacy.test.js
 RC-2026-09-28-2880 | jillianai | working | 2026-09-30T03:11:17Z | server/dm-event-visibility.mjs, server/store.mjs, server/reply-requests.mjs, server/notifications.mjs, server/activity.mjs, server/http.mjs, tests/dm-privacy.test.js, tests/reply-requests.test.js
+… +1 more
 
 ## file-claims
 file | lane | task-id | state
+deploy/agent-discovery.mjs | jill | RC-2026-09-29-3610 | working
 docs/EXPORT-RETENTION-DELETION.md | jillianai | RC-2026-09-27-2863 | working
 docs/ROOM-PROTOCOL.md | (none) | RC-2026-09-29-3605 | submitted
 docs/ROUTE-AUTH-TABLE.md | jillianai | RC-2026-09-28-2870 | working
@@ -159,6 +161,7 @@ RC-2026-09-28-2877 | jillianai | working | 2026-09-30T03:11:15Z | src/events.js,
 RC-2026-09-28-2874 | jillianai | working | 2026-09-30T03:11:16Z | src/events.js, tests/dm-privacy.test.js
 RC-2026-09-28-2878 | jillianai | working | 2026-09-30T03:11:17Z | server/dm-event-visibility.mjs, server/http.mjs, tests/dm-privacy.test.js
 RC-2026-09-28-2880 | jillianai | working | 2026-09-30T03:11:17Z | server/dm-event-visibility.mjs, server/store.mjs, server/reply-requests.mjs, server/notifications.mjs, server/activity.mjs, server/http.mjs, tests/dm-privacy.test.js, tests/reply-requests.test.js
+RC-2026-09-29-3610 | jill | working | 2026-09-30T05:02:49Z | deploy/agent-discovery.mjs
 
 ## unclaimed-lanes
 lane | focus | trust
@@ -189,5 +192,5 @@ comment-id | lane | task | at
 Uuriko/project-room#266 -> Uuriko/project-room#1160 · watermark 5859826064 · carried-open: RC-2026-09-27-005
 
 ## signals
-board_comments=453 threshold=1500 rotation_due=no watcher=active open_claims=25 prose_open=0 unfenced_prose=0 files_claimed=53 overlap_files=16 watermark=5899099782
+board_comments=455 threshold=1500 rotation_due=no watcher=active open_claims=26 prose_open=0 unfenced_prose=0 files_claimed=54 overlap_files=16 watermark=5900732465
 
