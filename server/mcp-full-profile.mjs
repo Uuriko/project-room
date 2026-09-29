@@ -243,13 +243,31 @@ export async function callHostedStdioTool(store, secret, name, args) {
 
 // Bounty dispatch. Every branch calls the same escrow method the HTTP route
 // calls, with the caller derived exactly as bounty-escrow-routes.mjs derives
-// it, so the two surfaces cannot drift on identity. EscrowError propagates
-// untouched: the transport maps its code, and there is one error contract.
+// it, so the two surfaces cannot drift on identity. Write tools are wrapped in
+// escrow.idemExecute with the same route names, statuses, and (caller, route,
+// bounty, payload) scoping the HTTP route uses: a retried MCP call carrying
+// the same idempotencyKey replays the stored receipt instead of duplicating
+// the credit movement. EscrowError propagates untouched: the transport maps
+// its code, and there is one error contract.
 function callBountyTool(store, secret, roomId, auth, name, rest) {
   const escrow = store.bountyEscrow;
   const caller = canonicalLane(auth.member.id);
   const actor = normalizeActor(null, caller);
   const bountyId = rest.bountyId;
+
+  // Route-equivalent idempotency: mirrors bounty-escrow-routes.mjs's idem()
+  // helper. MCP has no headers, so the key comes from the tool input's
+  // idempotencyKey; the payload hashed into the scope excludes it, exactly
+  // as the HTTP route does. A null key runs the thunk with no record,
+  // matching the HTTP route's behavior for keyless writes.
+  const idem = (route, status, thunk) => {
+    const key = typeof rest.idempotencyKey === "string" && rest.idempotencyKey.length > 0
+      ? rest.idempotencyKey : null;
+    const { idempotencyKey: _dropped, ...payload } = rest;
+    const result = escrow.idemExecute(roomId, key, route, status, thunk,
+      { callerLane: caller, bountyId: bountyId ?? null, payload });
+    return { ...result.body, idempotentReplay: result.replayed };
+  };
 
   switch (name) {
     case "bounty_list": {
@@ -262,44 +280,60 @@ function callBountyTool(store, secret, roomId, auth, name, rest) {
       return { roomId, receipts: escrow.history(roomId, caller,
         { state: rest.state ?? null, since: rest.since ?? null }) };
     case "bounty_post": {
-      const { bounty, receipt } = escrow.postBounty(roomId, { poster: caller, title: rest.title,
-        criteria: rest.criteria, amount: rest.amount, deadline: rest.deadline,
-        verifierId: rest.verifierId ?? null, rubric: rest.rubric ?? null, actor });
-      return { roomId, bounty, receipt };
+      return idem("bounty.post", 201, () => {
+        const { bounty, receipt } = escrow.postBounty(roomId, { poster: caller, title: rest.title,
+          criteria: rest.criteria, amount: rest.amount, deadline: rest.deadline,
+          verifierId: rest.verifierId ?? null, rubric: rest.rubric ?? null, actor });
+        return { roomId, bounty, receipt };
+      });
     }
     case "bounty_fund": {
-      const { bounty, receipt } = escrow.fundBounty(roomId, bountyId, { funder: caller, actor });
-      return { roomId, bounty, receipt };
+      return idem("bounty.fund", 200, () => {
+        const { bounty, receipt } = escrow.fundBounty(roomId, bountyId, { funder: caller, actor });
+        return { roomId, bounty, receipt };
+      });
     }
     case "bounty_claim": {
-      const { bounty, receipt } = escrow.claimBounty(roomId, bountyId, { claimant: caller, actor });
-      return { roomId, bounty, receipt };
+      return idem("bounty.claim", 200, () => {
+        const { bounty, receipt } = escrow.claimBounty(roomId, bountyId, { claimant: caller, actor });
+        return { roomId, bounty, receipt };
+      });
     }
     case "bounty_submit": {
-      const { bounty, receipt } = escrow.submitWork(roomId, bountyId, { claimant: caller, actor,
-        evidence: { evidenceUrl: rest.evidenceUrl, evidenceKind: rest.evidenceKind ?? null,
-          summary: rest.summary, checksClaimed: rest.checksClaimed ?? [],
-          producerId: rest.producerId ?? null } });
-      return { roomId, bounty, receipt };
+      return idem("bounty.submit", 200, () => {
+        const { bounty, receipt } = escrow.submitWork(roomId, bountyId, { claimant: caller, actor,
+          evidence: { evidenceUrl: rest.evidenceUrl, evidenceKind: rest.evidenceKind ?? null,
+            summary: rest.summary, checksClaimed: rest.checksClaimed ?? [],
+            producerId: rest.producerId ?? null } });
+        return { roomId, bounty, receipt };
+      });
     }
     case "bounty_accept": {
-      const { bounty, approval, attribution, receipt } = escrow.acceptWork(roomId, bountyId,
-        { acceptor: caller, verifierAttestation: rest.verifierAttestation, actor });
-      return { roomId, bounty, approval, attribution, receipt };
+      return idem("bounty.accept", 200, () => {
+        const { bounty, approval, attribution, receipt } = escrow.acceptWork(roomId, bountyId,
+          { acceptor: caller, verifierAttestation: rest.verifierAttestation, actor });
+        return { roomId, bounty, approval, attribution, receipt };
+      });
     }
     case "bounty_dispute": {
-      const { bounty, dispute, receipt } = escrow.disputeBounty(roomId, bountyId,
-        { challenger: caller, bond: rest.bond, grounds: rest.grounds, actor });
-      return { roomId, bounty, dispute, receipt };
+      return idem("bounty.dispute", 201, () => {
+        const { bounty, dispute, receipt } = escrow.disputeBounty(roomId, bountyId,
+          { challenger: caller, bond: rest.bond, grounds: rest.grounds, actor });
+        return { roomId, bounty, dispute, receipt };
+      });
     }
     case "bounty_watch":
-      return { roomId, ...escrow.watchBounty(roomId, bountyId, { watcher: caller, actor }) };
+      return idem("bounty.watch", 200, () =>
+        ({ roomId, ...escrow.watchBounty(roomId, bountyId, { watcher: caller, actor }) }));
     case "bounty_finalize": {
-      const { bounty, action, receipt } = escrow.finalizeBounty(roomId, bountyId, { caller });
-      return { roomId, bounty, action, receipt };
+      return idem("bounty.finalize", 200, () => {
+        const { bounty, action, receipt } = escrow.finalizeBounty(roomId, bountyId, { caller });
+        return { roomId, bounty, action, receipt };
+      });
     }
     case "bounty_transfer":
-      return { roomId, ...escrow.transfer(roomId, { from: caller, to: rest.to, amount: rest.amount, actor }) };
+      return idem("credit.transfer", 200, () =>
+        ({ roomId, ...escrow.transfer(roomId, { from: caller, to: rest.to, amount: rest.amount, actor }) }));
     default: {
       const error = new Error(`Bounty tool ${name} is listed but has no dispatcher`);
       error.status = 500;
