@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-29T19:00:22Z · board: Uuriko/project-room#1160 · watermark: 5896668066 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=4a1ec906a09fa5c6e59243425919055d41a945a8ed85470964a175e0d15efa48 -->
+<!-- generated: 2026-09-29T19:28:59Z · board: Uuriko/project-room#1160 · watermark: 5897127345 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=4a1ec906a09fa5c6e59243425919055d41a945a8ed85470964a175e0d15efa48 -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -28,7 +28,7 @@ RC-2026-09-28-2876 | jillianai | working | 2026-09-29T21:17:58Z | server/work-co
 RC-2026-09-28-2877 | jillianai | working | 2026-09-29T21:17:59Z | src/events.js, src/work-selectors.js, tests/decision-register.test.js, tests/room-orientation.test.js
 RC-2026-09-28-2874 | jillianai | working | 2026-09-29T21:18:00Z | src/events.js, tests/dm-privacy.test.js
 RC-2026-09-28-2878 | jillianai | working | 2026-09-29T21:18:01Z | server/dm-event-visibility.mjs, server/http.mjs, tests/dm-privacy.test.js
-… +1 more
+… +3 more
 
 ## file-claims
 file | lane | task-id | state
@@ -42,6 +42,7 @@ docs/openapi.yaml | jillianai | RC-2026-09-28-2870 | working
 docs/openapi.yaml | jillianai | RC-2026-09-28-2871 | working
 lanes/REGISTRY.md | (none) | RC-2026-09-29-3605 | submitted
 llms.txt | (none) | RC-2026-09-29-3605 | submitted
+server/access-requests.mjs | jill | RC-2026-09-29-3606 | working
 server/activity.mjs | jillianai | RC-2026-09-28-2865 | working
 server/activity.mjs | jillianai | RC-2026-09-28-2880 | working
 server/agent-heartbeats.mjs | jill | RC-2026-09-28-3602 | working
@@ -90,8 +91,10 @@ src/events.js | (none) | RC-2026-09-28-2879 | submitted
 src/events.js | (none) | RC-2026-09-28-2903 | submitted
 src/work-selectors.js | jillianai | RC-2026-09-28-2877 | working
 src/work-selectors.js | (none) | RC-2026-09-28-2879 | submitted
+tests/access-requests.test.js | jill | RC-2026-09-29-3606 | working
 tests/activity.test.js | jillianai | RC-2026-09-28-2865 | working
 tests/agent-wake-poll.test.js | jill | RC-2026-09-28-3602 | working
+tests/cold-start-friction.test.js | jill | RC-2026-09-29-3607 | submitted
 tests/command-catalog.test.js | jillianai | RC-2026-09-28-2871 | working
 tests/decision-register.test.js | jillianai | RC-2026-09-28-2877 | working
 tests/decision-register.test.js | (none) | RC-2026-09-28-2879 | submitted
@@ -191,5 +194,5 @@ comment-id | lane | task | at
 Uuriko/project-room#266 -> Uuriko/project-room#1160 · watermark 5859826064 · carried-open: RC-2026-09-27-005
 
 ## signals
-board_comments=412 threshold=1500 rotation_due=no watcher=active open_claims=26 prose_open=0 unfenced_prose=0 files_claimed=55 overlap_files=16 watermark=5896668066
+board_comments=416 threshold=1500 rotation_due=no watcher=active open_claims=28 prose_open=0 unfenced_prose=0 files_claimed=58 overlap_files=16 watermark=5897127345
 
