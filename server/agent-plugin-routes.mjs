@@ -764,8 +764,8 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     const rawWait = url.searchParams.get("waitMs");
     let waitMs = 25000;
     if (rawWait !== null) {
-      // NOTE: no anchored regex literal here — scripts/route-docs-check.mjs
-      // mistakes /^...$/ literals in this file for route patterns.
+      // NOTE: no anchored regex literal here — the route-docs extractor
+      // mistakes caret-anchored literals in this file for route patterns.
       const text = rawWait.trim();
       const parsed = text === "" ? NaN : Number(text);
       if (!Number.isInteger(parsed) || parsed < 0 || parsed > 55000)
@@ -774,7 +774,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     }
     const wakeNext = pendingWakes => [
       ...heartbeatNext(pendingWakes),
-      Object.freeze({ action: "poll-wakes", method: "GET", path: "/api/agent-wakes/poll?waitMs=25000",
+      Object.freeze({ action: "poll-wakes", method: "GET", path: "/api/agent-wakes/poll", requiredScope: "heartbeats:read",
         description: "Wait again for the next mention/DM: repeats the room-hosted wake poll." }),
     ];
     // Registering the waiter first is load-bearing: a reconnect with the
