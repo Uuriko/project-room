@@ -263,3 +263,237 @@ test("decide deny with note:null is accepted like an omitted note (RC-2026-09-18
   assert.equal(denied.status, "denied");
   assert.equal(denied.decisionNote, null);
 });
+
+// Self-serve admission (RC-2026-09-29-3603): rooms with an auto-approve rule
+// admit matching requests inline, with no human in the loop.
+
+test("auto-approve: subset of the configured rule is approved and linked inline", async t => {
+  const { store, requests, ownerToken, identity } = setup(t);
+  const configured = requests.setAutoApprove(ownerToken, "commons", { permissions: ["accept_work", "complete_work"] });
+  assert.deepEqual(configured.autoApprove.permissions, ["accept_work", "complete_work"]);
+  assert.equal(configured.autoApprove.updatedBy, "owner");
+
+  const approved = requests.request("commons", {
+    identityId: identity.identityId, displayName: "Requesting Agent",
+    requestedPermissions: ["accept_work"], requestId: "ar_auto1"
+  });
+  assert.equal(approved.status, "approved");
+  assert.equal(approved.memberId, identity.identityId);
+  assert.deepEqual(approved.grantedPermissions, ["accept_work"]);
+  assert.equal(approved.next.length, 2);
+  // The membership is real: projection, identity link, and event all exist.
+  const members = store.room("commons").state.members;
+  assert.ok(members[identity.identityId]);
+  assert.deepEqual(members[identity.identityId].permissions, ["accept_work"]);
+  const link = store.db.prepare("SELECT member_id FROM identity_links WHERE room_id=? AND identity_id=?")
+    .get("commons", identity.identityId);
+  assert.equal(link.member_id, identity.identityId);
+  const addedEvent = store.db.prepare("SELECT body FROM events WHERE room_id=? AND body LIKE '%\"member.added\"%'")
+    .all("commons").map(r => JSON.parse(r.body)).find(e => e.data?.memberId === identity.identityId);
+  assert.ok(addedEvent);
+  assert.equal(addedEvent.actorId, "owner");
+});
+
+test("auto-approve: audit fields on the request row", async t => {
+  const { requests, ownerToken, identity } = setup(t);
+  requests.setAutoApprove(ownerToken, "commons", { permissions: ["accept_work", "complete_work"] });
+  const approved = requests.request("commons", {
+    identityId: identity.identityId, displayName: "Requesting Agent",
+    requestedPermissions: ["accept_work", "complete_work"], requestId: "ar_auto_audit"
+  });
+  assert.equal(approved.status, "approved");
+  assert.equal(approved.decidedBy, "auto-approve");
+  assert.ok(typeof approved.decidedAt === "number" && approved.decidedAt > 0);
+  assert.match(approved.decisionNote, /auto-approved under standing rule set by owner/);
+});
+
+test("auto-approve: superset of the rule stays pending with a reason", async t => {
+  const { requests, ownerToken, identity } = setup(t);
+  requests.setAutoApprove(ownerToken, "commons", { permissions: ["accept_work", "complete_work"] });
+  const pending = requests.request("commons", {
+    identityId: identity.identityId, displayName: "Requesting Agent",
+    requestedPermissions: ["accept_work", "steer"], requestId: "ar_auto_super"
+  });
+  assert.equal(pending.status, "pending");
+  assert.match(pending.pendingNote, /outside the rule/);
+  assert.equal(pending.memberId, undefined);
+});
+
+test("auto-approve: empty request and no rule stay pending without a note", async t => {
+  const { requests, identity } = setup(t);
+  const pending = requests.request("commons", {
+    identityId: identity.identityId, displayName: "Requesting Agent",
+    requestedPermissions: [], requestId: "ar_auto_empty"
+  });
+  assert.equal(pending.status, "pending");
+  assert.equal(pending.pendingNote, undefined);
+});
+
+test("auto-approve: config rejects manage_members, decide, manage_claims", async t => {
+  const { requests, ownerToken } = setup(t);
+  for (const forbidden of ["manage_members", "decide", "manage_claims"]) {
+    assert.throws(() => requests.setAutoApprove(ownerToken, "commons", { permissions: ["accept_work", forbidden] }),
+      err => err.status === 422 && /never grant administration/.test(err.message),
+      `expected 422 for ${forbidden}`);
+  }
+  // Unknown names and duplicates also 422 with a teaching message.
+  assert.throws(() => requests.setAutoApprove(ownerToken, "commons", { permissions: ["accept_work", "fly"] }),
+    err => err.status === 422 && /valid:/.test(err.message));
+  assert.throws(() => requests.setAutoApprove(ownerToken, "commons", { permissions: ["accept_work", "accept_work"] }),
+    err => err.status === 422 && /must not repeat/.test(err.message));
+  // No rule was stored by the rejected writes.
+  assert.equal(requests.getAutoApprove(ownerToken, "commons").autoApprove, null);
+});
+
+test("auto-approve: non-owner cannot read or write the rule", async t => {
+  const { store, requests, ownerToken } = setup(t);
+  const { randomUUID } = await import("node:crypto");
+  store.command(ownerToken, "commons", {
+    id: randomUUID(), type: "member.added",
+    data: { memberId: "regular", displayName: "Regular", kind: "agent", permissions: ["accept_work"] }
+  });
+  const memberToken = store.issueAccessKey("commons", "regular");
+  assert.throws(() => requests.setAutoApprove(memberToken, "commons", { permissions: ["accept_work"] }),
+    err => err.status === 403);
+  assert.throws(() => requests.getAutoApprove(memberToken, "commons"), err => err.status === 403);
+  // The owner can read back what was set.
+  requests.setAutoApprove(ownerToken, "commons", { permissions: ["accept_work"] });
+  const read = requests.getAutoApprove(ownerToken, "commons");
+  assert.deepEqual(read.autoApprove.permissions, ["accept_work"]);
+});
+
+test("auto-approve: empty permission list disables the rule", async t => {
+  const { requests, ownerToken, identity } = setup(t);
+  requests.setAutoApprove(ownerToken, "commons", { permissions: ["accept_work"] });
+  const cleared = requests.setAutoApprove(ownerToken, "commons", { permissions: [] });
+  assert.equal(cleared.autoApprove, null);
+  const pending = requests.request("commons", {
+    identityId: identity.identityId, displayName: "Requesting Agent",
+    requestedPermissions: ["accept_work"], requestId: "ar_auto_cleared"
+  });
+  assert.equal(pending.status, "pending");
+  assert.equal(pending.pendingNote, undefined);
+});
+
+test("auto-approve: verified-only rooms never auto-approve the unverified", async t => {
+  const { store, requests, ownerToken, identity } = setup(t);
+  requests.setAutoApprove(ownerToken, "commons", { permissions: ["accept_work"] });
+  store.agentPlugin.setRoomVerificationPolicy({ roomId: "commons", requireVerified: true, setBy: "owner" });
+  const pending = requests.request("commons", {
+    identityId: identity.identityId, displayName: "Requesting Agent",
+    requestedPermissions: ["accept_work"], requestId: "ar_auto_unverified"
+  });
+  assert.equal(pending.status, "pending");
+  assert.match(pending.pendingNote, /verified/);
+  // A verified identity in the same room is approved inline.
+  store.agentPlugin.verifyIdentity({ identityId: identity.identityId, verifiedBy: "owner" });
+  const approved = requests.request("commons", {
+    identityId: identity.identityId, displayName: "Requesting Agent",
+    requestedPermissions: ["accept_work"], requestId: "ar_auto_verified"
+  });
+  assert.equal(approved.status, "approved");
+  assert.equal(approved.decidedBy, "auto-approve");
+});
+
+test("auto-approve: rule suspends when its author loses membership administration", async t => {
+  const { store, requests, ownerToken, identity } = setup(t);
+  const { randomUUID } = await import("node:crypto");
+  // A manager sets the rule, then the owner strips their manage_members.
+  store.command(ownerToken, "commons", {
+    id: randomUUID(), type: "member.added",
+    data: { memberId: "manager", displayName: "Manager", kind: "agent", permissions: ["accept_work", "manage_members"] }
+  });
+  const managerToken = store.issueAccessKey("commons", "manager");
+  requests.setAutoApprove(managerToken, "commons", { permissions: ["accept_work"] });
+  store.command(ownerToken, "commons", {
+    id: randomUUID(), type: "member.access_changed",
+    data: { memberId: "manager", expectedMemberRevision: 0, active: true, permissions: ["accept_work"] }
+  });
+  const pending = requests.request("commons", {
+    identityId: identity.identityId, displayName: "Requesting Agent",
+    requestedPermissions: ["accept_work"], requestId: "ar_auto_demoted"
+  });
+  assert.equal(pending.status, "pending");
+  assert.match(pending.pendingNote, /suspended/);
+});
+
+test("auto-approve: idempotent retry on an approved request returns the approval", async t => {
+  const { requests, ownerToken, identity } = setup(t);
+  requests.setAutoApprove(ownerToken, "commons", { permissions: ["accept_work"] });
+  const first = requests.request("commons", {
+    identityId: identity.identityId, displayName: "Requesting Agent",
+    requestedPermissions: ["accept_work"], requestId: "ar_auto_retry"
+  });
+  assert.equal(first.status, "approved");
+  const retry = requests.request("commons", {
+    identityId: identity.identityId, displayName: "Requesting Agent",
+    requestedPermissions: ["accept_work"], requestId: "ar_auto_retry"
+  });
+  assert.equal(retry.status, "approved");
+  assert.equal(retry.decidedBy, "auto-approve");
+  assert.equal(retry.memberId, identity.identityId);
+  assert.deepEqual(retry.grantedPermissions, ["accept_work"]);
+});
+
+test("auto-approve: deceptive display names never auto-admit", async t => {
+  const { store, requests, ownerToken } = setup(t);
+  const { randomUUID } = await import("node:crypto");
+  store.command(ownerToken, "commons", {
+    id: randomUUID(), type: "member.added",
+    data: { memberId: "alice", displayName: "Alice", kind: "agent", permissions: ["accept_work"] }
+  });
+  requests.setAutoApprove(ownerToken, "commons", { permissions: ["accept_work"] });
+  // Fullwidth "Ａ" (U+FF21) looks identical to "A" but is a different code
+  // point: the room-level skeleton check must catch what global identity
+  // creation (NFKC-normalized, single-script) legitimately allows.
+  const impostor = store.identities.create("Ａlice");
+  const pending = requests.request("commons", {
+    identityId: impostor.identityId, displayName: "Ａlice",
+    requestedPermissions: ["accept_work"], requestId: "ar_auto_deceptive"
+  });
+  assert.equal(pending.status, "pending");
+  assert.match(pending.pendingNote, /display name/i);
+});
+
+test("pending responses carry service-level poll-status guidance", async t => {
+  const { requests, identity } = setup(t);
+  // Plain pending (no auto-approve rule configured: no pendingNote branch).
+  const first = requests.request("commons", {
+    identityId: identity.identityId, displayName: "Guided Agent",
+    requestedPermissions: ["accept_work"], requestId: "ar_guide_plain"
+  });
+  assert.equal(first.status, "pending");
+  assert.equal(first.next[0].action, "poll-status");
+  assert.equal(first.next[0].method, "GET");
+  assert.ok(first.next[0].path.includes(`/api/access-requests/${first.requestId}`),
+    "poll-status path names the request");
+  assert.ok(first.next[0].path.includes(`identityId=${identity.identityId}`),
+    "poll-status path carries the identity");
+  assert.ok(first.next[0].description.includes("7 days"), "poll-status states the expiry window");
+  assert.equal(first.next[1].action, "cancel-request");
+  assert.equal(first.next[1].method, "POST");
+  assert.ok(first.next[1].path.endsWith(`/api/access-requests/${first.requestId}`));
+
+  // Idempotent retry of a still-pending request carries the same guidance.
+  const retry = requests.request("commons", {
+    identityId: identity.identityId, displayName: "Guided Agent",
+    requestedPermissions: ["accept_work"], requestId: "ar_guide_plain"
+  });
+  assert.equal(retry.status, "pending");
+  assert.deepEqual(retry.next.map(n => n.action), ["poll-status", "cancel-request"]);
+});
+
+test("pending guidance fires alongside a pendingNote when a rule is configured but does not match", async t => {
+  const { requests, ownerToken, identity } = setup(t);
+  requests.setAutoApprove(ownerToken, "commons", { permissions: ["complete_work"] });
+  // requestedPermissions (accept_work) are not a subset of the rule
+  // (complete_work): the request pends with a pendingNote AND the guidance.
+  const filed = requests.request("commons", {
+    identityId: identity.identityId, displayName: "Mismatched Agent",
+    requestedPermissions: ["accept_work"], requestId: "ar_guide_mismatch"
+  });
+  assert.equal(filed.status, "pending");
+  assert.ok(filed.pendingNote, "pendingNote explains why the rule did not fire");
+  assert.equal(filed.next[0].action, "poll-status");
+  assert.equal(filed.next[1].action, "cancel-request");
+});

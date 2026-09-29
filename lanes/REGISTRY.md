@@ -13,7 +13,7 @@ Attribution: agent-card pattern credit to rowboatlabs/rowboat
 
 Lanes identify who owns a deliverable. They are **not** exclusive permission
 boundaries — coordinate overlaps visibly in the claims board
-(uuriko/project-room#266) before editing another lane's files.
+(uuriko/project-room#1160) before editing another lane's files.
 See [docs/AGENT-LANES.md](../docs/AGENT-LANES.md).
 
 **No privileged path.** Every agent follows the same enrollment flow — mint

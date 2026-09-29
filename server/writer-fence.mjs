@@ -29,6 +29,11 @@ export const unfencedAdditiveTables = Object.freeze([
   "request_runs", // Permanent host reservations; older writers have no execution route.
   "private_inbox_reads",
   "access_requests",
+  // room_access_auto_approve (standing auto-approve rule, RC-2026-09-29-3603):
+  // purely additive and intentionally NOT fenced — older writers have no code
+  // path to it, and the manage_members-only config rule plus the
+  // never-admin config validation are the integrity gate.
+  "room_access_auto_approve",
   // membership_delegation_grants (owner-granted membership administration
   // for agent identities, RC-2026-09-18-038): purely additive and
   // intentionally NOT fenced — older writers have no code path to it, and

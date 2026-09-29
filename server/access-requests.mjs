@@ -7,8 +7,19 @@
 // (server/membership-delegation.mjs) — approves or denies it. Approval links the
 // identity as a room member via AgentIdentities.link() — the same path as
 // the owner-driven identity-link flow, so the security properties are
-// identical. Nothing here auto-approves: every grant is an explicit owner
-// decision, audit-logged as a member.added event.
+// identical.
+//
+// A room may also configure an auto-approve rule (room_access_auto_approve):
+// a standing list of permissions the room admits without a human in the
+// loop. An incoming request whose requested permissions are a non-empty
+// subset of the configured set is approved and linked inline, synchronously,
+// in the same call that files it; anything else stays pending for the owner
+// queue. Auto-approve can never confer administration (manage_members,
+// decide, and manage_claims are rejected from the config), never fires in
+// rooms that require verified agents, and stops admitting the moment its
+// authorizing configurer loses membership administration — fail-closed to
+// pending. Auto-approvals are audit-logged as member.added events whose
+// request row carries decided_by='auto-approve'.
 //
 // The module is storage-agnostic: it takes the RoomStore (for the db handle,
 // transactions, auth, and the identities helper) and exports its schema for
@@ -21,8 +32,9 @@ import { createRateLimiter } from "./identity-ratelimit.mjs";
 // an owner notification. These imports follow the agent-invites.mjs
 // precedent (same Workers bundle, same optional list in
 // scripts/runtime-package.mjs).
-import { event, EVENT_TYPES as T, isRoomArchived } from "../src/events.js";
+import { event, EVENT_TYPES as T, isRoomArchived, memberCan } from "../src/events.js";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
+import { checkAgentDisplayName } from "./display-name-guard.mjs";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 
 // Local ServiceError (mirrors server/store.mjs). We avoid importing from
@@ -59,6 +71,16 @@ export const accessRequestSchema = `
   );
   CREATE INDEX IF NOT EXISTS access_requests_room ON access_requests(room_id, status);
   CREATE INDEX IF NOT EXISTS access_requests_identity ON access_requests(identity_id);
+  -- Self-serve admission (RC-2026-09-29-3603): a room's standing auto-approve
+  -- rule. When set, incoming requests whose permissions are a non-empty subset
+  -- of this list are approved and linked inline, with no human in the loop.
+  -- Registered in server/writer-fence.mjs unfencedAdditiveTables.
+  CREATE TABLE IF NOT EXISTS room_access_auto_approve (
+    room_id TEXT PRIMARY KEY,
+    permissions TEXT NOT NULL,
+    updated_at INTEGER NOT NULL,
+    updated_by TEXT NOT NULL
+  );
 `;
 
 const STATUSES = ["pending", "approved", "denied", "expired", "cancelled"];
@@ -93,6 +115,15 @@ const compactState = state => ({ ...state, eventLog: [], seenEvents: {}, seenIde
 // store.mjs cannot be imported here without a circular dependency).
 const MAX_ROOM_EVENTS = 10000;
 const MAX_PROJECTION_BYTES = 4 * 1024 * 1024;
+const MAX_MEMBERS_PER_ROOM = 100;
+const countActiveMembers = members =>
+  Object.values(members ?? {}).filter(member => member?.active !== false).length;
+
+// Permissions an auto-approve config may never include. A standing rule that
+// admits guests must not be able to mint managers, deciders, or claim
+// arbiters: the guest tier never gets admin powers. Kill criterion from the
+// safety review — rejected with a teaching 422 at config time.
+const AUTO_APPROVE_FORBIDDEN_PERMISSIONS = Object.freeze(["manage_members", "decide", "manage_claims"]);
 
 export class AccessRequests {
   constructor(store, { rateLimiter } = {}) {
@@ -142,7 +173,20 @@ export class AccessRequests {
       if (existing) {
         // Idempotent retry: only the original identity may observe it.
         if (existing.identity_id !== identityId) fail(409, "request_conflict", "requestId is already in use");
-        return rowToRequest(existing);
+        // A retried auto-approval returns the approval record (member id +
+        // grant), not just the row — so a lost response can recover the
+        // membership the call created.
+        if (existing.status === "approved" && existing.decided_by === "auto-approve") {
+          const link = this.db.prepare(
+            "SELECT member_id AS memberId FROM identity_links WHERE room_id=? AND identity_id=?"
+          ).get(existing.room_id, existing.identity_id);
+          if (link) return this.autoApproveResponse(rowToRequest(existing), link.memberId, JSON.parse(existing.requested_permissions));
+        }
+        const retryLive = rowToRequest(existing);
+        if (retryLive.status === "pending") {
+          return Object.freeze({ ...retryLive, next: this.pendingNext(rid, identityId) });
+        }
+        return retryLive;
       }
       // The identity must exist (minted via identity-create). We do not
       // reveal anything else: a missing identity and a bad room look the
@@ -183,7 +227,21 @@ export class AccessRequests {
         requestId: rid, identityId, displayName: name,
         requestedPermissions, note: note?.trim() || null, at: now,
       });
-      return rowToRequest(this.db.prepare("SELECT * FROM access_requests WHERE request_id=?").get(rid));
+      // Self-serve admission (RC-2026-09-29-3603): rooms with an auto-approve
+      // rule admit matching requests inline, in the same transaction.
+      // Anything the rule does not cover stays pending for the owner queue —
+      // and a pending request never sits silent: when a configured rule did
+      // not fire, the response says why (the HTTP layer also links poll-status
+      // next[]).
+      const attempt = this.tryAutoApprove(roomId, rid);
+      const live = rowToRequest(this.db.prepare("SELECT * FROM access_requests WHERE request_id=?").get(rid));
+      if (attempt.approved) return attempt.response;
+      // Pending: the response carries poll-status guidance (see
+      // pendingNext()) so the requester is never left guessing. The HTTP
+      // wrapper reuses this next[] rather than rebuilding it.
+      const guidance = this.pendingNext(rid, identityId);
+      if (attempt.pendingNote) return Object.freeze({ ...live, pendingNote: attempt.pendingNote, next: guidance });
+      return Object.freeze({ ...live, next: guidance });
     });
   }
 
@@ -222,6 +280,221 @@ export class AccessRequests {
     const sequence = room.sequence + 1;
     this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
     this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
+  }
+
+  // RC-2026-09-29-3603: setting a standing admission rule requires actual
+  // manage_members — deliberately stricter than #requireMembershipAdministration.
+  // A membership-administration delegate may decide individual requests, but a
+  // standing rule that admits without review must not be settable by a grant
+  // that is itself delegated (that would make the grant transitive).
+  #requireManageMembers(token, roomId, expectedSessionBinding = null) {
+    const auth = this.store.authenticate(token, roomId, expectedSessionBinding);
+    const authority = this.store.roomAuthority(roomId);
+    let allowed = false;
+    try { allowed = memberCan(authority, auth.member.id, "manage_members"); }
+    catch { allowed = false; }
+    if (!allowed) fail(403, "access_denied", "manage_members required");
+    return { auth, authority };
+  }
+
+  // Internal read of the room's auto-approve rule. Returns
+  // { permissions, updatedAt, updatedBy } or null when the room has no rule.
+  getAutoApproveConfig(roomId) {
+    const row = this.db.prepare("SELECT * FROM room_access_auto_approve WHERE room_id=?").get(roomId);
+    return row ? { permissions: JSON.parse(row.permissions), updatedAt: row.updated_at, updatedBy: row.updated_by } : null;
+  }
+
+  // Owner-only read: the room's auto-approve rule, or null.
+  getAutoApprove(token, roomId, expectedSessionBinding = null) {
+    this.#requireManageMembers(token, roomId, expectedSessionBinding);
+    const config = this.getAutoApproveConfig(roomId);
+    return Object.freeze({
+      roomId,
+      autoApprove: config ? Object.freeze({
+        permissions: Object.freeze([...config.permissions]),
+        updatedAt: config.updatedAt,
+        updatedBy: config.updatedBy,
+      }) : null,
+    });
+  }
+
+  // Owner-only write: set or replace the room's auto-approve rule. An empty
+  // permission list deletes the rule (auto-approve off).
+  setAutoApprove(token, roomId, { permissions } = {}, expectedSessionBinding = null) {
+    const { auth } = this.#requireManageMembers(token, roomId, expectedSessionBinding);
+    // A standing admission rule is a membership write: the read-only autonomy
+    // tier cannot set one, even holding manage_members (issue #996).
+    enforceAutonomyTierForAction({ db: this.db, roomId, state: this.store.room(roomId).state, actor: auth.member, action: "access_auto_approve", fail });
+    if (!Array.isArray(permissions)) fail(422, "invalid_request", "permissions must be an array of permission strings; empty disables auto-approve");
+    return this.store.transaction(() => {
+      if (permissions.length === 0) {
+        this.db.prepare("DELETE FROM room_access_auto_approve WHERE room_id=?").run(roomId);
+        return Object.freeze({ roomId, autoApprove: null });
+      }
+      if (!permissions.every(p => typeof p === "string" && ACCESS_REQUEST_PERMISSIONS.includes(p))) {
+        fail(422, "invalid_request",
+          `permissions must be room permissions (valid: ${ACCESS_REQUEST_PERMISSIONS.join(", ")})`);
+      }
+      if (new Set(permissions).size !== permissions.length) fail(422, "invalid_request", "permissions must not repeat");
+      const forbidden = permissions.filter(p => AUTO_APPROVE_FORBIDDEN_PERMISSIONS.includes(p));
+      if (forbidden.length) {
+        fail(422, "invalid_request",
+          `auto-approve may never grant administration (${forbidden.join(", ")}): a standing rule that admits guests cannot mint managers, deciders, or claim arbiters`);
+      }
+      const now = this.store.now();
+      this.db.prepare(`INSERT INTO room_access_auto_approve(room_id, permissions, updated_at, updated_by)
+        VALUES(?,?,?,?) ON CONFLICT(room_id) DO UPDATE SET
+          permissions=excluded.permissions, updated_at=excluded.updated_at, updated_by=excluded.updated_by`)
+        .run(roomId, JSON.stringify(permissions), now, auth.member.id);
+      return Object.freeze({
+        roomId,
+        autoApprove: Object.freeze({
+          permissions: Object.freeze([...permissions]),
+          updatedAt: now,
+          updatedBy: auth.member.id,
+        }),
+      });
+    });
+  }
+
+  // Self-serve admission: attempt to approve and link a pending request under
+  // the room's auto-approve rule. Called inside request()'s transaction, after
+  // the request row and its access.requested event are recorded.
+  //
+  // The grant path is internal by design (agent-invites.mjs redeem
+  // precedent): it builds the member.added event directly and persists it
+  // through applyEventWithGrowth, instead of calling AgentIdentities.link(),
+  // which requires the requester's credential — an auto-approve has no
+  // business holding that. The rule's author (updated_by) is the auditable
+  // actor on the event and is named in the decision note; the request row
+  // carries decided_by='auto-approve'.
+  //
+  // Returns { approved: true, response } or { approved: false, pendingNote }.
+  // pendingNote explains why a configured rule did not fire; it is null when
+  // the room has no rule, preserving the existing silent-pending behavior.
+  tryAutoApprove(roomId, requestId) {
+    const row = this.db.prepare("SELECT * FROM access_requests WHERE request_id=?").get(requestId);
+    if (!row || row.status !== "pending" || row.room_id !== roomId) return { approved: false, pendingNote: null };
+    const config = this.getAutoApproveConfig(row.room_id);
+    if (!config) return { approved: false, pendingNote: null };
+    const requested = JSON.parse(row.requested_permissions);
+    if (!requested.length || !requested.every(p => config.permissions.includes(p))) {
+      return { approved: false, pendingNote:
+        `This room auto-approves ${config.permissions.join(", ")}; the requested ${requested.join(", ") || "read/chat access"} is outside the rule, so it waits for an owner decision.` };
+    }
+    // Verified-only rooms never auto-approve: the identity must be verified
+    // first. Mirrors the AgentIdentities.link() gate exactly.
+    const plugin = this.store.agentPlugin;
+    if (plugin && plugin.roomVerificationPolicy(row.room_id).requireVerified
+        && plugin.verificationLevel(row.identity_id) !== "verified") {
+      return { approved: false, pendingNote:
+        "This room only admits verified agents. Ask a room owner to verify the identity; the request stays pending meanwhile." };
+    }
+    // The rule author's authority is re-checked at approval time: a standing
+    // rule whose author lost membership administration stops admitting.
+    // Fail-closed to pending — the owner queue is the safe default.
+    let authorizerActive = false;
+    try { authorizerActive = memberCan(this.store.room(row.room_id).state, config.updatedBy, "manage_members"); }
+    catch { authorizerActive = false; }
+    if (!authorizerActive) {
+      return { approved: false, pendingNote:
+        "This room's auto-approve rule is suspended: its author no longer holds membership administration. The request waits for an owner decision." };
+    }
+    const room = this.store.room(row.room_id);
+    if (isRoomArchived(room.state)) {
+      return { approved: false, pendingNote: "This room is archived; new admissions wait for an owner decision." };
+    }
+    // Bounded pilot capacity, mirroring the invite-redeem guard.
+    if (room.sequence + 1 >= MAX_ROOM_EVENTS || countActiveMembers(room.state.members) >= MAX_MEMBERS_PER_ROOM) {
+      return { approved: false, pendingNote: "This room is at pilot capacity; the request waits for an owner decision." };
+    }
+    // Deceptive-name guard, same as AgentIdentities.link(): a confusing or
+    // duplicate name never auto-admits — it waits for owner review.
+    const canonical = value => value.trim().replace(/\p{White_Space}+/gu, " ").toLowerCase();
+    const activeNames = Object.values(room.state.members)
+      .filter(member => member.active !== false && member.id !== row.identity_id
+        && canonical(member.displayName) !== canonical(row.display_name))
+      .map(member => ({ memberId: member.id, displayName: member.displayName }));
+    const checked = checkAgentDisplayName(row.display_name, { activeNames });
+    if (!checked.safe) {
+      return { approved: false, pendingNote:
+        `The display name was not auto-approved (${checked.reason}); it waits for an owner decision.` };
+    }
+    const now = this.store.now();
+    // Referral attribution: match the "who referred you?" text against member
+    // display names, exactly as decide() does. Unmatched text joins with no
+    // referrer and never blocks the admission.
+    const referrerMemberId = this.store.referrals.matchReferrer(row.room_id, row.referred_by);
+    const incoming = event({
+      id: randomUUID(),
+      idempotencyKey: createHash("sha256").update(`access-request:auto-approve:${requestId}`).digest("hex"),
+      type: T.MEMBER_ADDED,
+      roomId: row.room_id,
+      actorId: config.updatedBy,
+      at: new Date(now).toISOString(),
+      data: {
+        memberId: row.identity_id,
+        displayName: row.display_name,
+        kind: "agent",
+        permissions: [...requested],
+        identityId: row.identity_id,
+        ...(referrerMemberId ? { referredBy: referrerMemberId } : {}),
+      },
+    });
+    let state;
+    try { state = compactState(applyEventWithGrowth(room.state, incoming, growthCollector).state); }
+    catch (error) {
+      return { approved: false, pendingNote: `Auto-approve was rejected (${error.message}); the request waits for an owner decision.` };
+    }
+    const projection = JSON.stringify(state);
+    if (Buffer.byteLength(projection) > MAX_PROJECTION_BYTES) {
+      return { approved: false, pendingNote: "Room projection limit reached; the request waits for an owner decision." };
+    }
+    const sequence = room.sequence + 1;
+    this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(row.room_id, sequence, incoming.id, JSON.stringify(incoming));
+    this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, row.room_id);
+    this.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)")
+      .run(row.room_id, row.identity_id, row.identity_id, now);
+    if (referrerMemberId && referrerMemberId !== row.identity_id) {
+      this.store.referrals.record({ roomId: row.room_id, referrerMemberId, refereeMemberId: row.identity_id, via: "request", at: now });
+    }
+    this.db.prepare("UPDATE access_requests SET status='approved', decided_at=?, decided_by='auto-approve', decision_note=? WHERE request_id=?")
+      .run(now, `auto-approved under standing rule set by ${config.updatedBy}`, requestId);
+    const updated = rowToRequest(this.db.prepare("SELECT * FROM access_requests WHERE request_id=?").get(requestId));
+    return { approved: true, response: this.autoApproveResponse(updated, row.identity_id, requested) };
+  }
+
+  // Approval-shaped response shared by tryAutoApprove and the idempotent
+  // retry: the request row plus the membership it created, and the new
+  // member's first moves.
+  autoApproveResponse(row, memberId, grants) {
+    return Object.freeze({
+      ...row,
+      memberId,
+      grantedPermissions: Object.freeze([...grants]),
+      next: Object.freeze([
+        Object.freeze({ action: "orient", method: "GET", path: `/api/rooms/${encodeURIComponent(row.roomId)}/orient`,
+          description: "You are a member now. Orient to the room: members, open work items, and how to claim work." }),
+        Object.freeze({ action: "see-membership", method: "GET", path: `/api/rooms/${encodeURIComponent(row.roomId)}/presence`,
+          description: "Confirm your membership and granted permissions in the room's member list." }),
+      ]),
+    });
+  }
+
+  // Pending-response guidance (RC-2026-09-29-3603): a pending request never
+  // sits silent. The poll-status next[] lives here at the service level so
+  // every caller — HTTP, the enroll route's inline room join, the plug-in
+  // route — gets the same guidance; the HTTP wrapper reuses it instead of
+  // rebuilding it.
+  pendingNext(requestId, identityId) {
+    return Object.freeze([
+      Object.freeze({ action: "poll-status", method: "GET",
+        path: `/api/access-requests/${encodeURIComponent(requestId)}?identityId=${encodeURIComponent(identityId)}`,
+        description: `Poll this path with your identityId to learn the owner's decision. Requests expire undecided after ${REQUEST_TTL_MS / 86400000} days.` }),
+      Object.freeze({ action: "cancel-request", method: "POST",
+        path: `/api/access-requests/${encodeURIComponent(requestId)}`,
+        description: "Withdraw this pending request. Send { identityId } with your identity's current secret as the Bearer token." }),
+    ]);
   }
 
   // Identity-scoped read: the requesting identity checks its own request.

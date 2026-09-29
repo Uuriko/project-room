@@ -2932,21 +2932,16 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }
         // Burs-IA steal A1: filing an access request is a cold-start step — the
         // response teaches the status-poll path and the expected decision
-        // window (requests expire undecided after REQUEST_TTL_MS).
+        // window (requests expire undecided after REQUEST_TTL_MS). The
+        // guidance lives at the service level (pendingNext / autoApproveResponse
+        // in server/access-requests.mjs) and is reused here, not rebuilt:
+        // pending responses carry poll-status + cancel guidance, approved
+        // ones carry the new member's first moves. Never overwrite an
+        // approval's next[] with poll/cancel.
         const filed = accessRequests.request(data.roomId, data);
         return json(res, 201, {
           ...filed,
-          next: [Object.freeze({
-            action: "poll-status",
-            method: "GET",
-            path: `/api/access-requests/${encodeURIComponent(filed.requestId)}?identityId=${encodeURIComponent(data.identityId)}`,
-            description: `Poll this path with your identityId to learn the owner's decision. Requests expire undecided after ${REQUEST_TTL_MS / 86400000} days.`,
-          }), Object.freeze({
-            action: "cancel-request",
-            method: "POST",
-            path: `/api/access-requests/${encodeURIComponent(filed.requestId)}`,
-            description: "Withdraw this pending request. Send { identityId } and Authorization: Bearer with that identity's current secret.",
-          })],
+          next: filed.next ?? [],
           nextActions: nextActionsForAccessRequest({
             requestId: filed.requestId, identityId: data.identityId,
             decisionWindowDays: REQUEST_TTL_MS / 86400000,
