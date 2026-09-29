@@ -78,7 +78,13 @@ jobs:
           fi
       - name: Verify automatic host namespace support without operator input
         run: node scripts/host-isolation-preflight.mjs
-      - run: npm test
+      - run: npm test 2>&1 | tee /tmp/test-output.log; test ${PIPESTATUS[0]} -eq 0
+      - name: Upload test output on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-output
+          path: /tmp/test-output.log
   browser-shards:
     name: browser shard ${{ matrix.shard }}/4
     runs-on: ubuntu-latest
