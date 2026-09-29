@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-29T06:28:19Z · board: Uuriko/project-room#1160 · watermark: 5883085056 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=8c6bee69f728bfe3ca6840001535efd33637c676b802023e0a47a8d8c325d84e -->
+<!-- generated: 2026-09-29T06:59:38Z · board: Uuriko/project-room#1160 · watermark: 5885123681 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=1c2e8c3e760b0d979e89398c2218579e2f0a8fae29ee51af2b3db11579fa22c0 -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -28,18 +28,24 @@ RC-2026-09-28-2877 | jillianai | working | 2026-09-29T09:31:09Z | src/events.js,
 RC-2026-09-28-2878 | jillianai | working | 2026-09-29T09:31:10Z | server/dm-event-visibility.mjs, server/http.mjs, tests/dm-privacy.test.js
 RC-2026-09-28-2874 | jillianai | working | 2026-09-29T09:31:11Z | src/events.js, tests/dm-privacy.test.js
 RC-2026-09-28-2880 | jillianai | working | 2026-09-29T09:31:11Z | server/dm-event-visibility.mjs, server/store.mjs, server/reply-requests.mjs, server/notifications.mjs, server/activity.mjs, server/http.mjs, tests/dm-privacy.test.js, tests/reply-requests.test.js
+… +3 more
 
 ## file-claims
 file | lane | task-id | state
 cloudflare/http.check.mjs | codex | RC-2026-09-27-1167 | working
 docs/EXPORT-RETENTION-DELETION.md | jillianai | RC-2026-09-27-2863 | working
+docs/ROOM-PROTOCOL.md | jill | RC-2026-09-29-3605 | working
 docs/ROUTE-AUTH-TABLE.md | jillianai | RC-2026-09-28-2870 | working
 docs/ROUTE-AUTH-TABLE.md | jillianai | RC-2026-09-28-2871 | working
 docs/SWARM-PLUG-IN.md | jill | RC-2026-09-28-3602 | working
 docs/openapi.yaml | jillianai | RC-2026-09-28-2870 | working
 docs/openapi.yaml | jillianai | RC-2026-09-28-2871 | working
+lanes/REGISTRY.md | jill | RC-2026-09-29-3605 | working
+llms.txt | jill | RC-2026-09-29-3605 | working
+server/access-requests.mjs | jill | RC-2026-09-29-3603 | working
 server/activity.mjs | jillianai | RC-2026-09-28-2865 | working
 server/activity.mjs | jillianai | RC-2026-09-28-2880 | working
+server/agent-enroll.mjs | jill | RC-2026-09-29-3604 | working
 server/agent-heartbeats.mjs | jill | RC-2026-09-28-3602 | working
 server/agent-plugin-routes.mjs | jill | RC-2026-09-28-3602 | working
 server/board-v2-sqlite.mjs | codex | RC-2026-09-27-1167 | working
@@ -79,6 +85,7 @@ server/thread-mutes.mjs | jillianai | RC-2026-09-28-2866 | working
 server/work-context.mjs | jillianai | RC-2026-09-28-2876 | working
 server/work-discussion.mjs | jillianai | RC-2026-09-28-2875 | working
 server/work-discussion.mjs | jillianai | RC-2026-09-28-2876 | working
+server/writer-fence.mjs | jill | RC-2026-09-29-3603 | working
 src/app.js | (none) | RC-2026-09-28-2879 | submitted
 src/events.js | jillianai | RC-2026-09-28-2874 | working
 src/events.js | jillianai | RC-2026-09-28-2877 | working
@@ -86,7 +93,9 @@ src/events.js | (none) | RC-2026-09-28-2879 | submitted
 src/events.js | (none) | RC-2026-09-28-2903 | submitted
 src/work-selectors.js | jillianai | RC-2026-09-28-2877 | working
 src/work-selectors.js | (none) | RC-2026-09-28-2879 | submitted
+tests/access-requests.test.js | jill | RC-2026-09-29-3603 | working
 tests/activity.test.js | jillianai | RC-2026-09-28-2865 | working
+tests/agent-enroll.test.js | jill | RC-2026-09-29-3604 | working
 tests/agent-wake-poll.test.js | jill | RC-2026-09-28-3602 | working
 tests/command-catalog.test.js | jillianai | RC-2026-09-28-2871 | working
 tests/decision-register.test.js | jillianai | RC-2026-09-28-2877 | working
@@ -158,6 +167,9 @@ RC-2026-09-28-2877 | jillianai | working | 2026-09-29T09:31:09Z | src/events.js,
 RC-2026-09-28-2878 | jillianai | working | 2026-09-29T09:31:10Z | server/dm-event-visibility.mjs, server/http.mjs, tests/dm-privacy.test.js
 RC-2026-09-28-2874 | jillianai | working | 2026-09-29T09:31:11Z | src/events.js, tests/dm-privacy.test.js
 RC-2026-09-28-2880 | jillianai | working | 2026-09-29T09:31:11Z | server/dm-event-visibility.mjs, server/store.mjs, server/reply-requests.mjs, server/notifications.mjs, server/activity.mjs, server/http.mjs, tests/dm-privacy.test.js, tests/reply-requests.test.js
+RC-2026-09-29-3603 | jill | working | 2026-09-29T12:45:32Z | server/access-requests.mjs, server/writer-fence.mjs, tests/access-requests.test.js
+RC-2026-09-29-3604 | jill | working | 2026-09-29T12:45:33Z | server/agent-enroll.mjs, tests/agent-enroll.test.js
+RC-2026-09-29-3605 | jill | working | 2026-09-29T12:45:34Z | docs/ROOM-PROTOCOL.md, lanes/REGISTRY.md, llms.txt
 
 ## unclaimed-lanes
 lane | focus | trust
@@ -187,5 +199,5 @@ comment-id | lane | task | at
 Uuriko/project-room#266 -> Uuriko/project-room#1160 · watermark 5859826064 · carried-open: RC-2026-09-27-005
 
 ## signals
-board_comments=357 threshold=1500 rotation_due=no watcher=active open_claims=25 prose_open=0 unfenced_prose=0 files_claimed=52 overlap_files=16 watermark=5883085056
+board_comments=360 threshold=1500 rotation_due=no watcher=active open_claims=28 prose_open=0 unfenced_prose=0 files_claimed=60 overlap_files=16 watermark=5885123681
 
