@@ -226,8 +226,16 @@ export class BoardV2 {
   /** Live claims (any lane) holding any of `files`, excluding `exceptLane`. */
   _holders(files, exceptLane) {
     const holders = [];
+    const nowMs = this._now();
     for (const claim of this._claims.values()) {
       if (!LIVE_STATES.has(claim.state) || claim.lane === exceptLane) continue;
+      // A lapsed lease does not hold a file. The lease is the whole point of
+      // the lease: an agent that stopped working still has state "working",
+      // and without this check its files stay blocked for every other lane
+      // until a human calls the sweep. Nothing sweeps automatically, so that
+      // wait was unbounded. The claim record is left untouched so the history
+      // still shows who held it and when the lease ran out.
+      if (nowMs > this._expiresAt(claim)) continue;
       const overlap = claim.files.filter(f => files.includes(f));
       if (overlap.length) holders.push({ task_id: claim.task_id, lane: claim.lane, files: overlap });
     }

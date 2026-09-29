@@ -147,7 +147,7 @@ test("rotate replaces the secret (old stops working) and revoke ends the key", a
   const keyId = first.keyId;
   const issuedSecret = first.secret;
 
-  const rotated = await post(origin, `/api/agent-keys/${keyId}/rotate`, {}, identity.secret);
+  const rotated = await post(origin, `/api/agent-keys/${keyId}/rotate`, { confirm: true }, identity.secret);
   assert.equal(rotated.status, 200);
   const rotatedBody = await rotated.json();
   assert.ok(rotatedBody.secret && rotatedBody.secret !== issuedSecret, "rotation shows a new secret once");
@@ -168,16 +168,16 @@ test("rotate replaces the secret (old stops working) and revoke ends the key", a
   const row = f.store.db.prepare("SELECT last_used_at FROM agent_api_keys WHERE key_id=?").get(keyId);
   assert.ok(row.last_used_at !== null, "lastUsedAt is persisted");
 
-  const revoked = await post(origin, `/api/agent-keys/${keyId}/revoke`, {}, identity.secret);
+  const revoked = await post(origin, `/api/agent-keys/${keyId}/revoke`, { confirm: true }, identity.secret);
   assert.equal(revoked.status, 200);
   assert.equal((await revoked.json()).revoked, true);
   assert.equal(f.store.agentPlugin.verifyApiKeySecret(rotatedBody.secret), null, "revoked secret no longer verifies");
-  assert.equal(await errorCode(await post(origin, `/api/agent-keys/${keyId}/rotate`, {}, identity.secret)), "invalid_api_key",
+  assert.equal(await errorCode(await post(origin, `/api/agent-keys/${keyId}/rotate`, { confirm: true }, identity.secret)), "invalid_api_key",
     "a revoked key cannot rotate");
 
   const listed = (await (await get(origin, "/api/agent-keys", identity.secret)).json()).keys;
   assert.equal(listed.find(k => k.keyId === keyId).revoked, true);
-  assert.equal(await errorCode(await post(origin, "/api/agent-keys/rak_nope/rotate", {}, identity.secret)), "unknown_key");
+  assert.equal(await errorCode(await post(origin, "/api/agent-keys/rak_nope/rotate", { confirm: true }, identity.secret)), "unknown_key");
 });
 
 test("one identity cannot rotate or revoke another identity's key", async t => {
@@ -186,10 +186,10 @@ test("one identity cannot rotate or revoke another identity's key", async t => {
   const a = f.store.identities.create("key-owner");
   const b = f.store.identities.create("key-stranger");
   const keyId = (await (await post(origin, "/api/agent-keys", { scopes: ["rooms:read"] }, a.secret)).json()).keyId;
-  assert.equal(await errorCode(await post(origin, `/api/agent-keys/${keyId}/rotate`, {}, b.secret)), "unknown_key");
-  assert.equal(await errorCode(await post(origin, `/api/agent-keys/${keyId}/revoke`, {}, b.secret)), "unknown_key");
+  assert.equal(await errorCode(await post(origin, `/api/agent-keys/${keyId}/rotate`, { confirm: true }, b.secret)), "unknown_key");
+  assert.equal(await errorCode(await post(origin, `/api/agent-keys/${keyId}/revoke`, { confirm: true }, b.secret)), "unknown_key");
   // The key is untouched: the owner can still rotate it.
-  assert.equal((await post(origin, `/api/agent-keys/${keyId}/rotate`, {}, a.secret)).status, 200);
+  assert.equal((await post(origin, `/api/agent-keys/${keyId}/rotate`, { confirm: true }, a.secret)).status, 200);
 });
 
 test("publish/withdraw roundtrip with public visibility", async t => {

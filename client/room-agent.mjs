@@ -849,8 +849,12 @@ export class RoomAgentClient {
     if (!Array.isArray(value?.keys)) throw new RoomClientError(200, "invalid_response", "Room returned an invalid key list");
     return value;
   }
+  // confirm:true is the server's explicit-consent guard on both destructive
+  // key actions. Calling this method IS the caller's intent, so the client
+  // supplies it; the guard exists to stop an empty POST from a caller that
+  // was only probing the route.
   async rotateAgentKey(keyId, { signal } = {}) {
-    const value = await this.#fetchPath(`/api/agent-keys/${encodeURIComponent(keyId)}/rotate`, {}, signal);
+    const value = await this.#fetchPath(`/api/agent-keys/${encodeURIComponent(keyId)}/rotate`, { confirm: true }, signal);
     if (typeof value?.keyId !== "string" || typeof value?.secret !== "string"
       || typeof value?.credential !== "string") {
       throw new RoomClientError(200, "invalid_response", "Room returned an invalid rotated key");
@@ -858,7 +862,7 @@ export class RoomAgentClient {
     return value;
   }
   async revokeAgentKey(keyId, { signal } = {}) {
-    const value = await this.#fetchPath(`/api/agent-keys/${encodeURIComponent(keyId)}/revoke`, {}, signal);
+    const value = await this.#fetchPath(`/api/agent-keys/${encodeURIComponent(keyId)}/revoke`, { confirm: true }, signal);
     if (value?.revoked !== true) throw new RoomClientError(200, "invalid_response", "Room returned an invalid revocation");
     return value;
   }
