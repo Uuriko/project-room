@@ -56,9 +56,9 @@ export function parseClaimFields(block) {
   return Object.fromEntries(fields);
 }
 
-const TASK_ID_RE = /^RC-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]+$/;
-const LEASE_RE = /^lease=([0-9]+)h$/;
-const STATE_RE = /^(submitted|working|cancelled|suspended|completed|failed\([A-Za-z0-9_]+\))$/;
+export const TASK_ID_RE = /^RC-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]+$/;
+export const LEASE_RE = /^lease=([0-9]+)h$/;
+export const STATE_RE = /^(submitted|working|cancelled|suspended|completed|failed\([A-Za-z0-9_]+\))$/;
 
 // Field rules, in the same order as scripts/room's validate_claim.
 export function validateClaimFields(fields) {

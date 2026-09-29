@@ -42,7 +42,7 @@ import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 
 export { createFeedbackStore, validateFeedback };
 
-const LANE_RE = /^[A-Za-z0-9_-]{1,64}$/;
+export const LANE_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
 const STATUS_FOR_CODE = {
   invalid_feedback: 422, invalid_agent: 422, invalid_repro: 422, invalid_verdict: 422,

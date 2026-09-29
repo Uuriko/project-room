@@ -34,7 +34,7 @@ const fail = (status, code, message, fields) => {
   throw new BoardV2Error(status, code, message, fields);
 };
 
-const SHA_RE = /^[0-9a-f]{7,40}$/i;
+export const SHA_RE = /^[0-9a-f]{7,40}$/i;
 const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
 
 export function createDurableBoardV2Machine(db, { now = () => Date.now() } = {}) {

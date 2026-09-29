@@ -310,23 +310,54 @@ export class Bonds {
     })));
   }
 
-  readThread(roomId, memberId, threadId) {
+  // limit caps the page (most recent messages when before is absent);
+  // before=<messageId> pages backwards from that message (exclusive).
+  // Both absent keeps the legacy full-history read.
+  readThread(roomId, memberId, threadId, { limit = null, before = null } = {}) {
     const identityId = this._requireIdentity(roomId, memberId);
     const thread = this.db.prepare("SELECT * FROM peer_dm_threads WHERE thread_id=?").get(threadId);
     if (!thread || (thread.agent_a !== identityId && thread.agent_b !== identityId)) {
       fail(404, "thread_not_found", "No such peer DM thread");
     }
+    let pageSize = null;
+    if (limit !== null && limit !== undefined) {
+      pageSize = Number(limit);
+      if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 200) {
+        fail(422, "invalid_pagination", "limit must be an integer from 1 to 200");
+      }
+    }
+    let cursor = null;
+    if (before !== null && before !== undefined && before !== "") {
+      if (typeof before !== "string") fail(422, "invalid_pagination", "before must be a message id");
+      cursor = this.db.prepare(
+        "SELECT created_at, message_id FROM peer_dm_messages WHERE message_id=? AND thread_id=? AND room_id=?"
+      ).get(before, threadId, roomId);
+      if (!cursor) fail(404, "cursor_not_found", "No message with that id in this thread; pass a messageId from a previous page");
+    }
+    // Newest-first for the cut, then re-sorted oldest-first for the read —
+    // the page is the N messages ending at (but excluding) the cursor.
+    const params = [threadId, roomId];
+    let cursorClause = "";
+    if (cursor) {
+      cursorClause = " AND (created_at < ? OR (created_at = ? AND message_id < ?))";
+      params.push(cursor.created_at, cursor.created_at, cursor.message_id);
+    }
+    const fetchN = pageSize === null ? -1 : pageSize + 1;
+    const rows = this.db.prepare(
+      `SELECT * FROM peer_dm_messages WHERE thread_id=? AND room_id=?${cursorClause} ORDER BY created_at DESC, message_id DESC LIMIT ${fetchN}`
+    ).all(...params);
+    const hasMore = pageSize !== null && rows.length > pageSize;
+    const page = (hasMore ? rows.slice(0, pageSize) : rows).reverse();
     // RC-2026-09-24-210: room-scoped bodies (see recentMessagesFor).
-    const messages = this.db.prepare(
-      "SELECT * FROM peer_dm_messages WHERE thread_id=? AND room_id=? ORDER BY created_at ASC"
-    ).all(threadId, roomId).map(row => this._publicMessage(row));
+    const messages = page.map(row => this._publicMessage(row));
     return Object.freeze({
       threadId: thread.thread_id,
       bondId: thread.bond_id,
       agentAId: thread.agent_a,
       agentBId: thread.agent_b,
       untrusted: true,
-      messages: Object.freeze(messages)
+      messages: Object.freeze(messages),
+      ...(pageSize === null ? {} : { hasMore }),
     });
   }
 

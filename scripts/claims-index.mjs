@@ -23,13 +23,14 @@
 
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const REPO = "Uuriko/project-room";
 const ISSUE = 266;
-const TASK_ID_RE = /^RC-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]+$/;
-const LEASE_RE = /^lease=([0-9]+)h$/;
-const STATE_RE = /^(submitted|working|cancelled|suspended|completed|failed\([A-Za-z0-9_]+\))$/;
+export const TASK_ID_RE = /^RC-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]+$/;
+export const LEASE_RE = /^lease=([0-9]+)h$/;
+export const STATE_RE = /^(submitted|working|cancelled|suspended|completed|failed\([A-Za-z0-9_]+\))$/;
 const STATE_WORD_RE = /^[a-z]+/;
 const LIVE_STATES = new Set(["submitted", "working", "suspended"]);
 const LEGAL = {
@@ -505,4 +506,6 @@ function main() {
   for (const p of written) console.log(`claims-index: wrote ${p}`);
 }
 
-main();
+// Only run when executed directly — importing this module (e.g. the
+// regex-parity tests) must not fetch the board or write output files.
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();
