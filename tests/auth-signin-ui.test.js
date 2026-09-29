@@ -181,3 +181,16 @@ test("declining password authentication sends no request", async () => {
   await container.listeners.submit[0](submitForm("password", { email: "p@example.invalid", password: "synthetic-password" }));
   assert.equal(client.calls.length, 0); assert.equal(ui.canLeave(), true);
 });
+
+for (const view of [{}, { authenticated: true, account: { id: "" } }, { session: { authenticated: false, account: { id: "a" } } }]) {
+  test(`invalid authentication success reconciles only the issuing identity: ${JSON.stringify(view)}`, async () => {
+    const client = stubClient({ "/api/auth/magic/request": { status: "sent" }, "/api/auth/magic/consume": view });
+    const old = { authenticated: true, account: { id: "old" }, sessionRevision: 1 }; client.session = old; client.generation = 4;
+    let fenced = 0, signed = 0;
+    const ui = createAuthSigninUI({ accountClient: client, ensureAccountSession: async () => {}, onSignedIn: () => signed++, onSignInUncertain: () => fenced++ });
+    const container = fakeContainer(); ui.mount(container); await readyCode(ui, container);
+    await container.listeners.submit[0](submitForm("magic-code", { code: "real-issued-code" }));
+    assert.equal(client.session, null); assert.equal(client.generation, 5); assert.equal(fenced, 1); assert.equal(signed, 0);
+    assert.match(container.status.textContent, /didn.t complete/);
+  });
+}

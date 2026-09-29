@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import { build } from 'esbuild';
 import { Miniflare, Response } from 'miniflare';
 import { chromium } from 'playwright';
-import { fillAccessKey } from '../scripts/auth-signin.mjs';
+import { signInFixture } from '../scripts/auth-signin.mjs';
 
 for (const touch of [false, true]) test(`release pause/resume preserves exact sends and privacy: ${touch ? 'touch' : 'desktop'}`, { timeout: 90000 }, async () => {
   const socket = createServer();
@@ -47,8 +47,7 @@ for (const touch of [false, true]) test(`release pause/resume preserves exact se
     const page = await context.newPage(); page.setDefaultTimeout(12000);
     const errors = []; page.on('pageerror', error => errors.push(error.message));
     page.on('dialog', dialog => dialog.accept());
-    await page.goto(origin); await fillAccessKey(page, ownerKey);
-    await page.getByRole('button', { name: 'Enter room', exact: true }).click();
+    await page.goto(origin); await signInFixture(page, ownerKey);
     await page.locator('#main').waitFor({ state: 'visible' });
     await clickChrome(page, '#invite-people-button');
     await page.locator('#share-link-create').click();

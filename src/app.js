@@ -513,6 +513,7 @@ const signinUI = createAuthSigninUI({
   ensureAccountSession,
   onBusyChange: value => {
     humanAuthBusy = value;
+    shareLinksUI?.syncAccountSigninBusy();
     if (invitation.secret) {
       renderInvitation();
       if (!value && invitation.phase === "ready" && $("#invitation-methods").hidden
@@ -538,9 +539,7 @@ const signinUI = createAuthSigninUI({
     if (accountClient.session?.authenticated) showAccountWorkspace();
     if (invitation.secret) renderInvitation();
   },
-  // QAX-002: the module's own status line lives inside the collapsed "More
-  // options" panel, so mirror a failed magic-link redemption where first
-  // paint can see it — above the sign-in panel, not behind the toggle.
+  // Keep failed emailed-link redemption visible when opening the email step.
   onMagicLinkFailure: message => {
     if (invitation.secret) $("#invitation-email").click();
     else openEmailAuth("magic", { recordHistory: false });
@@ -685,6 +684,7 @@ async function landAfterSignIn() {
     setFormStatus($("#auth-error"), unreachableRoomMessage(error), true);
   }
 }
+let startRoomFlight = null;
 function showAccountWorkspace() {
   if (!accountClient.session?.authenticated) return;
   rememberAccountHint();
@@ -699,7 +699,7 @@ function showAccountWorkspace() {
   }
   inboxUI.sync();
   if (!state && startRoomIntent && !initialInvitationFragment && !initialJoinFragment && consumeStartRoomIntent()) {
-    openStartedRoom();
+    startRoomFlight = openStartedRoom().finally(() => { startRoomFlight = null; });
     return;
   }
   if (!state) {
@@ -3055,6 +3055,13 @@ function openEmailAuth(mode, { recordHistory = true } = {}) {
   const panel = $("#email-auth-panel");
   if (!signinUI.openEmail(mode, panel)) return;
   if (recordHistory && $("#email-auth-step").hidden) {
+    // Reload renders the method chooser; its retained history entry must also
+    // represent that chooser before adding a fresh email step.
+    if (history.state?.roomSigninStep === "email") {
+      const entry = { ...history.state };
+      delete entry.roomSigninStep;
+      history.replaceState(entry, "", location.href);
+    }
     history.pushState({ ...history.state, roomSigninStep: "email" }, "", location.href);
   }
   $("#agent-auth-step").hidden = true;
@@ -3062,8 +3069,6 @@ function openEmailAuth(mode, { recordHistory = true } = {}) {
   $("#signin-entry-routes").hidden = true;
   $("#signin-methods").hidden = true;
   $("#email-auth-step").hidden = false;
-  $("#signin-methods").hidden = true;
-  $("#signin-entry-routes").hidden = true;
   panel?.querySelector('[name="email"]')?.focus();
 }
 function openAgentSignin() {
@@ -6322,6 +6327,7 @@ $("#rb-ack-button").addEventListener("click", () => { briefReconcileNote = ""; r
 $("#rb-show-all").addEventListener("click", () => { showAllAttention = !showAllAttention; renderReturnBrief(); });
 document.addEventListener("visibilitychange", renderReturnBrief);
 shareLinksUI = installShareLinks({ client, accountClient,
+  canLeaveAccountSignin: () => signinUI.canLeave(),
   onOAuthStart: stashInviteForOAuth,
   onAccountSignin: mode => {
     // One sign-in controller and form, hosted in the invitation while needed.
@@ -6375,6 +6381,10 @@ configureAuthPanel();
 if (initialInvitationFragment) openInvitation(initialInvitationFragment);
 (async () => {
   await initialSignin;
+  if (startRoomFlight) await startRoomFlight;
+  // Emailed-link authentication already owns its landing, including a newly
+  // created room. Do not restore a second session over that completed journey.
+  if (state) return;
   if (initialJoinFragment) {
     // Invitation preview deliberately does not restore/open a Room session.
     // Do not leave the initial session/connection progress labels running.

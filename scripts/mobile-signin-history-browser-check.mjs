@@ -37,6 +37,10 @@ test("mobile email taps and browser Back/Forward retain the room and fence a pen
   await page.evaluate(() => { window.historyEvents = 0; addEventListener("popstate", () => { window.historyEvents++; }); });
   await page.locator("#email-signin").tap();
   await page.locator('#email-auth-panel [name="email"]').waitFor({ state: "visible" });
+  const back = await page.locator("#email-auth-back").boundingBox();
+  const email = await page.locator("#email-auth-panel label").first().boundingBox();
+  assert.ok(back.height >= 44, "Back has a usable touch target");
+  assert.ok(back.y + back.height <= email.y, "Back does not overlap the email label or input");
   assert.equal(page.url(), destination);
   await page.evaluate(() => history.back());
   await page.waitForFunction(() => window.historyEvents >= 1 && !document.querySelector("#signin-methods").hidden);
@@ -66,5 +70,11 @@ test("mobile email taps and browser Back/Forward retain the room and fence a pen
   await page.locator("#email-auth-back").tap();
   await page.waitForFunction(() => !document.querySelector("#signin-methods").hidden);
   assert.equal(page.url(), destination);
+  await page.locator("#email-signin").tap();
+  await page.reload();
+  await page.locator("#email-signin").tap();
+  await page.locator("#email-auth-back").tap();
+  await page.locator("#email-signin").waitFor({ state: "visible" });
+  assert.equal(page.url(), destination, "Back after reload leaves email in one tap");
   assert.deepEqual(errors, []);
 });

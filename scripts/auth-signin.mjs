@@ -1,8 +1,10 @@
 // Authenticate disposable local browser fixtures through the real credential API.
 // This helper never mounts a production form or injects store/session state.
-export async function signInFixture(page, accessKey) {
+export async function signInFixture(page, accessKey, { returnTo = page.url() } = {}) {
   const origin = new URL(page.url()).origin;
   const hostname = new URL(origin).hostname;
+  const target = new URL(returnTo);
+  if (target.origin !== origin) throw new Error("Fixture return must stay on the local test server");
   if (!["localhost", "127.0.0.1", "[::1]"].includes(hostname)) {
     throw new Error("Fixture sign-in requires a local test server");
   }
@@ -24,15 +26,16 @@ export async function signInFixture(page, accessKey) {
     if (response.status() !== 201) throw new Error(`Fixture account credential login failed (${response.status()})`);
     const account = await response.json();
     if (!account.authenticated || !account.account?.id) throw new Error("Fixture login did not return an account");
-    await page.goto(page.url());
+    await page.evaluate(destination => globalThis.history.replaceState(globalThis.history.state, "", destination), target.href);
+    await page.reload();
     return account;
   }
   if (response.status() !== 201) throw new Error(`Fixture credential login failed (${response.status()})`);
   const session = await response.json();
   if (!session.roomId || !session.member?.id) throw new Error("Fixture login did not return a room member");
-  const target = new URL(page.url());
   target.searchParams.set("room", session.roomId);
-  await page.goto(target.href);
+  await page.evaluate(destination => globalThis.history.replaceState(globalThis.history.state, "", destination), target.href);
+  await page.reload();
   await page.locator("#main").waitFor({ state: "visible" });
   return session;
 }

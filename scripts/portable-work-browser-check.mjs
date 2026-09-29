@@ -8,6 +8,7 @@ import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { signInFixture } from "./auth-signin.mjs";
+import { signInFixtureInPlace } from "./in-place-fixture-signin.mjs";
 
 for (const mobile of [false, true]) {
   const label = mobile ? "mobile" : "desktop";
@@ -199,7 +200,7 @@ for (const mobile of [false, true]) {
     assert.equal(confirmations, 1, "a closed portable draft alone warns before sign-out");
     assert.equal(await page.locator("#packet-preview").inputValue(), "");
     assert.equal(await page.locator("#portable-status").textContent(), "");
-    await signInFixture(page, f.keys.owner); await page.locator("#main").waitFor({ state: "visible" }); await open(true);
+    await signInFixtureInPlace(page, f.store, f.keys.owner); await page.locator("#main").waitFor({ state: "visible" }); await open(true);
     assert.equal(await page.locator("#portable-result").inputValue(), "", "sign-out cleared the private draft and retry map");
     await page.locator("#portable-close").click(); await open();
     assert.equal(await page.locator("#packet-copy").isDisabled(), true, "sign-out cannot cancel an already issued system write");

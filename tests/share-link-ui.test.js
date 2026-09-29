@@ -93,7 +93,8 @@ test("invitation UI retries the same uncertain creation and preserves confirmed 
   const nodes = new Map();
   const node = selector => {
     if (!nodes.has(selector)) nodes.set(selector, {
-      value: "", textContent: "", hidden: false, disabled: false, open: false, dataset: {}, handlers: {},
+      value: "", textContent: "", hidden: false, disabled: false, open: false, dataset: {}, handlers: {}, attributes: {},
+      setAttribute(name, value) { this.attributes[name] = String(value); }, getAttribute(name) { return this.attributes[name] ?? null; },
       classList: { toggle() {} },
       addEventListener(type, handler) { this.handlers[type] = handler; },
       contains() { return false; }, replaceChildren() {}, showModal() { this.open = true; }, close() { this.open = false; },
@@ -155,7 +156,8 @@ test("invitation UI writes a path-aware www /room join URL", async () => {
   const nodes = new Map();
   const node = selector => {
     if (!nodes.has(selector)) nodes.set(selector, {
-      value: "", textContent: "", hidden: false, disabled: false, open: false, dataset: {}, handlers: {},
+      value: "", textContent: "", hidden: false, disabled: false, open: false, dataset: {}, handlers: {}, attributes: {},
+      setAttribute(name, value) { this.attributes[name] = String(value); }, getAttribute(name) { return this.attributes[name] ?? null; },
       classList: { toggle() {} },
       addEventListener(type, handler) { this.handlers[type] = handler; },
       contains() { return false; }, replaceChildren() {}, showModal() { this.open = true; }, close() { this.open = false; },
@@ -202,7 +204,8 @@ test("mint unlocks Create before a hanging clipboard write and never uses origin
   const nodes = new Map();
   const node = selector => {
     if (!nodes.has(selector)) nodes.set(selector, {
-      value: "", textContent: "", hidden: false, disabled: false, open: false, dataset: {}, handlers: {},
+      value: "", textContent: "", hidden: false, disabled: false, open: false, dataset: {}, handlers: {}, attributes: {},
+      setAttribute(name, value) { this.attributes[name] = String(value); }, getAttribute(name) { return this.attributes[name] ?? null; },
       classList: { toggle() {} },
       addEventListener(type, handler) { this.handlers[type] = handler; },
       contains() { return false; }, replaceChildren() {}, showModal() { this.open = true; }, close() { this.open = false; },
@@ -259,7 +262,8 @@ const guestJoinDom = () => {
   let focused = null;
   const node = selector => {
     if (!nodes.has(selector)) nodes.set(selector, {
-      value: "", textContent: "", hidden: false, disabled: false, open: false, dataset: {}, handlers: {},
+      value: "", textContent: "", hidden: false, disabled: false, open: false, dataset: {}, handlers: {}, attributes: {},
+      setAttribute(name, value) { this.attributes[name] = String(value); }, getAttribute(name) { return this.attributes[name] ?? null; },
       classList: { toggle() {} }, addEventListener(type, handler) { this.handlers[type] = handler; },
       contains() { return false; }, replaceChildren() {}, reset() {}, showModal() { this.open = true; }, close() { this.open = false; },
       focus() { focused = selector; },

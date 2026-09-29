@@ -9,6 +9,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { verificationSatisfied } from "../src/workflow.js";
 import { signInFixture } from "./auth-signin.mjs";
+import { signInFixtureInPlace } from "./in-place-fixture-signin.mjs";
 import { makeTestSigner } from "./helpers/signed-evidence.mjs";
 
 async function setup(t, { action = "complete", mobile = false, live = true } = {}) {
@@ -58,9 +59,11 @@ async function setup(t, { action = "complete", mobile = false, live = true } = {
     };
   }, live);
   await page.goto(origin);
+  let initialLogin = true;
   const login = async (role = "owner") => {
     await page.locator("#auth-panel").waitFor({ state: "visible" });
-    await signInFixture(page, f.keys[role]); await page.locator("#main").waitFor({ state: "visible" });
+    if (initialLogin) { await signInFixture(page, f.keys[role]); initialLogin = false; }
+    else await signInFixtureInPlace(page, f.store, f.keys[role]); await page.locator("#main").waitFor({ state: "visible" });
   };
   await login(action === "verify" ? "human-reviewer" : "owner");
   const card = page.locator(`[data-work-record-id="${workId}"]`), dialog = page.locator("#action-dialog"), form = page.locator("#action-form"), save = form.locator("button[type=submit]");

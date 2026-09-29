@@ -9,6 +9,7 @@ import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { signInFixture } from "./auth-signin.mjs";
+import { signInFixtureInPlace } from "./in-place-fixture-signin.mjs";
 import { makeTestSigner } from "./helpers/signed-evidence.mjs";
 
 async function setup(t, mobile = false) {
@@ -43,7 +44,9 @@ async function setup(t, mobile = false) {
     } } });
   });
   await page.goto(origin);
-  const login = async () => { await page.locator("#auth-panel").waitFor({ state: "visible" }); await signInFixture(page, f.keys.owner); await page.locator("#main").waitFor({ state: "visible" }); };
+  let initialLogin = true;
+  const login = async () => { await page.locator("#auth-panel").waitFor({ state: "visible" }); if (initialLogin) { await signInFixture(page, f.keys.owner); initialLogin = false; }
+    else await signInFixtureInPlace(page, f.store, f.keys.owner); await page.locator("#main").waitFor({ state: "visible" }); };
   await login(); posts.length = 0;
   const card = page.locator('[data-work-record-id="test-handoff"]'), dialog = page.locator("#result-copy-dialog"), input = page.locator("#result-copy-preview"), copy = page.locator("#result-copy-button");
   const open = async () => {

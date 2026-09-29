@@ -8,6 +8,7 @@ import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { signInFixture } from "./auth-signin.mjs";
+import { signInFixtureInPlace } from "./in-place-fixture-signin.mjs";
 
 async function setup(t, { humanWork = false, mobile = false } = {}) {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
@@ -38,9 +39,11 @@ async function setup(t, { humanWork = false, mobile = false } = {}) {
     };
   });
   await page.goto(origin);
+  let initialLogin = true;
   const login = async (key = f.keys.owner) => {
     await page.locator("#auth-panel").waitFor({ state: "visible" });
-    await signInFixture(page, key); await page.locator("#main").waitFor({ state: "visible" });
+    if (initialLogin) { await signInFixture(page, key); initialLogin = false; }
+    else await signInFixtureInPlace(page, f.store, key); await page.locator("#main").waitFor({ state: "visible" });
   };
   await login();
   const snapshot = () => f.store.snapshot(f.keys.owner, "commons");

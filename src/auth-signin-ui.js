@@ -25,6 +25,10 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
     try {
       const view = await api(session, path, data);
       if (!owns()) throw Object.assign(new Error("The browser account changed. Sign in again."), { status: 409, code: "auth_view_changed" });
+      const signed = view?.session ?? view;
+      if (signed?.authenticated !== true || typeof signed.account?.id !== "string" || !signed.account.id.trim()) {
+        throw new Error("Sign-in didn’t complete. Try again.");
+      }
       return view;
     } catch (error) {
       const uncertain = !Number.isSafeInteger(error.status)

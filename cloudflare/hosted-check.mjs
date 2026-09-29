@@ -5,7 +5,6 @@ import assert from 'node:assert/strict';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { fillAccessKey } from "../scripts/auth-signin.mjs";
 
 const origin = 'https://project-room-staging.getdasha.workers.dev';
 const privatePath = name => new URL(`./.operator/${name}`, import.meta.url);
@@ -20,6 +19,24 @@ if (values.help) {
 }
 const returning = values.return, inviting = values['invite-user'], checkingWork = values.work;
 if (returning && (inviting || checkingWork) || inviting && checkingWork) throw new Error('Choose one hosted check mode');
+
+// Existing operator credentials authenticate through the real legacy API; no
+// fixture-only provisioning route or production DOM form is involved.
+async function signInAuthorizedQaOwner(page, accessKey) {
+  if (origin !== 'https://project-room-staging.getdasha.workers.dev' || new URL(page.url()).origin !== origin) {
+    throw new Error('Hosted credential login is restricted to the explicit synthetic staging origin');
+  }
+  const response = await page.context().request.post(`${origin}/api/session`, {
+    headers: { Origin: origin }, data: { accessKey }, maxRedirects: 0
+  });
+  if (response.status() !== 201) throw new Error(`Authorized QA credential login failed (${response.status()})`);
+  const session = await response.json();
+  if (session.roomId !== 'commons' || session.member?.id !== 'owner' || session.member.kind !== 'human') {
+    throw new Error('Hosted QA requires the synthetic commons owner fixture');
+  }
+  await page.goto(`${origin}/?room=${encodeURIComponent(session.roomId)}`);
+  await page.locator('#main').waitFor({ state: 'visible' });
+}
 const { chromium } = await import('playwright');
 await mkdir(output, { recursive: true });
 const browser = await chromium.launch({ headless: true });
@@ -48,8 +65,7 @@ try {
     const owner = await ownerContext.newPage(), guest = await guestContext.newPage();
     for (const page of [owner, guest]) page.setDefaultTimeout(20000);
     await owner.goto(origin);
-    await fillAccessKey(owner, (await readFile(privatePath('owner-key.txt'), 'utf8')).trim());
-    await owner.getByRole('button', { name: 'Enter room', exact: true }).click();
+    await signInAuthorizedQaOwner(owner, (await readFile(privatePath('owner-key.txt'), 'utf8')).trim());
     await owner.locator('#main').waitFor({ state: 'visible' });
     await clickChrome(owner, '#invite-people-button');
     if (!inviting) {

@@ -446,7 +446,7 @@ test("opt-in sample mailbox review is usable from account Inbox without entering
   const sample = await createInboxSandbox({ includeEmailReview: true }), browser = await chromium.launch({ headless: true });
   t.after(async () => { await browser.close(); await sample.close(); rmSync(sample.directory, { recursive: true, force: true }); });
   const page = await browser.newPage(); page.setDefaultTimeout(9000);
-  await page.goto(sample.accountUrl); await signInFixture(page, sample.accountKey); await page.locator("#inbox-list").getByText("A small collaboration", { exact: true }).click();
+  await page.goto(sample.accountUrl); await signInFixture(page, sample.accountKey, { returnTo: sample.accountUrl }); await page.locator("#inbox-list").getByText("A small collaboration", { exact: true }).click();
   await page.locator("#inbox-reply-open").click(); await page.locator("#inbox-reply-confirm:not([disabled])").waitFor();
   await page.locator("#inbox-reply-confirm").click(); await page.locator("#inbox-reply-status").filter({ hasText: "Reviewed · not sent" }).waitFor();
   assert.equal(await page.locator("#main").isVisible(), false); assert.equal(sample.provider.submits, 0);
@@ -745,7 +745,7 @@ test("sample launcher: an empty room owner can sign in and finish a sample reply
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
   page.setDefaultTimeout(9000); const errors = [];
   page.on("pageerror", error => errors.push(error.message));
-  await page.goto(sample.url); await signInFixture(page, sample.accountKey); await page.locator("#inbox-reader").waitFor();
+  await page.goto(sample.url); await signInFixture(page, sample.accountKey, { returnTo: sample.url }); await page.locator("#inbox-reader").waitFor();
   assert.equal(await page.locator("#main").isVisible(), false);
   await page.locator("#inbox-draft").fill("Let’s try one small idea.");
   await page.locator("#inbox-save").click(); await page.getByText("Saved · only you", { exact: true }).waitFor();
@@ -775,7 +775,7 @@ test("sample arrival: two samples and existing localhost cookies coexist in one 
   for (const sample of [first, second]) {
     const page = await context.newPage(); pages.push(page); page.setDefaultTimeout(9000);
     page.on("pageerror", error => errors.push(error.message));
-    await page.goto(sample.url); await signInFixture(page, sample.accountKey); await page.locator("#inbox-reader").waitFor();
+    await page.goto(sample.url); await signInFixture(page, sample.accountKey, { returnTo: sample.url }); await page.locator("#inbox-reader").waitFor();
   }
   const [a, b] = pages;
   await a.locator("#inbox-draft").fill("Only in the first sample");

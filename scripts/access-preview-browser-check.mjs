@@ -8,6 +8,7 @@ import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { signInFixture } from "./auth-signin.mjs";
+import { signInFixtureInPlace } from "./in-place-fixture-signin.mjs";
 import { AccessRequests } from "../server/access-requests.mjs";
 import { makeTestSigner } from "./helpers/signed-evidence.mjs";
 
@@ -165,7 +166,7 @@ test("late owner attention page cannot return after signing in as a different me
   await page.locator("#session-menu-button").click();
   await page.locator("#signout-button").click();
   await page.locator("#auth-panel").waitFor({ state: "visible" });
-  await signInFixture(page, f.keys.guest);
+  await signInFixtureInPlace(page, f.store, f.keys.guest);
   await page.locator("#main").waitFor({ state: "visible" });
   const delivered = page.waitForResponse(response => new URL(response.url()).pathname.endsWith("/needs-attention") && new URL(response.url()).searchParams.has("cursor"));
   release(); await delivered;

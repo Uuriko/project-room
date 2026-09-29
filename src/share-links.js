@@ -112,7 +112,7 @@ export async function reuseVisibleRoom(client, roomId, visibleSession) {
 }
 
 export function installShareLinks({ client, accountClient, getState, getSession, openRoom,
-  listPurposes = () => [], onJoinedRoom = null, onAccountSignin = () => {}, onOAuthStart = () => {},
+  listPurposes = () => [], onJoinedRoom = null, onAccountSignin = () => {}, onOAuthStart = () => {}, canLeaveAccountSignin = () => true,
   setConnectionStatus = text => { $("#connection-status").textContent = text; } }) {
   let managementVersion = 0, listVersion = 0, joinVersion = 0, joinSecret = null, redemptionId = null, joining = false, pendingCreate = null;
   let joinFocus = null;
@@ -124,10 +124,13 @@ export function installShareLinks({ client, accountClient, getState, getSession,
   const status = text => setShareLinkStatus($("#share-link-status"), text);
   const listStatus = text => setShareLinkStatus($("#share-management-status"), text);
   const joinStatus = text => setShareLinkStatus($("#join-link-status"), text);
-  function joinBusy(value) {
-    joining = value;
-    for (const control of joinDialog.querySelectorAll("button,input")) control.disabled = value;
+  function syncAccountSigninBusy() {
+    const pending = joining || !canLeaveAccountSignin();
+    joinDialog.setAttribute("aria-busy", String(pending));
+    for (const control of joinDialog.querySelectorAll("button,input")) control.disabled = pending;
+    $("#join-account-google").setAttribute("aria-disabled", String(pending));
   }
+  function joinBusy(value) { joining = value; syncAccountSigninBusy(); }
   const member = () => getState()?.members[getSession()?.member.id];
   const canManage = () => {
     const current = member();
@@ -381,7 +384,8 @@ export function installShareLinks({ client, accountClient, getState, getSession,
   }
   $("#share-link-copy").addEventListener("click", () => copy(false));
   $("#share-note-copy").addEventListener("click", () => copy(true));
-  async function open(fragment) {
+  async function open(fragment, { afterSignIn = false } = {}) {
+    if (!afterSignIn && !canLeaveAccountSignin()) { joinStatus("Finish signing in before opening another invitation."); return; }
     if (joining) { joinStatus("Finish the current join before opening another invitation."); return; }
     const retryHadFocus = document.activeElement === $("#join-link-retry");
     const version = ++joinVersion; joinSecret = fragment.token; redemptionId = crypto.randomUUID(); joined = null; joinFocus = fragment.focus ?? null; previewRoomId = null; previewRoomTitle = null;
@@ -468,14 +472,18 @@ export function installShareLinks({ client, accountClient, getState, getSession,
   }
   for (const [id, mode] of [["#join-account-signin", "magic"]]) {
     $(id).addEventListener("click", () => {
-      if (joining) return;
+      if (joining || !canLeaveAccountSignin()) return;
       $("#join-account-choices").hidden = true; $("#join-link-form").hidden = true;
       $("#join-account-auth").hidden = false;
       onAccountSignin(mode); $("#join-account-google").focus();
     });
   }
-  $("#join-account-google").addEventListener("click", onOAuthStart);
+  $("#join-account-google").addEventListener("click", event => {
+    if (joining || !canLeaveAccountSignin()) { event.preventDefault(); return; }
+    onOAuthStart(event);
+  });
   $("#join-account-back").addEventListener("click", () => {
+    if (joining || !canLeaveAccountSignin()) return;
     onAccountSignin(null); $("#join-account-auth").hidden = true;
     $("#join-account-choices").hidden = false; $("#join-link-form").hidden = false;
     $("#join-link-name").focus();
@@ -487,10 +495,10 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     catch { if (version === joinVersion) { field.focus(); field.select(); joinStatus("Select and copy the agent instructions."); } }
   });
   $("#join-link-retry").addEventListener("click", () => {
-    if (joinSecret && !joining) return open({ token: joinSecret, focus: joinFocus, reviewSession: needsSessionReview });
+    if (joinSecret && !joining && canLeaveAccountSignin()) return open({ token: joinSecret, focus: joinFocus, reviewSession: needsSessionReview });
   });
   async function performJoin({ resume = false } = {}) {
-    if (joining || !joinSecret || needsSessionReview) return;
+    if (joining || !canLeaveAccountSignin() || !joinSecret || needsSessionReview) return;
     const version = joinVersion, name = $("#join-link-name").value.trim(); let failed = false;
     joinBusy(true);
     joinStatus(joined ? "Opening room…" : resume ? "Checking whether your earlier join completed…" : "Joining room…");
@@ -568,7 +576,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
   }
   $("#join-link-form").addEventListener("submit", event => { event.preventDefault(); return performJoin(); });
   $("#join-link-signout").addEventListener("click", async () => {
-    if (joining) return;
+    if (joining || !canLeaveAccountSignin()) return;
     const version = joinVersion;
     let failed = false;
     joinBusy(true); joinStatus("Signing out…");
@@ -590,8 +598,8 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       if (version === joinVersion && joinDialog.open) $(failed ? "#join-link-signout" : "#join-link-name").focus();
     }
   });
-  $("#join-link-close").addEventListener("click", () => { if (!joining) joinDialog.close(); });
-  joinDialog.addEventListener("cancel", event => { if (joining) event.preventDefault(); });
+  $("#join-link-close").addEventListener("click", () => { if (!joining && canLeaveAccountSignin()) joinDialog.close(); });
+  joinDialog.addEventListener("cancel", event => { if (joining || !canLeaveAccountSignin()) event.preventDefault(); });
   joinDialog.addEventListener("close", () => {
     onAccountSignin(null);
     joinVersion++;
@@ -619,11 +627,11 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     if (suppressJoinHash) { suppressJoinHash = false; return; }
     const fragment = consumeJoinFragment(); if (fragment) open(fragment);
   });
-  return { sync, resetManagement, open,
+  return { sync, resetManagement, open, syncAccountSigninBusy,
     pendingFragment: () => joinSecret ? `#join/${joinSecret}${joinFocus ? `/${joinFocus.kind}/${encodeURIComponent(joinFocus.id)}` : ""}` : null,
     async resumeSignedIn() {
       if (!joinDialog.open || !joinSecret) return false;
-      await open({ token: joinSecret, focus: joinFocus }); return true;
+      await open({ token: joinSecret, focus: joinFocus }, { afterSignIn: true }); return true;
     }
   };
 }

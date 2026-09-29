@@ -57,7 +57,7 @@ export async function createInboxCollaborationJourney({ mobile = false } = {}) {
       });
       const p = await context.newPage(); p.setDefaultTimeout(9000);
       p.on("pageerror", error => errors.push(error.message)); p.on("dialog", d => d.accept());
-      await p.goto(url); await signInFixture(p, key); return p;
+      await p.goto(url); await signInFixture(p, key, { returnTo: url }); return p;
     }
     const capture = async (name, p = page) => {
       assert.equal(await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);

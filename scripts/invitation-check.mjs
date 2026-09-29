@@ -397,7 +397,7 @@ test("uncertain acceptance retains its retry on cancelled dismissal and accepted
   assert.equal(await page.locator("#auth-error").textContent().then(text => text.includes("account that accepted")), false);
 });
 
-test("lost committed email sign-in response fences the old room before reconciling the browser account", { timeout: 45000 }, async t => {
+for (const responseBody of ["{", "{}"] ) test(`committed email response ${JSON.stringify(responseBody)} fences the old room and reconciles the actual cookie`, { timeout: 45000 }, async t => {
   const f = await fixture(t);
   const page = await (await f.browser.newContext()).newPage();
   await page.goto(f.origin); await signInFixture(page, f.targetRoomKey);
@@ -409,10 +409,14 @@ test("lost committed email sign-in response fences the old room before reconcili
     const response = await route.fetch();
     assert.equal(response.status(), 201);
     loginCommitted = true;
-    await route.fulfill({ response, body: "{" }); // cookie headers arrive; success body is lost
+    await route.fulfill({ response, body: responseBody }); // actual cookie arrives with unreadable/invalid success data
   });
+  const reconciliation = page.waitForResponse(response => loginCommitted && new URL(response.url()).pathname === "/api/account-session" && response.request().method() === "GET");
   page.once("dialog", dialog => dialog.accept());
   await page.locator('#invitation-methods [data-signin-form="magic-code"] button[type="submit"]').click();
+  const reconciled = await (await reconciliation).json();
+  assert.equal(reconciled.authenticated, true);
+  assert.equal(reconciled.account.id, "account-target", "host restoration reads the rotated cookie before any manual fixture GET");
   await page.locator("#main").waitFor({ state: "hidden" });
   assert.equal(loginCommitted, true);
   assert.equal(await page.locator("#main").isVisible(), false, "uncertain identity never retains the old room UI");
@@ -470,4 +474,45 @@ test("delivered email link opens its intended invitation in a fresh browser tab"
   await receiver.locator('#invitation-accept').click();
   await receiver.waitForURL(`${f.origin}/?room=studio`);
   await receiver.locator('#main').waitFor({ state: 'visible' });
+});
+
+test("a shared invitation retains its pending account signup across Escape and navigation controls", { timeout: 45000 }, async t => {
+  const f = await fixture(t), token = secret();
+  f.store.shareLinks.create(f.store.issueAccessKey("studio", "studio-owner"), "studio", {
+    requestId: "pending-account-signup", linkToken: token, expiresAt: Date.now() + 3600000, maxJoins: 2, expectedMemberRevision: 0
+  });
+  const page = await (await f.browser.newContext()).newPage(); page.setDefaultTimeout(10000);
+  await page.goto(`${f.origin}/#join/${token}`);
+  await page.locator("#join-account-signin").click();
+  await page.locator('#join-account-auth [data-email-method="password"]').click();
+  const form = page.locator('#join-account-auth [data-signin-form="password"]');
+  await form.locator('[data-password-mode="signup"]').click();
+  await form.locator('[name="email"]').fill("shared-pending-signup@example.invalid");
+  await form.locator('[name="password"]').fill("synthetic-shared-signup-password");
+  const committed = deferred(), release = deferred(); t.after(() => release.resolve());
+  await page.route("**/api/auth/password/signup", async route => {
+    const response = await route.fetch(); assert.equal(response.status(), 201);
+    committed.resolve(); await release.promise; await route.fulfill({ response });
+  });
+  await form.locator('button[type="submit"]').click(); await committed.promise;
+  assert.equal(await page.locator("#join-link-dialog").getAttribute("aria-busy"), "true");
+  for (const id of ["join-account-back", "join-link-close", "join-link-submit"]) assert.equal(await page.locator(`#${id}`).isDisabled(), true);
+  assert.equal(await page.locator("#join-account-google").getAttribute("aria-disabled"), "true");
+  await page.keyboard.press("Escape");
+  assert.equal(await page.locator("#join-link-dialog").evaluate(dialog => dialog.open), true);
+  assert.equal(await page.locator("#join-account-auth").isVisible(), true);
+  await page.locator("#join-account-google").evaluate(anchor => anchor.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })));
+  assert.equal(new URL(page.url()).pathname, "/", "pending auth cannot start Google navigation");
+  assert.equal(await page.evaluate(() => sessionStorage.getItem("pr-pending-join")), null, "pending auth cannot stash another OAuth handoff");
+  const another = secret();
+  await page.evaluate(value => { location.hash = `#join/${value}`; }, another);
+  await page.locator("#join-link-status").filter({ hasText: "Finish signing in" }).waitFor();
+  assert.equal(await page.locator("#join-account-auth").isVisible(), true);
+  release.resolve();
+  await page.locator("#join-link-submit").filter({ hasText: /^Join room$/ }).waitFor();
+  await page.waitForFunction(() => document.querySelector("#join-link-dialog").getAttribute("aria-busy") === "false");
+  assert.equal(await page.locator("#join-link-close").isDisabled(), false);
+  await page.locator("#join-link-name").fill("Signed-in shared participant");
+  await page.locator("#join-link-submit").click();
+  await page.waitForURL(`${f.origin}/?room=studio`); await page.locator("#main").waitFor({ state: "visible" });
 });

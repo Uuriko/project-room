@@ -110,7 +110,7 @@ test("room actions offer only the current member's available flows", { timeout: 
   for (const id of ["new-work", "invite", "agent"]) assert.equal(await f.action(id).count(), 0);
   for (const id of ["write", "search", "catch-up", "people", "results", "how-invite", "how-agent", "how-inbox"]) assert.equal(await f.action(id).count(), 1);
   await f.action("how-inbox").click();
-  assert.match(await f.page.locator("#status").textContent(), /Inbox uses Account key/);
+  assert.match(await f.page.locator("#status").textContent(), /Sign in with Google or email to open your Inbox/);
   await f.capture("guest");
 });
 
