@@ -112,6 +112,14 @@ export async function doctor({ env = process.env, fetchImpl = fetch } = {}) {
     const healthUrl = new URL("/api/health", connection.origin);
     const health = await fetchImpl(healthUrl, { method: "GET", headers: { Accept: "application/json" } });
     const attention = await readNeedsMe(connection, { fetchImpl });
+    let hostId = null, pendingWakes = 0, presence = "pull-only";
+    try {
+      const beat = await beatPullOnly(connection, { fetchImpl, env });
+      hostId = beat.hostId;
+      pendingWakes = beat.pendingWakes.length;
+    } catch {
+      presence = "heartbeat_failed";
+    }
     return {
       ok: true,
       code: "credential_accepted",
@@ -120,7 +128,10 @@ export async function doctor({ env = process.env, fetchImpl = fetch } = {}) {
       memberId: connection.memberId,
       health: health.status,
       items: attention.items.length,
-      hasMore: attention.hasMore
+      hasMore: attention.hasMore,
+      hostId,
+      pendingWakes,
+      presence
     };
   } catch (error) {
     const code = error instanceof ConnectionError || error instanceof GrokHostError ? error.code : "doctor_failed";

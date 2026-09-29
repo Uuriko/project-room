@@ -154,6 +154,44 @@ test("doctor with a live fetch reports credential_accepted", async t => {
   assert.equal(JSON.stringify(result).includes(secret), false);
 });
 
+test("doctor heartbeats pull-only on the real beat path without failing membership", async t => {
+  const directory = fixtureDir();
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const handlers = { needsMe: needsMe([]), acks: [] };
+  const fetchImpl = async (url, opts = {}) => {
+    if (String(url).includes("/api/health")) return new Response("{\"ok\":true}", { status: 200 });
+    return roomFetch(handlers)(url, opts);
+  };
+  const result = await doctor({ env: { ROOM_AGENT_CONFIG: directory }, fetchImpl });
+  assert.equal(result.ok, true);
+  assert.equal(result.code, "credential_accepted");
+  assert.equal(result.presence, "pull-only");
+  assert.equal(result.hostId, "grok-build");
+  assert.equal(result.pendingWakes, 0);
+  assert.equal(handlers.beats, 1);
+  assert.equal(handlers.beatBodies[0].mode, "pull-only");
+  assert.equal(handlers.beatBodies[0].workWakes, undefined);
+  assert.equal(JSON.stringify(result).includes(secret), false);
+});
+
+test("doctor stays credential_accepted when heartbeat is refused", async t => {
+  const directory = fixtureDir();
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const fetchImpl = async (url, opts = {}) => {
+    const path = String(url);
+    if (path.includes("/api/health")) return new Response("{\"ok\":true}", { status: 200 });
+    if (path.includes("/api/agent-heartbeats") && (opts.method || "GET") === "POST") {
+      return new Response(JSON.stringify({ error: { code: "invalid_heartbeat", message: "nope" } }), { status: 422 });
+    }
+    return new Response(JSON.stringify(needsMe([])), { status: 200 });
+  };
+  const result = await doctor({ env: { ROOM_AGENT_CONFIG: directory }, fetchImpl });
+  assert.equal(result.ok, true);
+  assert.equal(result.code, "credential_accepted");
+  assert.equal(result.presence, "heartbeat_failed");
+  assert.equal(result.hostId, null);
+});
+
 test("journal file round-trip stays 0600-shaped JSON without the secret", t => {
   const directory = mkdtempSync(join(tmpdir(), "grok-journal-"));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
