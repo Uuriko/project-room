@@ -217,13 +217,13 @@ export class AgentInvites {
     // for both formats.
     const normalized = typeof code === "string" ? code.trim().toUpperCase().replace(/[IL]/g, "1").replace(/O/g, "0") : "";
     if (!CODE_PATTERN.test(normalized)) {
-      fail(404, "invite_unavailable", "Invite code is invalid, expired, or already used");
+      fail(404, "invite_unavailable", "Invite code has the wrong format: invite codes are two letters, a dash, then 16 characters (no I, L, O, or U). Check for typos or ask the inviter for a fresh code");
     }
     // Hash outside the write transaction: scrypt is deliberately slow.
     const lookup = codeHash(normalized);
     return this.store.transaction(() => {
       const row = this.db.prepare("SELECT * FROM agent_invite_codes WHERE code_hash=?").get(lookup);
-      if (!row) fail(404, "invite_unavailable", "Invite code is invalid, expired, or already used");
+      if (!row) fail(404, "invite_unavailable", "No invite was issued for this code. Ask the inviter for a fresh code");
       if (row.redeemed_at != null && existingIdentity?.identityId === row.redeemed_identity_id) {
         const linked = this.db.prepare("SELECT member_id FROM identity_links WHERE room_id=? AND identity_id=?").get(row.room_id, existingIdentity.identityId);
         const member = linked && this.store.room(row.room_id).state.members[linked.member_id];
@@ -319,12 +319,12 @@ export class AgentInvites {
   preview(code) {
     const normalized = typeof code === "string" ? code.trim().toUpperCase().replace(/[IL]/g, "1").replace(/O/g, "0") : "";
     if (!CODE_PATTERN.test(normalized)) {
-      fail(404, "invite_unavailable", "Invite code is invalid, expired, or already used");
+      fail(404, "invite_unavailable", "Invite code has the wrong format: invite codes are two letters, a dash, then 16 characters (no I, L, O, or U). Check for typos or ask the inviter for a fresh code");
     }
     // Hash outside the transaction like redeem(): scrypt is deliberately slow.
     const lookup = codeHash(normalized);
     const row = this.db.prepare("SELECT * FROM agent_invite_codes WHERE code_hash=?").get(lookup);
-    if (!row) fail(404, "invite_unavailable", "Invite code is invalid, expired, or already used");
+    if (!row) fail(404, "invite_unavailable", "No invite was issued for this code. Ask the inviter for a fresh code");
     if (row.revoked_at != null) fail(410, "invite_revoked", "Invite code was revoked");
     const now = this.store.now();
     if (now >= row.expires_at) fail(410, "invite_expired", "Invite code expired");

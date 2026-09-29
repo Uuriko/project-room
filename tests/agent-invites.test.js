@@ -216,6 +216,16 @@ test("unknown, revoked, and expired codes fail distinctly", async t => {
   const { store, origin, ownerKey } = await serve(t);
   const unknown = await redeem(origin, "RM-AAAAAAAA");
   assert.equal(unknown.status, 404);
+  // R10: a never-issued code must not be blamed on expiry or prior use.
+  assert.equal(unknown.json.error.code, "invite_unavailable");
+  assert.match(unknown.json.error.message, /No invite was issued for this code/);
+  assert.ok(!/expired|already used/.test(unknown.json.error.message), "unknown code message stays accurate");
+  const malformed = await redeem(origin, "NOT-A-CODE");
+  assert.equal(malformed.status, 404);
+  assert.match(malformed.json.error.message, /wrong format/);
+  // R10 copy keeps invite vocabulary: the internal RM- prefix never reaches users.
+  assert.match(malformed.json.error.message, /two letters, a dash/);
+  assert.ok(!/(?<![A-Za-z])RM-/.test(malformed.json.error.message), "wrong-format copy leaks no internal prefix");
   const minted = await mint(origin, ownerKey, { permissions: ["accept_work"] });
   const revoked = await del(origin, "/api/rooms/commons/agent-invites", { inviteId: minted.json.inviteId }, ownerKey);
   assert.equal(revoked.status, 200);
@@ -459,6 +469,13 @@ test("preview folds failures like redeem: unknown, used, revoked, expired", asyn
   const unknown = await preview("RM-AAAAAAAAAAAAAAAA");
   assert.equal(unknown.status, 404);
   assert.equal(unknown.json.error.code, "invite_unavailable");
+  // R10: a never-issued code must not be blamed on expiry or prior use.
+  assert.match(unknown.json.error.message, /No invite was issued for this code/);
+  assert.ok(!/expired|already used/.test(unknown.json.error.message), "unknown code message stays accurate");
+  const malformed = await preview("NOT-A-CODE");
+  assert.equal(malformed.status, 404);
+  assert.match(malformed.json.error.message, /wrong format/);
+  assert.ok(!/(?<![A-Za-z])RM-/.test(malformed.json.error.message), "wrong-format copy leaks no internal prefix");
   const minted = await mint(origin, ownerKey, { profile: "chat", expiresInMinutes: 60 });
   assert.equal(minted.status, 201);
   assert.equal((await redeem(origin, minted.json.code)).status, 201);

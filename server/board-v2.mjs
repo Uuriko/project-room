@@ -15,10 +15,10 @@
 // mounts it in server/http.mjs over the durable state machine in
 // server/board-v2-durable.mjs (SQLite, see design §3).
 
-const TASK_ID_RE = /^RC-\d{4}-\d{2}-\d{2}-\d+$/;
-const LANE_RE = /^[A-Za-z0-9_-]{1,64}$/;
-const LEASE_RE = /^lease=(\d+)h$/;
-const SHA_RE = /^[0-9a-f]{7,40}$/i;
+export const TASK_ID_RE = /^RC-\d{4}-\d{2}-\d{2}-\d+$/;
+export const LANE_RE = /^[A-Za-z0-9_-]{1,64}$/;
+export const LEASE_RE = /^lease=(\d+)h$/;
+export const SHA_RE = /^[0-9a-f]{7,40}$/i;
 
 const LIVE_STATES = new Set(["submitted", "working", "suspended"]);
 const TERMINAL_STATES = new Set(["cancelled", "completed", "released"]);

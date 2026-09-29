@@ -160,3 +160,34 @@ test("end-to-end: a DM posted in room A is invisible when the thread is read in 
   assert.deepEqual(inB.body.messages.map(m => m.body), ["room B note"],
     "reading the same thread in room B shows only room B's bodies");
 });
+
+test("readThread honors limit/before: newest page first, cursor pages backwards, bad cursors teach", t => {
+  const f = storeFixture(t);
+  f.link("commons", f.a.identityId, "agent-a");
+  let at = 1000;
+  for (let i = 1; i <= 5; i++) {
+    at += 1000;
+    const id = randomUUID();
+    f.store.db.prepare("INSERT INTO peer_dm_messages(message_id, thread_id, room_id, event_id, from_identity_id, to_identity_id, body, created_at) VALUES(?,?,?,?,?,?,?,?)")
+      .run(id, f.threadId, "commons", randomUUID(), f.a.identityId, f.b.identityId, `msg${i}`, at);
+  }
+  // No params: legacy full history, oldest first, no hasMore key.
+  const full = f.store.bonds.readThread("commons", "agent-a", f.threadId);
+  assert.deepEqual(full.messages.map(m => m.body), ["msg1", "msg2", "msg3", "msg4", "msg5"]);
+  assert.equal("hasMore" in full, false);
+  // limit=2: the two newest, oldest-first within the page, hasMore true.
+  const page1 = f.store.bonds.readThread("commons", "agent-a", f.threadId, { limit: 2 });
+  assert.deepEqual(page1.messages.map(m => m.body), ["msg4", "msg5"]);
+  assert.equal(page1.hasMore, true);
+  // before=cursor: the two before msg4.
+  const page2 = f.store.bonds.readThread("commons", "agent-a", f.threadId, { limit: 2, before: page1.messages[0].messageId });
+  assert.deepEqual(page2.messages.map(m => m.body), ["msg2", "msg3"]);
+  assert.equal(page2.hasMore, true);
+  const page3 = f.store.bonds.readThread("commons", "agent-a", f.threadId, { limit: 2, before: page2.messages[0].messageId });
+  assert.deepEqual(page3.messages.map(m => m.body), ["msg1"]);
+  assert.equal(page3.hasMore, false);
+  // Bad inputs teach: unknown cursor is 404, bad limit is 422.
+  assert.equal((() => { try { f.store.bonds.readThread("commons", "agent-a", f.threadId, { before: "nope" }); } catch (e) { return e.code; } })(), "cursor_not_found");
+  assert.equal((() => { try { f.store.bonds.readThread("commons", "agent-a", f.threadId, { limit: 0 }); } catch (e) { return e.code; } })(), "invalid_pagination");
+  assert.equal((() => { try { f.store.bonds.readThread("commons", "agent-a", f.threadId, { limit: 999 }); } catch (e) { return e.code; } })(), "invalid_pagination");
+});

@@ -652,3 +652,25 @@ test("GX redemption refuses a full room while preserving the unused code", async
   assert.equal(store.room("commons").sequence, before);
   assert.equal(store.db.prepare("SELECT status FROM guest_invites WHERE id=?").get(minted.inviteId).status, "active");
 });
+
+test("guest upgrade diagnoses missing/invalid fields instead of 'not a guest'", async t => {
+  const s = await serve(t);
+  const { request, ownerKey } = s;
+  const upgrade = (data) => request("/api/rooms/commons/guest-invites-upgrade", {
+    method: "POST", token: ownerKey, data,
+  });
+  // Missing memberId: the message names the field and the expected shape.
+  const missingId = await upgrade({});
+  assert.equal(missingId.status, 422);
+  const missingIdBody = await missingId.json();
+  assert.match(missingIdBody.error.message, /memberId is required/);
+  assert.match(missingIdBody.error.message, /guest-agent-/);
+  // Non-guest id: teaches the required id shape, not "not a guest".
+  const wrongShape = await upgrade({ memberId: "owner", tier: "contributor" });
+  assert.equal(wrongShape.status, 422);
+  assert.match((await wrongShape.json()).error.message, /guest-agent-/);
+  // Missing tier: names the field and the accepted values.
+  const missingTier = await upgrade({ memberId: "guest-agent-0000000000000000" });
+  assert.equal(missingTier.status, 422);
+  assert.match((await missingTier.json()).error.message, /tier is required/);
+});

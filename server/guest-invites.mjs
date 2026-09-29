@@ -959,7 +959,18 @@ export class GuestInvites {
   // this operation changes it. The tier lives in guest_members and is read
   // on every command, so the change takes effect immediately.
   upgrade(token, roomId, memberId, tier, binding) {
-    if (!isGuestAgentMemberId(memberId)) fail(422, "invalid_guest_invite", "That member is not a guest");
+    // John's pass-5 rule ("does the error teach?"): validate the caller's
+    // fields before diagnosing membership state, so a malformed request
+    // never misreads as "not a guest".
+    if (typeof memberId !== "string" || !memberId) {
+      fail(422, "invalid_guest_invite", "memberId is required: the guest member to upgrade (a guest-agent-* id)");
+    }
+    if (!isGuestAgentMemberId(memberId)) {
+      fail(422, "invalid_guest_invite", "That member is not a guest: memberId must be a guest agent id (guest-agent-...)");
+    }
+    if (tier === undefined || tier === null) {
+      fail(422, "invalid_guest_invite", "tier is required: observer or contributor");
+    }
     if (!Object.hasOwn(GUEST_INVITE_TIERS, tier)) fail(422, "invalid_guest_invite", "Tier is observer or contributor");
     return this.store.transaction(() => {
       this.ownerGate(token, roomId, binding);
