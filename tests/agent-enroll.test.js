@@ -340,14 +340,14 @@ test("roomId files an access request inline: pending without an auto-approve rul
   const { res } = await h.call("POST", "/api/agents/enroll",
     { name: "Room Joiner", requestId: "enroll-room-1", roomId: "commons" });
   assert.equal(res.statusCode, 201);
-  const join = res.jsonValue.roomJoin;
-  assert.ok(join, "roomJoin present");
-  assert.equal(join.roomId, "commons");
-  assert.equal(join.status, "pending");
-  assert.ok(join.requestId);
-  assert.ok(join.pollPath.includes(join.requestId));
+  const roomJoin = res.jsonValue.roomJoin;
+  assert.ok(roomJoin, "roomJoin present");
+  assert.equal(roomJoin.roomId, "commons");
+  assert.equal(roomJoin.status, "pending");
+  assert.ok(roomJoin.requestId);
+  assert.ok(roomJoin.pollPath.includes(roomJoin.requestId));
   // The request row really exists, asking for the guest-worker set.
-  const row = h.store.db.prepare("SELECT * FROM access_requests WHERE request_id=?").get(join.requestId);
+  const row = h.store.db.prepare("SELECT * FROM access_requests WHERE request_id=?").get(roomJoin.requestId);
   assert.ok(row);
   assert.deepEqual(JSON.parse(row.requested_permissions), [...ENROLL_ROOM_PERMISSIONS]);
   assert.equal(row.status, "pending");
@@ -392,10 +392,10 @@ test("roomId surfaces an auto-approval as membership (approved shape)", async t 
     { url: new URL("/api/agents/enroll", "http://127.0.0.1"), remoteAddress: "127.0.0.1" },
   );
   assert.equal(res.statusCode, 201);
-  const join = res.jsonValue.roomJoin;
-  assert.equal(join.status, "approved");
-  assert.equal(join.memberId, res.jsonValue.identityId);
-  assert.deepEqual(join.grantedPermissions, [...ENROLL_ROOM_PERMISSIONS]);
+  const roomJoin = res.jsonValue.roomJoin;
+  assert.equal(roomJoin.status, "approved");
+  assert.equal(roomJoin.memberId, res.jsonValue.identityId);
+  assert.deepEqual(roomJoin.grantedPermissions, [...ENROLL_ROOM_PERMISSIONS]);
 });
 
 test("roomId for an unknown room is a 404, not a 500", async t => {
