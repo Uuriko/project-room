@@ -143,6 +143,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/capability-visibility.mjs'); // RC-2026-09-27-2731: withhold-never-refused catalog predicate (imported by server/mcp-discovery.mjs and server/mcp-room-profile.mjs)
   paths.add('server/capability-registry.mjs'); // Integration slice #11: typed capability registry (library module; pure, no imports of its own)
   for (const path of ['server/board-v2.mjs', 'server/board-v2-sqlite.mjs', 'server/board-v2-durable.mjs']) paths.add(path); // RC-2026-09-27-2720: board-v2 HTTP wiring (imported by server/http.mjs)
+  paths.add('server/conversation-sync.mjs'); // bounded viewer-scoped conversation reads (imported by server/http.mjs)
   const candidate = join(directory, 'synthetic-source'); mkdirSync(candidate);
   // No private state, credentials, docs or real checkout Git metadata.
   for (const path of paths) {

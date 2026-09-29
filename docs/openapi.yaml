@@ -68,6 +68,37 @@ security:
   - queryAuth: []
   - bearerAuth: []
 paths:
+  /api/rooms/{roomId}/conversation:
+    get:
+      summary: Read a bounded viewer-scoped conversation window
+      description: |
+        Current message records (including deletion tombstones), in chronological order.
+        Targeted DMs are filtered before pagination; editHistory is omitted. Default 50,
+        maximum 100 messages and 512 KiB of message JSON. No raw events are replayed.
+        `cursor` reads an older page; `since` conditionally revalidates the latest window;
+        `messageId` reads one current visible record (hidden and absent both return 404).
+        Choose at most one. Authenticated encrypted continuations bind the room, viewer, credential,
+        session and limit. Changed room history, a different viewer or a service restart
+        yields mode=reset; discard cached pages and fetch the latest page without a token.
+        mode=replace replaces the selected window; a latest-window replacement also
+        invalidates all older cached pages. mode=not_modified preserves current content.
+        Reply root IDs remain intact; retrieve an older root explicitly by messageId.
+        Authentication and scope checks run on every read, including conditional reads.
+        This additive API does not change the legacy full room snapshot.
+      parameters:
+        - { name: roomId, in: path, required: true, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: since, in: query, schema: { type: string } }
+        - { name: messageId, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: Viewer-bound version 1 response with mode, sequence, messages, nextCursor and checkpoint; not_modified omits messages
+        '401': { description: Credential expired or revoked }
+        '403': { description: Current membership or rooms read scope required }
+        '404': { description: Requested message absent or not visible }
+        '413': { description: One current message exceeds the bounded read byte limit }
+        '422': { description: Invalid selection }
   /api/inbox/setup:
     get:
       summary: Read or save resumable setup preferences.
