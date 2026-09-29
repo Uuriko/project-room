@@ -14,18 +14,42 @@ export const PUBLIC_DOOR_PATHS = Object.freeze(["/room", "/room/"]);
 // Hash-forward: #room/{id} onto Open/People with ?room= so hash-dropping
 // browsers survive. A complete #join/<43-char> leaves the public wrapper so
 // the app opens the join dialog. Bare or short #join/ stays here and shows
-// #join-empty. #code/ and the Join-with-code form also stay: CSP cannot
-// preview a code, so a formatted code (including ABC-DEF-GHJ) shows a
-// live-invite error instead of a silent leave.
+// #join-empty. #code/ and the Join-with-code form resolve the short code
+// against POST /room/api/share-links/preview (same-origin through the
+// getdasha edge door): a live code hands off to the app with #code/, and
+// anything else shows an inline error instead of a silent no-op or a blind
+// leave. Agent invite codes are never accepted here — they stay in
+// the CLI flow.
 export function publicDoorHashForward() {
   function id() {
     var m = /^#room\/([A-Za-z0-9][A-Za-z0-9_.:-]{0,127})$/.exec(globalThis.location.hash || "");
     return m && m[1];
   }
+  // Verdict mirror of src/share-invite-code.js normalizeShareInviteCode +
+  // formatShareInviteCode: separators (-, space, _) are stripped anywhere
+  // (group structure is not significant), I/L fold to 1, O folds to 0,
+  // every remaining char must be Crockford base32, and the total must be
+  // exactly 9 symbols. Keep this in lockstep with the canonical
+  // implementation — tests/room-entry.test.js asserts verdict agreement on
+  // a battery of inputs.
   function formatCode(value) {
-    var s = String(value || "").toUpperCase().replace(/[\s_-]/g, "").replace(/I/g, "1").replace(/L/g, "1").replace(/O/g, "0");
-    if (!/^[0-9A-HJKMNP-TV-Z]{9}$/.test(s)) return "";
-    return s.slice(0, 3) + "-" + s.slice(3, 6) + "-" + s.slice(6, 9);
+    if (typeof value !== "string") return "";
+    // Same alphabet as src/share-invite-code.js SHARE_CODE_ALPHABET (not a
+    // credential — the public Crockford base32 join-code alphabet).
+    var SHARE_CODE_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+    var chars = value.toUpperCase();
+    var out = "";
+    for (var i = 0; i < chars.length; i++) {
+      var raw = chars.charAt(i);
+      if (raw === "-" || raw === " " || raw === "_") continue;
+      var ch = raw === "I" || raw === "L" ? "1" : raw === "O" ? "0" : raw;
+      if (SHARE_CODE_ALPHABET.indexOf(ch) < 0) return "";
+      out += ch;
+      if (out.length > 9) return "";
+    }
+    return out.length === 9
+      ? out.slice(0, 3) + "-" + out.slice(3, 6) + "-" + out.slice(6, 9)
+      : "";
   }
   function joinInvite(hash) {
     if (hash.indexOf("#join/") !== 0) return "";
@@ -57,6 +81,112 @@ export function publicDoorHashForward() {
       if (show) input.setAttribute("aria-invalid", "true");
       else input.removeAttribute("aria-invalid");
     }
+  }
+  // Neutral status text (loading / success notes) that does not mark the
+  // input invalid the way whisperCode's error path does.
+  function codeStatus(text) {
+    var el = globalThis.document.getElementById && globalThis.document.getElementById("join-code-status");
+    if (!el) return;
+    if (text) {
+      el.textContent = text;
+      el.removeAttribute("hidden");
+    } else {
+      el.textContent = "";
+      el.setAttribute("hidden", "");
+    }
+  }
+  function setCodeBusy(busy) {
+    var input = globalThis.document.querySelector && globalThis.document.querySelector("#join-code");
+    var button = globalThis.document.querySelector && globalThis.document.querySelector("#join-code-submit");
+    if (input) input.disabled = !!busy;
+    if (button) {
+      button.disabled = !!busy;
+      button.textContent = busy ? "Checking…" : "Join with code";
+    }
+  }
+  var INVALID_CODE_MESSAGE = "This invite link is invalid, already used, or expired. Ask the inviter for a fresh link.";
+  // Resolve a formatted ABC-DEF-GHJ code against the room server. outcome is
+  // "ok" (live), "invalid" (unknown/used/expired), "limited" (429),
+  // "offline" (network/timeout), or "error" (anything else).
+  function resolveJoinCode(formatted, outcome) {
+    function finish(state) {
+      if (timer !== null) {
+        globalThis.clearTimeout(timer);
+        timer = null;
+      }
+      setCodeBusy(false);
+      outcome(state);
+    }
+    var timer = null;
+    if (typeof globalThis.fetch !== "function") {
+      setCodeBusy(false);
+      outcome("offline");
+      return;
+    }
+    setCodeBusy(true);
+    codeStatus("Checking your code…");
+    timer = globalThis.setTimeout(function () {
+      timer = null;
+      finish("offline");
+    }, 15000);
+    if (timer && timer.unref) timer.unref();
+    var url;
+    try {
+      url = new URL("/room/api/share-links/preview", globalThis.location.href).href;
+    } catch (e) {
+      finish("offline");
+      return;
+    }
+    globalThis.fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ linkToken: formatted })
+    }).then(function (resp) {
+      if (timer === null) return; // already timed out
+      if (resp.status === 200) finish("ok");
+      else if (resp.status === 410) finish("invalid");
+      else if (resp.status === 429) finish("limited");
+      else finish("error");
+    }, function () {
+      if (timer === null) return; // already timed out
+      finish("offline");
+    });
+  }
+  // Shared submit path for the Join-with-code form and for #code/ deep links.
+  // hashGuard, when given, is the #code/ hash that triggered the submit; a
+  // stale completion after the hash moved on is dropped.
+  function submitJoinCode(form, hashGuard) {
+    var input = globalThis.document.querySelector && globalThis.document.querySelector("#join-code");
+    var formatted = formatCode(input && input.value);
+    var origin = form.getAttribute ? form.getAttribute("data-room-origin") : "";
+    if (!formatted) {
+      var formatMsg = "That isn't a join code. Use ABC-DEF-GHJ (9 characters).";
+      whisperJoin(true, formatMsg);
+      whisperCode(true, formatMsg);
+      if (input && input.focus) input.focus();
+      return;
+    }
+    if (!origin) {
+      var originMsg = "Couldn't reach the room server from here. Use the Join link above instead.";
+      whisperJoin(true, originMsg);
+      whisperCode(true, originMsg);
+      return;
+    }
+    if (hashGuard && globalThis.location.hash !== hashGuard) return;
+    resolveJoinCode(formatted, function (state) {
+      if (hashGuard && globalThis.location.hash !== hashGuard) return; // stale
+      if (state === "ok") {
+        codeStatus("Code accepted — opening the app…");
+        globalThis.location.assign(origin.replace(/\/$/, "") + "/#code/" + formatted);
+        return;
+      }
+      var msg = state === "invalid" ? INVALID_CODE_MESSAGE
+        : state === "limited" ? "Too many tries. Wait a moment and try again."
+        : state === "offline" ? "Couldn't reach the server. Check your connection and try again."
+        : "Something went wrong. Try again in a moment.";
+      whisperJoin(true, msg);
+      whisperCode(true, msg);
+    });
   }
   function handoff(href) {
     var room = id();
@@ -93,12 +223,19 @@ export function publicDoorHashForward() {
       }
     }
     if (hash.indexOf("#code/") === 0) {
-      var formatted = formatCode(hash.slice(6).split("/")[0]);
-      var codeMsg = formatted
-        ? "This isn't a live invite. Ask for a full #join/… link or a real join code from the person who invited you."
-        : "That isn't a join code. Use ABC-DEF-GHJ (9 characters).";
-      whisperJoin(true, codeMsg);
-      whisperCode(true, codeMsg);
+      var rawCode = hash.slice(6).split("/")[0];
+      var codeForm = globalThis.document.querySelector && globalThis.document.querySelector("#join-code-form");
+      var codeInput = globalThis.document.querySelector && globalThis.document.querySelector("#join-code");
+      if (codeForm && codeInput) {
+        codeInput.value = rawCode;
+        submitJoinCode(codeForm, hash);
+      } else {
+        var fallbackMsg = formatCode(rawCode)
+          ? "This invite link is invalid, already used, or expired. Ask the inviter for a fresh link."
+          : "That isn't a join code. Use ABC-DEF-GHJ (9 characters).";
+        whisperJoin(true, fallbackMsg);
+        whisperCode(true, fallbackMsg);
+      }
     }
   }
   apply();
@@ -117,20 +254,14 @@ export function publicDoorHashForward() {
       var form = e.target && e.target.id === "join-code-form" ? e.target : null;
       if (!form) return;
       e.preventDefault();
-      var input = globalThis.document.querySelector("#join-code");
-      var formatted = formatCode(input && input.value);
-      var formMsg = formatted
-        ? "This isn't a live invite. Ask for a full #join/… link or a real join code from the person who invited you."
-        : "That isn't a join code. Use ABC-DEF-GHJ (9 characters).";
-      whisperJoin(true, formMsg);
-      whisperCode(true, formMsg);
+      submitJoinCode(form);
     });
   }
 }
 export const ROOM_DEEP_LINK_SCRIPT = `(${publicDoorHashForward.toString()})();`;
 // Computed at load so the base64 digest is not a committed high-entropy token.
 const SCRIPT_HASH = createHash("sha256").update(ROOM_DEEP_LINK_SCRIPT).digest("base64");
-export const PUBLIC_DOOR_CSP = `default-src 'none'; script-src 'sha256-${SCRIPT_HASH}'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`;
+export const PUBLIC_DOOR_CSP = `default-src 'none'; script-src 'sha256-${SCRIPT_HASH}'; connect-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`;
 
 function discoveryHeaders(type, pathname) {
   const card = pathname && discoveryDoc(pathname) === discoveryDoc(MCP_SERVER_CARD_PATH);
@@ -176,7 +307,7 @@ function joinCodeDoorHtml() {
     <label for="join-code">Join code</label>
     <div class="invite-row">
       <input id="join-code" type="text" autocomplete="off" spellcheck="false" maxlength="11" placeholder="ABC-DEF-GHJ" aria-describedby="join-code-status">
-      <button type="submit">Join with code</button>
+      <button type="submit" id="join-code-submit">Join with code</button>
     </div>
     <p class="join-code-status" id="join-code-status" role="status" hidden></p>
   </form>`;
@@ -410,6 +541,7 @@ h1{font-size:clamp(2.4rem,8vw,3.8rem);line-height:1.05;letter-spacing:-.04em;mar
 .join-code .invite-row{display:flex;gap:.6rem;align-items:center}
 .join-code .invite-row input{margin:0;flex:1}
 .join-code button{display:inline-flex;align-items:center;min-height:48px;padding:0 16px;background:var(--acid);color:var(--ink);border:0;font-weight:650}
+.join-code button:disabled{opacity:.55;cursor:wait}
 .join-code-status{margin:.65rem 0 0;font-size:14px;color:var(--acid)}
 .join-code-status[hidden]{display:none}
 .join-empty{margin:0 0 .85rem;font-size:15px;color:var(--acid);max-width:34em}
