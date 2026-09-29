@@ -673,7 +673,17 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           if (lagging()) break;
         }
         if (lagging()) lag();
-      } catch { end('event: access-ended\ndata: {"message":"Access ended; sign in again"}\n\n'); }
+        // Advance past invisible rows only after the complete visible batch
+        // was queued. A lagging stream must resume from its last sent event.
+        else cursor = batch.next;
+      } catch (error) {
+        if ([401, 403].includes(error?.status) || error?.code === "session_binding_changed") {
+          end('event: access-ended\ndata: {"message":"Access ended; sign in again"}\n\n');
+        } else {
+          diagnostics.record({ operationId, at: new Date().toISOString(), status: 503, code: "stream_unavailable", category: "unavailable", route: "/api/rooms/:roomId/stream", roomId });
+          end('event: unavailable\ndata: {"message":"Connection interrupted; reconnect to recover"}\n\n');
+        }
+      }
     };
     timer = setInterval(pump, streamInterval);
     timer.unref();

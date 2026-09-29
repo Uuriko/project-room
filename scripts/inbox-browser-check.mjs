@@ -17,6 +17,7 @@ import { seedRecordedReply } from "./reply-review-fixture.mjs";
 import { prepareGraphReplyUpdate } from "../server/graph-reply-draft.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
 import { signInFixture } from "./auth-signin.mjs";
+import { signInFixtureInPlace } from "./in-place-fixture-signin.mjs";
 
 // The attention lane syncs the read horizon (debounced, best-effort) while the
 // room view is up, and every sync bumps read_horizons.updated_at. That write is
@@ -1356,4 +1357,33 @@ for (const target of ["account", "room"]) test(`fixture account sign-in waits fo
   release(); const actual = await login;
   assert.equal(actual.authenticated, true); assert.equal(actual.account.id, account.id);
   assert.equal(counts.post, 1, "one actual credential commit");
+});
+
+
+test("account-only actual password fixture waits for pending login then opens its existing room", { timeout: 25000 }, async t => {
+  const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const browser = await chromium.launch({ headless: true });
+  let release, started;
+  const pending = new Promise(resolve => { release = resolve; }), reached = new Promise(resolve => { started = resolve; });
+  t.after(async () => { release(); await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
+  const page = await browser.newPage(); page.setDefaultTimeout(8000);
+  await page.goto(`http://127.0.0.1:${server.address().port}/?account=1`);
+  await page.locator('#auth-panel').waitFor({ state: 'visible' });
+  await page.route('**/api/auth/password/login', async route => {
+    const response = await route.fetch();
+    assert.equal(response.status(), 200);
+    started(); await pending; await route.fulfill({ response });
+  }, { times: 1 });
+  let completed = false;
+  const login = signInFixtureInPlace(page, f.store, f.keys.owner).then(() => { completed = true; });
+  await reached;
+  assert.equal(await page.locator('#auth-signin-ui [data-signin-form="password"] button[type="submit"]').isDisabled(), true);
+  assert.equal(await page.locator('#main').isVisible(), false);
+  assert.equal(completed, false, 'fixture must not open a room or complete while real login response is pending');
+  release(); await login;
+  assert.equal(await page.locator('#main').isVisible(), true);
+  const account = await (await page.request.get(new URL('/api/account-session', page.url()).href)).json();
+  assert.equal(account.authenticated, true);
+  assert.equal(account.account.id, f.store.accountForMember('commons', 'owner').id);
 });

@@ -1,3 +1,4 @@
+import { createMemberDisplayNames } from "./member-display-names.js";
 import { installRoomLayout, syncSidebarSections } from "./room-layout.js";
 import { EVENT_TYPES as T, MAX_MESSAGE_BODY_CHARS, WORK_STATES as S, roomPolicy, roomTrust, distinctMemberOwnerIds, roomKind, isRoomArchived, spendAllowance, pinnedMessages, isPinned, PIN_LIMIT, isMutedBy, channelList, messageChannelId, DEFAULT_CHANNEL_ID } from "./events.js";
 import { AccountClient, RoomClient, draftCommand, retryUnconfirmed } from "./client.js";
@@ -213,6 +214,7 @@ const client = new RoomClient({
   onSnapshot(snapshot, identity) {
     const firstSnapshot = !state;
     state = snapshot.state; session = identity;
+    displayNames = createMemberDisplayNames(state.members);
     void refreshRequestRuns();
     offerContextVersion = snapshot.offerContextVersion === 1 ? 1 : null;
     roomCursor = snapshot.cursor;
@@ -289,6 +291,7 @@ const client = new RoomClient({
     if (!leavingPage) recovery.clear();
     releaseSubmission(submitControls);
     submitOperationId += 1; busy = false;
+    displayNames = createMemberDisplayNames({});
     state = null; session = null; pendingMessage = null; pendingWork = null; pendingAction = null; offerContextVersion = null; actionEpoch++;
     mutedThreads = new Set(); threadMuteBusy = false;
     dmConsents = []; dmConsentSeq++;
@@ -935,13 +938,8 @@ const humanize = value => String(value).replaceAll("_", " ").replaceAll(".", " "
 const memberLabel = id => id == null ? "Unassigned" : state.members[id] ? `${state.members[id].displayName} (${id})` : `Unknown member (${id})`;
 // Keep ordinary conversation readable; exact IDs remain in details and decision
 // controls. Duplicate names retain the full ID so attribution stays unambiguous.
-const displayName = id => {
-  const member = state.members[id];
-  if (!member) return memberLabel(id);
-  const duplicate = Object.values(state.members).some(other => other.id !== id
-    && other.displayName.trim().toLocaleLowerCase() === member.displayName.trim().toLocaleLowerCase());
-  return duplicate ? memberLabel(id) : member.displayName;
-};
+let displayNames = createMemberDisplayNames({});
+const displayName = id => displayNames(id);
 const name = displayName; // Ordinary summaries use the same duplicate-aware attribution as authors.
 const can = capability => state?.members[session?.member.id]?.permissions.includes(capability);
 const sameSession = (generation, roomId, memberId) => generation === client.generation && state
@@ -1096,7 +1094,6 @@ function configureAuthPanel(roomId = selectedRoomFromLocation()) {
     roomHint.hidden = !startRoomIntent;
     roomHint.textContent = startRoomIntent ? "Sign in to start your room. It’s free." : "";
   }
-  syncSessionMenu();
   syncSessionMenu();
 }
 function syncSessionMenu() {

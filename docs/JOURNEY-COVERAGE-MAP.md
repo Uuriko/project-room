@@ -44,11 +44,16 @@ carry the claim, and the remaining tiers stay visibly open.
       "evidence": {
         "unit": [
           "tests/conversation.test.js",
+          "tests/member-display-names.test.js",
+          "tests/private-history-stream.test.js",
+          "tests/stream-recovery.test.js",
           "tests/work-search.test.js",
           "tests/work-discussion.test.js"
         ],
         "browser": [
           "scripts/browser-check.mjs",
+          "scripts/chat-performance-browser-check.mjs",
+          "scripts/stream-recovery-browser-check.mjs",
           "scripts/work-search-browser-check.mjs"
         ],
         "agent": [],
@@ -95,6 +100,7 @@ carry the claim, and the remaining tiers stay visibly open.
       "evidence": {
         "unit": [
           "tests/return-brief.test.js",
+          "tests/private-history-stream.test.js",
           "tests/return-brief-client.test.js",
           "tests/draft-feedback.test.js"
         ],

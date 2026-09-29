@@ -30,7 +30,8 @@ export async function signInFixtureInPlace(page, store, accessKey, roomId = "com
   assert.equal(accepted.status(), 200);
   assert.equal((await accepted.json()).account.id, account.id);
   await page.locator("#auth-panel").waitFor({ state: "hidden" });
-  await page.waitForFunction(() => globalThis.document.querySelector("#auth-panel").getAttribute("aria-busy") === "false");
+  await page.waitForFunction(() => globalThis.document.querySelector("#auth-panel").getAttribute("aria-busy") !== "true"
+    && !globalThis.document.querySelector('#auth-signin-ui [data-signin-form="password"] button[type="submit"]')?.disabled);
   await page.waitForFunction(() => !globalThis.document.querySelector("#main").hidden || !globalThis.document.querySelector("#workspace-nav").hidden);
   if (!await page.locator("#main").isVisible()) {
     await page.locator("#nav-rooms").click();

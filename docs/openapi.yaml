@@ -385,7 +385,7 @@ paths:
   /api/rooms/{roomId}/stream:
     get:
       summary: Server-sent events stream
-      description: Live event stream. Resume with Last-Event-ID header or ?after= (the header wins when both are sent). A consumer whose unsent bytes exceed the per-connection cap (64 KiB) receives a final `stream_lagging` event, is closed alone, and resumes by reconnecting with Last-Event-ID. Because EventSource cannot set headers, this route also accepts the account-session selectors in the query string; src/client.js opens `/stream?after=N&auth=account&binding=<sessionBinding>` for a signed-in browser.
+      description: Live event stream. Resume with Last-Event-ID header or ?after= (the header wins when both are sent). A consumer whose unsent bytes exceed the per-connection cap (64 KiB) receives a final `stream_lagging` event, is closed alone, and resumes by reconnecting with Last-Event-ID. An authorization or session-binding refusal emits `access-ended`; other pump failures emit a bounded `unavailable` event and close the transport so EventSource can reconnect without claiming lost account access. Because EventSource cannot set headers, this route also accepts the account-session selectors in the query string; src/client.js opens `/stream?after=N&auth=account&binding=<sessionBinding>` for a signed-in browser.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: Last-Event-ID

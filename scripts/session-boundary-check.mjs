@@ -465,7 +465,7 @@ test("composer failures stay discussion-scoped and keyboard sends preserve user 
   release.resolve();
   await page.locator("#auth-panel").waitFor({ state: "visible" });
   assert.equal(await form.getAttribute("aria-busy"), null);
-  assert.equal(await page.evaluate(() => document.activeElement?.id), "google-signin",
+  assert.equal(await page.locator('#auth-signin-ui [data-signin-form="password"] [name="email"]').evaluate(node => node === document.activeElement), true,
     "access termination focuses authentication, never the old composer");
   await enterRoom(page, owner, "Room owner");
   assert.equal(await input.inputValue(), "");
