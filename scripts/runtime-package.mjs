@@ -48,6 +48,8 @@ optional.push("src/work-help.js", "server/work-help.mjs");
 optional.push("src/help-offers.js");
 optional.push("client/help-actions.mjs");
 optional.push("client/begin-work.mjs"); // selected-work Begin (imported by client/mcp-stdio.mjs and server/mcp-full-profile.mjs)
+optional.push("client/bounty-tools.mjs"); // bounty tool surface (imported by server/mcp-full-profile.mjs; pure, no imports of its own)
+optional.push("client/trust-tools.mjs"); // trust tool surface (imported by server/mcp-full-profile.mjs; pure, no imports of its own)
 optional.push("server/inbox.mjs");
 optional.push("server/inbox-search.mjs"); // full-text search index (imported by server/inbox.mjs; pure, no imports of its own)
 optional.push("server/inbox-threads.mjs"); // thread builder (imported by server/inbox.mjs; pure, no imports of its own)
