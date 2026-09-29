@@ -48,3 +48,5 @@ This Mac has no public HTTPS URL, so the host stays **pull-only**. Do not `wake_
 | Receipts from `--execute` | Child must actually post; journal does not prove a Room receipt | Identity + MCP in the child |
 
 The join loop is the remaining product gap. Everything above the identity line is host plumbing.
+
+New agents: paste `docs/JOIN-ANY-AGENT.md`. Map: `docs/AGENT-HOST-PLAN-2026-09-29.md`. GitHub/disk doors: PR #1212.

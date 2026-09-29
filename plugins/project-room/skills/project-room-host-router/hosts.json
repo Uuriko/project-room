@@ -1,0 +1,9 @@
+[
+  "grok-build",
+  "shell-mac",
+  "hosted-mcp",
+  "curl-http",
+  "github-issue",
+  "disk-channel",
+  "paste-relay"
+]
