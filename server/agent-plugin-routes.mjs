@@ -222,13 +222,40 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     return json(res, 200, { keys, next });
   });
 
+  // Both actions here are destructive and neither reads a body, so an empty
+  // POST to either URL is indistinguishable from a deliberate one. That is
+  // the same hole that let an empty probe rotate a live identity secret, and
+  // revoke is the worse half: rotate at least hands back a replacement
+  // credential, while revoke retires the key outright with nothing to carry
+  // on with. The route table's own description says as much ("the key stops
+  // working immediately. Use rotate instead when you need continuity"), which
+  // is exactly the kind of warning a caller reads only afterwards.
+  //
+  // An agent walking this API to learn its surface — which is precisely what
+  // the onboarding path asks a newcomer to do — should not be one unlucky URL
+  // away from locking itself out. So require the caller to say so, the same
+  // shape as identity rotation and as the neighbouring key rotation that
+  // already demands newPublicKey.
+  const KEY_ACTION_CONFIRM = Object.freeze({
+    rotate: "Rotation retires this key immediately and shows the replacement credential once. Send {\"confirm\":true} to proceed; requestId is optional.",
+    revoke: "Revocation retires this key immediately and issues nothing in its place; it cannot be undone. Rotate instead when you need continuity. Send {\"confirm\":true} to proceed; requestId is optional.",
+  });
+
   const keyAction = translate(async (req, res, { remoteAddress, keyId, action }) => {
     rate(`agent-key-${action}:${remoteAddress}`, 20);
     const auth = ownerAuth(req);
+    const data = await body(req);
+    const shape = data && (exact(data, ["confirm"]) || exact(data, ["confirm", "requestId"]));
+    if (!shape || data.confirm !== true) {
+      reject(422, "confirm_required", KEY_ACTION_CONFIRM[action]);
+    }
+    if (data.requestId !== undefined && (typeof data.requestId !== "string" || !data.requestId)) {
+      reject(422, "invalid_request_id", "requestId must be a non-empty string when present");
+    }
     const result = action === "rotate"
       ? withCredential(store.agentPlugin.rotateApiKey({ identityId: auth.identityId, keyId }))
       : store.agentPlugin.revokeApiKey({ identityId: auth.identityId, keyId });
-    return json(res, 200, result);
+    return json(res, 200, data.requestId === undefined ? result : { ...result, requestId: data.requestId });
   });
 
   // ---- Agent directory ----
@@ -577,18 +604,57 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
   const SECRET_ROTATE_ROUTE = /^\/api\/agent-identities\/([A-Za-z0-9_-]{1,64})\/rotate$/;
   const SECRET_REVOKE_ROUTE = /^\/api\/agent-identities\/([A-Za-z0-9_-]{1,64})\/revoke$/;
 
+  // Rotation is destructive and unrecoverable: the previous secret stops
+  // authenticating the instant the new one is issued, and the new secret is
+  // shown exactly once. An agent that calls this by accident — probing the
+  // route, replaying a request, following a stale example — loses its
+  // credential with no way back to the same identity, because the
+  // replacement was in a response body it never meant to read. It then sees
+  // a bare 401 on its next call, which is indistinguishable from an unknown
+  // room or a pending access request, so it cannot even diagnose what
+  // happened.
+  //
+  // So require the caller to say so explicitly, the same way the neighbouring
+  // key rotation requires newPublicKey. An empty body no longer rotates
+  // anything; it returns the required shape instead. requestId is optional
+  // and echoed back, matching the access-request convention, so a client that
+  // retries an uncertain rotation can correlate the receipt.
   const rotateIdentitySecret = translate(async (req, res, { remoteAddress, identityId }) => {
     rate(`agent-identity-rotate:${remoteAddress}`, 20);
     const auth = ownerAuth(req);
     if (auth.identityId !== identityId) reject(403, "cross_identity", "An identity can only rotate its own secret");
-    return json(res, 200, store.identities.rotate(identityId, bearer(req)));
+    const data = await body(req);
+    const shape = data && (exact(data, ["confirm"]) || exact(data, ["confirm", "requestId"]));
+    if (!shape || data.confirm !== true) {
+      reject(422, "confirm_required",
+        "Rotation retires the current secret immediately and shows the replacement once. Send {\"confirm\":true} to proceed; requestId is optional.");
+    }
+    if (data.requestId !== undefined && (typeof data.requestId !== "string" || !data.requestId)) {
+      reject(422, "invalid_request_id", "requestId must be a non-empty string when present");
+    }
+    const result = store.identities.rotate(identityId, bearer(req));
+    return json(res, 200, data.requestId === undefined ? result : { ...result, requestId: data.requestId });
   });
 
+  // Revocation is the end of the line for this credential: unlike rotation it
+  // issues no replacement, so a caller that fires it by accident cannot get
+  // back to the same identity at all. It gets the same explicit confirmation
+  // as rotation, with a message that says plainly that nothing replaces it.
   const revokeIdentitySecret = translate(async (req, res, { remoteAddress, identityId }) => {
     rate(`agent-identity-revoke:${remoteAddress}`, 20);
     const auth = ownerAuth(req);
     if (auth.identityId !== identityId) reject(403, "cross_identity", "An identity can only revoke its own secret");
-    return json(res, 200, store.identities.revoke(identityId, bearer(req)));
+    const data = await body(req);
+    const shape = data && (exact(data, ["confirm"]) || exact(data, ["confirm", "requestId"]));
+    if (!shape || data.confirm !== true) {
+      reject(422, "confirm_required",
+        "Revocation retires this secret immediately and issues nothing in its place; it cannot be undone. Rotate instead when you need continuity. Send {\"confirm\":true} to proceed; requestId is optional.");
+    }
+    if (data.requestId !== undefined && (typeof data.requestId !== "string" || !data.requestId)) {
+      reject(422, "invalid_request_id", "requestId must be a non-empty string when present");
+    }
+    const result = store.identities.revoke(identityId, bearer(req));
+    return json(res, 200, data.requestId === undefined ? result : { ...result, requestId: data.requestId });
   });
 
   // ---- Identity link codes (RC-2026-09-24-210) ----

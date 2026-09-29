@@ -44,7 +44,7 @@ test("rotate issues a new secret once; the old secret 401s on every pri_ auth pa
   linkToCommons(f, agent.identityId);
   const path = id => `/api/agent-identities/${id}/rotate`;
 
-  const res = await post(origin, path(agent.identityId), null, agent.secret);
+  const res = await post(origin, path(agent.identityId), { confirm: true }, agent.secret);
   assert.equal(res.status, 200);
   const rotated = await res.json();
   assert.equal(rotated.identityId, agent.identityId);
@@ -58,7 +58,7 @@ test("rotate issues a new secret once; the old secret 401s on every pri_ auth pa
   const fresh = rotated.secret;
 
   // The old secret fails the rotate auth itself.
-  assert.equal(await errorCode(await post(origin, path(agent.identityId), null, dead)), "unauthenticated");
+  assert.equal(await errorCode(await post(origin, path(agent.identityId), { confirm: true }, dead)), "unauthenticated");
 
   // Room-scoped path: resolveIdentityAuth refuses the old secret, accepts the new.
   assert.equal((await get(origin, "/api/rooms/commons/events", dead)).status, 401);
@@ -71,8 +71,8 @@ test("rotate issues a new secret once; the old secret 401s on every pri_ auth pa
     { roomId: "rotate-probe-room", title: "x", purpose: "x", kind: "personal", displayName: "x" }, fresh)), "unauthenticated");
 
   // A second rotate with the dead secret stays dead; with the new one it works again.
-  assert.equal(await errorCode(await post(origin, path(agent.identityId), null, dead)), "unauthenticated");
-  const again = await post(origin, path(agent.identityId), null, fresh);
+  assert.equal(await errorCode(await post(origin, path(agent.identityId), { confirm: true }, dead)), "unauthenticated");
+  const again = await post(origin, path(agent.identityId), { confirm: true }, fresh);
   assert.equal(again.status, 200);
   assert.notEqual((await again.json()).secret, fresh);
 });
@@ -84,7 +84,7 @@ test("revoke kills every auth path and keeps the identity row for audit", async 
   linkToCommons(f, agent.identityId);
   const path = id => `/api/agent-identities/${id}/revoke`;
 
-  const res = await post(origin, path(agent.identityId), null, agent.secret);
+  const res = await post(origin, path(agent.identityId), { confirm: true }, agent.secret);
   assert.equal(res.status, 200);
   const revoked = await res.json();
   assert.deepEqual({ identityId: revoked.identityId, revoked: revoked.revoked, revokedApiKeys: revoked.revokedApiKeys },
@@ -102,11 +102,11 @@ test("revoke kills every auth path and keeps the identity row for audit", async 
   assert.equal(f.store.identities.get(agent.identityId).identityId, agent.identityId);
 
   // Revoke is final: rotate with the dead secret cannot resurrect it.
-  assert.equal(await errorCode(await post(origin, `/api/agent-identities/${agent.identityId}/rotate`, null, dead)), "unauthenticated");
+  assert.equal(await errorCode(await post(origin, `/api/agent-identities/${agent.identityId}/rotate`, { confirm: true }, dead)), "unauthenticated");
   assert.throws(() => f.store.identities.rotate(agent.identityId, dead), err => err.code === "unauthenticated");
 
   // Revoking twice is rejected (the secret no longer authenticates at all).
-  assert.equal(await errorCode(await post(origin, path(agent.identityId), null, dead)), "unauthenticated");
+  assert.equal(await errorCode(await post(origin, path(agent.identityId), { confirm: true }, dead)), "unauthenticated");
 });
 
 test("revoke also revokes the identity's scoped API keys", async t => {
@@ -120,7 +120,7 @@ test("revoke also revokes the identity's scoped API keys", async t => {
   const credential = `rak_${(await issued.json()).secret}`;
   assert.equal((await get(origin, "/api/agent-webhooks", credential)).status, 200);
 
-  const res = await post(origin, `/api/agent-identities/${agent.identityId}/revoke`, null, agent.secret);
+  const res = await post(origin, `/api/agent-identities/${agent.identityId}/revoke`, { confirm: true }, agent.secret);
   assert.equal(res.status, 200);
   assert.equal((await res.json()).revokedApiKeys, 1);
 
@@ -140,9 +140,9 @@ test("rotate/revoke never cross identities", async t => {
     const path = `/api/agent-identities/${bob.identityId}/${action}`;
     assert.equal(await errorCode(await post(origin, path, null, alice.secret)), "cross_identity");
   }
-  assert.equal(await errorCode(await post(origin, "/api/agent-identities/ai_nope/rotate", null, alice.secret)), "cross_identity");
+  assert.equal(await errorCode(await post(origin, "/api/agent-identities/ai_nope/rotate", { confirm: true }, alice.secret)), "cross_identity");
   // Bob's secret is untouched: he can still rotate his own.
-  assert.equal((await post(origin, `/api/agent-identities/${bob.identityId}/rotate`, null, bob.secret)).status, 200);
+  assert.equal((await post(origin, `/api/agent-identities/${bob.identityId}/rotate`, { confirm: true }, bob.secret)).status, 200);
 });
 
 test("scoped API keys cannot manage identity secrets", async t => {
@@ -158,10 +158,10 @@ test("scoped API keys cannot manage identity secrets", async t => {
   const path = `/api/agent-identities/${agent.identityId}`;
   // ownerAuth rejects rak_ before the identity-match check: privilege
   // escalation through scoped credentials is impossible.
-  assert.equal(await errorCode(await post(origin, `${path}/rotate`, null, credential)), "insufficient_scope");
-  assert.equal(await errorCode(await post(origin, `${path}/revoke`, null, credential)), "insufficient_scope");
+  assert.equal(await errorCode(await post(origin, `${path}/rotate`, { confirm: true }, credential)), "insufficient_scope");
+  assert.equal(await errorCode(await post(origin, `${path}/revoke`, { confirm: true }, credential)), "insufficient_scope");
   // The identity secret still works — the key-management attempts changed nothing.
-  assert.equal((await post(origin, `${path}/rotate`, null, agent.secret)).status, 200);
+  assert.equal((await post(origin, `${path}/rotate`, { confirm: true }, agent.secret)).status, 200);
 });
 
 test("rotate/revoke require authentication", async t => {
@@ -171,7 +171,7 @@ test("rotate/revoke require authentication", async t => {
   assert.equal((await post(origin, `/api/agent-identities/${agent.identityId}/rotate`)).status, 401);
   assert.equal((await post(origin, `/api/agent-identities/${agent.identityId}/revoke`)).status, 401);
   // A rotated-away secret format never authenticates (garbage pri_ token).
-  assert.equal(await errorCode(await post(origin, `/api/agent-identities/${agent.identityId}/rotate`, null, "pri_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")), "unauthenticated");
+  assert.equal(await errorCode(await post(origin, `/api/agent-identities/${agent.identityId}/rotate`, { confirm: true }, "pri_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")), "unauthenticated");
 });
 
 test("revoked_at column is backfilled on pre-existing identity tables", async t => {

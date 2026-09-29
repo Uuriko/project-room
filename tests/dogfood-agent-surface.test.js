@@ -131,7 +131,7 @@ test("api key: revoked key is 401; keys can never manage keys", async t => {
     403, "key issuing a key");
   assert.equal(issue.error?.code, "insufficient_scope");
 
-  await must(await post(origin, `/api/agent-keys/${key.keyId}/revoke`, {}, agent.secret),
+  await must(await post(origin, `/api/agent-keys/${key.keyId}/revoke`, { confirm: true }, agent.secret),
     200, "revoke");
   const after = await must(await get(origin, "/api/rooms/commons/events?after=0&limit=5", key.presented),
     401, "revoked key");
