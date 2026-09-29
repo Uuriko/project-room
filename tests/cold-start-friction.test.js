@@ -70,7 +70,7 @@ test("authenticated MCP reports field reasons and serves room_react plus replyTo
   assert.equal(full.result.tools.some(tool => tool.name === "room_read_board"), true);
   assert.equal(full.result.tools.some(tool => tool.name === "bond.list"), false);
 
-  const longBody = await call("room_post_message", { roomId: created.roomId, body: "x".repeat(4097) });
+  const longBody = await call("room_post_message", { roomId: created.roomId, body: "x".repeat(65537) });
   assert.equal(longBody.error.message, "invalid_arguments");
   assert.equal(longBody.error.data.invalid.body, "too long");
 
