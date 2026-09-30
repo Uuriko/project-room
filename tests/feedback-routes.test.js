@@ -34,11 +34,11 @@ const helpers = data => {
   };
 };
 
-const call = ({ method = "GET", route, id = null, data, lane = "jill", feedbackStore, limiter = createSubmitLimiter(), roomId = "room1" }) => {
+const call = ({ method = "GET", route, id = null, data, lane = "jill", feedbackStore, limiter = createSubmitLimiter(), roomId = "room1", store } = {}) => {
   const h = helpers(data);
   const req = { method, headers: {} };
   const auth = lane === null ? {} : { member: { id: lane } };
-  const result = handleFeedbackCore({ req, res: {}, store: undefined, roomId, auth,
+  const result = handleFeedbackCore({ req, res: {}, store, roomId, auth,
     feedbackRoute: route, feedbackId: id, feedbackStore, limiter,
     helpers: { json: h.json, reject: h.reject, body: h.body } });
   return { result, error: null };
@@ -235,4 +235,67 @@ test("triage with a bad verdict → 422 invalid_verdict", () => {
   const e = callErr({ method: "POST", route: "triage", id, data: { verdict: "meh" }, feedbackStore: fb, lane: "reviewer-a" });
   assert.equal(e.status, 422);
   assert.equal(e.code, "invalid_verdict");
+});
+
+// H-2 production wiring (server/feedback-routes.mjs): the HTTP layer must
+// configure the store's authority gates from room roles, otherwise the
+// store's legacy default lets any lane triage and mint Mark through the
+// production path.
+// Contract: triage and appeal decisions require a reviewer (room owner or
+// moderator); recording merged/adopted outcomes requires the room owner.
+// These tests go through handleFeedbackCore with a production-shaped store
+// (the real roomAuthority interface: ownerId + member roles) and NO injected
+// feedbackStore, so they exercise the wiring itself — the store-level gates
+// are owned by tests/feedback-store.test.js and are never re-asserted here.
+// Credible regression: on the pre-fix route code the plain-member calls
+// below succeed (200), because the store was built with no predicates.
+const roomStore = ({ ownerId = "owner-lane", roles = {} } = {}) => ({
+  roomAuthority: roomId => ({
+    roomId,
+    ownerId,
+    members: Object.fromEntries(
+      Object.entries(roles).map(([lane, role]) => [lane, { id: lane, role }])),
+  }),
+});
+
+test("H-2 wiring: plain member triage and appeal decisions → 403 not_reviewer; moderator triage → 200", () => {
+  const store = roomStore({ roles: { "mod-lane": "moderator", "member-lane": "member", "other-lane": "member" } });
+  const roomId = "authz-room-triage";
+  const id = call({ method: "POST", route: "submit", data: goodFiling("member-lane"),
+    lane: "member-lane", roomId, store }).result.value.feedback_id;
+
+  const e1 = callErr({ method: "POST", route: "triage", id, data: { verdict: "junk" },
+    lane: "member-lane", roomId, store });
+  assert.equal(e1.status, 403);
+  assert.equal(e1.code, "not_reviewer");
+
+  const triaged = call({ method: "POST", route: "triage", id, data: { verdict: "junk" },
+    lane: "mod-lane", roomId, store }).result;
+  assert.equal(triaged.status, 200);
+  assert.equal(triaged.value.verdict, "junk");
+
+  call({ method: "POST", route: "appeal", id, lane: "member-lane", roomId, store });
+  const e2 = callErr({ method: "POST", route: "appeal-decision", id, data: { decision: "uphold" },
+    lane: "other-lane", roomId, store });
+  assert.equal(e2.status, 403);
+  assert.equal(e2.code, "not_reviewer");
+});
+
+test("H-2 wiring: non-owner outcome recording → 403 not_release_authority; owner → 200", () => {
+  const store = roomStore({ roles: { "mod-lane": "moderator", "member-lane": "member" } });
+  const roomId = "authz-room-outcome";
+  const id = call({ method: "POST", route: "submit", data: goodFiling("member-lane"),
+    lane: "member-lane", roomId, store }).result.value.feedback_id;
+  call({ method: "POST", route: "triage", id, data: { verdict: "real" },
+    lane: "mod-lane", roomId, store });
+
+  const e = callErr({ method: "POST", route: "outcome", id,
+    data: { kind: "adopted", ref: "room decision 2026-09-30" }, lane: "mod-lane", roomId, store });
+  assert.equal(e.status, 403);
+  assert.equal(e.code, "not_release_authority");
+
+  const ok = call({ method: "POST", route: "outcome", id,
+    data: { kind: "adopted", ref: "room decision 2026-09-30" }, lane: "owner-lane", roomId, store }).result;
+  assert.equal(ok.status, 200);
+  assert.equal(ok.value.attributions.length, 1);
 });
