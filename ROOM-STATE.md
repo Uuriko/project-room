@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-30T11:29:27Z · board: Uuriko/project-room#1160 · watermark: 5910115639 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=f89c53470eda62585ea29c4c87908c677345dee69dd524edb3692fafe1a2652f -->
+<!-- generated: 2026-09-30T11:59:58Z · board: Uuriko/project-room#1160 · watermark: 5910768261 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=f89c53470eda62585ea29c4c87908c677345dee69dd524edb3692fafe1a2652f -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -32,8 +32,8 @@ RC-2026-09-28-2880 | (none) | submitted | 2026-09-30T03:11:17Z | server/dm-event
 
 ## file-claims
 file | lane | task-id | state
-act-components/src/components.js | jill | RC-2026-09-30-3630 | submitted
-contribution-rollup/src/rollup.js | jill | RC-2026-09-30-3630 | submitted
+activity-inbox/src/project.js | jill | RC-2026-09-30-3634 | submitted
+client/request-runner.mjs | jill | RC-2026-09-30-3634 | submitted
 docs/EXPORT-RETENTION-DELETION.md | (none) | RC-2026-09-27-2863 | submitted
 docs/ROOM-PROTOCOL.md | (none) | RC-2026-09-29-3605 | submitted
 docs/ROUTE-AUTH-TABLE.md | jillianai | RC-2026-09-28-2870 | working
@@ -43,40 +43,53 @@ docs/openapi.yaml | jillianai | RC-2026-09-28-2870 | working
 docs/openapi.yaml | (none) | RC-2026-09-28-2871 | submitted
 lanes/REGISTRY.md | (none) | RC-2026-09-29-3605 | submitted
 llms.txt | (none) | RC-2026-09-29-3605 | submitted
-member-capabilities/src/capabilities.js | jill | RC-2026-09-30-3630 | submitted
-scripts/check-no-shadow-imports.mjs | jill | RC-2026-09-30-3629 | submitted
-scripts/claims-index.mjs | jill | RC-2026-09-30-3629 | submitted
-scripts/gmail-live-fixture.mjs | jill | RC-2026-09-30-3629 | submitted
-scripts/grok-room-host.mjs | jill | RC-2026-09-30-3629 | submitted
-scripts/ralph-loop.mjs | jill | RC-2026-09-30-3629 | submitted
+scripts/agent-inbox.mjs | jill | RC-2026-09-30-3634 | submitted
+scripts/agent-onboard.mjs | jill | RC-2026-09-30-3634 | submitted
+scripts/backup-verify.mjs | jill | RC-2026-09-30-3634 | submitted
+scripts/deploy-checks.mjs | jill | RC-2026-09-30-3634 | submitted
+scripts/live-audit.mjs | jill | RC-2026-09-30-3634 | submitted
+scripts/merge-queue-dryrun.mjs | jill | RC-2026-09-30-3634 | submitted
+scripts/room-health.mjs | jill | RC-2026-09-30-3634 | submitted
+scripts/room-key-pull.mjs | jill | RC-2026-09-30-3634 | submitted
 scripts/runtime-package.mjs | jill | RC-2026-09-30-3616 | submitted
-scripts/stamp-version.mjs | jill | RC-2026-09-30-3629 | submitted
-scripts/untested-modules-lint.mjs | jill | RC-2026-09-30-3629 | submitted
 server/activity.mjs | (none) | RC-2026-09-28-2865 | submitted
 server/activity.mjs | (none) | RC-2026-09-28-2880 | submitted
 server/agent-heartbeats.mjs | jill | RC-2026-09-28-3602 | working
 server/agent-plugin-routes.mjs | jill | RC-2026-09-28-3602 | working
 server/command-fields.mjs | (none) | RC-2026-09-28-2871 | submitted
 server/discoverability.mjs | (none) | RC-2026-09-28-2871 | submitted
-server/dispatch-journal.mjs | jill | RC-2026-09-30-3627 | submitted
 server/display-name-guard.mjs | (none) | RC-2026-09-27-2862 | submitted
+server/dispute-arbiters.mjs | jill | RC-2026-09-30-3632 | submitted
+server/dm-consents.mjs | jill | RC-2026-09-30-3632 | submitted
 server/dm-event-visibility.mjs | (none) | RC-2026-09-28-2869 | submitted
 server/dm-event-visibility.mjs | (none) | RC-2026-09-28-2872 | submitted
 server/dm-event-visibility.mjs | (none) | RC-2026-09-28-2878 | submitted
 server/dm-event-visibility.mjs | (none) | RC-2026-09-28-2879 | submitted
 server/dm-event-visibility.mjs | (none) | RC-2026-09-28-2880 | submitted
-server/dm-rooms.mjs | jill | RC-2026-09-30-3627 | submitted
+server/emissary-ringdetect.mjs | jill | RC-2026-09-30-3632 | submitted
+server/github-oauth.mjs | jill | RC-2026-09-30-3632 | submitted
+server/governance.mjs | jill | RC-2026-09-30-3632 | submitted
+server/growth-funnel.mjs | jill | RC-2026-09-30-3632 | submitted
+server/health-report.mjs | jill | RC-2026-09-30-3632 | submitted
 server/http.mjs | jillianai | RC-2026-09-28-2870 | working
 server/http.mjs | (none) | RC-2026-09-28-2872 | submitted
 server/http.mjs | (none) | RC-2026-09-28-2878 | submitted
 server/http.mjs | (none) | RC-2026-09-28-2879 | submitted
 server/http.mjs | (none) | RC-2026-09-28-2880 | submitted
-server/inbox-collab-routes.mjs | jill | RC-2026-09-30-3627 | submitted
-server/inbox-collab-store.mjs | jill | RC-2026-09-30-3627 | submitted
+server/inbox-attachment-bytes.mjs | jill | RC-2026-09-30-3631 | submitted
+server/inbox-priority.mjs | jill | RC-2026-09-30-3631 | submitted
+server/inbox-rules.mjs | jill | RC-2026-09-30-3631 | submitted
+server/inbox-send-later.mjs | jill | RC-2026-09-30-3631 | submitted
+server/inbox-spam.mjs | jill | RC-2026-09-30-3631 | submitted
+server/inbox-stitch-store.mjs | jill | RC-2026-09-30-3631 | submitted
+server/inbox-threads.mjs | jill | RC-2026-09-30-3631 | submitted
 server/match-events.mjs | jill | RC-2026-09-30-3616 | submitted
 server/match-profiles.mjs | jill | RC-2026-09-30-3616 | submitted
 server/matchmaking-routes.mjs | jill | RC-2026-09-30-3616 | submitted
+server/mcp-install-script.mjs | jill | RC-2026-09-30-3632 | submitted
+server/migrations.mjs | jill | RC-2026-09-30-3632 | submitted
 server/moderation.mjs | (none) | RC-2026-09-27-2861 | submitted
+server/morning-digest.mjs | jill | RC-2026-09-30-3632 | submitted
 server/notifications.mjs | (none) | RC-2026-09-28-2880 | submitted
 server/oauth-provider.mjs | (none) | RC-2026-09-27-2853 | submitted
 server/open-questions.mjs | (none) | RC-2026-09-28-2867 | submitted
@@ -100,33 +113,32 @@ server/work-context.mjs | jillianai | RC-2026-09-28-2876 | working
 server/work-discussion.mjs | (none) | RC-2026-09-28-2875 | submitted
 server/work-discussion.mjs | jillianai | RC-2026-09-28-2876 | working
 server/writer-fence.mjs | jill | RC-2026-09-30-3616 | submitted
-src/agent-card-registry.mjs | jill | RC-2026-09-30-3630 | submitted
+src/agent-discovery.mjs | jill | RC-2026-09-30-3634 | submitted
 src/app.js | (none) | RC-2026-09-28-2879 | submitted
-src/cold-start.mjs | jill | RC-2026-09-30-3630 | submitted
-src/contact-merge.mjs | jill | RC-2026-09-30-3630 | submitted
-src/data-export.mjs | jill | RC-2026-09-30-3630 | submitted
+src/contact-merge.mjs | jill | RC-2026-09-30-3634 | submitted
+src/cross-agent-messaging.mjs | jill | RC-2026-09-30-3634 | submitted
+src/digest-scheduler.mjs | jill | RC-2026-09-30-3634 | submitted
 src/events.js | (none) | RC-2026-09-28-2874 | submitted
 src/events.js | (none) | RC-2026-09-28-2877 | submitted
 src/events.js | (none) | RC-2026-09-28-2879 | submitted
 src/events.js | (none) | RC-2026-09-28-2903 | submitted
-src/events.js | jill | RC-2026-09-30-3630 | submitted
-src/failover-provider-wireup.mjs | jill | RC-2026-09-30-3630 | submitted
-src/handoff-store.mjs | jill | RC-2026-09-30-3627 | submitted
-src/health-status.mjs | jill | RC-2026-09-30-3630 | submitted
-src/inbox-rule-store.mjs | jill | RC-2026-09-30-3627 | submitted
-src/mailbox-search-store.mjs | jill | RC-2026-09-30-3627 | submitted
-src/owner-alerts.mjs | jill | RC-2026-09-30-3627 | submitted
-src/passkey-login.mjs | jill | RC-2026-09-30-3630 | submitted
-src/secret-scan.mjs | jill | RC-2026-09-30-3630 | submitted
-src/snooze-store.mjs | jill | RC-2026-09-30-3627 | submitted
-src/storage-failure-drills.mjs | jill | RC-2026-09-30-3630 | submitted
-src/task-lifecycle.mjs | jill | RC-2026-09-30-3627 | submitted
-src/thread-view-store.mjs | jill | RC-2026-09-30-3627 | submitted
-src/unified-inbox-store.mjs | jill | RC-2026-09-30-3627 | submitted
+src/events.js | jill | RC-2026-09-30-3634 | submitted
+src/failover-provider-wireup.mjs | jill | RC-2026-09-30-3634 | submitted
+src/handoff-store.mjs | jill | RC-2026-09-30-3634 | submitted
+src/inbox-zero-triage.mjs | jill | RC-2026-09-30-3631 | submitted
+src/join.js | jill | RC-2026-09-30-3634 | submitted
+src/mcp-post-wiring.mjs | jill | RC-2026-09-30-3634 | submitted
+src/outside-agents.mjs | jill | RC-2026-09-30-3634 | submitted
+src/totp-2fa.mjs | jill | RC-2026-09-30-3634 | submitted
+src/unified-contact-thread.mjs | jill | RC-2026-09-30-3634 | submitted
+src/whatsapp-connect.mjs | jill | RC-2026-09-30-3634 | submitted
 src/work-selectors.js | (none) | RC-2026-09-28-2877 | submitted
 src/work-selectors.js | (none) | RC-2026-09-28-2879 | submitted
 tests/activity.test.js | (none) | RC-2026-09-28-2865 | submitted
 tests/agent-wake-poll.test.js | jill | RC-2026-09-28-3602 | working
+tests/audit-wave-low-a.test.js | jill | RC-2026-09-30-3631 | submitted
+tests/audit-wave-low-b.test.js | jill | RC-2026-09-30-3632 | submitted
+tests/audit-wave-low-d.test.js | jill | RC-2026-09-30-3634 | submitted
 tests/command-catalog.test.js | (none) | RC-2026-09-28-2871 | submitted
 tests/decision-register.test.js | (none) | RC-2026-09-28-2877 | submitted
 tests/decision-register.test.js | (none) | RC-2026-09-28-2879 | submitted
@@ -171,7 +183,7 @@ server/reply-requests.mjs | , jillianai | RC-2026-09-28-2876, RC-2026-09-28-2880
 server/room-activation-pack.mjs |  | RC-2026-09-27-2864, RC-2026-09-28-2879
 server/store.mjs | , jillianai | RC-2026-09-27-2863, RC-2026-09-28-2868, RC-2026-09-28-2869, RC-2026-09-28-2876, RC-2026-09-28-2879, RC-2026-09-28-2880, RC-2026-09-28-2903
 server/work-discussion.mjs | , jillianai | RC-2026-09-28-2875, RC-2026-09-28-2876
-src/events.js | , jill | RC-2026-09-28-2874, RC-2026-09-28-2877, RC-2026-09-28-2879, RC-2026-09-28-2903, RC-2026-09-30-3630
+src/events.js | , jill | RC-2026-09-28-2874, RC-2026-09-28-2877, RC-2026-09-28-2879, RC-2026-09-28-2903, RC-2026-09-30-3634
 src/work-selectors.js |  | RC-2026-09-28-2877, RC-2026-09-28-2879
 tests/decision-register.test.js |  | RC-2026-09-28-2877, RC-2026-09-28-2879
 tests/dm-privacy.test.js |  | RC-2026-09-28-2869, RC-2026-09-28-2872, RC-2026-09-28-2874, RC-2026-09-28-2878, RC-2026-09-28-2879, RC-2026-09-28-2880, RC-2026-09-28-2903
@@ -193,6 +205,9 @@ Jillian | documentation | standard
 
 ## recent-receipts
 task-id | merged | comment-id
+RC-2026-09-30-3630 | d5744ca72039c0ad34ee8f8b1bf63243048ac6fb | 5910740906
+RC-2026-09-30-3627 | 8112c23cfc093b572af352cba8aff6fcb4a3a701 | 5910475432
+RC-2026-09-30-3629 | 9b8e3c681a4957c799eb83aa35b0c12ae6492b72 | 5910334611
 RC-2026-09-30-3626 | 5d27aa42ca11b49ebcfa4305e95b09be9d8cb360 | 5910076214
 RC-2026-09-30-3625 | 6b99f28ff03277a98e5a6f0f772fb826f12f7136 | 5909823818
 RC-2026-09-30-3628 | d461b4ddd1eb96218e8a6b6bf84a5ec57a118bc1 | 5909646483
@@ -200,9 +215,6 @@ RC-2026-09-30-3620 | 198f0d4b | 5908893943
 RC-2026-09-30-3622 | 46b04bf3 | 5908890916
 RC-2026-09-30-3624 | 9461a050 | 5908888028
 RC-2026-09-30-3621 | 74c650fd | 5908206249
-RC-2026-09-30-3623 | 1914a87c | 5908189794
-RC-2026-09-30-3619 | 2185c8e1 | 5907899520
-RC-2026-09-30-3617 | e0824b5a | 5907889550
 
 ## prose-claims-needing-fence
 comment-id | lane | task | at
@@ -212,5 +224,5 @@ comment-id | lane | task | at
 Uuriko/project-room#266 -> Uuriko/project-room#1160 · watermark 5859826064 · carried-open: RC-2026-09-27-005
 
 ## signals
-board_comments=591 threshold=1500 rotation_due=no watcher=active open_claims=29 prose_open=0 unfenced_prose=0 files_claimed=92 overlap_files=16 watermark=5910115639
+board_comments=603 threshold=1500 rotation_due=no watcher=active open_claims=29 prose_open=0 unfenced_prose=0 files_claimed=104 overlap_files=16 watermark=5910768261
 
