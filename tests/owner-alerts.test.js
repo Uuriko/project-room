@@ -492,9 +492,9 @@ describe('owner-alerts', () => {
     const a = d1.raise(ALERT(), 'agent');
     assert.equal(box.saves, 1, 'raise persists');
     await d1.dispatch(a.id, 'agent');
-    assert.equal(box.saves, 2, 'dispatch persists');
+    assert.equal(box.saves, 3, 'dispatch persists the in-flight attempt and the outcome');
     d1.resolve(a.id, 'john');
-    assert.equal(box.saves, 3, 'resolve persists');
+    assert.equal(box.saves, 4, 'resolve persists');
     assert.equal(box.saved.version, OWNER_ALERTS_SCHEMA_VERSION);
     assert.equal(box.saved.alerts.length, 1);
 

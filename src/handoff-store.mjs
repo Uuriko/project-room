@@ -164,8 +164,14 @@ export function createHandoffStore(deps = {}) {
       at: clock(),
       handoff: handoffSnapshot,
     });
-    for (const sub of subscribers) {
-      sub(event);
+    // M-29: a throwing subscriber must not fail the committed transition or
+    // starve the subscribers after it (mirrors inbox-rule-store).
+    for (const sub of [...subscribers]) {
+      try {
+        sub(event);
+      } catch {
+        // Subscriber errors are isolated, never propagated.
+      }
     }
   }
 

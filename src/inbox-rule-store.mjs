@@ -255,6 +255,26 @@ export function createInboxRuleStore(deps = {}) {
     }
   }
 
+  /**
+   * M-8: transactional mutation. Snapshot the durable state before mutating;
+   * if the write fails, restore memory so live state never runs ahead of what
+   * survived to disk. Returns the mutator's value.
+   */
+  function transact(mutator) {
+    const beforeRules = structuredClone([...rules]);
+    const beforeCounter = idCounter;
+    try {
+      const result = mutator();
+      persist();
+      return result;
+    } catch (err) {
+      rules.clear();
+      for (const [id, rule] of beforeRules) rules.set(id, rule);
+      idCounter = beforeCounter;
+      throw err;
+    }
+  }
+
   /** Notify subscribers; a subscriber throw never breaks the mutation. */
   function notify(event) {
     for (const fn of [...subscribers]) {
@@ -317,12 +337,13 @@ export function createInboxRuleStore(deps = {}) {
         updatedAt: entry.updatedAt,
       });
     }
-    rules.clear();
-    for (const rule of restored) {
-      rules.set(rule.id, rule);
-    }
+    transact(() => {
+      rules.clear();
+      for (const rule of restored) {
+        rules.set(rule.id, rule);
+      }
+    });
     notify({ type: 'restore', ruleCount: restored.length, at: clock() });
-    persist();
     return list();
   }
 
@@ -391,20 +412,22 @@ export function createInboxRuleStore(deps = {}) {
   function create(payload, actor = 'agent') {
     const validated = validateRulePayload(payload);
     const at = clock();
-    const rule = {
-      id: newId(),
-      name: validated.name,
-      enabled: validated.enabled ?? true,
-      priority: validated.priority,
-      conditions: validated.conditions,
-      actions: validated.actions,
-      createdAt: at,
-      updatedAt: at,
-    };
-    rules.set(rule.id, rule);
-    persist();
-    notify({ type: 'create', ruleId: rule.id, at, actor });
-    return snapshotRule(rule);
+    const snap = transact(() => {
+      const rule = {
+        id: newId(),
+        name: validated.name,
+        enabled: validated.enabled ?? true,
+        priority: validated.priority,
+        conditions: validated.conditions,
+        actions: validated.actions,
+        createdAt: at,
+        updatedAt: at,
+      };
+      rules.set(rule.id, rule);
+      return { snap: snapshotRule(rule), ruleId: rule.id };
+    });
+    notify({ type: 'create', ruleId: snap.ruleId, at, actor });
+    return snap.snap;
   }
 
   function get(id) {
@@ -415,22 +438,25 @@ export function createInboxRuleStore(deps = {}) {
     const rule = getRuleOrThrow(id);
     const validated = validateRulePayload(patch ?? {}, { forUpdate: true });
     const at = clock();
-    if (validated.name !== undefined) rule.name = validated.name;
-    if (validated.enabled !== undefined) rule.enabled = validated.enabled;
-    if (validated.priority !== undefined) rule.priority = validated.priority;
-    if (validated.conditions !== undefined) rule.conditions = validated.conditions;
-    if (validated.actions !== undefined) rule.actions = validated.actions;
-    rule.updatedAt = at;
-    persist();
+    const snap = transact(() => {
+      if (validated.name !== undefined) rule.name = validated.name;
+      if (validated.enabled !== undefined) rule.enabled = validated.enabled;
+      if (validated.priority !== undefined) rule.priority = validated.priority;
+      if (validated.conditions !== undefined) rule.conditions = validated.conditions;
+      if (validated.actions !== undefined) rule.actions = validated.actions;
+      rule.updatedAt = at;
+      return snapshotRule(rule);
+    });
     notify({ type: 'update', ruleId: id, at, actor });
-    return snapshotRule(rule);
+    return snap;
   }
 
   function remove(id, actor = 'agent') {
     getRuleOrThrow(id);
-    rules.delete(id);
+    transact(() => {
+      rules.delete(id);
+    });
     const at = clock();
-    persist();
     notify({ type: 'delete', ruleId: id, at, actor });
     return true;
   }
