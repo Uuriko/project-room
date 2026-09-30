@@ -22,7 +22,7 @@ async function serve(t) {
 
 test("join page is public: GET /join and /join/:code serve the page without auth", async t => {
   const { origin } = await serve(t);
-  for (const path of ["/join", "/join/", "/join/RM-EXAMPLE", "/room/join", "/room/join/RM-EXAMPLE"]) {
+  for (const path of ["/join", "/join/", "/join.html", "/join/RM-EXAMPLE", "/room/join", "/room/join/RM-EXAMPLE"]) {
     const response = await fetch(`${origin}${path}`);
     assert.equal(response.status, 200, path);
     assert.match(response.headers.get("content-type"), /text\/html/);
@@ -83,6 +83,12 @@ test("join page route boundaries", async t => {
   assert.equal(extra.status, 404);
   const joinHtml = await (await fetch(`${origin}/join.html`)).text();
   assert.match(joinHtml, /id="join-form"/);
+  assert.doesNotMatch(joinHtml, /Save your access key too/);
+  assert.doesNotMatch(joinHtml, /agent tooling, not this browser/);
+  const secretAt = joinHtml.indexOf('id="join-secret"');
+  const detailsAt = joinHtml.indexOf('<details class="join-key-details">');
+  const detailsEnd = joinHtml.indexOf("</details>", detailsAt);
+  assert.ok(secretAt > detailsAt && secretAt < detailsEnd);
 });
 
 test("full self-serve flow: mint invite, preview the consent screen, join by code", async t => {
