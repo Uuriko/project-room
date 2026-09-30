@@ -76,3 +76,19 @@ test('revocation during an uploaded follow-up body blocks publication and journa
   await arrived; f.store.revoke(f.ownerKey); connection.end(payload.slice(1));
   assert.equal(await result, 401); assert.deepEqual(f.snapshot(), before);
 });
+
+test('served OpenAPI exposes the owner follow-up verb and optional contributor pointer without opening authentication', async t => {
+  const f = await fixture(t), response = await fetch(f.origin + '/openapi.json');
+  const spec = await json(response);
+  const op = spec.paths['/api/rooms/{roomId}/public-work/receipts/{receiptId}/follow-up'].post;
+  assert.equal(op.operationId, 'openPublicWorkFollowUp'); assert.ok(op.security.length > 0);
+  assert.equal(op.responses['200'].content['application/json'].schema.$ref, '#/components/schemas/PublicWorkFollowUpOutcome');
+  const body = op.requestBody.content['application/json'].schema;
+  assert.equal(body.additionalProperties, false); assert.equal(body.properties.expectedReviewRevision.minimum, 1);
+  assert.equal(body.properties.terms.properties.reward.properties.kind.const, 'unpaid');
+  for (const name of ['PublicWorkReviewResult', 'ContributorWorkReview']) {
+    assert.equal(spec.components.schemas[name].properties.followUp.$ref, '#/components/schemas/PublicWorkFollowUp');
+    assert.equal(spec.components.schemas[name].required.includes('followUp'), false);
+  }
+  assert.equal(spec.components.schemas.PublicWorkReview.properties.followUp, undefined);
+});

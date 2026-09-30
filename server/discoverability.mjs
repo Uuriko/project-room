@@ -63,6 +63,7 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/api/rooms/{roomId}/public-work/results", ["GET", "HEAD"], "room-member", "Owner-only submitted results, including withdrawn offers.", "listPublicWorkResults", { operationIds: { HEAD: "headPublicWorkResults" }, publicReview: "list" }),
   route("/api/rooms/{roomId}/public-work/receipts/{receiptId}", ["GET", "HEAD"], "room-member", "Owner or currently designated reviewer: inspect exact review revision and authority.", "inspectPublicWorkReview", { operationIds: { HEAD: "headPublicWorkReview" }, publicReview: "inspect" }),
   ...["decide", "verify"].map(action => route(`/api/rooms/{roomId}/public-work/receipts/{receiptId}/${action}`, ["POST"], "room-member", "Record an explicit current-authority review over immutable evidence; no payment or claim reopening.", `${action}PublicWorkReview`, { publicReview: action })),
+  route("/api/rooms/{roomId}/public-work/receipts/{receiptId}/follow-up", ["POST"], "room-member", "Owner explicitly publishes one linked unpaid follow-up; no automatic claim or private feedback publication.", "openPublicWorkFollowUp", { publicReview: "follow-up" }),
   route("/api/rooms/{roomId}/project-offers/{offerId}/claims", ["POST"], "room-member", "Owner-only: explicitly enable outside volunteer claims for declared repository paths.", "enablePublicWorkClaims", { publicWork: "enable" }),
   // Hosted MCP (JSON-RPC over POST).
   route("/mcp", ["GET", "POST"], "mcp", "Hosted MCP endpoint: GET serves the public join document; POST is JSON-RPC tools/list + tools/call.", "postMcp",
@@ -197,26 +198,36 @@ const reviewBindingProperties = { receiptId: { type: "string" }, taskId: { type:
 const reviewNote = { type: "string", minLength: 1, maxLength: 2000, description: "Nonempty text. Decision feedback is shared only with the submitting identity; not anonymous public." };
 const reviewRef = name => ({ $ref: `#/components/schemas/${name}` });
 const nullableReview = schema => ({ anyOf: [schema, { type: "null" }] });
+const publicWorkFollowUpTerms = { type: "object", additionalProperties: false, required: ["kind", "title", "summary", "acceptanceCriteria", "reward", "approvalPolicy", "repositoryUrl"], properties: {
+  kind: { enum: ["task", "project"] }, title: { type: "string", minLength: 1, maxLength: 200 }, summary: { type: "string", minLength: 1, maxLength: 4000 },
+  acceptanceCriteria: { type: "array", minItems: 1, maxItems: 20, items: { type: "string", minLength: 1, maxLength: 1000 } },
+  exclusions: { type: "array", maxItems: 20, items: { type: "string", minLength: 1, maxLength: 1000 } },
+  reward: { type: "object", additionalProperties: false, required: ["kind"], properties: { kind: { const: "unpaid" }, basis: { enum: ["fixed", "pool"] }, terms: { type: "string", minLength: 1, maxLength: 2000 } } },
+  approvalPolicy: { type: "object", additionalProperties: false, required: ["mode"], properties: { mode: { enum: ["human", "agent", "human_with_agent_review"] } } },
+  repositoryUrl: { type: "string", format: "uri", maxLength: 2000 }, submissionUrl: { type: "string", format: "uri", maxLength: 2000 }, deadline: { type: "string", format: "date-time" },
+} };
 const publicWorkReviewSchemas = {
+  PublicWorkFollowUp: { type: "object", additionalProperties: false, required: ["taskId", "termsVersion", "available"], properties: { taskId: { type: "string", minLength: 1, maxLength: 128 }, termsVersion: { type: "integer", minimum: 1 }, available: { type: "boolean", description: "Currently publicly eligible; not a guarantee that the task is unclaimed." } } },
+  PublicWorkFollowUpOutcome: { type: "object", required: ["followUp", "task"], properties: { followUp: reviewRef("PublicWorkFollowUp"), task: reviewRef("PublicWorkTask") } },
   PublicWorkReview: { type: "object", required: ["schema", ...Object.keys(reviewBindingProperties), "revision", "state", "verification", "decision"], properties: {
     schema: { const: "public-work-review/1" }, ...reviewBindingProperties, revision: { type: "integer", minimum: 0 }, state: reviewState,
     verification: nullableReview({ type: "object", required: ["verdict", "reviewerKind", "actorId", "reason", "at", "current"], properties: { verdict: { enum: ["PASS", "FAIL"] }, reviewerKind, actorId: { type: "string" }, reason: reviewNote, at: { type: "string", format: "date-time" }, current: { type: "boolean", description: "Still satisfies current standing and policy. FAIL is never a current PASS." } } }),
     decision: nullableReview({ type: "object", required: ["decision", "actorId", "reason", "at"], properties: { decision: { enum: ["accepted", "rejected", "revision_requested"] }, actorId: { type: "string" }, reason: reviewNote, at: { type: "string", format: "date-time" } } }),
   } },
   PublicWorkReviewResult: { type: "object", required: ["receipt", "offer", "task", "review", "authority"], properties: {
-    receipt: reviewRef("PublicWorkReceipt"), offer: { type: "object", required: ["id", "title", "summary", "acceptanceCriteria", "exclusions", "repositoryUrl", "status", "approvalPolicy"], properties: { id: { type: "string" }, title: { type: "string" }, summary: { type: "string", maxLength: 4000 }, acceptanceCriteria: { type: "array", maxItems: 20, items: { type: "string", maxLength: 1000 } }, exclusions: { type: "array", maxItems: 20, items: { type: "string", maxLength: 1000 } }, repositoryUrl: { type: "string", format: "uri" }, status: { enum: ["published", "withdrawn"] }, approvalPolicy: { type: "object", required: ["mode"], properties: { mode: { enum: ["human", "agent", "human_with_agent_review"] } } } } },
+    followUp: reviewRef("PublicWorkFollowUp"), receipt: reviewRef("PublicWorkReceipt"), offer: { type: "object", required: ["id", "title", "summary", "acceptanceCriteria", "exclusions", "repositoryUrl", "status", "approvalPolicy"], properties: { id: { type: "string" }, title: { type: "string" }, summary: { type: "string", maxLength: 4000 }, acceptanceCriteria: { type: "array", maxItems: 20, items: { type: "string", maxLength: 1000 } }, exclusions: { type: "array", maxItems: 20, items: { type: "string", maxLength: 1000 } }, repositoryUrl: { type: "string", format: "uri" }, status: { enum: ["published", "withdrawn"] }, approvalPolicy: { type: "object", required: ["mode"], properties: { mode: { enum: ["human", "agent", "human_with_agent_review"] } } } } },
     task: { type: "object", required: ["repositoryRef", "files"], properties: { repositoryRef: { type: "string", minLength: 1, maxLength: 128 }, files: { type: "array", minItems: 1, maxItems: 64, items: { type: "string", maxLength: 512 } } } },
     review: reviewRef("PublicWorkReview"), authority: { type: "object", required: ["canDecide", "canVerify", "acceptReady", "reason"], properties: { canDecide: { type: "boolean" }, canVerify: { type: "boolean" }, acceptReady: { type: "boolean" }, reason: { type: "string" } } },
   } },
   ContributorWorkReview: { type: "object", additionalProperties: false, required: [...Object.keys(reviewBindingProperties), "review"], properties: {
-    ...reviewBindingProperties, review: { type: "object", additionalProperties: false, required: ["revision", "state"], properties: { revision: { type: "integer", minimum: 0 }, state: reviewState,
+    ...reviewBindingProperties, followUp: reviewRef("PublicWorkFollowUp"), review: { type: "object", additionalProperties: false, required: ["revision", "state"], properties: { revision: { type: "integer", minimum: 0 }, state: reviewState,
       decision: { enum: ["accepted", "rejected", "revision_requested"] }, reason: reviewNote, decidedAt: { type: "string", format: "date-time" }, verificationVerdict: { enum: ["PASS", "FAIL"], description: "Last recorded reviewer check; not current eligibility or acceptance." }, verificationReviewerKind: reviewerKind } },
   } },
 };
 function publicWorkReviewOperation(entry, method) {
   const kind = entry.publicReview;
   if (!kind) return {};
-  const responseSchema = kind === "contributor" ? reviewRef("ContributorWorkReview") : kind === "list" ? { type: "object", required: ["results", "nextCursor"], properties: { results: { type: "array", maxItems: 100, items: reviewRef("PublicWorkReviewResult") }, nextCursor: { type: ["string", "null"] } } } : reviewRef("PublicWorkReviewResult");
+  const responseSchema = kind === "follow-up" ? reviewRef("PublicWorkFollowUpOutcome") : kind === "contributor" ? reviewRef("ContributorWorkReview") : kind === "list" ? { type: "object", required: ["results", "nextCursor"], properties: { results: { type: "array", maxItems: 100, items: reviewRef("PublicWorkReviewResult") }, nextCursor: { type: ["string", "null"] } } } : reviewRef("PublicWorkReviewResult");
   const responses = { ...operationResponses(entry, method) }; delete responses["201"];
   responses["200"] = { description: "Recorded review or current projection; submission bytes and rewards unchanged.", ...(method === "HEAD" ? {} : { content: { "application/json": { schema: responseSchema } } }) };
   for (const [code, description] of Object.entries({ 401: "Unknown, revoked or missing credential.", 403: "Owner/current designated review standing required.", 404: "Receipt not found for this room or submitting identity.", 409: "Stale receipt/review revision, final decision or required current PASS absent.", 422: "Invalid fields or unsupported query." })) responses[code] = { ...responses[code], description, ...(code === "422" ? { content: { "application/json": { schema: reviewRef("ErrorEnvelope") } } } : {}) };
@@ -228,6 +239,15 @@ function publicWorkReviewOperation(entry, method) {
       ...(kind === "decide" ? { decision: { enum: ["accepted", "rejected", "revision_requested"] } } : { verdict: { enum: ["PASS", "FAIL"] } }) };
     op.requestBody = { required: true, content: { "application/json": { schema: { type: "object", additionalProperties: false, required: Object.keys(properties), properties } } } };
     op.description += " Accepted/rejected decisions are terminal; revision_requested is feedback only. Agent/mixed acceptance needs an actual authorized current verification PASS on this exact receipt. Reuse exact requestId and payload after an unknown response.";
+  }
+  if (kind === "follow-up") {
+    const properties = { requestId: { type: "string", minLength: 1, maxLength: 128 }, expectedReviewRevision: { type: "integer", minimum: 1 }, taskId: { type: "string", minLength: 1, maxLength: 128 }, expectedTermsVersion: { type: "integer", minimum: 1 }, generation: { type: "integer", minimum: 1 }, artifactSha256: reviewBindingProperties.artifactSha256,
+      successorTaskId: { type: "string", minLength: 1, maxLength: 128 }, terms: publicWorkFollowUpTerms, repositoryRef: { type: "string", minLength: 1, maxLength: 128 }, files: { type: "array", minItems: 1, maxItems: 64, items: { type: "string", minLength: 1, maxLength: 512 } } };
+    op.requestBody = { required: true, content: { "application/json": { schema: { type: "object", additionalProperties: false, required: Object.keys(properties), properties } } } };
+    op.description += " Current active non-guest Room owner only. First creation needs a published unpaid parent and exact revision_requested review. Retain repository, approval mode, reviewer and linked-work policy. Owner authors public instructions; private feedback is not copied. Atomically publish one new task open to eligible contributors. Reuse exact requestId and payload after unknown response; replay is the original creation outcome, not current availability.";
+    responses["200"].description = "Committed follow-up publication or exact journal replay; not a claim or current-state guarantee.";
+    responses["403"].description = "Current active non-guest Room owner required.";
+    responses["409"].description = "Stale receipt/review, unavailable original, existing follow-up or changed retry payload.";
   }
   return op;
 }
