@@ -9,7 +9,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
-import { BountyEscrow, bountyEscrowSchema, APPROVAL_MODES } from "../server/bounty-escrow.mjs";
+import { BountyEscrow, APPROVAL_MODES } from "../server/bounty-escrow.mjs";
 
 const ROOM = "room-test";
 const JILL = "id:agent/jill";      // poster lane
