@@ -32,11 +32,11 @@ test('actual Worker public search routes load packaged HTML and preserve private
     }
     for (const file of publicAssetPaths.filter(path => path.startsWith('compare/') && path.endsWith('.html'))) {
       const canonical = '/' + file.slice(0, -5);
-      const page = await call(canonical); assert.equal(page.status, 200, canonical); assert.equal(page.headers.get('x-robots-tag'), 'all', canonical);
+      const page = await call(canonical); assert.equal(page.status, 200, canonical); assert.match(page.headers.get('x-robots-tag'), /noindex/, canonical);
       assert.match(await page.text(), new RegExp('rel="canonical" href="https://room.trydemigod.com' + canonical + '"'));
     }
     const map = await call('/sitemap.xml'); assert.equal(map.status, 200); assert.equal(map.headers.get('x-robots-tag'), 'all');
-    assert.match(await map.text(), /\/about/);
+    const sitemap = await map.text(); assert.match(sitemap, /\/about/); assert.doesNotMatch(sitemap, /compare/);
     missing = true;
     const failed = await call('/about'); assert.equal(failed.status, 500); assert.match(failed.headers.get('x-robots-tag'), /noindex/);
     assert.doesNotMatch(await (await call('/sitemap.xml')).text(), /\/about/);

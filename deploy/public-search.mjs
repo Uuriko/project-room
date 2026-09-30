@@ -1,3 +1,4 @@
+export const reviewedPublicSearchPaths = Object.freeze(["/about"]);
 export const PUBLIC_SEARCH_CSP = "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 // Only explicitly reviewed static marketing pages may override private defaults.
 export const comparisonSlugs = Object.freeze([

@@ -1,4 +1,4 @@
-import { publicSearchAssets, publicSearchCanonical, publicSearchSitemap, PUBLIC_SEARCH_CSP } from "../deploy/public-search.mjs";
+import { publicSearchAssets, publicSearchCanonical, publicSearchSitemap, PUBLIC_SEARCH_CSP, reviewedPublicSearchPaths } from "../deploy/public-search.mjs";
 import { readConversation } from "./conversation-sync.mjs";
 import { OutsideAgents } from "./outside-agents.mjs";
 import { GmailSync } from './gmail-sync.mjs';
@@ -1800,6 +1800,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // Confirm bytes exist before advertising an asset-backed canonical URL.
         const available = [];
         for (const [path, file] of publicSearchAssets(publicAssetPaths)) {
+          if (!reviewedPublicSearchPaths.includes(path)) continue;
           try { await loadAsset(file); available.push(path); } catch { /* Unavailable pages are not advertised. */ }
         }
         const xml = publicSearchSitemap(ROOM_ORIGIN, [...available, "/receipts"]);
@@ -1813,7 +1814,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const canonical = publicSearchCanonical(url.pathname, publicAssetPaths);
         if (canonical) res.setHeader("Content-Security-Policy", PUBLIC_SEARCH_CSP);
         if (canonical && !url.search) {
-          res.setHeader("X-Robots-Tag", "all");
+          if (reviewedPublicSearchPaths.includes(canonical)) res.setHeader("X-Robots-Tag", "all");
           if (canonical !== url.pathname) {
             res.writeHead(301, { Location: canonical });
             return res.end();

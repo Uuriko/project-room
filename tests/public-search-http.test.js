@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { publicSearchAssets, reviewedPublicSearchPaths } from "../deploy/public-search.mjs";
 import { publicAssetPaths } from "../deploy/public-assets.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
@@ -35,13 +36,13 @@ test("public landing is indexable while app, credentials and unknown pages keep 
   for (const file of publicAssetPaths.filter(path => path.startsWith("compare/") && path.endsWith(".html"))) {
     const canonical = "/" + file.slice(0, -5);
     const page = await fetch(origin + canonical);
-    assert.equal(page.status, 200, canonical); assert.equal(page.headers.get("x-robots-tag"), "all", canonical);
+    assert.equal(page.status, 200, canonical); assert.match(page.headers.get("x-robots-tag"), /noindex/, canonical);
     assert.match(await page.text(), new RegExp('rel="canonical" href="https://room.trydemigod.com' + canonical + '"'));
   }
   const map = await fetch(origin + "/sitemap.xml");
   assert.equal(map.status, 200); assert.equal(map.headers.get("x-robots-tag"), "all");
   const xml = await map.text(); assert.match(xml, /https:\/\/room.trydemigod.com\/about/); assert.match(xml, /\/receipts/);
-  assert.doesNotMatch(xml, /join|api|token/);
+  assert.doesNotMatch(xml, /compare|join|api|token/);
   assert.match(await (await fetch(origin + "/robots.txt")).text(), /Sitemap: https:\/\/room.trydemigod.com\/sitemap.xml/);
 });
 
@@ -50,4 +51,11 @@ test("failed public asset cannot become indexable or enter sitemap", async t => 
   const response = await fetch(origin + "/about");
   assert.equal(response.status, 500); assert.match(response.headers.get("x-robots-tag"), /noindex/);
   assert.doesNotMatch(await (await fetch(origin + "/sitemap.xml")).text(), /\/about/);
+});
+
+test("registering comparison assets does not implicitly approve their claims for indexing", () => {
+  const routes = publicSearchAssets(["about.html", "compare/project-room-vs-slack.html"]);
+  assert.equal(routes.get("/compare/project-room-vs-slack"), "compare/project-room-vs-slack.html");
+  assert.deepEqual(reviewedPublicSearchPaths, ["/about"]);
+  assert.equal(reviewedPublicSearchPaths.includes("/compare/project-room-vs-slack"), false);
 });
