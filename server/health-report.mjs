@@ -9,6 +9,10 @@ const check = (condition, message) => { if (!condition) fail("invalid_health", m
 // Score a room's health 0-100 from weekly stats.
 // stats: { messages, reactions, activeUsers, workItems, joins }
 function scoreHealth(stats) {
+  for (const key of ["messages", "reactions", "activeUsers", "workItems", "joins"]) {
+    check(typeof stats[key] === "number" && Number.isFinite(stats[key]) && stats[key] >= 0,
+      `stats.${key} must be a finite non-negative number`);
+  }
   let score = 50; // baseline
   score += Math.min(20, stats.messages / 10); // activity
   score += Math.min(15, stats.activeUsers * 3); // participation
