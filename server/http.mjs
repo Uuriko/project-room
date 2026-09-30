@@ -3332,7 +3332,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const publicWorkInspectMatch = /^\/api\/rooms\/([^/]{1,384})\/public-work\/receipts\/([^/]{1,128})$/.exec(url.pathname);
       const publicWorkDecideMatch = /^\/api\/rooms\/([^/]{1,384})\/public-work\/receipts\/([^/]{1,128})\/decide$/.exec(url.pathname);
       const publicWorkVerifyMatch = /^\/api\/rooms\/([^/]{1,384})\/public-work\/receipts\/([^/]{1,128})\/verify$/.exec(url.pathname);
-      const publicWorkRoomReviewMatch = publicWorkResultsMatch ?? publicWorkInspectMatch ?? publicWorkDecideMatch ?? publicWorkVerifyMatch;
+      const publicWorkFollowUpMatch = /^\/api\/rooms\/([^/]{1,384})\/public-work\/receipts\/([^/]{1,128})\/follow-up$/.exec(url.pathname);
+      const publicWorkRoomReviewMatch = publicWorkResultsMatch ?? publicWorkInspectMatch ?? publicWorkDecideMatch ?? publicWorkVerifyMatch ?? publicWorkFollowUpMatch;
       const projectOfferPublishMatch = /^\/api\/rooms\/([^/]{1,384})\/project-offers\/([^/]{1,128})\/publish$/.exec(url.pathname);
       const projectOfferWithdrawMatch = /^\/api\/rooms\/([^/]{1,384})\/project-offers\/([^/]{1,128})\/withdraw$/.exec(url.pathname);
       const projectOfferClaimsMatch = /^\/api\/rooms\/([^/]{1,384})\/project-offers\/([^/]{1,128})\/claims$/.exec(url.pathname);
@@ -3567,7 +3568,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (route === "public-work-review") {
         if ([...url.searchParams.keys()].some(key => (key !== "auth" && (!publicWorkResultsMatch || !["limit", "after"].includes(key))) || url.searchParams.getAll(key).length !== 1)) reject(422, "invalid_public_work_review", "Unsupported review query parameters");
         if (isGuestAgentMemberId(auth.member.id)) reject(403, "access_denied", "Guests cannot review contributions");
-        const action = publicWorkDecideMatch ? "decide" : publicWorkVerifyMatch ? "verify" : null;
+        const action = publicWorkDecideMatch ? "decide" : publicWorkVerifyMatch ? "verify" : publicWorkFollowUpMatch ? "follow-up" : null;
         if (!action) {
           if (!["GET", "HEAD"].includes(req.method)) reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET, HEAD" });
           const result = publicWorkResultsMatch
@@ -3581,7 +3582,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           const current = roomAuth(selected, roomId, fence);
           if (current.member.id !== auth.member.id) reject(403, "access_denied", "The acting identity changed");
           if (current.kind === "api-key" && !(current.apiKeyScopes ?? []).some(scope => scope === "rooms:write" || scope === "rooms:*")) reject(403, "insufficient_scope", "API key lacks rooms:write");
-          return store.publicWorkReviews[action](roomId, current.member.id, pathId(publicWorkRoomReviewMatch[2]), data);
+          return action === "follow-up"
+            ? store.publicWorkSuccessors.create(roomId, current.member.id, pathId(publicWorkFollowUpMatch[2]), data)
+            : store.publicWorkReviews[action](roomId, current.member.id, pathId(publicWorkRoomReviewMatch[2]), data);
         });
         return json(res, 200, result);
       }
