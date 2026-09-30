@@ -9,6 +9,8 @@ import { AgentWakeClient } from '../client/agent-wake.mjs';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { execFile } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { saveAgentConnection } from '../client/agent-connection.mjs';
 import { main } from '../scripts/agent-wake.mjs';
 async function fixture(t) {
@@ -106,14 +108,36 @@ test('actual CLI saved connection survives server restart; unknown ACK and lost 
   const config = join(directory, 'connection');
   saveAgentConnection(config, {version:1,origin:'http://127.0.0.1:'+port,roomId:'restart',memberId:identity.identityId,token:identity.secret});
   const env = { ROOM_AGENT_CONFIG: config }; const out = [];
-  const run = (args, fetchImpl = fetch) => main(args, {env,fetchImpl,write:value=>out.push(JSON.parse(value))});
+  // Each ordinary command is an actual CLI process. An in-process main()
+  // harness incorrectly reuses its fetch pool after rebinding the same port;
+  // a real newly invoked CLI has no socket from the stopped server.
+  const childEnv = { ...process.env, ...env };
+  for (const name of ['ROOM_AGENT_ORIGIN', 'ROOM_AGENT_ROOM', 'ROOM_AGENT_MEMBER', 'ROOM_AGENT_TOKEN']) delete childEnv[name];
+  const run = async (args, fetchImpl) => {
+    if (fetchImpl) return main(args, {env,fetchImpl,write:value=>out.push(JSON.parse(value))});
+    const reply = await new Promise(resolve => execFile(process.execPath,
+      [fileURLToPath(new URL('../scripts/agent-wake.mjs', import.meta.url)), ...args],
+      { env: childEnv, timeout: 30000, maxBuffer: 1048576 },
+      (error, stdout, stderr) => resolve({ error, stdout, stderr })));
+    assert.ok(!reply.stdout.includes(identity.secret) && !reply.stderr.includes(identity.secret), 'CLI output must exclude the saved credential');
+    if (reply.error && !Number.isInteger(reply.error.code)) throw new Error('CLI process did not complete');
+    out.push(JSON.parse(reply.stdout.trim()));
+    return reply.error?.code ?? 0;
+  };
+  const diagnostic = () => {
+    const result = out.at(-1);
+    return JSON.stringify({ code: result?.code, status: result?.status,
+      incomplete: ['before', 'after'].flatMap(stage => (result?.observations?.[stage]?.incompleteSources ?? [])
+        .slice(0, 5).map(row => ({ stage, source: row.source, code: row.code }))) });
+  };
   try {
     assert.equal(await run(['setup','--host','cli','--cadence-seconds','300']),0);
     assert.equal(out.at(-1).status,'registered_not_listening');
     const wake = store.agentHeartbeats.enqueueWake({agentId:identity.identityId,kind:'mention',roomId:'restart',messageId:'restart-message'}).signal;
     await new Promise(resolve=>server.close(resolve)); store.close();
     store = new RoomStore(file); server = createRoomServer({store}); await new Promise(resolve=>server.listen(port,'127.0.0.1',resolve));
-    assert.equal(await run(['wait','--host','cli','--cadence-seconds','300','--wait-ms','0']),0);
+    const waitExit = await run(['wait','--host','cli','--cadence-seconds','300','--wait-ms','0']);
+    assert.equal(waitExit,0,diagnostic());
     assert.equal(out.at(-1).pendingWakes[0].signalId,wake.signalId);
     assert.equal(await run(['ack','--host','cli','--signal','unknown']),0);
     assert.deepEqual(out.at(-1).notAcknowledged,['unknown']);
