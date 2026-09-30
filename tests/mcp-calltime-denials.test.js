@@ -185,7 +185,7 @@ test("guest-class hosted stdio chat-hole tools are denied at call time", async t
   const cases = [
     ["room_introduce_outside_agent", { roomId, externalRef: "agent-x", displayName: "Agent X", origin: "mcp" }],
     ["room_request_reply", { roomId, requestId: randomUUID(), toMemberId: ownerMemberId, body: "a formal request from a guest" }],
-    ["room_reply", { roomId, replyToId: "msg-1", body: "a reply-shaped post from a guest" }],
+    ["room_reply", { roomId, requestId: "guest-reply-1", replyToId: "msg-1", body: "a reply-shaped post from a guest" }],
   ];
   for (const [name, args] of cases) {
     const value = resultValue(await call("tools/call", { name, arguments: args }, guest.secret));
@@ -225,7 +225,7 @@ test("full members keep the hosted stdio write tools (no regression)", async t =
   }, owner.secret));
   assert.ok(!requested.isError, `owner request must work: ${JSON.stringify(requested).slice(0, 200)}`);
   const replied = resultValue(await call("tools/call", {
-    name: "room_reply", arguments: { roomId, replyToId: "msg-1", body: "owner reply" },
+    name: "room_reply", arguments: { roomId, requestId: "owner-reply-1", replyToId: "msg-1", body: "owner reply" },
   }, owner.secret));
   assert.ok(!replied.isError, `owner reply must work: ${JSON.stringify(replied).slice(0, 200)}`);
 });
