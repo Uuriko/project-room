@@ -349,6 +349,23 @@ test("defaultVerifySignature verifies ES256 and never throws", () => {
   assert.equal(defaultVerifySignature({ publicKeyCose: Buffer.from([0x01]), data, signature }), false);
 });
 
+test("defaultVerifySignature accepts real DER WebAuthn signatures (H-6)", () => {
+  const key = makeKey();
+  const data = Buffer.from("signed payload");
+  // What authenticators actually emit: ASN.1 DER, not raw R||S.
+  const der = sign("sha256", data, { key: key.privateKey, dsaEncoding: "der" });
+  assert.ok(der.length >= 70 && der.length <= 72, `DER signatures are ~70-72 bytes, got ${der.length}`);
+  assert.equal(defaultVerifySignature({ publicKeyCose: key.cose, data, signature: der }), true);
+  // A tampered DER signature must not verify under either encoding.
+  const tampered = Buffer.from(der);
+  tampered[tampered.length - 1] ^= 0xff;
+  assert.equal(defaultVerifySignature({ publicKeyCose: key.cose, data, signature: tampered }), false);
+  // A DER signature for different data must not verify.
+  assert.equal(defaultVerifySignature({ publicKeyCose: key.cose, data: Buffer.from("other"), signature: der }), false);
+  // Garbage that is neither DER nor P1363 never verifies and never throws.
+  assert.equal(defaultVerifySignature({ publicKeyCose: key.cose, data, signature: Buffer.alloc(70) }), false);
+});
+
 // --- registration verification ------------------------------------------------
 
 test("registration happy path returns a storable credential record", () => {

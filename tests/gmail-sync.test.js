@@ -63,3 +63,29 @@ test('background import capability is unforgeable, account-bound, import-only an
   f.m.disconnect(f.slot.token, f.session.sessionBinding, f.id);
   assert.throws(() => gmailImportAuth(f.store, token, { action: 'page.apply', connectionId: f.id }), { code: 'gmail_import_authority' });
 });
+test('reset sync follows nextPageToken past the first 50 messages (H-8)', async t => {
+  const f = await setup(t);
+  // 76 INBOX messages total (mail-1 from the fixture + 75 more).
+  for (let i = 2; i <= 76; i++) {
+    const id = 'mail-' + i;
+    f.messages.set(id, { id, historyId: '1000', internalDate: '1700000000000', threadId: 'thread-1', labelIds: ['INBOX'], snippet: 'body ' + i,
+      payload: { mimeType: 'text/plain', headers: [{ name: 'From', value: 'taylor@example.com' }, { name: 'Subject', value: 'msg ' + i }], body: { data: Buffer.from('body ' + i).toString('base64url') } } });
+  }
+  // Paginate the /messages list at 50 per page, like the real Gmail API.
+  const original = f.config.fetchImpl;
+  f.config.fetchImpl = async (url, init) => {
+    const u = new URL(url);
+    if (u.pathname.endsWith('/messages') && u.searchParams.get('labelIds') === 'INBOX') {
+      const all = [...f.messages.values()].filter(m => m.labelIds.includes('INBOX')).map(m => ({ id: m.id }));
+      const token = Number(u.searchParams.get('pageToken') ?? 0);
+      const slice = all.slice(token, token + 50);
+      return Response.json({ messages: slice, ...(token + 50 < all.length ? { nextPageToken: String(token + 50) } : {}) });
+    }
+    return original(url, init);
+  };
+  // Fresh grant => first tick is a reset (no historyId yet).
+  const result = await f.sync.mailboxTick(f.account.id, f.id);
+  assert.equal(result.imported, 76);
+  const sources = f.store.inbox.list(f.slot.token, f.session.sessionBinding, { includeChannels: true, limit: 100 }).sources;
+  assert.equal(sources.filter(s => s.connection?.id === f.id).length, 76);
+});

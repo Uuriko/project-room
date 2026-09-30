@@ -7,10 +7,13 @@
 //
 // Every number in the snapshot comes from a real board comment; nothing is
 // fabricated. A receipt is one board post. Result meanings:
-//   verified = the receipt's merge SHA (or its PR's merge commit) exists in
-//              Uuriko/project-room upstream.
+//   verified = the receipt's merge SHA (or its PR's merge commit) is an
+//              ancestor of upstream main (H-5: existence in the repo is not
+//              enough — a commit on an unmerged branch is fetchable but
+//              proves no merge).
 //   failed   = a merge was claimed but no merge commit could be confirmed
-//              (no SHA given, or the SHA is not in the repo).
+//              (no SHA given, the SHA is not in the repo, or it is not in
+//              main's ancestry).
 //   open     = the receipt announces an opened PR with no merge claimed yet.
 //   reported = the run was reported complete with no merge artifact to check
 //              (e.g. read-only scans, triage runs).
@@ -179,6 +182,33 @@ function parseReceipt(comment) {
   };
 }
 
+// Verify one candidate merge SHA (H-5). Returns the full 40-char SHA when
+// the commit is an ancestor of (or identical to) upstream main, null
+// otherwise. `api` is injectable so tests never touch the network:
+//   api.commitSha(sha)      -> full 40-char SHA, or null when unresolvable
+//   api.compareStatus(full) -> compare status of basehead "main...{full}"
+//                              ("behind"/"identical" mean merged into main),
+//                              or null when the comparison is unavailable.
+// Existence alone never verifies: a fetchable commit on an unmerged branch
+// is not a merge.
+export async function verifyMergeSha(sha, api) {
+  if (typeof sha !== "string" || !/^[0-9a-f]{7,40}$/i.test(sha)) return null;
+  let full;
+  try {
+    full = await api.commitSha(sha);
+  } catch {
+    return null;
+  }
+  if (typeof full !== "string" || !/^[0-9a-f]{40}$/.test(full)) return null;
+  let status;
+  try {
+    status = await api.compareStatus(full);
+  } catch {
+    return null;
+  }
+  return status === "behind" || status === "identical" ? full : null;
+}
+
 // --- main ------------------------------------------------------------------
 
 async function pool(items, size, fn) {
@@ -251,10 +281,26 @@ async function main() {
       candidates.get(sha).add(i);
     }
   });
+  // Verify every candidate SHA against upstream main. A SHA counts as a
+  // confirmed merge ONLY when it is an ancestor of (or identical to) main:
+  // compare basehead "main...{sha}" reports status "behind"/"identical"
+  // exactly then. A bare commits/{sha} existence check is not enough — a
+  // commit on an unmerged branch is fetchable but proves no merge (H-5),
+  // so "verified" is never granted by existence alone.
+  const ghApi = {
+    commitSha: async (sha) => {
+      const res = ghMaybeText(`repos/${REPO}/commits/${sha}`, "--jq", ".sha");
+      return res.ok && typeof res.value === "string" && /^[0-9a-f]{40}$/.test(res.value) ? res.value : null;
+    },
+    compareStatus: async (fullSha) => {
+      const res = ghMaybe(`repos/${REPO}/compare/main...${fullSha}`);
+      return res.ok ? res.value?.status ?? null : null;
+    },
+  };
   const verifiedSha = new Map(); // sha -> full sha
   await pool([...candidates.keys()], 8, async (sha) => {
-    const res = ghMaybeText(`repos/${REPO}/commits/${sha}`, "--jq", ".sha");
-    if (res.ok && typeof res.value === "string" && /^[0-9a-f]{40}$/.test(res.value)) verifiedSha.set(sha, res.value);
+    const full = await verifyMergeSha(sha, ghApi);
+    if (full) verifiedSha.set(sha, full);
   });
 
   const upstreamMain = ghText(`repos/${REPO}/commits/main`, "--jq", ".sha");
@@ -298,10 +344,10 @@ async function main() {
 //   node scripts/receipts-snapshot.mjs
 // Every number below was parsed from a real board post; nothing is
 // fabricated. Result meanings: verified = the receipt's merge SHA (or its
-// PR's merge commit) exists upstream; failed = a merge was claimed but no
-// merge commit could be confirmed; open = an opened PR with no merge
-// claimed yet; reported = the run was reported complete with no merge
-// artifact to check.
+// PR's merge commit) is an ancestor of upstream main (existence in the repo
+// alone never verifies); failed = a merge was claimed but no merge commit
+// could be confirmed; open = an opened PR with no merge claimed yet;
+// reported = the run was reported complete with no merge artifact to check.
 `;
   writeFileSync(outPath, header + `export const RECEIPTS_SNAPSHOT = ${JSON.stringify(snapshot, null, 2)};\n`);
 
@@ -310,4 +356,6 @@ async function main() {
   console.log(`receipts-snapshot: ${rows.length} receipts (${counts.verified} verified, ${counts.failed} failed, ${counts.open} open, ${counts.reported} reported) from ${comments.length} board comments -> ${outPath}`);
 }
 
-await main();
+// verifyMergeSha is unit-tested via import; only run the live snapshot when
+// this file is executed directly (importing must not hit the network).
+if (process.argv[1] === fileURLToPath(import.meta.url)) await main();
