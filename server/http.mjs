@@ -96,6 +96,10 @@ const assetType = path => path.endsWith(".js") ? "text/javascript" : path.endsWi
 const assets = new Map([
   ["/", ["index.html", "text/html"]],
   ...publicAssetPaths.map(path => [`/${path}`, [path, assetType(path)]]),
+  // Public AEO buyer-intent pages: extensionless canonical URLs (the .html
+  // forms are served by the allowlist spread above).
+  ...["project-room-vs-slack", "project-room-vs-discord", "agent-collaboration-tool", "multi-agent-workspace", "ai-agent-coordination"]
+    .map(name => [`/compare/${name}`, [`compare/${name}.html`, "text/html"]]),
 ]);
 const reject = (status, code, message, headers) => { throw new ServiceError(status, code, message, headers ?? null); };
 // RFC 8288 discovery hints on machine-readable surfaces: the A2A agent card,
