@@ -189,12 +189,15 @@ export class DmConsents {
       this._requireActiveMember(state, memberId, "member_not_found");
       const forward = this._get(roomId, memberId, otherId);
       const backward = this._get(roomId, otherId, memberId);
-      const live = [forward, backward].find(r => r && r.status === "approved");
-      if (!live) fail(409, "dm_nothing_to_revoke", "There is no approved DM consent between these members");
+      const live = [forward, backward].filter(r => r && r.status === "approved");
+      if (live.length === 0) fail(409, "dm_nothing_to_revoke", "There is no approved DM consent between these members");
+      // Revoke every approved directional row: with both directions
+      // approved, revoking only one would leave the other live,
+      // contradicting the "unilaterally revoke" contract.
       this.db.prepare(
-        "UPDATE dm_consents SET status='revoked', decided_at=? WHERE room_id=? AND requester_id=? AND target_id=?"
-      ).run(nowMs(), roomId, live.requester_id, live.target_id);
-      return rowToPair(this._get(roomId, live.requester_id, live.target_id));
+        "UPDATE dm_consents SET status='revoked', decided_at=? WHERE room_id=? AND status='approved' AND ((requester_id=? AND target_id=?) OR (requester_id=? AND target_id=?))"
+      ).run(nowMs(), roomId, memberId, otherId, otherId, memberId);
+      return rowToPair(this._get(roomId, live[0].requester_id, live[0].target_id));
     });
   }
 

@@ -257,7 +257,14 @@ export function createFailover(deps = {}) {
         }
 
         if (healthChecker) {
-          const healthy = await healthChecker(provider.name);
+          // A throwing checker must not abort the failover: treat it as an
+          // unhealthy provider and keep walking the priority list.
+          let healthy = false;
+          try {
+            healthy = await healthChecker(provider.name);
+          } catch {
+            healthy = false;
+          }
           if (!healthy) {
             attempts.push(
               Object.freeze({

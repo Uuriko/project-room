@@ -517,3 +517,30 @@ test("the full signed lifecycle conserves the ledger", () => {
   for (const id of ids) assert.match(id, /^room-bounty-receipt:[a-z]{2}:[0-9a-f]{32}$/);
   assert.equal(new Set(ids).size, ids.length, "receiptIds are unique");
 });
+
+test("H-21: rejectWork with signing enabled completes — refund-issued accepts the escrow's reject vocabulary", () => {
+  // Contract: the receipts module's refund-issued vocabulary must cover every
+  // reason the escrow actually emits. Credible regression: the escrow's
+  // rejectWork path emits reason "verification-rejected", which the old
+  // vocabulary rejected — issueBountyReceipt threw invalid_receipt inside the
+  // escrow's transaction, rolling the whole reject/refund back so funds
+  // stayed locked. (Same for _settleUnverified's "unverified".)
+  const { escrow, db } = makeEscrow({ signed: true });
+  const bounty = runToSubmitted(escrow, { amount: 10 });
+  const out = escrow.rejectWork(ROOM, bounty.bountyId, { rejector: JILL, reason: "did not meet the criteria" });
+  assert.equal(out.bounty.state, "refunded", "the rejection transition committed, not rolled back");
+  assert.equal(out.receipt.signed.length, 1);
+  const [r] = out.receipt.signed;
+  assert.equal(r.type, "refund-issued");
+  assert.equal(r.payload.reason, "verification-rejected");
+  assert.equal(r.payload.refundTo, JILL);
+  expectVerifiable(db, r);
+  expectConserved(escrow);
+});
+
+test("H-21: refund-issued accepts the escrow's unverified-settlement vocabulary", () => {
+  const r = issueBountyReceipt(issueArgs("refund-issued", { reason: "unverified", refundTo: JILL }));
+  assert.equal(r.type, "refund-issued");
+  assert.equal(r.payload.reason, "unverified");
+  assert.equal(verifyBountyReceipt(r).ok, true);
+});

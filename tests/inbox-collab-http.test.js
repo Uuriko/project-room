@@ -320,6 +320,23 @@ test("routing: mentions, list, resolve, policy", async t => {
   assert.equal(badMention.status, 422);
 });
 
+test("routing-policy: only the room owner or the agent itself may set a policy (M-7a)", async t => {
+  const f = setup(t); await f.serve();
+  const base = "/api/rooms/commons/collab";
+  const policyBody = agentId => ({ agentId, policy: { mode: "direct" } });
+  // A second agent cannot set a policy for the first agent's mentions.
+  const forged = await post(f, `${base}/routing/policy`, f.agent2.secret, policyBody(agentIdOf(f)));
+  assert.equal(forged.status, 403);
+  assert.equal(await codeOf(forged), "routing_forbidden");
+  // ...but it can set its own.
+  const own = await post(f, `${base}/routing/policy`, f.agent2.secret, policyBody(agent2IdOf(f)));
+  assert.equal(own.status, 200);
+  assert.equal((await own.json()).policy.mode, "direct");
+  // The room owner can set anyone's.
+  const ownerSet = await post(f, `${base}/routing/policy`, f.humanKey, policyBody(agentIdOf(f)));
+  assert.equal(ownerSet.status, 200);
+});
+
 test("handoffs: room-scoped journal writes with account resolution", async t => {
   const f = setup(t); await f.serve();
   const base = "/api/rooms/commons/collab";

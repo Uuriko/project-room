@@ -188,8 +188,9 @@ export function createSenderReputation({ store } = {}) {
 class QuarantineError extends Error { constructor(code, message) { super(message); this.name = "QuarantineError"; this.code = code; } }
 const qfail = (code, message) => { throw new QuarantineError(code, message); };
 const qcheck = (condition, message) => { if (!condition) qfail("invalid_quarantine", message); };
-export function createQuarantineQueue({ store } = {}) {
+export function createQuarantineQueue({ store, now = Date.now } = {}) {
   qcheck(store === undefined || store instanceof Map, "store must be a Map if given");
+  qcheck(typeof now === "function", "now must be a function returning ms epoch");
   const records = store ?? new Map();
   let counter = 0;
   const snap = rec => Object.freeze({ id: rec.id, messageId: rec.messageId, channel: rec.channel,
@@ -197,7 +198,7 @@ export function createQuarantineQueue({ store } = {}) {
     at: rec.at, status: rec.status, reviewedBy: rec.reviewedBy, reviewedAt: rec.reviewedAt,
     decision: rec.decision, note: rec.note });
   // File one quarantined message. flag is a flagMessage() result.
-  const quarantine = ({ messageId, flag, channel, connectionId, at = Date.now() }) => {
+  const quarantine = ({ messageId, flag, channel, connectionId, at = now() }) => {
     qcheck(typeof messageId === "string" && messageId.length > 0 && messageId.length <= 512, "messageId must be a 1..512 character string");
     qcheck(flag !== null && typeof flag === "object" && typeof flag.score === "number" && Array.isArray(flag.signals) && flag.quarantine === true,
       "flag must be a flagMessage() result with quarantine true");
@@ -220,7 +221,7 @@ export function createQuarantineQueue({ store } = {}) {
     const rec = records.get(id);
     qcheck(rec.status === "pending", `quarantine "${id}" already ${rec.status}; reviews are final`);
     rec.status = decision === "release" ? "released" : "confirmed_spam";
-    rec.decision = decision; rec.reviewedBy = reviewer; rec.reviewedAt = Date.now(); rec.note = note;
+    rec.decision = decision; rec.reviewedBy = reviewer; rec.reviewedAt = now(); rec.note = note;
     records.set(id, rec);
     return snap(rec);
   };

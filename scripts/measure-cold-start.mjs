@@ -88,11 +88,11 @@ if (childIndex >= 0) {
   };
   const { RoomStore } = await import(pathToFileURL(join(root, "server/store.mjs")));
   const { createRoomServer } = await import(pathToFileURL(join(root, "server/http.mjs")));
-  const { initialRoom } = await import(pathToFileURL(join(root, "server/bootstrap.mjs")));
+  const { initialRoom: childInitialRoom } = await import(pathToFileURL(join(root, "server/bootstrap.mjs")));
   mark("import server/store.mjs + server/http.mjs");
   const file = join(directory, "room.sqlite");
   const store = new RoomStore(file);
-  store.initialize(initialRoom());
+  store.initialize(childInitialRoom());
   const ownerKey = store.issueAccessKey("commons", "owner");
   mark("fresh store: constructor + initialize");
   const server = createRoomServer({ store });
@@ -123,13 +123,13 @@ if (subcommand === "constructor") {
   const RUNS = Number(positionals[1] ?? 5);
   const HELP_HISTORY = flags.has("--help-history");
   if (!Number.isInteger(TARGET) || TARGET < 2 || !Number.isInteger(RUNS) || RUNS < 1 || positionals.length > 2 || flags.has("--no-miniflare")) usage();
-  const { RoomStore, initialRoom, EVENT_TYPES: T } = await serverModules();
+  const { RoomStore, initialRoom: constructorInitialRoom, EVENT_TYPES: T } = await serverModules();
   const directory = mkdtempSync(join(tmpdir(), "room-cold-start-"));
   const file = join(directory, "room.sqlite");
   try {
     const buildStart = performance.now();
     const store = new RoomStore(file);
-    store.initialize(initialRoom()); // room.created + member.added
+    store.initialize(constructorInitialRoom()); // room.created + member.added
     const ownerKey = store.issueAccessKey("commons", "owner");
     if (HELP_HISTORY) {
       store.command(ownerKey, "commons", { id: randomUUID(), type: T.WORK_PROPOSED, data: {

@@ -462,14 +462,15 @@ export class InboxStitchStore {
     let indexed = 0, accounts = 0;
     for (const accountId of accountIds) {
       accounts++;
+      let accountIndexed = 0;
       for (const { sourceId, envelope } of this.#scanEnvelopes(accountId, null)) {
         const result = this.indexEnvelope(accountId, envelope, { sourceId, suggest: false, backfill: false });
-        if (result.indexed) indexed++;
+        if (result.indexed) { indexed++; accountIndexed++; }
       }
       const backfilled = this.#backfillAll(accountId, now);
       if (backfilled > 0) this.#count("thread:stitch:backfilled", backfilled);
       this.#receipt(accountId, { action: "stitch.rotate", stitchKey: `${epoch}:rotation`,
-        payload: { fromEpoch: oldPrefix.replace(":", ""), toEpoch: epoch, indexedSources: indexed, at: now }, now });
+        payload: { fromEpoch: oldPrefix.replace(":", ""), toEpoch: epoch, indexedSources: accountIndexed, at: now }, now });
     }
     return { epoch, accounts, indexed };
   }

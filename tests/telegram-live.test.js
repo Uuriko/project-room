@@ -131,8 +131,8 @@ test("the setWebhook script builds the webhook URL, redacts dry runs, and regist
 
 test("the live transport posts sendMessage once per outbox key, honors retry_after, and maps failures to channel codes", async t => {
   const f = fixture(t), { sourceId, sendId, reader, preview } = await f.queuedReply(), config = telegramConfig(env());
-  assert.deepEqual(telegramSendRequest(preview), { method: "sendMessage", body: { chat_id: -1001000000001, text: "Thanks, reading it now.", reply_parameters: { message_id: 42, allow_sending_without_reply: true } } });
-  assert.equal(telegramSendRequest({ ...preview, target: { ...preview.target, threadId: "-1001000000001/77" } }).body.message_thread_id, 77);
+  assert.deepEqual(telegramSendRequest(preview), { method: "sendMessage", body: { chat_id: "-1001000000001", text: "Thanks, reading it now.", reply_parameters: { message_id: "42", allow_sending_without_reply: true } } });
+  assert.equal(telegramSendRequest({ ...preview, target: { ...preview.target, threadId: "-1001000000001/77" } }).body.message_thread_id, "77");
   assert.throws(() => telegramSendRequest({ ...preview, adapter: "synthetic" }), { code: "telegram_transport_mismatch" });
   assert.throws(() => telegramSendRequest({ ...preview, body: "x".repeat(4097) }), { code: "telegram_transport_mismatch" });
   assert.equal(telegramRetryDelay({ attempt: 0 }), 500); assert.equal(telegramRetryDelay({ attempt: 2 }), 2000); assert.equal(telegramRetryDelay({ attempt: 1, retryAfter: 3 }), 3000); assert.equal(telegramRetryDelay({ attempt: 9, retryAfter: 60 }), 5000);
@@ -150,7 +150,7 @@ test("the live transport posts sendMessage once per outbox key, honors retry_aft
   let send = await run.driver.dispatch(f.auth.token, sourceId, sendId, f.auth.sessionBinding);
   assert.equal(send.status, "accepted"); assert.equal(send.providerId, "telegram:-1001000000001:57");
   assert.equal(run.calls.length, 1); assert.equal(run.calls[0].url, "https://api.telegram.org/bot" + FAKE_TOKEN + "/sendMessage");
-  assert.deepEqual(run.calls[0].body, { chat_id: -1001000000001, text: "Thanks, reading it now.", reply_parameters: { message_id: 42, allow_sending_without_reply: true } });
+  assert.deepEqual(run.calls[0].body, { chat_id: "-1001000000001", text: "Thanks, reading it now.", reply_parameters: { message_id: "42", allow_sending_without_reply: true } });
   assert.equal(JSON.stringify(run.calls[0].body).includes(FAKE_TOKEN), false);
   assert.equal(run.status.snapshot(f.auth.account.id, f.telegram.connection.id).lastSendResult.outcome, "accepted");
   // Idempotent retry: the same operation key replays the receipt without another POST, a different preview conflicts.
@@ -266,4 +266,17 @@ test("the owner-authenticated import trigger works off loopback, enforces sessio
   // A disconnected connection is never re-registered.
   f.apply({ action: "connection.disconnect", requestId: "off", connectionId: f.telegram.connection.id, expectedRevision: 1 });
   response = await hosted.get(path); assert.equal((await response.json()).connection.state, "disconnected");
+});
+
+// M-25: chat ids above 2^53 fail closed instead of being serialized through
+// Number() — both in the Bot API payload and in the providerId used for
+// dedup/correlation.
+test("M-25: oversized telegram chat ids fail closed instead of corrupting", async t => {
+  const f = fixture(t), { preview } = await f.queuedReply();
+  const big = "9007199254740993"; // 2^53 + 1: not exactly representable as a double
+  assert.throws(() => telegramSendRequest({ ...preview, target: { ...preview.target, chatId: big } }), { code: "telegram_transport_mismatch" });
+  assert.throws(() => telegramSendRequest({ ...preview, target: { ...preview.target, threadId: `-1001000000001/${big}` } }), { code: "telegram_transport_mismatch" });
+  assert.throws(() => telegramSendRequest({ ...preview, target: { ...preview.target, chatId: `${big}.5` } }), { code: "telegram_transport_mismatch" });
+  const exact = "9007199254740992"; // 2^53: exactly representable, still accepted
+  assert.equal(telegramSendRequest({ ...preview, target: { ...preview.target, chatId: exact } }).body.chat_id, exact);
 });

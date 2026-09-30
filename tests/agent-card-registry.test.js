@@ -187,3 +187,23 @@ describe('coded-error contract', () => {
     }
   });
 });
+
+describe("M-41 prerelease ordering", () => {
+  it("treats prerelease upgrades as newer (semver-aware), not equal", () => {
+    const registry = createAgentCardRegistry({ clock: () => 1700000000000 });
+    registry.publish(validCard({ version: "1.0.0-alpha" }));
+    registry.publish(validCard({ version: "1.0.0-alpha.1", name: "Newer prerelease" }));
+    assert.equal(registry.get("quill-agent").version, "1.0.0-alpha.1");
+    registry.publish(validCard({ version: "1.0.0-beta", name: "Beta" }));
+    assert.equal(registry.get("quill-agent").version, "1.0.0-beta");
+  });
+
+  it("release still beats prerelease; older prerelease is stale", () => {
+    const registry = createAgentCardRegistry({ clock: () => 1700000000000 });
+    registry.publish(validCard({ version: "1.0.0-alpha" }));
+    registry.publish(validCard({ version: "1.0.0", name: "Release" }));
+    assert.equal(registry.get("quill-agent").version, "1.0.0");
+    expectCode(() => registry.publish(validCard({ version: "1.0.0-alpha.1" })), "ACR_STALE_VERSION");
+    expectCode(() => registry.publish(validCard({ version: "1.0.0-alpha" })), "ACR_STALE_VERSION");
+  });
+});

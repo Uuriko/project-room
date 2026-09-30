@@ -116,7 +116,7 @@ test('new discovery client reads exact schema12 fallback without upgrading or mu
   createRuntimePackage({ repository: resolve('.'), commit: '4d22189ccdebc56db23397e6cc75b07eff0e3c2c', destination: root });
   const { RoomStore } = await import(pathToFileURL(join(root, 'server/store.mjs')));
   const { createRoomServer: fallbackServer } = await import(pathToFileURL(join(root, 'server/http.mjs')));
-  const { auditRecovery } = await import(pathToFileURL(join(root, 'server/recovery.mjs')));
+  const { auditRecovery: auditRecoveryFallback } = await import(pathToFileURL(join(root, 'server/recovery.mjs')));
   const { frozenAcceptanceFixture } = await import('../scripts/frozen-runtime-fixture.mjs');
   const createOldFixture = await frozenAcceptanceFixture(resolve('.'), root, '4d22189ccdebc56db23397e6cc75b07eff0e3c2c');
   const f = createOldFixture(); f.store.close(); const store = new RoomStore(join(f.directory, 'room.sqlite'));
@@ -124,7 +124,7 @@ test('new discovery client reads exact schema12 fallback without upgrading or mu
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
     store.close(); rmSync(f.directory, { recursive: true, force: true }); });
-  const origin = `http://127.0.0.1:${server.address().port}`, responses = [], routes = [], before = auditRecovery(store).dataSha256;
+  const origin = `http://127.0.0.1:${server.address().port}`, responses = [], routes = [], before = auditRecoveryFallback(store).dataSha256;
   const client = new RoomAgentClient({ origin, roomId: 'commons', memberId: 'producer', token: f.keys.producer,
     fetchImpl: async (...args) => { routes.push(new URL(args[0]).pathname.split('/').at(-1));
       const response = await fetch(...args); responses.push(await response.clone().json()); return response; } });
@@ -142,5 +142,5 @@ test('new discovery client reads exact schema12 fallback without upgrading or mu
   await assert.rejects(client.orient({ focus: 'help_wanted' }), { code: 'help_context_unavailable' });
   assert.equal(responses.length, 8, 'Unsupported discovery does not retry with weaker reads');
   assert.deepEqual(routes.slice(6), ['session', 'commons']);
-  assert.equal(auditRecovery(store).dataSha256, before);
+  assert.equal(auditRecoveryFallback(store).dataSha256, before);
 });

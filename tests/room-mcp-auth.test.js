@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { AgentRooms } from "../server/agent-rooms.mjs";
-import { HOSTED_ROOM_MCP_TOOLS, CORE_MCP_TOOLS, MCP_TOOL_NAME_RE } from "../src/room-mcp-join.js";
+import { HOSTED_ROOM_MCP_TOOLS, PUBLIC_WORK_MCP_TOOLS, CORE_MCP_TOOLS, MCP_TOOL_NAME_RE } from "../src/room-mcp-join.js";
 import { setTier } from "../server/autonomy-tiers.mjs";
 
 const JOIN_TOOLS = ["room_join_packet", "room_join_kits", "room_join_prompt", "room_mcp_snippet"];
@@ -42,12 +42,12 @@ async function call(origin, name, args, secret) {
   return { status: response.status, body, value: body.result?.structuredContent };
 }
 
-test("unauthenticated hosted MCP stays the four join tools", async t => {
+test("unauthenticated hosted MCP keeps four join documents and adds two public-work reads", async t => {
   const { origin } = await serve(t);
   const listed = await rpc(origin, "tools/list");
   assert.equal(listed.status, 200);
   const body = await listed.json();
-  assert.deepEqual(body.result.tools.map(tool => tool.name), JOIN_TOOLS);
+  assert.deepEqual(body.result.tools.map(tool => tool.name), [...JOIN_TOOLS, "public_work_recommend", "public_work_read_task"]);
   const denied = await call(origin, "room_check_access", {});
   assert.equal(denied.status, 401);
   assert.equal(denied.body.error.code, -32001);
@@ -63,7 +63,7 @@ test("unauthenticated hosted MCP stays the four join tools", async t => {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" })
   });
-  assert.deepEqual((await onShortPath.json()).result.tools.map(tool => tool.name), JOIN_TOOLS);
+  assert.deepEqual((await onShortPath.json()).result.tools.map(tool => tool.name), [...JOIN_TOOLS, "public_work_recommend", "public_work_read_task"]);
 });
 
 test("Bearer pri_ exposes room tools and keeps command receipts", async t => {
@@ -118,7 +118,7 @@ test("Bearer pri_ exposes room tools and keeps command receipts", async t => {
   const fullNames = (await full.json()).result.tools.map(tool => tool.name);
   assert.equal(fullNames.includes("room_react"), true);
   assert.deepEqual(fullNames.slice(0, HOSTED_ROOM_MCP_TOOLS.length), [...HOSTED_ROOM_MCP_TOOLS]);
-  assert.deepEqual(fullNames.slice(HOSTED_ROOM_MCP_TOOLS.length), JOIN_TOOLS);
+  assert.deepEqual(fullNames.slice(HOSTED_ROOM_MCP_TOOLS.length), [...JOIN_TOOLS, ...PUBLIC_WORK_MCP_TOOLS]);
   for (const name of fullNames) assert.match(name, MCP_TOOL_NAME_RE);
   for (const name of ["add_land_item", "list_land_queue", "remove_land_item", "report_tip"]) {
     assert.equal(fullNames.includes(name), true, name);
@@ -212,7 +212,7 @@ test("Bearer pri_ exposes room tools and keeps command receipts", async t => {
 
   const get = await fetch(`${origin}/room/mcp`, { headers: { Authorization: `Bearer ${owner.secret}` } });
   const page = await get.text();
-  assert.match(page, /four public join tools/);
+  assert.match(page, /four join documents plus public_work_recommend and public_work_read_task/);
   assert.match(page, /room_read_board/);
   assert.match(page, /room_read_inbox/);
   assert.match(page, /Bearer <saved-identity-secret>/);

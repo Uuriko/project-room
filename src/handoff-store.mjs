@@ -123,6 +123,19 @@ export function createHandoffStore(deps = {}) {
   let idCounter = 0;
   const newId = deps.id ?? (() => `ho-${(idCounter += 1)}`);
 
+  // H-14: after restore(), the next generated id must not collide with a
+  // restored record. Reseed the counter from the numeric suffixes present in
+  // the map (ids not matching the ho-N shape, e.g. from an injected id fn,
+  // are ignored). Monotonic: never lowers the counter.
+  const reseedIdCounter = () => {
+    let max = 0;
+    for (const id of handoffs.keys()) {
+      const m = /^ho-(\d+)$/.exec(id);
+      if (m) max = Math.max(max, Number(m[1]));
+    }
+    idCounter = Math.max(idCounter, max);
+  };
+
   /** Internal handoff records, keyed by id. */
   const handoffs = new Map();
 
@@ -151,8 +164,14 @@ export function createHandoffStore(deps = {}) {
       at: clock(),
       handoff: handoffSnapshot,
     });
-    for (const sub of subscribers) {
-      sub(event);
+    // M-29: a throwing subscriber must not fail the committed transition or
+    // starve the subscribers after it (mirrors inbox-rule-store).
+    for (const sub of [...subscribers]) {
+      try {
+        sub(event);
+      } catch {
+        // Subscriber errors are isolated, never propagated.
+      }
     }
   }
 
@@ -497,6 +516,7 @@ export function createHandoffStore(deps = {}) {
           for (const entry of data.audit) {
             audit.push(Object.freeze({ ...entry }));
           }
+          reseedIdCounter();
           record({
             at: clock(),
             from: null,

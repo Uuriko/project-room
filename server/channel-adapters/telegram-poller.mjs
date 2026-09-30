@@ -75,23 +75,28 @@ export class LiveTelegramPoller {
   }
   // One long-poll against Telegram. The returned shape matches the Bot API
   // response the fixture reader produces, so `bind` consumes it unchanged.
-  // An explicit offset re-asks from there (redeliveries are deduped); omitted,
-  // the poller advances from the highest update_id it has emitted. `signal`
-  // aborts the request; an abort while closed or signalled is a shutdown,
-  // never a transient failure.
+  // M-26: an explicit offset re-asks from there and redelivers VERBATIM —
+  // the batch is not deduped against #seen and does not move the
+  // auto-advance cursor, so a failed downstream import retried with the same
+  // cursor is not silently skipped. Only the auto-advance path (offset
+  // omitted) dedupes, so a redelivered offset cannot duplicate a change.
+  // `signal` aborts the request; an abort while closed or signalled is a
+  // shutdown, never a transient failure.
   async getUpdates({ offset = null, signal = null } = {}) {
     if (this.#closed) fail(503, "channel_poller_closed", "The Telegram poller is closed.");
-    const from = offset === null ? this.#cursor : qualifyTelegramCursor(offset);
+    const explicit = offset !== null;
+    const from = explicit ? qualifyTelegramCursor(offset) : this.#cursor;
     const value = await this.#request(telegramGetUpdatesRequest({ offset: from === null ? null : Number(from), limit: this.limit, timeout: this.#limits.longPollSecs }), signal);
     requireContract(object(value) && value.ok === true && Array.isArray(value.result), "invalid_telegram_updates");
     const fresh = [];
     for (const update of value.result) {
       requireContract(object(update) && Number.isSafeInteger(update.update_id) && update.update_id >= 0, "invalid_telegram_updates");
+      if (explicit) { fresh.push(update); continue; }
       if (this.#seen.has(update.update_id)) continue;
       this.#remember(update.update_id); fresh.push(update);
     }
     // Telegram returns update_ids ascending, so the last fresh one sets the cursor.
-    if (fresh.length) this.#cursor = String(fresh[fresh.length - 1].update_id + 1);
+    if (!explicit && fresh.length) this.#cursor = String(fresh[fresh.length - 1].update_id + 1);
     if (fresh.length) this.#status?.received(this.#accountId, this.#connectionId, { at: this.#now(), count: fresh.length });
     return { ok: true, result: fresh };
   }

@@ -38,8 +38,19 @@ export class GmailSync {
     if (reset) {
       // Capture history before listing; later mutations are replayed on the next tick.
       const profile = await get('/profile'); historyId = profile.historyId ?? null; nextPageToken = null;
-      const page = await get('/messages?labelIds=INBOX&maxResults=50');
-      ids = new Set((page.messages ?? []).map(v => v.id));
+      // A reset must see the whole INBOX, not just the first 50 messages
+      // (H-8): follow nextPageToken until the list is exhausted, bounded by
+      // the same 200-id per-tick budget the detail fetch below enforces.
+      // The folder is marked complete only after this walk finishes.
+      ids = new Set();
+      let listToken = null;
+      do {
+        const listQuery = new URLSearchParams({ labelIds: 'INBOX', maxResults: '50' });
+        if (listToken) listQuery.set('pageToken', listToken);
+        const listPage = await get('/messages?' + listQuery);
+        for (const v of listPage.messages ?? []) if (ids.size < 200) ids.add(v.id);
+        listToken = listPage.nextPageToken ?? null;
+      } while (listToken && ids.size < 200);
     }
     if (ids.size > 200 || [...ids].some(id => typeof id !== 'string' || !/^[\w-]{1,128}$/.test(id))) fail('gmail_invalid_response');
     const observations = [];

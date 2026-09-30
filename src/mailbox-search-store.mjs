@@ -182,6 +182,39 @@ export function createMailboxSearchStore(deps = {}) {
     }
   }
 
+  /**
+   * M-8: transactional mutation. Snapshot the durable state before mutating;
+   * if the write fails, restore memory so live state never runs ahead of what
+   * survived to disk. Returns the mutator's value.
+   */
+  function captureState() {
+    return {
+      documents: structuredClone([...documents]),
+      postings: structuredClone([...postings]),
+      savedSearches: structuredClone([...savedSearches]),
+      recentSearches: structuredClone(recentSearches),
+      counter,
+    };
+  }
+  function restoreState(before) {
+    documents = new Map(before.documents);
+    postings = new Map(before.postings.map(([term, entries]) => [term, new Map(entries)]));
+    savedSearches = new Map(before.savedSearches);
+    recentSearches = before.recentSearches;
+    counter = before.counter;
+  }
+  function transact(mutator) {
+    const before = captureState();
+    try {
+      const result = mutator();
+      writeThrough();
+      return result;
+    } catch (err) {
+      restoreState(before);
+      throw err;
+    }
+  }
+
   /** Index every searchable field of a document. */
   function indexDocument(doc) {
     for (const field of SEARCHABLE_FIELDS) {
@@ -244,32 +277,36 @@ export function createMailboxSearchStore(deps = {}) {
 
   function addDocument(doc) {
     validateDocumentInput(doc);
-    const id = doc.id ?? generateId();
-    if (documents.has(id)) {
-      throw searchError('MS_DUPLICATE_ID', `Document id "${id}" already indexed`, { id });
-    }
-    const record = {
-      id,
-      from: doc.from,
-      to: doc.to,
-      subject: doc.subject,
-      body: doc.body,
-      channel: doc.channel,
-      ts: doc.ts ?? clock(),
-      indexedAt: clock(),
-    };
-    documents.set(id, record);
-    indexDocument(record);
-    writeThrough();
-    return { ...record };
+    // M-8: the id is minted inside the transaction so a failed write does not
+    // burn a counter value.
+    return transact(() => {
+      const id = doc.id ?? generateId();
+      if (documents.has(id)) {
+        throw searchError('MS_DUPLICATE_ID', `Document id "${id}" already indexed`, { id });
+      }
+      const record = {
+        id,
+        from: doc.from,
+        to: doc.to,
+        subject: doc.subject,
+        body: doc.body,
+        channel: doc.channel,
+        ts: doc.ts ?? clock(),
+        indexedAt: clock(),
+      };
+      documents.set(id, record);
+      indexDocument(record);
+      return { ...record };
+    });
   }
 
   function removeDocument(id) {
     const record = requireDocument(id);
-    deindexDocument(id);
-    documents.delete(id);
-    writeThrough();
-    return { ...record };
+    return transact(() => {
+      deindexDocument(id);
+      documents.delete(id);
+      return { ...record };
+    });
   }
 
   function updateDocument(id, patch) {
@@ -279,12 +316,13 @@ export function createMailboxSearchStore(deps = {}) {
     }
     const merged = { ...current, ...patch, id: current.id };
     validateDocumentInput(merged);
-    deindexDocument(id);
-    const record = { ...merged, ts: merged.ts ?? clock(), indexedAt: clock() };
-    documents.set(id, record);
-    indexDocument(record);
-    writeThrough();
-    return { ...record };
+    return transact(() => {
+      deindexDocument(id);
+      const record = { ...merged, ts: merged.ts ?? clock(), indexedAt: clock() };
+      documents.set(id, record);
+      indexDocument(record);
+      return { ...record };
+    });
   }
 
   function getDocument(id) {
@@ -398,11 +436,12 @@ export function createMailboxSearchStore(deps = {}) {
   }
 
   function recordRecentSearch(query) {
-    recentSearches = [
-      { query, searchedAt: clock() },
-      ...recentSearches.filter((entry) => entry.query !== query),
-    ].slice(0, Math.max(1, historyCap));
-    writeThrough();
+    transact(() => {
+      recentSearches = [
+        { query, searchedAt: clock() },
+        ...recentSearches.filter((entry) => entry.query !== query),
+      ].slice(0, Math.max(1, historyCap));
+    });
   }
 
   function getRecentSearches() {
@@ -410,8 +449,9 @@ export function createMailboxSearchStore(deps = {}) {
   }
 
   function clearRecentSearches() {
-    recentSearches = [];
-    writeThrough();
+    transact(() => {
+      recentSearches = [];
+    });
   }
 
   function saveSearch(name, query) {
@@ -429,8 +469,9 @@ export function createMailboxSearchStore(deps = {}) {
       throw searchError('MS_SAVED_EXISTS', `Saved search "${name}" already exists`, { name });
     }
     const entry = { name, query: query.trim(), savedAt: clock() };
-    savedSearches.set(name, entry);
-    writeThrough();
+    transact(() => {
+      savedSearches.set(name, entry);
+    });
     return { ...entry };
   }
 
@@ -443,8 +484,9 @@ export function createMailboxSearchStore(deps = {}) {
     if (!entry) {
       throw searchError('MS_SAVED_NOT_FOUND', `No saved search named "${name}"`, { name });
     }
-    savedSearches.delete(name);
-    writeThrough();
+    transact(() => {
+      savedSearches.delete(name);
+    });
     return { ...entry };
   }
 
@@ -521,11 +563,12 @@ export function createMailboxSearchStore(deps = {}) {
     for (const [name, entry] of Object.entries(data.savedSearches)) {
       nextSaved.set(name, { ...entry });
     }
-    documents = nextDocuments;
-    postings = nextPostings;
-    savedSearches = nextSaved;
-    recentSearches = data.recentSearches.map((entry) => ({ ...entry }));
-    writeThrough();
+    transact(() => {
+      documents = nextDocuments;
+      postings = nextPostings;
+      savedSearches = nextSaved;
+      recentSearches = data.recentSearches.map((entry) => ({ ...entry }));
+    });
   }
 
   const store = {

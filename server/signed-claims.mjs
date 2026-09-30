@@ -118,6 +118,9 @@ export function signPubkeyClaim({ agentId, action, payload, privateKey, ttlMs = 
   return `${PUBKEY_TOKEN_PREFIX}.${bodyB64}.${sig}`;
 }
 
+// Clock-skew allowance for issuedAt: a claim may be issued slightly in the
+// future relative to the verifier's clock, but never beyond this bound.
+export const PUBKEY_CLAIM_CLOCK_SKEW_MS = 5 * 60 * 1000;
 // Verify an Ed25519 claim token. keysFor is either an array of registry key
 // entries or a function (agentId) => entries, where an entry is
 // { publicKey, validFrom, validUntil, revokedAt } as returned by
@@ -158,6 +161,10 @@ export function verifyPubkeyClaim({ token, keysFor, now }) {
     }
   });
   check(verified, "no registered key verifies this claim");
-  check(clock() <= claim.expiresAt, "claim has expired");
+  const at = clock();
+  check(at <= claim.expiresAt, "claim has expired");
+  // No not-before bound existed: a future-dated issuedAt verified as long as
+  // a key window covered it. Reject claims issued beyond the skew allowance.
+  check(claim.issuedAt <= at + PUBKEY_CLAIM_CLOCK_SKEW_MS, "claim issued in the future");
   return Object.freeze({ ...claim, payload: Object.freeze({ ...claim.payload }) });
 }

@@ -1428,6 +1428,10 @@ async function submitRequestAccessForm(event) {
       if (!identityId) throw new Error("The identity service did not return an identity.");
     }
     const requestId = newAccessRequestId();
+    // Stash BEFORE the submit (M-37): a failed submit must not orphan the
+    // freshly minted identity — the record stays stashed so the retry reuses
+    // it instead of burning another mint.
+    stashAccessRequest(window.sessionStorage, door.roomId, { identityId, secret, requestId, displayName: checked.displayName });
     await accountClient.submitAccessRequest({
       roomId: door.roomId,
       identityId,
@@ -1437,7 +1441,6 @@ async function submitRequestAccessForm(event) {
       referredBy: checked.referredBy,
       requestId,
     });
-    stashAccessRequest(window.sessionStorage, door.roomId, { identityId, secret, requestId, displayName: checked.displayName });
     flow.phase = "sent";
     $("#invitation-request-form").hidden = true;
     setRequestAccessStatus(`Request sent — the owner of “${door.roomTitle}” has been notified and will review it. Your request ID is ${requestId}.`);

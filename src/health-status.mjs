@@ -25,10 +25,22 @@ const isPlainObject = value => value !== null && typeof value === "object" && !A
 //   a failing optional check only degrades it.
 // - probe: () => undefined | true | { ok: boolean, detail?: string }.
 //   Cheap and non-invasive by contract: throwing counts as a failure.
+// A clock read can itself throw or return garbage; neither may break the
+// never-throws contract. Degrade to a safe default instead.
+function safeClockMs(clock) {
+  try {
+    const ms = clock();
+    if (Number.isFinite(ms)) return ms;
+  } catch {
+    // fall through to the default
+  }
+  return 0;
+}
+
 function runCheck(check, now) {
   const name = typeof check?.name === "string" && check.name.length > 0 ? check.name : "unnamed";
   const required = check?.required === true;
-  const started = now();
+  const started = safeClockMs(now);
   let status = CHECK_OK;
   let detail = null;
   if (typeof check?.probe !== "function") {
@@ -46,7 +58,7 @@ function runCheck(check, now) {
       detail = error instanceof Error ? error.message : String(error);
     }
   }
-  return { name, required, status, detail, latencyMs: Math.max(0, now() - started) };
+  return { name, required, status, detail, latencyMs: Math.max(0, safeClockMs(now) - started) };
 }
 
 // Build the health payload. Never throws: a bad option degrades to a
@@ -63,7 +75,7 @@ export function collectHealth({ service = "project-room", version = "0.1.0", upt
     version: String(version),
     status,
     uptimeMs: Number.isFinite(uptimeMs) && uptimeMs >= 0 ? Math.floor(uptimeMs) : 0,
-    checkedAt: new Date(clock()).toISOString(),
+    checkedAt: new Date(safeClockMs(clock)).toISOString(),
     checks: Object.freeze(results.map(result => Object.freeze({ ...result }))),
   });
 }

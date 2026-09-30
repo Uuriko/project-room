@@ -73,7 +73,7 @@ test('decide permission delegation follows #643 owner-grant rules', t => {
 test('a decision must cite an exact existing message and bounded text', t => {
   const { store, keys, decisions } = fixture(t);
   for (const [data, pattern] of [
-    [{ sourceMessageId: 'ghost', statement: 'Cites nothing real.' }, /reference a message/],
+    [{ sourceMessageId: 'ghost', statement: 'Cites nothing real.' }, /must be a message in this Room/],
     [{ sourceMessageId: 'msg-1' }, /missing statement/],
     [{ sourceMessageId: 'msg-1', statement: '   ' }, /Invalid statement|missing statement/],
     [{ sourceMessageId: 'msg-1', statement: ' padded ' }, /trimmed/],

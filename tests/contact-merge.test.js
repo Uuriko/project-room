@@ -370,3 +370,32 @@ describe('contact-merge', () => {
     assert.deepEqual([...MERGE_STATES], ['proposed', 'approved', 'merged', 'rejected', 'conflict']);
   });
 });
+
+describe("M-42 union metadata", () => {
+  it("union keeps verified/newer metadata for duplicate addresses, not the first entry", () => {
+    const { planner } = harness();
+    const p = planner();
+    // 'a' lists the address first as unverified+stale; 'b' has it verified+newer.
+    p.addContact({
+      id: "a",
+      names: ["Al"],
+      emails: [{ address: "shared@x.com", verified: false, seenAt: 50 }],
+      phones: [],
+      channels: { x: "@al" },
+    });
+    p.addContact({
+      id: "b",
+      names: ["Al B"],
+      emails: [{ address: "shared@x.com", verified: true, seenAt: 100 }],
+      phones: [],
+      channels: { x: "@al" },
+    });
+    const plan = p.proposeMerge("a", "b");
+    const kept = plan.fieldPlan.emails.value.filter((e) => e.address === "shared@x.com");
+    assert.equal(kept.length, 1);
+    assert.equal(kept[0].verified, true, "the verified entry wins over the stale first entry");
+    assert.equal(kept[0].seenAt, 100);
+    // ...and the verified entry now feeds primaryEmail selection.
+    assert.equal(plan.fieldPlan.primaryEmail.value, "shared@x.com");
+  });
+});

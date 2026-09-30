@@ -111,7 +111,11 @@ if [ ! -t 0 ] && [ "$#" -eq 0 ]; then
   set -- --yes
 fi
 
-exec node "$TMP_INIT" "$@"
+# No exec here: exec replaces the shell without running EXIT traps, which
+# would leave the downloaded init script on disk. Running node as a child
+# lets the trap remove $TMP_INIT on every exit path (success, failure via
+# set -e, or INT/TERM).
+node "$TMP_INIT" "$@"
 `;
 }
 

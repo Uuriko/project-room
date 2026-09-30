@@ -31,16 +31,65 @@ for (const file of roots.flatMap(r => { try { return files(r); } catch { return 
     if (m[3]) imported.add(m[3]);
   }
   if (!imported.size) continue;
-  const lines = src.replace(/\/\*[\s\S]*?\*\//g, "").split("\n");
+  // Strip block comments at file level; per line, strip strings then `//`
+  // comments so prose mentioning an import (e.g. `functions (parseDiff, …)`)
+  // is never read as a declaration or a use.
+  const lines = src.replace(/\/\*[\s\S]*?\*\//g, "").split("\n")
+    .map((l) => stripStrings(l).replace(/\/\/.*$/, ""));
+  // Declaration forms that introduce a binding for `name`. The gate used to
+  // match only line-leading `const name =` / `let name =`, so destructuring,
+  // multi-declarator, for-of, catch params, `var`, and function params all
+  // slipped through — every one of them is the same TDZ hazard.
+  //
+  // For const/let/var lines we split the declarator list on top-level commas
+  // (depth-aware, so `const x = f(a, NAME)` is NOT a declaration of NAME —
+  // a bare regex cannot tell a declarator comma from a call-argument comma).
+  const splitDeclarators = (rest) => {
+    const parts = [];
+    let depth = 0, cur = "";
+    for (const ch of rest) {
+      if (ch === "(" || ch === "[" || ch === "{") depth++;
+      else if (ch === ")" || ch === "]" || ch === "}") depth--;
+      if (ch === "," && depth === 0) { parts.push(cur); cur = ""; }
+      else cur += ch;
+    }
+    parts.push(cur);
+    return parts;
+  };
+  const bindingRes = (name) => [
+    new RegExp(`^\\s*${name}\\s*(?:=|;|$)`), // plain / multi-declarator: NAME = ...
+    // Object/array destructuring where `name` is the local binding.
+    // `(?!\s*:)` excludes the alias-source position (`{name: alias}`,
+    // `const {name: mk} = await import(...)`) — there `name` is a key, not a binding.
+    new RegExp(`^\\s*\\{[^}]*\\b${name}\\b(?!\\s*:)`),
+    new RegExp(`^\\s*\\[[^\\]]*\\b${name}\\b(?!\\s*:)`),
+  ];
+  const otherDeclRes = (name) => [
+    new RegExp(`^\\s*for\\s*\\(\\s*(?:const|let|var)?\\s*${name}\\s+(?:of|in)\\b`), // for (name of
+    new RegExp(`\\bcatch\\s*\\(\\s*${name}\\s*\\)`),                    // catch (name)
+  ];
+  // Function params: `name` in binding position inside the parameter list —
+  // right after (, ,, {, [, :, or ... — but not as another param's default
+  // value (`f(a = name)`). A single regex can't reuse the paren it consumed,
+  // so extract the param list first, then look for binding positions in it.
+  const declaresFunctionParam = (line, name) => {
+    const pm = line.match(/\bfunction(?![\w$])\s*[\w$]*\s*\(([^)]*)\)/);
+    return !!pm && new RegExp(`(?:^|[(,{\\[:]|\\.\\.\\.)\\s*\\b${name}\\b`).test(pm[1]);
+  };
+  const declaresOnLine = (line, name) => {
+    const m = line.match(/^\s*(?:const|let|var)\s+(.*?);?\s*$/);
+    if (m && splitDeclarators(m[1]).some((d) => bindingRes(name).some((re) => re.test(d)))) return true;
+    if (declaresFunctionParam(line, name)) return true;
+    return otherDeclRes(name).some((re) => re.test(line));
+  };
   for (const name of imported) {
-    const declRe = new RegExp(`^\\s*(?:const|let)\\s+${name}\\s*=`);
     const useRe = new RegExp(`(^|[^\\w$.])${name}([^\\w$]|$)`);
     const declLines = [];
-    lines.forEach((l, i) => { if (declRe.test(l)) declLines.push(i + 1); });
+    lines.forEach((l, i) => { if (declaresOnLine(l, name)) declLines.push(i + 1); });
     for (const declLine of declLines) {
       for (let i = 0; i < declLine - 1; i++) {
         const code = stripStrings(lines[i]);
-        if (/^\s*import\b/.test(code) || declRe.test(code)) continue;
+        if (/^\s*import\b/.test(code) || declaresOnLine(code, name)) continue;
         if (useRe.test(code)) {
           failures.push(`${file}:${declLine}: '${name}' shadows an import used earlier at line ${i + 1} (TDZ hazard)`);
           break;

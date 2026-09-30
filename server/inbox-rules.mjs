@@ -25,11 +25,20 @@ const fieldValue = (message, field) => {
     }
   }
 };
+const MAX_PATTERN_LENGTH = 200;
+// ReDoS guard: nested quantifiers like (a+)+$ can hang the evaluator.
+// Reject patterns that stack a quantifier on an already-quantified group.
+const hasNestedQuantifier = pattern =>
+  /\([^()]*[*+{][^()]*\)[*+{?]|\)[*+{?][*+{?]/.test(pattern) ||
+  /(\*|\+|\{\d+(,\d*)?\})(\?)?(\*|\+|\{\d+(,\d*)?\})/.test(pattern);
+const validPattern = value =>
+  typeof value === "string" && value.length > 0 && value.length <= MAX_PATTERN_LENGTH &&
+  !hasNestedQuantifier(value) && (() => { try { new RegExp(value); return true; } catch { return false; } })();
 const conditionOf = value => {
   check(value !== null && typeof value === "object" && !Array.isArray(value), "conditions must be objects");
   check(FIELDS.includes(value.field), `condition field must be one of ${FIELDS.join(", ")}`);
   check(OPS.includes(value.op), `condition op must be one of ${OPS.join(", ")}`);
-  if (value.op === "matches") check(typeof value.value === "string" && (() => { try { new RegExp(value.value); return true; } catch { return false; } })(), "matches needs a valid regex");
+  if (value.op === "matches") check(validPattern(value.value), "matches needs a valid regex (<= 200 chars, no nested quantifiers)");
   else if (value.op === "gte" || value.op === "lte") check(typeof value.value === "number" && Number.isFinite(value.value), `${value.op} needs a finite number`);
   else check(typeof value.value === "string", `${value.op} needs text`);
   return value;
@@ -38,7 +47,7 @@ const actionOf = value => {
   check(value !== null && typeof value === "object" && !Array.isArray(value), "actions must be objects");
   check(ACTION_TYPES.includes(value.type), `action type must be one of ${ACTION_TYPES.join(", ")}`);
   if (value.type === "file") check(typeof value.folder === "string" && value.folder.length > 0, "file actions need a folder");
-  if (value.type === "snooze") check(typeof value.delay === "string" && /^\d+[mhDw]$/.test(value.delay) === false && /^\d+[mhdw]$/.test(value.delay), "snooze actions need a delay like 2h");
+  if (value.type === "snooze") check(typeof value.delay === "string" && /^\d+[mhdw]$/.test(value.delay), "snooze actions need a delay like 2h");
   if (value.type === "flag") check(typeof value.label === "string" && value.label.length > 0, "flag actions need a label");
   return value;
 };

@@ -125,7 +125,11 @@ const communications = () => ({
     approvalScope: "connection linking",
     automaticSend: false,
     connectionLinking: "owner_required",
-    dmConsentRequired: true,
+    // DMs are open by default (2026-09-24 standing rule): no consent gate
+    // exists — requireDmAllowed only blocks explicitly denied directions.
+    // Published honestly as false; abuse is handled with block/mute,
+    // per-pair rate limits, and journal accountability.
+    dmConsentRequired: false,
     sendBudgets: "per-channel token bucket",
   },
 });

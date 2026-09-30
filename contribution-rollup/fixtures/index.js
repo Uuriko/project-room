@@ -6,5 +6,9 @@ export {
   ARTIFACT_SHA,
   EVIDENCE_URL,
   ROOM_ID,
-  WORK_ITEM_ID
+  WORK_ITEM_ID,
+  completeKnownProducer,
+  ownerDecision,
+  proposeReview,
+  verifyPass
 } from "./helpers.js";

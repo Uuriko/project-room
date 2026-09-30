@@ -166,3 +166,35 @@ test("dependency cycles terminate with a documented fallback", () => {
   assert.equal(plan.steps.length, 2);
   assert.ok(plan.errors.some(e => e.includes("cycle")), "cycle is flagged");
 });
+
+// M-1: the purge executor deletes gmail_mailboxes, gmail_linked_mailboxes,
+// gmail_pending, gmail_operations, and account_setup — those tables must be
+// represented in the signed plan (inventory + RETENTION_POLICY.purged) so the
+// plan digest actually covers them and the confirmation summary discloses them.
+test("M-1: deletion plan covers the connected-data tables the executor purges", async t => {
+  const { mkdtempSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { RoomStore } = await import("../server/store.mjs");
+  const { planAccountDeletion, executeAccountDeletion, RETENTION_POLICY } = await import("../server/account-deletion.mjs");
+  const directory = mkdtempSync(join(tmpdir(), "account-deletion-m1-"));
+  t.after(() => { try { store.close(); } catch {} });
+  const store = new RoomStore(join(directory, "room.sqlite"));
+  const account = store.createAccount("acct-m1", "test");
+  store.db.prepare("INSERT INTO gmail_mailboxes(account_id,auth_epoch,encrypted) VALUES(?,?,?)").run(account.id, 0, "x");
+  store.db.prepare("INSERT INTO gmail_linked_mailboxes(account_id,mailbox_id,auth_epoch,encrypted) VALUES(?,?,?,?)").run(account.id, "m1", 0, "x");
+  store.db.prepare("INSERT INTO gmail_pending(state_hash,account_id,expires_at,encrypted) VALUES(?,?,?,?)").run("h1", account.id, 0, "x");
+  store.db.prepare("INSERT INTO gmail_operations(account_id,request_id,fingerprint,result_json,at) VALUES(?,?,?,?,?)").run(account.id, "r1", "f", "{}", 0);
+  store.db.prepare("INSERT INTO account_setup(account_id,data_json) VALUES(?,?)").run(account.id, "{}");
+  const { plan, summary } = planAccountDeletion(store, account.id);
+  const step = plan.steps.find(s => s.category === "connected_data");
+  assert.ok(step, "plan has a connected_data step for the five tables");
+  assert.equal(step.action, "purge");
+  assert.equal(step.itemCount, 5, "all five rows are counted in the plan digest input");
+  assert.ok(RETENTION_POLICY.purged.some(e => e.category === "connected_data"), "retention policy discloses the purge");
+  assert.ok(summary.text.includes("connected_data"), "confirmation summary names the category");
+  executeAccountDeletion(store, plan);
+  for (const table of ["gmail_mailboxes", "gmail_linked_mailboxes", "gmail_pending", "gmail_operations", "account_setup"]) {
+    assert.equal(store.db.prepare(`SELECT count(*) AS n FROM ${table} WHERE account_id=?`).get(account.id).n, 0, `${table} purged`);
+  }
+});

@@ -69,8 +69,29 @@ export class DispatchJournal {
   }
   append(entry) {
     const full = { ...entry, at: this.now() };
+    // M-8: capture the affected record before applying, so a failed disk
+    // write rolls the in-memory journal back — memory must never run ahead
+    // of what survived to disk.
+    const existing = this.records.get(full.key);
+    const before = existing
+      ? { state: existing.state, jobId: existing.jobId, at: existing.at,
+          historyLength: existing.history.length }
+      : null;
     this.apply(full); // validate before touching disk
-    appendFileSync(this.path, JSON.stringify(encodeRow(DISPATCH_JOURNAL_ROW_KIND, full)) + "\n");
+    try {
+      appendFileSync(this.path, JSON.stringify(encodeRow(DISPATCH_JOURNAL_ROW_KIND, full)) + "\n");
+    } catch (err) {
+      if (before === null) {
+        this.records.delete(full.key);
+      } else {
+        const record = this.records.get(full.key);
+        record.state = before.state;
+        record.jobId = before.jobId;
+        record.at = before.at;
+        record.history.length = before.historyLength;
+      }
+      throw err;
+    }
     return full;
   }
   // Persist the intent BEFORE the provider is contacted. Same key + same

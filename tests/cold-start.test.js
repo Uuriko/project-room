@@ -250,7 +250,9 @@ test("phase validation rejects malformed phase lists", () => {
   assert.throws(() => evaluateStartup([null]), TypeError);
   assert.throws(() => evaluateStartup([{ estimatedMs: 100 }]), TypeError);
   assert.throws(() => evaluateStartup([{ name: "", estimatedMs: 100 }]), TypeError);
-  assert.throws(() => evaluateStartup([{ name: "a", estimatedMs: 0 }]), TypeError);
+  // M-43: zero-duration phases are valid (instant work is real); only negative
+  // and non-finite estimates are rejected.
+  assert.doesNotThrow(() => evaluateStartup([{ name: "a", estimatedMs: 0 }]));
   assert.throws(() => evaluateStartup([{ name: "a", estimatedMs: -5 }]), TypeError);
   assert.throws(() => evaluateStartup([{ name: "a", estimatedMs: NaN }]), TypeError);
   assert.throws(() => evaluateStartup([{ name: "a", estimatedMs: Infinity }]), TypeError);
@@ -282,4 +284,13 @@ test("phase validation rejects malformed phase lists", () => {
       evaluateStartup([{ name: "a", estimatedMs: 100, dependsOn: ["a"] }]),
     TypeError
   );
+});
+
+test("M-43: a 0ms measured phase is accepted by downstream assertions", () => {
+  const zero = measurePhase("instant", () => {}, { now: () => 42 });
+  assert.equal(zero.estimatedMs, 0);
+  // totalEstimate / criticalPathMs run assertPhases — a 0ms phase must not trip it.
+  assert.doesNotThrow(() => totalEstimate([zero]));
+  assert.doesNotThrow(() => criticalPathMs([zero]));
+  assert.equal(totalEstimate([zero]), 0);
 });

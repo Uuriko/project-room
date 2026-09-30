@@ -208,3 +208,16 @@ test("cyclic inputs terminate: repeated references reuse the scrubbed clone", ()
   // Original untouched.
   assert.equal(cyclic.password, FIXTURES.passwordHash);
 });
+
+test("M-39: exportJson never throws on cyclic snapshots (never-throws contract)", () => {
+  const cyclic = { name: "Ada", password: FIXTURES.passwordHash };
+  cyclic.self = cyclic;
+  cyclic.list = [cyclic];
+  let json;
+  assert.doesNotThrow(() => {
+    json = exportJson({ data: { profile: cyclic }, now });
+  }, "exportJson must not throw on cyclic input");
+  const parsed = JSON.parse(json); // the output must be valid JSON
+  assert.equal(parsed.data.profile.name, "Ada");
+  assert.equal(parsed.data.profile.password, REDACTED);
+});

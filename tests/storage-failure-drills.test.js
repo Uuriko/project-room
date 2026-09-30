@@ -302,7 +302,8 @@ test("evaluateDrill fails when data loss exceeds RPO", () => {
   const rpoFinding = report.findings.find((f) => f.check === "data-loss-within-rpo");
   assert.equal(rpoFinding.pass, false);
   // Everything else still passes: the failure is precisely the RPO breach.
-  assert.equal(report.findings.filter((f) => f.pass).length, 4);
+  // (6 findings now: the M-48 recovery-succeeded finding joins the set.)
+  assert.equal(report.findings.filter((f) => f.pass).length, 5);
 });
 
 test("evaluateDrill fails when recovery exceeds RTO", () => {
@@ -440,12 +441,28 @@ test("graded report carries the full drill verdict shape", () => {
     assert.ok(key in report.metrics, `metrics.${key}`);
   }
   assert.deepEqual(report.metrics.lostKeys, []);
-  assert.equal(report.findings.length, 5);
+  assert.equal(report.findings.length, 6);
   assert.deepEqual(
     report.findings.map((f) => f.check),
-    ["fault-observed", "data-loss-within-rpo", "recovery-within-rto", "no-partial-state-leakage", "baseline-recoverable"]
+    ["fault-observed", "data-loss-within-rpo", "recovery-succeeded", "recovery-within-rto", "no-partial-state-leakage", "baseline-recoverable"]
   );
   assert.ok(report.findings.every((f) => typeof f.detail === "string" && f.detail.length > 0));
   assert.ok(report.timeline.eventCount > 0);
   assert.ok(report.timeline.durationMs >= 0);
+});
+
+test("M-48: dropped-writes drill fails when its recovery write fails", () => {
+  const harness = makeHarness();
+  // Simulate a stuck fault: the recovery "disarm" does not actually clear the
+  // killer — it re-arms it, so the recovery write fails too.
+  harness.chaos.disarm = () => harness.chaos.killWrite(1);
+  const { timeline } = runDrill(SCENARIO_DROPPED_WRITES, harness);
+  const verdict = evaluateDrill(timeline, SCENARIO_DROPPED_WRITES);
+  assert.equal(verdict.verdict, "fail", "a drill whose recovery failed must not pass");
+  const recovery = verdict.findings.find((f) => f.check === "recovery-succeeded");
+  assert.ok(recovery && recovery.pass === false, "recovery-succeeded finding records the failure");
+  // And a healthy harness still passes, so the finding is not a tautological fail.
+  const healthy = evaluateDrill(runDrill(SCENARIO_DROPPED_WRITES, makeHarness()).timeline, SCENARIO_DROPPED_WRITES);
+  assert.equal(healthy.verdict, "pass");
+  assert.ok(healthy.findings.every((f) => f.pass));
 });

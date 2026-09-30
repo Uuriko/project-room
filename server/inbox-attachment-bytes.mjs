@@ -107,7 +107,9 @@ export class InboxAttachmentBytes {
   }
 
   expire(identityId, now) {
-    this.db.prepare(`UPDATE inbox_attachment_bytes SET state='expired', bytes=NULL
+    // Expired rows are purged outright (bytes NULLed offered no quota
+    // relief: the row itself was retained, so nothing bounded row growth).
+    this.db.prepare(`DELETE FROM inbox_attachment_bytes
       WHERE identity_id=? AND state='staged' AND expires_at<=?`).run(identityId, now);
   }
 
@@ -168,9 +170,16 @@ export class InboxAttachmentBytes {
     return this.store.transaction(() => {
       const owner = this.identity(identityId);
       if (!validId(id)) fail(422, "invalid_attachment", "Attachment id is not valid");
-      this.expire(owner, this.store.now());
+      const now = this.store.now();
       const row = this.db.prepare("SELECT * FROM inbox_attachment_bytes WHERE identity_id=? AND id=?").get(owner, id);
       if (!row) fail(404, "attachment_not_found", "Attachment not found");
+      // L-14: expired rows are purged, not retained. Snapshot the expiry
+      // decision before the sweep deletes the row: an id that expired is
+      // reported as unavailable (410 — the id was valid), not missing (404),
+      // matching the room-attachments API.
+      const expired = row.state === "staged" && row.expires_at <= now;
+      this.expire(owner, now);
+      if (expired) fail(410, "attachment_unavailable", "Attachment bytes are no longer available");
       if (row.state !== "staged" || row.bytes == null) {
         fail(410, "attachment_unavailable", "Attachment bytes are no longer available");
       }

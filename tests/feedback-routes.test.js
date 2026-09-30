@@ -8,7 +8,8 @@
 // so no test-only seam is involved.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { handleFeedbackCore, createSubmitLimiter, createFeedbackStore } from "../server/feedback-routes.mjs";
+import { handleFeedbackCore, createSubmitLimiter, createFeedbackStore, sweepFeedbackVerdicts } from "../server/feedback-routes.mjs";
+import { APPEAL_WINDOW_MS, MARK_REVIEWER_CONFIRMED } from "../server/feedback-store.mjs";
 
 const goodFiling = (lane = "jill") => ({
   agent: { lane, card_uri: "https://muse-room.example/.well-known/agent-card.json" },
@@ -34,11 +35,11 @@ const helpers = data => {
   };
 };
 
-const call = ({ method = "GET", route, id = null, data, lane = "jill", feedbackStore, limiter = createSubmitLimiter(), roomId = "room1" }) => {
+const call = ({ method = "GET", route, id = null, data, lane = "jill", feedbackStore, limiter = createSubmitLimiter(), roomId = "room1", store } = {}) => {
   const h = helpers(data);
   const req = { method, headers: {} };
   const auth = lane === null ? {} : { member: { id: lane } };
-  const result = handleFeedbackCore({ req, res: {}, store: undefined, roomId, auth,
+  const result = handleFeedbackCore({ req, res: {}, store, roomId, auth,
     feedbackRoute: route, feedbackId: id, feedbackStore, limiter,
     helpers: { json: h.json, reject: h.reject, body: h.body } });
   return { result, error: null };
@@ -235,4 +236,102 @@ test("triage with a bad verdict → 422 invalid_verdict", () => {
   const e = callErr({ method: "POST", route: "triage", id, data: { verdict: "meh" }, feedbackStore: fb, lane: "reviewer-a" });
   assert.equal(e.status, 422);
   assert.equal(e.code, "invalid_verdict");
+});
+
+// H-2 production wiring (server/feedback-routes.mjs): the HTTP layer must
+// configure the store's authority gates from room roles, otherwise the
+// store's legacy default lets any lane triage and mint Mark through the
+// production path.
+// Contract: triage and appeal decisions require a reviewer (room owner or
+// moderator); recording merged/adopted outcomes requires the room owner.
+// These tests go through handleFeedbackCore with a production-shaped store
+// (the real roomAuthority interface: ownerId + member roles) and NO injected
+// feedbackStore, so they exercise the wiring itself — the store-level gates
+// are owned by tests/feedback-store.test.js and are never re-asserted here.
+// Credible regression: on the pre-fix route code the plain-member calls
+// below succeed (200), because the store was built with no predicates.
+const roomStore = ({ ownerId = "owner-lane", roles = {} } = {}) => ({
+  roomAuthority: roomId => ({
+    roomId,
+    ownerId,
+    members: Object.fromEntries(
+      Object.entries(roles).map(([lane, role]) => [lane, { id: lane, role }])),
+  }),
+});
+
+test("H-2 wiring: plain member triage and appeal decisions → 403 not_reviewer; moderator triage → 200", () => {
+  const store = roomStore({ roles: { "mod-lane": "moderator", "member-lane": "member", "other-lane": "member" } });
+  const roomId = "authz-room-triage";
+  const id = call({ method: "POST", route: "submit", data: goodFiling("member-lane"),
+    lane: "member-lane", roomId, store }).result.value.feedback_id;
+
+  const e1 = callErr({ method: "POST", route: "triage", id, data: { verdict: "junk" },
+    lane: "member-lane", roomId, store });
+  assert.equal(e1.status, 403);
+  assert.equal(e1.code, "not_reviewer");
+
+  const triaged = call({ method: "POST", route: "triage", id, data: { verdict: "junk" },
+    lane: "mod-lane", roomId, store }).result;
+  assert.equal(triaged.status, 200);
+  assert.equal(triaged.value.verdict, "junk");
+
+  call({ method: "POST", route: "appeal", id, lane: "member-lane", roomId, store });
+  const e2 = callErr({ method: "POST", route: "appeal-decision", id, data: { decision: "uphold" },
+    lane: "other-lane", roomId, store });
+  assert.equal(e2.status, 403);
+  assert.equal(e2.code, "not_reviewer");
+});
+
+test("H-2 wiring: non-owner outcome recording → 403 not_release_authority; owner → 200", () => {
+  const store = roomStore({ roles: { "mod-lane": "moderator", "member-lane": "member" } });
+  const roomId = "authz-room-outcome";
+  const id = call({ method: "POST", route: "submit", data: goodFiling("member-lane"),
+    lane: "member-lane", roomId, store }).result.value.feedback_id;
+  call({ method: "POST", route: "triage", id, data: { verdict: "real" },
+    lane: "mod-lane", roomId, store });
+
+  const e = callErr({ method: "POST", route: "outcome", id,
+    data: { kind: "adopted", ref: "room decision 2026-09-30" }, lane: "mod-lane", roomId, store });
+  assert.equal(e.status, 403);
+  assert.equal(e.code, "not_release_authority");
+
+  const ok = call({ method: "POST", route: "outcome", id,
+    data: { kind: "adopted", ref: "room decision 2026-09-30" }, lane: "owner-lane", roomId, store }).result;
+  assert.equal(ok.status, 200);
+  assert.equal(ok.value.attributions.length, 1);
+});
+
+// H-22 (server/feedback-routes.mjs): HEAD on the notifications route must be
+// a pure metadata read — never a drain. Contract: crawlers/proxies issue
+// HEAD freely; a HEAD request must not destroy queued feedback
+// notifications. Credible regression: the old code evaluated
+// fb.drainNotifications(lane) while building the HEAD response, so one HEAD
+// silently emptied the queue and the next GET came back empty.
+test("H-22: HEAD on notifications never drains the queue", () => {
+  const fb = createFeedbackStore();
+  const id = call({ method: "POST", route: "submit", data: goodFiling("jill"), feedbackStore: fb }).result.value.feedback_id;
+  call({ method: "POST", route: "triage", id, data: { verdict: "junk" }, feedbackStore: fb, lane: "reviewer-a" });
+
+  const head = call({ method: "HEAD", route: "notifications", feedbackStore: fb, lane: "jill" }).result;
+  assert.equal(head.status, 200);
+  assert.equal(head.head, true);
+
+  const get = call({ method: "GET", route: "notifications", feedbackStore: fb, lane: "jill" }).result;
+  assert.equal(get.status, 200);
+  assert.equal(get.value.notifications.length, 1, "the HEAD request left the queued notification untouched");
+});
+
+test("M-58: sweepFeedbackVerdicts is operational — it settles an unappealed verdict (scheduled manually)", () => {
+  // The sweep is intentionally invoked manually until the metrics-dashboard
+  // slice wires a scheduler (docs/feedback-endpoint.md §6); this test pins
+  // the production entry point's contract, not a schedule that doesn't exist.
+  let nowMs = Date.now();
+  const fb = createFeedbackStore({ now: () => nowMs });
+  const id = call({ method: "POST", route: "submit", data: goodFiling(), feedbackStore: fb }).result.value.feedback_id;
+  call({ method: "POST", route: "triage", id, data: { verdict: "junk" }, feedbackStore: fb, lane: "reviewer-a" });
+  nowMs += APPEAL_WINDOW_MS + 1000;
+  const result = sweepFeedbackVerdicts(fb);
+  assert.equal(result.settled, 1);
+  assert.equal(fb.get(id).status, "settled");
+  assert.equal(fb.mark("reviewer-a").balance, 10 + MARK_REVIEWER_CONFIRMED);
 });

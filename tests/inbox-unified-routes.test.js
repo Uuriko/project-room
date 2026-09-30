@@ -209,7 +209,7 @@ test("channel sends: a Telegram reply dispatches through the fixture sender when
   assert.equal(response.status, 200, JSON.stringify(value)); assert.equal(value.send.status, "accepted"); assert.equal(value.send.providerId, "telegram:-1001000000001:777");
   assert.equal(value.channelSend.mode, "live"); assert.equal(value.lastSendResult.outcome, "accepted"); assert.equal(value.lastSendResult.code, null);
   assert.equal(calls.length, 1); assert.equal(calls[0].url, "https://api.telegram.org/bot" + FAKE_TOKEN + "/sendMessage");
-  assert.deepEqual(calls[0].body, { chat_id: -1001000000001, text: "Got the brief.", reply_parameters: { message_id: 42, allow_sending_without_reply: true } });
+  assert.deepEqual(calls[0].body, { chat_id: "-1001000000001", text: "Got the brief.", reply_parameters: { message_id: "42", allow_sending_without_reply: true } }, "M-25: ids travel as validated digit strings");
   assert.equal(JSON.stringify(value).includes(FAKE_TOKEN), false);
   // Telegram unreachable: the attempt stays unknown and the response names the failure for the browser.
   answer = () => { throw new TypeError("fetch failed"); };

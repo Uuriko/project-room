@@ -602,3 +602,61 @@ test("member ownership and invitation authority ignore inherited names but retai
   assert.equal(canInviteMembers(added, "toString"), true);
   assert.equal(canInviteMembers(state, "potter"), true);
 });
+
+test("H-11: retrying a handler-mutated event object is idempotent", () => {
+  // Contract: the stored fingerprint must agree with the immutable log entry.
+  // Handlers stamp markers onto incoming.data (delegatedAdmin here); the old
+  // code fingerprinted BEFORE the handler ran, so re-applying the same
+  // (now mutated) object threw a spurious "Conflicting reuse of event id",
+  // turning an idempotent retry into a hard failure. Credible regression:
+  // the second applyEvent with the identical object must not throw.
+  const state = baseState();
+  const grant = fixedEvent("owner-grant-admin", EVENT_TYPES.MEMBER_ADDED, "potter", {
+    memberId: "agent-admin", displayName: "Admin", kind: "agent",
+    permissions: ["manage_members"],
+  });
+  const pristine = structuredClone(grant);
+  const once = applyEvent(state, grant);
+  assert.equal(grant.data.delegatedAdmin, true, "handler stamps the grant marker onto the event");
+  assert.equal(once.members["agent-admin"].delegatedAdmin, true);
+  // Retry with the same (now mutated) object: idempotent, no throw.
+  const twice = applyEvent(once, grant);
+  assert.equal(twice.members["agent-admin"].delegatedAdmin, true);
+  assert.equal(twice.eventLog.length, once.eventLog.length, "no duplicate log entry");
+  // Retry with a pristine copy of the same logical event: also idempotent.
+  const thrice = applyEvent(once, pristine);
+  assert.equal(thrice.eventLog.length, once.eventLog.length, "no duplicate log entry");
+});
+
+test("H-11: a genuinely conflicting reuse of an event id still throws", () => {
+  const state = baseState();
+  const grant = fixedEvent("owner-grant-admin-2", EVENT_TYPES.MEMBER_ADDED, "potter", {
+    memberId: "agent-admin-2", displayName: "Admin", kind: "agent",
+    permissions: ["manage_members"],
+  });
+  const once = applyEvent(state, grant);
+  const conflict = { ...structuredClone(grant), data: { ...grant.data, displayName: "Someone Else" } };
+  assert.throws(() => applyEvent(once, conflict), /Conflicting reuse of event id/);
+});
+
+test("M-38: decision.recorded rejects deleted and private messages as decision sources", () => {
+  let state = baseState();
+  state = applyEvent(state, fixedEvent("m38-msg", EVENT_TYPES.MESSAGE_POSTED, "potter", { body: "the public rationale" }));
+  const msgId = state.messages.at(-1).id;
+  // Deleted source: the tombstone still resolves by id, so the old check accepted it.
+  const deleted = applyEvent(state, fixedEvent("m38-del", EVENT_TYPES.MESSAGE_DELETED, "potter", { messageId: msgId, expectedMessageRevision: 0 }));
+  assert.throws(() => applyEvent(deleted, fixedEvent("m38-dec", EVENT_TYPES.DECISION_RECORDED, "potter", {
+    sourceMessageId: msgId, statement: "we ship it"
+  })), /Decision source must be a message in this Room/);
+  // DM (private) source: must be a public room message.
+  const dm = applyEvent(state, fixedEvent("m38-dm", EVENT_TYPES.MESSAGE_POSTED, "potter", { body: "private rationale", toMemberId: "maya" }));
+  const dmId = dm.messages.at(-1).id;
+  assert.throws(() => applyEvent(dm, fixedEvent("m38-dec2", EVENT_TYPES.DECISION_RECORDED, "potter", {
+    sourceMessageId: dmId, statement: "we ship it"
+  })), /Decision source must be a public room message/);
+  // A live public message still records fine (recordDecision is validation-only;
+  // the event itself is the record, so success = no throw).
+  assert.doesNotThrow(() => applyEvent(state, fixedEvent("m38-dec3", EVENT_TYPES.DECISION_RECORDED, "potter", {
+    sourceMessageId: msgId, statement: "we ship it"
+  })));
+});

@@ -6,6 +6,14 @@
 // network failures) are retried with bounded backoff; everything that is
 // still uncertain afterwards is reported as unavailable, which leaves the
 // attempt "unknown" in the send journal rather than guessing.
+//
+// Delivery trade-off (at-least-once): after an ambiguous network failure the
+// first POST may already have been accepted by Telegram, and the retry loop
+// re-POSTs without an idempotency key — a duplicate message is possible.
+// Telegram's sendMessage has no client idempotency key, so this cannot be
+// closed at the transport layer; the operation-keyed receipt store and the
+// send journal bound the blast radius to in-flight retries of one attempt.
+// Narrowing to a single attempt + reconcile is a product decision.
 import { ServiceError } from "../store.mjs";
 import { requireContract } from "../channel-connection.mjs";
 import { provider, channel } from "./telegram.mjs";
@@ -13,20 +21,40 @@ import { redactTelegram } from "./telegram-config.mjs";
 
 export const telegramSendLimits = Object.freeze({ textChars: 4096, maxAttempts: 4, baseDelayMs: 500, maxDelayMs: 5000, timeoutMs: 10000 });
 const object = v => v !== null && typeof v === "object" && !Array.isArray(v);
-const digits = /^-?\d{1,20}$/;
 const fail = (status, code, message, headers = null) => { throw new ServiceError(status, code, message, headers); };
 const slug = text => String(text ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 64) || "unknown";
 
 // The Bot API request for one outbox envelope; pure, so tests can inspect it.
+// M-25: ids travel as the validated digit STRINGS, never through Number() —
+// a chat id above 2^53 is not exactly representable as a double and would
+// otherwise be silently corrupted (wrong recipient + poisoned providerId).
+// Oversized ids fail closed via the contract instead.
+const asSafeIdString = (value, { allowNegative = false } = {}) => {
+  const text = String(value ?? "");
+  if (!(allowNegative ? /^-?\d{1,20}$/ : /^\d{1,20}$/).test(text)) return null;
+  const num = Number(text);
+  // Exact round-trip: an id above 2^53 parses to a DIFFERENT decimal
+  // ("9007199254740993" -> 9007199254740992), which Number() would silently
+  // corrupt. The BigInt comparison keeps leading zeros working. (Note:
+  // Number.isSafeInteger is the wrong gate here — 2^53 itself is exactly
+  // representable and must stay accepted.)
+  return BigInt(text) === BigInt(num) ? text : null;
+};
 export function telegramSendRequest(envelope) {
   requireContract(object(envelope) && envelope.adapter === channel && envelope.provider === provider && object(envelope.target), "telegram_transport_mismatch");
   const { chatId, replyToMessageId, threadId } = envelope.target;
-  requireContract(digits.test(chatId) && (replyToMessageId === null || /^\d{1,20}$/.test(replyToMessageId)) && typeof threadId === "string", "telegram_transport_mismatch");
+  const chat = asSafeIdString(chatId, { allowNegative: true });
+  const replyTo = replyToMessageId === null ? null : asSafeIdString(replyToMessageId);
+  requireContract(chat !== null && (replyToMessageId === null || replyTo !== null) && typeof threadId === "string", "telegram_transport_mismatch");
   requireContract(typeof envelope.body === "string" && envelope.body.trim() && envelope.body.length <= telegramSendLimits.textChars && envelope.body.isWellFormed(), "telegram_transport_mismatch");
-  const body = { chat_id: Number(chatId), text: envelope.body };
-  if (replyToMessageId !== null) body.reply_parameters = { message_id: Number(replyToMessageId), allow_sending_without_reply: true };
+  const body = { chat_id: chat, text: envelope.body };
+  if (replyTo !== null) body.reply_parameters = { message_id: replyTo, allow_sending_without_reply: true };
   const [, topic] = threadId.split("/");
-  if (topic !== undefined) { requireContract(/^\d{1,20}$/.test(topic), "telegram_transport_mismatch"); body.message_thread_id = Number(topic); }
+  if (topic !== undefined) {
+    const topicId = asSafeIdString(topic);
+    requireContract(topicId !== null, "telegram_transport_mismatch");
+    body.message_thread_id = topicId;
+  }
   return { method: "sendMessage", body };
 }
 // Retry only on answers that may succeed unchanged later.

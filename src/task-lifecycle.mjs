@@ -156,6 +156,19 @@ export function createTaskLifecycle(deps = {}) {
   let idCounter = 0;
   const newId = deps.id ?? (() => `task-${(idCounter += 1)}`);
 
+  // H-14: after restore(), the next generated id must not collide with a
+  // restored record. Reseed the counter from the numeric suffixes present in
+  // the map (ids not matching the task-N shape, e.g. from an injected id fn,
+  // are ignored). Monotonic: never lowers the counter.
+  const reseedIdCounter = () => {
+    let max = 0;
+    for (const id of tasks.keys()) {
+      const m = /^task-(\d+)$/.exec(id);
+      if (m) max = Math.max(max, Number(m[1]));
+    }
+    idCounter = Math.max(idCounter, max);
+  };
+
   /** Internal task records, keyed by id. */
   const tasks = new Map();
 
@@ -215,6 +228,26 @@ export function createTaskLifecycle(deps = {}) {
     storage.save(snapshotData());
   }
 
+  /**
+   * M-8: transactional mutation. Snapshot the durable state before mutating;
+   * if the write fails, restore memory so live state never runs ahead of what
+   * survived to disk. Returns the mutator's value.
+   */
+  function transact(mutator) {
+    const beforeTasks = structuredClone([...tasks]);
+    const beforeCounter = idCounter;
+    try {
+      const result = mutator();
+      persist();
+      return result;
+    } catch (err) {
+      tasks.clear();
+      for (const [id, task] of beforeTasks) tasks.set(id, task);
+      idCounter = beforeCounter;
+      throw err;
+    }
+  }
+
   function applyTransition(task, to, actor, note) {
     if (!STATES.includes(to)) {
       throw taskError(
@@ -232,19 +265,21 @@ export function createTaskLifecycle(deps = {}) {
     }
     const from = task.state;
     const at = clock();
-    task.state = to;
-    task.updatedAt = at;
-    task.history.push(
-      Object.freeze({
-        from,
-        to,
-        actor,
-        note: note === undefined ? null : note,
-        at,
-      }),
-    );
-    persist();
-    notifySubscribers(Object.freeze({ taskId: task.id, from, to, actor, note: note === undefined ? null : note, at }));
+    const event = transact(() => {
+      task.state = to;
+      task.updatedAt = at;
+      task.history.push(
+        Object.freeze({
+          from,
+          to,
+          actor,
+          note: note === undefined ? null : note,
+          at,
+        }),
+      );
+      return Object.freeze({ taskId: task.id, from, to, actor, note: note === undefined ? null : note, at });
+    });
+    notifySubscribers(event);
     return freezeTask(task);
   }
 
@@ -281,26 +316,30 @@ export function createTaskLifecycle(deps = {}) {
       if (agentId !== null && (typeof agentId !== 'string' || agentId === '')) {
         throw taskError('TL_INVALID_TASK', 'Task agentId must be a non-empty string or null', { title });
       }
-      const id = newId();
-      const at = clock();
-      const task = {
-        id,
-        title,
-        description,
-        agentId,
-        state: 'created',
-        createdAt: at,
-        updatedAt: at,
-        history: [
-          Object.freeze({ from: null, to: 'created', actor, note: null, at }),
-        ],
-      };
-      tasks.set(id, task);
-      persist();
+      // M-8: the id is minted inside the transaction so a failed write does
+      // not burn a counter value.
+      const created = transact(() => {
+        const id = newId();
+        const at = clock();
+        const task = {
+          id,
+          title,
+          description,
+          agentId,
+          state: 'created',
+          createdAt: at,
+          updatedAt: at,
+          history: [
+            Object.freeze({ from: null, to: 'created', actor, note: null, at }),
+          ],
+        };
+        tasks.set(id, task);
+        return { id, at };
+      });
       notifySubscribers(
-        Object.freeze({ taskId: id, from: null, to: 'created', actor, note: null, at }),
+        Object.freeze({ taskId: created.id, from: null, to: 'created', actor, note: null, at: created.at }),
       );
-      return freezeTask(task);
+      return freezeTask(tasks.get(created.id));
     },
 
     /**
@@ -394,25 +433,28 @@ export function createTaskLifecycle(deps = {}) {
      */
     restore(data) {
       validateSnapshotData(data);
-      const next = new Map();
-      for (const saved of data.tasks) {
-        next.set(saved.id, {
-          id: saved.id,
-          title: saved.title,
-          description: saved.description ?? '',
-          agentId: saved.agentId ?? null,
-          state: saved.state,
-          createdAt: saved.createdAt,
-          updatedAt: saved.updatedAt,
-          history: saved.history.map((entry) => Object.freeze({ ...entry })),
-        });
-      }
-      tasks.clear();
-      for (const [id, task] of next) {
-        tasks.set(id, task);
-      }
-      persist();
-      return tasks.size;
+      const size = transact(() => {
+        const next = new Map();
+        for (const saved of data.tasks) {
+          next.set(saved.id, {
+            id: saved.id,
+            title: saved.title,
+            description: saved.description ?? '',
+            agentId: saved.agentId ?? null,
+            state: saved.state,
+            createdAt: saved.createdAt,
+            updatedAt: saved.updatedAt,
+            history: saved.history.map((entry) => Object.freeze({ ...entry })),
+          });
+        }
+        tasks.clear();
+        for (const [id, task] of next) {
+          tasks.set(id, task);
+        }
+        reseedIdCounter();
+        return tasks.size;
+      });
+      return size;
     },
   };
 

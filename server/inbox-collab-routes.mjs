@@ -29,7 +29,7 @@ const STATUS_BY_CODE = new Map(Object.entries({
   approval_invalid: 422, approval_not_found: 404, approval_not_human: 403, approval_transition: 409,
   routing_invalid: 422, routing_not_found: 404, routing_transition: 409,
   assignment_not_found: 404, lock_not_found: 404,
-  handoff_no_account_scope: 409,
+  handoff_no_account_scope: 409, handoff_forbidden: 403,
   // Typed handoff envelopes (RC-2026-09-19-062): validation is 422, unknown
   // envelopes are 404, recipient/sender actor rules are 403, and illegal
   // lifecycle moves are 409.
@@ -274,6 +274,20 @@ function handleInboxCollabCore({ req, res, url, store, roomId, auth, collabRoute
         if (!shape(fields, { required: ["agentId", "policy"] })) {
           invalidInput(reject, "{agentId, policy: {mode: direct|escalate, scopes?, escalateTo?, note?}}");
         }
+        // M-7(a): a routing policy names who handles an agent's mentions —
+        // only the room owner or that agent itself may set it. An agent's
+        // member id resolves to its agent identity via identity_links.
+        const ownerId = store.roomAuthority?.(roomId)?.ownerId ?? null;
+        let callerAgentId = caller.id;
+        if (caller.kind === "agent") {
+          callerAgentId = store.db.prepare(
+            "SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?")
+            .get(roomId, caller.id)?.identityId ?? caller.id;
+        }
+        if (caller.id !== ownerId && callerAgentId !== fields.agentId) {
+          return reject(403, "routing_forbidden",
+            "Only the room owner or the agent the policy is for can set a routing policy.");
+        }
         const policy = collab.setRoutingPolicy(roomId, fields.agentId, fields.policy);
         return json(res, 200, { agentId: fields.agentId, policy });
       }
@@ -318,7 +332,8 @@ function handleInboxCollabCore({ req, res, url, store, roomId, auth, collabRoute
           invalidInput(reject, '{status: "accepted"|"completed"|"released", note?}');
         }
         const scope = collab.resolveHandoffAccount(roomId, caller.id, auth.account?.id ?? null);
-        const handoff = collab.transitionHandoff(scope, collabId, fields.status, { note: fields.note ?? null });
+        const handoff = collab.transitionHandoff(scope, collabId, fields.status,
+          { note: fields.note ?? null, by: caller.id, roomId });
         return json(res, 200, { handoff });
       }
       // Typed handoff envelopes (RC-2026-09-19-062): agent-to-agent delegation

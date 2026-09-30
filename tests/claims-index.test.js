@@ -194,3 +194,35 @@ test("watermark and stats are consistent", () => {
     idx.unregistered.length,
   );
 });
+
+test("M-49: cross-lane STATUS:/DONE:/[receipt] transitions are ignored, same-lane apply", () => {
+  const fx = [
+    // jill holds the claim
+    C(3001, "2026-09-23T18:00:00Z", claimBlock("RC-2026-09-23-201", "jill", "lease=12h")),
+    // codex tries a heartbeat on jill's claim -> ignored, no lease renewal
+    C(3002, "2026-09-23T18:30:00Z",
+      "[codex]STATUS: heartbeat RC-2026-09-23-201 — still working (codex)\n\n" +
+      "```room-claim\ntask-id: RC-2026-09-23-201\nlane: codex\nfiles: scripts/a.mjs\n" +
+      "lease: lease=12h\nstate: working\nreason: cross-lane heartbeat\n```"),
+    // codex tries a DONE: on jill's claim -> ignored, claim not completed
+    C(3003, "2026-09-23T19:00:00Z", "[codex]DONE: RC-2026-09-23-201\n\n```room-receipt\nmerged: beefcafe1234\n```"),
+    // codex tries a [receipt] on jill's claim -> ignored, no receipt attached
+    C(3004, "2026-09-23T19:10:00Z", "[codex][receipt] RC-2026-09-23-201 done. PR #902"),
+    // jill's own heartbeat still applies
+    C(3005, "2026-09-23T19:20:00Z",
+      "[jill]STATUS: heartbeat RC-2026-09-23-201 — still working (jill)\n\n" +
+      "```room-claim\ntask-id: RC-2026-09-23-201\nlane: jill\nfiles: scripts/a.mjs\n" +
+      "lease: lease=12h\nstate: working\nreason: own heartbeat\n```"),
+  ];
+  const idx = run(fx);
+  const c = idx.claims.find((x) => x.task_id === "RC-2026-09-23-201");
+  assert.ok(c, "claim present");
+  // only jill's heartbeat (3005) renewed the lease: expires 2026-09-24T07:20:00Z
+  assert.equal(c.heartbeat_at, "2026-09-23T19:20:00Z");
+  assert.equal(c.expires_at, "2026-09-24T07:20:00.000Z");
+  assert.equal(c.state, "working", "codex DONE: did not complete the claim");
+  assert.equal(c.receipts.length, 0, "codex [receipt] did not attach");
+  const xl = idx.unregistered.filter((x) => x.kind === "cross-lane-transition");
+  assert.equal(xl.length, 3, `cross-lane attempts recorded, got ${xl.length}`);
+  assert.ok(xl.every((x) => x.lane === "codex"));
+});

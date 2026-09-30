@@ -30,9 +30,10 @@ const fail = (status, code, message) => { throw new ServiceError(status, code, m
 // What deletion removes vs retains, and why. Served verbatim at
 // GET /api/account/retention and attached to every deletion plan.
 export const RETENTION_POLICY = Object.freeze({
-  version: "1.0.0",
+  version: "1.1.0",
   summary: "Account deletion purges the account's sign-in credentials, "
-    + "sessions, room memberships, and profile data. Security audit rows and "
+    + "sessions, room memberships, connected Gmail data, account setup answers, "
+    + "and profile data. Security audit rows and "
     + "the deactivated account tombstone are retained under legal hold; "
     + "room history already shared with other members is room-owned and is "
     + "not rewritten.",
@@ -42,6 +43,7 @@ export const RETENTION_POLICY = Object.freeze({
     Object.freeze({ category: "login_methods", description: "All linked sign-in methods are deleted: password verifiers, magic codes, and recovery codes." }),
     Object.freeze({ category: "passkeys", description: "All registered passkey credentials are deleted." }),
     Object.freeze({ category: "memberships", description: "Room membership bindings (member_accounts) are deleted; the account leaves every room." }),
+    Object.freeze({ category: "connected_data", description: "Connected Gmail data (gmail_mailboxes, gmail_linked_mailboxes, gmail_pending, gmail_operations) and account setup answers (account_setup) are permanently deleted." }),
     Object.freeze({ category: "profile", description: "The account row is deactivated (active=0), its auth epoch is rotated so no residual credential can authenticate, and display name / avatar are scrubbed." }),
   ]),
   retained: Object.freeze([
@@ -74,6 +76,13 @@ export function inventoryFromStore(store, accountId) {
       legalHoldReason: "Access history is retained for security auditing, fraud prevention, and dispute resolution.",
     },
     profile: { itemCount: 1 },
+    // Connected Gmail data and account setup answers: purged by their own
+    // executor so the signed plan, the retention policy, and the
+    // confirmation summary all disclose them (M-1).
+    connected_data: {
+      itemCount: ["gmail_mailboxes", "gmail_linked_mailboxes", "gmail_pending", "gmail_operations", "account_setup"]
+        .reduce((sum, table) => sum + countWhere(store, table, accountId), 0),
+    },
   };
 }
 
@@ -103,8 +112,14 @@ const EXECUTORS = {
     store.db.prepare("DELETE FROM account_passkey_credentials WHERE account_id=?").run(accountId).changes,
   memberships: (store, accountId) =>
     store.db.prepare("DELETE FROM member_accounts WHERE account_id=?").run(accountId).changes,
+  connected_data: (store, accountId) => {
+    let removed = 0;
+    for (const table of ["gmail_mailboxes", "gmail_linked_mailboxes", "gmail_pending", "gmail_operations", "account_setup"]) {
+      removed += store.db.prepare(`DELETE FROM ${table} WHERE account_id=?`).run(accountId).changes;
+    }
+    return removed;
+  },
   profile: (store, accountId) => {
-    for (const table of ['gmail_mailboxes', 'gmail_linked_mailboxes', 'gmail_pending', 'gmail_operations', 'account_setup']) store.db.prepare(`DELETE FROM ${table} WHERE account_id=?`).run(accountId);
     return store.db.prepare(`UPDATE accounts SET active=0, auth_epoch=auth_epoch+1,
       display_name=NULL, avatar_url=NULL, onboarded=1 WHERE id=?`).run(accountId).changes;
   },

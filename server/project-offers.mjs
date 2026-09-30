@@ -3,6 +3,7 @@ import { renderPublicContributionTerms } from '../src/contribution-brief.js';
 // Money remains unconfigured; the independent valueless-credit ledger is unchanged.
 import { canonicalJson } from '../src/audit-receipts.mjs';
 import { validId, roomPolicy } from '../src/events.js';
+import { isGuestAgentMemberId } from './guest-agent-links.mjs';
 
 const fail = (status, code, message) => { throw Object.assign(new Error(message), { status, code }); };
 const check = (ok, message) => { if (!ok) fail(422, 'invalid_project_offer', message); };
@@ -74,6 +75,7 @@ function termsOf(value) {
 function validateReview(state, terms, links) {
   const reviewers = links.reviewerMemberIds;
   check(Array.isArray(reviewers) && reviewers.length > 0 && reviewers.length <= 10, 'Reviewers required');
+  check(reviewers.every(id => !isGuestAgentMemberId(id)), 'Guest passes cannot approve work; choose a durable reviewer');
   const members = reviewers.map(id => state.members[identifier(id)]);
   check(members.every(member => member && member.active !== false), 'Reviewers must be active room members');
   const mode = terms.approvalPolicy.mode;
@@ -166,7 +168,15 @@ export class ProjectOffers {
   }
   ownerList(roomId, actorId) {
     this.requireOwner(roomId, actorId);
-    return { offers: this.db.prepare('SELECT * FROM project_offers WHERE room_id=? ORDER BY created_at DESC, offer_id LIMIT 100').all(roomId).map(row => this.record(row, true)) };
+    return this.store.readTransaction(() => {
+      const rows = this.store.publicWorkClaims?.available()
+        ? this.db.prepare(`SELECT o.*,t.repository_ref AS public_ref,t.files_json AS public_files
+            FROM project_offers o LEFT JOIN public_work_tasks t ON t.offer_id=o.offer_id
+            WHERE o.room_id=? ORDER BY o.created_at DESC,o.offer_id LIMIT 100`).all(roomId)
+        : this.db.prepare('SELECT * FROM project_offers WHERE room_id=? ORDER BY created_at DESC,offer_id LIMIT 100').all(roomId);
+      return { offers: rows.map(row => ({ ...this.record(row, true), publicClaims: row.public_ref
+        ? { enabled: true, repositoryRef: row.public_ref, files: JSON.parse(row.public_files) } : null })) };
+    });
   }
   list({ limit = 20, after = null } = {}) {
     const size = Number(limit);

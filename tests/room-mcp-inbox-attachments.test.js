@@ -52,7 +52,7 @@ test("inbox attachment tools stay behind a live identity secret", async t => {
     roomId: "inbox-den", title: "Inbox den", purpose: "Inbox bytes", kind: "personal", displayName: "Inbox owner"
   });
   const listed = await rpc(origin, "tools/list");
-  assert.deepEqual((await listed.json()).result.tools.map(tool => tool.name), JOIN_TOOLS);
+  assert.deepEqual((await listed.json()).result.tools.map(tool => tool.name), [...JOIN_TOOLS, "public_work_recommend", "public_work_read_task"]);
   const denied = await call(origin, "inbox_get_attachment", { id: "note" });
   assert.equal(denied.status, 401);
   assert.equal(denied.body.error.code, -32001);
@@ -203,7 +203,13 @@ test("staged inbox attachments expire and an identity cannot exceed the staged c
   assert.throws(() => store.inboxAttachments.get(owner.identityId, "f0"),
     error => error.status === 410 && error.code === "attachment_unavailable");
   assert.deepEqual(store.inboxAttachments.list(owner.identityId).attachments, []);
+  // Expired rows are purged outright (L-14): no retained state='expired'
+  // row, so nothing accumulates unboundedly.
   const expired = store.db.prepare("SELECT state, bytes FROM inbox_attachment_bytes WHERE identity_id=? AND id=?").get(owner.identityId, "f0");
-  assert.equal(expired.state, "expired");
-  assert.equal(expired.bytes, null);
+  assert.equal(expired, undefined);
+  // The purge frees the quota: a fresh staged attachment fits again.
+  const restaged = store.inboxAttachments.put(owner.identityId, {
+    id: "f0", filename: "n.txt", mediaType: "text/plain", data
+  });
+  assert.equal(restaged.duplicate, false);
 });

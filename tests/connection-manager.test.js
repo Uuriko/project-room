@@ -330,4 +330,99 @@ describe('connection-manager', () => {
       ['connecting', 'connected'],
     ]);
   });
+
+  it('a failed scheduled reconnect re-schedules with growing backoff (M-34)', async () => {
+    const scheduled = [];
+    const { cm } = makeManager({
+      backoffBaseMs: 500,
+      scheduler: (fn, delayMs) => scheduled.push({ fn, delayMs }),
+    });
+    // The retry re-schedule lands in promise continuations; drain them
+    // deterministically (no real timers involved).
+    const flush = () => new Promise((resolve) => setImmediate(resolve));
+    let up = true;
+    const connector = {
+      connect: async () => {
+        if (!up) throw new Error('down');
+      },
+      disconnect: async () => {},
+    };
+    cm.register('tg', connector);
+    await cm.connect('tg');
+
+    up = false;
+    cm.markFailed('tg', new Error('socket reset'));
+    assert.equal(scheduled.length, 1);
+    assert.equal(scheduled[0].delayMs, 500);
+
+    await scheduled[0].fn(); // attempt 1 fails
+    await flush();
+    assert.equal(cm.status('tg').state, 'failed');
+    assert.equal(scheduled.length, 2, 'a failed auto-reconnect must re-schedule the next attempt');
+    assert.equal(scheduled[1].delayMs, 1000, 'backoff grows between attempts');
+
+    await scheduled[1].fn(); // attempt 2 fails
+    await flush();
+    assert.equal(cm.status('tg').state, 'failed');
+    assert.equal(scheduled.length, 3);
+    assert.equal(scheduled[2].delayMs, 2000);
+
+    up = true;
+    await scheduled[2].fn(); // attempt 3 recovers
+    await flush();
+    assert.equal(cm.status('tg').state, 'connected');
+    assert.equal(scheduled.length, 3, 'no further retries once the channel recovers');
+    assert.equal(cm.status('tg').reconnectAttempts, 0);
+  });
+
+  it('disconnect() during auto-reconnect backoff stops the retry loop (M-34/M-35)', async () => {
+    const scheduled = [];
+    const { cm } = makeManager({
+      backoffBaseMs: 500,
+      scheduler: (fn, delayMs) => scheduled.push({ fn, delayMs }),
+    });
+    const connector = {
+      connect: async () => {
+        throw new Error('down');
+      },
+      disconnect: async () => {},
+    };
+    cm.register('tg', connector);
+    // Start already-failed: register then fail the first connect, then markFailed.
+    await expectCmError(() => cm.connect('tg'), 'CM_CONNECT_FAILED');
+    cm.markFailed('tg', new Error('socket reset'));
+    assert.equal(scheduled.length, 1);
+
+    await cm.disconnect('tg');
+    assert.equal(cm.status('tg').state, 'disconnected');
+
+    await scheduled[0].fn(); // stale timer fires
+    assert.equal(cm.status('tg').state, 'disconnected', 'a stale timer must not reconnect');
+    assert.equal(scheduled.length, 1, 'no further retries after an explicit disconnect');
+  });
+
+  it('an in-flight connect() that settles after disconnect() leaves the channel disconnected (M-35)', async () => {
+    let releaseConnect;
+    const connector = {
+      connect: () => new Promise((resolve) => {
+        releaseConnect = resolve;
+      }),
+      disconnect: async () => {},
+    };
+    const { cm } = makeManager();
+    cm.register('tg', connector);
+
+    const pending = cm.connect('tg'); // hangs inside connector.connect()
+    assert.equal(cm.status('tg').state, 'connecting');
+    await cm.disconnect('tg');
+    assert.equal(cm.status('tg').state, 'disconnected');
+
+    releaseConnect(); // the stale connect resolves late
+    await pending;
+    assert.equal(
+      cm.status('tg').state,
+      'disconnected',
+      'a stale connect completion must not resurrect the channel',
+    );
+  });
 });

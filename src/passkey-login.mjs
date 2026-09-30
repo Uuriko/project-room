@@ -158,8 +158,10 @@ export function createRegistrationOptions({
       displayName: isNonEmptyString(user.displayName) ? user.displayName : user.name,
     },
     pubKeyCredParams: [
+      // ES256 only: coseKeyToJwk can persist P-256 keys (-7) but not RSA keys
+      // (-257), so advertising RS256 offered credentials we would refuse at
+      // registration time. Add algs here only alongside coseKeyToJwk support.
       { type: "public-key", alg: -7 }, // ES256
-      { type: "public-key", alg: -257 }, // RS256
     ],
     timeout,
     excludeCredentials: (Array.isArray(excludeCredentials) ? excludeCredentials : []).map(cred => ({
@@ -355,18 +357,32 @@ export function coseKeyToJwk(coseBytes) {
 }
 
 // Default assertion signature verifier: ES256 over
-// authenticatorData || SHA-256(clientDataJSON), via node:crypto with
-// ieee-p1363 (raw R||S) signatures. Never throws — returns false on any
-// failure (bad key, bad signature shape, crypto error). Override with the
-// `verifySignature` option for other algorithms.
+// authenticatorData || SHA-256(clientDataJSON), via node:crypto. Real
+// WebAuthn authenticators emit ASN.1 DER signatures (~70-72 bytes); some
+// stacks emit raw R||S (P1363, 64 bytes). Both are accepted: DER is tried
+// first, then P1363 (H-6 — the old code required exactly 64 bytes, so real
+// passkey logins failed under the default). Never throws — returns false on
+// any failure (bad key, bad signature shape, crypto error). Override with
+// the `verifySignature` option for other algorithms.
 export function defaultVerifySignature({ publicKeyCose, publicKeyJwk, data, signature }) {
   try {
     const jwk = publicKeyJwk != null ? publicKeyJwk : coseKeyToJwk(publicKeyCose);
     if (jwk == null || jwk.kty !== "EC" || jwk.crv !== "P-256") return false;
     const key = createPublicKey({ key: { kty: "EC", crv: "P-256", x: jwk.x, y: jwk.y }, format: "jwk" });
     const sig = toBuffer(signature);
-    if (sig.length !== 64) return false;
-    return verify("sha256", toBuffer(data), { key, dsaEncoding: "ieee-p1363" }, sig);
+    const msg = toBuffer(data);
+    // Accept exactly the signatures that are cryptographically valid under
+    // one of the two standard encodings — trying both wire formats does not
+    // weaken verification, it only accepts both shapes of a valid signature.
+    for (const dsaEncoding of ["der", "ieee-p1363"]) {
+      if (dsaEncoding === "ieee-p1363" && sig.length !== 64) continue;
+      try {
+        if (verify("sha256", msg, { key, dsaEncoding }, sig)) return true;
+      } catch {
+        // Malformed for this encoding; try the next one.
+      }
+    }
+    return false;
   } catch {
     return false;
   }

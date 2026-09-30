@@ -64,7 +64,7 @@ test("wake tools stay behind a live identity secret", async t => {
   const owner = store.identities.create("Wake owner");
   const created = roomFor(store, rooms, owner);
   const listed = await rpc(origin, "tools/list");
-  assert.deepEqual((await listed.json()).result.tools.map(tool => tool.name), JOIN_TOOLS);
+  assert.deepEqual((await listed.json()).result.tools.map(tool => tool.name), [...JOIN_TOOLS, "public_work_recommend", "public_work_read_task"]);
   const open = await call(origin, "wake.register", { hostId: "host-1", wakeUrl: WAKE_URL });
   assert.equal(open.status, 401);
   assert.equal(open.body.error.code, -32001);

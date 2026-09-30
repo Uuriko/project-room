@@ -268,14 +268,14 @@ describe('dlq-store', () => {
     expectDlqError(() => store.purge('done', -1), 'DLQ_INVALID_ENTRY');
   });
 
-  it('replayAll: replays every queued entry, returns {done, failed}', () => {
+  it('replayAll: replays every queued entry, returns {done, failed}', async () => {
     const { store } = ctx;
     store.enqueue(ENQUEUE({ reason: 'ok' }));
     store.enqueue(ENQUEUE({ reason: 'boom' }));
     const d = store.enqueue(ENQUEUE({ reason: 'stays' }));
     store.discard(d.id, 'john'); // not queued → skipped
 
-    const result = store.replayAll((entry) => {
+    const result = await store.replayAll((entry) => {
       if (entry.reason === 'boom') throw new Error('handler hates this one');
     });
     assert.deepEqual(result, { done: 1, failed: 1 });
@@ -284,11 +284,11 @@ describe('dlq-store', () => {
     assert.equal(store.stats().queued, 1);
   });
 
-  it('replayAll: honors limit and validates args', () => {
+  it('replayAll: honors limit and validates args', async () => {
     const { store } = ctx;
     store.enqueue(ENQUEUE());
     store.enqueue(ENQUEUE());
-    const result = store.replayAll(() => {}, { limit: 1 });
+    const result = await store.replayAll(() => {}, { limit: 1 });
     assert.deepEqual(result, { done: 1, failed: 0 });
     assert.equal(store.stats().queued, 1);
     expectDlqError(() => store.replayAll('nope'), 'DLQ_INVALID_HANDLER');
@@ -450,5 +450,43 @@ describe('dlq-store', () => {
   it('exposes ENTRY_STATES and SNAPSHOT_SCHEMA_VERSION', () => {
     assert.deepEqual([...ENTRY_STATES], ['queued', 'replaying', 'discarded', 'done']);
     assert.equal(SNAPSHOT_SCHEMA_VERSION, 1);
+  });
+});
+
+describe('H-12 async replay settlement', () => {
+  // Contract: an async handler's rejection must settle the entry back to
+  // queued (attempts++, lastError), never to done. The old code marked the
+  // entry done immediately after dispatching the handler without awaiting
+  // the promise, so genuinely failing replays were recorded complete and
+  // the `dlq retry` workflow silently dropped real errors. Credible
+  // regression: replaying with a rejecting async handler must not end done.
+  it('replay: rejecting async handler settles the entry to queued, not done', async () => {
+    const { store } = makeStore();
+    const entry = store.enqueue(ENQUEUE());
+    const result = store.replay(entry.id, async () => {
+      throw new Error('boom');
+    });
+    const settled = result && typeof result.then === 'function' ? await result : result;
+    assert.equal(settled.state, 'queued');
+    assert.equal(settled.attempts, 1);
+    assert.match(settled.lastError, /boom/);
+  });
+
+  it('replay: resolving async handler settles the entry to done', async () => {
+    const { store } = makeStore();
+    const entry = store.enqueue(ENQUEUE());
+    const result = store.replay(entry.id, async () => 'ok');
+    const settled = result && typeof result.then === 'function' ? await result : result;
+    assert.equal(settled.state, 'done');
+  });
+
+  it('replayAll: awaits async handlers before counting done/failed', async () => {
+    const { store } = makeStore();
+    store.enqueue(ENQUEUE());
+    store.enqueue(ENQUEUE());
+    const result = await store.replayAll(async (entry) => {
+      if (entry.id === 'entry-1') throw new Error('nope');
+    });
+    assert.deepEqual(result, { done: 1, failed: 1 });
   });
 });

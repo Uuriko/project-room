@@ -130,8 +130,13 @@ export function createDMRooms(deps = {}) {
 
   function emit(type, payload) {
     const event = Object.freeze({ type, at: clock(), ...payload });
+    // M-30: a throwing listener must not starve the listeners after it.
     for (const listener of [...listeners]) {
-      listener(event);
+      try {
+        listener(event);
+      } catch {
+        // Listener errors are isolated, never propagated.
+      }
     }
     return event;
   }
@@ -488,6 +493,15 @@ export function createDMRooms(deps = {}) {
             'DM_CORRUPT_SNAPSHOT',
             `Snapshot has two rooms for the same pair '${agentA}'/'${agentB}'`,
             { agentA, agentB },
+          );
+        }
+        // M-31: duplicate room ids must be rejected, not silently merged —
+        // otherwise a corrupt snapshot can overwrite one room with another.
+        if (nextRooms.has(room.id)) {
+          throw dmError(
+            'DM_CORRUPT_SNAPSHOT',
+            `Snapshot has two rooms with the same id '${room.id}'`,
+            { roomId: room.id },
           );
         }
         nextRooms.set(room.id, room);

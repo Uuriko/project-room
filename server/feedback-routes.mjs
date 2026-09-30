@@ -50,6 +50,7 @@ const STATUS_FOR_CODE = {
   invalid_transition: 409, not_found: 404, not_appealable: 409, already_appealed: 409,
   appeal_window_closed: 409, same_reviewer: 422, not_filer: 403,
   suspended: 403, insufficient_mark: 402, rate_limited: 429,
+  not_reviewer: 403, not_release_authority: 403, unverified_merge_ref: 422,
 };
 
 // Per-lane filing throttle: 10 filings/hour. The room funnel already applies
@@ -78,9 +79,47 @@ export function createSubmitLimiter({ capacity = 10, refillPerHour = 10, now } =
 // IDs and list reads are room-keyed: one room can never see another room's
 // filings. Tests inject their own feedbackStore and bypass this entirely.
 const roomStores = new Map();
-function storeForRoom(roomId) {
+
+// Authority for the H-2 gates (server/feedback-store.mjs), resolved from
+// room roles: triage and appeal decisions (which move Mark) require a
+// reviewer — the room owner or a moderator; recording merged/adopted
+// outcomes (which mint Mark) requires the room owner as release authority.
+// Roles are read fresh on every gated call (roomAuthority() is a fresh
+// storage read, never a cache), so membership changes take effect
+// immediately and the process-level store cache cannot go stale.
+//
+// verifyMergeRef is deliberately NOT wired: the only existing merge-record
+// facility (the per-room land queue) is opt-in per PR, so a strict gate on
+// it would reject legitimate merges that were never queued; a live GitHub
+// check inside the synchronous store call is not cleanly reusable (needs a
+// token and network I/O). The owner-only release-authority gate is the
+// protection, exactly as the store documents. Revisit when a room-scoped
+// merge record with full coverage exists.
+function feedbackAuthorityOptions(roomId, store) {
+  // No main store on this path (unit tests that bypass the HTTP mount):
+  // keep the store's legacy behavior; production always passes the store.
+  if (!store || typeof store.roomAuthority !== "function") return {};
+  const authority = () => {
+    try { return store.roomAuthority(roomId); }
+    catch { return null; } // unknown/corrupt room: fail closed below
+  };
+  return {
+    isReviewer: lane => {
+      const a = authority();
+      if (!a || typeof lane !== "string") return false;
+      return lane === a.ownerId || a.members?.[lane]?.role === "moderator";
+    },
+    isReleaseAuthority: lane => {
+      const a = authority();
+      if (!a || typeof lane !== "string") return false;
+      return lane === a.ownerId;
+    },
+  };
+}
+
+function storeForRoom(roomId, store) {
   let fb = roomStores.get(roomId);
-  if (!fb) { fb = createFeedbackStore(); roomStores.set(roomId, fb); }
+  if (!fb) { fb = createFeedbackStore(feedbackAuthorityOptions(roomId, store)); roomStores.set(roomId, fb); }
   return fb;
 }
 const defaultLimiter = createSubmitLimiter();
@@ -105,7 +144,7 @@ export function handleFeedbackCore({ req, res, store, roomId, auth, feedbackRout
 function dispatchFeedbackCore({ req, res, store, roomId, auth, feedbackRoute, feedbackId,
   feedbackStore, limiter, helpers }) {
   const { json, reject, body } = helpers;
-  const fb = feedbackStore ?? storeForRoom(roomId);
+  const fb = feedbackStore ?? storeForRoom(roomId, store);
   const lim = limiter ?? defaultLimiter;
   const lane = auth?.member?.id;
   if (typeof lane !== "string" || !LANE_RE.test(lane)) {
@@ -156,6 +195,10 @@ function dispatchFeedbackCore({ req, res, store, roomId, auth, feedbackRoute, fe
   }
   if (feedbackRoute === "notifications") {
     if (!readMethod(req.method)) reject(405, "method_not_allowed", "Use GET to read notifications");
+    // HEAD is a metadata probe (crawlers, proxies), never a read: draining
+    // here let any HEAD request silently destroy the queued notifications
+    // (H-22). Report the queue untouched.
+    if (head) return json(res, 200, { notifications: [], drained: false }, head);
     return json(res, 200, { notifications: fb.drainNotifications(lane) }, head);
   }
   if (feedbackRoute === "read") {

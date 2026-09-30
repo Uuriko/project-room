@@ -32,11 +32,13 @@ export function buildThreads(messages) {
     groups.get(key).push(message);
   }
   const threads = [...groups.entries()].map(([threadId, group]) => {
+    // Duplicate message ids collapse to the last occurrence; iteration is
+    // over nodes so a repeated id can never corrupt the tree or the count.
     const nodes = new Map(group.map(message => [message.id, { message, children: [] }]));
     const roots = [];
-    for (const message of [...group].sort(byTime)) {
+    for (const node of [...nodes.values()].sort((a, b) => byTime(a.message, b.message))) {
+      const message = node.message;
       const parent = message.inReplyTo ? nodes.get(message.inReplyTo) : null;
-      const node = nodes.get(message.id);
       // Cycles/dangling refs: guard with a depth cap and fall back to root.
       if (parent && parent !== node && depthOf(nodes, message.inReplyTo, 0) < 64) parent.children.push(node);
       else roots.push(node);
@@ -45,8 +47,8 @@ export function buildThreads(messages) {
     const flat = [];
     const walk = (node, depth) => { flat.push(Object.freeze({ message: node.message, depth })); node.children.sort((a, b) => byTime(a.message, b.message)).forEach(child => walk(child, depth + 1)); };
     roots.forEach(root => walk(root, 0));
-    const sorted = [...group].sort(byTime);
-    return Object.freeze({ threadId, messageCount: group.length, depth: flat.reduce((max, entry) => Math.max(max, entry.depth), 0),
+    const sorted = [...nodes.values()].map(n => n.message).sort(byTime);
+    return Object.freeze({ threadId, messageCount: nodes.size, depth: flat.reduce((max, entry) => Math.max(max, entry.depth), 0),
       firstAt: sorted[0].occurredAt, lastAt: sorted[sorted.length - 1].occurredAt, entries: Object.freeze(flat) });
   });
   threads.sort((a, b) => b.lastAt.localeCompare(a.lastAt) || (a.threadId < b.threadId ? -1 : 1));

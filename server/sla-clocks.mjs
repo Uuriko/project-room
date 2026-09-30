@@ -76,7 +76,12 @@ export function assessThreadSla({ threadId, channel, messages, now, targets = sl
   check(typeof channel === "string" && channel.length > 0, "channel must be text");
   check(Array.isArray(messages) && messages.length <= 10000, "messages must be a list of at most 10000");
   const at = msOf(now), validated = targetOf(targets);
-  const timed = messages.map(messageOf).sort((a, b) => a.occurredAt.localeCompare(b.occurredAt) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  // M-23: canonicalize to epoch ms before comparing — mixed ISO formats
+  // ("Z" vs "+00:00" vs offsets) misorder and mis-dedup under raw string
+  // comparison. messageOf already guarantees Date.parse succeeds.
+  const timed = messages.map(messageOf)
+    .map(m => ({ ...m, _ms: Date.parse(m.occurredAt) }))
+    .sort((a, b) => a._ms - b._ms || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   const inbound = timed.filter(m => m.direction === "inbound");
   const target = targetFor(channel, validated);
   if (!target) return Object.freeze({ threadId, channel, status: "unknown_channel", targetMs: null, label: null,
@@ -84,7 +89,7 @@ export function assessThreadSla({ threadId, channel, messages, now, targets = sl
   if (inbound.length === 0) return Object.freeze({ threadId, channel, status: "not_applicable", targetMs: target.targetMs,
     label: target.label ?? null, elapsedMs: null, awaitingSince: null, respondedMs: null, withinTarget: null });
   const latest = inbound[inbound.length - 1];
-  const reply = timed.find(m => m.direction === "outbound" && m.occurredAt >= latest.occurredAt);
+  const reply = timed.find(m => m.direction === "outbound" && m._ms >= latest._ms);
   if (reply) {
     const respondedMs = new Date(reply.occurredAt).getTime() - new Date(latest.occurredAt).getTime();
     return Object.freeze({ threadId, channel, status: "responded", targetMs: target.targetMs, label: target.label ?? null,

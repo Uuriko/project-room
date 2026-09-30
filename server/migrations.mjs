@@ -30,6 +30,14 @@ export function verifyMigrations(migrations, journal) {
     check(sorted[i].version > sorted[i - 1].version, `duplicate or out-of-order version ${sorted[i].version}`);
   }
   const applied = new Map((journal ?? []).map(entry => [entry.version, entry]));
+  // The journal is caller-persisted: an out-of-order journal would make
+  // rollback pop the wrong migration, so its ordering is verified too.
+  let prevVersion = 0;
+  for (const entry of journal ?? []) {
+    check(Number.isInteger(entry?.version) && entry.version > prevVersion,
+      `journal is out of order or duplicated at version ${entry?.version}`);
+    prevVersion = entry.version;
+  }
   for (const migration of sorted) {
     const entry = applied.get(migration.version);
     if (entry) {

@@ -285,11 +285,16 @@ test("public feed edges: limits clamp, unknown cursor restarts, HEAD is 405", as
   assert.equal((await feed("?limit=0")).json.messages.length, 2);
   // Over-limit caps at 100 (harmless here with two messages).
   assert.equal((await feed("?limit=500")).json.messages.length, 2);
-  // An unknown cursor restarts from the beginning rather than 500ing.
+  // An unknown cursor fails closed (M-15: invalid_feed_cursor) rather than
+  // silently restarting — clients re-fetch from the start instead of
+  // looping on re-poll.
   const unknown = await feed("?after=nope&limit=1");
-  assert.equal(unknown.status, 200);
-  assert.equal(unknown.json.messages.length, 1);
-  assert.equal(unknown.json.messages[0].body, "first");
+  assert.equal(unknown.status, 422);
+  assert.equal(unknown.json.error.code, "invalid_feed_cursor");
+  const restart = await feed("?limit=1");
+  assert.equal(restart.status, 200);
+  assert.equal(restart.json.messages.length, 1);
+  assert.equal(restart.json.messages[0].body, "first");
   // A known cursor pages forward.
   const first = (await feed("?limit=1")).json;
   const second = await feed(`?limit=1&after=${first.messages[0].id}`);

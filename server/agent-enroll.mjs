@@ -323,6 +323,15 @@ export function createAgentEnrollRoutes({
     // pilot_limit, no row written). Control-char and deceptive-spelling
     // rules are enforced there too.
     const identity = store.identities.create(name);
+    // The inline room join runs BEFORE the key is issued (H-23): the old
+    // order committed the shown-once credential and *then* joined, so a
+    // join failure left the key committed but never delivered — and the
+    // retry path returns guestToken: null, losing the credential forever.
+    // Join-first means a join failure fails the whole enrollment with no
+    // credential minted, and the retry starts clean.
+    const roomJoin = roomId
+      ? fileRoomJoin({ roomId, identityId: identity.identityId, displayName: name, enrollRequestId: data.requestId })
+      : null;
     const createdAt = now();
     const issued = store.agentPlugin.issueApiKey({
       identityId: identity.identityId,
@@ -342,9 +351,7 @@ export function createAgentEnrollRoutes({
     const summary = publicSummary(record, { duplicate: false });
     return json(res, 201, Object.freeze({
       ...summary,
-      roomJoin: roomId
-        ? fileRoomJoin({ roomId, identityId: identity.identityId, displayName: name, enrollRequestId: data.requestId })
-        : null,
+      roomJoin,
       guestToken: `rak_${issued.secret}`,
       guestTokenId: issued.keyId,
       guestTokenExpiresAt: issued.expiresAt,

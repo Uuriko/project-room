@@ -61,7 +61,8 @@ test("build rejects non-https origins and bad room ids", t => {
 });
 
 test("manifest documents the API-key scope vocabulary and it matches enforcement (RC-2026-09-18-019)", async t => {
-  const { buildPluginManifest, validatePluginManifest } = await import("../server/agent-plugin-manifest.mjs");
+  // buildPluginManifest/validatePluginManifest are already statically imported
+  // above; no dynamic re-import (it would shadow the imports).
   const { API_KEY_SCOPES } = await import("../server/agent-api-keys.mjs");
   const manifest = buildPluginManifest({ serviceOrigin: "https://room.example" });
   assert.equal(validatePluginManifest(manifest), true);

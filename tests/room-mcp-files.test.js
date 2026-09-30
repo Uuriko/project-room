@@ -53,7 +53,7 @@ test("room file tools stay behind a live identity secret", async t => {
     roomId: "file-den", title: "File den", purpose: "Room file bytes", kind: "personal", displayName: "File owner"
   });
   const listed = await rpc(origin, "tools/list");
-  assert.deepEqual((await listed.json()).result.tools.map(tool => tool.name), JOIN_TOOLS);
+  assert.deepEqual((await listed.json()).result.tools.map(tool => tool.name), [...JOIN_TOOLS, "public_work_recommend", "public_work_read_task"]);
   const denied = await call(origin, "room_get_file", { roomId: created.roomId, id: "note" });
   assert.equal(denied.status, 401);
   assert.equal(denied.body.error.code, -32001);

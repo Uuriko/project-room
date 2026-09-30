@@ -17,7 +17,7 @@
  * Abandon keeps every recorded decision but marks the session abandoned.
  *
  * Buckets (suggested by scoring; the actual decision is validated against them):
- *   act-now, schedule, delegate, archive, spam-candidate
+ *   act-now, schedule, delegate, archive, needs-review, spam-candidate
  *
  * Scoring (all weights sum to 1 by default):
  *   score = w.recency * recencyScore + w.sender * senderScore(sender)
@@ -27,7 +27,9 @@
  *   Bucket thresholds on score: >= 0.75 act-now, >= 0.5 schedule,
  *   >= 0.3 delegate, >= 0.15 archive, below that spam-candidate.
  *   An item whose injected senderScore is <= SPAM_SENDER_SCORE_MAX lands in
- *   spam-candidate regardless of the other signals.
+ *   spam-candidate regardless of the other signals. An item whose score is
+ *   not finite (missing/invalid inputs) lands in needs-review (H-16): an
+ *   unscored item is not evidence of spam.
  *
  * Dependency injection (all via the `deps` parameter of createInboxZeroTriage):
  *   - clock:               () => number  (ms epoch; default: Date.now)
@@ -68,6 +70,9 @@ export const BUCKETS = Object.freeze([
   'schedule',
   'delegate',
   'archive',
+  // H-16: items whose score cannot be computed (missing/invalid inputs)
+  // surface here for human review instead of being buried as spam-candidate.
+  'needs-review',
   'spam-candidate',
 ]);
 
@@ -147,14 +152,17 @@ export function createInboxZeroTriage(deps = {}) {
     const recency = 1 - Math.min(1, ageMs / RECENCY_WINDOW_MS);
     const sender = clamp01(senderScore(item.sender ?? ''));
     const attachment = item.hasAttachment ? 1 : 0;
-    const thread = Math.min(1, (item.threadDepth ?? 0) / 10);
+    const thread = Math.min(1, Math.max(0, item.threadDepth ?? 0) / 10);
     const score =
       weights.recency * recency +
       weights.sender * sender +
       weights.attachment * attachment +
       weights.thread * thread;
-    const bucket =
-      sender <= SPAM_SENDER_SCORE_MAX ? 'spam-candidate' : bucketForScore(score);
+    // H-16: an uncomputable score is not evidence of spam. Route it to the
+    // review bucket so a human sees it instead of it being silently buried.
+    const bucket = !Number.isFinite(score)
+      ? 'needs-review'
+      : sender <= SPAM_SENDER_SCORE_MAX ? 'spam-candidate' : bucketForScore(score);
     return Object.freeze({
       score,
       bucket,

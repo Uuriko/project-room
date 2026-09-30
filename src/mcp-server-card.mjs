@@ -58,7 +58,7 @@ export function renderMcpServerCardJson({
       supportedProtocolVersions: [...protocolVersions],
       headers: [{
         name: "Authorization",
-        description: "Identity secret for the enrolled room profile. Omit this header for the public join tools.",
+        description: "Saved identity secret for explicit public-work actions and own feedback. Private Room tools also require current membership. Omit this header for join documents and public-work recommendations/reads.",
         isRequired: false,
         isSecret: true
       }]

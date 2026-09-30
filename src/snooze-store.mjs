@@ -88,6 +88,21 @@ export function createSnoozeStore(deps = {}) {
   let idCounter = 0;
   const newId = deps.id ?? (() => `snooze-${(idCounter += 1)}`);
 
+  // H-14: after restore()/storage load, the next generated id must not
+  // collide with a restored record. Reseed the counter from the numeric
+  // suffixes present in the map (ids not matching the snooze-N shape, e.g.
+  // from an injected id fn, are ignored). Monotonic: never lowers the
+  // counter. Lives in loadSnapshotObject so both restore() and the eager
+  // storage load at creation are covered.
+  const reseedIdCounter = () => {
+    let max = 0;
+    for (const id of records.keys()) {
+      const m = /^snooze-(\d+)$/.exec(id);
+      if (m) max = Math.max(max, Number(m[1]));
+    }
+    idCounter = Math.max(idCounter, max);
+  };
+
   /** Internal records, keyed by id. */
   const records = new Map();
 
@@ -143,6 +158,27 @@ export function createSnoozeStore(deps = {}) {
   function persist() {
     if (!storage) return;
     storage.write(JSON.stringify(toSnapshotObject()));
+  }
+
+  /**
+   * M-8: transactional mutation. Snapshot the durable state before mutating;
+   * if the write fails, restore memory so live state never runs ahead of what
+   * survived to disk. Returns the mutator's value. The in-memory audit log is
+   * append-only by design and is not part of the durable state.
+   */
+  function transact(mutator) {
+    const beforeRecords = structuredClone([...records]);
+    const beforeCounter = idCounter;
+    try {
+      const result = mutator();
+      persist();
+      return result;
+    } catch (err) {
+      records.clear();
+      for (const [id, rec] of beforeRecords) records.set(id, rec);
+      idCounter = beforeCounter;
+      throw err;
+    }
   }
 
   function notify(event) {
@@ -210,6 +246,7 @@ export function createSnoozeStore(deps = {}) {
     for (const rec of snap.records) {
       records.set(rec.id, { ...rec });
     }
+    reseedIdCounter();
   }
 
   // Eager load: a corrupt persisted state throws at creation, never silently.
@@ -258,25 +295,26 @@ export function createSnoozeStore(deps = {}) {
       }
       assertNoLiveDuplicate(messageId);
       const wakeAt = resolveWakeAt(wake, asDuration);
-      const rec = {
-        id: newId(),
-        messageId,
-        channel,
-        snoozedAt: clock(),
-        wakeAt,
-        state: 'snoozed',
-        note,
-        wokenAt: null,
-      };
-      records.set(rec.id, rec);
-      persist();
+      const snap = transact(() => {
+        const rec = {
+          id: newId(),
+          messageId,
+          channel,
+          snoozedAt: clock(),
+          wakeAt,
+          state: 'snoozed',
+          note,
+          wokenAt: null,
+        };
+        records.set(rec.id, rec);
+        return snapshot(rec);
+      });
       record({
         at: clock(),
         type: 'snoozed',
-        recordId: rec.id,
+        recordId: snap.id,
         detail: { messageId, wakeAt, channel },
       });
-      const snap = snapshot(rec);
       notify({ type: 'snoozed', record: snap });
       return snap;
     },
@@ -284,10 +322,11 @@ export function createSnoozeStore(deps = {}) {
     /** Cancel a snooze by id. Returns the removed record's snapshot. */
     unsnooze(id) {
       const rec = getRecordOrThrow(id);
-      records.delete(id);
-      persist();
+      const snap = transact(() => {
+        records.delete(id);
+        return snapshot(rec);
+      });
       record({ at: clock(), type: 'unsnoozed', recordId: id, detail: { messageId: rec.messageId } });
-      const snap = snapshot(rec);
       notify({ type: 'unsnoozed', record: snap });
       return snap;
     },
@@ -324,25 +363,29 @@ export function createSnoozeStore(deps = {}) {
      */
     wakeDue(now = clock(), actor = 'system') {
       const due = this.listDue(now);
-      const woken = [];
-      for (const snap of due) {
-        const rec = records.get(snap.id);
-        if (!rec || rec.state !== 'snoozed') continue;
-        rec.state = 'woken';
-        rec.wokenAt = now;
-        woken.push(snapshot(rec));
-      }
-      if (woken.length > 0) {
-        persist();
-        for (const snap of woken) {
-          record({
-            at: now,
-            type: 'woken',
-            recordId: snap.id,
-            detail: { messageId: snap.messageId, actor, wokenAt: now },
-          });
-          notify({ type: 'woken', record: snap });
-        }
+      const ids = due
+        .map((snap) => snap.id)
+        .filter((id) => {
+          const rec = records.get(id);
+          return rec && rec.state === 'snoozed';
+        });
+      if (ids.length === 0) return [];
+      const woken = transact(() =>
+        ids.map((id) => {
+          const rec = records.get(id);
+          rec.state = 'woken';
+          rec.wokenAt = now;
+          return snapshot(rec);
+        }),
+      );
+      for (const snap of woken) {
+        record({
+          at: now,
+          type: 'woken',
+          recordId: snap.id,
+          detail: { messageId: snap.messageId, actor, wokenAt: now },
+        });
+        notify({ type: 'woken', record: snap });
       }
       return woken;
     },
@@ -373,19 +416,20 @@ export function createSnoozeStore(deps = {}) {
         throw snoozeError('SZ_INVALID_ARG', 'note must be a string or null', { note });
       }
       const wakeAt = resolveWakeAt(wake, asDuration);
-      rec.snoozedAt = clock();
-      rec.wakeAt = wakeAt;
-      rec.state = 'snoozed';
-      rec.note = note;
-      rec.wokenAt = null;
-      persist();
+      const snap = transact(() => {
+        rec.snoozedAt = clock();
+        rec.wakeAt = wakeAt;
+        rec.state = 'snoozed';
+        rec.note = note;
+        rec.wokenAt = null;
+        return snapshot(rec);
+      });
       record({
         at: clock(),
         type: 'resnoozed',
         recordId: id,
         detail: { messageId: rec.messageId, wakeAt },
       });
-      const snap = snapshot(rec);
       notify({ type: 'resnoozed', record: snap });
       return snap;
     },
@@ -441,13 +485,15 @@ export function createSnoozeStore(deps = {}) {
      * to storage.
      */
     restore(snap) {
-      loadSnapshotObject(snap, 'restore');
-      persist();
+      const count = transact(() => {
+        loadSnapshotObject(snap, 'restore');
+        return records.size;
+      });
       record({
         at: clock(),
         type: 'restored',
         recordId: null,
-        detail: { schemaVersion: SNOOZE_SCHEMA_VERSION, count: records.size },
+        detail: { schemaVersion: SNOOZE_SCHEMA_VERSION, count },
       });
       return this.snapshot();
     },

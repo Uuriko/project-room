@@ -29,8 +29,13 @@ const median = values => {
 export function funnelAnalysis(events) {
   check(Array.isArray(events) && events.length <= 200000, "events must be a list of at most 200000");
   const agents = new Map();
-  events.forEach((event, index) => {
-    const { type, actorId, at } = eventOf(event, index);
+  // Chronological order (stable): first-event capture must be the earliest
+  // event, not the first one the caller happened to list. Equal timestamps
+  // keep input order, so the output stays deterministic.
+  const ordered = events.map((event, index) => eventOf(event, index))
+    .sort((a, b) => new Date(a.at) - new Date(b.at));
+  ordered.forEach(event => {
+    const { type, actorId, at } = event;
     if (!agents.has(actorId)) agents.set(actorId, { invitedAt: null, joinedAt: null, firstWorkAt: null, completedAt: null, secondWorkAt: null, workCount: 0 });
     const agent = agents.get(actorId);
     if (type === "member.invited" && !agent.invitedAt) agent.invitedAt = at;
@@ -61,7 +66,10 @@ export function funnelAnalysis(events) {
         completed.push(actorId);
         workToCompleted.push(new Date(agent.completedAt) - new Date(agent.firstWorkAt));
       }
-      if (agent.secondWorkAt && agent.secondWorkAt >= agent.firstWorkAt) {
+      // The retention signal is a contribution AFTER the previous stage:
+      // once completed, the second contribution must follow the completion,
+      // otherwise the delta goes negative and the stage ordering lies.
+      if (agent.secondWorkAt && agent.secondWorkAt >= (agent.completedAt ?? agent.firstWorkAt)) {
         returned.push(actorId);
         completedToSecond.push(new Date(agent.secondWorkAt) - new Date(agent.completedAt ?? agent.firstWorkAt));
       }

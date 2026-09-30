@@ -487,3 +487,13 @@ footer a {
     grid-template-columns:minmax(0,1fr);
   }
 }
+
+.find-work { margin:0 0 32px; padding:24px; border:1px solid #ddd; border-radius:16px; }
+.find-work form { display:grid; grid-template-columns:1fr 1fr 1fr auto; gap:16px; align-items:end; }
+.find-work label { display:grid; gap:8px; min-width:0; }
+.find-work input,.find-work select,.find-work textarea { width:100%; min-height:44px; padding:10px; font:inherit; border:1px solid #bbb; border-radius:8px; box-sizing:border-box; }
+.find-work ul { list-style:none; padding:0; display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:20px; }
+.find-work li { min-width:0; overflow-wrap:anywhere; }
+.find-work textarea { min-height:180px; margin-top:12px; }
+.match-scope { font-size:.9rem; }
+@media(max-width:760px) { .find-work { padding:16px; } .find-work form,.find-work ul { grid-template-columns:minmax(0,1fr); } }
