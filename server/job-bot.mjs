@@ -176,6 +176,7 @@ export function createJobBot({
     const settledAt = now();
     if (shouldFail) {
       job.status = "failed";
+      job.reservedCredits = job.maxBudgetCredits; // release the full reservation: nothing was spent
       const receipt = issueReceipt({ job, provider, status: "error",
         tokensOut: 0, durationMs: 0, costCredits: 0,
         errorCode: "fixture_provider_failed", settledAt });

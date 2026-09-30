@@ -90,6 +90,10 @@ export function createReputation({ store } = {}) {
     check(Number.isInteger(ts) && ts >= 0, "at must be a non-negative integer ms timestamp");
     const weight = BOUNTY_SIGNAL_WEIGHTS[signalType];
     const current = recordFor(agentId);
+    // Out-of-order signals are ignored: a late-arriving older `at` must not
+    // regress updatedMs (decayedScore clamps negative elapsed to zero, so the
+    // timeline would move backwards with no decay applied).
+    if (current.updatedMs !== null && ts < current.updatedMs) return current;
     const base = current.updatedMs === null ? current.score : decayedScore(current.score, current.updatedMs, ts);
     const score = Math.max(-100, Math.min(100, base + weight));
     const updated = Object.freeze({ ...current, score, updatedMs: ts,

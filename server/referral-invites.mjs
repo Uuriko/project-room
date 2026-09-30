@@ -334,6 +334,11 @@ export class ReferralInvites {
         || room.state.members[ledger.inviter_member_id]?.active !== true) {
       fail(404, "invite_unavailable", "That invite is not available");
     }
+    // Read-only public key: preview must never generate key material
+    // (roomKeys() INSERTs on a missing row). verifyToken already proved
+    // the row exists; fail closed if it vanished in between.
+    const publicKey = this.roomPublicKey(payload.roomId);
+    if (!publicKey) fail(404, "invite_unavailable", "That invite is not available");
     return {
       roomId: payload.roomId,
       roomTitle: room.state.room.title,
@@ -343,7 +348,7 @@ export class ReferralInvites {
       expiresAt: payload.expiresAt,
       tier: REFERRAL_TIER,
       grantedPermissions: grantedPermissions(),
-      publicKey: this.roomKeys(payload.roomId).publicKey.toString("base64"),
+      publicKey: publicKey.toString("base64"),
     };
   }
 

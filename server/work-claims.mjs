@@ -211,10 +211,15 @@ export function renewWork(work, agentId, { note, leaseHours, room, now } = {}) {
   check(item.leaseExpiresAt !== null, `work "${item.id}" has no lease — nothing to renew`);
   check(Date.parse(item.leaseExpiresAt) > atMs, `work "${item.id}" lease already lapsed — claim it again instead`);
   const wanted = leaseHoursOf(leaseHours);
-  const effective = wanted ?? roomWorkClaimConfig(room).defaultLeaseHours;
-  const renewed = { ...item, leaseStartAt: isoOf(atMs),
-    leaseExpiresAt: isoOf(atMs + effective * 3600 * 1000) };
-  return withHistory(renewed, atMs, agent, "renewed", note ?? `lease: ${effective}h`);
+  // Explicit null opts out of leases, exactly like claimWork: the renewed
+  // claim carries no lease window (it previously fell through to the room
+  // default, contradicting claimWork's null handling).
+  const effective = wanted === null ? null : wanted ?? roomWorkClaimConfig(room).defaultLeaseHours;
+  const renewed = { ...item,
+    leaseStartAt: effective === null ? null : isoOf(atMs),
+    leaseExpiresAt: effective === null ? null : isoOf(atMs + effective * 3600 * 1000) };
+  return withHistory(renewed, atMs, agent, "renewed",
+    note ?? (effective === null ? "lease removed" : `lease: ${effective}h`));
 }
 // Update claimed work: move state or add a note. Only the owner may update.
 // The done transition accepts deliveryMode (how the work was delivered),
@@ -255,6 +260,9 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
     // a released claim drops its reviews too — attestations belong to the
     // lapsed owner's round of work, never to whoever claims next
     attestations: released ? Object.freeze([]) : item.attestations,
+    // declared files belong to the owner's round too — a re-claim must not
+    // inherit the previous owner's file declarations
+    files: released ? Object.freeze([]) : item.files,
     deliveryMode: state === "done" && deliveryMode != null ? deliveryMode : item.deliveryMode,
     reviewedBy: state === "done" && reviewedBy != null ? reviewedBy : item.reviewedBy,
     tags: state === "done" && tags != null ? tagsOf(tags) : item.tags,
@@ -300,7 +308,10 @@ export function releaseExpired(items, now) {
   return items.map(entry => {
     const item = workOf(entry);
     if (!isLeaseExpired(item, atMs)) return item;
-    const released = { ...item, state: "unclaimed", owner: null, leaseExpiresAt: null };
+    // Auto-release clears owner, lease, and the lapsed owner's declared
+    // files — whoever claims next starts with a clean declaration.
+    const released = { ...item, state: "unclaimed", owner: null, leaseExpiresAt: null,
+      files: Object.freeze([]) };
     return withHistory(released, atMs, item.owner ?? "system", "lease_expired",
       `claim by ${item.owner ?? "nobody"} lapsed at ${item.leaseExpiresAt} — auto-released`);
   });

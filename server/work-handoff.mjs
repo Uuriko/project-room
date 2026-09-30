@@ -418,11 +418,14 @@ export class HandoffEnvelopeJournal {
         envelopeCheck(Array.isArray(checksPassed) && checksPassed.length >= 1, "envelope_checks_required",
           "Completing an envelope requires naming the acceptance checks that passed.");
         const declared = new Set(envelope.acceptanceTest.checks.map(c => c.kind));
-        passed = Object.freeze([...new Set(checksPassed.map((kind, i) => {
+        // Each asserted pass is recorded as given: collapsing duplicate
+        // kinds would merge two distinct declared checks of the same kind
+        // into one, weakening the acceptance criteria on the receipt.
+        passed = Object.freeze(checksPassed.map((kind, i) => {
           envelopeCheck(typeof kind === "string" && declared.has(kind), "envelope_unknown_check",
             `checksPassed[${i}] is not a declared acceptance check`);
           return kind;
-        }))]);
+        }));
         envelopeCheck(passed.length >= 1, "envelope_checks_required", "At least one declared acceptance check must pass.");
       }
       const entry = { status, at: new Date(now).toISOString(), ...(actor ? { by: actor } : {}),

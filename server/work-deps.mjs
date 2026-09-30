@@ -78,17 +78,27 @@ export function createDepGraph({ store } = {}) {
     return null;
   };
   // Topological order: items with no unmet dependencies first.
+  // Iterative post-order DFS (findCycle already proved acyclicity): deep
+  // graphs must not risk a stack overflow, the reason findCycle is iterative.
   const topoOrder = () => {
     const cycle = findCycle();
     if (cycle) fail("dependency_cycle", `cannot order a graph with a cycle: ${cycle.join(" -> ")}`);
     const visited = new Set(), order = [];
-    const visit = id => {
-      if (visited.has(id)) return;
-      visited.add(id);
-      for (const dep of [...edges.get(id)].sort()) visit(dep);
-      order.push(id);
-    };
-    for (const id of [...edges.keys()].sort()) visit(id);
+    for (const root of [...edges.keys()].sort()) {
+      if (visited.has(root)) continue;
+      visited.add(root);
+      const stack = [[root, [...edges.get(root)].sort()[Symbol.iterator]()]];
+      while (stack.length > 0) {
+        const [node, it] = stack[stack.length - 1];
+        const next = it.next();
+        if (next.done) { order.push(node); stack.pop(); continue; }
+        const dep = next.value;
+        if (!visited.has(dep)) {
+          visited.add(dep);
+          stack.push([dep, [...edges.get(dep)].sort()[Symbol.iterator]()]);
+        }
+      }
+    }
     return Object.freeze(order);
   };
   return Object.freeze({ addItem, addDependency, removeDependency, blockedBy, blocking,

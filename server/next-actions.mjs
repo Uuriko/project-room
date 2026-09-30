@@ -149,7 +149,11 @@ export function buildNextActions({ agent, snapshots, dismissals = [], suppressio
   for (const bounty of bounties) {
     if (!bounty || typeof bounty.bountyId !== "string") continue;
     const overlap = capabilityOverlap(card, bounty);
-    const deadlineSoon = typeof bounty.deadlineMs === "number" && bounty.deadlineMs - atMs < 7 * 24 * 3600 * 1000;
+    const deadlineMs = bounty.deadlineMs;
+    // Expired-but-unswept bounties must not read as "deadline soon": the
+    // boost is for live bounties approaching their deadline, not dead ones.
+    const deadlineSoon = typeof deadlineMs === "number"
+      && deadlineMs - atMs > 0 && deadlineMs - atMs < 7 * 24 * 3600 * 1000;
     const score = Math.min(0.95, 0.40 + 0.40 * overlap + (deadlineSoon ? 0.10 : 0));
     const id = itemIdOf("bounty-match", `bounty:${bounty.bountyId}`);
     push({
