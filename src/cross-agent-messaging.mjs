@@ -193,6 +193,9 @@ export function createMessaging(deps = {}) {
   }
 
   function storeMessage({ from, to, threadId, body, state, sentAt }) {
+    // Inbound sentAt is untrusted: a non-numeric value corrupts numeric
+    // ordering downstream. Coerce to a finite number, falling back to now.
+    const at = typeof sentAt === 'number' && Number.isFinite(sentAt) ? sentAt : clock();
     const msg = {
       id: newId(),
       seq: (seqCounter += 1),
@@ -200,7 +203,7 @@ export function createMessaging(deps = {}) {
       to,
       threadId,
       body,
-      sentAt,
+      sentAt: at,
       state,
     };
     messages.set(msg.id, msg);

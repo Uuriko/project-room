@@ -298,7 +298,7 @@ if (action === "join") {
   cat room.jsonl | node scripts/agent-inbox.mjs import-history
   node scripts/agent-inbox.mjs thread MESSAGE_ID
   node scripts/agent-inbox.mjs notify '{"mentions":"mentions_only"}'
-  node scripts/agent-inbox.mjs templates
+  node scripts/agent-inbox.mjs room-templates
   node scripts/agent-inbox.mjs apply-template team-standup [ACCOUNTABLE_MEMBER_ID]
   node scripts/agent-inbox.mjs heartbeats
   node scripts/agent-inbox.mjs rooms [NEXT_CURSOR]
@@ -395,7 +395,7 @@ permissions. See docs/SWARM-PLUG-IN.md for scope, recovery and current limits.`)
     // threads the post under an existing message.
     const sayArgs = action === "say" ? parseSayArgs([checkpoint, ...extra].filter(word => word !== undefined)) : null;
     const outsideArgs = action === "outside-agents" ? parseOutsideAgentArgs([checkpoint, ...extra].filter(word => word !== undefined)) : null;
-    if (!["connect", "import", "check", "orient", "next", "search", "find", "brief", "context", "changes", "packet", "work", "discussion", "result", "presence", "capabilities", "advertise", "say", "sessions", "claim", "session", "work-claim", "work-complete", "work-release", "status", "notify", "templates", "apply-template", "heartbeats", "identity-create", "rooms", "room-create", "identity-link", "identity-links", "identity-unlink", "leave-room", "invite-code", "invite-codes", "invite-code-revoke", "redeem-invite", "request-access", "access-requests", "access-decide", "membership-grant", "membership-revoke", "membership-grants", "export", "import-history", "thread", "doctor", "support-export", "agent-keys", "outside-agents"].includes(action)
+    if (!["connect", "import", "check", "orient", "next", "search", "find", "brief", "context", "changes", "packet", "work", "discussion", "result", "presence", "capabilities", "advertise", "say", "sessions", "claim", "session", "work-claim", "work-complete", "work-release", "status", "notify", "templates", "room-templates", "apply-template", "heartbeats", "identity-create", "rooms", "room-create", "identity-link", "identity-links", "identity-unlink", "leave-room", "invite-code", "invite-codes", "invite-code-revoke", "redeem-invite", "request-access", "access-requests", "access-decide", "membership-grant", "membership-revoke", "membership-grants", "export", "import-history", "thread", "doctor", "support-export", "agent-keys", "outside-agents"].includes(action)
       || (["connect", "import"].includes(action) && (!checkpoint || checkpoint.startsWith("--") || process.env.ROOM_AGENT_CONFIG !== undefined))
       || (action === "import" && ["ROOM_AGENT_ORIGIN", "ROOM_AGENT_ROOM", "ROOM_AGENT_MEMBER", "ROOM_AGENT_TOKEN"].some(name => process.env[name] !== undefined))
       || (["packet", "work", "discussion", "result", "claim", "work-claim", "work-complete", "work-release"].includes(action) && !validId(checkpoint))
@@ -463,7 +463,7 @@ permissions. See docs/SWARM-PLUG-IN.md for scope, recovery and current limits.`)
       : action === "find" ? await client.search(checkpoint, { kind: extra[0] ?? "all" })
       : action === "thread" ? await client.messageThread(checkpoint)
       : action === "notify" ? await client.setNotificationPreferences(JSON.parse(checkpoint))
-      : action === "templates" ? client.roomTemplates()
+      : action === "room-templates" ? client.roomTemplates()
       : action === "apply-template" ? await client.applyRoomTemplate(checkpoint, { accountableMemberId: extra[0] })
       : action === "heartbeats" ? await client.providerHeartbeats()
       : action === "identity-create" ? await createAgentIdentity(process.env.ROOM_AGENT_ORIGIN, checkpoint)

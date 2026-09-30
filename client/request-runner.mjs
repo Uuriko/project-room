@@ -121,6 +121,18 @@ export async function runRequestOnce({ connection, requestMessageId, db, execute
 
 // Explicit execution mode, separate from the notify-only watcher. Each scan is
 // bounded; work is serialized and every invocation re-reads its eligibility.
+
+/**
+ * Whether a reply request is eligible to be (re)run. The second disjunct
+ * covers retrying a locally-saved response — it must still require the
+ * request to be open, or closed/cancelled requests would be re-run (G-L2).
+ */
+export function isRequestEligible(request, { owned, runState, hasPendingDelivery }) {
+  if (request?.status !== "open") return false;
+  if (!owned) return true;
+  return runState !== "needs_attention" && hasPendingDelivery;
+}
+
 export async function runRequestQueue({ connection, db, execute, signal, emit = () => {}, intervalMs = 10000, stream = true }) {
   if (!Number.isInteger(intervalMs) || intervalMs < 1000 || intervalMs > 60000) throw new Error("Invalid polling interval");
   const client = new RoomAgentClient(connection);
@@ -133,8 +145,11 @@ export async function runRequestQueue({ connection, db, execute, signal, emit = 
       const { runs } = await client.requestRuns(undefined, { signal });
       const pending = request => db.prepare("SELECT 1 FROM request_runs WHERE delivered=0 AND json_extract(response,'$.responseToRequestId')=?").get(request.id);
       const owned = request => Object.hasOwn(runs, request.id);
-      const eligible = requests.filter(request => request.status === "open" && !owned(request)
-        || runs[request.id]?.state !== "needs_attention" && pending(request));
+      const eligible = requests.filter(request => isRequestEligible(request, {
+        owned: owned(request),
+        runState: runs[request.id]?.state,
+        hasPendingDelivery: Boolean(pending(request)),
+      }));
       for (const request of eligible.slice(0, 50)) {
         signal?.throwIfAborted();
         // A saved response may be retried only by its original local journal.

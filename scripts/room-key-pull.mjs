@@ -33,9 +33,12 @@ function args(argv) {
 }
 
 async function post(origin, token, path, body) {
+  // Bound the heartbeat/ack POST so a stalled network can't hang the pull
+  // loop forever (L-53).
   const response = await fetch(new URL(path, origin), {
     method: "POST",
     redirect: "error",
+    signal: AbortSignal.timeout(15000),
     headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
     body: JSON.stringify(body),
   });

@@ -206,13 +206,17 @@ export function createHandoffStore(deps = {}) {
    * Persist the full store to the injected storage (write-through). Throws
    * HO_STORAGE_ERROR when the storage dep fails.
    */
-  function persist() {
-    const data = Object.freeze({
+  function buildSnapshot() {
+    return Object.freeze({
       schemaVersion: SCHEMA_VERSION,
       savedAt: clock(),
       handoffs: handoffs.size === 0 ? [] : [...handoffs.values()].map(snapshot),
       audit: [...audit],
     });
+  }
+
+  function persist() {
+    const data = buildSnapshot();
     try {
       storage.save(data);
     } catch (err) {
@@ -479,9 +483,9 @@ export function createHandoffStore(deps = {}) {
         .map((entry) => ({ ...entry }));
     },
 
-    /** Full store snapshot: {schemaVersion, savedAt, handoffs, audit}. */
+    /** Full store snapshot: {schemaVersion, savedAt, handoffs, audit}. Read-only. */
     snapshot() {
-      return persist();
+      return buildSnapshot();
     },
 
     /**

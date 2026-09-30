@@ -30,9 +30,10 @@ function argValue(name) {
   return i >= 0 && i + 1 < process.argv.length ? process.argv[i + 1] : null;
 }
 
-function ghApi(path, jq) {
+function ghApi(path, jq, paginate = false) {
   const args = ["api", path];
   if (jq) args.push("--jq", jq);
+  if (paginate) args.push("--paginate");
   try {
     return execFileSync("gh", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
   } catch (e) {
@@ -42,8 +43,8 @@ function ghApi(path, jq) {
   }
 }
 
-function ghApiJson(path, jq) {
-  const out = ghApi(path, jq);
+function ghApiJson(path, jq, paginate = false) {
+  const out = ghApi(path, jq, paginate);
   return out.trim() === "" ? null : JSON.parse(out);
 }
 
@@ -64,7 +65,8 @@ console.log(`strict (require up to date): ${strict ? "ON — incompatible with t
 console.log("");
 
 // --- open PRs ----------------------------------------------------------------
-const prs = ghApiJson(`repos/${REPO}/pulls?state=open&base=${BASE}&per_page=100`);
+// Paginate (Link headers) rather than assuming per_page=100 fits (L-51).
+const prs = ghApiJson(`repos/${REPO}/pulls?state=open&base=${BASE}&per_page=100`, null, true);
 if (prs.length === 0) {
   console.log("No open PRs targeting main. Queue is empty (trivially).");
   process.exit(0);
@@ -75,9 +77,16 @@ const rows = prs
   .map((pr) => {
     const detail = ghApiJson(`repos/${REPO}/pulls/${pr.number}`, "{mergeable_state, mergeable, draft, head_sha: .head.sha}");
     const combined = ghApiJson(`repos/${REPO}/commits/${detail.head_sha}/check-runs`, "[.check_runs[] | {name, status, conclusion}]");
+    // Legacy commit statuses (the old Statuses API, contexts[]) never appear
+    // in check-runs: union them in so required checks reported only as
+    // statuses aren't misclassified as missing (L-50).
+    const legacy = ghApiJson(`repos/${REPO}/commits/${detail.head_sha}/status`, "[.statuses[] | {name: .context, state}]");
     const states = {};
     for (const run of combined) {
       if (requiredChecks.includes(run.name)) states[run.name] = run.status === "completed" ? run.conclusion : run.status;
+    }
+    for (const s of legacy) {
+      if (requiredChecks.includes(s.name) && !(s.name in states)) states[s.name] = s.state;
     }
     const missing = requiredChecks.filter((c) => !(c in states));
     const failing = requiredChecks.filter((c) => c in states && states[c] !== "success");

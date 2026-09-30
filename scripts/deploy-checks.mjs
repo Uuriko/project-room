@@ -66,16 +66,26 @@ function listFilesUnder(absDir, fs, prefix = "") {
 // regular file beneath them. Paths in the returned hashes map are posix-style
 // paths relative to root, sorted. Returns { hashes, missing, skipped } where
 // missing/skipped are sorted arrays of posix relative paths.
+//
+// Safety (L-49): paths must resolve inside root (a ".." or absolute-path
+// entry is skipped, never hashed), and lstatSync is used instead of statSync
+// so a symlink is never followed into its target — symlinks are skipped.
 export function computeAssetHashes(paths, { fs = nodeFs, root = process.cwd() } = {}) {
   const hashes = {};
   const missing = [];
   const skipped = [];
+  const rootAbs = resolve(root);
+  const insideRoot = abs => abs === rootAbs || abs.startsWith(rootAbs + sep);
   for (const raw of paths) {
     const rel = String(raw).split(sep).join("/");
-    const abs = resolve(root, rel);
+    const abs = resolve(rootAbs, rel);
+    if (!insideRoot(abs)) {
+      skipped.push(rel);
+      continue;
+    }
     let stat = null;
     try {
-      stat = fs.statSync(abs);
+      stat = fs.lstatSync(abs);
     } catch {
       missing.push(rel);
       continue;
@@ -109,7 +119,9 @@ export function computeAssetHashes(paths, { fs = nodeFs, root = process.cwd() } 
 // --- Manifest ----------------------------------------------------------------
 
 // Read and validate a manifest file. Throws with a clear message when the
-// file is missing, unparsable, or has the wrong shape.
+// file is missing, unparsable, has the wrong shape, or fails the integrity
+// assertions (version, assetCount, hash format) — a corrupt or hand-edited
+// manifest must fail loudly, not be trusted silently (L-49).
 export function readManifest(manifestPath, { fs = nodeFs } = {}) {
   let raw;
   try {
@@ -125,6 +137,18 @@ export function readManifest(manifestPath, { fs = nodeFs } = {}) {
   }
   if (!parsed || typeof parsed !== "object" || !parsed.assets || typeof parsed.assets !== "object") {
     throw new Error(`manifest at ${manifestPath} has no "assets" object`);
+  }
+  if (parsed.version !== MANIFEST_VERSION) {
+    throw new Error(`manifest at ${manifestPath} has version ${JSON.stringify(parsed.version)}, expected ${MANIFEST_VERSION}`);
+  }
+  const keys = Object.keys(parsed.assets);
+  if (parsed.assetCount !== keys.length) {
+    throw new Error(`manifest at ${manifestPath} has assetCount ${JSON.stringify(parsed.assetCount)} but ${keys.length} assets`);
+  }
+  for (const key of keys) {
+    if (typeof parsed.assets[key] !== "string" || !/^[0-9a-f]{64}$/.test(parsed.assets[key])) {
+      throw new Error(`manifest at ${manifestPath} has malformed hash for asset "${key}"`);
+    }
   }
   return parsed;
 }

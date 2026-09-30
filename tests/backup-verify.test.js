@@ -151,7 +151,7 @@ test("cli: --print-cron emits a usable crontab line", async (t) => {
   const { stdout } = await execFileAsync(process.execPath,
     [script, "--print-cron", "--db", "room.sqlite", "--to", dest, "--schedule", "hourly"]);
   assert.match(stdout, /\* \* \* \* \*/);
-  assert.match(stdout, /--schedule "hourly"/);
+  assert.match(stdout, /--schedule 'hourly'/);
   assert.match(stdout, /scripts\/backup-verify\.mjs/);
 });
 
