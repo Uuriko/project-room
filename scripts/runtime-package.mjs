@@ -206,6 +206,7 @@ optional.push("server/mention-receipts.mjs"); // sender-facing mention delivery 
 optional.push("server/feedback-store.mjs"); // RC-2026-09-27-2745: pure /feedback state machine + Mark-staked triage economy (imported by server/feedback-routes.mjs; imports ./feedback-scrub.mjs)
 optional.push("server/feedback-scrub.mjs"); // RC-2026-09-27-2745: secret scrubbing at feedback intake (imported by server/feedback-store.mjs; pure, no imports)
 optional.push("server/feedback-routes.mjs"); // RC-2026-09-27-2745: /feedback HTTP routes (imported by server/http.mjs)
+optional.push("server/feedback-persistence.mjs"); // REL-25: SQLite snapshot persistence for the /feedback store (imported by server/feedback-routes.mjs; imports ./feedback-store.mjs)
 optional.push("server/work-duplicates.mjs"); // jill 2026-09-24: pure work-claim duplicate detection (imported by server/work-claim-routes.mjs; pure, no imports)
 optional.push("server/retention-response.mjs"); // jill 2026-10-03: first-contribution response SLA + no-zero-reply watchdog (imported by server/work-claim-routes.mjs; pure, no imports)
 optional.push("server/bounty-escrow.mjs"); // agent work exchange slice 1: escrowed-bounty ledger + lifecycle (imported by server/bounty-escrow-routes.mjs)

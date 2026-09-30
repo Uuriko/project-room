@@ -22,9 +22,10 @@
 // participation). Non-GET routes additionally enforce the caller's autonomy
 // tier, mirroring server/work-claim-routes.mjs.
 //
-// Durability: the store is a process-level singleton. Feedback items drain
-// into the claims board via triage promotion, so loss on restart is bounded —
-// but durable SQLite persistence is an OPEN ITEM (docs/feedback-endpoint.md).
+// Durability: state is snapshotted to SQLite per room on every mutation
+// (server/feedback-persistence.mjs), so filings, Mark balances and undrained
+// notifications survive a restart. A room with no database behind it falls
+// back to the in-memory store.
 //
 // The Jev triage-advisor seam is documented but NOT wired (owner call: leave
 // Jev open, build without it). Triage is lane-operated; the advisor interface
@@ -37,6 +38,7 @@ import {
   createFeedbackStore, validateFeedback, routeForSeverity, FeedbackError,
   FEEDBACK_ID_PATTERN,
 } from "./feedback-store.mjs";
+import { createPersistentFeedbackStore } from "./feedback-persistence.mjs";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 
@@ -119,7 +121,18 @@ function feedbackAuthorityOptions(roomId, store) {
 
 function storeForRoom(roomId, store) {
   let fb = roomStores.get(roomId);
-  if (!fb) { fb = createFeedbackStore(feedbackAuthorityOptions(roomId, store)); roomStores.set(roomId, fb); }
+  if (!fb) {
+    // Durable when the room has a database behind it; in-memory only when it
+    // does not (unit tests construct the store without one). Authority gates
+    // apply either way.
+    const authority = feedbackAuthorityOptions(roomId, store);
+    const db = store?.db;
+    fb = db
+      ? createPersistentFeedbackStore({ db, roomId, ...authority,
+          onError: e => console.error("feedback: snapshot write failed", e?.message ?? e) })
+      : createFeedbackStore(authority);
+    roomStores.set(roomId, fb);
+  }
   return fb;
 }
 const defaultLimiter = createSubmitLimiter();

@@ -24,6 +24,11 @@ import { scrubString, scrubAttempt } from "./feedback-scrub.mjs";
 export const SEVERITIES = Object.freeze(["bug", "missing-feature", "docs", "perf"]);
 export const FEEDBACK_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 
+// Snapshot format version (server/feedback-persistence.mjs). Bump on any
+// change that an older reader could not understand; unknown versions are
+// dropped rather than mis-read.
+export const SNAPSHOT_VERSION = 1;
+
 // Mark economics. Small on purpose: the price is a filter, not a toll.
 export const MARK_FILING_COST = 1;      // debited on every non-duplicate filing
 export const MARK_ACCEPT_REWARD = 5;    // credited when triage accepts as real
@@ -150,7 +155,8 @@ export function validateFeedback(input) {
 // pure library. Production wiring MUST configure reviewer and release
 // authority from room roles; without it any room member can triage and mint
 // Mark via self-reported merges.
-export function createFeedbackStore({ now, isReviewer, isReleaseAuthority, verifyMergeRef } = {}) {
+// state: optional snapshot to restore (REL-25 durable persistence).
+export function createFeedbackStore({ now, state, isReviewer, isReleaseAuthority, verifyMergeRef } = {}) {
   const clock = now ?? (() => Date.now());
   const toPredicate = (value, name) => {
     if (value === undefined) return lane => isNonEmptyString(lane, 64);
@@ -173,8 +179,26 @@ export function createFeedbackStore({ now, isReviewer, isReleaseAuthority, verif
   const marks = new Map();    // lane -> { balance, filings: [bool junk], suspended }
   const notifications = new Map(); // lane -> [{ seq, at, type, ... }] (drain-on-read)
   const reviewers = new Map();     // lane -> { decided, confirmed, wrong, stale }
-  let seq = 0;
-  let notifSeq = 0;
+
+  // Rehydration from a durable snapshot (server/feedback-persistence.mjs).
+  // Still a pure module: the caller owns the bytes and passes them in; we
+  // only read them. Entries arrive as plain objects (JSON round-trip), which
+  // is exactly what the mutators below expect - frozen shapes are built at
+  // the read boundary, never stored.
+  const restore = (map, entries) => {
+    if (!Array.isArray(entries)) return;
+    for (const entry of entries) {
+      if (!Array.isArray(entry) || entry.length !== 2) continue;
+      map.set(entry[0], entry[1]);
+    }
+  };
+  restore(items, state?.items);
+  restore(clusters, state?.clusters);
+  restore(marks, state?.marks);
+  restore(notifications, state?.notifications);
+  restore(reviewers, state?.reviewers);
+  let seq = Number.isInteger(state?.seq) ? state.seq : 0;
+  let notifSeq = Number.isInteger(state?.notifSeq) ? state.notifSeq : 0;
 
   const markFor = lane => {
     if (!marks.has(lane)) marks.set(lane, { balance: 10, filings: [], suspended: false });
@@ -564,5 +588,17 @@ export function createFeedbackStore({ now, isReviewer, isReleaseAuthority, verif
     mark: lane => { const m = markFor(lane); return Object.freeze({ balance: m.balance, suspended: m.suspended,
       recentFilings: m.filings.length }); },
     size: () => items.size,
+    // Serializable state for durable persistence. Snapshot, not a delta: the
+    // store is small (bounded by CLUSTER_FILEDAT_CAP and drained
+    // notifications) and one row per room writes atomically.
+    snapshot: () => ({
+      v: SNAPSHOT_VERSION,
+      items: [...items.entries()],
+      clusters: [...clusters.entries()],
+      marks: [...marks.entries()],
+      notifications: [...notifications.entries()],
+      reviewers: [...reviewers.entries()],
+      seq, notifSeq,
+    }),
   });
 }
