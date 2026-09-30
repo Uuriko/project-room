@@ -35,8 +35,33 @@ export function scrubString(s) {
   if (typeof s !== "string") return s;
   let out = s.replace(PEM_RE, "[REDACTED:private-key]");
   out = out.replace(JWT_RE, "[REDACTED:jwt]");
+  out = scrubQuerySecrets(out);
   out = out.replace(TOKEN_PREFIX_RE, "[REDACTED:token]");
   return out;
+}
+
+// Query-string secrets (H-3): redact the value of any query parameter whose
+// name is secret-shaped (?api_key=, ?token=, ?secret=, ...). Vendor-prefix
+// rules only catch prefixed tokens, so a bare ?api_key=deadbeef1 used to
+// pass through to storage. Runs inside scrubString so every string surface
+// (request paths, goals, observed/expected prose) is covered. Only the value
+// is replaced; the parameter name and the rest of the URL survive.
+function scrubQuerySecrets(s) {
+  const q = s.indexOf("?");
+  if (q === -1) return s;
+  const hash = s.indexOf("#", q + 1);
+  const end = hash === -1 ? s.length : hash;
+  const query = s.slice(q + 1, end);
+  if (!query.includes("=")) return s;
+  const scrubbed = query.split("&").map(pair => {
+    const eq = pair.indexOf("=");
+    if (eq === -1) return pair;
+    const rawName = pair.slice(0, eq);
+    let name = rawName;
+    try { name = decodeURIComponent(rawName); } catch { /* keep the raw name */ }
+    return SECRET_KEY_RE.test(name) ? `${rawName}=[REDACTED:credential]` : pair;
+  }).join("&");
+  return s.slice(0, q + 1) + scrubbed + s.slice(end);
 }
 
 export function scrubValue(value, keyName = "") {

@@ -10,8 +10,8 @@ import { EVENT_TYPES as T, PIN_LIMIT, pinnedMessages, validId } from "../src/eve
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 
-// Public view of one pin: the message body is included because the pinned
-// list is read by members who can already read every message in the room.
+// Public view of one pin: the message body is included when the viewer is
+// allowed to read the underlying message (see pinVisibleToViewer).
 function pinView({ messageId, pinnedById, pinnedAt, message }) {
   return {
     messageId, pinnedById, pinnedAt,
@@ -20,16 +20,26 @@ function pinView({ messageId, pinnedById, pinnedAt, message }) {
   };
 }
 
-function listView(store, roomId) {
+// Pin visibility follows message visibility (server/activity.mjs): a room
+// message is visible to every member, but a DM is visible only to its author
+// and its recipient. Filtering here (not just in the HTTP route wrapper)
+// protects every caller of the pin library.
+function pinVisibleToViewer(message, viewerId) {
+  return !message.toMemberId || message.authorId === viewerId || message.toMemberId === viewerId;
+}
+
+function listView(store, roomId, viewerId) {
   const room = store.room(roomId);
-  const pins = pinnedMessages(room.state).map(pinView);
+  const pins = pinnedMessages(room.state)
+    .filter(({ message }) => pinVisibleToViewer(message, viewerId))
+    .map(pinView);
   return { roomId, sequence: room.sequence, limit: PIN_LIMIT, count: pins.length, pins };
 }
 
 export function listPins(store, token, roomId, expectedSessionBinding = null) {
   return store.readTransaction(() => {
-    store.authenticate(token, roomId, expectedSessionBinding);
-    return listView(store, roomId);
+    const auth = store.authenticate(token, roomId, expectedSessionBinding);
+    return listView(store, roomId, auth.member?.id);
   });
 }
 
@@ -48,13 +58,13 @@ export function setPin(store, token, roomId, data, expectedSessionBinding = null
   // Membership is checked before anything about the room is disclosed; the
   // early return for "already in the requested state" appends no event.
   const current = store.readTransaction(() => {
-    store.authenticate(token, roomId, expectedSessionBinding);
+    const auth = store.authenticate(token, roomId, expectedSessionBinding);
     const room = store.room(roomId);
     const message = room.state.messages.find(m => m.id === messageId);
     if (!message) fail(404, "message_not_found", "No such message in this room");
     // 409 on both write paths: the same refusal through `commands` is 409 command_rejected (store.command maps the reducer message).
     if (data.pinned && (message.deletedAt || message.body == null)) fail(409, "message_deleted", "A deleted message cannot be pinned");
-    return { pinned: Boolean(room.state.pins?.some(pin => pin.messageId === messageId)) };
+    return { pinned: Boolean(room.state.pins?.some(pin => pin.messageId === messageId)), viewerId: auth.member?.id };
   });
   let receipt = null;
   if (current.pinned !== data.pinned) {
@@ -69,6 +79,6 @@ export function setPin(store, token, roomId, data, expectedSessionBinding = null
     changed: receipt !== null && receipt.duplicate === false,
     // The command receipt, when a command was issued; absent when the room was already in the requested state.
     ...(receipt ? { event: { id: receipt.event.id, sequence: receipt.sequence, duplicate: receipt.duplicate } } : {}),
-    ...store.readTransaction(() => listView(store, roomId))
+    ...store.readTransaction(() => listView(store, roomId, current.viewerId))
   };
 }

@@ -44,9 +44,11 @@ export const ALLOWLIST = [
   /\b(secret|password|passwd|pwd|token|api[_-]?key)\b\s*[:=]\s*`(?:\$\{[^{}`]*\}|[\s.\-_:/+,;=&?#|])*`/i,
   // Verified false positives (2026-09-16 audit):
   /IDENTITY_SECRET_PREFIX/, // runtime-generated: `secret = PREFIX + base64url(randomBytes(32))`
-  /CODE_ALPHABET\s*=\s*"/, // invite-code alphabet constants, not secrets
-  /LEGACY_CODE_ALPHABET\s*=\s*"/, // invite-code alphabet constants, not secrets
-  /SHARE_CODE_ALPHABET\s*=\s*"/, // Crockford 9-char human join-code alphabet demo, not a credential
+  /secret = suppliedSecret/, // server/agent-identities.mjs:186 — variable reference, not a hardcoded secret
+  /secret: imported\?\.token/, // client/agent-setup.mjs:58 — reads the imported token (or generates one at runtime), not a hardcoded secret
+  /CODE_ALPHABET\s*=\s*"[0-9A-Z]/, // invite-code alphabet constants, not secrets (extends one char into the value so the per-finding allowlist overlaps the finding)
+  /LEGACY_CODE_ALPHABET\s*=\s*"[A-Z]/, // invite-code alphabet constants, not secrets
+  /SHARE_CODE_ALPHABET\s*=\s*"[0-9]/, // Crockford 9-char human join-code alphabet demo, not a credential
   /token:\s*"TELEGRAM_BOT_TOKEN"/, // env var NAME as string, not a token value
   /password:\s*form\.querySelector/, // src/auth-signin-ui.js: reads the user's typed password back from the DOM to preserve it across signup/login mode toggles — not a hardcoded secret
   /secret = \(data\.secret \|\| ""\)\.trim\(\)/, // src/agent-signin-ui.js: reads the user's typed identity secret back from the sign-in form's FormData — runtime input, not a hardcoded secret
@@ -60,8 +62,9 @@ export const ALLOWLIST = [
   /^\|.*\|$/, // markdown table rows
   /randomBytes\(/, // runtime-generated: `randomBytes(32).toString("base64url")`
   /\btokens\.get\(/, // `token = tokens.get(tokenId)` — Map lookup, not a secret
-  /BASE32_ALPHABET\s*=/, // TOTP alphabet constant
-  /GSM7_BASIC\s*=\s*"/, // GSM-7 SMS alphabet constant (server/sms-outbound.mjs) — character set for segmentation accounting, not a secret
+  /BASE32_ALPHABET\s*=\s*"[A-Z]/, // TOTP alphabet constant (extends one char into the value for per-finding overlap)
+  /GSM7_BASIC\s*=\s*".*/, // GSM-7 SMS alphabet constant (server/sms-outbound.mjs) — character set for segmentation accounting, not a secret.
+    // Anchored to the assignment and spanning the value: the charset splits into several high-entropy tokens.
   /github\.com\/Uuriko\/[A-Za-z0-9_.-]+\/(pull|issues)\/\d+/, // repo PR/issue URLs (evidence links)
   /\/blob\/main\/docs\//, // docs URLs in discovery configs
   /^\s*secret:\s*<redacted>\s*$/, // literally redacted values
@@ -71,7 +74,7 @@ export const ALLOWLIST = [
   /can store a secret:/, // documentation template string
   /tokenPattern\.test\(/, // `token: tokenPattern.test(...) ? ...` — validation, not a secret
   /\.replace\(.*\.toUpperCase\(\)/, // `secret.replace(...).toUpperCase()` — transform, not a secret
-  /DUMMY_PASSWORD_VERIFIER/, // slice 2: public placeholder scrypt verifier (hash of a known
+  /DUMMY_PASSWORD_VERIFIER\s*=\s*"scrypt/, // slice 2: public placeholder scrypt verifier (hash of a known
     // placeholder password); used only so unknown-email logins cost one scrypt
     // derivation. Not a credential — it is deliberately published in source.
   /AGENT_CARD_PUBLIC_KEY = "e74i9XPv8I1hIhTsVztVupDr6moyCfL\+nGr1HDoOpTc="/, // Owner recovery 2026-09-24: room Agent Card

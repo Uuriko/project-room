@@ -569,3 +569,42 @@ describe('coded-error contract', () => {
     assert.ok(ops.has('request-timeout'));
   });
 });
+
+describe('a2a-transport responder identity (H-9)', () => {
+  it('a response from the wrong responder is dead-lettered; the waiter survives for the real one', async () => {
+    const fc = fakeClock();
+    const channel = fakeChannel();
+    const t = createA2ATransport({ clock: fc.clock, id: fakeIds('r'), channel });
+    t.connect('quill');
+    const p = t.request('instinct', 'ping', { n: 1 });
+    const reqId = channel.sent[0].id;
+
+    // A rogue bystander forges a response into quill's pending request.
+    channel.deliver({ from: 'mallory', to: 'quill', type: 'ping.response', inReplyTo: reqId, payload: { n: -1 } });
+
+    assert.equal(t.pendingRequestCount, 1, 'the forged response must not resolve the waiter');
+    assert.equal(t.deadLetters.length, 1, 'the forged response is dead-lettered');
+    assert.equal(t.deadLetters[0].code, 'AT_RESPONSE_SPOOF');
+    assert.ok(t.audit.some((e) => e.op === 'response-spoof'), 'the spoof is audited');
+
+    // The genuine responder's reply still resolves the request.
+    channel.deliver({ from: 'instinct', to: 'quill', type: 'ping.response', inReplyTo: reqId, payload: { n: 2 } });
+    const res = await p;
+    assert.deepEqual(res.payload, { n: 2 });
+    assert.equal(res.from, 'instinct');
+    assert.equal(t.pendingRequestCount, 0);
+  });
+
+  it('a response from the addressed responder resolves normally', async () => {
+    const fc = fakeClock();
+    const channel = fakeChannel();
+    const t = createA2ATransport({ clock: fc.clock, id: fakeIds('r'), channel });
+    t.connect('quill');
+    const p = t.request('instinct', 'ping', { n: 1 });
+    const reqId = channel.sent[0].id;
+    channel.deliver({ from: 'instinct', to: 'quill', type: 'ping.response', inReplyTo: reqId, payload: { n: 2 } });
+    const res = await p;
+    assert.deepEqual(res.payload, { n: 2 });
+    assert.equal(t.deadLetters.length, 0, 'a genuine response is never dead-lettered');
+  });
+});

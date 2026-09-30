@@ -208,10 +208,27 @@ export function createA2ATransport(deps = {}) {
     }
 
     // Request/response correlation: a response answers the oldest pending
-    // request whose id matches inReplyTo.
+    // request whose id matches inReplyTo — and only when it comes from the
+    // agent the request was addressed to. Without the identity check a
+    // rogue bystander can inject a response into someone else's pending
+    // request (cross-agent request forgery); the real responder's later
+    // reply would then be silently dropped as an orphan. A forged response
+    // is dead-lettered and audited, and the waiter is kept so the genuine
+    // response still resolves.
     if (stamped.inReplyTo !== undefined) {
       const waiter = pending.get(stamped.inReplyTo);
       if (waiter) {
+        if (stamped.from !== waiter.to) {
+          deadLetter(stamped,
+            `response from unexpected responder '${stamped.from}' (expected '${waiter.to}')`,
+            'AT_RESPONSE_SPOOF');
+          record('response-spoof', {
+            requestId: stamped.inReplyTo,
+            from: stamped.from,
+            expected: waiter.to,
+          });
+          return { delivered: false, reason: 'response-spoof' };
+        }
         pending.delete(stamped.inReplyTo);
         record('response', {
           requestId: stamped.inReplyTo,

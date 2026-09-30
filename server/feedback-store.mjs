@@ -134,8 +134,40 @@ export function validateFeedback(input) {
 
 // Store: items + clusters + per-lane Mark ledger + lifecycle state.
 // Caller-owned Maps, time injected.
-export function createFeedbackStore({ now } = {}) {
+//
+// Authority (H-2): triage and outcome recording move Mark, so they are gated
+// on caller-supplied authority:
+//   - isReviewer(lane): who may triage / decide appeals. Enforced in
+//     triage() and decideAppeal().
+//   - isReleaseAuthority(lane): who may record "merged"/"adopted" outcomes.
+//     Enforced in recordOutcome().
+//   - verifyMergeRef(ref): optional sync hook verifying a "merged" ref
+//     against the actual merge record (commit/PR). When absent, the release
+//     authority gate is the protection; production wiring should verify refs.
+// Each accepts a predicate function or an iterable of authorized lanes.
+// When omitted, the legacy behavior applies (any non-empty lane string) —
+// the HTTP route applies its own member/guest auth, and the store stays a
+// pure library. Production wiring MUST configure reviewer and release
+// authority from room roles; without it any room member can triage and mint
+// Mark via self-reported merges.
+export function createFeedbackStore({ now, isReviewer, isReleaseAuthority, verifyMergeRef } = {}) {
   const clock = now ?? (() => Date.now());
+  const toPredicate = (value, name) => {
+    if (value === undefined) return lane => isNonEmptyString(lane, 64);
+    if (typeof value === "function") return value;
+    // NB: strings are iterable but are never a lane set — a bare string here
+    // would silently become a set of characters, so it is rejected.
+    if (typeof value !== "string" && value !== null && typeof value[Symbol.iterator] === "function") {
+      const set = new Set(value);
+      return lane => set.has(lane);
+    }
+    throw new FeedbackError("invalid_authority", `${name} must be a predicate or an iterable of lanes`);
+  };
+  const reviewerOk = toPredicate(isReviewer, "isReviewer");
+  const releaseOk = toPredicate(isReleaseAuthority, "isReleaseAuthority");
+  if (verifyMergeRef !== undefined && typeof verifyMergeRef !== "function") {
+    throw new FeedbackError("invalid_authority", "verifyMergeRef must be a function");
+  }
   const items = new Map();    // feedbackId -> item
   const clusters = new Map(); // dedupKey -> { key, firstId, count, severity, status, filedAt[], heat, priority }
   const marks = new Map();    // lane -> { balance, filings: [bool junk], suspended }
@@ -278,6 +310,9 @@ export function createFeedbackStore({ now } = {}) {
   const triage = (feedbackId, verdict, reviewerLane) => {
     check(["real", "junk", "user-error"].includes(verdict), "invalid_verdict", "verdict ∈ real|junk|user-error");
     check(isNonEmptyString(reviewerLane, 64), "invalid_reviewer", "reviewerLane required");
+    // H-2: triage moves Mark (refund + reward on "real"), so the reviewer
+    // must hold the reviewer role — any lane is not enough.
+    check(reviewerOk(reviewerLane), "not_reviewer", "reviewerLane is not authorized to triage feedback");
     const item = items.get(feedbackId);
     check(item, "not_found", "feedback id not found");
     check(item.status === "new", "invalid_transition", `cannot triage item in status ${item.status}`);
@@ -348,6 +383,9 @@ export function createFeedbackStore({ now } = {}) {
     check(["uphold", "overturn"].includes(decision), "invalid_decision",
       "decision ∈ uphold|overturn");
     check(isNonEmptyString(reviewerLane, 64), "invalid_reviewer", "reviewerLane required");
+    // H-2: deciding an appeal moves Mark (and can promote), so the decider
+    // needs the reviewer role like any triage.
+    check(reviewerOk(reviewerLane), "not_reviewer", "reviewerLane is not authorized to decide appeals");
     const item = items.get(feedbackId);
     check(item, "not_found", "feedback id not found");
     check(item.status === "appealed", "invalid_transition",
@@ -413,6 +451,14 @@ export function createFeedbackStore({ now } = {}) {
       "ref required (PR sha for merged, decision ref for adopted)");
     check(Array.isArray(feedbackIds) && feedbackIds.length > 0, "invalid_outcome",
       "feedbackIds required");
+    // H-2: outcome recording mints Mark (merge bonus to the filer, confirmation
+    // to the reviewer), so only a release authority may record it — a "merged"
+    // verdict must never come from a self-reported ref by an arbitrary lane.
+    check(isNonEmptyString(recordedBy, 64), "invalid_outcome", "recordedBy required");
+    check(releaseOk(recordedBy), "not_release_authority", "recordedBy is not a release authority");
+    if (kind === "merged" && verifyMergeRef !== undefined) {
+      check(verifyMergeRef(ref), "unverified_merge_ref", "ref did not verify against a merge record");
+    }
     const at = new Date(clock()).toISOString();
     const attributions = feedbackIds.map(id => {
       const item = items.get(id);
@@ -421,7 +467,7 @@ export function createFeedbackStore({ now } = {}) {
         `cannot record outcome on feedback in status ${item.status}`);
       const status = kind === "merged" ? "merged" : "adopted";
       const updated = Object.freeze({ ...item, status,
-        outcome: Object.freeze({ kind, ref, recordedBy: recordedBy ?? null, at }) });
+        outcome: Object.freeze({ kind, ref, recordedBy, at }) });
       items.set(id, updated);
       const filerMark = markFor(item.agent.lane);
       filerMark.balance += MARK_MERGE_BONUS;
