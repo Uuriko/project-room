@@ -23,6 +23,19 @@ function inspect(filename, fn) {
 }
 const schema = db => db.prepare("SELECT name,sql FROM sqlite_master WHERE name IN ('work_claims','work_claim_config') ORDER BY name").all().map(row => ({ ...row }));
 const allSchema = db => db.prepare("SELECT name,type,sql FROM sqlite_master ORDER BY name").all().map(row => ({ ...row }));
+function removeNewerClaimProfile(db) {
+  // Model a genuinely older database, not damaged modern public tasks. All
+  // public sidecars are empty here; no published scope or receipt is discarded.
+  for (const table of ["public_work_tasks", "public_work_requests", "public_work_receipts"]) {
+    assert.equal(db.prepare(`SELECT count(*) AS n FROM ${table}`).get().n, 0);
+  }
+  assert.equal(db.prepare("SELECT enabled FROM public_work_claim_writer_permit").get().enabled, 0);
+  db.exec(`DROP TABLE public_work_receipts; DROP TABLE public_work_requests;
+    DROP TABLE public_work_tasks; DROP TABLE public_work_claim_writer_permit;
+    DROP TABLE work_claims; DROP TABLE work_claim_config;`);
+  assert.equal(db.prepare("SELECT count(*) AS n FROM sqlite_master WHERE type='trigger' AND name GLOB 'public_claim_guard_*'").get().n, 0);
+  return allSchema(db);
+}
 
 for (const readOnly of [false, true]) {
   for (const [label, damage] of [
@@ -41,7 +54,7 @@ for (const readOnly of [false, true]) {
 
 test("read-only startup permits both old claim tables absent and does not create them", t => {
   const { filename } = fixture(t);
-  const before = inspect(filename, db => { db.exec("DROP TABLE work_claims; DROP TABLE work_claim_config"); return allSchema(db); });
+  const before = inspect(filename, removeNewerClaimProfile);
   const store = new RoomStore(filename, { readOnly: true });
   try {
     assert.equal(store.workClaims.verifySchema({ allowAbsent: true }), false);
@@ -52,7 +65,7 @@ test("read-only startup permits both old claim tables absent and does not create
 
 test("write startup creates both claim tables atomically and failed commit leaves neither", t => {
   const { filename, platform } = fixture(t);
-  const before = inspect(filename, db => { db.exec("DROP TABLE work_claims; DROP TABLE work_claim_config"); return allSchema(db); });
+  const before = inspect(filename, removeNewerClaimProfile);
   let observedBoth = false;
   const storagePlatform = { ...platform, transaction(db, fn, readOnly) {
     const outermost = !db.isTransaction;

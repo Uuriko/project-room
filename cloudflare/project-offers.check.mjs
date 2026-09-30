@@ -25,7 +25,7 @@ test('actual Worker disposal/reopen preserves draft, publication, withdrawal and
     assert.equal(draft.status, 'draft');
     await reopen();
     const restoredDrafts = await json(await call(privatePath, undefined, ownerKey));
-    assert.deepEqual(restoredDrafts.offers, [draft]);
+    assert.deepEqual(restoredDrafts.offers, [{ ...draft, publicClaims: null }]);
     assert.deepEqual(await json(await call('/api/project-offers')), { offers: [], nextCursor: null });
     assert.equal((await call('/api/project-offers/worker-offer')).status, 404);
     const publish = { requestId: 'worker-publish', expectedRevision: 1 };
@@ -44,7 +44,7 @@ test('actual Worker disposal/reopen preserves draft, publication, withdrawal and
     const withdrawn = await json(await call(privatePath + '/worker-offer/withdraw', withdraw, ownerKey));
     await reopen();
     const restoredWithdrawn = await json(await call(privatePath, undefined, ownerKey));
-    assert.deepEqual(restoredWithdrawn.offers, [withdrawn]);
+    assert.deepEqual(restoredWithdrawn.offers, [{ ...withdrawn, publicClaims: null }]);
     assert.deepEqual(await json(await call(privatePath + '/worker-offer/withdraw', withdraw, ownerKey)), withdrawn);
     assert.equal((await call('/api/project-offers/worker-offer/brief.md')).status, 404);
     assert.deepEqual(await json(await call('/api/project-offers')), { offers: [], nextCursor: null });

@@ -47,6 +47,19 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/api/access-requests/{requestId}", ["GET"], "identity-scoped", "Poll your own access request status.", "getAccessRequest"),
   route("/api/share-links/join-agent", ["POST"], "identity-secret", "Guest-link redemption: join with a guest pass.", "joinAgentViaShareLink"),
   route("/api/needs-me", ["GET"], "identity-secret", "What needs you, across every room.", "getNeedsMe"),
+  // Public contribution work: owner consent, outside claims and immutable evidence.
+  route("/api/public-work/tasks", ["GET", "HEAD"], "none", "List explicitly enabled public volunteer tasks.", "listPublicWorkTasks",
+    { operationIds: { HEAD: "headPublicWorkTasks" }, publicWork: "list" }),
+  route("/api/public-work/tasks/{taskId}", ["GET", "HEAD"], "none", "Inspect current task terms and lease.", "getPublicWorkTask",
+    { operationIds: { HEAD: "headPublicWorkTask" }, publicWork: "task" }),
+  ...["claim", "renew", "release", "finish"].map(action => route(`/api/public-work/tasks/{taskId}/${action}`, ["POST"], "identity-secret",
+    `${action} public work using a saved global identity; no private room admission.`, `${action}PublicWork`, { publicWork: action })),
+  route("/api/public-work/match", ["POST"], "none", "Recommend volunteer tasks, or explicitly find and claim one.", "matchPublicWork", { publicWork: "match" }),
+  route("/api/public-work/receipts/{receiptId}", ["GET", "HEAD"], "none", "Read an immutable submitted receipt; hash-only verification, not acceptance or payment.", "getPublicWorkReceipt",
+    { operationIds: { HEAD: "headPublicWorkReceipt" }, publicWork: "receipt" }),
+  route("/api/public-work/receipts/{receiptId}/artifact", ["GET", "HEAD"], "none", "Fetch the exact UTF-8 contribution bytes for independent digest checking.", "getPublicWorkArtifact",
+    { operationIds: { HEAD: "headPublicWorkArtifact" }, publicWork: "artifact" }),
+  route("/api/rooms/{roomId}/project-offers/{offerId}/claims", ["POST"], "room-member", "Owner-only: explicitly enable outside volunteer claims for declared repository paths.", "enablePublicWorkClaims", { publicWork: "enable" }),
   // Hosted MCP (JSON-RPC over POST).
   route("/mcp", ["GET", "POST"], "mcp", "Hosted MCP endpoint: GET serves the public join document; POST is JSON-RPC tools/list + tools/call.", "postMcp",
     { operationIds: { GET: "getMcpJoinDoc", POST: "postMcp" } }),
@@ -101,6 +114,79 @@ function operationResponses(entry, method) {
   return { ...success, ...errors };
 }
 
+const publicWorkSchemas = {
+  PublicWorkTask: {
+    type: "object", required: ["schema", "taskId", "termsVersion", "namespaceId", "repositoryUrl", "repositoryRef", "title", "acceptanceCriteria", "files", "claim"],
+    properties: {
+      schema: { const: "public-work-task/1" }, taskId: { type: "string" }, termsVersion: { type: "integer", minimum: 1 },
+      namespaceId: { type: "string" }, repositoryUrl: { type: "string", format: "uri" }, repositoryRef: { type: "string" },
+      title: { type: "string" }, acceptanceCriteria: { type: "array", items: { type: "string" } }, files: { type: "array", items: { type: "string" } },
+      claim: { type: "object", required: ["state", "generation", "identityId", "leaseExpiresAt", "submittedReceiptId"], properties: {
+        state: { enum: ["unclaimed", "claimed", "submitted"] }, generation: { type: "integer", minimum: 0 },
+        identityId: { type: ["string", "null"] }, leaseExpiresAt: { type: ["string", "null"] }, submittedReceiptId: { type: ["string", "null"] },
+      } },
+    },
+  },
+  PublicWorkReceipt: {
+    type: "object", required: ["schema", "receiptId", "taskId", "termsVersion", "namespaceId", "generation", "identityId", "state", "artifact", "checksReported", "verification", "createdAt"],
+    properties: {
+      schema: { const: "public-work-receipt/1" }, receiptId: { type: "string" }, taskId: { type: "string" }, termsVersion: { type: "integer", minimum: 1 },
+      namespaceId: { type: "string" }, generation: { type: "integer", minimum: 1 }, identityId: { type: "string" }, state: { const: "submitted" },
+      artifact: { type: "object", required: ["sha256", "bytes"], properties: { sha256: { type: "string", pattern: "^[a-f0-9]{64}$" }, bytes: { type: "integer", minimum: 0, maximum: 65536 } } },
+      checksReported: { type: "array", maxItems: 20, items: { type: "string", minLength: 1, maxLength: 1000 } }, verification: { const: "hash_only" }, createdAt: { type: "string", format: "date-time" },
+    },
+  },
+  PublicWorkOutcome: { type: "object", required: ["action", "task"], properties: {
+    action: { enum: ["claimed", "renewed", "released", "submitted"] }, task: { $ref: "#/components/schemas/PublicWorkTask" }, receipt: { $ref: "#/components/schemas/PublicWorkReceipt" },
+  } },
+};
+function publicWorkOperation(entry, method) {
+  const kind = entry.publicWork;
+  if (!kind) return {};
+  const ref = name => ({ $ref: `#/components/schemas/${name}` });
+  const strings = { type: "array", maxItems: 20, items: { type: "string", minLength: 1, maxLength: 1000 } };
+  const requestId = { type: "string", minLength: 1, maxLength: 128 };
+  const props = { requestId, expectedTermsVersion: { type: "integer", minimum: 1 } };
+  let required = ["requestId", "expectedTermsVersion"], schema;
+  if (["claim", "renew"].includes(kind)) props.leaseHours = { type: "number", exclusiveMinimum: 0, maximum: 24, default: 1 };
+  if (["renew", "release", "finish"].includes(kind)) { props.generation = { type: "integer", minimum: 1 }; required.push("generation"); }
+  if (kind === "finish") {
+    props.artifactText = { type: "string", description: "Valid UTF-8 text, at most 65536 encoded bytes; not characters." };
+    props.checksReported = strings; required.push("artifactText", "checksReported");
+  }
+  if (kind === "enable") {
+    props.expectedRevision = { type: "integer", minimum: 1 }; props.repositoryRef = { type: "string", minLength: 1, maxLength: 128 };
+    props.files = { type: "array", minItems: 1, maxItems: 64, items: { type: "string", maxLength: 512 } };
+    required.push("expectedRevision", "repositoryRef", "files");
+  }
+  if (kind === "match") {
+    delete props.expectedTermsVersion; required = [];
+    Object.assign(props, { after: { type: "string", description: "nextCursor from the prior bounded scan; use a new requestId for a new autoClaim page." }, skills: { ...strings, items: { type: "string", minLength: 1, maxLength: 100 } }, interests: { ...strings, items: { type: "string", minLength: 1, maxLength: 100 } }, reward: { enum: ["volunteer", "work_trade", "cash"], default: "volunteer" },
+      autoClaim: { type: "boolean", default: false }, limit: { type: "integer", minimum: 1, maximum: 5, default: 3 }, leaseHours: { type: "number", exclusiveMinimum: 0, maximum: 24, default: 1 } });
+  }
+  if (kind === "task" || kind === "enable") schema = ref("PublicWorkTask");
+  else if (kind === "receipt") schema = ref("PublicWorkReceipt");
+  else if (kind === "list") schema = { type: "object", required: ["tasks", "nextCursor"], properties: { tasks: { type: "array", items: ref("PublicWorkTask") }, nextCursor: { type: ["string", "null"] } } };
+  else if (kind === "match") schema = { type: "object", required: ["recommendations", "claim", "inspected", "hasMore", "nextCursor", "supportedRewards"], properties: {
+    recommendations: { type: "array", maxItems: 5, items: { type: "object", required: ["task", "reasons"], properties: { task: ref("PublicWorkTask"), reasons: { ...strings, maxItems: 40 } } } },
+    claim: { anyOf: [ref("PublicWorkOutcome"), { type: "null" }] }, inspected: { type: "integer", minimum: 0 }, hasMore: { type: "boolean" }, nextCursor: { type: ["string", "null"] }, supportedRewards: { type: "array", items: { const: "volunteer" } },
+  } };
+  else schema = ref("PublicWorkOutcome");
+  const responses = { ...operationResponses(entry, method) }; delete responses["201"];
+  responses["200"] = { description: "OK", ...(method === "HEAD" ? {} : { content: kind === "artifact" ? { "text/plain": { schema: { type: "string", description: "Exact artifact bytes, attachment; recompute SHA-256." } } } : { "application/json": { schema } } }) };
+  responses["422"] = { description: "Invalid fields, unsupported query or ineligible owner task." };
+  const op = { responses, security: entry.auth === "none" ? [] : [{ identityBearer: [] }] };
+  if (method === "POST") op.requestBody = { required: true, content: { "application/json": { schema: { type: "object", additionalProperties: false, required, properties: props, ...(kind === "match" ? { if: { required: ["autoClaim"], properties: { autoClaim: { const: true } } }, then: { required: ["requestId"] } } : {}) } } } };
+  if (kind === "list") op.queryParameters = [
+    { name: "limit", in: "query", schema: { type: "integer", minimum: 1, maximum: 100, default: 20 } },
+    { name: "after", in: "query", schema: { type: "string" }, description: "Use nextCursor from the prior page." },
+  ];
+  // Owner enablement accepts the existing room credential/session; it is not an outside identity grant.
+  if (kind === "match") op.description = "Anonymous recommendations are read-only. autoClaim=true requires Authorization: Bearer saved global identity secret and atomically claims at most one task. No room admission.";
+  if (kind === "enable") { delete op.security; op.description = "Owner-only room authentication. Explicit consent to public artifacts and declared scope; unpaid published offer only."; }
+  return op;
+}
+
 const AUTH_DESCRIPTION = {
   none: "Public: no credential required.",
   open: "Public: no credential required.",
@@ -132,6 +218,10 @@ export function buildOpenApiJson({ origin }) {
           name: m[1], in: "path", required: true, schema: { type: "string" },
         }));
       }
+      const publicSpec = publicWorkOperation(entry, method);
+      const queryParameters = publicSpec.queryParameters; delete publicSpec.queryParameters;
+      Object.assign(op, publicSpec);
+      if (queryParameters) op.parameters = [...(op.parameters ?? []), ...queryParameters];
       item[method.toLowerCase()] = op;
     }
     paths[entry.path] = item;
@@ -151,8 +241,10 @@ export function buildOpenApiJson({ origin }) {
     servers: [{ url: origin }],
     paths,
     components: {
+      securitySchemes: { identityBearer: { type: "http", scheme: "bearer", description: "Saved global agent identity secret." } },
       responses: errorComponents(),
       schemas: {
+        ...publicWorkSchemas,
         NextStep: {
           type: "object",
           description: "One machine-readable next step. At least one of tool, path, or command is present.",
