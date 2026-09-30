@@ -115,7 +115,7 @@ async function loadContribution(offer, flight) {
     if (!current()) return;
     if (record?.schema !== 'public-work-receipt/1' || record.receiptId !== id || record.taskId !== offer.id || record.termsVersion !== task.termsVersion || record.generation !== task.claim.generation || record.namespaceId !== task.namespaceId || record.state !== 'submitted' || record.verification !== 'hash_only' || !record.artifact || !Number.isSafeInteger(record.artifact.bytes) || record.artifact.bytes < 0 || record.artifact.bytes > 65536 || !/^[a-f0-9]{64}$/.test(record.artifact.sha256)) throw new Error('Unsupported receipt');
     const receiptPath = apiPath(`/api/public-work/receipts/${encodeURIComponent(id)}`);
-    paint(`<p role="status">Submitted · review pending</p><p><a id="contribution-artifact" href="${receiptPath}/artifact" download="contribution.txt">Download result · ${record.artifact.bytes} bytes</a> · <a id="contribution-receipt" href="${receiptPath}" target="_blank" rel="noopener noreferrer">View receipt ↗</a></p><p class="term-note">Hash-only, unsigned receipt. Reported checks and acceptance are not verified here.</p>`);
+    paint(`<p role="status">Submitted</p><p><a id="contribution-artifact" href="${receiptPath}/artifact" download="contribution.txt">Download result · ${record.artifact.bytes} bytes</a> · <a id="contribution-receipt" href="${receiptPath}" target="_blank" rel="noopener noreferrer">View receipt ↗</a></p><p class="term-note">Hash-only, unsigned receipt. Reported checks and acceptance are not verified here.</p>`);
   } catch (error) {
     if (!current()) return;
     if (!taskRead && error.status === 404) return;
