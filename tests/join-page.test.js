@@ -28,6 +28,11 @@ test("join page is public: GET /join and /join/:code serve the page without auth
     assert.match(response.headers.get("content-type"), /text\/html/);
     const html = await response.text();
     assert.match(html, /id="join-form"/, `${path} has the join form`);
+    const formAt = html.indexOf('id="join-form"');
+    const permsAt = html.indexOf('id="join-permissions"');
+    const detailsPerms = html.indexOf('<details class="join-permissions-details">');
+    assert.ok(formAt >= 0 && formAt < permsAt, `${path} name+Join come before the permission list`);
+    assert.ok(detailsPerms >= 0 && permsAt > detailsPerms, `${path} permissions sit inside details`);
     assert.match(html, /id="join-consent"/, `${path} has the consent screen`);
     assert.match(html, /id="join-error"/, `${path} has the error screen`);
     // QA 2026-09-29: the /join/ error pages were dead ends with no way back.

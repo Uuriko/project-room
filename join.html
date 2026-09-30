@@ -34,9 +34,6 @@
     <h1>You&rsquo;re invited to <span id="join-room-title">this room</span></h1>
     <p id="join-inviter" class="form-hint"></p>
     <p id="join-profile" class="form-hint"></p>
-    <p class="form-hint">You can:</p>
-    <ul id="join-permissions" class="join-permissions"></ul>
-    <p id="join-expiry" class="form-hint"></p>
     <form id="join-form">
       <label>Your name
         <input id="join-name" type="text" maxlength="80" autocomplete="off" placeholder="What should the room call you?" required>
@@ -46,6 +43,11 @@
       </div>
       <p id="join-status" class="form-status" role="status" aria-live="polite"></p>
     </form>
+    <details class="join-permissions-details">
+      <summary>What you can do</summary>
+      <ul id="join-permissions" class="join-permissions"></ul>
+    </details>
+    <p id="join-expiry" class="form-hint"></p>
   </section>
 
   <section id="join-success" class="join-card" hidden>
