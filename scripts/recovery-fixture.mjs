@@ -260,9 +260,28 @@ export function createRecoveryFixture(filename) {
       '[{"seq":1,"at":0,"type":"claim_flaked"},{"seq":2,"at":0,"type":"dispute_lost"}]')`)
       .run(new Date(now).toISOString(), first.bountyId);
   }
+  // Real model writes seed both offer records and exact request receipts. Older
+  // runtime packages genuinely lack this additive feature and retain their fixture.
+  const projectOffers = [];
+  if (store.projectOffers) {
+    for (const status of ["draft", "published", "withdrawn"]) {
+      const offerId = `recovery-offer:${status}`;
+      const input = { requestId: `create-${offerId}`, offerId, reviewerMemberIds: ["owner"], terms: {
+        kind: "task", title: `Recovery ${status} offer`, summary: "Private synthetic recovery offer terms",
+        acceptanceCriteria: ["Preserve exact pinned terms and receipts"], exclusions: ["No live payments"],
+        repositoryUrl: "https://github.com/Uuriko/project-room", reward: { kind: "work_trade", unit: "credit", amountMinor: "12500" }, approvalPolicy: { mode: "human" }
+      } };
+      const retries = [{ action: "create", input, result: store.projectOffers.create("commons", "owner", input) }];
+      for (const action of status === "draft" ? [] : status === "published" ? ["publish"] : ["publish", "withdraw"]) {
+        const request = { requestId: `${action}-${offerId}`, expectedRevision: retries.at(-1).result.revision };
+        retries.push({ action, input: request, result: store.projectOffers.transition("commons", "owner", offerId, action, request) });
+      }
+      projectOffers.push({ offerId, retries, record: retries.at(-1).result });
+    }
+  }
   store.workClaims.configure("commons", { defaultLeaseHours: 6 });
   store.workClaims.set("commons", claimWork(createWork({ id: "recovery-claim", title: "Restore an active claim", files: ["synthetic/recovery.mjs"] }, { now }), "owner", { now, leaseHours: 6 }));
-  return { store, filename, keys, owner, target, validSession, revokedSession, loggedOut, sharedSession, pending, invitation,
+  return { store, filename, keys, owner, target, projectOffers, validSession, revokedSession, loggedOut, sharedSession, pending, invitation,
     shareRequest, link, linkToken, guestSlot, guest, joinRequest, reminders, command, commandResult, cursor, inboxRequests, inboxReceipts, inboxDraftBody, transportRequests, transportReceipts, replyRequests, replyReceipts,
     enrollmentToken, enrollmentRequest, enrollment, nativeBody, nativeCommand, nativeCompletion, charterCommand, charterSaved, emailProfile, emailPage, emailEnvelope,
     now: () => now, advance: ms => { now += ms; } };
