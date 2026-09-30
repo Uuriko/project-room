@@ -110,8 +110,14 @@ export class ProjectRoom extends DurableObject {
         return Buffer.from(await response.arrayBuffer());
       },
       resolveClientAddress: req => {
-        // Only the front Worker may call this DO binding. It overwrites this
-        // internal header from Cloudflare's incoming visitor-IP header.
+        // 2026-09-30 (phase-3 audit LOW-2): trust model documented explicitly.
+        // The Durable Object is NOT reachable from the internet — only the
+        // front Worker calls this binding, and the Worker overwrites
+        // x-room-visitor-ip from Cloudflare's CF-Connecting-IP (validated
+        // with isIP() at the Worker boundary) before forwarding. A direct
+        // caller cannot spoof this header because they cannot reach the DO.
+        // The isIP() check here is defense-in-depth against a misconfigured
+        // Worker, not the primary trust boundary.
         const address = req.headers['x-room-visitor-ip'];
         const kind = typeof address === 'string' && isIP(address);
         if (!kind) throw new Error('Trusted visitor address missing');
