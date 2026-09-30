@@ -9,7 +9,7 @@ import {
   loadJournal, buildRunPlan, assertPlanSafe, parseAttentionItem, childEnvFor, emptyAttentionNext, countKinds,
   setCursor
 } from "../client/grok-host.mjs";
-import { pull, doctor, ingestWake, writeJournalFile, readJournalFile, loadPendingAccess, rememberPendingAccess, writePendingAccessFile, fileAccessRequest, claimWork as hostClaim } from "../scripts/grok-room-host.mjs";
+import { pull, doctor, ingestWake, writeJournalFile, readJournalFile, loadPendingAccess, rememberPendingAccess, writePendingAccessFile, fileAccessRequest, claimWork as hostClaim, handleTextCommand } from "../scripts/grok-room-host.mjs";
 import { saveAgentConnection } from "../client/agent-connection.mjs";
 
 const secret = "pri_abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG";
@@ -222,6 +222,36 @@ test("doctor reports pending admissions from the saved request list", async t =>
   assert.equal(result.ok, true);
   assert.deepEqual(result.pendingAdmissions, [{ requestId: "ar_1", roomId: "build-together-32f67587", status: "pending" }]);
   assert.equal(JSON.stringify(result).includes(secret), false);
+});
+
+test("text match ranks listings and never claims", async t => {
+  const directory = fixtureDir();
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const listings = [
+    { id: "h1", kind: "offer", motive: "hobby", title: "Docs", tags: ["docs"], open: true },
+    { id: "c1", kind: "bounty", motive: "cash", title: "Paid", tags: ["docs"], open: true }
+  ];
+  const result = await handleTextCommand({
+    env: { ROOM_AGENT_CONFIG: directory },
+    line: "match hobby docs",
+    listings
+  });
+  assert.equal(result.verb, "match");
+  assert.deepEqual(result.matches.map(row => row.id), ["h1"]);
+  assert.equal(JSON.stringify(result).includes(secret), false);
+});
+
+test("text claim uses the work-claims lease", async t => {
+  const directory = fixtureDir();
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const fetchImpl = async () => new Response(JSON.stringify({
+    id: "w1", state: "claimed", owner: "ai_x", leaseExpiresAt: 1, fileWarnings: []
+  }), { status: 200 });
+  const result = await handleTextCommand({
+    env: { ROOM_AGENT_CONFIG: directory }, fetchImpl, line: "PR claim w1"
+  });
+  assert.equal(result.verb, "claim");
+  assert.equal(result.state, "claimed");
 });
 
 test("claim posts the existing work-claims lease and redacts the bearer", async t => {

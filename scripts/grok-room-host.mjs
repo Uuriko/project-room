@@ -9,6 +9,8 @@ import {
   pendingWakeToItem, attentionKey, selectUnhandled, markHandled, setCursor, loadJournal,
   emptyJournal, buildRunPlan, assertPlanSafe, childEnvFor, emptyAttentionNext, countKinds
 } from "../client/grok-host.mjs";
+import { parseRoomText } from "../client/text-plug.mjs";
+import { matchListings } from "../client/matchmaking.mjs";
 
 function fail(code, message) {
   throw new GrokHostError(code, message);
@@ -421,6 +423,11 @@ function parseArgs(argv) {
     }
     return out;
   }
+  if (args[0] === "text") {
+    const line = args.slice(1).join(" ").trim();
+    if (!line) return null;
+    return { command: "text", line };
+  }
   const command = args[0] === "doctor" || args[0] === "pull" || args[0] === "wake" ? args[0] : null;
   if (!command) return null;
   const execute = args.includes("--execute");
@@ -476,6 +483,25 @@ export async function claimWork({ env = process.env, fetchImpl = fetch, workItem
   };
 }
 
+export async function handleTextCommand({ env = process.env, fetchImpl = fetch, line, listings = [] } = {}) {
+  const parsed = parseRoomText(line);
+  if (parsed.verb === "pull") {
+    const result = await pull({ env, fetchImpl, execute: false });
+    return { ok: true, verb: "pull", silent: result.silent, planned: result.planned.length };
+  }
+  if (parsed.verb === "claim") {
+    const result = await claimWork({ env, fetchImpl, workItemId: parsed.workItemId });
+    return { ok: true, verb: "claim", workItemId: result.workItemId, state: result.state };
+  }
+  if (parsed.verb === "done") return { ok: true, verb: "done" };
+  const hits = matchListings({ motive: parsed.motive, tags: parsed.tags }, listings);
+  return {
+    ok: true,
+    verb: "match",
+    matches: hits.map(hit => ({ id: hit.listing.id, score: hit.score, reasons: hit.reasons }))
+  };
+}
+
 function readWakeBody() {
   const text = readFileSync(0, "utf8");
   try { return JSON.parse(text); }
@@ -485,7 +511,7 @@ function readWakeBody() {
 export async function main(argv = process.argv, env = process.env, io = { log: console.log, error: console.error }) {
   const parsed = parseArgs(argv);
   if (!parsed) {
-    io.error("Usage: node scripts/grok-room-host.mjs doctor | pull [--execute] | wake [--execute] | request-access <roomId> | claim <workItemId> [--lease-hours N] [--room ROOM]");
+    io.error("Usage: node scripts/grok-room-host.mjs doctor | pull [--execute] | wake [--execute] | request-access <roomId> | claim <workItemId> [--lease-hours N] [--room ROOM] | text <line>");
     process.exitCode = 2;
     return;
   }
@@ -494,7 +520,8 @@ export async function main(argv = process.argv, env = process.env, io = { log: c
       : parsed.command === "wake" ? await ingestWake({ env, body: readWakeBody(), execute: parsed.execute })
         : parsed.command === "request-access" ? await fileAccessRequest({ env, roomId: parsed.roomId })
           : parsed.command === "claim" ? await claimWork({ env, workItemId: parsed.workItemId, leaseHours: parsed.leaseHours, roomId: parsed.roomId })
-            : await pull({ env, execute: parsed.execute });
+            : parsed.command === "text" ? await handleTextCommand({ env, line: parsed.line })
+              : await pull({ env, execute: parsed.execute });
     io.log(JSON.stringify(result));
     if (parsed.command === "doctor" && result.ok === false) process.exitCode = 1;
   } catch (error) {
