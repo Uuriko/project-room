@@ -41,7 +41,6 @@ class X402BridgeError extends Error {
 }
 const fail = (code, message) => { throw new X402BridgeError(code, message); };
 const check = (cond, code, message) => { if (!cond) fail(code, message); };
-const nonEmptyString = (v, what) => check(typeof v === "string" && v.length > 0, "invalid_input", `${what} must be a non-empty string`);
 const rawUnits = (v, what) => check(typeof v === "string" && /^(0|[1-9][0-9]*)$/.test(v), "invalid_input", `${what} must be integer raw-unit string`);
 
 function addressKind(x402Chain) {
