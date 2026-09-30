@@ -70,3 +70,40 @@ test("scrubAttempt redacts request/response bodies and query-param tokens", () =
   assert.equal(out.response.status, 401, "structure survives scrubbing");
   assert.equal(out.goal, "call the thing");
 });
+
+test("H-3: bare query-string secrets are redacted; ordinary params survive", () => {
+  // The pre-fix defect: only vendor-prefixed tokens (sk-, ghp-, ...) were
+  // redacted, so ?api_key=deadbeef1 passed through to storage verbatim.
+  assert.equal(
+    scrubString("https://x.example/path?api_key=deadbeef1"),
+    "https://x.example/path?api_key=[REDACTED:credential]");
+  assert.equal(
+    scrubString("https://x.example/path?token=deadbeef1"),
+    "https://x.example/path?token=[REDACTED:credential]");
+  assert.equal(
+    scrubString("/api/things?page=2&sort=asc"),
+    "/api/things?page=2&sort=asc",
+    "non-secret params must survive");
+  assert.equal(
+    scrubString("/api/things?API_KEY=deadbeef1"),
+    "/api/things?API_KEY=[REDACTED:credential]",
+    "secret param names match case-insensitively");
+  assert.equal(
+    scrubString("/x?api_key=deadbeef1#frag"),
+    "/x?api_key=[REDACTED:credential]#frag",
+    "fragments survive scrubbing");
+  assert.equal(
+    scrubString("/x?api_key=deadbeef1&api_key=second"),
+    "/x?api_key=[REDACTED:credential]&api_key=[REDACTED:credential]",
+    "repeated secret params are all redacted");
+});
+
+test("H-3: scrubAttempt redacts bare query-param secrets in request paths", () => {
+  const attempt = {
+    goal: "g",
+    request: { method: "GET", path: "/api/things?api_key=deadbeef1&verbose=true" },
+    response: { status: 200, body: {} },
+  };
+  const out = scrubAttempt(attempt);
+  assert.equal(out.request.path, "/api/things?api_key=[REDACTED:credential]&verbose=true");
+});
