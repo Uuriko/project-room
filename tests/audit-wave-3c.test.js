@@ -247,8 +247,7 @@ function collabHarness(t) {
   return { store, collab: store.collab };
 }
 
-test("M-8: a refreshed draft lock still replays after a failed mutation evicts the cache", (t) => {
-  const { store, collab } = collabHarness(t);
+test("M-8: a refreshed draft lock still replays after a failed mutation evicts the cache", (t) => {  const { store, collab } = collabHarness(t);
   const agent = { kind: "agent", id: "agent-a" };
   const first = collab.acquireDraftLock("commons", "thread-1", agent);
   const refreshed = collab.acquireDraftLock("commons", "thread-1", agent);
@@ -268,6 +267,30 @@ test("M-8: a refreshed draft lock still replays after a failed mutation evicts t
   // thread-2 was never persisted: no phantom lock.
   const none = collab.detectDraftLock("commons", "thread-2", { kind: "agent", id: "agent-b" });
   assert.equal(none.collision, false);
+});
+
+test("M-8: a same-instant refresh still replays (empty id sequence falls back to the lockId)", (t) => {
+  // With a frozen clock the refresh lands in the same instant as the
+  // original acquire: the refresh rewrote the row with an empty id
+  // sequence, which replay must seed from the persisted lockId.
+  const directory = mkdtempSync(join(tmpdir(), "audit-wave-3c-collab-"));
+  const frozen = 1790000000000;
+  const store = new RoomStore(join(directory, "room.sqlite"), { now: () => frozen });
+  store.initialize(initialRoom("commons"));
+  t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
+  const collab = store.collab;
+  const agent = { kind: "agent", id: "agent-a" };
+  const first = collab.acquireDraftLock("commons", "thread-1", agent);
+  const refreshed = collab.acquireDraftLock("commons", "thread-1", agent);
+  assert.equal(refreshed.duplicate, true);
+  assert.equal(refreshed.lock.lockId, first.lock.lockId);
+  store.db.exec(`CREATE TRIGGER fail_lock_insert BEFORE INSERT ON collab_draft_locks
+    BEGIN SELECT RAISE(ABORT, 'simulated disk failure'); END;`);
+  assert.throws(() => collab.acquireDraftLock("commons", "thread-2", agent), /simulated disk failure/);
+  store.db.exec("DROP TRIGGER fail_lock_insert");
+  const detected = collab.detectDraftLock("commons", "thread-1", { kind: "agent", id: "agent-b" });
+  assert.equal(detected.collision, true);
+  assert.equal(detected.holders[0].id, "agent-a");
 });
 
 test("M-8: a failed collab mutation does not leave the cached journal ahead of the database", (t) => {

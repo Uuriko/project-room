@@ -289,7 +289,11 @@ export class InboxCollabStore {
       // persisted lockId for the cold acquire; a cold acquire's own id_json
       // already carries it.
       entry.cell.clocks = fresh ? [acquiredMs] : [acquiredMs, acquiredMs, lock.expiresAt - lock.ttlMs];
-      entry.cell.ids = fresh ? JSON.parse(row.id_json) : [lock.lockId];
+      // A same-instant refresh rewrote the row with an empty id sequence
+      // (refreshes consume no id), so fall back to the persisted lockId —
+      // the cold acquire below always consumes exactly one id.
+      const persistedIds = JSON.parse(row.id_json);
+      entry.cell.ids = persistedIds.length > 0 ? persistedIds : [lock.lockId];
       entry.locks.acquireLock(lock.threadId, lock.holder, { ttlMs: lock.ttlMs });
       if (!fresh) entry.locks.heartbeat(lock.lockId);
       this.#drained(entry, "draft lock");
