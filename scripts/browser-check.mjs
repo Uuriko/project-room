@@ -207,7 +207,9 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     assert.equal(warned, true);
     await page.waitForFunction(() => document.querySelector("#message-input").value === "Reload keeps this unsent thought");
 
-    // Revoking a session removes every private discussion and in-memory draft.
+    // E-H2: rotating the access key is an unexpected 401 for this tab — the
+    // credential died, the user didn't leave. Private discussions are still
+    // removed, but the unsent draft is preserved for re-authentication.
     await input.fill("Clear this private draft on revocation");
     if (await page.locator("#search-form").evaluate(node => node.hidden)) {
       await page.locator("#topbar-search-toggle").click();
@@ -217,10 +219,15 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     await page.locator("#auth-panel").waitFor({ state: "visible" });
     assert.equal(await page.locator("#message-list").textContent(), "");
     assert.equal(await page.locator("#search-list").textContent(), "");
-    assert.equal(await input.inputValue(), "");
+    // E-H2: unexpected access loss preserves the in-flight draft (was: cleared).
+    assert.equal(await input.inputValue(), "Clear this private draft on revocation",
+      "unexpected access loss preserves the in-flight draft");
     await signInFixture(page, rotated);
     await page.locator("#main").waitFor({ state: "visible" });
-    assert.equal(await input.inputValue(), "");
+    // The rotated key starts a new auth epoch; the pre-rotation draft backup
+    // is epoch-scoped and does not carry over. Revocation still fully clears.
+    assert.equal(await input.inputValue(), "",
+      "re-authentication after key rotation starts a new epoch without the old draft");
     assert.deepEqual(errors, []);
   });
 }

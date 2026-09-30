@@ -5,7 +5,7 @@ import { EVENT_TYPES as T, MAX_MESSAGE_BODY_CHARS, WORK_STATES as S, roomPolicy,
 import { AccountClient, RoomClient, draftCommand, retryUnconfirmed } from "./client.js";
 import { ReturnBrief, groupBriefHistory } from "./return-brief.js";
 import { attentionPreview, needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult, roomOrientation } from "./work-selectors.js";
-import { conversationIndex, searchMessages, ConversationDrafts, DraftRecovery, draftRecoveryScope, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, mentionHtml, kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery, reactionPills } from "./conversation.js";
+import { conversationIndex, searchMessages, ConversationDrafts, DraftRecovery, draftRecoveryScope, shouldPreserveDrafts, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, mentionHtml, kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery, reactionPills } from "./conversation.js";
 import { canonicalReaction, clipGraphemes, emojiCatalog, emojiMatches, emojiName, emojiQuery, foldedReactionMap, frequentEmoji, insertEmoji, renderEmojiShortcodes } from "./emoji.js";
 import { nextWorkStep, workStatus, workActions, renderWorkActions, activeClaim, terminalWork, doneChip, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, matchesReceipt, producerKnown as hasReportedProducer, changeDescription, diffResultLines, diffResultSummary, workRecipeOptions } from "./workflow.js";
 import { coordinationLoops } from "./work-loops.js";
@@ -289,7 +289,13 @@ const client = new RoomClient({
     accessEndContext = null;
     const pendingSignout = signoutLoading;
     const keepAccount = !leavingPage && !pendingSignout && endedContext !== "account-switch" && accountClient.session?.authenticated;
-    if (!leavingPage) recovery.clear();
+    // E-H2: an unexpected access end (401/403 session expiry, not sign-out,
+    // room/account switch, or page unload) must not destroy the in-flight
+    // draft. The user didn't leave; the credential died. Preserve the
+    // persisted backup, the in-memory drafts, and the composer text so
+    // re-authentication restores them.
+    const sessionExpired = shouldPreserveDrafts({ leavingPage, pendingSignout, endedContext });
+    if (!leavingPage && !sessionExpired) recovery.clear();
     releaseSubmission(submitControls);
     submitOperationId += 1; busy = false;
     displayNames = createMemberDisplayNames({});
@@ -331,8 +337,11 @@ const client = new RoomClient({
     workDraftId = null; replyToId = null; workFormEpoch++; setWorkRetry(false);
     syncRoomLifecycle();
     $("#work-reuse-hint").hidden = true;
-    currentThreadId = null; conversation = null; drafts = new ConversationDrafts();
-    $("#message-input").value = "";
+    currentThreadId = sessionExpired ? currentThreadId : null; conversation = null;
+    if (!sessionExpired) {
+      drafts = new ConversationDrafts();
+      $("#message-input").value = "";
+    }
     requestRuns = {}; requestMode = null; requestReading = false; requestEpoch++; syncRequestComposer();
     renderComposerError();
     viewPositions.clear(); pendingReactions.clear(); locallyOwnedMessageIds.clear(); newVisibleMessages = 0; briefView.reset();
@@ -352,6 +361,7 @@ const client = new RoomClient({
     $("#usage-refresh").hidden = true; $("#record-export-html").disabled = false; exportRequest += 1;
     for (const id of ["message-to-select", "assignee-select", "verifier-select"]) { $(`#${id}`).replaceChildren(); delete $(`#${id}`).dataset.signature; }
     for (const form of document.querySelectorAll("form")) {
+      if (sessionExpired && form.id === "message-form") continue;
       if (!keepAccount || !form.closest("#inbox-panel")) form.reset();
     }
     if (!humanAuthBusy) signinUI?.clear();
@@ -5519,19 +5529,26 @@ function horizonAnchorFor(messages, lastRead) {
 }
 async function refreshSavedIds() {
   if (!state || !session || savedIdsBusy) return;
+  const generation = client.generation, roomId = session.roomId;
   savedIdsBusy = true;
   try {
     const result = await client.savedList();
+    // E-H3: drop stale flights — the previous room's saved ids must never
+    // land in the new room's set.
+    if (generation !== client.generation || session?.roomId !== roomId) return;
     if (result) savedMessageIds = new Set(result.items.map(item => item.messageId));
   } catch { /* the Save toggle reports loudly; the menu label just stays stale */ }
   finally { savedIdsBusy = false; }
 }
 async function syncAttentionBadges() {
   if (!state || !session || attentionBadgesBusy) return;
+  const generation = client.generation, roomId = session.roomId;
   attentionBadgesBusy = true;
   try {
     const [count, saved] = await Promise.all([client.activityUnreadCount(), client.savedList()]);
-    if (!state || !session) return;
+    // E-H3: drop stale flights — the previous room's badge counts and saved
+    // ids must never render into the new room.
+    if (!state || !session || generation !== client.generation || session.roomId !== roomId) return;
     const unread = count?.total ?? 0;
     setText("#activity-count", unread ? String(unread) : "");
     $("#activity-count").hidden = !unread;
@@ -5550,10 +5567,13 @@ async function syncAttentionBadges() {
 let previewItems = [], previewBusy = false;
 async function refreshActivityPreview() {
   if (!state || !session || previewBusy) return;
+  const generation = client.generation, roomId = session.roomId;
   previewBusy = true;
   try {
     const result = await client.activity({ limit: 20 });
-    if (!state || !session || !result) return;
+    // E-H3: drop stale flights — the previous room's message excerpts must
+    // never render into the new room's preview.
+    if (!state || !session || !result || generation !== client.generation || session.roomId !== roomId) return;
     previewItems = result.items.filter(item => !item.readAt).slice(0, 3);
     $("#activity-preview").hidden = previewItems.length === 0;
     setText("#activity-preview-count", String(previewItems.length));
@@ -5700,10 +5720,13 @@ function openLater() {
   void loadLater();
 }
 async function loadLater() {
+  const generation = client.generation, roomId = session?.roomId;
   setText("#later-status", "Loading…");
   try {
     const result = await client.savedList();
-    if (!state) return;
+    // E-H3: drop stale flights — the previous room's saved message bodies
+    // must never render into the new room's dialog.
+    if (!state || generation !== client.generation || session?.roomId !== roomId) return;
     renderBriefList("#later-list", result.items.map(item => {
       const detail = item.deleted ? "Message deleted" : (item.body ?? "").slice(0, 120);
       return `<li class="rb-event later-item">`

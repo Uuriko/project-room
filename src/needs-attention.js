@@ -23,9 +23,25 @@ export function createNeedsAttentionCard({ client, section }) {
   const previous = section.querySelector("#attention-previous");
   const next = section.querySelector("#attention-next");
   let currentReport = null, epoch = 0, busy = false;
+  // E-H1: retry state for failed fetches. The section starts hidden and the
+  // Refresh button lives inside it, so a failed first fetch would otherwise
+  // be invisible and unretryable for the whole session.
+  let retryTimer = null;
+  const RETRY_DELAY_MS = 30000;
 
   function owns(ticket, session, generation) {
     return ticket === epoch && session === client.session && generation === client.generation;
+  }
+  function clearRetry() {
+    if (retryTimer !== null) { clearTimeout(retryTimer); retryTimer = null; }
+  }
+  function scheduleRetry() {
+    clearRetry();
+    const retryTicket = ++epoch, retrySession = client.session, retryGeneration = client.generation;
+    retryTimer = setTimeout(() => {
+      retryTimer = null;
+      if (owns(retryTicket, retrySession, retryGeneration) && client.session) refresh();
+    }, RETRY_DELAY_MS);
   }
   function setBusy(value) {
     busy = value;
@@ -36,6 +52,7 @@ export function createNeedsAttentionCard({ client, section }) {
   }
   function hide() {
     epoch++;
+    clearRetry();
     currentReport = null;
     section.hidden = true;
     list.innerHTML = "";
@@ -108,6 +125,7 @@ export function createNeedsAttentionCard({ client, section }) {
 
   async function refresh(cursor = null) {
     if (!client.session) { hide(); return; }
+    clearRetry();
     const ticket = ++epoch, session = client.session, generation = client.generation;
     const focused = document.activeElement;
     setBusy(true);
@@ -125,6 +143,11 @@ export function createNeedsAttentionCard({ client, section }) {
       if (!owns(ticket, session, generation)) return;
       setBusy(false);
       setStatus(`Could not load: ${error.message}`);
+      // E-H1: unhide so the owner sees the error and the Refresh button, and
+      // schedule an automatic retry so a transient blip doesn't hide join
+      // requests and approvals for the whole session.
+      section.hidden = false;
+      scheduleRetry();
     }
   }
 
