@@ -802,7 +802,7 @@ export function robotsTxt() {
   return AI_CRAWLERS.map(bot => `User-agent: ${bot}\nAllow: /`).join("\n")
     + "\n\nUser-agent: *\nDisallow:\n"
     // ARD discovery hook: agents reading robots.txt find the ai-catalog.
-    + `\nAgentmap: ${ROOM_ORIGIN}/.well-known/ard.json\n`;
+    + `\nSitemap: ${ROOM_ORIGIN}/sitemap.xml\nAgentmap: ${ROOM_ORIGIN}/.well-known/ard.json\n`;
 }
 
 // Agentic Resource Discovery (ARD) catalog. ARD v0.91 (2026-08-26) moved the

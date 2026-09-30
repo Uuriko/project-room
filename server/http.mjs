@@ -1,3 +1,4 @@
+import { publicSearchAssets, publicSearchCanonical, publicSearchSitemap, PUBLIC_SEARCH_CSP, reviewedPublicSearchPaths } from "../deploy/public-search.mjs";
 import { readConversation } from "./conversation-sync.mjs";
 import { OutsideAgents } from "./outside-agents.mjs";
 import { GmailSync } from './gmail-sync.mjs';
@@ -30,7 +31,7 @@ import { SOURCE_REVISION, BUILD_ID } from "./version.mjs";
 import { agentErrorBody, errorCategory } from "../src/agent-error.mjs";
 import { DiagnosticsLog, supportExportBundle } from "./diagnostics.mjs";
 import { renderRoomExportHtml, EXPORT_HTML_CSP } from "./room-export-html.mjs";
-import { discoveryDoc, isHealthAliasPath, rewriteRoomApiPrefix, EDGE_DOOR_HOSTS } from "../deploy/agent-discovery.mjs";
+import { discoveryDoc, isHealthAliasPath, rewriteRoomApiPrefix, EDGE_DOOR_HOSTS, ROOM_ORIGIN } from "../deploy/agent-discovery.mjs";
 import { buildOpenApiJson, discoverabilityErrorOverride, nextActionsForAccessRequest, nextActionsForAccessRequestStatus, nextActionsForInviteRedeem } from "./discoverability.mjs";
 import { MCP_SERVER_CARD_PATH, MCP_DISCOVERY_CACHE_CONTROL, MCP_SERVER_CARD_CORS } from "../src/mcp-server-card.mjs";
 import { SKILLS_CATALOG_PATH } from "../deploy/agent-discovery.mjs";
@@ -97,6 +98,7 @@ const assets = new Map([
   ["/", ["index.html", "text/html"]],
   ...publicAssetPaths.map(path => [`/${path}`, [path, assetType(path)]]),
 ]);
+for (const [url, file] of publicSearchAssets(publicAssetPaths)) assets.set(url, [file, "text/html"]);
 const reject = (status, code, message, headers) => { throw new ServiceError(status, code, message, headers ?? null); };
 // RFC 8288 discovery hints on machine-readable surfaces: the A2A agent card,
 // the llms packet, the skills catalog, and the public HTML door.
@@ -1794,9 +1796,30 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return res.end(req.method === "HEAD" ? undefined : html);
       }
       if (url.pathname === "/receipts" || url.pathname === "/api/public/receipts") reject(405, "method_not_allowed", "Method not allowed");
+      if (url.pathname === "/sitemap.xml" && ["GET", "HEAD"].includes(req.method)) {
+        // Confirm bytes exist before advertising an asset-backed canonical URL.
+        const available = [];
+        for (const [path, file] of publicSearchAssets(publicAssetPaths)) {
+          if (!reviewedPublicSearchPaths.includes(path)) continue;
+          try { await loadAsset(file); available.push(path); } catch { /* Unavailable pages are not advertised. */ }
+        }
+        const xml = publicSearchSitemap(ROOM_ORIGIN, [...available, "/receipts"]);
+        if (!url.search) res.setHeader("X-Robots-Tag", "all");
+        res.writeHead(200, { "Content-Type": "application/xml; charset=utf-8" });
+        return res.end(req.method === "HEAD" ? undefined : xml);
+      }
       if (assets.has(url.pathname) && ["GET", "HEAD"].includes(req.method)) {
         const [path, type] = assets.get(url.pathname);
         const data = await loadAsset(path);
+        const canonical = publicSearchCanonical(url.pathname, publicAssetPaths);
+        if (canonical) res.setHeader("Content-Security-Policy", PUBLIC_SEARCH_CSP);
+        if (canonical && !url.search) {
+          if (reviewedPublicSearchPaths.includes(canonical)) res.setHeader("X-Robots-Tag", "all");
+          if (canonical !== url.pathname) {
+            res.writeHead(301, { Location: canonical });
+            return res.end();
+          }
+        }
         // RFC 8288 discovery hints on the public HTML door too: a cold agent
         // starting at GET / alone can find the agent card from Link headers.
         res.setHeader("Link", discoveryLinks());
