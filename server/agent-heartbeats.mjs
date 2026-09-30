@@ -16,7 +16,7 @@
 // status: online when any host was seen inside its reachability window,
 // offline when every host is stale, unregistered when no host ever
 // reported. Wake signals are a durable queue: mentioning or DM'ing an
-// offline registered agent enqueues one signal per message (coalesced on
+// registered wakeable agent, or an offline pull-only agent, enqueues one signal per message (coalesced on
 // agent+message), and the host collects pending signals on its next
 // heartbeat — or immediately through the wake poll — and acknowledges them
 // once handled. Waiting on the poll consumes nothing: signals are
@@ -324,9 +324,10 @@ export class AgentHeartbeats {
   }
 
   // Eligible push targets for an agent: wakeable hosts with a configured,
-  // non-suspended push subscription, and only when the agent is offline
-  // (the wakeIfOffline gating pattern — an online agent already sees the
-  // event). Never throws for missing tables (older DB) — returns no
+  // non-suspended push subscription, and only when the agent is offline.
+  // This push policy is separate from durable wake queue eligibility:
+  // fresh heartbeat presence does not prove message delivery.
+  // Never throws for missing tables (older DB) — returns no
   // targets. The returned targets carry the token only in memory; it is
   // never logged and never enters room state.
   pushTargets(agentId) {
@@ -574,15 +575,17 @@ export class AgentHeartbeats {
   }
 
   // Offline registered hosts receive durable wakes. A fresh host actively
-  // waiting for this room also needs a signal: presence alone does not mean
-  // its polling process has read the message. Other online hosts stay unchanged.
+  // waiting for this room also needs a signal. Registered wakeable hosts need
+  // durable signals between polls too: heartbeat presence is not message
+  // delivery. Fresh pull-only hosts without a waiter keep their own cadence.
   wakeIfOffline({ agentId, kind, roomId = null, messageId }) {
     checkAgentId(agentId);
     const status = this.statusOf(agentId);
     const prefix = `${agentId}\0`;
     const waiting = [...this._wakeWaiters].some(([key, waiter]) =>
       key.startsWith(prefix) && (waiter.roomId === null || waiter.roomId === roomId));
-    if (status.status !== "offline" && !(status.status === "online" && waiting))
+    const wakeable = status.hosts.some(host => host.mode === "wakeable");
+    if (status.status !== "offline" && !(status.status === "online" && (wakeable || waiting)))
       return Object.freeze({ woken: false, signal: null });
     const { enqueued, signal } = this.enqueueWake({ agentId, kind, roomId, messageId });
     return Object.freeze({ woken: true, enqueued, signal });

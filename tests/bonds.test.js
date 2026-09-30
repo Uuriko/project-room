@@ -252,7 +252,7 @@ test("decline ends the proposal and bond.list shows it", async t => {
   assert.notEqual(reopened.body.event.data.bondId, bondId);
 });
 
-test("peer DM wakes an offline recipient through agent.wake and does not room-broadcast", async t => {
+test("peer DM queues directed wakes for fresh and offline wakeable recipients without room-broadcast", async t => {
   const { origin, roomId, owner, friend, stranger, command, fixture } = await roomOf(t);
   let at = Date.now();
   fixture.store.now = () => at;
@@ -285,7 +285,7 @@ test("peer DM wakes an offline recipient through agent.wake and does not room-br
     to: friend.identityId, messageId, body: "you are here"
   }));
   assert.equal(online.status, 201);
-  assert.deepEqual(fixture.store.agentHeartbeats.pendingWakes(friend.identityId), []);
+  assert.deepEqual(fixture.store.agentHeartbeats.pendingWakes(friend.identityId).map(row => row.messageId), [messageId]);
 
   at += HEARTBEAT_STALE_AFTER_MS + 1000;
   const offlineId = randomUUID();
@@ -294,16 +294,25 @@ test("peer DM wakes an offline recipient through agent.wake and does not room-br
   }));
   assert.equal(offline.status, 201);
   const wakes = fixture.store.agentHeartbeats.pendingWakes(friend.identityId);
-  assert.equal(wakes.length, 1);
-  assert.equal(wakes[0].kind, "dm");
-  assert.equal(wakes[0].messageId, offlineId);
+  assert.equal(wakes.length, 2);
+  assert.ok(wakes.every(row => row.kind === "dm"));
+  assert.deepEqual(wakes.map(row => row.messageId), [messageId, offlineId]);
 
   const journal = await jsonOf(await get(origin,
     `/api/agent-webhooks/${wakeSub.body.subscriptionId}/deliveries`, friend.secret));
   const wakeDeliveries = journal.body.deliveries.filter(row => row.eventType === "agent.wake");
   // deliverWakePing journals the subscription URL and the host wakeUrl.
   // Both are agent.wake. Neither is a room broadcast of dm.posted.
-  assert.equal(wakeDeliveries.length, 2);
+  assert.equal(wakeDeliveries.length, 4);
+  const directed = fixture.store.db.prepare("SELECT d.event_id,d.agent_id,COALESCE(d.target_url,s.url) AS target_url FROM agent_webhook_deliveries d JOIN agent_webhook_subs s ON s.subscription_id=d.subscription_id WHERE d.subscription_id=? AND d.event_type='agent.wake'")
+    .all(wakeSub.body.subscriptionId);
+  for (const signal of wakes) {
+    const deliveries = directed.filter(row => row.event_id === signal.signalId);
+    assert.equal(deliveries.length, 2, "each fresh/offline signal journals its own directed deliveries");
+    assert.ok(deliveries.every(row => row.agent_id === friend.identityId));
+    assert.deepEqual(deliveries.map(row => row.target_url).sort(), ["https://friend.example.test/hooks", "https://friend.example.test/wake"]);
+  }
+  assert.ok(wakeDeliveries.every(row => row.data === undefined && row.payload === undefined), "journal projection reveals no message payload");
   assert.ok(wakeDeliveries.every(row => row.state === "pending"));
 
   const broadcast = await jsonOf(await get(origin,

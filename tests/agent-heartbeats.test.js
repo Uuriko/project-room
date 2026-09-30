@@ -106,13 +106,13 @@ test("wake signals coalesce per message and deliver through pending/ack", t => {
   assert.throws(() => hb.ackWakes({ agentId: "ai_testagent", signalIds: [] }), /signalIds/);
 });
 
-test("wakeIfOffline only wakes offline registered agents", t => {
+test("wake queue preserves fresh pull-only suppression and offline delivery", t => {
   const { hb, advance } = unit(t);
   assert.equal(hb.wakeIfOffline({ agentId: "ai_testagent", kind: "mention", messageId: "m1" }).woken, false,
     "unregistered agent has nowhere to deliver");
-  hb.heartbeat(wakeable());
+  hb.heartbeat({ agentId: "ai_testagent", hostId: "host-1", mode: "pull-only" });
   assert.equal(hb.wakeIfOffline({ agentId: "ai_testagent", kind: "mention", messageId: "m1" }).woken, false,
-    "online agent already sees the message");
+    "fresh pull-only host retains its own cadence without extra wake pointers");
   advance(HEARTBEAT_STALE_AFTER_MS + 1);
   const { woken, enqueued, signal } = hb.wakeIfOffline({ agentId: "ai_testagent", kind: "dm", roomId: "r", messageId: "m2" });
   assert.equal(woken, true);
@@ -278,7 +278,7 @@ test("mention of an offline agent enqueues a wake and journals the webhook ping"
   assert.deepEqual(hb.pendingWakes.map(s => s.messageId), ["mention-1", "dm-1"]);
 });
 
-test("online agents and non-agent mentions are never woken", async t => {
+test("fresh wakeable agents retain mentions while non-agent mentions queue nothing", async t => {
   const f = createAcceptanceFixture();
   let at = Date.now();
   f.store.now = () => at;
@@ -290,15 +290,15 @@ test("online agents and non-agent mentions are never woken", async t => {
   });
   await post(origin, "/api/agent-heartbeats", beat("host-1"), identity.secret);
 
-  // Fresh heartbeat: the agent is online, so the mention wakes nobody.
+  // Fresh heartbeat does not prove message delivery; retain the targeted pointer.
   f.store.command(f.keys.owner, "commons", { id: randomUUID(), type: "message.posted",
     data: { messageId: "online-mention", body: "hey @wakeagent2 you are here" } });
-  assert.deepEqual(f.store.agentHeartbeats.pendingWakes(identity.identityId), []);
+  assert.deepEqual(f.store.agentHeartbeats.pendingWakes(identity.identityId).map(row => row.messageId), ["online-mention"]);
 
   // Mentions that resolve to nobody (or to humans) wake nobody either.
   f.store.command(f.keys.owner, "commons", { id: randomUUID(), type: "message.posted",
     data: { messageId: "nobody-mention", body: "hey @ghost-agent and @guest" } });
-  assert.deepEqual(f.store.agentHeartbeats.pendingWakes(identity.identityId), []);
+  assert.deepEqual(f.store.agentHeartbeats.pendingWakes(identity.identityId).map(row => row.messageId), ["online-mention"]);
 });
 
 test("room presence lists agent members with additive host presence", async t => {
@@ -468,4 +468,17 @@ test("pre-work-delivery stores open read-only without migration and upgrade with
     assert.equal(before.host.workWakes, false);
     assert.equal(upgraded.agentHeartbeats.heartbeat({ agentId: identity.identityId, hostId: "legacy", mode: "pull-only", workWakes: true }).host.workWakes, true);
   } finally { upgraded.close(); }
+});
+
+
+test("fresh wakeable hosts queue durable wakes without activating offline-only push targets", t => {
+  const { hb } = unit(t);
+  hb.heartbeat(wakeable());
+  assert.equal(hb.statusOf("ai_testagent").status, "online");
+  const first = hb.wakeIfOffline({ agentId: "ai_testagent", kind: "mention", roomId: "r", messageId: "gap" });
+  assert.equal(first.woken, true); assert.equal(first.enqueued, true);
+  const duplicate = hb.wakeIfOffline({ agentId: "ai_testagent", kind: "mention", roomId: "r", messageId: "gap" });
+  assert.equal(duplicate.enqueued, false); assert.equal(duplicate.signal.signalId, first.signal.signalId);
+  assert.equal(hb.pendingWakes("ai_testagent").length, 1);
+  assert.deepEqual(hb.pushTargets("ai_testagent"), [], "durable queue eligibility must not widen push eligibility");
 });

@@ -43,8 +43,8 @@ export const ROOM_ROSTER = Object.freeze([
     product: "Grok Build local TUI",
     productUrl: "https://docs.x.ai/build/features/mcp-servers",
     contributed: false,
-    dialogHint: "After Create access, import the private setup into a new directory, then merge the printed MCP snippet into ~/.grok/config.toml. Do not put the key in a prompt.",
-    today: "Owner creates access in the browser, then import the private setup into a new directory and start local stdio MCP with ROOM_AGENT_CONFIG pointing at that directory. First tool call is room_check_access.",
+    dialogHint: "Reuse Grok’s saved connection and check access first. If none exists, import private setup and merge MCP. Keep its scheduled pull; verify a directed Room reply.",
+    today: "Reuse the existing ROOM_AGENT_CONFIG and check access. Configure the host’s actual scheduler or wake listener, then verify a directed Room reply. If no connection exists, create access and import the private setup.",
     later: "Same adapter. Do not duplicate a project-room MCP entry. Do not write config until connection.json exists.",
     capabilityQuestion: null
   }),
@@ -58,7 +58,7 @@ export const ROOM_ROSTER = Object.freeze([
     product: "xAI Grok Bot",
     productUrl: "https://docs.x.ai/grok-bot/computer-and-apps",
     contributed: false,
-    dialogHint: "After Create access, import in the Bot’s computer. Bots on the same OS share files and CLI credentials; a separate Room identity does not isolate secrets.",
+    dialogHint: "Reuse the Bot’s saved connection on its own computer. Check access and configure a supported listener or pull fallback. Verify a directed Room reply; shared OS secrets remain shared.",
     today: "Install the Room client in the Bot runtime, import the private setup there, set ROOM_AGENT_CONFIG, then node scripts/agent-inbox.mjs check. Mac localhost does not reach a hosted Bot.",
     later: "Same direct client. Do not reuse Grok Build’s key. Bots share OS secrets even with separate Room names.",
     capabilityQuestion: "Can you run Node 24.19+ in this computer, reach the approved HTTPS Project Room, and read ROOM_AGENT_CONFIG from a private local directory without putting the key in chat? Do not install anything, start work, or request credentials yet."
@@ -92,37 +92,37 @@ export const AGENT_TYPE_CATALOG = Object.freeze([
     id: "claude-code", label: "Claude Code", icon: "CC",
     bestFor: "Local coding sessions",
     route: "mcp", access: "contribute", joinPath: "mcp-url", connectName: "Claude Code",
-    dialogHint: "After Create access, import the private setup, then merge Claude MCP. First tool is room_check_access. No key in a prompt."
+    dialogHint: "Reuse Claude’s saved MCP connection, then room_check_access. Set up a supported runner or explicit pull fallback, then verify a directed Room reply."
   }),
   Object.freeze({
     id: "codex", label: "Codex", icon: "CX",
     bestFor: "OpenAI coding",
     route: "mcp", access: "contribute", joinPath: "mcp-url", connectName: "Codex",
-    dialogHint: "After Create access, import the private setup, then merge the Codex MCP snippet. First tool is room_check_access. No key in a prompt."
+    dialogHint: "Reuse Codex’s saved connection, then room_check_access. Use a native chat heartbeat when available, then verify a scheduled read and directed Room reply."
   }),
   Object.freeze({
     id: "cursor", label: "Cursor", icon: "CR",
     bestFor: "Your IDE, by pasting a prompt",
     route: "mcp", access: "contribute", joinPath: "paste-prompt", connectName: "Cursor",
-    dialogHint: "Today: paste the Join prompt, or Add Room as MCP. Create access if Cursor will hold a local stdio key. No key in chat."
+    dialogHint: "Reuse Cursor’s saved connection, then room_check_access. Add MCP only if needed. Configure a supported runner or explicit pull fallback, then verify a directed Room reply."
   }),
   Object.freeze({
     id: "hermes", label: "Hermes", icon: "HM",
     bestFor: "Research tasks",
     route: "mcp", access: "contribute", joinPath: "mcp-url", connectName: "Hermes",
-    dialogHint: "After Create access, import the private setup and merge MCP. Same Room identity model as any other type. No key in a prompt."
+    dialogHint: "Reuse the saved connection, then room_check_access. Configure this runtime’s supported listener or pull fallback, then verify a directed Room reply."
   }),
   Object.freeze({
     id: "opencode", label: "OpenCode", icon: "OC",
     bestFor: "Open-source coding",
     route: "mcp", access: "contribute", joinPath: "mcp-url", connectName: "OpenCode",
-    dialogHint: "After Create access, import the private setup, then merge MCP. First tool is room_check_access. No key in a prompt."
+    dialogHint: "Reuse the saved MCP connection, then room_check_access. Configure a supported listener or pull fallback, then verify a directed Room reply."
   }),
   Object.freeze({
     id: "pi", label: "Pi", icon: "π",
     bestFor: "A lightweight agent",
     route: "mcp", access: "contribute", joinPath: "paste-prompt", connectName: "Pi",
-    dialogHint: "Use agent instructions, or create access and import MCP. No key in chat."
+    dialogHint: "Reuse saved access with agent instructions or MCP. Configure a supported listener or pull fallback and verify a directed Room reply. No key in chat."
   }),
   Object.freeze({
     id: "grok-bot", label: "Grok Bot", icon: "GB", rosterId: "grok-bot",
@@ -333,27 +333,31 @@ export function setupChecklist({ route = "mcp", configDir = "/absolute/private/r
   }
   if (route === "direct") {
     return [
-      "Copy the private setup.",
-      `On that computer, import: ${importLine}`,
+      "Reuse your saved connection; copy private setup only if none exists.",
+      `On that computer, import only if needed: ${importLine}`,
       check,
+      "Configure a supported scheduler or wake listener; otherwise keep an explicit pull fallback.",
+      "Verify a directed message and its linked Room reply before calling the setup wakeable.",
       "Do not reuse another agent’s directory. Keep the key out of prompts.",
       "Clear the clipboard."
     ];
   }
   return [
-    "Copy the private setup.",
-    `Import: ${importLine}`,
+    "Reuse your saved connection; copy private setup only if none exists.",
+    `Import only if needed: ${importLine}`,
     check,
-    "Merge an MCP snippet (Grok Build TOML, or Claude/Cursor JSON under Advanced hosts). Do not put the key in a prompt.",
-    "Restart the host. First tool: room_check_access.",
+    "Merge an MCP snippet only if needed (Grok Build TOML, or Claude/Cursor JSON under Advanced hosts). Do not put the key in a prompt.",
+    "Restart the host only if its configuration changed. First tool: room_check_access.",
+    "Configure this runtime’s supported scheduler or wake listener; otherwise keep an explicit pull fallback.",
+    "Verify a directed message and its linked Room reply before calling the setup wakeable.",
     "Clear the clipboard."
   ];
 }
 
 export function routeHint(route) {
   if (route === "packet") return "Shortest path today: Use my AI, then Paste AI draft. Create access is optional identity for later.";
-  if (route === "direct") return "Import the private setup on that computer. Mac localhost does not reach a hosted Bot.";
-  return "Import locally, then merge MCP config. First tool is room_check_access. Addressing still does not start a model.";
+  if (route === "direct") return "Reuse saved access on that computer; import only if needed. Configure its listener or pull fallback. Mac localhost does not reach a hosted Bot.";
+  return "Reuse saved access, then room_check_access. Configure this host’s wake mechanism and verify a reply. Addressing alone does not start a model.";
 }
 
 export function routeFromDisplayName(name) {
