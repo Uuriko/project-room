@@ -120,20 +120,16 @@ test("displayName must be text when present: null is rejected, not stored as \"n
   assert.equal((await mint(origin, ownerKey, { permissions: ["accept_work"], displayName: "Named" })).status, 201);
 });
 
-test("legacy 8-symbol codes stored as sha256 keep redeeming until they expire", async t => {
+test("legacy 8-symbol sha256 codes no longer redeem (unsalted fallback removed)", async t => {
   const { store, origin, ownerKey } = await serve(t);
   const legacy = "RM-7K2P9QXZ"; // pre-v2 format: 8 symbols, no 0/O/1/I/L
   const now = Date.now();
   store.db.prepare(`INSERT INTO agent_invite_codes(code_hash,room_id,created_by,permissions_json,display_name,created_at,expires_at)
     VALUES(?,?,?,?,?,?,?)`).run(sha256(legacy), "commons", "owner", JSON.stringify(["accept_work"]), "Legacy Bot", now, now + 3600000);
-  // Listed by the handle derived from the stored hash; the bare sha256 itself never shows.
-  const listed = await get(origin, "/api/rooms/commons/agent-invites", ownerKey);
-  assert.ok(listed.json.invites.some(row => row.inviteId === sha256(legacy).slice(0, 8) && row.status === "active"));
-  assert.ok(!JSON.stringify(listed.json).includes(sha256(legacy)));
+  // The stale row may still list, but redeeming the legacy code fails: the
+  // bare-sha256 lookup is gone, so the scrypt of the presented code matches nothing.
   const res = await redeem(origin, legacy.toLowerCase(), "Legacy Bot");
-  assert.equal(res.status, 201, JSON.stringify(res.json));
-  assert.deepEqual(res.json.permissions, ["accept_work"]);
-  assert.equal((await redeem(origin, legacy)).status, 409);
+  assert.equal(res.status, 404, JSON.stringify(res.json));
   // A legacy-length code with v2-only symbols is neither format: rejected up front.
   assert.equal((await redeem(origin, "RM-0000AAAA")).status, 404);
   // Unknown codes in either format, and lengths that are neither, all fail alike.
