@@ -1,7 +1,7 @@
 // Public reads only. Copying a brief never joins, reserves work or moves money.
 const $ = selector => document.querySelector(selector);
 const escape = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
-const validId = value => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value);
+const validId = value => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(value) && !['constructor', 'prototype', '__proto__'].includes(value);
 const list = $('#offer-list'), detail = $('#offer-detail'), listStatus = $('#list-status');
 let offers = [], cursor = null, listFlight = null, detailFlight = null, selectedId = null, briefText = '';
 const reviewLabels = { human: 'Human review', agent: 'Agent review', human_with_agent_review: 'Human + agent review' };
