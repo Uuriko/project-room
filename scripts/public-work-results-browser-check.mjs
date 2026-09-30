@@ -11,7 +11,7 @@ import { PublicWorkClaimsClient } from '../client/public-work-claims.mjs';
 async function setup(t, { width = 1280, mixed = false, withdrawn = false } = {}) {
   const fixture = createAcceptanceFixture(), { store } = fixture;
   const mode = mixed ? 'human_with_agent_review' : 'human', id = 'result-task';
-  store.projectOffers.create('commons', 'owner', { requestId: 'create-result', offerId: id, reviewerMemberIds: mixed ? ['owner', 'reviewer'] : ['owner'], terms: { kind: 'task', title: 'Review the exact contribution', summary: 'A small public contribution', acceptanceCriteria: ['Readable result'], repositoryUrl: 'https://github.com/example/project', reward: { kind: 'unpaid' }, approvalPolicy: { mode } } });
+  store.projectOffers.create('commons', 'owner', { requestId: 'create-result', offerId: id, reviewerMemberIds: mixed ? ['owner', 'reviewer'] : ['owner'], terms: { kind: 'task', title: 'Review the exact contribution', summary: 'A small public contribution', acceptanceCriteria: ['Readable result <script>window.untrustedCriterion=true</script>'], exclusions: ['No unrelated edits'], repositoryUrl: 'https://github.com/example/project', reward: { kind: 'unpaid' }, approvalPolicy: { mode } } });
   store.projectOffers.transition('commons', 'owner', id, 'publish', { requestId: 'publish-result', expectedRevision: 1 });
   store.publicWorkClaims.enable('commons', 'owner', id, { requestId: 'enable-result', expectedRevision: 2, expectedTermsVersion: 1, repositoryRef: 'main', files: ['result.txt'] });
   const server = createRoomServer({ store, assetRoot: new URL('../', import.meta.url) });
@@ -36,6 +36,11 @@ async function decide(f, decision, reason) { await row(f).locator('[data-review-
 for (const width of [1280, 320]) test(`withdrawn contribution remains inspectable and explicit feedback stays safe at ${width}px`, { timeout: 45000 }, async t => {
   const f = await setup(t, { width, withdrawn: true }); await open(f);
   assert.match(await row(f).textContent(), /Offer withdrawn/); assert.equal(await f.page.locator('#owner-offer-form').isVisible(), true);
+  const details = row(f).locator('[data-result-task-details]'); assert.equal(await details.evaluate(node => node.open), false); await details.locator('summary').click();
+  assert.match(await details.textContent(), /Readable result <script>window.untrustedCriterion=true<\/script>/); assert.match(await details.textContent(), /No unrelated edits/); assert.match(await details.textContent(), /Branch or commit: main/); assert.match(await details.textContent(), /result.txt/);
+  assert.equal(await details.getByRole('link', { name: 'Repository' }).getAttribute('href'), 'https://github.com/example/project'); assert.equal(await details.locator('script').count(), 0); assert.equal(await f.page.evaluate(() => Boolean(window.untrustedCriterion)), false);
+  assert.equal(await details.evaluate(node => node.scrollWidth <= node.clientWidth), true, 'original criteria and file scope must wrap within the review panel');
+  if (process.env.ROOM_RESULTS_SCREENSHOT_DIR) { await details.scrollIntoViewIfNeeded(); await f.page.screenshot({ path: `${process.env.ROOM_RESULTS_SCREENSHOT_DIR}/owner-results-task-details-${width}.png`, fullPage: true }); }
   const download = f.page.waitForEvent('download'); await row(f).getByRole('link', { name: /Download result/ }).click(); const file = await download;
   assert.equal(readFileSync(await file.path(), 'utf8'), f.artifactText); assert.equal(await f.page.evaluate(() => Boolean(window.untrustedArtifact)), false);
   const feedback = 'Please revise\n<script>window.untrustedFeedback=true</script>';
