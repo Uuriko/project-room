@@ -17,7 +17,7 @@ export function installOwnerProjectOffers({ client, getState, getSession, host }
     <form id="owner-offer-form"><label>Title<input name="title" required maxlength="200"></label><label>What should be delivered?<textarea name="summary" required rows="2" maxlength="4000"></textarea></label><label>Acceptance criteria · one per line<textarea name="criteria" required rows="3"></textarea></label>
     <label>Reward<select name="reward"><option value="unpaid">Unpaid</option><option value="credit">Work trade · internal credits</option><option value="USD">Cash · USD</option><option value="USDC">Cash · USDC</option></select></label><label id="owner-offer-amount" hidden>Proposed amount<input name="amount" inputmode="decimal" autocomplete="off"></label><p id="owner-offer-reward-note" class="form-hint">No payment offered.</p>
     <label>Approval<select name="approval"><option value="human">Human review</option><option value="agent">Agent review</option><option value="human_with_agent_review">Human + agent review</option></select></label><label id="owner-human-review">Human reviewer<select name="human"></select></label><label id="owner-agent-review" hidden>Agent reviewer<select name="agent"></select></label>
-    <label>Public return link<input name="submission" type="url" placeholder="https://…"><span class="form-hint">Where contributors submit results. Required to publish unless a repository is provided below.</span></label>
+    <label>Public return link<input name="submission" type="url" placeholder="https://…"><span class="form-hint">Where contributors return work; add this or a repository.</span></label>
     <details><summary>Additional scope</summary><label>Task or project<select name="kind"><option value="task">Task</option><option value="project">Project</option></select></label><label>Out of scope · one per line<textarea name="exclusions" rows="2"></textarea></label><label>Public repository<input name="repository" type="url" placeholder="https://…"></label><label>Deadline<input name="deadline" type="datetime-local"></label><label>Reward terms<textarea name="rewardTerms" rows="2" maxlength="2000"></textarea></label></details>
     <div class="form-actions"><button type="button" id="owner-offer-preview" class="button secondary">Preview public terms</button><button type="submit" id="owner-offer-save" class="button">Save draft</button></div></form>
     <section id="owner-offer-preview-view" hidden aria-label="Public preview"></section><p id="owner-offer-status" class="form-status" role="status"></p><button type="button" id="owner-offer-retry" class="button secondary" hidden>Retry same request</button>
@@ -83,11 +83,15 @@ export function installOwnerProjectOffers({ client, getState, getSession, host }
   }
   async function execute() {
     if (busy || !pending || !scope || scope !== currentScope()) return;
+    // Any list captured before this write may be obsolete, even on retry.
+    reading++;
     busy = true; controlState(); status('Saving…'); const version = epoch, binding = scope, request = pending;
     try {
       const result = await client.request(request.path, { method: 'POST', data: request.data });
       if (!owned(version, binding) || pending !== request) return;
       if (result?.schema !== 'project-room-offer/1' || result.id !== request.offerId || !['draft', 'published', 'withdrawn'].includes(result.status)) throw new Error('Unsupported offer receipt');
+      // The receipt outranks reads started while the mutation was pending.
+      reading++;
       pending = null;
       if (request.action === 'create') { dirty = false; form.reset(); choices(); $('#owner-offer-preview-view').hidden = true; status('Draft saved. Review it below, then publish when ready.'); }
       else status(result.status === 'published' ? 'Published.' : 'Withdrawn from public discovery.');

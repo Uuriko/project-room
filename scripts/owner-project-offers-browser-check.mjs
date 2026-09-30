@@ -61,3 +61,18 @@ test('unpublishable draft is prevented locally and logout clears private owner f
   const f = await setup(t); await open(f.page); await fill(f.page); await f.page.locator('#owner-offer-form [name=submission]').fill(''); await f.page.locator('#owner-offer-save').click(); await f.page.locator('#owner-offer-status').filter({ hasText: 'Add a public return link' }).waitFor(); assert.equal(f.store.projectOffers.ownerList('commons', 'owner').offers.length, 0);
   await f.page.locator('#owner-offers-close').click(); f.page.on('dialog', dialog => dialog.accept()); await f.page.locator('#session-menu-button').click(); await f.page.locator('#signout-button').click(); await f.page.locator('#auth-panel').waitFor({ state: 'visible' }); assert.equal(await f.page.locator('#owner-offer-form [name=title]').inputValue(), ''); assert.equal(await f.page.locator('#owner-offers-open').isVisible(), false); assert.equal(await f.page.locator('#owner-offer-preview-view').textContent(), '');
 });
+
+test('held pre-write owner list cannot erase a saved draft receipt', { timeout: 45000 }, async t => {
+  const f = await setup(t); let release, observed; let first = true;
+  const held = new Promise(resolve => { release = resolve; }), captured = new Promise(resolve => { observed = resolve; }); t.after(() => release());
+  await f.page.route('**/api/rooms/commons/project-offers', async route => {
+    if (route.request().method() !== 'GET' || !first) return route.continue();
+    first = false; const response = await route.fetch(); observed(); await held; await route.fulfill({ response });
+  });
+  await open(f.page); await captured; await fill(f.page); await f.page.locator('#owner-offer-save').click(); await saved(f.page);
+  assert.equal(await f.page.locator('[data-publish]').count(), 1); assert.equal(f.store.projectOffers.ownerList('commons', 'owner').offers.length, 1);
+  const delivered = f.page.waitForEvent('requestfinished', request => request.method() === 'GET' && request.url().endsWith('/project-offers'));
+  release(); await delivered; await f.page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  assert.equal(await f.page.locator('[data-publish]').count(), 1, 'obsolete pre-write list must not erase the saved receipt');
+  await f.page.locator('#owner-offers-refresh').click(); await f.page.locator('[data-publish]').waitFor(); assert.equal(await f.page.locator('[data-publish]').count(), 1);
+});
