@@ -1,6 +1,7 @@
 import { validId, roomPolicy } from '../src/events.js';
 import { canonicalJson } from '../src/audit-receipts.mjs';
 import { ServiceError } from './service-error.mjs';
+import { isGuestAgentMemberId } from './guest-agent-links.mjs';
 
 // Private review is a separate fact. Submission bytes, public receipt, leases,
 // work gates, credit balances and payment state are never changed here.
@@ -18,7 +19,7 @@ const check = (ok, message) => { if (!ok) fail(422, 'invalid_public_review', mes
 const normalize = sql => sql?.trim().replace(/;$/, '').replace(/IF NOT EXISTS /g, '').replace(/\s+/g, ' ');
 const knownMember = (state, actorId) => {
   const actor = state.members[actorId];
-  if (!actor || actor.active === false) fail(403, 'review_forbidden', 'Current room membership required');
+  if (!actor || actor.active === false || isGuestAgentMemberId(actorId)) fail(403, 'review_forbidden', 'Current non-guest room membership required');
   return actor;
 };
 export class PublicWorkReviews {
@@ -60,7 +61,9 @@ export class PublicWorkReviews {
   }
   permissions(scope, actorId) {
     const actor = scope.state.members[actorId], mode = scope.offer.approvalPolicy.mode;
-    if (!actor || actor.active === false || !scope.offer.reviewerMemberIds.includes(actorId) || this.selfReviewer(scope, actorId)) return { decide: false, verify: false };
+    // Granted verify bits never widen the guest credential's fixed scope;
+    // this also invalidates a historical guest PASS before a human decision.
+    if (!actor || actor.active === false || isGuestAgentMemberId(actorId) || !scope.offer.reviewerMemberIds.includes(actorId) || this.selfReviewer(scope, actorId)) return { decide: false, verify: false };
     const humanRequired = scope.policy.requireOwnerDecision || scope.work?.ownerDecisionRequired;
     const human = actor.kind === 'human' && actor.permissions?.includes('decide') === true;
     const agent = actor.kind === 'agent' && actor.permissions?.includes('verify') === true;

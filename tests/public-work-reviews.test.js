@@ -200,3 +200,28 @@ test('Human-mode independent verification records human evidence without implyin
   assert.equal(feedback.review.verificationReviewerKind, 'human');
   assert.equal(Object.hasOwn(feedback.review, 'agentVerdict'), false);
 });
+
+test('actual owner capability grant cannot turn a guest into a private contribution reviewer', t => {
+  const f = fixture(t, 'human_with_agent_review'), id = f.receipt.receiptId, guest = 'guest-agent-review-probe';
+  const ownerKey = f.store.issueAccessKey('commons', 'owner');
+  f.store.command(ownerKey, 'commons', { id: 'add-guest-review', type: 'member.added', data: { memberId: guest, displayName: 'Guest review probe', kind: 'agent', permissions: [] } });
+  f.store.command(ownerKey, 'commons', { id: 'grant-guest-verify', type: 'member.access_changed', data: { memberId: guest, expectedMemberRevision: 0, permissions: ['verify'], active: true } });
+  assert.ok(f.store.room('commons').state.members[guest].permissions.includes('verify'));
+  // A prior binary allowed publication with this selected guest. Seed that
+  // historical private binding, independently of the newly tightened publisher.
+  f.store.db.prepare('UPDATE project_offers SET private_links=? WHERE offer_id=?').run(JSON.stringify({ reviewerMemberIds: ['owner', guest], workItemId: null }), 'review-task');
+  assert.throws(() => f.service().inspect('commons', guest, id), code('review_forbidden'));
+  assert.throws(() => f.service().verify('commons', guest, id, f.input('guest-pass', 0, { verdict: 'PASS' })), code('review_forbidden'));
+  assert.throws(() => f.service().decide('commons', guest, id, f.input('guest-decision', 0, { decision: 'accepted' })), code('review_forbidden'));
+  assert.equal(f.store.db.prepare('SELECT count(*) AS n FROM public_work_reviews').get().n, 0);
+  assert.equal(f.store.db.prepare('SELECT count(*) AS n FROM public_work_review_requests').get().n, 0);
+  assert.equal(f.service().inspect('commons', 'owner', id).authority.acceptReady, false);
+  assert.equal(f.service().contributorReview(f.producer.secret, id).review.state, 'pending');
+  assert.deepEqual(f.store.publicWorkClaims.receipt(id), f.receipt);
+  // Existing recorded guest PASS must not satisfy a later human decision either.
+  const fingerprint = f.service().scope('commons', 'owner', id).fingerprint;
+  f.store.db.prepare('INSERT INTO public_work_reviews VALUES (?,?,?,?)').run(id, 'commons', 1, JSON.stringify({ revision: 1, state: 'pending', decision: null,
+    verification: { verdict: 'PASS', reviewerKind: 'agent', actorId: guest, reason: 'Historical guest check', at: new Date().toISOString(), fingerprint } }));
+  assert.equal(f.service().inspect('commons', 'owner', id).review.verification.current, false);
+  assert.throws(() => f.service().decide('commons', 'owner', id, f.input('old-guest-pass', 1, { decision: 'accepted' })), code('review_pass_required'));
+});
