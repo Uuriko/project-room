@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, readFileSync, statSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync, statSync, writeFileSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -74,4 +74,34 @@ test("keys are withheld from non-terminal stdout unless explicitly requested", t
   const saved = readFileSync(keyFile, "utf8").trim();
   assert.equal(/^[A-Za-z0-9_-]{43}$/.test(saved), true, "key file holds one usable key");
   assert.equal(statSync(keyFile).mode & 0o777, 0o600, "key file is owner-only");
+});
+
+// H-17 regression: writeFileSync's `mode` option applies only at creation, so
+// a pre-existing world-readable key file kept its mode and leaked the bearer
+// key. --key-file must lock the file down to 0600 whether it is new or not.
+// Contract: the key file is owner-only after every --key-file run.
+// Credible regression: the pre-fix writeFileSync(..., { mode: 0o600 }) leaves
+// a pre-existing 0644 file at 0644 -> the mode assertion fails.
+// Existing coverage gap: the test above only exercises the newly-created
+// file case. Real CLI boundary via spawnSync; no new production seams.
+test("key-file with pre-existing loose permissions is locked down to 0600", t => {
+  const directory = mkdtempSync(join(tmpdir(), "project-room-provision-keymode-"));
+  const filename = join(directory, "room.sqlite");
+  const keyFile = join(directory, "owner.key");
+  const script = fileURLToPath(new URL("../scripts/provision.mjs", import.meta.url));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const run = (...args) => spawnSync(process.execPath, [script, ...args], {
+    env: { ...process.env, ROOM_DB: filename }, encoding: "utf8",
+  });
+  run("--init", "--room", "commons", "--member", "owner", "--name", "Owner", "--print-key");
+  // Simulate a key file left behind by an older run (or the operator) with
+  // loose permissions; chmodSync pins the mode even under a strict umask.
+  writeFileSync(keyFile, "old-key-material\n");
+  chmodSync(keyFile, 0o644);
+  assert.equal(statSync(keyFile).mode & 0o777, 0o644, "precondition: fixture file is world-readable");
+  const filed = run("--room", "commons", "--member", "owner", "--key-file", keyFile);
+  assert.equal(filed.status, 0, filed.stderr);
+  assert.equal(statSync(keyFile).mode & 0o777, 0o600, "pre-existing key file is locked down to owner-only");
+  const saved = readFileSync(keyFile, "utf8").trim();
+  assert.equal(/^[A-Za-z0-9_-]{43}$/.test(saved), true, "key file holds one usable key");
 });

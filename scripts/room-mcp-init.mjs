@@ -150,7 +150,20 @@ async function readJson(path, fsApi = fs) {
 async function writeJsonAtomic(path, data, fsApi = fs) {
   await fsApi.mkdir(dirname(path), { recursive: true });
   const tmp = `${path}.${process.pid}.tmp`;
-  await fsApi.writeFile(tmp, JSON.stringify(data, null, 2) + "\n", "utf8");
+  // H-18: the temp file's default mode used to survive the rename, loosening
+  // a pre-existing 0600 config (which may hold unrelated auth tokens) to the
+  // umask default. Preserve the original file's mode; newly created
+  // credential-bearing configs default to owner-only.
+  let mode = 0o600;
+  try {
+    mode = (await fsApi.stat(path)).mode & 0o7777;
+  } catch (err) {
+    if (!err || err.code !== "ENOENT") throw err;
+  }
+  await fsApi.writeFile(tmp, JSON.stringify(data, null, 2) + "\n", { mode, encoding: "utf8" });
+  // writeFile's mode applies only at creation; force it in case the tmp file
+  // already existed (e.g. left behind by a crashed run).
+  await fsApi.chmod(tmp, mode);
   await fsApi.rename(tmp, path);
 }
 
