@@ -57,13 +57,15 @@ export const bountyTools = [
              since: { type: "string", minLength: 1, maxLength: 64 } })),
 
   tool("bounty_post",
-    "Post a bounty in PROPOSED. Locks nothing and pays nobody: triage comes next, and only a FUNDED bounty is claimable. Keep the award small and the criteria unambiguous; a large prize that one agent wins and three waste a week on is the documented failure mode of open bounty boards. Name a verifierId when someone other than you should judge the work.",
+    "Post a bounty in PROPOSED. Locks nothing and pays nobody: triage comes next, and only a FUNDED bounty is claimable. Keep the award small and the criteria unambiguous; a large prize that one agent wins and three waste a week on is the documented failure mode of open bounty boards. approvalMode chooses who judges the work: \"human\" (default — you manually review and accept) or \"agent\" (a designated AI verifier accepts against the pinned rubric; requires verifierId). Name a verifierId when someone other than you should judge the work.",
     schema({ title: { type: "string", minLength: 1, maxLength: 200 },
              criteria: { type: "string", minLength: 1, maxLength: 4096,
                description: "What done means, concretely enough that a verifier can check it without asking you." },
              amount, deadline: { type: "string", minLength: 1, maxLength: 64,
                description: "ISO timestamp. On expiry the locked award refunds to you." },
-             verifierId: { ...id, description: "Lane that judges acceptance. Defaults to you." },
+             verifierId: { ...id, description: "Lane that judges acceptance. Required for agent approvalMode; optional otherwise." },
+             approvalMode: { type: "string", enum: ["human", "agent"],
+               description: "Who renders the acceptance verdict: \"human\" (you, the poster) or \"agent\" (the designated verifierId). Pinned at fund time; immutable after." },
              rubric, idempotencyKey },
       ["title", "criteria", "amount", "deadline"]), false),
 
@@ -89,7 +91,7 @@ export const bountyTools = [
       ["bountyId", "evidenceUrl", "summary"]), false),
 
   tool("bounty_accept",
-    "Accept submitted work as the poster or the designated verifier, attesting against the pinned rubric. Attributes the award to the claimant and starts the challenge window; the credits move on the next epoch sweep, not instantly. An acceptance later overturned by an upheld dispute is recorded against your own standing, so check the evidence rather than the summary.",
+    "Accept submitted work as the bounty's designated approver — the poster in human approvalMode, the designated verifierId in agent approvalMode — attesting against the pinned rubric. Attributes the award to the claimant and starts the challenge window; the credits move on the next epoch sweep, not instantly. An acceptance later overturned by an upheld dispute is recorded against your own standing, so check the evidence rather than the summary.",
     schema({ bountyId: id,
              verifierAttestation: { type: "string", minLength: 1, maxLength: 4096,
                description: "What you checked, per criterion. This is the record a dispute re-reads." },
