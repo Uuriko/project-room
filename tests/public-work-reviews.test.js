@@ -43,7 +43,16 @@ test('owner results retain withdrawn receipts, exact decisions persist, artifact
   const artifact = f.store.publicWorkClaims.artifact(id), kernel = f.store.publicWorkClaims.read('review-task');
   const balances = f.store.db.prepare('SELECT * FROM bounty_journal ORDER BY seq').all();
   f.store.projectOffers.transition('commons', 'owner', 'review-task', 'withdraw', { requestId: 'withdraw', expectedRevision: 2 });
+  const minimalFeedback = f.service().contributorReview(f.producer.secret, id);
   const initial = f.service().results('commons', 'owner').results[0];
+  assert.equal(initial.offer.summary, 'Explicit feedback');
+  assert.deepEqual(initial.offer.acceptanceCriteria, ['Correct result']);
+  assert.deepEqual(initial.offer.exclusions, []);
+  assert.equal(initial.offer.repositoryUrl, 'https://github.com/example/project');
+  assert.deepEqual(initial.task, { repositoryRef: 'main', files: ['result.txt'] });
+  assert.deepEqual(f.service().inspect('commons', 'owner', id), initial);
+  assert.deepEqual(f.service().contributorReview(f.producer.secret, id), minimalFeedback);
+  for (const field of ['offer', 'task', 'acceptanceCriteria', 'repositoryUrl', 'files']) assert.equal(Object.hasOwn(minimalFeedback, field), false);
   assert.equal(initial.offer.status, 'withdrawn'); assert.equal(initial.review.revision, 0); assert.equal(initial.authority.acceptReady, true);
   assert.throws(() => f.service().results('commons', 'stranger'), code('owner_only'));
   const args = f.input('accept', 0, { decision: 'accepted' });

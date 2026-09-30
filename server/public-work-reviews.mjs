@@ -38,7 +38,7 @@ export class PublicWorkReviews {
     if (state.room.archivedAt) fail(409, 'room_archived', 'Archived rooms cannot review contributions');
     if (!this.hasTable('public_work_receipts')) fail(404, 'review_not_found', 'Contribution not found in this room');
     // Room qualification precedes any public receipt or private binding lookup.
-    const row = this.db.prepare(`SELECT r.*,t.room_id FROM public_work_receipts r
+    const row = this.db.prepare(`SELECT r.*,t.room_id,t.repository_ref,t.files_json FROM public_work_receipts r
       JOIN public_work_tasks t ON t.offer_id=r.offer_id WHERE r.receipt_id=? AND t.room_id=?`).get(receiptId, roomId);
     if (!row) fail(404, 'review_not_found', 'Contribution not found in this room');
     const offerRow = this.db.prepare('SELECT * FROM project_offers WHERE offer_id=? AND room_id=?').get(row.offer_id, roomId);
@@ -52,7 +52,7 @@ export class PublicWorkReviews {
         accountableMemberId: work.accountableMemberId, verifierMemberId: work.verifierMemberId,
         humanDecisionMakerId: work.humanDecisionMakerId, independentVerificationRequired: work.independentVerificationRequired,
         ownerDecisionRequired: work.ownerDecisionRequired, state: work.state } : null });
-    return { roomId, actorId, state, actor, receipt, offer, work, policy, fingerprint };
+    return { roomId, actorId, state, actor, receipt, offer, work, policy, fingerprint, task: { repositoryRef: row.repository_ref, files: JSON.parse(row.files_json) } };
   }
   selfReviewer(scope, actorId) {
     return actorId === scope.receipt.identityId || scope.state.members[actorId]?.identityId === scope.receipt.identityId || Boolean(this.db.prepare('SELECT 1 FROM identity_links WHERE room_id=? AND member_id=? AND identity_id=?')
@@ -89,7 +89,9 @@ export class PublicWorkReviews {
     const ready = !this.needsPass(scope) || this.passCurrent(scope, review);
     const { fingerprint: ignored, ...evidence } = review.verification ?? {};
     void ignored;
-    return { receipt: scope.receipt, offer: { id: scope.offer.id, title: scope.offer.title, status: scope.offer.status, approvalPolicy: scope.offer.approvalPolicy },
+    return { receipt: scope.receipt, offer: { id: scope.offer.id, title: scope.offer.title, summary: scope.offer.summary, acceptanceCriteria: scope.offer.acceptanceCriteria,
+        exclusions: scope.offer.exclusions, repositoryUrl: scope.offer.repositoryUrl, status: scope.offer.status, approvalPolicy: scope.offer.approvalPolicy },
+      task: scope.task,
       review: { schema: 'public-work-review/1', receiptId: scope.receipt.receiptId, taskId: scope.receipt.taskId,
         termsVersion: scope.receipt.termsVersion, generation: scope.receipt.generation, artifactSha256: scope.receipt.artifact.sha256,
         revision: review.revision, state: review.state, verification: review.verification ? { ...evidence, current: this.passCurrent(scope, review) } : null, decision: review.decision },
