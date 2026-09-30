@@ -56,11 +56,10 @@ const randomSymbols = (length, alphabet) => {
   }
   return out;
 };
-// Deterministic slow hash for v2 codes. Legacy 8-symbol codes were stored as
-// bare sha256, so lookup dispatches on the code format.
-const codeHash = code => code.length === CODE_PREFIX.length + LEGACY_CODE_LENGTH
-  ? hash(code)
-  : scryptSync(code, CODE_HASH_SALT, 32, CODE_HASH_PARAMS).toString("hex");
+// Deterministic slow hash for invite codes. Legacy 8-symbol codes were stored
+// as bare unsalted sha256 (~40 bits, offline-invertible by anyone with DB read
+// access); the sha256 fallback is removed, so those rows no longer redeem.
+const codeHash = code => scryptSync(code, CODE_HASH_SALT, 32, CODE_HASH_PARAMS).toString("hex");
 const NEVER_GRANT = ["manage_members", "decide", "invite_member"];
 
 // Human descriptions for the standing invite profiles, surfaced by
