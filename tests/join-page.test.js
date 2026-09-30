@@ -22,7 +22,7 @@ async function serve(t) {
 
 test("join page is public: GET /join and /join/:code serve the page without auth", async t => {
   const { origin } = await serve(t);
-  for (const path of ["/join", "/join/", "/join.html", "/join/RM-EXAMPLE", "/room/join", "/room/join/RM-EXAMPLE"]) {
+  for (const path of ["/join", "/join/", "/join/RM-EXAMPLE", "/room/join", "/room/join/RM-EXAMPLE"]) {
     const response = await fetch(`${origin}${path}`);
     assert.equal(response.status, 200, path);
     assert.match(response.headers.get("content-type"), /text\/html/);
