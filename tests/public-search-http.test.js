@@ -21,6 +21,8 @@ test("public landing is indexable while app, credentials and unknown pages keep 
   const about = await fetch(origin + "/about");
   assert.equal(about.status, 200); assert.match(about.headers.get("content-type"), /text\/html/);
   assert.equal(about.headers.get("x-robots-tag"), "all");
+  assert.match(about.headers.get("content-security-policy"), /style-src 'unsafe-inline'/);
+  assert.doesNotMatch(about.headers.get("content-security-policy"), /script-src/);
   assert.match(await about.text(), /rel="canonical" href="https:\/\/room.trydemigod.com\/about"/);
   const head = await fetch(origin + "/about", { method: "HEAD" });
   assert.equal(head.status, 200); assert.equal(head.headers.get("x-robots-tag"), "all"); assert.equal(await head.text(), "");

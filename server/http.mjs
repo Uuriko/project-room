@@ -1,4 +1,4 @@
-import { publicSearchAssets, publicSearchCanonical, publicSearchSitemap } from "../deploy/public-search.mjs";
+import { publicSearchAssets, publicSearchCanonical, publicSearchSitemap, PUBLIC_SEARCH_CSP } from "../deploy/public-search.mjs";
 import { readConversation } from "./conversation-sync.mjs";
 import { OutsideAgents } from "./outside-agents.mjs";
 import { GmailSync } from './gmail-sync.mjs';
@@ -1811,6 +1811,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const [path, type] = assets.get(url.pathname);
         const data = await loadAsset(path);
         const canonical = publicSearchCanonical(url.pathname, publicAssetPaths);
+        if (canonical) res.setHeader("Content-Security-Policy", PUBLIC_SEARCH_CSP);
         if (canonical && !url.search) {
           res.setHeader("X-Robots-Tag", "all");
           if (canonical !== url.pathname) {

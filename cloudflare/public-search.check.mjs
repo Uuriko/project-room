@@ -23,6 +23,7 @@ test('actual Worker public search routes load packaged HTML and preserve private
   const call = (path, method = 'GET') => mf.dispatchFetch(origin + path, { method, redirect: 'manual', headers: { 'CF-Connecting-IP': '192.0.2.1' } });
   try {
     const page = await call('/about'); assert.equal(page.status, 200); assert.equal(page.headers.get('x-robots-tag'), 'all');
+    assert.match(page.headers.get('content-security-policy'), /style-src 'unsafe-inline'/);
     assert.match(page.headers.get('content-type'), /text\/html/); assert.match(await page.text(), /Work with your agents in one room/);
     const head = await call('/about', 'HEAD'); assert.equal(head.status, 200); assert.equal(await head.text(), '');
     const alias = await call('/about.html'); assert.equal(alias.status, 301); assert.equal(alias.headers.get('location'), '/about');
