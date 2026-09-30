@@ -79,3 +79,99 @@ test("CLI emits only public command when requested, and does not echo invalid JS
   assert.equal(invalid.status, 1);
   assert.doesNotMatch(invalid.stderr, /confidential-business-notes/);
 });
+
+const commonBrief = (overrides = {}) => {
+  const { currency, amountMinor, costsMinor, platformFeeBps, ...common } = brief(overrides);
+  return common;
+};
+const policyContext = () => ({ contractVersion: 1, roomId: 'room', evaluatedThrough: 4,
+  policy: { requireOwnerDecision: false, requireIndependentReview: true }, roster: [
+    { id: 'owner', kind: 'human', active: true, permissions: ['decide', 'verify'] },
+    { id: 'producer', kind: 'agent', active: true, permissions: ['accept_work', 'complete_work'] },
+    { id: 'reviewer', kind: 'agent', active: true, permissions: ['verify'] }
+  ] });
+
+for (const mode of ['human', 'agent', 'human_with_agent_review']) {
+  test(`compiled ${mode} approval follows real work lifecycle, actor and version guards`, async () => {
+    const { prepareWorkOffer } = await import('../src/paid-work-offers.js');
+    const { terminalWork } = await import('../src/workflow.js');
+    let state = emptyRoomState(), seq = 0;
+    const send = (type, actorId, data) => {
+      const incoming = event({ type, actorId, data, roomId: 'room', id: `policy-${++seq}`, idempotencyKey: `policy-key-${seq}` });
+      state = applyEvent(state, incoming); return incoming;
+    };
+    send(T.ROOM_CREATED, 'owner', { roomId: 'room', ownerId: 'owner', title: 'Approval', purpose: 'Check acceptance' });
+    for (const member of policyContext().roster) send(T.MEMBER_ADDED, 'owner', { memberId: member.id, displayName: member.id, kind: member.kind,
+      permissions: member.id === 'owner' ? ['manage_members', 'steer', ...member.permissions] : member.permissions });
+    const reviewer = mode === 'human' ? 'owner' : 'reviewer';
+    const prepared = prepareWorkOffer(commonBrief({ approvalPolicy: mode, verifierMemberId: reviewer }), { context: policyContext() });
+    validateCommand(prepared.command);
+    send(T.WORK_PROPOSED, 'owner', prepared.command.data);
+    const item = () => state.workItems['offer-work'];
+    const mutate = (type, actor, data = {}) => send(type, actor, { workItemId: 'offer-work', expectedRevision: item().revision, ...data });
+    mutate(T.WORK_ACCEPTED, 'producer');
+    mutate(T.WORK_COMPLETED, 'producer', { summary: 'Evidence delivered', evidenceUrl: 'https://example.invalid/patch', evidenceVersion: 'v1', producerId: 'producer', nextAction: 'Review evidence' });
+    const proof = { completionEventId: item().receipt.eventId, evidenceVersion: 'v1', result: 'pass', summary: 'Independently checked' };
+    assert.equal(terminalWork(item()), false);
+    assert.throws(() => mutate(T.VERIFICATION_RECORDED, 'producer', proof), /designated verifier/);
+    assert.throws(() => mutate(T.VERIFICATION_RECORDED, reviewer, { ...proof, evidenceVersion: 'wrong' }), /exact current/);
+    assert.throws(() => mutate(T.VERIFICATION_RECORDED, reviewer, { ...proof, expectedRevision: item().revision - 1 }), /revision/i);
+    const check = mutate(T.VERIFICATION_RECORDED, reviewer, proof);
+    const beforeRetry = structuredClone(state);
+    state = applyEvent(state, check);
+    assert.deepEqual(state, beforeRetry);
+    assert.equal(terminalWork(item()), mode !== 'human_with_agent_review');
+    if (mode === 'human_with_agent_review') {
+      const decision = { ...proof, decision: 'approved', reason: 'Accepted' };
+      assert.throws(() => mutate(T.OWNER_DECISION_RECORDED, 'reviewer', decision), /permission|human|lacks decide/i);
+      mutate(T.OWNER_DECISION_RECORDED, 'owner', decision);
+      assert.equal(terminalWork(item()), true);
+    }
+  });
+}
+
+test('Room policy and selected reviewer kind cannot be weakened by the compiler', async () => {
+  const { prepareWorkOffer } = await import('../src/paid-work-offers.js');
+  const context = policyContext();
+  context.policy.requireOwnerDecision = true;
+  assert.throws(() => prepareWorkOffer(commonBrief({ approvalPolicy: 'agent' }), { context }), /human decision/);
+  assert.throws(() => prepareWorkOffer(commonBrief({ approvalPolicy: 'human' }), { context }), /selected kind/);
+  assert.throws(() => prepareWorkOffer(commonBrief({ approvalPolicy: 'agent' })), /context/);
+  assert.throws(() => prepareWorkOffer(commonBrief({ approvalPolicy: 'agent', verifierMemberId: 'producer' }), { context }), /independent/);
+});
+
+test('public contribution terms support distinct credit/cash/unpaid rails without private execution bindings', async () => {
+  const { prepareContributionBrief, contributionMarkdown, renderPublicContributionTerms } = await import('../src/contribution-brief.js');
+  for (const reward of [
+    { kind: 'work_trade', unit: 'credit', amountMinor: '12000', decimals: 3, terms: 'After accepted work', basis: 'fixed' },
+    { kind: 'cash', unit: 'USD', amountMinor: '12000', decimals: 2, terms: 'Proposed cash reward', basis: 'fixed' },
+    { kind: 'cash', unit: 'USDC', amountMinor: '12000000', decimals: 6, terms: 'Proposed token reward', basis: 'fixed' },
+    { kind: 'unpaid', unit: 'credit', amountMinor: '0', decimals: 3, terms: '', basis: 'fixed' }
+  ]) {
+    const prepared = prepareContributionBrief({ ...commonBrief(), reward });
+    assert.deepEqual(prepared.publicTerms.reward, reward);
+    const output = contributionMarkdown(prepared, { skill: true });
+    assert.match(output, /^---\nname: project-room-contribution-offer/);
+    assert.doesNotMatch(output, /offer-request|offer-work|"producer"|"owner"|"reviewer"|privateEstimate/);
+    assert.match(output, /not automatically redeemable/);
+    assert.match(output, /configured funding/);
+    const publicApi = { ...prepared.publicTerms, id: 'public-offer', version: 1, roomId: 'PRIVATE_ROOM', fundingStatus: 'paid', paymentStatus: { privateAccount: 'PRIVATE_ACCOUNT' }, reward: { ...reward, privateEstimate: 'PRIVATE_COST' }, approvalPolicy: { mode: 'agent', reviewerId: 'PRIVATE_REVIEWER' } };
+    const rendered = renderPublicContributionTerms(publicApi);
+    assert.doesNotMatch(rendered, /PRIVATE_ROOM|PRIVATE_COST|PRIVATE_REVIEWER|PRIVATE_ACCOUNT|"paid"/);
+    assert.match(rendered, /public-offer/);
+  }
+  const reward = { kind: 'work_trade', unit: 'USD', amountMinor: '100', decimals: 3, terms: '', basis: 'fixed' };
+  assert.throws(() => prepareContributionBrief({ ...commonBrief(), reward }), /unit/);
+});
+
+test('CLI skill output is public-only and cannot assert caller-supplied settlement', t => {
+  const dir = mkdtempSync(join(tmpdir(), 'contribution-skill-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const file = join(dir, 'brief.json');
+  writeFileSync(file, JSON.stringify({ ...commonBrief(), reward: { kind: 'cash', unit: 'USD', amountMinor: '12000', decimals: 2, terms: 'Agreed scope only', basis: 'fixed' }, costsMinor: { labor: '987654', tools: '0', other: '0' } }));
+  const output = spawnSync(process.execPath, ['scripts/paid-work.mjs', 'skill', file], { encoding: 'utf8' });
+  assert.equal(output.status, 0, output.stderr);
+  assert.match(output.stdout, /name: project-room-contribution-offer/);
+  assert.match(output.stdout, /"paymentStatus": "not_configured"/);
+  assert.doesNotMatch(output.stdout, /987654|offer-work|offer-request|privateEstimate|verifierMemberId/);
+});

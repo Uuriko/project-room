@@ -83,3 +83,26 @@ Production payment work must connect durable quote and payment records to a sele
 5. **Traceable result:** follow one pilot from proposed scope through an explicit buyer decision, exact reviewed deliverable, actual cost record, and separately verified payment status. Rejected work and unpaid work remain distinguishable from accepted, paid work.
 
 Success is an accepted useful result with a truthful payment record and understandable economics. Record paid work completed, repeat interest, actual contribution, human interventions, overruns, refunds, and disputes. Do not count prepared quotes, internal credit transfers, or agent activity as revenue.
+
+## Owner-selected acceptance and public contribution copy
+
+`approvalPolicy` accepts `human`, `agent`, or `human_with_agent_review` (the backward-compatible default). Human mode designates an independent human verifier; agent mode designates an independent agent verifier; mixed mode also requires the designated human's decision after exact-version independent PASS. An active human sponsor remains recorded privately for all modes. Nondefault modes require `--context context.json` from current authenticated Room context. A Room requiring a human decision cannot be compiled as agent-only. Current server permissions and Room policy still govern each actual mutation; a context snapshot grants no authority.
+
+The CLI also accepts a structured `reward` instead of the legacy monetary fields:
+
+```json
+{"kind":"work_trade","unit":"credit","amountMinor":"12000","decimals":3,"terms":"After accepted work","basis":"fixed"}
+```
+
+For cash use `kind: cash`, `unit: USD` with decimals 2, or `unit: USDC` with decimals 6. For unpaid use `kind: unpaid`, `unit: credit`, amountMinor `0`, decimals 3. This compiler handles fixed rewards; pool allocation is separate work. Cash estimates and optional platformFeeBps remain private compiler inputs, separate from the reward.
+
+```sh
+node scripts/paid-work.mjs markdown brief.json --context context.json
+node scripts/paid-work.mjs skill brief.json --context context.json > SKILL.md
+```
+
+Markdown and skill output contain public offer terms only, excluding request/work/room/member IDs and internal cost estimates. `command` output contains the private execution bindings needed for authorized proposal submission; `prepare` includes private economics. These views are deliberately distinct. The generated skill describes this offer; it does not duplicate the generic bounty-worker bootstrap skill.
+
+`renderPublicContributionTerms(terms, {skill})` also renders an already-public project-offer record without private execution inputs. The initial renderer always reports cash funding/payment as `not_configured`, work trade as `ledger_only`, and unpaid as `not_applicable`. Caller-provided paid/funded flags cannot establish settlement. Internal credits are never converted into USD by the compiler. Publishing, copying a skill, work verification, and acceptance do not reserve funds or initiate payouts.
+
+The peer `bounty-brief` formatter remains for existing private credit bounty records and their pinned rubric. It takes numeric credit amounts plus Room/verifier IDs; this public offer formatter instead uses integer-string dual-rail terms and excludes those identifiers. Neither formatter is a funding or payout authorizer.
