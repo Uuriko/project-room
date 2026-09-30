@@ -176,13 +176,17 @@ export function isHealthAliasPath(pathname) {
 // Prefix-preserving www/apex doors keep /room on the wire (Worker routes are
 // getdasha.com/room*). Enrollment APIs live at /api/… on origin; without this
 // rewrite, POST /room/api/agent-rooms is AX not_found even though health is
-// aliased. Strip only /room/api… — /room/health stays a health alias, packets
-// stay at /room/llms.txt.
+// aliased. /room/health stays a health alias, packets stay at /room/llms.txt.
+// Public static assets (/src/…) served from the asset map get the same
+// treatment: the join page (and any page using {{ASSET_BASE}}) references
+// {{ASSET_BASE}}/src/…, which is /room/src/… on the www door and would 404
+// without the rewrite — the invitee would stare at "Loading your invite…"
+// forever.
 export function rewriteRoomApiPrefix(pathname) {
   if (typeof pathname !== "string") return pathname;
-  return pathname === "/room/api" || pathname.startsWith("/room/api/")
-    ? pathname.slice("/room".length)
-    : pathname;
+  if (pathname === "/room/api" || pathname.startsWith("/room/api/")) return pathname.slice("/room".length);
+  if (pathname === "/room/src" || pathname.startsWith("/room/src/")) return pathname.slice("/room".length);
+  return pathname;
 }
 
 // CLI origin cannot include a path (assertServiceOrigin). On the getdasha
