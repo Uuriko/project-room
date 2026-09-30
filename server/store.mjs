@@ -1,3 +1,4 @@
+import { ProjectOffers, projectOffersSchema } from "./project-offers.mjs";
 import { gmailSchema } from './gmail-mailbox.mjs';
 import { DatabaseSync } from "node:sqlite";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
@@ -783,6 +784,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     this.agentHeartbeats = new AgentHeartbeats(this); // RC-2026-09-18-051: wakeable agent presence (durable host heartbeats + wake queue).
     this.landQueue = new LandQueue(this);
     this.membersDirectory = new MembersDirectory(this); // RC-2026-09-24-202: members directory + evidence-backed skill cards.
+    this.projectOffers = new ProjectOffers(this);
     this.bountyEscrow = new BountyEscrow(this, { now: () => this.now() }); // Escrowed bounties, agent work exchange slice 1.
     const version = this.storagePlatform.version(this.db);
     // Supported schema versions are the contiguous range 0..STORE_SCHEMA_VERSION.
@@ -1144,6 +1146,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // stored CREATE TABLE text that verifySchema compares.
       convergeBountyDeployedSchema(this.db);
       this.db.exec(bountyEscrowSchema);
+      this.db.exec(projectOffersSchema);
       // Self-serve agent access requests: purely additive, intentionally outside
       // the writer fence (see unfencedAdditiveTables). Applied here (not only in
       // createRoomServer) so store-only fixtures and the recovery audit see it.

@@ -25,6 +25,9 @@ the body is read.
 
 | Method + route | Credential | Store-level authorization |
 |---|---|---|
+| `GET /api/project-offers` and `HEAD /api/project-offers` | none | Explicitly published public offer terms; no private room/work/member identifiers or admission data; draft/withdrawn/archived return 404. |
+| `GET /api/project-offers/{offerId}` and `HEAD /api/project-offers/{offerId}` | none | Explicitly published public offer terms; no private room/work/member identifiers or admission data; draft/withdrawn/archived return 404. |
+| `GET /api/project-offers/{offerId}/brief.md` and `HEAD /api/project-offers/{offerId}/brief.md` | none | Explicitly published public offer terms; no private room/work/member identifiers or admission data; draft/withdrawn/archived return 404. |
 | `POST /api/agent-identities` | none (by design) | creates identity only; no room access granted; bounded by a per-address rate limit and a 5000-row table cap (`409 pilot_limit`) |
 | `POST /api/identities/{identityId}/link-code` | the identity's OWN `pri_` secret (scoped API keys rejected with 403; path identity must equal the authenticated identity) | mints a single-use 128-bit enrollment proof (10-minute TTL, SHA-256 hash-only storage, raw code shown once); minting IS the holder's consent for `agent-connections create` with `identityId`; 20/address/min; unknown identities read as 403 `cross_identity` (no oracle) |
 | `POST /api/identity-create` | none (by design) | alias of `POST /api/agent-identities` (same handler, same `identity-create:<ip>` rate bucket) |
