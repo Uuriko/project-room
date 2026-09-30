@@ -34,6 +34,7 @@ test('resume keeps obligations/own claims and refs, never transcript or effects'
   const f = transport();
   const result = await resumeAgent({ connection, fetchImpl: f.fetchImpl });
   assert.equal(result.connection.status, 'credential_accepted');
+  assert.deepEqual(result.toolProfile, { transport: 'hosted_mcp', profile: 'full' });
   assert.deepEqual(result.obligations.map(x => x.id), ['task']);
   assert.deepEqual(result.ownClaims.map(x => x.workItemId), ['own']);
   assert.deepEqual(result.attention.map(({ nextRead, ...ref }) => ref), [{ kind: 'mention', roomId: 'commons', seq: 9, id: 'm' }]);
@@ -126,11 +127,45 @@ test('malformed attention identity/cursor and unsolicited not-modified are refus
   assert.equal((await resumeAgent({ connection, fetchImpl: f.fetchImpl })).connection.status, 'unconfirmed');
 });
 
+test('attention completion is never inferred from missing or nonboolean hasMore', async () => {
+  for (const hasMore of [undefined, null, 'false', 0]) {
+    const f = transport(url => url.includes('/needs-me') ? page({ hasMore }) : undefined);
+    const result = await resumeAgent({ connection, fetchImpl: f.fetchImpl });
+    assert.ok(result.incompleteSources.some(source => source.source === 'attention' && source.code === 'invalid_response'));
+    assert.equal(result.observedThroughBySource.attention, undefined);
+  }
+});
+
+test('failed continuation returns no fabricated progress and exact input cursor retries safely', async () => {
+  const start = { rooms: { commons: 2 } }, next = { rooms: { commons: 5 } };
+  let needs = 0;
+  const f = transport(url => {
+    if (!url.includes('/needs-me')) return undefined;
+    needs++;
+    if (needs === 2) return Response.json({}, { status: 503 });
+    return page({ cursor: next, hasMore: needs === 1 || needs === 3 });
+  });
+  const first = await resumeAgent({ connection, fetchImpl: f.fetchImpl, attentionCursor: start });
+  assert.ok(first.incompleteSources.some(source => source.source === 'attention'));
+  assert.equal(first.observedThroughBySource.attention, undefined);
+  assert.deepEqual(first.attention, []);
+  const retry = await resumeAgent({ connection, fetchImpl: f.fetchImpl, attentionCursor: start });
+  assert.deepEqual(retry.incompleteSources, []);
+  const calls = f.calls.filter(call => call.url.includes('/needs-me'));
+  assert.deepEqual(calls.map(call => JSON.parse(new URL(call.url).searchParams.get('since'))), [start, next, start, next]);
+  assert.deepEqual(retry.observedThroughBySource.attention.cursor, next);
+  assert.equal(retry.observedThroughBySource.attention.hasMore, false);
+});
+
 test('CLI help/invalid arguments never touch config or network and errors are sanitized', async () => {
   const printed = []; const fetchImpl = () => { throw new Error('network should not run'); };
   assert.equal(await main(['--help'], { env: {}, write: x => printed.push(x), fetchImpl }), 0);
   assert.equal(await main(['--bad'], { env: {}, write: x => printed.push(x), fetchImpl }), 1);
   assert.equal(await main(['--since-version', connection.token], { env: {}, write: x => printed.push(x), fetchImpl }), 1);
+  let requests = 0;
+  assert.equal(await main([], { env: { ROOM_AGENT_ORIGIN: connection.origin, ROOM_AGENT_ROOM: connection.roomId, ROOM_AGENT_MEMBER: connection.memberId }, write: x => printed.push(x), fetchImpl: () => { requests++; } }), 1);
+  assert.equal(requests, 0);
+  assert.equal(JSON.parse(printed.at(-1)).code, 'invalid_config');
   assert.equal(printed.join('').includes(connection.token), false);
   assert.equal(JSON.parse(printed[1]).code, 'usage_error');
 });
@@ -156,6 +191,20 @@ test('real HTTP compact resume measures bytes against existing full snapshot and
   assert.ok(first.obligations.some(x => x.id === 'task'));
   assert.equal(JSON.stringify(first).includes('private-body-sentinel'), false);
   assert.equal(first.metrics.requests, 3);
+  const rpc = async (method, params) => {
+    const response = await fetch(origin + '/room/mcp?profile=full', { method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${worker.secret}` },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 'resume', method, params }) });
+    return response.json();
+  };
+  const listed = await rpc('tools/list', {});
+  const hint = first.nextReads.find(read => read.source === 'work');
+  const tool = listed.result.tools.find(tool => tool.name === hint.tool);
+  assert.ok(tool); assert.ok(tool.inputSchema.required.includes('roomId'));
+  for (const key of Object.keys(hint.arguments)) assert.ok(Object.hasOwn(tool.inputSchema.properties, key));
+  const transported = await rpc('tools/call', { name: hint.tool, arguments: hint.arguments });
+  assert.equal(transported.error, undefined); assert.notEqual(transported.result.isError, true);
+  assert.equal(transported.result.structuredContent.work.id, 'task');
   const repeat = await resumeAgent({ connection: config, sinceVersion: first.contextVersion, attentionCursor: first.observedThroughBySource.attention.cursor });
   assert.ok(Buffer.byteLength(JSON.stringify(repeat)) < Buffer.byteLength(JSON.stringify(first)));
   assert.ok(first.metrics.responseBytes < baselineBytes);

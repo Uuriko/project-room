@@ -70,7 +70,7 @@ export async function resumeAgent({ connection, fetchImpl = fetch, sinceVersion,
   };
   const client = new RoomAgentClient({ ...connection, memberId: undefined, fetchImpl: boundedFetch });
   const out = { version: 1, scope: { roomId: connection.roomId, memberId: connection.memberId, readOnly: true },
-    connection: { status: 'unconfirmed' }, contextVersion: null, authoritySummary: null,
+    connection: { status: 'unconfirmed' }, toolProfile: { transport: 'hosted_mcp', profile: 'full' }, contextVersion: null, authoritySummary: null,
     observedThroughBySource: {}, attention: [], ownClaims: [], obligations: [], pendingReconciliations: { status: 'not_read' },
     incompleteSources: [], nextReads: [], metrics };
   const safe = () => { if (JSON.stringify(out).includes(connection.token)) throw invalid(); return out; };
@@ -114,7 +114,11 @@ export async function resumeAgent({ connection, fetchImpl = fetch, sinceVersion,
       });
       if (!response.ok) throw new RoomClientError(response.status, 'request_failed', 'Attention unavailable');
       let parsed;
-      try { parsed = parseNeedsMeBody(await response.json()); } catch { throw invalid(); }
+      try {
+        const raw = await response.json();
+        if (typeof raw?.hasMore !== 'boolean') throw invalid();
+        parsed = parseNeedsMeBody(raw);
+      } catch { throw invalid(); }
       if (!validId(parsed.identityId) || parsed.items.length > 100) throw invalid();
       checkedCursor(parsed.cursor);
       metrics.attentionPages++;
