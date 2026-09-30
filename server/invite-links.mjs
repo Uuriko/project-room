@@ -20,7 +20,9 @@ export function createInvites({ store, randomBytes, defaultTtlMs } = {}) {
   const ttl = defaultTtlMs ?? 24 * 60 * 60 * 1000;
   check(Number.isFinite(ttl) && ttl > 0, "defaultTtlMs must be positive");
   const invites = store ?? new Map();
-  const gen = randomBytes ?? (() => nodeRandomBytes(8).toString("hex"));
+  // Default tokens carry 128 bits of entropy (32 hex chars): the floor for
+  // unguessable bearer capabilities (G-LOW-1).
+  const gen = randomBytes ?? (() => nodeRandomBytes(16).toString("hex"));
   const nowMs = now => {
     const at = now === undefined || now === null ? Date.now() : new Date(now).getTime();
     check(!Number.isNaN(at), "now must be parseable");

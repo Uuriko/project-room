@@ -136,19 +136,21 @@ test("one member's key cannot read another member's receipt body", () => {
   assert.equal(result.body.receipt.actor.id, INSTINCT, "receipt names the real caller");
 });
 
-test("a key with no scope still replays on the raw key (backward compatible)", () => {
+test("a key with no scope is refused instead of replaying on the raw key", () => {
   const { escrow } = makeEscrow();
-  // Direct construction without a scope object must keep working: legacy
-  // callers (and tests) pass no scope, and the key alone still identifies one
-  // record so repeated calls remain idempotent.
+  // The pre-#1000 cross-member leak: an unscoped key cannot identify one
+  // member's operation, so a second member reusing the key would receive the
+  // first member's response body. The unscoped path is refused outright
+  // (G-LOW-5) — both production routes pass full scope.
   let calls = 0;
   const fn = () => { calls += 1; return { n: calls }; };
-  const first = escrow.idemExecute(ROOM, "bare", "bounty.post", 201, fn);
-  const second = escrow.idemExecute(ROOM, "bare", "bounty.post", 201, fn);
-  assert.equal(first.replayed, false);
-  assert.equal(second.replayed, true);
-  assert.equal(second.body.n, 1);
-  assert.equal(calls, 1);
+  assert.throws(() => escrow.idemExecute(ROOM, "bare", "bounty.post", 201, fn),
+    { code: "idempotency_scope_required" });
+  assert.throws(() => escrow.idemExecute(ROOM, "bare", "bounty.post", 201, fn, {}),
+    { code: "idempotency_scope_required" });
+  assert.throws(() => escrow.idemExecute(ROOM, "bare", "bounty.post", 201, fn, { callerLane: null }),
+    { code: "idempotency_scope_required" });
+  assert.equal(calls, 0, "refused before executing");
 });
 
 test("the scoped key is stable across calls and distinguishes only real scope changes", () => {
@@ -219,7 +221,8 @@ test("a legacy (room, key) row is not replayed under the scoped regime", () => {
   // than replay a response whose key cannot be trusted to name one member's
   // operation. A plain body generator keeps this about the key mapping, not
   // about funding authorization.
-  escrow.idemExecute(ROOM, "legacy", "bounty.fund", 200, () => ({ legacy: true }));
+  escrow.idemExecute(ROOM, "legacy", "bounty.fund", 200, () => ({ legacy: true }),
+    { callerLane: JILL, bountyId: "ROOMTEST-0" });
   db.exec("UPDATE bounty_idempotency SET version = NULL, scope_key = NULL WHERE idem_key = 'legacy'");
 
   assert.throws(() => escrow.idemExecute(ROOM, "legacy", "bounty.fund", 200,

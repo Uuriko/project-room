@@ -1,18 +1,26 @@
 // E-H2: session expiry must not destroy unsent drafts.
-// Regression test for the bug where onAccessEnded() unconditionally called
-// recovery.clear() + reset the in-memory drafts + wiped the composer, so a
-// 401 mid-send irrecoverably destroyed the draft the "Draft kept" promise
-// claimed to preserve.
 //
 // Test audit gate:
-// 1. Protects: draft text survives an unexpected session end (401/403) through
-//    the access-teardown path, in both the persisted backup and memory.
+// 1. Protects: the draft-preservation policy decision — shouldPreserveDrafts()
+//    classifies 401/403 session expiry as "preserve" and intentional leaves
+//    (sign-out, room/account switch, page unload) as "clear". This is the real
+//    production seam: src/app.js onAccessEnded() consults it (line ~297) to
+//    decide whether recovery.clear() runs, and whether the in-memory drafts
+//    and composer text are reset (lines ~340-344).
 // 2. Fails when: shouldPreserveDrafts() misclassifies session expiry as an
-//    intentional leave, or the teardown clears despite the preserve signal.
+//    intentional leave.
 // 3. No existing test covers the access-end draft policy; client.test.js only
-//    asserts the onAccessEnded callback fires, not what the handler preserves.
+//    asserts the onAccessEnded callback fires, not what the policy decides.
 // 4. No production seam added: shouldPreserveDrafts lives in
 //    src/conversation.js next to DraftRecovery and is used by app.js.
+//
+// Honesty note (G-LOW-10): an earlier version of this file wrapped the policy
+// in a local teardownDrafts() replica and asserted a ternary in the test
+// body — both vacuous, testing the test rather than the app. The app.js
+// branch itself (which side of the if clears) is not unit-testable without
+// touching app.js; that wiring was verified by reading onAccessEnded
+// directly. These tests pin the decision table and the DraftRecovery
+// mechanism the policy gates.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { ConversationDrafts, DraftRecovery, shouldPreserveDrafts } from "../src/conversation.js";
@@ -38,12 +46,6 @@ function writeInFlightDraft() {
   return { storage, recovery, drafts };
 }
 
-// Simulates the app.js onAccessEnded draft teardown with the fix applied:
-// clear() runs only when the preserve signal is false.
-function teardownDrafts(recovery, preserve) {
-  if (!preserve) recovery.clear();
-}
-
 test("shouldPreserveDrafts: session expiry preserves, intentional leaves clear", () => {
   // 401/403 mid-operation: no context, no sign-out, not leaving the page.
   assert.equal(
@@ -67,30 +69,14 @@ test("shouldPreserveDrafts: session expiry preserves, intentional leaves clear",
     false, "page unload clears drafts");
 });
 
-test("session expiry: in-flight draft survives teardown and reads back on re-auth", () => {
+test("DraftRecovery mechanism: write survives when clear() is skipped, read is null after clear()", () => {
+  // The mechanism the preserve/clear policy gates: skipping clear() leaves
+  // the backup readable (session expiry path); calling clear() wipes it
+  // (intentional-leave path).
   const { recovery } = writeInFlightDraft();
-  const preserve = shouldPreserveDrafts({ leavingPage: false, pendingSignout: false, endedContext: null });
-  teardownDrafts(recovery, preserve);
-  // User re-authenticates; the recovery scope still matches (same tab/room).
-  const saved = recovery.read(SCOPE, { messages: [] });
-  assert.ok(saved, "draft backup survives session expiry");
-  assert.equal(saved.drafts.get(null).body, "unsent mid-send message");
-});
-
-test("intentional sign-out: draft backup is cleared", () => {
-  const { recovery } = writeInFlightDraft();
-  const preserve = shouldPreserveDrafts({ leavingPage: false, pendingSignout: true, endedContext: null });
-  teardownDrafts(recovery, preserve);
-  assert.equal(recovery.read(SCOPE, { messages: [] }), null, "sign-out wipes the draft backup");
-});
-
-test("in-memory drafts object is the same reference the composer keeps writing to", () => {
-  // Guards the second half of the E-H2 fix: onAccessEnded must not replace
-  // the ConversationDrafts instance on session expiry, or post-re-auth
-  // keystrokes would land in a fresh map while the UI still reads the old one.
-  const { drafts } = writeInFlightDraft();
-  const preserve = shouldPreserveDrafts({ leavingPage: false, pendingSignout: false, endedContext: null });
-  const kept = preserve ? drafts : new ConversationDrafts();
-  assert.equal(kept, drafts, "session expiry keeps the live drafts instance");
-  assert.equal(kept.get(null).body, "unsent mid-send message");
+  const preserved = recovery.read(SCOPE, { messages: [] });
+  assert.ok(preserved, "backup readable when clear() is skipped");
+  assert.equal(preserved.drafts.get(null).body, "unsent mid-send message");
+  recovery.clear();
+  assert.equal(recovery.read(SCOPE, { messages: [] }), null, "backup gone after clear()");
 });
