@@ -44,7 +44,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
-import { rmSync } from "node:fs";
+import { rmSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { RoomStore } from "../server/store.mjs";
+import { AgentRooms } from "../server/agent-rooms.mjs";
 import { randomUUID } from "node:crypto";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
@@ -397,4 +401,53 @@ test("fresh heartbeating host receives a mention through its active poll", async
   const result = await response.json();
   assert.equal(result.timedOut, false, "fresh presence does not suppress a waiting host's wake");
   assert.deepEqual(result.pendingWakes.map(w => w.messageId), ["online-mention"]);
+});
+
+
+// A completed/aborted poll has no active waiter. Presence must not erase the
+// interval's wake. Real HTTP post/poll plus cold DB reopen pin the durable
+// contract; existing active-wait tests cannot observe this gap.
+test("fresh wakeable host retains between-poll mention across database restart until explicit ack", async t => {
+  const directory = mkdtempSync(join(tmpdir(), "wake-poll-gap-"));
+  const filename = join(directory, "room.sqlite");
+  let store = new RoomStore(filename), server;
+  const owner = store.identities.create("Gap owner"), worker = store.identities.create("Gap worker");
+  new AgentRooms(store).create(owner.secret, { roomId: "gap-room", title: "Gap", purpose: "Wake interval", kind: "personal" });
+  store.identities.link(owner.secret, "gap-room", { identityId: worker.identityId, memberId: "gap-worker", permissions: [] });
+  const linksBefore = store.db.prepare("SELECT * FROM identity_links ORDER BY room_id,identity_id").all();
+  const open = async () => {
+    server = createRoomServer({ store });
+    await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+    return `http://127.0.0.1:${server.address().port}`;
+  };
+  const close = async () => {
+    server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close();
+  };
+  t.after(async () => { await close(); rmSync(directory, { recursive: true, force: true }); });
+  let origin = await open();
+  const heartbeat = await post(origin, "/api/agent-heartbeats", { hostId: "gap-host" }, worker.secret);
+  assert.equal(heartbeat.status, 200); const registered = await heartbeat.json();
+  assert.equal(registered.host.mode, "wakeable"); assert.equal(registered.host.wakeUrl, null);
+  const pollPath = "/api/agent-wakes/poll?hostId=gap-host&waitMs=0";
+  assert.deepEqual((await (await get(origin, pollPath, worker.secret)).json()).pendingWakes, []);
+  assert.equal(store.agentHeartbeats.statusOf(worker.identityId).status, "online");
+  const command = { id: "gap-post", type: "message.posted", data: { messageId: "gap-message", body: "@gap-worker please review" } };
+  assert.equal((await post(origin, "/api/rooms/gap-room/commands", command, owner.secret)).status, 201);
+  const first = await (await get(origin, pollPath, worker.secret)).json();
+  assert.deepEqual(first.pendingWakes.map(row => row.messageId), ["gap-message"]);
+  const repeated = await (await get(origin, pollPath, worker.secret)).json();
+  assert.deepEqual(repeated.pendingWakes, first.pendingWakes, "reads never consume the signal");
+  assert.equal((await post(origin, "/api/rooms/gap-room/commands", command, owner.secret)).status, 200);
+  assert.equal(store.db.prepare("SELECT count(*) AS n FROM agent_wake_signals").get().n, 1, "exact post replay creates no extra wake");
+  await close(); store = new RoomStore(filename); origin = await open();
+  assert.deepEqual((await (await get(origin, pollPath, worker.secret)).json()).pendingWakes, first.pendingWakes, "cold restart retains exact wake receipt");
+  assert.equal((await post(origin, "/api/agent-heartbeats/ack", { signalIds: first.pendingWakes.map(row => row.signalId) }, worker.secret)).status, 200);
+  assert.deepEqual((await (await get(origin, pollPath, worker.secret)).json()).pendingWakes, []);
+  assert.deepEqual(store.db.prepare("SELECT * FROM identity_links ORDER BY room_id,identity_id").all(), linksBefore);
+  // Mode opt-out stays intact: an online pull-only host continues reading attention on its own cadence.
+  assert.equal((await post(origin, "/api/agent-heartbeats", { hostId: "gap-host", mode: "pull-only" }, worker.secret)).status, 200);
+  assert.equal((await post(origin, "/api/rooms/gap-room/commands", { id: "pull-post", type: "message.posted", data: { messageId: "pull-message", body: "@gap-worker on your cadence" } }, owner.secret)).status, 201);
+  assert.deepEqual((await (await get(origin, pollPath, worker.secret)).json()).pendingWakes, []);
+  const attention = await (await get(origin, "/api/needs-me", worker.secret)).json();
+  assert.ok(attention.items.some(item => item.id === "pull-message"));
 });
