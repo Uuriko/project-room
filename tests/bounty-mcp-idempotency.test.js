@@ -53,6 +53,42 @@ const postArgs = (overrides = {}) => ({
 const bounties = (store, keys) =>
   store.bountyEscrow.listBounties(ROOM, { group: null, viewer: null });
 
+test("MCP agent approval mode persists and authorizes only the designated verifier across transports", async t => {
+  const { store, keys } = fixture(t);
+  for (const memberId of ["worker", "reviewer"]) {
+    store.command(keys.owner, ROOM, { id: `add-${memberId}`, type: "member.added",
+      data: { memberId, displayName: memberId, kind: "agent", permissions: ["accept_work", "complete_work"] } });
+    keys[memberId] = store.issueAccessKey(ROOM, memberId);
+    setTier(store.db, ROOM, memberId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
+  }
+  const args = postArgs({ approvalMode: "agent", verifierId: "reviewer", idempotencyKey: "agent-review-post" });
+  const posted = await call(store, keys, "bounty_post", args);
+  assert.equal(posted.value.bounty.approvalMode, "agent");
+  const bountyId = posted.value.bounty.bountyId;
+  assert.equal((await call(store, keys, "bounty_post", args)).value.idempotentReplay, true);
+  await call(store, keys, "bounty_fund", { bountyId, idempotencyKey: "agent-review-fund" });
+  const workerCall = (name, data) => callHostedStdioTool(store, keys.worker, name, { roomId: ROOM, bountyId, ...data });
+  await workerCall("bounty_claim", { idempotencyKey: "agent-review-claim" });
+  await workerCall("bounty_submit", { evidenceUrl: "https://example.com/result", summary: "Completed criteria.", idempotencyKey: "agent-review-submit" });
+  const verifierAttestation = { citations: [{ criterionId: "c1", verdict: "pass" }] };
+  const server = createRoomServer({ store });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const denied = await fetch(`http://127.0.0.1:${server.address().port}/api/rooms/${ROOM}/bounties/${bountyId}/accept`, {
+    method: "POST", headers: { authorization: `Bearer ${keys[AGENT]}`, "content-type": "application/json" },
+    body: JSON.stringify({ verifierAttestation, idempotencyKey: "poster-not-reviewer" }) });
+  assert.equal(denied.status, 403);
+  assert.equal(store.bountyEscrow.getBounty(ROOM, bountyId).state, "submitted");
+  const acceptArgs = { roomId: ROOM, bountyId, verifierAttestation, idempotencyKey: "designated-reviewer" };
+  const accepted = await callHostedStdioTool(store, keys.reviewer, "bounty_accept", acceptArgs);
+  assert.equal(accepted.value.bounty.state, "accepted");
+  assert.equal(accepted.value.bounty.approvalMode, "agent");
+  const before = store.bountyEscrow.balances(ROOM, "worker");
+  assert.equal((await callHostedStdioTool(store, keys.reviewer, "bounty_accept", acceptArgs)).value.idempotentReplay, true);
+  assert.deepEqual(store.bountyEscrow.balances(ROOM, "worker"), before);
+  assert.equal(before.attributed, 10);
+});
+
 test("a retried bounty_post with the same idempotencyKey replays instead of posting twice", async t => {
   const { store, keys } = fixture(t);
   // One args object, reused verbatim: a real retry sends the exact same input.
