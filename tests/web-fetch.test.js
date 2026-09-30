@@ -494,3 +494,15 @@ test("quota exhaustion is 429 with Retry-After and retry info", async t => {
   });
   assert.equal(owner.status, 200);
 });
+
+test("migrateWebFetchLogColumns is a no-op when the table does not exist (L-P2-7)", t => {
+  const directory = mkdtempSync(join(tmpdir(), "room-web-fetch-mig-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const db = new DatabaseSync(join(directory, "mig-empty.sqlite"));
+  // Fresh database: no web_fetch_log table at all. Must not throw.
+  assert.doesNotThrow(() => migrateWebFetchLogColumns(db));
+  const table = db.prepare(
+    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='web_fetch_log'").get();
+  assert.equal(table, undefined, "migration does not create the table");
+  db.close();
+});

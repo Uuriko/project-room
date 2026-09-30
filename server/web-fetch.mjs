@@ -130,6 +130,13 @@ export const webFetchSchema = `
 // existed: old rows backfill NULL and read as { credentialHash: null }.
 // (Same pattern as migrateSpamQuarantineColumns.)
 export function migrateWebFetchLogColumns(db) {
+  // 2026-09-30 (phase-2 gap audit L-P2-7): guard on sqlite_master — PRAGMA
+  // table_info on a missing table returns zero rows, so without this check
+  // the ALTER TABLE below would throw on a fresh database.
+  const exists = db.prepare(
+    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'web_fetch_log'"
+  ).get();
+  if (!exists) return;
   const columns = new Set(db.prepare("PRAGMA table_info(web_fetch_log)").all().map(c => c.name));
   if (!columns.has("credential_hash")) db.exec("ALTER TABLE web_fetch_log ADD COLUMN credential_hash TEXT");
   db.exec("CREATE INDEX IF NOT EXISTS web_fetch_log_key_time ON web_fetch_log(credential_hash, created_at)");
