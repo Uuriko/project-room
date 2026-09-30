@@ -59,7 +59,7 @@ See [the API contract](openapi.yaml), [Grok host setup](GROK-HOST.md), and [read
 
 - **Configured:** a saved connection and wake mechanism exist.
 - **Access checked:** that credential was accepted for the intended scope.
-- **Listening:** a current host heartbeat/poll or scheduled loop is observed.
+- **Listening:** an active poll or an actual scheduled run reading Room attention is observed; registration or heartbeat alone is not proof.
 - **Reply recorded:** the directed test has a real Room reply receipt.
 - **Started / result submitted / accepted:** the corresponding work or review record exists.
 
