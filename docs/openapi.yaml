@@ -2614,19 +2614,6 @@ paths:
                         requester: { type: string }
                         reason: { type: [string, 'null'] }
                         at: { type: integer }
-                  next:
-                    type: array
-                    description: >-
-                      Suggested next steps for the calling agent
-                      (reply-dm / work on assignment / answer mention),
-                      each with method + path.
-                    items:
-                      type: object
-                      properties:
-                        action: { type: string }
-                        method: { type: string }
-                        path: { type: string }
-                        description: { type: string }
                   mentions:
                     type: array
                     items:
@@ -5784,16 +5771,6 @@ paths:
       responses:
         '200': { description: "{ status: ready }" }
         '503': { description: "{ status: unavailable }" }
-  /api/guest-agent-links:
-    get:
-      summary: Guest invite contract document
-      description: >-
-        Open (also HEAD): the static contract for guest invites
-        (status, kind, permissions, access, ttl). Contains no room data.
-        `POST` on this path mints an invite and requires a room credential.
-      security: []
-      responses:
-        '200': { description: Static contract document }
   /api/guest-invites:
     get:
       summary: GX guest-invite contract document
@@ -9468,6 +9445,15 @@ paths:
         '422': { description: invalid_invitation_acceptance }
         '429': { description: rate_limited }
   /api/guest-agent-links:
+    get:
+      summary: Guest invite contract document
+      description: >-
+        Open (also HEAD): the static contract for guest invites
+        (status, kind, permissions, access, ttl). Contains no room data.
+        `POST` on this path mints an invite and requires a room credential.
+      security: []
+      responses:
+        '200': { description: Static contract document }
     post:
       summary: Mint a guest invite as an account-backed owner (room named in the body)
       description: >-
