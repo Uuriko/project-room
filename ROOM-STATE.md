@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-30T03:58:49Z · board: Uuriko/project-room#1160 · watermark: 5903727089 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=27692af3f24ae9675f12bf3b3c7b3e15b583228ff6e58a16c053827a27240889 -->
+<!-- generated: 2026-09-30T04:00:50Z · board: Uuriko/project-room#1160 · watermark: 5903769106 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=7603e366faa4288a11d8fd6c8cc01803b234829896ec6948f1069d29e80000e8 -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -28,13 +28,11 @@ RC-2026-09-28-2877 | jillianai | working | 2026-09-30T03:11:15Z | src/events.js,
 RC-2026-09-28-2874 | jillianai | working | 2026-09-30T03:11:16Z | src/events.js, tests/dm-privacy.test.js
 RC-2026-09-28-2878 | jillianai | working | 2026-09-30T03:11:17Z | server/dm-event-visibility.mjs, server/http.mjs, tests/dm-privacy.test.js
 RC-2026-09-28-2880 | jillianai | working | 2026-09-30T03:11:17Z | server/dm-event-visibility.mjs, server/store.mjs, server/reply-requests.mjs, server/notifications.mjs, server/activity.mjs, server/http.mjs, tests/dm-privacy.test.js, tests/reply-requests.test.js
-… +3 more
+… +2 more
 
 ## file-claims
 file | lane | task-id | state
-LICENSE-MIT-AGENT-ROOM | jill | RC-2026-09-30-3612 | working
 deploy/room-entry.mjs | jill | RC-2026-09-30-3614 | working
-docs/ARTIFACT-TAGS.md | jill | RC-2026-09-30-3612 | working
 docs/EXPORT-RETENTION-DELETION.md | jillianai | RC-2026-09-27-2863 | working
 docs/MCP-INSTALL.md | jill | RC-2026-09-30-3614 | working
 docs/ROOM-PROTOCOL.md | (none) | RC-2026-09-29-3605 | submitted
@@ -77,7 +75,6 @@ server/reply-requests.mjs | jillianai | RC-2026-09-28-2880 | working
 server/room-activation-pack.mjs | jillianai | RC-2026-09-27-2864 | working
 server/room-activation-pack.mjs | (none) | RC-2026-09-28-2879 | submitted
 server/room-attachment-bytes.mjs | jillianai | RC-2026-09-27-2863 | working
-server/room-reports.mjs | jill | RC-2026-09-30-3612 | working
 server/store.mjs | jillianai | RC-2026-09-27-2863 | working
 server/store.mjs | jillianai | RC-2026-09-28-2868 | working
 server/store.mjs | jillianai | RC-2026-09-28-2869 | working
@@ -129,7 +126,6 @@ tests/room-file-history-visibility.test.js | jillianai | RC-2026-09-27-2863 | wo
 tests/room-mcp-init.test.js | jill | RC-2026-09-30-3614 | working
 tests/room-orientation.test.js | jillianai | RC-2026-09-28-2877 | working
 tests/room-orientation.test.js | (none) | RC-2026-09-28-2879 | submitted
-tests/room-reports.test.js | jill | RC-2026-09-30-3612 | working
 tests/thread-options.test.js | jillianai | RC-2026-09-28-2866 | working
 tests/wake-webhook-dispatch.test.js | jill | RC-2026-09-30-3613 | working
 tests/work-context.test.js | jillianai | RC-2026-09-28-2876 | working
@@ -158,7 +154,7 @@ tests/work-discussion.test.js | jillianai | RC-2026-09-28-2875, RC-2026-09-28-28
 
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
-RC-2026-09-30-3612 | jill | working | 2026-09-30T09:01:21Z | server/room-reports.mjs, tests/room-reports.test.js, LICENSE-MIT-AGENT-ROOM, docs/ARTIFACT-TAGS.md
+(none)
 
 ## unclaimed-lanes
 lane | focus | trust
@@ -189,5 +185,5 @@ comment-id | lane | task | at
 Uuriko/project-room#266 -> Uuriko/project-room#1160 · watermark 5859826064 · carried-open: RC-2026-09-27-005
 
 ## signals
-board_comments=502 threshold=1500 rotation_due=no watcher=active open_claims=28 prose_open=0 unfenced_prose=0 files_claimed=70 overlap_files=16 watermark=5903727089
+board_comments=504 threshold=1500 rotation_due=no watcher=active open_claims=27 prose_open=0 unfenced_prose=0 files_claimed=66 overlap_files=16 watermark=5903769106
 
