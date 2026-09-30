@@ -3447,8 +3447,15 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (auth.member && isGuestAgentMemberId(auth.member.id)) {
         const tier = this.guestInvites.guestTierOf(auth.member.id) ?? "observer";
         const isDraft = command.type === T.MESSAGE_POSTED && command.data?.workItemId != null;
+        // RC-2026-09-30-848: a guest must not OPEN a reply request. The store
+        // injects requestPolicyVersion when it builds the event, so
+        // requestKind:"reply" alone lands an open request past the catalog
+        // gate (GUEST_WRITABLE_TOOLS). Respond-mode fields stay admitted:
+        // prepareReplyPost scopes responses to requests addressed to the
+        // guest itself.
+        const opensReplyRequest = command.type === T.MESSAGE_POSTED && command.data?.requestKind != null;
         const allowed = command.type === T.MESSAGE_REACTION_SET
-          || (command.type === T.MESSAGE_POSTED && (!isDraft || tier === "contributor"));
+          || (command.type === T.MESSAGE_POSTED && !opensReplyRequest && (!isDraft || tier === "contributor"));
         if (!allowed) fail(403, "guest_scope_denied", "Guest members cannot perform this action");
       }
       const fingerprint = hash(canonical(command));
