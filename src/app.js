@@ -1,3 +1,4 @@
+import { installOwnerProjectOffers } from "./owner-project-offers-ui.js";
 import { createMemberDisplayNames } from "./member-display-names.js";
 import { installRoomLayout, syncSidebarSections } from "./room-layout.js";
 import { EVENT_TYPES as T, MAX_MESSAGE_BODY_CHARS, WORK_STATES as S, roomPolicy, roomTrust, distinctMemberOwnerIds, roomKind, isRoomArchived, spendAllowance, pinnedMessages, isPinned, PIN_LIMIT, isMutedBy, channelList, messageChannelId, DEFAULT_CHANNEL_ID } from "./events.js";
@@ -308,6 +309,7 @@ const client = new RoomClient({
     selectWorkView("work");
     renderContent("#room-results-list", "");
     roomCursor = 0; roomGeneration = -1; showAllAttention = false; clearTimeout(returnClock); returnClock = null;
+    ownerOffersUI?.reset();
     shareLinksUI?.resetManagement();
     portableWorkUI?.reset();
     resultCopyUI?.reset();
@@ -410,6 +412,7 @@ const client = new RoomClient({
     });
   }
 });
+const ownerOffersUI = installOwnerProjectOffers({ client, getState: () => state, getSession: () => session, host: $(".room-more-actions") });
 const briefView = new ReturnBrief(client, {
   onChange: renderReturnBrief,
   // A recoverable catch-up error belongs to its own status region. It does not
@@ -838,7 +841,7 @@ async function openAccountRoom(roomId) {
   if (invitationIsCommitting() || signoutLoading) return;
   if (state) saveComposer();
   if (state && (drafts.hasText() || pendingAction || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending()
-      || agentConnectionsUI?.hasPending() || instructionsUI?.hasPending() || !$("#new-work-form").hidden)
+      || agentConnectionsUI?.hasPending() || instructionsUI?.hasPending() || ownerOffersUI?.hasPending() || !$("#new-work-form").hidden)
       && !window.confirm("Switch rooms and clear unsent room drafts and pending retries? Saved work stays.")) return;
   const owned = accountClient.session;
   if (await confirmAccount() !== true || accountClient.session !== owned) return;
@@ -1671,6 +1674,7 @@ function syncRecipeStrip() {
   renderContent("#recipe-strip", recipes.map(recipeChipHtml).join(""));
 }
 function render() {
+  ownerOffersUI.sync();
   conversation = conversationIndex(state.messages);
   const members = Object.values(state.members), active = members.filter(m => m.active !== false);
   selectOptions("#message-to-select", active, "Everyone");
@@ -2936,7 +2940,7 @@ function confirmInvitationSignin() {
   if (invitationIsCommitting() || !invitation.secret) return false;
   const hasDraft = drafts.hasText() || inboxUI?.hasPending() || portableWorkUI?.hasDraft()
     || resultCopyUI?.hasDraft() || remindersUI?.hasPending() || agentConnectionsUI?.hasPending()
-    || instructionsUI?.hasPending() || !$("#new-work-form").hidden || pendingAction;
+    || instructionsUI?.hasPending() || ownerOffersUI?.hasPending() || !$("#new-work-form").hidden || pendingAction;
   return !hasDraft || window.confirm("Signing in clears unsent drafts and private setup. Continue?");
 }
 $("#invitation-email").addEventListener("click", () => {
@@ -3236,8 +3240,8 @@ $("#signout-button").addEventListener("click", async () => {
   }
   if (busy || signoutLoading || !state || !session || invitationIsCommitting()) return;
   saveComposer();
-  if (drafts.hasText() || inboxUI?.hasPending() || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending() || agentConnectionsUI?.hasPending() || instructionsUI?.hasPending() || !$("#new-work-form").hidden || pendingAction) {
-    if (!window.confirm((pendingAction?.uncertain || instructionsUI?.hasUnknown()) ? "Sign out and clear drafts and the pending retry? The action may already be saved." : "Sign out and clear unsent drafts and private setup on this device?")) return;
+  if (drafts.hasText() || inboxUI?.hasPending() || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending() || agentConnectionsUI?.hasPending() || instructionsUI?.hasPending() || ownerOffersUI?.hasPending() || !$("#new-work-form").hidden || pendingAction) {
+    if (!window.confirm((pendingAction?.uncertain || instructionsUI?.hasUnknown() || ownerOffersUI?.hasUnknown()) ? "Sign out and clear drafts and the pending retry? The action may already be saved." : "Sign out and clear unsent drafts and private setup on this device?")) return;
   }
   recovery.clear();
   const operationId = ++signoutOperationId;
@@ -5282,7 +5286,7 @@ $("#action-form").addEventListener("submit", e => {
 });
 window.addEventListener("beforeunload", e => {
   if (state) saveComposer();
-  if ((state && (drafts.hasText() || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending() || agentConnectionsUI?.hasPending() || instructionsUI?.hasPending() || !$("#new-work-form").hidden || pendingAction))
+  if ((state && (drafts.hasText() || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending() || agentConnectionsUI?.hasPending() || instructionsUI?.hasPending() || ownerOffersUI?.hasPending() || !$("#new-work-form").hidden || pendingAction))
     || invitationIsCommitting() || invitation.phase === "unknown") { e.preventDefault(); e.returnValue = ""; }
 });
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden" && state) saveComposer(); });
