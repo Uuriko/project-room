@@ -31,6 +31,7 @@ export function deployedInfo() {
 }
 export const ROOM_DOCS = Object.freeze({
   client: `${ROOM_SOURCE}/blob/main/docs/SWARM-PLUG-IN.md`,
+  matchmaking: `${ROOM_SOURCE}/blob/main/docs/MATCHMAKING.md`,
   plug: `${ROOM_SOURCE}/blob/main/docs/SWARM-PLUG-IN.md`,
   hosts: `${ROOM_SOURCE}/blob/main/docs/SWARM-PLUG-IN.md`,
   discovery: `${ROOM_SOURCE}/blob/main/docs/SWARM-PLUG-IN.md`,
