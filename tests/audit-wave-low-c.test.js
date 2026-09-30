@@ -14,7 +14,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
-import { createJobBot, JobBotError } from "../server/job-bot.mjs";
+import { createJobBot } from "../server/job-bot.mjs";
 import { buildNextActions } from "../server/next-actions.mjs";
 import { ReferralInvites, referralInviteSchema } from "../server/referral-invites.mjs";
 import { createInvites, InviteError } from "../server/invite-links.mjs";
