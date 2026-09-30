@@ -105,3 +105,48 @@ test("key-file with pre-existing loose permissions is locked down to 0600", t =>
   const saved = readFileSync(keyFile, "utf8").trim();
   assert.equal(/^[A-Za-z0-9_-]{43}$/.test(saved), true, "key file holds one usable key");
 });
+
+// M-27: revocation-before-delivery strands operators — when the new key
+// cannot be delivered, provision must refuse BEFORE revoking the old key.
+test("M-27: non-TTY stdout with no key-file refuses to revoke the old account key", async t => {
+  const dir = mkdtempSync(join(tmpdir(), "project-room-provision-m27-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const db = join(dir, "room.sqlite");
+  const script = fileURLToPath(new URL("../scripts/provision.mjs", import.meta.url));
+  const run = args => spawnSync(process.execPath, [script, ...args], {
+    env: { ...process.env, ROOM_DB: db }, encoding: "utf8",
+  });
+  const first = run(["--account-key", "--account", "u1", "--print-key"]);
+  assert.equal(first.status, 0, first.stderr);
+  const key1 = first.stdout.trim().split("\n").at(-1);
+  assert.ok(/^[A-Za-z0-9_-]{43}$/.test(key1), "first run delivered a usable key");
+  // Piped stdout is not a TTY and no --key-file was given: the new key
+  // cannot be delivered, so the run must fail before revoking key1.
+  const second = run(["--account-key", "--account", "u1"]);
+  assert.notEqual(second.status, 0);
+  assert.match(second.stdout + second.stderr, /key withheld/i);
+  assert.match(second.stdout + second.stderr, /strand/i);
+  const store = new RoomStore(db);
+  t.after(() => store.close());
+  assert.ok(store.authenticateAccountAccessKey(key1), "key1 still authenticates — nothing was revoked");
+});
+
+test("M-27: an unwritable --key-file refuses to revoke the old account key", async t => {
+  const dir = mkdtempSync(join(tmpdir(), "project-room-provision-m27-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const db = join(dir, "room.sqlite");
+  const script = fileURLToPath(new URL("../scripts/provision.mjs", import.meta.url));
+  const run = args => spawnSync(process.execPath, [script, ...args], {
+    env: { ...process.env, ROOM_DB: db }, encoding: "utf8",
+  });
+  const first = run(["--account-key", "--account", "u1", "--print-key"]);
+  assert.equal(first.status, 0, first.stderr);
+  const key1 = first.stdout.trim().split("\n").at(-1);
+  assert.ok(/^[A-Za-z0-9_-]{43}$/.test(key1), "first run delivered a usable key");
+  const bad = run(["--account-key", "--account", "u1", "--key-file", join(dir, "no-such-dir", "k.txt")]);
+  assert.notEqual(bad.status, 0);
+  assert.match(bad.stdout + bad.stderr, /ENOENT|no such file/i, "the write failure surfaces instead of a silent strand");
+  const store = new RoomStore(db);
+  t.after(() => store.close());
+  assert.ok(store.authenticateAccountAccessKey(key1), "key1 still authenticates — nothing was revoked");
+});

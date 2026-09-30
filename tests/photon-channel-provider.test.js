@@ -96,7 +96,7 @@ test("telegram provider sends through createSender against a fake transport", as
   assert.equal(receipt.providerId, "telegram:-1001000000001:77");
   assert.equal(receipt.operationId, "op-1");
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].body.chat_id, -1001000000001, "the Bot API sendMessage body reaches the right chat");
+  assert.equal(calls[0].body.chat_id, "-1001000000001", "the Bot API sendMessage body reaches the right chat (M-25: ids travel as validated digit strings)");
   assert.equal(calls[0].body.text, "Hello from the Photon provider test");
   const lookedUp = await transport.lookup({ operationId: "op-1" });
   assert.equal(lookedUp.providerId, receipt.providerId, "the recorded receipt is reconcilable by operation id");

@@ -141,10 +141,30 @@ test("passkey credential store round-trips through the passkey-store adapter", (
   assert.equal(listed.length, 1);
   assert.equal(listed[0].credentialId, "cred-1");
   assert.ok(!("publicKeyJwk" in listed[0]) || listed[0] !== undefined); // public view keeps no private key material
+  // M-2: removal of the last active method is refused, so keep a second
+  // method around for the round-trip's removal step.
+  logins.linkPasswordMethod("acct-1", { email: "ada@example.com", verifier: "scrypt$..." });
   assert.equal(logins.removePasskeyCredential("acct-1", "cred-1").removed, true);
   assert.equal(adapter.getCredential("cred-1"), undefined);
   // Removing the credential also removes its method row.
   assert.equal(logins.listMethods("acct-1").filter(m => m.type === "passkey").length, 0);
+});
+
+test("M-2: removePasskeyCredential refuses to remove the last active sign-in method", () => {
+  const { store, logins } = makeStore();
+  store.createAccount("acct-1", "test");
+  const record = {
+    id: "cred-1", rpId: "room.example", publicKeyCose: "cose-bytes",
+    publicKeyJwk: { kty: "EC", crv: "P-256", x: "x", y: "y" },
+  };
+  logins.registerPasskeyCredential("acct-1", record, { label: "My key" });
+  // The passkey is the only active method: removal must fail like
+  // setMethodDisabled/removeMethod do, instead of self-locking the account.
+  assert.throws(() => logins.removePasskeyCredential("acct-1", "cred-1"), /Keep at least one active sign-in method/);
+  assert.equal(logins.listPasskeyCredentials("acct-1").length, 1, "refused removal keeps the credential");
+  // With a second active method, removal succeeds.
+  logins.linkPasswordMethod("acct-1", { email: "ada@example.com", verifier: "scrypt$..." });
+  assert.equal(logins.removePasskeyCredential("acct-1", "cred-1").removed, true);
 });
 
 test("magic codes are single-use, hashed at rest, and expire", () => {

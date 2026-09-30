@@ -212,7 +212,7 @@ test("buildTelegramDirectRequest rejects bad chat ids and oversize text", () => 
     catch (error) { assert.equal(error.code, "invalid_direct_send"); }
   }
   const req = buildTelegramDirectRequest({ to: "-123", text: "hi" });
-  assert.deepEqual(req, { method: "sendMessage", body: { chat_id: -123, text: "hi" } });
+  assert.deepEqual(req, { method: "sendMessage", body: { chat_id: "-123", text: "hi" } });
 });
 
 test("sendTelegramDirect without config reports telegram_not_connected", async t => {
