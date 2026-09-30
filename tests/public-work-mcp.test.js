@@ -35,7 +35,8 @@ test('actual MCP anonymous recommendations and task reads discover auth without 
  for(const name of ['room_join_packet','room_join_kits','room_join_prompt','room_mcp_snippet'])assert.ok((await f.call(name)).body.result.content.length);
  const all=await f.rpc({jsonrpc:'2.0',id:2,method:'tools/list'},f.first.secret);assert.ok(PUBLIC_WORK_MCP_TOOLS.every(name=>all.body.result.tools.some(tool=>tool.name===name)));
  assert.equal(all.body.result.tools.find(tool=>tool.name==='public_work_claim')._meta.authorization,'saved-identity-secret');
- const bad=await f.call('public_work_recommend',{},f.first.secret.slice(0,-1)+(f.first.secret.endsWith('a')?'b':'a'));assert.equal(bad.body.result.structuredContent.status,401);assert.equal(state(f.store),before);
+ const bad=await f.call('public_work_recommend',{},f.first.secret.slice(0,-1)+(f.first.secret.endsWith('a')?'b':'a'));assert.equal(bad.status,401);assert.equal(bad.body.error.code,-32001);assert.equal(state(f.store),before);
+ const badRead=await f.call('public_work_read_task',{taskId:'mcp:task'},f.first.secret.slice(0,-1)+(f.first.secret.endsWith('a')?'b':'a'));assert.equal(badRead.status,401);assert.equal(badRead.body.error.code,-32001);
 });
 
 test('actual outside MCP claim/renew/release/finish and own feedback reuse HTTP receipts and preserve zero membership/credits',async t=>{
@@ -72,9 +73,9 @@ test('strict MCP schemas reject excessive arguments and notifications never muta
 test('credential revoked while MCP body uploads cannot claim even with a saved prior connection',async t=>{
  const f=await fixture(t),payload=JSON.stringify({jsonrpc:'2.0',id:'held',method:'tools/call',params:{name:'public_work_claim',arguments:claim}});
  let arrival;const arrived=new Promise(resolve=>{arrival=resolve;});f.server.once('request',arrival);let connection;
- const result=new Promise((resolve,reject)=>{connection=request(f.origin+'/mcp',{method:'POST',headers:{'Content-Type':'application/json','Content-Length':Buffer.byteLength(payload),Authorization:'Bearer '+f.first.secret}},response=>{const chunks=[];response.on('data',chunk=>chunks.push(chunk));response.on('end',()=>resolve(JSON.parse(Buffer.concat(chunks).toString('utf8'))));});connection.on('error',reject);connection.write(payload.slice(0,10));});
+ const result=new Promise((resolve,reject)=>{connection=request(f.origin+'/mcp',{method:'POST',headers:{'Content-Type':'application/json','Content-Length':Buffer.byteLength(payload),Authorization:'Bearer '+f.first.secret}},response=>{const chunks=[];response.on('data',chunk=>chunks.push(chunk));response.on('end',()=>resolve({status:response.statusCode,body:JSON.parse(Buffer.concat(chunks).toString('utf8'))}));});connection.on('error',reject);connection.write(payload.slice(0,10));});
  await arrived;f.store.identities.revoke(f.first.identityId,f.first.secret);connection.end(payload.slice(10));
- const reply=await result;assert.equal(reply.result.structuredContent.status,401);assert.equal(f.store.publicWorkClaims.read('mcp:task').claim.state,'unclaimed');assert.equal(f.store.db.prepare("SELECT COUNT(*) n FROM public_work_requests WHERE actor_id=?").get(f.first.identityId).n,0);
+ const reply=await result;assert.equal(reply.status,401);assert.equal(reply.body.error.code,-32001);assert.equal(f.store.publicWorkClaims.read('mcp:task').claim.state,'unclaimed');assert.equal(f.store.db.prepare("SELECT COUNT(*) n FROM public_work_requests WHERE actor_id=?").get(f.first.identityId).n,0);
 });
 
 test('maximum legal escaped UTF-8 artifact and checks fit the actual hosted MCP transport',async t=>{

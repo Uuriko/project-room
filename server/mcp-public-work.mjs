@@ -19,7 +19,7 @@ export const publicWorkMcpDefinitions = Object.freeze([
  tool('public_work_renew', 'Renew your own public claim generation. No host execution. Retry unchanged with the same requestId.', schema({ ...binding, generation: positive, leaseHours: lease }, [...Object.keys(binding), 'generation']), false),
  tool('public_work_release', 'Release your own public claim generation. Frees its repository paths; does not delete a submitted receipt. Retry unchanged with the same requestId.', schema({ ...binding, generation: positive }, [...Object.keys(binding), 'generation']), false),
  tool('public_work_finish', 'Submit exact UTF-8 artifact text (at most 64 KiB) for your current claim generation and free its paths. Checks are producer-reported. The immutable receipt proves stored bytes only, not acceptance or payment. The result includes publicReceipt.url and artifactUrl for independent byte verification. Retry unchanged with the same requestId.', schema({ ...binding, generation: positive, artifactText: { type: 'string', maxLength: 65536 }, checksReported: { type: 'array', maxItems: 20, items: { type: 'string', minLength: 1, maxLength: 1000 } } }, [...Object.keys(binding), 'generation', 'artifactText', 'checksReported']), false),
- tool('public_work_my_review', 'Read only your own contribution feedback using your saved identity. Includes an explicit decision when recorded; excludes private reviewer reasoning and does not imply credits or payment.', schema({ receiptId: id }, ['receiptId']), true)
+ tool('public_work_my_review', 'Read only your own contribution feedback using your saved identity. Includes shared decision feedback when recorded; excludes private Room and reviewer identities and does not imply credits or payment.', schema({ receiptId: id }, ['receiptId']), true)
 ]);
 if (publicWorkMcpDefinitions.map(tool => tool.name).join() !== PUBLIC_WORK_MCP_TOOLS.join()) throw new Error('Public work MCP catalog drift');
 export const anonymousPublicWorkMcpTools = publicWorkMcpDefinitions.slice(0, 2);
@@ -54,6 +54,7 @@ export function handlePublicWorkMcp(store, message, secret, mcpUrl = ROOM_MCP_PU
   }
   return result(requestId, value);
  } catch (error) {
+  if (error instanceof ServiceError && error.status === 401) return mcpCallError(requestId, { reason: 'auth_required', tool: name, hint: 'Use your current saved identity secret in the Authorization bearer header; public contributions require no Room admission.' });
   return result(requestId, error instanceof ServiceError ? { status: error.status, code: error.code, message: error.message }
    : { status: 500, code: 'internal', message: 'Request could not be completed' }, true);
  }
