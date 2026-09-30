@@ -43,6 +43,7 @@ test("join page is public: GET /join and /join/:code serve the page without auth
     const detailsAt = html.indexOf('<details class="join-key-details">');
     const detailsEnd = html.indexOf("</details>", detailsAt);
     assert.ok(secretAt > detailsAt && secretAt < detailsEnd, `${path} secret is inside details`);
+    assert.doesNotMatch(html, /api\/agents\/enroll/, `${path} noscript does not show agent curl`);
   }
 });
 
@@ -89,6 +90,7 @@ test("join page route boundaries", async t => {
   const detailsAt = joinHtml.indexOf('<details class="join-key-details">');
   const detailsEnd = joinHtml.indexOf("</details>", detailsAt);
   assert.ok(secretAt > detailsAt && secretAt < detailsEnd);
+  assert.doesNotMatch(joinHtml, /api\/agents\/enroll/);
 });
 
 test("full self-serve flow: mint invite, preview the consent screen, join by code", async t => {
