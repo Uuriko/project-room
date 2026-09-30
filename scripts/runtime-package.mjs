@@ -106,6 +106,8 @@ optional.push("server/inbox-collab-routes.mjs"); // Lane C: collab HTTP routes (
 optional.push("server/room-activation-pack.mjs"); // quill lane RC-2026-09-18-040: room activation pack (imported by server/http.mjs; pure, imports ../src/events.js only)
 optional.push("server/work-claims.mjs"); // RC-2026-09-18-041: pure work-claim state machine (imported by server/work-claim-routes.mjs)
 optional.push("server/work-claim-routes.mjs"); // RC-2026-09-18-041: work-claim HTTP routes (imported by server/http.mjs)
+optional.push("server/public-claims.mjs"); // Jill 2026-09-30: public claim registry with Ed25519 receipts (imported by server/public-claim-routes.mjs; pure, node:crypto only)
+optional.push("server/public-claim-routes.mjs"); // Jill 2026-09-30: public claim HTTP routes — the ONE public verb (imported by server/http.mjs)
 optional.push("server/agent-rooms.mjs"); // agent room ownership service (imported by server/http.mjs)
 optional.push("server/agent-api-keys.mjs"); // Lane D: scoped agent API-key issuance (imported by server/agent-plugin-store.mjs; pure, node:crypto only)
 optional.push("server/agent-card-signing.mjs"); // RC-2026-09-18-014: Ed25519 card signing/verification (imported by server/agent-directory.mjs; pure, node:crypto only)
