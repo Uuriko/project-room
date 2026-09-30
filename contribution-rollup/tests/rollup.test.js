@@ -7,7 +7,10 @@ import {
   c2SamePayloadNewIds,
   c3ForgedActorEvents,
   c4UnknownProducerEvents,
+  completeKnownProducer,
+  proposeReview,
   ROOM_ID,
+  verifyPass,
   WORK_ITEM_ID
 } from "../fixtures/index.js";
 import { contributorsForReturnBrief, rollupContributions, UNKNOWN_PRODUCER, WEIGHT_KINDS } from "../src/index.js";
@@ -233,4 +236,20 @@ test("wrong designated verifier or decision-maker earns no share", () => {
   assert.equal(rolled.active_rows.filter((row) => row.kind === "verify").length, 0);
   assert.equal(rolled.active_rows.filter((row) => row.kind === "decide").length, 0);
   assert.equal(rolled.active_rows.filter((row) => row.kind === "complete").length, 0);
+});
+
+test("G-M1: verification-first ordering keeps the verifier in member_shares", () => {
+  // The verifier's pass arrives BEFORE the completion event it cites. Pre-fix,
+  // the later completion's supersede erased the earlier verify row (different
+  // evidence_ref), zeroing the verifier's credit.
+  const events = [
+    proposeReview(),
+    verifyPass(),
+    completeKnownProducer(),
+  ];
+  const rolled = rollupContributions(events);
+  const row = rolled.member_shares.find((share) => share.member_id === "instinct");
+  assert.ok(row, "the verifier must not be superseded out of the summary");
+  assert.ok(row.kinds.includes("verify"), "the verify row survives the later completion");
+  assert.ok(row.member_weight > 0, "the verifier's verification work keeps a positive weight");
 });

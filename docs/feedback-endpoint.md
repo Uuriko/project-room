@@ -220,6 +220,17 @@ Today:
   the advertised SLA (the honest answer to §1's weak spot), reviewer
   precision/recall, appeal overturn rates, cluster velocity,
   unappealed-rejection spot-audit results.
+- **Verdict-settlement scheduling (intentionally manual):**
+  `sweepFeedbackVerdicts(store)` (server/feedback-routes.mjs) is the
+  production settlement entry point — it confirms unchallenged verdicts
+  past the appeal window and marks stale promotions — but nothing calls
+  it on a schedule today. It runs manually (an operator invokes it, e.g.
+  via the room's periodic checks) until the metrics-dashboard slice
+  above lands a real scheduler. The contract is pinned by
+  `tests/feedback-routes.test.js` (M-58): the sweep must settle an
+  unappealed verdict and confirm the reviewer when invoked. Do not wire
+  a cron/interval around it without the dashboard slice's
+  settlement-window and idempotency review.
 - **Replayable-repro verification:** an optional lane that re-runs
   the repro pair and attests the outcome, turning `real` into
   `real+reproduced`.

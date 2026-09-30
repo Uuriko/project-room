@@ -154,10 +154,24 @@ export function exportData(options) {
 // Serialize an export document to JSON (pretty-printed: this is a file a
 // person downloads). Accepts the same options as exportData, or a
 // ready-built document via { document }.
+// Cycle-safe stringify for the never-throws contract: exportJson must
+// serialize even when the snapshot graph contains cycles (scrub preserves
+// them by identity, so plain JSON.stringify would throw).
+function stringifyCyclesSafe(document) {
+  const seen = new Set();
+  return JSON.stringify(document, (key, value) => {
+    if (value !== null && typeof value === "object") {
+      if (seen.has(value)) return "[circular]";
+      seen.add(value);
+    }
+    return value;
+  }, 2);
+}
+
 export function exportJson(options) {
   const opts = options ?? {};
   const document = typeof opts === "object" && "document" in opts
     ? opts.document
     : exportData(opts);
-  return JSON.stringify(document, null, 2);
+  return stringifyCyclesSafe(document);
 }

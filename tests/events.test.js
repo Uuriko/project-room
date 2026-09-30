@@ -638,3 +638,25 @@ test("H-11: a genuinely conflicting reuse of an event id still throws", () => {
   const conflict = { ...structuredClone(grant), data: { ...grant.data, displayName: "Someone Else" } };
   assert.throws(() => applyEvent(once, conflict), /Conflicting reuse of event id/);
 });
+
+test("M-38: decision.recorded rejects deleted and private messages as decision sources", () => {
+  let state = baseState();
+  state = applyEvent(state, fixedEvent("m38-msg", EVENT_TYPES.MESSAGE_POSTED, "potter", { body: "the public rationale" }));
+  const msgId = state.messages.at(-1).id;
+  // Deleted source: the tombstone still resolves by id, so the old check accepted it.
+  const deleted = applyEvent(state, fixedEvent("m38-del", EVENT_TYPES.MESSAGE_DELETED, "potter", { messageId: msgId, expectedMessageRevision: 0 }));
+  assert.throws(() => applyEvent(deleted, fixedEvent("m38-dec", EVENT_TYPES.DECISION_RECORDED, "potter", {
+    sourceMessageId: msgId, statement: "we ship it"
+  })), /Decision source must be a message in this Room/);
+  // DM (private) source: must be a public room message.
+  const dm = applyEvent(state, fixedEvent("m38-dm", EVENT_TYPES.MESSAGE_POSTED, "potter", { body: "private rationale", toMemberId: "maya" }));
+  const dmId = dm.messages.at(-1).id;
+  assert.throws(() => applyEvent(dm, fixedEvent("m38-dec2", EVENT_TYPES.DECISION_RECORDED, "potter", {
+    sourceMessageId: dmId, statement: "we ship it"
+  })), /Decision source must be a public room message/);
+  // A live public message still records fine (recordDecision is validation-only;
+  // the event itself is the record, so success = no throw).
+  assert.doesNotThrow(() => applyEvent(state, fixedEvent("m38-dec3", EVENT_TYPES.DECISION_RECORDED, "potter", {
+    sourceMessageId: msgId, statement: "we ship it"
+  })));
+});

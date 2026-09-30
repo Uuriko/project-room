@@ -60,7 +60,9 @@ export function computePointer(event, receipt) {
     const jobId = firstDefined(surface.computeJobId, surface.jobId, surface.compute_job_id);
     if (jobId) computeJobId = computeJobId ?? jobId;
     if (surface.bridge === "compute" || surface.product === "compute") flagged = true;
-    if (surface.computeUrl || surface.href) flagged = true;
+    // A plain href is content, not a compute marker: only an explicit
+    // computeUrl may flag the open-compute action on URL presence alone.
+    if (surface.computeUrl) flagged = true;
   }
   if (!computeJobId && !flagged) return null;
 

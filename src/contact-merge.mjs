@@ -223,18 +223,33 @@ function unionStrings(a, b, norm) {
   return out;
 }
 
-/** Union of entry lists ({address}|{number} payloads), deduped on norm(key). */
+/**
+ * Union of entry lists ({address}|{number} payloads), deduped on norm(key).
+ * When two entries collide on the same key, the richer one wins: verified
+ * beats unverified, then newer seenAt beats older. First-seen ORDER is kept
+ * for stable, deterministic output.
+ */
+function entryWins(kept, candidate) {
+  const keptVerified = kept.verified === true;
+  const candVerified = candidate.verified === true;
+  if (candVerified !== keptVerified) return candVerified;
+  return (candidate.seenAt ?? 0) > (kept.seenAt ?? 0);
+}
+
 function unionEntries(a, b, keyOf, norm) {
-  const seen = new Set();
-  const out = [];
+  const byKey = new Map(); // norm(key) -> { entry, order }
   for (const e of [...a, ...b]) {
     const k = norm(keyOf(e));
-    if (!seen.has(k)) {
-      seen.add(k);
-      out.push(e);
+    const existing = byKey.get(k);
+    if (!existing) {
+      byKey.set(k, { entry: e, order: byKey.size });
+    } else if (entryWins(existing.entry, e)) {
+      byKey.set(k, { entry: e, order: existing.order });
     }
   }
-  return out;
+  return [...byKey.values()]
+    .sort((x, y) => x.order - y.order)
+    .map((x) => x.entry);
 }
 
 /* ------------------------------------------------------------------ */

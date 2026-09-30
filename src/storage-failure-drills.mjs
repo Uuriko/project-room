@@ -366,8 +366,14 @@ const SCRIPTS = {
     }
     ctx.log("recover:start", { action: "disarm-and-retry" });
     ctx.chaos.disarm();
-    attemptWrite(ctx, RETRY_KEY, `drill-payload:${ctx.scenarioName}:${RETRY_KEY}`);
-    ctx.log("recover:complete", {});
+    // The recovery write is the point of the drill: a still-armed fault means
+    // recovery failed, and the verdict must say so (not log recover:complete).
+    const recovery = attemptWrite(ctx, RETRY_KEY, `drill-payload:${ctx.scenarioName}:${RETRY_KEY}`);
+    if (recovery.ok) {
+      ctx.log("recover:complete", {});
+    } else {
+      ctx.log("recover:failed", { key: RETRY_KEY, error: recovery.error ?? "unknown" });
+    }
     verifyKeys(ctx, PROBE_KEYS);
   },
 
@@ -529,6 +535,7 @@ export function evaluateDrill(timeline, scenarioName) {
   const injectT = firstOf("inject")?.t;
   const detectedT = firstOf("fault-detected")?.t ?? null;
   const recoverEndT = firstOf("recover:complete")?.t;
+  const recoverFailedT = firstOf("recover:failed")?.t ?? null;
 
   const writes = timeline.filter((e) => e.type === "write");
   const reads = timeline.filter((e) => e.type === "read");
@@ -570,6 +577,11 @@ export function evaluateDrill(timeline, scenarioName) {
 
   const recoveryMs = (recoverEndT ?? endT) - (detectedT ?? injectT ?? startT);
 
+  // Recovery that never happened is a drill failure: a drill passes only when
+  // its recovery step succeeded (recover:failed logged by the scenario, or no
+  // recovery step was attempted at all).
+  const recoverySucceeded = recoverFailedT === null;
+
   const expected = verifies.filter((v) => v.baseline === true);
   const findings = [
     {
@@ -584,6 +596,13 @@ export function evaluateDrill(timeline, scenarioName) {
       check: "data-loss-within-rpo",
       pass: dataLossMs <= rpoMs,
       detail: `data loss ${dataLossMs}ms vs RPO ${rpoMs}ms (${lost.length} lost/corrupted keys)`
+    },
+    {
+      check: "recovery-succeeded",
+      pass: recoverySucceeded,
+      detail: recoverySucceeded
+        ? "the recovery step completed without failure"
+        : `recovery failed at t=${recoverFailedT}: the drill's recovery step did not succeed`
     },
     {
       check: "recovery-within-rto",

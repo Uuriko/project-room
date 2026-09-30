@@ -158,8 +158,10 @@ export function createRegistrationOptions({
       displayName: isNonEmptyString(user.displayName) ? user.displayName : user.name,
     },
     pubKeyCredParams: [
+      // ES256 only: coseKeyToJwk can persist P-256 keys (-7) but not RSA keys
+      // (-257), so advertising RS256 offered credentials we would refuse at
+      // registration time. Add algs here only alongside coseKeyToJwk support.
       { type: "public-key", alg: -7 }, // ES256
-      { type: "public-key", alg: -257 }, // RS256
     ],
     timeout,
     excludeCredentials: (Array.isArray(excludeCredentials) ? excludeCredentials : []).map(cred => ({

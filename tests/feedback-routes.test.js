@@ -8,7 +8,8 @@
 // so no test-only seam is involved.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { handleFeedbackCore, createSubmitLimiter, createFeedbackStore } from "../server/feedback-routes.mjs";
+import { handleFeedbackCore, createSubmitLimiter, createFeedbackStore, sweepFeedbackVerdicts } from "../server/feedback-routes.mjs";
+import { APPEAL_WINDOW_MS, MARK_REVIEWER_CONFIRMED } from "../server/feedback-store.mjs";
 
 const goodFiling = (lane = "jill") => ({
   agent: { lane, card_uri: "https://muse-room.example/.well-known/agent-card.json" },
@@ -318,4 +319,19 @@ test("H-22: HEAD on notifications never drains the queue", () => {
   const get = call({ method: "GET", route: "notifications", feedbackStore: fb, lane: "jill" }).result;
   assert.equal(get.status, 200);
   assert.equal(get.value.notifications.length, 1, "the HEAD request left the queued notification untouched");
+});
+
+test("M-58: sweepFeedbackVerdicts is operational — it settles an unappealed verdict (scheduled manually)", () => {
+  // The sweep is intentionally invoked manually until the metrics-dashboard
+  // slice wires a scheduler (docs/feedback-endpoint.md §6); this test pins
+  // the production entry point's contract, not a schedule that doesn't exist.
+  let nowMs = Date.now();
+  const fb = createFeedbackStore({ now: () => nowMs });
+  const id = call({ method: "POST", route: "submit", data: goodFiling(), feedbackStore: fb }).result.value.feedback_id;
+  call({ method: "POST", route: "triage", id, data: { verdict: "junk" }, feedbackStore: fb, lane: "reviewer-a" });
+  nowMs += APPEAL_WINDOW_MS + 1000;
+  const result = sweepFeedbackVerdicts(fb);
+  assert.equal(result.settled, 1);
+  assert.equal(fb.get(id).status, "settled");
+  assert.equal(fb.mark("reviewer-a").balance, 10 + MARK_REVIEWER_CONFIRMED);
 });

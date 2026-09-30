@@ -117,6 +117,10 @@ export function rollupContributions(input = {}, options = {}) {
     if (!workItemId || !newEvidence || !supersededBy) return;
     for (const row of rows) {
       if (row.work_item_id !== workItemId || row.superseded_by) continue;
+      // Verify and decide rows carry their own evidence (the verification /
+      // decision event id), not the artifact version — a new completion must
+      // not erase independent verifier/owner credit.
+      if (row.kind === "verify" || row.kind === "decide") continue;
       if (row.evidence_ref === newEvidence || row.source_event_id === supersededBy) continue;
       row.superseded_by = supersededBy;
     }

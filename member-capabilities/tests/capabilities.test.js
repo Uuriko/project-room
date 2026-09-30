@@ -104,3 +104,11 @@ test("collaborate autonomy set: steer + complete_work folds to act + emit_receip
   assert.equal(canEmitReceipt(peer), true);
   assert.equal(canInviteMember(peer), false);
 });
+
+test("G-M3: inactive owners lose capabilities exactly like everyone else", () => {
+  const inactiveOwner = Object.freeze({ id: "gone-owner", kind: "human", role: "owner", active: false });
+  const bits = memberCapabilities(inactiveOwner).bits;
+  assert.deepEqual(bits, [], "inactivity gates the owner early-return");
+  assert.equal(canAct(inactiveOwner), false);
+  assert.equal(memberCapabilities(inactiveOwner).owner, true, "the owner flag itself survives — only the capabilities lapse");
+});

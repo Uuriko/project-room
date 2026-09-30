@@ -55,7 +55,11 @@ function grantedBit(member, context, bit) {
 export function memberCapabilities(member = {}, context = {}) {
   if (!isMemberRecord(member)) return { bits: [], owner: false };
   const owner = isRoomOwner(member, context);
-  if (owner) return { bits: [...CAPABILITY_BITS], owner: true };
+  // Inactivity gates capabilities for everyone, owners included: the owner
+  // flag survives (it describes the role), but the capability bits lapse
+  // exactly like any other inactive member's.
+  if (owner && member.active !== false) return { bits: [...CAPABILITY_BITS], owner: true };
+  if (owner) return { bits: [], owner: true };
 
   const granted = new Set(DEFAULT_GRANTS);
   if (member.active !== false) {

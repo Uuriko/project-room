@@ -14,7 +14,8 @@
 //
 // Phase shape: { name, estimatedMs, deferrable?, dependsOn? } —
 //   name is a non-empty string, unique across the phase list;
-//   estimatedMs is a positive finite number of milliseconds;
+//   estimatedMs is a non-negative finite number of milliseconds
+//     (0ms is allowed: instant work is real);
 //   deferrable (default false) means the phase may be lazy-loaded after
 //     the first response instead of blocking startup;
 //   dependsOn (default []) lists phase names that must complete first;
@@ -92,9 +93,9 @@ function assertPhases(phases) {
       throw new TypeError(`${where}: duplicate phase name ${JSON.stringify(phase.name)}`);
     }
     seen.add(phase.name);
-    if (!isFiniteNumber(phase.estimatedMs) || phase.estimatedMs <= 0) {
+    if (!isFiniteNumber(phase.estimatedMs) || phase.estimatedMs < 0) {
       throw new TypeError(
-        `${where}: estimatedMs must be a positive finite number, got ${String(phase.estimatedMs)}`
+        `${where}: estimatedMs must be a non-negative finite number, got ${String(phase.estimatedMs)}`
       );
     }
     if (phase.deferrable !== undefined && typeof phase.deferrable !== "boolean") {
