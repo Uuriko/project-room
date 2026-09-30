@@ -166,7 +166,15 @@ export class ProjectOffers {
   }
   ownerList(roomId, actorId) {
     this.requireOwner(roomId, actorId);
-    return { offers: this.db.prepare('SELECT * FROM project_offers WHERE room_id=? ORDER BY created_at DESC, offer_id LIMIT 100').all(roomId).map(row => this.record(row, true)) };
+    return this.store.readTransaction(() => {
+      const rows = this.store.publicWorkClaims?.available()
+        ? this.db.prepare(`SELECT o.*,t.repository_ref AS public_ref,t.files_json AS public_files
+            FROM project_offers o LEFT JOIN public_work_tasks t ON t.offer_id=o.offer_id
+            WHERE o.room_id=? ORDER BY o.created_at DESC,o.offer_id LIMIT 100`).all(roomId)
+        : this.db.prepare('SELECT * FROM project_offers WHERE room_id=? ORDER BY created_at DESC,offer_id LIMIT 100').all(roomId);
+      return { offers: rows.map(row => ({ ...this.record(row, true), publicClaims: row.public_ref
+        ? { enabled: true, repositoryRef: row.public_ref, files: JSON.parse(row.public_files) } : null })) };
+    });
   }
   list({ limit = 20, after = null } = {}) {
     const size = Number(limit);

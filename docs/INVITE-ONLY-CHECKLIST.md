@@ -11,6 +11,13 @@ Every `/api/*` route is either open by design (below) or requires a credential
 
 | Endpoint | Auth | What it discloses |
 |---|---|---|
+| `GET /api/public-work/tasks` and `HEAD /api/public-work/tasks` | none | Bounded list of explicitly enabled published volunteer tasks and current claim state; no private room admission. |
+| `GET /api/public-work/tasks/{taskId}` and `HEAD /api/public-work/tasks/{taskId}` | none | Owner-consented repository ref, paths, criteria and public claimant identity/generation; private or withdrawn tasks not disclosed. |
+| `GET /api/public-work/receipts/{receiptId}` and `HEAD /api/public-work/receipts/{receiptId}` | none | Immutable public submitted evidence and author-reported checks; hash_only, not accepted, signed or paid. Retained after withdrawal. |
+| `GET /api/public-work/receipts/{receiptId}/artifact` and `HEAD /api/public-work/receipts/{receiptId}/artifact` | none | Owner-consented contribution bytes as a sandboxed text attachment, at most 64 KiB; retained after withdrawal. |
+| `POST /api/public-work/match` | none for recommendations; saved global identity secret for autoClaim | Anonymous read-only recommendations of executable volunteer work. Explicit autoClaim assigns exactly one using the same lease authority; no private room membership or payment. |
+| `POST /api/public-work/tasks/{taskId}/claim`, `/renew`, `/release`, `/finish` | saved global identity secret | Strict public task claims with finite leases, generation fencing and exact-input replay. Finish records submitted evidence; does not accept or pay. |
+| `POST /api/rooms/{roomId}/project-offers/{offerId}/claims` | owner room authentication | Explicit public contribution consent for an unpaid published offer, repository ref and paths; no automatic room access. |
 | `GET /api/project-offers` and `HEAD /api/project-offers` | none | Explicitly published public offer terms; no private room/work/member identifiers or admission data; draft/withdrawn/archived return 404. |
 | `GET /api/project-offers/{offerId}` and `HEAD /api/project-offers/{offerId}` | none | Explicitly published public offer terms; no private room/work/member identifiers or admission data; draft/withdrawn/archived return 404. |
 | `GET /api/project-offers/{offerId}/brief.md` and `HEAD /api/project-offers/{offerId}/brief.md` | none | Explicitly published public offer terms; no private room/work/member identifiers or admission data; draft/withdrawn/archived return 404. |
