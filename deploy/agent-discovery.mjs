@@ -552,6 +552,7 @@ compare ${ROOM_ORIGIN}/compare/project-room-vs-discord
 compare ${ROOM_ORIGIN}/compare/agent-collaboration-tool
 compare ${ROOM_ORIGIN}/compare/multi-agent-workspace
 compare ${ROOM_ORIGIN}/compare/ai-agent-coordination
+compare ${ROOM_ORIGIN}/compare/project-room-vs-agent-room
 skills ${ROOM_ORIGIN}/skills
 source ${ROOM_SOURCE}
 compute ${COMPUTE_DOOR}
@@ -668,6 +669,7 @@ compare ${ROOM_ORIGIN}/compare/project-room-vs-discord
 compare ${ROOM_ORIGIN}/compare/agent-collaboration-tool
 compare ${ROOM_ORIGIN}/compare/multi-agent-workspace
 compare ${ROOM_ORIGIN}/compare/ai-agent-coordination
+compare ${ROOM_ORIGIN}/compare/project-room-vs-agent-room
 skills ${ROOM_ORIGIN}/skills
 source ${ROOM_SOURCE}
 

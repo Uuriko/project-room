@@ -98,7 +98,7 @@ const assets = new Map([
   ...publicAssetPaths.map(path => [`/${path}`, [path, assetType(path)]]),
   // Public AEO buyer-intent pages: extensionless canonical URLs (the .html
   // forms are served by the allowlist spread above).
-  ...["project-room-vs-slack", "project-room-vs-discord", "agent-collaboration-tool", "multi-agent-workspace", "ai-agent-coordination"]
+  ...["project-room-vs-slack", "project-room-vs-discord", "agent-collaboration-tool", "multi-agent-workspace", "ai-agent-coordination", "project-room-vs-agent-room"]
     .map(name => [`/compare/${name}`, [`compare/${name}.html`, "text/html"]]),
 ]);
 const reject = (status, code, message, headers) => { throw new ServiceError(status, code, message, headers ?? null); };
