@@ -1606,9 +1606,7 @@ function recordDecision(state, incoming) {
   requirePermission(state, incoming.actorId, "decide");
   if (actor.kind !== "human") throw new Error("Only a human member may record a decision");
   requireFields(incoming.data, ["sourceMessageId", "statement"]);
-  if (!state.messages.some(m => m.id === incoming.data.sourceMessageId)) {
-    throw new Error("Decision must reference a message in this Room");
-  }
+  requirePublicDecisionSource(state, incoming.data.sourceMessageId);
   const statement = String(incoming.data.statement);
   if (statement !== statement.trim() || statement.length > 500) {
     throw new Error("Decision statement must be trimmed text up to 500 characters");

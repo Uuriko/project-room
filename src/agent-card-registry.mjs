@@ -52,6 +52,34 @@ function registryError(code, message, detail) {
   return err;
 }
 
+/** Compare two semver-ish versions: -1, 0, or 1. Prerelease tags order
+ * semver-style: a release outranks any prerelease of the same core, and two
+ * prereleases of the same core compare identifier-by-identifier (numeric
+ * identifiers compare numerically, numeric < alphanumeric, alphanumeric
+ * compares lexically; fewer identifiers loses when all preceding are equal). */
+function comparePrerelease(a, b) {
+  const as = a.includes('-') ? a.split('-').slice(1).join('-').split('.') : null;
+  const bs = b.includes('-') ? b.split('-').slice(1).join('-').split('.') : null;
+  if (as === null && bs === null) return 0;
+  if (as === null) return 1; // release > prerelease
+  if (bs === null) return -1;
+  const len = Math.max(as.length, bs.length);
+  for (let i = 0; i < len; i += 1) {
+    if (i >= as.length) return -1;
+    if (i >= bs.length) return 1;
+    const ai = as[i];
+    const bi = bs[i];
+    if (ai === bi) continue;
+    const an = /^\d+$/.test(ai);
+    const bn = /^\d+$/.test(bi);
+    if (an && bn) return Number(ai) < Number(bi) ? -1 : 1;
+    if (an) return -1; // numeric identifiers sort below alphanumeric
+    if (bn) return 1;
+    return ai < bi ? -1 : 1;
+  }
+  return 0;
+}
+
 /** Compare two semver-ish versions: -1, 0, or 1. */
 function compareVersions(a, b) {
   const core = (v) => v.split('-')[0].split('.').map(Number);
@@ -60,10 +88,7 @@ function compareVersions(a, b) {
   for (let i = 0; i < 3; i += 1) {
     if (ac[i] !== bc[i]) return ac[i] < bc[i] ? -1 : 1;
   }
-  const as = a.includes('-');
-  const bs = b.includes('-');
-  if (as === bs) return 0;
-  return as ? -1 : 1; // release > prerelease
+  return comparePrerelease(a, b);
 }
 
 function isStringArray(value) {

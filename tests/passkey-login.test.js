@@ -657,3 +657,14 @@ test("custom verifySignature hook is honored", () => {
   });
   assert.equal(result.signCount, 1);
 });
+
+test("M-45: registration advertises only algorithms the store can persist (ES256)", () => {
+  const { options } = createRegistrationOptions({
+    rpId: "room.example.com",
+    rpName: "Project Room",
+    user: { id: "u1", name: "maya", displayName: "Maya" },
+  });
+  const algs = options.pubKeyCredParams.map((p) => p.alg);
+  assert.ok(algs.includes(-7), "ES256 is advertised");
+  assert.ok(!algs.includes(-257), "RS256 must not be advertised: coseKeyToJwk only persists P-256 ES256 keys");
+});

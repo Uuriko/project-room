@@ -153,3 +153,21 @@ test("renderStatusPage survives a missing or empty payload", () => {
   assert.match(html, /healthy/);
   assert.match(html, /Dependency checks/);
 });
+
+test("M-40: collectHealth never throws on throwing or malformed clocks", () => {
+  // Throwing clock: the never-throws contract degrades to a default, not a throw.
+  const throwing = collectHealth({
+    now: () => { throw new Error("clock broken"); },
+    checks: [{ name: "db", required: true, probe: () => true }],
+  });
+  assert.equal(throwing.status, HEALTH_OK);
+  assert.equal(throwing.checks[0].status, CHECK_OK);
+  assert.ok(typeof throwing.checkedAt === "string");
+
+  // Malformed clocks: NaN and non-number clock values must not throw either.
+  for (const bad of [() => NaN, () => "not-a-number", () => undefined]) {
+    const payload = collectHealth({ now: bad });
+    assert.ok(typeof payload.checkedAt === "string", "checkedAt degrades to a default");
+    assert.ok(payload.status === HEALTH_OK || payload.status === HEALTH_DEGRADED || payload.status === HEALTH_UNHEALTHY);
+  }
+});

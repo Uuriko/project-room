@@ -127,3 +127,13 @@ test("ack: optional Acknowledge appears when ackNeeded and the viewer can act", 
   assert.deepEqual(components[0].records, INTENDED_RECORDS.ack);
   assert.deepEqual(availableComponents({ event: source, viewer: guest }).components, []);
 });
+
+test("G-M2: a plain link in event data does not surface the open-compute action", () => {
+  const source = event({
+    id: "link-1",
+    type: "message.posted",
+    data: { href: "https://example.com/ordinary-link", text: "click me" },
+  });
+  const { components } = availableComponents({ event: source, viewer: actor });
+  assert.deepEqual(componentKinds({ components }), [], "no compute action for an ordinary link");
+});

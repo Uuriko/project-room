@@ -378,3 +378,24 @@ function catchCode(fn) {
   }
   assert.fail('expected a throw');
 }
+
+  it("M-44: a throwing healthChecker is treated as unhealthy, not fatal", async () => {
+    const log = [];
+    const { fo } = makeFailover({
+      clock: fakeClock(),
+      providers: [
+        { name: "sick", priority: 1, sender: senderThat(log, "sick", { ok: true }) },
+        { name: "well", priority: 2, sender: senderThat(log, "well", { ok: true }) },
+      ],
+      healthChecker: (name) => {
+        if (name === "sick") throw new Error("checker down");
+        return true;
+      },
+    });
+    const res = await fo.send({ to: "john@example.com" });
+    assert.equal(res.ok, true);
+    assert.equal(res.provider, "well", "the send falls through to the healthy provider");
+    assert.deepEqual(log.map((l) => l.provider), ["well"], "the sick provider was never sent to");
+    const unhealthy = res.attempts.find((a) => a.provider === "sick");
+    assert.ok(unhealthy && unhealthy.ok === false, "the throwing checker records an unhealthy attempt");
+  });
