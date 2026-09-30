@@ -159,7 +159,7 @@ test("M-11: merge fails when the merged venue list would exceed MAX_VENUES=8", t
 });
 
 // ---- M-12: rejected clusters must re-open on refile, not absorb as duplicate ----
-import { createFeedbackStore, MARK_FILING_COST } from "../server/feedback-store.mjs";
+import { createFeedbackStore } from "../server/feedback-store.mjs";
 
 const goodFiling = (over = {}) => ({
   agent: { lane: "jill", card_uri: "https://x.example/.well-known/agent-card.json" },
