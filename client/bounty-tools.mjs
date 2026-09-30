@@ -30,7 +30,7 @@ const tool = (name, description, inputSchema, readOnlyHint = true) => ({
   annotations: { readOnlyHint, destructiveHint: false, idempotentHint: readOnlyHint, openWorldHint: false }
 });
 
-export const BOUNTY_GROUPS = Object.freeze(["open", "active", "settled", "archived"]);
+export const BOUNTY_GROUPS = Object.freeze(["proposed", "funded", "claimed", "in-review", "paid", "cancelled"]);
 
 const amount = { type: "number", exclusiveMinimum: 0,
   description: "Credits, at most 3 decimals. A valueless ledger unit, never money." };
@@ -43,7 +43,7 @@ const rubric = { type: "array", minItems: 1, maxItems: 20, items: schema({
 
 export const bountyTools = [
   tool("bounty_list",
-    "List this room's bounties with their state, award, deadline, pinned rubric and claimant. Filter by semantic group (open, active, settled, archived), not by display label. Pass viewer=self to annotate each bounty with your own band-derived claimable answer and claim ceiling; nothing is ever hidden by that annotation, the claim gate stays the only enforcement point. Pass poster=self to see only bounties you posted. A read: never claims, funds or accepts anything.",
+    "List this room's bounties with their state, award, deadline, pinned rubric and claimant. Filter by semantic group (proposed, funded, claimed, in-review, paid, cancelled), not by display label. Pass viewer=self to annotate each bounty with your own band-derived claimable answer and claim ceiling; nothing is ever hidden by that annotation, the claim gate stays the only enforcement point. Pass poster=self to see only bounties you posted. A read: never claims, funds or accepts anything.",
     schema({ group: { type: "string", enum: [...BOUNTY_GROUPS] },
              viewer: { ...id, description: "A lane id, or 'self' for your own routing visibility." },
              poster: { ...id, description: "A lane id, or 'self' for bounties you posted." } })),
@@ -94,8 +94,8 @@ export const bountyTools = [
   tool("bounty_accept",
     "Accept submitted work as the bounty's designated approver — the poster in human approvalMode, the designated verifierId in agent approvalMode — attesting against the pinned rubric. Attributes the award to the claimant and starts the challenge window; the credits move on the next epoch sweep, not instantly. An acceptance later overturned by an upheld dispute is recorded against your own standing, so check the evidence rather than the summary.",
     schema({ bountyId: id,
-             verifierAttestation: { type: "string", minLength: 1, maxLength: 4096,
-               description: "What you checked, per criterion. This is the record a dispute re-reads." },
+             verifierAttestation: { type: "object", minProperties: 1,
+               description: "Structured attestation with citations: [{criterionId, verdict: pass|fail}] covering every pinned rubric criterion; optional at is an ISO timestamp. The escrow validates the pinned rubric. This is the record a dispute re-reads." },
              idempotencyKey },
       ["bountyId", "verifierAttestation"]), false),
 
@@ -151,6 +151,7 @@ export function validBountyToolArguments(name, args) {
     if (spec.type === "string" && typeof value !== "string") return false;
     if (spec.type === "number" && (typeof value !== "number" || !Number.isFinite(value) || value <= 0)) return false;
     if (spec.type === "array" && !Array.isArray(value)) return false;
+    if (spec.type === "object" && (!isPlainObject(value) || Object.keys(value).length < (spec.minProperties ?? 0))) return false;
   }
   return true;
 }
