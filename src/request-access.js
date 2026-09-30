@@ -59,13 +59,16 @@ export async function submitGeneralAccessRequest({ client, storage, roomId, disp
     if (!identityId) throw new Error("The identity service did not return an identity.");
   }
   body.identityId = identityId;
-  await client.submitAccessRequest(body);
+  // Stash BEFORE the submit (M-37): a failed submit must not orphan the
+  // freshly minted identity — the record stays stashed so the retry reuses
+  // it instead of burning another mint.
   stashAccessRequest(storage, body.roomId, {
     identityId,
     secret,
     requestId: body.requestId,
     displayName: body.displayName,
   });
+  await client.submitAccessRequest(body);
   return { requestId: body.requestId, roomId: body.roomId, identityId };
 }
 
