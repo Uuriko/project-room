@@ -1,3 +1,4 @@
+// Exercises server/mcp-public-work.mjs through the actual hosted HTTP boundary.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { request } from 'node:http';
@@ -42,6 +43,10 @@ test('actual MCP anonymous recommendations and task reads discover auth without 
 test('actual outside MCP claim/renew/release/finish and own feedback reuse HTTP receipts and preserve zero membership/credits',async t=>{
  const f=await fixture(t),credits=f.store.db.prepare('SELECT * FROM bounty_journal').all();
  const claimed=value(await f.call('public_work_claim',claim,f.first.secret));assert.deepEqual(value(await f.call('public_work_claim',claim,f.first.secret)),claimed);
+ const httpClaim={requestId:claim.requestId,expectedTermsVersion:claim.expectedTermsVersion};
+ const httpRetry=await fetch(f.origin+'/api/public-work/tasks/'+encodeURIComponent(claim.taskId)+'/claim',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+f.first.secret},body:JSON.stringify(httpClaim)});
+ assert.equal(httpRetry.status,200);assert.deepEqual(await httpRetry.json(),claimed,'HTTP and MCP share the exact persisted request outcome');
+ assert.equal(f.store.db.prepare('SELECT COUNT(*) n FROM public_work_requests WHERE actor_id=? AND request_id=?').get(f.first.identityId,claim.requestId).n,1);
  const competing=await f.call('public_work_claim',{...claim,requestId:'competitor'},f.second.secret);assert.equal(competing.body.result.structuredContent.code,'public_work_claim_conflict');
  const bound={taskId:'mcp:task',expectedTermsVersion:1,generation:1};
  const renewed=value(await f.call('public_work_renew',{...bound,requestId:'renew',leaseHours:0.5},f.first.secret));assert.deepEqual(value(await f.call('public_work_renew',{...bound,requestId:'renew',leaseHours:0.5},f.first.secret)),renewed);
