@@ -21,15 +21,16 @@ export function installOwnerProjectOffers({ client, getState, getSession, host }
     <details><summary>Additional scope</summary><label>Task or project<select name="kind"><option value="task">Task</option><option value="project">Project</option></select></label><label>Out of scope · one per line<textarea name="exclusions" rows="2"></textarea></label><label>Public repository<input name="repository" type="url" placeholder="https://…"></label><label>Deadline<input name="deadline" type="datetime-local"></label><label>Reward terms<textarea name="rewardTerms" rows="2" maxlength="2000"></textarea></label></details>
     <div class="form-actions"><button type="button" id="owner-offer-preview" class="button secondary">Preview public terms</button><button type="submit" id="owner-offer-save" class="button">Save draft</button></div></form>
     <section id="owner-offer-preview-view" hidden aria-label="Public preview"></section><p id="owner-offer-status" class="form-status" role="status"></p><button type="button" id="owner-offer-retry" class="button secondary" hidden>Retry same request</button>
+    <form id="owner-public-claims-form" hidden><h3 id="owner-public-claims-title">Allow public claims</h3><p class="form-hint">Outside agents can claim these paths and submit public artifacts. Repository access stays separate.</p><label>Repository ref<input name="repositoryRef" required maxlength="128" placeholder="main"></label><label>Files or folders · one per line<textarea name="files" required rows="3" placeholder="src/welcome.js"></textarea></label><div class="form-actions"><button type="submit" class="button">Enable public claims</button><button type="button" id="owner-public-claims-cancel" class="button ghost">Cancel</button></div></form>
     <hr><div class="panel-header"><h3>Your posted work</h3><button type="button" id="owner-offers-refresh" class="button ghost">Refresh</button></div><p class="form-hint">Terms stay fixed. For changed terms, create a replacement draft.</p><div id="owner-offers-list"></div>`;
   host.append(button); document.body.append(dialog);
-  const $ = selector => dialog.querySelector(selector), form = $('#owner-offer-form');
-  let scope = null, epoch = 0, pending = null, busy = false, dirty = false, rows = [], reading = 0;
+  const $ = selector => dialog.querySelector(selector), form = $('#owner-offer-form'), claimForm = $('#owner-public-claims-form');
+  let scope = null, epoch = 0, pending = null, busy = false, dirty = false, rows = [], reading = 0, enablingId = null, claimDirty = false;
   const currentScope = () => { const state = getState(), session = getSession(); return state && session?.member?.id === state.room.ownerId && !state.room.archivedAt ? `${client.generation}:${state.room.id}:${session.member.id}` : null; };
   const owned = (version, binding) => version === epoch && binding === scope && scope === currentScope();
   const status = text => { $('#owner-offer-status').textContent = text; $('#owner-offer-status').classList.toggle('visible', Boolean(text)); };
-  const controlState = () => { for (const input of form.elements) input.disabled = busy || Boolean(pending); $('#owner-offer-retry').hidden = !pending || busy; $('#owner-offers-refresh').disabled = busy; for (const action of $('#owner-offers-list').querySelectorAll('button')) action.disabled = busy || Boolean(pending); };
-  function reset() { epoch++; reading++; scope = null; pending = null; busy = false; dirty = false; rows = []; form.reset(); $('#owner-offers-list').replaceChildren(); $('#owner-offer-preview-view').replaceChildren(); $('#owner-offer-preview-view').hidden = true; status(''); dialog.close(); button.hidden = true; controlState(); }
+  const controlState = () => { for (const input of [...form.elements, ...claimForm.elements]) input.disabled = busy || Boolean(pending); $('#owner-offer-retry').hidden = !pending || busy; $('#owner-offers-refresh').disabled = busy; for (const action of $('#owner-offers-list').querySelectorAll('button')) action.disabled = busy || Boolean(pending); };
+  function reset() { epoch++; reading++; scope = null; pending = null; busy = false; dirty = false; rows = []; form.reset(); claimForm.reset(); claimForm.hidden = true; enablingId = null; claimDirty = false; $('#owner-offers-list').replaceChildren(); $('#owner-offer-preview-view').replaceChildren(); $('#owner-offer-preview-view').hidden = true; status(''); dialog.close(); button.hidden = true; controlState(); }
   function sync() { const next = currentScope(); if (scope && scope !== next) reset(); scope = next; button.hidden = !next; }
   function choices() {
     const state = getState();
@@ -73,7 +74,7 @@ export function installOwnerProjectOffers({ client, getState, getSession, host }
     return `${padded.slice(0, -reward.decimals)}.${padded.slice(-reward.decimals)} ${reward.unit}${reward.basis === 'pool' ? ' pool' : ''}`;
   }
   function paintRows() {
-    $('#owner-offers-list').innerHTML = rows.length ? rows.map(row => `<section><h4>${escape(row.title)}</h4><p>${escape(row.status)} · terms v${row.version} · ${escape(policies[row.approvalPolicy.mode])} · ${escape(rewardLabel(row.reward))}</p><details><summary>Read saved terms</summary><p>${escape(row.summary)}</p><ul>${row.acceptanceCriteria.map(value => `<li>${escape(value)}</li>`).join('')}</ul>${row.exclusions.length ? `<p>Out of scope: ${row.exclusions.map(escape).join('; ')}</p>` : ''}<p>${escape(row.submissionUrl || row.repositoryUrl)}</p><p>${escape(row.reward.terms)} ${row.reward.kind === 'cash' ? 'Cash payment is not configured.' : row.reward.kind === 'work_trade' ? 'Credits are not reserved.' : ''}</p></details>${row.status === 'draft' ? `<button type="button" class="button secondary" data-publish="${escape(row.id)}">Publish</button>` : row.status === 'published' ? `<a href="/offers?offer=${encodeURIComponent(row.id)}" target="_blank" rel="noopener noreferrer">View public offer</a> <button type="button" class="button secondary" data-withdraw="${escape(row.id)}">Withdraw</button>` : ''}</section>`).join('') : '<p class="form-hint">No offers yet.</p>';
+    $('#owner-offers-list').innerHTML = rows.length ? rows.map(row => `<section><h4>${escape(row.title)}</h4><p>${escape(row.status)} · terms v${row.version} · ${escape(policies[row.approvalPolicy.mode])} · ${escape(rewardLabel(row.reward))}</p><details><summary>Read saved terms</summary><p>${escape(row.summary)}</p><ul>${row.acceptanceCriteria.map(value => `<li>${escape(value)}</li>`).join('')}</ul>${row.exclusions.length ? `<p>Out of scope: ${row.exclusions.map(escape).join('; ')}</p>` : ''}<p>${escape(row.submissionUrl || row.repositoryUrl)}</p><p>${escape(row.reward.terms)} ${row.reward.kind === 'cash' ? 'Cash payment is not configured.' : row.reward.kind === 'work_trade' ? 'Credits are not reserved.' : ''}</p></details>${row.status === 'draft' ? `<button type="button" class="button secondary" data-publish="${escape(row.id)}">Publish</button>` : row.status === 'published' ? `<a href="/offers?offer=${encodeURIComponent(row.id)}" target="_blank" rel="noopener noreferrer">View public offer</a> <button type="button" class="button secondary" data-withdraw="${escape(row.id)}">Withdraw</button>${row.publicClaims?.enabled ? '<p>Public claims enabled.</p>' : row.reward.kind === 'unpaid' && row.repositoryUrl ? `<button type="button" class="button secondary" data-enable-claims="${escape(row.id)}">Allow public claims</button>` : ''}` : ''}</section>`).join('') : '<p class="form-hint">No offers yet.</p>';
     controlState();
   }
   async function refresh() {
@@ -89,6 +90,12 @@ export function installOwnerProjectOffers({ client, getState, getSession, host }
     try {
       const result = await client.request(request.path, { method: 'POST', data: request.data });
       if (!owned(version, binding) || pending !== request) return;
+      if (request.action === 'enable') {
+        if (result?.schema !== 'public-work-task/1' || result.taskId !== request.offerId || result.termsVersion !== request.data.expectedTermsVersion || !Array.isArray(result.files) || typeof result.repositoryRef !== 'string') throw new Error('Unsupported public claim receipt');
+        reading++; pending = null; claimDirty = false; claimForm.reset(); claimForm.hidden = true; enablingId = null;
+        rows = rows.map(row => row.id === result.taskId ? { ...row, publicClaims: { enabled: true, repositoryRef: result.repositoryRef, files: result.files } } : row);
+        paintRows(); status('Public claims enabled. Share the public offer with contributors.'); return;
+      }
       if (result?.schema !== 'project-room-offer/1' || result.id !== request.offerId || !['draft', 'published', 'withdrawn'].includes(result.status)) throw new Error('Unsupported offer receipt');
       // The receipt outranks reads started while the mutation was pending.
       reading++;
@@ -111,9 +118,20 @@ export function installOwnerProjectOffers({ client, getState, getSession, host }
     if (!row) return;
     pending = { action, offerId, path: client.path(`/project-offers/${encodeURIComponent(offerId)}/${action}`), data: { requestId: crypto.randomUUID(), expectedRevision: row.revision } }; void execute();
   });
+  claimForm.addEventListener('input', () => { claimDirty = true; });
+  claimForm.addEventListener('submit', event => {
+    event.preventDefault(); if (busy || pending) return;
+    const row = rows.find(item => item.id === enablingId); if (!row || row.status !== 'published' || row.reward.kind !== 'unpaid' || !row.repositoryUrl) return;
+    pending = { action: 'enable', offerId: row.id, path: client.path(`/project-offers/${encodeURIComponent(row.id)}/claims`), data: { requestId: crypto.randomUUID(), expectedRevision: row.revision, expectedTermsVersion: row.version, repositoryRef: claimForm.elements.repositoryRef.value.trim(), files: claimForm.elements.files.value.split('\n').map(value => value.trim()).filter(Boolean) } }; void execute();
+  });
+  $('#owner-public-claims-cancel').addEventListener('click', () => { if (busy || pending) return; const id = enablingId; enablingId = null; claimDirty = false; claimForm.reset(); claimForm.hidden = true; $('#owner-offers-list').querySelector(`[data-enable-claims="${CSS.escape(id)}"]`)?.focus(); });
+  $('#owner-offers-list').addEventListener('click', event => {
+    const target = event.target.closest('[data-enable-claims]'); if (!target || busy || pending) return;
+    enablingId = target.dataset.enableClaims; claimDirty = false; claimForm.reset(); claimForm.hidden = false; claimForm.elements.repositoryRef.focus();
+  });
   function close() { if (busy) return; dialog.close(); button.focus(); }
   $('#owner-offers-close').addEventListener('click', close); dialog.addEventListener('cancel', event => { event.preventDefault(); close(); });
   dialog.addEventListener('keydown', event => { if (event.key !== 'Tab') return; const controls = [...dialog.querySelectorAll('button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),summary,a[href]')].filter(element => element.getClientRects().length); const first = controls[0], last = controls.at(-1); if (event.shiftKey && document.activeElement === first || !event.shiftKey && document.activeElement === last) { event.preventDefault(); (event.shiftKey ? last : first)?.focus(); } });
   button.addEventListener('click', () => { sync(); if (!scope) return; host.closest('details')?.removeAttribute('open'); if (!pending) choices(); dialog.showModal(); form.elements.title.focus(); void refresh(); });
-  return { sync, reset, hasPending: () => busy || Boolean(pending) || dirty, hasUnknown: () => Boolean(pending) && !busy };
+  return { sync, reset, hasPending: () => busy || Boolean(pending) || dirty || claimDirty, hasUnknown: () => Boolean(pending) && !busy };
 }
