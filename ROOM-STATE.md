@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-30T08:07:25Z · board: Uuriko/project-room#1160 · watermark: 5906872130 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=f89c53470eda62585ea29c4c87908c677345dee69dd524edb3692fafe1a2652f -->
+<!-- generated: 2026-09-30T08:28:38Z · board: Uuriko/project-room#1160 · watermark: 5906981530 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=f89c53470eda62585ea29c4c87908c677345dee69dd524edb3692fafe1a2652f -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -28,7 +28,7 @@ RC-2026-09-28-2877 | (none) | submitted | 2026-09-30T03:11:15Z | src/events.js, 
 RC-2026-09-28-2874 | (none) | submitted | 2026-09-30T03:11:16Z | src/events.js, tests/dm-privacy.test.js
 RC-2026-09-28-2878 | (none) | submitted | 2026-09-30T03:11:17Z | server/dm-event-visibility.mjs, server/http.mjs, tests/dm-privacy.test.js
 RC-2026-09-28-2880 | (none) | submitted | 2026-09-30T03:11:17Z | server/dm-event-visibility.mjs, server/store.mjs, server/reply-requests.mjs, server/notifications.mjs, server/activity.mjs, server/http.mjs, tests/dm-privacy.test.js, tests/reply-requests.test.js
-… +3 more
+… +4 more
 
 ## file-claims
 file | lane | task-id | state
@@ -57,6 +57,7 @@ server/dm-event-visibility.mjs | (none) | RC-2026-09-28-2872 | submitted
 server/dm-event-visibility.mjs | (none) | RC-2026-09-28-2878 | submitted
 server/dm-event-visibility.mjs | (none) | RC-2026-09-28-2879 | submitted
 server/dm-event-visibility.mjs | (none) | RC-2026-09-28-2880 | submitted
+server/feedback-routes.mjs | jill | RC-2026-09-30-3619 | submitted
 server/feedback-scrub.mjs | jill | RC-2026-09-30-3617 | submitted
 server/feedback-store.mjs | jill | RC-2026-09-30-3617 | submitted
 server/gmail-sync.mjs | jill | RC-2026-09-30-3618 | submitted
@@ -119,6 +120,7 @@ tests/dm-privacy.test.js | (none) | RC-2026-09-28-2878 | submitted
 tests/dm-privacy.test.js | (none) | RC-2026-09-28-2879 | submitted
 tests/dm-privacy.test.js | (none) | RC-2026-09-28-2880 | submitted
 tests/dm-privacy.test.js | (none) | RC-2026-09-28-2903 | submitted
+tests/feedback-routes.test.js | jill | RC-2026-09-30-3619 | submitted
 tests/feedback-scrub.test.js | jill | RC-2026-09-30-3617 | submitted
 tests/feedback-store.test.js | jill | RC-2026-09-30-3617 | submitted
 tests/gmail-sync.test.js | jill | RC-2026-09-30-3618 | submitted
@@ -201,5 +203,5 @@ comment-id | lane | task | at
 Uuriko/project-room#266 -> Uuriko/project-room#1160 · watermark 5859826064 · carried-open: RC-2026-09-27-005
 
 ## signals
-board_comments=547 threshold=1500 rotation_due=no watcher=active open_claims=28 prose_open=0 unfenced_prose=0 files_claimed=82 overlap_files=16 watermark=5906872130
+board_comments=550 threshold=1500 rotation_due=no watcher=active open_claims=29 prose_open=0 unfenced_prose=0 files_claimed=84 overlap_files=16 watermark=5906981530
 
