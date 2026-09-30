@@ -30,6 +30,7 @@ import {
   GUEST_WRITABLE_TOOLS,
   T1_WRITABLE_TOOLS,
 } from "../server/capability-visibility.mjs";
+import { PUBLIC_WORK_MCP_TOOLS } from "../src/room-mcp-join.js";
 import { demoteToReadonly } from "../server/autonomy-tiers.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { generateKeyPair, signCard } from "../server/agent-card-signing.mjs";
@@ -60,7 +61,7 @@ function toolNames(tools) {
 }
 
 function writeNames(tools) {
-  return tools.filter(tool => tool.annotations?.readOnlyHint === false).map(tool => tool.name);
+  return tools.filter(tool => tool.annotations?.readOnlyHint === false && !PUBLIC_WORK_MCP_TOOLS.includes(tool.name)).map(tool => tool.name);
 }
 
 // A t1_readonly agent with one linked room: builds the fixture once,
@@ -112,6 +113,21 @@ test("t1_readonly direct invocation is still denied at call time (defense in dep
   assert.equal(refused.code, "agent_readonly");
 });
 
+
+test("readonly Room membership preserves independent public contribution authority", async t => {
+  const { store, peer, call } = await demotedPeer(t);
+  store.projectOffers.create("commons", "owner", { requestId: "visibility-create", offerId: "visibility-task", reviewerMemberIds: ["owner"], terms: { kind: "task", title: "Public volunteer task", summary: "Catalog authority keeper", acceptanceCriteria: ["Deliver exact bytes"], repositoryUrl: "https://github.com/example/project", reward: { kind: "unpaid" }, approvalPolicy: { mode: "human" } } });
+  store.projectOffers.transition("commons", "owner", "visibility-task", "publish", { requestId: "visibility-publish", expectedRevision: 1 });
+  store.publicWorkClaims.enable("commons", "owner", "visibility-task", { requestId: "visibility-enable", expectedRevision: 2, expectedTermsVersion: 1, repositoryRef: "main", files: ["public-result.js"] });
+  const listed = await call("tools/list", { profile: "full" }, peer.secret);
+  const claimTool = listed.result.tools.find(tool => tool.name === "public_work_claim");
+  assert.equal(claimTool._meta.authorization, "saved-identity-secret");
+  const claimed = resultValue(await call("tools/call", { name: "public_work_claim", arguments: { taskId: "visibility-task", requestId: "visibility-claim", expectedTermsVersion: 1 } }, peer.secret));
+  assert.equal(claimed.task.claim.identityId, peer.identityId);
+  assert.equal(claimed.task.claim.state, "claimed");
+  assert.equal(store.publicWorkClaims.read("visibility-task").claim.identityId, peer.identityId);
+});
+
 test("owner keeps the full catalog: withholding changes nothing for the unrestricted", async t => {
   const { owner, call } = await demotedPeer(t);
   for (const profile of ["core", "full"]) {
@@ -150,7 +166,11 @@ test("guest-visible subset matches the #1166 guest semantics", () => {
   const tools = listedMcpTools("full", false, guest);
   const names = toolNames(tools);
   for (const tool of tools) {
-    if (capabilityIsWrite(tool)) {
+    if (PUBLIC_WORK_MCP_TOOLS.includes(tool.name)) {
+      // This unfiltered full catalog also documents public contribution tools.
+      // A ga1 guest token cannot satisfy their separate global identity authority.
+      assert.equal(tool._meta.authorization, ["public_work_recommend", "public_work_read_task"].includes(tool.name) ? "none" : "saved-identity-secret");
+    } else if (capabilityIsWrite(tool)) {
       assert.ok(GUEST_WRITABLE_TOOLS.has(tool.name),
         `guest catalog lists write tool ${tool.name}: call time would 403 guest_scope_denied`);
     }
@@ -205,13 +225,13 @@ test("capabilityVisibleTo: grant-edge seam refines tiers (slice-1 plug-in point)
 });
 
 test("listing endpoints: no leaks, no over-filtering", async t => {
-  // 1. Unauthenticated MCP surface: the four public join tools only, unchanged.
+  // 1. Anonymous MCP: four join documents plus two executable read-only work tools.
   const publicList = handleMcpJoinRpc(rpc("tools/list"));
   assert.deepEqual(toolNames(publicList.result.tools),
-    new Set(["room_join_packet", "room_join_kits", "room_join_prompt", "room_mcp_snippet"]));
+    new Set(["room_join_packet", "room_join_kits", "room_join_prompt", "room_mcp_snippet", "public_work_recommend", "public_work_read_task"]));
 
   // 2. Server card: public by design, full unfiltered list.
-  assert.deepEqual(toolNames(liveEnrolledMcpTools()), toolNames(listedMcpTools("core", false)));
+  assert.deepEqual(toolNames(liveEnrolledMcpTools()), toolNames(listedMcpTools("core", false, null, "public_work")));
 
   // 3. Member capabilities directory: reads stay open to guests (#1166);
   //    it advertises unenforced delegation hints, not permission-gated
