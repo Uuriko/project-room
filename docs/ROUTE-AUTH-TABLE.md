@@ -280,3 +280,5 @@ Gmail mailbox OAuth return: `GET /api/auth/gmail/callback` is public but require
 | `GET /api/inbox/setup`, `POST /api/inbox/setup` | account session + binding; POST also CSRF + Origin | own saved preferences only |
 | `GET /api/inbox/gmail` | account session + binding | no credentials in projection |
 | `POST /api/inbox/gmail/connect`, `POST /api/inbox/gmail/sync`, `POST /api/inbox/gmail/disconnect`, `POST /api/inbox/gmail/mailbox` | account session + binding + CSRF + Origin | own mailbox; 60/account/min; mutations require modify grant and durable request ID |
+
+The public read routes explicitly documented with `HEAD` use the same access policy and status as their `GET` counterpart and return no response body. Anonymous account-session routes remain guarded, including their session-binding refusal.

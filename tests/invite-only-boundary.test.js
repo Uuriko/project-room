@@ -44,6 +44,22 @@ assert.ok(SERVED_CANDIDATES.length >= 60 && SERVED_CANDIDATES.includes("/api/hea
 // Keyed like routeKey(): parameters reduced to {}.
 const token = () => randomBytes(32).toString("base64url");
 const PROBES = {
+  "HEAD /api/health": [undefined, 200],
+  "HEAD /api/version": [undefined, 200],
+  "HEAD /api/ready": [undefined, 200],
+  "HEAD /api/guest-agent-links": [undefined, 200],
+  "HEAD /api/guest-invites": [undefined, 200],
+  "HEAD /api/public/receipts": [undefined, 200],
+  "HEAD /api/agent-identities/{}/keys": [undefined, 404],
+  "HEAD /api/agents/directory/{}": [undefined, 404],
+  "HEAD /api/agents/{}/card": [undefined, 404],
+
+  "GET /api/project-offers": [undefined, 200],
+  "HEAD /api/project-offers": [undefined, 200],
+  "GET /api/project-offers/{}": [undefined, 404],
+  "HEAD /api/project-offers/{}": [undefined, 404],
+  "GET /api/project-offers/{}/brief.md": [undefined, 404],
+  "HEAD /api/project-offers/{}/brief.md": [undefined, 404],
   "GET /api/auth/gmail/callback": [undefined, 200],
   "GET /api/health": [undefined, 200],
   // Hosted MCP is outside the /api template scan. Unauthenticated GET/POST
@@ -185,8 +201,14 @@ test("Node unauthenticated endpoint inventory equals its openapi security: [] se
     .map(route => [routeKey(route.method, route.path), route]));
   const served = new Map();
   for (const template of SERVED_CANDIDATES) {
-    for (const method of ["GET", "POST", "DELETE"]) {
-      const res = await raw(origin, concrete(template), { method, body: method === "GET" ? undefined : {} });
+    let getResponse;
+    for (const method of ["GET", "HEAD", "POST", "DELETE"]) {
+      const res = await raw(origin, concrete(template), { method, body: ["GET", "HEAD"].includes(method) ? undefined : {} });
+      if (method === "GET") getResponse = res;
+      // HEAD has no error envelope: use its GET counterpart to distinguish a
+      // missing-resource response from unsupported-method/fallthrough 404.
+      if (method === "HEAD" && res.status === 404 && (getResponse?.status !== 404 || code(getResponse) === "not_found")) continue;
+      if (method === "HEAD" && res.status === 422 && getResponse?.status === 422 && guarded(getResponse)) continue;
       if (guarded(res) || unserved(res)) continue;
       served.set(routeKey(method, template), `${method} ${template} -> ${res.status} ${code(res) ?? ""}`.trim());
     }

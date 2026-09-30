@@ -15,7 +15,7 @@ const v13Assets = [...v12Assets, "src/work-help.js"];
 const v14Assets = [...v13Assets, "src/help-offers.js"];
 const inboxAssets = [...v14Assets, "src/inbox-client.js", "src/inbox-ui.js", "src/inbox-quarantine-ui.js"];
 export const publicAssets = [inboxAssets[0], "about.html", "offers.html", "src/project-offers-ui.js", "src/project-offers.css", "join.html", "push-sw.js", inboxAssets[1], "src/member-display-names.js", "src/room-layout.js", ...inboxAssets.slice(2, 6), "src/human-push.js", "src/human-push-display.js", ...inboxAssets.slice(6), "src/account-setup-ui.js", "src/gmail-ui.js", "src/inbox-send-ui.js", "src/room-roster.js", "src/account-settings-ui.js", "src/auth-signin-ui.js", "src/agent-signin-ui.js", "src/agent-first-run.js", "src/invite-context.js", "src/request-access.js", "src/room-deep-link.js", "src/browser-session.js", "src/composer-files.js", "src/session-expiry.js", "src/agent-invite-ui.js", "src/referral-board.js", "src/land-queue-board.js", "src/join.js", "src/work-item-session.js", "src/work-loops.js", "src/work-recipes.js", "src/chat-suggestions.js", "src/share-invite-code.js", "src/handoff-envelope-ui.js", "src/dm-consents.js", "src/friend-bond.js", "src/needs-attention.js", "src/emoji.js", "src/emoji-catalog.js", "connectors/muse.md"];
-const assetsFor = (schema, inbox, sendUI = false, setupUI = false, gmailUI = false, layoutUI = false) => schema === 8 ? v8Assets : schema <= 10 ? v9Assets : schema === 11 ? v11Assets : schema === 12 ? v12Assets : schema === 13 ? v13Assets : inbox && schema >= 15 ? sendUI ? publicAssets.filter(path => (setupUI || path !== "src/account-setup-ui.js") && (gmailUI || path !== "src/gmail-ui.js") && (layoutUI || path !== "src/room-layout.js")) : inboxAssets : v14Assets;
+const assetsFor = (schema, inbox, sendUI = false, setupUI = false, gmailUI = false, layoutUI = false, offersUI = false) => schema === 8 ? v8Assets : schema <= 10 ? v9Assets : schema === 11 ? v11Assets : schema === 12 ? v12Assets : schema === 13 ? v13Assets : inbox && schema >= 15 ? sendUI ? publicAssets.filter(path => (setupUI || path !== "src/account-setup-ui.js") && (gmailUI || path !== "src/gmail-ui.js") && (layoutUI || path !== "src/room-layout.js") && (offersUI || !["offers.html", "src/project-offers-ui.js", "src/project-offers.css"].includes(path))) : inboxAssets : v14Assets;
 const required = [...v8Assets, "server.mjs", "package.json", "package-lock.json",
   ...["backup", "bootstrap", "claim-scopes", "deployment", "http", "invitation-evidence", "invitation-journal", "reminders",
     "return-brief", "return-selectors", "share-links", "store", "work-context", "writer-fence"].map(name => `server/${name}.mjs`),
@@ -32,7 +32,7 @@ optional.push("server/dm-consents.mjs", "server/public-face.mjs"); // consent-bo
 optional.push("server/bonds.mjs"); // agent Bond + peer DMs (imported by server/store.mjs and server/http.mjs)
 optional.push("server/membership-delegation-journal.mjs"); // append-only membership grant decisions
 optional.push("server/room-directory.mjs"); // #605 opt-in public room directory (imported by server/store.mjs)
-optional.push("server/project-offers.mjs", "src/contribution-brief.js", "src/paid-work-offers.js");
+optional.push("offers.html", "src/project-offers-ui.js", "src/project-offers.css", "server/project-offers.mjs", "src/contribution-brief.js", "src/paid-work-offers.js");
 optional.push("server/opportunities.mjs"); // opportunity feed v2: read-only open-work discovery (imported by server/http.mjs)
 optional.push("server/conversation-sync.mjs"); // bounded viewer-scoped conversation reads (imported by server/http.mjs)
 optional.push("src/dm-consents.js"); // DM consent browser view-model + API helpers (imported by src/app.js)
@@ -315,7 +315,7 @@ export function createRuntimePackage({ repository, commit, destination }) {
     mkdirSync(dirname(join(output, path)), { recursive: true, mode: 0o700 });
     writeFileSync(join(output, path), bytes, { mode: 0o600, flag: "wx" });
   }
-  const manifest = { format: 1, sourceCommit: commit, sourceTree: tree, runtime, publicAssets: assetsFor(runtime.schemaVersion, files.has("src/inbox-ui.js"), files.has("src/inbox-send-ui.js"), files.has("src/account-setup-ui.js"), files.has("src/gmail-ui.js"), files.has("src/room-layout.js")),
+  const manifest = { format: 1, sourceCommit: commit, sourceTree: tree, runtime, publicAssets: assetsFor(runtime.schemaVersion, files.has("src/inbox-ui.js"), files.has("src/inbox-send-ui.js"), files.has("src/account-setup-ui.js"), files.has("src/gmail-ui.js"), files.has("src/room-layout.js"), files.has("server/project-offers.mjs")),
     files: [...files].map(([path, bytes]) => ({ path, bytes: bytes.length, sha256: sha256(bytes) })),
     limitation: "Content consistency only; not trusted provenance, recovery freshness, hosted readiness or publication approval." };
   // Last write is the completion marker. A partial directory is not a package.
@@ -353,12 +353,14 @@ export function verifyRuntimePackage(directory, { expectedCommit } = {}) {
     `runtime manifest sourceCommit ${manifest.sourceCommit} does not match expected ${expectedCommit}`);
   check(Array.isArray(manifest.files), "runtime manifest files is not an array");
   const expectedAssets = assetsFor(manifest.runtime?.schemaVersion,
-    manifest.files.some(f => f.path === "src/inbox-ui.js"), manifest.files.some(f => f.path === "src/inbox-send-ui.js"), manifest.files.some(f => f.path === "src/account-setup-ui.js"), manifest.files.some(f => f.path === "src/gmail-ui.js"), manifest.files.some(f => f.path === "src/room-layout.js"));
+    manifest.files.some(f => f.path === "src/inbox-ui.js"), manifest.files.some(f => f.path === "src/inbox-send-ui.js"), manifest.files.some(f => f.path === "src/account-setup-ui.js"), manifest.files.some(f => f.path === "src/gmail-ui.js"), manifest.files.some(f => f.path === "src/room-layout.js"), manifest.files.some(f => f.path === "server/project-offers.mjs"));
   const missingAssets = expectedAssets.filter(a => !manifest.publicAssets.includes(a));
   const extraAssets = manifest.publicAssets.filter(a => !expectedAssets.includes(a));
   check(missingAssets.length === 0 && extraAssets.length === 0,
     `runtime manifest publicAssets mismatch: missing [${missingAssets.join(", ")}], extra [${extraAssets.join(", ")}]`);
   const listed = manifest.files.map(entry => entry.path);
+  const absentAssets = manifest.publicAssets.filter(path => !listed.includes(path));
+  check(absentAssets.length === 0, `runtime public assets missing from packaged files: ${absentAssets.join(", ")}`);
   check(new Set(listed).size === listed.length, "runtime manifest lists a file more than once");
   check(same([...listed].sort(), listed), "runtime manifest file list is not sorted");
   const missingListed = required.filter(path => !listed.includes(path));

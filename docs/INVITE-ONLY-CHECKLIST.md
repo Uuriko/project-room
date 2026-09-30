@@ -198,3 +198,5 @@ expiry, revocation, and rate limits.
   removed member and secret-free responses.
 
 Gmail mailbox OAuth return: `GET /api/auth/gmail/callback` is public but requires expiring, single-use, encrypted PKCE state bound to the initiating authenticated account session. It grants no Room or account login.
+
+The public read routes explicitly documented with `HEAD` use the same access policy and status as their `GET` counterpart and return no response body. Anonymous account-session routes remain guarded, including their session-binding refusal.
