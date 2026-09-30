@@ -174,7 +174,9 @@ export function createPendingStore({ now = Date.now, ttlMs = GITHUB_PENDING_TTL_
 }
 
 // Bounded JSON fetch mirroring google-oauth.mjs: 64 KiB cap, no redirects.
-async function fetchJson(fetchFn, url, init, { providerError, invalidError, allowArray = false }) {
+// With includeHeaders: true, returns { data, headers } so callers can
+// follow pagination links without a second request.
+async function fetchJson(fetchFn, url, init, { providerError, invalidError, allowArray = false, includeHeaders = false }) {
   let response;
   try {
     response = await fetchFn(url, { ...init, redirect: "error", signal: AbortSignal.timeout(15000) });
@@ -205,7 +207,7 @@ async function fetchJson(fetchFn, url, init, { providerError, invalidError, allo
   try { data = JSON.parse(Buffer.concat(chunks).toString("utf8")); }
   catch { fail(invalidError); }
   if (!data || typeof data !== "object" || (!allowArray && Array.isArray(data))) fail(invalidError);
-  return data;
+  return includeHeaders ? { data, headers: response.headers } : data;
 }
 
 export async function exchangeCodeForToken({ code, codeVerifier, clientId, clientSecret, redirectUri, fetchFn = fetch }) {
@@ -226,6 +228,36 @@ export async function exchangeCodeForToken({ code, codeVerifier, clientId, clien
   return data.access_token;
 }
 
+// /user/emails paginates (30 per page): a primary verified address beyond
+// page 1 used to resolve to null. Follow Link rel="next" up to a hard cap;
+// the next URL must stay on the GitHub API origin (never follow a
+// provider-supplied URL off-origin).
+const MAX_EMAIL_PAGES = 10;
+const nextPageUrl = headers => {
+  const link = headers?.get?.("link");
+  if (typeof link !== "string") return null;
+  const match = link.match(/<([^>]+)>\s*;\s*rel="next"/);
+  if (!match) return null;
+  let url;
+  try { url = new URL(match[1], GITHUB_EMAILS_URL); } catch { return null; }
+  return url.origin === new URL(GITHUB_EMAILS_URL).origin ? url.toString() : null;
+};
+async function fetchEmailPages(fetchFn, headers) {
+  const emails = [];
+  let url = GITHUB_EMAILS_URL;
+  for (let page = 0; page < MAX_EMAIL_PAGES; page++) {
+    const { data, headers: responseHeaders } = await fetchJson(fetchFn, url, { method: "GET", headers },
+      { providerError: "github_provider_rejected", invalidError: "github_user_invalid",
+        allowArray: true, includeHeaders: true });
+    if (!Array.isArray(data)) fail("github_user_invalid");
+    emails.push(...data);
+    const next = nextPageUrl(responseHeaders);
+    if (!next) break;
+    url = next;
+  }
+  return emails;
+}
+
 // Reads the GitHub user and their emails. Only an email the provider marks
 // primary AND verified is ever trusted for account linking — an unverified
 // address yields null and the account is keyed on the numeric subject.
@@ -240,11 +272,10 @@ export async function fetchGitHubUser(accessToken, fetchFn = fetch) {
     { providerError: "github_provider_rejected", invalidError: "github_user_invalid" });
   if (!Number.isSafeInteger(user.id) || user.id <= 0) fail("github_user_invalid");
   const login = typeof user.login === "string" && user.login.length > 0 ? user.login : null;
-  const emails = await fetchJson(fetchFn, GITHUB_EMAILS_URL, { method: "GET", headers },
-    { providerError: "github_provider_rejected", invalidError: "github_user_invalid", allowArray: true });
-  if (!Array.isArray(emails)) fail("github_user_invalid");
+  const emails = await fetchEmailPages(fetchFn, headers);
   const primary = emails.find(entry => entry && entry.primary === true && entry.verified === true
     && typeof entry.email === "string" && entry.email.length > 0);
   const email = primary ? primary.email : null;
   return { id: user.id, login, email };
 }
+

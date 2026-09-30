@@ -22,7 +22,10 @@ const check = (condition, message) => { if (!condition) fail("invalid_digest", m
 
 const isoOf = value => {
   check(typeof value === "string" && Number.isFinite(Date.parse(value)), "since/occurredAt must be parseable timestamps");
-  return value;
+  // Canonical UTC form: non-canonical but parseable inputs ("2026-09-30
+  // 10:00:00", offsets) would otherwise misorder under the string
+  // comparisons and localeCompare sorts below.
+  return new Date(value).toISOString();
 };
 const arrivalOf = value => {
   check(value !== null && typeof value === "object" && !Array.isArray(value), "arrivals must be objects");
@@ -38,7 +41,7 @@ const arrivalOf = value => {
     check(typeof value.spamScore === "number" && value.spamScore >= 0 && value.spamScore <= 100, "arrival spamScore must be 0..100");
   if (value.matchedRules !== undefined && value.matchedRules !== null) check(Array.isArray(value.matchedRules), "arrival matchedRules must be a list");
   if (value.sla !== undefined && value.sla !== null) check(typeof value.sla === "object" && !Array.isArray(value), "arrival sla must be an object");
-  return value;
+  return { ...value, occurredAt: isoOf(value.occurredAt) };
 };
 // Default triage wiring: the shared decider over the arrival's own signals.
 // Spam stays flag-only in the digest (task 33's default): a quarantined item

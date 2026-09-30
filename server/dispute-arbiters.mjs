@@ -35,7 +35,20 @@ export function createArbiters() {
     }
     const vDel = norm(verifier.delegatedChain);
     const eDel = norm(executor.delegatedChain);
-    if (vDel && eDel && (vDel.includes(eDel) || eDel.includes(vDel)))
+    // Lineage containment on segment boundaries: chains are "a>b>c"
+    // delegation paths, so "agent1" must not match "agent12" via substring.
+    // Overlap means one chain's full segment sequence sits inside the
+    // other as a contiguous run — i.e. one party is downstream of (or on
+    // the same delegation line as) the other. Merely sharing the root
+    // delegator ("john>instinct" vs "john>quill") is not overlap.
+    const segments = s => String(s).split(">").map(x => x.trim()).filter(Boolean);
+    const containsRun = (hay, needle) =>
+      needle.length > 0 && needle.length <= hay.length &&
+      hay.some((_, i) => needle.every((seg, j) => hay[i + j] === seg));
+    const vSeg = vDel ? segments(vDel) : null;
+    const eSeg = eDel ? segments(eDel) : null;
+    const chainOverlap = vSeg && eSeg && (containsRun(vSeg, eSeg) || containsRun(eSeg, vSeg));
+    if (chainOverlap)
       return { independent: false, reason: "delegated chain overlap" };
     return { independent: true, reason: "independent" };
   };

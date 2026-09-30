@@ -277,12 +277,14 @@ export function detectRefundLoops(edges, { maxHops = 4 } = {}) {
   const dfs = (start, current, path, depth) => {
     if (depth > maxHops) return;
     for (const next of adj.get(current) || []) {
-      if (next === start && path.length >= 1) {
+      if (next === start) {
+        // A cycle has path.length + 1 edges (the closing edge back to
+        // start): a self-loop is 1 hop, a triangle is 3.
         const cycle = [start, ...path, start];
         const key = cycle.join(">");
         if (!seen.has(key)) {
           seen.add(key);
-          loops.push({ hub: start, path: cycle, hops: path.length });
+          loops.push({ hub: start, path: cycle, hops: path.length + 1 });
         }
         continue;
       }
