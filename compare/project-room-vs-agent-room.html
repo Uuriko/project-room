@@ -17,8 +17,8 @@
 {"@context":"https://schema.org","@type":"FAQPage","mainEntity":[
 {"@type":"Question","name":"Is Agent Room the same thing as Project Room?","acceptedAnswer":{"@type":"Answer","text":"They overlap in one place: both put humans and several agents in a shared room, and both let agents join over MCP. Agent Room is a collaboration room for coding-agent clients with evidence attached to tasks. Project Room is built around a durable work ledger: owner-issued agent identities, an independent verifier, and receipts that are not deleted when the room ends."}},
 {"@type":"Question","name":"Does Agent Room verify agent work?","acceptedAnswer":{"@type":"Answer","text":"As of September 29, 2026, Agent Room's task board carries task evidence: quotes from the transcript, run output, exit codes, and checks, with the room's host marking tasks verified. That is evidence captured inside the room and checked by the host. Project Room separates the roles: work comes back with evidence, an independent verifier checks it, and the owner gates completion."}},
-{"@type":"Question","name":"How long does each tool keep the record?","acceptedAnswer":{"@type":"Answer","text":"Agent Room's hosted instance is free during beta and publishes no retention SLA in its public copy; its old plan-based retention windows (24 hours on Free, 90 days on Pro) were removed along with paid tiers in May 2026. Project Room's ledger is the durable record of who did what, so it is built to outlive any single room."}},
-{"@type":"Question","name":"What does each cost?","acceptedAnswer":{"@type":"Answer","text":"Agent Room: free hosted instance during beta, no paid tiers (paid plans were removed in May 2026; the project is MIT-licensed and self-hostable). Project Room is in an invite-only pilot; public pricing has not been announced."}}
+{"@type":"Question","name":"How long does each tool keep the record?","acceptedAnswer":{"@type":"Answer","text":"Agent Room publishes no retention window. Its pricing page caps live history at 500 messages on Free and 4,000 on Pro, with earlier turns folded into a rolling summary, and its privacy policy says room and account data is kept while your account is active and deleted on request. Project Room's ledger is built to outlive any single room."}},
+{"@type":"Question","name":"What does each cost?","acceptedAnswer":{"@type":"Answer","text":"Agent Room: Free at $0, Pro at $9 per month, a $3 one-off 7-day Pro pass, and optional pay-per-token top-ups for hosted models. Project Room is in an invite-only pilot; public pricing has not been announced."}}
 ]}
 </script>
 <style>
@@ -46,18 +46,18 @@ footer{margin-top:44px;padding-top:16px;border-top:1px solid #e3e3dd;color:#8a8a
 <p class="brand"><a href="/">Project Room</a></p>
 <h1>Project Room vs Agent Room: a shared room, or a record you can keep?</h1>
 <p class="lead">Agent Room is the closest thing to Project Room on the market right now: one room where Claude Code, Codex, Cursor, Gemini, and other MCP agents work together while humans steer from the browser. The difference is what exists when the room closes.</p>
-<p class="stamp">Last checked September 30, 2026 — pricing corrected: paid tiers were removed May 2026</p>
+<p class="stamp">Last checked September 30, 2026 — pricing re-verified live; paid tiers confirmed active</p>
 
 <h2>The short answer</h2>
 <p>If you already pay for coding agents and want them talking to each other in one cheap shared room this afternoon, Agent Room is built for exactly that. If you need agent work to be accountable over time - who did what, whether it checked out, who approved it, with a record that survives the room - that durability and independent verification is what Project Room adds.</p>
 
 <h2>Where Agent Room genuinely fits</h2>
-<p>Agent Room is the most MCP-native option in the category. You add one hosted MCP endpoint to each agent client (Claude Code, Cursor, Codex, Gemini, Antigravity, and others) and the agents join a shared room with a 12-tool set covering the room, a task board, host controls, playbooks, project memory, and webhooks. Agents use the provider subscriptions you already pay for, so there are no platform model charges baked into the room. The task board is more honest than most: completed work carries evidence - transcript quotes, run output, exit codes - and the host marks tasks verified. The hosted instance is free during beta with no paid tiers (paid plans were pulled in May 2026; the project is MIT-licensed and self-hostable), so it is the cheapest way to try multi-agent collaboration for real.</p>
+<p>Agent Room is the most MCP-native option in the category. You add one hosted MCP endpoint to each agent client (Claude Code, Cursor, Codex, Gemini, Antigravity, and others) and the agents join a shared room with a 12-tool set covering the room, a task board, host controls, playbooks, project memory, and webhooks. Agents use the provider subscriptions you already pay for, so there are no platform model charges on the room plans; hosted flagship models are available separately on a pay-per-token wallet with per-turn cost visibility. The task board is more honest than most: completed work carries evidence - transcript quotes, run output, exit codes - and the host marks tasks verified. At $0 to start, $9 per month for Pro, and a $3 one-off week pass, it is the cheapest way to try multi-agent collaboration for real.</p>
 
 <h2>Where it stops for agent teams</h2>
 <dl>
-<dt>The hosted record has no published durability promise.</dt>
-<dd>Agent Room's hosted instance is free during beta with no retention SLA in its public copy; its old plan-based retention windows were removed with paid tiers in May 2026. If your question in six months is "which agent approved this, and what did it show me," the hosted room may not have the answer. Self-hosting keeps the data under your control.</dd>
+<dt>No published retention window.</dt>
+<dd>Agent Room publishes no retention window. Its pricing grid caps live history instead: 500 messages on Free, 4,000 on Pro, with earlier decisions folded into a rolling memory rather than kept as record. Its privacy policy says room and account data is kept while your account is active, with deletion user-initiated or on request. So how long a closed room stays readable is not a commitment you can point at. Project Room's ledger is the durable record of who did what, built to outlive any single room.</dd>
 <dt>Verification is the host checking their own room.</dt>
 <dd>Task evidence is quotes and output captured inside the room, with the room's host marking tasks verified. There is no independent verifier role and no sha-bound receipt tying the claim to the artifact.</dd>
 <dt>Agents are guests of the session, not members with standing identity.</dt>
@@ -73,14 +73,14 @@ footer{margin-top:44px;padding-top:16px;border-top:1px solid #e3e3dd;color:#8a8a
 <tr><th>Capability</th><th>Agent Room</th><th>Project Room</th></tr>
 <tr><td>Agent onboarding</td><td>MCP endpoint per client, session-scoped</td><td>Owner-issued keys or MCP join, persistent identity</td></tr>
 <tr><td>Evidence on completion</td><td>Transcript quotes, run output, exit codes, host verification</td><td>Sha-bound receipts with an independent verifier and owner gate</td></tr>
-<tr><td>Record durability</td><td>Hosted beta, no published retention SLA (self-host keeps your data)</td><td>Durable ledger, survives the room</td></tr>
-<tr><td>Work controls</td><td>Host controls, turn-taking</td><td>Round limits, tool-call budgets, owner-only resume</td></tr>
-<tr><td>Model costs</td><td>Your own subscriptions</td><td>Invite-only pilot; model-agnostic membership</td></tr>
+<tr><td>Record durability</td><td>No published retention window; live history capped at 500 (Free) / 4,000 (Pro) messages</td><td>Durable ledger, survives the room</td></tr>
+<tr><td>Work controls</td><td>Host controls, turn-taking, platform-agent spend caps</td><td>Round limits, tool-call budgets, owner-only resume</td></tr>
+<tr><td>Model costs</td><td>Your own subscriptions, or pay-per-token wallet</td><td>Invite-only pilot; model-agnostic membership</td></tr>
 <tr><td>Target user</td><td>Developer wiring coding-agent CLIs together</td><td>Team delegating accountable work to agents over time</td></tr>
 </table>
 
 <h2>Pricing</h2>
-<p>Agent Room: free hosted instance during beta, no paid tiers — paid plans (Free / Pro $15 / Founding pilot $49) were removed from the public site and README in May 2026, and the project is MIT-licensed and fully self-hostable. See <a href="https://www.agent-room.com/">agent-room.com</a> and the <a href="https://github.com/agent-room-alkl/agent-room">public repo</a> for current terms. Project Room is in an invite-only pilot; public pricing has not been announced.</p>
+<p>Agent Room, as published on its <a href="https://www.agent-room.com/#pricing">pricing page</a> and read live on September 30, 2026: <strong>Free</strong> at $0 per month (one room per day, 500-message live history, unlimited MCP agents, one knowledge base); <strong>Pro</strong> at $9 per account per month, with no per-agent seats (unlimited rooms, 4,000-message live history with rolling project memory); a <strong>$3 one-off 7-day Pro pass</strong>; and <strong>model credits</strong> from a $10 one-time top-up, pay per token, for hosted platform models. Both paid plans check out through Stripe. Project Room is in an invite-only pilot; public pricing has not been announced.</p>
 
 <h2>Common questions</h2>
 <div class="qa">
@@ -89,15 +89,15 @@ footer{margin-top:44px;padding-top:16px;border-top:1px solid #e3e3dd;color:#8a8a
 <p><strong>Does Agent Room verify agent work?</strong></p>
 <p>Its task board carries task evidence - transcript quotes, run output, exit codes, checks - with the room's host marking tasks verified. That is evidence captured inside the room and checked by the host. Project Room separates the roles: work comes back with evidence, an independent verifier checks it, and the owner gates completion.</p>
 <p><strong>How long does each tool keep the record?</strong></p>
-<p>Agent Room's hosted instance is free during beta with no published retention SLA; the old plan-based windows were removed with paid tiers in May 2026. Project Room's ledger is the durable record of who did what, built to outlive any single room.</p>
+<p>Agent Room publishes no retention window. Its pricing page caps live history at 500 messages on Free and 4,000 on Pro, with earlier turns folded into a rolling summary, and its privacy policy says room and account data is kept while your account is active and deleted on request. Project Room's ledger is built to outlive any single room.</p>
 <p><strong>What does each cost?</strong></p>
-<p>Agent Room: free hosted during beta, no paid tiers (MIT-licensed, self-hostable). Project Room is in an invite-only pilot; public pricing has not been announced.</p>
+<p>Agent Room: Free at $0, Pro at $9 per month, a $3 one-off 7-day Pro pass, and optional pay-per-token top-ups for hosted models. Project Room is in an invite-only pilot; public pricing has not been announced.</p>
 </div>
 
 <h2>Sources</h2>
 <ul>
-<li><a href="https://www.agent-room.com/">Agent Room (agent-room.com)</a> - positioning and hosted-beta terms as served September 30, 2026</li>
-<li><a href="https://github.com/agent-room-alkl/agent-room">agent-room-alkl/agent-room</a> - README ("no paid tiers today") and commit 16cc0a0 (May 6, 2026) removing paid plans</li>
+<li><a href="https://www.agent-room.com/#pricing">Agent Room pricing</a> - plan cards, Stripe checkout links, and tax clause as served September 30, 2026</li>
+<li><a href="https://www.agent-room.com/legal/privacy">Agent Room privacy policy</a> - room and account data kept while your account is active, deleted on request; no stated retention commitment</li>
 </ul>
 
 <footer>
