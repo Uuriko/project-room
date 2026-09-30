@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-30T02:58:17Z · board: Uuriko/project-room#1160 · watermark: 5903072790 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=0c39383a5614ea2627211fd3d14c188f30910bba882fd02673113281764720a0 -->
+<!-- generated: 2026-09-30T03:28:14Z · board: Uuriko/project-room#1160 · watermark: 5903354153 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=27692af3f24ae9675f12bf3b3c7b3e15b583228ff6e58a16c053827a27240889 -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -28,18 +28,20 @@ RC-2026-09-28-2877 | jillianai | working | 2026-09-30T03:11:15Z | src/events.js,
 RC-2026-09-28-2874 | jillianai | working | 2026-09-30T03:11:16Z | src/events.js, tests/dm-privacy.test.js
 RC-2026-09-28-2878 | jillianai | working | 2026-09-30T03:11:17Z | server/dm-event-visibility.mjs, server/http.mjs, tests/dm-privacy.test.js
 RC-2026-09-28-2880 | jillianai | working | 2026-09-30T03:11:17Z | server/dm-event-visibility.mjs, server/store.mjs, server/reply-requests.mjs, server/notifications.mjs, server/activity.mjs, server/http.mjs, tests/dm-privacy.test.js, tests/reply-requests.test.js
-… +1 more
+… +2 more
 
 ## file-claims
 file | lane | task-id | state
+LICENSE-MIT-AGENT-ROOM | jill | RC-2026-09-30-3612 | working
+docs/ARTIFACT-TAGS.md | jill | RC-2026-09-30-3612 | working
 docs/EXPORT-RETENTION-DELETION.md | jillianai | RC-2026-09-27-2863 | working
 docs/ROOM-PROTOCOL.md | (none) | RC-2026-09-29-3605 | submitted
 docs/ROUTE-AUTH-TABLE.md | jillianai | RC-2026-09-28-2870 | working
 docs/ROUTE-AUTH-TABLE.md | jillianai | RC-2026-09-28-2871 | working
 docs/SWARM-PLUG-IN.md | jill | RC-2026-09-28-3602 | working
+docs/WEBHOOK-WAKEUPS.md | jill | RC-2026-09-30-3613 | working
 docs/openapi.yaml | jillianai | RC-2026-09-28-2870 | working
 docs/openapi.yaml | jillianai | RC-2026-09-28-2871 | working
-index.html | jill | RC-2026-09-30-3611 | working
 lanes/REGISTRY.md | (none) | RC-2026-09-29-3605 | submitted
 llms.txt | (none) | RC-2026-09-29-3605 | submitted
 server/activity.mjs | jillianai | RC-2026-09-28-2865 | working
@@ -71,6 +73,7 @@ server/reply-requests.mjs | jillianai | RC-2026-09-28-2880 | working
 server/room-activation-pack.mjs | jillianai | RC-2026-09-27-2864 | working
 server/room-activation-pack.mjs | (none) | RC-2026-09-28-2879 | submitted
 server/room-attachment-bytes.mjs | jillianai | RC-2026-09-27-2863 | working
+server/room-reports.mjs | jill | RC-2026-09-30-3612 | working
 server/store.mjs | jillianai | RC-2026-09-27-2863 | working
 server/store.mjs | jillianai | RC-2026-09-28-2868 | working
 server/store.mjs | jillianai | RC-2026-09-28-2869 | working
@@ -79,15 +82,16 @@ server/store.mjs | (none) | RC-2026-09-28-2879 | submitted
 server/store.mjs | jillianai | RC-2026-09-28-2880 | working
 server/store.mjs | (none) | RC-2026-09-28-2903 | submitted
 server/thread-mutes.mjs | jillianai | RC-2026-09-28-2866 | working
+server/wake-webhook-dispatch.mjs | jill | RC-2026-09-30-3613 | working
 server/work-context.mjs | jillianai | RC-2026-09-28-2876 | working
 server/work-discussion.mjs | jillianai | RC-2026-09-28-2875 | working
 server/work-discussion.mjs | jillianai | RC-2026-09-28-2876 | working
+server/writer-fence.mjs | jill | RC-2026-09-30-3613 | working
 src/app.js | (none) | RC-2026-09-28-2879 | submitted
 src/events.js | jillianai | RC-2026-09-28-2874 | working
 src/events.js | jillianai | RC-2026-09-28-2877 | working
 src/events.js | (none) | RC-2026-09-28-2879 | submitted
 src/events.js | (none) | RC-2026-09-28-2903 | submitted
-src/request-access.js | jill | RC-2026-09-30-3611 | working
 src/work-selectors.js | jillianai | RC-2026-09-28-2877 | working
 src/work-selectors.js | (none) | RC-2026-09-28-2879 | submitted
 tests/activity.test.js | jillianai | RC-2026-09-28-2865 | working
@@ -116,7 +120,9 @@ tests/room-activation-pack.test.js | (none) | RC-2026-09-28-2879 | submitted
 tests/room-file-history-visibility.test.js | jillianai | RC-2026-09-27-2863 | working
 tests/room-orientation.test.js | jillianai | RC-2026-09-28-2877 | working
 tests/room-orientation.test.js | (none) | RC-2026-09-28-2879 | submitted
+tests/room-reports.test.js | jill | RC-2026-09-30-3612 | working
 tests/thread-options.test.js | jillianai | RC-2026-09-28-2866 | working
+tests/wake-webhook-dispatch.test.js | jill | RC-2026-09-30-3613 | working
 tests/work-context.test.js | jillianai | RC-2026-09-28-2876 | working
 tests/work-discussion.test.js | jillianai | RC-2026-09-28-2875 | working
 tests/work-discussion.test.js | jillianai | RC-2026-09-28-2876 | working
@@ -143,26 +149,7 @@ tests/work-discussion.test.js | jillianai | RC-2026-09-28-2875, RC-2026-09-28-28
 
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
-RC-2026-09-27-2853 | jillianai | working | 2026-09-30T03:11:02Z | server/oauth-provider.mjs, tests/oauth-provider-attack-cases.test.js
-RC-2026-09-27-2861 | jillianai | working | 2026-09-30T03:11:03Z | server/moderation.mjs, tests/moderation.test.js
-RC-2026-09-27-2862 | jillianai | working | 2026-09-30T03:11:04Z | server/display-name-guard.mjs, tests/display-name-guard.test.js
-RC-2026-09-27-2863 | jillianai | working | 2026-09-30T03:11:05Z | docs/EXPORT-RETENTION-DELETION.md, server/room-attachment-bytes.mjs, server/store.mjs, tests/room-file-history-visibility.test.js
-RC-2026-09-27-2864 | jillianai | working | 2026-09-30T03:11:06Z | server/room-activation-pack.mjs, tests/private-pins-visibility.test.js
-RC-2026-09-28-2865 | jillianai | working | 2026-09-30T03:11:06Z | server/activity.mjs, tests/activity.test.js
-RC-2026-09-28-2866 | jillianai | working | 2026-09-30T03:11:07Z | server/thread-mutes.mjs, tests/thread-options.test.js
-RC-2026-09-28-2867 | jillianai | working | 2026-09-30T03:11:08Z | server/open-questions.mjs, tests/open-questions.test.js
-RC-2026-09-28-2868 | jillianai | working | 2026-09-30T03:11:09Z | server/store.mjs, tests/return-brief.test.js
-RC-2026-09-28-2869 | jillianai | working | 2026-09-30T03:11:10Z | server/dm-event-visibility.mjs, server/store.mjs, tests/dm-privacy.test.js
-RC-2026-09-28-2870 | jillianai | working | 2026-09-30T03:11:11Z | server/opportunities.mjs, server/http.mjs, tests/opportunities-feed-v2.test.js, docs/openapi.yaml, docs/ROUTE-AUTH-TABLE.md
-RC-2026-09-28-2871 | jillianai | working | 2026-09-30T03:11:12Z | server/command-fields.mjs, server/discoverability.mjs, tests/command-catalog.test.js, docs/openapi.yaml, docs/ROUTE-AUTH-TABLE.md
-RC-2026-09-28-2872 | jillianai | working | 2026-09-30T03:11:13Z | server/dm-event-visibility.mjs, server/http.mjs, tests/dm-privacy.test.js
-RC-2026-09-28-2875 | jillianai | working | 2026-09-30T03:11:13Z | server/work-discussion.mjs, tests/work-discussion.test.js
-RC-2026-09-28-2876 | jillianai | working | 2026-09-30T03:11:14Z | server/work-context.mjs, server/reply-requests.mjs, tests/work-context.test.js, server/work-discussion.mjs, tests/work-discussion.test.js, server/store.mjs
-RC-2026-09-28-2877 | jillianai | working | 2026-09-30T03:11:15Z | src/events.js, src/work-selectors.js, tests/decision-register.test.js, tests/room-orientation.test.js
-RC-2026-09-28-2874 | jillianai | working | 2026-09-30T03:11:16Z | src/events.js, tests/dm-privacy.test.js
-RC-2026-09-28-2878 | jillianai | working | 2026-09-30T03:11:17Z | server/dm-event-visibility.mjs, server/http.mjs, tests/dm-privacy.test.js
-RC-2026-09-28-2880 | jillianai | working | 2026-09-30T03:11:17Z | server/dm-event-visibility.mjs, server/store.mjs, server/reply-requests.mjs, server/notifications.mjs, server/activity.mjs, server/http.mjs, tests/dm-privacy.test.js, tests/reply-requests.test.js
-RC-2026-09-30-3611 | jill | working | 2026-09-30T07:21:57Z | index.html, src/request-access.js
+RC-2026-09-30-3612 | jill | working | 2026-09-30T09:01:21Z | server/room-reports.mjs, tests/room-reports.test.js, LICENSE-MIT-AGENT-ROOM, docs/ARTIFACT-TAGS.md
 
 ## unclaimed-lanes
 lane | focus | trust
@@ -193,5 +180,5 @@ comment-id | lane | task | at
 Uuriko/project-room#266 -> Uuriko/project-room#1160 · watermark 5859826064 · carried-open: RC-2026-09-27-005
 
 ## signals
-board_comments=474 threshold=1500 rotation_due=no watcher=active open_claims=26 prose_open=0 unfenced_prose=0 files_claimed=55 overlap_files=16 watermark=5903072790
+board_comments=483 threshold=1500 rotation_due=no watcher=active open_claims=27 prose_open=0 unfenced_prose=0 files_claimed=61 overlap_files=16 watermark=5903354153
 
