@@ -316,6 +316,22 @@ function parseArgs(argv) {
     if (typeof roomId !== "string" || roomId.length < 1 || args.length !== 2) return null;
     return { command: "request-access", roomId };
   }
+  if (args[0] === "claim") {
+    const workItemId = args[1];
+    if (typeof workItemId !== "string" || workItemId.length < 1) return null;
+    const out = { command: "claim", workItemId, leaseHours: undefined, roomId: undefined };
+    for (let i = 2; i < args.length; i++) {
+      if (args[i] === "--lease-hours" && args[i + 1]) {
+        const hours = Number(args[++i]);
+        if (!Number.isInteger(hours) || hours < 1 || hours > 720) return null;
+        out.leaseHours = hours;
+        continue;
+      }
+      if (args[i] === "--room" && args[i + 1]) { out.roomId = args[++i]; continue; }
+      return null;
+    }
+    return out;
+  }
   const command = args[0] === "doctor" || args[0] === "pull" || args[0] === "wake" ? args[0] : null;
   if (!command) return null;
   const execute = args.includes("--execute");
@@ -349,6 +365,28 @@ export async function fileAccessRequest({ env = process.env, fetchImpl = fetch, 
   return { ok: true, requestId: parsed.requestId || requestId, status: parsed.status, roomId: parsed.roomId || roomId };
 }
 
+export async function claimWork({ env = process.env, fetchImpl = fetch, workItemId, leaseHours, roomId } = {}) {
+  const connection = connectionFromEnv(env);
+  if (typeof workItemId !== "string" || workItemId.length < 1 || workItemId.length > 128) fail("invalid_attention_item", "workItemId required");
+  const room = (typeof roomId === "string" && roomId) ? roomId : connection.roomId;
+  const path = `/api/rooms/${encodeURIComponent(room)}/work-claims/${encodeURIComponent(workItemId)}/claim`;
+  const body = { ...(leaseHours === undefined ? {} : { leaseHours }) };
+  const parsed = await jsonRequest(connection, path, { fetchImpl, method: "POST", body });
+  const token = connection.token;
+  const safe = JSON.parse(JSON.stringify(parsed));
+  const blob = JSON.stringify(safe);
+  if (blob.includes(token)) fail("secret_in_plan");
+  return {
+    ok: true,
+    workItemId: parsed.id || workItemId,
+    roomId: room,
+    state: parsed.state || null,
+    owner: parsed.owner || parsed.claimedBy || null,
+    leaseExpiresAt: parsed.leaseExpiresAt ?? null,
+    fileWarnings: Array.isArray(parsed.fileWarnings) ? parsed.fileWarnings : []
+  };
+}
+
 function readWakeBody() {
   const text = readFileSync(0, "utf8");
   try { return JSON.parse(text); }
@@ -358,7 +396,7 @@ function readWakeBody() {
 export async function main(argv = process.argv, env = process.env, io = { log: console.log, error: console.error }) {
   const parsed = parseArgs(argv);
   if (!parsed) {
-    io.error("Usage: node scripts/grok-room-host.mjs doctor | pull [--execute] | wake [--execute] | request-access <roomId>");
+    io.error("Usage: node scripts/grok-room-host.mjs doctor | pull [--execute] | wake [--execute] | request-access <roomId> | claim <workItemId> [--lease-hours N] [--room ROOM]");
     process.exitCode = 2;
     return;
   }
@@ -366,7 +404,8 @@ export async function main(argv = process.argv, env = process.env, io = { log: c
     const result = parsed.command === "doctor" ? await doctor({ env })
       : parsed.command === "wake" ? await ingestWake({ env, body: readWakeBody(), execute: parsed.execute })
         : parsed.command === "request-access" ? await fileAccessRequest({ env, roomId: parsed.roomId })
-          : await pull({ env, execute: parsed.execute });
+          : parsed.command === "claim" ? await claimWork({ env, workItemId: parsed.workItemId, leaseHours: parsed.leaseHours, roomId: parsed.roomId })
+            : await pull({ env, execute: parsed.execute });
     io.log(JSON.stringify(result));
     if (parsed.command === "doctor" && result.ok === false) process.exitCode = 1;
   } catch (error) {

@@ -8,7 +8,7 @@ import {
   pendingWakeToItem, attentionKey, selectUnhandled, markHandled, emptyJournal,
   loadJournal, buildRunPlan, assertPlanSafe, parseAttentionItem, childEnvFor, emptyAttentionNext, countKinds
 } from "../client/grok-host.mjs";
-import { pull, doctor, ingestWake, writeJournalFile, readJournalFile, loadPendingAccess, rememberPendingAccess, writePendingAccessFile, fileAccessRequest } from "../scripts/grok-room-host.mjs";
+import { pull, doctor, ingestWake, writeJournalFile, readJournalFile, loadPendingAccess, rememberPendingAccess, writePendingAccessFile, fileAccessRequest, claimWork as hostClaim } from "../scripts/grok-room-host.mjs";
 import { saveAgentConnection } from "../client/agent-connection.mjs";
 
 const secret = "pri_abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG";
@@ -221,6 +221,39 @@ test("doctor reports pending admissions from the saved request list", async t =>
   assert.equal(result.ok, true);
   assert.deepEqual(result.pendingAdmissions, [{ requestId: "ar_1", roomId: "build-together-32f67587", status: "pending" }]);
   assert.equal(JSON.stringify(result).includes(secret), false);
+});
+
+test("claim posts the existing work-claims lease and redacts the bearer", async t => {
+  const directory = fixtureDir();
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  let posted = null;
+  const fetchImpl = async (url, opts = {}) => {
+    posted = { url: String(url), body: JSON.parse(opts.body || "{}") };
+    return new Response(JSON.stringify({
+      id: "w1", state: "claimed", owner: "ai_x", leaseExpiresAt: 1_800_000_000_000, fileWarnings: []
+    }), { status: 200 });
+  };
+  const result = await hostClaim({
+    env: { ROOM_AGENT_CONFIG: directory }, fetchImpl, workItemId: "w1", leaseHours: 6
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.state, "claimed");
+  assert.equal(result.workItemId, "w1");
+  assert.match(posted.url, /\/work-claims\/w1\/claim$/);
+  assert.equal(posted.body.leaseHours, 6);
+  assert.equal(JSON.stringify(result).includes(secret), false);
+});
+
+test("claim surfaces work_claim_conflict when another agent holds the lease", async t => {
+  const directory = fixtureDir();
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const fetchImpl = async () => new Response(JSON.stringify({
+    error: { code: "work_claim_conflict", message: "already claimed" }
+  }), { status: 409 });
+  await assert.rejects(
+    hostClaim({ env: { ROOM_AGENT_CONFIG: directory }, fetchImpl, workItemId: "w1" }),
+    error => error.code === "work_claim_conflict"
+  );
 });
 
 test("fileAccessRequest remembers the pending row without putting the secret in JSON", async t => {

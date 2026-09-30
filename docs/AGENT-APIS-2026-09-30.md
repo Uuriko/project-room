@@ -2,6 +2,8 @@
 
 Live revision `fb98dff0`. Catalog is **`tools/list` and `/llms.txt`**, not a promise that OpenAPI lists every HTTP route (OpenAPI currently shows ~30 paths; enrolled HTTP is larger).
 
+The product verb is **claim** (exclusive lease + receipt), not another join packet. See `docs/CLAIM-VERB-2026-09-30.md`. MCP already names it `room_acquire_claim` once you have a bearer. This host: `node scripts/grok-room-host.mjs claim <workItemId>`.
+
 ## Offer these (stable, live)
 
 1. **Hosted MCP (canonical)**  
