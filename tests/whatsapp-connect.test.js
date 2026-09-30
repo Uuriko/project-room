@@ -236,3 +236,19 @@ describe('whatsapp-connect', () => {
     assert.deepEqual(states, ['disconnected', 'code-staged', 'linking', 'connected']);
   });
 });
+
+describe('L-P2-15: default code generator uses a CSPRNG', () => {
+  it('does not touch Math.random (uses crypto.getRandomValues)', () => {
+    const origRandom = Math.random;
+    Math.random = () => { throw new Error('Math.random must not be used for pairing codes'); };
+    try {
+      const wa = createWhatsAppConnect(); // no deps.code override: default generator
+      for (let i = 0; i < 25; i++) {
+        const { id } = wa.createConnection();
+        wa.stageCode(id, '+15551234567'); // stageCode throws if the code malforms
+      }
+    } finally {
+      Math.random = origRandom;
+    }
+  });
+});

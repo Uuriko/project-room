@@ -69,10 +69,23 @@ function waError(code, message, detail) {
   return err;
 }
 
-/** Default pairing-code generator: random 8 digits as XXXX-XXXX. */
+// 2026-09-30 (phase-2 gap audit L-P2-15): default pairing-code generator.
+// Uses a CSPRNG (crypto.getRandomValues), not Math.random — pairing codes
+// are short-lived bearer secrets. The injectable deps.code override is kept
+// for tests.
 function randomCode() {
-  const digits = Array.from({ length: 8 }, () => Math.floor(Math.random() * 10)).join('');
-  return `${digits.slice(0, 4)}-${digits.slice(4)}`;
+  // Rejection-sample bytes < 250 so each digit is uniform (250 % 10 === 0).
+  const digits = [];
+  const buf = new Uint8Array(16);
+  while (digits.length < 8) {
+    crypto.getRandomValues(buf);
+    for (const b of buf) {
+      if (b < 250) digits.push(String(b % 10));
+      if (digits.length === 8) break;
+    }
+  }
+  const code = digits.join('');
+  return `${code.slice(0, 4)}-${code.slice(4)}`;
 }
 
 /** Keep only the last 4 digits — never store the raw phone number. */
