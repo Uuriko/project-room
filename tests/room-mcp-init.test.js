@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync, writeFileSync, mkdirSync, existsSync, statSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -159,4 +159,36 @@ test("parseArgs validates clients and flags", () => {
   assert.throws(() => parseArgs(["notaclient"]), /unknown client/);
   assert.throws(() => parseArgs(["--bogus"]), /unknown flag/);
   return assert.rejects(() => installTarget("notaclient", {}), /unknown install target/);
+});
+
+// H-18 regression: the atomic rewrite wrote the temp file with the default
+// mode and renamed it over the original, so a pre-existing 0600 config came
+// back 0644/0660 — loosening a file that may hold unrelated auth tokens.
+// Contract: the atomic rewrite preserves the original file's mode, and newly
+// created credential-bearing configs default to 0600.
+// Credible regression: the pre-fix writeJsonAtomic leaves the tmp file at the
+// umask default -> the 0600 assertion fails after rewrite.
+// Existing coverage gap: no mode assertions anywhere in this suite.
+// Real boundary (installTarget with a real temp home); no new production seams.
+test("copilot install preserves a pre-existing 0600 config mode", async t => {
+  const home = tempHome(t);
+  const copilotHome = join(home, ".copilot");
+  mkdirSync(copilotHome, { recursive: true });
+  const path = join(copilotHome, "mcp-config.json");
+  writeFileSync(path, JSON.stringify({ mcpServers: {} }) + "\n");
+  chmodSync(path, 0o600);
+  const result = await installTarget("copilot", { home, env: { COPILOT_HOME: copilotHome }, run: failRun, platform: "linux" });
+  assert.equal(result.changes.length, 1, "server entry was written");
+  assert.equal(statSync(path).mode & 0o777, 0o600, "atomic rewrite preserves the original 0600 mode");
+  const data = JSON.parse(readFileSync(path, "utf8"));
+  assert.ok(data.mcpServers["project-room"], "server entry was still written");
+});
+
+test("copilot install creates a new config file as 0600", async t => {
+  const home = tempHome(t);
+  const copilotHome = join(home, ".copilot");
+  const path = join(copilotHome, "mcp-config.json");
+  const result = await installTarget("copilot", { home, env: { COPILOT_HOME: copilotHome }, run: failRun, platform: "linux" });
+  assert.equal(result.changes.length, 1, "server entry was written");
+  assert.equal(statSync(path).mode & 0o777, 0o600, "new credential-bearing config defaults to owner-only");
 });

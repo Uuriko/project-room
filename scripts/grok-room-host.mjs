@@ -289,23 +289,99 @@ export async function ingestWake({ env = process.env, body, execute = false, run
   return { ok: true, planned: result.plans, executed: result.executed, key: result.plans[0]?.key ?? null };
 }
 
+// H-20: head+tail capped byte buffer. A noisy child previously had every
+// chunk retained forever, growing operator memory without bound. The first
+// half of the budget keeps the head, the last half keeps the tail; dropped
+// bytes are counted so the truncation is visible in the output.
+function cappedOutputBuffer(limit) {
+  const half = Math.max(1, Math.floor(limit / 2));
+  const head = [];
+  const tail = [];
+  let headLen = 0, tailLen = 0, dropped = 0;
+  const pushTail = buf => {
+    tail.push(buf);
+    tailLen += buf.length;
+    while (tailLen > half) {
+      const first = tail[0];
+      const over = tailLen - half;
+      if (first.length <= over) {
+        tail.shift();
+        tailLen -= first.length;
+        dropped += first.length;
+      } else {
+        tail[0] = first.subarray(over);
+        tailLen -= over;
+        dropped += over;
+      }
+    }
+  };
+  return {
+    push(chunk) {
+      const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
+      if (buf.length === 0) return;
+      if (headLen < half) {
+        const take = Math.min(buf.length, half - headLen);
+        head.push(buf.subarray(0, take));
+        headLen += take;
+        if (take < buf.length) pushTail(buf.subarray(take));
+        return;
+      }
+      pushTail(buf);
+    },
+    text() {
+      const parts = head.concat(tail);
+      if (dropped === 0) return Buffer.concat(parts).toString("utf8");
+      const marker = `\n…[grok host: output truncated, ${dropped} bytes dropped]…\n`;
+      return Buffer.concat([...head, Buffer.from(marker), ...tail]).toString("utf8");
+    },
+  };
+}
+
 async function defaultRunner(plan, env, connection) {
   const bin = env.GROK_BIN?.trim() || "grok";
   const cwd = env.GROK_ROOM_CWD?.trim() || process.cwd();
+  // H-20: a hung child previously stalled the standing host loop indefinitely
+  // (the promise resolved only on child close). Bound the run and kill the
+  // child on timeout; resolve (not reject) so the loop continues with the
+  // next item and the unhandled plan is retried on a later tick.
+  const timeoutMs = Number(env.GROK_HOST_TIMEOUT_MS) > 0 ? Number(env.GROK_HOST_TIMEOUT_MS) : 300000;
+  const maxBytes = Number(env.GROK_HOST_MAX_OUTPUT_BYTES) > 0 ? Number(env.GROK_HOST_MAX_OUTPUT_BYTES) : 1000000;
   const childEnv = childEnvFor({ ...process.env, ...env }, connection);
   return await new Promise((resolve, reject) => {
     const child = spawn(bin, ["-p", plan.prompt], { cwd, env: childEnv, stdio: ["ignore", "pipe", "pipe"] });
-    const stdout = [], stderr = [];
+    const stdout = cappedOutputBuffer(maxBytes);
+    const stderr = cappedOutputBuffer(maxBytes);
     child.stdout.on("data", chunk => stdout.push(chunk));
     child.stderr.on("data", chunk => stderr.push(chunk));
-    child.on("error", error => reject(new GrokHostError("execute_failed", error.message)));
-    child.on("close", code => {
+    let timedOut = false;
+    let settled = false;
+    const settle = fn => (...args) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      fn(...args);
+    };
+    const finish = settle(code => {
+      // The timeout note leads stderr so it survives the journal's
+      // stderr slice: the most operationally important fact comes first.
+      const note = timedOut ? `[grok host] timed out after ${timeoutMs}ms; child killed (SIGKILL)\n` : "";
       resolve({
-        code,
-        stdout: Buffer.concat(stdout).toString("utf8"),
-        stderr: Buffer.concat(stderr).toString("utf8")
+        code: timedOut ? null : code,
+        stdout: stdout.text(),
+        stderr: note + stderr.text(),
       });
     });
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGKILL");
+      // Resolve now instead of waiting for "close": orphaned grandchildren
+      // can hold the stdio pipes open and delay "close" indefinitely.
+      // The settle guard makes a later "close" a no-op.
+      finish(null);
+    }, timeoutMs);
+    if (typeof timer.unref === "function") timer.unref();
+    child.on("error", settle(error => reject(new GrokHostError("execute_failed", error.message))));
+    child.on("close", code => finish(code));
   });
 }
 

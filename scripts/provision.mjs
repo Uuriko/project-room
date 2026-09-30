@@ -1,5 +1,5 @@
 import { parseArgs } from "node:util";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, openSync, fchmodSync, closeSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
@@ -16,7 +16,18 @@ if (values.help) {
 // (explicit, auditable) or --key-file <path> (written with mode 0600).
 function emitKey(meta, accessKey) {
   if (values["key-file"]) {
-    writeFileSync(values["key-file"], accessKey + "\n", { mode: 0o600 });
+    // H-17: writeFileSync's `mode` option applies only when the file is
+    // created. A pre-existing world-readable key file would keep its mode and
+    // leak the bearer key. Force owner-only mode on the fd before writing;
+    // fail closed (the exception propagates, no key is written) when the
+    // chmod cannot be applied.
+    const fd = openSync(values["key-file"], "w", 0o600);
+    try {
+      fchmodSync(fd, 0o600);
+      writeFileSync(fd, accessKey + "\n");
+    } finally {
+      closeSync(fd);
+    }
     process.stdout.write(`${meta} Key written to ${values["key-file"]} (mode 0600).\n`);
     return;
   }
