@@ -260,3 +260,37 @@ describe('agent-reputation', () => {
     assert.deepEqual({ ...EVENT_DELTAS }, { completed: 10, helpful: 5, failed: -20, harmful: -50, timeout: -15 });
   });
 });
+
+describe('H-10 backdate farming', () => {
+  // Contract: the per-(agent,type) event clock is monotonic. A caller that
+  // supplies decreasing timestamps must not inflate the score: the old
+  // exact-(agent,type,ts) dedup was bypassed by backdates (+10 per call,
+  // unbounded). Credible regression: 5 backdated 'completed' events must
+  // leave the score unchanged (rejected as duplicates after clamping, or
+  // recorded without additional delta).
+  it('decreasing timestamps cannot inflate the score', () => {
+    const clock = fakeClock();
+    const rep = makeRep(clock);
+    const t0 = clock();
+    rep.record('a1', { type: 'completed', at: t0 });
+    const afterFirst = rep.score('a1').score;
+    for (let i = 1; i <= 5; i++) {
+      try {
+        rep.record('a1', { type: 'completed', at: t0 - i * 1000 });
+      } catch (err) {
+        assert.equal(err.code, 'AR_DUPLICATE_EVENT');
+      }
+    }
+    assert.equal(rep.score('a1').score, afterFirst);
+  });
+
+  it('lastActiveAt never moves backwards on out-of-order records', () => {
+    const clock = fakeClock();
+    const rep = makeRep(clock);
+    const t0 = clock();
+    const first = rep.record('a1', { type: 'helpful', at: t0 });
+    const second = rep.record('a1', { type: 'completed', at: t0 - 5000 });
+    assert.ok(second.lastActiveAt >= first.lastActiveAt,
+      `lastActiveAt moved backwards: ${first.lastActiveAt} -> ${second.lastActiveAt}`);
+  });
+});

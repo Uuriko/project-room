@@ -73,3 +73,30 @@ test('needs-me continuation preserves overflow DMs, mentions, rooms and tied lan
   }
   assert.equal(page.hasMore, false);
 });
+
+// G-H2 follow-on (audit 2026-09-30): room_reply requires requestId, so the
+// needs-me suggested call must carry one — otherwise agents following the
+// suggestion hit missing_request_id on the documented path. Contract: every
+// mention/dm suggestion includes a stable, non-empty requestId that is
+// deterministic across calls (retrying the suggestion is idempotent).
+test('needs-me room_reply suggestions carry a stable requestId', t => {
+  const store = new RoomStore(':memory:');
+  t.after(() => store.close());
+  const rooms = new AgentRooms(store);
+  const ada = store.identities.create('Ada');
+  const bob = store.identities.create('Bob');
+  const roomId = 'rid-reqid';
+  const owner = store.identities.create('OwnerRid');
+  rooms.create(owner.secret, { roomId, title: 'rid', purpose: 'x', kind: 'personal' });
+  store.identities.link(owner.secret, roomId, { identityId: ada.identityId, displayName: 'Ada', permissions: [] });
+  store.identities.link(owner.secret, roomId, { identityId: bob.identityId, displayName: 'Bob', permissions: [] });
+  setTier(store.db, roomId, bob.identityId, 't2_standard', { updatedBy: 'owner', nowMs: Date.now() });
+  store.command(bob.secret, roomId, { id: 'm1', type: 'message.posted', data: { messageId: 'm1', body: '@Ada look here' } });
+  const first = collectNeedsMe(store, ada.secret, {}).items.find(i => i.kind === 'mention');
+  assert.ok(first, 'expected a mention item');
+  const rid = first.next?.arguments?.requestId;
+  assert.equal(typeof rid, 'string');
+  assert.ok(rid.length > 0, 'suggestion must include a requestId');
+  const second = collectNeedsMe(store, ada.secret, {}).items.find(i => i.kind === 'mention');
+  assert.equal(second.next.arguments.requestId, rid, 'requestId must be stable across calls');
+});

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, chmodSync } from "node:fs";
+import { mkdtempSync, rmSync, chmodSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -507,4 +507,47 @@ test("legacy handoff journal remains intact without suppressing a newer event", 
   assert.equal((await pull(options)).executed.length, 0);
   assert.equal(runs, 1);
   assert.equal(readJournalFile(filename).handled["handoff:den:work-1"], 123, "upgrade retains legacy evidence");
+});
+
+// H-20 regression: the grok child ran with no timeout and unbounded output
+// buffering — a hung child stalled the host loop forever, a noisy one grew
+// memory without bound. Contract: the runner kills a hung child after
+// GROK_HOST_TIMEOUT_MS and caps buffered output head+tail at
+// GROK_HOST_MAX_OUTPUT_BYTES.
+// Credible regression: pre-fix there is no timeout logic and no cap, so the
+// hang test's race timer wins (pull never resolves in time) and the spew test
+// sees no truncation marker.
+// Existing coverage gap: tests/grok-host.test.js had no timeout/kill/cap tests.
+// Real boundary: pull(..., { execute: true }) with the real default runner and
+// a fake GROK_BIN. No new production seams (both knobs are env vars).
+test("a hung grok child is killed after GROK_HOST_TIMEOUT_MS and the loop continues", async t => {
+  const directory = fixtureDir();
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const hangBin = join(directory, "hang.sh");
+  writeFileSync(hangBin, "#!/bin/sh\nsleep 8\n");
+  chmodSync(hangBin, 0o755);
+  const env = { ROOM_AGENT_CONFIG: directory, GROK_BIN: hangBin, GROK_HOST_TIMEOUT_MS: "300" };
+  const fetchImpl = async () => new Response(JSON.stringify(needsMe([mention()])), { status: 200 });
+  const raced = await Promise.race([
+    pull({ env, fetchImpl, execute: true, now: () => 1 }).then(r => ({ done: true, r })),
+    new Promise(resolve => setTimeout(() => resolve({ done: false }), 5000)),
+  ]);
+  assert.equal(raced.done, true, "pull resolves instead of hanging on a stuck grok child");
+  const exec = raced.r.executed[0];
+  assert.notEqual(exec.result.code, 0, "a timed-out child is not marked handled");
+  assert.match(exec.result.stderr, /timed out after 300ms/, "the timeout is reported on stderr");
+});
+
+test("noisy grok output is capped head+tail instead of buffered whole", async t => {
+  const directory = fixtureDir();
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const spewBin = join(directory, "spew.sh");
+  writeFileSync(spewBin, "#!/bin/sh\nyes ABCDEFGH | head -c 200000\n");
+  chmodSync(spewBin, 0o755);
+  const env = { ROOM_AGENT_CONFIG: directory, GROK_BIN: spewBin, GROK_HOST_MAX_OUTPUT_BYTES: "2000" };
+  const fetchImpl = async () => new Response(JSON.stringify(needsMe([mention()])), { status: 200 });
+  const result = await pull({ env, fetchImpl, execute: true, now: () => 1 });
+  const out = result.executed[0].result.stdout;
+  assert.match(out, /truncated/, "capped output carries the truncation marker");
+  assert.ok(out.length < 8000, "runner cap applies before the 8000-char journal slice");
 });
