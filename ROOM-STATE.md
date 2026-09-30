@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-30T10:29:06Z · board: Uuriko/project-room#1160 · watermark: 5909333210 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=f89c53470eda62585ea29c4c87908c677345dee69dd524edb3692fafe1a2652f -->
+<!-- generated: 2026-09-30T10:58:04Z · board: Uuriko/project-room#1160 · watermark: 5909646483 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=f89c53470eda62585ea29c4c87908c677345dee69dd524edb3692fafe1a2652f -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -28,12 +28,11 @@ RC-2026-09-28-2877 | (none) | submitted | 2026-09-30T03:11:15Z | src/events.js, 
 RC-2026-09-28-2874 | (none) | submitted | 2026-09-30T03:11:16Z | src/events.js, tests/dm-privacy.test.js
 RC-2026-09-28-2878 | (none) | submitted | 2026-09-30T03:11:17Z | server/dm-event-visibility.mjs, server/http.mjs, tests/dm-privacy.test.js
 RC-2026-09-28-2880 | (none) | submitted | 2026-09-30T03:11:17Z | server/dm-event-visibility.mjs, server/store.mjs, server/reply-requests.mjs, server/notifications.mjs, server/activity.mjs, server/http.mjs, tests/dm-privacy.test.js, tests/reply-requests.test.js
-… +7 more
+… +6 more
 
 ## file-claims
 file | lane | task-id | state
 act-components/src/components.js | jill | RC-2026-09-30-3630 | submitted
-client/app.js | jill | RC-2026-09-30-3628 | submitted
 contribution-rollup/src/rollup.js | jill | RC-2026-09-30-3630 | submitted
 docs/EXPORT-RETENTION-DELETION.md | (none) | RC-2026-09-27-2863 | submitted
 docs/ROOM-PROTOCOL.md | (none) | RC-2026-09-29-3605 | submitted
@@ -123,15 +122,11 @@ server/work-context.mjs | jillianai | RC-2026-09-28-2876 | working
 server/work-discussion.mjs | (none) | RC-2026-09-28-2875 | submitted
 server/work-discussion.mjs | jillianai | RC-2026-09-28-2876 | working
 server/writer-fence.mjs | jill | RC-2026-09-30-3616 | submitted
-src/a2a-transport.mjs | jill | RC-2026-09-30-3628 | submitted
 src/agent-card-registry.mjs | jill | RC-2026-09-30-3630 | submitted
 src/app.js | (none) | RC-2026-09-28-2879 | submitted
 src/cold-start.mjs | jill | RC-2026-09-30-3630 | submitted
-src/connection-manager.mjs | jill | RC-2026-09-30-3628 | submitted
 src/contact-merge.mjs | jill | RC-2026-09-30-3630 | submitted
-src/cross-agent-messaging.mjs | jill | RC-2026-09-30-3628 | submitted
 src/data-export.mjs | jill | RC-2026-09-30-3630 | submitted
-src/digest-scheduler.mjs | jill | RC-2026-09-30-3628 | submitted
 src/events.js | (none) | RC-2026-09-28-2874 | submitted
 src/events.js | (none) | RC-2026-09-28-2877 | submitted
 src/events.js | (none) | RC-2026-09-28-2879 | submitted
@@ -142,7 +137,6 @@ src/handoff-store.mjs | jill | RC-2026-09-30-3627 | submitted
 src/health-status.mjs | jill | RC-2026-09-30-3630 | submitted
 src/inbox-rule-store.mjs | jill | RC-2026-09-30-3627 | submitted
 src/mailbox-search-store.mjs | jill | RC-2026-09-30-3627 | submitted
-src/mcp-search-wiring.mjs | jill | RC-2026-09-30-3628 | submitted
 src/owner-alerts.mjs | jill | RC-2026-09-30-3627 | submitted
 src/passkey-login.mjs | jill | RC-2026-09-30-3630 | submitted
 src/secret-scan.mjs | jill | RC-2026-09-30-3630 | submitted
@@ -222,6 +216,7 @@ Jillian | documentation | standard
 
 ## recent-receipts
 task-id | merged | comment-id
+RC-2026-09-30-3628 | d461b4ddd1eb96218e8a6b6bf84a5ec57a118bc1 | 5909646483
 RC-2026-09-30-3620 | 198f0d4b | 5908893943
 RC-2026-09-30-3622 | 46b04bf3 | 5908890916
 RC-2026-09-30-3624 | 9461a050 | 5908888028
@@ -231,7 +226,6 @@ RC-2026-09-30-3619 | 2185c8e1 | 5907899520
 RC-2026-09-30-3617 | e0824b5a | 5907889550
 RC-2026-09-30-3618 | eaa535c8 | 5907887150
 unknown | none | 5906501923
-RC-2026-09-29-3607 | 8287fc8e | 5897708716
 
 ## prose-claims-needing-fence
 comment-id | lane | task | at
@@ -241,5 +235,5 @@ comment-id | lane | task | at
 Uuriko/project-room#266 -> Uuriko/project-room#1160 · watermark 5859826064 · carried-open: RC-2026-09-27-005
 
 ## signals
-board_comments=584 threshold=1500 rotation_due=no watcher=active open_claims=32 prose_open=0 unfenced_prose=0 files_claimed=119 overlap_files=17 watermark=5909333210
+board_comments=586 threshold=1500 rotation_due=no watcher=active open_claims=31 prose_open=0 unfenced_prose=0 files_claimed=113 overlap_files=17 watermark=5909646483
 
