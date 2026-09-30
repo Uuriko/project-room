@@ -10,6 +10,8 @@ import { OutsideAgents } from "./outside-agents.mjs";
 import { resolveCatalogAgent, catalogCallDenial } from "./capability-visibility.mjs";
 import { ServiceError } from "./service-error.mjs";
 import { canonicalLane, normalizeActor } from "./bounty-escrow.mjs";
+import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
+import { publishBountyEvent } from "./bounty-escrow-routes.mjs";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
 
 import { prepareWork } from "../client/work-preparation.mjs";
@@ -263,9 +265,21 @@ function callBountyTool(store, secret, roomId, auth, name, rest) {
   const idem = (route, status, thunk) => {
     const key = typeof rest.idempotencyKey === "string" && rest.idempotencyKey.length > 0
       ? rest.idempotencyKey : null;
-    const { idempotencyKey: _dropped, ...payload } = rest;
-    const result = escrow.idemExecute(roomId, key, route, status, thunk,
-      { callerLane: caller, bountyId: bountyId ?? null, payload });
+    // HTTP binds the path's bounty id separately from its JSON body.
+    const { idempotencyKey: _dropped, bountyId: _target, ...payload } = rest;
+    const result = store.transaction(() => {
+      const current = store.authenticate(secret, roomId, auth.sessionBinding);
+      if (current.member.id !== auth.member.id)
+        throw new ServiceError(403, "access_denied", "The acting identity changed");
+      // Catalog visibility can span rooms. Write authority belongs to the
+      // target room and must be checked inside the mutation/replay fence.
+      enforceAutonomyTierForAction({ db: store.db, roomId,
+        state: { room: { ownerId: store.roomAuthority(roomId).ownerId } },
+        actor: current.member, action: route });
+      return escrow.idemExecute(roomId, key, route, status, thunk,
+        { callerLane: caller, bountyId: bountyId ?? null, payload });
+    });
+    if (!result.replayed) publishBountyEvent(store, roomId, result.body?.receipt?.event);
     return { ...result.body, idempotentReplay: result.replayed };
   };
 

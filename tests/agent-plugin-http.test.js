@@ -4,6 +4,7 @@
 // wired to server/agent-plugin-store.mjs (SQLite persistence + ownership)
 // with the pure modules untouched. No network calls, no real credentials.
 import test from "node:test";
+import { request as httpRequest } from "node:http";
 import assert from "node:assert/strict";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
@@ -629,3 +630,49 @@ test("a failed SQLite write-through rolls back the in-memory Map mutation", asyn
   const issued = plugins.issueApiKey({ identityId: identity.identityId, scopes: ["rooms:read"] });
   assert.match(issued.keyId, /^rak_[A-Za-z0-9_-]+$/);
 });
+
+
+for (const identityAction of ["rotate", "revoke"]) {
+  for (const keyAction of ["rotate", "revoke"]) {
+    test(`held key ${keyAction} rejects identity credential ended by ${identityAction}`, async t => {
+      const f = createAcceptanceFixture();
+      const origin = await startServer(t, f);
+      const identity = f.store.identities.create("held-key-owner");
+      const issued = await (await post(origin, "/api/agent-keys", { scopes: ["rooms:read"] }, identity.secret)).json();
+      let observed;
+      const authenticated = new Promise(resolve => { observed = resolve; });
+      const resolveSecret = f.store.identities.resolveGlobalIdentitySecret.bind(f.store.identities);
+      f.store.identities.resolveGlobalIdentitySecret = secret => {
+        const result = resolveSecret(secret);
+        if (secret === identity.secret && result) observed();
+        return result;
+      };
+      const body = JSON.stringify({ confirm: true });
+      let pending;
+      const response = new Promise((resolve, reject) => {
+        pending = httpRequest(origin + `/api/agent-keys/${issued.keyId}/${keyAction}`, {
+          method: "POST", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body),
+            Authorization: `Bearer ${identity.secret}` }
+        }, res => {
+          let text = "";
+          res.on("data", chunk => { text += chunk; });
+          res.on("end", () => resolve({ status: res.statusCode, body: JSON.parse(text) }));
+        });
+        pending.on("error", reject);
+        pending.write(body.slice(0, -1));
+      });
+      t.after(() => pending.destroy());
+      await authenticated;
+      assert.equal((await post(origin, `/api/agent-identities/${identity.identityId}/${identityAction}`,
+        { confirm: true }, identity.secret)).status, 200);
+      assert.equal(resolveSecret(identity.secret), null, "the originally accepted caller credential is ended");
+      const before = f.store.db.prepare("SELECT key_hash,revoked FROM agent_api_keys WHERE key_id=?").get(issued.keyId);
+      pending.end(body.slice(-1));
+      const result = await response;
+      assert.equal(result.status, 401);
+      assert.equal(result.body.error.code, "unauthenticated");
+      const after = f.store.db.prepare("SELECT key_hash,revoked FROM agent_api_keys WHERE key_id=?").get(issued.keyId);
+      assert.deepEqual(after, before, "finishing the held request cannot mutate current key state");
+    });
+  }
+}

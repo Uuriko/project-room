@@ -27,7 +27,7 @@ const schema = (properties = {}, required = []) =>
   ({ type: "object", properties, required, additionalProperties: false });
 const tool = (name, description, inputSchema, readOnlyHint = true) => ({
   name, description, inputSchema,
-  annotations: { readOnlyHint, destructiveHint: false, idempotentHint: true, openWorldHint: false }
+  annotations: { readOnlyHint, destructiveHint: false, idempotentHint: readOnlyHint, openWorldHint: false }
 });
 
 export const BOUNTY_GROUPS = Object.freeze(["open", "active", "settled", "archived"]);
@@ -35,7 +35,7 @@ export const BOUNTY_GROUPS = Object.freeze(["open", "active", "settled", "archiv
 const amount = { type: "number", exclusiveMinimum: 0,
   description: "Credits, at most 3 decimals. A valueless ledger unit, never money." };
 const idempotencyKey = { ...id,
-  description: "Your stable key for this write. Replaying the EXACT same input returns the stored outcome instead of moving credits twice." };
+  description: "Send a stable key to retry this write safely. Keyless writes are not deduplicated. Replaying the EXACT same input returns the stored outcome instead of moving credits twice." };
 const rubric = { type: "array", minItems: 1, maxItems: 20, items: schema({
   criterionId: id, description: { type: "string", minLength: 1, maxLength: 500 }
 }, ["criterionId", "description"]),

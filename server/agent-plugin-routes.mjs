@@ -243,7 +243,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
 
   const keyAction = translate(async (req, res, { remoteAddress, keyId, action }) => {
     rate(`agent-key-${action}:${remoteAddress}`, 20);
-    const auth = ownerAuth(req);
+    ownerAuth(req);
     const data = await body(req);
     const shape = data && (exact(data, ["confirm"]) || exact(data, ["confirm", "requestId"]));
     if (!shape || data.confirm !== true) {
@@ -252,9 +252,14 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     if (data.requestId !== undefined && (typeof data.requestId !== "string" || !data.requestId)) {
       reject(422, "invalid_request_id", "requestId must be a non-empty string when present");
     }
-    const result = action === "rotate"
-      ? withCredential(store.agentPlugin.rotateApiKey({ identityId: auth.identityId, keyId }))
-      : store.agentPlugin.revokeApiKey({ identityId: auth.identityId, keyId });
+    const result = store.transaction(() => {
+      // The request body can wait while the identity credential is retired.
+      // Check current authority under the same writer fence as the mutation.
+      const auth = ownerAuth(req);
+      return action === "rotate"
+        ? withCredential(store.agentPlugin.rotateApiKey({ identityId: auth.identityId, keyId }))
+        : store.agentPlugin.revokeApiKey({ identityId: auth.identityId, keyId });
+    });
     return json(res, 200, data.requestId === undefined ? result : { ...result, requestId: data.requestId });
   });
 

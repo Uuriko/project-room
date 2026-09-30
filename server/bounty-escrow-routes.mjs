@@ -96,6 +96,17 @@ const readPayload = async (reject, readBody, req) => {
   return payload;
 };
 
+// Share lifecycle delivery across HTTP and MCP; retries never publish twice.
+export function publishBountyEvent(store, roomId, event) {
+  if (!event || !store.agentPlugin) return;
+  try {
+    store.agentPlugin.fanoutRoomEvent({ roomId,
+      event: { id: `bounty-event-${event.seq}`, type: event.type,
+        data: { ...(event.data ?? {}), bountyId: event.bountyId ?? null,
+          actor: event.actor ?? null, before: event.before ?? null, after: event.after ?? null } } });
+  } catch (error) { console.error("bounty webhook fan-out failed:", error?.message ?? error); }
+}
+
 export async function handleBountyEscrow({ req, res, url, store, roomId, auth, escrowRoute, bountyId, identity, sybilFlagId, reauthorize, helpers }) {
   const { json, reject, body } = helpers;
   if (req.method !== "GET" && req.method !== "HEAD") enforceAutonomyTierForAction({
@@ -105,19 +116,6 @@ export async function handleBountyEscrow({ req, res, url, store, roomId, auth, e
   const caller = canonicalLane(auth.member.id);
   const actor = normalizeActor(null, caller);
   const key = payload => idemKeyOf(req, payload);
-  // Spec: bounty lifecycle events go to the room feed + webhook. The
-  // bounty_events table is the durable log; here each non-replayed mutation
-  // fans its event out to matching webhook subscriptions (never throws — a
-  // fan-out failure must not fail the mutation that triggered it).
-  const publishEvent = event => {
-    if (!event || !store.agentPlugin) return;
-    try {
-      store.agentPlugin.fanoutRoomEvent({ roomId,
-        event: { id: `bounty-event-${event.seq}`, type: event.type,
-          data: { ...(event.data ?? {}), bountyId: event.bountyId ?? null,
-            actor: event.actor ?? null, before: event.before ?? null, after: event.after ?? null } } });
-    } catch (error) { console.error("bounty webhook fan-out failed:", error?.message ?? error); }
-  };
   const idem = (payload, route, status, thunk) =>
     runPure(reject, () => {
       const result = store.transaction(() => {
@@ -134,7 +132,7 @@ export async function handleBountyEscrow({ req, res, url, store, roomId, auth, e
         return escrow.idemExecute(roomId, key(payload), route, status, () => runPure(reject, thunk),
           { callerLane: caller, bountyId: bountyId ?? sybilFlagId ?? null, payload: Object.fromEntries(Object.entries(payload).filter(([name]) => name !== "idempotencyKey")) });
       });
-      if (!result.replayed) publishEvent(result.body?.receipt?.event);
+      if (!result.replayed) publishBountyEvent(store, roomId, result.body?.receipt?.event);
       return json(res, result.status, result.body);
     });
 
