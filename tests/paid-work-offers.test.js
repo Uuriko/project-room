@@ -207,3 +207,13 @@ test('public API maximum terms and unpaid shape render a real safe skill without
     assert.match(output, kind === 'cash' ? /not_configured/ : /ledger_only/);
   }
 });
+
+test('public submission guidance retains owner-provided HTTPS destinations without leaking admission links', async () => {
+  const { renderPublicContributionTerms } = await import('../src/contribution-brief.js');
+  const terms = { schema: 'project-room-offer/1', id: 'submit-offer', version: 1, kind: 'task', title: 'Contribute a patch', summary: 'Return reviewed evidence', acceptanceCriteria: ['Exact revision'], exclusions: [], reward: { kind: 'unpaid' }, approvalPolicy: { mode: 'human' }, submissionUrl: 'https://github.com/Uuriko/project-room/issues' };
+  const output = renderPublicContributionTerms(terms, { skill: true });
+  assert.match(output, /https:\/\/github.com\/Uuriko\/project-room\/issues/);
+  assert.match(output, /Return your deliverable and exact-version evidence/);
+  assert.doesNotMatch(output, /#join\//);
+  for (const submissionUrl of ['http://example.invalid/submit', 'https://user:password@example.invalid/', 'https://example.invalid/?token=private', 'https://example.invalid/#join/private', 'javascript:alert(1)', 'not a URL']) assert.throws(() => renderPublicContributionTerms({ ...terms, submissionUrl }), /URL/);
+});
