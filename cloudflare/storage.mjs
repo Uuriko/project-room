@@ -66,6 +66,11 @@ export const durableStorage = {
     for (const row of db.prepare("SELECT name,sql FROM sqlite_master WHERE type='trigger' AND name GLOB 'writer_v*'").all()) {
       if (current.get(row.name) === row.sql) continue;
       if (known.get(row.name) !== row.sql) reconciliation();
+      // 2026-09-30 (phase-3 audit LOW-1): validate the trigger name against
+      // the expected pattern before interpolating into SQL. The name comes
+      // from sqlite_master (not user input) and is already GLOB-filtered,
+      // but defense-in-depth demands an explicit allowlist.
+      if (!/^writer_v\d+_[A-Za-z0-9_]+_(insert|update|delete)$/.test(row.name)) reconciliation();
       db.exec(`DROP TRIGGER ${row.name}`);
     }
     if (hasPermit(db) && permitValue(db) !== STORE_SCHEMA_VERSION) {
