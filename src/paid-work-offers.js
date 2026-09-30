@@ -30,8 +30,11 @@ const display = (raw, decimals) => {
   return `${value.slice(0, -decimals)}.${value.slice(-decimals)}`;
 };
 
-export function preparePaidWork(input) {
-  keys(input, ["requestId", "workItemId", "accountableMemberId", "humanDecisionMakerId", "verifierMemberId", "offerId", "outcome", "acceptanceCriteria", "exclusions", "currency", "amountMinor", "costsMinor", "platformFeeBps"], "brief");
+export const OFFER_FIELDS = Object.freeze(["requestId", "workItemId", "accountableMemberId", "humanDecisionMakerId", "verifierMemberId", "offerId", "outcome", "acceptanceCriteria", "exclusions", "approvalPolicy"]);
+export const APPROVAL_POLICIES = Object.freeze(["human", "agent", "human_with_agent_review"]);
+
+export function prepareWorkOffer(input, { context } = {}) {
+  keys(input, OFFER_FIELDS, "brief");
   const offer = PAID_WORK_OFFERS.find(candidate => candidate.id === input.offerId);
   if (!offer) fail("Unknown offerId");
   const requestId = id(input.requestId, "requestId");
@@ -40,6 +43,39 @@ export function preparePaidWork(input) {
   const humanDecisionMakerId = id(input.humanDecisionMakerId, "humanDecisionMakerId");
   const verifierMemberId = id(input.verifierMemberId, "verifierMemberId");
   if (verifierMemberId === accountableMemberId) fail("Verifier must be independent of the accountable member");
+  const approvalPolicy = input.approvalPolicy ?? "human_with_agent_review";
+  if (!APPROVAL_POLICIES.includes(approvalPolicy)) fail("Unknown approvalPolicy");
+  if (approvalPolicy !== "human_with_agent_review" && !context) fail("Current Room context is required for this approval policy");
+  const humanDecisionRequired = approvalPolicy === "human_with_agent_review" || context?.policy?.requireOwnerDecision === true;
+  if (approvalPolicy === "agent" && humanDecisionRequired) fail("Room policy requires a human decision; choose human_with_agent_review");
+  if (context) {
+    if (context.contractVersion !== 1 || typeof context.roomId !== "string" || !Array.isArray(context.roster)
+      || !context.policy || typeof context.policy.requireOwnerDecision !== "boolean" || typeof context.policy.requireIndependentReview !== "boolean") fail("Invalid Room context");
+    const member = memberId => context.roster.find(candidate => candidate.id === memberId && candidate.active === true);
+    const sponsor = member(humanDecisionMakerId), reviewer = member(verifierMemberId);
+    if (!member(accountableMemberId) || !sponsor || sponsor.kind !== "human") fail("An active human sponsor and producer are required");
+    if (!reviewer || reviewer.kind !== (approvalPolicy === "human" ? "human" : "agent") || !reviewer.permissions?.includes("verify")) fail("The designated reviewer must have the selected kind and verify permission");
+    if (humanDecisionRequired && !sponsor.permissions?.includes("decide")) fail("The human decision-maker needs decide permission");
+  }
+  const outcome = text(input.outcome, "outcome", 160);
+  const criteria = list(input.acceptanceCriteria, "acceptanceCriteria");
+  const exclusions = list(input.exclusions ?? [], "exclusions", false);
+  const terms = [`${offer.title}: ${outcome}`, offer.deliverable, "Acceptance criteria:", ...criteria.map((v, i) => `${i + 1}. ${v}`),
+    ...(exclusions.length ? ["Out of scope:", ...exclusions.map(v => `- ${v}`)] : []),
+    `Acceptance: ${approvalPolicy}; reviewer ${verifierMemberId}; human sponsor ${humanDecisionMakerId}.`,
+    ...(humanDecisionRequired ? ["A human decision is required after independent review."] : [])].join("\n");
+  return { offer, outcome, terms, publicTerms: { schema: "project-room-offer-terms/1", kind: "task", title: outcome, summary: offer.deliverable, acceptanceCriteria: criteria, exclusions, approvalPolicy: { mode: approvalPolicy } }, approval: { requestedPolicy: approvalPolicy, effectivePolicy: approvalPolicy,
+    reviewerMemberId: verifierMemberId, sponsorMemberId: humanDecisionMakerId, ownerDecisionRequired: humanDecisionRequired,
+    independentVerificationRequired: true, contextEvaluatedThrough: context?.evaluatedThrough ?? null },
+    command: { id: requestId, type: "work.proposed", data: { workItemId, title: `[Offer] ${outcome}`, definitionOfDone: terms,
+      accountableMemberId, humanDecisionMakerId, verifierMemberId, mode: "read", independentVerificationRequired: true,
+      ownerDecisionRequired: humanDecisionRequired } } };
+}
+
+export function preparePaidWork(input, options = {}) {
+  keys(input, [...OFFER_FIELDS, "currency", "amountMinor", "costsMinor", "platformFeeBps"], "brief");
+  const base = prepareWorkOffer(Object.fromEntries(OFFER_FIELDS.filter(key => Object.hasOwn(input, key)).map(key => [key, input[key]])), options);
+  const { offer } = base;
   if (!["USD", "USDC"].includes(input.currency)) fail("currency must be USD or USDC; ledger credits are not money");
   const decimals = input.currency === "USD" ? 2 : 6;
   const gross = amount(input.amountMinor, "amountMinor");
@@ -50,13 +86,7 @@ export function preparePaidWork(input) {
   // Floor in asset minor units; disclosed explicitly in the quote.
   const fee = gross * BigInt(input.platformFeeBps) / 10000n;
   const net = gross - fee;
-  const outcome = text(input.outcome, "outcome", 160);
-  const criteria = list(input.acceptanceCriteria, "acceptanceCriteria");
-  const exclusions = list(input.exclusions ?? [], "exclusions", false);
-  const quoteText = [
-    `${offer.title}: ${outcome}`, offer.deliverable,
-    "Acceptance criteria:", ...criteria.map((v, i) => `${i + 1}. ${v}`),
-    ...(exclusions.length ? ["Out of scope:", ...exclusions.map(v => `- ${v}`)] : []),
+  const quoteText = [base.terms,
     `Proposed total: ${display(gross, decimals)} ${input.currency}.`,
     `Proposed platform fee, included in total: ${input.platformFeeBps} basis points (${display(fee, decimals)} ${input.currency}; rounded down to asset minor units).`,
     `Provider proceeds before costs: ${display(net, decimals)} ${input.currency}.`,
@@ -69,12 +99,10 @@ export function preparePaidWork(input) {
     schema: "room-paid-work-brief/1",
     commercialStatus: "draft_quote",
     paymentStatus: "not_configured",
+    approval: base.approval,
+    publicTerms: { ...base.publicTerms, reward: { kind: "cash", unit: input.currency, amountMinor: gross.toString(), decimals, terms: "Proposed total; no funds received or reserved.", basis: "fixed" }, fundingStatus: "not_configured", paymentStatus: "not_configured" },
     quote: { offerId: offer.id, currency: input.currency, decimals, amountMinor: gross.toString(), platformFeeBps: input.platformFeeBps, feeMinor: fee.toString(), providerProceedsMinor: net.toString(), text: quoteText },
     privateEstimate: { costMinor: cost.toString(), contributionMinor: (net - cost).toString(), contributionBps: ((net - cost) * 10000n / gross).toString(), profitable: net > cost, note: "Estimate only; excludes any unentered payment, tax, refund or operating costs. Not revenue." },
-    command: { id: requestId, type: "work.proposed", data: {
-      workItemId, title: `[Offer] ${outcome}`, definitionOfDone: quoteText,
-      accountableMemberId, humanDecisionMakerId, verifierMemberId,
-      mode: "read", independentVerificationRequired: true, ownerDecisionRequired: true
-    } }
+    command: { ...base.command, data: { ...base.command.data, definitionOfDone: quoteText } }
   };
 }
