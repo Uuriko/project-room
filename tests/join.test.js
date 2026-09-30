@@ -9,6 +9,7 @@ import {
   joinErrorMessage,
   validateJoinName,
   joinSuccessCopy,
+  joinProfileHint,
 } from "../src/join.js";
 
 test("parse join code from the path, rejecting lookalikes", () => {
@@ -46,6 +47,12 @@ test("permission labels are human-readable", () => {
   assert.equal(permissionLabel("steer"), "Claim work");
   assert.equal(permissionLabel("mystery_perm"), "mystery perm");
   assert.ok(permissionLabel("steer").length < "Steer work (claim and direct tasks)".length);
+});
+
+test("default join profiles do not add an Access: line", () => {
+  assert.equal(joinProfileHint("member"), "");
+  assert.equal(joinProfileHint("read"), "");
+  assert.equal(joinProfileHint("custom"), "Custom access");
 });
 
 test("join success copy puts Open room first and keeps the agent key short", () => {

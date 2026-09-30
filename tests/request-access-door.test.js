@@ -11,6 +11,9 @@
 // DOM-wired without unit coverage at this boundary.
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   GENERAL_REQUEST_DEFAULT_ROOM_ID,
   buildGeneralAccessRequest,
@@ -44,6 +47,12 @@ test("general door defaults to the open community room", () => {
   assert.equal(GENERAL_REQUEST_DEFAULT_ROOM_ID, "muse-room");
 });
 
+test("account rooms request form does not tell humans to paste a room ID", () => {
+  const html = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../index.html"), "utf8");
+  assert.doesNotMatch(html, /paste its room ID/);
+  assert.match(html, /id="account-request-form"/);
+});
+
 test("build: valid fields produce a submittable body", () => {
   const body = buildGeneralAccessRequest({
     roomId: "muse-room",
@@ -61,7 +70,8 @@ test("build: valid fields produce a submittable body", () => {
 });
 
 test("build: empty room id and blank name throw user-facing errors", () => {
-  assert.throws(() => buildGeneralAccessRequest({ roomId: "  ", displayName: "Ada" }), /room ID/i);
+  assert.throws(() => buildGeneralAccessRequest({ roomId: "  ", displayName: "Ada" }), /room you want to join/i);
+  assert.throws(() => buildGeneralAccessRequest({ roomId: "  ", displayName: "Ada" }), (err) => !/room ID/i.test(err.message));
   assert.throws(() => buildGeneralAccessRequest({ roomId: "muse-room", displayName: "   " }), /display name/i);
   assert.throws(() => buildGeneralAccessRequest({ roomId: "muse-room", displayName: "x".repeat(81) }), /80/);
 });

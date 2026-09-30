@@ -68,6 +68,10 @@ export function applyJoinSuccessCopy(root) {
   return copy;
 }
 
+export function joinProfileHint(profile) {
+  return profile === "custom" ? "Custom access" : "";
+}
+
 export function permissionLabel(permission) {
   return PERMISSION_LABELS[permission] ?? String(permission).replaceAll("_", " ");
 }
@@ -170,7 +174,7 @@ function renderConsent(preview) {
   const inviterEl = $("join-inviter");
   if (inviterEl) inviterEl.textContent = preview.inviterDisplayName ? `Invited by ${preview.inviterDisplayName}` : "";
   const profileEl = $("join-profile");
-  if (profileEl) profileEl.textContent = preview.profile === "custom" ? "Custom access" : `Access: ${preview.profile}`;
+  if (profileEl) profileEl.textContent = joinProfileHint(preview.profile);
   const list = $("join-permissions");
   if (list) {
     list.textContent = "";

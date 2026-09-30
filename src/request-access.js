@@ -27,7 +27,7 @@ export const GENERAL_REQUEST_ROOM_ID_MAX = 128;
 // filled by submitGeneralAccessRequest after the stash read / mint.
 export function buildGeneralAccessRequest({ roomId, displayName, note, referredBy } = {}) {
   const room = typeof roomId === "string" ? roomId.trim() : "";
-  if (!room) throw new Error("Enter the room ID you want to join.");
+  if (!room) throw new Error("Enter the room you want to join.");
   if (room.length > GENERAL_REQUEST_ROOM_ID_MAX) {
     throw new Error(`Room ID must be at most ${GENERAL_REQUEST_ROOM_ID_MAX} characters.`);
   }
