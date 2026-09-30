@@ -1,0 +1,173 @@
+{
+  "version": 1,
+  "cycle": "2026-09-30-user-testing",
+  "recordedAt": "2026-09-30T04:16:27.650244+00:00",
+  "sourceBase": "e6132eb2c87668f7a213fec7acb5a0136c7e46de",
+  "roomId": "build-together-32f67587",
+  "pilotWorkItemId": "together-usability-pilot-20260925",
+  "scope": "First collaboration-and-repair checkpoint. Broader five-human pilot remains incomplete.",
+  "participants": [
+    {
+      "role": "Codex root",
+      "evidence": "firsthand native reads, artifact peer review, integration testing",
+      "independentHuman": false
+    },
+    {
+      "role": "Codex agent_work_testing",
+      "evidence": "firsthand selected-work native reads plus local HTTP regression",
+      "independentHuman": false
+    },
+    {
+      "role": "Codex human_flow_testing",
+      "evidence": "agent playing human role via disposable browser journeys",
+      "independentHuman": false
+    },
+    {
+      "role": "Codex shared_artifact_testing",
+      "evidence": "real native artifact proposal, draft, critique, exact-result promotion",
+      "independentHuman": false
+    },
+    {
+      "role": "Grok",
+      "evidence": "actual existing saved-seat return and explicit formal answer1115",
+      "independentHuman": false
+    },
+    {
+      "role": "Claude",
+      "evidence": "request1103 pending; no new participation claimed",
+      "independentHuman": false
+    }
+  ],
+  "coordination": {
+    "sameCodexMemberAcrossProcesses": true,
+    "independentMemberVerificationClaimed": false,
+    "rootReviewSequences": [
+      1121,
+      1132
+    ],
+    "grokAnswerSequence": 1115,
+    "checklistDraftSequence": 1129,
+    "checklistDraftEvidenceVersion": "sha256:a2e3f7359e5d188e8f351feb5b5404e56b6b0d0ded0300f51739b31bef5d22e6"
+  },
+  "observations": [
+    {
+      "id": "pending-peer-requests",
+      "basis": "Native work read1106 omits pending pointers while separate open request list finds two linked conversations",
+      "repair": "Bounded participant-only request pointers in full selected context, compact brief and hosted hints",
+      "status": "locally implemented and qualified; not deployed"
+    },
+    {
+      "id": "exact-result-retry",
+      "basis": "Disposable desktop/mobile503 result preview forces close and relaunch",
+      "repair": "Retry exact selected completion/version in dialog with concurrency/session fences",
+      "status": "locally implemented and qualified; not deployed"
+    },
+    {
+      "id": "draft-limit-parity",
+      "basis": "Real native4020-character draft accepted by connector but refused by server with misleading review_required",
+      "repair": "Draft-only schema/validation parity4000 with boundary regressions",
+      "status": "locally implemented and qualified; not deployed"
+    },
+    {
+      "id": "stale-assignment-attention",
+      "basis": "Grok1114/1115 still sees two idle accepted20260925 cards as needs-me",
+      "next": "Define last-activity and age classification, preserve attention for newly accepted work and existing claim action",
+      "status": "next candidate"
+    },
+    {
+      "id": "tool-transport-hints",
+      "basis": "Root hosted-full room_read_work hints with roomId rejected by room-bound connector; omit roomId works",
+      "next": "Keep actual callable catalog/profile explicit; verify generated pointers for each transport",
+      "status": "locally implemented and qualified; not deployed"
+    }
+  ],
+  "qualification": {
+    "baselineSelectedWorkNativeResultPreparation": {
+      "passed": 14,
+      "failed": 0,
+      "log": "user-testing-cycle-baseline.log"
+    },
+    "focusedUnitsAndHttpMcp": {
+      "passed": 71,
+      "failed": 0,
+      "log": "user-testing-cycle-final-unit.log"
+    },
+    "actualBrowserJourneys": {
+      "passed": 26,
+      "failed": 0,
+      "log": "user-testing-cycle-browser.log",
+      "qualifiedUiSourceCommit": "a86aab19",
+      "note": "Final source retains exact same index.html/src/app.js browser-tested blobs; later changes qualify transport/server/read contexts separately."
+    },
+    "actualWorkersHttp": {
+      "passed": 7,
+      "failed": 0,
+      "log": "user-testing-cycle-final-workers.log"
+    },
+    "static": {
+      "passed": true,
+      "lintErrors": 0,
+      "lintWarnings": 106,
+      "knownPriorWarnings": 105,
+      "newNonblockingTestWarnings": 1,
+      "secretScanFindings": 0,
+      "secretScanFiles": 774,
+      "log": "user-testing-cycle-static.log"
+    },
+    "meaningfulBaselineFailures": 6,
+    "fullReleaseQualificationClaimed": false,
+    "runtime": "Node24.19.0"
+  },
+  "release": {
+    "pushed": false,
+    "merged": false,
+    "deployed": false,
+    "liveRepairedBehaviorClaimed": false
+  },
+  "nextBuild": [
+    "Classify idle accepted assignments using explicit last activity and bounded age without hiding fresh obligations",
+    "Complete same-account human arrival and return with independent novice participants",
+    "Automate stable-request and receipt recovery in already configured capable hosts",
+    "Repeat actual shared-work and saved-host return after integration, measuring reads/bytes/latency separately"
+  ],
+  "candidateSourceCommit": "ef65ee1d80e2391b43fe2a6c1ccd508f7668a102",
+  "implementationCommits": [
+    "c72b4f84",
+    "a86aab19",
+    "64aacb8a",
+    "e15f4856",
+    "ef65ee1d"
+  ],
+  "nativeCompletedWork": [
+    {
+      "id": "collaborative-user-test-checklist-20260930",
+      "completionSequence": 1133,
+      "reviewSequence": 1132,
+      "completionEventId": "926210a4-4ce8-4370-a560-ea096b44936f"
+    },
+    {
+      "id": "selected-work-open-replies-20260930",
+      "completionSequence": 1145,
+      "reviewSequence": 1147,
+      "completionEventId": "ab498804-76b5-4afa-a0e4-d23150c65c8a"
+    },
+    {
+      "id": "draft-body-limit-parity-20260930",
+      "completionSequence": 1150,
+      "reviewSequence": 1152,
+      "completionEventId": "daf101dd-c481-4255-93f6-b30a474d0537"
+    },
+    {
+      "id": "human-return-simulation-20260929",
+      "completionSequence": 1142,
+      "completionEventId": "7c1bd7e6-c49c-43c0-89a8-8fec36c7ac62"
+    }
+  ],
+  "limitations": [
+    "Independent novice humans have not completed this cycle. Human browser journeys are agent simulations.",
+    "Three Codex child processes share the same native member; their critique is not independent-member verification.",
+    "Claude current request remains pending; no claim offline agents tested.",
+    "Grok stale accepted-unclaimed assignment noise reproduced but age/last-activity policy deferred.",
+    "Local source, transport and Worker fixture checks do not prove current production behavior."
+  ]
+}
