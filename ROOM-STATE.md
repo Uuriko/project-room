@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-30T12:59:04Z · board: Uuriko/project-room#1160 · watermark: 5911738788 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=f89c53470eda62585ea29c4c87908c677345dee69dd524edb3692fafe1a2652f -->
+<!-- generated: 2026-09-30T13:28:23Z · board: Uuriko/project-room#1160 · watermark: 5911902837 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=f89c53470eda62585ea29c4c87908c677345dee69dd524edb3692fafe1a2652f -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -28,7 +28,7 @@ RC-2026-09-28-2877 | (none) | submitted | 2026-09-30T03:11:15Z | src/events.js, 
 RC-2026-09-28-2874 | (none) | submitted | 2026-09-30T03:11:16Z | src/events.js, tests/dm-privacy.test.js
 RC-2026-09-28-2878 | (none) | submitted | 2026-09-30T03:11:17Z | server/dm-event-visibility.mjs, server/http.mjs, tests/dm-privacy.test.js
 RC-2026-09-28-2880 | (none) | submitted | 2026-09-30T03:11:17Z | server/dm-event-visibility.mjs, server/store.mjs, server/reply-requests.mjs, server/notifications.mjs, server/activity.mjs, server/http.mjs, tests/dm-privacy.test.js, tests/reply-requests.test.js
-… +3 more
+… +2 more
 
 ## file-claims
 file | lane | task-id | state
@@ -55,7 +55,6 @@ scripts/runtime-package.mjs | jill | RC-2026-09-30-3616 | submitted
 server/activity.mjs | (none) | RC-2026-09-28-2865 | submitted
 server/activity.mjs | (none) | RC-2026-09-28-2880 | submitted
 server/agent-heartbeats.mjs | jill | RC-2026-09-28-3602 | working
-server/agent-invites.mjs | jill | RC-2026-09-30-3635 | submitted
 server/agent-plugin-routes.mjs | jill | RC-2026-09-28-3602 | working
 server/command-fields.mjs | (none) | RC-2026-09-28-2871 | submitted
 server/discoverability.mjs | (none) | RC-2026-09-28-2871 | submitted
@@ -118,7 +117,6 @@ src/whatsapp-connect.mjs | jill | RC-2026-09-30-3634 | submitted
 src/work-selectors.js | (none) | RC-2026-09-28-2877 | submitted
 src/work-selectors.js | (none) | RC-2026-09-28-2879 | submitted
 tests/activity.test.js | (none) | RC-2026-09-28-2865 | submitted
-tests/agent-invites.test.js | jill | RC-2026-09-30-3635 | submitted
 tests/agent-wake-poll.test.js | jill | RC-2026-09-28-3602 | working
 tests/audit-wave-low-d.test.js | jill | RC-2026-09-30-3634 | submitted
 tests/command-catalog.test.js | (none) | RC-2026-09-28-2871 | submitted
@@ -187,6 +185,7 @@ Jillian | documentation | standard
 
 ## recent-receipts
 task-id | merged | comment-id
+RC-2026-09-30-3635 | f08dd69f76fec5e3d764626a41028005c8a593e2 | 5911902837
 RC-2026-09-30-3632 | dce1822aabfbfc5d39880f43f539597bc9c6e579 | 5911628465
 RC-2026-09-30-3631 | d93340805f20ae29d6b2f46ec84163db106513ed | 5911620215
 RC-2026-09-30-3630 | d5744ca72039c0ad34ee8f8b1bf63243048ac6fb | 5910740906
@@ -196,7 +195,6 @@ RC-2026-09-30-3626 | 5d27aa42ca11b49ebcfa4305e95b09be9d8cb360 | 5910076214
 RC-2026-09-30-3625 | 6b99f28ff03277a98e5a6f0f772fb826f12f7136 | 5909823818
 RC-2026-09-30-3628 | d461b4ddd1eb96218e8a6b6bf84a5ec57a118bc1 | 5909646483
 RC-2026-09-30-3620 | 198f0d4b | 5908893943
-RC-2026-09-30-3622 | 46b04bf3 | 5908890916
 
 ## prose-claims-needing-fence
 comment-id | lane | task | at
@@ -206,5 +204,5 @@ comment-id | lane | task | at
 Uuriko/project-room#266 -> Uuriko/project-room#1160 · watermark 5859826064 · carried-open: RC-2026-09-27-005
 
 ## signals
-board_comments=610 threshold=1500 rotation_due=no watcher=active open_claims=28 prose_open=0 unfenced_prose=0 files_claimed=86 overlap_files=16 watermark=5911738788
+board_comments=612 threshold=1500 rotation_due=no watcher=active open_claims=27 prose_open=0 unfenced_prose=0 files_claimed=84 overlap_files=16 watermark=5911902837
 
