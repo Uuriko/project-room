@@ -18,8 +18,10 @@
  *   - clock:     () => number  (ms epoch; default: Date.now)
  *   - id:        () => string  (message id generator; default: per-store counter)
  *   - transport: { send(msg) => any, receive(handler) => unsubscribe? }
- *                duck-typed delivery channel. `send` must throw (or return a
- *                rejected promise — not awaited here) on failure. `receive`
+ *                duck-typed delivery channel. `send` must throw on failure,
+ *                or return a rejected promise (awaited: the message stays
+ *                `queued` until the send settles, and a rejection moves it
+ *                to `failed` with CAM_UNDELIVERABLE). `receive`
  *                registers an inbound envelope handler. If no transport is
  *                injected, sending throws CAM_NO_TRANSPORT (never silent).
  *
@@ -220,7 +222,10 @@ export function createMessaging(deps = {}) {
   /**
    * Deliver a queued message through the transport. On success the message
    * moves queued → sent; on transport failure it moves to failed and the
-   * CAM_UNDELIVERABLE error is rethrown (never silent).
+   * CAM_UNDELIVERABLE error is rethrown (never silent). An async transport
+   * whose send() returns a rejected promise is awaited: the message stays
+   * queued until the send settles, so a rejection is recorded failed rather
+   * than silently marked sent (M-28).
    */
   function deliver(msg) {
     if (!transport || typeof transport.send !== 'function') {
@@ -230,20 +235,30 @@ export function createMessaging(deps = {}) {
         { messageId: msg.id },
       );
     }
+    let result;
     try {
-      transport.send(snapshot(msg));
+      result = transport.send(snapshot(msg));
     } catch (err) {
-      transition(msg, 'failed', 'system', {
-        reason: 'transport.send threw',
-        transportError: err?.message ?? String(err),
-      });
-      throw camError(
-        'CAM_UNDELIVERABLE',
-        `Message ${msg.id} from ${msg.from} to ${msg.to} could not be delivered`,
-        { messageId: msg.id, transportError: err?.message ?? String(err) },
+      return failDelivery(msg, 'transport.send threw', err);
+    }
+    if (result && typeof result.then === 'function') {
+      return result.then(
+        () => transition(msg, 'sent', 'system', { via: 'transport' }),
+        (err) => failDelivery(msg, 'transport.send rejected', err),
       );
     }
     return transition(msg, 'sent', 'system', { via: 'transport' });
+  }
+
+  /** Move msg to failed and throw CAM_UNDELIVERABLE (never silent). */
+  function failDelivery(msg, reason, err) {
+    const transportError = err?.message ?? String(err);
+    transition(msg, 'failed', 'system', { reason, transportError });
+    throw camError(
+      'CAM_UNDELIVERABLE',
+      `Message ${msg.id} from ${msg.from} to ${msg.to} could not be delivered`,
+      { messageId: msg.id, transportError },
+    );
   }
 
   const messaging = {

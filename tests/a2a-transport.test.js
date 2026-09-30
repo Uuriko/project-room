@@ -607,4 +607,62 @@ describe('a2a-transport responder identity (H-9)', () => {
     assert.deepEqual(res.payload, { n: 2 });
     assert.equal(t.deadLetters.length, 0, 'a genuine response is never dead-lettered');
   });
+
+  it('repeated connect() releases the prior inbound subscription (M-32)', () => {
+    const registrations = [];
+    const released = [];
+    const channel = {
+      sent: [],
+      send(e) {
+        this.sent.push(e);
+      },
+      onInbound(cb) {
+        registrations.push(cb);
+        return () => {
+          released.push(cb);
+        };
+      },
+    };
+    const t = createA2ATransport({ channel });
+    t.connect('quill');
+    t.connect('quill');
+    t.connect('quill');
+    assert.equal(registrations.length, 3);
+    assert.equal(
+      registrations.length - released.length,
+      1,
+      'the channel must never hold more than one live inbound subscription',
+    );
+    assert.ok(released.includes(registrations[0]), 'the first subscription was released');
+    assert.ok(released.includes(registrations[1]), 'the second subscription was released');
+  });
+
+  it('NaN / non-finite timeoutMs falls back to the default instead of hanging (M-33)', async () => {
+    for (const bad of [NaN, Infinity, -Infinity, -5, 0]) {
+      const fc = fakeClock();
+      const t = createA2ATransport({ clock: fc.clock, channel: fakeChannel() });
+      t.connect('quill');
+      const p = t.request('instinct', 'slow', {}, { timeoutMs: bad });
+      fc.advance(DEFAULT_REQUEST_TIMEOUT_MS);
+      const expired = t.sweep();
+      assert.equal(expired.length, 1, `timeoutMs=${String(bad)} must not hang the waiter forever`);
+      await expectTransportRejection(p, 'AT_TIMEOUT');
+      assert.equal(t.pendingRequestCount, 0);
+    }
+  });
+
+  it('NaN requestTimeoutMs constructor dep falls back to the default (M-33)', async () => {
+    const fc = fakeClock();
+    const t = createA2ATransport({
+      clock: fc.clock,
+      channel: fakeChannel(),
+      requestTimeoutMs: NaN,
+    });
+    t.connect('quill');
+    const p = t.request('instinct', 'slow', {});
+    fc.advance(DEFAULT_REQUEST_TIMEOUT_MS);
+    const expired = t.sweep();
+    assert.equal(expired.length, 1, 'constructor NaN timeout must not hang the waiter forever');
+    await expectTransportRejection(p, 'AT_TIMEOUT');
+  });
 });
