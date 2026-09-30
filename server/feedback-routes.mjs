@@ -195,6 +195,10 @@ function dispatchFeedbackCore({ req, res, store, roomId, auth, feedbackRoute, fe
   }
   if (feedbackRoute === "notifications") {
     if (!readMethod(req.method)) reject(405, "method_not_allowed", "Use GET to read notifications");
+    // HEAD is a metadata probe (crawlers, proxies), never a read: draining
+    // here let any HEAD request silently destroy the queued notifications
+    // (H-22). Report the queue untouched.
+    if (head) return json(res, 200, { notifications: [], drained: false }, head);
     return json(res, 200, { notifications: fb.drainNotifications(lane) }, head);
   }
   if (feedbackRoute === "read") {
