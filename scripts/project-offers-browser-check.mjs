@@ -134,3 +134,26 @@ test('maximum public text remains literal and fits a narrow viewport without tru
   assert.equal(await f.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
 
 });
+
+test('published colon IDs survive list, encoded detail routing, clipboard and return focus', { timeout: 45000 }, async t => {
+  const f = await setup(t, { seeded: false, viewportWidth: 320 });
+  publish(f.store, 'team:task', { kind: 'unpaid' }, { title: 'Colon identifier contribution' });
+  await f.context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await f.page.goto(`${f.origin}/offers`);
+  await f.page.locator('[data-offer="team:task"]').waitFor();
+  assert.equal(await f.page.locator('.offer-card').count(), 1);
+  await f.page.locator('[data-offer="team:task"]').click();
+  await f.page.locator('#copy-offer:not(:disabled)').waitFor();
+  assert.equal(new URL(f.page.url()).searchParams.get('offer'), 'team:task');
+  assert.equal(await f.page.locator('#detail-title').textContent(), 'Colon identifier contribution');
+  assert.equal(await f.page.locator('#download-offer').getAttribute('href'), '/api/project-offers/team%3Atask/brief.md');
+  await f.page.locator('#copy-offer').click();
+  await f.page.locator('#copy-status').filter({ hasText: 'Copied.' }).waitFor();
+  const copied = await f.page.evaluate(() => navigator.clipboard.readText());
+  assert.ok(copied.startsWith('---\n'));
+  assert.ok(copied.includes('Colon identifier contribution'));
+  await f.page.reload(); await f.page.locator('#copy-offer:not(:disabled)').waitFor();
+  assert.equal(await f.page.locator('#detail-title').textContent(), 'Colon identifier contribution');
+  await f.page.getByRole('button', { name: /All offers/ }).click();
+  assert.equal(await f.page.locator('[data-offer="team:task"]').evaluate(node => node === document.activeElement), true);
+});
