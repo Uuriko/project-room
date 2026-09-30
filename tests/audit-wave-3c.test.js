@@ -94,7 +94,10 @@ test("M-31: DM restore rejects a snapshot with two rooms sharing one id", () => 
   const dm = createDMRooms();
   const room = dm.openDM("alice", "bob");
   const snapshot = JSON.parse(dm.snapshot());
-  const dup = { ...snapshot.rooms[0] };
+  // Same room id, different agent pair: the pair-key check alone cannot
+  // catch this; without the id check the second room silently overwrites
+  // the first.
+  const dup = { ...snapshot.rooms[0], agentA: "carol", agentB: "dave" };
   snapshot.rooms.push(dup);
   assert.throws(
     () => dm.restore(JSON.stringify(snapshot)),
@@ -130,6 +133,7 @@ test("M-46: the in-flight dispatch attempt is persisted before notify runs", asy
   };
   const dispatcher = createOwnerAlertDispatcher(raiseAndDispatchDeps({ storage, notifier }));
   const alert = dispatcher.raise({ severity: "critical", title: "t", body: "b", source: "test" });
+  order.length = 0; // ignore raise's persist; only dispatch's ordering matters
   await dispatcher.dispatch(alert.id);
   const firstPersist = order.indexOf("persist");
   const firstNotify = order.indexOf("notify");
@@ -172,25 +176,26 @@ test("M-8: unified-inbox-store rolls back memory when the write fails", () => {
   const store = createUnifiedInboxStore({ storage: failingKeyValueStorage() });
   assert.throws(() => store.upsertMessage({
     from: "a", to: "b", subject: "s", body: "b", channel: "email", ts: 1_000_000,
-  }), /./);
+  }), (err) => err.code === "UIS_STORAGE_ERROR");
   assert.equal(store.list().messages.length, 0);
 });
 
 test("M-8: snooze-store rolls back memory when the write fails", () => {
   const store = createSnoozeStore({ storage: failingSnoozeStorage(), clock: () => 1_000_000 });
-  assert.throws(() => store.snooze("msg-1", 2_000_000), /./);
+  assert.throws(() => store.snooze("msg-1", 2_000_000), /disk is full/);
   assert.equal(store.list().length, 0);
 });
 
 test("M-8: task-lifecycle rolls back memory when the write fails", () => {
   const store = createTaskLifecycle({ storage: failingSerializedStorage() });
-  assert.throws(() => store.create({ title: "do the thing" }), /./);
+  assert.throws(() => store.create({ title: "do the thing" }), /disk is full/);
   assert.equal(store.list().length, 0);
 });
 
 test("M-8: thread-view-store rolls back memory when the write fails", () => {
   const store = createThreadViewStore({ storage: failingKeyValueStorage() });
-  assert.throws(() => store.updateDraft("thread-1", "hello"), /./);
+  assert.throws(() => store.updateDraft("thread-1", "hello"),
+    (err) => err.code === "TV_STORAGE_ERROR");
   assert.equal(store.getViewState("thread-1"), null);
 });
 
@@ -198,17 +203,17 @@ test("M-8: mailbox-search-store rolls back memory when the write fails", () => {
   const store = createMailboxSearchStore({ storage: failingKeyValueStorage() });
   assert.throws(() => store.addDocument({
     from: "a", to: "b", subject: "s", body: "b", channel: "email",
-  }), /./);
+  }), (err) => err.code === "MS_STORAGE_ERROR");
   assert.equal(store.documentCount(), 0);
 });
 
 test("M-8: inbox-rule-store rolls back memory when the write fails", () => {
   const store = createInboxRuleStore({ storage: failingSerializedStorage() });
   assert.throws(() => store.create({
-    name: "r", priority: 1,
-    conditions: { all: [] },
-    actions: [{ type: "notify", target: "owner" }],
-  }), /./);
+    name: "boss mail", enabled: true, priority: 10,
+    conditions: [{ field: "from", op: "contains", value: "boss@corp.com" }],
+    actions: [{ type: "star" }],
+  }), (err) => err.code === "IR_STORAGE");
   assert.equal(store.list().length, 0);
 });
 
@@ -241,6 +246,29 @@ function collabHarness(t) {
   t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
   return { store, collab: store.collab };
 }
+
+test("M-8: a refreshed draft lock still replays after a failed mutation evicts the cache", (t) => {
+  const { store, collab } = collabHarness(t);
+  const agent = { kind: "agent", id: "agent-a" };
+  const first = collab.acquireDraftLock("commons", "thread-1", agent);
+  const refreshed = collab.acquireDraftLock("commons", "thread-1", agent);
+  assert.equal(refreshed.duplicate, true);
+  assert.equal(refreshed.lock.lockId, first.lock.lockId);
+  // Break the write path: the journal runs for thread-2, the INSERT fails,
+  // and the room cache is evicted. The next read must replay the refreshed
+  // thread-1 lock from the database — the refresh rewrote the row with an
+  // empty id sequence, which replay must still handle.
+  store.db.exec(`CREATE TRIGGER fail_lock_insert BEFORE INSERT ON collab_draft_locks
+    BEGIN SELECT RAISE(ABORT, 'simulated disk failure'); END;`);
+  assert.throws(() => collab.acquireDraftLock("commons", "thread-2", agent), /simulated disk failure/);
+  store.db.exec("DROP TRIGGER fail_lock_insert");
+  const detected = collab.detectDraftLock("commons", "thread-1", { kind: "agent", id: "agent-b" });
+  assert.equal(detected.collision, true);
+  assert.equal(detected.holders[0].id, "agent-a");
+  // thread-2 was never persisted: no phantom lock.
+  const none = collab.detectDraftLock("commons", "thread-2", { kind: "agent", id: "agent-b" });
+  assert.equal(none.collision, false);
+});
 
 test("M-8: a failed collab mutation does not leave the cached journal ahead of the database", (t) => {
   const { store, collab } = collabHarness(t);

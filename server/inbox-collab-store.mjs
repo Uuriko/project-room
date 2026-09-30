@@ -151,9 +151,17 @@ export class InboxCollabStore {
   // room's cached journals would stay ahead of the database. Evict the
   // cached entry on failure so the next access replays from the database —
   // memory can never run ahead of disk.
-  #transact(roomId, fn) {
+  // M-8: the in-memory journal mutation runs first, outside the eviction
+  // scope. If the journal itself refuses the op (a coded domain error such
+  // as collision_lock_held or assign_forbidden), the cached entry is
+  // untouched and stays live — no replay is needed. Only a failure in the
+  // database write step, after the journal already ran, evicts the cached
+  // entry, so the next access replays from the rolled-back database instead
+  // of serving a journal that ran ahead of it.
+  #transact(roomId, entry, journalFn, persistFn) {
+    const logged = loggedMutation(entry, journalFn);
     try {
-      return this.store.transaction(fn);
+      return this.store.transaction(() => persistFn(logged));
     } catch (err) {
       this.#rooms.delete(roomId);
       throw err;
@@ -276,9 +284,12 @@ export class InboxCollabStore {
       // pattern, so its sequence is synthesized from the lock fields: the
       // acquire consumes the acquired instant, the heartbeat's expiry check
       // consumes it again (it cannot be expired: the refresh happened while
-      // live), and the heartbeat's write consumes expiresAt - ttlMs.
+      // live), and the heartbeat's write consumes expiresAt - ttlMs. A refresh
+      // consumes no id (the lockId is unchanged), so replay seeds the
+      // persisted lockId for the cold acquire; a cold acquire's own id_json
+      // already carries it.
       entry.cell.clocks = fresh ? [acquiredMs] : [acquiredMs, acquiredMs, lock.expiresAt - lock.ttlMs];
-      entry.cell.ids = JSON.parse(row.id_json);
+      entry.cell.ids = fresh ? JSON.parse(row.id_json) : [lock.lockId];
       entry.locks.acquireLock(lock.threadId, lock.holder, { ttlMs: lock.ttlMs });
       if (!fresh) entry.locks.heartbeat(lock.lockId);
       this.#drained(entry, "draft lock");
@@ -380,26 +391,27 @@ export class InboxCollabStore {
   // addresses assignments by id. ----
   assignThread(roomId, threadId, assignee, { by, force = false } = {}) {
     const entry = this.#entry(roomId);
-    return this.#transact(roomId, () => {
-      const op = { op: "assign", threadId, assignee, by, force };
-      const { result, clocks, ids } = loggedMutation(entry, () => this.#runAssignmentOp(entry, op));
-      const row = this.db.prepare(
-        "SELECT assignment_id, ops_json, clock_json, id_json FROM collab_assignments WHERE room_id=? AND thread_id=?")
-        .get(roomId, threadId);
-      const assignmentId = row?.assignment_id ?? randomUUID();
-      const ops = row ? [...JSON.parse(row.ops_json), op] : [op];
-      const allClocks = row ? [...JSON.parse(row.clock_json), ...clocks] : clocks;
-      const allIds = row ? [...JSON.parse(row.id_json), ...ids] : ids;
-      this.db.prepare(`INSERT INTO collab_assignments
-        (room_id, thread_id, assignment_id, ops_json, record_json, clock_json, id_json, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT (room_id, thread_id) DO UPDATE SET
-          ops_json=excluded.ops_json, record_json=excluded.record_json,
-          clock_json=excluded.clock_json, id_json=excluded.id_json, updated_at=excluded.updated_at`)
-        .run(roomId, threadId, assignmentId, JSON.stringify(ops), JSON.stringify(result),
-          JSON.stringify(allClocks), JSON.stringify(allIds), this.store.now());
-      return { assignmentId, record: result };
-    });
+    const op = { op: "assign", threadId, assignee, by, force };
+    return this.#transact(roomId, entry,
+      () => this.#runAssignmentOp(entry, op),
+      ({ result, clocks, ids }) => {
+        const row = this.db.prepare(
+          "SELECT assignment_id, ops_json, clock_json, id_json FROM collab_assignments WHERE room_id=? AND thread_id=?")
+          .get(roomId, threadId);
+        const assignmentId = row?.assignment_id ?? randomUUID();
+        const ops = row ? [...JSON.parse(row.ops_json), op] : [op];
+        const allClocks = row ? [...JSON.parse(row.clock_json), ...clocks] : clocks;
+        const allIds = row ? [...JSON.parse(row.id_json), ...ids] : ids;
+        this.db.prepare(`INSERT INTO collab_assignments
+          (room_id, thread_id, assignment_id, ops_json, record_json, clock_json, id_json, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT (room_id, thread_id) DO UPDATE SET
+            ops_json=excluded.ops_json, record_json=excluded.record_json,
+            clock_json=excluded.clock_json, id_json=excluded.id_json, updated_at=excluded.updated_at`)
+          .run(roomId, threadId, assignmentId, JSON.stringify(ops), JSON.stringify(result),
+            JSON.stringify(allClocks), JSON.stringify(allIds), this.store.now());
+        return { assignmentId, record: result };
+      });
   }
 
   listAssignments(roomId) {
@@ -414,40 +426,41 @@ export class InboxCollabStore {
 
   releaseAssignment(roomId, assignmentId, { by, reason = null } = {}) {
     const entry = this.#entry(roomId);
-    return this.#transact(roomId, () => {
-      const row = this.db.prepare(
-        "SELECT thread_id, ops_json, clock_json, id_json FROM collab_assignments WHERE room_id=? AND assignment_id=?")
-        .get(roomId, assignmentId);
-      if (!row) throw notFound("assignment_not_found");
-      // M-7(b): releasing someone else's assignment is a privileged act —
-      // only the assignee, the assigner, or the room owner may do it. When
-      // there is no live assignment the journal below still throws
-      // assign_not_assigned as before.
-      const current = entry.assign.get(row.thread_id);
-      if (current?.status === "assigned") {
-        const ownerId = this.store.roomAuthority(roomId)?.ownerId ?? null;
-        const byId = by?.id ?? null;
-        const permitted = typeof byId === "string" && byId !== "" && (
-          byId === current.assignee?.id ||
-          byId === current.assignedBy?.id ||
-          byId === ownerId
-        );
-        if (!permitted) {
-          const error = new Error("Only the assignee, the assigner, or the room owner can release an assignment.");
-          error.code = "assign_forbidden";
-          throw error;
-        }
+    const row = this.db.prepare(
+      "SELECT thread_id, ops_json, clock_json, id_json FROM collab_assignments WHERE room_id=? AND assignment_id=?")
+      .get(roomId, assignmentId);
+    if (!row) throw notFound("assignment_not_found");
+    // M-7(b): releasing someone else's assignment is a privileged act —
+    // only the assignee, the assigner, or the room owner may do it. When
+    // there is no live assignment the journal below still throws
+    // assign_not_assigned as before.
+    const current = entry.assign.get(row.thread_id);
+    if (current?.status === "assigned") {
+      const ownerId = this.store.roomAuthority(roomId)?.ownerId ?? null;
+      const byId = by?.id ?? null;
+      const permitted = typeof byId === "string" && byId !== "" && (
+        byId === current.assignee?.id ||
+        byId === current.assignedBy?.id ||
+        byId === ownerId
+      );
+      if (!permitted) {
+        const error = new Error("Only the assignee, the assigner, or the room owner can release an assignment.");
+        error.code = "assign_forbidden";
+        throw error;
       }
-      const op = { op: "release", threadId: row.thread_id, by, reason };
-      const { result, clocks, ids } = loggedMutation(entry, () => this.#runAssignmentOp(entry, op));
-      this.db.prepare(`UPDATE collab_assignments
-        SET ops_json=?, record_json=?, clock_json=?, id_json=?, updated_at=? WHERE room_id=? AND thread_id=?`)
-        .run(JSON.stringify([...JSON.parse(row.ops_json), op]), JSON.stringify(result),
-          JSON.stringify([...JSON.parse(row.clock_json), ...clocks]),
-          JSON.stringify([...JSON.parse(row.id_json), ...ids]),
-          this.store.now(), roomId, row.thread_id);
-      return { assignmentId, record: result };
-    });
+    }
+    const op = { op: "release", threadId: row.thread_id, by, reason };
+    return this.#transact(roomId, entry,
+      () => this.#runAssignmentOp(entry, op),
+      ({ result, clocks, ids }) => {
+        this.db.prepare(`UPDATE collab_assignments
+          SET ops_json=?, record_json=?, clock_json=?, id_json=?, updated_at=? WHERE room_id=? AND thread_id=?`)
+          .run(JSON.stringify([...JSON.parse(row.ops_json), op]), JSON.stringify(result),
+            JSON.stringify([...JSON.parse(row.clock_json), ...clocks]),
+            JSON.stringify([...JSON.parse(row.id_json), ...ids]),
+            this.store.now(), roomId, row.thread_id);
+        return { assignmentId, record: result };
+      });
   }
 
   // ---- internal notes: append-only over HTTP (add + list). Notes carry
@@ -455,16 +468,16 @@ export class InboxCollabStore {
   // reader is the collab notes endpoint. ----
   addThreadNote(roomId, threadId, { author, body, tag = null } = {}) {
     const entry = this.#entry(roomId);
-    return this.#transact(roomId, () => {
-      const { result: note, clocks, ids } = loggedMutation(entry,
-        () => entry.notes.addNote(threadId, { author, body, tag }));
-      this.db.prepare(`INSERT INTO collab_notes
-        (room_id, note_id, thread_id, note_json, clock_json, id_json, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)`)
-        .run(roomId, note.noteId, threadId, JSON.stringify(note),
-          JSON.stringify(clocks), JSON.stringify(ids), this.store.now());
-      return note;
-    });
+    return this.#transact(roomId, entry,
+      () => entry.notes.addNote(threadId, { author, body, tag }),
+      ({ result: note, clocks, ids }) => {
+        this.db.prepare(`INSERT INTO collab_notes
+          (room_id, note_id, thread_id, note_json, clock_json, id_json, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?)`)
+          .run(roomId, note.noteId, threadId, JSON.stringify(note),
+            JSON.stringify(clocks), JSON.stringify(ids), this.store.now());
+        return note;
+      });
   }
 
   listThreadNotes(roomId, threadId) {
@@ -476,32 +489,33 @@ export class InboxCollabStore {
   // replay so a restart never resurrects a stale hold. ----
   acquireDraftLock(roomId, threadId, holder, { ttlMs = null } = {}) {
     const entry = this.#entry(roomId);
-    return this.#transact(roomId, () => {
-      const { result, clocks, ids } = loggedMutation(entry,
-        () => entry.locks.acquireLock(threadId, holder, ttlMs === null ? {} : { ttlMs }));
-      const { lock, duplicate } = result;
-      this.db.prepare(`INSERT INTO collab_draft_locks
-        (room_id, lock_id, thread_id, lock_json, clock_json, id_json, expires_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT (room_id, lock_id) DO UPDATE SET
-          lock_json=excluded.lock_json, clock_json=excluded.clock_json, id_json=excluded.id_json,
-          expires_at=excluded.expires_at, updated_at=excluded.updated_at`)
-        .run(roomId, lock.lockId, threadId, JSON.stringify(lock),
-          JSON.stringify(clocks), JSON.stringify(ids), lock.expiresAt, this.store.now());
-      return { lock, duplicate };
-    });
+    return this.#transact(roomId, entry,
+      () => entry.locks.acquireLock(threadId, holder, ttlMs === null ? {} : { ttlMs }),
+      ({ result, clocks, ids }) => {
+        const { lock, duplicate } = result;
+        this.db.prepare(`INSERT INTO collab_draft_locks
+          (room_id, lock_id, thread_id, lock_json, clock_json, id_json, expires_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT (room_id, lock_id) DO UPDATE SET
+            lock_json=excluded.lock_json, clock_json=excluded.clock_json, id_json=excluded.id_json,
+            expires_at=excluded.expires_at, updated_at=excluded.updated_at`)
+          .run(roomId, lock.lockId, threadId, JSON.stringify(lock),
+            JSON.stringify(clocks), JSON.stringify(ids), lock.expiresAt, this.store.now());
+        return { lock, duplicate };
+      });
   }
 
   releaseDraftLock(roomId, lockId, { by } = {}) {
     const entry = this.#entry(roomId);
-    return this.#transact(roomId, () => {
-      const row = this.db.prepare(
-        "SELECT 1 FROM collab_draft_locks WHERE room_id=? AND lock_id=?").get(roomId, lockId);
-      if (!row) throw notFound("lock_not_found");
-      const released = entry.locks.releaseLock(lockId, { by });
-      this.db.prepare("DELETE FROM collab_draft_locks WHERE room_id=? AND lock_id=?").run(roomId, lockId);
-      return released;
-    });
+    const row = this.db.prepare(
+      "SELECT 1 FROM collab_draft_locks WHERE room_id=? AND lock_id=?").get(roomId, lockId);
+    if (!row) throw notFound("lock_not_found");
+    return this.#transact(roomId, entry,
+      () => entry.locks.releaseLock(lockId, { by }),
+      ({ result: released }) => {
+        this.db.prepare("DELETE FROM collab_draft_locks WHERE room_id=? AND lock_id=?").run(roomId, lockId);
+        return released;
+      });
   }
 
   detectDraftLock(roomId, threadId, actor) {
@@ -512,17 +526,17 @@ export class InboxCollabStore {
   // ---- approvals: propose, list, human decide, agent resubmit. ----
   proposeDraft(roomId, threadId, { draft, byAgent, channel }) {
     const entry = this.#entry(roomId);
-    return this.#transact(roomId, () => {
-      const op = { op: "propose", threadId, draft, byAgent, channel };
-      const { result: record, clocks, ids } = loggedMutation(entry,
-        () => this.#runApprovalOp(entry, null, op));
-      this.db.prepare(`INSERT INTO collab_approvals
-        (room_id, proposal_id, thread_id, ops_json, record_json, clock_json, id_json, status, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-        .run(roomId, record.proposalId, threadId, JSON.stringify([op]), JSON.stringify(record),
-          JSON.stringify(clocks), JSON.stringify(ids), record.status, this.store.now(), this.store.now());
-      return record;
-    });
+    const op = { op: "propose", threadId, draft, byAgent, channel };
+    return this.#transact(roomId, entry,
+      () => this.#runApprovalOp(entry, null, op),
+      ({ result: record, clocks, ids }) => {
+        this.db.prepare(`INSERT INTO collab_approvals
+          (room_id, proposal_id, thread_id, ops_json, record_json, clock_json, id_json, status, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+          .run(roomId, record.proposalId, threadId, JSON.stringify([op]), JSON.stringify(record),
+            JSON.stringify(clocks), JSON.stringify(ids), record.status, this.store.now(), this.store.now());
+        return record;
+      });
   }
 
   listApprovals(roomId, { status = null } = {}) {
@@ -532,69 +546,69 @@ export class InboxCollabStore {
 
   decideApproval(roomId, proposalId, { decision, by, note = null, editedBody = null, reason = null }) {
     const entry = this.#entry(roomId);
-    return this.#transact(roomId, () => {
-      const row = this.db.prepare(
-        "SELECT ops_json, clock_json, id_json FROM collab_approvals WHERE room_id=? AND proposal_id=?")
-        .get(roomId, proposalId);
-      if (!row) throw notFound("approval_not_found");
-      const op = decision === "approve" ? { op: "approve", by, note }
-        : decision === "edit" ? { op: "requestEdits", by, edits: editedBody, note }
-        : { op: "reject", by, reason };
-      const { result: record, clocks, ids } = loggedMutation(entry,
-        () => this.#runApprovalOp(entry, proposalId, op));
-      this.db.prepare(`UPDATE collab_approvals
-        SET ops_json=?, record_json=?, clock_json=?, id_json=?, status=?, updated_at=?
-        WHERE room_id=? AND proposal_id=?`)
-        .run(JSON.stringify([...JSON.parse(row.ops_json), op]), JSON.stringify(record),
-          JSON.stringify([...JSON.parse(row.clock_json), ...clocks]),
-          JSON.stringify([...JSON.parse(row.id_json), ...ids]),
-          record.status, this.store.now(), roomId, proposalId);
-      return record;
-    });
+    const row = this.db.prepare(
+      "SELECT ops_json, clock_json, id_json FROM collab_approvals WHERE room_id=? AND proposal_id=?")
+      .get(roomId, proposalId);
+    if (!row) throw notFound("approval_not_found");
+    const op = decision === "approve" ? { op: "approve", by, note }
+      : decision === "edit" ? { op: "requestEdits", by, edits: editedBody, note }
+      : { op: "reject", by, reason };
+    return this.#transact(roomId, entry,
+      () => this.#runApprovalOp(entry, proposalId, op),
+      ({ result: record, clocks, ids }) => {
+        this.db.prepare(`UPDATE collab_approvals
+          SET ops_json=?, record_json=?, clock_json=?, id_json=?, status=?, updated_at=?
+          WHERE room_id=? AND proposal_id=?`)
+          .run(JSON.stringify([...JSON.parse(row.ops_json), op]), JSON.stringify(record),
+            JSON.stringify([...JSON.parse(row.clock_json), ...clocks]),
+            JSON.stringify([...JSON.parse(row.id_json), ...ids]),
+            record.status, this.store.now(), roomId, proposalId);
+        return record;
+      });
   }
 
   resubmitApproval(roomId, proposalId, { draft, byAgent }) {
     const entry = this.#entry(roomId);
-    return this.#transact(roomId, () => {
-      const row = this.db.prepare(
-        "SELECT ops_json, clock_json, id_json FROM collab_approvals WHERE room_id=? AND proposal_id=?")
-        .get(roomId, proposalId);
-      if (!row) throw notFound("approval_not_found");
-      const op = { op: "resubmit", draft, byAgent };
-      const { result: record, clocks, ids } = loggedMutation(entry,
-        () => this.#runApprovalOp(entry, proposalId, op));
-      this.db.prepare(`UPDATE collab_approvals
-        SET ops_json=?, record_json=?, clock_json=?, id_json=?, status=?, updated_at=?
-        WHERE room_id=? AND proposal_id=?`)
-        .run(JSON.stringify([...JSON.parse(row.ops_json), op]), JSON.stringify(record),
-          JSON.stringify([...JSON.parse(row.clock_json), ...clocks]),
-          JSON.stringify([...JSON.parse(row.id_json), ...ids]),
-          record.status, this.store.now(), roomId, proposalId);
-      return record;
-    });
+    const row = this.db.prepare(
+      "SELECT ops_json, clock_json, id_json FROM collab_approvals WHERE room_id=? AND proposal_id=?")
+      .get(roomId, proposalId);
+    if (!row) throw notFound("approval_not_found");
+    const op = { op: "resubmit", draft, byAgent };
+    return this.#transact(roomId, entry,
+      () => this.#runApprovalOp(entry, proposalId, op),
+      ({ result: record, clocks, ids }) => {
+        this.db.prepare(`UPDATE collab_approvals
+          SET ops_json=?, record_json=?, clock_json=?, id_json=?, status=?, updated_at=?
+          WHERE room_id=? AND proposal_id=?`)
+          .run(JSON.stringify([...JSON.parse(row.ops_json), op]), JSON.stringify(record),
+            JSON.stringify([...JSON.parse(row.clock_json), ...clocks]),
+            JSON.stringify([...JSON.parse(row.id_json), ...ids]),
+            record.status, this.store.now(), roomId, proposalId);
+        return record;
+      });
   }
 
   // ---- agent routing: mention routing with policy overrides. ----
   routeMention(roomId, { threadId, mentionedAgentId, from, context = null }) {
     const entry = this.#entry(roomId);
-    return this.#transact(roomId, () => {
-      const { result: out, clocks, ids } = loggedMutation(entry,
-        () => entry.router.route(threadId, { text: `@${mentionedAgentId}`, from, context }));
-      // route() consumes two clock reads and one id per emitted record, in
-      // mention order; slice the logged sequences back apart per record.
-      let clockOffset = 0, idOffset = 0;
-      for (const record of out.records) {
-        const recordClocks = clocks.slice(clockOffset, clockOffset + 2);
-        const recordIds = ids.slice(idOffset, idOffset + 1);
-        clockOffset += 2; idOffset += 1;
-        this.#insertRoutingEvent(roomId, "route", {
-          recordId: record.routingId, threadId: record.threadId, agentId: record.agent,
-          data: { threadId, mentionedAgentId, from, context },
-          clocks: recordClocks, ids: recordIds,
-        });
-      }
-      return out;
-    });
+    return this.#transact(roomId, entry,
+      () => entry.router.route(threadId, { text: `@${mentionedAgentId}`, from, context }),
+      ({ result: out, clocks, ids }) => {
+        // route() consumes two clock reads and one id per emitted record, in
+        // mention order; slice the logged sequences back apart per record.
+        let clockOffset = 0, idOffset = 0;
+        for (const record of out.records) {
+          const recordClocks = clocks.slice(clockOffset, clockOffset + 2);
+          const recordIds = ids.slice(idOffset, idOffset + 1);
+          clockOffset += 2; idOffset += 1;
+          this.#insertRoutingEvent(roomId, "route", {
+            recordId: record.routingId, threadId: record.threadId, agentId: record.agent,
+            data: { threadId, mentionedAgentId, from, context },
+            clocks: recordClocks, ids: recordIds,
+          });
+        }
+        return out;
+      });
   }
 
   listRouting(roomId) {
@@ -626,30 +640,34 @@ export class InboxCollabStore {
 
   resolveRouting(roomId, routingId, { by, outcome }) {
     const entry = this.#entry(roomId);
-    return this.#transact(roomId, () => {
-      const row = this.db.prepare(
-        "SELECT 1 FROM collab_routing_events WHERE room_id=? AND kind='route' AND record_id=?").get(roomId, routingId);
-      if (!row) throw notFound("routing_not_found");
-      const { result: record, clocks, ids } = loggedMutation(entry,
-        () => entry.router.resolve(routingId, { by, outcome }));
-      this.#insertRoutingEvent(roomId, "resolve", {
-        recordId: routingId, agentId: record.agent,
-        data: { routingId, by, outcome }, clocks, ids,
+    const row = this.db.prepare(
+      "SELECT 1 FROM collab_routing_events WHERE room_id=? AND kind='route' AND record_id=?").get(roomId, routingId);
+    if (!row) throw notFound("routing_not_found");
+    return this.#transact(roomId, entry,
+      () => entry.router.resolve(routingId, { by, outcome }),
+      ({ result: record, clocks, ids }) => {
+        this.#insertRoutingEvent(roomId, "resolve", {
+          recordId: routingId, agentId: record.agent,
+          data: { routingId, by, outcome }, clocks, ids,
+        });
+        return this.#routingView(record);
       });
-      return this.#routingView(record);
-    });
   }
 
   setRoutingPolicy(roomId, agent, policy) {
     const entry = this.#entry(roomId);
-    return this.#transact(roomId, () => {
-      const result = entry.router.setPolicy(agent, policy);
-      entry.policies.set(agent, result);
-      this.#insertRoutingEvent(roomId, "policy", {
-        agentId: agent, data: { agent, policy: result }, clocks: [], ids: [],
+    return this.#transact(roomId, entry,
+      () => {
+        const result = entry.router.setPolicy(agent, policy);
+        entry.policies.set(agent, result);
+        return result;
+      },
+      ({ result }) => {
+        this.#insertRoutingEvent(roomId, "policy", {
+          agentId: agent, data: { agent, policy: result }, clocks: [], ids: [],
+        });
+        return result;
       });
-      return result;
-    });
   }
 
   // ---- handoffs: the existing durable journal (store.handoffs) is reused
