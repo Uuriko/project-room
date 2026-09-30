@@ -90,6 +90,18 @@ test("releaseExpired: expired claims auto-release, everything else untouched", (
   throwsCode(() => releaseExpired("nope", T0), "invalid_claim_input");
 });
 
+test("releaseExpired clears attestations like updateWork (L-P2-8)", () => {
+  // A reviewed claim lapses: the next claimant must not inherit the
+  // previous owner's attestations.
+  const claimed = claimWork({ id: "e2" }, "quill", { leaseHours: 1, now: T0 });
+  const reviewed = attestWork(claimed, "jill", { note: "looks good", now: T0 });
+  assert.equal(reviewed.attestations.length, 1);
+  const [released] = releaseExpired([reviewed], T0 + 2 * H);
+  assert.equal(released.state, "unclaimed");
+  assert.deepEqual(released.attestations, []);
+  assert.ok(Object.isFrozen(released.attestations));
+});
+
 test("delivery modes: done transition persists the mode, others reject it", () => {
   for (const mode of DELIVERY_MODES) {
     const claimed = claimWork({ id: `m-${mode}` }, "quill", { now: T0 });
