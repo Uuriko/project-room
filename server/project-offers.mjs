@@ -164,9 +164,6 @@ export class ProjectOffers {
     this.requireOwner(roomId, actorId);
     return { offers: this.db.prepare('SELECT * FROM project_offers WHERE room_id=? ORDER BY created_at DESC, offer_id LIMIT 100').all(roomId).map(row => this.record(row, true)) };
   }
-  publicRows() {
-    return this.db.prepare("SELECT o.* FROM project_offers o JOIN rooms r ON r.id=o.room_id WHERE o.status='published' AND r.archived_at IS NULL ORDER BY o.created_at DESC,o.offer_id LIMIT 100").all();
-  }
   list({ limit = 20, after = null } = {}) {
     const size = Number(limit);
     check(Number.isInteger(size) && size > 0 && size <= 100, 'limit must be 1 through 100');
