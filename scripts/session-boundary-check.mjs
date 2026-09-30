@@ -468,15 +468,22 @@ test("composer failures stay discussion-scoped and keyboard sends preserve user 
   assert.equal(await page.locator('#auth-signin-ui [data-signin-form="password"] [name="email"]').evaluate(node => node === document.activeElement), true,
     "access termination focuses authentication, never the old composer");
   await enterRoom(page, owner, "Room owner");
-  assert.equal(await input.inputValue(), "");
+  // E-H2: the 403 was unexpected access loss (the credential died mid-send),
+  // so the in-flight draft is preserved for re-authentication (was: cleared).
+  // The session keeps the thread context it died in.
+  assert.equal(await input.inputValue(), "This old-session draft must disappear",
+    "unexpected access loss preserves the in-flight draft across re-entry");
   assert.equal(await page.locator("#composer-status").textContent(), "");
   assert.equal(await form.getAttribute("aria-busy"), null);
   await page.locator('[data-message-record-id="topic"] [data-message-action="thread"]').click();
-  assert.equal(await input.inputValue(), "", "access loss clears an offscreen thread draft, not only the visible form");
+  assert.equal(await input.inputValue(), "This old-session draft must disappear",
+    "unexpected access loss preserves the offscreen thread draft, not only the visible form");
   assert.equal(await page.locator("#composer-status").textContent(), "", "access loss clears an offscreen thread error");
   await page.locator("#thread-back").click();
-  assert.equal(await input.inputValue(), "");
-  assert.equal(await page.locator("#composer-status").textContent(), "", "access loss clears an offscreen room error");
+  assert.equal(await input.inputValue(), "This old-session room error must disappear",
+    "unexpected access loss preserves the offscreen room draft");
+  assert.equal(await page.locator("#composer-status").textContent(), expectedError,
+    "unexpected access loss preserves the offscreen room error");
 });
 
 test("a late successful composer result cannot cross into a replacement session", { timeout: 90000 }, async t => {
