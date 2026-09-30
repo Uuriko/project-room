@@ -40,13 +40,13 @@ export class PublicWorkClaimsClient {
     this.#identitySecret = identitySecret; this.fetchImpl = fetchImpl; this.timeoutMs = timeoutMs;
   }
   async #request(path, { data, signal, artifact = false, authenticate = Boolean(data) } = {}) {
-    if (authenticate && !this.#identitySecret) throw new RoomClientError(0, 'identity_required', 'Use your saved agent identity to claim public work');
+    if (authenticate && !this.#identitySecret) throw new RoomClientError(0, 'identity_required', 'Use your saved agent identity');
     const stop = signal ? AbortSignal.any([signal, AbortSignal.timeout(this.timeoutMs)]) : AbortSignal.timeout(this.timeoutMs);
     let response;
     try {
       response = await this.fetchImpl(this.origin + edgeDoorApiPath(this.origin, path), {
         method: data ? 'POST' : 'GET', redirect: 'error', credentials: 'omit', signal: stop,
-        headers: { Accept: artifact ? 'text/plain' : 'application/json', ...(data ? { Origin: this.origin, 'Content-Type': 'application/json', ...(authenticate ? { Authorization: `Bearer ${this.#identitySecret}` } : {}) } : {}) },
+        headers: { Accept: artifact ? 'text/plain' : 'application/json', ...(authenticate ? { Authorization: `Bearer ${this.#identitySecret}` } : {}), ...(data ? { Origin: this.origin, 'Content-Type': 'application/json' } : {}) },
         ...(data ? { body: JSON.stringify(data) } : {})
       });
     } catch { throw new RoomClientError(0, 'service_unavailable', 'Response unknown. Retry the same request ID and exact payload.'); }
@@ -113,6 +113,20 @@ export class PublicWorkClaimsClient {
   release(id, input, options) { return this.#action(id, 'release', input, options); }
   finish(id, input, options) { return this.#action(id, 'finish', input, options); }
   async readReceipt(id, options) { if (!validId(id)) throw new RoomClientError(0, 'invalid_input', 'Use a public receipt ID'); return receipt(await this.#request(`/api/public-work/receipts/${encodeURIComponent(id)}`, options), id); }
+  async readReview(record, options) {
+    const checked = receipt(record);
+    const value = await this.#request(`/api/public-work/receipts/${encodeURIComponent(checked.receiptId)}/review`, { ...options, authenticate: true });
+    if (!object(value) || Object.keys(value).some(key => !['receiptId', 'taskId', 'termsVersion', 'generation', 'artifactSha256', 'review'].includes(key))
+      || value.receiptId !== checked.receiptId || value.taskId !== checked.taskId || value.termsVersion !== checked.termsVersion
+      || value.generation !== checked.generation || value.artifactSha256 !== checked.artifact.sha256 || !object(value.review)) throw invalid();
+    const review = value.review;
+    if (Object.keys(review).some(key => !['revision', 'state', 'decision', 'reason', 'decidedAt', 'verificationVerdict', 'verificationReviewerKind'].includes(key))
+      || !Number.isSafeInteger(review.revision) || review.revision < 0 || !['pending', 'accepted', 'rejected', 'revision_requested'].includes(review.state)
+      || review.state !== 'pending' && (review.decision !== review.state || typeof review.reason !== 'string' || !review.reason.trim() || review.reason.length > 2000 || !date(review.decidedAt))
+      || review.verificationVerdict !== undefined && !['PASS', 'FAIL'].includes(review.verificationVerdict)
+      || review.verificationReviewerKind !== undefined && !['human', 'agent'].includes(review.verificationReviewerKind)) throw invalid();
+    return value;
+  }
   async readArtifact(record, options) {
     const checked = receipt(record), raw = await this.#request(`/api/public-work/receipts/${encodeURIComponent(checked.receiptId)}/artifact`, { ...options, artifact: true });
     const sha256 = createHash('sha256').update(raw).digest('hex');

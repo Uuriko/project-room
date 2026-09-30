@@ -83,3 +83,18 @@ test('a private draft without a return path cannot publish; an owner-authored su
   store.projectOffers.transition('commons', 'owner', 'submission', 'publish', { requestId: 'publish-submission', expectedRevision: 1 });
   assert.equal(store.projectOffers.read('submission').submissionUrl, useful.terms.submissionUrl);
 });
+
+
+test('guest verify bits cannot publish an approval promise the guest scope cannot execute', t => {
+  const { store } = fixture(t), key = store.issueAccessKey('commons', 'owner');
+  const id = 'guest-agent-offer-review';
+  store.command(key, 'commons', { id: 'add-guest-reviewer', type: 'member.added', data: {
+    memberId: id, displayName: 'Guest reviewer', kind: 'agent', permissions: [], accountableHumanId: 'owner' } });
+  store.command(key, 'commons', { id: 'grant-guest-review-bits', type: 'member.access_changed', data: {
+    memberId: id, expectedMemberRevision: 0, permissions: ['verify'], active: true } });
+  assert.deepEqual(store.room('commons').state.members[id].permissions, ['verify']);
+  const draft = input('guest-review-promise');
+  draft.reviewerMemberIds = [id]; draft.terms.approvalPolicy.mode = 'agent';
+  assert.throws(() => store.projectOffers.create('commons', 'owner', draft), error => error.code === 'invalid_project_offer' && /guest/i.test(error.message));
+  assert.deepEqual(store.projectOffers.ownerList('commons', 'owner').offers, []);
+});

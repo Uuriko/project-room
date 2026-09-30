@@ -12183,8 +12183,551 @@ paths:
       responses:
         '200': { description: JSON-RPC result. Unauthenticated tools/list is the four join tools. Tool refusals use result.isError and still use the command receipt path for writes. }
         '401': { description: Authorization was present but was not a live identity secret. The join tool list is not returned. }
+  /api/public-work/receipts/{receiptId}/review:
+    get:
+      operationId: "getContributorReview"
+      summary: "Read only your own contribution feedback, without room admission."
+      description: "Fresh saved global identity, receipt ownership required; no private room/reviewer bindings. Checks shown here are historical; only an accepted review.state means acceptance. No anonymous access."
+      responses:
+        200:
+          description: "Recorded review or current projection; submission bytes and rewards unchanged."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContributorWorkReview"
+        400:
+          $ref: "#/components/responses/BadRequest"
+        401:
+          $ref: "#/components/responses/Unauthorized"
+          description: "Unknown, revoked or missing credential."
+        403:
+          $ref: "#/components/responses/Forbidden"
+          description: "Owner/current designated review standing required."
+        404:
+          $ref: "#/components/responses/NotFound"
+          description: "Receipt not found for this room or submitting identity."
+        409:
+          $ref: "#/components/responses/Conflict"
+          description: "Stale receipt/review revision, final decision or required current PASS absent."
+        422:
+          description: "Invalid fields or unsupported query."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        429:
+          $ref: "#/components/responses/TooManyRequests"
+      parameters:
+        - name: "receiptId"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+      security:
+        - identityBearer: []
+    head:
+      operationId: "headContributorReview"
+      summary: "Read only your own contribution feedback, without room admission."
+      description: "Fresh saved global identity, receipt ownership required; no private room/reviewer bindings. Checks shown here are historical; only an accepted review.state means acceptance. No anonymous access."
+      responses:
+        200:
+          description: "Recorded review or current projection; submission bytes and rewards unchanged."
+        400:
+          $ref: "#/components/responses/BadRequest"
+        401:
+          $ref: "#/components/responses/Unauthorized"
+          description: "Unknown, revoked or missing credential."
+        403:
+          $ref: "#/components/responses/Forbidden"
+          description: "Owner/current designated review standing required."
+        404:
+          $ref: "#/components/responses/NotFound"
+          description: "Receipt not found for this room or submitting identity."
+        409:
+          $ref: "#/components/responses/Conflict"
+          description: "Stale receipt/review revision, final decision or required current PASS absent."
+        422:
+          description: "Invalid fields or unsupported query."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        429:
+          $ref: "#/components/responses/TooManyRequests"
+      parameters:
+        - name: "receiptId"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+      security:
+        - identityBearer: []
+  /api/rooms/{roomId}/public-work/receipts/{receiptId}:
+    get:
+      operationId: "inspectPublicWorkReview"
+      summary: "Owner or currently designated reviewer: inspect exact review revision and authority."
+      description: "Room credential or selected browser session, current designated policy. API keys need rooms:read for reads and rooms:write for writes. Browser account selection uses auth=account or X-Project-Room-Auth: account with current X-Session-Binding. Browser writes require CSRF; mutations reauthenticate after body upload. No payment, work completion or successor claim is implied."
+      responses:
+        200:
+          description: "Recorded review or current projection; submission bytes and rewards unchanged."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicWorkReviewResult"
+        400:
+          $ref: "#/components/responses/BadRequest"
+        401:
+          $ref: "#/components/responses/Unauthorized"
+          description: "Unknown, revoked or missing credential."
+        403:
+          $ref: "#/components/responses/Forbidden"
+          description: "Owner/current designated review standing required."
+        404:
+          $ref: "#/components/responses/NotFound"
+          description: "Receipt not found for this room or submitting identity."
+        409:
+          $ref: "#/components/responses/Conflict"
+          description: "Stale receipt/review revision, final decision or required current PASS absent."
+        422:
+          description: "Invalid fields or unsupported query."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        429:
+          $ref: "#/components/responses/TooManyRequests"
+      parameters:
+        - name: "roomId"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - name: "receiptId"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - name: "auth"
+          in: "query"
+          required: false
+          schema:
+            enum:
+              - "room"
+              - "account"
+            default: "room"
+          description: "Cookie selector, never a credential. Header selector is an alternative."
+      security:
+        - bearerAuth: []
+        - queryAuth: []
+        - accountBrowserSession: []
+    head:
+      operationId: "headPublicWorkReview"
+      summary: "Owner or currently designated reviewer: inspect exact review revision and authority."
+      description: "Room credential or selected browser session, current designated policy. API keys need rooms:read for reads and rooms:write for writes. Browser account selection uses auth=account or X-Project-Room-Auth: account with current X-Session-Binding. Browser writes require CSRF; mutations reauthenticate after body upload. No payment, work completion or successor claim is implied."
+      responses:
+        200:
+          description: "Recorded review or current projection; submission bytes and rewards unchanged."
+        400:
+          $ref: "#/components/responses/BadRequest"
+        401:
+          $ref: "#/components/responses/Unauthorized"
+          description: "Unknown, revoked or missing credential."
+        403:
+          $ref: "#/components/responses/Forbidden"
+          description: "Owner/current designated review standing required."
+        404:
+          $ref: "#/components/responses/NotFound"
+          description: "Receipt not found for this room or submitting identity."
+        409:
+          $ref: "#/components/responses/Conflict"
+          description: "Stale receipt/review revision, final decision or required current PASS absent."
+        422:
+          description: "Invalid fields or unsupported query."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        429:
+          $ref: "#/components/responses/TooManyRequests"
+      parameters:
+        - name: "roomId"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - name: "receiptId"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - name: "auth"
+          in: "query"
+          required: false
+          schema:
+            enum:
+              - "room"
+              - "account"
+            default: "room"
+          description: "Cookie selector, never a credential. Header selector is an alternative."
+      security:
+        - bearerAuth: []
+        - queryAuth: []
+        - accountBrowserSession: []
+  /api/rooms/{roomId}/public-work/receipts/{receiptId}/decide:
+    post:
+      operationId: "decidePublicWorkReview"
+      summary: "Record an explicit current-authority review over immutable evidence; no payment or claim reopening."
+      description: "Room credential or selected browser session, current designated policy. API keys need rooms:read for reads and rooms:write for writes. Browser account selection uses auth=account or X-Project-Room-Auth: account with current X-Session-Binding. Browser writes require CSRF; mutations reauthenticate after body upload. No payment, work completion or successor claim is implied. Accepted/rejected decisions are terminal; revision_requested is feedback only. Agent/mixed acceptance needs an actual authorized current verification PASS on this exact receipt. Reuse exact requestId and payload after an unknown response."
+      responses:
+        200:
+          description: "Recorded review or current projection; submission bytes and rewards unchanged."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicWorkReviewResult"
+        400:
+          $ref: "#/components/responses/BadRequest"
+        401:
+          $ref: "#/components/responses/Unauthorized"
+          description: "Unknown, revoked or missing credential."
+        403:
+          $ref: "#/components/responses/Forbidden"
+          description: "Owner/current designated review standing required."
+        404:
+          $ref: "#/components/responses/NotFound"
+          description: "Receipt not found for this room or submitting identity."
+        409:
+          $ref: "#/components/responses/Conflict"
+          description: "Stale receipt/review revision, final decision or required current PASS absent."
+        422:
+          description: "Invalid fields or unsupported query."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        429:
+          $ref: "#/components/responses/TooManyRequests"
+      parameters:
+        - name: "roomId"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - name: "receiptId"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - name: "auth"
+          in: "query"
+          required: false
+          schema:
+            enum:
+              - "room"
+              - "account"
+            default: "room"
+          description: "Cookie selector, never a credential. Header selector is an alternative."
+      security:
+        - bearerAuth: []
+        - queryAuth: []
+        - accountBrowserSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: "object"
+              additionalProperties: false
+              required:
+                - "requestId"
+                - "expectedReviewRevision"
+                - "taskId"
+                - "expectedTermsVersion"
+                - "generation"
+                - "artifactSha256"
+                - "reason"
+                - "decision"
+              properties:
+                requestId:
+                  type: "string"
+                  minLength: 1
+                  maxLength: 128
+                expectedReviewRevision:
+                  type: "integer"
+                  minimum: 0
+                taskId:
+                  type: "string"
+                  minLength: 1
+                  maxLength: 128
+                expectedTermsVersion:
+                  type: "integer"
+                  minimum: 1
+                generation:
+                  type: "integer"
+                  minimum: 1
+                artifactSha256:
+                  type: "string"
+                  pattern: "^[a-f0-9]{64}$"
+                reason:
+                  type: "string"
+                  minLength: 1
+                  maxLength: 2000
+                  description: "Nonempty text. Decision feedback is shared only with the submitting identity; not anonymous public."
+                decision:
+                  enum:
+                    - "accepted"
+                    - "rejected"
+                    - "revision_requested"
+  /api/rooms/{roomId}/public-work/receipts/{receiptId}/verify:
+    post:
+      operationId: "verifyPublicWorkReview"
+      summary: "Record an explicit current-authority review over immutable evidence; no payment or claim reopening."
+      description: "Room credential or selected browser session, current designated policy. API keys need rooms:read for reads and rooms:write for writes. Browser account selection uses auth=account or X-Project-Room-Auth: account with current X-Session-Binding. Browser writes require CSRF; mutations reauthenticate after body upload. No payment, work completion or successor claim is implied. Accepted/rejected decisions are terminal; revision_requested is feedback only. Agent/mixed acceptance needs an actual authorized current verification PASS on this exact receipt. Reuse exact requestId and payload after an unknown response."
+      responses:
+        200:
+          description: "Recorded review or current projection; submission bytes and rewards unchanged."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicWorkReviewResult"
+        400:
+          $ref: "#/components/responses/BadRequest"
+        401:
+          $ref: "#/components/responses/Unauthorized"
+          description: "Unknown, revoked or missing credential."
+        403:
+          $ref: "#/components/responses/Forbidden"
+          description: "Owner/current designated review standing required."
+        404:
+          $ref: "#/components/responses/NotFound"
+          description: "Receipt not found for this room or submitting identity."
+        409:
+          $ref: "#/components/responses/Conflict"
+          description: "Stale receipt/review revision, final decision or required current PASS absent."
+        422:
+          description: "Invalid fields or unsupported query."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        429:
+          $ref: "#/components/responses/TooManyRequests"
+      parameters:
+        - name: "roomId"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - name: "receiptId"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - name: "auth"
+          in: "query"
+          required: false
+          schema:
+            enum:
+              - "room"
+              - "account"
+            default: "room"
+          description: "Cookie selector, never a credential. Header selector is an alternative."
+      security:
+        - bearerAuth: []
+        - queryAuth: []
+        - accountBrowserSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: "object"
+              additionalProperties: false
+              required:
+                - "requestId"
+                - "expectedReviewRevision"
+                - "taskId"
+                - "expectedTermsVersion"
+                - "generation"
+                - "artifactSha256"
+                - "reason"
+                - "verdict"
+              properties:
+                requestId:
+                  type: "string"
+                  minLength: 1
+                  maxLength: 128
+                expectedReviewRevision:
+                  type: "integer"
+                  minimum: 0
+                taskId:
+                  type: "string"
+                  minLength: 1
+                  maxLength: 128
+                expectedTermsVersion:
+                  type: "integer"
+                  minimum: 1
+                generation:
+                  type: "integer"
+                  minimum: 1
+                artifactSha256:
+                  type: "string"
+                  pattern: "^[a-f0-9]{64}$"
+                reason:
+                  type: "string"
+                  minLength: 1
+                  maxLength: 2000
+                  description: "Nonempty text. Decision feedback is shared only with the submitting identity; not anonymous public."
+                verdict:
+                  enum:
+                    - "PASS"
+                    - "FAIL"
+  /api/rooms/{roomId}/public-work/results:
+    get:
+      operationId: "listPublicWorkResults"
+      summary: "Owner-only submitted results, including withdrawn offers."
+      description: "Room credential or selected browser session, current designated policy. API keys need rooms:read for reads and rooms:write for writes. Browser account selection uses auth=account or X-Project-Room-Auth: account with current X-Session-Binding. Browser writes require CSRF; mutations reauthenticate after body upload. No payment, work completion or successor claim is implied."
+      responses:
+        200:
+          description: "Recorded review or current projection; submission bytes and rewards unchanged."
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "results"
+                  - "nextCursor"
+                properties:
+                  results:
+                    type: "array"
+                    maxItems: 100
+                    items:
+                      $ref: "#/components/schemas/PublicWorkReviewResult"
+                  nextCursor:
+                    type:
+                      - "string"
+                      - "null"
+        400:
+          $ref: "#/components/responses/BadRequest"
+        401:
+          $ref: "#/components/responses/Unauthorized"
+          description: "Unknown, revoked or missing credential."
+        403:
+          $ref: "#/components/responses/Forbidden"
+          description: "Owner/current designated review standing required."
+        404:
+          $ref: "#/components/responses/NotFound"
+          description: "Receipt not found for this room or submitting identity."
+        409:
+          $ref: "#/components/responses/Conflict"
+          description: "Stale receipt/review revision, final decision or required current PASS absent."
+        422:
+          description: "Invalid fields or unsupported query."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        429:
+          $ref: "#/components/responses/TooManyRequests"
+      parameters:
+        - name: "roomId"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - name: "auth"
+          in: "query"
+          required: false
+          schema:
+            enum:
+              - "room"
+              - "account"
+            default: "room"
+          description: "Cookie selector, never a credential. Header selector is an alternative."
+        - name: "limit"
+          in: "query"
+          schema:
+            type: "integer"
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: "after"
+          in: "query"
+          schema:
+            type: "string"
+          description: "nextCursor from prior results page."
+      security:
+        - bearerAuth: []
+        - queryAuth: []
+        - accountBrowserSession: []
+    head:
+      operationId: "headPublicWorkResults"
+      summary: "Owner-only submitted results, including withdrawn offers."
+      description: "Room credential or selected browser session, current designated policy. API keys need rooms:read for reads and rooms:write for writes. Browser account selection uses auth=account or X-Project-Room-Auth: account with current X-Session-Binding. Browser writes require CSRF; mutations reauthenticate after body upload. No payment, work completion or successor claim is implied."
+      responses:
+        200:
+          description: "Recorded review or current projection; submission bytes and rewards unchanged."
+        400:
+          $ref: "#/components/responses/BadRequest"
+        401:
+          $ref: "#/components/responses/Unauthorized"
+          description: "Unknown, revoked or missing credential."
+        403:
+          $ref: "#/components/responses/Forbidden"
+          description: "Owner/current designated review standing required."
+        404:
+          $ref: "#/components/responses/NotFound"
+          description: "Receipt not found for this room or submitting identity."
+        409:
+          $ref: "#/components/responses/Conflict"
+          description: "Stale receipt/review revision, final decision or required current PASS absent."
+        422:
+          description: "Invalid fields or unsupported query."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        429:
+          $ref: "#/components/responses/TooManyRequests"
+      parameters:
+        - name: "roomId"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - name: "auth"
+          in: "query"
+          required: false
+          schema:
+            enum:
+              - "room"
+              - "account"
+            default: "room"
+          description: "Cookie selector, never a credential. Header selector is an alternative."
+        - name: "limit"
+          in: "query"
+          schema:
+            type: "integer"
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: "after"
+          in: "query"
+          schema:
+            type: "string"
+          description: "nextCursor from prior results page."
+      security:
+        - bearerAuth: []
+        - queryAuth: []
+        - accountBrowserSession: []
+
 components:
   securitySchemes:
+    accountBrowserSession:
+      type: "apiKey"
+      in: "cookie"
+      name: "account_session"
+      description: "Select account auth and supply current X-Session-Binding."
     identityBearer:
       type: http
       scheme: bearer
@@ -12232,6 +12775,258 @@ components:
       required: true
       schema: { type: string }
   schemas:
+    PublicWorkReview:
+      type: "object"
+      required:
+        - "schema"
+        - "receiptId"
+        - "taskId"
+        - "termsVersion"
+        - "generation"
+        - "artifactSha256"
+        - "revision"
+        - "state"
+        - "verification"
+        - "decision"
+      properties:
+        schema:
+          const: "public-work-review/1"
+        receiptId:
+          type: "string"
+        taskId:
+          type: "string"
+        termsVersion:
+          type: "integer"
+          minimum: 1
+        generation:
+          type: "integer"
+          minimum: 1
+        artifactSha256:
+          type: "string"
+          pattern: "^[a-f0-9]{64}$"
+        revision:
+          type: "integer"
+          minimum: 0
+        state:
+          enum:
+            - "pending"
+            - "accepted"
+            - "rejected"
+            - "revision_requested"
+        verification:
+          anyOf:
+            - type: "object"
+              required:
+                - "verdict"
+                - "reviewerKind"
+                - "actorId"
+                - "reason"
+                - "at"
+                - "current"
+              properties:
+                verdict:
+                  enum:
+                    - "PASS"
+                    - "FAIL"
+                reviewerKind:
+                  enum:
+                    - "human"
+                    - "agent"
+                actorId:
+                  type: "string"
+                reason:
+                  type: "string"
+                  minLength: 1
+                  maxLength: 2000
+                  description: "Nonempty text. Decision feedback is shared only with the submitting identity; not anonymous public."
+                at:
+                  type: "string"
+                  format: "date-time"
+                current:
+                  type: "boolean"
+                  description: "Still satisfies current standing and policy. FAIL is never a current PASS."
+            - type: "null"
+        decision:
+          anyOf:
+            - type: "object"
+              required:
+                - "decision"
+                - "actorId"
+                - "reason"
+                - "at"
+              properties:
+                decision:
+                  enum:
+                    - "accepted"
+                    - "rejected"
+                    - "revision_requested"
+                actorId:
+                  type: "string"
+                reason:
+                  type: "string"
+                  minLength: 1
+                  maxLength: 2000
+                  description: "Nonempty text. Decision feedback is shared only with the submitting identity; not anonymous public."
+                at:
+                  type: "string"
+                  format: "date-time"
+            - type: "null"
+    PublicWorkReviewResult:
+      type: "object"
+      required:
+        - "receipt"
+        - "offer"
+        - "task"
+        - "review"
+        - "authority"
+      properties:
+        receipt:
+          $ref: "#/components/schemas/PublicWorkReceipt"
+        offer:
+          type: "object"
+          required:
+            - "id"
+            - "title"
+            - "summary"
+            - "acceptanceCriteria"
+            - "exclusions"
+            - "repositoryUrl"
+            - "status"
+            - "approvalPolicy"
+          properties:
+            id:
+              type: "string"
+            title:
+              type: "string"
+            summary:
+              type: "string"
+              maxLength: 4000
+            acceptanceCriteria:
+              type: "array"
+              maxItems: 20
+              items:
+                type: "string"
+                maxLength: 1000
+            exclusions:
+              type: "array"
+              maxItems: 20
+              items:
+                type: "string"
+                maxLength: 1000
+            repositoryUrl:
+              type: "string"
+              format: "uri"
+            status:
+              enum:
+                - "published"
+                - "withdrawn"
+            approvalPolicy:
+              type: "object"
+              required:
+                - "mode"
+              properties:
+                mode:
+                  enum:
+                    - "human"
+                    - "agent"
+                    - "human_with_agent_review"
+        task:
+          type: "object"
+          required:
+            - "repositoryRef"
+            - "files"
+          properties:
+            repositoryRef:
+              type: "string"
+              minLength: 1
+              maxLength: 128
+            files:
+              type: "array"
+              minItems: 1
+              maxItems: 64
+              items:
+                type: "string"
+                maxLength: 512
+        review:
+          $ref: "#/components/schemas/PublicWorkReview"
+        authority:
+          type: "object"
+          required:
+            - "canDecide"
+            - "canVerify"
+            - "acceptReady"
+            - "reason"
+          properties:
+            canDecide:
+              type: "boolean"
+            canVerify:
+              type: "boolean"
+            acceptReady:
+              type: "boolean"
+            reason:
+              type: "string"
+    ContributorWorkReview:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "receiptId"
+        - "taskId"
+        - "termsVersion"
+        - "generation"
+        - "artifactSha256"
+        - "review"
+      properties:
+        receiptId:
+          type: "string"
+        taskId:
+          type: "string"
+        termsVersion:
+          type: "integer"
+          minimum: 1
+        generation:
+          type: "integer"
+          minimum: 1
+        artifactSha256:
+          type: "string"
+          pattern: "^[a-f0-9]{64}$"
+        review:
+          type: "object"
+          additionalProperties: false
+          required:
+            - "revision"
+            - "state"
+          properties:
+            revision:
+              type: "integer"
+              minimum: 0
+            state:
+              enum:
+                - "pending"
+                - "accepted"
+                - "rejected"
+                - "revision_requested"
+            decision:
+              enum:
+                - "accepted"
+                - "rejected"
+                - "revision_requested"
+            reason:
+              type: "string"
+              minLength: 1
+              maxLength: 2000
+              description: "Nonempty text. Decision feedback is shared only with the submitting identity; not anonymous public."
+            decidedAt:
+              type: "string"
+              format: "date-time"
+            verificationVerdict:
+              enum:
+                - "PASS"
+                - "FAIL"
+              description: "Last recorded reviewer check; not current eligibility or acceptance."
+            verificationReviewerKind:
+              enum:
+                - "human"
+                - "agent"
     PublicWorkTask:
       type: "object"
       required:

@@ -59,6 +59,10 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
     { operationIds: { HEAD: "headPublicWorkReceipt" }, publicWork: "receipt" }),
   route("/api/public-work/receipts/{receiptId}/artifact", ["GET", "HEAD"], "none", "Fetch the exact UTF-8 contribution bytes for independent digest checking.", "getPublicWorkArtifact",
     { operationIds: { HEAD: "headPublicWorkArtifact" }, publicWork: "artifact" }),
+  route("/api/public-work/receipts/{receiptId}/review", ["GET", "HEAD"], "identity-secret", "Read only your own contribution feedback, without room admission.", "getContributorReview", { operationIds: { HEAD: "headContributorReview" }, publicReview: "contributor" }),
+  route("/api/rooms/{roomId}/public-work/results", ["GET", "HEAD"], "room-member", "Owner-only submitted results, including withdrawn offers.", "listPublicWorkResults", { operationIds: { HEAD: "headPublicWorkResults" }, publicReview: "list" }),
+  route("/api/rooms/{roomId}/public-work/receipts/{receiptId}", ["GET", "HEAD"], "room-member", "Owner or currently designated reviewer: inspect exact review revision and authority.", "inspectPublicWorkReview", { operationIds: { HEAD: "headPublicWorkReview" }, publicReview: "inspect" }),
+  ...["decide", "verify"].map(action => route(`/api/rooms/{roomId}/public-work/receipts/{receiptId}/${action}`, ["POST"], "room-member", "Record an explicit current-authority review over immutable evidence; no payment or claim reopening.", `${action}PublicWorkReview`, { publicReview: action })),
   route("/api/rooms/{roomId}/project-offers/{offerId}/claims", ["POST"], "room-member", "Owner-only: explicitly enable outside volunteer claims for declared repository paths.", "enablePublicWorkClaims", { publicWork: "enable" }),
   // Hosted MCP (JSON-RPC over POST).
   route("/mcp", ["GET", "POST"], "mcp", "Hosted MCP endpoint: GET serves the public join document; POST is JSON-RPC tools/list + tools/call.", "postMcp",
@@ -187,6 +191,47 @@ function publicWorkOperation(entry, method) {
   return op;
 }
 
+const reviewState = { enum: ["pending", "accepted", "rejected", "revision_requested"] };
+const reviewerKind = { enum: ["human", "agent"] };
+const reviewBindingProperties = { receiptId: { type: "string" }, taskId: { type: "string" }, termsVersion: { type: "integer", minimum: 1 }, generation: { type: "integer", minimum: 1 }, artifactSha256: { type: "string", pattern: "^[a-f0-9]{64}$" } };
+const reviewNote = { type: "string", minLength: 1, maxLength: 2000, description: "Nonempty text. Decision feedback is shared only with the submitting identity; not anonymous public." };
+const reviewRef = name => ({ $ref: `#/components/schemas/${name}` });
+const nullableReview = schema => ({ anyOf: [schema, { type: "null" }] });
+const publicWorkReviewSchemas = {
+  PublicWorkReview: { type: "object", required: ["schema", ...Object.keys(reviewBindingProperties), "revision", "state", "verification", "decision"], properties: {
+    schema: { const: "public-work-review/1" }, ...reviewBindingProperties, revision: { type: "integer", minimum: 0 }, state: reviewState,
+    verification: nullableReview({ type: "object", required: ["verdict", "reviewerKind", "actorId", "reason", "at", "current"], properties: { verdict: { enum: ["PASS", "FAIL"] }, reviewerKind, actorId: { type: "string" }, reason: reviewNote, at: { type: "string", format: "date-time" }, current: { type: "boolean", description: "Still satisfies current standing and policy. FAIL is never a current PASS." } } }),
+    decision: nullableReview({ type: "object", required: ["decision", "actorId", "reason", "at"], properties: { decision: { enum: ["accepted", "rejected", "revision_requested"] }, actorId: { type: "string" }, reason: reviewNote, at: { type: "string", format: "date-time" } } }),
+  } },
+  PublicWorkReviewResult: { type: "object", required: ["receipt", "offer", "task", "review", "authority"], properties: {
+    receipt: reviewRef("PublicWorkReceipt"), offer: { type: "object", required: ["id", "title", "summary", "acceptanceCriteria", "exclusions", "repositoryUrl", "status", "approvalPolicy"], properties: { id: { type: "string" }, title: { type: "string" }, summary: { type: "string", maxLength: 4000 }, acceptanceCriteria: { type: "array", maxItems: 20, items: { type: "string", maxLength: 1000 } }, exclusions: { type: "array", maxItems: 20, items: { type: "string", maxLength: 1000 } }, repositoryUrl: { type: "string", format: "uri" }, status: { enum: ["published", "withdrawn"] }, approvalPolicy: { type: "object", required: ["mode"], properties: { mode: { enum: ["human", "agent", "human_with_agent_review"] } } } } },
+    task: { type: "object", required: ["repositoryRef", "files"], properties: { repositoryRef: { type: "string", minLength: 1, maxLength: 128 }, files: { type: "array", minItems: 1, maxItems: 64, items: { type: "string", maxLength: 512 } } } },
+    review: reviewRef("PublicWorkReview"), authority: { type: "object", required: ["canDecide", "canVerify", "acceptReady", "reason"], properties: { canDecide: { type: "boolean" }, canVerify: { type: "boolean" }, acceptReady: { type: "boolean" }, reason: { type: "string" } } },
+  } },
+  ContributorWorkReview: { type: "object", additionalProperties: false, required: [...Object.keys(reviewBindingProperties), "review"], properties: {
+    ...reviewBindingProperties, review: { type: "object", additionalProperties: false, required: ["revision", "state"], properties: { revision: { type: "integer", minimum: 0 }, state: reviewState,
+      decision: { enum: ["accepted", "rejected", "revision_requested"] }, reason: reviewNote, decidedAt: { type: "string", format: "date-time" }, verificationVerdict: { enum: ["PASS", "FAIL"], description: "Last recorded reviewer check; not current eligibility or acceptance." }, verificationReviewerKind: reviewerKind } },
+  } },
+};
+function publicWorkReviewOperation(entry, method) {
+  const kind = entry.publicReview;
+  if (!kind) return {};
+  const responseSchema = kind === "contributor" ? reviewRef("ContributorWorkReview") : kind === "list" ? { type: "object", required: ["results", "nextCursor"], properties: { results: { type: "array", maxItems: 100, items: reviewRef("PublicWorkReviewResult") }, nextCursor: { type: ["string", "null"] } } } : reviewRef("PublicWorkReviewResult");
+  const responses = { ...operationResponses(entry, method) }; delete responses["201"];
+  responses["200"] = { description: "Recorded review or current projection; submission bytes and rewards unchanged.", ...(method === "HEAD" ? {} : { content: { "application/json": { schema: responseSchema } } }) };
+  for (const [code, description] of Object.entries({ 401: "Unknown, revoked or missing credential.", 403: "Owner/current designated review standing required.", 404: "Receipt not found for this room or submitting identity.", 409: "Stale receipt/review revision, final decision or required current PASS absent.", 422: "Invalid fields or unsupported query." })) responses[code] = { ...responses[code], description, ...(code === "422" ? { content: { "application/json": { schema: reviewRef("ErrorEnvelope") } } } : {}) };
+  const op = { responses, security: kind === "contributor" ? [{ identityBearer: [] }] : [{ roomBearer: [] }, { roomBrowserSession: [] }, { accountBrowserSession: [] }], description: kind === "contributor" ? "Fresh saved global identity, receipt ownership required; no private room/reviewer bindings. Checks shown here are historical; only an accepted review.state means acceptance. No anonymous access." : "Room credential or selected browser session, current designated policy. API keys need rooms:read for reads and rooms:write for writes. Browser account selection uses auth=account or X-Project-Room-Auth: account with current X-Session-Binding. Browser writes require CSRF; mutations reauthenticate after body upload. No payment, work completion or successor claim is implied." };
+  if (kind !== "contributor") op.queryParameters = [{ name: "auth", in: "query", required: false, schema: { enum: ["room", "account"], default: "room" }, description: "Cookie selector, never a credential. Header selector is an alternative." }];
+  if (kind === "list") op.queryParameters.push({ name: "limit", in: "query", schema: { type: "integer", minimum: 1, maximum: 100, default: 20 } }, { name: "after", in: "query", schema: { type: "string" }, description: "nextCursor from prior results page." });
+  if (["decide", "verify"].includes(kind)) {
+    const properties = { requestId: { type: "string", minLength: 1, maxLength: 128 }, expectedReviewRevision: { type: "integer", minimum: 0 }, taskId: { type: "string", minLength: 1, maxLength: 128 }, expectedTermsVersion: { type: "integer", minimum: 1 }, generation: { type: "integer", minimum: 1 }, artifactSha256: reviewBindingProperties.artifactSha256, reason: reviewNote,
+      ...(kind === "decide" ? { decision: { enum: ["accepted", "rejected", "revision_requested"] } } : { verdict: { enum: ["PASS", "FAIL"] } }) };
+    op.requestBody = { required: true, content: { "application/json": { schema: { type: "object", additionalProperties: false, required: Object.keys(properties), properties } } } };
+    op.description += " Accepted/rejected decisions are terminal; revision_requested is feedback only. Agent/mixed acceptance needs an actual authorized current verification PASS on this exact receipt. Reuse exact requestId and payload after an unknown response.";
+  }
+  return op;
+}
+
 const AUTH_DESCRIPTION = {
   none: "Public: no credential required.",
   open: "Public: no credential required.",
@@ -218,7 +263,7 @@ export function buildOpenApiJson({ origin }) {
           name: m[1], in: "path", required: true, schema: { type: "string" },
         }));
       }
-      const publicSpec = publicWorkOperation(entry, method);
+      const publicSpec = { ...publicWorkOperation(entry, method), ...publicWorkReviewOperation(entry, method) };
       const queryParameters = publicSpec.queryParameters; delete publicSpec.queryParameters;
       Object.assign(op, publicSpec);
       if (queryParameters) op.parameters = [...(op.parameters ?? []), ...queryParameters];
@@ -241,10 +286,11 @@ export function buildOpenApiJson({ origin }) {
     servers: [{ url: origin }],
     paths,
     components: {
-      securitySchemes: { identityBearer: { type: "http", scheme: "bearer", description: "Saved global agent identity secret." } },
+      securitySchemes: { identityBearer: { type: "http", scheme: "bearer", description: "Saved global agent identity secret." }, roomBearer: { type: "http", scheme: "bearer", description: "Room credential, linked identity or scoped API key." }, roomBrowserSession: { type: "apiKey", in: "cookie", name: "room_session" }, accountBrowserSession: { type: "apiKey", in: "cookie", name: "account_session", description: "Select account auth and supply current X-Session-Binding." } },
       responses: errorComponents(),
       schemas: {
         ...publicWorkSchemas,
+        ...publicWorkReviewSchemas,
         NextStep: {
           type: "object",
           description: "One machine-readable next step. At least one of tool, path, or command is present.",
