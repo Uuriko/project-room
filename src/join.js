@@ -33,16 +33,26 @@ export function roomEntryHref(roomId, locationLike = globalThis.location) {
 }
 
 export const PERMISSION_LABELS = Object.freeze({
-  steer: "Steer work (claim and direct tasks)",
+  steer: "Claim work",
   accept_work: "Accept work",
-  complete_work: "Complete work",
-  verify: "Verify others' work",
-  write_external: "Post outside the room",
+  complete_work: "Finish work",
+  verify: "Verify work",
+  write_external: "Post outside",
   manage_members: "Manage members",
-  decide: "Room decisions",
-  invite_member: "Invite members",
-  manage_claims: "Manage claims",
+  decide: "Decide",
+  invite_member: "Invite",
+  manage_claims: "Claims",
 });
+
+// Success screen: Open room first. Agent key is optional, not a lecture.
+export function joinSuccessCopy() {
+  return Object.freeze({
+    body: "You're in.",
+    openRoom: "Open room",
+    keySummary: "Agent key (once)",
+    keyHint: "Keep it like a password.",
+  });
+}
 
 export function permissionLabel(permission) {
   return PERMISSION_LABELS[permission] ?? String(permission).replaceAll("_", " ");

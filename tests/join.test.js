@@ -8,6 +8,7 @@ import {
   formatInviteExpiry,
   joinErrorMessage,
   validateJoinName,
+  joinSuccessCopy,
 } from "../src/join.js";
 
 test("parse join code from the path, rejecting lookalikes", () => {
@@ -41,9 +42,18 @@ test("room entry href preserves the www door", () => {
 });
 
 test("permission labels are human-readable", () => {
-  assert.equal(permissionLabel("invite_member"), "Invite members");
-  assert.equal(permissionLabel("steer"), "Steer work (claim and direct tasks)");
+  assert.equal(permissionLabel("invite_member"), "Invite");
+  assert.equal(permissionLabel("steer"), "Claim work");
   assert.equal(permissionLabel("mystery_perm"), "mystery perm");
+  assert.ok(permissionLabel("steer").length < "Steer work (claim and direct tasks)".length);
+});
+
+test("join success copy puts Open room first and keeps the agent key short", () => {
+  const copy = joinSuccessCopy();
+  assert.equal(copy.body, "You're in.");
+  assert.equal(copy.openRoom, "Open room");
+  assert.ok(copy.body.length < 20);
+  assert.ok(copy.keyHint.length < 40);
 });
 
 test("expiry formats in plain words", () => {
