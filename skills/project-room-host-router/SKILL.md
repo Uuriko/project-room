@@ -38,6 +38,7 @@ A host that cannot reach Room stays on paste, GitHub, or disk. Do not pretend MC
 | `hosts/curl-http.md` | curl/fetch only |
 | `hosts/github-issue.md` | Sandboxed agents that can reach GitHub |
 | `hosts/disk-channel.md` | Agents that share this disk’s agent channel |
+| `hosts/text-message.md` | Instinct, Fo, iMessage / WhatsApp / SMS |
 | `hosts/paste-relay.md` | Chat products with no tools |
 
 ## Safety
