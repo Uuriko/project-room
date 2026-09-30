@@ -107,7 +107,9 @@ export class InboxAttachmentBytes {
   }
 
   expire(identityId, now) {
-    this.db.prepare(`UPDATE inbox_attachment_bytes SET state='expired', bytes=NULL
+    // Expired rows are purged outright (bytes NULLed offered no quota
+    // relief: the row itself was retained, so nothing bounded row growth).
+    this.db.prepare(`DELETE FROM inbox_attachment_bytes
       WHERE identity_id=? AND state='staged' AND expires_at<=?`).run(identityId, now);
   }
 
