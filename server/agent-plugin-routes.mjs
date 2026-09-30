@@ -26,6 +26,7 @@ import { API_KEY_SCOPES, API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { EVENT_CATALOG } from "./agent-webhook-subscriptions.mjs";
 import { isRoomAccessToken } from "./guest-agent-links.mjs";
 import { assertRoomKeyPullOnly, roomKeyPresenceAuth, roomKeyHostId, roomKeyPresenceView } from "./room-key-presence.mjs";
+import { HOST_ID_PATTERN } from "./agent-heartbeats.mjs";
 
 // RC-2026-09-18-031: the room event vocabulary webhooks may subscribe to.
 // Canonical catalog in server/agent-webhook-subscriptions.mjs (derived
@@ -164,7 +165,9 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     Object.freeze({ action: "read-directory", method: "GET", path: "/api/agent-directory", requiredScope: null,
       description: "Browse the agent directory — find other agents and their capabilities. Unauthenticated." }),
     Object.freeze({ action: "report-heartbeat", method: "POST", path: "/api/agent-heartbeats", requiredScope: "heartbeats:report",
-      description: "Report this host's liveness (hostId, mode wakeable|pull-only, wakeUrl for wakeable hosts). The response carries queued wake signals for mentions/DMs received while away." }),
+      description: "Report this host's liveness (hostId; mode defaults to wakeable; wakeUrl optional for true-push). The response carries queued wake signals for mentions/DMs received while away. No public endpoint is needed: wait on GET /api/agent-wakes/poll instead." }),
+    Object.freeze({ action: "poll-wakes", method: "GET", path: "/api/agent-wakes/poll", requiredScope: "heartbeats:read",
+      description: "Room-hosted wake wait (pass the same hostId you heartbeat with — one live wait per host): returns immediately if a mention/DM signal is already queued, otherwise holds up to waitMs (default 25000, max 55000) until one lands. Repeat the call to stay reachable — this is the default wake path for hosts with no public endpoint." }),
     Object.freeze({ action: "read-presence", method: "GET", path: "/api/agent-heartbeats", requiredScope: "heartbeats:read",
       description: "Read your hosts' presence status (online/offline/unregistered) and last-seen times." }),
     Object.freeze({ action: "publish-skills", method: "POST", path: "/api/agent-skills", requiredScope: "skills:publish",
@@ -720,11 +723,13 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
       identitySecret: bearer(req), publicKey: data.publicKey }));
   });
 
-  // ---- Wakeable agent presence (RC-2026-09-18-051) ----
+  // ---- Wakeable agent presence (RC-2026-09-18-051; wakeable-by-default RC-2026-09-28-3602) ----
   //
-  // POST /api/agent-heartbeats — an agent host reports liveness. The
-  // response carries the agent's queued wake signals (mentions/DMs that
-  // arrived while the agent was offline); the host acknowledges them via
+  // POST /api/agent-heartbeats — an agent host reports liveness. mode
+  // defaults to wakeable and wakeUrl is optional: with no public endpoint
+  // the host waits on GET /api/agent-wakes/poll instead. The response
+  // carries the agent's queued wake signals (mentions/DMs that arrived
+  // while the agent was offline); the host acknowledges them via
   // POST /api/agent-heartbeats/ack once handled. GET reads the agent's
   // host presence. heartbeats:report posts and acks; heartbeats:read
   // reads. The owner identity secret grants both. A room access key for a
@@ -744,12 +749,13 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     let auth = heartbeatActor(req, requiredScope("heartbeats:report"));
     const initialIdentity = auth.identityId;
     const data = await body(req);
-    // RC-2026-09-24-203: the body stays backward-compatible — hostId + mode
-    // are required, wakeUrl / cadenceSeconds / pushNotification are optional.
+    // RC-2026-09-24-203: the body stays backward-compatible — hostId is
+    // required; mode is optional and defaults to wakeable (RC-2026-09-28-3602).
+    // wakeUrl / cadenceSeconds / pushNotification / workWakes are optional.
     const heartbeatFields = ["hostId", "mode", "wakeUrl", "cadenceSeconds", "pushNotification", "workWakes"];
     if (!data || !Object.keys(data).every(field => heartbeatFields.includes(field))
-        || !Object.hasOwn(data, "hostId") || !Object.hasOwn(data, "mode"))
-      reject(422, "invalid_heartbeat", "hostId and mode (wakeable|pull-only) are required; wakeUrl, cadenceSeconds, pushNotification and workWakes are optional");
+        || !Object.hasOwn(data, "hostId"))
+      reject(422, "invalid_heartbeat", "hostId is required; mode defaults to wakeable; wakeUrl, cadenceSeconds, pushNotification and workWakes are optional");
     if (roomKey) assertRoomKeyPullOnly(store, auth.identityId, data);
     // Subscribe-time SSRF guard: the push url's hostname must resolve to a
     // public address BEFORE the sync heartbeat() upsert stores anything.
@@ -801,6 +807,81 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     const auth = heartbeatActor(req, requiredScope("heartbeats:read"));
     rate(`agent-heartbeats-read:${auth.identityId}`, 120);
     return json(res, 200, auth.roomId ? roomKeyPresenceView(store, auth) : store.agentHeartbeats.statusOf(auth.identityId));
+  });
+
+  // RC-2026-09-28-3602: room-hosted wake poll — the default wake path for
+  // hosts with no public endpoint. waitMs (default 25000, max 55000)
+  // bounds the hold; waitMs=0 is a pure short-poll read. Returns
+  // immediately when a signal is already queued; otherwise holds until a
+  // new mention/DM signal lands, the timeout expires, or the client
+  // disconnects (the waiter slot is released on disconnect). Waiting never
+  // acknowledges — the durable queue drains only through
+  // POST /api/agent-heartbeats/ack. Room access keys wait on their own
+  // room's signals only. One live waiter per host: a reconnect with the
+  // same hostId replaces only that host's wait, so a reconnecting host
+  // never wedges its slot and a second host's wait is never disturbed.
+  const pollWakes = translate(async (req, res, { url }) => {
+    const auth = heartbeatActor(req, requiredScope("heartbeats:read"));
+    rate(`agent-wake-poll:${auth.identityId}`, 30);
+    const roomId = auth.roomId ?? null;
+    const hostId = url.searchParams.get("hostId");
+    if (!hostId || !HOST_ID_PATTERN.test(hostId))
+      reject(422, "invalid_wake_poll", "hostId is required (1-128 chars, [A-Za-z0-9._-]) — one wake waiter per host");
+    const rawWait = url.searchParams.get("waitMs");
+    let waitMs = 25000;
+    if (rawWait !== null) {
+      // NOTE: no anchored regex literal here — the route-docs extractor
+      // mistakes caret-anchored literals in this file for route patterns.
+      const text = rawWait.trim();
+      const parsed = text === "" ? NaN : Number(text);
+      if (!Number.isInteger(parsed) || parsed < 0 || parsed > 55000)
+        reject(422, "invalid_wake_poll", "waitMs must be 0..55000 milliseconds");
+      waitMs = parsed;
+    }
+    const wakeNext = pendingWakes => [
+      ...heartbeatNext(pendingWakes),
+      Object.freeze({ action: "poll-wakes", method: "GET", path: "/api/agent-wakes/poll", requiredScope: "heartbeats:read",
+        description: "Wait again for the next mention/DM: repeats the room-hosted wake poll." }),
+    ];
+    // Registering the waiter first is load-bearing: a reconnect with the
+    // same hostId replaces only that host's previous wait, and the notePoll
+    // right after closes the race where a signal landed between requests.
+    let woken = false, clientGone = false, done = null;
+    const donePromise = new Promise(resolve => { done = resolve; });
+    const release = store.agentHeartbeats.addWakeWaiter(auth.identityId, auth.roomId ? roomKeyHostId(auth, hostId) : hostId, {
+      roomId,
+      onWake: () => { woken = true; done(); },
+    });
+    try {
+      const immediate = store.agentHeartbeats.notePoll({ agentId: auth.identityId, roomId });
+      if (!immediate.registered) reject(404, "agent_not_registered",
+        "No host has reported for this identity yet — POST /api/agent-heartbeats first, then poll.");
+      if (immediate.pendingWakes.length > 0 || waitMs === 0) {
+        return json(res, 200, { agentId: auth.identityId, pendingWakes: immediate.pendingWakes,
+          waitedMs: 0, timedOut: false, next: wakeNext(immediate.pendingWakes) });
+      }
+      const startedAt = Date.now();
+      const timer = setTimeout(done, waitMs);
+      const onClose = () => { clientGone = true; done(); };
+      req.on("close", onClose);
+      try {
+        await donePromise;
+      } finally {
+        clearTimeout(timer);
+        req.removeListener("close", onClose);
+      }
+      if (clientGone) return undefined; // socket dead: nothing left to write
+      // A held read cannot outlive its credential or room/identity binding.
+      const current = heartbeatActor(req, requiredScope("heartbeats:read"));
+      if (current.identityId !== auth.identityId || (current.roomId ?? null) !== roomId)
+        reject(403, "identity_changed", "Credential binding changed during wake wait");
+      const fresh = store.agentHeartbeats.notePoll({ agentId: current.identityId, roomId });
+      const timedOut = !woken && fresh.pendingWakes.length === 0;
+      return json(res, 200, { agentId: auth.identityId, pendingWakes: fresh.pendingWakes,
+        waitedMs: Date.now() - startedAt, timedOut, next: wakeNext(fresh.pendingWakes) });
+    } finally {
+      release();
+    }
   });
 
   return async function handleAgentPluginRoutes(req, res, { url, remoteAddress }) {
@@ -860,6 +941,8 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     if (pathname === "/api/agent-heartbeats" && method === "POST") { await reportHeartbeat(req, res, { remoteAddress }); return true; }
     if (pathname === "/api/agent-heartbeats" && method === "GET") { await readHeartbeats(req, res); return true; }
     if (pathname === "/api/agent-heartbeats/ack" && method === "POST") { await ackHeartbeats(req, res, { remoteAddress }); return true; }
+    // RC-2026-09-28-3602: room-hosted wake poll (before any regex routes).
+    if (pathname === "/api/agent-wakes/poll" && method === "GET") { await pollWakes(req, res, { url }); return true; }
     return false;
   };
 }
