@@ -192,3 +192,43 @@ for (const [tool, args] of [
   const retried = (await next.rpc("tools/call", { name: tool, arguments: args })).result.structuredContent;
   assert.equal(retried.status, "recorded"); assert.equal(retried.duplicate, true); assert.equal(retried.eventId, saved.event.id);
 });
+
+test("draft body matches the 4000 UTF-16 proposal boundary before any client command", async t => {
+  const sent = [], h = harness(t, { command: async command => { sent.push(command); return receipt(command); } });
+  await h.ready();
+  const draft = (await h.rpc("tools/list")).result.tools.find(tool => tool.name === "room_post_draft");
+  assert.equal(draft.inputSchema.properties.body.maxLength, 4000);
+  assert.match(draft.inputSchema.properties.body.description, /UTF-16/);
+  for (const body of ["x".repeat(4000), "🌱".repeat(2000)]) {
+    const response = await h.rpc("tools/call", { name: "room_post_draft", arguments: { ...args, body } });
+    assert.equal(response.result.structuredContent.status, "draft_posted");
+    assert.equal(sent.at(-1).data.body, body);
+  }
+  const before = sent.length;
+  for (const body of ["x".repeat(4001), "🌱".repeat(2000) + "x", "x".repeat(4096), "x".repeat(4097), "\ud800", "   ", null]) {
+    const response = await h.rpc("tools/call", { name: "room_post_draft", arguments: { ...args, body } });
+    assert.equal(response.error.code, -32602);
+    assert.match(response.error.message, /body.*1.*4000.*UTF-16/i);
+    assert.equal(response.error.message.includes("review_required"), false);
+  }
+  assert.equal(sent.length, before, "invalid drafts must not reach the service");
+});
+
+
+test("4000-unit MCP draft reaches the real Room proposal store intact", async t => {
+  const f = createAcceptanceFixture();
+  t.after(() => { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
+  let calls = 0;
+  const h = harness(t, { command: async command => { calls++; return f.store.command(f.keys.producer, "commons", command); } }, { memberId: "producer" });
+  await h.ready();
+  const body = "🌱".repeat(2000), arguments_ = { ...args, workItemId: "test-handoff", body };
+  const result = (await h.rpc("tools/call", { name: "room_post_draft", arguments: arguments_ })).result;
+  assert.equal(result.structuredContent.status, "draft_posted");
+  const stored = f.store.snapshot(f.keys.producer, "commons").state.messages.find(message => message.id === result.structuredContent.messageId);
+  assert.equal(stored.body, body);
+  const rejected = await h.rpc("tools/call", { name: "room_post_draft", arguments: { ...arguments_, requestId: "draft-too-long", body: body + "x" } });
+  assert.ok(rejected.error, "4001-unit draft must fail locally instead of reaching a misleading service refusal");
+  assert.equal(rejected.error.code, -32602);
+  assert.match(rejected.error.message, /body.*4000.*UTF-16/i);
+  assert.equal(calls, 1);
+});
