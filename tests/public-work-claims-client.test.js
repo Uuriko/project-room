@@ -95,3 +95,35 @@ test('a claim response redirect cannot forward credentials or invoke a second pa
   assert.equal(redirected, 0, 'never resend the authenticated mutation to a redirect target');
   assert.equal(failure.code, 'service_unavailable');
 });
+
+
+test('anonymous recommendations and explicitly atomic find-and-claim preserve server replay choice', async t => {
+  const f = await fixture(t);
+  const suggestions = await f.publicClient.match({ skills: ['artifact'], limit: 1 });
+  assert.equal(suggestions.claim, null); assert.equal(suggestions.recommendations[0].task.taskId, 'client:task');
+  assert.equal((await f.publicClient.read('client:task')).claim.state, 'unclaimed');
+  const input = { requestId: 'explicit-match-one', skills: ['artifact'], autoClaim: true, limit: 1 };
+  const result = await f.firstClient.match(input);
+  assert.equal(result.claim.task.claim.identityId, f.first.identityId);
+  assert.deepEqual(await f.firstClient.match(input), result);
+  await assert.rejects(f.firstClient.match({ ...input, reward: 'cash' }), error => error.status === 409);
+  assert.deepEqual((await f.publicClient.match({ reward: 'cash' })).recommendations, []);
+  assert.equal(f.store.db.prepare('SELECT count(*) AS n FROM identity_links WHERE identity_id=?').get(f.first.identityId).n, 0);
+});
+
+test('maximum legal matching packets remain readable within a bounded response', async t => {
+  const f = await fixture(t);
+  for (let i = 0; i < 5; i++) {
+    const id = `a-wide-${i}`;
+    const terms = { kind: 'task', title: `Maximum public packet ${i}`, summary: 'A bounded public contribution', acceptanceCriteria: Array.from({ length: 20 }, () => '雪'.repeat(1000)), repositoryUrl: 'https://github.com/Uuriko/project-room', reward: { kind: 'unpaid' }, approvalPolicy: { mode: 'human' } };
+    f.store.projectOffers.create('commons', 'owner', { requestId: `create-${id}`, offerId: id, terms, reviewerMemberIds: ['owner'] });
+    f.store.projectOffers.transition('commons', 'owner', id, 'publish', { requestId: `publish-${id}`, expectedRevision: 1 });
+    f.store.publicWorkClaims.enable('commons', 'owner', id, { requestId: `enable-${id}`, expectedRevision: 2, expectedTermsVersion: 1, repositoryRef: 'main', files: Array.from({ length: 64 }, (_, j) => `scope-${i}/file-${j}-` + '雪'.repeat(490)) });
+  }
+  const result = await f.publicClient.match({ limit: 5 });
+  assert.equal(result.recommendations.length, 5);
+  const maximum = result.recommendations.find(item => item.task.acceptanceCriteria.length === 20).task;
+  assert.equal(maximum.files.length, 64);
+  assert.equal(maximum.acceptanceCriteria[19], '雪'.repeat(1000));
+  assert.ok(Buffer.byteLength(JSON.stringify(result), 'utf8') > 262144);
+});

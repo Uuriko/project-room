@@ -39,23 +39,24 @@ export class PublicWorkClaimsClient {
       || !Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 15000) throw new RoomClientError(0, 'invalid_config', 'Use a saved identity and a bounded request deadline');
     this.#identitySecret = identitySecret; this.fetchImpl = fetchImpl; this.timeoutMs = timeoutMs;
   }
-  async #request(path, { data, signal, artifact = false } = {}) {
-    if (data && !this.#identitySecret) throw new RoomClientError(0, 'identity_required', 'Use your saved agent identity to claim public work');
+  async #request(path, { data, signal, artifact = false, authenticate = Boolean(data) } = {}) {
+    if (authenticate && !this.#identitySecret) throw new RoomClientError(0, 'identity_required', 'Use your saved agent identity to claim public work');
     const stop = signal ? AbortSignal.any([signal, AbortSignal.timeout(this.timeoutMs)]) : AbortSignal.timeout(this.timeoutMs);
     let response;
     try {
       response = await this.fetchImpl(this.origin + edgeDoorApiPath(this.origin, path), {
         method: data ? 'POST' : 'GET', redirect: 'error', credentials: 'omit', signal: stop,
-        headers: { Accept: artifact ? 'text/plain' : 'application/json', ...(data ? { Origin: this.origin, 'Content-Type': 'application/json', Authorization: `Bearer ${this.#identitySecret}` } : {}) },
+        headers: { Accept: artifact ? 'text/plain' : 'application/json', ...(data ? { Origin: this.origin, 'Content-Type': 'application/json', ...(authenticate ? { Authorization: `Bearer ${this.#identitySecret}` } : {}) } : {}) },
         ...(data ? { body: JSON.stringify(data) } : {})
       });
     } catch { throw new RoomClientError(0, 'service_unavailable', 'Response unknown. Retry the same request ID and exact payload.'); }
     const reader = response.body?.getReader(); if (!reader) throw invalid();
+    // Five legal recommendations plus an explicit claim contain full criteria and paths.
     const chunks = []; let bytes = 0;
     try {
       for (;;) {
         const { done, value } = await reader.read(); if (done) break;
-        bytes += value.byteLength; if (bytes > (artifact && response.ok ? 65536 : 262144)) throw invalid();
+        bytes += value.byteLength; if (bytes > (artifact && response.ok ? 65536 : 2 * 1024 * 1024)) throw invalid();
         chunks.push(Buffer.from(value));
       }
     } catch (error) { void reader.cancel().catch(() => {}); throw error; }
@@ -64,6 +65,30 @@ export class PublicWorkClaimsClient {
     if (!(artifact && response.ok)) { try { value = JSON.parse(raw.toString('utf8')); } catch { throw invalid(); } }
     if (!response.ok) throw new RoomClientError(response.status, value?.error?.code ?? 'request_failed', 'Public work request was refused; inspect its status and code before retrying.');
     return artifact ? raw : value;
+  }
+  async match(input = {}, options) {
+    if (!object(input) || input.autoClaim !== undefined && typeof input.autoClaim !== 'boolean'
+      || input.autoClaim === true && !validId(input.requestId)
+      || input.requestId !== undefined && !validId(input.requestId)
+      || input.after !== undefined && !validId(input.after)
+      || input.limit !== undefined && (!positive(input.limit) || input.limit > 5)
+      || input.reward !== undefined && !['volunteer', 'work_trade', 'cash'].includes(input.reward)
+      || ['skills', 'interests'].some(key => input[key] !== undefined && (!Array.isArray(input[key]) || input[key].length > 20 || !input[key].every(value => typeof value === 'string' && value.trim() && value.length <= 100)))) throw new RoomClientError(0, 'invalid_input', 'Use bounded matching preferences and a stable request ID for an explicit claim');
+    const result = await this.#request('/api/public-work/match', { ...options, data: input, authenticate: Boolean(this.#identitySecret) || input.autoClaim === true });
+    if (!object(result) || !Array.isArray(result.recommendations) || result.recommendations.length > (input.limit ?? 3)
+      || !Number.isSafeInteger(result.inspected) || result.inspected < 0 || result.inspected > 100 || typeof result.hasMore !== 'boolean'
+      || result.nextCursor !== null && !validId(result.nextCursor) || !Array.isArray(result.supportedRewards)
+      || result.supportedRewards.length !== 1 || result.supportedRewards[0] !== 'volunteer') throw invalid();
+    for (const item of result.recommendations) {
+      if (!object(item) || !Array.isArray(item.reasons) || !item.reasons.every(value => typeof value === 'string')) throw invalid();
+      packet(item.task, item.task?.taskId);
+    }
+    if (result.claim !== null) {
+      if (input.autoClaim !== true || !object(result.claim) || result.claim.action !== 'claimed') throw invalid();
+      packet(result.claim.task, result.claim.task?.taskId);
+      if (!result.recommendations.some(item => item.task.taskId === result.claim.task.taskId)) throw invalid();
+    }
+    return result;
   }
   read(taskId, options) { if (!validId(taskId)) throw new RoomClientError(0, 'invalid_input', 'Use a public task ID'); return this.#request(`/api/public-work/tasks/${encodeURIComponent(taskId)}`, options).then(value => packet(value, taskId)); }
   async #action(taskId, action, input, options) {
