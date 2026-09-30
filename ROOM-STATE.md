@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-30T15:59:09Z · board: Uuriko/project-room#1160 · watermark: 5914624376 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=2d11d89f4d4384d18bafd7cf9ca2887686c17f9380b89b10b8aaafa2ab9843dc -->
+<!-- generated: 2026-09-30T16:28:40Z · board: Uuriko/project-room#1160 · watermark: 5915384848 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=f89c53470eda62585ea29c4c87908c677345dee69dd524edb3692fafe1a2652f -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -28,7 +28,7 @@ RC-2026-09-28-2877 | (none) | submitted | 2026-09-30T03:11:15Z | src/events.js, 
 RC-2026-09-28-2874 | (none) | submitted | 2026-09-30T03:11:16Z | src/events.js, tests/dm-privacy.test.js
 RC-2026-09-28-2878 | (none) | submitted | 2026-09-30T03:11:17Z | server/dm-event-visibility.mjs, server/http.mjs, tests/dm-privacy.test.js
 RC-2026-09-28-2880 | (none) | submitted | 2026-09-30T03:11:17Z | server/dm-event-visibility.mjs, server/store.mjs, server/reply-requests.mjs, server/notifications.mjs, server/activity.mjs, server/http.mjs, tests/dm-privacy.test.js, tests/reply-requests.test.js
-… +2 more
+… +1 more
 
 ## file-claims
 file | lane | task-id | state
@@ -46,7 +46,6 @@ server/activity.mjs | (none) | RC-2026-09-28-2865 | submitted
 server/activity.mjs | (none) | RC-2026-09-28-2880 | submitted
 server/agent-heartbeats.mjs | jill | RC-2026-09-28-3602 | working
 server/agent-plugin-routes.mjs | jill | RC-2026-09-28-3602 | working
-server/bounty-escrow.mjs | jill | RC-2026-09-30-3636 | working
 server/command-fields.mjs | (none) | RC-2026-09-28-2871 | submitted
 server/discoverability.mjs | (none) | RC-2026-09-28-2871 | submitted
 server/display-name-guard.mjs | (none) | RC-2026-09-27-2862 | submitted
@@ -60,7 +59,6 @@ server/http.mjs | (none) | RC-2026-09-28-2872 | submitted
 server/http.mjs | (none) | RC-2026-09-28-2878 | submitted
 server/http.mjs | (none) | RC-2026-09-28-2879 | submitted
 server/http.mjs | (none) | RC-2026-09-28-2880 | submitted
-server/invite-links.mjs | jill | RC-2026-09-30-3636 | working
 server/match-events.mjs | jill | RC-2026-09-30-3616 | submitted
 server/match-profiles.mjs | jill | RC-2026-09-30-3616 | submitted
 server/matchmaking-routes.mjs | jill | RC-2026-09-30-3616 | submitted
@@ -70,7 +68,6 @@ server/oauth-provider.mjs | (none) | RC-2026-09-27-2853 | submitted
 server/open-questions.mjs | (none) | RC-2026-09-28-2867 | submitted
 server/opportunities.mjs | jillianai | RC-2026-09-28-2870 | working
 server/private-reply-admission.mjs | (none) | RC-2026-09-28-2903 | submitted
-server/public-claim-routes.mjs | jill | RC-2026-09-30-3636 | working
 server/referral-invites.mjs | instinct | RC-2026-09-27-005 | working
 server/reply-requests.mjs | jillianai | RC-2026-09-28-2876 | working
 server/reply-requests.mjs | (none) | RC-2026-09-28-2880 | submitted
@@ -94,15 +91,10 @@ src/events.js | (none) | RC-2026-09-28-2874 | submitted
 src/events.js | (none) | RC-2026-09-28-2877 | submitted
 src/events.js | (none) | RC-2026-09-28-2879 | submitted
 src/events.js | (none) | RC-2026-09-28-2903 | submitted
-src/totp-2fa.mjs | jill | RC-2026-09-30-3636 | working
 src/work-selectors.js | (none) | RC-2026-09-28-2877 | submitted
 src/work-selectors.js | (none) | RC-2026-09-28-2879 | submitted
-tests/account-login-methods.test.js | jill | RC-2026-09-30-3636 | working
 tests/activity.test.js | (none) | RC-2026-09-28-2865 | submitted
 tests/agent-wake-poll.test.js | jill | RC-2026-09-28-3602 | working
-tests/bounty-idempotency-scope.test.js | jill | RC-2026-09-30-3636 | working
-tests/bounty-journal-replay.test.js | jill | RC-2026-09-30-3636 | working
-tests/browser-session.test.js | jill | RC-2026-09-30-3636 | working
 tests/command-catalog.test.js | (none) | RC-2026-09-28-2871 | submitted
 tests/decision-register.test.js | (none) | RC-2026-09-28-2877 | submitted
 tests/decision-register.test.js | (none) | RC-2026-09-28-2879 | submitted
@@ -114,8 +106,6 @@ tests/dm-privacy.test.js | (none) | RC-2026-09-28-2878 | submitted
 tests/dm-privacy.test.js | (none) | RC-2026-09-28-2879 | submitted
 tests/dm-privacy.test.js | (none) | RC-2026-09-28-2880 | submitted
 tests/dm-privacy.test.js | (none) | RC-2026-09-28-2903 | submitted
-tests/draft-session-expiry.test.js | jill | RC-2026-09-30-3636 | working
-tests/invite-links.test.js | jill | RC-2026-09-30-3636 | working
 tests/match-profiles.test.js | jill | RC-2026-09-30-3616 | submitted
 tests/matchmaking-routes.test.js | jill | RC-2026-09-30-3616 | submitted
 tests/moderation.test.js | (none) | RC-2026-09-27-2861 | submitted
@@ -123,8 +113,6 @@ tests/oauth-provider-attack-cases.test.js | (none) | RC-2026-09-27-2853 | submit
 tests/open-questions.test.js | (none) | RC-2026-09-28-2867 | submitted
 tests/opportunities-feed-v2.test.js | jillianai | RC-2026-09-28-2870 | working
 tests/private-pins-visibility.test.js | (none) | RC-2026-09-27-2864 | submitted
-tests/public-claim-routes.test.js | jill | RC-2026-09-30-3636 | working
-tests/receipt-payout.test.js | jill | RC-2026-09-30-3636 | working
 tests/referral-invites.test.js | instinct | RC-2026-09-27-005 | working
 tests/reply-requests.test.js | (none) | RC-2026-09-28-2880 | submitted
 tests/reply-requests.test.js | (none) | RC-2026-09-28-2903 | submitted
@@ -134,9 +122,7 @@ tests/room-file-history-visibility.test.js | (none) | RC-2026-09-27-2863 | submi
 tests/room-orientation.test.js | (none) | RC-2026-09-28-2877 | submitted
 tests/room-orientation.test.js | (none) | RC-2026-09-28-2879 | submitted
 tests/runtime-package.test.js | jill | RC-2026-09-30-3616 | submitted
-tests/telegram-token-leak.test.js | jill | RC-2026-09-30-3636 | working
 tests/thread-options.test.js | (none) | RC-2026-09-28-2866 | submitted
-tests/totp-2fa.test.js | jill | RC-2026-09-30-3636 | working
 tests/work-context.test.js | jillianai | RC-2026-09-28-2876 | working
 tests/work-discussion.test.js | (none) | RC-2026-09-28-2875 | submitted
 tests/work-discussion.test.js | jillianai | RC-2026-09-28-2876 | working
@@ -163,7 +149,7 @@ tests/work-discussion.test.js | , jillianai | RC-2026-09-28-2875, RC-2026-09-28-
 
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
-RC-2026-09-30-3636 | jill | working | 2026-09-30T21:27:24Z | server/invite-links.mjs, tests/invite-links.test.js, tests/browser-session.test.js, tests/telegram-token-leak.test.js, tests/totp-2fa.test.js, src/totp-2fa.mjs, tests/bounty-idempotency-scope.test.js, server/bounty-escrow.mjs, tests/receipt-payout.test.js, tests/public-claim-routes.test.js, server/public-claim-routes.mjs, tests/bounty-journal-replay.test.js, tests/account-login-methods.test.js, tests/draft-session-expiry.test.js
+(none)
 
 ## unclaimed-lanes
 lane | focus | trust
@@ -175,6 +161,7 @@ Jillian | documentation | standard
 
 ## recent-receipts
 task-id | merged | comment-id
+RC-2026-09-30-3636 | 9cc86f52 | 5914996786
 RC-2026-09-30-3634 | 43ffc3484b03e8af37eb3536940b85ffe66ff7da | 5913994237
 RC-2026-09-30-3635 | f08dd69f76fec5e3d764626a41028005c8a593e2 | 5911902837
 RC-2026-09-30-3632 | dce1822aabfbfc5d39880f43f539597bc9c6e579 | 5911628465
@@ -184,7 +171,6 @@ RC-2026-09-30-3627 | 8112c23cfc093b572af352cba8aff6fcb4a3a701 | 5910475432
 RC-2026-09-30-3629 | 9b8e3c681a4957c799eb83aa35b0c12ae6492b72 | 5910334611
 RC-2026-09-30-3626 | 5d27aa42ca11b49ebcfa4305e95b09be9d8cb360 | 5910076214
 RC-2026-09-30-3625 | 6b99f28ff03277a98e5a6f0f772fb826f12f7136 | 5909823818
-RC-2026-09-30-3628 | d461b4ddd1eb96218e8a6b6bf84a5ec57a118bc1 | 5909646483
 
 ## prose-claims-needing-fence
 comment-id | lane | task | at
@@ -194,5 +180,5 @@ comment-id | lane | task | at
 Uuriko/project-room#266 -> Uuriko/project-room#1160 · watermark 5859826064 · carried-open: RC-2026-09-27-005
 
 ## signals
-board_comments=626 threshold=1500 rotation_due=no watcher=active open_claims=27 prose_open=0 unfenced_prose=0 files_claimed=75 overlap_files=16 watermark=5914624376
+board_comments=629 threshold=1500 rotation_due=no watcher=active open_claims=26 prose_open=0 unfenced_prose=0 files_claimed=61 overlap_files=16 watermark=5915384848
 
