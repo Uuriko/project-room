@@ -62,10 +62,20 @@ Worker directly through the Cloudflare API, mirroring
 `cloudflare/wrangler.jsonc` at the deployed commit, and authenticates via the
 `custom.cloudflare` surrogate credential — it never carries raw API keys.
 
-Durable repair: the script's script-upload metadata pins the bindings
-`ROOM_DEPLOYMENT=production`, `ROOM_GMAIL_ENABLED=0`,
-`ROOM_GMAIL_PILOT_ONLY=1` (plus `ROOM_ORIGIN` and `ROOM_SERVICE_MODE`), the
-`cpu_ms: 30000` production CPU budget, and `assets.config.run_worker_first`.
-Every use of the helper re-applies these bindings; they are not optional
-flags. Usage: `deploy-live.py <script_name> <account_id> <public_dir> <bundle_path>` —
-see the script's docstring for the exact signature.
+The selected script name reads its existing topology from
+`cloudflare/wrangler.jsonc`: `project-room` owns the Durable Object namespace,
+uses production variables and a 30-second CPU budget; `project-room-staging`
+forwards through `ROOM.script_name=project-room`, uses entry variables and its
+one-second forwarding budget. The helper does not add migrations, change
+schedules, or alter public routes. Invalid arguments or configuration fail
+before any upload; the surrogate import is delayed until an API request.
+
+Upload metadata explicitly includes `keep_bindings: ["secret_text", "plain_text"]`
+to retain live secrets and text bindings not replaced by checked-in variables.
+It retains `assets.config.run_worker_first`. The helper does not fetch or log
+secret values. This wire preservation contract follows the
+[Cloudflare Worker upload API](https://developers.cloudflare.com/api/resources/workers/subresources/scripts/methods/update/).
+
+Usage: `deploy-live.py <script_name> <account_id> <public_dir> <bundle_path>`.
+Use the normal Wrangler release procedure above; this emergency helper requires
+the same release authorization and is covered by local metadata tests.
