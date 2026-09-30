@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-30T18:28:40Z · board: Uuriko/project-room#1160 · watermark: 5917246305 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=f89c53470eda62585ea29c4c87908c677345dee69dd524edb3692fafe1a2652f -->
+<!-- generated: 2026-09-30T18:59:25Z · board: Uuriko/project-room#1160 · watermark: 5917424920 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=f89c53470eda62585ea29c4c87908c677345dee69dd524edb3692fafe1a2652f -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -28,10 +28,11 @@ RC-2026-09-28-2877 | (none) | submitted | 2026-09-30T03:11:15Z | src/events.js, 
 RC-2026-09-28-2874 | (none) | submitted | 2026-09-30T03:11:16Z | src/events.js, tests/dm-privacy.test.js
 RC-2026-09-28-2878 | (none) | submitted | 2026-09-30T03:11:17Z | server/dm-event-visibility.mjs, server/http.mjs, tests/dm-privacy.test.js
 RC-2026-09-28-2880 | (none) | submitted | 2026-09-30T03:11:17Z | server/dm-event-visibility.mjs, server/store.mjs, server/reply-requests.mjs, server/notifications.mjs, server/activity.mjs, server/http.mjs, tests/dm-privacy.test.js, tests/reply-requests.test.js
-… +2 more
+… +3 more
 
 ## file-claims
 file | lane | task-id | state
+.github/workflows/ci.yml | jill | RC-2026-09-30-3645 | working
 cloudflare/room.mjs | jill | RC-2026-09-30-3644 | working
 cloudflare/storage.mjs | jill | RC-2026-09-30-3644 | working
 docs/EXPORT-RETENTION-DELETION.md | (none) | RC-2026-09-27-2863 | submitted
@@ -182,5 +183,5 @@ comment-id | lane | task | at
 Uuriko/project-room#266 -> Uuriko/project-room#1160 · watermark 5859826064 · carried-open: RC-2026-09-27-005
 
 ## signals
-board_comments=650 threshold=1500 rotation_due=no watcher=active open_claims=27 prose_open=0 unfenced_prose=0 files_claimed=63 overlap_files=16 watermark=5917246305
+board_comments=654 threshold=1500 rotation_due=no watcher=active open_claims=28 prose_open=0 unfenced_prose=0 files_claimed=64 overlap_files=16 watermark=5917424920
 
