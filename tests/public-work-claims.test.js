@@ -103,6 +103,19 @@ test('a reused identity cannot submit an earlier generation after release and re
   assert.equal(f.service().act('same-identity', a.secret, 'finish', owned('current', 2, { artifactText: 'Current result', checksReported: [] })).receipt.generation, 2);
 });
 
+test('submission survives lease expiry and releases paths without reopening the completed task', t => {
+  const f = fixture(t), [a, b] = f.identities; f.enable('submitted-task'); f.enable('followup-task');
+  f.service().act('submitted-task', a.secret, 'claim', claim('claim'));
+  const result = f.service().act('submitted-task', a.secret, 'finish', owned('finish', 1, { artifactText: 'Submitted result', checksReported: [] }));
+  f.tick(3600001);
+  f.reopen();
+  assert.equal(f.service().read('submitted-task').claim.state, 'submitted');
+  assert.equal(f.service().read('submitted-task').claim.submittedReceiptId, result.receipt.receiptId);
+  assert.throws(() => f.service().act('submitted-task', b.secret, 'claim', claim('reclaim')), code('public_work_already_submitted'));
+  for (const action of ['renew', 'release']) assert.throws(() => f.service().act('submitted-task', a.secret, action, owned(action, 1)), code('public_work_already_submitted'));
+  assert.equal(f.service().act('followup-task', b.secret, 'claim', claim('next')).task.claim.state, 'claimed');
+});
+
 test('explicit opt-in and strict terms/lease/artifact limits refuse without claim or permit changes', t => {
   const f = fixture(t), [a] = f.identities;
   assert.throws(() => f.enable('cash-task', ['cash.js'], { kind: 'cash', unit: 'USD', amountMinor: '100' }), code('public_work_not_eligible'));

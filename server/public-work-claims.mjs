@@ -85,12 +85,12 @@ export class PublicWorkClaims {
   }
   packet(row, item, offer) {
     const live = releaseExpired([item], this.store.now())[0];
-    const receipt = live.owner && this.db.prepare('SELECT receipt_id FROM public_work_receipts WHERE offer_id=? AND generation=?').get(row.offer_id, row.generation);
+    const receipt = this.db.prepare('SELECT receipt_id,identity_id FROM public_work_receipts WHERE offer_id=? AND generation=?').get(row.offer_id, row.generation);
     return { schema: 'public-work-task/1', taskId: row.offer_id, termsVersion: row.terms_version,
       namespaceId: row.namespace_key, repositoryUrl: row.repository_url, repositoryRef: row.repository_ref,
       title: offer.title, acceptanceCriteria: offer.acceptanceCriteria, files: JSON.parse(row.files_json),
-      claim: { state: !live.owner ? 'unclaimed' : receipt ? 'submitted' : 'claimed', generation: row.generation,
-        identityId: live.owner, leaseExpiresAt: live.leaseExpiresAt, submittedReceiptId: receipt?.receipt_id ?? null } };
+      claim: { state: receipt ? 'submitted' : live.owner ? 'claimed' : 'unclaimed', generation: row.generation,
+        identityId: receipt?.identity_id ?? live.owner, leaseExpiresAt: receipt ? null : live.leaseExpiresAt, submittedReceiptId: receipt?.receipt_id ?? null } };
   }
   read(offerId) {
     return this.store.readTransaction(() => {
@@ -130,7 +130,8 @@ export class PublicWorkClaims {
         if (url.hostname === 'github.com') url.pathname = url.pathname.toLowerCase();
         const namespace = 'public_' + hash(roomId + '\n' + url.href + '\n' + input.repositoryRef);
         this.db.prepare('INSERT INTO public_work_tasks VALUES (?,?,?,?,?,?,?,?,?)').run(offerId, namespace, roomId, offer.version, url.href, input.repositoryRef, JSON.stringify(files), 0, this.store.now());
-        const item = createWork({ id: offerId, title: offer.title, files, reviewPolicy: 'distinct_member' }, { now: this.store.now() });
+        // Kernel done means submitted delivery here, never independent acceptance.
+        const item = createWork({ id: offerId, title: offer.title, files, reviewPolicy: 'self_attested' }, { now: this.store.now() });
         this.store.workClaims.set(namespace, item);
         return this.packet(this.task(offerId), item, offer);
       });
@@ -151,6 +152,8 @@ export class PublicWorkClaims {
       const row = this.task(offerId);
       return this.request(row, identity.identityId, action, input, () => {
         if (input.expectedTermsVersion !== row.terms_version) fail(409, 'stale_public_work', 'Task terms changed');
+        if (this.db.prepare('SELECT 1 FROM public_work_receipts WHERE offer_id=? AND generation=?').get(offerId, row.generation))
+          fail(409, 'public_work_already_submitted', 'This task already has a submitted receipt');
         const offer = action === 'release' ? this.store.projectOffers.record(this.db.prepare('SELECT * FROM project_offers WHERE offer_id=?').get(offerId)) : this.offer(row);
         // Sweep the whole shared repository/ref namespace before collision checks.
         for (const item of releaseExpired(this.store.workClaims.list(row.namespace_key), this.store.now())) this.store.workClaims.set(row.namespace_key, item);
@@ -188,6 +191,8 @@ export class PublicWorkClaims {
             namespaceId: row.namespace_key, generation: row.generation, identityId: identity.identityId, state: 'submitted',
             artifact: { sha256, bytes }, checksReported: input.checksReported, verification: 'hash_only', createdAt: new Date(this.store.now()).toISOString() };
           this.db.prepare('INSERT INTO public_work_receipts VALUES (?,?,?,?,?,?,?,?,?,?)').run(receiptId, offerId, row.namespace_key, row.generation, identity.identityId, input.artifactText, sha256, bytes, JSON.stringify(receipt), this.store.now());
+          item = updateWork({ ...item, files: [] }, identity.identityId, { state: 'done', deliveryMode: 'result', blobs: ['sha256:' + sha256], now: this.store.now() });
+          this.store.workClaims.set(row.namespace_key, item);
           outcome.receipt = receipt;
           outcome.task = this.packet(row, item, offer);
         }
