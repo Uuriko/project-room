@@ -32,6 +32,17 @@ test("skill markdown wraps the same brief", () => {
   assert.match(skill, /untrusted task data/);
 });
 
+test("skill description strips angle brackets and stays YAML-quoted", () => {
+  const dirty = { ...bounty, title: 'Fix <script>alert(1)</script> and "quotes"' };
+  const skill = bountyContributorSkillMd(dirty, { origin: "https://room.example", roomId: "den" });
+  const desc = skill.match(/^description: "(.*)"$/m)[1];
+  assert.equal(desc.includes("<"), false);
+  assert.equal(desc.includes(">"), false);
+  assert.ok(desc.length <= 1024);
+  assert.match(skill, /^name: project-room-bounty$/m);
+  assert.equal(yamlSafeLine("a <b> c", 10).includes("<"), false);
+});
+
 test("skill description stays one YAML line when the title has quotes and newlines", () => {
   const messy = { ...bounty, title: 'Fix "wake"\nand ship' };
   const skill = bountyContributorSkillMd(messy, { origin: "https://room.example", roomId: "den" });

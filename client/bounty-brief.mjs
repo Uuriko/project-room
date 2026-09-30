@@ -47,13 +47,16 @@ export function bountyContributorBrief(bounty, { origin, roomId } = {}) {
 
 export function yamlSafeLine(value, max) {
   const text = typeof value === "string" ? value : "";
-  return text.replace(/[\r\n]+/g, " ").replace(/\\/g, "\\\\").replace(/"/g, "'").replace(/\s+/g, " ").trim().slice(0, max);
+  // Agent Skills descriptions must not contain angle brackets (injected into
+  // system prompts) or raw newlines (breaks YAML). https://agentskills.io/specification
+  return text.replace(/[\r\n]+/g, " ").replace(/[<>]/g, "").replace(/\\/g, "\\\\")
+    .replace(/"/g, "'").replace(/\s+/g, " ").trim().slice(0, max);
 }
 
 export function bountyContributorSkillMd(bounty, { origin, roomId } = {}) {
   const b = normalizeBounty(bounty);
   const brief = bountyContributorBrief(bounty, { origin, roomId });
-  const description = yamlSafeLine(`Contribute to Project Room bounty ${b.bountyId}: ${b.title}`, 200);
+  const description = yamlSafeLine(`Contribute to Project Room bounty ${b.bountyId}: ${b.title}. Use when pasting this bounty into Codex, Claude, Grok, or Cursor.`, 1024);
   return [
     "---",
     "name: project-room-bounty",
