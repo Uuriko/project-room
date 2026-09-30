@@ -88,11 +88,12 @@ export class PublicWorkReviews {
   needsPass(scope) { return scope.offer.approvalPolicy.mode !== 'human' || scope.policy.requireIndependentReview || scope.work?.independentVerificationRequired; }
   view(scope) {
     const review = this.current(scope), permissions = this.permissions(scope, scope.actorId);
+    const followUp = this.store.publicWorkSuccessors?.link(scope.receipt.receiptId);
     const terminal = ['accepted', 'rejected'].includes(review.state);
     const ready = !this.needsPass(scope) || this.passCurrent(scope, review);
     const { fingerprint: ignored, ...evidence } = review.verification ?? {};
     void ignored;
-    return { receipt: scope.receipt, offer: { id: scope.offer.id, title: scope.offer.title, summary: scope.offer.summary, acceptanceCriteria: scope.offer.acceptanceCriteria,
+    return { ...(followUp ? { followUp } : {}), receipt: scope.receipt, offer: { id: scope.offer.id, title: scope.offer.title, summary: scope.offer.summary, acceptanceCriteria: scope.offer.acceptanceCriteria,
         exclusions: scope.offer.exclusions, repositoryUrl: scope.offer.repositoryUrl, status: scope.offer.status, approvalPolicy: scope.offer.approvalPolicy },
       task: scope.task,
       review: { schema: 'public-work-review/1', receiptId: scope.receipt.receiptId, taskId: scope.receipt.taskId,
@@ -129,9 +130,10 @@ export class PublicWorkReviews {
       const row = this.db.prepare('SELECT receipt_json FROM public_work_receipts WHERE receipt_id=? AND identity_id=?').get(receiptId, identity.identityId);
       if (!row) fail(404, 'review_not_found', 'Contribution not found');
       const receipt = JSON.parse(row.receipt_json);
+      const followUp = this.store.publicWorkSuccessors?.link(receiptId);
       const saved = this.hasTable('public_work_reviews') && this.db.prepare('SELECT state_json FROM public_work_reviews WHERE receipt_id=?').get(receiptId);
       const current = saved ? JSON.parse(saved.state_json) : { revision: 0, state: 'pending' };
-      return { receiptId, taskId: receipt.taskId, termsVersion: receipt.termsVersion, generation: receipt.generation,
+      return { ...(followUp ? { followUp } : {}), receiptId, taskId: receipt.taskId, termsVersion: receipt.termsVersion, generation: receipt.generation,
         artifactSha256: receipt.artifact.sha256, review: { revision: current.revision, state: current.state,
           ...(current.decision ? { decision: current.decision.decision, reason: current.decision.reason, decidedAt: current.decision.at } : {}),
           ...(current.verification ? { verificationVerdict: current.verification.verdict, verificationReviewerKind: current.verification.reviewerKind } : {}) } };

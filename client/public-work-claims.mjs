@@ -116,9 +116,10 @@ export class PublicWorkClaimsClient {
   async readReview(record, options) {
     const checked = receipt(record);
     const value = await this.#request(`/api/public-work/receipts/${encodeURIComponent(checked.receiptId)}/review`, { ...options, authenticate: true });
-    if (!object(value) || Object.keys(value).some(key => !['receiptId', 'taskId', 'termsVersion', 'generation', 'artifactSha256', 'review'].includes(key))
+    if (!object(value) || Object.keys(value).some(key => !['receiptId', 'taskId', 'termsVersion', 'generation', 'artifactSha256', 'review', 'followUp'].includes(key))
       || value.receiptId !== checked.receiptId || value.taskId !== checked.taskId || value.termsVersion !== checked.termsVersion
       || value.generation !== checked.generation || value.artifactSha256 !== checked.artifact.sha256 || !object(value.review)) throw invalid();
+    if (value.followUp !== undefined && (!object(value.followUp) || Object.keys(value.followUp).some(key => !['taskId', 'termsVersion', 'available'].includes(key)) || !validId(value.followUp.taskId) || !positive(value.followUp.termsVersion) || typeof value.followUp.available !== 'boolean')) throw invalid();
     const review = value.review;
     if (Object.keys(review).some(key => !['revision', 'state', 'decision', 'reason', 'decidedAt', 'verificationVerdict', 'verificationReviewerKind'].includes(key))
       || !Number.isSafeInteger(review.revision) || review.revision < 0 || !['pending', 'accepted', 'rejected', 'revision_requested'].includes(review.state)

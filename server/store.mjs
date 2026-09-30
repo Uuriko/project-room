@@ -1,6 +1,7 @@
 import { publicWorkClaimFenceSchema, verifyPublicWorkClaimFence } from "./public-work-claim-fence.mjs";
 import { PublicWorkClaims, publicWorkClaimsSchema } from "./public-work-claims.mjs";
 import { PublicWorkReviews, publicWorkReviewsSchema } from "./public-work-reviews.mjs";
+import { PublicWorkSuccessors, publicWorkSuccessorsSchema } from "./public-work-successors.mjs";
 import { ProjectOffers, projectOffersSchema } from "./project-offers.mjs";
 import { gmailSchema } from './gmail-mailbox.mjs';
 import { DatabaseSync } from "node:sqlite";
@@ -790,6 +791,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     this.projectOffers = new ProjectOffers(this);
     this.publicWorkClaims = new PublicWorkClaims(this);
     this.publicWorkReviews = new PublicWorkReviews(this);
+    this.publicWorkSuccessors = new PublicWorkSuccessors(this);
     this.bountyEscrow = new BountyEscrow(this, { now: () => this.now() }); // Escrowed bounties, agent work exchange slice 1.
     const version = this.storagePlatform.version(this.db);
     // Supported schema versions are the contiguous range 0..STORE_SCHEMA_VERSION.
@@ -819,6 +821,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         this.workClaims.verifySchema({ allowAbsent: true });
         this.publicWorkClaims.verifySchema({ allowAbsent: true });
         this.publicWorkReviews.verifySchema({ allowAbsent: true });
+        this.publicWorkSuccessors.verifySchema({ allowAbsent: true });
         verifyPublicWorkClaimFence(this.db, { allowAbsent: true });
         this.nextActions.verifySchema({ allowAbsent: true }); // RC-2026-09-25-911: next-action tables additive, read-only never migrates.
         this.agentConnections.verify();
@@ -1164,6 +1167,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.publicWorkReviews.verifySchema({ allowAbsent: true });
       this.db.exec(publicWorkReviewsSchema);
       this.publicWorkReviews.verifySchema();
+      this.publicWorkSuccessors.verifySchema({ allowAbsent: true });
+      this.db.exec(publicWorkSuccessorsSchema);
+      this.publicWorkSuccessors.verifySchema();
       // Self-serve agent access requests: purely additive, intentionally outside
       // the writer fence (see unfencedAdditiveTables). Applied here (not only in
       // createRoomServer) so store-only fixtures and the recovery audit see it.

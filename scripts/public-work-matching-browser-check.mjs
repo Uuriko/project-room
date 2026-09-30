@@ -107,6 +107,10 @@ test('an empty bounded recommendation page offers a working next scan', { timeou
   }
   await f.page.goto(`${f.origin}/offers`); await f.page.locator('#find-work-form [type=submit]').click();
   await f.page.locator('#more-matches').waitFor({ state: 'visible' }); assert.equal(await f.page.locator('[data-match-offer]').count(), 0);
+  await f.page.locator('#find-work-form [name=reward]').selectOption('cash');
+  assert.equal(await f.page.locator('#more-matches').isVisible(), false, 'an edited preference invalidates the prior scan cursor');
+  await f.page.locator('#find-work-form [type=submit]').click(); await f.page.locator('#find-work-status').filter({ hasText: 'No claimable cash matches' }).waitFor(); assert.equal(await f.page.locator('[data-match-offer]').count(), 0);
+  await f.page.locator('#find-work-form [name=reward]').selectOption('volunteer'); await f.page.locator('#find-work-form [type=submit]').click(); await f.page.locator('#more-matches').waitFor({ state: 'visible' });
   await f.page.locator('#more-matches').click(); await f.page.locator('[data-match-offer="page-100"]').waitFor();
   assert.equal(await f.page.locator('#more-matches').isVisible(), false);
   assert.equal(f.store.publicWorkClaims.read('page-100').claim.state, 'unclaimed');
@@ -152,4 +156,30 @@ test('edge-host copied instructions use the real prefixed API without inventing 
   assert.equal(paths.includes('/api/public-work/match'), false);
   assert.equal(f.store.publicWorkClaims.read(id).claim.state, 'unclaimed');
   assert.equal((await fetch(f.origin + '/room/offers')).status, 404, 'the Node app has no claimed mounted offers route');
+});
+function preferenceTask(f) {
+  f.store.projectOffers.create('commons', 'owner', { requestId: 'preference-create', offerId: 'preference-task', reviewerMemberIds: ['owner'], terms: { kind: 'task', title: 'JavaScript keyboard task', summary: 'A small volunteer contribution', acceptanceCriteria: ['Keyboard access'], repositoryUrl: 'https://github.com/example/project', reward: { kind: 'unpaid' }, approvalPolicy: { mode: 'human' } } });
+  f.store.projectOffers.transition('commons', 'owner', 'preference-task', 'publish', { requestId: 'preference-publish', expectedRevision: 1 });
+  f.store.publicWorkClaims.enable('commons', 'owner', 'preference-task', { requestId: 'preference-enable', expectedRevision: 2, expectedTermsVersion: 1, repositoryRef: 'main', files: ['src/preference.js'] });
+}
+test('editing preferences fences an older real match response and starts a fresh search without its cursor', { timeout: 45000 }, async t => {
+  const f = await setup(t, 320); preferenceTask(f); let release, observed, delivered, first = true; const inputs = [];
+  const held = new Promise(resolve => { release = resolve; }), captured = new Promise(resolve => { observed = resolve; }), finished = new Promise(resolve => { delivered = resolve; }); t.after(() => release());
+  await f.page.route('**/api/public-work/match', async route => {
+    inputs.push(JSON.parse(route.request().postData())); if (!first) return route.continue(); first = false; const response = await route.fetch(); observed(); await held;
+    try { await route.fulfill({ response }); } catch { /* The obsolete browser read is allowed to abort. */ } finally { delivered(); }
+  });
+  await f.page.goto(`${f.origin}/offers`); await f.page.locator('#find-work-form [name=skills]').fill('JavaScript'); await f.page.locator('#find-work-form [type=submit]').click(); await captured;
+  await f.page.locator('#find-work-form [name=skills]').fill('Python'); await f.page.locator('#find-work-form [name=reward]').selectOption('cash'); assert.equal(await f.page.locator('#find-work-form [type=submit]').isEnabled(), true);
+  await f.page.locator('#find-work-form [type=submit]').click(); await f.page.locator('#find-work-status').filter({ hasText: 'No claimable cash matches' }).waitFor(); release(); await finished; await f.page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  assert.equal(await f.page.locator('[data-copy-claim]').count(), 0); assert.match(await f.page.locator('#find-work-status').textContent(), /No claimable cash matches/); assert.deepEqual(inputs[1], { skills: ['Python'], interests: [], reward: 'cash', limit: 3 });
+});
+test('a completed native clipboard write cannot restore old match feedback after interests change', { timeout: 45000 }, async t => {
+  const f = await setup(t, 1280); preferenceTask(f); await f.page.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: f.origin });
+  await f.page.goto(`${f.origin}/offers`); await f.page.locator('#find-work-form [type=submit]').click(); await f.page.locator('[data-copy-claim]').waitFor();
+  await f.page.evaluate(() => { const write = navigator.clipboard.writeText.bind(navigator.clipboard); navigator.clipboard.writeText = async text => { await write(text); window.nativeClipboardWritten = true; await new Promise(resolve => { window.finishClipboardResponse = resolve; }); }; });
+  await f.page.locator('[data-copy-claim]').click(); await f.page.waitForFunction(() => window.nativeClipboardWritten);
+  assert.match(await f.page.evaluate(() => navigator.clipboard.readText()), /preference-task/);
+  await f.page.locator('#find-work-form [name=interests]').fill('Games'); await f.page.evaluate(() => window.finishClipboardResponse()); await f.page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  assert.equal(await f.page.locator('[data-copy-claim]').count(), 0); assert.equal(await f.page.locator('#find-work-status').textContent(), '');
 });
