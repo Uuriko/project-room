@@ -101,6 +101,10 @@ const assets = new Map([
   ["/", ["index.html", "text/html"]],
   ["/offers", ["offers.html", "text/html"]],
   ...publicAssetPaths.map(path => [`/${path}`, [path, assetType(path)]]),
+  // Public AEO buyer-intent pages: extensionless canonical URLs (the .html
+  // forms are served by the allowlist spread above).
+  ...["project-room-vs-slack", "project-room-vs-discord", "agent-collaboration-tool", "multi-agent-workspace", "ai-agent-coordination"]
+    .map(name => [`/compare/${name}`, [`compare/${name}.html`, "text/html"]]),
 ]);
 for (const [url, file] of publicSearchAssets(publicAssetPaths)) assets.set(url, [file, "text/html"]);
 for (const name of ["favicon.svg", "icon.svg", "manifest.webmanifest"]) {
