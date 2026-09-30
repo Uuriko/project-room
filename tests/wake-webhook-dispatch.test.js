@@ -22,6 +22,7 @@ import { DatabaseSync } from "node:sqlite";
 import {
   createWakeWebhooks,
   validateWakeWebhookUrl,
+  resolveWakeWebhookTarget,
   signWakePayload,
   verifyWakeSignature,
   WakeWebhookError,
@@ -34,6 +35,9 @@ import {
 const T0 = 1_750_000_000_000;
 const PUBLIC = "https://hooks.example.com/wake";
 const PUBLIC2 = "https://hooks.example.org/wake";
+// The fake DNS answers below never leave the test process (fetch is faked
+// too); they just need to be public-range literals for the vetting step.
+const PUBLIC_IP = "93.184.216.34";
 
 // Strict fake fetch: validates the delivery call shape and throws on
 // anything unexpected (per checkout AGENTS.md — no permissive doubles).
@@ -65,7 +69,7 @@ test("createWakeWebhooks refuses a database without the provisioned table", t =>
   );
 });
 
-function setup(t, { participants = ["alice", "bob"], fetchFn } = {}) {
+function setup(t, { participants = ["alice", "bob"], fetchFn, dnsResolvers } = {}) {
   const db = new DatabaseSync(":memory:");
   // Test-only DDL: the wiring layer provisions this table in the app DB
   // (see docs/WEBHOOK-WAKEUPS.md "Provisioning"). The module itself never
@@ -90,6 +94,13 @@ function setup(t, { participants = ["alice", "bob"], fetchFn } = {}) {
     id: (() => { let n = 0; return () => `wh_test${++n}`; })(),
     isParticipant: (roomId, name) => roomId === "room-1" && participants.includes(name),
     fetchFn: fetchFn ?? strictFetch(async () => ({ ok: true })),
+    // Delivery resolves DNS before connecting (H-4); the fake resolver
+    // answers a public IP for the example hosts so tests never touch the
+    // network. Attacker-DNS cases below override it per test.
+    dnsResolvers: dnsResolvers ?? {
+      resolve4: async host => (host === "hooks.example.com" || host === "hooks.example.org" ? [PUBLIC_IP] : []),
+      resolve6: async () => [],
+    },
   });
   t.after(() => db.close());
   return { db, hooks };
@@ -253,6 +264,98 @@ test("delivery re-validates the URL: a hook re-pointed at a private host is bloc
     assert.equal(calls.length, 0, "no POST to the re-pointed private host");
     assert.deepEqual(outcomes.map(o => o.outcome), ["failed"]);
   });
+});
+
+// ---- H-4: DNS resolution + transport pinning at delivery ----
+
+test("delivery refuses a hostname that resolves to a private address (DNS rebinding)", t => {
+  const calls = [];
+  const { hooks } = setup(t, {
+    fetchFn: strictFetch(async (url, init) => { calls.push(url); return { ok: true }; }),
+    dnsResolvers: {
+      // Attacker-controlled name; the resolver now answers internal.
+      resolve4: async () => ["10.9.9.9"],
+      resolve6: async () => [],
+    },
+  });
+  hooks.register({ roomId: "room-1", url: PUBLIC, registeredBy: "alice" });
+  return hooks.dispatchRoomWakes({ roomId: "room-1", message: messageFrom("bob") }).then(outcomes => {
+    assert.equal(calls.length, 0, "no POST to a host that resolves private");
+    assert.deepEqual(outcomes.map(o => o.outcome), ["failed"]);
+  });
+});
+
+test("delivery refuses mixed answers when any resolved address is private", t => {
+  const calls = [];
+  const { hooks } = setup(t, {
+    fetchFn: strictFetch(async (url, init) => { calls.push(url); return { ok: true }; }),
+    dnsResolvers: {
+      resolve4: async () => [PUBLIC_IP, "192.168.1.7"],
+      resolve6: async () => [],
+    },
+  });
+  hooks.register({ roomId: "room-1", url: PUBLIC, registeredBy: "alice" });
+  return hooks.dispatchRoomWakes({ roomId: "room-1", message: messageFrom("bob") }).then(outcomes => {
+    assert.equal(calls.length, 0, "one private answer poisons the whole set");
+    assert.deepEqual(outcomes.map(o => o.outcome), ["failed"]);
+  });
+});
+
+test("delivery fails closed when the hostname does not resolve", t => {
+  const calls = [];
+  const { hooks } = setup(t, {
+    fetchFn: strictFetch(async (url, init) => { calls.push(url); return { ok: true }; }),
+    dnsResolvers: { resolve4: async () => [], resolve6: async () => [] },
+  });
+  hooks.register({ roomId: "room-1", url: PUBLIC, registeredBy: "alice" });
+  return hooks.dispatchRoomWakes({ roomId: "room-1", message: messageFrom("bob") }).then(outcomes => {
+    assert.equal(calls.length, 0, "no POST when DNS has no vetted answer");
+    assert.deepEqual(outcomes.map(o => o.outcome), ["failed"]);
+  });
+});
+
+test("ALLOW_HTTP self-hoster escape still permits private resolved addresses", t => {
+  const prev = process.env.PROJECT_ROOM_WAKE_WEBHOOK_ALLOW_HTTP;
+  process.env.PROJECT_ROOM_WAKE_WEBHOOK_ALLOW_HTTP = "1";
+  const calls = [];
+  const { hooks } = setup(t, {
+    fetchFn: strictFetch(async (url, init) => { calls.push(url); return { ok: true }; }),
+    dnsResolvers: { resolve4: async () => ["10.0.0.9"], resolve6: async () => [] },
+  });
+  t.after(() => {
+    if (prev === undefined) delete process.env.PROJECT_ROOM_WAKE_WEBHOOK_ALLOW_HTTP;
+    else process.env.PROJECT_ROOM_WAKE_WEBHOOK_ALLOW_HTTP = prev;
+  });
+  hooks.register({ roomId: "room-1", url: "http://intranet.example/wake", registeredBy: "alice" });
+  return hooks.dispatchRoomWakes({ roomId: "room-1", message: messageFrom("bob") }).then(outcomes => {
+    assert.equal(calls.length, 1, "self-hoster escape hatch still delivers");
+    assert.deepEqual(outcomes.map(o => o.outcome), ["delivered"]);
+  });
+});
+
+test("resolveWakeWebhookTarget returns vetted addresses; rejects private answers", async () => {
+  const good = await resolveWakeWebhookTarget(PUBLIC, {
+    resolve4: async () => [PUBLIC_IP], resolve6: async () => [],
+  });
+  assert.deepEqual(good.addresses, [PUBLIC_IP]);
+  // IP literals pass through as their own pinned set.
+  const literal = await resolveWakeWebhookTarget("https://93.184.216.34/wake", {
+    resolve4: async () => { throw new Error("must not resolve literals"); },
+    resolve6: async () => { throw new Error("must not resolve literals"); },
+  });
+  assert.deepEqual(literal.addresses, ["93.184.216.34"]);
+  // IPv6 literal in a blocked range is rejected by the string gate.
+  await assert.rejects(
+    resolveWakeWebhookTarget("https://[::1]/wake", { resolve4: async () => [], resolve6: async () => [] }),
+    err => err instanceof WakeWebhookError && err.code === "invalid_url");
+  // Private DNS answers are rejected.
+  await assert.rejects(
+    resolveWakeWebhookTarget(PUBLIC, { resolve4: async () => ["169.254.169.254"], resolve6: async () => [] }),
+    err => err instanceof WakeWebhookError && err.code === "invalid_url");
+  // Unresolvable names fail closed.
+  await assert.rejects(
+    resolveWakeWebhookTarget(PUBLIC, { resolve4: async () => [], resolve6: async () => [] }),
+    err => err instanceof WakeWebhookError && err.code === "invalid_url");
 });
 
 test("consecutive failures drop the hook after 20; success resets the counter", t => {

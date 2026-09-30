@@ -14,10 +14,16 @@
 //   failure counter).
 // - Optional HMAC-SHA256 shared secret -> X-ProjectRoom-Signature:
 //   sha256=<hex hmac of the raw body>. Unsigned hooks get no header.
-// - SSRF posture (ported from Agent Room): require https, refuse
-//   localhost / private / link-local / metadata hostnames and IP literals
-//   AT REGISTRATION AND AT DELIVERY. PROJECT_ROOM_WAKE_WEBHOOK_ALLOW_HTTP=1
-//   relaxes the scheme check for self-hosters on private networks (and tests).
+// - SSRF posture: require https, refuse localhost / private / link-local /
+//   metadata hostnames and IP literals (canonical ranges from
+//   server/ip-blocklist.mjs) AT REGISTRATION; at delivery the hostname is
+//   DNS-RESOLVED and EVERY answer is re-vetted, and the POST is pinned to
+//   the vetted addresses (node:http/https with a pinned lookup) so a
+//   record that rebinds between the check and the connection is never
+//   consulted. On Cloudflare Workers there is no pinning API, so the
+//   Workers egress sandbox is the backstop and plain fetch is used.
+//   PROJECT_ROOM_WAKE_WEBHOOK_ALLOW_HTTP=1 relaxes the scheme check for
+//   self-hosters on private networks (and tests).
 // - Dispatch is never on the response critical path: the wiring layer calls
 //   dispatchRoomWakes() after the message append, off-path (Cloudflare:
 //   waitUntil-style; node: don't await it before responding).
@@ -73,6 +79,13 @@
 // ---------------------------------------------------------------------------
 
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
+import { promises as dns } from "node:dns";
+// Canonical SSRF ranges + pinned transport (shared with the web-fetch and
+// webhook-dispatch paths so a hardening fix can never land in one and miss
+// the other). node:dns is only touched by the opt-in async resolution in
+// resolveWakeWebhookTarget below.
+import { parseIpv4, parseIpv6, isBlockedIp, isBlockedIpv6Value, isWorkersRuntime } from "./ip-blocklist.mjs";
+import { pinnedDispatchPost } from "./webhook-dispatch.mjs";
 
 // Local ServiceError (mirrors server/store.mjs). We avoid importing from
 // store.mjs here to break the circular dependency for the Workers bundle:
@@ -108,31 +121,21 @@ export const SIGNATURE_SCHEME = "sha256=";
 // auditRecovery table inventory until the wiring task registers it.
 export const WAKE_HOOKS_TABLE = "room_wake_hooks";
 
-// ---- SSRF-hardened URL validation (adapted from Agent Room) ------------------
-
+// ---- SSRF-hardened URL validation -------------------------------------------
+// Hostname-name blocks (things that are internal by name, not by address).
+// IP-literal verdicts come from the canonical server/ip-blocklist.mjs so
+// every SSRF path in the repo shares one definition of "private".
 const BLOCKED_HOSTNAMES = new Set([
   "localhost",
   "metadata.google.internal",
-  "169.254.169.254",
 ]);
-
-function isPrivateIpLiteral(hostname) {
-  // IPv6 literal (URL hostnames keep brackets off after parsing)
-  const bare = hostname.replace(/^\[|\]$/g, "");
-  if (bare === "::1" || bare === "::") return true;
-  if (/^(fc|fd)[0-9a-f]{2}:/i.test(bare) || /^fe[89ab][0-9a-f]:/i.test(bare)) return true;
-  const m = bare.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-  if (!m) return false;
-  const [a, b] = [Number(m[1]), Number(m[2])];
-  if (a === 0 || a === 10 || a === 127) return true;
-  if (a === 172 && b >= 16 && b <= 31) return true;
-  if (a === 192 && b === 168) return true;
-  if (a === 169 && b === 254) return true;
-  return false;
-}
 
 // Validate a webhook URL the same way at registration and at delivery.
 // Returns the normalized href. Throws WakeWebhookError(422) on rejection.
+// This is the string-level gate: IP literals are vetted against the full
+// canonical blocklist (private, loopback, link-local, multicast, reserved,
+// documentation, CGNAT, and IPv4 embedded in IPv6); DNS names are vetted
+// again after resolution by resolveWakeWebhookTarget at delivery time.
 export function validateWakeWebhookUrl(raw) {
   check(typeof raw === "string" && raw.length > 0 && raw.length <= 2000,
     422, "invalid_url", "url must be a 1-2000 char string");
@@ -146,13 +149,14 @@ export function validateWakeWebhookUrl(raw) {
   if (url.protocol !== "https:" && !(allowHttp && url.protocol === "http:")) {
     fail(422, "invalid_url", "Webhook URLs must be https.");
   }
-  const host = url.hostname.toLowerCase();
+  const host = url.hostname.toLowerCase().replace(/\.$/, "");
+  const bare = host.replace(/^\[|\]$/g, "");
   if (
     BLOCKED_HOSTNAMES.has(host) ||
     host.endsWith(".localhost") ||
     host.endsWith(".local") ||
     host.endsWith(".internal") ||
-    (isPrivateIpLiteral(host) && !allowHttp)
+    (!allowHttp && isBlockedIp(bare))
   ) {
     fail(422, "invalid_url", "Webhook URLs must point at a public host.");
   }
@@ -160,6 +164,53 @@ export function validateWakeWebhookUrl(raw) {
     fail(422, "invalid_url", "Webhook URLs must not embed credentials.");
   }
   return url.href;
+}
+
+// DNS-resolution + pinning companion to validateWakeWebhookUrl (H-4 fix).
+// Resolves the validated URL's hostname, vets EVERY DNS answer against the
+// canonical blocklist, and returns the checked addresses so the delivery
+// path pins the connection to exactly those — a record that rebinds to a
+// private address between the check and the POST is never consulted.
+// Fails closed: a name that does not resolve, or an answer that is not a
+// vetted public IP, is rejected. The resolver is injectable
+// ({ resolve4, resolve6 }) so tests never touch the network.
+// allowPrivate mirrors the PROJECT_ROOM_WAKE_WEBHOOK_ALLOW_HTTP self-hoster
+// escape hatch: private resolved addresses pass only when it is set.
+export async function resolveWakeWebhookTarget(raw, { resolve4 = dns.resolve4, resolve6 = dns.resolve6 } = {}) {
+  const normalized = validateWakeWebhookUrl(raw);
+  const allowPrivate = process.env.PROJECT_ROOM_WAKE_WEBHOOK_ALLOW_HTTP === "1";
+  const host = new URL(normalized).hostname.toLowerCase().replace(/\.$/, "");
+  const bare = host.replace(/^\[|\]$/g, "");
+  // IP literals were already vetted by validateWakeWebhookUrl; the literal
+  // itself is the pinned set (no second resolution to rebind).
+  if (parseIpv4(bare) !== null || parseIpv6(bare) !== null) {
+    return { url: normalized, addresses: [bare] };
+  }
+  let answers = [];
+  try {
+    const settled = await Promise.allSettled([resolve4(host), resolve6(host)]);
+    answers = settled.flatMap(result => (result.status === "fulfilled" ? result.value : []));
+  } catch { answers = []; }
+  if (!allowPrivate) {
+    for (const answer of answers) {
+      if (parseIpv4(answer) !== null) {
+        if (isBlockedIp(answer)) {
+          fail(422, "invalid_url", "Webhook URL resolves to a private or reserved address.");
+        }
+        continue;
+      }
+      // Fail closed on anything unparseable — a DNS answer that is not an
+      // IP literal is not something we can vet.
+      const v6 = parseIpv6(answer);
+      if (v6 === null || isBlockedIpv6Value(v6)) {
+        fail(422, "invalid_url", "Webhook URL resolves to a private or reserved address.");
+      }
+    }
+  }
+  if (answers.length === 0 && !isWorkersRuntime()) {
+    fail(422, "invalid_url", "Webhook URL hostname does not resolve to a usable address.");
+  }
+  return { url: normalized, addresses: answers };
 }
 
 // ---- Payload signing --------------------------------------------------------
@@ -198,11 +249,13 @@ const hookView = row => row ? Object.freeze({
   createdAt: row.created_at,
 }) : null;
 
-export function createWakeWebhooks({ db, clock, id, isParticipant, fetchFn } = {}) {
+export function createWakeWebhooks({ db, clock, id, isParticipant, fetchFn, dnsResolvers } = {}) {
   check(db && typeof db.prepare === "function",
     500, "misconfigured", "db (node:sqlite DatabaseSync) is required");
   check(typeof isParticipant === "function",
     500, "misconfigured", "isParticipant(roomId, name) is required");
+  check(dnsResolvers === undefined || (dnsResolvers !== null && typeof dnsResolvers === "object"),
+    500, "misconfigured", "dnsResolvers must be an object");
   const provisioned = db.prepare(
     "SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(WAKE_HOOKS_TABLE);
   if (!provisioned) {
@@ -212,6 +265,8 @@ export function createWakeWebhooks({ db, clock, id, isParticipant, fetchFn } = {
   const now = clock ?? Date.now;
   const newId = id ?? (() => "wh_" + randomUUID().replace(/-/g, "").slice(0, 12));
   const fetchImpl = fetchFn ?? globalThis.fetch;
+  const fetchOverridden = fetchFn !== undefined && fetchFn !== null;
+  const resolvers = dnsResolvers ?? {};
 
   const hooksForRoom = roomId =>
     db.prepare("SELECT * FROM room_wake_hooks WHERE room_id = ? ORDER BY created_at ASC").all(roomId);
@@ -290,10 +345,12 @@ export function createWakeWebhooks({ db, clock, id, isParticipant, fetchFn } = {
 
   const deliverOne = async (hookRow, body, roomId) => {
     // Re-validate at delivery time (upstream rule): a URL that was valid at
-    // registration may have been re-pointed at a private host since.
-    let normalized;
+    // registration may have been re-pointed at a private host since. Then
+    // resolve DNS and vet every answer (H-4): a name that rebinds to an
+    // internal address between the check and the POST is refused here.
+    let target;
     try {
-      normalized = validateWakeWebhookUrl(hookRow.url);
+      target = await resolveWakeWebhookTarget(hookRow.url, resolvers);
     } catch {
       return false;
     }
@@ -307,21 +364,33 @@ export function createWakeWebhooks({ db, clock, id, isParticipant, fetchFn } = {
     if (hookRow.secret) {
       headers[SIGNATURE_HEADER] = signWakePayload(hookRow.secret, body);
     }
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), DELIVERY_TIMEOUT_MS);
     try {
-      const resp = await fetchImpl(normalized, {
-        method: "POST",
-        headers,
-        body,
-        signal: controller.signal,
-        redirect: "error",
+      // Injected fetch (tests) and Workers (no pinning API; the egress
+      // sandbox is the backstop) use plain fetch against the validated URL.
+      // On Node the connection is pinned to the DNS answers the check
+      // vetted, so a rebinding record is never consulted.
+      if (fetchOverridden || isWorkersRuntime()) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), DELIVERY_TIMEOUT_MS);
+        try {
+          const resp = await fetchImpl(target.url, {
+            method: "POST",
+            headers,
+            body,
+            signal: controller.signal,
+            redirect: "error",
+          });
+          return resp != null && resp.ok === true;
+        } finally {
+          clearTimeout(timer);
+        }
+      }
+      const { status } = await pinnedDispatchPost(target.url, target.addresses, {
+        headers, body, timeoutMs: DELIVERY_TIMEOUT_MS,
       });
-      return resp != null && resp.ok === true;
+      return status >= 200 && status < 300;
     } catch {
       return false;
-    } finally {
-      clearTimeout(timer);
     }
   };
 
