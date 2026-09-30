@@ -2982,6 +2982,13 @@ export class BountyEscrow {
   idemExecute(roomId, key, route, status, thunk, scope = {}) {
     if (key === null || key === undefined) return { replayed: false, status, body: thunk() };
     check(typeof key === "string" && key.length >= 1 && key.length <= 128, "invalid_input", "idempotency key must be 1..128 characters");
+    // An unscoped replay is the pre-#1000 cross-member leak: without a named
+    // caller the key cannot identify one member's operation, so a second
+    // member reusing the key would receive the first member's response body.
+    // Refuse it outright (G-LOW-5) — both production routes already pass full
+    // scope, so no live caller is affected.
+    if (scope.callerLane === null || scope.callerLane === undefined)
+      fail("idempotency_scope_required", "Idempotency scope must name the caller (callerLane)");
     // Scope the replay to (caller, route, bounty, key). The original
     // (room, key) key let any member replay another member's response: an
     // agent that builds keys predictably (claim-<bountyId>) could be

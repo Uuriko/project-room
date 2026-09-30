@@ -13,6 +13,10 @@ import {
   stashPendingJoin,
   clearPendingJoin,
   takeRestoredJoin,
+  accessRequestStorageKey,
+  stashAccessRequest,
+  readAccessRequest,
+  clearAccessRequest,
 } from "../src/invite-context.js";
 
 const SECRET = "a".repeat(43);
@@ -168,4 +172,57 @@ test("join helpers tolerate missing or throwing storage", () => {
   assert.doesNotThrow(() => stashPendingJoin(throwing, JOIN_FRAGMENT));
   assert.doesNotThrow(() => clearPendingJoin(throwing));
   assert.equal(takeRestoredJoin({ storage: throwing, hash: "", search: "" }), null);
+});
+
+// Access-request stash (src/invite-context.js): the stashed record carries the
+// minted identity's bearer secret, so it must be clearable — G-LOW-2. The
+// read path is deliberately non-consuming (status checks need the record
+// after the submit), so the app needs an explicit clear for terminal states.
+const ACCESS_RECORD = {
+  identityId: "ai_testidentity_123",
+  secret: "pri_bearer_secret_that_must_not_linger",
+  requestId: "ar_testrequest_456",
+  displayName: "Test Requester",
+};
+
+test("access request stash round-trips and read does not consume", () => {
+  const storage = fakeStorage();
+  stashAccessRequest(storage, "room-a", ACCESS_RECORD);
+  assert.equal(storage._has(accessRequestStorageKey("room-a")), true);
+  const first = readAccessRequest(storage, "room-a");
+  assert.equal(first.secret, ACCESS_RECORD.secret);
+  // Non-consuming: a second read (status check) still sees the record.
+  assert.equal(readAccessRequest(storage, "room-a")?.requestId, ACCESS_RECORD.requestId);
+});
+
+test("clearAccessRequest drops the bearer secret from the stash", () => {
+  const storage = fakeStorage();
+  stashAccessRequest(storage, "room-a", ACCESS_RECORD);
+  clearAccessRequest(storage, "room-a");
+  assert.equal(storage._has(accessRequestStorageKey("room-a")), false);
+  assert.equal(readAccessRequest(storage, "room-a"), null);
+});
+
+test("clearAccessRequest is scoped to one room", () => {
+  const storage = fakeStorage();
+  stashAccessRequest(storage, "room-a", ACCESS_RECORD);
+  stashAccessRequest(storage, "room-b", ACCESS_RECORD);
+  clearAccessRequest(storage, "room-a");
+  assert.equal(readAccessRequest(storage, "room-a"), null);
+  assert.equal(readAccessRequest(storage, "room-b")?.requestId, ACCESS_RECORD.requestId);
+});
+
+test("access request helpers tolerate missing or throwing storage", () => {
+  assert.doesNotThrow(() => stashAccessRequest(null, "room-a", ACCESS_RECORD));
+  assert.doesNotThrow(() => clearAccessRequest(null, "room-a"));
+  assert.doesNotThrow(() => clearAccessRequest(null, null));
+  assert.equal(readAccessRequest(null, "room-a"), null);
+  const throwing = {
+    getItem: () => { throw new Error("denied"); },
+    setItem: () => { throw new Error("denied"); },
+    removeItem: () => { throw new Error("denied"); },
+  };
+  assert.doesNotThrow(() => stashAccessRequest(throwing, "room-a", ACCESS_RECORD));
+  assert.doesNotThrow(() => clearAccessRequest(throwing, "room-a"));
+  assert.equal(readAccessRequest(throwing, "room-a"), null);
 });

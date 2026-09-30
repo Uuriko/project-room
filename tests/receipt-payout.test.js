@@ -121,12 +121,19 @@ test("owner queue: unknown instruction → not_found", () => {
 });
 
 test("owner queue: FIFO ordering", () => {
+  // G-LOW-6: pin the real order (oldest createdAt first), not mere presence.
+  // The two enqueues are forced into different milliseconds so the sort key
+  // actually differs — same-ms ties would let any order pass.
   const q = createPayoutQueue();
   const i1 = receiptToInstruction({ receipt, bounty: bounty({ bountyId: "b1" }) });
   const i2 = receiptToInstruction({ receipt, bounty: bounty({ bountyId: "b2" }) });
-  q.enqueue({ instruction: i2, receiptId: "r2", bountyId: "b2" });
-  q.enqueue({ instruction: i1, receiptId: "r1", bountyId: "b1" });
+  // Enqueue i2 first, i1 second: FIFO means i2's entry comes first.
+  const e2 = q.enqueue({ instruction: i2, receiptId: "r2", bountyId: "b2" });
+  const tick = e2.createdAt;
+  while (Date.now() === tick) { /* wait for the next millisecond */ }
+  const e1 = q.enqueue({ instruction: i1, receiptId: "r1", bountyId: "b1" });
+  assert.ok(e1.createdAt > e2.createdAt, "sort keys must differ for the order assertion to be meaningful");
   const pending = q.pending();
-  // FIFO: first enqueued first (by createdAt; both are ~now, so check both present)
-  assert.equal(pending.length, 2);
+  assert.deepEqual(pending.map(e => e.id), [e2.id, e1.id],
+    "first-enqueued instruction must come first");
 });
