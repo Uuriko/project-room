@@ -41,7 +41,19 @@ export function loadPendingAccess(data) {
   const requests = [];
   for (const row of data.requests) {
     if (!row || typeof row.requestId !== "string" || typeof row.roomId !== "string") continue;
-    requests.push({ requestId: row.requestId, roomId: row.roomId, identityId: typeof row.identityId === "string" ? row.identityId : null });
+    const entry = { requestId: row.requestId, roomId: row.roomId, identityId: typeof row.identityId === "string" ? row.identityId : null };
+    if (row.input !== undefined) {
+      const input = row.input;
+      if (!input || typeof input !== "object" || Array.isArray(input)
+        || Object.keys(input).sort().join(",") !== "displayName,identityId,note,requestId,requestedPermissions,roomId"
+        || input.requestId !== entry.requestId || input.roomId !== entry.roomId || input.identityId !== entry.identityId
+        || input.displayName !== "Grok Build" || typeof input.note !== "string" || input.note.length > 500
+        || JSON.stringify(input.requestedPermissions) !== JSON.stringify(["accept_work", "complete_work"])) {
+        fail("invalid_pending_access", "Pending access intent is invalid; preserve it for reconciliation");
+      }
+      entry.input = { ...input, requestedPermissions: [...input.requestedPermissions] };
+    }
+    requests.push(entry);
   }
   return { requests };
 }
@@ -49,7 +61,7 @@ export function loadPendingAccess(data) {
 export function rememberPendingAccess(current, row) {
   const next = loadPendingAccess(current);
   if (next.requests.some(item => item.requestId === row.requestId)) return next;
-  next.requests.push({ requestId: row.requestId, roomId: row.roomId, identityId: row.identityId ?? null });
+  next.requests.push(...loadPendingAccess({ requests: [row] }).requests);
   return next;
 }
 
@@ -187,7 +199,7 @@ export async function doctor({ env = process.env, fetchImpl = fetch } = {}) {
       listening: presence === "pull-only" ? "pull-only" : presence,
       executeDefault: false,
       rooms,
-      pendingAdmissions: await pollPendingAdmissions(connection, env, fetchImpl)
+      pendingAdmissions: await pollPendingAdmissions(connection, env, fetchImpl, attention.identityId)
     };
   } catch (error) {
     const code = error instanceof ConnectionError || error instanceof GrokHostError ? error.code : "doctor_failed";
@@ -195,13 +207,13 @@ export async function doctor({ env = process.env, fetchImpl = fetch } = {}) {
   }
 }
 
-async function pollPendingAdmissions(connection, env, fetchImpl) {
+async function pollPendingAdmissions(connection, env, fetchImpl, identityId) {
   const filename = pendingAccessPathFor(env);
   const pending = readPendingAccessFile(filename);
   const out = [];
   for (const row of pending.requests) {
-    const identityId = row.identityId || connection.memberId;
     try {
+      if (!identityId || (row.identityId && row.identityId !== identityId)) fail("identity_mismatch", "Pending request belongs to a different identity");
       const parsed = await jsonRequest(connection, `/api/access-requests/${encodeURIComponent(row.requestId)}?identityId=${encodeURIComponent(identityId)}`, { fetchImpl });
       out.push({ requestId: row.requestId, roomId: parsed.roomId || row.roomId, status: parsed.status || "unknown" });
     } catch {
@@ -413,29 +425,38 @@ function parseArgs(argv) {
   return { command, execute };
 }
 
-export async function fileAccessRequest({ env = process.env, fetchImpl = fetch, roomId, note = "" } = {}) {
+export async function fileAccessRequest({ env = process.env, fetchImpl = fetch, roomId, note } = {}) {
   const connection = connectionFromEnv(env);
   if (typeof roomId !== "string" || roomId.length < 1 || roomId.length > 128) fail("invalid_attention_item", "roomId required");
-  const requestId = `ar_${randomUUID().replaceAll("-", "").slice(0, 16)}`;
-  const parsed = await jsonRequest(connection, "/api/access-requests", {
-    fetchImpl, method: "POST",
-    body: {
-      roomId,
-      identityId: connection.memberId,
-      displayName: "Grok Build",
-      requestedPermissions: ["accept_work", "complete_work"],
-      note,
-      requestId
-    }
-  });
+  if (note !== undefined && (typeof note !== "string" || note.length > 500)) fail("invalid_request", "note must be text of at most 500 characters");
+  // Resolve the authenticated global identity, not its possibly aliased room seat.
+  // Preflight every invocation, including retries; a persisted intent is not authority.
+  const attention = await readNeedsMe(connection, { fetchImpl });
+  const identityId = attention.identityId;
+  if (!identityId) fail("invalid_response", "Authenticated attention did not identify the caller");
   const filename = pendingAccessPathFor(env);
-  const remembered = rememberPendingAccess(readPendingAccessFile(filename), {
-    requestId: parsed.requestId || requestId,
-    roomId: parsed.roomId || roomId,
-    identityId: connection.memberId
-  });
-  writePendingAccessFile(filename, remembered);
-  return { ok: true, requestId: parsed.requestId || requestId, status: parsed.status, roomId: parsed.roomId || roomId };
+  const pending = readPendingAccessFile(filename);
+  const prior = pending.requests.find(row => row.roomId === roomId && (row.identityId === identityId || row.identityId === null));
+  let input;
+  if (prior) {
+    // Older host journals did not retain the body. Read their original request;
+    // never reconstruct it with new terms or invent a replacement retry key.
+    if (!prior.input) {
+      const parsed = await jsonRequest(connection, `/api/access-requests/${encodeURIComponent(prior.requestId)}?identityId=${encodeURIComponent(identityId)}`, { fetchImpl });
+      return { ok: true, requestId: prior.requestId, status: parsed.status, roomId };
+    }
+    if (note !== undefined && prior.input.note !== note) fail("request_conflict", "Retry the saved access request with its original note");
+    input = prior.input;
+  } else {
+    input = { roomId, identityId, displayName: "Grok Build", requestedPermissions: ["accept_work", "complete_work"],
+      note: note ?? "", requestId: `ar_${randomUUID().replaceAll("-", "").slice(0, 16)}` };
+    // Commit the exact intent before any POST. A lost response or process restart
+    // reuses this same key/body, including a request which was already approved.
+    writePendingAccessFile(filename, rememberPendingAccess(pending, { requestId: input.requestId, roomId, identityId, input }));
+  }
+  const parsed = await jsonRequest(connection, "/api/access-requests", { fetchImpl, method: "POST", body: input });
+  if (parsed.requestId !== input.requestId || parsed.roomId !== roomId) fail("invalid_response", "Access response does not match the saved intent");
+  return { ok: true, requestId: input.requestId, status: parsed.status, roomId };
 }
 
 function readWakeBody() {

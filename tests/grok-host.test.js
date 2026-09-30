@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, chmodSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, chmodSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -10,6 +10,11 @@ import {
   setCursor
 } from "../client/grok-host.mjs";
 import { pull, doctor, ingestWake, writeJournalFile, readJournalFile, loadPendingAccess, rememberPendingAccess, writePendingAccessFile, fileAccessRequest } from "../scripts/grok-room-host.mjs";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { RoomStore } from "../server/store.mjs";
+import { AgentRooms } from "../server/agent-rooms.mjs";
+import { createRoomServer } from "../server/http.mjs";
 import { saveAgentConnection } from "../client/agent-connection.mjs";
 
 const secret = "pri_abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG";
@@ -227,7 +232,8 @@ test("doctor reports pending admissions from the saved request list", async t =>
 test("fileAccessRequest remembers the pending row without putting the secret in JSON", async t => {
   const directory = fixtureDir();
   t.after(() => rmSync(directory, { recursive: true, force: true }));
-  const fetchImpl = async (_url, opts = {}) => {
+  const fetchImpl = async (url, opts = {}) => {
+    if (String(url).endsWith("/api/needs-me")) return Response.json(needsMe([]));
     const body = JSON.parse(opts.body || "{}");
     return new Response(JSON.stringify({ requestId: body.requestId, roomId: body.roomId, status: "pending" }), { status: 200 });
   };
@@ -596,4 +602,97 @@ test("M-53: journal write replaces the file instead of truncating in place", asy
     [],
     "no temp write files litter the directory",
   );
+});
+
+
+async function liveAccessFixture(t) {
+  const root = mkdtempSync(join(tmpdir(), "grok-access-http-"));
+  const store = new RoomStore(join(root, "room.sqlite"));
+  const rooms = new AgentRooms(store);
+  const owner = store.identities.create("Access fixture owner");
+  const worker = store.identities.create("Access fixture worker");
+  rooms.create(owner.secret, { roomId: "source", title: "Source", purpose: "Alias fixture", kind: "personal" });
+  rooms.create(owner.secret, { roomId: "target", title: "Target", purpose: "Access fixture", kind: "personal" });
+  store.identities.link(owner.secret, "source", { identityId: worker.identityId, memberId: "worker-alias", permissions: [] });
+  const server = createRoomServer({ store });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const directory = join(root, "connection");
+  saveAgentConnection(directory, { version: 1, origin, roomId: "source", memberId: "worker-alias", token: worker.secret });
+  t.after(async () => {
+    server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
+    store.close(); rmSync(root, { recursive: true, force: true });
+  });
+  return { store, worker, directory, env: { ROOM_AGENT_CONFIG: directory } };
+}
+
+test("real HTTP access uses global identity for an alias seat, preserves scopes, and polls legacy journals", async t => {
+  const { store, worker, directory, env } = await liveAccessFixture(t);
+  const beforeLinks = store.db.prepare("SELECT * FROM identity_links ORDER BY room_id,identity_id").all();
+  const result = await fileAccessRequest({ env, roomId: "target", note: "Existing saved host" });
+  assert.equal(result.status, "pending");
+  const row = store.db.prepare("SELECT * FROM access_requests WHERE request_id=?").get(result.requestId);
+  assert.equal(row.identity_id, worker.identityId); assert.notEqual(row.identity_id, "worker-alias");
+  assert.deepEqual(JSON.parse(row.requested_permissions), ["accept_work", "complete_work"]);
+  assert.deepEqual(store.db.prepare("SELECT * FROM identity_links ORDER BY room_id,identity_id").all(), beforeLinks);
+  const filename = join(directory, "pending-access.json");
+  const text = readFileSync(filename, "utf8"); assert.ok(!text.includes(worker.secret));
+  assert.equal(JSON.stringify(result).includes(worker.secret), false);
+  // A pre-upgrade journal without identity/body must poll with authenticated global identity.
+  writePendingAccessFile(filename, { requests: [{ requestId: result.requestId, roomId: "target" }] });
+  const checked = await doctor({ env });
+  assert.deepEqual(checked.pendingAdmissions, [{ requestId: result.requestId, roomId: "target", status: "pending" }]);
+  let posts = 0;
+  const replay = await fileAccessRequest({ env, roomId: "target", fetchImpl: (url, options) => {
+    if (options.method === "POST") posts++;
+    return fetch(url, options);
+  } });
+  assert.equal(replay.requestId, result.requestId); assert.equal(posts, 0);
+  assert.equal(store.db.prepare("SELECT count(*) AS n FROM access_requests").get().n, 1);
+});
+
+test("real committed response loss retains write-ahead intent and a restarted CLI replays without duplicate", async t => {
+  const { store, worker, directory, env } = await liveAccessFixture(t);
+  const filename = join(directory, "pending-access.json");
+  let posted;
+  await assert.rejects(fileAccessRequest({ env, roomId: "target", note: "Saved host requests review access", fetchImpl: async (url, options) => {
+    if (options.method === "POST") {
+      posted = JSON.parse(options.body);
+      assert.deepEqual(JSON.parse(readFileSync(filename, "utf8")).requests[0].input, posted, "intent is durable before POST");
+      const response = await fetch(url, options); assert.equal(response.status, 201); await response.text();
+      throw new Error("simulated response loss after commit");
+    }
+    return fetch(url, options);
+  } }), /simulated response loss/);
+  const saved = readFileSync(filename, "utf8");
+  assert.ok(!saved.includes(worker.secret));
+  const before = store.db.prepare("SELECT * FROM access_requests ORDER BY request_id").all();
+  assert.equal(before.length, 1);
+  const { stdout, stderr } = await promisify(execFile)(process.execPath, ["scripts/grok-room-host.mjs", "request-access", "target"], {
+    cwd: new URL("..", import.meta.url), env: { ...process.env, ...env }
+  });
+  const retry = JSON.parse(stdout);
+  assert.equal(retry.ok, true); assert.equal(retry.requestId, posted.requestId); assert.equal(retry.status, "pending");
+  assert.deepEqual(store.db.prepare("SELECT * FROM access_requests ORDER BY request_id").all(), before);
+  assert.equal(readFileSync(filename, "utf8"), saved);
+  assert.ok(!stdout.includes(worker.secret) && !stderr.includes(worker.secret));
+  await assert.rejects(fileAccessRequest({ env, roomId: "target", note: "changed terms" }), error => error.code === "request_conflict");
+  assert.deepEqual(store.db.prepare("SELECT * FROM access_requests ORDER BY request_id").all(), before);
+});
+
+test("real revoked saved identity cannot file or replay access intents", async t => {
+  const { store, worker, directory, env } = await liveAccessFixture(t);
+  const result = await fileAccessRequest({ env, roomId: "target" });
+  const filename = join(directory, "pending-access.json");
+  const saved = readFileSync(filename, "utf8");
+  const before = store.db.prepare("SELECT * FROM access_requests ORDER BY request_id").all();
+  store.identities.revoke(worker.identityId, worker.secret);
+  let posts = 0;
+  const fetchImpl = (url, options) => { if (options.method === "POST") posts++; return fetch(url, options); };
+  await assert.rejects(fileAccessRequest({ env, roomId: "target", fetchImpl }), error => error.code === "unauthenticated");
+  await assert.rejects(fileAccessRequest({ env, roomId: "source", fetchImpl }), error => error.code === "unauthenticated");
+  assert.equal(posts, 0); assert.equal(readFileSync(filename, "utf8"), saved);
+  assert.deepEqual(store.db.prepare("SELECT * FROM access_requests ORDER BY request_id").all(), before);
+  assert.equal(before[0].request_id, result.requestId);
+  assert.equal(existsSync(join(directory, "connection.json")), true);
 });
