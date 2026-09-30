@@ -234,6 +234,8 @@ optional.push("connectors/muse.md"); // Muse custom-connector brief (served at /
 optional.push("server/account-login-methods.mjs"); // Multi-method login model (imported by server/store.mjs)
 optional.push("server/account-deletion.mjs"); // RC-2026-09-19-078: deletion executor (imported by server/http.mjs; imports the src planner below)
 optional.push("src/account-deletion.mjs"); // RC-2026-09-19-078: pure purge planner (imported by server/account-deletion.mjs)
+optional.push("server/match-profiles.mjs", "server/match-events.mjs"); // RC-2026-09-30-3616: matchmaking P1 seeker profiles + match journal/idempotency (imported by server/matchmaking-routes.mjs; pure, node:crypto only)
+optional.push("server/matchmaking-routes.mjs"); // RC-2026-09-30-3616: matchmaking P1 HTTP routes (to be imported by server/http.mjs when the mount lands)
 optional.push("server/account-passkeys.mjs"); // Passkey auth wiring (slice 5; imported by server/http.mjs)
 optional.push("src/passkey-login.mjs"); // WebAuthn logic (imported by server/account-passkeys.mjs)
 optional.push("server/magic-links.mjs"); // Magic-link mail sender seam (imported by server/http.mjs)

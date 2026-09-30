@@ -345,7 +345,16 @@ export const unfencedAdditiveTables = Object.freeze([
   "emissary_drops",
   "emissary_invite_attribution",
   "emissary_idempotency",
-  "emissary_journal"
+  "emissary_journal",
+  // match_profiles + match_events + match_idempotency (matchmaking P1,
+  // RC-2026-09-30-3616): seeker profiles, the append-only match journal, and
+  // idempotency records for the mutating matchmaking routes. Purely additive
+  // and intentionally NOT fenced — older writers have no code path to them,
+  // and server/match-profiles.mjs + server/match-events.mjs verify their own
+  // schema on open (fail closed when unprovisioned).
+  "match_profiles",
+  "match_events",
+  "match_idempotency"
 ]);
 export const applicationTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables, ...unfencedAdditiveTables])]);
 const v34FencedTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables])]);
