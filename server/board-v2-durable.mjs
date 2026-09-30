@@ -98,9 +98,11 @@ export function createDurableBoardV2Machine(db, { now = () => Date.now() } = {})
   };
 
   // --- claims ------------------------------------------------------------
+  const expiresAtMs = claim => (claim.heartbeat_at_ms ?? claim.claim_at_ms) + claim.lease_h * 3600_000;
+
   const publicClaim = claim => {
     const base = claim.heartbeat_at_ms ?? claim.claim_at_ms;
-    const expiresAtMs = base + claim.lease_h * 3600_000;
+    const expiresAt = base + claim.lease_h * 3600_000;
     return {
       task_id: claim.task_id,
       lane: claim.lane,
@@ -111,8 +113,8 @@ export function createDurableBoardV2Machine(db, { now = () => Date.now() } = {})
       state: claim.state,
       claim_at: iso(claim.claim_at_ms),
       heartbeat_at: claim.heartbeat_at_ms == null ? null : iso(claim.heartbeat_at_ms),
-      expires_at: iso(expiresAtMs),
-      expired: now() > expiresAtMs,
+      expires_at: iso(expiresAt),
+      expired: now() > expiresAt,
       last_seq: claim.last_seq,
       receipts: claim.receipts.map(r => ({ ...r })),
     };
@@ -135,8 +137,15 @@ export function createDurableBoardV2Machine(db, { now = () => Date.now() } = {})
   /** Live claims (any lane) holding any of `files`, excluding `exceptLane`. */
   const holders = (files, exceptLane) => {
     const out = [];
+    const nowMs = now();
     for (const claim of reg.listClaims({})) {
       if (!LIVE_STATES.has(claim.state) || claim.lane === exceptLane) continue;
+      // A lapsed lease does not hold a file (H-7). Mirrors BoardV2._holders
+      // in server/board-v2.mjs: an agent that stopped working still has a
+      // live state, and without this check its files stay blocked for every
+      // other lane until someone sweeps. The claim record is left untouched
+      // so the history still shows who held it and when the lease ran out.
+      if (nowMs > expiresAtMs(claim)) continue;
       const overlap = claim.files.filter(f => files.includes(f));
       if (overlap.length) out.push({ task_id: claim.task_id, lane: claim.lane, files: overlap });
     }
