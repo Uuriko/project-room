@@ -42,8 +42,29 @@ test("join page asset base follows the door", async t => {
   const { origin } = await serve(t);
   const root = await (await fetch(`${origin}/join/RM-EXAMPLE`)).text();
   assert.match(root, /src="\/src\/join\.js"/);
+  // B1 regression: the stylesheet href must point at the served asset path,
+  // not the unserved /styles.css (404 on both doors pre-fix).
+  assert.match(root, /href="\/src\/styles\.css"/);
   const door = await (await fetch(`${origin}/room/join/RM-EXAMPLE`)).text();
   assert.match(door, /src="\/room\/src\/join\.js"/);
+  assert.match(door, /href="\/room\/src\/styles\.css"/);
+});
+
+test("join page assets resolve on both doors (B1+B2)", async t => {
+  const { origin } = await serve(t);
+  // The exact URLs the rendered join page references must serve 200 with
+  // correct content types — through the /room/src/* edge rewrite on the
+  // www door twin. Pre-fix: /room/src/join.js 404'd and boot() never ran.
+  for (const [path, type] of [
+    ["/src/styles.css", /text\/css/],
+    ["/src/join.js", /javascript/],
+    ["/room/src/styles.css", /text\/css/],
+    ["/room/src/join.js", /javascript/],
+  ]) {
+    const res = await fetch(`${origin}${path}`);
+    assert.equal(res.status, 200, `${path} serves`);
+    assert.match(res.headers.get("content-type") ?? "", type, `${path} content type`);
+  }
 });
 
 test("join page route boundaries", async t => {

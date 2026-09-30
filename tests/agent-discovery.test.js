@@ -332,7 +332,7 @@ test("kits catalog is its own packet; leftover kit/apps/tools paths do not 404",
   assert.notEqual(discoveryDoc("/room/kit").body, short.body);
 });
 
-test("rewriteRoomApiPrefix strips only /room/api…; packets and /room/health stay", () => {
+test("rewriteRoomApiPrefix strips /room/api… and /room/src…; packets and /room/health stay", () => {
   assert.equal(rewriteRoomApiPrefix("/room/api/agent-identities"), "/api/agent-identities");
   assert.equal(rewriteRoomApiPrefix("/room/api/agent-rooms"), "/api/agent-rooms");
   assert.equal(rewriteRoomApiPrefix("/room/api/agent-invites/redeem"), "/api/agent-invites/redeem");
@@ -340,6 +340,10 @@ test("rewriteRoomApiPrefix strips only /room/api…; packets and /room/health st
   assert.equal(rewriteRoomApiPrefix("/room/api/health"), "/api/health");
   assert.equal(rewriteRoomApiPrefix("/room/api/health/"), "/api/health/");
   assert.equal(rewriteRoomApiPrefix("/room/api"), "/api");
+  assert.equal(rewriteRoomApiPrefix("/room/src/join.js"), "/src/join.js");
+  assert.equal(rewriteRoomApiPrefix("/room/src/styles.css"), "/src/styles.css");
+  assert.equal(rewriteRoomApiPrefix("/room/src"), "/src");
+  assert.equal(rewriteRoomApiPrefix("/room/srcother"), "/room/srcother");
   assert.equal(rewriteRoomApiPrefix("/api/agent-rooms"), "/api/agent-rooms");
   assert.equal(rewriteRoomApiPrefix("/room/health"), "/room/health");
   assert.equal(rewriteRoomApiPrefix("/room/llms.txt"), "/room/llms.txt");
