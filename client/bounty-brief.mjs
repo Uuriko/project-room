@@ -58,6 +58,12 @@ export function bountyContributorSkillMd(bounty, { origin, roomId } = {}) {
   ].join("\n");
 }
 
+export function renderBountyPacket(bounty, { origin, roomId, format = "brief" } = {}) {
+  return format === "skill"
+    ? bountyContributorSkillMd(bounty, { origin, roomId })
+    : bountyContributorBrief(bounty, { origin, roomId });
+}
+
 function normalizeBounty(bounty) {
   if (!bounty || typeof bounty !== "object") throw new Error("invalid_bounty");
   if (!TEXT(bounty.bountyId, 128) || !TEXT(bounty.title, 200) || !TEXT(bounty.criteria, 4096)) {

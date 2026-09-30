@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { bountyContributorBrief, bountyContributorSkillMd } from "../client/bounty-brief.mjs";
+import { bountyContributorBrief, bountyContributorSkillMd, renderBountyPacket } from "../client/bounty-brief.mjs";
+import { parseBriefArgs, briefFromStdinJson } from "../scripts/bounty-brief.mjs";
 
 const bounty = {
   bountyId: "b-1",
@@ -35,4 +36,18 @@ test("invalid bounties fail closed", () => {
   assert.throws(() => bountyContributorBrief(null), /invalid_bounty/);
   assert.throws(() => bountyContributorBrief({ ...bounty, amount: 0 }), /invalid_bounty/);
   assert.throws(() => bountyContributorBrief({ ...bounty, title: "" }), /invalid_bounty/);
+});
+
+test("CLI args select skill vs brief", () => {
+  assert.deepEqual(parseBriefArgs(["node", "scripts/bounty-brief.mjs", "--skill", "--room", "den"]), {
+    format: "skill", origin: null, roomId: "den"
+  });
+  assert.equal(parseBriefArgs(["node", "x", "--wat"]), null);
+});
+
+test("stdin JSON renders the same packet as the library", () => {
+  const text = JSON.stringify(bounty);
+  const brief = briefFromStdinJson(text, { format: "brief", origin: "https://room.example", roomId: "den" });
+  assert.equal(brief, renderBountyPacket(bounty, { origin: "https://room.example", roomId: "den" }));
+  assert.throws(() => briefFromStdinJson("not-json", { format: "brief" }), /stdin must be one bounty JSON object/);
 });

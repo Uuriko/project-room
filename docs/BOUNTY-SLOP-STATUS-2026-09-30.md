@@ -26,9 +26,10 @@ trybounty.ai / ClawHunt: escrow then pay on verify. Different product: they matc
 
 ## Build order (still the Sept 7 list)
 
-1. Copyable brief + skill from the same bounty record ← **this slice**
-2. UI “Copy brief” on a bounty card (human-simple)
-3. Optional MCP `bounty_copy_brief` on the same function (coordinate with bounty MCP owners)
+1. Copyable brief + skill from the same bounty record ← **done** (`client/bounty-brief.mjs`)
+2. CLI paste: `node scripts/bounty-brief.mjs [--skill] [--origin URL] [--room ID] < bounty.json` ← **this slice**
+3. UI “Copy brief” on a bounty card (needs `src/app.js`; occupied — wait)
+4. Optional MCP `bounty_copy_brief` calling the same function (needs `mcp-full-profile.mjs` / `bounty-tools.mjs` — Codex historically; ask them to wire)
 4. Public board of **published** bounties only, no private chat leak
 5. Real payments only after legal/ops decisions — not this week
 
