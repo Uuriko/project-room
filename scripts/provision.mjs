@@ -46,6 +46,26 @@ mkdirSync(dirname(filename), { recursive: true, mode: 0o700 });
 const store = new RoomStore(filename);
 try {
   if (values.init) store.initialize(initialRoom(values.room, values.member));
+  // M-27: deliver-then-commit. The new key is minted WITHOUT revoking its
+  // predecessors, delivered, and only then do the old keys get revoked. A
+  // delivery failure (unwritable --key-file, no deliverable channel) leaves
+  // the old keys working instead of stranding the operator — and a minted
+  // but undelivered key is revoked again so it cannot linger.
+  const deliverable = values["print-key"] || values["key-file"] || process.stdout.isTTY;
+  if (!deliverable) {
+    console.error("provision: key withheld — stdout is not a terminal. Minting a key the operator cannot receive would revoke the previous key and strand them, so nothing was minted or revoked. Re-run with --print-key or --key-file <path>.");
+    process.exit(2);
+  }
+  const deliverThenRevoke = (mint, message, { revokeStale, revokeMinted }) => {
+    const accessKey = mint();
+    try {
+      emitKey(message, accessKey);
+    } catch (error) {
+      revokeMinted(accessKey);
+      throw error;
+    }
+    revokeStale(accessKey);
+  };
   if (values["account-key"]) {
     if (!values.account) throw new Error("Account-key provisioning requires --account");
     let account;
@@ -54,8 +74,14 @@ try {
       if (error.code !== "account_not_found") throw error;
       account = store.createAccount(values.account);
     }
-    const accessKey = store.issueAccountAccessKey(account.id);
-    emitKey(`New account key for ${account.id}; previous account keys and account browser sessions revoked. Auth epoch ${account.authEpoch}. Expires in seven days. This does not grant Room membership. Keep private; never put it in a URL, chat, logs, or GitHub.`, accessKey);
+    deliverThenRevoke(
+      () => store.insertAccountCredential(account.id, Date.now() + 7 * 86400000),
+      `New account key for ${account.id}; previous account keys and account browser sessions are revoked now that this key is delivered. Auth epoch ${account.authEpoch}. Expires in seven days. This does not grant Room membership. Keep private; never put it in a URL, chat, logs, or GitHub.`,
+      {
+        revokeStale: key => store.revokeStaleAccountKeys(account.id, key),
+        revokeMinted: key => store.revokeAccountCredential(account.id, key),
+      },
+    );
   } else {
     const { state } = store.room(values.room);
     if (!Object.hasOwn(state.members, values.member)) {
@@ -68,6 +94,13 @@ try {
     const accessKey = store.issueAccessKey(values.room, values.member, 7 * 86400000, values.account ?? null);
     const account = store.accountForMember(values.room, values.member);
     const ownership = account ? ` Canonical account: ${account.id}; auth epoch ${account.authEpoch}.` : " Agent credential; no human account is attached.";
-    emitKey(`New key for ${values.member} in ${values.room}; previous keys and sessions revoked.${ownership} Expires in seven days. Keep private; never paste into GitHub.`, accessKey);
+    deliverThenRevoke(
+      () => store.mintAccessKey(values.room, values.member, 7 * 86400000, values.account ?? null),
+      `New key for ${values.member} in ${values.room}; previous keys and sessions are revoked now that this key is delivered.${ownership} Expires in seven days. Keep private; never paste into GitHub.`,
+      {
+        revokeStale: key => store.revokeStaleRoomKeys(values.room, values.member, key),
+        revokeMinted: key => store.revokeRoomCredential(values.room, values.member, key),
+      },
+    );
   }
 } finally { store.close(); }

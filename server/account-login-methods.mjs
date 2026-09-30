@@ -393,6 +393,14 @@ export class AccountLoginMethods {
       const row = this.db.prepare("SELECT method_id AS methodId, account_id AS owner FROM account_passkey_credentials WHERE credential_id=?")
         .get(credentialId);
       if (!row || row.owner !== accountId) fail(404, "login_method_not_found", "Passkey not found");
+      // M-2: removing the last active sign-in method would self-lock the
+      // account. Refuse before deleting, like setMethodDisabled/removeMethod.
+      const methodRow = this.db.prepare("SELECT disabled FROM account_login_methods WHERE id=?").get(row.methodId);
+      if (methodRow && methodRow.disabled === 0) {
+        const active = this.db.prepare("SELECT count(*) AS n FROM account_login_methods WHERE account_id=? AND disabled=0 AND id != ?")
+          .get(accountId, row.methodId).n;
+        if (active === 0) fail(409, "last_login_method", "Keep at least one active sign-in method");
+      }
       this.db.prepare("DELETE FROM account_passkey_credentials WHERE credential_id=?").run(credentialId);
       const remaining = this.db.prepare("SELECT count(*) AS n FROM account_passkey_credentials WHERE method_id=?").get(row.methodId).n;
       if (remaining === 0) this.db.prepare("DELETE FROM account_login_methods WHERE id=?").run(row.methodId);

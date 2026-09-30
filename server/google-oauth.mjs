@@ -167,6 +167,11 @@ export class GoogleSignIn {
       || !Number.isSafeInteger(claims.exp) || !Number.isSafeInteger(claims.iat)
       || claims.exp <= seconds || claims.iat > seconds || claims.exp <= claims.iat || claims.exp - claims.iat > 3600)
       fail('google_token_invalid');
+    // M-13: a multi-audience token is only for us when azp pins it to this
+    // client. An aud that merely *contains* our id does not suffice — a
+    // token minted for another app that happens to list us would otherwise
+    // pass. Single-string aud (the normal case) has no azp to check.
+    if (Array.isArray(claims.aud) && claims.azp !== this.#clientId) fail('google_token_invalid');
     // RC-2026-09-19-075: thread the provider-verified email through the
     // flow like the GitHub one does, so the HTTP layer can link the same
     // human's magic-link method (linkOAuthMethod + linkMagicMethod) instead

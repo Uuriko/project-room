@@ -140,3 +140,20 @@ test("amounts are raw-unit integer strings — floats rejected", () => {
     throwsCode(() => rail.post({ bountyId: `b-${bad}`, poster: "a", amountRaw: bad, title: "t" }), "invalid_input");
   }
 });
+
+// M-17: terminal state commits after (not before) the settler callback — a
+// throwing settler leaves the bounty in its prior state so the payout is
+// retryable instead of recorded-and-lost.
+test("M-17: a throwing onPayout leaves the bounty uncommitted (retryable)", () => {
+  let failing = true;
+  const payouts = [];
+  const rail = createUsdcRail({ onPayout: instruction => { if (failing) throw new Error("settler down"); payouts.push(instruction); } });
+  toVerified(rail);
+  assert.throws(() => rail.release("b1"), /settler down/);
+  assert.equal(rail.get("b1").state, "verified", "bounty stays verified, not released");
+  assert.equal(payouts.length, 0);
+  failing = false;
+  rail.release("b1");
+  assert.equal(rail.get("b1").state, "released");
+  assert.equal(payouts.length, 1, "the payout went through on retry");
+});

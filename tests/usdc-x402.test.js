@@ -162,3 +162,21 @@ test("x402OnPayout composes with the rail: release emits the instruction", () =>
   assert.equal(captured.legs[1].requirements.amount, "40000");
   assert.equal(captured.receiptId, "rcpt_9");
 });
+
+// M-16: x402OnPayout generates an instruction the settler must actually
+// deliver — a callback that ignores the instruction must not leave the
+// payout instruction silently dropped.
+test("M-16: x402OnPayout delivers the generated instruction to its deliver sink", () => {
+  let delivered = null;
+  const rail = createUsdcRail({ onPayout: x402OnPayout({ feeAddress: EVM_FEE, deliver: ix => { delivered = ix; } }) });
+  rail.post({ bountyId: "b3", poster: "alice", amountRaw: "2000000", title: "t", chain: "base" });
+  rail.fund("b3", { by: "alice", fundTxRef: "tx_9" });
+  rail.claim("b3", { claimant: "bob", payoutAddress: EVM_ADDR });
+  rail.verify("b3", { verifier: "carol", receiptId: "rcpt_9", approved: true });
+  rail.release("b3");
+  assert.ok(delivered, "the x402 instruction reached the deliver sink");
+  assert.equal(delivered.kind, "x402-payout-instruction/v1");
+  assert.equal(delivered.execution, "PENDING_OWNER_TAP");
+  assert.equal(delivered.legs.length, 2);
+  assert.equal(delivered.receiptId, "rcpt_9");
+});
