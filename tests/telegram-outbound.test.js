@@ -441,3 +441,62 @@ describe('telegram-outbound: coded-error contract', () => {
     assert.equal(after.state, 'sent');
   });
 });
+
+describe('telegram-outbound: H-15 multi-chunk budget', () => {
+  // Contract: the rate budget is per delivered chunk (each chunk is one
+  // Telegram API message), so a multi-chunk message may only send when ALL
+  // of its chunks fit the window. Credible regression: the old check
+  // (`used >= maxPerWindow`) counted one slot for the whole message, so a
+  // 3-chunk message with 2 of 4 slots used sailed through and overshot the
+  // operator's budget to 5.
+  const chunker = (text) => (text === 'big' ? ['one', 'two', 'three'] : [text]);
+
+  it('sendOne holds a multi-chunk message queued unless every chunk fits', async () => {
+    const clock = makeClock();
+    const { sender, calls } = makeSender();
+    const planner = createTelegramOutbound({ clock, sender, chunker, maxPerWindow: 4, windowMs: 60_000 });
+
+    for (let i = 0; i < 2; i += 1) prepare(planner, { chatId: 'chat-a', text: `filler ${i}` });
+    await planner.flush();
+    assert.equal(calls.length, 2);
+
+    const big = prepare(planner, { chatId: 'chat-a', text: 'big' });
+    assert.equal(big.chunks.length, 3);
+    const after = await planner.sendOne(big.id);
+    assert.equal(after.state, 'queued', '2 used + 3 needed > 4: stays queued');
+    assert.equal(calls.length, 2, 'no chunk was emitted');
+    assert.equal(planner.budgetStatus('chat-a').used, 2);
+    const note = planner.audit.find(
+      (e) => e.detail?.messageId === big.id && e.detail?.reason === 'rate budget exhausted',
+    );
+    assert.ok(note, 'budget exhaustion is recorded in the audit log');
+    assert.equal(note.detail.budget.needed, 3);
+  });
+
+  it('flush skips a multi-chunk message that would overshoot the window', async () => {
+    const clock = makeClock();
+    const { sender, calls } = makeSender();
+    const planner = createTelegramOutbound({ clock, sender, chunker, maxPerWindow: 2, windowMs: 60_000 });
+
+    const filler = prepare(planner, { chatId: 'chat-a', text: 'filler' });
+    const big = prepare(planner, { chatId: 'chat-a', text: 'big' });
+    const result = await planner.flush();
+    assert.deepEqual(result.sent, [filler.id]);
+    assert.deepEqual(result.skipped, [big.id]);
+    assert.equal(planner.get(big.id).state, 'queued');
+    assert.equal(calls.length, 1, 'only the filler chunk was emitted');
+    assert.equal(planner.budgetStatus('chat-a').used, 1);
+  });
+
+  it('a multi-chunk message sends when all chunks fit, consuming one slot per chunk', async () => {
+    const clock = makeClock();
+    const { sender, calls } = makeSender();
+    const planner = createTelegramOutbound({ clock, sender, chunker, maxPerWindow: 3, windowMs: 60_000 });
+
+    const big = prepare(planner, { chatId: 'chat-a', text: 'big' });
+    const after = await planner.sendOne(big.id);
+    assert.equal(after.state, 'sent');
+    assert.equal(calls.length, 3);
+    assert.equal(planner.budgetStatus('chat-a').used, 3);
+  });
+});
