@@ -87,7 +87,7 @@ test('expired authorization ends access and cancels a queued closed-stream retry
 });
 
 test('a queued reconnect rechecks account ownership without signing out the replacement account', async t => {
-  const { client, streams, emit, streamRequests } = fixture(t);
+  const { client, streams, streamRequests } = fixture(t);
   const session = client.session;
   session.authMode = 'account'; session.sessionRevision = 1;
   const account = { generation: 1, session: { ...session } };
