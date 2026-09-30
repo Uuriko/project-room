@@ -18,7 +18,7 @@ export function rollup({ events }) {
     check(typeof e.roomId === "string" && e.roomId.length > 0, "roomId must be non-empty");
     check(typeof e.timestamp === "string" && !Number.isNaN(Date.parse(e.timestamp)),
       "timestamp must be a valid ISO string");
-    const day = e.timestamp.slice(0, 10); // YYYY-MM-DD
+    const day = new Date(Date.parse(e.timestamp)).toISOString().slice(0, 10); // UTC YYYY-MM-DD
     const key = `${e.roomId}|${day}`;
     if (!rooms.has(key)) {
       rooms.set(key, { roomId: e.roomId, day, messages: 0, reactions: 0,

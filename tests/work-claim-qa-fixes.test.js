@@ -90,15 +90,14 @@ test("W1: junk leaseHours is refused loudly, never silently defaulted", async ()
   }
 });
 
-test("W1: renew with null leaseHours keeps the default-duration semantics", async () => {
+test("W1: renew with null leaseHours removes the lease (explicit opt-out, like claimWork)", async () => {
   const registry = await claimedRegistry({ leaseHours: 1 });
-  const before = Date.now();
   const { out, error } = await runRoute({ route: "renew", id: "w1",
     body: { progressMessageId: "progress-1", leaseHours: null },
     registry, storeMessages: [liveProgress()] });
   assert.equal(error, null);
-  const expires = Date.parse(out.value.leaseExpiresAt);
-  assert.ok(expires >= before + 24 * H && expires <= Date.now() + 24 * H + 5000);
+  assert.equal(out.value.leaseExpiresAt, null);
+  assert.equal(out.value.leaseStartAt, null);
 });
 
 // ---------------------------------------------------------------------------

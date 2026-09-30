@@ -50,7 +50,7 @@ export function createInvites({ store, randomBytes, defaultTtlMs } = {}) {
     check(invites.has(token), "unknown invite token");
     const at = nowMs(now);
     const invite = invites.get(token);
-    if (at > new Date(invite.expiresAt).getTime()) fail("invite_expired", `invite for room "${invite.room}" expired`);
+    if (at >= new Date(invite.expiresAt).getTime()) fail("invite_expired", `invite for room "${invite.room}" expired`);
     if (invite.usedCount >= invite.maxUses) fail("invite_exhausted", `invite for room "${invite.room}" already used`);
     const updated = Object.freeze({ ...invite, usedCount: invite.usedCount + 1 });
     invites.set(token, updated);

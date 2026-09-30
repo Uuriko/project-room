@@ -6,6 +6,14 @@
 // network failures) are retried with bounded backoff; everything that is
 // still uncertain afterwards is reported as unavailable, which leaves the
 // attempt "unknown" in the send journal rather than guessing.
+//
+// Delivery trade-off (at-least-once): after an ambiguous network failure the
+// first POST may already have been accepted by Telegram, and the retry loop
+// re-POSTs without an idempotency key — a duplicate message is possible.
+// Telegram's sendMessage has no client idempotency key, so this cannot be
+// closed at the transport layer; the operation-keyed receipt store and the
+// send journal bound the blast radius to in-flight retries of one attempt.
+// Narrowing to a single attempt + reconcile is a product decision.
 import { ServiceError } from "../store.mjs";
 import { requireContract } from "../channel-connection.mjs";
 import { provider, channel } from "./telegram.mjs";

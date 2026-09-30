@@ -513,6 +513,9 @@ export class WebResearch {
     const evidence = [];
     const errors = [];
     for (const url of req.urls) {
+      // Stop fetching once the evidence cap is reached: further URLs bill
+      // web-fetch quota for evidence that can never be used.
+      if (evidence.length >= req.maxEvidence) break;
       try {
         const res = await this.store.webFetch.fetch(roomId, memberId, {
           url,
