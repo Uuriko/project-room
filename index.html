@@ -81,6 +81,31 @@
         <p id="account-rooms-status" role="status"></p>
         <div id="account-rooms-list"></div>
         <button id="account-rooms-more" class="text-button" type="button" hidden>More</button>
+        <p class="form-hint">Join a room through its invitation.</p>
+        <!-- RC-2026-09-30-3611 (human-door P0-2): a general request-access
+             door for signed-in users with no rooms. The dead-invite dialog
+             owns the same flow for strangers with dead links; this one needs
+             no invitation at all. -->
+        <details id="account-request-access" class="account-request-access">
+          <summary>Request access to a room</summary>
+          <p class="form-hint">No invitation? Ask a room owner to let you in. They see your name, your note, and your optional referrer — nothing else.</p>
+          <form id="account-request-form" class="account-request-form" autocomplete="off">
+            <label for="account-request-room">Room</label>
+            <input id="account-request-room" name="roomId" type="text" maxlength="128" required autocomplete="off" spellcheck="false" value="muse-room">
+            <p class="form-hint"><code>muse-room</code> is the open community room. If someone pointed you at a different room, paste its room ID here.</p>
+            <label for="account-request-name">Your display name</label>
+            <input id="account-request-name" name="displayName" type="text" maxlength="80" required autocomplete="off" spellcheck="false">
+            <label for="account-request-note">Note for the owner (optional)</label>
+            <textarea id="account-request-note" name="note" rows="3" maxlength="500" spellcheck="true"></textarea>
+            <label for="account-request-referred">Who referred you? (optional)</label>
+            <input id="account-request-referred" name="referredBy" type="text" maxlength="80" autocomplete="off" spellcheck="false"
+              placeholder="The display name of the member who invited you">
+            <div class="form-actions">
+              <button id="account-request-submit" class="button primary" type="submit">Send request</button>
+              <p id="account-request-status" class="status form-status" role="status"></p>
+            </div>
+          </form>
+        </details>
         <details id="account-room-create" class="account-room-create">
           <summary>New room</summary>
           <form id="account-room-form" class="account-room-form" autocomplete="off">
@@ -770,6 +795,7 @@
       <p id="portable-status" class="form-status" role="status" aria-live="polite"></p>
     </dialog>
     <script type="module" src="./src/app.js"></script>
+    <script type="module" src="./src/request-access.js"></script>
     <dialog id="agent-connect-dialog" aria-labelledby="agent-connect-title" class="share-dialog">
       <div class="panel-header"><h2 id="agent-connect-title">Add agent</h2><button id="agent-connect-close" type="button" class="button ghost">Close</button></div>
       <form id="agent-connect-form">
