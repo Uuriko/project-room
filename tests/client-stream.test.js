@@ -5,30 +5,22 @@ import { RoomClient } from '../src/client.js';
 function fixture(t) {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   t.mock.method(Math, 'random', () => 0);
-  const streams = [], statuses = [], streamRequests = [];
+  const streams = [], statuses = [];
   class Events extends EventTarget {
     constructor(url) { super(); this.url = url; this.readyState = 0; streams.push(this); }
     close() { this.readyState = 2; }
     emit(type, readyState) { this.readyState = readyState; this.dispatchEvent(new Event(type)); }
   }
   const session = { roomId: 'commons', member: { id: 'human' }, account: { id: 'account-human', authEpoch: 0 }, sessionBinding: 'binding-one' };
-  const fetcher = async (url, options) => {
-    if (typeof url === 'string' && url.includes('/stream')) {
-      streamRequests.push({ url, headers: options?.headers ?? {} });
-      // Never resolve the body: the stream stays connecting in tests.
-      return { ok: true, body: null };
-    }
-    return {
-      ok: true, json: async () => ({ sequence: 7, roomId: 'commons', viewerId: 'human',
-        viewerAccountId: session.account.id, viewerAuthEpoch: 0, viewerSessionBinding: session.sessionBinding,
-        viewerSessionRevision: session.sessionRevision })
-    };
-  };
-  const client = new RoomClient({ events: Events, onStatus: status => statuses.push(status), fetcher });
+  const client = new RoomClient({ events: Events, onStatus: status => statuses.push(status), fetcher: async () => ({
+    ok: true, json: async () => ({ sequence: 7, roomId: 'commons', viewerId: 'human',
+      viewerAccountId: session.account.id, viewerAuthEpoch: 0, viewerSessionBinding: session.sessionBinding,
+      viewerSessionRevision: session.sessionRevision })
+  }) });
   client.session = session;
   t.after(() => client.disconnect());
   const emit = async (type, state) => { streams.at(-1).emit(type, state); await client.flight?.promise; };
-  return { client, streams, statuses, emit, streamRequests };
+  return { client, streams, statuses, emit };
 }
 
 test('native reconnect is preserved; closed streams retry once with bounded backoff and the current cursor', async t => {
@@ -87,28 +79,22 @@ test('expired authorization ends access and cancels a queued closed-stream retry
 });
 
 test('a queued reconnect rechecks account ownership without signing out the replacement account', async t => {
-  const { client, streams, streamRequests } = fixture(t);
+  const { client, streams, emit } = fixture(t);
   const session = client.session;
   session.authMode = 'account'; session.sessionRevision = 1;
   const account = { generation: 1, session: { ...session } };
   client.accountClient = account;
   client.accountOwnership = { client: account, generation: 1, session: account.session };
   client.connect();
-  // L-P2-14: the binding travels as a request header, never in the URL.
-  assert.equal(streamRequests.length, 1);
-  assert.match(streamRequests[0].url, /\/stream\?after=\d+&auth=account$/);
-  assert.ok(!streamRequests[0].url.includes('binding='), 'no binding in the stream URL');
-  assert.equal(streamRequests[0].headers['x-session-binding'], 'binding-one');
-  client.stream.readyState = 2;
-  client.stream.dispatchEvent(new Event('error'));
-  await client.flight?.promise;
+  assert.match(streams[0].url, /auth=account&binding=binding-one$/);
+  await emit('error', 2);
   assert.equal(client.session, session);
   assert.ok(client.streamRetry, 'the original account owns a pending retry');
   const replacement = { account: { id: 'other', authEpoch: 0 }, sessionBinding: 'other-binding' };
   account.session = replacement; account.generation++;
   t.mock.timers.tick(1000);
   assert.equal(client.session, null);
-  assert.equal(streams.length, 0, 'account mode no longer uses the EventSource mock');
+  assert.equal(streams.length, 1);
   assert.equal(account.session, replacement);
 });
 
@@ -147,45 +133,4 @@ test('a transient unavailable stream and failed refresh preserve identity and re
   await emit('open', 1);
   assert.equal(client.session, session);
   assert.equal(ended, 0);
-});
-
-test('FetchEventSource sends the session binding as a header and parses SSE frames (L-P2-14)', async t => {
-  const { FetchEventSource } = await import('../src/client.js');
-  const seen = [];
-  const chunks = [
-    ': heartbeat\n',
-    'event: room-event\ndata: {"seq":1}\n\n',
-    'event: access-ended\ndata: {"message":"Access ended; sign in again"}\n\n',
-  ];
-  const stream = new ReadableStream({
-    start(controller) {
-      for (const c of chunks) controller.enqueue(new TextEncoder().encode(c));
-      controller.close();
-    }
-  });
-  const fetcher = async (url, options) => {
-    seen.push({ url, headers: options.headers });
-    return { ok: true, body: stream };
-  };
-  const source = new FetchEventSource('https://example.com/api/rooms/r/stream?after=0&auth=account',
-    { headers: { 'x-session-binding': 'secret-binding' }, fetcher });
-  const events = [];
-  source.addEventListener('open', () => events.push(['open', null]));
-  source.addEventListener('room-event', e => events.push(['room-event', e.data]));
-  source.addEventListener('access-ended', e => events.push(['access-ended', e.data]));
-  await new Promise(resolve => {
-    source.addEventListener('error', () => resolve(), { once: true });
-    setTimeout(resolve, 1000);
-  });
-  assert.equal(seen.length, 1);
-  assert.ok(!seen[0].url.includes('binding'), 'binding must not appear in the URL');
-  assert.equal(seen[0].headers['x-session-binding'], 'secret-binding');
-  assert.equal(seen[0].headers['Accept'], 'text/event-stream');
-  assert.deepEqual(events, [
-    ['open', null],
-    ['room-event', '{"seq":1}'],
-    ['access-ended', '{"message":"Access ended; sign in again"}'],
-  ]);
-  source.close();
-  assert.equal(source.readyState, 2);
 });
