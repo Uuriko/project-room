@@ -8,6 +8,15 @@ import {
 const NOW = Date.parse("2026-09-30T12:00:00.000Z");
 const clock = () => NOW;
 
+// These tests exercise the FILTER, so trust is stubbed as if every seeker's
+// receipts matched what it declared. That honesty is the stub's job, not the
+// matcher's assumption: the seekers that lie live in
+// tests/work-matchmaking-adversarial.test.js, and the filter reads the
+// resolved tier, never the claim.
+const honest = tier => () => tier;
+const matched = ({ seeker, openings, tier }) =>
+  matchWork({ seeker, openings, now: clock, resolveTier: honest(tier ?? seeker.claimedTier) });
+
 const seeker = (over = {}) => declareSeeker({
   seekerId: "ai_stranger", motives: ["paid"], capabilities: ["javascript", "tests"],
   appetiteMinutes: 120, trustTier: 1, ...over,
@@ -35,7 +44,7 @@ test("declarations are normalised so both sides meet without translation", () =>
   assert.deepEqual(s.capabilities, ["javascript", "rust"]);
   const o = opening({ requires: ["JAVASCRIPT"] });
   assert.deepEqual(o.requires, ["javascript"]);
-  assert.equal(matchWork({ seeker: s, openings: [o], now: clock }).match.openingId, "op-1");
+  assert.equal(matched({ seeker: s, openings: [o] }).match.openingId, "op-1");
 });
 
 test("work offered for fun cannot carry a reward amount", () => {
@@ -44,10 +53,9 @@ test("work offered for fun cannot carry a reward amount", () => {
 });
 
 test("unpaid work is first class: a hobby seeker is matched to it", () => {
-  const result = matchWork({
+  const result = matched({
     seeker: seeker({ motives: ["fun"], trustTier: 0 }),
     openings: [opening({ openingId: "hobby", rewardKind: "fun", rewardAmount: 0, sizeMinutes: 30 })],
-    now: clock,
   });
   assert.equal(result.match.openingId, "hobby");
   assert.match(result.match.why, /unpaid/);
@@ -65,7 +73,7 @@ test("work-trade is matched on its own motive and never confused with paid", () 
 
 test("one match comes back, never a list", () => {
   const openings = [opening({ openingId: "a" }), opening({ openingId: "b", rewardAmount: 400 })];
-  const result = matchWork({ seeker: seeker(), openings, now: clock });
+  const result = matched({ seeker: seeker(), openings });
   assert.equal(result.match.openingId, "b");
   assert.deepEqual(result.alternatives, ["a"]);
 });
@@ -78,7 +86,7 @@ test("every rejection says why, so a non-match is never unexplained", () => {
     opening({ openingId: "long", sizeMinutes: 600 }),
     opening({ openingId: "guarded", trustFloor: 3 }),
   ];
-  const result = matchWork({ seeker: seeker(), openings, now: clock });
+  const result = matched({ seeker: seeker(), openings });
   assert.equal(result.match, null);
   const byId = Object.fromEntries(result.rejected.map(r => [r.openingId, r]));
   assert.equal(byId.shut.code, "closed");
@@ -93,18 +101,17 @@ test("every rejection says why, so a non-match is never unexplained", () => {
 test("a stranger's first piece of work is capped in size", () => {
   const big = opening({ openingId: "big", sizeMinutes: FIRST_MATCH_MAX_MINUTES + 1, trustFloor: 0 });
   const stranger = seeker({ trustTier: MIN_TIER, appetiteMinutes: 600 });
-  const capped = matchWork({ seeker: stranger, openings: [big], now: clock });
+  const capped = matched({ seeker: stranger, openings: [big] });
   assert.equal(capped.match, null);
   assert.equal(capped.rejected[0].code, "first-match-cap");
   // the same work is open to someone who has finished something here
-  assert.equal(matchWork({ seeker: seeker({ trustTier: 1, appetiteMinutes: 600 }), openings: [big], now: clock }).match.openingId, "big");
+  assert.equal(matched({ seeker: seeker({ trustTier: 1, appetiteMinutes: 600 }), openings: [big] }).match.openingId, "big");
 });
 
 test("the trust floor holds work back from a stranger regardless of capability", () => {
-  const result = matchWork({
+  const result = matched({
     seeker: seeker({ trustTier: 0, capabilities: ["javascript", "rust", "tests"] }),
     openings: [opening({ openingId: "prod", trustFloor: 2, sizeMinutes: 30 })],
-    now: clock,
   });
   assert.equal(result.match, null);
   assert.equal(result.rejected[0].code, "trust");
@@ -115,17 +122,16 @@ test("the same inputs always produce the same match", () => {
     opening({ openingId: "z", rewardAmount: 100, sizeMinutes: 60 }),
     opening({ openingId: "a", rewardAmount: 100, sizeMinutes: 60 }),
   ];
-  const first = matchWork({ seeker: seeker(), openings, now: clock });
-  const again = matchWork({ seeker: seeker(), openings: [...openings].reverse(), now: clock });
+  const first = matched({ seeker: seeker(), openings });
+  const again = matched({ seeker: seeker(), openings: [...openings].reverse() });
   assert.equal(first.match.openingId, "a");
   assert.equal(again.match.openingId, "a");
 });
 
 test("paid work is preferred over unpaid when the seeker asked for both", () => {
-  const result = matchWork({
+  const result = matched({
     seeker: seeker({ motives: ["paid", "fun"] }),
     openings: [opening({ openingId: "free", rewardKind: "fun", rewardAmount: 0, sizeMinutes: 10 }), opening({ openingId: "cash" })],
-    now: clock,
   });
   assert.equal(result.match.openingId, "cash");
 });
@@ -136,21 +142,21 @@ test("a seeker who matched nothing is told which constraint excluded the most", 
     opening({ openingId: "b", requires: ["go"] }),
     opening({ openingId: "c", sizeMinutes: 900 }),
   ];
-  const result = matchWork({ seeker: seeker(), openings, now: clock });
+  const result = matched({ seeker: seeker(), openings });
   assert.equal(result.nearest.code, "capability");
   assert.equal(result.nearest.count, 2);
   assert.match(result.nearest.hint, /capabilities/);
 });
 
 test("nothing on offer is an empty answer, not an error", () => {
-  const result = matchWork({ seeker: seeker(), openings: [], now: clock });
+  const result = matched({ seeker: seeker(), openings: [] });
   assert.equal(result.match, null);
   assert.equal(result.nearest, null);
   assert.deepEqual(result.rejected, []);
 });
 
 test("the matcher is pure: outputs frozen, clock injected, no status codes", () => {
-  const result = matchWork({ seeker: seeker(), openings: [opening()], now: clock });
+  const result = matched({ seeker: seeker(), openings: [opening()] });
   assert.equal(Object.isFrozen(result), true);
   assert.equal(Object.isFrozen(result.match), true);
   assert.throws(() => matchWork({ seeker: seeker(), openings: [opening()] }), /now must be a clock function/);

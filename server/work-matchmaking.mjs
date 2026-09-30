@@ -45,6 +45,12 @@ const stringList = (value, label, { max = 32 } = {}) => {
 
 // An agent declaring what it wants. No profile, no history required: a
 // stranger can declare and be matched on the first call.
+//
+// `trustTier` here is a CLAIM and is stored as `claimedTier`. The filter never
+// reads it. It is kept only so a caller can see what was asserted versus what
+// the receipts actually support. Trust arrives through `resolveTier` on
+// matchWork, because a defence keyed off a number the attacker supplies is
+// not a defence.
 export function declareSeeker({ seekerId, motives, capabilities = [], appetiteMinutes, trustTier = MIN_TIER } = {}) {
   check(isStr(seekerId), "seekerId is required");
   const wanted = stringList(motives ?? [], "motives", { max: MOTIVES.length });
@@ -56,7 +62,7 @@ export function declareSeeker({ seekerId, motives, capabilities = [], appetiteMi
     `trustTier must be an integer between ${MIN_TIER} and ${MAX_TIER}`);
   return Object.freeze({
     seekerId, motives: wanted, capabilities: stringList(capabilities, "capabilities"),
-    appetiteMinutes, trustTier,
+    appetiteMinutes, claimedTier: trustTier, declared: true,
   });
 }
 
@@ -85,21 +91,43 @@ export function describeOpening({
   });
 }
 
+// A record that never went through describeOpening used to throw a raw
+// TypeError out of the match loop, so one bad row failed every match in the
+// batch. It is now a rejection like any other: the row pays for itself.
+const malformationOf = o => {
+  if (typeof o.open !== "boolean") return "record is incomplete: no open flag";
+  if (!MOTIVES.includes(o.rewardKind)) return "record is incomplete: no usable reward kind";
+  if (!Number.isFinite(o.rewardAmount) || o.rewardAmount < 0) return "record is incomplete: no reward amount";
+  if (!Array.isArray(o.requires)) return "record is incomplete: no capability list";
+  if (!Number.isInteger(o.sizeMinutes) || o.sizeMinutes <= 0) return "record is incomplete: no size";
+  if (!Number.isInteger(o.trustFloor) || o.trustFloor < MIN_TIER || o.trustFloor > MAX_TIER)
+    return "record is incomplete: no usable trust floor";
+  if (o.deadline !== null && !(isStr(o.deadline) && Number.isFinite(Date.parse(o.deadline))))
+    return "record is incomplete: unreadable deadline";
+  if (!isStr(o.roomId) || !isStr(o.title)) return "record is incomplete: no room or title";
+  return null;
+};
+
 // Every rejection carries a code and a sentence, because an unexplained
 // non-match is the thing that makes a matchmaker feel broken.
-const rejectionOf = (seeker, opening, nowMs) => {
+const rejectionOf = (seeker, opening, nowMs, tier) => {
+  const bad = malformationOf(opening);
+  if (bad !== null) return ["malformed", bad];
   if (!opening.open) return ["closed", "this work is no longer open"];
   if (opening.deadline !== null && Date.parse(opening.deadline) <= nowMs)
     return ["expired", "the deadline has passed"];
   if (!seeker.motives.includes(opening.rewardKind))
     return ["motive", `pays in ${opening.rewardKind} and you asked for ${seeker.motives.join(" or ")}`];
-  if (seeker.trustTier < opening.trustFloor)
-    return ["trust", `needs trust tier ${opening.trustFloor} and you are at ${seeker.trustTier}`];
+  if (tier < opening.trustFloor)
+    // Deliberately vague about the floor. Naming it tells whoever is probing
+    // exactly what to forge next, and the honest seeker does not need the
+    // number to know what to do.
+    return ["trust", "held back for agents with more completed work here than your receipts show"];
   const missing = opening.requires.filter(r => !seeker.capabilities.includes(r));
   if (missing.length > 0) return ["capability", `needs ${missing.join(", ")}`];
   if (opening.sizeMinutes > seeker.appetiteMinutes)
     return ["appetite", `takes about ${opening.sizeMinutes} minutes and you offered ${seeker.appetiteMinutes}`];
-  if (seeker.trustTier === MIN_TIER && opening.sizeMinutes > FIRST_MATCH_MAX_MINUTES)
+  if (tier === MIN_TIER && opening.sizeMinutes > FIRST_MATCH_MAX_MINUTES)
     return ["first-match-cap", `a first piece of work here is capped at ${FIRST_MATCH_MAX_MINUTES} minutes`];
   return null;
 };
@@ -125,19 +153,35 @@ const compareOpenings = (a, b) => {
 
 // Match one seeker against the openings on offer. Returns the single best fit
 // plus why everything else missed.
-export function matchWork({ seeker, openings, now } = {}) {
-  check(seeker !== null && typeof seeker === "object" && isStr(seeker.seekerId), "seeker must be a declared seeker");
+export function matchWork({ seeker, openings, now, resolveTier } = {}) {
+  check(seeker !== null && typeof seeker === "object" && isStr(seeker.seekerId)
+    && Array.isArray(seeker.motives) && Array.isArray(seeker.capabilities)
+    && Number.isInteger(seeker.appetiteMinutes) && seeker.declared === true,
+    "seeker must be a declared seeker");
   check(Array.isArray(openings) && openings.length <= 5000, "openings must be a list of at most 5000");
   check(typeof now === "function", "now must be a clock function");
   const nowMs = now();
   check(Number.isFinite(nowMs), "now() must return a finite epoch in milliseconds");
+
+  // Trust comes from receipts or it does not come at all. No resolver means
+  // every seeker is a stranger: a caller who forgets to wire the trust read
+  // gets a matcher that trusts nobody, never one that trusts everybody.
+  let tier = MIN_TIER;
+  if (resolveTier !== undefined) {
+    check(typeof resolveTier === "function", "resolveTier must be a function that reads trust from receipts");
+    try { tier = resolveTier(seeker.seekerId); }
+    catch (cause) { fail("trust_unavailable", `trust could not be read for ${seeker.seekerId}: ${cause?.message ?? cause}`); }
+    check(Number.isInteger(tier) && tier >= MIN_TIER && tier <= MAX_TIER,
+      `resolveTier returned ${String(tier)}; a tier must be an integer between ${MIN_TIER} and ${MAX_TIER}`,
+      "trust_unavailable");
+  }
 
   const eligible = [];
   const rejected = [];
   for (const opening of openings) {
     check(opening !== null && typeof opening === "object" && isStr(opening.openingId),
       "every opening must be a described opening");
-    const rejection = rejectionOf(seeker, opening, nowMs);
+    const rejection = rejectionOf(seeker, opening, nowMs, tier);
     if (rejection === null) eligible.push(opening);
     else rejected.push(Object.freeze({ openingId: opening.openingId, code: rejection[0], reason: rejection[1] }));
   }
@@ -146,6 +190,9 @@ export function matchWork({ seeker, openings, now } = {}) {
 
   return Object.freeze({
     seekerId: seeker.seekerId,
+    // What the receipts say, next to what was claimed, so a caller can see a
+    // gap rather than discover it.
+    tier, claimedTier: seeker.claimedTier,
     match: match === null ? null : Object.freeze({
       openingId: match.openingId, roomId: match.roomId, title: match.title,
       rewardKind: match.rewardKind, rewardAmount: match.rewardAmount,
@@ -160,13 +207,23 @@ export function matchWork({ seeker, openings, now } = {}) {
     // which single constraint excluded the most work, so they know what to
     // change rather than concluding the room is empty.
     nearest: match !== null || rejected.length === 0 ? null : (() => {
+      // Only constraints the seeker can actually change. Work that is closed,
+      // expired or malformed is not theirs to fix, and counting it told a
+      // stranger "the work was taken" when the real blocker was a capability
+      // they could have declared in the next call.
       const counts = new Map();
-      for (const r of rejected) counts.set(r.code, (counts.get(r.code) ?? 0) + 1);
+      for (const r of rejected) {
+        if (!ACTIONABLE.has(r.code)) continue;
+        counts.set(r.code, (counts.get(r.code) ?? 0) + 1);
+      }
+      if (counts.size === 0) return Object.freeze({ code: "gone", count: rejected.length, hint: HINTS.gone });
       const [code, count] = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0];
       return Object.freeze({ code, count, hint: HINTS[code] ?? "nothing here fits that declaration yet" });
     })(),
   });
 }
+
+const ACTIONABLE = new Set(["motive", "capability", "appetite", "trust", "first-match-cap"]);
 
 const HINTS = Object.freeze({
   motive: "most open work here pays in something you did not ask for; widen your motives",
@@ -176,4 +233,5 @@ const HINTS = Object.freeze({
   "first-match-cap": "your first piece of work here is capped; ask again once one is done",
   closed: "the work you can do was taken",
   expired: "the work you can do has passed its deadline",
+  gone: "nothing open right now; everything here is already taken or past its deadline",
 });
