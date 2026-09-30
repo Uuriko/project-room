@@ -447,6 +447,29 @@ test("runner output removes the known bearer before returning printable results"
 });
 
 
+test("a later handoff for the same Work Item runs once per event seq", async t => {
+  const directory = fixtureDir();
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const env = { ROOM_AGENT_CONFIG: directory };
+  const calls = [];
+  const handoff = seq => ({
+    kind: "handoff", roomId: "den", id: "work-1", seq,
+    summary: `Review event ${seq}`,
+    next: { tool: "room_read_work", arguments: { roomId: "den", workItemId: "work-1" } }
+  });
+  const handlers = { needsMe: needsMe([handoff(4), handoff(4)]), acks: [] };
+  const fetchImpl = roomFetch(handlers);
+  const runner = async plan => { calls.push(plan.item.seq); return { code: 0 }; };
+  await pull({ env, fetchImpl, execute: true, runner });
+  await pull({ env, fetchImpl, execute: true, runner });
+  assert.deepEqual(calls, [4]);
+  handlers.needsMe = needsMe([handoff(9), handoff(9)], { cursor: { rooms: { den: 9 } } });
+  const later = await pull({ env, fetchImpl, execute: true, runner });
+  assert.equal(later.executed.length, 1);
+  await pull({ env, fetchImpl, execute: true, runner });
+  assert.deepEqual(calls, [4, 9]);
+});
+
 test("duplicate heartbeat and paged attention runs one handler", async t => {
   const directory = fixtureDir(); t.after(() => rmSync(directory, { recursive: true, force: true }));
   const handlers = { needsMe: needsMe([mention(), mention()]), acks: [],

@@ -17,3 +17,10 @@ test("a body past the room message cap names nobody", () => {
   assert.ok(body.length > MAX_MESSAGE_BODY_CHARS);
   assert.deepEqual(resolveMentionTargetsInText(members, {}, body, "me"), []);
 });
+
+test("a mention after whitespace at the end of a max-length legal body still names the member", () => {
+  const pad = `${"z".repeat(MAX_MESSAGE_BODY_CHARS - 5)} `;
+  const body = `${pad}@Ada`;
+  assert.equal(body.length, MAX_MESSAGE_BODY_CHARS);
+  assert.deepEqual(resolveMentionTargetsInText(members, {}, body, "me"), ["ada"]);
+});

@@ -21,6 +21,12 @@ export function attentionKey(item) {
   if (!item || !text(item.kind, KIND_MAX) || !text(item.roomId, ROOM_MAX) || !text(item.id, ID_MAX)) {
     fail("invalid_attention_item");
   }
+  // Handoffs reuse the Work Item id; each event has its own seq. Skipping
+  // seq made a later handoff look like the first completed one.
+  if (item.kind === "handoff") {
+    if (!Number.isSafeInteger(item.seq) || item.seq < 0) fail("invalid_attention_item");
+    return `${item.kind}:${item.roomId}:${item.id}:${item.seq}`;
+  }
   return `${item.kind}:${item.roomId}:${item.id}`;
 }
 
