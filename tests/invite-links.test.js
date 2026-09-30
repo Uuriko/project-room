@@ -41,8 +41,8 @@ test("default token generation is cryptographically secure, never Math.random", 
     const invites = createInvites();
     const t1 = invites.issue({ room: "lobby", now: 0 }).token;
     const t2 = invites.issue({ room: "lobby", now: 0 }).token;
-    assert.match(t1, /^[0-9a-f]{16}$/);
-    assert.match(t2, /^[0-9a-f]{16}$/);
+    assert.match(t1, /^[0-9a-f]{32}$/);
+    assert.match(t2, /^[0-9a-f]{32}$/);
     assert.notEqual(t1, t2); // constant Math.random would produce identical tokens (or a collision throw)
   } finally {
     Math.random = orig;

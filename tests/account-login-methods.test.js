@@ -139,8 +139,12 @@ test("passkey credential store round-trips through the passkey-store adapter", (
   assert.equal(adapter.getCredential("cred-1").signCount, 4);
   const listed = logins.listPasskeyCredentials("acct-1");
   assert.equal(listed.length, 1);
-  assert.equal(listed[0].credentialId, "cred-1");
-  assert.ok(!("publicKeyJwk" in listed[0]) || listed[0] !== undefined); // public view keeps no private key material
+  // G-LOW-9: pin the exact public key set — the query projects an explicit
+  // allowlist, and a future publicKeyJwk/publicKeyCose leak must fail here.
+  assert.deepEqual(Object.keys(listed[0]).sort(), [
+    "aaguid", "createdAt", "credentialId", "disabled", "fmt", "lastUsedAt",
+    "rpId", "signCount", "transports",
+  ]);
   // M-2: removal of the last active method is refused, so keep a second
   // method around for the round-trip's removal step.
   logins.linkPasswordMethod("acct-1", { email: "ada@example.com", verifier: "scrypt$..." });

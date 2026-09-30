@@ -192,3 +192,16 @@ export function readAccessRequest(storage, roomId) {
     return record;
   } catch { return null; }
 }
+// Drop the stashed access request: the record holds the minted identity's
+// bearer secret, which must not linger in sessionStorage past the request's
+// terminal state (approved / denied / withdrawn).
+//
+// G-LOW-2 follow-up (NOT yet wired): src/app.js and src/request-access.js
+// stash and read the access request but never clear it — the secret sits in
+// sessionStorage until the tab closes. The app's request-completion handlers
+// must call clearAccessRequest(roomId) when the request reaches a terminal
+// state. This helper exists so that wiring has a seam to call.
+export function clearAccessRequest(storage, roomId) {
+  if (!storage || typeof roomId !== "string" || !roomId) return;
+  try { storage.removeItem(accessRequestStorageKey(roomId)); } catch { /* storage unavailable */ }
+}
