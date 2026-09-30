@@ -38,7 +38,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, openSync, closeSync, unlinkSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -232,13 +232,71 @@ function blankState() {
 
 export function loadState(path) {
   if (!existsSync(path)) return blankState();
+  let s;
   try {
-    const s = JSON.parse(readFileSync(path, 'utf8'));
-    if (!Array.isArray(s.slots)) s.slots = [];
-    if (typeof s.attempts !== 'object' || s.attempts === null) s.attempts = {};
-    return s;
+    s = JSON.parse(readFileSync(path, 'utf8'));
   } catch {
-    return blankState();
+    // M-54: fail closed. A corrupt state file must never silently reset to a
+    // blank — the old code forgot in-flight worker slots and attempt counts,
+    // letting the loop over-dispatch past the worker cap.
+    throw invalidState(path);
+  }
+  if (typeof s !== 'object' || s === null) throw invalidState(path);
+  if (!Array.isArray(s.slots)) s.slots = [];
+  if (typeof s.attempts !== 'object' || s.attempts === null) s.attempts = {};
+  return s;
+}
+
+function invalidState(path) {
+  const err = new Error(`ralph-loop: state file is not valid JSON: ${path}`);
+  err.code = 'INVALID_STATE';
+  return err;
+}
+
+function pidAlive(pid) {
+  try { process.kill(pid, 0); return true; }
+  catch (e) { return e.code !== 'ESRCH'; } // EPERM etc: process exists, treat as alive
+}
+
+/**
+ * M-54: run `fn` with an exclusive lock on the state file (O_EXCL lockfile).
+ * Serializes the dispatch/release load→mutate→save critical sections so two
+ * ticks can't both pass the worker-cap check and over-dispatch. A lock left
+ * by a dead pid is treated as stale and cleared; a live holder makes this
+ * call throw with code STATE_LOCKED (callers exit gracefully).
+ */
+export function withStateLock(statePath, fn) {
+  const lockPath = `${statePath}.lock`;
+  const acquire = (allowStaleClear) => {
+    try {
+      const fd = openSync(lockPath, 'wx', 0o600);
+      writeFileSync(fd, String(process.pid));
+      return fd;
+    } catch (e) {
+      if (e.code !== 'EEXIST') throw e;
+      let owner = NaN;
+      try { owner = parseInt(readFileSync(lockPath, 'utf8').trim(), 10); } catch { /* unreadable: treat as stale */ }
+      // Stale only when the owner pid is gone. Our own pid is never stale —
+      // re-entrant acquisition must fail closed, not steal the outer lock.
+      // (A lockfile from a dead previous incarnation reusing our pid is
+      // indistinguishable from re-entrancy; it fails closed with STATE_LOCKED,
+      // which is the safe direction.)
+      const stale = !Number.isInteger(owner) || !pidAlive(owner);
+      if (!stale || !allowStaleClear) {
+        const err = new Error(`ralph-loop: state lock held by pid ${Number.isInteger(owner) ? owner : '?'} (${lockPath})`);
+        err.code = 'STATE_LOCKED';
+        throw err;
+      }
+      try { unlinkSync(lockPath); } catch { /* lost the race; retry anyway */ }
+      return acquire(false);
+    }
+  };
+  const fd = acquire(true);
+  try {
+    return fn();
+  } finally {
+    closeSync(fd);
+    try { unlinkSync(lockPath); } catch { /* already gone */ }
   }
 }
 
@@ -530,13 +588,33 @@ function dispatch(opts) {
     });
   }
 
+  // M-54: the load→reap→cap-check→mutate→save critical section runs under an
+  // exclusive state lock so two ticks can't both pass the cap check and
+  // over-dispatch. exitReport calls process.exit (which skips finally), so
+  // the locked section returns its report and we exit only after unlock.
+  let outcome;
+  try {
+    outcome = withStateLock(opts.statePath, () => dispatchLocked(opts, item, routine, backlogPath, backlogText));
+  } catch (e) {
+    if (e.code === 'STATE_LOCKED') {
+      return exitReport(opts, { text: 'ralph-loop: state lock held by another tick — exiting without dispatching.', locked: true }, 2);
+    }
+    if (e.code === 'INVALID_STATE') {
+      return exitReport(opts, { text: `ralph-loop: ${e.message} — refusing to dispatch on unknown state.`, invalidState: true }, 1);
+    }
+    throw e;
+  }
+  return exitReport(opts, outcome.report, outcome.code);
+}
+
+function dispatchLocked(opts, item, routine, backlogPath, backlogText) {
   let state = loadState(opts.statePath);
   ({ state } = reapStaleSlots(state, opts.staleAfterHours));
   if (activeSlots(state).length >= opts.maxWorkers) {
-    return exitReport(opts, {
+    return { report: {
       text: `ralph-loop: at worker cap (${opts.maxWorkers}) — tick exits.`,
       atCap: true,
-    }, 2);
+    }, code: 2 };
   }
 
   // Bounded attempts: an item that keeps failing is left for a human.
@@ -546,10 +624,10 @@ function dispatch(opts) {
     writeFileSync(backlogPath, blockItem(backlogText, item.id, trailer));
     recordAttempt(state, item.id, 'blocked: max attempts reached, moved to ## blocked');
     saveState(opts.statePath, state);
-    return exitReport(opts, {
+    return { report: {
       text: `ralph-loop: ${item.id} exhausted ${opts.maxAttempts} attempts — moved to ## blocked for a human. Tick exits.`,
       blocked: item.id,
-    });
+    }, code: 0 };
   }
 
   // The pull marks the item claimed in BACKLOG.md AND refuses on live overlap
@@ -557,14 +635,14 @@ function dispatch(opts) {
   const pull = runRoom(opts.repo, ['backlog', 'pull', '--lane', opts.lane]);
   if (!pull.ok) {
     const firstErr = String(pull.err || pull.out).replace(/\\n/g, '\n').split('\n')[0];
-    return exitReport(opts, {
+    return { report: {
       text: `ralph-loop: pull refused — ${firstErr}. Tick exits; item left for the next tick/operator.`,
       refused: true,
-    });
+    }, code: 0 };
   }
   const claim = parseClaimBlock(pull.out);
   if (!claim.taskId) {
-    return exitReport(opts, { text: 'ralph-loop: pull succeeded but no task-id parsed — aborting.', refused: true }, 1);
+    return { report: { text: 'ralph-loop: pull succeeded but no task-id parsed — aborting.', refused: true }, code: 1 };
   }
 
   // Persistent worktree for the worker (never /tmp).
@@ -592,10 +670,10 @@ function dispatch(opts) {
     try {
       writeFileSync(backlogPath, unclaimTask(readFileSync(backlogPath, 'utf8'), claim.taskId));
     } catch { /* best effort; the stranded mark is visible in BACKLOG.md */ }
-    return exitReport(opts, {
+    return { report: {
       text: `ralph-loop: worktree setup failed — ${redactSecrets(e.message || String(e))}. Claim mark rolled back; tick exits.`,
       refused: true,
-    }, 1);
+    }, code: 1 };
   }
 
   const slot = {
@@ -643,7 +721,7 @@ function dispatch(opts) {
     'The loop opened no PR and merged nothing. Merges stay human/coordinator-gated.',
     'No cron was activated by this dispatch.',
   ].join('\n');
-  return exitReport(opts, { text: report, dispatched: slot });
+  return { report: { text: report, dispatched: slot }, code: 0 };
 }
 
 function status(opts) {
@@ -669,22 +747,40 @@ function status(opts) {
 }
 
 function release(opts, blId, heartbeatOnly) {
+  // M-54: load→mutate→save under the state lock so a concurrent dispatch tick
+  // can't interleave and lose the release (or the dispatch).
+  let outcome;
+  try {
+    outcome = withStateLock(opts.statePath, () => releaseLocked(opts, blId, heartbeatOnly));
+  } catch (e) {
+    if (e.code === 'STATE_LOCKED') {
+      return exitReport(opts, { text: `ralph-loop: state lock held — cannot release ${blId} now; retry next tick.`, locked: true }, 2);
+    }
+    if (e.code === 'INVALID_STATE') {
+      return exitReport(opts, { text: `ralph-loop: ${e.message} — refusing to release on unknown state.`, invalidState: true }, 1);
+    }
+    throw e;
+  }
+  return exitReport(opts, outcome.report, outcome.code);
+}
+
+function releaseLocked(opts, blId, heartbeatOnly) {
   const state = loadState(opts.statePath);
   const slot = state.slots.find((s) => s.blId === blId);
   if (!slot) {
-    return exitReport(opts, { text: `ralph-loop: no active slot for ${blId}.`, released: false }, 1);
+    return { report: { text: `ralph-loop: no active slot for ${blId}.`, released: false }, code: 1 };
   }
   if (heartbeatOnly) {
     slot.lastHeartbeat = Date.now();
     saveState(opts.statePath, state);
-    return exitReport(opts, { text: `ralph-loop: heartbeat recorded for ${blId}.`, released: false });
+    return { report: { text: `ralph-loop: heartbeat recorded for ${blId}.`, released: false }, code: 0 };
   }
   state.slots = state.slots.filter((s) => s.blId !== blId);
   saveState(opts.statePath, state);
-  return exitReport(opts, {
+  return { report: {
     text: `ralph-loop: released slot for ${blId} (${slot.taskId}). Worktree kept at ${slot.worktree} — remove with \`git worktree remove\` after review.`,
     released: true,
-  });
+  }, code: 0 };
 }
 
 function main() {

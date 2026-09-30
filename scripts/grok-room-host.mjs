@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { readFileSync, writeFileSync, mkdirSync, openSync, closeSync, fsyncSync, chmodSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, openSync, closeSync, fsyncSync, chmodSync, existsSync, renameSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
@@ -62,18 +62,31 @@ export function readJournalFile(filename) {
 export function writeJournalFile(filename, journal) {
   mkdirSync(dirname(filename), { recursive: true, mode: 0o700 });
   const body = JSON.stringify(journal) + "\n";
-  const fd = openSync(filename, "w", 0o600);
+  // M-53: write to a temp file and rename — a crash mid-write must never
+  // leave a truncated journal behind (the old truncate-in-place did).
+  const tmp = `${filename}.tmp-${process.pid}`;
+  const fd = openSync(tmp, "w", 0o600);
   try {
     writeFileSync(fd, body);
     fsyncSync(fd);
   } finally { closeSync(fd); }
-  chmodSync(filename, 0o600);
+  chmodSync(tmp, 0o600);
+  renameSync(tmp, filename);
 }
 
 export function readPendingAccessFile(filename) {
   if (!existsSync(filename)) return { requests: [] };
-  try { return loadPendingAccess(JSON.parse(readFileSync(filename, "utf8"))); }
-  catch { return { requests: [] }; }
+  let parsed;
+  try { parsed = JSON.parse(readFileSync(filename, "utf8")); }
+  catch {
+    // M-53: fail loudly on corrupt files like readJournalFile does. Returning
+    // { requests: [] } silently forgot pending access requests. The corrupt
+    // file is preserved alongside for forensics.
+    const backup = `${filename}.corrupt-${Date.now()}`;
+    try { renameSync(filename, backup); } catch { /* keep the original; still fail */ }
+    fail("invalid_pending_access", `Pending-access file is not valid JSON (moved to ${backup})`);
+  }
+  return loadPendingAccess(parsed);
 }
 
 export function writePendingAccessFile(filename, data) {
