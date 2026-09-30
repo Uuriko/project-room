@@ -1728,6 +1728,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const input = await body(req);
         return json(res, 200, store.publicWorkClaims.match(secret, input));
       }
+      const publicWorkReviewMatch = /^\/api\/public-work\/receipts\/([^/]{1,128})\/review$/.exec(url.pathname);
+      if (publicWorkReviewMatch) {
+        if (!["GET", "HEAD"].includes(req.method)) reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET, HEAD" });
+        if ([...url.searchParams].length) reject(422, "invalid_public_work_review", "No review query parameters accepted");
+        rate(`public-work-review:${remoteAddress}`, 120);
+        return json(res, 200, store.publicWorkReviews.contributorReview(bearer(req), pathId(publicWorkReviewMatch[1])), req.method === "HEAD");
+      }
       const publicWorkTaskMatch = /^\/api\/public-work\/tasks\/([^/]{1,128})(?:\/(claim|renew|release|finish))?$/.exec(url.pathname);
       const publicWorkReceiptMatch = /^\/api\/public-work\/receipts\/([^/]{1,128})(?:\/(artifact))?$/.exec(url.pathname);
       if (url.pathname === "/api/public-work/tasks" || publicWorkTaskMatch || publicWorkReceiptMatch) {
@@ -3321,6 +3328,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       // onboarding-funnel was removed on main (replaced by activation-pack);
       // dm-consents + public-face are this branch's consent/face routes.
+      const publicWorkResultsMatch = /^\/api\/rooms\/([^/]{1,384})\/public-work\/results$/.exec(url.pathname);
+      const publicWorkInspectMatch = /^\/api\/rooms\/([^/]{1,384})\/public-work\/receipts\/([^/]{1,128})$/.exec(url.pathname);
+      const publicWorkDecideMatch = /^\/api\/rooms\/([^/]{1,384})\/public-work\/receipts\/([^/]{1,128})\/decide$/.exec(url.pathname);
+      const publicWorkVerifyMatch = /^\/api\/rooms\/([^/]{1,384})\/public-work\/receipts\/([^/]{1,128})\/verify$/.exec(url.pathname);
+      const publicWorkRoomReviewMatch = publicWorkResultsMatch ?? publicWorkInspectMatch ?? publicWorkDecideMatch ?? publicWorkVerifyMatch;
       const projectOfferPublishMatch = /^\/api\/rooms\/([^/]{1,384})\/project-offers\/([^/]{1,128})\/publish$/.exec(url.pathname);
       const projectOfferWithdrawMatch = /^\/api\/rooms\/([^/]{1,384})\/project-offers\/([^/]{1,128})\/withdraw$/.exec(url.pathname);
       const projectOfferClaimsMatch = /^\/api\/rooms\/([^/]{1,384})\/project-offers\/([^/]{1,128})\/claims$/.exec(url.pathname);
@@ -3505,13 +3517,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         ?? boardV2EventsMatch ?? boardV2MirrorMatch ?? boardV2HealthMatch;
       // Consent-bound DMs (decide/revoke/unblock) and public-face rotate ride
       // the same funnel: their literal segments must never be mistaken for ids.
-      if (!projectOfferActionMatch && !match && !revokeMatch && !threadMatch && !accessDecideMatch && !delegationGrantMatch && !delegationRevokeMatch && !delegationListMatch && !ownerDelegateGrantMatch && !ownerDelegateRevokeMatch && !ownerDelegateListMatch && !ownershipTransferMatch && !collabMatch && !workClaimMatch
+      if (!publicWorkRoomReviewMatch && !projectOfferActionMatch && !match && !revokeMatch && !threadMatch && !accessDecideMatch && !delegationGrantMatch && !delegationRevokeMatch && !delegationListMatch && !ownerDelegateGrantMatch && !ownerDelegateRevokeMatch && !ownerDelegateListMatch && !ownershipTransferMatch && !collabMatch && !workClaimMatch
         && !feedbackMatch && !bountyMatch && !creditsMatch && !boardV2Match
         && !dmConsentDecideMatch && !dmConsentBlockMatch && !dmConsentRevokeMatch && !dmConsentUnblockMatch && !publicFaceRotateMatch
         && !peerDmThreadMatch && !operatorAgentMatch
         && !mentionAckMatch && !mentionSettingsMatch && !savedDeleteMatch && !memberDeactivateMatch
         && !agentGrantsMatch && !agentGrantDeleteMatch && !agentCapabilitiesMatch) reject(404, "not_found", "Not found");
-      const roomId = pathId((projectOfferActionMatch ?? match ?? revokeMatch ?? threadMatch ?? accessDecideMatch ?? delegationGrantMatch ?? delegationRevokeMatch ?? delegationListMatch ?? ownerDelegateGrantMatch ?? ownerDelegateRevokeMatch ?? ownerDelegateListMatch ?? ownershipTransferMatch ?? collabMatch ?? workClaimMatch
+      const roomId = pathId((publicWorkRoomReviewMatch ?? projectOfferActionMatch ?? match ?? revokeMatch ?? threadMatch ?? accessDecideMatch ?? delegationGrantMatch ?? delegationRevokeMatch ?? delegationListMatch ?? ownerDelegateGrantMatch ?? ownerDelegateRevokeMatch ?? ownerDelegateListMatch ?? ownershipTransferMatch ?? collabMatch ?? workClaimMatch
         ?? feedbackMatch ?? bountyMatch ?? creditsMatch ?? boardV2Match
         ?? dmConsentDecideMatch ?? dmConsentBlockMatch ?? dmConsentRevokeMatch ?? dmConsentUnblockMatch ?? publicFaceRotateMatch
         ?? peerDmThreadMatch ?? operatorAgentMatch
@@ -3525,7 +3537,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const mentionEventId = mentionAckMatch ? pathId(mentionAckMatch[2]) : null;
       const savedDeleteMessageId = savedDeleteMatch ? pathId(savedDeleteMatch[2]) : null;
       const deactivateMemberId = memberDeactivateMatch ? pathId(memberDeactivateMatch[2]) : null;
-      const route = projectOfferActionMatch ? "project-offers" : match ? (match[2] ?? "") : revokeMatch ? "invitation-revoke" : threadMatch ? "thread" : accessDecideMatch ? "access-decide" : delegationGrantMatch ? "delegation-grant" : delegationRevokeMatch ? "delegation-revoke" : delegationListMatch ? "delegation-list" : ownerDelegateGrantMatch ? "owner-delegate-grant" : ownerDelegateRevokeMatch ? "owner-delegate-revoke" : ownerDelegateListMatch ? "owner-delegate-list"
+      const route = publicWorkRoomReviewMatch ? "public-work-review" : projectOfferActionMatch ? "project-offers" : match ? (match[2] ?? "") : revokeMatch ? "invitation-revoke" : threadMatch ? "thread" : accessDecideMatch ? "access-decide" : delegationGrantMatch ? "delegation-grant" : delegationRevokeMatch ? "delegation-revoke" : delegationListMatch ? "delegation-list" : ownerDelegateGrantMatch ? "owner-delegate-grant" : ownerDelegateRevokeMatch ? "owner-delegate-revoke" : ownerDelegateListMatch ? "owner-delegate-list"
         : dmConsentDecideMatch ? "dm-consent-decide" : dmConsentBlockMatch ? "dm-consent-block" : dmConsentRevokeMatch ? "dm-consent-revoke"
         : dmConsentUnblockMatch ? "dm-consent-unblock" : publicFaceRotateMatch ? "public-face-rotate"
         : peerDmThreadMatch ? "peer-dm-thread" : operatorAgentMatch ? "operator-agent"
@@ -3551,6 +3563,27 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const granted = (auth.apiKeyScopes ?? []).some(scope =>
           scope === requiredScope || (scope.endsWith(":*") && requiredScope.startsWith(scope.slice(0, -1))));
         if (!granted) reject(403, "insufficient_scope", `API key lacks the ${requiredScope} scope`);
+      }
+      if (route === "public-work-review") {
+        if ([...url.searchParams.keys()].some(key => (key !== "auth" && (!publicWorkResultsMatch || !["limit", "after"].includes(key))) || url.searchParams.getAll(key).length !== 1)) reject(422, "invalid_public_work_review", "Unsupported review query parameters");
+        if (isGuestAgentMemberId(auth.member.id)) reject(403, "access_denied", "Guests cannot review contributions");
+        const action = publicWorkDecideMatch ? "decide" : publicWorkVerifyMatch ? "verify" : null;
+        if (!action) {
+          if (!["GET", "HEAD"].includes(req.method)) reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET, HEAD" });
+          const result = publicWorkResultsMatch
+            ? store.publicWorkReviews.results(roomId, auth.member.id, { limit: Number(url.searchParams.get("limit") ?? 20), after: url.searchParams.get("after") ?? "" })
+            : store.publicWorkReviews.inspect(roomId, auth.member.id, pathId(publicWorkInspectMatch[2]));
+          return json(res, 200, result, req.method === "HEAD");
+        }
+        if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
+        const data = await body(req);
+        const result = store.transaction(() => {
+          const current = roomAuth(selected, roomId, fence);
+          if (current.member.id !== auth.member.id) reject(403, "access_denied", "The acting identity changed");
+          if (current.kind === "api-key" && !(current.apiKeyScopes ?? []).some(scope => scope === "rooms:write" || scope === "rooms:*")) reject(403, "insufficient_scope", "API key lacks rooms:write");
+          return store.publicWorkReviews[action](roomId, current.member.id, pathId(publicWorkRoomReviewMatch[2]), data);
+        });
+        return json(res, 200, result);
       }
       if (route === "project-offers") {
         if (isGuestAgentMemberId(auth.member.id)) reject(403, "owner_only", "Guests cannot manage project offers");
