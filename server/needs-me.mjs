@@ -108,6 +108,7 @@ function mentionsOf(store, roomId, memberId, after, through) {
       tool: "room_reply",
       arguments: {
         roomId,
+        requestId: `needs-me-${roomId}-${row.replyToId ?? row.messageId ?? row.eventId}`,
         replyToId: row.replyToId,
         ...(row.private && row.replyToMemberId ? { toMemberId: row.replyToMemberId } : {})
       }
@@ -175,7 +176,7 @@ function roomDmsOf(store, roomId, memberId, after) {
       summary: clip(event.data?.body),
       next: {
         tool: "room_reply",
-        arguments: { roomId, replyToId: messageId, ...(event.actorId ? { toMemberId: event.actorId } : {}) }
+        arguments: { roomId, requestId: `needs-me-${roomId}-${messageId}`, replyToId: messageId, ...(event.actorId ? { toMemberId: event.actorId } : {}) }
       }
     };
   });
