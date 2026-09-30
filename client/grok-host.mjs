@@ -180,6 +180,15 @@ export function assertPlanSafe(plan, secrets = []) {
 // Child Grok processes need the hosted MCP bearer in the environment
 // (plugins/project-room/.mcp.json reads PROJECT_ROOM_SECRET). Never put it
 // in the prompt.
+export function countKinds(items) {
+  const counts = {};
+  for (const item of items) {
+    if (!item || typeof item.kind !== "string") continue;
+    counts[item.kind] = (counts[item.kind] || 0) + 1;
+  }
+  return counts;
+}
+
 export function emptyAttentionNext({ execute = false } = {}) {
   if (execute) return "No new attention; --execute did not start a model.";
   return "No new attention. Host is pull-only; run pull again later. executeDefault is off.";
