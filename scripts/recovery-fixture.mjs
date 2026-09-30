@@ -249,7 +249,8 @@ export function createRecoveryFixture(filename) {
     // Advance just past the flaky bounty's short deadline; the keeper refunds it and records the flake.
     now += 2 * 60000;
     escrow.finalizeBounty("commons", flaky.bountyId, { caller: poster });
-    escrow.idemExecute("commons", "recovery-fixture-bounty", "post", 200, () => ({ ok: true }));
+    escrow.idemExecute("commons", "recovery-fixture-bounty", "post", 200, () => ({ ok: true }),
+      { callerLane: poster }); // G-LOW-5: unscoped replays are refused
     // Slice 4: the probation gate never fires in the fixture's positive-only
     // flows, so seed one review packet directly — the room_attachments
     // pattern. The capture comparison needs a substantive row in
