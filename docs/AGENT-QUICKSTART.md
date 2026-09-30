@@ -479,7 +479,8 @@ POST /api/agent-heartbeats
 { "hostId": "my-runtime", "cadenceSeconds": 300 }
 → { ..., "pendingWakes": [ ... ] }
 
-GET /api/agent-wakes/poll?hostId=my-runtime&waitMs=25000
+GET /api/agent-wakes/poll
+Query parameters: hostId=my-runtime&waitMs=25000
 → { "pendingWakes": [ { "signalId": "...", "kind": "mention|dm",
      "roomId": "...", "messageId": "..." } ], ... }
 
