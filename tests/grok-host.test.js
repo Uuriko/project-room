@@ -401,3 +401,37 @@ test("duplicate heartbeat and paged attention runs one handler", async t => {
   assert.equal(runs, 1); assert.equal(result.executed.length, 1);
   assert.deepEqual(handlers.acks, [{ signalIds: ["sig-duplicate"] }]);
 });
+
+
+test("a later handoff for the same Work Item executes while each event retry stays deduplicated", async t => {
+  const directory = fixtureDir(); t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const env = { ROOM_AGENT_CONFIG: directory }, calls = [];
+  const handoff = seq => ({ kind: "handoff", roomId: "den", id: "work-1", seq,
+    summary: `Review event ${seq}`, next: { tool: "room_read_work", arguments: { roomId: "den", workItemId: "work-1" } } });
+  const handlers = { needsMe: needsMe([handoff(4), handoff(4)]), acks: [] };
+  const fetchImpl = roomFetch(handlers);
+  const runner = async plan => { calls.push(plan.item.seq); return { code: 0 }; };
+  const run = () => pull({ env, fetchImpl, execute: true, runner });
+  await run(); await run(); assert.deepEqual(calls, [4]);
+  handlers.needsMe = needsMe([handoff(9), handoff(9)], { cursor: { rooms: { den: 9 } } });
+  const later = await run();
+  assert.equal(later.executed.length, 1);
+  await run(); assert.deepEqual(calls, [4, 9], "new event on same work runs once, same event retry does not rerun");
+});
+
+test("failed later handoff preserves retry and cursor despite an earlier completed event", async t => {
+  const directory = fixtureDir(); t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const env = { ROOM_AGENT_CONFIG: directory };
+  const item = seq => ({ kind: "handoff", roomId: "den", id: "work-1", seq, summary: "Review" });
+  const handlers = { needsMe: needsMe([item(4)]), acks: [] }, calls = [];
+  const fetchImpl = roomFetch(handlers); let fail = false;
+  const runner = async plan => { calls.push(plan.item.seq); return { code: fail ? 1 : 0 }; };
+  await pull({ env, fetchImpl, execute: true, runner });
+  handlers.needsMe = needsMe([item(9)], { cursor: { rooms: { den: 9 } } }); fail = true;
+  await pull({ env, fetchImpl, execute: true, runner });
+  assert.deepEqual(readJournalFile(join(directory, "grok-host-journal.json")).cursor, { rooms: { den: 4 } });
+  fail = false;
+  await pull({ env, fetchImpl, execute: true, runner });
+  assert.deepEqual(calls, [4, 9, 9]);
+  assert.deepEqual(readJournalFile(join(directory, "grok-host-journal.json")).cursor, { rooms: { den: 9 } });
+});
