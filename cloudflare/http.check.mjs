@@ -558,3 +558,55 @@ test('Workers password reset commits failed attempts, consumes once and requires
     assert.equal((await json(await call('/api/account-session', null, { Cookie: cookie }))).account.id, 'worker-reset-owner');
   } finally { await mf.dispose(); }
 });
+
+
+test('Workers held wake poll receives a fresh online mention and fences revoked credentials', async () => {
+  const bundled = await build({ entryPoints: [fileURLToPath(new URL('./http-worker.test-fixture.mjs', import.meta.url))],
+    bundle: true, write: false, format: 'esm', platform: 'neutral', external: ['node:*', 'cloudflare:*'] });
+  const origin = 'https://room.example.test';
+  const mf = new Miniflare({ modules: true, script: bundled.outputFiles[0].text,
+    compatibilityDate: '2026-07-30', compatibilityFlags: ['nodejs_compat', 'enable_request_signal', 'request_signal_passthrough', 'enable_nodejs_http_server_modules'],
+    durableObjects: { ROOM: { className: 'HttpTestRoom', useSQLite: true } }, bindings: { ROOM_ORIGIN: origin } });
+  const call = (path, data, headers = {}) => mf.dispatchFetch(origin + path, {
+    method: data ? 'POST' : 'GET', headers: { Host: new URL(origin).host, 'CF-Connecting-IP': '192.0.2.87',
+      ...(data ? { Origin: origin, 'Content-Type': 'application/json' } : {}), ...headers },
+    ...(data ? { body: JSON.stringify(data) } : {}) });
+  const json = async (response, status = 200) => {
+    assert.equal(response.status, status, await response.clone().text()); return response.json();
+  };
+  try {
+    const { ownerKey } = await json(await call('/__test-provision'));
+    const peer = await json(await call('/api/agent-identities', { displayName: 'Workers wake agent' }), 201);
+    const ownerHeaders = { Authorization: `Bearer ${ownerKey}` }, identityHeaders = { Authorization: `Bearer ${peer.secret}` };
+    await json(await call('/api/rooms/commons/identity-links', {
+      identityId: peer.identityId, memberId: 'worker-wake-peer', displayName: 'Worker wake peer', permissions: []
+    }, ownerHeaders), 201);
+    const key = await json(await call('/api/agent-keys', { scopes: ['heartbeats:report', 'heartbeats:read'] }, identityHeaders), 201);
+    const peerHeaders = { Authorization: `Bearer ${key.credential}` };
+    const host = await json(await call('/api/agent-heartbeats', { hostId: 'worker-wake-host' }, peerHeaders));
+    assert.equal(host.host.mode, 'wakeable'); assert.equal(host.host.wakeUrl, null);
+    const pollPath = '/api/agent-wakes/poll?hostId=worker-wake-host&waitMs=2000';
+    let settled = false;
+    const held = call(pollPath, null, peerHeaders).then(response => { settled = true; return response; });
+    await new Promise(resolve => setTimeout(resolve, 150));
+    assert.equal(settled, false, 'workerd keeps the actual HTTP poll pending');
+    await json(await call('/api/rooms/commons/commands', { id: randomUUID(), type: 'message.posted',
+      data: { messageId: 'worker-held-mention', body: 'Hello @worker-wake-peer' } }, ownerHeaders), 201);
+    const woke = await json(await held);
+    assert.equal(woke.timedOut, false);
+    assert.deepEqual(woke.pendingWakes.map(row => [row.kind, row.roomId, row.messageId]),
+      [['mention', 'commons', 'worker-held-mention']]);
+    const again = await json(await call('/api/agent-wakes/poll?hostId=worker-wake-host&waitMs=0', null, peerHeaders));
+    assert.deepEqual(again.pendingWakes, woke.pendingWakes, 'poll does not consume the signal');
+    await json(await call('/api/agent-heartbeats/ack', { signalIds: woke.pendingWakes.map(row => row.signalId) }, peerHeaders));
+    assert.deepEqual((await json(await call('/api/agent-wakes/poll?hostId=worker-wake-host&waitMs=0', null, peerHeaders))).pendingWakes, []);
+    settled = false;
+    const revokedPoll = call(pollPath, null, peerHeaders).then(response => { settled = true; return response; });
+    await new Promise(resolve => setTimeout(resolve, 150)); assert.equal(settled, false);
+    await json(await call(`/api/agent-keys/${key.keyId}/revoke`, { confirm: true }, identityHeaders));
+    await json(await call('/api/rooms/commons/commands', { id: randomUUID(), type: 'message.posted',
+      data: { messageId: 'worker-after-revoke', body: 'Again @worker-wake-peer' } }, ownerHeaders), 201);
+    const denied = await json(await revokedPoll, 401);
+    assert.equal(denied.error.code, 'unauthenticated'); assert.equal(denied.pendingWakes, undefined);
+  } finally { await mf.dispose(); }
+});
