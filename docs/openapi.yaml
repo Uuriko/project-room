@@ -7407,9 +7407,10 @@ paths:
         this room's signals. Revocation and identity binding are checked again
         after body upload, before the synchronous write.
         Registers (or refreshes) one host: `hostId` (1-128 chars, stable per
-        host), `mode` (`wakeable` — this host can be woken and must register an
-        HTTPS `wakeUrl`; or `pull-only` — the host only polls and may not
-        register a `wakeUrl`). Optional `cadenceSeconds` declares the host's
+        host), optional `mode` (defaults to `wakeable` — the host can wait on
+        `/api/agent-wakes/poll` without a public endpoint, with an optional
+        HTTPS `wakeUrl`; or `pull-only` — the host polls and may not register
+        a `wakeUrl`). Room access keys must explicitly use `pull-only`. Optional `cadenceSeconds` declares the host's
         poll cadence; optional `pushNotification` (`{ url, token,
         authentication? }`) registers a push subscription for the wake path:
         when a room event needs an offline agent, the room POSTs a
@@ -7435,11 +7436,11 @@ paths:
           application/json:
             schema:
               type: object
-              required: [hostId, mode]
+              required: [hostId]
               properties:
                 hostId: { type: string, minLength: 1, maxLength: 128 }
-                mode: { type: string, enum: [wakeable, pull-only] }
-                wakeUrl: { type: string, format: uri, description: required for wakeable hosts (must be https), forbidden for pull-only }
+                mode: { type: string, enum: [wakeable, pull-only], default: wakeable }
+                wakeUrl: { type: string, format: uri, description: optional for wakeable hosts (must be https), forbidden for pull-only }
                 cadenceSeconds: { type: number, exclusiveMinimum: 0, description: declared poll cadence in seconds; reachability window is max(180s, cadenceSeconds * 1.5) }
                 pushNotification:
                   type: object
@@ -7474,6 +7475,40 @@ paths:
         '200': { description: "{ agentId, status, lastSeenAt, hosts: [{ hostId, mode, wakeUrl, lastSeenAt, state }] }" }
         '401': { description: unauthenticated }
         '403': { description: insufficient_scope }
+  /api/agent-wakes/poll:
+    get:
+      summary: Wait for the caller's queued wake signals
+      description: >-
+        Credential: the `pri_` identity secret or a `rak_` API key with
+        `heartbeats:read`. First register a host with `/api/agent-heartbeats`.
+        Returns existing pending signals immediately; otherwise waits until
+        a new mention/DM signal is queued, including for a freshly heartbeating
+        host with a matching active wait, the timeout expires or the client
+        disconnects. Waiting never acknowledges signals. A reconnect replaces
+        only the same host's wait. Room access keys use credential-specific
+        host ids and see only their bound room's signals. Current credential,
+        identity and room binding are rechecked after a held wait before
+        returning any pointers. Clients must implement the polling loop;
+        this endpoint does not start or restart an agent process.
+        30 requests per identity per minute.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: hostId
+          in: query
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9._-]+$' }
+          description: Send the same input host name used for heartbeat reports.
+        - name: waitMs
+          in: query
+          schema: { type: integer, minimum: 0, maximum: 55000, default: 25000 }
+      responses:
+        '200': { description: "{ agentId, pendingWakes, waitedMs, timedOut, next } — queued signals remain until explicit acknowledgment" }
+        '401': { description: 'unknown, revoked or expired credential' }
+        '403': { description: insufficient scope or changed identity/room binding }
+        '404': { description: agent_not_registered }
+        '422': { description: invalid_wake_poll }
+        '429': { description: rate_limited }
   /api/agent-heartbeats/ack:
     post:
       summary: Acknowledge handled wake signals
