@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-30T17:00:27Z · board: Uuriko/project-room#1160 · watermark: 5915834719 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=f89c53470eda62585ea29c4c87908c677345dee69dd524edb3692fafe1a2652f -->
+<!-- generated: 2026-09-30T17:29:46Z · board: Uuriko/project-room#1160 · watermark: 5916258662 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=f89c53470eda62585ea29c4c87908c677345dee69dd524edb3692fafe1a2652f -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -32,7 +32,7 @@ RC-2026-09-28-2880 | (none) | submitted | 2026-09-30T03:11:17Z | server/dm-event
 
 ## file-claims
 file | lane | task-id | state
-cloudflare/package.json | jill | RC-2026-09-30-3637 | submitted
+cloudflare/package.json | jill | RC-2026-09-30-3637 | working
 docs/EXPORT-RETENTION-DELETION.md | (none) | RC-2026-09-27-2863 | submitted
 docs/ROOM-PROTOCOL.md | (none) | RC-2026-09-29-3605 | submitted
 docs/ROUTE-AUTH-TABLE.md | jillianai | RC-2026-09-28-2870 | working
@@ -42,16 +42,16 @@ docs/openapi.yaml | jillianai | RC-2026-09-28-2870 | working
 docs/openapi.yaml | (none) | RC-2026-09-28-2871 | submitted
 lanes/REGISTRY.md | (none) | RC-2026-09-29-3605 | submitted
 llms.txt | (none) | RC-2026-09-29-3605 | submitted
-package.json | jill | RC-2026-09-30-3637 | submitted
-scripts/build-gmail-sanitizer.mjs | jill | RC-2026-09-30-3637 | submitted
-scripts/room | jill | RC-2026-09-30-3637 | submitted
+package.json | jill | RC-2026-09-30-3637 | working
+scripts/build-gmail-sanitizer.mjs | jill | RC-2026-09-30-3637 | working
+scripts/room | jill | RC-2026-09-30-3637 | working
 scripts/runtime-package.mjs | jill | RC-2026-09-30-3616 | submitted
-scripts/secret-scan-check.mjs | jill | RC-2026-09-30-3637 | submitted
+scripts/secret-scan-check.mjs | jill | RC-2026-09-30-3637 | working
 server/activity.mjs | (none) | RC-2026-09-28-2865 | submitted
 server/activity.mjs | (none) | RC-2026-09-28-2880 | submitted
 server/agent-heartbeats.mjs | jill | RC-2026-09-28-3602 | working
 server/agent-plugin-routes.mjs | jill | RC-2026-09-28-3602 | working
-server/bounty-escrow.mjs | jill | RC-2026-09-30-3637 | submitted
+server/bounty-escrow.mjs | jill | RC-2026-09-30-3637 | working
 server/command-fields.mjs | (none) | RC-2026-09-28-2871 | submitted
 server/discoverability.mjs | (none) | RC-2026-09-28-2871 | submitted
 server/display-name-guard.mjs | (none) | RC-2026-09-27-2862 | submitted
@@ -60,13 +60,13 @@ server/dm-event-visibility.mjs | (none) | RC-2026-09-28-2872 | submitted
 server/dm-event-visibility.mjs | (none) | RC-2026-09-28-2878 | submitted
 server/dm-event-visibility.mjs | (none) | RC-2026-09-28-2879 | submitted
 server/dm-event-visibility.mjs | (none) | RC-2026-09-28-2880 | submitted
-server/emissary-graph.mjs | jill | RC-2026-09-30-3637 | submitted
+server/emissary-graph.mjs | jill | RC-2026-09-30-3637 | working
 server/http.mjs | jillianai | RC-2026-09-28-2870 | working
 server/http.mjs | (none) | RC-2026-09-28-2872 | submitted
 server/http.mjs | (none) | RC-2026-09-28-2878 | submitted
 server/http.mjs | (none) | RC-2026-09-28-2879 | submitted
 server/http.mjs | (none) | RC-2026-09-28-2880 | submitted
-server/inbox-collab-store.mjs | jill | RC-2026-09-30-3637 | submitted
+server/inbox-collab-store.mjs | jill | RC-2026-09-30-3637 | working
 server/match-events.mjs | jill | RC-2026-09-30-3616 | submitted
 server/match-profiles.mjs | jill | RC-2026-09-30-3616 | submitted
 server/matchmaking-routes.mjs | jill | RC-2026-09-30-3616 | submitted
@@ -90,29 +90,29 @@ server/store.mjs | (none) | RC-2026-09-28-2879 | submitted
 server/store.mjs | (none) | RC-2026-09-28-2880 | submitted
 server/store.mjs | (none) | RC-2026-09-28-2903 | submitted
 server/thread-mutes.mjs | (none) | RC-2026-09-28-2866 | submitted
-server/web-fetch.mjs | jill | RC-2026-09-30-3637 | submitted
-server/work-claims.mjs | jill | RC-2026-09-30-3637 | submitted
+server/web-fetch.mjs | jill | RC-2026-09-30-3637 | working
+server/work-claims.mjs | jill | RC-2026-09-30-3637 | working
 server/work-context.mjs | jillianai | RC-2026-09-28-2876 | working
 server/work-discussion.mjs | (none) | RC-2026-09-28-2875 | submitted
 server/work-discussion.mjs | jillianai | RC-2026-09-28-2876 | working
 server/writer-fence.mjs | jill | RC-2026-09-30-3616 | submitted
 src/app.js | (none) | RC-2026-09-28-2879 | submitted
-src/app.js | jill | RC-2026-09-30-3637 | submitted
-src/attachment-bytes.mjs | jill | RC-2026-09-30-3637 | submitted
-src/client.js | jill | RC-2026-09-30-3637 | submitted
+src/app.js | jill | RC-2026-09-30-3637 | working
+src/attachment-bytes.mjs | jill | RC-2026-09-30-3637 | working
+src/client.js | jill | RC-2026-09-30-3637 | working
 src/events.js | (none) | RC-2026-09-28-2874 | submitted
 src/events.js | (none) | RC-2026-09-28-2877 | submitted
 src/events.js | (none) | RC-2026-09-28-2879 | submitted
 src/events.js | (none) | RC-2026-09-28-2903 | submitted
-src/gmail-send-gate.mjs | jill | RC-2026-09-30-3637 | submitted
-src/gmail-ui.js | jill | RC-2026-09-30-3637 | submitted
-src/mcp-scope-enforcement.mjs | jill | RC-2026-09-30-3637 | submitted
-src/whatsapp-connect.mjs | jill | RC-2026-09-30-3637 | submitted
+src/gmail-send-gate.mjs | jill | RC-2026-09-30-3637 | working
+src/gmail-ui.js | jill | RC-2026-09-30-3637 | working
+src/mcp-scope-enforcement.mjs | jill | RC-2026-09-30-3637 | working
+src/whatsapp-connect.mjs | jill | RC-2026-09-30-3637 | working
 src/work-selectors.js | (none) | RC-2026-09-28-2877 | submitted
 src/work-selectors.js | (none) | RC-2026-09-28-2879 | submitted
 tests/activity.test.js | (none) | RC-2026-09-28-2865 | submitted
 tests/agent-wake-poll.test.js | jill | RC-2026-09-28-3602 | working
-tests/claims-state-machine-fake-gh.sh | jill | RC-2026-09-30-3637 | submitted
+tests/claims-state-machine-fake-gh.sh | jill | RC-2026-09-30-3637 | working
 tests/command-catalog.test.js | (none) | RC-2026-09-28-2871 | submitted
 tests/decision-register.test.js | (none) | RC-2026-09-28-2877 | submitted
 tests/decision-register.test.js | (none) | RC-2026-09-28-2879 | submitted
@@ -126,7 +126,7 @@ tests/dm-privacy.test.js | (none) | RC-2026-09-28-2880 | submitted
 tests/dm-privacy.test.js | (none) | RC-2026-09-28-2903 | submitted
 tests/match-profiles.test.js | jill | RC-2026-09-30-3616 | submitted
 tests/matchmaking-routes.test.js | jill | RC-2026-09-30-3616 | submitted
-tests/mcp-scope-enforcement.test.js | jill | RC-2026-09-30-3637 | submitted
+tests/mcp-scope-enforcement.test.js | jill | RC-2026-09-30-3637 | working
 tests/moderation.test.js | (none) | RC-2026-09-27-2861 | submitted
 tests/oauth-provider-attack-cases.test.js | (none) | RC-2026-09-27-2853 | submitted
 tests/open-questions.test.js | (none) | RC-2026-09-28-2867 | submitted
@@ -140,7 +140,7 @@ tests/room-activation-pack.test.js | (none) | RC-2026-09-28-2879 | submitted
 tests/room-file-history-visibility.test.js | (none) | RC-2026-09-27-2863 | submitted
 tests/room-orientation.test.js | (none) | RC-2026-09-28-2877 | submitted
 tests/room-orientation.test.js | (none) | RC-2026-09-28-2879 | submitted
-tests/room-watch-enforcer.test.sh | jill | RC-2026-09-30-3637 | submitted
+tests/room-watch-enforcer.test.sh | jill | RC-2026-09-30-3637 | working
 tests/runtime-package.test.js | jill | RC-2026-09-30-3616 | submitted
 tests/thread-options.test.js | (none) | RC-2026-09-28-2866 | submitted
 tests/work-context.test.js | jillianai | RC-2026-09-28-2876 | working
@@ -201,5 +201,5 @@ comment-id | lane | task | at
 Uuriko/project-room#266 -> Uuriko/project-room#1160 · watermark 5859826064 · carried-open: RC-2026-09-27-005
 
 ## signals
-board_comments=636 threshold=1500 rotation_due=no watcher=active open_claims=27 prose_open=0 unfenced_prose=0 files_claimed=80 overlap_files=17 watermark=5915834719
+board_comments=637 threshold=1500 rotation_due=no watcher=active open_claims=27 prose_open=0 unfenced_prose=0 files_claimed=80 overlap_files=17 watermark=5916258662
 
