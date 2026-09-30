@@ -8,7 +8,7 @@ import {
   pendingWakeToItem, attentionKey, selectUnhandled, markHandled, emptyJournal,
   loadJournal, buildRunPlan, assertPlanSafe, parseAttentionItem, childEnvFor, emptyAttentionNext, countKinds
 } from "../client/grok-host.mjs";
-import { pull, doctor, ingestWake, writeJournalFile, readJournalFile } from "../scripts/grok-room-host.mjs";
+import { pull, doctor, ingestWake, writeJournalFile, readJournalFile, loadPendingAccess, rememberPendingAccess, writePendingAccessFile, fileAccessRequest } from "../scripts/grok-room-host.mjs";
 import { saveAgentConnection } from "../client/agent-connection.mjs";
 
 const secret = "pri_abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG";
@@ -190,6 +190,53 @@ test("doctor heartbeats pull-only on the real beat path without failing membersh
   assert.equal(handlers.beats, 1);
   assert.equal(handlers.beatBodies[0].mode, "pull-only");
   assert.equal(handlers.beatBodies[0].workWakes, undefined);
+  assert.equal(JSON.stringify(result).includes(secret), false);
+});
+
+test("rememberPendingAccess is idempotent on requestId", () => {
+  const first = rememberPendingAccess({ requests: [] }, { requestId: "ar_1", roomId: "build-together-32f67587", identityId: "ai_x" });
+  const second = rememberPendingAccess(first, { requestId: "ar_1", roomId: "build-together-32f67587", identityId: "ai_x" });
+  assert.equal(second.requests.length, 1);
+  assert.deepEqual(loadPendingAccess(null), { requests: [] });
+});
+
+test("doctor reports pending admissions from the saved request list", async t => {
+  const directory = fixtureDir();
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  writePendingAccessFile(join(directory, "pending-access.json"), {
+    requests: [{ requestId: "ar_1", roomId: "build-together-32f67587", identityId: "ai_x" }]
+  });
+  const fetchImpl = async (url, opts = {}) => {
+    const path = String(url);
+    if (path.includes("/api/health")) return new Response("{\"ok\":true}", { status: 200 });
+    if (path.includes("/api/access-requests/ar_1")) {
+      return new Response(JSON.stringify({ requestId: "ar_1", roomId: "build-together-32f67587", status: "pending" }), { status: 200 });
+    }
+    if (path.includes("/api/agent-heartbeats")) {
+      return new Response(JSON.stringify({ host: { hostId: "grok-build" }, pendingWakes: [] }), { status: 200 });
+    }
+    return new Response(JSON.stringify(needsMe([])), { status: 200 });
+  };
+  const result = await doctor({ env: { ROOM_AGENT_CONFIG: directory }, fetchImpl });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.pendingAdmissions, [{ requestId: "ar_1", roomId: "build-together-32f67587", status: "pending" }]);
+  assert.equal(JSON.stringify(result).includes(secret), false);
+});
+
+test("fileAccessRequest remembers the pending row without putting the secret in JSON", async t => {
+  const directory = fixtureDir();
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const fetchImpl = async (_url, opts = {}) => {
+    const body = JSON.parse(opts.body || "{}");
+    return new Response(JSON.stringify({ requestId: body.requestId, roomId: body.roomId, status: "pending" }), { status: 200 });
+  };
+  const result = await fileAccessRequest({
+    env: { ROOM_AGENT_CONFIG: directory }, fetchImpl, roomId: "build-together-32f67587", note: "join"
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.status, "pending");
+  assert.equal(result.roomId, "build-together-32f67587");
+  assert.match(result.requestId, /^ar_/);
   assert.equal(JSON.stringify(result).includes(secret), false);
 });
 
