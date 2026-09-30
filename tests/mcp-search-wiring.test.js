@@ -522,4 +522,28 @@ describe('mcp-search-wiring', () => {
     assert.deepEqual(wiring.reconnectDelaysMs, [1000, 2000, 5000]);
     assert.equal(wiring.state, 'disconnected');
   });
+
+  it('disconnect() during connect backoff stops the pending retry (M-47)', async () => {
+    const pending = [];
+    const transport = fakeTransport({ connectOutcomes: [new Error('down'), null] });
+    const wiring = createMcpSearchWiring({
+      transport,
+      reconnectDelaysMs: [10_000],
+      schedule: (fn) => pending.push(fn),
+    });
+    const p = wiring.connect('agent'); // attempt 0 fails; the retry waits on backoff
+    for (let i = 0; i < 50 && pending.length === 0; i++) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    assert.equal(pending.length, 1, 'the backoff wait is scheduled');
+    assert.equal(wiring.state, 'reconnecting');
+
+    await wiring.disconnect('agent');
+    assert.equal(wiring.state, 'closed');
+
+    pending[0](); // the stale backoff timer fires late
+    await p;
+    assert.equal(wiring.state, 'closed', 'a stale backoff retry must not reconnect');
+    assert.equal(transport.calls.connect, 1, 'no second connect attempt after disconnect');
+  });
 });

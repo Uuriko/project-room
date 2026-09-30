@@ -150,6 +150,52 @@ describe('cross-agent-messaging', () => {
     assert.equal(failed.body, 'will fail');
   });
 
+  it('rejected async send → failed + CAM_UNDELIVERABLE, never silently sent (M-28)', async () => {
+    const transport = {
+      sent: [],
+      send: async (envelope) => {
+        transport.sent.push(envelope);
+        throw new Error('async wire down');
+      },
+      receive: () => () => {},
+    };
+    const asyncMessaging = createMessaging({
+      clock: fakeClock().clock,
+      id: fakeIds(),
+      transport,
+    });
+    await assert.rejects(
+      asyncMessaging.sendMessage({ from: 'quill', to: 'instinct', body: 'async fail' }),
+      (err) => {
+        assert.ok(err instanceof Error, 'expected an Error');
+        assert.equal(err.code, 'CAM_UNDELIVERABLE');
+        return true;
+      },
+    );
+    const failed = asyncMessaging.get('msg-1');
+    assert.equal(failed.state, 'failed');
+    assert.equal(failed.body, 'async fail');
+  });
+
+  it('resolved async send → sent (async transports keep working)', async () => {
+    const transport = {
+      send: async () => ({ ok: true }),
+      receive: () => () => {},
+    };
+    const asyncMessaging = createMessaging({
+      clock: fakeClock().clock,
+      id: fakeIds(),
+      transport,
+    });
+    const sent = await asyncMessaging.sendMessage({
+      from: 'quill',
+      to: 'instinct',
+      body: 'async ok',
+    });
+    assert.equal(sent.state, 'sent');
+    assert.equal(asyncMessaging.get('msg-1').state, 'sent');
+  });
+
   it('sending without a usable transport throws CAM_NO_TRANSPORT', () => {
     const fc = fakeClock();
     const messaging = createMessaging({ clock: fc.clock, id: fakeIds() });

@@ -165,6 +165,13 @@ export function createMcpSearchWiring(deps = {}) {
 
   let state = 'disconnected';
 
+  // Generation counter (M-47): every connect()/disconnect() intent bumps it.
+  // A backoff wait or connect attempt that settles after a newer intent
+  // (e.g. disconnect() during backoff) is stale and must not move the
+  // lifecycle — otherwise the client reconnects after the operator
+  // explicitly disconnected.
+  let connectEpoch = 0;
+
   /** Append-only audit log: lifecycle transitions + request/response/error records. */
   const audit = [];
 
@@ -320,6 +327,7 @@ export function createMcpSearchWiring(deps = {}) {
       }
       transition('connecting', actor, { tool: TOOL_NAME });
 
+      const epoch = ++connectEpoch;
       const delays = [...reconnectDelaysMs]; // delays[n] waits before attempt n+2
       const totalAttempts = 1 + delays.length;
       let lastError = null;
@@ -330,19 +338,24 @@ export function createMcpSearchWiring(deps = {}) {
           await new Promise((resolve) => {
             schedule(resolve, delays[n - 1]);
           });
+          if (epoch !== connectEpoch) return false; // stale: disconnect() landed during backoff
           transition('connecting', actor, { tool: TOOL_NAME, attempt: n + 1 });
         }
         try {
           await tryConnectOnce();
         } catch (err) {
+          if (epoch !== connectEpoch) return false; // stale: do not retry a dead intent
           lastError = err;
           if (n + 1 < totalAttempts) return attempt(n + 1);
           return false;
         }
+        if (epoch !== connectEpoch) return false; // stale: the attempt finished after disconnect()
         return true;
       }
 
-      if (await attempt(0)) {
+      const ok = await attempt(0);
+      if (epoch !== connectEpoch) return state; // a disconnect() landed mid-connect; stay closed
+      if (ok) {
         transition('connected', actor, { tool: TOOL_NAME });
         return state;
       }
@@ -365,6 +378,7 @@ export function createMcpSearchWiring(deps = {}) {
     /** Disconnect the transport. Idempotent; always ends on `closed`. */
     async disconnect(actor = 'agent') {
       if (state === 'closed') return state;
+      connectEpoch += 1; // invalidate any in-flight connect()/backoff intent (M-47)
       if (state === 'connected' || state === 'connecting' || state === 'reconnecting') {
         try {
           await transport.disconnect();

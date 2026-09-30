@@ -16,7 +16,7 @@ import {
   buildGeneralAccessRequest,
   submitGeneralAccessRequest,
 } from "../src/request-access.js";
-import { FALLBACK_REQUEST_PERMISSIONS } from "../src/invite-context.js";
+import { FALLBACK_REQUEST_PERMISSIONS, readAccessRequest } from "../src/invite-context.js";
 
 function memStorage() {
   const m = new Map();
@@ -108,4 +108,26 @@ test("submit: mint returning no identity fails closed", async () => {
     () => submitGeneralAccessRequest({ client, storage: memStorage(), roomId: "muse-room", displayName: "Ada" }),
     /identity service/i,
   );
+});
+
+test("submit: a failed submit keeps the minted identity stashed for the retry (M-37)", async () => {
+  let failSubmit = true;
+  const client = fakeClient();
+  const submit = client.submitAccessRequest;
+  client.submitAccessRequest = async (body) => {
+    if (failSubmit) throw new Error("network down");
+    return submit(body);
+  };
+  const storage = memStorage();
+  await assert.rejects(
+    () => submitGeneralAccessRequest({ client, storage, roomId: "muse-room", displayName: "Ada" }),
+    /network down/,
+  );
+  const stashed = readAccessRequest(storage, "muse-room");
+  assert.ok(stashed?.identityId, "the minted identity stays stashed even though the submit failed");
+
+  failSubmit = false;
+  const result = await submitGeneralAccessRequest({ client, storage, roomId: "muse-room", displayName: "Ada" });
+  assert.equal(client.mintCount(), 1, "the retry reuses the stashed identity instead of minting again");
+  assert.equal(result.identityId, stashed.identityId);
 });

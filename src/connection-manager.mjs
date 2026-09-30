@@ -30,10 +30,12 @@
  *
  * Auto-reconnect model: markFailed(channel, err) marks the channel `failed`
  * and, when a scheduler is injected, schedules reconnect() after the current
- * exponential backoff delay. Without a scheduler there are no real timers —
- * the caller drives recovery explicitly via reconnect(), and the manager keeps
- * the attempts counter + next-retry bookkeeping (lastReconnectDelayMs,
- * nextReconnectAt) so the caller knows when to retry.
+ * exponential backoff delay — and keeps retrying with growing backoff until
+ * the channel recovers or the operator intervenes (disconnect() or a manual
+ * connect()/reconnect() stops the loop). Without a scheduler there are no
+ * real timers — the caller drives recovery explicitly via reconnect(), and
+ * the manager keeps the attempts counter + next-retry bookkeeping
+ * (lastReconnectDelayMs, nextReconnectAt) so the caller knows when to retry.
  *
  * Backoff: delayMs(attempt n) = min(backoffBaseMs * 2^(n-1), backoffCapMs),
  * where n = reconnectAttempts after increment. A successful connect() resets
@@ -157,8 +159,11 @@ export function createConnectionManager(deps = {}) {
   /**
    * Run the connector's connect() through a connecting → connected|failed
    * transition. Assumes the connection is already in `connecting` state.
+   * The epoch captured by the caller identifies this intent; a completion
+   * whose epoch is stale (a later connect()/disconnect() intervened) is a
+   * no-op and leaves the channel's current state untouched (M-35).
    */
-  async function finishConnect(conn) {
+  async function finishConnect(conn, epoch) {
     const connector = conn.connector;
     if (typeof connector?.connect !== 'function') {
       conn.lastError = 'connector has no connect() function';
@@ -175,6 +180,7 @@ export function createConnectionManager(deps = {}) {
         throw new Error('connector.connect() returned false');
       }
     } catch (err) {
+      if (conn.epoch !== epoch) return snapshot(conn); // stale: a newer intent owns the channel
       const message = err instanceof Error ? err.message : String(err);
       conn.lastError = message;
       transition(conn, 'failed', { reason: message });
@@ -184,12 +190,36 @@ export function createConnectionManager(deps = {}) {
         { channel: conn.channel, cause: message },
       );
     }
+    if (conn.epoch !== epoch) return snapshot(conn); // stale: e.g. disconnect() won the race
     conn.lastError = null;
     conn.connectedAt = clock();
     conn.reconnectAttempts = 0;
     conn.lastReconnectDelayMs = null;
     conn.nextReconnectAt = null;
     return transition(conn, 'connected', { connectedAt: conn.connectedAt });
+  }
+
+  /**
+   * Fire one scheduled auto-reconnect attempt. A failed attempt re-schedules
+   * the next one with the following backoff delay (M-34: the loop keeps
+   * retrying instead of giving up after a single attempt). The loop stops
+   * when the channel leaves `failed` or a newer connect()/disconnect()
+   * intent bumped the epoch — a stale timer never reconnects against the
+   * operator's intent (M-35). Every attempt and failure lands in the event
+   * log (reconnecting/connecting/failed transitions + lastError): never
+   * silent.
+   */
+  function fireScheduledReconnect(channel, epoch) {
+    const conn = connections.get(channel);
+    if (!conn || conn.state !== 'failed' || conn.epoch !== epoch) return;
+    manager.reconnect(channel).catch(() => {
+      const retry = connections.get(channel);
+      if (!retry || retry.state !== 'failed' || retry.epoch !== epoch || !scheduler) return;
+      const retryDelayMs = backoffDelayMs(retry.reconnectAttempts + 1);
+      retry.lastReconnectDelayMs = retryDelayMs;
+      retry.nextReconnectAt = clock() + retryDelayMs;
+      scheduler(() => fireScheduledReconnect(channel, epoch), retryDelayMs);
+    });
   }
 
   const manager = {
@@ -232,6 +262,10 @@ export function createConnectionManager(deps = {}) {
         reconnectAttempts: 0,
         lastReconnectDelayMs: null,
         nextReconnectAt: null,
+        // Generation counter (M-35): every connect()/disconnect() intent bumps
+        // it. An in-flight connector.connect() that settles after a newer
+        // intent (e.g. disconnect()) is stale and must not move the channel.
+        epoch: 0,
       };
       connections.set(channel, conn);
       record({
@@ -265,8 +299,10 @@ export function createConnectionManager(deps = {}) {
           { channel, state: conn.state },
         );
       }
+      conn.epoch += 1;
+      const epoch = conn.epoch;
       transition(conn, 'connecting');
-      return finishConnect(conn);
+      return finishConnect(conn, epoch);
     },
 
     /**
@@ -282,6 +318,9 @@ export function createConnectionManager(deps = {}) {
           state: conn.state,
         });
       }
+      // A newer intent: any in-flight connect()/reconnect() completion from
+      // before this point is stale and must not resurrect the channel (M-35).
+      conn.epoch += 1;
       const connector = conn.connector;
       if (typeof connector?.disconnect !== 'function') {
         const message = 'connector has no disconnect() function';
@@ -337,7 +376,10 @@ export function createConnectionManager(deps = {}) {
       });
       transition(conn, 'connecting', { attempt: conn.reconnectAttempts });
       try {
-        return await finishConnect(conn);
+        // reconnect() shares the channel's current epoch: it is part of the
+        // ongoing recovery intent, not a new one. finishConnect still drops
+        // the completion if disconnect()/connect() intervened (M-35).
+        return await finishConnect(conn, conn.epoch);
       } catch (err) {
         // finishConnect already set state `failed` + CM_CONNECT_FAILED; the
         // reconnect-level contract surfaces as CM_RECONNECT_FAILED with the
@@ -359,9 +401,11 @@ export function createConnectionManager(deps = {}) {
     /**
      * Mark a channel as failed (e.g. a dropped socket surfaced outside the
      * manager). Records the error, resets connectedAt, and — when a scheduler
-     * was injected — schedules reconnect() after the next backoff delay.
-     * With no scheduler injected, no timers run: the caller drives recovery
-     * explicitly via reconnect(), and nextReconnectAt says when.
+     * was injected — schedules reconnect() after the next backoff delay, then
+     * keeps retrying with growing backoff until the channel recovers or the
+     * operator intervenes (M-34). With no scheduler injected, no timers run:
+     * the caller drives recovery explicitly via reconnect(), and
+     * nextReconnectAt says when.
      */
     markFailed(channel, err) {
       const conn = getConnOrThrow(channel);
@@ -375,13 +419,8 @@ export function createConnectionManager(deps = {}) {
       conn.nextReconnectAt = clock() + delayMs;
       const snap = transition(conn, 'failed', { reason: message, nextReconnectAt: conn.nextReconnectAt });
       if (scheduler) {
-        scheduler(() => {
-          manager.reconnect(channel).catch(() => {
-            // Failures are never silent: the reconnect attempt itself throws
-            // CM_RECONNECT_FAILED to the scheduled context and records the
-            // `failed` transition + error in the event log / lastError.
-          });
-        }, delayMs);
+        const epoch = conn.epoch;
+        scheduler(() => fireScheduledReconnect(channel, epoch), delayMs);
       }
       return snap;
     },

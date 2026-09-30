@@ -35,6 +35,11 @@ export const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 export const DEFAULT_RECONNECT_BASE_MS = 1_000;
 export const DEFAULT_RECONNECT_MAX_MS = 30_000;
 
+/** A usable request timeout: a finite positive number, otherwise the fallback. */
+function normalizeTimeoutMs(value, fallback) {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
 /** Throw a coded transport error (never silent failures). */
 function transportError(code, message, detail) {
   const err = new Error(message);
@@ -60,7 +65,7 @@ function isNonEmptyString(value) {
 export function createA2ATransport(deps = {}) {
   const clock = deps.clock ?? (() => Date.now());
   const channel = deps.channel ?? null;
-  const requestTimeoutMs = deps.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+  const requestTimeoutMs = normalizeTimeoutMs(deps.requestTimeoutMs, DEFAULT_REQUEST_TIMEOUT_MS);
   const reconnectBaseMs = deps.reconnectBaseMs ?? DEFAULT_RECONNECT_BASE_MS;
   const reconnectMaxMs = deps.reconnectMaxMs ?? DEFAULT_RECONNECT_MAX_MS;
 
@@ -339,6 +344,16 @@ export function createA2ATransport(deps = {}) {
       connected = true;
       reconnectAttempts = 0;
       if (channel && typeof channel.onInbound === 'function') {
+        // Idempotent connect: a repeated connect() must not stack inbound
+        // subscriptions on the channel (duplicate delivery + unbounded growth).
+        if (channelUnsubscribe) {
+          try {
+            channelUnsubscribe();
+          } catch {
+            // Best-effort unsubscribe; connect must not fail.
+          }
+          channelUnsubscribe = null;
+        }
         const unsub = channel.onInbound((envelope) => ingest(envelope));
         channelUnsubscribe = typeof unsub === 'function' ? unsub : null;
       }
@@ -416,7 +431,9 @@ export function createA2ATransport(deps = {}) {
      * the send itself cannot proceed.
      */
     request(to, type, payload, options = {}) {
-      const timeoutMs = options.timeoutMs ?? requestTimeoutMs;
+      // NaN / non-finite / non-positive timeouts would hang the waiter
+      // forever (deadline NaN never fires); fall back to the configured default.
+      const timeoutMs = normalizeTimeoutMs(options.timeoutMs, requestTimeoutMs);
       return new Promise((resolve, reject) => {
         let stamped;
         try {
