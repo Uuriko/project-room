@@ -416,8 +416,7 @@ test("HTML export keeps the JSONL export byte-for-byte and shares its integrity 
   assert.equal((await request("/api/rooms/commons/export?format=html", { token: ownerKey })).status, 200);
 });
 
-test("HTML renderer never links anything but a credential-free https URL and never fails on unknown events", () => {
-  assert.equal(safeEvidenceHref("https://example.com/x"), "https://example.com/x");
+test("HTML renderer never links anything but a credential-free https URL and never fails on unknown events", () => {  assert.equal(safeEvidenceHref("https://example.com/x"), "https://example.com/x");
   for (const bad of ["javascript:alert(1)", "data:text/html,hi", "http://example.com/", "https://user:pw@example.com/", "not a url", 42, null]) {
     assert.equal(safeEvidenceHref(bad), null, String(bad));
   }
@@ -442,4 +441,39 @@ test("HTML renderer never links anything but a credential-free https URL and nev
   assert.doesNotMatch(html, /<goes>/);
   assert.match(html, /End of export: 8 events rendered, through sequence 8\./);
   assert.match(html, new RegExp(`<meta http-equiv="Content-Security-Policy" content="default-src &#39;none&#39;; style-src &#39;sha256-`));
+});
+
+test("R1: an owner's export of a room with inter-member DMs renumbers densely and round-trips through import", async t => {
+  const { request, importNdjson, ownerKey, store } = await serve(t);
+  const cmd = (token, type, data) => store.command(token, "commons", { id: randomUUID(), type, data });
+  // Two members besides the owner so they can DM each other.
+  for (const [memberId, displayName] of [["alice", "Alice"], ["bob", "Bob"]]) {
+    cmd(ownerKey, T.MEMBER_ADDED, { memberId, displayName, kind: "human", permissions: [] });
+  }
+  const aliceKey = store.issueAccessKey("commons", "alice");
+  const bobKey = store.issueAccessKey("commons", "bob");
+  cmd(aliceKey, T.MESSAGE_POSTED, { messageId: "m1", body: "hello everyone" });
+  store.dmConsents.request("commons", "alice", "bob", "test fixture");
+  store.dmConsents.decide("commons", "bob", "alice", "approve");
+  cmd(aliceKey, T.MESSAGE_POSTED, { messageId: "dm1", body: "secret for bob", toMemberId: "bob" });
+  cmd(bobKey, T.MESSAGE_POSTED, { messageId: "m2", body: "hello back" });
+
+  // The owner cannot see the DM, so the filtered export would have a
+  // sequence gap without renumbering — and import demands density.
+  const ndjson = await (await request("/api/rooms/commons/export", { token: ownerKey })).text();
+  const lines = ndjson.trim().split("\n").map(l => JSON.parse(l));
+  assert.ok(lines.length < store.room("commons").sequence, "the DM is filtered from the owner's export");
+  assert.deepEqual(lines.map(l => l.sequence), lines.map((_, i) => i + 1),
+    "export renumbers the visible walk densely after filtering");
+  assert.ok(!lines.some(l => l.event?.data?.toMemberId), "no DM leaks into the export");
+
+  // The owner's own export reimports cleanly (destructive replace).
+  const imp = await importNdjson(ownerKey, ndjson);
+  assert.equal(imp.status, 200, "filtered export round-trips through import");
+  const result = await imp.json();
+  assert.equal(result.imported, lines.length);
+  assert.equal(store.room("commons").sequence, lines.length);
+  // The replayed projection kept the public messages; the DM was never exported.
+  const messages = store.room("commons").state.messages.map(m => m.id);
+  assert.ok(messages.includes("m1") && messages.includes("m2"), "public messages survive the round-trip");
 });
