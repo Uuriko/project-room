@@ -145,6 +145,10 @@ export function verifyCode(code, secret, { digits = TOTP_DIGITS_6, window = TOTP
   }
   if (!isNonNegativeInteger(window)) return false;
   if (!/^\d+$/.test(normalized)) return false;
+  // time/stepSeconds are caller-controlled; a malformed value must fail the
+  // verification, not throw out of the "never throws" contract.
+  if (typeof time !== 'number' || !Number.isFinite(time) || time < 0) return false;
+  if (typeof stepSeconds !== 'number' || !Number.isFinite(stepSeconds) || stepSeconds <= 0) return false;
   let key;
   try {
     key = base32Decode(secret);

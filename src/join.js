@@ -164,6 +164,14 @@ function renderConsent(preview) {
 
 async function boot() {
   const code = parseJoinCode(globalThis.location?.pathname);
+  // Register the retry button before any network call: when the preview
+  // fetch fails, the user must still be able to retry (L-39). Once-only so
+  // repeated retries don't stack duplicate boot() handlers.
+  const retryEl = $("join-retry");
+  if (retryEl && !retryEl.dataset.retryWired) {
+    retryEl.dataset.retryWired = "1";
+    retryEl.addEventListener("click", () => boot());
+  }
   if (!code) {
     fail({ title: "Invite link problem", message: "This invitation is invalid. Ask for a new link.", retry: false });
     return;
@@ -224,7 +232,6 @@ async function boot() {
     if (openEl) openEl.href = roomEntryHref(roomId);
   });
 
-  $("join-retry")?.addEventListener("click", () => boot());
   $("join-copy-secret")?.addEventListener("click", async () => {
     const secretEl = $("join-secret");
     const statusEl = $("join-copy-status");

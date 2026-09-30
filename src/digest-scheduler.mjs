@@ -51,7 +51,6 @@ const CADENCE_MS = Object.freeze({
   weekly: 7 * 24 * 60 * 60 * 1000,
 });
 
-const DAY_MS = 24 * 60 * 60 * 1000;
 const HM_RE = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
 const MAX_QUIET_SKIPS = 1000;
 
@@ -100,8 +99,18 @@ function tzOffsetMs(t, tz) {
   return asUTC - t;
 }
 
-/** Absolute ms of local midnight (in `tz`) for the local day containing `t`. */
-function localMidnightMs(t, tz) {
+/**
+ * Absolute ms for a local wall-clock time in `tz`. `guess` is the Date.UTC
+ * value of the wall-clock fields; two-pass refinement keeps DST transitions
+ * exact at the boundary.
+ */
+function wallClockMs(guess, tz) {
+  const first = guess - tzOffsetMs(guess, tz);
+  return guess - tzOffsetMs(first, tz);
+}
+
+/** Local calendar date (y/m/d) in `tz` for instant `t`. */
+function localDateParts(t, tz) {
   const dtf = new Intl.DateTimeFormat('en-CA', {
     timeZone: tz,
     year: 'numeric',
@@ -109,24 +118,23 @@ function localMidnightMs(t, tz) {
     day: '2-digit',
   });
   const p = Object.fromEntries(dtf.formatToParts(new Date(t)).map((x) => [x.type, x.value]));
-  const guess = Date.UTC(Number(p.year), Number(p.month) - 1, Number(p.day));
-  // Two-pass refinement keeps DST transitions exact at the boundary.
-  const midnight = guess - tzOffsetMs(guess, tz);
-  return guess - tzOffsetMs(midnight, tz);
+  return { y: Number(p.year), m: Number(p.month), d: Number(p.day) };
 }
 
 /**
  * End (absolute ms) of the quiet window containing `t`, or null when `t` is
  * outside quiet hours. Checks today's and yesterday's window so overnight
- * windows (e.g. 22:00–07:00) are caught after local midnight.
+ * windows (e.g. 22:00–07:00) are caught after local midnight. Window
+ * boundaries are computed in wall-clock terms, so DST transition days
+ * keep the advertised local times.
  */
 function quietWindowEndContaining(t, tz, startMin, endMin) {
-  const midnight = localMidnightMs(t, tz);
+  const { y, m, d } = localDateParts(t, tz);
   for (const dayOffset of [0, -1]) {
-    const base = midnight + dayOffset * DAY_MS;
-    const ws = base + startMin * 60 * 1000;
-    let we = base + endMin * 60 * 1000;
-    if (we <= ws) we += DAY_MS; // overnight wrap
+    const ws = wallClockMs(Date.UTC(y, m - 1, d + dayOffset) + startMin * 60 * 1000, tz);
+    // Overnight wrap: the end belongs to the next local day.
+    const endDay = endMin <= startMin ? d + dayOffset + 1 : d + dayOffset;
+    const we = wallClockMs(Date.UTC(y, m - 1, endDay) + endMin * 60 * 1000, tz);
     if (t >= ws && t < we) return we;
   }
   return null;

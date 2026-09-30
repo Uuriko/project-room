@@ -1039,6 +1039,7 @@ function setMessageReaction(state, incoming) {
   const { messageId, reaction, active } = incoming.data;
   const message = state.messages.find(m => m.id === messageId);
   if (!message) throw new Error("Reaction must reference a message in this Room");
+  if (message.deletedAt) throw new Error("Message was deleted");
   const key = canonicalReaction(reaction);
   if (!key || typeof active !== "boolean") throw new Error("Invalid reaction choice");
   // Replay and checkpoints may still carry like/heart/celebrate/thinking.

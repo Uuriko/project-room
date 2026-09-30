@@ -91,10 +91,29 @@ function cardSkills(card) {
   return Array.isArray(card.skills) ? new Set(card.skills) : new Set();
 }
 
-/** Card version for tie-breaking (defaults to 0). */
-function cardVersion(card) {
-  const v = Number(card.version);
-  return Number.isFinite(v) ? v : 0;
+/**
+ * Compare two version values semver-style: -1, 0, or 1. Handles multi-part
+ * strings ("1.2.10" > "1.2.3"), plain numbers (2 > 1.9), and non-version
+ * values (treated as 0). The old Number("1.2.3") coercion collapsed every
+ * dotted version to 0, tying real releases.
+ */
+function compareCardVersions(a, b) {
+  const parts = (v) => String(v ?? '').split('.').map((p) => {
+    const n = Number(p);
+    return Number.isFinite(n) && p.trim() !== '' ? n : NaN;
+  });
+  const ap = parts(a), bp = parts(b);
+  const len = Math.max(ap.length, bp.length);
+  for (let i = 0; i < len; i += 1) {
+    const x = ap[i] ?? 0, y = bp[i] ?? 0;
+    if (Number.isNaN(x) || Number.isNaN(y)) {
+      const xs = String(ap[i] ?? ''), ys = String(bp[i] ?? '');
+      if (xs !== ys) return xs < ys ? -1 : 1;
+      continue;
+    }
+    if (x !== y) return x < y ? -1 : 1;
+  }
+  return 0;
 }
 
 function assertNonEmptyStringArray(value, name) {
@@ -240,7 +259,7 @@ export function createAgentDiscovery(deps = {}) {
     // Rank: coverage score desc, then card version desc, then agentId asc.
     ranked.sort((a, b) => (
       b.score - a.score
-      || cardVersion(b.card) - cardVersion(a.card)
+      || compareCardVersions(b.card.version, a.card.version)
       || (a.agentId < b.agentId ? -1 : a.agentId > b.agentId ? 1 : 0)
     ));
 

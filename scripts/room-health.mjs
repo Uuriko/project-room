@@ -30,7 +30,7 @@
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..');
@@ -191,17 +191,35 @@ function prAgePanel(prs, now) {
   return { total: prs.length, buckets: buckets.map(({ key, prs: p }) => ({ key, count: p.length })), stale };
 }
 
-function ciPanel(prs) {
+/**
+ * CI panel data over open PRs' statusCheckRollup rows (pure; exported for
+ * tests). Rows may be CheckRun {status, conclusion} or legacy StatusContext
+ * {state, context} shapes — see L-52.
+ */
+export function ciPanel(prs) {
   let pass = 0;
   let fail = 0;
   let pending = 0;
   let none = 0;
   const failing = [];
+  // statusCheckRollup rows are a union: CheckRun {status, conclusion} or a
+  // legacy StatusContext {state, context} from the old Statuses API. Branch
+  // on __typename/state rather than assuming CheckRun shape (L-52).
+  const checkState = (c) => {
+    if (c.__typename === 'StatusContext' || (c.state !== undefined && c.status === undefined)) {
+      const done = c.state !== 'PENDING';
+      return { done, ok: !done || c.state === 'SUCCESS' };
+    }
+    const done = c.status === 'COMPLETED';
+    const ok = !done || c.conclusion === 'SUCCESS' || c.conclusion === 'NEUTRAL' || c.conclusion === 'SKIPPED';
+    return { done, ok };
+  };
   for (const pr of prs) {
     const rollup = pr.statusCheckRollup || [];
-    const done = rollup.filter((c) => c.status === 'COMPLETED');
-    const inFlight = rollup.length - done.length;
-    const failed = done.filter((c) => c.conclusion !== 'SUCCESS' && c.conclusion !== 'NEUTRAL' && c.conclusion !== 'SKIPPED');
+    const states = rollup.map(checkState);
+    const done = states.filter((s) => s.done);
+    const inFlight = states.length - done.length;
+    const failed = done.filter((s) => !s.ok);
     if (rollup.length === 0) {
       none += 1;
     } else if (failed.length > 0) {
@@ -526,4 +544,8 @@ function main() {
   if (Object.keys(errors).length) process.exitCode = 1;
 }
 
-main();
+// Importable for tests (ciPanel is exported): only run the report when this
+// file is executed directly, never as a library import.
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  main();
+}

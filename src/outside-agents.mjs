@@ -57,6 +57,16 @@ export function planOutsideAgentRecord(messages, members, roomId, actorId, input
 export function assembleOutsideAgents(messages, members = {}) {
   const agents = new Map();
   const edges = [];
+  const pendingLinks = []; // link records seen before their introduction (L-42)
+  const applyLink = (agent, record, authorId) => {
+    if (agent && authorId === record.memberId && Object.hasOwn(members, record.memberId)
+        && members[record.memberId].active !== false && agent.linkedMemberId === null) {
+      agent.linkedMemberId = record.memberId;
+      agent.linkedBy = authorId;
+      return true;
+    }
+    return false;
+  };
   for (const message of messages ?? []) {
     // This is a shared public network, never a projection of targeted messages.
     if (message?.toMemberId || message?.deletedAt) continue;
@@ -75,11 +85,18 @@ export function assembleOutsideAgents(messages, members = {}) {
       }
     } else if (record.kind === "knows") edges.push({ ...record, reportedBy: message.authorId });
     else if (record.kind === "link") {
-      const existing = agents.get(record.externalRef);
-      if (existing && message.authorId === record.memberId && Object.hasOwn(members, record.memberId) && members[record.memberId].active !== false && existing.linkedMemberId === null) {
-        existing.linkedMemberId = record.memberId; existing.linkedBy = message.authorId;
+      if (!applyLink(agents.get(record.externalRef), record, message.authorId)) {
+        // The introduction may not have been seen yet; buffer the link so
+        // it isn't silently dropped when it arrives first (L-42).
+        if (!agents.has(record.externalRef)) {
+          pendingLinks.push({ record, authorId: message.authorId });
+        }
       }
     }
+  }
+  // Backfill links buffered before their introductions (L-42).
+  for (const { record, authorId } of pendingLinks) {
+    applyLink(agents.get(record.externalRef), record, authorId);
   }
   for (const edge of edges) {
     const from = agents.get(edge.fromRef), to = agents.get(edge.toRef);
