@@ -201,6 +201,8 @@ export async function callHostedStdioTool(store, secret, name, args) {
       workDiscussion: (id, options) => store.workDiscussion(secret, roomId, id, options)
     }, rest.workItemId, { ...options, discussionSince: rest.discussionSince }) : store.workContext(secret, roomId, rest.workItemId, options);
     if (context.preparation?.nextRead) context.preparation.nextRead.arguments.roomId = roomId;
+    for (const request of context.replyRequestContext?.requests ?? []) request.nextRead.arguments.roomId = roomId;
+    if (context.replyRequestContext?.nextRead) context.replyRequestContext.nextRead.arguments.roomId = roomId;
     if (!rest.brief) return { value: context, isError: false };
     return { value: {
       roomId: context.roomId, workItemId: context.work.id, revision: context.work.revision,
