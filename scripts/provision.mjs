@@ -91,11 +91,11 @@ try {
       try { store.command(admin, values.room, { id: crypto.randomUUID(), type: T.MEMBER_ADDED, data: { memberId: values.member, displayName: values.name, kind: values.kind, permissions: values.permissions ? values.permissions.split(",") : [] } }); }
       finally { store.revoke(admin); }
     }
-    const accessKey = store.issueAccessKey(values.room, values.member, 7 * 86400000, values.account ?? null);
+    const accessKey = store.mintAccessKey(values.room, values.member, 7 * 86400000, values.account ?? null);
     const account = store.accountForMember(values.room, values.member);
     const ownership = account ? ` Canonical account: ${account.id}; auth epoch ${account.authEpoch}.` : " Agent credential; no human account is attached.";
     deliverThenRevoke(
-      () => store.mintAccessKey(values.room, values.member, 7 * 86400000, values.account ?? null),
+      () => accessKey,
       `New key for ${values.member} in ${values.room}; previous keys and sessions are revoked now that this key is delivered.${ownership} Expires in seven days. Keep private; never paste into GitHub.`,
       {
         revokeStale: key => store.revokeStaleRoomKeys(values.room, values.member, key),
