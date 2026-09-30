@@ -424,6 +424,11 @@ export function createOwnerAlertDispatcher(deps = {}) {
      * success the alert moves to `sent`; if every attempt fails the alert
      * stays pending, every attempt is recorded, and OA_DELIVERY_FAILED is
      * thrown — never silent.
+     *
+     * Ordering (M-46): each attempt is recorded and persisted BEFORE the
+     * external notify. A storage failure after a successful notify throws
+     * OA_STORAGE_ERROR and is never retried as a delivery failure, so an
+     * already-sent notification is not sent twice.
      */
     async dispatch(alertId, actor = 'agent') {
       const alert = getAlertOrThrow(alertId);
@@ -432,29 +437,45 @@ export function createOwnerAlertDispatcher(deps = {}) {
 
       let lastError = null;
       for (let attempt = 1; attempt <= MAX_DISPATCH_ATTEMPTS; attempt += 1) {
-        try {
-          await channel.notify(snapshot(alert));
-          recordAttempt(alert, { kind: 'dispatch', attempt, ok: true });
-          alert.sentAt = clock();
-          const sent = transition(alert, 'sent', actor, {
-            attempt,
-            attempts: attempt,
-          });
-          emit('dispatched', alert, clock());
-          persist();
-          return sent;
-        } catch (err) {
-          lastError = err;
-          recordAttempt(alert, {
+        // M-46: the durable attempt record leads the external effect. The
+        // in-flight attempt is persisted BEFORE notify() so a crash between
+        // the external send and the state write cannot be mistaken for a
+        // failed delivery and retried into a double send.
+        const attemptIndex = alert.attempts.length;
+        recordAttempt(alert, { kind: 'dispatch', attempt, ok: null });
+        persist();
+        const settleAttempt = (ok, error) => {
+          alert.attempts[attemptIndex] = Object.freeze({
+            at: clock(),
             kind: 'dispatch',
             attempt,
-            ok: false,
-            error: err instanceof Error ? err.message : String(err),
+            ok,
+            error: error ?? null,
           });
+        };
+        try {
+          await channel.notify(snapshot(alert));
+        } catch (err) {
+          lastError = err;
+          settleAttempt(false, err instanceof Error ? err.message : String(err));
+          persist();
           if (attempt < MAX_DISPATCH_ATTEMPTS) {
             await sleep(Math.max(0, backoff(attempt)));
           }
+          continue;
         }
+        // Delivery succeeded. Finalize durably; a storage failure here throws
+        // OA_STORAGE_ERROR and is never retried as a delivery failure, so an
+        // already-sent notification is not sent twice.
+        settleAttempt(true);
+        alert.sentAt = clock();
+        const sent = transition(alert, 'sent', actor, {
+          attempt,
+          attempts: attempt,
+        });
+        emit('dispatched', alert, clock());
+        persist();
+        return sent;
       }
       record({
         at: clock(),

@@ -244,6 +244,26 @@ export function createUnifiedInboxStore(deps = {}) {
     }
   }
 
+  /**
+   * M-8: transactional mutation. Snapshot the durable state before mutating;
+   * if the write fails, restore memory so live state never runs ahead of what
+   * survived to disk. Returns the mutator's value.
+   */
+  function transact(mutator) {
+    const beforeMessages = structuredClone([...messages]);
+    const beforeCounter = idCounter;
+    try {
+      const result = mutator();
+      persist();
+      return result;
+    } catch (err) {
+      messages.clear();
+      for (const [id, record] of beforeMessages) messages.set(id, record);
+      idCounter = beforeCounter;
+      throw err;
+    }
+  }
+
   function getRecordOrThrow(id) {
     const message = messages.get(id);
     if (!message) {
@@ -274,28 +294,32 @@ export function createUnifiedInboxStore(deps = {}) {
       const at = clock();
       const existing = input.id !== undefined ? messages.get(input.id) : undefined;
       if (existing) {
-        const updated = {
-          ...existing,
-          channel: input.channel,
-          ts: input.ts,
-          from: input.from ?? existing.from,
-          subject: input.subject ?? existing.subject,
-          body: input.body ?? existing.body,
-          read: input.read ?? existing.read,
-          starred: input.starred ?? existing.starred,
-          updatedAt: at,
-        };
-        messages.set(existing.id, updated);
-        persist();
+        const snap = transact(() => {
+          const updated = {
+            ...existing,
+            channel: input.channel,
+            ts: input.ts,
+            from: input.from ?? existing.from,
+            subject: input.subject ?? existing.subject,
+            body: input.body ?? existing.body,
+            read: input.read ?? existing.read,
+            starred: input.starred ?? existing.starred,
+            updatedAt: at,
+          };
+          messages.set(existing.id, updated);
+          return messageSnapshot(updated);
+        });
         emit({ type: 'message-updated', messageId: existing.id });
-        return messageSnapshot(updated);
+        return snap;
       }
-      const id = input.id ?? newId();
-      const record = toRecord(input, id, at);
-      messages.set(id, record);
-      persist();
+      const id = transact(() => {
+        const newIdValue = input.id ?? newId();
+        const record = toRecord(input, newIdValue, at);
+        messages.set(newIdValue, record);
+        return newIdValue;
+      });
       emit({ type: 'message-created', messageId: id });
-      return messageSnapshot(record);
+      return messageSnapshot(messages.get(id));
     },
 
     /** Read-only snapshot of a message (null if unknown — no throw). */
@@ -348,11 +372,13 @@ export function createUnifiedInboxStore(deps = {}) {
     /** Set the read flag on a message (default true). */
     markRead(id, read = true) {
       const message = getRecordOrThrow(id);
-      message.read = read === true;
-      message.updatedAt = clock();
-      persist();
+      const snap = transact(() => {
+        message.read = read === true;
+        message.updatedAt = clock();
+        return messageSnapshot(message);
+      });
       emit({ type: read ? 'message-read' : 'message-unread', messageId: id });
-      return messageSnapshot(message);
+      return snap;
     },
 
     /** Convenience: mark a message unread. */
@@ -363,28 +389,33 @@ export function createUnifiedInboxStore(deps = {}) {
     /** Star a message. */
     star(id) {
       const message = getRecordOrThrow(id);
-      message.starred = true;
-      message.updatedAt = clock();
-      persist();
+      const snap = transact(() => {
+        message.starred = true;
+        message.updatedAt = clock();
+        return messageSnapshot(message);
+      });
       emit({ type: 'message-starred', messageId: id });
-      return messageSnapshot(message);
+      return snap;
     },
 
     /** Unstar a message. */
     unstar(id) {
       const message = getRecordOrThrow(id);
-      message.starred = false;
-      message.updatedAt = clock();
-      persist();
+      const snap = transact(() => {
+        message.starred = false;
+        message.updatedAt = clock();
+        return messageSnapshot(message);
+      });
       emit({ type: 'message-unstarred', messageId: id });
-      return messageSnapshot(message);
+      return snap;
     },
 
     /** Remove a message. Throws UIS_NOT_FOUND for unknown ids. */
     deleteMessage(id) {
       getRecordOrThrow(id);
-      messages.delete(id);
-      persist();
+      transact(() => {
+        messages.delete(id);
+      });
       emit({ type: 'message-deleted', messageId: id });
       return true;
     },
@@ -429,12 +460,13 @@ export function createUnifiedInboxStore(deps = {}) {
       const copied = Array.isArray(rawMessages) ? rawMessages.map((m) => ({ ...m })) : rawMessages;
       const migrated = migrate({ version: snapshot.version, messages: copied });
       validateMigratedSnapshot(migrated);
-      messages.clear();
-      for (const message of migrated.messages) {
-        messages.set(message.id, { ...message });
-      }
-      reseedIdCounter();
-      persist();
+      transact(() => {
+        messages.clear();
+        for (const message of migrated.messages) {
+          messages.set(message.id, { ...message });
+        }
+        reseedIdCounter();
+      });
       emit({ type: 'store-restored', messageId: null });
       return this.snapshot();
     },

@@ -238,6 +238,26 @@ export function createThreadViewStore(deps = {}) {
     }
   }
 
+  /**
+   * M-8: transactional mutation. Snapshot the durable state before mutating;
+   * if the write fails, restore memory so live state never runs ahead of what
+   * survived to disk. Returns the mutator's value.
+   */
+  function transact(mutator) {
+    const beforeViews = structuredClone([...views]);
+    const beforeCounter = idCounter;
+    try {
+      const result = mutator();
+      persist();
+      return result;
+    } catch (err) {
+      views.clear();
+      for (const [threadId, view] of beforeViews) views.set(threadId, view);
+      idCounter = beforeCounter;
+      throw err;
+    }
+  }
+
   function viewSnapshot(view) {
     return Object.freeze({ ...view });
   }
@@ -282,12 +302,20 @@ export function createThreadViewStore(deps = {}) {
       assertThreadId(threadId);
       assertViewPatch(patch);
       const existed = views.has(threadId);
-      const view = getOrCreate(threadId);
-      const changed = applyPatch(view, patch);
-      if (existed && !changed) return viewSnapshot(view); // no-op: no write, no event
-      persist();
+      if (existed) {
+        // No-op check without mutating, mirroring applyPatch's comparison:
+        // every patch entry already equals the record. No write, no event.
+        const view = views.get(threadId);
+        const changed = Object.entries(patch).some(([key, value]) => view[key] !== value);
+        if (!changed) return viewSnapshot(view);
+      }
+      const snap = transact(() => {
+        const view = getOrCreate(threadId);
+        applyPatch(view, patch);
+        return viewSnapshot(view);
+      });
       emit({ type: existed ? 'view-updated' : 'view-created', threadId });
-      return viewSnapshot(view);
+      return snap;
     },
 
     /** Read-only view record for a thread (null if none — no throw). */
@@ -306,23 +334,27 @@ export function createThreadViewStore(deps = {}) {
       if (typeof text !== 'string') {
         throw storeError('TV_INVALID_ARG', 'Draft text must be a string', { text });
       }
-      const view = getOrCreate(threadId);
-      view.draftText = text;
-      view.updatedAt = clock();
-      persist();
+      const snap = transact(() => {
+        const view = getOrCreate(threadId);
+        view.draftText = text;
+        view.updatedAt = clock();
+        return viewSnapshot(view);
+      });
       emit({ type: 'draft-updated', threadId });
-      return viewSnapshot(view);
+      return snap;
     },
 
     /** Flip the muted flag for a thread; returns the new frozen record. */
     toggleMute(threadId) {
       assertThreadId(threadId);
-      const view = getOrCreate(threadId);
-      view.muted = !view.muted;
-      view.updatedAt = clock();
-      persist();
-      emit({ type: 'mute-toggled', threadId, muted: view.muted });
-      return viewSnapshot(view);
+      const snap = transact(() => {
+        const view = getOrCreate(threadId);
+        view.muted = !view.muted;
+        view.updatedAt = clock();
+        return { snap: viewSnapshot(view), muted: view.muted };
+      });
+      emit({ type: 'mute-toggled', threadId, muted: snap.muted });
+      return snap.snap;
     },
 
     /**
@@ -332,12 +364,14 @@ export function createThreadViewStore(deps = {}) {
     markSeen(threadId, messageId) {
       assertThreadId(threadId);
       assertMessageId(messageId, 'seenUpTo');
-      const view = getOrCreate(threadId);
-      view.seenUpTo = messageId;
-      view.updatedAt = clock();
-      persist();
+      const snap = transact(() => {
+        const view = getOrCreate(threadId);
+        view.seenUpTo = messageId;
+        view.updatedAt = clock();
+        return viewSnapshot(view);
+      });
       emit({ type: 'seen-updated', threadId, seenUpTo: messageId });
-      return viewSnapshot(view);
+      return snap;
     },
 
     /**
@@ -351,8 +385,9 @@ export function createThreadViewStore(deps = {}) {
           threadId,
         });
       }
-      views.delete(threadId);
-      persist();
+      transact(() => {
+        views.delete(threadId);
+      });
       emit({ type: 'view-reset', threadId });
     },
 
@@ -380,8 +415,9 @@ export function createThreadViewStore(deps = {}) {
 
     /** Drop ALL thread view state. Emits a single 'cleared' change event. */
     clear() {
-      views.clear();
-      persist();
+      transact(() => {
+        views.clear();
+      });
       emit({ type: 'cleared' });
     },
 
@@ -446,9 +482,10 @@ export function createThreadViewStore(deps = {}) {
         }
         incoming.set(record.threadId, { ...record });
       }
-      views.clear();
-      for (const [threadId, record] of incoming) views.set(threadId, record);
-      persist();
+      transact(() => {
+        views.clear();
+        for (const [threadId, record] of incoming) views.set(threadId, record);
+      });
       emit({ type: 'restored', threadCount: views.size });
     },
   };

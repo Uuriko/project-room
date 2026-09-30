@@ -118,7 +118,6 @@ const notFound = code => {
   error.code = code;
   return error;
 };
-
 export class InboxCollabStore {
   #rooms;
 
@@ -145,6 +144,20 @@ export class InboxCollabStore {
       if (normalize(actual) !== normalize(sql)) throw new Error("Inbox collab store schema requires operator reconciliation");
     }
     return true;
+  }
+
+  // M-8: journal mutations apply in memory before the SQLite write. If the
+  // write fails the store transaction rolls the database back, but the
+  // room's cached journals would stay ahead of the database. Evict the
+  // cached entry on failure so the next access replays from the database —
+  // memory can never run ahead of disk.
+  #transact(roomId, fn) {
+    try {
+      return this.store.transaction(fn);
+    } catch (err) {
+      this.#rooms.delete(roomId);
+      throw err;
+    }
   }
 
   // One lazy journal set per room. The first access replays persisted rows.
@@ -367,7 +380,7 @@ export class InboxCollabStore {
   // addresses assignments by id. ----
   assignThread(roomId, threadId, assignee, { by, force = false } = {}) {
     const entry = this.#entry(roomId);
-    return this.store.transaction(() => {
+    return this.#transact(roomId, () => {
       const op = { op: "assign", threadId, assignee, by, force };
       const { result, clocks, ids } = loggedMutation(entry, () => this.#runAssignmentOp(entry, op));
       const row = this.db.prepare(
@@ -401,11 +414,30 @@ export class InboxCollabStore {
 
   releaseAssignment(roomId, assignmentId, { by, reason = null } = {}) {
     const entry = this.#entry(roomId);
-    return this.store.transaction(() => {
+    return this.#transact(roomId, () => {
       const row = this.db.prepare(
         "SELECT thread_id, ops_json, clock_json, id_json FROM collab_assignments WHERE room_id=? AND assignment_id=?")
         .get(roomId, assignmentId);
       if (!row) throw notFound("assignment_not_found");
+      // M-7(b): releasing someone else's assignment is a privileged act —
+      // only the assignee, the assigner, or the room owner may do it. When
+      // there is no live assignment the journal below still throws
+      // assign_not_assigned as before.
+      const current = entry.assign.get(row.thread_id);
+      if (current?.status === "assigned") {
+        const ownerId = this.store.roomAuthority(roomId)?.ownerId ?? null;
+        const byId = by?.id ?? null;
+        const permitted = typeof byId === "string" && byId !== "" && (
+          byId === current.assignee?.id ||
+          byId === current.assignedBy?.id ||
+          byId === ownerId
+        );
+        if (!permitted) {
+          const error = new Error("Only the assignee, the assigner, or the room owner can release an assignment.");
+          error.code = "assign_forbidden";
+          throw error;
+        }
+      }
       const op = { op: "release", threadId: row.thread_id, by, reason };
       const { result, clocks, ids } = loggedMutation(entry, () => this.#runAssignmentOp(entry, op));
       this.db.prepare(`UPDATE collab_assignments
@@ -423,7 +455,7 @@ export class InboxCollabStore {
   // reader is the collab notes endpoint. ----
   addThreadNote(roomId, threadId, { author, body, tag = null } = {}) {
     const entry = this.#entry(roomId);
-    return this.store.transaction(() => {
+    return this.#transact(roomId, () => {
       const { result: note, clocks, ids } = loggedMutation(entry,
         () => entry.notes.addNote(threadId, { author, body, tag }));
       this.db.prepare(`INSERT INTO collab_notes
@@ -444,7 +476,7 @@ export class InboxCollabStore {
   // replay so a restart never resurrects a stale hold. ----
   acquireDraftLock(roomId, threadId, holder, { ttlMs = null } = {}) {
     const entry = this.#entry(roomId);
-    return this.store.transaction(() => {
+    return this.#transact(roomId, () => {
       const { result, clocks, ids } = loggedMutation(entry,
         () => entry.locks.acquireLock(threadId, holder, ttlMs === null ? {} : { ttlMs }));
       const { lock, duplicate } = result;
@@ -462,7 +494,7 @@ export class InboxCollabStore {
 
   releaseDraftLock(roomId, lockId, { by } = {}) {
     const entry = this.#entry(roomId);
-    return this.store.transaction(() => {
+    return this.#transact(roomId, () => {
       const row = this.db.prepare(
         "SELECT 1 FROM collab_draft_locks WHERE room_id=? AND lock_id=?").get(roomId, lockId);
       if (!row) throw notFound("lock_not_found");
@@ -480,7 +512,7 @@ export class InboxCollabStore {
   // ---- approvals: propose, list, human decide, agent resubmit. ----
   proposeDraft(roomId, threadId, { draft, byAgent, channel }) {
     const entry = this.#entry(roomId);
-    return this.store.transaction(() => {
+    return this.#transact(roomId, () => {
       const op = { op: "propose", threadId, draft, byAgent, channel };
       const { result: record, clocks, ids } = loggedMutation(entry,
         () => this.#runApprovalOp(entry, null, op));
@@ -500,7 +532,7 @@ export class InboxCollabStore {
 
   decideApproval(roomId, proposalId, { decision, by, note = null, editedBody = null, reason = null }) {
     const entry = this.#entry(roomId);
-    return this.store.transaction(() => {
+    return this.#transact(roomId, () => {
       const row = this.db.prepare(
         "SELECT ops_json, clock_json, id_json FROM collab_approvals WHERE room_id=? AND proposal_id=?")
         .get(roomId, proposalId);
@@ -523,7 +555,7 @@ export class InboxCollabStore {
 
   resubmitApproval(roomId, proposalId, { draft, byAgent }) {
     const entry = this.#entry(roomId);
-    return this.store.transaction(() => {
+    return this.#transact(roomId, () => {
       const row = this.db.prepare(
         "SELECT ops_json, clock_json, id_json FROM collab_approvals WHERE room_id=? AND proposal_id=?")
         .get(roomId, proposalId);
@@ -545,7 +577,7 @@ export class InboxCollabStore {
   // ---- agent routing: mention routing with policy overrides. ----
   routeMention(roomId, { threadId, mentionedAgentId, from, context = null }) {
     const entry = this.#entry(roomId);
-    return this.store.transaction(() => {
+    return this.#transact(roomId, () => {
       const { result: out, clocks, ids } = loggedMutation(entry,
         () => entry.router.route(threadId, { text: `@${mentionedAgentId}`, from, context }));
       // route() consumes two clock reads and one id per emitted record, in
@@ -594,7 +626,7 @@ export class InboxCollabStore {
 
   resolveRouting(roomId, routingId, { by, outcome }) {
     const entry = this.#entry(roomId);
-    return this.store.transaction(() => {
+    return this.#transact(roomId, () => {
       const row = this.db.prepare(
         "SELECT 1 FROM collab_routing_events WHERE room_id=? AND kind='route' AND record_id=?").get(roomId, routingId);
       if (!row) throw notFound("routing_not_found");
@@ -610,7 +642,7 @@ export class InboxCollabStore {
 
   setRoutingPolicy(roomId, agent, policy) {
     const entry = this.#entry(roomId);
-    return this.store.transaction(() => {
+    return this.#transact(roomId, () => {
       const result = entry.router.setPolicy(agent, policy);
       entry.policies.set(agent, result);
       this.#insertRoutingEvent(roomId, "policy", {
@@ -667,7 +699,33 @@ export class InboxCollabStore {
     return this.store.handoffs.list(scope.accountId, { status, roomId: scope.roomId });
   }
 
-  transitionHandoff(scope, handoffId, status, { note = null } = {}) {
+  transitionHandoff(scope, handoffId, status, { note = null, by = null, roomId = null } = {}) {
+    // M-7(c): the handoff's from/to name the parties to the handoff. Any
+    // other member of the room — even one acting under the owner's account
+    // scope — must not move it through its lifecycle. The room owner keeps
+    // an override. from/to never change after creation, so the check-then-
+    // act here cannot race the transition.
+    if (typeof by === "string" && by !== "") {
+      const handoff = this.listHandoffs(scope, {}).find(h => h.handoffId === handoffId);
+      if (handoff) {
+        const ownerId = roomId !== null ? this.store.roomAuthority(roomId)?.ownerId ?? null : null;
+        let identityId = null;
+        if (roomId !== null) {
+          identityId = this.db.prepare(
+            "SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?")
+            .get(roomId, by)?.identityId ?? null;
+        }
+        const ids = new Set([by, identityId].filter(id => typeof id === "string" && id !== ""));
+        const permitted = ids.has(handoff.fromAgent) || ids.has(handoff.toAgent)
+          || (ownerId !== null && by === ownerId);
+        if (!permitted) {
+          const error = new Error("Only the handoff sender, recipient, or room owner can transition it.");
+          error.code = "handoff_forbidden";
+          throw error;
+        }
+      }
+      // Unknown to this scope: the journal's transition still 404s as before.
+    }
     return this.store.handoffs.transition(scope.accountId, handoffId, status, { note, roomId: scope.roomId });
   }
 }
