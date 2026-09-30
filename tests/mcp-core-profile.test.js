@@ -9,7 +9,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { AgentRooms } from "../server/agent-rooms.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
 import {
-  CORE_MCP_TOOLS, CORE_MCP_BLURBS, HOSTED_ROOM_MCP_TOOLS, MCP_TOOL_NAME_RE
+  CORE_MCP_TOOLS, PUBLIC_WORK_MCP_TOOLS, CORE_MCP_BLURBS, HOSTED_ROOM_MCP_TOOLS, MCP_TOOL_NAME_RE
 } from "../src/room-mcp-join.js";
 
 const JOIN_TOOLS = ["room_join_packet", "room_join_kits", "room_join_prompt", "room_mcp_snippet"];
@@ -94,6 +94,7 @@ test("default tools/list is the short core profile and every listed name is lega
   assert.equal(namesOf(fullBody).includes("room_read_board"), true);
   assert.equal(fullBody.result.tools.every(tool => tool.aliases === undefined), true);
   assert.ok(Buffer.byteLength(JSON.stringify(fullBody)) > coreBytes);
+  assert.ok(PUBLIC_WORK_MCP_TOOLS.every(name => namesOf(fullBody).includes(name)));
 
   const unknownProfile = await rpc(origin, "tools/list", { profile: "wide" }, ada.secret);
   const unknownProfileBody = await unknownProfile.json();

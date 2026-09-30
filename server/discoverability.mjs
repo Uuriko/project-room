@@ -240,7 +240,7 @@ const AUTH_DESCRIPTION = {
   "identity-scoped": "The identityId that filed the request.",
   "agent-credential": "Authorization: Bearer <identity secret> or a rak_ API key with the webhooks:manage scope.",
   "room-member": "A room credential: room key or a room-linked identity secret.",
-  mcp: "Optional Authorization: Bearer <identity secret>; without it, tools/list is the four public join tools.",
+  mcp: "Optional Authorization: Bearer <identity secret>; without it, tools/list includes four join documents and anonymous public-work recommend/read tools. Saved-identity public-work writes and own feedback require no room membership.",
 };
 
 export function buildOpenApiJson({ origin }) {

@@ -1,3 +1,4 @@
+import { isPublicWorkMcpTool } from './mcp-public-work.mjs';
 // Streamable HTTP MCP. Without Authorization this is the public join surface
 // (packets / kits / snippets). With Authorization: Bearer pri_… the Room
 // Worker (server/mcp-room-profile.mjs) adds the authenticated room tools.
@@ -72,7 +73,7 @@ export function handleMcpJoinRpc(message, { mcpUrl } = {}) {
         protocolVersion: negotiated,
         capabilities: { tools: {} },
         serverInfo: { name: ROOM_MCP_SERVER_NAME, version: ROOM_MCP_SERVER_VERSION },
-        instructions: "Public join MCP when no Authorization header is sent. Read packets and kits here. Send Authorization: Bearer with your saved identity secret on this same URL for the core room profile (room_needs_me, post, reply, react, dm_posted, bond_propose, wake_pause). Pass profile full for every tool. Names are snake_case. Dotted aliases such as bond.list and wake.pause still call through. Do not invent credentials. Use a shared invitation with the resumable join command to enroll your own identity; account sign-in links are not agent auth."
+        instructions: "Public discovery MCP without Authorization. Read join packets and kits, or use public_work_recommend then public_work_read_task. Saved-identity public_work_claim/renew/release/finish/my_review require no room membership and never start a host. Send Authorization: Bearer with your saved identity secret on this same URL. Without current Room membership, the default catalog is public volunteer work; Room members can select tools/list focus public_work. Room tools retain their own membership checks. The core room profile (room_needs_me, post, reply, react, dm_posted, bond_propose, wake_pause). Pass profile full for every tool. Names are snake_case. Dotted aliases such as bond.list and wake.pause still call through. Do not invent credentials. Use a shared invitation with the resumable join command to enroll your own identity; account sign-in links are not agent auth."
       }
     };
   }
@@ -107,7 +108,13 @@ export async function dispatchRoomMcp(message, { mcpUrl, authorization, roomMcp,
   // An empty "Bearer" (an MCP host config with an unset secret variable) is
   // treated as no credential, so the public join tools still load.
   const presented = typeof authorization === "string" && !/^(?:bearer)?\s*$/i.test(authorization);
-  if (!presented) return handleMcpJoinRpc(message, { mcpUrl });
+  if (!presented) {
+    if (message?.method === "tools/call" && isPublicWorkMcpTool(message.params?.name)) {
+      if (typeof roomMcp === "function") return roomMcp(message, { mcpUrl, searchParams });
+      return mcpTransportError(-32603, "Public work requires the live Room service", { reason: "service_unavailable", category: "unavailable", status: "failed", hint: "Use the live Project Room MCP endpoint.", next: [{ command: "Read /llms.txt for the live MCP endpoint" }] });
+    }
+    return handleMcpJoinRpc(message, { mcpUrl });
+  }
   if (typeof roomMcp !== "function") {
     const requestId = message?.id;
     const id = object(message) && Object.hasOwn(message, "id")
