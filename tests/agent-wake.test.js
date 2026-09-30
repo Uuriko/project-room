@@ -109,7 +109,7 @@ test('actual CLI saved connection survives server restart; unknown ACK and lost 
   saveAgentConnection(config, {version:1,origin:'http://127.0.0.1:'+port,roomId:'restart',memberId:identity.identityId,token:identity.secret});
   const env = { ROOM_AGENT_CONFIG: config }; const out = [];
   // Each ordinary command is an actual CLI process. An in-process main()
-  // harness incorrectly reuses its fetch pool after rebinding the same port;
+  // harness retains its fetch pool after rebinding the same port;
   // a real newly invoked CLI has no socket from the stopped server.
   const childEnv = { ...process.env, ...env };
   for (const name of ['ROOM_AGENT_ORIGIN', 'ROOM_AGENT_ROOM', 'ROOM_AGENT_MEMBER', 'ROOM_AGENT_TOKEN']) delete childEnv[name];
