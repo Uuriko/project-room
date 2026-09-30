@@ -242,6 +242,70 @@ export class AccountClient {
   }
 }
 
+// 2026-09-30 (phase-2 gap audit L-P2-14): fetch-based SSE reader. The
+// native EventSource cannot send request headers, so the account-mode
+// stream carried its sessionBinding in the query string (visible in access
+// logs, browser history, and referrers). This reader sends it as the
+// x-session-binding header instead and exposes the EventSource surface the
+// client relies on (open/room-event/access-ended/error events, readyState,
+// close). Room-key mode keeps using the injected native EventSource.
+export class FetchEventSource extends EventTarget {
+  constructor(url, { headers = {}, fetcher = globalThis.fetch } = {}) {
+    super();
+    this.url = url;
+    this.readyState = 0; // CONNECTING
+    this._abort = new AbortController();
+    this._run(headers, fetcher);
+  }
+  async _run(headers, fetcher) {
+    try {
+      const response = await fetcher(this.url, {
+        headers: { Accept: "text/event-stream", ...headers },
+        signal: this._abort.signal,
+      });
+      if (!response.ok || !response.body) throw new Error(`stream refused: ${response.status}`);
+      this.readyState = 1; // OPEN
+      this.dispatchEvent(new Event("open"));
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "", type = "message", data = [];
+      const flush = () => {
+        if (!data.length) { type = "message"; return; }
+        this.dispatchEvent(new MessageEvent(type, { data: data.join("\n") }));
+        type = "message"; data = [];
+      };
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let nl;
+        while ((nl = buffer.indexOf("\n")) >= 0) {
+          let line = buffer.slice(0, nl);
+          buffer = buffer.slice(nl + 1);
+          if (line.endsWith("\r")) line = line.slice(0, -1);
+          if (line === "") { flush(); continue; }
+          if (line.startsWith(":")) continue; // heartbeat comment
+          const colon = line.indexOf(":");
+          const field = colon < 0 ? line : line.slice(0, colon);
+          const val = colon < 0 ? "" : line.slice(colon + 1).replace(/^ /, "");
+          if (field === "event") type = val || "message";
+          else if (field === "data") data.push(val);
+        }
+      }
+    } catch (error) {
+      if (error?.name === "AbortError") return;
+    }
+    if (this.readyState !== 2) {
+      this.readyState = 2; // CLOSED
+      this.dispatchEvent(new Event("error"));
+    }
+  }
+  close() {
+    this.readyState = 2;
+    try { this._abort.abort(); } catch { /* already settled */ }
+  }
+}
+
 export class RoomClient {
   constructor({ fetcher = globalThis.fetch.bind(globalThis), events = globalThis.EventSource, accountClient = null, onSnapshot = () => {}, onStatus = () => {}, onAccessEnded = () => {} } = {}) {
     Object.assign(this, { fetcher, events, accountClient, onSnapshot, onStatus, onAccessEnded });
@@ -790,7 +854,17 @@ export class RoomClient {
     if (!this.events || !this.session) { this.onStatus("Manual refresh available; live updates unavailable"); return; }
     if (this.session.authMode === "account" && !this.ownsAccountSession()) { this.endAccess(); return; }
     const generation = this.generation, session = this.session;
-    const stream = new this.events(`${this.path("/stream")}?after=${this.sequence}${this.session.authMode === "account" ? `&auth=account&binding=${encodeURIComponent(this.session.sessionBinding)}` : ""}`);
+    const accountMode = this.session.authMode === "account";
+    const streamUrl = `${this.path("/stream")}?after=${this.sequence}${accountMode ? "&auth=account" : ""}`;
+    // L-P2-14: the session binding travels as a request header, never in
+    // the URL. Native EventSource cannot set headers, so account-mode
+    // streams use the fetch-based reader; room-key mode is unchanged.
+    const stream = accountMode
+      ? new FetchEventSource(streamUrl, {
+          headers: this.session.sessionBinding ? { "x-session-binding": this.session.sessionBinding } : {},
+          fetcher: this.fetcher,
+        })
+      : new this.events(streamUrl);
     this.stream = stream;
     const ownsStream = () => this.stream === stream && this.generation === generation && this.session === session;
     const refreshStream = receipt => this.refresh(receipt).catch(error => { if (ownsStream()) this.handleFailure(error); });
