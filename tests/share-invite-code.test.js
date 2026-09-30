@@ -34,6 +34,20 @@ test("short invite codes fold confusable letters and reject lookalikes", () => {
   assert.equal(shareJoinSecretFromText("abc def ghj"), "ABC-DEF-GHJ");
 });
 
+test("short invite codes parse out of join URLs and links", () => {
+  assert.equal(parseShareInviteCode("https://www.getdasha.com/room#code/abc-def-ghj"), "ABC-DEF-GHJ");
+  assert.equal(parseShareInviteCode("https://www.getdasha.com/room#code/ABCDEFGHJ"), "ABC-DEF-GHJ");
+  assert.equal(parseShareInviteCode("https://www.getdasha.com/room?code=abc-def-ghj"), "ABC-DEF-GHJ");
+  assert.equal(parseShareInviteCode("https://example.com/x/abc-def-ghj"), "ABC-DEF-GHJ");
+  assert.equal(parseShareInviteCode("https://www.getdasha.com/room#code/abc-def-ghj/extra"), "ABC-DEF-GHJ");
+  assert.equal(parseShareInviteCode("https://www.getdasha.com/room"), "");
+  assert.equal(parseShareInviteCode("https://example.com/x/not-a-code"), "");
+  assert.equal(parseShareInviteCode(""), "");
+  assert.equal(parseShareInviteCode(null), "");
+  assert.equal(isShareInviteCode("https://www.getdasha.com/room#code/abc-def-ghj"), true);
+  assert.equal(shareJoinSecretFromText("https://www.getdasha.com/room#code/abc-def-ghj"), "ABC-DEF-GHJ");
+});
+
 test("persisted legacy invite aliases still preview and redeem without issuing new codes", t => {
   const f = fixture(t);
   const { store, ownerKey } = f;

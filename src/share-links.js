@@ -21,7 +21,7 @@ export function humanJoinShareUrl(token, purposePath = "", locationLike = global
 
 export function consumeJoinFragment() {
   if (location.hash.startsWith("#code/")) {
-    const formatted = parseShareInviteCode(location.hash.slice(6).split("/")[0]);
+    const formatted = parseShareInviteCode(location.hash);
     history.replaceState(history.state, "", location.pathname + location.search);
     return { token: formatted || null, focus: null };
   }
