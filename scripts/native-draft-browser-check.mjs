@@ -152,7 +152,7 @@ for (const touch of [false, true]) test("draft feedback and revised result " + (
     await owner.page.locator('[data-message-action="result"][data-message-id="' + message.id + '"]').click();
     await owner.page.waitForFunction(body => document.querySelector("#action-text-body").textContent === body, message.body);
     await owner.page.locator('[name="producerId"]').selectOption("guest");
-    await owner.page.locator('[name="summary"]').fill("Contributor guide"); await owner.page.locator('[name="nextAction"]').fill("Review");
+    await owner.page.locator('#action-fields [name="summary"]').fill("Contributor guide"); await owner.page.locator('#action-fields [name="nextAction"]').fill("Review");
     await owner.page.locator("#action-form button[type=submit]").click(); await owner.page.locator("#action-dialog").waitFor({ state: "hidden" });
   };
   const review = async requestId => {
