@@ -72,6 +72,12 @@ test("enum fields reject values outside the declared set", () => {
   assert.ok(!validBountyToolArguments("bounty_read_history", { state: "spent" }));
 });
 
+test("bounty_list accepts a poster filter", () => {
+  assert.ok(validBountyToolArguments("bounty_list", { poster: "self" }));
+  assert.ok(validBountyToolArguments("bounty_list", { poster: "id:agent/jill", group: "open" }));
+  assert.ok(!validBountyToolArguments("bounty_list", { poster: "self", unknown: 1 }));
+});
+
 test("the hosted arg validator routes bounty tools through the bounty validator", () => {
   assert.ok(validHostedStdioArgs("bounty_claim", { roomId: "muse-room", bountyId: "ROOM-1" }));
   assert.ok(!validHostedStdioArgs("bounty_claim", { bountyId: "ROOM-1" }));

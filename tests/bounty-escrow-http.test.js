@@ -417,3 +417,40 @@ for (const scenario of ["revoked replay", "downgraded new write"]) test(`bounty 
   assert.equal(result.body.bounty, undefined);
   assert.equal(store.db.prepare("SELECT count(*) AS n FROM bounty_records WHERE room_id=?").get(ROOM).n, before);
 });
+
+test("?poster=self filters the bounty list to the caller's own bounties", async t => {
+  const { origin, keys } = await startServer(t);
+  // Producer posts two bounties, owner posts one.
+  const p1 = await post(origin, `/api/rooms/${ROOM}/bounties`, bountyBody({ title: "producer one" }), keys.producer);
+  assert.equal(p1.status, 201);
+  const p2 = await post(origin, `/api/rooms/${ROOM}/bounties`, bountyBody({ title: "producer two" }), keys.producer);
+  assert.equal(p2.status, 201);
+  const o1 = await post(origin, `/api/rooms/${ROOM}/bounties`, bountyBody({ title: "owner one" }), keys.owner);
+  assert.equal(o1.status, 201);
+
+  // Producer's ?poster=self sees exactly their two, all with matching poster.
+  const mineRes = await get(origin, `/api/rooms/${ROOM}/bounties?poster=self`, keys.producer);
+  assert.equal(mineRes.status, 200);
+  const mine = (await mineRes.json()).bounties;
+  assert.equal(mine.length, 2);
+  const posters = new Set(mine.map(b => b.poster));
+  assert.equal(posters.size, 1, "all returned bounties share one poster");
+
+  // Owner's ?poster=self sees only their one.
+  const theirsRes = await get(origin, `/api/rooms/${ROOM}/bounties?poster=self`, keys.owner);
+  assert.equal(theirsRes.status, 200);
+  assert.equal((await theirsRes.json()).bounties.length, 1);
+
+  // Explicit lane id works too, and composes with ?group=.
+  const lane = mine[0].poster;
+  const explicitRes = await get(origin, `/api/rooms/${ROOM}/bounties?poster=${encodeURIComponent(lane)}&group=proposed`, keys.owner);
+  assert.equal(explicitRes.status, 200);
+  const explicit = (await explicitRes.json()).bounties;
+  assert.equal(explicit.length, 2);
+  assert.ok(explicit.every(b => b.poster === lane && b.group === "proposed"));
+
+  // Unfiltered list still returns everything.
+  const allRes = await get(origin, `/api/rooms/${ROOM}/bounties`, keys.producer);
+  assert.equal(allRes.status, 200);
+  assert.equal((await allRes.json()).bounties.length, 3);
+});
