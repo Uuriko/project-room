@@ -149,6 +149,19 @@ test('readOnly constraint blocks room.post but allows reads', () => {
   assert.equal(reply.reason, 'read-only');
   assert.equal(enforcer.check('observer', 'room.read-thread', {}).allowed, true);
   assert.equal(enforcer.check('observer', 'mcp:search', {}).allowed, true);
+  // 2026-09-30 (phase-2 gap audit M-P2-2): snake_case / kebab-case names
+  // cannot smuggle a write verb past the readOnly check — ANY segment
+  // matching a write verb denies (fail-closed).
+  const snakePost = enforcer.check('observer', 'room_post_message', {});
+  assert.equal(snakePost.allowed, false);
+  assert.equal(snakePost.reason, 'read-only');
+  const kebabDelete = enforcer.check('observer', 'room-delete-message', {});
+  assert.equal(kebabDelete.allowed, false);
+  assert.equal(kebabDelete.reason, 'read-only');
+  const midVerb = enforcer.check('observer', 'mcp:send_notification', {});
+  assert.equal(midVerb.allowed, false);
+  assert.equal(midVerb.reason, 'read-only');
+  assert.equal(enforcer.check('observer', 'room_get_thread', {}).allowed, true);
 });
 
 test('audit log records every check with {agentId, tool, allowed, reason, at}', () => {

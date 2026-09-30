@@ -177,9 +177,18 @@ function normalizeGrant(agentId, grant) {
   };
 }
 
-/** Last dotted/colon/slash segment of a tool name, lower-cased. */
-function toolVerb(tool) {
-  return String(tool).split(/[.:/]/).pop().toLowerCase();
+/**
+ * Every segment of a tool name, lower-cased.
+ * 2026-09-30 (phase-2 gap audit M-P2-2): splits on [.:/_-] so snake_case
+ * (room_post_message) and kebab-case (room-post-message) names cannot hide
+ * a write verb from the readOnly check. The check denies when ANY segment
+ * is a write verb (fail-closed), not just the tail.
+ */
+function toolVerbs(tool) {
+  return String(tool)
+    .split(/[.:/_-]/)
+    .map((segment) => segment.toLowerCase())
+    .filter((segment) => segment.length > 0);
 }
 
 /** Does a grant entry's tool pattern match the requested tool? */
@@ -228,7 +237,7 @@ export function createScopeEnforcer(deps = {}) {
   /** Evaluate one constraint set against args; returns a deny reason or null. */
   function constraintViolation(constraints, tool, args) {
     if (!constraints) return null;
-    if (constraints.readOnly && WRITE_VERBS.has(toolVerb(tool))) {
+    if (constraints.readOnly && toolVerbs(tool).some((verb) => WRITE_VERBS.has(verb))) {
       return 'read-only';
     }
     if (constraints.channels !== undefined) {
