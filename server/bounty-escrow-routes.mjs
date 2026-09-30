@@ -145,7 +145,11 @@ export async function handleBountyEscrow({ req, res, url, store, roomId, auth, e
     // hidden — visibility only.
     const viewerParam = url.searchParams.get("viewer");
     const viewer = viewerParam === null ? null : viewerParam === "self" ? caller : viewerParam;
-    const bounties = runPure(reject, () => escrow.listBounties(roomId, { group, viewer }));
+    // ?poster= filters to bounties posted by a lane; "self" means the caller.
+    // Lets a poster see their own bounties (proposed, funded, or otherwise).
+    const posterParam = url.searchParams.get("poster");
+    const poster = posterParam === null ? null : posterParam === "self" ? caller : posterParam;
+    const bounties = runPure(reject, () => escrow.listBounties(roomId, { group, viewer, poster }));
     return json(res, 200, { roomId, bounties });
   }
   // Slice 10: arbiter inspection of correlation review packets. Read-only

@@ -290,7 +290,8 @@ function callBountyTool(store, secret, roomId, auth, name, rest) {
   switch (name) {
     case "bounty_list": {
       const viewer = rest.viewer === undefined ? null : rest.viewer === "self" ? caller : rest.viewer;
-      return { roomId, bounties: escrow.listBounties(roomId, { group: rest.group ?? null, viewer }) };
+      const poster = rest.poster === undefined ? null : rest.poster === "self" ? caller : rest.poster;
+      return { roomId, bounties: escrow.listBounties(roomId, { group: rest.group ?? null, viewer, poster }) };
     }
     case "bounty_read_balances":
       return { roomId, balances: escrow.balances(roomId, caller) };
