@@ -329,6 +329,16 @@ export class EmissaryGraph {
       this.db.prepare(
         "UPDATE external_identities SET venues_json=?, last_seen_at=? WHERE room_id=? AND external_id=?"
       ).run(JSON.stringify(merged), Date.now(), roomId, toExternalId);
+      // M-11a: merged venues must not exceed the cap the rest of the code assumes.
+      if (merged.length > MAX_VENUES)
+        fail(422, "too_many_venues", `merge would leave ${merged.length} venues, over the ${MAX_VENUES} cap`,
+          { external_id: toExternalId });
+      // M-11b: reassign other identities' referrers to the survivor (or NULL)
+      // before deleting the source row — otherwise referrer_external_id
+      // dangles at a deleted identity, violating the schema invariant.
+      this.db.prepare(
+        "UPDATE external_identities SET referrer_external_id=? WHERE room_id=? AND referrer_external_id=?"
+      ).run(toExternalId, roomId, fromExternalId);
       this.db.prepare(
         "DELETE FROM external_identities WHERE room_id=? AND external_id=?"
       ).run(roomId, fromExternalId);

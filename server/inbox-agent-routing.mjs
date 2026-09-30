@@ -147,7 +147,13 @@ export function createAgentRouter({ clock = () => Date.now(), id = () => randomU
         "routing_invalid", "reason must be 1..1000 well-formed characters");
       return reason;
     })() });
-    return freezeRecord({ ...next, escalatedTo: target ? Object.freeze({ ...target }) : null });
+    // M-5: the resolved target must be persisted with the record — the old
+    // code stored the pre-escalation target and only carried the new one on
+    // the returned copy, so get()/list() showed the stale target.
+    const stored = freezeRecord({ ...next,
+      escalatedTo: target ? Object.freeze({ ...target }) : null });
+    records.set(stored.routingId, stored);
+    return stored;
   }
 
   // Close the loop: the mention was handled, with the outcome on record.

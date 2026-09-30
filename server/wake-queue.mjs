@@ -311,14 +311,24 @@ export class WakeQueue {
   complete(roomId, memberId, queueKey, { requestId, leaseOwner, effect = null }) {
     return this.store.transaction(() => {
       if (!validId(requestId)) fail(422, "invalid_wake", "Supply a request ID.");
-      const prior = this.db.prepare("SELECT response FROM wake_queue_commands WHERE room_id=? AND member_id=? AND request_id=?").get(roomId, memberId, requestId);
       const row = this.db.prepare("SELECT * FROM wake_queue WHERE room_id=? AND member_id=? AND queue_key=?").get(roomId, memberId, queueKey);
-      if (prior) return { receipt: JSON.parse(prior.response), duplicate: true, wake: row ? view(row) : null };
+      // M-19: idempotency binds (requestId, queueKey) via the fingerprint — a
+      // colliding requestId from a different wake is a conflict, not a
+      // duplicate completion of this wake.
+      const fingerprint = createHash("sha256").update(JSON.stringify({ complete: queueKey, requestId })).digest("hex");
+      const prior = this.db.prepare("SELECT fingerprint,response FROM wake_queue_commands WHERE room_id=? AND member_id=? AND request_id=?").get(roomId, memberId, requestId);
+      if (prior) {
+        if (prior.fingerprint !== fingerprint) fail(409, "idempotency_conflict", "Request ID already used for a different wake command");
+        return { receipt: JSON.parse(prior.response), duplicate: true, wake: row ? view(row) : null };
+      }
+      // M-20: enforce the receipt capacity contract like every other writer —
+      // checked after the prior-receipt lookup so an exact retry at the cap
+      // still answers with its historical receipt.
+      this.receiptCapacity(roomId, memberId);
       if (!row || row.state !== "leased" || row.lease_owner !== leaseOwner) fail(409, "wake_not_leased", "Only the lease holder can complete a wake.");
       const now = this.store.now();
       this.db.prepare("UPDATE wake_queue SET state='done',lease_owner=NULL,lease_expires_at=NULL,updated_at=? WHERE room_id=? AND member_id=? AND queue_key=?").run(now, roomId, memberId, queueKey);
       const receipt = { requestId, queueKey, state: "done", effect, completedAt: now };
-      const fingerprint = createHash("sha256").update(JSON.stringify({ complete: queueKey, requestId })).digest("hex");
       this.db.prepare("INSERT INTO wake_queue_commands VALUES(?,?,?,?,?)").run(roomId, memberId, requestId, fingerprint, JSON.stringify(receipt));
       return { receipt, duplicate: false, wake: view(this.db.prepare("SELECT * FROM wake_queue WHERE room_id=? AND member_id=? AND queue_key=?").get(roomId, memberId, queueKey)) };
     });
@@ -344,6 +354,10 @@ export class WakeQueue {
   // crash-retry consumes budget exactly like an observed failure. Returns the
   // number of recovered wakes.
   recover(now = this.store.now()) {
-    return this.db.prepare("UPDATE wake_queue SET state='pending',lease_owner=NULL,lease_expires_at=NULL,updated_at=? WHERE state='leased' AND lease_expires_at<=?").run(now, now).changes;
+    // M-18: exhausted leases must not get an extra attempt after a crash —
+    // they go to dead, like fail() would have, instead of back to pending.
+    this.db.prepare("UPDATE wake_queue SET state='dead',lease_owner=NULL,lease_expires_at=NULL,last_error=?,updated_at=? WHERE state='leased' AND lease_expires_at<=? AND attempts>=max_attempts")
+      .run("crash_recovery_attempts_exhausted", now, now);
+    return this.db.prepare("UPDATE wake_queue SET state='pending',lease_owner=NULL,lease_expires_at=NULL,updated_at=? WHERE state='leased' AND lease_expires_at<=? AND attempts<max_attempts").run(now, now).changes;
   }
 }

@@ -191,7 +191,14 @@ export class PublicFace {
       // every non-DM message is treated as public. Per-channel public
       // flags are explicitly out of v1 (see DESIGN.md).
       .filter(m => m && m.toMemberId == null && typeof m.body === "string" && m.body.length > 0);
-    const start = after ? messages.findIndex(m => m.id === after) + 1 : 0;
+    // M-15: an unrecognized cursor fails closed — silently restarting from
+    // the first message would make clients re-read from the top (duplicate
+    // processing, potential infinite re-poll loop).
+    const start = after === null || after === undefined ? 0 : (() => {
+      const at = messages.findIndex(m => m.id === after);
+      if (at < 0) fail(422, "invalid_feed_cursor", "unknown feed cursor — re-fetch from the start");
+      return at + 1;
+    })();
     const page = messages.slice(Math.max(0, start), Math.max(0, start) + n);
     return Object.freeze({
       messages: Object.freeze(page.map(m => Object.freeze({

@@ -276,9 +276,16 @@ export function createFeedbackStore({ now, isReviewer, isReleaseAuthority, verif
     const key = dedupKey({ method: clean.endpoint.method, path: clean.endpoint.path,
       response: clean.attempt.response });
 
+    // M-12: a filing matching a terminally-rejected cluster re-opens the
+    // cluster as "new" instead of being absorbed as an untriageable
+    // "duplicate" — otherwise a genuine regression is silently swallowed
+    // with no path back to the triage queue.
+    const existing = clusters.get(key);
+    const reopening = existing && (existing.status === "rejected-junk" || existing.status === "rejected-user-error");
+
     // Duplicate path: merge into the cluster, cost nothing.
-    if (clusters.has(key)) {
-      const cluster = clusters.get(key);
+    if (existing && !reopening) {
+      const cluster = existing;
       cluster.count += 1;
       cluster.lastSeenAt = new Date(clock()).toISOString();
       applyVelocity(cluster);
@@ -290,19 +297,25 @@ export function createFeedbackStore({ now, isReviewer, isReleaseAuthority, verif
         cluster: Object.freeze({ ...cluster }) });
     }
 
-    // New cluster: debit the Mark cost.
+    // New cluster (or a re-opened one): debit the Mark cost.
     mark.balance -= MARK_FILING_COST;
     const id = `fb-${(++seq).toString().padStart(6, "0")}`;
     const createdAt = new Date(clock()).toISOString();
     const item = Object.freeze({ id, ...clean, status: "new", clusterKey: key, createdAt });
     items.set(id, item);
-    const cluster = { key, firstId: id, count: 1, severity: clean.severity,
+    const cluster = reopening ? existing : { key, firstId: id, count: 1, severity: clean.severity,
       status: "new", createdAt, lastSeenAt: createdAt,
       filedAt: [], heat: 0, priority: "normal",
       escalatedSeverity: null, demandSignal: false };
-    clusters.set(key, cluster);
+    if (reopening) {
+      cluster.status = "new";
+      cluster.count += 1;
+      cluster.lastSeenAt = createdAt;
+    } else {
+      clusters.set(key, cluster);
+    }
     applyVelocity(cluster);
-    return Object.freeze({ outcome: "accepted", item,
+    return Object.freeze({ outcome: reopening ? "reopened" : "accepted", item,
       cluster: Object.freeze({ ...cluster }),
       markBalance: mark.balance });
   };

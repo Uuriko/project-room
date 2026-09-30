@@ -75,7 +75,7 @@ export function reviewCoverageBySignal({ rows, splits = null, now = Date.now() }
   const bySignal = new Map();
   const touch = key => {
     if (!bySignal.has(key)) bySignal.set(key,
-      { held: 0, confirmed: 0, dismissed: 0, split: 0, total: 0, scoreSum: 0, weightSum: 0 });
+      { held: 0, confirmed: 0, dismissed: 0, split: 0, total: 0, scoreSum: 0, scored: 0, weightSum: 0 });
     return bySignal.get(key);
   };
   for (const row of clean) {
@@ -87,7 +87,9 @@ export function reviewCoverageBySignal({ rows, splits = null, now = Date.now() }
       else if (row.status === "released") stats.confirmed++;
       else stats.dismissed++;
       if (isSplit) stats.split++;
-      if (row.score !== null) stats.scoreSum += row.score;
+      // M-14: avgScore divides by the scored rows, not total rows — scoreless
+      // rows otherwise deflate the average.
+      if (row.score !== null) { stats.scoreSum += row.score; stats.scored++; }
       stats.weightSum += signal.weight;
     }
   }
@@ -106,7 +108,8 @@ export function reviewCoverageBySignal({ rows, splits = null, now = Date.now() }
         // The #567 reviewCoverage metric, per signal.
         reviewCoverage: ratio(reviewed, stats.total),
         shareOfHolds: ratio(stats.total, totalHolds),
-        avgScore: stats.total === 0 ? null : Math.round((stats.scoreSum / stats.total) * 10) / 10,
+        // M-14: guard division by zero when no row carries a score.
+        avgScore: stats.scored === 0 ? null : Math.round((stats.scoreSum / stats.scored) * 10) / 10,
         avgWeight: stats.total === 0 ? null : Math.round((stats.weightSum / stats.total) * 10) / 10,
       });
     })
