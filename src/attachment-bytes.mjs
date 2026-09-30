@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 /**
  * attachment-bytes.mjs — Pure fetch-job pipeline planner for message attachments.
  *
@@ -23,7 +24,7 @@
  *                     thrown error with `transient === true` is retried once.
  *   - maxBytes:       number        (hard byte cap; default: 25 MiB)
  *   - hasher:         (bytes) => string — content-addressed result handle;
- *                     default: FNV-1a hex (see note below)
+ *                     default: sha256 hex (see note below)
  *   - onProgress:     (jobId, bytesSoFar) => void — progress sink
  *   - mimeAllowlist:  string[] | null — if set, mimeType MUST be listed
  *   - mimeBlocklist:  string[]      — defaults to common executables
@@ -31,7 +32,8 @@
  *                     this long are swept to `expired`; default: 5 minutes
  *
  * The injected `hasher` is the content-addressed identity of the fetched
- * bytes, so production wiring MUST inject a cryptographic hash (e.g. sha256
+ * bytes. The default is sha256 hex via node:crypto (collision-resistant);
+ * a custom hasher may still be injected for tests (e.g. sha256
  * hex). The default FNV-1a is deterministic but NOT collision-resistant; it
  * exists only so the pipeline is usable/testable without any dependency.
  *
@@ -82,11 +84,10 @@ function abError(code, message, detail) {
   return err;
 }
 
-/**
- * Default content handle: FNV-1a (32-bit), hex, over raw bytes.
- * Deterministic, non-crypto — inject sha256 in production.
- */
-function fnv1aBytesHex(input) {
+// 2026-09-30 (phase-2 gap audit L-P2-16): default content handle is sha256
+// hex via node:crypto — the handle is the content-addressed identity of the
+// fetched bytes, so the default must be collision-resistant, not FNV-1a.
+function sha256BytesHex(input) {
   const bytes =
     typeof input === 'string'
       ? Buffer.from(input, 'utf8')
@@ -99,12 +100,7 @@ function fnv1aBytesHex(input) {
       'Hasher received bytes it cannot read (expected Uint8Array or string)',
     );
   }
-  let h = 0x811c9dc5;
-  for (let i = 0; i < bytes.length; i += 1) {
-    h ^= bytes[i];
-    h = Math.imul(h, 0x01000193);
-  }
-  return (h >>> 0).toString(16).padStart(8, '0');
+  return createHash("sha256").update(bytes).digest("hex");
 }
 
 /** Normalize fetched bytes to a Uint8Array; throw AB_FETCH_FAILED otherwise. */
@@ -132,7 +128,7 @@ function toBytes(bytes) {
  */
 export function createAttachmentBytes(deps = {}) {
   const clock = deps.clock ?? (() => Date.now());
-  const hasher = deps.hasher ?? fnv1aBytesHex;
+  const hasher = deps.hasher ?? sha256BytesHex;
   const maxBytes = deps.maxBytes ?? DEFAULT_MAX_BYTES;
   const onProgress = deps.onProgress ?? (() => {});
   const stallTimeoutMs = deps.stallTimeoutMs ?? DEFAULT_STALL_TIMEOUT_MS;

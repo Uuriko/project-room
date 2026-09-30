@@ -303,3 +303,16 @@ describe('gmail-send-gate', () => {
     ]);
   });
 });
+
+describe('L-P2-16: default hash is sha256', () => {
+  it('contentHash is a 64-char sha256 hex of the canonical content', async () => {
+    const { createHash } = await import('node:crypto');
+    const gate = createGmailSendGate(); // no deps.hash: default generator
+    const draft = { to: 'a@example.com', subject: 'hi', body: 'hello' };
+    const created = gate.createDraft(draft, 'agent');
+    const canonical = JSON.stringify({ to: 'a@example.com', subject: 'hi', body: 'hello' });
+    const expected = createHash('sha256').update(canonical, 'utf8').digest('hex');
+    assert.equal(created.contentHash, expected);
+    assert.ok(/^[0-9a-f]{64}$/.test(created.contentHash));
+  });
+});

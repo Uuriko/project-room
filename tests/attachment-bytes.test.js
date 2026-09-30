@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { createHash } from 'node:crypto';
 import assert from 'node:assert/strict';
 
 import {
@@ -24,14 +25,9 @@ function bytesOf(n, fill = 0x41) {
   return b;
 }
 
-/** Deterministic FNV-1a over raw bytes (mirrors the module default). */
-function fnv1a(bytes) {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < bytes.length; i += 1) {
-    h ^= bytes[i];
-    h = Math.imul(h, 0x01000193);
-  }
-  return (h >>> 0).toString(16).padStart(8, '0');
+/** SHA-256 hex over raw bytes (mirrors the module default). */
+function sha256(bytes) {
+  return createHash("sha256").update(bytes).digest("hex");
 }
 
 const SPEC = () => ({
@@ -70,9 +66,9 @@ test('happy path: queued → fetching → fetched with byte count and handle', a
   assert.equal(done.state, 'fetched');
   assert.equal(done.byteLength, 128);
   assert.equal(done.bytesSoFar, 128);
-  assert.equal(done.handle, fnv1a(payload));
+  assert.equal(done.handle, sha256(payload));
   assert.equal(done.attempts, 1);
-  assert.ok(/^[0-9a-f]{8}$/.test(done.handle));
+  assert.ok(/^[0-9a-f]{64}$/.test(done.handle));
 });
 
 test('too-large declaredSize rejected at enqueue', async () => {
