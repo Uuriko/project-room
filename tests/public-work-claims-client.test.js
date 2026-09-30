@@ -127,3 +127,25 @@ test('maximum legal matching packets remain readable within a bounded response',
   assert.equal(maximum.acceptanceCriteria[19], '雪'.repeat(1000));
   assert.ok(Buffer.byteLength(JSON.stringify(result), 'utf8') > 262144);
 });
+
+test('saved-identity feedback rejects malformed or private follow-up pointers from an HTTP intermediary', async t => {
+  const f = await fixture(t);
+  const claim = await f.firstClient.claim('client:task', { requestId: 'pointer-claim', expectedTermsVersion: 1 });
+  const { receipt } = await f.firstClient.finish('client:task', { requestId: 'pointer-finish', expectedTermsVersion: 1, generation: claim.task.claim.generation, artifactText: 'Original pointer fixture', checksReported: [] });
+  const binding = { taskId: receipt.taskId, expectedTermsVersion: receipt.termsVersion, generation: receipt.generation, artifactSha256: receipt.artifact.sha256 };
+  f.store.publicWorkReviews.decide('commons', 'owner', receipt.receiptId, { ...binding, requestId: 'pointer-revision', expectedReviewRevision: 0, decision: 'revision_requested', reason: 'Original contributor feedback' });
+  f.store.publicWorkSuccessors.create('commons', 'owner', receipt.receiptId, { ...binding, requestId: 'pointer-follow-up', expectedReviewRevision: 1, successorTaskId: 'client:follow-up', terms: { kind: 'task', title: 'Explicit follow-up', summary: 'Public instructions', acceptanceCriteria: ['Return new bytes'], repositoryUrl: 'https://github.com/Uuriko/project-room', reward: { kind: 'unpaid' }, approvalPolicy: { mode: 'human' } }, repositoryRef: 'main', files: ['src/public-contribution.js'] });
+  assert.deepEqual((await f.firstClient.readReview(receipt)).followUp, { taskId: 'client:follow-up', termsVersion: 1, available: true });
+  let pointer;
+  const proxy = createServer(async (request, response) => {
+    const upstream = await fetch(f.origin + request.url, { headers: { Authorization: request.headers.authorization }, redirect: 'error', credentials: 'omit' });
+    const feedback = await upstream.json(); feedback.followUp = pointer;
+    response.writeHead(upstream.status, { 'Content-Type': 'application/json' }); response.end(JSON.stringify(feedback));
+  });
+  await new Promise(resolve => proxy.listen(0, '127.0.0.1', resolve));
+  t.after(async () => { proxy.closeAllConnections(); await new Promise(resolve => proxy.close(resolve)); });
+  const intercepted = new PublicWorkClaimsClient({ origin: `http://127.0.0.1:${proxy.address().port}`, identitySecret: f.first.secret });
+  for (pointer of [null, {}, { taskId: 'child', termsVersion: 1 }, { taskId: 'child', termsVersion: 0, available: true }, { taskId: 'child', termsVersion: 1, available: 'true' }, { taskId: 'child', termsVersion: 1, available: true, roomId: 'private' }]) {
+    await assert.rejects(intercepted.readReview(receipt), error => error.code === 'invalid_response');
+  }
+});
