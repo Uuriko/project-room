@@ -18,13 +18,13 @@ function fixture(t) {
   store.db.exec(publicWorkClaimsSchema); store.db.exec(publicWorkClaimFenceSchema);
   const identities = [store.identities.create('First worker'), store.identities.create('Second worker')];
   const service = () => new PublicWorkClaims(store);
-  const enable = (id, files = ['src/shared.js'], reward = { kind: 'unpaid' }, reference = 'main') => {
+  const enable = (id, files = ['src/shared.js'], reward = { kind: 'unpaid' }, reference = 'main', roomId = 'commons') => {
     const input = { requestId: `create-${id}`, offerId: id, reviewerMemberIds: ['owner'],
       terms: { kind: 'task', title: id, summary: 'Public result', acceptanceCriteria: ['Deliver the declared change'],
         repositoryUrl: 'https://github.com/Example/Project', reward, approvalPolicy: { mode: 'human' } } };
-    store.projectOffers.create('commons', 'owner', input);
-    store.projectOffers.transition('commons', 'owner', id, 'publish', { requestId: `publish-${id}`, expectedRevision: 1 });
-    return service().enable('commons', 'owner', id, { requestId: `enable-${id}`, expectedRevision: 2, expectedTermsVersion: 1, repositoryRef: reference, files });
+    store.projectOffers.create(roomId, 'owner', input);
+    store.projectOffers.transition(roomId, 'owner', id, 'publish', { requestId: `publish-${id}`, expectedRevision: 1 });
+    return service().enable(roomId, 'owner', id, { requestId: `enable-${id}`, expectedRevision: 2, expectedTermsVersion: 1, repositoryRef: reference, files });
   };
   t.after(() => { store.close(); rmSync(dir, { recursive: true, force: true }); });
   return { get store() { return store; }, service, identities, enable,
@@ -129,4 +129,87 @@ test('explicit opt-in and strict terms/lease/artifact limits refuse without clai
   assert.equal(verifyPublicWorkClaimFence(f.store.db), true);
   f.store.db.prepare('UPDATE agent_identities SET revoked_at=? WHERE identity_id=?').run(f.store.now(), a.identityId);
   assert.throws(() => f.service().act('limits-task', a.secret, 'claim', claim('good')), code('unauthenticated'));
+});
+
+// Matching must choose through the exact same durable path-lock/lease mutation,
+// not a second assignment ledger. Suggestions alone never reserve anything.
+test('anonymous recommendations are grounded, bounded, and leave the registry/journal unchanged', t => {
+  const f = fixture(t), [a] = f.identities;
+  f.enable('a-docs', ['docs']); f.enable('b-typescript', ['src']); f.enable('c-overlap', ['src/file.js']);
+  const before = f.store.db.prepare('SELECT count(*) AS n FROM public_work_requests').get().n;
+  const result = f.service().match(null, { skills: ['typescript'], limit: 1 });
+  assert.equal(result.recommendations[0].task.taskId, 'b-typescript');
+  assert.deepEqual(result.recommendations[0].reasons, ['Matches preference: typescript']);
+  assert.equal(result.claim, null); assert.equal(result.inspected, 3);
+  assert.deepEqual(result.supportedRewards, ['volunteer']);
+  assert.equal(f.store.db.prepare('SELECT count(*) AS n FROM public_work_requests').get().n, before);
+  assert.ok(f.service().list().tasks.every(task => task.claim.state === 'unclaimed'));
+  f.service().act('b-typescript', a.secret, 'claim', claim('hold-src'));
+  assert.deepEqual(f.service().match(null, {}).recommendations.map(entry => entry.task.taskId), ['a-docs']);
+  f.tick(3600001);
+  assert.equal(f.service().match(null, {}).recommendations.length, 3);
+  for (const reward of ['cash', 'work_trade']) assert.deepEqual(f.service().match(null, { reward }), {
+    recommendations: [], claim: null, inspected: 0, hasMore: false, nextCursor: null, supportedRewards: ['volunteer'] });
+  assert.throws(() => f.service().match(null, { autoClaim: true, requestId: 'no-auth' }), code('unauthenticated'));
+  assert.throws(() => f.service().match('revoked', {}), code('unauthenticated'));
+  assert.throws(() => f.service().match(null, { skills: ['bad\nvalue'] }), code('invalid_public_work'));
+});
+
+test('explicit match claims exactly one task and retry retains chosen outcome through expiry/withdrawal/restart', t => {
+  const f = fixture(t), [a, b] = f.identities;
+  f.enable('a-docs', ['docs']); f.enable('b-typescript', ['src']); f.enable('c-overlap', ['src/file.js']);
+  const input = { requestId: 'find-one', skills: ['typescript'], autoClaim: true };
+  const result = f.service().match(a.secret, input);
+  assert.equal(result.claim.action, 'claimed'); assert.equal(result.claim.task.taskId, 'b-typescript');
+  assert.equal(f.service().list().tasks.filter(task => task.claim.state === 'claimed').length, 1);
+  assert.deepEqual(f.service().match(a.secret, input), result);
+  assert.throws(() => f.service().match(a.secret, { ...input, interests: ['docs'] }), code('request_id_reused'));
+  // Different identity cannot take this task or its overlapping paths; it gets docs.
+  const second = f.service().match(b.secret, { requestId: 'find-one', autoClaim: true });
+  assert.equal(second.claim.task.taskId, 'a-docs');
+  f.store.projectOffers.transition('commons', 'owner', 'b-typescript', 'withdraw', { requestId: 'withdraw-match', expectedRevision: 2 });
+  f.tick(3600001); f.reopen();
+  assert.deepEqual(f.service().match(a.secret, input), result);
+  assert.equal(f.store.db.prepare('SELECT enabled FROM public_work_claim_writer_permit').get().enabled, 0);
+  assert.equal(f.store.db.prepare('SELECT count(*) AS n FROM identity_links').get().n, 0);
+  f.store.db.prepare('UPDATE agent_identities SET secret_hash=? WHERE identity_id=?').run('revoked', a.identityId);
+  assert.throws(() => f.service().match(a.secret, input), code('unauthenticated'));
+});
+
+test('matching exposes continuation when the first hundred tasks are held and rejects invalid cursors', t => {
+  const f = fixture(t), [a, b] = f.identities;
+  f.store.initialize(initialRoom('overflow'));
+  for (let n = 0; n < 101; n++) {
+    const id = 'page-' + String(n).padStart(3, '0');
+    f.enable(id, ['files/' + id], { kind: 'unpaid' }, 'main', n === 100 ? 'overflow' : 'commons');
+    if (n < 100) f.service().act(id, a.secret, 'claim', claim('hold-' + id));
+  }
+  const page = f.service().match(null, {});
+  assert.deepEqual(page.recommendations, []); assert.equal(page.inspected, 100);
+  assert.equal(page.hasMore, true); assert.equal(page.nextCursor, 'page-099');
+  const next = f.service().match(b.secret, { requestId: 'next-page', after: page.nextCursor, autoClaim: true });
+  assert.equal(next.claim.task.taskId, 'page-100'); assert.equal(next.inspected, 1);
+  assert.equal(next.hasMore, false); assert.equal(next.nextCursor, null);
+  assert.deepEqual(f.service().match(b.secret, { requestId: 'next-page', after: page.nextCursor, autoClaim: true }), next);
+  assert.throws(() => f.service().match(null, { after: '../bad' }), code('invalid_public_work'));
+  assert.throws(() => f.service().match(b.secret, { requestId: 'next-page', autoClaim: true }), code('request_id_reused'));
+});
+
+test('direct claim journal cannot impersonate a later matchmaking lease', t => {
+  const f = fixture(t), [a] = f.identities; f.enable('alias-task');
+  const matchRequest = 'future-match';
+  const predicted = 'match_' + createHash('sha256').update(a.identityId + '\n' + matchRequest).digest('hex');
+  f.service().act('alias-task', a.secret, 'claim', claim(predicted));
+  f.service().act('alias-task', a.secret, 'release', owned('release-old', 1));
+  const input = { requestId: matchRequest, autoClaim: true };
+  const result = f.service().match(a.secret, input);
+  assert.equal(result.claim.task.claim.generation, 2);
+  assert.equal(f.service().read('alias-task').claim.state, 'claimed');
+  assert.equal(f.service().read('alias-task').claim.generation, 2);
+  assert.deepEqual(f.service().match(a.secret, input), result);
+});
+
+test('equally relevant recommendations prefer oldest work within the scanned page', t => {
+  const f = fixture(t); f.enable('z-older', ['old']); f.tick(1000); f.enable('a-newer', ['new']);
+  assert.deepEqual(f.service().match(null, {}).recommendations.map(entry => entry.task.taskId), ['z-older', 'a-newer']);
 });

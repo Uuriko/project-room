@@ -149,8 +149,13 @@ export class PublicWorkClaims {
     return withPublicWorkClaimWriter(this.store, () => {
       const identity = this.store.identities.resolveGlobalIdentitySecret(secret);
       if (!identity) fail(401, 'unauthenticated', 'Unknown or revoked identity');
-      const row = this.task(offerId);
-      return this.request(row, identity.identityId, action, input, () => {
+      return this.apply(offerId, identity, action, input);
+    });
+  }
+  // Both direct commands and matchmaking share the same serialized claim path.
+  apply(offerId, identity, action, input, journal = true) {
+    const row = this.task(offerId);
+      const operation = () => {
         if (input.expectedTermsVersion !== row.terms_version) fail(409, 'stale_public_work', 'Task terms changed');
         if (this.db.prepare('SELECT 1 FROM public_work_receipts WHERE offer_id=? AND generation=?').get(offerId, row.generation))
           fail(409, 'public_work_already_submitted', 'This task already has a submitted receipt');
@@ -181,7 +186,6 @@ export class PublicWorkClaims {
         this.store.workClaims.set(row.namespace_key, item);
         const outcome = { action: { claim: 'claimed', renew: 'renewed', release: 'released', finish: 'submitted' }[action], task: this.packet(row, item, offer) };
         if (action === 'finish') {
-          if (this.db.prepare('SELECT 1 FROM public_work_receipts WHERE offer_id=? AND generation=?').get(offerId, row.generation)) fail(409, 'public_work_already_submitted', 'This claim already has a submitted receipt');
           check(typeof input.artifactText === 'string' && Buffer.byteLength(input.artifactText, 'utf8') <= 65536
             && Buffer.from(input.artifactText, 'utf8').toString('utf8') === input.artifactText, 'Artifact must be valid UTF-8 text no larger than 64 KiB');
           check(Array.isArray(input.checksReported) && input.checksReported.length <= 20 && input.checksReported.every(text => typeof text === 'string' && text.length > 0 && text.length <= 1000), 'Invalid caller-reported checks');
@@ -197,9 +201,58 @@ export class PublicWorkClaims {
           outcome.task = this.packet(row, item, offer);
         }
         return outcome;
-      });
+      };
+      return journal ? this.request(row, identity.identityId, action, input, operation) : operation();
+  }
+  match(secret, input) {
+    shape(input, [], ['requestId', 'skills', 'interests', 'reward', 'autoClaim', 'limit', 'leaseHours', 'after']);
+    if (input.requestId !== undefined) check(identifier(input.requestId), 'Invalid request ID');
+    const limit = input.limit ?? 3, reward = input.reward ?? 'volunteer';
+    check(Number.isInteger(limit) && limit >= 1 && limit <= 5 && ['volunteer', 'work_trade', 'cash'].includes(reward), 'Invalid matching preferences');
+    check(input.autoClaim === undefined || typeof input.autoClaim === 'boolean', 'autoClaim must be explicit boolean');
+    const preferences = ['skills', 'interests'].flatMap(key => {
+      const values = input[key] ?? [];
+      check(Array.isArray(values) && values.length <= 20 && values.every(value => typeof value === 'string' && value.trim().length > 0 && value.length <= 100 && !/[\x00-\x1f\x7f]/.test(value)), 'Invalid matching preferences');
+      return values.map(value => value.trim().toLowerCase());
+    });
+    check(input.after === undefined || identifier(input.after), 'Invalid matching cursor');
+    lease(input.leaseHours);
+    const run = operation => input.autoClaim === true ? withPublicWorkClaimWriter(this.store, operation) : this.store.readTransaction(operation);
+    return run(() => {
+      const identity = secret ? this.store.identities.resolveGlobalIdentitySecret(secret) : null;
+      if ((secret || input.autoClaim === true) && !identity) fail(401, 'unauthenticated', 'Unknown or revoked identity');
+      const recommend = () => {
+        const outcome = { recommendations: [], claim: null, inspected: 0, hasMore: false, nextCursor: null, supportedRewards: ['volunteer'] };
+        if (reward !== 'volunteer') return outcome;
+        const page = this.list({ limit: 100, after: input.after ?? '' });
+        outcome.inspected = page.tasks.length; outcome.hasMore = page.nextCursor !== null; outcome.nextCursor = page.nextCursor;
+        const ages = new Map(page.tasks.length ? this.db.prepare(`SELECT offer_id,created_at FROM public_work_tasks WHERE offer_id IN (${page.tasks.map(() => '?').join(',')})`).all(...page.tasks.map(task => task.taskId)).map(row => [row.offer_id, row.created_at]) : []);
+        const candidates = page.tasks.filter(task => {
+          if (task.claim.state !== 'unclaimed') return false;
+          return !releaseExpired(this.store.workClaims.list(task.namespaceId), this.store.now()).some(other =>
+            other.id !== task.taskId && other.owner && other.files.some(path => task.files.some(file => overlaps(path, file))));
+        }).map(task => {
+          const text = [task.title, ...task.acceptanceCriteria].join(' ').toLowerCase();
+          const matched = [...new Set(preferences.filter(value => text.includes(value)))];
+          return { task, score: matched.length, reasons: matched.length ? matched.map(value => 'Matches preference: ' + value) : ['Available volunteer task with declared repository paths'] };
+        }).sort((left, right) => right.score - left.score || ages.get(left.task.taskId) - ages.get(right.task.taskId) || (left.task.taskId < right.task.taskId ? -1 : left.task.taskId > right.task.taskId ? 1 : 0));
+        outcome.recommendations = candidates.slice(0, limit).map(({ task, reasons }) => ({ task, reasons }));
+        if (input.autoClaim === true && candidates.length) {
+          const selected = candidates[0].task;
+          const claimInput = { expectedTermsVersion: selected.termsVersion };
+          // The outer @match journal owns this choice; direct-command keys cannot alias it.
+          if (input.leaseHours !== undefined) claimInput.leaseHours = input.leaseHours;
+          outcome.claim = this.apply(selected.taskId, identity, 'claim', claimInput, false);
+          outcome.recommendations = [{ task: outcome.claim.task, reasons: candidates[0].reasons }, ...candidates.slice(1).filter(candidate =>
+            candidate.task.namespaceId !== selected.namespaceId || !candidate.task.files.some(path => selected.files.some(file => overlaps(path, file))))
+            .slice(0, limit - 1).map(({ task, reasons }) => ({ task, reasons }))];
+        }
+        return outcome;
+      };
+      return input.autoClaim === true ? this.request({ offer_id: '@match' }, identity.identityId, 'match', input, recommend) : recommend();
     });
   }
+
   receipt(receiptId) {
     check(identifier(receiptId), 'Invalid receipt ID');
     const row = this.available() && this.db.prepare('SELECT receipt_json FROM public_work_receipts WHERE receipt_id=?').get(receiptId);
