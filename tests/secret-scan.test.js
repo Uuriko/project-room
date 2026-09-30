@@ -125,3 +125,25 @@ test("the gate allows a token assembled at runtime and still catches a literal o
   assert.equal(scan(`  const token = \`prefix-\${x}-${literal}\`;`).length > 0, true, "and so is one beside an interpolation");
   assert.equal(scan(`  const password = "${literal}";`).length > 0, true);
 });
+
+test("H-19: an allowlisted token does not silence a co-located secret", () => {
+  const awsKey = fakeAwsKey();
+  // example.com is allowlisted (docs URLs) but must not exempt the AWS key
+  // sharing the line. The pre-fix whole-line check returned zero findings.
+  const findings = scanText(`see example.com for docs; key ${awsKey}`, { allowlist: [/example\.com/] });
+  assert.equal(findings.length, 1);
+  assert.equal(findings[0].rule, "aws-access-key");
+});
+
+test("H-19: an allowlist match that overlaps the finding still suppresses it", () => {
+  const awsKey = fakeAwsKey();
+  const findings = scanText(`key ${awsKey}`, { allowlist: [/AKIA[0-9A-Z]{16}/] });
+  assert.deepEqual(findings, [], "the allowlist still works when it covers the finding itself");
+});
+
+test("H-19: a high-entropy token beside an allowlisted word is still flagged", () => {
+  const secret = highEntropySecret();
+  const findings = scanLines([`example.com deployed ${secret} ok`], { allowlist: [/example\.com/] });
+  assert.equal(findings.length, 1);
+  assert.equal(findings[0].rule, "high-entropy");
+});

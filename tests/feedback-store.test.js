@@ -254,7 +254,7 @@ test("outcome recording pays the filer +10 and confirms the reviewer", () => {
   assert.equal(o.attributions[0].mergeBonus, MARK_MERGE_BONUS);
   assert.equal(store.mark("jill").balance, before + MARK_MERGE_BONUS);
   assert.equal(store.get(r.item.id).status, "merged");
-  throwsCode(() => store.recordOutcome({ feedbackIds: [r.item.id], kind: "merged", ref: "PR #123" }), "invalid_transition");
+  throwsCode(() => store.recordOutcome({ feedbackIds: [r.item.id], kind: "merged", ref: "PR #123", recordedBy: "reviewer-a" }), "invalid_transition");
 });
 
 test("promotions that never ship go stale (precision signal, no Mark penalty)", () => {
@@ -297,4 +297,76 @@ test("cluster velocity: heat ≥ 5/day fast-tracks the cluster", () => {
   const queue = store.triageQueue();
   assert.equal(queue[0].key, key, "fast-tracked clusters sort first");
   assert.equal(store.clusterHeat(key), 5);
+});
+
+test("H-2: triage requires the reviewer role when authority is configured", () => {
+  const store = createFeedbackStore({ isReviewer: ["reviewer-a"] });
+  const r = store.submit(goodFiling());
+  // The pre-fix store let any non-guest lane triage and move Mark.
+  throwsCode(() => store.triage(r.item.id, "real", "mallory"), "not_reviewer");
+  const t = store.triage(r.item.id, "real", "reviewer-a");
+  assert.equal(t.item.verdict, "real");
+});
+
+test("H-2: appeal decisions require the reviewer role", () => {
+  const store = createFeedbackStore({ isReviewer: ["reviewer-a", "reviewer-b"] });
+  const r = store.submit(goodFiling());
+  store.triage(r.item.id, "junk", "reviewer-a");
+  store.appeal(r.item.id, "jill");
+  throwsCode(() => store.decideAppeal(r.item.id, "mallory", "overturn"), "not_reviewer");
+  const d = store.decideAppeal(r.item.id, "reviewer-b", "overturn");
+  assert.equal(d.item.status, "promoted");
+});
+
+test("H-2: outcome recording requires a release authority (not a self-reported ref)", () => {
+  const store = createFeedbackStore({ isReviewer: ["reviewer-a"], isReleaseAuthority: ["owner"] });
+  const r = store.submit(goodFiling());
+  store.triage(r.item.id, "real", "reviewer-a");
+  // recordedBy is now required and must hold release authority.
+  throwsCode(() => store.recordOutcome({ feedbackIds: [r.item.id], kind: "merged", ref: "PR #123" }), "invalid_outcome");
+  throwsCode(
+    () => store.recordOutcome({ feedbackIds: [r.item.id], kind: "merged", ref: "PR #123", recordedBy: "reviewer-a" }),
+    "not_release_authority");
+  const o = store.recordOutcome({ feedbackIds: [r.item.id], kind: "merged", ref: "PR #123", recordedBy: "owner" });
+  assert.equal(o.attributions.length, 1);
+  assert.equal(store.get(r.item.id).status, "merged");
+});
+
+test("H-2: a configured verifyMergeRef hook must verify merged refs", () => {
+  const store = createFeedbackStore({
+    isReviewer: ["reviewer-a"],
+    isReleaseAuthority: ["owner"],
+    verifyMergeRef: ref => ref === "PR #123",
+  });
+  const r1 = store.submit(goodFiling());
+  store.triage(r1.item.id, "real", "reviewer-a");
+  throwsCode(
+    () => store.recordOutcome({ feedbackIds: [r1.item.id], kind: "merged", ref: "PR #999", recordedBy: "owner" }),
+    "unverified_merge_ref");
+  // Adopted outcomes are not merge refs: the hook is not consulted.
+  const r2 = store.submit(goodFiling({
+    endpoint: { method: "POST", path: "/api/rooms/abc123/other-endpoint" },
+    attempt: {
+      goal: "a distinct filing for the adopted path",
+      request: { method: "POST", path: "/api/rooms/abc123/other-endpoint", body: {} },
+      response: { status: 500, body: { error: "boom" } },
+    },
+  }));
+  store.triage(r2.item.id, "real", "reviewer-a");
+  const o = store.recordOutcome({ feedbackIds: [r2.item.id], kind: "adopted", ref: "decision-1", recordedBy: "owner" });
+  assert.equal(store.get(r2.item.id).status, "adopted");
+  assert.equal(o.attributions.length, 1);
+});
+
+test("H-2: authority config accepts predicates and rejects invalid values", () => {
+  const store = createFeedbackStore({ isReviewer: lane => lane.endsWith("-reviewer") });
+  const r = store.submit(goodFiling());
+  throwsCode(() => store.triage(r.item.id, "real", "mallory"), "not_reviewer");
+  store.triage(r.item.id, "real", "senior-reviewer");
+  assert.throws(
+    () => createFeedbackStore({ isReviewer: "reviewer-a" }),
+    err => err.code === "invalid_authority");
+  assert.throws(
+    () => createFeedbackStore({ verifyMergeRef: "yes" }),
+    err => err.code === "invalid_authority");
 });
