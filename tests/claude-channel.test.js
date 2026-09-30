@@ -151,7 +151,7 @@ test('startup surfaces historical addressed attention immediately even when the 
     messageId: 'historical-question', body: 'Synthetic private question', toMemberId: 'receiver', requestKind: 'reply' } });
   assert.equal(f.store.agentHeartbeats.pendingWakes(f.agent.identityId).length, 0);
   const p = peer(t, f); await p.initialize(); p.send({ method: 'notifications/initialized' });
-  const notice = await p.wait(frame => frame.method === 'notifications/claude/channel' && frame.params.meta.source === 'startup_attention');
+  const notice = await p.wait(frame => frame.method === 'notifications/claude/channel' && frame.params.meta.notice_kind === 'startup_attention');
   assert.ok(!notice.params.content.includes('Synthetic private question'), 'startup publishes no private message body');
   assert.equal(f.store.agentHeartbeats.pendingWakes(f.agent.identityId).length, 0);
 });

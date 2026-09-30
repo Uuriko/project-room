@@ -34,7 +34,7 @@ export function serveClaudeRoomChannel({ connection, hostId, cadenceSeconds, inp
             .some(observations => observations.attention.length || observations.obligations.some(row => row.needsAttention));
           if (hasAttention) {
             if (!await transport.notifyChannel('Existing Room attention may be waiting. Read room_read_inbox and current work before acting. This notice does not mark anything handled.',
-              { room_id: connection.roomId, source: 'startup_attention', partial: String(partial) })) break;
+              { room_id: connection.roomId, notice_kind: 'startup_attention', partial: String(partial) })) break;
           }
         }
         for (const signal of result.pendingWakes) {
