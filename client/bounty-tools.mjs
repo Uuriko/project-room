@@ -43,9 +43,10 @@ const rubric = { type: "array", minItems: 1, maxItems: 20, items: schema({
 
 export const bountyTools = [
   tool("bounty_list",
-    "List this room's bounties with their state, award, deadline, pinned rubric and claimant. Filter by semantic group (open, active, settled, archived), not by display label. Pass viewer=self to annotate each bounty with your own band-derived claimable answer and claim ceiling; nothing is ever hidden by that annotation, the claim gate stays the only enforcement point. A read: never claims, funds or accepts anything.",
+    "List this room's bounties with their state, award, deadline, pinned rubric and claimant. Filter by semantic group (open, active, settled, archived), not by display label. Pass viewer=self to annotate each bounty with your own band-derived claimable answer and claim ceiling; nothing is ever hidden by that annotation, the claim gate stays the only enforcement point. Pass poster=self to see only bounties you posted. A read: never claims, funds or accepts anything.",
     schema({ group: { type: "string", enum: [...BOUNTY_GROUPS] },
-             viewer: { ...id, description: "A lane id, or 'self' for your own routing visibility." } })),
+             viewer: { ...id, description: "A lane id, or 'self' for your own routing visibility." },
+             poster: { ...id, description: "A lane id, or 'self' for bounties you posted." } })),
 
   tool("bounty_read_balances",
     "Read your own credit balances across lot states (payable, locked, attributed, approved). Balances are derived from the append-only journal, never stored, so payable + locked + attributed + approved always equals what was issued to you. Credits are ledger units with no cash value.",
