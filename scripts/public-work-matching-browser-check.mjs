@@ -1,6 +1,7 @@
 // Actual owner enable → anonymous suggestions → outside-agent claim. No live services.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { chromium } from 'playwright';
 import { createAcceptanceFixture } from './acceptance-fixture.mjs';
 import { signInFixtureInPlace } from './in-place-fixture-signin.mjs';
@@ -70,6 +71,25 @@ for (const width of [1280, 320]) test(`owner enables scoped public work and anon
   const claimed = await client.claim(offerId, { requestId: 'human-handoff-claim', expectedTermsVersion: 1 }); assert.equal(claimed.task.claim.identityId, identity.identityId);
   assert.equal(f.store.db.prepare('SELECT count(*) AS n FROM identity_links WHERE identity_id=?').get(identity.identityId).n, 0);
   await visitor.locator('#find-work-form [name=reward]').selectOption('volunteer'); await visitor.locator('#find-work-form [type=submit]').click(); await visitor.locator('#find-work-status').filter({ hasText: 'No matching public tasks' }).waitFor();
+  await visitor.goto(`${f.origin}/offers?offer=${offerId}`); await visitor.locator('#contribution-status').filter({ hasText: 'Agent working' }).waitFor();
+  const artifactText = '<script>throw new Error("untrusted artifact")</script>\n雪 🧪';
+  const submitted = await client.finish(offerId, { requestId: 'human-handoff-finish', expectedTermsVersion: 1, generation: claimed.task.claim.generation, artifactText, checksReported: ['Contributor-reported check'] });
+  if (width === 320) await visitor.reload(); else await visitor.locator('#refresh-offers').click();
+  await visitor.locator('#contribution-artifact').waitFor();
+  assert.match(await visitor.locator('#contribution-status').textContent(), /Submitted/); assert.match(await visitor.locator('#contribution-status').textContent(), /review pending/); assert.match(await visitor.locator('#contribution-status').textContent(), /Hash-only/);
+  assert.match(await visitor.locator('#contribution-artifact').textContent(), new RegExp(`${Buffer.byteLength(artifactText, 'utf8')} bytes`));
+  assert.equal(await visitor.locator('#contribution-status script').count(), 0);
+  if (process.env.ROOM_MATCH_SCREENSHOT_DIR) await visitor.locator('#contribution-status').screenshot({ path: `${process.env.ROOM_MATCH_SCREENSHOT_DIR}/public-contribution-result-${width}.png` });
+  const artifactPath = await visitor.locator('#contribution-artifact').getAttribute('href'), receiptPath = await visitor.locator('#contribution-receipt').getAttribute('href');
+  assert.equal(artifactPath, `/api/public-work/receipts/${submitted.receipt.receiptId}/artifact`);
+  assert.equal((await (await visitor.request.get(f.origin + receiptPath)).json()).receiptId, submitted.receipt.receiptId);
+  const [download] = await Promise.all([visitor.waitForEvent('download'), visitor.locator('#contribution-artifact').click()]);
+  assert.deepEqual(readFileSync(await download.path()), Buffer.from(artifactText, 'utf8'));
+  f.store.projectOffers.transition('commons', 'owner', offerId, 'withdraw', { requestId: 'after-submission-withdraw', expectedRevision: 2 });
+  if (width === 320) await visitor.reload(); else await visitor.locator('#refresh-offers').click();
+  await visitor.locator('#detail-title').filter({ hasText: 'Offer unavailable' }).waitFor();
+  assert.equal((await visitor.request.get(f.origin + artifactPath)).status(), 200, 'immutable public submission survives withdrawal');
+
 });
 
 
@@ -88,6 +108,19 @@ test('an empty bounded recommendation page offers a working next scan', { timeou
   await f.page.locator('#more-matches').click(); await f.page.locator('[data-match-offer="page-100"]').waitFor();
   assert.equal(await f.page.locator('#more-matches').isVisible(), false);
   assert.equal(f.store.publicWorkClaims.read('page-100').claim.state, 'unclaimed');
+  let observed, release, delivered;
+  const oldObserved = new Promise(resolve => { observed = resolve; }), held = new Promise(resolve => { release = resolve; }), oldDelivered = new Promise(resolve => { delivered = resolve; });
+  await f.page.route('**/api/public-work/tasks/page-100', async route => {
+    const response = await route.fetch(); observed(); await held;
+    try { await route.fulfill({ response }); } finally { delivered(); }
+  });
+  await f.page.locator('[data-match-offer="page-100"]').click(); await oldObserved;
+  await f.page.locator('[data-close]').click(); await f.page.locator('[data-offer="page-000"]').click();
+  await f.page.locator('#contribution-status').filter({ hasText: 'Agent working' }).waitFor();
+  release(); await oldDelivered; await f.page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  assert.match(await f.page.locator('#contribution-status').textContent(), /Agent working/);
+  assert.equal(await f.page.locator('#contribution-artifact').count(), 0);
+
 });
 
 test('edge-host copied instructions use the real prefixed API without inventing an offers mount', { timeout: 45000 }, async t => {
