@@ -360,7 +360,13 @@ export class AgentHeartbeats {
       check(PUSH_EVENT_TYPES.includes(eventType), 422, "invalid_heartbeat", `eventType must be one of ${PUSH_EVENT_TYPES.join(", ")}`);
       for (const target of this.pushTargets(identityId)) {
         const pending = this.deliverPush({ ...target, eventType, roomId, id, ts }).catch(() => {});
+        // M-3: settled deliveries self-remove — without this, one settled
+        // promise is retained per offline wakeable host per event, forever.
         this._pushInflight.push(pending);
+        pending.then(() => {
+          const at = this._pushInflight.indexOf(pending);
+          if (at >= 0) this._pushInflight.splice(at, 1);
+        });
       }
     } catch {
       // The push path never fails the caller.

@@ -113,10 +113,15 @@ export function createApprovalQueue({ clock = () => Date.now(), id = () => rando
   function requestEdits(proposalId, { by, edits, note = null } = {}) {
     const proposal = getProposal(proposalId);
     const who = humanOf(by);
+    const requestedEdits = Object.freeze({ edits: textOf(edits, 2000, "edits"), by: who,
+      at: isoOf(clock()) });
     const next = move(proposal, "changes_requested", who, note === null || note === undefined
       ? {} : { note: textOf(note, 1000, "note") });
-    return freezeProposal({ ...next, requestedEdits: Object.freeze({ edits: textOf(edits, 2000, "edits"), by: who,
-      at: isoOf(clock()) }) });
+    // M-4: the edit payload must be persisted with the record — the old code
+    // attached it only to the returned copy, so get()/reviewers never saw it.
+    const stored = freezeProposal({ ...next, requestedEdits });
+    proposals.set(stored.proposalId, stored);
+    return stored;
   }
   // The agent answers changes_requested with a new draft version; the
   // proposal returns to pending for a fresh human verdict.
@@ -124,6 +129,11 @@ export function createApprovalQueue({ clock = () => Date.now(), id = () => rando
     const proposal = getProposal(proposalId);
     const agent = identity(byAgent, "byAgent");
     check(agent.kind === "agent", "approval_invalid", "byAgent must be an agent identity.");
+    // M-6: only the original proposer may resubmit — otherwise agent B can
+    // resubmit agent A's changes_requested proposal with a substituted draft,
+    // hijacking the approval thread and version history.
+    check(agent.id === proposal.byAgent.id, "approval_invalid",
+      "resubmit must come from the original proposer.");
     const moved = move(proposal, "pending", agent);
     return freezeProposal({ ...moved, draft: draftOf(draft), version: proposal.version + 1, requestedEdits: null });
   }

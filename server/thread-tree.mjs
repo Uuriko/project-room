@@ -21,10 +21,27 @@ export function buildThreadTree({ messages }) {
   const roots = [];
   for (const node of byId.values()) {
     if (node.replyTo && byId.has(node.replyTo)) {
+      // M-22: self-replies fail loud instead of being silently dropped.
+      check(node.replyTo !== node.messageId, `message "${node.messageId}" replies to itself`);
       byId.get(node.replyTo).children.push(node);
     } else {
       roots.push(node);
     }
+  }
+  // M-22: any message attached but unreachable from a root is in a reply
+  // cycle — fail loud instead of silently dropping the whole component.
+  const reachable = new Set();
+  const markReachable = nodes => {
+    for (const node of nodes) {
+      if (reachable.has(node.messageId)) continue;
+      reachable.add(node.messageId);
+      markReachable(node.children);
+    }
+  };
+  markReachable(roots);
+  for (const node of byId.values()) {
+    if (!reachable.has(node.messageId))
+      fail("reply_cycle", `reply cycle involving message "${node.messageId}"`);
   }
   // Assign depth and freeze.
   const freezeNode = (node, depth) => {

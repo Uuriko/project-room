@@ -439,28 +439,46 @@ export function mintHumanInvite(db, roomId, memberId, input, deps = {}, opts = {
   if (!HUMAN_INVITE_TOKEN_PATTERN.test(token)) fail(500, "emissary_invite_token_shape", "Minted token failed its shape check");
   const expiresAt = nowMs + expires_in_days * DAY_MS;
   const requestId = idempotencyKey ?? randomUUID();
-  const minted = deps.createShareLink({
-    requestId,
-    linkToken: token,
-    expiresAt,
-    maxJoins: MAX_JOINS_PER_INVITE,
-    expectedMemberRevision: deps.memberRevision ?? null,
-  });
-  if (!minted || typeof minted !== "object") fail(500, "emissary_invite_mint_failed", "Share-link mint returned no link");
-
   const attributionId = mintAttributionId();
   const tokenHash = createHash("sha256").update(token).digest("hex");
+  // M-10: attribution + idempotency are persisted BEFORE the live link is
+  // minted — a mint failure must never leave a redeemable link with no
+  // attribution/journal/idempotency, and a retry must not mint a second link.
   db.prepare(`INSERT INTO emissary_invite_attribution
       (attribution_id, room_id, issuer_member_id, invite_token_hash, note, minted_at, expires_at)
       VALUES (?, ?, ?, ?, ?, ?, ?)`)
     .run(attributionId, roomId, memberId, tokenHash, note ?? null, nowMs, expiresAt);
+  const minting = { attribution_id: attributionId, expires_at: expiresAt, status: "minting", duplicate: false };
+  storeIdempotency(db, roomId, idempotencyKey, "human_invite_mint", minting, nowMs);
+  let minted;
+  try {
+    minted = deps.createShareLink({
+      requestId,
+      linkToken: token,
+      expiresAt,
+      maxJoins: MAX_JOINS_PER_INVITE,
+      expectedMemberRevision: deps.memberRevision ?? null,
+    });
+  } catch (error) {
+    // No link was minted: drop the "minting" marker so a retry re-attempts
+    // the mint instead of replaying a link-less record.
+    if (idempotencyKey) db.prepare("DELETE FROM emissary_idempotency WHERE room_id=? AND idempotency_key=?")
+      .run(roomId, idempotencyKey);
+    throw error;
+  }
+  if (!minted || typeof minted !== "object") {
+    if (idempotencyKey) db.prepare("DELETE FROM emissary_idempotency WHERE room_id=? AND idempotency_key=?")
+      .run(roomId, idempotencyKey);
+    fail(500, "emissary_invite_mint_failed", "Share-link mint returned no link");
+  }
   journalEvent(db, {
     roomId, kind: "emissary.human_invite_minted", actorMemberId: memberId, subjectId: attributionId,
     details: { attribution_id: attributionId, expires_at: expiresAt }, nowMs,
   });
 
-  const stored = { attribution_id: attributionId, expires_at: expiresAt, duplicate: false };
-  storeIdempotency(db, roomId, idempotencyKey, "human_invite_mint", stored, nowMs);
+  const stored = { attribution_id: attributionId, expires_at: expiresAt, status: "minted", duplicate: false };
+  if (idempotencyKey) db.prepare("UPDATE emissary_idempotency SET result_json=? WHERE room_id=? AND idempotency_key=?")
+    .run(JSON.stringify(stored), roomId, idempotencyKey);
   return { ...stored, url: `${PUBLIC_ROOM_DOOR}/#join/${token}` };
 }
 
