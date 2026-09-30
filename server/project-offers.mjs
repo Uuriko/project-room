@@ -29,7 +29,11 @@ CREATE TABLE IF NOT EXISTS project_offers (
 CREATE TABLE IF NOT EXISTS project_offer_requests (
   room_id TEXT NOT NULL, request_id TEXT NOT NULL, actor_id TEXT NOT NULL,
   input TEXT NOT NULL, outcome TEXT NOT NULL, PRIMARY KEY(room_id, request_id)
-);`;
+);
+CREATE INDEX IF NOT EXISTS project_offers_room_created
+  ON project_offers(room_id, created_at DESC, offer_id);
+CREATE INDEX IF NOT EXISTS project_offers_published_id
+  ON project_offers(offer_id) WHERE status='published';`;
 
 function termsOf(value) {
   shape(value, ['kind', 'title', 'summary', 'acceptanceCriteria', 'reward', 'approvalPolicy'], ['exclusions', 'repositoryUrl', 'submissionUrl', 'deadline']);
