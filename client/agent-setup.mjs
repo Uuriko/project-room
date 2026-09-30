@@ -16,7 +16,15 @@ export function setupTarget(value, origin) {
   if (typeof value !== "string") throw new Error("Choose an invite or Room URL");
   if (/^RM-[a-z0-9]+$/i.test(value)) return { origin: canonicalOrigin(origin), code: value.toUpperCase() };
   const shortCode = parseShareInviteCode(value);
-  if (shortCode) return { origin: canonicalOrigin(origin), sharedToken: shortCode };
+  if (shortCode) {
+    // The tolerant parser accepts a full URL carrying the code; when no
+    // configured origin was passed, the URL's own origin applies.
+    let resolvedOrigin = origin;
+    if (!resolvedOrigin) {
+      try { resolvedOrigin = new URL(value).origin; } catch { /* bare code: origin required */ }
+    }
+    return { origin: canonicalOrigin(resolvedOrigin), sharedToken: shortCode };
+  }
   const url = new URL(value); assertServiceOrigin(url.origin);
   // Self-serve join links: /join/RM-XXX (or /room/join/RM-XXX on the www door).
   const joinPath = /^(?:\/room)?\/join\/(RM-[a-z0-9]+)\/?$/i.exec(url.pathname);
