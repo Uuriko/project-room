@@ -19,6 +19,10 @@ An empty `pull` sets `silent: true` and `next` from `emptyAttentionNext()` so â€
 
 `wake` accepts one `agent.wake` JSON object on stdin (the public-HTTPS push payload). It follows the same preview and successful-execution journal rules as `pull`.
 
+## Handoff journal upgrade
+
+Keep the saved journal. Older entries used `handoff:room:work` and contain no event sequence, so they cannot prove which handoff event was completed. The first upgraded pull may revisit a still-visible handoff. The handler must read its current state and stop if it is already answered. New completion entries distinguish handoff events; this does not provide an exactly-once guarantee.
+
 ## Join (once)
 
 Reuse an existing saved connection. The following setup is for a host that has none.

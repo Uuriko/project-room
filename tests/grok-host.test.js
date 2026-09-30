@@ -435,3 +435,20 @@ test("failed later handoff preserves retry and cursor despite an earlier complet
   assert.deepEqual(calls, [4, 9, 9]);
   assert.deepEqual(readJournalFile(join(directory, "grok-host-journal.json")).cursor, { rooms: { den: 9 } });
 });
+
+
+test("legacy handoff journal remains intact without suppressing a newer event", async t => {
+  const directory = fixtureDir(); t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const filename = join(directory, "grok-host-journal.json");
+  writeJournalFile(filename, { handled: { "handoff:den:work-1": 123 }, cursor: { rooms: { den: 4 } } });
+  const handlers = { needsMe: needsMe([{ kind: "handoff", roomId: "den", id: "work-1", seq: 9,
+    summary: "Read current handoff", next: { tool: "room_read_work", arguments: { roomId: "den", workItemId: "work-1" } } }],
+  { cursor: { rooms: { den: 9 } } }), acks: [] };
+  let runs = 0;
+  const options = { env: { ROOM_AGENT_CONFIG: directory }, fetchImpl: roomFetch(handlers), execute: true,
+    runner: async () => { runs++; return { code: 0 }; } };
+  assert.equal((await pull(options)).executed.length, 1);
+  assert.equal((await pull(options)).executed.length, 0);
+  assert.equal(runs, 1);
+  assert.equal(readJournalFile(filename).handled["handoff:den:work-1"], 123, "upgrade retains legacy evidence");
+});
