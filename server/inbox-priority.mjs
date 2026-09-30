@@ -79,7 +79,9 @@ export function scoreMessage(message, { vipSenders = new Set(), mentionTokens = 
 
   const isVip = typeof checked.sender === "string" && vip.has(checked.sender) ? 1 : 0;
   const body = typeof checked.body === "string" ? checked.body.toLowerCase() : "";
-  const mentioned = mentionTokens.some(token => typeof token === "string" && token && body.includes(token.toLowerCase())) ? 1 : 0;
+  // Mention boost uses token-boundary matching so "@ann" does not match "@anna".
+  const tokens = new Set(body.split(/[^a-z0-9_@]+/).filter(Boolean));
+  const mentioned = mentionTokens.some(token => typeof token === "string" && token && tokens.has(token.toLowerCase())) ? 1 : 0;
   const sla = slaUrgency(checked, now);
   const stale = stalenessOf(checked, now);
 

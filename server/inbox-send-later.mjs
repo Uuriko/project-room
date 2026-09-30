@@ -131,6 +131,7 @@ export function createSendLaterStore(deps = {}) {
         check(record.state === "scheduled" || record.state === "ready", "SL_BAD_TRANSITION",
           `Cannot take a send in state '${record.state}'`);
         if (record.state === "scheduled") {
+          check(record.sendAt <= now, "SL_NOT_DUE", `Send '${id}' is not due until ${new Date(record.sendAt).toISOString()}`);
           record.state = "ready";
           record.updatedAt = now;
         }

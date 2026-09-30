@@ -152,7 +152,7 @@ export function createInboxZeroTriage(deps = {}) {
     const recency = 1 - Math.min(1, ageMs / RECENCY_WINDOW_MS);
     const sender = clamp01(senderScore(item.sender ?? ''));
     const attachment = item.hasAttachment ? 1 : 0;
-    const thread = Math.min(1, (item.threadDepth ?? 0) / 10);
+    const thread = Math.min(1, Math.max(0, item.threadDepth ?? 0) / 10);
     const score =
       weights.recency * recency +
       weights.sender * sender +
