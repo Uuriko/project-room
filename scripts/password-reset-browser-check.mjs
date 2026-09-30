@@ -232,3 +232,52 @@ test('unconfigured Google from targeted invitation restores offer without accept
   await f.page.locator('#invitation-email').click();
   assert.equal(await f.page.locator('#invitation-methods [data-signin-form="password"]').isVisible(), true, 'email/password fallback remains usable');
 });
+
+
+test('malformed email links scrub every proof, explain recovery and preserve room or invitation intent without consuming', { timeout: 45000 }, async t => {
+  const f = await setup(t);
+  let consumes = 0;
+  f.page.on('request', request => {
+    if (/\/api\/auth\/(magic|password\/reset)\/consume$/.test(new URL(request.url()).pathname)) consumes++;
+  });
+  const cases = [
+    'magic=unusable-proof',
+    'magic=&email=synthetic%40example.invalid',
+    'reset=unusable-proof',
+    'reset=unusable-reset&magic=unusable-magic&email=synthetic%40example.invalid',
+    'magic=first-proof&magic=second-proof&email=synthetic%40example.invalid',
+    'reset=unusable-proof&email=first%40example.invalid&email=second%40example.invalid',
+  ];
+  for (const query of cases) {
+    await f.page.goto(`${f.origin}/?room=commons&${query}`);
+    await f.page.locator('[data-signin-form]').waitFor();
+    const destination = new URL(f.page.url());
+    for (const key of ['magic', 'reset', 'email']) assert.equal(destination.searchParams.has(key), false, `${query}: ${key} is cleared before recovery`);
+    assert.equal(destination.searchParams.get('room'), 'commons');
+    await f.page.locator('[data-signin-status]').filter({ hasText: 'Request a new link' }).waitFor({ state: 'visible' });
+    assert.equal(await f.page.locator('[data-signin-form="reset-consume"]').count(), 0, 'invalid proof cannot expose a consumable reset');
+  }
+  const joinsBefore = f.store.db.prepare("SELECT count(*) AS n FROM share_link_joins").get().n;
+  const previewed = f.page.waitForResponse(response => new URL(response.url()).pathname === "/api/share-links/preview");
+  await f.page.goto(`${f.origin}/?room=commons&magic=unusable-proof#join/${f.links.valid}`);
+  const preview = await previewed;
+  assert.equal(preview.request().postDataJSON().linkToken, f.links.valid, "malformed auth preserves the independent invitation for preview");
+  assert.equal((await preview.json()).room.id, "commons");
+  await f.page.locator('#join-link-dialog').waitFor();
+  const destination = new URL(f.page.url());
+  assert.equal(destination.searchParams.has('magic'), false);
+  assert.equal(destination.searchParams.get('room'), 'commons');
+  assert.equal(f.store.db.prepare("SELECT count(*) AS n FROM share_link_joins").get().n, joinsBefore, "preview does not accept the invitation");
+  const slot = f.store.createAccountSessionSlot();
+  const owner = f.store.loginAccountSession(slot.token, f.store.issueAccountAccessKey(f.store.accountForMember('commons', 'owner').id), slot.session.sessionRevision);
+  const token = randomBytes(32).toString('base64url');
+  const issued = f.store.issueInvitation(slot.token, 'commons', { requestId: 'malformed-reset-targeted', token, intendedAccountId: 'reset-browser-account', intendedMemberId: 'malformed-reset-member', displayName: 'Reset browser human', role: 'member', expiresAt: Date.now() + 3600000, expectedIssuerMemberRevision: 0, expectedSessionBinding: owner.sessionBinding });
+  await f.page.goto(`${f.origin}/?room=commons&reset=unusable-proof#invite/${token}`);
+  await f.page.locator('#invitation-dialog').waitFor();
+  assert.equal(new URL(f.page.url()).searchParams.has('reset'), false);
+  await f.page.locator('#invitation-error').filter({ hasText: 'Request a new link' }).waitFor({ state: 'visible' });
+  assert.equal(f.store.db.prepare('SELECT status FROM membership_invitations WHERE id=?').get(issued.invitation.id).status, 'pending');
+  assert.equal(await f.page.locator('#main').isVisible(), false);
+  assert.equal(consumes, 0, 'incomplete, ambiguous and duplicate proofs never reach authentication');
+  assert.equal(f.delivered.length, 0, 'recovery does not send mail automatically');
+});

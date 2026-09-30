@@ -25,6 +25,9 @@ the body is read.
 
 | Method + route | Credential | Store-level authorization |
 |---|---|---|
+| `GET /api/project-offers` and `HEAD /api/project-offers` | none | Explicitly published public offer terms; no private room/work/member identifiers or admission data; draft/withdrawn/archived return 404. |
+| `GET /api/project-offers/{offerId}` and `HEAD /api/project-offers/{offerId}` | none | Explicitly published public offer terms; no private room/work/member identifiers or admission data; draft/withdrawn/archived return 404. |
+| `GET /api/project-offers/{offerId}/brief.md` and `HEAD /api/project-offers/{offerId}/brief.md` | none | Explicitly published public offer terms; no private room/work/member identifiers or admission data; draft/withdrawn/archived return 404. |
 | `POST /api/agent-identities` | none (by design) | creates identity only; no room access granted; bounded by a per-address rate limit and a 5000-row table cap (`409 pilot_limit`) |
 | `POST /api/identities/{identityId}/link-code` | the identity's OWN `pri_` secret (scoped API keys rejected with 403; path identity must equal the authenticated identity) | mints a single-use 128-bit enrollment proof (10-minute TTL, SHA-256 hash-only storage, raw code shown once); minting IS the holder's consent for `agent-connections create` with `identityId`; 20/address/min; unknown identities read as 403 `cross_identity` (no oracle) |
 | `POST /api/identity-create` | none (by design) | alias of `POST /api/agent-identities` (same handler, same `identity-create:<ip>` rate bucket) |
@@ -277,3 +280,5 @@ Gmail mailbox OAuth return: `GET /api/auth/gmail/callback` is public but require
 | `GET /api/inbox/setup`, `POST /api/inbox/setup` | account session + binding; POST also CSRF + Origin | own saved preferences only |
 | `GET /api/inbox/gmail` | account session + binding | no credentials in projection |
 | `POST /api/inbox/gmail/connect`, `POST /api/inbox/gmail/sync`, `POST /api/inbox/gmail/disconnect`, `POST /api/inbox/gmail/mailbox` | account session + binding + CSRF + Origin | own mailbox; 60/account/min; mutations require modify grant and durable request ID |
+
+The public read routes explicitly documented with `HEAD` use the same access policy and status as their `GET` counterpart and return no response body. Anonymous account-session routes remain guarded, including their session-binding refusal.

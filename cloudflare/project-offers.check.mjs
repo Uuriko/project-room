@@ -1,0 +1,53 @@
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { fileURLToPath } from 'node:url';
+import { build } from 'esbuild';
+import { Miniflare } from 'miniflare';
+
+test('actual Worker disposal/reopen preserves draft, publication, withdrawal and credit balances', async () => {
+  const bundled = await build({ entryPoints: [fileURLToPath(new URL('./http-worker.test-fixture.mjs', import.meta.url))], bundle: true, write: false, format: 'esm', platform: 'neutral', external: ['node:*', 'cloudflare:*'] });
+  const origin = 'https://room.example.test';
+  const persistence = await mkdtemp(join(tmpdir(), 'project-offer-worker-persist-'));
+  const config = { modules: true, script: bundled.outputFiles[0].text, compatibilityDate: '2026-07-30', compatibilityFlags: ['nodejs_compat'], durableObjects: { ROOM: { className: 'HttpTestRoom', useSQLite: true } }, bindings: { ROOM_ORIGIN: origin }, durableObjectsPersist: persistence };
+  let mf = new Miniflare(config);
+  const reopen = async () => { await mf.dispose(); mf = new Miniflare(config); };
+  const call = (path, data, key) => mf.dispatchFetch(origin + path, { method: data ? 'POST' : 'GET', headers: { Host: 'room.example.test', ...(data ? { Origin: origin, 'Content-Type': 'application/json' } : {}), ...(key ? { Authorization: `Bearer ${key}` } : {}) }, ...(data ? { body: JSON.stringify(data) } : {}) });
+  const json = async (response, expected = 200) => { assert.equal(response.status, expected, await response.clone().text()); return response.json(); };
+  try {
+    const { ownerKey } = await json(await call('/__test-provision'));
+    const balancesBefore = await json(await call('/api/rooms/commons/credits/balances/owner', undefined, ownerKey));
+    const input = { requestId: 'worker-create', offerId: 'worker-offer', reviewerMemberIds: ['owner'], terms: { repositoryUrl: 'https://github.com/Uuriko/project-room', kind: 'project', title: 'Worker contribution', summary: 'Deliver a reviewable result.', acceptanceCriteria: ['Complete criteria with reproducible evidence'], reward: { kind: 'work_trade', unit: 'credit', amountMinor: '1000' }, approvalPolicy: { mode: 'human' } } };
+    const privatePath = '/api/rooms/commons/project-offers';
+    const draft = await json(await call(privatePath, input, ownerKey), 201);
+    assert.equal(draft.status, 'draft');
+    await reopen();
+    const restoredDrafts = await json(await call(privatePath, undefined, ownerKey));
+    assert.deepEqual(restoredDrafts.offers, [draft]);
+    assert.deepEqual(await json(await call('/api/project-offers')), { offers: [], nextCursor: null });
+    assert.equal((await call('/api/project-offers/worker-offer')).status, 404);
+    const publish = { requestId: 'worker-publish', expectedRevision: 1 };
+    const published = await json(await call(privatePath + '/worker-offer/publish', publish, ownerKey));
+    assert.deepEqual(await json(await call(privatePath + '/worker-offer/publish', publish, ownerKey)), published);
+    const beforeReopen = await json(await call('/api/project-offers/worker-offer'));
+    await reopen();
+    const offer = await json(await call('/api/project-offers/worker-offer'));
+    assert.deepEqual(offer, beforeReopen);
+    assert.deepEqual(await json(await call(privatePath + '/worker-offer/publish', publish, ownerKey)), published);
+    assert.equal(offer.reward.decimals, 3); assert.equal(offer.paymentStatus, 'ledger_only');
+    assert.equal(Object.hasOwn(offer, 'reviewerMemberIds'), false); assert.equal(Object.hasOwn(offer, 'roomId'), false);
+    const brief = await call('/api/project-offers/worker-offer/brief.md');
+    assert.equal(brief.status, 200); const skillText = await brief.text(); assert.match(skillText, /^---\nname: [a-z0-9-]+\ndescription:/); assert.ok(skillText.includes(offer.acceptanceCriteria[0])); assert.ok(skillText.includes(offer.repositoryUrl));
+    const withdraw = { requestId: 'worker-withdraw', expectedRevision: 2 };
+    const withdrawn = await json(await call(privatePath + '/worker-offer/withdraw', withdraw, ownerKey));
+    await reopen();
+    const restoredWithdrawn = await json(await call(privatePath, undefined, ownerKey));
+    assert.deepEqual(restoredWithdrawn.offers, [withdrawn]);
+    assert.deepEqual(await json(await call(privatePath + '/worker-offer/withdraw', withdraw, ownerKey)), withdrawn);
+    assert.equal((await call('/api/project-offers/worker-offer/brief.md')).status, 404);
+    assert.deepEqual(await json(await call('/api/project-offers')), { offers: [], nextCursor: null });
+    assert.deepEqual(await json(await call('/api/rooms/commons/credits/balances/owner', undefined, ownerKey)), balancesBefore);
+  } finally { await mf.dispose(); await rm(persistence, { recursive: true, force: true }); }
+});

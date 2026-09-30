@@ -53,7 +53,7 @@ test("required arguments are enforced", () => {
 
 test("unknown arguments are rejected rather than silently dropped", () => {
   assert.ok(!validBountyToolArguments("bounty_claim", { bountyId: "ROOM-1", confirm: true }));
-  assert.ok(!validBountyToolArguments("bounty_list", { group: "open", limit: 10 }));
+  assert.ok(!validBountyToolArguments("bounty_list", { group: "funded", limit: 10 }));
 });
 
 // An amount is the one field that moves credits, so a sign or type error here
@@ -66,10 +66,17 @@ test("amounts must be positive finite numbers", () => {
 });
 
 test("enum fields reject values outside the declared set", () => {
-  assert.ok(validBountyToolArguments("bounty_list", { group: "open" }));
+  assert.ok(validBountyToolArguments("bounty_list", { group: "funded" }));
   assert.ok(!validBountyToolArguments("bounty_list", { group: "everything" }));
+  assert.ok(!validBountyToolArguments("bounty_list", { group: "open" }));
   assert.ok(validBountyToolArguments("bounty_read_history", { state: "locked" }));
   assert.ok(!validBountyToolArguments("bounty_read_history", { state: "spent" }));
+});
+
+test("bounty_list accepts a poster filter", () => {
+  assert.ok(validBountyToolArguments("bounty_list", { poster: "self" }));
+  assert.ok(validBountyToolArguments("bounty_list", { poster: "id:agent/jill", group: "funded" }));
+  assert.ok(!validBountyToolArguments("bounty_list", { poster: "self", unknown: 1 }));
 });
 
 test("the hosted arg validator routes bounty tools through the bounty validator", () => {
@@ -107,4 +114,14 @@ test("optional-key writes do not promise unconditional retry safety", () => {
     if (!entry.annotations.readOnlyHint)
       assert.ok(!entry.inputSchema.required.includes("idempotencyKey"));
   }
+});
+
+test("advertised acceptance schema and hosted validation support structured rubric attestations", () => {
+  const attestation = { citations: [{ criterionId: "c1", verdict: "pass" }], summary: "Checked the evidence" };
+  const entry = hostedStdioToolDefinitions().find(tool => tool.name === "bounty_accept");
+  assert.equal(entry.inputSchema.properties.verifierAttestation.type, "object", "clients must be able to send the escrow attestation shape");
+  assert.equal(entry.inputSchema.properties.verifierAttestation.minProperties, 1);
+  assert.ok(validHostedStdioArgs("bounty_accept", { roomId: "commons", bountyId: "bounty-1", verifierAttestation: attestation }));
+  for (const invalid of ["Checked it", [], {}, null, 1])
+    assert.equal(validHostedStdioArgs("bounty_accept", { roomId: "commons", bountyId: "bounty-1", verifierAttestation: invalid }), false);
 });

@@ -1091,6 +1091,11 @@ export function workContextMarkdown(result) {
     "Responsible member for this step: " + (result.resume.next.memberId ?? "none"),
     "Session display status: " + (result.work.displayStatus ?? result.work.status) + " (presentation only; recorded controls below)",
     resumeMarkdown(result.resume),
+    ...(result.replyRequestContext ? [
+      `Pending linked reply requests: ${result.replyRequestContext.total} (${result.replyRequestContext.shown} shown). Conversations, separate from work completion.`,
+      ...result.replyRequestContext.requests.map(request => `${request.direction}: ${request.id} · ${request.requesterId} → ${request.recipientId}. Next read: ${JSON.stringify(request.nextRead)}`),
+      ...(result.replyRequestContext.truncated ? ["More pending requests: " + JSON.stringify(result.replyRequestContext.nextRead) + "; select this workItemId."] : [])
+    ] : []),
     "Current evidence references (not fetched): " + JSON.stringify(result.accessSummary.evidence.records),
     "Recorded write scope: " + JSON.stringify(result.work.claim),
     "Recorded session controls (separate from work completion): " + JSON.stringify({ status: result.work.status, stopRequestedAt: result.work.stop_requested_at, heartbeatAt: result.work.heartbeat_at }),

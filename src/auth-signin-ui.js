@@ -2,6 +2,18 @@
 // HttpOnly; authentication writes use the current browser slot and CSRF token.
 import { escapeHtml } from "./account-settings-ui.js";
 
+// Shared by startup routing and redemption so malformed reset links do not
+// reserve the invitation journey. This classifies input; it never consumes it.
+export function classifyAuthLink(params) {
+  const hasReset = params.has("reset"), hasMagic = params.has("magic");
+  if (!hasReset && !hasMagic && !params.has("email")) return { kind: "none" };
+  const proof = (params.get(hasReset ? "reset" : "magic") || "").trim();
+  const email = (params.get("email") || "").trim();
+  if (hasReset === hasMagic || params.getAll(hasReset ? "reset" : "magic").length !== 1
+    || params.getAll("email").length !== 1 || !proof || !email) return { kind: "invalid" };
+  return { kind: hasReset ? "reset" : "magic", proof, email };
+}
+
 export function createAuthSigninUI({ accountClient, ensureAccountSession, onSignedIn, onMagicLinkFailure, onBusyChange, beforeSignIn, onSignInUncertain, onMagicLinkRequest, onAccountSwitch, onPasswordResetComplete, onViewChange, onBack }) {
   let container = null;
   let emailMethod = "password", passwordMode = "login", passwordEmail = "";
@@ -241,23 +253,28 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
     let params;
     try { params = new URLSearchParams(window.location.search); }
     catch { return; }
-    if (params.has("reset")) {
-      resetCode = (params.get("reset") || "").trim(); resetEmail = (params.get("email") || "").trim();
-      params.delete("reset"); params.delete("email");
-      const rest = params.toString();
-      try { window.history.replaceState(null, "", window.location.pathname + (rest ? `?${rest}` : "") + window.location.hash); } catch { /* URL cleanup may be unavailable */ }
-      emailMethod = "reset"; resetPhase = "form"; render(); focusView();
-      if (!resetCode || !resetEmail) setStatus("Request a new password reset link.", true);
-      return { pendingPasswordReset: true };
-    }
-    const code = (params.get("magic") || "").trim();
-    const email = (params.get("email") || "").trim();
-    if (!code || !email) return;
-    params.delete("magic");
-    params.delete("email");
+    const link = classifyAuthLink(params);
+    if (link.kind === "none") return;
+    // Clear every auth parameter even when validation fails or proofs compete.
+    params.delete("reset"); params.delete("magic"); params.delete("email");
     const rest = params.toString();
     const clean = window.location.pathname + (rest ? `?${rest}` : "") + window.location.hash;
-    try { window.history.replaceState(null, "", clean); } catch { /* ignore */ }
+    try { window.history.replaceState(null, "", clean); } catch { /* URL cleanup may be unavailable */ }
+    if (link.kind === "invalid") {
+      const message = "This sign-in link is incomplete or invalid.";
+      // Mounting hosts finish wiring their other sign-in controls this turn.
+      await Promise.resolve();
+      onMagicLinkFailure?.(message);
+      setStatus(`${message} Request a new link.`, true);
+      return;
+    }
+    const { proof, email } = link;
+    if (link.kind === "reset") {
+      resetCode = proof; resetEmail = email;
+      emailMethod = "reset"; resetPhase = "form"; render(); focusView();
+      return { pendingPasswordReset: true };
+    }
+    const code = proof;
     if (await beforeSignIn?.() === false) return;
     emailMethod = "magic"; magicEmail = email;
     magicPhase = "sent";

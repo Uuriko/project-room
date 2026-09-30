@@ -392,7 +392,9 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     const rotated = store.issueAccessKey("commons", "owner");
     await page.locator("#auth-panel").waitFor({ state: "visible" });
     assert.equal(await status.textContent(), "", "access loss clears the former session's send error");
-    assert.equal(await input.inputValue(), "");
+    // E-H2: unexpected access loss preserves the in-flight draft (was: cleared).
+    assert.equal(await input.inputValue(), "Unsent before access ended",
+      "unexpected access loss preserves the in-flight draft for re-authentication");
     assert.equal(await page.locator("#message-form").getAttribute("aria-busy"), null);
     await page.unroute("**/api/rooms/commons/commands");
     await login(rotated);

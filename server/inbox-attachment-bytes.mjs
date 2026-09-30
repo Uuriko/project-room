@@ -135,7 +135,7 @@ export class InboxAttachmentBytes {
       const usage = this.db.prepare(`SELECT
         COALESCE(SUM(CASE WHEN state='staged' THEN byte_length ELSE 0 END), 0) AS stagedBytes,
         COALESCE(SUM(CASE WHEN state='staged' THEN 1 ELSE 0 END), 0) AS stagedCount,
-        COUNT(*) AS records
+        COALESCE(SUM(CASE WHEN state='staged' THEN 1 ELSE 0 END), 0) AS records
         FROM inbox_attachment_bytes WHERE identity_id=?`).get(owner);
       if (usage.stagedBytes + bytes.length > attachmentLimits.memberBytes
         || usage.stagedCount + 1 > attachmentLimits.stagedPerMember

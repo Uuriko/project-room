@@ -1,10 +1,11 @@
+import { installOwnerProjectOffers } from "./owner-project-offers-ui.js";
 import { createMemberDisplayNames } from "./member-display-names.js";
 import { installRoomLayout, syncSidebarSections } from "./room-layout.js";
 import { EVENT_TYPES as T, MAX_MESSAGE_BODY_CHARS, WORK_STATES as S, roomPolicy, roomTrust, distinctMemberOwnerIds, roomKind, isRoomArchived, spendAllowance, pinnedMessages, isPinned, PIN_LIMIT, isMutedBy, channelList, messageChannelId, DEFAULT_CHANNEL_ID } from "./events.js";
 import { AccountClient, RoomClient, draftCommand, retryUnconfirmed } from "./client.js";
 import { ReturnBrief, groupBriefHistory } from "./return-brief.js";
 import { attentionPreview, needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult, roomOrientation } from "./work-selectors.js";
-import { conversationIndex, searchMessages, ConversationDrafts, DraftRecovery, draftRecoveryScope, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, mentionHtml, kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery, reactionPills } from "./conversation.js";
+import { conversationIndex, searchMessages, ConversationDrafts, DraftRecovery, draftRecoveryScope, shouldPreserveDrafts, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, mentionHtml, kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery, reactionPills } from "./conversation.js";
 import { canonicalReaction, clipGraphemes, emojiCatalog, emojiMatches, emojiName, emojiQuery, foldedReactionMap, frequentEmoji, insertEmoji, renderEmojiShortcodes } from "./emoji.js";
 import { nextWorkStep, workStatus, workActions, renderWorkActions, activeClaim, terminalWork, doneChip, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, matchesReceipt, producerKnown as hasReportedProducer, changeDescription, diffResultLines, diffResultSummary, workRecipeOptions } from "./workflow.js";
 import { coordinationLoops } from "./work-loops.js";
@@ -24,7 +25,7 @@ import { workHelpContext, validateHelpData } from "./work-help.js";
 import { workOffersContext, validateHelpOfferData } from "./help-offers.js";
 import { installInbox } from "./inbox-ui.js";
 import { createAccountSettingsUI } from "./account-settings-ui.js";
-import { createAuthSigninUI } from "./auth-signin-ui.js";
+import { createAuthSigninUI, classifyAuthLink } from "./auth-signin-ui.js";
 import { createAgentSigninUI } from "./agent-signin-ui.js";
 import { stashPendingInvite, clearPendingInvite, takeRestoredInvite, stashPendingJoin, clearPendingJoin, takeRestoredJoin, inviteRequestDoor, defaultRequestPermissions, validateAccessRequestForm, newAccessRequestId, stashAccessRequest, readAccessRequest } from "./invite-context.js";
 import { selectedRoomFromLocation as roomFromLocation, roomIdFromHash, authPanelTitle, roomIdFromNext, ROOM_ACCESS_NOTICE } from "./room-deep-link.js";
@@ -288,7 +289,13 @@ const client = new RoomClient({
     accessEndContext = null;
     const pendingSignout = signoutLoading;
     const keepAccount = !leavingPage && !pendingSignout && endedContext !== "account-switch" && accountClient.session?.authenticated;
-    if (!leavingPage) recovery.clear();
+    // E-H2: an unexpected access end (401/403 session expiry, not sign-out,
+    // room/account switch, or page unload) must not destroy the in-flight
+    // draft. The user didn't leave; the credential died. Preserve the
+    // persisted backup, the in-memory drafts, and the composer text so
+    // re-authentication restores them.
+    const sessionExpired = shouldPreserveDrafts({ leavingPage, pendingSignout, endedContext });
+    if (!leavingPage && !sessionExpired) recovery.clear();
     releaseSubmission(submitControls);
     submitOperationId += 1; busy = false;
     displayNames = createMemberDisplayNames({});
@@ -308,6 +315,7 @@ const client = new RoomClient({
     selectWorkView("work");
     renderContent("#room-results-list", "");
     roomCursor = 0; roomGeneration = -1; showAllAttention = false; clearTimeout(returnClock); returnClock = null;
+    ownerOffersUI?.reset();
     shareLinksUI?.resetManagement();
     portableWorkUI?.reset();
     resultCopyUI?.reset();
@@ -329,8 +337,11 @@ const client = new RoomClient({
     workDraftId = null; replyToId = null; workFormEpoch++; setWorkRetry(false);
     syncRoomLifecycle();
     $("#work-reuse-hint").hidden = true;
-    currentThreadId = null; conversation = null; drafts = new ConversationDrafts();
-    $("#message-input").value = "";
+    currentThreadId = sessionExpired ? currentThreadId : null; conversation = null;
+    if (!sessionExpired) {
+      drafts = new ConversationDrafts();
+      $("#message-input").value = "";
+    }
     requestRuns = {}; requestMode = null; requestReading = false; requestEpoch++; syncRequestComposer();
     renderComposerError();
     viewPositions.clear(); pendingReactions.clear(); locallyOwnedMessageIds.clear(); newVisibleMessages = 0; briefView.reset();
@@ -350,6 +361,7 @@ const client = new RoomClient({
     $("#usage-refresh").hidden = true; $("#record-export-html").disabled = false; exportRequest += 1;
     for (const id of ["message-to-select", "assignee-select", "verifier-select"]) { $(`#${id}`).replaceChildren(); delete $(`#${id}`).dataset.signature; }
     for (const form of document.querySelectorAll("form")) {
+      if (sessionExpired && form.id === "message-form") continue;
       if (!keepAccount || !form.closest("#inbox-panel")) form.reset();
     }
     if (!humanAuthBusy) signinUI?.clear();
@@ -410,6 +422,7 @@ const client = new RoomClient({
     });
   }
 });
+const ownerOffersUI = installOwnerProjectOffers({ client, getState: () => state, getSession: () => session, host: $(".room-more-actions") });
 const briefView = new ReturnBrief(client, {
   onChange: renderReturnBrief,
   // A recoverable catch-up error belongs to its own status region. It does not
@@ -606,7 +619,8 @@ const signinUI = createAuthSigninUI({
     await landAfterSignIn();
   }
 });
-const initialPasswordReset = new URLSearchParams(location.search).has("reset");
+const initialAuthLink = classifyAuthLink(new URLSearchParams(location.search));
+const initialPasswordReset = initialAuthLink.kind === "reset";
 const initialSignin = signinUI.mount($("#auth-signin-ui"));
 
 // Agent sign-in (RC-2026-09-23): agents choose their own account (identity
@@ -837,7 +851,7 @@ async function openAccountRoom(roomId) {
   if (invitationIsCommitting() || signoutLoading) return;
   if (state) saveComposer();
   if (state && (drafts.hasText() || pendingAction || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending()
-      || agentConnectionsUI?.hasPending() || instructionsUI?.hasPending() || !$("#new-work-form").hidden)
+      || agentConnectionsUI?.hasPending() || instructionsUI?.hasPending() || ownerOffersUI?.hasPending() || !$("#new-work-form").hidden)
       && !window.confirm("Switch rooms and clear unsent room drafts and pending retries? Saved work stays.")) return;
   const owned = accountClient.session;
   if (await confirmAccount() !== true || accountClient.session !== owned) return;
@@ -1305,6 +1319,9 @@ async function openInvitation(fragment) {
   if (!fragment.valid) return;
   await previewCurrentInvitation();
   if (initialGoogleFailed && invitation.phase === "needs-account") setInvitationFeedback(googleSigninFailureMessage, true);
+  if (initialAuthLink.kind === "invalid" && fragment.secret === initialInvitationFragment?.secret && invitation.phase === "needs-account") {
+    setInvitationFeedback("This sign-in link is incomplete or invalid. Request a new link or sign in below.", true);
+  }
 }
 async function previewCurrentInvitation() {
   const { version, secret } = invitation;
@@ -1667,6 +1684,7 @@ function syncRecipeStrip() {
   renderContent("#recipe-strip", recipes.map(recipeChipHtml).join(""));
 }
 function render() {
+  ownerOffersUI.sync();
   conversation = conversationIndex(state.messages);
   const members = Object.values(state.members), active = members.filter(m => m.active !== false);
   selectOptions("#message-to-select", active, "Everyone");
@@ -2932,7 +2950,7 @@ function confirmInvitationSignin() {
   if (invitationIsCommitting() || !invitation.secret) return false;
   const hasDraft = drafts.hasText() || inboxUI?.hasPending() || portableWorkUI?.hasDraft()
     || resultCopyUI?.hasDraft() || remindersUI?.hasPending() || agentConnectionsUI?.hasPending()
-    || instructionsUI?.hasPending() || !$("#new-work-form").hidden || pendingAction;
+    || instructionsUI?.hasPending() || ownerOffersUI?.hasPending() || !$("#new-work-form").hidden || pendingAction;
   return !hasDraft || window.confirm("Signing in clears unsent drafts and private setup. Continue?");
 }
 $("#invitation-email").addEventListener("click", () => {
@@ -3232,8 +3250,8 @@ $("#signout-button").addEventListener("click", async () => {
   }
   if (busy || signoutLoading || !state || !session || invitationIsCommitting()) return;
   saveComposer();
-  if (drafts.hasText() || inboxUI?.hasPending() || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending() || agentConnectionsUI?.hasPending() || instructionsUI?.hasPending() || !$("#new-work-form").hidden || pendingAction) {
-    if (!window.confirm((pendingAction?.uncertain || instructionsUI?.hasUnknown()) ? "Sign out and clear drafts and the pending retry? The action may already be saved." : "Sign out and clear unsent drafts and private setup on this device?")) return;
+  if (drafts.hasText() || inboxUI?.hasPending() || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending() || agentConnectionsUI?.hasPending() || instructionsUI?.hasPending() || ownerOffersUI?.hasPending() || !$("#new-work-form").hidden || pendingAction) {
+    if (!window.confirm((pendingAction?.uncertain || instructionsUI?.hasUnknown() || ownerOffersUI?.hasUnknown()) ? "Sign out and clear drafts and the pending retry? The action may already be saved." : "Sign out and clear unsent drafts and private setup on this device?")) return;
   }
   recovery.clear();
   const operationId = ++signoutOperationId;
@@ -4897,15 +4915,18 @@ function resultStatus() {
   if (!view || !sameSession(view.generation, view.roomId, view.memberId)) return;
   const item = state.workItems[view.workItemId];
   const earlier = !matchesReceipt(view.receipt, item?.receipt) || item?.state !== S.COMPLETED || Boolean(item?.supersededBy);
-  $("#result-status").textContent = (earlier ? "Earlier result · " : "") + (view.error ? "Exact text unavailable. Close and try again."
+  $("#result-status").textContent = (earlier ? "Earlier result · " : "") + (view.error ? "Exact text unavailable. Retry this result or close."
     : view.withdrawn ? `Text withdrawn by ${memberLabel(view.withdrawn.by)} · reported by ${memberLabel(view.reportedById)}`
     : view.loaded ? `Submitted by ${memberLabel(view.reportedById)} · exact stored text` : "Loading exact text…");
+  const retry = $("#result-retry");
+  retry.hidden = !view.error && !view.retrying;
+  retry.disabled = !view.error;
 }
 function closeResult(restore = true) {
   const view = resultView;
   resultView = null; $("#result-dialog").close(); $("#result-title").textContent = "Result";
   $("#result-status").textContent = ""; $("#result-body").textContent = ""; $("#result-body").hidden = false;
-  $("#result-original").hidden = true;
+  $("#result-original").hidden = true; $("#result-retry").hidden = true; $("#result-retry").disabled = true;
   clearResultComparison($("#result-diff"));
   if (restore && view && sameSession(view.generation, view.roomId, view.memberId)) {
     if (view.fromResults) {
@@ -4925,6 +4946,34 @@ $("#result-original").addEventListener("click", () => {
   history.replaceState(null, "", recordHref("message", view.originalId)); revealMessage(view.originalId);
 });
 $("#result-dialog").addEventListener("cancel", event => { event.preventDefault(); closeResult(); });
+function loadExactResult(view) {
+  const owns = () => resultView === view && sameSession(view.generation, view.roomId, view.memberId);
+  client.workResult(view.workItemId, { completionEventId: view.receipt.completionEventId }).then(value => {
+    if (!owns() || !value) return;
+    if (value.result.receipt?.evidenceVersion !== view.receipt.evidenceVersion) throw new Error("Pinned version changed");
+    // Text taken out of the room is served as an absence, so say so rather
+    // than showing an empty box: the result was still reported and verified,
+    // and the receipt still names what it was verified against.
+    view.withdrawn = value.result.text.withdrawnAt ? { by: value.result.text.withdrawnBy, at: value.result.text.withdrawnAt } : null;
+    $("#result-body").textContent = view.withdrawn ? "" : value.result.text.body;
+    $("#result-body").hidden = Boolean(view.withdrawn);
+    const message = state.messages.find(message => message.id === value.result.text.messageId && message.workItemId === view.workItemId
+      && message.body === value.result.text.body);
+    const original = state.messages.find(original => original.id === message?.replyToId && original.workItemId === view.workItemId && original.proposal);
+    view.originalId = original?.id; $("#result-original").hidden = !original;
+    view.loaded = true; view.retrying = false;
+    if (document.activeElement === $("#result-retry")) $("#close-result").focus({ preventScroll: true });
+    resultStatus();
+    loadResultComparison(view.workItemId, view.previousCompletionEventId, value.result.text, $("#result-diff"), owns);
+  }).catch(() => { if (owns()) { view.error = true; view.retrying = false; resultStatus(); } });
+}
+$("#result-retry").addEventListener("click", () => {
+  const view = resultView;
+  if (!view?.error || busy || !sameSession(view.generation, view.roomId, view.memberId)) return;
+  if (document.activeElement === $("#result-retry")) $("#close-result").focus({ preventScroll: true });
+  view.error = false; view.retrying = true; resultStatus();
+  loadExactResult(view);
+});
 function readResult(e) {
   const read = e.target.closest("[data-read-result]");
   if (read && state && !busy) {
@@ -4933,28 +4982,13 @@ function readResult(e) {
     const fromResults = Boolean(read.closest("#room-results-list"));
     if (fromResults && !currentResult(item)) return;
     const view = { generation: client.generation, roomId: session.roomId, memberId: session.member.id, workItemId: item.id,
-      fromResults, receipt: { completionEventId: receipt.eventId, evidenceVersion: receipt.evidenceVersion }, reportedById: receipt.reportedById }; resultView = view;
+      fromResults, previousCompletionEventId: receipt.nativeText.previousCompletionEventId, receipt: { completionEventId: receipt.eventId, evidenceVersion: receipt.evidenceVersion }, reportedById: receipt.reportedById }; resultView = view;
     $("#result-title").textContent = item.title; $("#result-status").textContent = "Loading exact text…"; $("#result-body").textContent = ""; $("#result-body").hidden = false;
     $("#result-original").hidden = true;
     const diffBox = $("#result-diff"); diffBox.hidden = true; diffBox.innerHTML = "";
+    $("#result-retry").hidden = true; $("#result-retry").disabled = true;
     $("#result-dialog").showModal();
-    const owns = () => resultView === view && sameSession(view.generation, view.roomId, view.memberId);
-    client.workResult(item.id, { completionEventId: receipt.eventId }).then(value => {
-      if (!owns() || !value) return;
-      if (value.result.receipt?.evidenceVersion !== receipt.evidenceVersion) throw new Error("Pinned version changed");
-      // Text taken out of the room is served as an absence, so say so rather
-      // than showing an empty box: the result was still reported and verified,
-      // and the receipt still names what it was verified against.
-      view.withdrawn = value.result.text.withdrawnAt ? { by: value.result.text.withdrawnBy, at: value.result.text.withdrawnAt } : null;
-      $("#result-body").textContent = view.withdrawn ? "" : value.result.text.body;
-      $("#result-body").hidden = Boolean(view.withdrawn);
-      const message = state.messages.find(message => message.id === value.result.text.messageId && message.workItemId === item.id
-        && message.body === value.result.text.body);
-      const original = state.messages.find(original => original.id === message?.replyToId && original.workItemId === item.id && original.proposal);
-      view.originalId = original?.id; $("#result-original").hidden = !original;
-      view.loaded = true; resultStatus();
-      loadResultComparison(item.id, receipt.nativeText.previousCompletionEventId, value.result.text, diffBox, owns);
-    }).catch(() => { if (owns()) { view.error = true; resultStatus(); } });
+    loadExactResult(view);
     return;
   }
   const button = e.target.closest("[data-action]"); if (!button || busy) return;
@@ -5262,7 +5296,7 @@ $("#action-form").addEventListener("submit", e => {
 });
 window.addEventListener("beforeunload", e => {
   if (state) saveComposer();
-  if ((state && (drafts.hasText() || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending() || agentConnectionsUI?.hasPending() || instructionsUI?.hasPending() || !$("#new-work-form").hidden || pendingAction))
+  if ((state && (drafts.hasText() || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending() || agentConnectionsUI?.hasPending() || instructionsUI?.hasPending() || ownerOffersUI?.hasPending() || !$("#new-work-form").hidden || pendingAction))
     || invitationIsCommitting() || invitation.phase === "unknown") { e.preventDefault(); e.returnValue = ""; }
 });
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden" && state) saveComposer(); });
@@ -5495,19 +5529,26 @@ function horizonAnchorFor(messages, lastRead) {
 }
 async function refreshSavedIds() {
   if (!state || !session || savedIdsBusy) return;
+  const generation = client.generation, roomId = session.roomId;
   savedIdsBusy = true;
   try {
     const result = await client.savedList();
+    // E-H3: drop stale flights — the previous room's saved ids must never
+    // land in the new room's set.
+    if (generation !== client.generation || session?.roomId !== roomId) return;
     if (result) savedMessageIds = new Set(result.items.map(item => item.messageId));
   } catch { /* the Save toggle reports loudly; the menu label just stays stale */ }
   finally { savedIdsBusy = false; }
 }
 async function syncAttentionBadges() {
   if (!state || !session || attentionBadgesBusy) return;
+  const generation = client.generation, roomId = session.roomId;
   attentionBadgesBusy = true;
   try {
     const [count, saved] = await Promise.all([client.activityUnreadCount(), client.savedList()]);
-    if (!state || !session) return;
+    // E-H3: drop stale flights — the previous room's badge counts and saved
+    // ids must never render into the new room.
+    if (!state || !session || generation !== client.generation || session.roomId !== roomId) return;
     const unread = count?.total ?? 0;
     setText("#activity-count", unread ? String(unread) : "");
     $("#activity-count").hidden = !unread;
@@ -5526,10 +5567,13 @@ async function syncAttentionBadges() {
 let previewItems = [], previewBusy = false;
 async function refreshActivityPreview() {
   if (!state || !session || previewBusy) return;
+  const generation = client.generation, roomId = session.roomId;
   previewBusy = true;
   try {
     const result = await client.activity({ limit: 20 });
-    if (!state || !session || !result) return;
+    // E-H3: drop stale flights — the previous room's message excerpts must
+    // never render into the new room's preview.
+    if (!state || !session || !result || generation !== client.generation || session.roomId !== roomId) return;
     previewItems = result.items.filter(item => !item.readAt).slice(0, 3);
     $("#activity-preview").hidden = previewItems.length === 0;
     setText("#activity-preview-count", String(previewItems.length));
@@ -5676,10 +5720,13 @@ function openLater() {
   void loadLater();
 }
 async function loadLater() {
+  const generation = client.generation, roomId = session?.roomId;
   setText("#later-status", "Loading…");
   try {
     const result = await client.savedList();
-    if (!state) return;
+    // E-H3: drop stale flights — the previous room's saved message bodies
+    // must never render into the new room's dialog.
+    if (!state || generation !== client.generation || session?.roomId !== roomId) return;
     renderBriefList("#later-list", result.items.map(item => {
       const detail = item.deleted ? "Message deleted" : (item.body ?? "").slice(0, 120);
       return `<li class="rb-event later-item">`

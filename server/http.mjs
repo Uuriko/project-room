@@ -1,3 +1,4 @@
+import { publicSearchAssets, publicSearchCanonical, publicSearchSitemap, PUBLIC_SEARCH_CSP, reviewedPublicSearchPaths } from "../deploy/public-search.mjs";
 import { readConversation } from "./conversation-sync.mjs";
 import { OutsideAgents } from "./outside-agents.mjs";
 import { GmailSync } from './gmail-sync.mjs';
@@ -30,7 +31,7 @@ import { SOURCE_REVISION, BUILD_ID } from "./version.mjs";
 import { agentErrorBody, errorCategory } from "../src/agent-error.mjs";
 import { DiagnosticsLog, supportExportBundle } from "./diagnostics.mjs";
 import { renderRoomExportHtml, EXPORT_HTML_CSP } from "./room-export-html.mjs";
-import { discoveryDoc, isHealthAliasPath, rewriteRoomApiPrefix, EDGE_DOOR_HOSTS } from "../deploy/agent-discovery.mjs";
+import { discoveryDoc, isHealthAliasPath, rewriteRoomApiPrefix, EDGE_DOOR_HOSTS, ROOM_ORIGIN } from "../deploy/agent-discovery.mjs";
 import { buildOpenApiJson, discoverabilityErrorOverride, nextActionsForAccessRequest, nextActionsForAccessRequestStatus, nextActionsForInviteRedeem } from "./discoverability.mjs";
 import { MCP_SERVER_CARD_PATH, MCP_DISCOVERY_CACHE_CONTROL, MCP_SERVER_CARD_CORS } from "../src/mcp-server-card.mjs";
 import { SKILLS_CATALOG_PATH } from "../deploy/agent-discovery.mjs";
@@ -95,8 +96,10 @@ const assetType = path => path.endsWith(".js") ? "text/javascript" : path.endsWi
   : path.endsWith(".html") ? "text/html" : "text/markdown; charset=utf-8";
 const assets = new Map([
   ["/", ["index.html", "text/html"]],
+  ["/offers", ["offers.html", "text/html"]],
   ...publicAssetPaths.map(path => [`/${path}`, [path, assetType(path)]]),
 ]);
+for (const [url, file] of publicSearchAssets(publicAssetPaths)) assets.set(url, [file, "text/html"]);
 const reject = (status, code, message, headers) => { throw new ServiceError(status, code, message, headers ?? null); };
 // RFC 8288 discovery hints on machine-readable surfaces: the A2A agent card,
 // the llms packet, the skills catalog, and the public HTML door.
@@ -1717,6 +1720,25 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }));
       }
       if (url.pathname === "/api/public/rooms/directory") reject(405, "method_not_allowed", "Method not allowed");
+      const projectOfferPublicMatch = /^\/api\/project-offers\/([^/]{1,128})(?:\/(brief.md))?$/.exec(url.pathname);
+      if (url.pathname === "/api/project-offers" || projectOfferPublicMatch) {
+        if (!["GET", "HEAD"].includes(req.method)) reject(405, "method_not_allowed", "Method not allowed");
+        rate(`project-offers:${remoteAddress}`, 120);
+        if (projectOfferPublicMatch) {
+          // Exact literal guard: route inventory expands the dot-form matcher.
+          if (projectOfferPublicMatch[2] && projectOfferPublicMatch[2] !== "brief.md") reject(404, "not_found", "Not found");
+          if ([...url.searchParams].length) reject(422, "invalid_project_offer", "No detail query parameters accepted");
+          const offerId = pathId(projectOfferPublicMatch[1]);
+          if (projectOfferPublicMatch[2]) {
+            const brief = store.projectOffers.brief(offerId);
+            res.writeHead(200, { "Content-Type": "text/markdown; charset=utf-8", "Cache-Control": "no-store" });
+            return res.end(req.method === "HEAD" ? undefined : brief);
+          }
+          return json(res, 200, store.projectOffers.read(offerId));
+        }
+        if ([...url.searchParams.keys()].some(key => !["limit", "after"].includes(key) || url.searchParams.getAll(key).length !== 1)) reject(422, "invalid_project_offer", "Only limit and after accepted");
+        return json(res, 200, store.projectOffers.list({ limit: url.searchParams.get("limit") ?? 20, after: url.searchParams.get("after") }));
+      }
       // Public opportunity feed (v2): read-only discovery of open work
       // across directory-listed rooms. Decoupled from admission — reading
       // the feed grants nothing; acting on an opportunity uses the normal
@@ -1794,9 +1816,30 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return res.end(req.method === "HEAD" ? undefined : html);
       }
       if (url.pathname === "/receipts" || url.pathname === "/api/public/receipts") reject(405, "method_not_allowed", "Method not allowed");
+      if (url.pathname === "/sitemap.xml" && ["GET", "HEAD"].includes(req.method)) {
+        // Confirm bytes exist before advertising an asset-backed canonical URL.
+        const available = [];
+        for (const [path, file] of publicSearchAssets(publicAssetPaths)) {
+          if (!reviewedPublicSearchPaths.includes(path)) continue;
+          try { await loadAsset(file); available.push(path); } catch { /* Unavailable pages are not advertised. */ }
+        }
+        const xml = publicSearchSitemap(ROOM_ORIGIN, [...available, "/receipts"]);
+        if (!url.search) res.setHeader("X-Robots-Tag", "all");
+        res.writeHead(200, { "Content-Type": "application/xml; charset=utf-8" });
+        return res.end(req.method === "HEAD" ? undefined : xml);
+      }
       if (assets.has(url.pathname) && ["GET", "HEAD"].includes(req.method)) {
         const [path, type] = assets.get(url.pathname);
         const data = await loadAsset(path);
+        const canonical = publicSearchCanonical(url.pathname, publicAssetPaths);
+        if (canonical) res.setHeader("Content-Security-Policy", PUBLIC_SEARCH_CSP);
+        if (canonical && !url.search) {
+          if (reviewedPublicSearchPaths.includes(canonical)) res.setHeader("X-Robots-Tag", "all");
+          if (canonical !== url.pathname) {
+            res.writeHead(301, { Location: canonical });
+            return res.end();
+          }
+        }
         // RFC 8288 discovery hints on the public HTML door too: a cold agent
         // starting at GET / alone can find the agent card from Link headers.
         res.setHeader("Link", discoveryLinks());
@@ -3236,7 +3279,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       // onboarding-funnel was removed on main (replaced by activation-pack);
       // dm-consents + public-face are this branch's consent/face routes.
-      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|context|conversation|stream|cursor|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|export|import|charter|outside-agents|request-runs|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-agent-links|guest-invites|guest-invites-list|guest-invites-revoke|guest-invites-disconnect|guest-invites-revoke-all|guest-invites-upgrade|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|orient|verification-policy|dm-consents|bonds|peer-dms|directory|opportunities|public-face|needs-attention|jev-shadow|mentions|open-questions|human-push|thread-mutes|referrals|referral-invites|activity|activity-read|activity-read-all|activity-unread-count|read-horizon|saved))?$/.exec(url.pathname);
+      const projectOfferPublishMatch = /^\/api\/rooms\/([^/]{1,384})\/project-offers\/([^/]{1,128})\/publish$/.exec(url.pathname);
+      const projectOfferWithdrawMatch = /^\/api\/rooms\/([^/]{1,384})\/project-offers\/([^/]{1,128})\/withdraw$/.exec(url.pathname);
+      const projectOfferActionMatch = projectOfferPublishMatch ?? projectOfferWithdrawMatch;
+      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|context|conversation|stream|cursor|project-offers|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|export|import|charter|outside-agents|request-runs|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-agent-links|guest-invites|guest-invites-list|guest-invites-revoke|guest-invites-disconnect|guest-invites-revoke-all|guest-invites-upgrade|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|orient|verification-policy|dm-consents|bonds|peer-dms|directory|opportunities|public-face|needs-attention|jev-shadow|mentions|open-questions|human-push|thread-mutes|referrals|referral-invites|activity|activity-read|activity-read-all|activity-unread-count|read-horizon|saved))?$/.exec(url.pathname);
       // Round-2 #112: threaded replies share the room funnel below (id decoding,
       // credential selection, read rate limit) with every other room route.
       const threadMatch = /^\/api\/rooms\/([^/]{1,384})\/messages\/([^/]{1,384})\/thread$/.exec(url.pathname);
@@ -3416,13 +3462,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         ?? boardV2EventsMatch ?? boardV2MirrorMatch ?? boardV2HealthMatch;
       // Consent-bound DMs (decide/revoke/unblock) and public-face rotate ride
       // the same funnel: their literal segments must never be mistaken for ids.
-      if (!match && !revokeMatch && !threadMatch && !accessDecideMatch && !delegationGrantMatch && !delegationRevokeMatch && !delegationListMatch && !ownerDelegateGrantMatch && !ownerDelegateRevokeMatch && !ownerDelegateListMatch && !ownershipTransferMatch && !collabMatch && !workClaimMatch
+      if (!projectOfferActionMatch && !match && !revokeMatch && !threadMatch && !accessDecideMatch && !delegationGrantMatch && !delegationRevokeMatch && !delegationListMatch && !ownerDelegateGrantMatch && !ownerDelegateRevokeMatch && !ownerDelegateListMatch && !ownershipTransferMatch && !collabMatch && !workClaimMatch
         && !feedbackMatch && !bountyMatch && !creditsMatch && !boardV2Match
         && !dmConsentDecideMatch && !dmConsentBlockMatch && !dmConsentRevokeMatch && !dmConsentUnblockMatch && !publicFaceRotateMatch
         && !peerDmThreadMatch && !operatorAgentMatch
         && !mentionAckMatch && !mentionSettingsMatch && !savedDeleteMatch && !memberDeactivateMatch
         && !agentGrantsMatch && !agentGrantDeleteMatch && !agentCapabilitiesMatch) reject(404, "not_found", "Not found");
-      const roomId = pathId((match ?? revokeMatch ?? threadMatch ?? accessDecideMatch ?? delegationGrantMatch ?? delegationRevokeMatch ?? delegationListMatch ?? ownerDelegateGrantMatch ?? ownerDelegateRevokeMatch ?? ownerDelegateListMatch ?? ownershipTransferMatch ?? collabMatch ?? workClaimMatch
+      const roomId = pathId((projectOfferActionMatch ?? match ?? revokeMatch ?? threadMatch ?? accessDecideMatch ?? delegationGrantMatch ?? delegationRevokeMatch ?? delegationListMatch ?? ownerDelegateGrantMatch ?? ownerDelegateRevokeMatch ?? ownerDelegateListMatch ?? ownershipTransferMatch ?? collabMatch ?? workClaimMatch
         ?? feedbackMatch ?? bountyMatch ?? creditsMatch ?? boardV2Match
         ?? dmConsentDecideMatch ?? dmConsentBlockMatch ?? dmConsentRevokeMatch ?? dmConsentUnblockMatch ?? publicFaceRotateMatch
         ?? peerDmThreadMatch ?? operatorAgentMatch
@@ -3436,7 +3482,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const mentionEventId = mentionAckMatch ? pathId(mentionAckMatch[2]) : null;
       const savedDeleteMessageId = savedDeleteMatch ? pathId(savedDeleteMatch[2]) : null;
       const deactivateMemberId = memberDeactivateMatch ? pathId(memberDeactivateMatch[2]) : null;
-      const route = match ? (match[2] ?? "") : revokeMatch ? "invitation-revoke" : threadMatch ? "thread" : accessDecideMatch ? "access-decide" : delegationGrantMatch ? "delegation-grant" : delegationRevokeMatch ? "delegation-revoke" : delegationListMatch ? "delegation-list" : ownerDelegateGrantMatch ? "owner-delegate-grant" : ownerDelegateRevokeMatch ? "owner-delegate-revoke" : ownerDelegateListMatch ? "owner-delegate-list"
+      const route = projectOfferActionMatch ? "project-offers" : match ? (match[2] ?? "") : revokeMatch ? "invitation-revoke" : threadMatch ? "thread" : accessDecideMatch ? "access-decide" : delegationGrantMatch ? "delegation-grant" : delegationRevokeMatch ? "delegation-revoke" : delegationListMatch ? "delegation-list" : ownerDelegateGrantMatch ? "owner-delegate-grant" : ownerDelegateRevokeMatch ? "owner-delegate-revoke" : ownerDelegateListMatch ? "owner-delegate-list"
         : dmConsentDecideMatch ? "dm-consent-decide" : dmConsentBlockMatch ? "dm-consent-block" : dmConsentRevokeMatch ? "dm-consent-revoke"
         : dmConsentUnblockMatch ? "dm-consent-unblock" : publicFaceRotateMatch ? "public-face-rotate"
         : peerDmThreadMatch ? "peer-dm-thread" : operatorAgentMatch ? "operator-agent"
@@ -3462,6 +3508,24 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const granted = (auth.apiKeyScopes ?? []).some(scope =>
           scope === requiredScope || (scope.endsWith(":*") && requiredScope.startsWith(scope.slice(0, -1))));
         if (!granted) reject(403, "insufficient_scope", `API key lacks the ${requiredScope} scope`);
+      }
+      if (route === "project-offers") {
+        if (isGuestAgentMemberId(auth.member.id)) reject(403, "owner_only", "Guests cannot manage project offers");
+        if (!projectOfferActionMatch && ["GET", "HEAD"].includes(req.method)) return json(res, 200, store.projectOffers.ownerList(roomId, auth.member.id));
+        if (req.method === "POST") {
+          const data = await body(req);
+          const outcome = store.transaction(() => {
+            // Upload may outlive credential revocation, role change or session rotation.
+            const current = roomAuth(selected, roomId, fence);
+            if (current.member.id !== auth.member.id) reject(403, "access_denied", "The acting identity changed");
+            if (current.kind === "api-key" && !(current.apiKeyScopes ?? []).some(scope => scope === "rooms:write" || scope === "rooms:*")) reject(403, "insufficient_scope", "API key lacks rooms:write");
+            return projectOfferActionMatch
+              ? store.projectOffers.transition(roomId, current.member.id, pathId(projectOfferActionMatch[2]), projectOfferPublishMatch ? "publish" : "withdraw", data)
+              : store.projectOffers.create(roomId, current.member.id, data);
+          });
+          return json(res, projectOfferActionMatch ? 200 : 201, outcome);
+        }
+        reject(405, "method_not_allowed", "Method not allowed");
       }
       // RC-2026-09-19-070: DM privacy. A targeted message (message.posted
       // with data.toMemberId) is visible only to its sender and its addressed
@@ -3946,8 +4010,18 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           return res.end(bytes);
         }
         const lines = [];
+        // R1 (export/import round-trip): the per-viewer filter can drop
+        // targeted DMs the viewer cannot see, leaving sequence gaps in the
+        // file; importEvents demands dense line.sequence === i + 1, so the
+        // export renumbers the visible walk densely. Event bodies carry no
+        // sequence (order + event ids are the stable references; import
+        // rewrites dense row keys anyway), so renumbering is replay-safe
+        // and keeps the export self-consistent for reimport.
+        let exportSequence = 0;
         for (const line of store.exportEvents(selected.token, roomId, fence)) {
-          if (roomEventVisible(line.event)) lines.push(JSON.stringify(line) + "\n");
+          if (!roomEventVisible(line.event)) continue;
+          exportSequence += 1;
+          lines.push(JSON.stringify({ sequence: exportSequence, event: line.event }) + "\n");
         }
         const bytes = Buffer.from(lines.join(""), "utf8");
         res.writeHead(200, { "Content-Type": "application/x-ndjson; charset=utf-8", "Content-Length": bytes.length,

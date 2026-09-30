@@ -317,6 +317,15 @@ export function searchMessages(state, query, limit = 50, { viewer = null, mentio
   return { messages: matches.slice(-limit).reverse(), total: matches.length, mentionsOnly: only };
 }
 
+// E-H2: decides whether an access-end should preserve in-flight drafts.
+// A session that died unexpectedly (401/403 expiry — the credential died,
+// the user didn't leave) preserves drafts so re-authentication restores
+// them. Intentional leaves — sign-out, room/account switch, page unload —
+// clear drafts as before.
+export function shouldPreserveDrafts({ leavingPage, pendingSignout, endedContext }) {
+  return !leavingPage && !pendingSignout && !endedContext;
+}
+
 // In-memory only: every thread has its own text, recipient, reply target, retry ID,
 // and submission error. Moving between discussions must not leak local composer state.
 // The containing session discards the entire instance on sign-out or revoked access.

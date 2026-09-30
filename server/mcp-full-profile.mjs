@@ -201,6 +201,8 @@ export async function callHostedStdioTool(store, secret, name, args) {
       workDiscussion: (id, options) => store.workDiscussion(secret, roomId, id, options)
     }, rest.workItemId, { ...options, discussionSince: rest.discussionSince }) : store.workContext(secret, roomId, rest.workItemId, options);
     if (context.preparation?.nextRead) context.preparation.nextRead.arguments.roomId = roomId;
+    for (const request of context.replyRequestContext?.requests ?? []) request.nextRead.arguments.roomId = roomId;
+    if (context.replyRequestContext?.nextRead) context.replyRequestContext.nextRead.arguments.roomId = roomId;
     if (!rest.brief) return { value: context, isError: false };
     return { value: {
       roomId: context.roomId, workItemId: context.work.id, revision: context.work.revision,
@@ -288,7 +290,8 @@ function callBountyTool(store, secret, roomId, auth, name, rest) {
   switch (name) {
     case "bounty_list": {
       const viewer = rest.viewer === undefined ? null : rest.viewer === "self" ? caller : rest.viewer;
-      return { roomId, bounties: escrow.listBounties(roomId, { group: rest.group ?? null, viewer }) };
+      const poster = rest.poster === undefined ? null : rest.poster === "self" ? caller : rest.poster;
+      return { roomId, bounties: escrow.listBounties(roomId, { group: rest.group ?? null, viewer, poster }) };
     }
     case "bounty_read_balances":
       return { roomId, balances: escrow.balances(roomId, caller) };
@@ -299,7 +302,7 @@ function callBountyTool(store, secret, roomId, auth, name, rest) {
       return idem("bounty.post", 201, () => {
         const { bounty, receipt } = escrow.postBounty(roomId, { poster: caller, title: rest.title,
           criteria: rest.criteria, amount: rest.amount, deadline: rest.deadline,
-          verifierId: rest.verifierId ?? null, rubric: rest.rubric ?? null, actor });
+          verifierId: rest.verifierId ?? null, approvalMode: rest.approvalMode ?? "human", rubric: rest.rubric ?? null, actor });
         return { roomId, bounty, receipt };
       });
     }

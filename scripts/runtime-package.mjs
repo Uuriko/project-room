@@ -14,8 +14,27 @@ const v12Assets = [...v11Assets, "src/reply-requests.js"];
 const v13Assets = [...v12Assets, "src/work-help.js"];
 const v14Assets = [...v13Assets, "src/help-offers.js"];
 const inboxAssets = [...v14Assets, "src/inbox-client.js", "src/inbox-ui.js", "src/inbox-quarantine-ui.js"];
-export const publicAssets = [inboxAssets[0], "join.html", "push-sw.js", inboxAssets[1], "src/member-display-names.js", "src/room-layout.js", ...inboxAssets.slice(2, 6), "src/human-push.js", "src/human-push-display.js", ...inboxAssets.slice(6), "src/account-setup-ui.js", "src/gmail-ui.js", "src/inbox-send-ui.js", "src/room-roster.js", "src/account-settings-ui.js", "src/auth-signin-ui.js", "src/agent-signin-ui.js", "src/agent-first-run.js", "src/invite-context.js", "src/request-access.js", "src/room-deep-link.js", "src/browser-session.js", "src/composer-files.js", "src/session-expiry.js", "src/agent-invite-ui.js", "src/referral-board.js", "src/land-queue-board.js", "src/join.js", "src/work-item-session.js", "src/work-loops.js", "src/work-recipes.js", "src/chat-suggestions.js", "src/share-invite-code.js", "src/handoff-envelope-ui.js", "src/dm-consents.js", "src/friend-bond.js", "src/needs-attention.js", "src/emoji.js", "src/emoji-catalog.js", "connectors/muse.md"];
-const assetsFor = (schema, inbox, sendUI = false, setupUI = false, gmailUI = false, layoutUI = false) => schema === 8 ? v8Assets : schema <= 10 ? v9Assets : schema === 11 ? v11Assets : schema === 12 ? v12Assets : schema === 13 ? v13Assets : inbox && schema >= 15 ? sendUI ? publicAssets.filter(path => (setupUI || path !== "src/account-setup-ui.js") && (gmailUI || path !== "src/gmail-ui.js") && (layoutUI || path !== "src/room-layout.js")) : inboxAssets : v14Assets;
+export const publicAssets = [inboxAssets[0], "about.html", "offers.html", "src/project-offers-ui.js", "src/owner-project-offers-ui.js", "src/project-offers.css", "join.html", "push-sw.js", inboxAssets[1], "src/member-display-names.js", "src/room-layout.js", ...inboxAssets.slice(2, 6), "src/human-push.js", "src/human-push-display.js", ...inboxAssets.slice(6), "src/account-setup-ui.js", "src/gmail-ui.js", "src/inbox-send-ui.js", "src/room-roster.js", "src/account-settings-ui.js", "src/auth-signin-ui.js", "src/agent-signin-ui.js", "src/agent-first-run.js", "src/invite-context.js", "src/request-access.js", "src/room-deep-link.js", "src/browser-session.js", "src/composer-files.js", "src/session-expiry.js", "src/agent-invite-ui.js", "src/referral-board.js", "src/land-queue-board.js", "src/join.js", "src/work-item-session.js", "src/work-loops.js", "src/work-recipes.js", "src/chat-suggestions.js", "src/share-invite-code.js", "src/handoff-envelope-ui.js", "src/dm-consents.js", "src/friend-bond.js", "src/needs-attention.js", "src/emoji.js", "src/emoji-catalog.js", "connectors/muse.md"];
+// Read the selected source's explicit asset declaration, never today's list for
+// an older schema. Parse only this repository's data-only array/spread/map shape;
+// do not execute packaged JavaScript. Missing advertised assets remain errors.
+function assetsFor(files) {
+  const path = files.has("deploy/public-assets.mjs") ? "deploy/public-assets.mjs" : "cloudflare/build-assets.mjs";
+  const name = path.startsWith("deploy/") ? "publicAssetPaths" : "assetPaths";
+  const source = files.get(path)?.toString();
+  const declaration = source?.match(new RegExp(`export const ${name} = ([\\s\\S]*?);`))?.[1];
+  const expression = declaration?.startsWith("Object.freeze(") ? declaration.slice(14, -1) : declaration;
+  const parts = expression?.match(/^\[(.*?)\.\.\.\[(.*?)\]\.map\(\s*(\w+)\s*=>\s*(["'])src\/\4\s*\+\s*\3\s*\)(.*?)\]$/s);
+  check(parts, `${path} has an unsupported public asset declaration`);
+  const literals = text => {
+    const values = [...text.matchAll(/["']([A-Za-z0-9_./-]+)["']/g)].map(match => match[1]);
+    check(!text.replace(/["'][A-Za-z0-9_./-]+["']/g, "").replace(/[\s,]/g, ""), `${path} has unsupported asset expressions`);
+    return values;
+  };
+  const assets = [...literals(parts[1]), ...literals(parts[2]).map(file => "src/" + file), ...literals(parts[5])];
+  check(assets.includes("index.html") && new Set(assets).size === assets.length && assets.every(asset => allowed.has(asset)), `${path} advertises invalid or unregistered assets`);
+  return assets;
+}
 const required = [...v8Assets, "server.mjs", "package.json", "package-lock.json",
   ...["backup", "bootstrap", "claim-scopes", "deployment", "http", "invitation-evidence", "invitation-journal", "reminders",
     "return-brief", "return-selectors", "share-links", "store", "work-context", "writer-fence"].map(name => `server/${name}.mjs`),
@@ -25,6 +44,7 @@ const required = [...v8Assets, "server.mjs", "package.json", "package-lock.json"
 // Historical v8 packages predate these files. Literal-import closure below makes
 // them mandatory when the selected source imports them, without rewriting history.
 const optional = ["server/diagnostics.mjs", "server/maintenance.mjs", "server/recovery.mjs", "client/agent-connection.mjs", "server/agent-connections.mjs", "src/agent-connections.js", "src/agent-error.mjs", "client/mcp-stdio.mjs", "client/work-preparation.mjs", "scripts/agent-mcp.mjs", "client/work-actions.mjs", "server/work-discussion.mjs", "server/text-results.mjs", "client/attention-inbox.mjs"];
+optional.push("server/mcp-install-script.mjs", "server/usdc-x402.mjs", "server/x402.mjs", "server/usdc-payouts.mjs");
 optional.push("src/audit-receipts.mjs", "src/outside-agents.mjs", "server/outside-agents.mjs", "scripts/outside-agents.mjs");
 optional.push("src/room-charter.js", "src/room-instructions.js");
 optional.push("src/reply-requests.js", "server/reply-requests.mjs");
@@ -32,6 +52,7 @@ optional.push("server/dm-consents.mjs", "server/public-face.mjs"); // consent-bo
 optional.push("server/bonds.mjs"); // agent Bond + peer DMs (imported by server/store.mjs and server/http.mjs)
 optional.push("server/membership-delegation-journal.mjs"); // append-only membership grant decisions
 optional.push("server/room-directory.mjs"); // #605 opt-in public room directory (imported by server/store.mjs)
+optional.push("offers.html", "src/project-offers-ui.js", "src/owner-project-offers-ui.js", "src/project-offers.css", "server/project-offers.mjs", "src/contribution-brief.js", "src/paid-work-offers.js");
 optional.push("server/opportunities.mjs"); // opportunity feed v2: read-only open-work discovery (imported by server/http.mjs)
 optional.push("server/conversation-sync.mjs"); // bounded viewer-scoped conversation reads (imported by server/http.mjs)
 optional.push("src/dm-consents.js"); // DM consent browser view-model + API helpers (imported by src/app.js)
@@ -87,7 +108,7 @@ optional.push("src/inbox-client.js", "src/inbox-ui.js");
 optional.push("src/inbox-quarantine-ui.js"); // quarantine review surface (imported by src/inbox-ui.js)
 optional.push("src/inbox-send-ui.js");
 optional.push("src/room-roster.js");
-optional.push("deploy/public-assets.mjs"); // Shared live manifest; historical packages predate it.
+optional.push("deploy/public-assets.mjs", "deploy/public-search.mjs"); // Shared live manifest; historical packages predate it.
 optional.push("deploy/agent-discovery.mjs", "deploy/room-entry.mjs", "server/guest-agent-links.mjs");
 optional.push("deploy/agent-card-key.mjs", "deploy/agent-card-signed.mjs"); // RC-2026-09-23-105: room card signing key (public half) + build-time signature (imported by deploy/agent-discovery.mjs; pure)
 optional.push("server/guest-invites.mjs"); // RC-2026-09-23-100: GX-invite public handoff for external agents (imported by server/store.mjs + server/http.mjs)
@@ -231,6 +252,7 @@ optional.push("src/agent-invite-ui.js"); // People-rail invite-code mint (collab
 optional.push("src/referral-board.js"); // People-rail referral board (imports agent-invite-ui for "my referral link" mint)
 optional.push("src/land-queue-board.js"); // Land-queue board card (imported by src/app.js)
 optional.push("server/room-export-html.mjs");
+optional.push("about.html");
 optional.push("join.html"); // Self-serve join page (public asset)
 optional.push("src/join.js"); // Join page logic (public asset, imported by join.html)
 optional.push("server/access-review.mjs");
@@ -313,7 +335,7 @@ export function createRuntimePackage({ repository, commit, destination }) {
     mkdirSync(dirname(join(output, path)), { recursive: true, mode: 0o700 });
     writeFileSync(join(output, path), bytes, { mode: 0o600, flag: "wx" });
   }
-  const manifest = { format: 1, sourceCommit: commit, sourceTree: tree, runtime, publicAssets: assetsFor(runtime.schemaVersion, files.has("src/inbox-ui.js"), files.has("src/inbox-send-ui.js"), files.has("src/account-setup-ui.js"), files.has("src/gmail-ui.js"), files.has("src/room-layout.js")),
+  const manifest = { format: 1, sourceCommit: commit, sourceTree: tree, runtime, publicAssets: assetsFor(files),
     files: [...files].map(([path, bytes]) => ({ path, bytes: bytes.length, sha256: sha256(bytes) })),
     limitation: "Content consistency only; not trusted provenance, recovery freshness, hosted readiness or publication approval." };
   // Last write is the completion marker. A partial directory is not a package.
@@ -350,12 +372,6 @@ export function verifyRuntimePackage(directory, { expectedCommit } = {}) {
   check(!expectedCommit || manifest.sourceCommit === expectedCommit,
     `runtime manifest sourceCommit ${manifest.sourceCommit} does not match expected ${expectedCommit}`);
   check(Array.isArray(manifest.files), "runtime manifest files is not an array");
-  const expectedAssets = assetsFor(manifest.runtime?.schemaVersion,
-    manifest.files.some(f => f.path === "src/inbox-ui.js"), manifest.files.some(f => f.path === "src/inbox-send-ui.js"), manifest.files.some(f => f.path === "src/account-setup-ui.js"), manifest.files.some(f => f.path === "src/gmail-ui.js"), manifest.files.some(f => f.path === "src/room-layout.js"));
-  const missingAssets = expectedAssets.filter(a => !manifest.publicAssets.includes(a));
-  const extraAssets = manifest.publicAssets.filter(a => !expectedAssets.includes(a));
-  check(missingAssets.length === 0 && extraAssets.length === 0,
-    `runtime manifest publicAssets mismatch: missing [${missingAssets.join(", ")}], extra [${extraAssets.join(", ")}]`);
   const listed = manifest.files.map(entry => entry.path);
   check(new Set(listed).size === listed.length, "runtime manifest lists a file more than once");
   check(same([...listed].sort(), listed), "runtime manifest file list is not sorted");
@@ -374,6 +390,13 @@ export function verifyRuntimePackage(directory, { expectedCommit } = {}) {
       `packaged file ${entry.path} does not match its manifest bytes/sha256`);
     files.set(entry.path, bytes);
   }
+  const expectedAssets = assetsFor(files);
+  const missingAssets = expectedAssets.filter(asset => !manifest.publicAssets.includes(asset));
+  const extraAssets = manifest.publicAssets.filter(asset => !expectedAssets.includes(asset));
+  check(missingAssets.length === 0 && extraAssets.length === 0,
+    `runtime manifest publicAssets mismatch: missing [${missingAssets.join(", ")}], extra [${extraAssets.join(", ")}]`);
+  const absentAssets = expectedAssets.filter(path => !files.has(path));
+  check(absentAssets.length === 0, `runtime public assets missing from packaged files: ${absentAssets.join(", ")}`);
   // Check this codebase's literal imports, including dynamic literal imports.
   // This is not a complete JavaScript dependency parser; cold runtime tests and
   // source review remain required, especially if a computed loader is added.
