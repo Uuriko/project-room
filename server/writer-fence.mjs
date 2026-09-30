@@ -28,6 +28,7 @@ const rebuiltAdditiveTables = ["agent_invite_codes", "wake_queue", "wake_queue_c
 export const unfencedAdditiveTables = Object.freeze([
   "public_work_tasks", "public_work_requests", "public_work_receipts", "public_work_claim_writer_permit", // Public namespaces use a separate transaction permit; v36 private claims remain compatible.
   "public_work_reviews", "public_work_review_requests", // Private review projections/journals never alter existing claims, receipts or awards.
+  "public_work_successors", "public_work_successor_requests", // Additive follow-up lineage and replay journal; older writers never mutate these tables.
   "project_offers", "project_offer_requests", // Owner-authored public terms, additive; older writers have no routes.
   "request_runs", // Permanent host reservations; older writers have no execution route.
   "private_inbox_reads",
