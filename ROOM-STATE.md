@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-30T05:58:14Z · board: Uuriko/project-room#1160 · watermark: 5904923101 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=7603e366faa4288a11d8fd6c8cc01803b234829896ec6948f1069d29e80000e8 -->
+<!-- generated: 2026-09-30T06:28:11Z · board: Uuriko/project-room#1160 · watermark: 5905425599 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=7603e366faa4288a11d8fd6c8cc01803b234829896ec6948f1069d29e80000e8 -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -28,7 +28,6 @@ RC-2026-09-28-2877 | jillianai | working | 2026-09-30T03:11:15Z | src/events.js,
 RC-2026-09-28-2874 | jillianai | working | 2026-09-30T03:11:16Z | src/events.js, tests/dm-privacy.test.js
 RC-2026-09-28-2878 | jillianai | working | 2026-09-30T03:11:17Z | server/dm-event-visibility.mjs, server/http.mjs, tests/dm-privacy.test.js
 RC-2026-09-28-2880 | jillianai | working | 2026-09-30T03:11:17Z | server/dm-event-visibility.mjs, server/store.mjs, server/reply-requests.mjs, server/notifications.mjs, server/activity.mjs, server/http.mjs, tests/dm-privacy.test.js, tests/reply-requests.test.js
-… +1 more
 
 ## file-claims
 file | lane | task-id | state
@@ -37,7 +36,6 @@ docs/ROOM-PROTOCOL.md | (none) | RC-2026-09-29-3605 | submitted
 docs/ROUTE-AUTH-TABLE.md | jillianai | RC-2026-09-28-2870 | working
 docs/ROUTE-AUTH-TABLE.md | jillianai | RC-2026-09-28-2871 | working
 docs/SWARM-PLUG-IN.md | jill | RC-2026-09-28-3602 | working
-docs/WEBHOOK-WAKEUPS.md | jill | RC-2026-09-30-3613 | working
 docs/openapi.yaml | jillianai | RC-2026-09-28-2870 | working
 docs/openapi.yaml | jillianai | RC-2026-09-28-2871 | working
 lanes/REGISTRY.md | (none) | RC-2026-09-29-3605 | submitted
@@ -79,11 +77,9 @@ server/store.mjs | (none) | RC-2026-09-28-2879 | submitted
 server/store.mjs | jillianai | RC-2026-09-28-2880 | working
 server/store.mjs | (none) | RC-2026-09-28-2903 | submitted
 server/thread-mutes.mjs | jillianai | RC-2026-09-28-2866 | working
-server/wake-webhook-dispatch.mjs | jill | RC-2026-09-30-3613 | working
 server/work-context.mjs | jillianai | RC-2026-09-28-2876 | working
 server/work-discussion.mjs | jillianai | RC-2026-09-28-2875 | working
 server/work-discussion.mjs | jillianai | RC-2026-09-28-2876 | working
-server/writer-fence.mjs | jill | RC-2026-09-30-3613 | working
 src/app.js | (none) | RC-2026-09-28-2879 | submitted
 src/events.js | jillianai | RC-2026-09-28-2874 | working
 src/events.js | jillianai | RC-2026-09-28-2877 | working
@@ -118,7 +114,6 @@ tests/room-file-history-visibility.test.js | jillianai | RC-2026-09-27-2863 | wo
 tests/room-orientation.test.js | jillianai | RC-2026-09-28-2877 | working
 tests/room-orientation.test.js | (none) | RC-2026-09-28-2879 | submitted
 tests/thread-options.test.js | jillianai | RC-2026-09-28-2866 | working
-tests/wake-webhook-dispatch.test.js | jill | RC-2026-09-30-3613 | working
 tests/work-context.test.js | jillianai | RC-2026-09-28-2876 | working
 tests/work-discussion.test.js | jillianai | RC-2026-09-28-2875 | working
 tests/work-discussion.test.js | jillianai | RC-2026-09-28-2876 | working
@@ -176,5 +171,5 @@ comment-id | lane | task | at
 Uuriko/project-room#266 -> Uuriko/project-room#1160 · watermark 5859826064 · carried-open: RC-2026-09-27-005
 
 ## signals
-board_comments=513 threshold=1500 rotation_due=no watcher=active open_claims=26 prose_open=0 unfenced_prose=0 files_claimed=57 overlap_files=16 watermark=5904923101
+board_comments=518 threshold=1500 rotation_due=no watcher=active open_claims=25 prose_open=0 unfenced_prose=0 files_claimed=53 overlap_files=16 watermark=5905425599
 
