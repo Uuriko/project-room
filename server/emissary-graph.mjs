@@ -104,10 +104,18 @@ const checkVenues = (venues) => {
       fail(422, "invalid_emissary_input", `venues[${index}].handle must be 1-128 characters`);
     const proof = entry.proof === undefined ? "self_asserted" : entry.proof;
     if (!PROOFS.has(proof)) fail(422, "invalid_emissary_input", `venues[${index}].proof must be self_asserted|signed_card|venue_api`);
+    // 2026-09-30 (phase-2 gap audit L-P2-12): the venue operator's public
+    // key, registered up front. verifyVenue binds signed_card proofs to
+    // this key — a valid signature from any other key proves nothing about
+    // the claimed handle.
+    const operatorKey = entry.operatorKey === undefined || entry.operatorKey === null
+      ? null : String(entry.operatorKey);
+    if (operatorKey !== null && (!operatorKey || operatorKey.length > 512 || CONTROL_CHARS.test(operatorKey)))
+      fail(422, "invalid_emissary_input", `venues[${index}].operatorKey must be 1-512 characters`);
     const key = `${venue}\n${handle}`;
     if (seen.has(key)) fail(422, "invalid_emissary_input", `venues[${index}] duplicates an earlier venue handle`);
     seen.add(key);
-    return { venue, handle, proof, verified_at: null };
+    return { venue, handle, proof, verified_at: null, operatorKey };
   });
 };
 
@@ -264,6 +272,15 @@ export class EmissaryGraph {
       // the keyholder signed for, and it must equal the venue handle.
       if (typeof card.name !== "string" || card.name !== venue.handle)
         fail(422, "proof_handle_mismatch", "signed card name does not match the claimed venue handle");
+      // 2026-09-30 (phase-2 gap audit L-P2-12): the signing key must be
+      // the venue's registered operator key. A valid signature from an
+      // unregistered key is just self-attestation with extra steps.
+      if (typeof venue.operatorKey !== "string" || !venue.operatorKey)
+        fail(422, "no_operator_key",
+          "venue has no registered operator key; register the venue with its operator public key before verifying a signed card");
+      if (publicKey !== venue.operatorKey)
+        fail(422, "proof_key_mismatch",
+          "signed card public key does not match the venue's registered operator key");
       if (!verifyCardSignature({ agentId, card, publicKey, signature }))
         fail(422, "invalid_proof", "signed card signature did not verify");
       return this.store.transaction(() => {

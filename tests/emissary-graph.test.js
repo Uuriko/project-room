@@ -62,7 +62,7 @@ test("register mints an ex1 id at status stranger", t => {
   assert.equal(record.kind, "agent");
   assert.equal(record.display_name, "Longcat");
   assert.deepEqual(record.venues, [
-    { venue: "thecolony", handle: "longcat", proof: "self_asserted", verified_at: null },
+    { venue: "thecolony", handle: "longcat", proof: "self_asserted", verified_at: null, operatorKey: null },
   ]);
   assert.equal(record.referrer_external_id, null);
   assert.equal(record.reputation, 0);
@@ -135,11 +135,11 @@ test("verified venue handles are exclusive per room; self-asserted handles are n
 
 test("verifyVenue with a valid signed card promotes stranger to known", t => {
   const store = freshStore(t);
+  const { publicKey, privateKey } = generateKeyPair();
   const record = store.emissaryGraph.register(ROOM, {
     kind: "agent", displayName: "Carded",
-    venues: [{ venue: "thecolony", handle: "carded-agent" }],
+    venues: [{ venue: "thecolony", handle: "carded-agent", operatorKey: publicKey }],
   });
-  const { publicKey, privateKey } = generateKeyPair();
   const card = { name: "carded-agent", description: "test agent", version: "1" };
   const signature = signCard({ agentId: "agent-123", card, privateKey });
   const updated = store.emissaryGraph.verifyVenue(roomOf(record), record.external_id, 0, {
@@ -152,11 +152,11 @@ test("verifyVenue with a valid signed card promotes stranger to known", t => {
 
 test("verifyVenue fails closed on forged or mismatched cards with no state change", t => {
   const store = freshStore(t);
+  const { publicKey, privateKey } = generateKeyPair();
   const record = store.emissaryGraph.register(ROOM, {
     kind: "agent", displayName: "Target",
-    venues: [{ venue: "thecolony", handle: "real-handle" }],
+    venues: [{ venue: "thecolony", handle: "real-handle", operatorKey: publicKey }],
   });
-  const { publicKey, privateKey } = generateKeyPair();
   const other = generateKeyPair();
   const card = { name: "real-handle", version: "1" };
   const goodSig = signCard({ agentId: "agent-1", card, privateKey });
@@ -203,6 +203,42 @@ test("verifyVenue with venue_api stores evidence opaquely and never promotes", t
   assert.deepEqual(serviceError(() =>
     store.emissaryGraph.verifyVenue(ROOM, record.external_id, 0, { kind: "venue_api", evidence: "nope" })),
     { status: 422, code: "invalid_proof" });
+});
+
+test("verifyVenue binds the signed_card key to the venue's registered operator key (L-P2-12)", t => {
+  const store = freshStore(t);
+  const operator = generateKeyPair();
+  const attacker = generateKeyPair();
+  const record = store.emissaryGraph.register(ROOM, {
+    kind: "agent", displayName: "Keyed",
+    venues: [{ venue: "thecolony", handle: "keyed-agent", operatorKey: operator.publicKey }],
+  });
+  // Attacker self-signs a card for the victim's handle with their own key:
+  // signature is valid, name matches — but the key is not the operator's.
+  const forgedCard = { name: "keyed-agent", version: "1" };
+  const forgedSig = signCard({ agentId: "attacker", card: forgedCard, privateKey: attacker.privateKey });
+  assert.deepEqual(serviceError(() =>
+    store.emissaryGraph.verifyVenue(ROOM, record.external_id, 0,
+      { kind: "signed_card", agentId: "attacker", card: forgedCard, publicKey: attacker.publicKey, signature: forgedSig })),
+    { status: 422, code: "proof_key_mismatch" });
+  // The real operator's card still verifies.
+  const card = { name: "keyed-agent", version: "1" };
+  const sig = signCard({ agentId: "agent-9", card, privateKey: operator.privateKey });
+  const updated = store.emissaryGraph.verifyVenue(ROOM, record.external_id, 0,
+    { kind: "signed_card", agentId: "agent-9", card, publicKey: operator.publicKey, signature: sig });
+  assert.equal(updated.status, "known");
+  // A venue with no registered operator key cannot be verified by signed card.
+  const keyless = store.emissaryGraph.register(ROOM, {
+    kind: "agent", displayName: "Keyless",
+    venues: [{ venue: "thecolony", handle: "keyless-agent" }],
+  });
+  const kCard = { name: "keyless-agent", version: "1" };
+  const kSig = signCard({ agentId: "agent-9", card: kCard, privateKey: operator.privateKey });
+  assert.deepEqual(serviceError(() =>
+    store.emissaryGraph.verifyVenue(ROOM, keyless.external_id, 0,
+      { kind: "signed_card", agentId: "agent-9", card: kCard, publicKey: operator.publicKey, signature: kSig })),
+    { status: 422, code: "no_operator_key" });
+  assert.equal(store.emissaryGraph.get(ROOM, keyless.external_id).status, "stranger");
 });
 
 test("status ladder is monotonic: one rung up, never a skip or demotion", t => {
