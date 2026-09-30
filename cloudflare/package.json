@@ -13,10 +13,12 @@
     "wrangler": "4.116.0"
   },
   "license": "Apache-2.0",
-  "overrides": {
-    "miniflare": {
-      "sharp": "0.35.4",
-      "undici": "7.29.1"
+  "pnpm": {
+    "overrides": {
+      "miniflare": {
+        "sharp": "0.35.4",
+        "undici": "7.29.1"
+      }
     }
   }
 }
