@@ -4,7 +4,7 @@
 // pre-fix source, run, re-apply the fix) before being committed here.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { execFile, execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, symlinkSync, rmSync, utimesSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve, dirname } from "node:path";
@@ -315,7 +315,6 @@ test("L-47: checklist/status never rewrite the state file", async () => {
   const dir = mkdtempSync(join(tmpdir(), "lowd-l47-"));
   const statePath = join(dir, "state.json");
   try {
-    const env = { ROOM_ONBOARD_STATE: statePath };
     const realEnv = process.env.ROOM_ONBOARD_STATE;
     process.env.ROOM_ONBOARD_STATE = statePath;
     try {
