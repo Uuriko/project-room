@@ -793,6 +793,24 @@ export class BountyEscrow {
     return lane;
   }
 
+  // 2026-09-30 (phase-2 gap audit L-P2-11): owner-only gate for sybil-flag
+  // resolution, enforced in the store layer (the route layer keeps its own
+  // 403 check). Mirrors _requireLane: in legacy string-lane test mode there
+  // is no room authority and the check is skipped; in production the room
+  // authority is always present and the resolver must be the room owner.
+  // Fails closed: no authority, no ownerId, or any mismatch is not_authorized.
+  _requireRoomOwner(roomId, lane, role) {
+    if (typeof this.store.roomAuthority !== "function") {
+      check(this._allowLegacyStringLanes === true, "internal",
+        "bounty escrow requires a membership source (store.roomAuthority)");
+      return lane;
+    }
+    const { ownerId } = this.store.roomAuthority(roomId);
+    if (typeof ownerId !== "string" || ownerId !== lane)
+      fail("not_authorized", `${role}: only the room owner may resolve sybil flags`);
+    return lane;
+  }
+
   // Like _requireLane, but the member must be an agent (kind === "agent").
   // Used for the designated verifier: only an agent lane can verify work.
   _requireAgentLane(roomId, rawId, role) {
@@ -1906,6 +1924,7 @@ export class BountyEscrow {
       if (!row) fail("unknown_flag", `unknown sybil flag "${flagId}"`);
       check(row.status === "open", "invalid_state", `flag is ${row.status}, not open`);
       const by = this._requireLane(roomId, resolver, "resolver");
+      this._requireRoomOwner(roomId, by, "resolver");
       const resolvedAt = isoNow(this.nowMs());
       const trimmed = reason.trim();
       this.db.prepare(`UPDATE bounty_sybil_flags SET status=?, resolved_at=?, resolved_by=?, resolution_reason=?
@@ -3024,9 +3043,14 @@ export class BountyEscrow {
   getDispute(roomId, disputeId) {
     return this.store.readTransaction(() => {
       this._ensure();
-      const dispute = this._disputes.get(disputeId);
-      void roomId;
-      return dispute;
+      // 2026-09-30 (phase-2 gap audit L-P2-10): room-scoped read. The
+      // dispute machine itself is room-unaware; the room_id lives in the
+      // bounty_disputes table. A dispute from another room reads as absent
+      // here, never leaked across rooms.
+      const row = this.db.prepare(`SELECT room_id FROM bounty_disputes WHERE dispute_id=?`)
+        .get(disputeId);
+      if (!row || row.room_id !== roomId) return undefined;
+      return this._disputes.get(disputeId);
     });
   }
 }
