@@ -274,6 +274,9 @@ export function createDlqStore(deps = {}) {
      * Entry goes queued → replaying; handler success → done; handler throw →
      * back to queued with attempts++ and lastError recorded (never silent,
      * never rethrown — redrive-all style redelivery depends on this).
+     * Async handlers are awaited (H-12): a promise-returning handler settles
+     * the entry on settle, and replay returns a promise of the snapshot.
+     * Sync handlers keep the synchronous snapshot return.
      */
     replay(entryId, handler) {
       assertHandler(handler, 'replay');
@@ -288,9 +291,20 @@ export function createDlqStore(deps = {}) {
       entry.state = 'replaying';
       entry.updatedAt = clock();
       notify('replay-started', entry);
-      try {
-        handler(snapshotEntry(entry));
-      } catch (err) {
+      // H-12: an async handler's promise must settle before the entry leaves
+      // 'replaying'. The old code marked the entry done on dispatch without
+      // awaiting, so a rejecting async handler was recorded complete and the
+      // error vanished. Sync handlers keep the synchronous return; async
+      // handlers return a promise of the settled snapshot.
+      const settleSuccess = () => {
+        entry.state = 'done';
+        delete entry.lastError;
+        entry.updatedAt = clock();
+        persist();
+        notify('replay-succeeded', entry);
+        return snapshotEntry(entry);
+      };
+      const settleFailure = (err) => {
         entry.state = 'queued';
         entry.attempts += 1;
         entry.lastError = err instanceof Error ? err.message : String(err);
@@ -298,13 +312,17 @@ export function createDlqStore(deps = {}) {
         persist();
         notify('replay-failed', entry);
         return snapshotEntry(entry);
+      };
+      let result;
+      try {
+        result = handler(snapshotEntry(entry));
+      } catch (err) {
+        return settleFailure(err);
       }
-      entry.state = 'done';
-      delete entry.lastError;
-      entry.updatedAt = clock();
-      persist();
-      notify('replay-succeeded', entry);
-      return snapshotEntry(entry);
+      if (result && typeof result.then === 'function') {
+        return result.then(settleSuccess, settleFailure);
+      }
+      return settleSuccess();
     },
 
     /**
@@ -390,7 +408,8 @@ export function createDlqStore(deps = {}) {
     /**
      * Replay every queued entry through `handler`, up to `limit` entries.
      * Individual failures are recorded on the entries (queued + attempts++);
-     * this never throws for handler failures. Returns { done, failed }.
+     * this never throws for handler failures. Awaits async handlers (H-12)
+     * before counting. Returns a promise of { done, failed }.
      */
     replayAll(handler, { limit } = {}) {
       assertHandler(handler, 'replayAll');
@@ -399,19 +418,24 @@ export function createDlqStore(deps = {}) {
           limit,
         });
       }
-      const queued = this.list({ state: 'queued' }).slice(
-        0,
-        limit === undefined ? undefined : limit,
-      );
-      let done = 0;
-      let failed = 0;
-      for (const entry of queued) {
-        const before = this.get(entry.id);
-        const after = this.replay(entry.id, handler);
-        if (after.state === 'done' && before.state !== 'done') done += 1;
-        else if (after.attempts > before.attempts) failed += 1;
-      }
-      return Object.freeze({ done, failed });
+      // H-12: async handlers are awaited before an entry is counted, so this
+      // returns a promise of { done, failed }. Argument validation above
+      // stays synchronous.
+      return (async () => {
+        const queued = this.list({ state: 'queued' }).slice(
+          0,
+          limit === undefined ? undefined : limit,
+        );
+        let done = 0;
+        let failed = 0;
+        for (const entry of queued) {
+          const before = this.get(entry.id);
+          const after = await this.replay(entry.id, handler);
+          if (after.state === 'done' && before.state !== 'done') done += 1;
+          else if (after.attempts > before.attempts) failed += 1;
+        }
+        return Object.freeze({ done, failed });
+      })();
     },
 
     /** Subscribe to queue events. Returns an unsubscribe function. */

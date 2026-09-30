@@ -194,7 +194,7 @@ export function createAgentReputation(deps = {}) {
           { agentId, weight },
         );
       }
-      const at = event?.at ?? clock();
+      let at = event?.at ?? clock();
       if (typeof at !== 'number' || !Number.isFinite(at) || at < 0) {
         throw repError(
           'AR_INVALID_TIMESTAMP',
@@ -219,8 +219,13 @@ export function createAgentReputation(deps = {}) {
       applyDecay(agent);
 
       // Anti-gaming: at most one event of a given type per agent per minute.
-      const lastOfType = agent.lastEventAtByType.get(type);
-      if (lastOfType !== undefined && at - lastOfType >= 0 && at - lastOfType < DUPLICATE_WINDOW_MS) {
+      // H-10: the per-(agent,type) clock is monotonic. A backdated `at` used
+      // to bypass the exact-(agent,type,ts) dedup and inflate the score
+      // without bound; clamp it to the last seen timestamp so out-of-order
+      // records land inside the duplicate window instead of farming score.
+      const prevOfType = agent.lastEventAtByType.get(type);
+      if (prevOfType !== undefined && at < prevOfType) at = prevOfType;
+      if (prevOfType !== undefined && at - prevOfType < DUPLICATE_WINDOW_MS) {
         auditNote({
           action: 'record-rejected',
           agentId,
@@ -236,7 +241,9 @@ export function createAgentReputation(deps = {}) {
       const delta = round2(EVENT_DELTAS[type] * weight);
       agent.score = round2(Math.min(MAX_SCORE, Math.max(MIN_SCORE, agent.score + delta)));
       agent.lastEventAtByType.set(type, at);
-      agent.lastActiveAt = at;
+      // H-10: lastActiveAt is monotonic — a backdated record must not drag it
+      // backwards (it feeds "recently active" surfaces).
+      agent.lastActiveAt = Math.max(agent.lastActiveAt ?? -Infinity, at);
       agent.events.push(Object.freeze({ type, delta, weight, at }));
       auditNote({ action: 'record', agentId, detail: { type, delta, weight, at } });
       return snapshot(agent);
