@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { roomEntry, START_ROOM_URL, publicRoomDoorHtml, isPublicRoomDoorPath, wantsPublicDoorHtml, PUBLIC_DOOR_PATHS, ROOM_DEEP_LINK_SCRIPT, PUBLIC_DOOR_CSP, publicDoorHashForward, connectMcpPathHtml, HOSTED_MCP_JOIN_PUBLIC_URL } from "../deploy/room-entry.mjs";
+import { runInThisContext } from "node:vm";
+import { roomEntry, START_ROOM_URL, publicRoomDoorHtml, isPublicRoomDoorPath, wantsPublicDoorHtml, PUBLIC_DOOR_PATHS, ROOM_DEEP_LINK_SCRIPT, PUBLIC_DOOR_CSP, connectMcpPathHtml, HOSTED_MCP_JOIN_PUBLIC_URL } from "../deploy/room-entry.mjs";
 import { ROOM_ORIGIN, COMPUTE_DOOR, ROOM_PUBLIC_WWW } from "../deploy/agent-discovery.mjs";
 
 const FORBIDDEN = /Bearer |ROOM_AGENT_TOKEN|sk-|password|@gmail|John |Potter |Uuriko@|acct-|memberId":"[^c]/i;
@@ -229,7 +230,7 @@ function runDoorHash(hash) {
     value() {}
   });
   try {
-    publicDoorHashForward();
+    runInThisContext(ROOM_DEEP_LINK_SCRIPT);
     return { hrefs, replaced };
   } finally {
     for (const [key, descriptor] of Object.entries(previous)) {
@@ -278,8 +279,4 @@ test("www /room #room/{id} still rewrites Open/People and does not follow Join",
   assert.equal(result.hrefs["a.people"], `${ROOM_ORIGIN}/?room=commons#room/commons`);
   assert.equal(result.hrefs["a.join"], `${ROOM_ORIGIN}/#join/`);
   assert.equal(result.replaced, "");
-});
-
-test("door script bytes are the exported hash-forward function", () => {
-  assert.equal(ROOM_DEEP_LINK_SCRIPT, `(${publicDoorHashForward.toString()})();`);
 });

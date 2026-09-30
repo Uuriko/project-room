@@ -16,7 +16,9 @@ export const PUBLIC_DOOR_PATHS = Object.freeze(["/room", "/room/"]);
 // the app opens the join dialog. Bare or short #join/ stays here and shows
 // #join-empty. Legacy #code/ links forward to the app for redemption;
 // this door exposes invitation links only.
-export function publicDoorHashForward() {
+// Keep browser source literal: bundler name-preservation helpers belong to the
+// Worker module and are not available inside a serialized inline function.
+export const ROOM_DEEP_LINK_SCRIPT = String.raw`(function publicDoorHashForward() {
   function id() {
     var m = /^#room\/([A-Za-z0-9][A-Za-z0-9_.:-]{0,127})$/.exec(globalThis.location.hash || "");
     return m && m[1];
@@ -85,8 +87,7 @@ export function publicDoorHashForward() {
     }, true);
 
   }
-}
-export const ROOM_DEEP_LINK_SCRIPT = `(${publicDoorHashForward.toString()})();`;
+})();`;
 // Computed at load so the base64 digest is not a committed high-entropy token.
 const SCRIPT_HASH = createHash("sha256").update(ROOM_DEEP_LINK_SCRIPT).digest("base64");
 export const PUBLIC_DOOR_CSP = `default-src 'none'; script-src 'sha256-${SCRIPT_HASH}'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`;
