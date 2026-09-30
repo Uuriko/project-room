@@ -109,7 +109,9 @@ function classifyEvent(event, viewer) {
   }
 
   if (data.ackNeeded === true) {
-    if (data.toMemberId && data.toMemberId !== viewer.memberId) return null;
+    // An ack request without an explicit addressee is a broadcast: it is not
+    // the viewer's ack to give, so it must not land in their inbox (G-L1).
+    if (data.toMemberId !== viewer.memberId) return null;
     return { kind: "ack_needed", summary: "Acknowledgment needed" };
   }
   if (type === EVENT_TYPES.MESSAGE_POSTED && data.requestKind === "reply" && data.toMemberId === viewer.memberId) {

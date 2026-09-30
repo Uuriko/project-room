@@ -206,6 +206,12 @@ async function findMatches(more = false) {
   } catch { if (flight === matchFlight && !flight.signal.aborted) $('#find-work-status').textContent = 'Couldn’t find work. Try Find work again.'; }
   finally { if (flight === matchFlight) { button.disabled = false; $('#more-matches').disabled = false; } }
 }
+function clearMatches() {
+  matchFlight?.abort(); matchFlight = null; matches = []; matchAfter = null; lastPreferences = null;
+  $('#find-work-results').replaceChildren(); $('#find-work-status').textContent = ''; $('#more-matches').hidden = true;
+  matchForm.querySelector('button').disabled = false; $('#more-matches').disabled = false;
+}
+matchForm.addEventListener('input', clearMatches); matchForm.addEventListener('change', clearMatches);
 matchForm.addEventListener('submit', event => { event.preventDefault(); void findMatches(); });
 $('#more-matches').addEventListener('click', () => { if (matchAfter) void findMatches(true); });
 $('#find-work-results').addEventListener('click', async event => {

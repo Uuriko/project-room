@@ -162,6 +162,11 @@ export function createUnifiedContactThread(deps = {}) {
     });
   }
 
+  /** A message is visible on a channel when it is primary there or aliased there (L-41). */
+  function visibleOnChannel(msg, channel) {
+    return msg.channel === channel || msg.aliases.some((a) => a.channel === channel);
+  }
+
   function compareMessages(a, b) {
     if (a.ts !== b.ts) return a.ts - b.ts;
     if (CHANNEL_RANK[a.channel] !== CHANNEL_RANK[b.channel]) {
@@ -277,14 +282,16 @@ export function createUnifiedContactThread(deps = {}) {
     },
 
     /**
-     * Mark messages read. With `{ channel }` only that channel is marked;
-     * with no channel every message is marked. Returns the number marked.
+     * Mark messages read. With `{ channel }` only that channel is marked —
+     * a message counts for the channel when its primary channel matches or
+     * it carries an alias on that channel (L-41); with no channel every
+     * message is marked. Returns the number marked.
      */
     markRead({ channel } = {}) {
       if (channel !== undefined) assertChannel(channel);
       let marked = 0;
       for (const msg of messages.values()) {
-        if (channel !== undefined && msg.channel !== channel) continue;
+        if (channel !== undefined && !visibleOnChannel(msg, channel)) continue;
         if (!msg.read) {
           msg.read = true;
           marked += 1;
@@ -312,7 +319,7 @@ export function createUnifiedContactThread(deps = {}) {
       }
 
       let result = sortedMessages();
-      if (channel !== undefined) result = result.filter((m) => m.channel === channel);
+      if (channel !== undefined) result = result.filter((m) => visibleOnChannel(m, channel));
       if (sinceMs !== undefined) result = result.filter((m) => m.ts >= sinceMs);
       if (untilMs !== undefined) result = result.filter((m) => m.ts <= untilMs);
       if (unreadFirst) {

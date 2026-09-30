@@ -22,6 +22,11 @@ process.umask(0o077);
 const NAMED_INTERVALS = { hourly: 3_600_000, daily: 86_400_000, weekly: 604_800_000 };
 const DURATION_UNITS = { m: 60_000, h: 3_600_000, d: 86_400_000, w: 604_800_000 };
 
+/** POSIX shell single-quote escaping: safe for any value inside double quotes' reach (L-45). */
+export function shQuote(value) {
+  return `'${String(value).replace(/'/g, `'\\''`)}'`;
+}
+
 // Schedule spec: "hourly" | "daily" | "weekly" | "15m" | "6h" | "2d" | "1w"
 // | 5-field cron "m h dom mon dow" (dom/mon/dow must be "*"; m/h accept
 // "*", "*/n" and literals). Returns { spec, kind: "interval"|"cron", ... }.
@@ -243,10 +248,13 @@ async function main() {
   const statePath = values.state || join(resolve(to), "backup-verify-state.json");
   if (values["print-cron"]) {
     const root = fileURLToPath(new URL("..", import.meta.url));
+    // Values are operator-controlled (flags/env); quote them so a path with
+    // `"`, `$`, backticks, or whitespace can't break the crontab line or
+    // inject into the operator's crontab (L-45).
     process.stdout.write(
       `# project-room F001: automated backup + restore verification\n` +
       `# Runs every minute; the script itself skips until the schedule ("${schedule.spec}") is due.\n` +
-      `* * * * * cd ${root} && node scripts/backup-verify.mjs --db "${db}" --to "${to}" --schedule "${schedule.spec}" >> "${resolve(to)}/backup-verify.log" 2>&1\n`);
+      `* * * * * cd ${shQuote(root)} && node scripts/backup-verify.mjs --db ${shQuote(db)} --to ${shQuote(to)} --schedule ${shQuote(schedule.spec)} >> ${shQuote(join(resolve(to), "backup-verify.log"))} 2>&1\n`);
     return;
   }
   const nowMs = Date.now();

@@ -183,10 +183,15 @@ function receiptSet(escrow, roomId) {
   return [...seen.values()].sort((a, b) => (a.receiptId < b.receiptId ? -1 : 1));
 }
 
-// --- journal import (the replay path under test) ----------------------------
-// Rows may arrive in any order and may be delivered more than once. Import
-// is idempotent on entry_id; a redelivered row carrying CONFLICTING bytes is
-// rejected loudly (tamper-evident), never merged.
+// --- journal import (test scaffolding, NOT a production path) ----------------
+// There is no journal-import path in server/bounty-escrow.mjs. This helper
+// only builds equivalent stores so the replay-correctness tests can compare
+// canonical digests. Real tamper-evidence lives in
+// BountyEscrow.verifyConservation, which recomputes every row's hash from its
+// fields. Rows may arrive in any order and may be delivered more than once;
+// the helper is idempotent on entry_id, and a redelivered row carrying
+// CONFLICTING bytes throws — but that throw guards the test harness, not a
+// production boundary.
 const JOURNAL_COLUMNS = ["seq", "room_id", "entry_id", "account_id", "at", "kind",
   "bounty_id", "lot_id", "amount", "lot_state", "prev_hash", "hash", "memo", "actor_kind", "actor_id",
   "track"]; // track joins the journal hash core when present: the replay must carry it.
@@ -331,17 +336,21 @@ test("mid-sequence snapshot + resume rebuilds identical state", () => {
     "resumed receipt set differs");
 });
 
-test("duplicate delivery with conflicting bytes is rejected, never merged", () => {
-  const { db: dbA } = runFullScenario();
-  const rows = journalRows(dbA);
-  const dbB = new DatabaseSync(":memory:");
-  importJournal(dbB, ROOM, rows);
+test("in-place journal tampering breaks conservation with a hash-mismatch violation", () => {
+  // G-LOW-8: there is no production journal-import path, so "duplicate
+  // delivery" tested only the test helper. The real tamper-evidence is
+  // verifyConservation, which recomputes each row's hash from its fields.
+  // Mutating a row in place (as a compromised store or a bad restore would)
+  // changes the recomputed hash without touching the stored one, so
+  // verification must fail with a hash-mismatch violation — never silently.
+  const { escrow, db } = runFullScenario();
+  const victim = db.prepare(
+    "SELECT entry_id FROM bounty_journal WHERE room_id=? AND kind != 'genesis' ORDER BY seq LIMIT 1")
+    .get(ROOM);
+  db.prepare("UPDATE bounty_journal SET amount = amount + 1 WHERE entry_id=?").run(victim.entry_id);
 
-  const tampered = { ...rows[10], amount: rows[10].amount + 1 };
-  assert.throws(() => importJournal(dbB, ROOM, [tampered]), /conflicting bytes/);
-
-  // The rejected tamper leaves the store untouched and still verifying.
-  const escB = new BountyEscrow(makeStore(dbB), { now: () => nowMs, allowLegacyStringLanes: true });
-  assert.equal(escB.verifyConservation(ROOM).ok, true);
-  assert.equal(stateDigest(dbB, ROOM), stateDigest(dbA, ROOM));
+  const report = escrow.verifyConservation(ROOM);
+  assert.equal(report.ok, false);
+  assert.ok(report.violations.some(v => v.startsWith("hash mismatch for")),
+    `expected a hash-mismatch violation, got: ${JSON.stringify(report.violations)}`);
 });

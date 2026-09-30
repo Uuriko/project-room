@@ -139,3 +139,31 @@ test("unmatched path returns false (falls through)", async () => {
   const { handled } = await call({ method: "GET", pathname: "/api/other" });
   assert.equal(handled, false);
 });
+
+// G-LOW-7: mount-state characterization for the public claim verb.
+//
+// LATENT GAP (documented, not fixed here): handlePublicClaims is implemented
+// and unit-tested above, and it is registered in scripts/runtime-package.mjs,
+// but it is NOT mounted in server/http.mjs — no route calls it, so the verb
+// 404s for everyone in production. Mounting is blocked on jillianai's live
+// claim on server/http.mjs (RC-2026-09-28-2870), which this lane must not
+// touch. This test characterizes the CURRENT reality (unmounted) so the gap
+// is loud instead of silent; when the mount lands, flip the first assertion
+// to require the mount and delete the "not mounted" branch.
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+
+const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+const httpSource = readFileSync(join(root, "server/http.mjs"), "utf8");
+const runtimePackageSource = readFileSync(join(root, "scripts/runtime-package.mjs"), "utf8");
+
+test("mount state: claim verb registered for packaging, mount pending in http.mjs", () => {
+  // Packaging registration must hold: the route module ships in the bundle.
+  assert.ok(runtimePackageSource.includes("server/public-claim-routes.mjs"),
+    "public-claim-routes.mjs must stay registered in scripts/runtime-package.mjs");
+  // Current reality: NOT mounted in http.mjs (latent gap G-LOW-7). Flip this
+  // to assert.ok(...includes("handlePublicClaims")) when the mount lands.
+  assert.ok(!httpSource.includes("handlePublicClaims"),
+    "EXPECTED CURRENT GAP: handlePublicClaims is not mounted in server/http.mjs — flip this assertion when the mount lands");
+});

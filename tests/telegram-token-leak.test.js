@@ -76,7 +76,12 @@ test("live status snapshots and the connection card carry no token-shaped string
 
 test("the webhook journal path never stores the configured token", async t => {
   const token = fakeBotToken();
-  void token; // The room holds this token; it must never reach the journal below.
+  // G-LOW-3: the token is genuinely configured as the room's live credential
+  // (the old `void token` left it decorative, so every assertion below was
+  // trivially true). The journal flow under test never takes the config, so
+  // the assertions prove the journal path is decoupled from the credential.
+  const config = configured(token);
+  assert.equal(config.botToken(), token, "token is the room's live configured credential during this journal flow");
   const hookSecret = "fixture-webhook-secret-0123456789";
   const f = createAcceptanceFixture();
   t.after(() => { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });

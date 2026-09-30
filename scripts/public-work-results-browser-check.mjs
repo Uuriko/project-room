@@ -99,3 +99,95 @@ test('results read one bounded page on demand and Show more reads the next page'
   await f.page.locator('#owner-results-open').click(); await f.page.locator('#owner-results-more').waitFor({ state: 'visible' }); assert.equal(await f.page.locator('[data-result-receipt]').count(), 20); assert.equal(reads.length, 1); assert.equal(reads[0].searchParams.get('limit'), '20');
   await f.page.locator('#owner-results-more').click(); await f.page.locator('#owner-results-more').waitFor({ state: 'hidden' }); assert.equal(await f.page.locator('[data-result-receipt]').count(), 21); assert.equal(reads.length, 2); assert.ok(reads[1].searchParams.get('after'));
 });
+async function prepareFollowUp(f) {
+  await open(f); assert.equal(await row(f).locator('[data-open-follow-up]').count(), 0);
+  await decide(f, 'revision_requested', 'Private contributor feedback must not become public terms.');
+  await row(f).locator('[data-open-follow-up]').click();
+  const form = f.page.locator('#owner-follow-up-form'); await form.waitFor({ state: 'visible' });
+  assert.equal(await form.locator('[name=title]').evaluate(node => node === document.activeElement), true);
+  assert.equal(await form.locator('[name=summary]').inputValue(), 'A small public contribution');
+  assert.doesNotMatch(await form.locator('[name=summary]').inputValue(), /Private contributor/);
+  await form.locator('[name=title]').fill('Explicit follow-up <script>window.badChild=true</script>');
+  await form.locator('[name=summary]').fill('Publicly requested improvement');
+  await form.locator('[name=criteria]').fill('New readable result\nKeep the original unchanged');
+  await form.locator('[name=repositoryRef]').fill('follow-up-branch');
+  await form.locator('[name=files]').fill('follow-up.txt');
+  return form;
+}
+const followUpRecorded = f => f.page.locator('#owner-offer-status').filter({ hasText: 'Follow-up published' }).waitFor();
+for (const width of [1280, 320]) test(`explicit follow-up is unassigned, preserves parent bytes, and reports withdrawn child at ${width}px`, { timeout: 45000 }, async t => {
+  const f = await setup(t, { width }), form = await prepareFollowUp(f), posts = [];
+  f.page.on('request', request => { if (request.url().endsWith('/follow-up')) posts.push(request.postDataJSON()); });
+  await form.getByRole('button', { name: 'Publish follow-up' }).click();
+  assert.equal(posts.length, 0); assert.equal(f.store.publicWorkSuccessors.link(f.receipt.receiptId), null);
+  if (process.env.ROOM_RESULTS_SCREENSHOT_DIR) await f.page.screenshot({ path: `${process.env.ROOM_RESULTS_SCREENSHOT_DIR}/owner-follow-up-form-${width}.png`, fullPage: true });
+  await form.locator('[name=publicConfirm]').check(); await form.getByRole('button', { name: 'Publish follow-up' }).click(); await followUpRecorded(f);
+  assert.equal(posts.length, 1); const childId = posts[0].successorTaskId;
+  const child = await (await fetch(`${f.origin}/api/public-work/tasks/${childId}`)).json();
+  assert.equal(child.claim.state, 'unclaimed'); assert.equal(child.claim.identityId, null); assert.deepEqual(child.files, ['follow-up.txt']); assert.equal(child.repositoryRef, 'follow-up-branch');
+  assert.deepEqual(child.acceptanceCriteria, ['New readable result', 'Keep the original unchanged']);
+  const parentBytes = await fetch(`${f.origin}/api/public-work/receipts/${f.receipt.receiptId}/artifact`); assert.equal(await parentBytes.text(), f.artifactText);
+  assert.equal(f.store.publicWorkClaims.read(f.receipt.taskId).claim.state, 'submitted');
+  const feedback = await (await fetch(`${f.origin}/api/public-work/receipts/${f.receipt.receiptId}/review`, { headers: { Authorization: `Bearer ${f.identity.secret}` } })).json();
+  assert.deepEqual(feedback.followUp, { taskId: childId, termsVersion: 1, available: true });
+  const outside = await createAgentIdentity(f.origin, 'Different disposable successor contributor'), client = new PublicWorkClaimsClient({ origin: f.origin, identitySecret: outside.secret });
+  const claimed = await client.claim(childId, { requestId: 'child-claim', expectedTermsVersion: 1 });
+  const submitted = await client.finish(childId, { requestId: 'child-finish', expectedTermsVersion: 1, generation: claimed.task.claim.generation, artifactText: 'New independent artifact', checksReported: [] });
+  assert.notEqual(submitted.receipt.receiptId, f.receipt.receiptId);
+  await row(f).getByRole('link', { name: 'View follow-up' }).waitFor();
+  assert.equal(await row(f).getByRole('link', { name: 'View follow-up' }).getAttribute('href'), `/offers?offer=${childId}`);
+  assert.equal(await f.page.evaluate(() => Boolean(window.badChild)), false);
+  f.store.projectOffers.transition('commons', 'owner', childId, 'withdraw', { requestId: 'withdraw-child', expectedRevision: 2 });
+  await f.page.locator('#owner-results-refresh').click(); await row(f).getByText('Follow-up unavailable.', { exact: true }).waitFor();
+  assert.equal(await row(f).locator('[data-open-follow-up]').count(), 0); assert.equal(await row(f).getByRole('link', { name: 'View follow-up' }).count(), 0);
+  assert.equal(await (await fetch(`${f.origin}/api/public-work/receipts/${submitted.receipt.receiptId}/artifact`)).text(), 'New independent artifact');
+  assert.equal(await f.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  if (process.env.ROOM_RESULTS_SCREENSHOT_DIR) await f.page.screenshot({ path: `${process.env.ROOM_RESULTS_SCREENSHOT_DIR}/owner-follow-up-result-${width}.png`, fullPage: true });
+});
+test('lost committed follow-up retries exact public terms without creating another child', { timeout: 45000 }, async t => {
+  const f = await setup(t), form = await prepareFollowUp(f), payloads = []; let lose = true;
+  await f.page.route('**/public-work/receipts/*/follow-up', async route => { payloads.push(route.request().postData()); const response = await route.fetch(); assert.equal(response.status(), 200); if (lose) { lose = false; await route.abort('failed'); } else await route.fulfill({ response }); });
+  await form.locator('[name=publicConfirm]').check(); await form.getByRole('button', { name: 'Publish follow-up' }).click(); await f.page.locator('#owner-offer-retry').waitFor();
+  assert.equal(await form.locator('[name=title]').isDisabled(), true); assert.equal(await form.locator('[name=summary]').inputValue(), 'Publicly requested improvement');
+  const pointer = f.store.publicWorkSuccessors.link(f.receipt.receiptId); assert.ok(pointer);
+  f.store.projectOffers.transition('commons', 'owner', pointer.taskId, 'withdraw', { requestId: 'withdraw-lost-child', expectedRevision: 2 });
+  await f.page.locator('#owner-offer-retry').click(); await followUpRecorded(f); assert.equal(payloads.length, 2); assert.equal(payloads[0], payloads[1]);
+  await row(f).getByText('Follow-up unavailable.', { exact: true }).waitFor();
+  assert.equal(await row(f).getByRole('link', { name: 'View follow-up' }).count(), 0);
+  assert.deepEqual(f.store.publicWorkSuccessors.link(f.receipt.receiptId), { ...pointer, available: false });
+  assert.equal(f.store.projectOffers.ownerList('commons', 'owner').offers.filter(offer => offer.title.startsWith('Explicit follow-up')).length, 1);
+});
+test('ended account session fences a held committed follow-up and clears private terms', { timeout: 45000 }, async t => {
+  const f = await setup(t), form = await prepareFollowUp(f); let release, observed;
+  const held = new Promise(resolve => { release = resolve; }), captured = new Promise(resolve => { observed = resolve; }); t.after(() => release());
+  await f.page.route('**/public-work/receipts/*/follow-up', async route => { const response = await route.fetch(); assert.equal(response.status(), 200); observed(); await held; await route.fulfill({ response }); });
+  await form.locator('[name=publicConfirm]').check(); await form.getByRole('button', { name: 'Publish follow-up' }).click(); await captured;
+  const cookie = (await f.page.context().cookies()).find(cookie => cookie.name === 'account_session'); assert.ok(cookie); f.store.logoutAccountSession(cookie.value, f.store.accountSessionSlot(cookie.value).sessionRevision);
+  await f.page.locator('#refresh-button').click(); await f.page.locator('#main').waitFor({ state: 'hidden' });
+  const delivered = f.page.waitForEvent('requestfinished', request => request.url().endsWith('/follow-up')); release(); await delivered;
+  await f.page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  assert.equal(await f.page.locator('#owner-results-list').textContent(), ''); assert.equal(await form.locator('[name=summary]').inputValue(), ''); assert.equal(await f.page.locator('#owner-follow-up-context').textContent(), '');
+  assert.equal(await f.page.locator('#owner-offers-open').isVisible(), false);
+  assert.ok(f.store.publicWorkSuccessors.link(f.receipt.receiptId), 'the real committed public task remains distinct from the ended private UI');
+});
+test('edge-door owner follow-up links open the canonical supported offers route', { timeout: 45000 }, async t => {
+  const f = await setup(t), form = await prepareFollowUp(f);
+  await form.locator('[name=publicConfirm]').check(); await form.getByRole('button', { name: 'Publish follow-up' }).click(); await followUpRecorded(f);
+  // Replay reads through the existing /room proxy rewrite locally. Mutation
+  // lifecycle is covered above; this keeper owns rendered edge-host links.
+  const door = 'http://www.getdasha.com';
+  await f.page.context().addCookies((await f.page.context().cookies()).map(cookie => ({ ...cookie, domain: 'www.getdasha.com' })));
+  await f.page.route(`${door}/**`, route => {
+    const url = new URL(route.request().url()); const path = url.pathname.replace(/^\/room(?=\/|$)/, '') || '/';
+    if (path.endsWith('/stream')) return route.abort(); // This bounded read/link keeper does not proxy an infinite SSE response.
+    return route.fetch({ url: f.origin + path + url.search, headers: { ...route.request().headers(), host: new URL(f.origin).host, origin: f.origin } }).then(response => route.fulfill({ response }));
+  });
+  await f.page.routeWebSocket('**', socket => socket.close());
+  await f.page.goto(`${door}/room/?room=commons`); await f.page.locator('#main').waitFor({ state: 'visible' }); await open(f);
+  await row(f).getByRole('link', { name: 'View follow-up' }).waitFor();
+  const pointer = f.store.publicWorkSuccessors.link(f.receipt.receiptId);
+  assert.equal(await row(f).getByRole('link', { name: 'View follow-up' }).getAttribute('href'), `https://room.trydemigod.com/offers?offer=${pointer.taskId}`);
+  const publicLinks = await f.page.locator('#owner-offers-list').getByRole('link', { name: 'View public offer' }).evaluateAll(links => links.map(link => link.href));
+  assert.ok(publicLinks.includes(`https://room.trydemigod.com/offers?offer=${pointer.taskId}`));
+  assert.equal(publicLinks.some(link => new URL(link).pathname === '/room/offers'), false);
+});

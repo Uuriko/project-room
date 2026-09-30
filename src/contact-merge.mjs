@@ -423,16 +423,22 @@ export function createContactMerge(deps = {}) {
     const emails = unionEntries(a.emails, b.emails, (e) => e.address, normEmail);
     const phones = unionEntries(a.phones, b.phones, (p) => p.number, normPhone);
 
-    // channels union — same key, different handle = conflict
+    // channels union — same (normalized) key, different handle = conflict.
+    // Keys are normalized like scorePair's channelMap so "X" and "x" can't
+    // slip past conflict detection with the same handle.
     const channels = { ...a.channels };
+    const channelKeys = new Map(Object.keys(channels).map((k) => [normChannelKey(k), k]));
     const channelConflicts = [];
     for (const [key, handleB] of Object.entries(b.channels)) {
-      if (!(key in channels)) {
+      const nkey = normChannelKey(key);
+      const existing = channelKeys.get(nkey);
+      if (existing === undefined) {
         channels[key] = handleB;
+        channelKeys.set(nkey, key);
         continue;
       }
-      if (normHandle(channels[key]) !== normHandle(handleB)) {
-        channelConflicts.push({ key, a: channels[key], b: handleB });
+      if (normHandle(channels[existing]) !== normHandle(handleB)) {
+        channelConflicts.push({ key: existing, a: channels[existing], b: handleB });
       }
     }
 

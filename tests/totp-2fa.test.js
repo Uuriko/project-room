@@ -102,12 +102,23 @@ test("window tolerance: ±1 step passes, ±2 steps fails", () => {
 });
 
 test("verifyCode never throws on malformed input — it returns false", () => {
+  const secret = generateSecret();
   for (const args of [
     ["123456", "!!!"],
     ["123456", ""],
     ["123456", null],
     [null, generateSecret()],
     ["123456", generateSecret(), { digits: 5 }],
+    // G-LOW-4: malformed time / stepSeconds must fail the verification, not
+    // throw out of the "never throws" contract (LOW-D fixed the module; these
+    // pin the contract).
+    ["123456", secret, { time: NaN }],
+    ["123456", secret, { time: -1 }],
+    ["123456", secret, { time: "now" }],
+    ["123456", secret, { stepSeconds: 0 }],
+    ["123456", secret, { stepSeconds: -30 }],
+    ["123456", secret, { stepSeconds: Infinity }],
+    ["123456", secret, { stepSeconds: "30" }],
   ]) {
     let result;
     assert.doesNotThrow(() => {

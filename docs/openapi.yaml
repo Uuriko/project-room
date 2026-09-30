@@ -12486,6 +12486,120 @@ paths:
                     - "accepted"
                     - "rejected"
                     - "revision_requested"
+  /api/rooms/{roomId}/public-work/receipts/{receiptId}/follow-up:
+    post:
+      operationId: "openPublicWorkFollowUp"
+      summary: "Explicitly publish one linked unpaid follow-up task for requested revisions."
+      description: "Current active non-guest Room owner only. Original must be published unpaid and current review revision_requested at first creation. Bind the exact receipt and review revision. Atomically create/publish/enable one new task using existing offer/claim services. Original bytes/review and rewards stay unchanged. New task is open to eligible saved identities; no reserved assignment, lease, Room admission or payment. Keep original repository, approval mode and reviewer/linked-work policy; owner authors new public terms. Do not automatically copy private feedback. Exact requestId/input replay reauthenticates owner before returning the committed outcome, even after later withdrawal/review changes. Browser/API key authentication and after-upload fencing match review mutations."
+      responses:
+        200:
+          description: "Committed follow-up publication or exact journal replay; not a claim or current-state guarantee."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicWorkFollowUpOutcome"
+        400:
+          $ref: "#/components/responses/BadRequest"
+        401:
+          $ref: "#/components/responses/Unauthorized"
+          description: "Unknown, revoked or missing credential."
+        403:
+          $ref: "#/components/responses/Forbidden"
+          description: "Current active non-guest Room owner required."
+        404:
+          $ref: "#/components/responses/NotFound"
+          description: "Receipt not found for this room or submitting identity."
+        409:
+          $ref: "#/components/responses/Conflict"
+          description: "Stale receipt/review, non-revision state, withdrawn original, existing follow-up or changed retry."
+        422:
+          description: "Invalid fields, unsupported query or unavailable retained reviewer/work policy."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        429:
+          $ref: "#/components/responses/TooManyRequests"
+      parameters:
+        - name: "roomId"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - name: "receiptId"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - name: "auth"
+          in: "query"
+          required: false
+          schema:
+            enum:
+              - "room"
+              - "account"
+            default: "room"
+          description: "Cookie selector, never a credential. Header selector is an alternative."
+      security:
+        - bearerAuth: []
+        - queryAuth: []
+        - accountBrowserSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [requestId, expectedReviewRevision, taskId, expectedTermsVersion, generation, artifactSha256, successorTaskId, terms, repositoryRef, files]
+              properties:
+                requestId: { type: string, minLength: 1, maxLength: 128 }
+                expectedReviewRevision: { type: integer, minimum: 1 }
+                taskId: { type: string, minLength: 1, maxLength: 128 }
+                expectedTermsVersion: { type: integer, minimum: 1 }
+                generation: { type: integer, minimum: 1 }
+                artifactSha256: { type: string, pattern: "^[a-f0-9]{64}$" }
+                successorTaskId: { type: string, minLength: 1, maxLength: 128 }
+                repositoryRef: { type: string, minLength: 1, maxLength: 128 }
+                files:
+                  type: array
+                  minItems: 1
+                  maxItems: 64
+                  items: { type: string, minLength: 1, maxLength: 512 }
+                terms:
+                  type: object
+                  additionalProperties: false
+                  required: [kind, title, summary, acceptanceCriteria, reward, approvalPolicy, repositoryUrl]
+                  properties:
+                    kind: { enum: [task, project] }
+                    title: { type: string, minLength: 1, maxLength: 200 }
+                    summary: { type: string, minLength: 1, maxLength: 4000 }
+                    acceptanceCriteria:
+                      type: array
+                      minItems: 1
+                      maxItems: 20
+                      items: { type: string, minLength: 1, maxLength: 1000 }
+                    exclusions:
+                      type: array
+                      maxItems: 20
+                      items: { type: string, minLength: 1, maxLength: 1000 }
+                    reward:
+                      type: object
+                      additionalProperties: false
+                      required: [kind]
+                      properties:
+                        kind: { const: unpaid }
+                        basis: { enum: [fixed, pool] }
+                        terms: { type: string, minLength: 1, maxLength: 2000 }
+                    approvalPolicy:
+                      type: object
+                      additionalProperties: false
+                      required: [mode]
+                      properties:
+                        mode: { enum: [human, agent, human_with_agent_review] }
+                    repositoryUrl: { type: string, format: uri, maxLength: 2000 }
+                    submissionUrl: { type: string, format: uri, maxLength: 2000 }
+                    deadline: { type: string, format: date-time }
   /api/rooms/{roomId}/public-work/receipts/{receiptId}/verify:
     post:
       operationId: "verifyPublicWorkReview"
@@ -12783,6 +12897,23 @@ components:
       required: true
       schema: { type: string }
   schemas:
+    PublicWorkFollowUp:
+      type: object
+      additionalProperties: false
+      required: [taskId, termsVersion, available]
+      properties:
+        taskId: { type: string, minLength: 1, maxLength: 128 }
+        termsVersion: { type: integer, minimum: 1 }
+        available:
+          type: boolean
+          description: Public eligibility, not an unclaimed-lease guarantee. Historical links survive withdrawal.
+    PublicWorkFollowUpOutcome:
+      type: object
+      additionalProperties: false
+      required: [followUp, task]
+      properties:
+        followUp: { $ref: "#/components/schemas/PublicWorkFollowUp" }
+        task: { $ref: "#/components/schemas/PublicWorkTask" }
     PublicWorkReview:
       type: "object"
       required:
@@ -12888,6 +13019,7 @@ components:
         - "review"
         - "authority"
       properties:
+        followUp: { $ref: "#/components/schemas/PublicWorkFollowUp" }
         receipt:
           $ref: "#/components/schemas/PublicWorkReceipt"
         offer:
@@ -12984,6 +13116,7 @@ components:
         - "artifactSha256"
         - "review"
       properties:
+        followUp: { $ref: "#/components/schemas/PublicWorkFollowUp" }
         receiptId:
           type: "string"
         taskId:
