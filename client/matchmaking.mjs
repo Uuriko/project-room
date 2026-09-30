@@ -37,6 +37,7 @@ export function normalizeListing(listing) {
     motive: listing.motive,
     title: listing.title,
     tags: tagsOf(listing.tags),
+    open: true,
     roomId: typeof listing.roomId === "string" ? listing.roomId : null
   };
 }
@@ -58,6 +59,43 @@ export function scoreListing(seeker, listing) {
   else reasons.push("motive:any");
   for (const tag of overlap) reasons.push(`tag:${tag}`);
   return { listing: l, score, reasons };
+}
+
+export function listingFromPublicTask(task) {
+  if (!task || typeof task !== "object" || task.schema !== "public-work-task/1") fail("invalid_match_input");
+  if (typeof task.taskId !== "string" || typeof task.title !== "string") fail("invalid_match_input");
+  const state = task.claim && typeof task.claim === "object" ? task.claim.state : null;
+  const rewardKind = task.reward && typeof task.reward === "object" ? task.reward.kind : "unpaid";
+  const motive = rewardKind === "cash" ? "cash" : rewardKind === "work_trade" ? "credits" : "hobby";
+  const tags = [];
+  if (Array.isArray(task.files)) {
+    for (const file of task.files) {
+      if (typeof file !== "string" || !file.trim()) continue;
+      const part = file.split("/")[0].toLowerCase();
+      if (part && part.length <= 32 && !tags.includes(part)) tags.push(part);
+      if (tags.length >= 16) break;
+    }
+  }
+  if (state !== "unclaimed") return null;
+  return normalizeListing({
+    id: task.taskId,
+    kind: "claim",
+    motive,
+    title: task.title.slice(0, 200) || task.taskId,
+    tags,
+    open: true,
+    roomId: typeof task.namespaceId === "string" ? task.namespaceId : null
+  });
+}
+
+export function matchPublicTasks(seeker, tasks, options) {
+  if (!Array.isArray(tasks)) fail("invalid_match_input");
+  const listings = [];
+  for (const task of tasks) {
+    const listing = listingFromPublicTask(task);
+    if (listing) listings.push(listing);
+  }
+  return matchListings(seeker, listings, options);
 }
 
 export function matchListings(seeker, listings, { limit = 5 } = {}) {

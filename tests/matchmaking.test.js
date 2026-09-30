@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { matchListings, listingFitsMotive, scoreListing } from "../client/matchmaking.mjs";
+import { matchListings, listingFitsMotive, scoreListing, listingFromPublicTask, matchPublicTasks } from "../client/matchmaking.mjs";
 import { parseMatchArgs, matchFromFiles } from "../scripts/matchmaking.mjs";
 
 const hobby = { id: "h1", kind: "offer", motive: "hobby", title: "Open source docs", tags: ["docs"], open: true, roomId: "den" };
@@ -34,6 +34,26 @@ test("match does not invent a claim", () => {
 test("invalid seekers fail closed", () => {
   assert.throws(() => matchListings({ motive: "fame", tags: [] }, []), /invalid_match_input/);
   assert.throws(() => scoreListing({ motive: "hobby", tags: [] }, { id: "z" }), /invalid_match_input/);
+});
+
+test("public-work-task packets become listings only while unclaimed", () => {
+  const packet = {
+    schema: "public-work-task/1",
+    taskId: "first-task",
+    namespaceId: "commons",
+    title: "Public result",
+    files: ["src/shared.js"],
+    reward: { kind: "unpaid" },
+    claim: { state: "unclaimed" }
+  };
+  const listing = listingFromPublicTask(packet);
+  assert.equal(listing.id, "first-task");
+  assert.equal(listing.kind, "claim");
+  assert.equal(listing.motive, "hobby");
+  assert.ok(listing.tags.includes("src"));
+  assert.equal(listingFromPublicTask({ ...packet, claim: { state: "claimed" } }), null);
+  const hits = matchPublicTasks({ motive: "hobby", tags: ["src"] }, [packet]);
+  assert.equal(hits[0].listing.id, "first-task");
 });
 
 test("CLI files rank the same as matchListings", () => {
