@@ -728,8 +728,22 @@ export class InboxCollabStore {
     // an override. from/to never change after creation, so the check-then-
     // act here cannot race the transition.
     if (typeof by === "string" && by !== "") {
-      const handoff = this.listHandoffs(scope, {}).find(h => h.handoffId === handoffId);
-      if (handoff) {
+      // 2026-09-30 (phase-2 gap audit L-P2-13): direct room-scoped lookup
+      // by handoff id. listHandoffs is capped (LIMIT 500); a handoff past
+      // the cap would miss a .find() over the list and silently skip the
+      // M-7(c) permission check below. The direct query mirrors the
+      // journal's own room scoping, uncapped: found -> check permissions;
+      // not found -> the journal's transition 404s as before.
+      const row = scope.roomId == null
+        ? this.db.prepare(
+            "SELECT from_agent AS fromAgent, to_agent AS toAgent FROM inbox_handoffs WHERE account_id=? AND handoff_id=?")
+          .get(scope.accountId, handoffId)
+        : this.db.prepare(
+            `SELECT h.from_agent AS fromAgent, h.to_agent AS toAgent FROM inbox_handoffs h
+             JOIN inbox_handoff_rooms r ON r.handoff_id=h.handoff_id
+             WHERE h.account_id=? AND h.handoff_id=? AND r.room_id=?`)
+          .get(scope.accountId, handoffId, scope.roomId);
+      if (row) {
         const ownerId = roomId !== null ? this.store.roomAuthority(roomId)?.ownerId ?? null : null;
         let identityId = null;
         if (roomId !== null) {
@@ -738,7 +752,7 @@ export class InboxCollabStore {
             .get(roomId, by)?.identityId ?? null;
         }
         const ids = new Set([by, identityId].filter(id => typeof id === "string" && id !== ""));
-        const permitted = ids.has(handoff.fromAgent) || ids.has(handoff.toAgent)
+        const permitted = ids.has(row.fromAgent) || ids.has(row.toAgent)
           || (ownerId !== null && by === ownerId);
         if (!permitted) {
           const error = new Error("Only the handoff sender, recipient, or room owner can transition it.");
