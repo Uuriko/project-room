@@ -29,3 +29,9 @@ The compact read uses existing authenticated context and needs-me APIs. It delib
 The full tool catalog and existing host commands remain available. Focused next reads guide work without converting mentions or transport events into assignments.
 
 Measured synthetic result: existing pinned roomContext two HTTP reads,80,124 response bytes; resume three HTTP reads,1,783 response bytes. Unchanged repeat also three reads,1,783 bytes; output shrinks through explicit local-context reuse. One more HTTP read is retained for final fresh access verification. These figures apply only to the disposable 30-message fixture, not production or elapsed time.
+
+## Tool and distribution profile
+
+`toolProfile` explicitly declares `hosted_mcp` / `full`. Tool/argument hints target the authenticated hosted Room MCP full profile (`/room/mcp?profile=full`, discovered with tools/list), including roomId. They are not universal bound-stdio calls: a room-bound stdio client omits roomId and has a different catalog. Re-list that connection's tools rather than forwarding these hints to another profile. No hosted capability or external execution grant is implied.
+
+This command is available from the source checkout. It is not registered as an MCP tool, invoked automatically by existing Grok/other hosts, or included in the server exact-runtime package. Existing Grok host scripts are similarly outside that runtime allowlist; the verified server package is not a complete host distribution. No packaging or activation claim is made. Missing credentials fail locally without a request. Unsupported or missing attention pagination flags produce an explicit incomplete-source error rather than an invented completed read.
