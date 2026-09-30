@@ -411,3 +411,69 @@ test("selected resume preserves worker continuity without exposing attempt histo
   assert.equal(roundPaused.work.suspended_by, "round_limit");
   assert.match(workContextMarkdown(roundPaused), /next mention or post resumes this run/);
 });
+
+
+test("selected work HTTP lists only viewer-participant open linked requests without bodies or writes", async t => {
+  const f = await fixture(t);
+  for (const a of ["owner", "producer", "reviewer", "guest"]) for (const b of ["owner", "producer", "reviewer", "guest"]) {
+    if (a === b) continue;
+    f.store.dmConsents.request("commons", a, b, "testing");
+    f.store.dmConsents.decide("commons", b, a, "approve");
+  }
+  const open = (actor, recipient, id, workItemId = "test-handoff") => f.send(actor, T.MESSAGE_POSTED,
+    { messageId: id, body: "PRIVATE-REQUEST-BODY", toMemberId: recipient, requestKind: "reply", workItemId });
+  open("owner", "producer", "incoming-linked");
+  open("producer", "reviewer", "outgoing-linked");
+  open("owner", "reviewer", "nonparticipant-linked");
+  open("owner", "producer", "unrelated-open", null);
+  const answered = open("owner", "producer", "answered-linked");
+  f.send("producer", T.MESSAGE_POSTED, { messageId: "answer-linked", responseToRequestId: "answered-linked", replyToId: "answered-linked", toMemberId: "owner", workItemId: "test-handoff",
+    expectedRequestRevision: 0, responseOutcome: "answered", contextEventId: answered.event.id,
+    contextSequence: answered.sequence, body: "Answered" });
+  const before = f.store.snapshot(f.keys.owner, "commons");
+  const view = await f.client("producer").workContext("test-handoff");
+  assert.equal(view.replyRequestContext.version, 1);
+  assert.equal(view.replyRequestContext.total, 2);
+  assert.equal(view.replyRequestContext.shown, 2);
+  assert.equal(view.replyRequestContext.truncated, false);
+  assert.deepEqual(view.replyRequestContext.requests.map(q => [q.id, q.direction]),
+    [["incoming-linked", "incoming"], ["outgoing-linked", "outgoing"]]);
+  for (const q of view.replyRequestContext.requests) {
+    assert.equal(q.status, "open"); assert.equal(q.workItemId, "test-handoff");
+    assert.deepEqual(q.nextRead, { tool: "room_read_request", arguments: { requestMessageId: q.id } });
+  }
+  assert.equal(JSON.stringify(view).includes("PRIVATE-REQUEST-BODY"), false);
+  assert.equal(JSON.stringify(view).includes("nonparticipant-linked"), false);
+  assert.equal(JSON.stringify(view).includes("unrelated-open"), false);
+  assert.equal(view.evaluatedThrough, before.sequence);
+  assert.deepEqual(f.store.snapshot(f.keys.owner, "commons"), before);
+  assert.equal((await f.client("guest").workContext("test-handoff")).replyRequestContext.total, 0);
+  f.send("owner", "reply_request.cancelled", { requestMessageId: "incoming-linked", expectedRequestRevision: 0, reason: "Test complete" });
+  const after = await f.client("producer").workContext("test-handoff");
+  assert.deepEqual(after.replyRequestContext.requests.map(q => q.id), ["outgoing-linked"]);
+});
+
+
+test("selected work reply pointers are bounded, detached and do not change completed work gates", async t => {
+  const f = await fixture(t), snapshot = f.store.snapshot(f.keys.producer, "commons");
+  const state = structuredClone(snapshot.state), item = state.workItems["test-handoff"];
+  item.state = "completed";
+  item.independentVerificationRequired = false; item.ownerDecisionRequired = false;
+  item.receipt = { eventId: "completion", evidenceVersion: "version", summary: "Done" };
+  state.replyRequests = Object.fromEntries(Array.from({ length: 30 }, (_, i) => {
+    const id = `request-${String(i).padStart(2, "0")}`;
+    return [id, { id, requesterId: "producer", recipientId: "reviewer", workItemId: item.id,
+      status: "open", revision: 0, createdAt: new Date(i * 1000).toISOString(), privateBody: "BODY-SENTINEL" }];
+  }).reverse());
+  const context = selectedWorkContext({ state, workItemId: item.id, viewerId: "producer", sequence: snapshot.sequence, now: 50000 });
+  assert.equal(context.replyRequestContext.total, 30); assert.equal(context.replyRequestContext.shown, 25);
+  assert.equal(context.replyRequestContext.truncated, true);
+  assert.deepEqual(context.replyRequestContext.requests.map(q => q.id), Array.from({ length: 25 }, (_, i) => `request-${String(i).padStart(2, "0")}`));
+  assert.deepEqual(context.replyRequestContext.nextRead, { tool: "room_list_requests", arguments: { direction: "both", status: "open" } });
+  assert.equal(context.work.state, "completed"); assert.equal(context.next.action, "complete");
+  assert.equal(context.next.needsAttention, false); assert.equal(JSON.stringify(context).includes("BODY-SENTINEL"), false);
+  context.replyRequestContext.requests[0].recipientId = "mutated";
+  assert.equal(state.replyRequests["request-00"].recipientId, "reviewer");
+  const other = selectedWorkContext({ state, workItemId: item.id, viewerId: "owner", sequence: snapshot.sequence, now: 50000 });
+  assert.equal(other.replyRequestContext.total, 0); assert.equal(other.replyRequestContext.nextRead, null);
+});

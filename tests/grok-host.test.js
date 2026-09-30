@@ -6,9 +6,9 @@ import { join } from "node:path";
 import {
   GrokHostError, parseNeedsMeBody, parseWakePing, wakeToAttentionItem,
   pendingWakeToItem, attentionKey, selectUnhandled, markHandled, emptyJournal,
-  loadJournal, buildRunPlan, assertPlanSafe, parseAttentionItem, childEnvFor, emptyAttentionNext
+  loadJournal, buildRunPlan, assertPlanSafe, parseAttentionItem, childEnvFor, emptyAttentionNext, countKinds
 } from "../client/grok-host.mjs";
-import { pull, doctor, ingestWake, writeJournalFile, readJournalFile } from "../scripts/grok-room-host.mjs";
+import { pull, doctor, ingestWake, writeJournalFile, readJournalFile, loadPendingAccess, rememberPendingAccess, writePendingAccessFile, fileAccessRequest } from "../scripts/grok-room-host.mjs";
 import { saveAgentConnection } from "../client/agent-connection.mjs";
 
 const secret = "pri_abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG";
@@ -70,6 +70,14 @@ test("run plan never includes the identity secret", () => {
   assert.match(plan.prompt, /id=msg-1/);
   assert.equal(plan.prompt.includes(secret), false);
   assert.throws(() => assertPlanSafe({ prompt: `hi ${secret}` }, [secret]), /secret_in_plan/);
+});
+
+test("countKinds tallies planned attention by kind", () => {
+  assert.deepEqual(countKinds([mention(), mention({ id: "msg-2", kind: "direct_ask", seq: 5 })]), {
+    mention: 1,
+    direct_ask: 1
+  });
+  assert.deepEqual(countKinds([]), {});
 });
 
 test("emptyAttentionNext is honest and secret-free", () => {
@@ -185,6 +193,53 @@ test("doctor heartbeats pull-only on the real beat path without failing membersh
   assert.equal(JSON.stringify(result).includes(secret), false);
 });
 
+test("rememberPendingAccess is idempotent on requestId", () => {
+  const first = rememberPendingAccess({ requests: [] }, { requestId: "ar_1", roomId: "build-together-32f67587", identityId: "ai_x" });
+  const second = rememberPendingAccess(first, { requestId: "ar_1", roomId: "build-together-32f67587", identityId: "ai_x" });
+  assert.equal(second.requests.length, 1);
+  assert.deepEqual(loadPendingAccess(null), { requests: [] });
+});
+
+test("doctor reports pending admissions from the saved request list", async t => {
+  const directory = fixtureDir();
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  writePendingAccessFile(join(directory, "pending-access.json"), {
+    requests: [{ requestId: "ar_1", roomId: "build-together-32f67587", identityId: "ai_x" }]
+  });
+  const fetchImpl = async (url, opts = {}) => {
+    const path = String(url);
+    if (path.includes("/api/health")) return new Response("{\"ok\":true}", { status: 200 });
+    if (path.includes("/api/access-requests/ar_1")) {
+      return new Response(JSON.stringify({ requestId: "ar_1", roomId: "build-together-32f67587", status: "pending" }), { status: 200 });
+    }
+    if (path.includes("/api/agent-heartbeats")) {
+      return new Response(JSON.stringify({ host: { hostId: "grok-build" }, pendingWakes: [] }), { status: 200 });
+    }
+    return new Response(JSON.stringify(needsMe([])), { status: 200 });
+  };
+  const result = await doctor({ env: { ROOM_AGENT_CONFIG: directory }, fetchImpl });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.pendingAdmissions, [{ requestId: "ar_1", roomId: "build-together-32f67587", status: "pending" }]);
+  assert.equal(JSON.stringify(result).includes(secret), false);
+});
+
+test("fileAccessRequest remembers the pending row without putting the secret in JSON", async t => {
+  const directory = fixtureDir();
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const fetchImpl = async (_url, opts = {}) => {
+    const body = JSON.parse(opts.body || "{}");
+    return new Response(JSON.stringify({ requestId: body.requestId, roomId: body.roomId, status: "pending" }), { status: 200 });
+  };
+  const result = await fileAccessRequest({
+    env: { ROOM_AGENT_CONFIG: directory }, fetchImpl, roomId: "build-together-32f67587", note: "join"
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.status, "pending");
+  assert.equal(result.roomId, "build-together-32f67587");
+  assert.match(result.requestId, /^ar_/);
+  assert.equal(JSON.stringify(result).includes(secret), false);
+});
+
 test("doctor stays credential_accepted when heartbeat is refused", async t => {
   const directory = fixtureDir();
   t.after(() => rmSync(directory, { recursive: true, force: true }));
@@ -274,6 +329,7 @@ test("empty pull is silent and points at emptyAttentionNext", async t => {
   assert.equal(result.silent, true);
   assert.equal(result.planned.length, 0);
   assert.equal(result.next, emptyAttentionNext({ execute: false }));
+  assert.deepEqual(result.kinds, {});
   assert.equal(JSON.stringify(result).includes(secret), false);
 });
 
@@ -400,4 +456,55 @@ test("duplicate heartbeat and paged attention runs one handler", async t => {
     runner: async () => { runs++; return { code: 0 }; } });
   assert.equal(runs, 1); assert.equal(result.executed.length, 1);
   assert.deepEqual(handlers.acks, [{ signalIds: ["sig-duplicate"] }]);
+});
+
+
+test("a later handoff for the same Work Item executes while each event retry stays deduplicated", async t => {
+  const directory = fixtureDir(); t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const env = { ROOM_AGENT_CONFIG: directory }, calls = [];
+  const handoff = seq => ({ kind: "handoff", roomId: "den", id: "work-1", seq,
+    summary: `Review event ${seq}`, next: { tool: "room_read_work", arguments: { roomId: "den", workItemId: "work-1" } } });
+  const handlers = { needsMe: needsMe([handoff(4), handoff(4)]), acks: [] };
+  const fetchImpl = roomFetch(handlers);
+  const runner = async plan => { calls.push(plan.item.seq); return { code: 0 }; };
+  const run = () => pull({ env, fetchImpl, execute: true, runner });
+  await run(); await run(); assert.deepEqual(calls, [4]);
+  handlers.needsMe = needsMe([handoff(9), handoff(9)], { cursor: { rooms: { den: 9 } } });
+  const later = await run();
+  assert.equal(later.executed.length, 1);
+  await run(); assert.deepEqual(calls, [4, 9], "new event on same work runs once, same event retry does not rerun");
+});
+
+test("failed later handoff preserves retry and cursor despite an earlier completed event", async t => {
+  const directory = fixtureDir(); t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const env = { ROOM_AGENT_CONFIG: directory };
+  const item = seq => ({ kind: "handoff", roomId: "den", id: "work-1", seq, summary: "Review" });
+  const handlers = { needsMe: needsMe([item(4)]), acks: [] }, calls = [];
+  const fetchImpl = roomFetch(handlers); let fail = false;
+  const runner = async plan => { calls.push(plan.item.seq); return { code: fail ? 1 : 0 }; };
+  await pull({ env, fetchImpl, execute: true, runner });
+  handlers.needsMe = needsMe([item(9)], { cursor: { rooms: { den: 9 } } }); fail = true;
+  await pull({ env, fetchImpl, execute: true, runner });
+  assert.deepEqual(readJournalFile(join(directory, "grok-host-journal.json")).cursor, { rooms: { den: 4 } });
+  fail = false;
+  await pull({ env, fetchImpl, execute: true, runner });
+  assert.deepEqual(calls, [4, 9, 9]);
+  assert.deepEqual(readJournalFile(join(directory, "grok-host-journal.json")).cursor, { rooms: { den: 9 } });
+});
+
+
+test("legacy handoff journal remains intact without suppressing a newer event", async t => {
+  const directory = fixtureDir(); t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const filename = join(directory, "grok-host-journal.json");
+  writeJournalFile(filename, { handled: { "handoff:den:work-1": 123 }, cursor: { rooms: { den: 4 } } });
+  const handlers = { needsMe: needsMe([{ kind: "handoff", roomId: "den", id: "work-1", seq: 9,
+    summary: "Read current handoff", next: { tool: "room_read_work", arguments: { roomId: "den", workItemId: "work-1" } } }],
+  { cursor: { rooms: { den: 9 } } }), acks: [] };
+  let runs = 0;
+  const options = { env: { ROOM_AGENT_CONFIG: directory }, fetchImpl: roomFetch(handlers), execute: true,
+    runner: async () => { runs++; return { code: 0 }; } };
+  assert.equal((await pull(options)).executed.length, 1);
+  assert.equal((await pull(options)).executed.length, 0);
+  assert.equal(runs, 1);
+  assert.equal(readJournalFile(filename).handled["handoff:den:work-1"], 123, "upgrade retains legacy evidence");
 });

@@ -21,6 +21,12 @@ export function attentionKey(item) {
   if (!item || !text(item.kind, KIND_MAX) || !text(item.roomId, ROOM_MAX) || !text(item.id, ID_MAX)) {
     fail("invalid_attention_item");
   }
+  // Handoffs reuse the Work Item id; each new handoff has its own event.
+  // Message wakes can lack seq, so their identity stays message-based.
+  if (item.kind === "handoff") {
+    if (!Number.isSafeInteger(item.seq) || item.seq < 0) fail("invalid_attention_item");
+    return `${item.kind}:${item.roomId}:${item.id}:${item.seq}`;
+  }
   return `${item.kind}:${item.roomId}:${item.id}`;
 }
 
@@ -174,6 +180,15 @@ export function assertPlanSafe(plan, secrets = []) {
 // Child Grok processes need the hosted MCP bearer in the environment
 // (plugins/project-room/.mcp.json reads PROJECT_ROOM_SECRET). Never put it
 // in the prompt.
+export function countKinds(items) {
+  const counts = {};
+  for (const item of items) {
+    if (!item || typeof item.kind !== "string") continue;
+    counts[item.kind] = (counts[item.kind] || 0) + 1;
+  }
+  return counts;
+}
+
 export function emptyAttentionNext({ execute = false } = {}) {
   if (execute) return "No new attention; --execute did not start a model.";
   return "No new attention. Host is pull-only; run pull again later. executeDefault is off.";

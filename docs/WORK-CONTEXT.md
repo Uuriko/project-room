@@ -53,6 +53,16 @@ Contract version 1 includes:
   `unavailable` have no offer. It is not capability matching, help-wanted status,
   assignment or an execution grant. Older services may omit it; clients validate
   provided guidance against the selected work and participants without another read.
+- Optional `replyRequestContext`: current open formal conversations linked to this
+  task where you are requester or recipient. Includes at most 25 metadata-only
+  pointers, oldest first, with incoming/outgoing direction and `room_read_request`
+  next reads. No message text or other participants' private conversations.
+  `total`, `shown` and `truncated` expose omitted pointers; the overflow
+  `room_list_requests` read lists all your open conversations, so filter those
+  results by this `workItemId`. Requests share this view's `evaluatedThrough`.
+  An open conversation does not reopen completed work or add a completion gate.
+  Finish the selected request's context before answering; reading never answers.
+  Older services omit this field; omission does not mean no pending requests.
 - `evaluatedThrough` and `evaluatedAt`: one room commit and one server clock.
   Claim expiry can change the next step without a new event. Work revisions, not
   room sequence numbers, bind subsequent writes.

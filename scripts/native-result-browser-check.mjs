@@ -122,3 +122,66 @@ test("native result large text and keyboard remain usable; revocation clears vis
   await f.page.locator("#auth-panel").waitFor({ state: "visible" });
   assert.equal(await f.page.locator("#result-body").textContent(), ""); assert.equal(await f.page.locator("#action-text-body").textContent(), "");
 });
+
+for (const mobile of [false, true]) test(`native result ${mobile ? "phone" : "desktop"}: failed read retries the pinned result in place`, { timeout: 25000 }, async t => {
+  const f = await setup(t, { mobile }); f.complete();
+  const attempts = [], retry = f.page.locator("#result-retry"); let release, began;
+  const gate = new Promise(resolve => { release = resolve; }), started = new Promise(resolve => { began = resolve; });
+  await f.page.route("**/work-result?**", async route => {
+    attempts.push(new URL(route.request().url()).searchParams.get("completionEventId"));
+    if (attempts.length === 1) return route.fulfill({ status: 503, json: { error: "Synthetic unavailable" } });
+    const response = await route.fetch(); began(); await gate;
+    return route.fulfill({ response }).catch(() => {});
+  });
+  await f.page.locator("#message-input").fill("Keep my steering draft.");
+  await f.page.locator(`[data-read-result='${f.workItemId}']`).click();
+  await f.page.waitForFunction(() => document.querySelector("#result-status").textContent.includes("unavailable"));
+  assert.equal(await retry.isVisible(), true, "a failed exact result can be retried inside its selected reader");
+  await retry.focus(); await f.page.keyboard.press("Enter"); await started;
+  assert.equal(await retry.isDisabled(), true);
+  await retry.evaluate(node => node.click()); assert.equal(attempts.length, 2, "one retry read can be pending");
+  // Another result arrives while the selected old read is held. Retrying must
+  // retain the exact original completion and never show the replacement text.
+  f.mutate(T.WORK_BLOCKED, { reason: "Correction", nextAction: "Revise" });
+  f.mutate(T.WORK_BLOCKER_RESOLVED, { resolution: "Ready" });
+  const body = "Replacement result", posted = f.send(T.MESSAGE_POSTED, { messageId: "replacement-draft", workItemId: f.workItemId, packetId: "replacement", basisRevision: f.item().revision, body });
+  f.mutate(T.WORK_COMPLETED, { evidenceKind: "room_text", evidenceMessageId: "replacement-draft", evidenceMessageEventId: posted.event.id,
+    evidenceVersion: textVersion(body), previousCompletionEventId: f.item().receipt.eventId, producerId: "owner", summary: "Replacement", nextAction: "Review" });
+  await f.page.waitForFunction(id => document.querySelector(`[data-work-record-id="${id}"]`).textContent.includes("Replacement"), f.workItemId);
+  release(); await f.page.waitForFunction(body => document.querySelector("#result-body").textContent === body, f.body);
+  assert.match(await f.page.locator("#result-status").textContent(), /^Earlier result/);
+  assert.equal(attempts[0], attempts[1]); assert.equal(await retry.isVisible(), false);
+  assert.equal(await f.page.locator("#close-result").evaluate(node => node === document.activeElement), true, "hidden retry hands keyboard focus to Close");
+  assert.equal(await f.page.locator("#message-input").inputValue(), "Keep my steering draft.");
+  await f.capture(mobile ? "retry-phone" : "retry-desktop");
+  await f.page.keyboard.press("Escape"); await f.page.locator("#result-dialog").waitFor({ state: "hidden" });
+  await f.page.reload(); await f.page.locator("#main").waitFor({ state: "visible" });
+  assert.equal(await f.page.locator("#message-input").inputValue(), "Keep my steering draft.");
+});
+
+for (const boundary of ["close", "revoke"]) test(`native result: held retry cannot restore text after ${boundary}`, { timeout: 25000 }, async t => {
+  const f = await setup(t); f.complete(); let attempts = 0, release, began;
+  const gate = new Promise(resolve => { release = resolve; }), started = new Promise(resolve => { began = resolve; }); t.after(() => release());
+  await f.page.route("**/work-result?**", async route => {
+    attempts++;
+    if (attempts !== 2) return route.fulfill({ status: 503, json: { error: "Synthetic unavailable" } });
+    const response = await route.fetch(); began(); await gate;
+    return route.fulfill({ response }).catch(() => {});
+  });
+  const open = () => f.page.locator(`[data-read-result='${f.workItemId}']`).click();
+  await open(); await f.page.locator("#result-retry").waitFor({ state: "visible" });
+  await f.page.locator("#result-retry").click(); await started;
+  if (boundary === "close") {
+    await f.page.keyboard.press("Escape"); await f.page.locator("#result-dialog").waitFor({ state: "hidden" });
+    await open(); await f.page.locator("#result-retry").waitFor({ state: "visible" });
+  } else {
+    f.store.issueAccessKey("commons", "owner");
+    await f.page.locator("#auth-panel").waitFor({ state: "visible" });
+  }
+  release(); await f.page.unroute("**/work-result?**", { behavior: "wait" });
+  assert.equal(await f.page.locator("#result-body").textContent(), "");
+  if (boundary === "close") {
+    assert.match(await f.page.locator("#result-status").textContent(), /unavailable/);
+    assert.equal(await f.page.locator("#result-retry").isEnabled(), true);
+  } else assert.equal(await f.page.locator("#result-dialog").isVisible(), false);
+});

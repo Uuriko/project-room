@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { readFileSync, writeFileSync, mkdirSync, openSync, closeSync, fsyncSync, chmodSync, existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -6,7 +7,7 @@ import { readAgentConnection, ConnectionError } from "../client/agent-connection
 import {
   GrokHostError, parseNeedsMeBody, parseWakePing, wakeToAttentionItem,
   pendingWakeToItem, attentionKey, selectUnhandled, markHandled, setCursor, loadJournal,
-  emptyJournal, buildRunPlan, assertPlanSafe, childEnvFor, emptyAttentionNext
+  emptyJournal, buildRunPlan, assertPlanSafe, childEnvFor, emptyAttentionNext, countKinds
 } from "../client/grok-host.mjs";
 
 function fail(code, message) {
@@ -27,6 +28,31 @@ function journalPathFor(env = process.env) {
   fail("config_not_found", "Set ROOM_AGENT_CONFIG or ROOM_GROK_STATE for the journal");
 }
 
+function pendingAccessPathFor(env = process.env) {
+  if (typeof env.ROOM_AGENT_CONFIG === "string" && env.ROOM_AGENT_CONFIG.trim()) {
+    return join(resolve(env.ROOM_AGENT_CONFIG.trim()), "pending-access.json");
+  }
+  fail("config_not_found", "Set ROOM_AGENT_CONFIG");
+}
+
+export function loadPendingAccess(data) {
+  if (data == null) return { requests: [] };
+  if (typeof data !== "object" || Array.isArray(data) || !Array.isArray(data.requests)) return { requests: [] };
+  const requests = [];
+  for (const row of data.requests) {
+    if (!row || typeof row.requestId !== "string" || typeof row.roomId !== "string") continue;
+    requests.push({ requestId: row.requestId, roomId: row.roomId, identityId: typeof row.identityId === "string" ? row.identityId : null });
+  }
+  return { requests };
+}
+
+export function rememberPendingAccess(current, row) {
+  const next = loadPendingAccess(current);
+  if (next.requests.some(item => item.requestId === row.requestId)) return next;
+  next.requests.push({ requestId: row.requestId, roomId: row.roomId, identityId: row.identityId ?? null });
+  return next;
+}
+
 export function readJournalFile(filename) {
   if (!existsSync(filename)) return emptyJournal();
   try { return loadJournal(JSON.parse(readFileSync(filename, "utf8"))); }
@@ -42,6 +68,16 @@ export function writeJournalFile(filename, journal) {
     fsyncSync(fd);
   } finally { closeSync(fd); }
   chmodSync(filename, 0o600);
+}
+
+export function readPendingAccessFile(filename) {
+  if (!existsSync(filename)) return { requests: [] };
+  try { return loadPendingAccess(JSON.parse(readFileSync(filename, "utf8"))); }
+  catch { return { requests: [] }; }
+}
+
+export function writePendingAccessFile(filename, data) {
+  writeJournalFile(filename, loadPendingAccess(data));
 }
 
 function hostIdFor(env = process.env) {
@@ -137,12 +173,29 @@ export async function doctor({ env = process.env, fetchImpl = fetch } = {}) {
       presence,
       listening: presence === "pull-only" ? "pull-only" : presence,
       executeDefault: false,
-      rooms
+      rooms,
+      pendingAdmissions: await pollPendingAdmissions(connection, env, fetchImpl)
     };
   } catch (error) {
     const code = error instanceof ConnectionError || error instanceof GrokHostError ? error.code : "doctor_failed";
     return { ok: false, code, next: nextFor(code) };
   }
+}
+
+async function pollPendingAdmissions(connection, env, fetchImpl) {
+  const filename = pendingAccessPathFor(env);
+  const pending = readPendingAccessFile(filename);
+  const out = [];
+  for (const row of pending.requests) {
+    const identityId = row.identityId || connection.memberId;
+    try {
+      const parsed = await jsonRequest(connection, `/api/access-requests/${encodeURIComponent(row.requestId)}?identityId=${encodeURIComponent(identityId)}`, { fetchImpl });
+      out.push({ requestId: row.requestId, roomId: parsed.roomId || row.roomId, status: parsed.status || "unknown" });
+    } catch {
+      out.push({ requestId: row.requestId, roomId: row.roomId, status: "poll_failed" });
+    }
+  }
+  return out;
 }
 
 function nextFor(code) {
@@ -222,6 +275,7 @@ export async function pull({ env = process.env, fetchImpl = fetch, execute = fal
     pendingWakes: beat.pendingWakes.length,
     hostId: beat.hostId,
     silent,
+    kinds: countKinds(result.plans.map(plan => plan.item)),
     next: silent ? emptyAttentionNext({ execute }) : "Review planned items; --execute starts Grok."
   };
 }
@@ -257,12 +311,42 @@ async function defaultRunner(plan, env, connection) {
 
 function parseArgs(argv) {
   const args = argv.slice(2);
+  if (args[0] === "request-access") {
+    const roomId = args[1];
+    if (typeof roomId !== "string" || roomId.length < 1 || args.length !== 2) return null;
+    return { command: "request-access", roomId };
+  }
   const command = args[0] === "doctor" || args[0] === "pull" || args[0] === "wake" ? args[0] : null;
   if (!command) return null;
   const execute = args.includes("--execute");
   if (execute && command === "doctor") return null;
   if (args.some((word, i) => i > 0 && word !== "--execute")) return null;
   return { command, execute };
+}
+
+export async function fileAccessRequest({ env = process.env, fetchImpl = fetch, roomId, note = "" } = {}) {
+  const connection = connectionFromEnv(env);
+  if (typeof roomId !== "string" || roomId.length < 1 || roomId.length > 128) fail("invalid_attention_item", "roomId required");
+  const requestId = `ar_${randomUUID().replaceAll("-", "").slice(0, 16)}`;
+  const parsed = await jsonRequest(connection, "/api/access-requests", {
+    fetchImpl, method: "POST",
+    body: {
+      roomId,
+      identityId: connection.memberId,
+      displayName: "Grok Build",
+      requestedPermissions: ["accept_work", "complete_work"],
+      note,
+      requestId
+    }
+  });
+  const filename = pendingAccessPathFor(env);
+  const remembered = rememberPendingAccess(readPendingAccessFile(filename), {
+    requestId: parsed.requestId || requestId,
+    roomId: parsed.roomId || roomId,
+    identityId: connection.memberId
+  });
+  writePendingAccessFile(filename, remembered);
+  return { ok: true, requestId: parsed.requestId || requestId, status: parsed.status, roomId: parsed.roomId || roomId };
 }
 
 function readWakeBody() {
@@ -274,14 +358,15 @@ function readWakeBody() {
 export async function main(argv = process.argv, env = process.env, io = { log: console.log, error: console.error }) {
   const parsed = parseArgs(argv);
   if (!parsed) {
-    io.error("Usage: node scripts/grok-room-host.mjs doctor | pull [--execute] | wake [--execute]");
+    io.error("Usage: node scripts/grok-room-host.mjs doctor | pull [--execute] | wake [--execute] | request-access <roomId>");
     process.exitCode = 2;
     return;
   }
   try {
     const result = parsed.command === "doctor" ? await doctor({ env })
       : parsed.command === "wake" ? await ingestWake({ env, body: readWakeBody(), execute: parsed.execute })
-        : await pull({ env, execute: parsed.execute });
+        : parsed.command === "request-access" ? await fileAccessRequest({ env, roomId: parsed.roomId })
+          : await pull({ env, execute: parsed.execute });
     io.log(JSON.stringify(result));
     if (parsed.command === "doctor" && result.ok === false) process.exitCode = 1;
   } catch (error) {

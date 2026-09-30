@@ -1,3 +1,5 @@
+import { MAX_MESSAGE_BODY_CHARS } from "../src/events.js";
+
 // #658: mention lifecycle tracking — pure state machine, mention schema,
 // and member-resolution helper. Dependency-free and unit-testable without
 // a database. The store (server/store.mjs) owns persistence; this module
@@ -113,7 +115,7 @@ export const mentionStateSchema = `
 // longer label to a shorter recipient. Silent @_mentions, email addresses,
 // inactive members, and self-mentions do not create delivery targets.
 export function resolveMentionTargetsInText(members, identityNames, text, senderMemberId) {
-  if (typeof text !== "string" || text.length === 0 || text.length > 20000) return [];
+  if (typeof text !== "string" || text.length === 0 || text.length > MAX_MESSAGE_BODY_CHARS) return [];
   const candidates = mentionCandidates(members, identityNames);
   const lowerText = text.toLowerCase(), found = [];
   for (let at = text.indexOf("@"); at >= 0; at = text.indexOf("@", at + 1)) {
