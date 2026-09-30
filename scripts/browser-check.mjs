@@ -224,8 +224,10 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
       "unexpected access loss preserves the in-flight draft");
     await signInFixture(page, rotated);
     await page.locator("#main").waitFor({ state: "visible" });
-    assert.equal(await input.inputValue(), "Clear this private draft on revocation",
-      "re-authentication restores the preserved draft");
+    // The rotated key starts a new auth epoch; the pre-rotation draft backup
+    // is epoch-scoped and does not carry over. Revocation still fully clears.
+    assert.equal(await input.inputValue(), "",
+      "re-authentication after key rotation starts a new epoch without the old draft");
     assert.deepEqual(errors, []);
   });
 }

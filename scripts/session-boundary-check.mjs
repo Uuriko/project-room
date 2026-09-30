@@ -475,6 +475,9 @@ test("composer failures stay discussion-scoped and keyboard sends preserve user 
     "unexpected access loss preserves the in-flight draft across re-entry");
   assert.equal(await page.locator("#composer-status").textContent(), "");
   assert.equal(await form.getAttribute("aria-busy"), null);
+  // The message list repopulates asynchronously after the refresh-based
+  // re-entry; wait for the thread entry before switching.
+  await page.locator('[data-message-record-id="topic"] [data-message-action="thread"]').waitFor();
   await page.locator('[data-message-record-id="topic"] [data-message-action="thread"]').click();
   assert.equal(await input.inputValue(), "This old-session draft must disappear",
     "unexpected access loss preserves the offscreen thread draft, not only the visible form");
