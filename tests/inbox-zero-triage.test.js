@@ -340,6 +340,7 @@ describe('stats', () => {
       schedule: 0,
       delegate: 1,
       archive: 0,
+      'needs-review': 0,
       'spam-candidate': 0,
     });
     assert.equal(stats.estimatedTimeSavedMs, 2 * DEFAULT_DECISION_TIME_SAVED_MS);
@@ -429,10 +430,41 @@ describe('exports', () => {
       'schedule',
       'delegate',
       'archive',
+      'needs-review',
       'spam-candidate',
     ]);
     assert.equal(RECENCY_WINDOW_MS, 72 * 60 * 60 * 1000);
     assert.equal(SPAM_SENDER_SCORE_MAX, 0.1);
     assert.equal(DEFAULT_DECISION_TIME_SAVED_MS, 2 * 60 * 1000);
+  });
+});
+
+describe('H-16 unscored items', () => {
+  // Contract: an item whose score cannot be computed (missing/invalid
+  // inputs) must surface for human review, never be buried as
+  // spam-candidate. The old bucketForScore sent every NaN score to
+  // spam-candidate, silently burying real work. Credible regression: an
+  // item with undefined receivedAt / NaN threadDepth must land in
+  // needs-review, not spam-candidate.
+  it('routes NaN-score items to needs-review instead of spam-candidate', () => {
+    const clock = fakeClock();
+    const triage = createInboxZeroTriage(makeDeps(clock));
+    triage.startSession([
+      item(clock.clock(), { id: 'm-nan-recv', receivedAt: undefined }),
+      item(clock.clock(), { id: 'm-nan-thread', threadDepth: NaN }),
+    ]);
+    for (const id of ['m-nan-recv', 'm-nan-thread']) {
+      const got = triage.get(id);
+      assert.equal(got.bucket, 'needs-review', `${id} buried as ${got.bucket}`);
+    }
+  });
+
+  it('a genuinely low-sender-score item still lands in spam-candidate', () => {
+    const clock = fakeClock();
+    const triage = createInboxZeroTriage(makeDeps(clock));
+    triage.startSession([
+      item(clock.clock(), { id: 'm-spam', sender: 'spammy@phish.invalid' }),
+    ]);
+    assert.equal(triage.get('m-spam').bucket, 'spam-candidate');
   });
 });

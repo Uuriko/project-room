@@ -602,3 +602,39 @@ test("member ownership and invitation authority ignore inherited names but retai
   assert.equal(canInviteMembers(added, "toString"), true);
   assert.equal(canInviteMembers(state, "potter"), true);
 });
+
+test("H-11: retrying a handler-mutated event object is idempotent", () => {
+  // Contract: the stored fingerprint must agree with the immutable log entry.
+  // Handlers stamp markers onto incoming.data (delegatedAdmin here); the old
+  // code fingerprinted BEFORE the handler ran, so re-applying the same
+  // (now mutated) object threw a spurious "Conflicting reuse of event id",
+  // turning an idempotent retry into a hard failure. Credible regression:
+  // the second applyEvent with the identical object must not throw.
+  const state = baseState();
+  const grant = fixedEvent("owner-grant-admin", EVENT_TYPES.MEMBER_ADDED, "potter", {
+    memberId: "agent-admin", displayName: "Admin", kind: "agent",
+    permissions: ["manage_members"],
+  });
+  const pristine = structuredClone(grant);
+  const once = applyEvent(state, grant);
+  assert.equal(grant.data.delegatedAdmin, true, "handler stamps the grant marker onto the event");
+  assert.equal(once.members["agent-admin"].delegatedAdmin, true);
+  // Retry with the same (now mutated) object: idempotent, no throw.
+  const twice = applyEvent(once, grant);
+  assert.equal(twice.members["agent-admin"].delegatedAdmin, true);
+  assert.equal(twice.eventLog.length, once.eventLog.length, "no duplicate log entry");
+  // Retry with a pristine copy of the same logical event: also idempotent.
+  const thrice = applyEvent(once, pristine);
+  assert.equal(thrice.eventLog.length, once.eventLog.length, "no duplicate log entry");
+});
+
+test("H-11: a genuinely conflicting reuse of an event id still throws", () => {
+  const state = baseState();
+  const grant = fixedEvent("owner-grant-admin-2", EVENT_TYPES.MEMBER_ADDED, "potter", {
+    memberId: "agent-admin-2", displayName: "Admin", kind: "agent",
+    permissions: ["manage_members"],
+  });
+  const once = applyEvent(state, grant);
+  const conflict = { ...structuredClone(grant), data: { ...grant.data, displayName: "Someone Else" } };
+  assert.throws(() => applyEvent(once, conflict), /Conflicting reuse of event id/);
+});

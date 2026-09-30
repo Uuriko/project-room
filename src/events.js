@@ -351,7 +351,9 @@ export function replay(events) {
 export function applyEvent(current, incoming) {
   const state = structuredClone(current);
   validateEnvelope(incoming);
-  const fingerprint = stableStringify(incoming);
+  // H-11: fingerprint via eventFingerprint (handler-stamped markers excluded)
+  // so the stored fingerprint agrees with the logged (post-handler) event.
+  const fingerprint = eventFingerprint(incoming);
 
   if (state.seenEvents[incoming.id]) {
     if (state.seenEvents[incoming.id] !== fingerprint) throw new Error("Conflicting reuse of event id");
@@ -1794,6 +1796,29 @@ function stableStringify(value) {
     return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(",")}}`;
   }
   return JSON.stringify(value);
+}
+
+// H-11: keys a handler stamps onto incoming.data as derived audit markers
+// (not part of the caller's event). The fingerprint excludes them so the
+// stored fingerprint agrees with the immutable log entry: a retry reusing
+// the same (already stamped) object — or a pristine copy — is idempotent
+// instead of throwing a spurious "Conflicting reuse of event id". If a
+// handler stamps a new marker key, add it here.
+const HANDLER_STAMPED_DATA_KEYS = ["delegatedAdmin"];
+
+function eventFingerprint(incoming) {
+  const data = incoming.data;
+  if (data && typeof data === "object") {
+    let stripped = null;
+    for (const key of HANDLER_STAMPED_DATA_KEYS) {
+      if (Object.hasOwn(data, key)) {
+        stripped ??= { ...data };
+        delete stripped[key];
+      }
+    }
+    if (stripped) return stableStringify({ ...incoming, data: stripped });
+  }
+  return stableStringify(incoming);
 }
 
 // Pinned messages (issue #6 B2). A pin is a room-visible bookmark on one

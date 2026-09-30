@@ -113,10 +113,13 @@ function assertTokens(tokens) {
  */
 export function createRateLimitTracker(deps = {}) {
   const clock = deps.clock ?? (() => Date.now());
-  const defaultPolicy = Object.freeze(
-    deps.defaultPolicy === undefined
-      ? { ...BUILT_IN_DEFAULT_POLICY }
-      : normalizePolicy(deps.defaultPolicy, 'defaultPolicy'),
+  // H-13: the built-in default goes through normalizePolicy like every
+  // custom policy. The old code spread it raw, leaving maxTokens undefined,
+  // so token math produced NaN and every consume on the default path was
+  // denied.
+  const defaultPolicy = normalizePolicy(
+    deps.defaultPolicy === undefined ? BUILT_IN_DEFAULT_POLICY : deps.defaultPolicy,
+    'defaultPolicy',
   );
 
   /** Buckets keyed by `${agentId}${action}`; value: { policy, tokens, lastRefill }. */

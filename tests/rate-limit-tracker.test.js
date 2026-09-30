@@ -268,3 +268,23 @@ describe('rate-limit-tracker', () => {
     );
   });
 });
+
+describe('H-13 default policy', () => {
+  // Contract: the built-in default policy must behave like a normalized
+  // policy (capacity 60, refill 1/s). The old code spread the built-in
+  // default WITHOUT normalizePolicy, so maxTokens was undefined and every
+  // consume on the documented default path was denied (NaN token math).
+  // Credible regression: 60 sequential consumes on a fresh default-policy
+  // tracker must all be allowed; the 61st must be denied with retryAfterMs.
+  it('default policy allows consumes up to capacity instead of denying everything', () => {
+    const { clock } = fakeClock();
+    const rl = createRateLimitTracker({ clock });
+    for (let i = 0; i < 60; i++) {
+      const r = rl.tryConsume('agent-a', 'chat');
+      assert.equal(r.allowed, true, `consume ${i + 1} denied on the default policy`);
+    }
+    const denied = rl.tryConsume('agent-a', 'chat');
+    assert.equal(denied.allowed, false);
+    assert.ok(denied.retryAfterMs > 0, 'denial carries a retryAfterMs');
+  });
+});
