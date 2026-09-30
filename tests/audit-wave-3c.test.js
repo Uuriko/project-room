@@ -10,7 +10,7 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -375,7 +375,7 @@ test("M-7(c): the handoff sender, recipient, and room owner can transition", (t)
 });
 
 test("M-7(c): an agent acting under its linked identity id can transition its own handoff", (t) => {
-  const { store, collab, accountId, makeHandoff } = handoffHarness(t);
+  const { store, collab, accountId } = handoffHarness(t);
   // A real agent identity whose id names the handoff recipient; the caller
   // arrives as the linked member id.
   const identity = store.identities.create("Agent B");
