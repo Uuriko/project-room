@@ -2730,10 +2730,14 @@ export class BountyEscrow {
   }
 
   // --- reads --------------------------------------------------------------------------
-  listBounties(roomId, { group = null, viewer = null } = {}) {
+  listBounties(roomId, { group = null, viewer = null, poster = null } = {}) {
     return this.store.readTransaction(() => {
       this._ensure();
       if (group !== null) check(BOUNTY_GROUPS.includes(group), "invalid_input", `unknown bounty group "${group}"`);
+      // Poster filter: a canonical lane id, or "self" resolved by the caller
+      // (routes/MCP layers) before reaching here. Lets a poster see their
+      // own bounties without client-side filtering.
+      const posterLane = poster === null || poster === undefined ? null : canonicalLane(poster);
       const rows = this.db.prepare("SELECT * FROM bounty_records WHERE room_id=? ORDER BY created_at").all(roomId);
       // Slice 4: optional per-viewer routing visibility. When a viewer lane
       // is given, each bounty view carries the routing layer's band-derived
@@ -2750,7 +2754,8 @@ export class BountyEscrow {
             viewerRouting: Object.freeze({ band: routing.band, maxClaimMillis: routing.maxClaimMillis,
               claimable: routing.claimable(row.amount_millis) }) });
         })
-        .filter(b => group === null || b.group === group);
+        .filter(b => group === null || b.group === group)
+        .filter(b => posterLane === null || b.poster === posterLane);
     });
   }
 
