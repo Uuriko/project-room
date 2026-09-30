@@ -18,8 +18,11 @@ export const SCAN_EXT = /\.(mjs|js|cjs|json|yaml|yml|toml|md|txt|html|css|env|ex
 // Fixture/check scripts and READMEs use placeholder secrets (verified 2026-09-16).
 // Pinned, reproducibly bundled sanitize-html dependencies contain HTML entity tables,
 // base64 alphabets and parser messages, not credentials (build-gmail-sanitizer.mjs).
+// 2026-09-30 (phase-2 gap audit L-P2-17): no blanket *-fixture.mjs / *-check.mjs
+// skips — fixture and check scripts are scanned like any other source. Their
+// genuinely-safe placeholder values are allowlisted explicitly below.
 export const SKIP_FILES = [/server\/vendor\/gmail-html-sanitizer\.mjs$/, /package-lock\.json$/, /pnpm-lock\.yaml$/, /\.min\.js$/, /secret-scan-check\.mjs$/,
-  /-fixture\.mjs$/, /-check\.mjs$/, /README\.md$/];
+  /README\.md$/];
 // Known-safe lines: the scanner's own patterns, documented examples, redacted placeholders,
 // and variable assignments (not hardcoded values).
 export const ALLOWLIST = [
@@ -85,6 +88,32 @@ export const ALLOWLIST = [
   /CITABLE_PROOF_KINDS/, // emissary-lure.mjs: constant naming the citable Slice 1 receipt
     // kinds (work/jury/oracle). The `!` prefix in `!CITABLE_PROOF_KINDS.includes(...)`
     // trips the high-entropy detector; it is a code constant, not a secret.
+  // 2026-09-30 (phase-2 gap audit L-P2-17): fixture/check scripts are scanned
+  // (no blanket *-fixture.mjs / *-check.mjs skip). Their genuinely-safe
+  // placeholder values are allowlisted explicitly below — each entry names
+  // the file and why the value is not a credential.
+  /synthetic-test-secret/, // scripts/agent-signin-browser-check.mjs:51 — mocked
+    // /api/agent-identities route fulfillment; obvious placeholder, not a credential
+  /synthetic-test-private-key/, // scripts/agent-signin-browser-check.mjs:51 — same
+    // mocked response; obvious placeholder, not a credential
+  /synthetic-email-password/, // scripts/email-password-browser-check.mjs:10 —
+    // placeholder password typed into a synthetic browser form
+  /doesNotMatch\(page\.url\(\), \/pri_\|secret=\|privateKey=\//, // scripts/agent-signin-browser-check.mjs:194 —
+    // negative assertion that the URL does NOT contain secrets; the regex text
+    // itself is not a credential
+  /doesNotMatch\(page\.url\(\), \/password=\|new-email-password\//, // scripts/email-password-browser-check.mjs:37 —
+    // negative assertion; the regex text itself is not a credential
+  /BCVxsr7N_eNgVRqvHtD0zTZsEc6/, // scripts/human-push-browser-check.mjs:13,
+    // cloudflare/store-worker.test-fixture.mjs:101 — Web Push p256dh PUBLIC key
+    // (shared test vector, also in tests/); public by design, grants nothing
+  /BTBZMqHH6r4Tts7J_aSIgg/, // scripts/human-push-browser-check.mjs:14,
+    // cloudflare/store-worker.test-fixture.mjs:101 — Web Push `auth` test vector
+    // (16 bytes, shared across tests/web-push.test.js etc.) paired with a fake
+    // FCM endpoint; a fixture value, not a real subscription credential
+  /synthetic-not-for-export/, // scripts/result-copy-agent-fixture.mjs:20 —
+    // example.invalid URL token; obvious placeholder, not a credential
+  /token=not-for-export/, // scripts/result-copy-browser-check.mjs:23 —
+    // example.invalid URL token; obvious placeholder, not a credential
 
 ];
 

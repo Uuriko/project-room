@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 /**
  * gmail-send-gate.mjs — Pure approval-gate state machine for the Gmail send path.
  *
@@ -12,12 +13,12 @@
  * Dependency injection (all via the `deps` parameter of createGmailSendGate):
  *   - clock:          () => number  (ms epoch; default: Date.now)
  *   - id:             () => string  (draft id generator; default: per-gate counter)
- *   - hash:           (content: string) => string  (content hash; default: FNV-1a hex)
+ *   - hash:           (content: string) => string  (content hash; default: sha256 hex)
  *   - approvalTtlMs:  number        (pending-approval TTL; default: 15 minutes)
  *
- * The injected `hash` is the identity of the content for approval purposes, so
- * production wiring MUST inject a cryptographic hash (e.g. sha256 hex). The
- * default FNV-1a is deterministic but NOT collision-resistant; it exists only so
+ * The injected `hash` is the identity of the content for approval purposes.
+ * The default is sha256 hex via node:crypto (collision-resistant); a custom
+ * hash may still be injected for tests. What follows exists only so
  * the machine is usable/testable without any dependency.
  *
  * Error contract: every failure throws an Error with a `code` property:
@@ -51,14 +52,11 @@ function gateError(code, message, detail) {
   return err;
 }
 
-/** Default content hash: FNV-1a (32-bit), hex. Deterministic, non-crypto. */
-function fnv1aHex(input) {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < input.length; i += 1) {
-    h ^= input.charCodeAt(i);
-    h = Math.imul(h, 0x01000193);
-  }
-  return (h >>> 0).toString(16).padStart(8, '0');
+// 2026-09-30 (phase-2 gap audit L-P2-16): default content hash is sha256
+// hex via node:crypto. The approval binds to the exact approved content,
+// so the default must be collision-resistant, not FNV-1a.
+function sha256Hex(input) {
+  return createHash("sha256").update(input, "utf8").digest("hex");
 }
 
 /** Canonical serialization of draft content — fixed field order, hash identity. */
@@ -80,7 +78,7 @@ function canonicalContent(content) {
  */
 export function createGmailSendGate(deps = {}) {
   const clock = deps.clock ?? (() => Date.now());
-  const hash = deps.hash ?? fnv1aHex;
+  const hash = deps.hash ?? sha256Hex;
   const approvalTtlMs = deps.approvalTtlMs ?? DEFAULT_APPROVAL_TTL_MS;
 
   let idCounter = 0;

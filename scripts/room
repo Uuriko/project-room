@@ -658,6 +658,20 @@ reduce_state() { # $1=now_epoch $2=comment_count $3=watermark ; stdin: events ->
       if $a.path != $b.path then false
       elif ($a.scope == null or $b.scope == null) then true
       else $a.scope == $b.scope end;
+    # 2026-09-30 (phase-2 gap audit H-P2-1): a handoff ACK is a distinct
+    # protocol action, not a cross-lane status — the designated recipient
+    # accepts a pending transfer. Lane-less events carry no identity claim
+    # and keep their legacy treatment (the prose STATUS/DONE affordances).
+    # NOTE (trust model): all lanes post from one shared GitHub account, so
+    # a [lane] tag is self-asserted, never authenticated. This check is a
+    # tripwire — it refuses openly cross-lane actions and records them in
+    # .illegal with by_lane attribution — not an impersonation defense. A
+    # forged victim tag or a bare tag-less comment still passes; per-lane
+    # comment signatures would be the real fix.
+    def is_valid_ack($ev):
+      ((($ev.ack_task // null) != null)
+       and ((.tasks[$ev.ack_task].pending_handoff // null) != null)
+       and (.tasks[$ev.ack_task].pending_handoff.to == $ev.lane));
     # R3: collisions between candidate entries and live claims held by a
     # DIFFERENT lane. Released claims (lane null after strike-two) and
     # terminal states never block; same-lane entries never collide.
@@ -730,8 +744,20 @@ reduce_state() { # $1=now_epoch $2=comment_count $3=watermark ; stdin: events ->
             else ($e.block | validate_claim(.)) as $errs
               | if ($errs | length) > 0 then
                   .log += [{id:$cid, at:$at, kind:"claim", task_id:$tid, ok:false, errors:$errs}]
+                elif (($e.block.lane // "") != $e.lane) then
+                  # 2026-09-30 (phase-2 gap audit H-P2-4): the fence lane:
+                  # field is not authoritative — it must equal the [lane]
+                  # header tag. A mismatch is lane spoofing/framing and the
+                  # claim is refused, never registered.
+                  .refused += [{task_id:$tid, by_lane:$e.lane, colliding:"lane",
+                                holder_lane:($e.block.lane // "(missing)"),
+                                holder_state:"n/a", at:$at, comment_id:$cid, via:"fenced"}]
+                  | .log += [{id:$cid, at:$at, kind:"claim", task_id:$tid, ok:false,
+                              errors:["fence lane != header lane: "
+                                      + ($e.block.lane // "(missing)")
+                                      + " != " + $e.lane]}]
                 else ((($e.block.files // "") | split(",") | map(trim) | map(select(length > 0)))) as $fentries
-                  | (overlap_hits($e.block.lane; $fentries)) as $hits
+                  | (overlap_hits($e.lane; $fentries)) as $hits
                   | if ($hits | length) > 0 then
                       # R3 (2026-09-27, RC-2026-09-27-1145): reducer-level
                       # refusal closes the TOCTOU gap between the client-side
@@ -739,7 +765,7 @@ reduce_state() { # $1=now_epoch $2=comment_count $3=watermark ; stdin: events ->
                       # files overlap a live claim held by another lane is
                       # never registered; the refusal is recorded, never
                       # silent.
-                      .refused += [{task_id:$tid, by_lane:$e.block.lane, colliding:"files",
+                      .refused += [{task_id:$tid, by_lane:$e.lane, colliding:"files",
                                     holder_lane:$hits[0].holder_lane, holder_task:$hits[0].holder_task,
                                     overlapping:$hits, at:$at, comment_id:$cid, via:"fenced"}]
                       | .log += [{id:$cid, at:$at, kind:"claim", task_id:$tid, ok:false,
@@ -749,7 +775,7 @@ reduce_state() { # $1=now_epoch $2=comment_count $3=watermark ; stdin: events ->
                                        | join("; "))]}]
                     else
                       .tasks[$tid] = {
-                        task_id:$tid, lane:$e.block.lane,
+                        task_id:$tid, lane:$e.lane,
                         files:$fentries,
                         lease:$e.block.lease, lease_h:lease_h_of($e.block.lease),
                         reason:$e.block.reason, state:$e.block.state,
@@ -757,7 +783,7 @@ reduce_state() { # $1=now_epoch $2=comment_count $3=watermark ; stdin: events ->
                         last_block:$e.block, strike_one_at:null, released_at:null,
                         pending_handoff:null, handoff_voided:false,
                         receipts:[], missing_receipt:false }
-                      | .lanes += [$e.block.lane]
+                      | .lanes += [$e.lane]
                       | .log += [{id:$cid, at:$at, kind:"claim", task_id:$tid, ok:true}]
                     end
                 end
@@ -775,6 +801,21 @@ reduce_state() { # $1=now_epoch $2=comment_count $3=watermark ; stdin: events ->
                               comment_id:$cid, reason:"transition from terminal state"}]
                 | .log += [{id:$cid, at:$at, kind:"status", task_id:$tid, ok:false,
                             errors:["illegal: " + $t.state + " -> " + $ns]}]
+              elif ((($t.lane // null) != null)
+                    and (($e.lane // null) != null)
+                    and ($e.lane != $t.lane)
+                    and (is_valid_ack($e) | not)) then
+                # 2026-09-30 (phase-2 gap audit H-P2-1): only the holding
+                # lane may transition its own claim. An explicitly-tagged
+                # cross-lane STATUS — cancel, suspend, renew, or complete by
+                # another lane — is an illegal transition, recorded never
+                # silent. Lane-less prose events and valid handoff ACKs are
+                # exempt (see is_valid_ack).
+                .illegal += [{task_id:$tid, by_lane:$e.lane, from:$t.state, attempted:$ns, at:$at,
+                              comment_id:$cid, reason:"status from non-holding lane"}]
+                | .log += [{id:$cid, at:$at, kind:"status", task_id:$tid, ok:false,
+                            errors:["illegal: " + $e.lane + " is not the holding lane ("
+                                    + ($t.lane // "(released)") + ")"]}]
               elif $to == $from then
                 if ($to == "failed" and $ns == "failed") then
                   .log += [{id:$cid, at:$at, kind:"status", task_id:$tid, ok:false,
@@ -820,6 +861,18 @@ reduce_state() { # $1=now_epoch $2=comment_count $3=watermark ; stdin: events ->
                 # terminal claims again (2026-09-19 strike misfires).
                 .log += [{id:$cid, at:$at, kind:"done", task_id:$tid, ok:true,
                           receipt:($e.receipt != null), note:"already terminal"}]
+              elif ((($t.lane // null) != null)
+                    and (($e.lane // null) != null)
+                    and ($e.lane != $t.lane)) then
+                # 2026-09-30 (phase-2 gap audit H-P2-1): only the holding
+                # lane may close its own claim. An explicitly-tagged
+                # cross-lane DONE is an illegal transition, recorded never
+                # silent. Lane-less prose DONEs keep legacy treatment.
+                .illegal += [{task_id:$tid, by_lane:$e.lane, from:$t.state, attempted:"completed", at:$at,
+                              comment_id:$cid, reason:"done from non-holding lane"}]
+                | .log += [{id:$cid, at:$at, kind:"done", task_id:$tid, ok:false,
+                            errors:["illegal: " + $e.lane + " is not the holding lane ("
+                                    + ($t.lane // "(released)") + ")"]}]
               elif ($from == "working")
                    or (($e.via == "prose-terminal") and ($from == "submitted")) then
                 .tasks[$tid] |= (.state = "completed" | .last_at = $at
@@ -865,6 +918,14 @@ reduce_state() { # $1=now_epoch $2=comment_count $3=watermark ; stdin: events ->
                 .log += [{id:$cid, at:$at, kind:"handoff", task_id:$tid, ok:false, errors:["missing room-handoff block"]}]
               elif (($e.hblock.from // "") != $t.lane) then
                 .log += [{id:$cid, at:$at, kind:"handoff", task_id:$tid, ok:false, errors:["handoff from != holding lane"]}]
+              elif (($e.lane // "") != ($e.hblock.from // "")) then
+                # 2026-09-30 (phase-2 gap audit H-P2-2): the handoff must be
+                # posted by the holding lane itself. Without this, two forged
+                # comments (a HANDOFF naming the victim as from, then an ACK
+                # posted by the attacker) transfer the victim claim to the attacker.
+                .log += [{id:$cid, at:$at, kind:"handoff", task_id:$tid, ok:false,
+                          errors:["handoff poster (" + ($e.lane // "(none)")
+                                  + ") != from lane (" + ($e.hblock.from // "(none)") + ")"]}]
               elif (($e.hblock.to // "") == "") then
                 .log += [{id:$cid, at:$at, kind:"handoff", task_id:$tid, ok:false, errors:["missing to lane"]}]
               elif (($e.cblock // null) | not) or (($e.cblock.lane // "") != $e.hblock.to) then
@@ -938,6 +999,13 @@ reduce_state() { # $1=now_epoch $2=comment_count $3=watermark ; stdin: events ->
                         and (epoch($m.ts // $at) < lease_exp(.tasks[$tid]) - 300)) then
                     .log += [{id:$cid, at:$at, kind:"reclaim", task_id:$tid, ok:true,
                               ignored:"strike-one before lease expiry: ignored (premature stamp)"}]
+                  elif (epoch($at) - epoch($m.ts // $at) > 3600) then
+                    # 2026-09-30 (phase-2 gap audit M-P2-1): the enforcer
+                    # posts strike stamps fresh, so a stamp older than 60m
+                    # before the comment timestamp is backdated (forged to
+                    # collapse the 4h grace). Ignored, never recorded.
+                    .log += [{id:$cid, at:$at, kind:"reclaim", task_id:$tid, ok:true,
+                              ignored:"strike-one stamp older than 60m before comment: ignored (backdated stamp)"}]
                   else
                     (($m.ts // $at) as $stamp
                      | (if (epoch($stamp) > epoch($at)) then $at else $stamp end) as $clamped
@@ -989,7 +1057,18 @@ reduce_state() { # $1=now_epoch $2=comment_count $3=watermark ; stdin: events ->
                 elif $k == "dup_refusal" then
                   .log += [{id:$cid, at:$at, kind:"duplicate-refusal", task_id:$tid, ok:true}]
                 elif $k == "illegal_rej" then
-                  .noticed += [$tid]
+                  # 2026-09-30 (phase-2 gap audit L-P2-1): an
+                  # illegal-rejection stamp is honored only when it matches a
+                  # recorded illegal entry for the task AND is fresh (within
+                  # 1h of the comment) — otherwise a forged stamp suppresses
+                  # legitimate illegal-transition notices.
+                  if ((.illegal | map(select(.task_id == $tid)) | length) == 0) then
+                    .log += [{id:$cid, at:$at, kind:"reclaim", task_id:$tid, ok:true,
+                              ignored:"illegal-rejection stamp with no matching illegal record: ignored"}]
+                  elif (epoch($at) - epoch($m.ts // $at) > 3600) then
+                    .log += [{id:$cid, at:$at, kind:"reclaim", task_id:$tid, ok:true,
+                              ignored:"illegal-rejection stamp older than 60m before comment: ignored (stale stamp)"}]
+                  else .noticed += [$tid] end
                 else . end
               end))
           | .log += [{id:$cid, at:$at, kind:"reclaim", ok:true}]
@@ -1003,20 +1082,33 @@ reduce_state() { # $1=now_epoch $2=comment_count $3=watermark ; stdin: events ->
           # date). A carried task-id already registered on the new
           # board is left alone and logged loudly — the ledger is a
           # snapshot, not a clobber.
+          # 2026-09-30 (phase-2 gap audit H-P2-3): (a) carried claims go
+          # through the same R3 overlap refusal as fresh claims, so a
+          # forged ledger cannot squat files held live by another lane;
+          # (b) a later rotation-handoff comment never displaces the
+          # established ledger (carried claims are still merged).
           ($e.handoff // {}) as $rh
           | if (($rh.ok // false) | not) then
               .log += [{id:$cid, at:$at, kind:"rotation-handoff", ok:false,
                         errors:($rh.errors // ["malformed rotation-handoff"])}]
             else
-              .rotation = {old_issue:$rh.old_issue, new_issue:$rh.new_issue,
-                           watermark:$rh.watermark,
-                           unclaimed_lanes:$rh.unclaimed_lanes,
-                           at:$at, comment_id:$cid,
-                           carried:[$rh.claims[]
-                                    | select((.errors // []) | length == 0)
-                                    | .task_id]}
+              (if (.rotation // null) == null then
+                 .rotation = {old_issue:$rh.old_issue, new_issue:$rh.new_issue,
+                              watermark:$rh.watermark,
+                              unclaimed_lanes:$rh.unclaimed_lanes,
+                              at:$at, comment_id:$cid,
+                              carried:[$rh.claims[]
+                                       | select((.errors // []) | length == 0)
+                                       | .task_id]}
+                 | .log += [{id:$cid, at:$at, kind:"rotation-handoff", ok:true,
+                             note:"rotation ledger established"}]
+               else
+                 .log += [{id:$cid, at:$at, kind:"rotation-handoff", ok:true,
+                           note:"rotation ledger already established; carried claims merged, ledger kept"}]
+               end)
               | (reduce $rh.claims[] as $c (.;
                   ($c.errors // []) as $errs
+                  | (overlap_hits($c.lane; $c.files)) as $ohits
                   | if ($errs | length) > 0 then
                       .log += [{id:$cid, at:$at, kind:"rotation-handoff",
                                 task_id:$c.task_id, ok:false, errors:$errs}]
@@ -1024,6 +1116,13 @@ reduce_state() { # $1=now_epoch $2=comment_count $3=watermark ; stdin: events ->
                       .log += [{id:$cid, at:$at, kind:"rotation-handoff",
                                 task_id:$c.task_id, ok:false,
                                 errors:["carried task-id already registered on the new board; ledger entry not applied"]}]
+                    elif ($ohits | length) > 0 then
+                      .log += [{id:$cid, at:$at, kind:"rotation-handoff",
+                                task_id:$c.task_id, ok:false,
+                                errors:["carried claim file-overlap refused: "
+                                  + ([$ohits[]
+                                      | "\(.entry) collides with \(.holder_entry) held by \(.holder_lane) (\(.holder_task))"]
+                                     | join("; "))]}]
                     else
                       ((($c.expires | fromdate) - ($c.lease_h * 3600)
                         | strftime("%Y-%m-%dT%H:%M:%SZ"))) as $base
@@ -1427,13 +1526,27 @@ cmd_claim() {
     [.tasks[] | select(.task_id == $t)] | .[0] // empty
     | "\(.lane // "(released)")|\(.state)"')"
   collide="$(printf '%s' "$st" | jq -r --arg lane "$lane" --arg fs "$files" '
-    [ .tasks[]
+    # 2026-09-30 (phase-2 gap audit L-P2-2): scope-aware overlap, mirroring
+    # the reducer scope_overlaps — exact-element matching lets a scoped
+    # entry slip past the guard only to be refused by the reducer.
+    def trim: gsub("^[ \t]+|[ \t]+$"; "");
+    def filescope($f):
+      (($f | capture("^(?<p>[^()]+?)[ \\t]*\\((?<s>[^()]+)\\)[ \\t]*$")) // null)
+      | if . == null then {path: ($f | trim), scope: null}
+        else {path: (.p | trim), scope: (.s | trim | ascii_downcase)} end;
+    def scope_overlaps($a; $b):
+      if $a.path != $b.path then false
+      elif ($a.scope == null or $b.scope == null) then true
+      else $a.scope == $b.scope end;
+    ($fs | split(",") | map(trim) | map(select(length > 0))
+     | map({entry: ., parsed: filescope(.)})) as $want
+    | [ .tasks[]
       | select((.state as $s | (["submitted","working","suspended"] | index($s)) != null)
               and .lane != $lane)
       | .task_id as $t | .lane as $l
-      | (.files[] as $f
-         | select(("|" + $fs + "|") | contains("|" + $f + "|"))
-         | "\($t)|\($l)|\($f)")
+      | (.files[] | {entry: ., parsed: filescope(.)}) as $h
+      | ($want[] | select(scope_overlaps(.parsed; $h.parsed))
+         | "\($t)|\($l)|\(.entry)")
     ] | join("\n")')"
   if [ -n "$holder" ] || [ -n "$collide" ]; then
     local iso refusal other_ids
@@ -1786,6 +1899,11 @@ guard_enforcer_freshness() { # $1 = verb
   need sha256sum
   local rr ref self_path self_sha main_sha
   rr="$(repo_root)"
+  # 2026-09-30 (phase-2 gap audit L-P2-3): refresh the origin/main ref
+  # before comparing — trusting a stale local ref lets a stale
+  # scripts/room pass the byte-identical check.
+  git -C "$rr" fetch --quiet origin main 2>/dev/null \
+    || die "refusing $verb: cannot fetch origin/main — run from a full clone of $DEFAULT_REPO with network access"
   ref="$(git -C "$rr" rev-parse --verify --quiet 'refs/remotes/origin/main' 2>/dev/null || true)"
   [ -n "$ref" ] || die "refusing $verb: cannot locate origin/main in $rr — run from a full clone of $DEFAULT_REPO with origin/main fetched"
   self_path="$(room_self_path)"

@@ -54,7 +54,9 @@ for (const mobile of [false, true]) test(`results ${mobile ? "touch" : "desktop"
   assert.match(await f.row("native-result").textContent(), /Completed/);
   assert.match(await f.row("approved-result").textContent(), /Approved.*External evidence/);
   assert.equal(await f.row("pending-result").count(), 0);
-  assert.equal(await f.row("approved-result").locator("a").getAttribute("rel"), "noreferrer");
+  const approvedRel = await f.row("approved-result").locator("a").getAttribute("rel");
+  assert.match(approvedRel, /(^|\s)noreferrer(\s|$)/);
+  assert.match(approvedRel, /(^|\s)noopener(\s|$)/);
   assert.equal(await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   await f.capture(mobile ? "touch-list" : "desktop-list");
   await f.read(); await f.ready();

@@ -88,7 +88,9 @@ test("enforcer freshness guard: missing origin/main ref fails closed", () => {
     sh(`cp "${roomScript}" "${dir}/wt/scripts/room"`);
     const res = guardDriver(join(dir, "wt"), "metrics");
     assert.equal(res.status, 1, "guard must refuse without origin/main");
-    assert.match(res.stderr, /cannot locate origin\/main/, `stderr should name the missing ref, got: ${res.stderr}`);
+    // 2026-09-30 (L-P2-3): guard fetches origin/main before comparing, so a
+    // repo without an origin remote fails at the fetch step, not the locate step.
+    assert.match(res.stderr, /cannot (fetch|locate) origin\/main/, `stderr should name the missing ref, got: ${res.stderr}`);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

@@ -308,10 +308,13 @@ export function releaseExpired(items, now) {
   return items.map(entry => {
     const item = workOf(entry);
     if (!isLeaseExpired(item, atMs)) return item;
-    // Auto-release clears owner, lease, and the lapsed owner's declared
-    // files — whoever claims next starts with a clean declaration.
+    // Auto-release clears owner, lease, the lapsed owner's declared
+    // files, and their attestations — whoever claims next starts clean.
+    // 2026-09-30 (phase-2 gap audit L-P2-8): mirrors updateWork, where a
+    // released claim drops its reviews too (attestations belong to the
+    // lapsed owner's round of work, never to whoever claims next).
     const released = { ...item, state: "unclaimed", owner: null, leaseExpiresAt: null,
-      files: Object.freeze([]) };
+      files: Object.freeze([]), attestations: Object.freeze([]) };
     return withHistory(released, atMs, item.owner ?? "system", "lease_expired",
       `claim by ${item.owner ?? "nobody"} lapsed at ${item.leaseExpiresAt} — auto-released`);
   });

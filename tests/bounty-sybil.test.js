@@ -462,3 +462,43 @@ test("HTTP: only the room owner can confirm or dismiss a sybil flag", async t =>
   assert.equal(flag.resolutionReason, "correlated cluster");
   assert.equal((await openFlags()).length, 0);
 });
+
+test("store-level owner gate: only the room owner may resolve sybil flags (L-P2-11)", () => {
+  // Production-mode escrow: a real roomAuthority, no legacy lane mode. The
+  // route layer keeps its own 403 check; this is the defense-in-depth gate
+  // for direct store callers.
+  const db = new DatabaseSync(":memory:");
+  const transaction = fn => {
+    db.exec("SAVEPOINT escrow_test");
+    try { const out = fn(); db.exec("RELEASE escrow_test"); return out; }
+    catch (error) { db.exec("ROLLBACK TO escrow_test"); db.exec("RELEASE escrow_test"); throw error; }
+  };
+  const members = {
+    [JILL]: { active: true, kind: "agent" },
+    [GROK]: { active: true, kind: "agent" },
+    [CODEX]: { active: true, kind: "agent" },
+  };
+  const store = { db, transaction, readTransaction: transaction,
+    roomAuthority: () => ({ ownerId: JILL, members }) };
+  const escrow = new BountyEscrow(store, { now: () => nowMs });
+  escrow.ensureGenesis(ROOM);
+  const b1 = post(escrow); fund(escrow, b1.bountyId); claim(escrow, b1.bountyId, GROK);
+  submit(escrow, b1.bountyId, GROK, EVIDENCE_A);
+  const b2 = post(escrow); fund(escrow, b2.bountyId); claim(escrow, b2.bountyId, CODEX);
+  const { flags } = submit(escrow, b2.bountyId, CODEX, { ...EVIDENCE_A });
+  const flagId = flags[0].flagId;
+  const throwsAuth = fn => assert.throws(fn,
+    error => error.code === "not_authorized" && /only the room owner/.test(error.message));
+  // A non-owner lane (even the bounty poster is not the owner here — the
+  // room owner is) cannot resolve through the store directly.
+  throwsAuth(() => escrow.resolveSybilFlag(ROOM, flagId,
+    { resolution: "dismissed", reason: "nope", resolver: GROK }));
+  throwsAuth(() => escrow.resolveSybilFlag(ROOM, flagId,
+    { resolution: "confirmed", reason: "nope", resolver: CODEX }));
+  assert.equal(escrow.getSybilFlags(ROOM, { status: "open" }).length, 1, "flag still open");
+  // The room owner resolves fine.
+  const dismissed = escrow.resolveSybilFlag(ROOM, flagId,
+    { resolution: "dismissed", reason: "honest coincidence", resolver: JILL });
+  assert.equal(dismissed.status, "dismissed");
+  assert.equal(dismissed.resolvedBy, JILL);
+});

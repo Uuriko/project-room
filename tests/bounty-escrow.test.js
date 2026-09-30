@@ -410,6 +410,17 @@ test("no designated verifier means no authorized decider: dispute is honestly un
   expectConserved(escrow);
 });
 
+test("getDispute is room-scoped: another room's dispute reads as absent (L-P2-10)", () => {
+  const { escrow } = makeEscrow();
+  const OTHER = "room-other";
+  escrow.ensureGenesis(OTHER);
+  const bounty = runToAccepted(escrow, { amount: 4 });
+  const { dispute } = escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: INSTINCT, bond: 1, grounds: "meh" });
+  assert.ok(escrow.getDispute(ROOM, dispute.disputeId), "own room reads it");
+  assert.equal(escrow.getDispute(OTHER, dispute.disputeId), undefined,
+    "cross-room read must not leak the dispute");
+});
+
 test("unresolved disputes default to RELEASE after 14 days via permissionless finalize", () => {
   const { escrow } = makeEscrow();
   const bounty = runToAccepted(escrow, { amount: 4, verifier: INSTINCT });

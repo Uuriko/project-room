@@ -39,7 +39,7 @@
 set -euo pipefail
 
 ROOM="${ROOM:-$(cd "$(dirname "$0")/.." && pwd)/scripts/room}"
-TMPD="${TMPDIR:-/tmp}/room-watch-enforcer-test.$$"
+TMPD="$(mktemp -d "${TMPDIR:-/tmp}/room-watch-enforcer-test.XXXXXX")"
 mkdir -p "$TMPD"
 trap 'rm -rf "$TMPD"' EXIT
 
@@ -397,6 +397,201 @@ expect_not_in "i/no deliverable-landed suppression on a forged SHA (920)" \
   "$TMPD/i.out" "strike-one suppressed for RC-2026-09-26-920"
 expect_in     "i/SHA-anchored receipt still suppresses strike-one (921)" \
   "$TMPD/i.out" "strike-one suppressed for RC-2026-09-26-921"
+
+
+# ---------------------------------------------------------------------------
+# (j) forged cross-lane STATUS is refused (phase-2 gap audit H-P2-1)
+# 930: jill holds the claim; a [quill]STATUS with a fenced block tries to
+#      suspend it. Refused: .illegal entry, log line, no transition.
+# 931: negative control — the holding lane's own STATUS transitions.
+# ---------------------------------------------------------------------------
+
+cat > "$TMPD/j.json" <<'EOF'
+[
+ {"id": 100, "created_at": "2026-09-30T00:00:00Z", "body": "[jill][claim] j930\n\n```room-claim\ntask-id:    RC-2026-09-30-930\nlane:       jill\nfiles:      scripts/room\nlease:      lease=6h\nstate:      working\nreason:     fixture\n```"},
+ {"id": 101, "created_at": "2026-09-30T01:00:00Z", "body": "[quill]STATUS: suspending RC-2026-09-30-930\n\n```room-claim\ntask-id:    RC-2026-09-30-930\nlane:       quill\nfiles:      scripts/room\nlease:      lease=6h\nstate:      suspended\nreason:     forged cross-lane status\n```"},
+ {"id": 102, "created_at": "2026-09-30T00:00:00Z", "body": "[jill][claim] j931\n\n```room-claim\ntask-id:    RC-2026-09-30-931\nlane:       jill\nfiles:      docs/j.md\nlease:      lease=6h\nstate:      working\nreason:     fixture\n```"},
+ {"id": 103, "created_at": "2026-09-30T01:00:00Z", "body": "[jill]STATUS: suspending RC-2026-09-30-931\n\n```room-claim\ntask-id:    RC-2026-09-30-931\nlane:       jill\nfiles:      docs/j.md\nlease:      lease=6h\nstate:      suspended\nreason:     own-lane suspend\n```"}
+]
+EOF
+
+"$ROOM" _parse < "$TMPD/j.json" | "$ROOM" _state --now 2026-09-30T02:00:00Z > "$TMPD/j.state"
+
+expect_jq     "j/cross-lane STATUS recorded in .illegal (930)" \
+  "$TMPD/j.state" '.illegal | map(select(.task_id=="RC-2026-09-30-930" and .by_lane=="quill" and .reason=="status from non-holding lane")) | length == 1'
+expect_in     "j/cross-lane STATUS logged, never silent (930)" \
+  "$TMPD/j.state" "illegal: quill is not the holding lane (jill)"
+expect_jq     "j/forged STATUS transitions nothing (930 stays working)" \
+  "$TMPD/j.state" '.tasks | map(select(.task_id=="RC-2026-09-30-930"))[0].state == "working"'
+expect_jq     "j/control: own-lane STATUS still transitions (931 suspended)" \
+  "$TMPD/j.state" '.tasks | map(select(.task_id=="RC-2026-09-30-931"))[0].state == "suspended"'
+
+# ---------------------------------------------------------------------------
+# (k) forged cross-lane DONE is refused (phase-2 gap audit H-P2-1)
+# 932: jill holds the claim; [quill]DONE: tries to close it. Refused.
+# 933: negative control — the holding lane's own DONE completes.
+# ---------------------------------------------------------------------------
+
+cat > "$TMPD/k.json" <<'EOF'
+[
+ {"id": 110, "created_at": "2026-09-30T00:00:00Z", "body": "[jill][claim] k932\n\n```room-claim\ntask-id:    RC-2026-09-30-932\nlane:       jill\nfiles:      scripts/room\nlease:      lease=6h\nstate:      working\nreason:     fixture\n```"},
+ {"id": 111, "created_at": "2026-09-30T01:00:00Z", "body": "[quill]DONE: RC-2026-09-30-932 finished by quill"},
+ {"id": 112, "created_at": "2026-09-30T00:00:00Z", "body": "[jill][claim] k933\n\n```room-claim\ntask-id:    RC-2026-09-30-933\nlane:       jill\nfiles:      docs/k.md\nlease:      lease=6h\nstate:      working\nreason:     fixture\n```"},
+ {"id": 113, "created_at": "2026-09-30T01:00:00Z", "body": "[jill]DONE: RC-2026-09-30-933 finished by jill"}
+]
+EOF
+
+"$ROOM" _parse < "$TMPD/k.json" | "$ROOM" _state --now 2026-09-30T02:00:00Z > "$TMPD/k.state"
+
+expect_jq     "k/cross-lane DONE recorded in .illegal (932)" \
+  "$TMPD/k.state" '.illegal | map(select(.task_id=="RC-2026-09-30-932" and .by_lane=="quill" and .reason=="done from non-holding lane")) | length == 1'
+expect_jq     "k/forged DONE closes nothing (932 stays working)" \
+  "$TMPD/k.state" '.tasks | map(select(.task_id=="RC-2026-09-30-932"))[0].state == "working"'
+expect_jq     "k/control: own-lane DONE still completes (933)" \
+  "$TMPD/k.state" '.tasks | map(select(.task_id=="RC-2026-09-30-933"))[0].state == "completed"'
+
+# ---------------------------------------------------------------------------
+# (l) fence lane: != [lane] header tag is refused (phase-2 gap audit H-P2-4)
+# 934: [jill][claim] whose fence says lane: quill — lane spoofing/framing.
+#      Refused, never registered. 935: control, matching fence/header.
+# ---------------------------------------------------------------------------
+
+cat > "$TMPD/l.json" <<'EOF'
+[
+ {"id": 120, "created_at": "2026-09-30T00:00:00Z", "body": "[jill][claim] l934\n\n```room-claim\ntask-id:    RC-2026-09-30-934\nlane:       quill\nfiles:      scripts/room\nlease:      lease=6h\nstate:      working\nreason:     forged fence lane\n```"},
+ {"id": 121, "created_at": "2026-09-30T00:00:00Z", "body": "[jill][claim] l935\n\n```room-claim\ntask-id:    RC-2026-09-30-935\nlane:       jill\nfiles:      docs/l.md\nlease:      lease=6h\nstate:      working\nreason:     fixture\n```"}
+]
+EOF
+
+"$ROOM" _parse < "$TMPD/l.json" | "$ROOM" _state --now 2026-09-30T02:00:00Z > "$TMPD/l.state"
+
+expect_in     "l/fence/header lane mismatch refused (934)" \
+  "$TMPD/l.state" "fence lane != header lane: quill != jill"
+expect_jq     "l/mismatched claim never registered (934)" \
+  "$TMPD/l.state" '.tasks | map(select(.task_id=="RC-2026-09-30-934")) | length == 0'
+expect_jq     "l/control: matching fence/header registers (935)" \
+  "$TMPD/l.state" '.tasks | map(select(.task_id=="RC-2026-09-30-935"))[0].lane == "jill"'
+
+# ---------------------------------------------------------------------------
+# (m) forged handoff (poster != from) is refused (phase-2 gap audit H-P2-2)
+# 936: jill holds the claim; [quill]HANDOFF names from: jill. Refused: no
+#      pending_handoff. 937: control — the holding lane posts its own
+#      HANDOFF, which registers pending_handoff.
+# ---------------------------------------------------------------------------
+
+cat > "$TMPD/m.json" <<'EOF'
+[
+ {"id": 130, "created_at": "2026-09-30T00:00:00Z", "body": "[jill][claim] m936\n\n```room-claim\ntask-id:    RC-2026-09-30-936\nlane:       jill\nfiles:      scripts/room\nlease:      lease=6h\nstate:      working\nreason:     fixture\n```"},
+ {"id": 131, "created_at": "2026-09-30T01:00:00Z", "body": "[quill]HANDOFF: RC-2026-09-30-936 to quill\n\n```room-handoff\ntask-id: RC-2026-09-30-936\nfrom: jill\nto: quill\ncontext: forged handoff\n```\n\n```room-claim\ntask-id:    RC-2026-09-30-936\nlane:       quill\nfiles:      scripts/room\nlease:      lease=6h\nstate:      working\nreason:     restated\n```"},
+ {"id": 132, "created_at": "2026-09-30T00:00:00Z", "body": "[jill][claim] m937\n\n```room-claim\ntask-id:    RC-2026-09-30-937\nlane:       jill\nfiles:      docs/m.md\nlease:      lease=6h\nstate:      working\nreason:     fixture\n```"},
+ {"id": 133, "created_at": "2026-09-30T01:00:00Z", "body": "[jill]HANDOFF: RC-2026-09-30-937 to quill\n\n```room-handoff\ntask-id: RC-2026-09-30-937\nfrom: jill\nto: quill\ncontext: legitimate handoff\n```\n\n```room-claim\ntask-id:    RC-2026-09-30-937\nlane:       quill\nfiles:      docs/m.md\nlease:      lease=6h\nstate:      working\nreason:     restated\n```"}
+]
+EOF
+
+"$ROOM" _parse < "$TMPD/m.json" | "$ROOM" _state --now 2026-09-30T02:00:00Z > "$TMPD/m.state"
+
+expect_in     "m/forged handoff refused: poster != from (936)" \
+  "$TMPD/m.state" "handoff poster (quill) != from lane (jill)"
+expect_jq     "m/forged handoff sets no pending_handoff (936)" \
+  "$TMPD/m.state" '.tasks | map(select(.task_id=="RC-2026-09-30-936"))[0].pending_handoff == null'
+expect_jq     "m/control: holding-lane handoff registers (937)" \
+  "$TMPD/m.state" '.tasks | map(select(.task_id=="RC-2026-09-30-937"))[0].pending_handoff.to == "quill"'
+
+# ---------------------------------------------------------------------------
+# (n) forged rotation-handoff ledger cannot squat live files (H-P2-3)
+# 938: jill holds scripts/room live; a rotation-handoff ledger carries
+#      RC-2026-09-30-939 (lane=quill, files: scripts/room). The carried
+#      claim is refused via R3 overlap. The ledger itself is still
+#      established, and a non-overlapping carried claim (940, docs/n.md)
+#      registers normally.
+# ---------------------------------------------------------------------------
+
+cat > "$TMPD/n.json" <<'EOF'
+[
+ {"id": 140, "created_at": "2026-09-30T00:00:00Z", "body": "[jill][claim] n938\n\n```room-claim\ntask-id:    RC-2026-09-30-938\nlane:       jill\nfiles:      scripts/room\nlease:      lease=6h\nstate:      working\nreason:     fixture\n```"},
+ {"id": 141, "created_at": "2026-09-30T01:00:00Z", "body": "[room-watch][rotation-handoff]\nold issue:    #11\nnew issue:    #1160\nwatermark:    140\nopen claims:  RC-2026-09-30-939 lane=quill state=working expires=2026-09-30T07:00:00Z (claimed 2026-09-30T01:00:00Z lease=6h; files: scripts/room; reason: forged ledger squat)\nopen claims:  RC-2026-09-30-940 lane=quill state=working expires=2026-09-30T07:00:00Z (claimed 2026-09-30T01:00:00Z lease=6h; files: docs/n.md; reason: disjoint carried claim)\nunclaimed lanes: grokbot"}
+]
+EOF
+
+"$ROOM" _parse < "$TMPD/n.json" | "$ROOM" _state --now 2026-09-30T02:00:00Z > "$TMPD/n.state"
+
+expect_in     "n/overlapping carried claim refused (939)" \
+  "$TMPD/n.state" "carried claim file-overlap refused"
+expect_jq     "n/squatting claim never registers (939)" \
+  "$TMPD/n.state" '.tasks | map(select(.task_id=="RC-2026-09-30-939")) | length == 0'
+expect_jq     "n/ledger still established despite the refusal" \
+  "$TMPD/n.state" '.rotation.old_issue == "11"'
+expect_jq     "n/control: disjoint carried claim registers (940)" \
+  "$TMPD/n.state" '.tasks | map(select(.task_id=="RC-2026-09-30-940"))[0].lane == "quill"'
+
+# ---------------------------------------------------------------------------
+# (o) backdated strike-one stamps are ignored (phase-2 gap audit M-P2-1)
+# 941: strike-one comment posted 07:00 but stamped 05:00 (2h backdated) —
+#      ignored, strike_one_at stays null. 942: control, stamp == post time.
+# ---------------------------------------------------------------------------
+
+cat > "$TMPD/o.json" <<'EOF'
+[
+ {"id": 150, "created_at": "2026-09-30T00:00:00Z", "body": "[jill][claim] o941\n\n```room-claim\ntask-id:    RC-2026-09-30-941\nlane:       jill\nfiles:      scripts/room\nlease:      lease=6h\nstate:      working\nreason:     fixture\n```"},
+ {"id": 151, "created_at": "2026-09-30T08:00:00Z", "body": "[quill-s2]RECLAIM (strike 1): @jill - lease on RC-2026-09-30-941 expired 2h ago, no heartbeat seen. (quill-s2, scheduled, quill)\n\n<!-- room:strike-one:RC-2026-09-30-941:2026-09-30T06:30:00Z -->\n\n· claim:RC-2026-09-30-941 · lane:jill"},
+ {"id": 152, "created_at": "2026-09-30T00:00:00Z", "body": "[jill][claim] o942\n\n```room-claim\ntask-id:    RC-2026-09-30-942\nlane:       jill\nfiles:      docs/o.md\nlease:      lease=6h\nstate:      working\nreason:     fixture\n```"},
+ {"id": 153, "created_at": "2026-09-30T08:00:00Z", "body": "[quill-s2]RECLAIM (strike 1): @jill - lease on RC-2026-09-30-942 expired 2h ago, no heartbeat seen. (quill-s2, scheduled, quill)\n\n<!-- room:strike-one:RC-2026-09-30-942:2026-09-30T08:00:00Z -->\n\n· claim:RC-2026-09-30-942 · lane:jill"}
+]
+EOF
+
+"$ROOM" _parse < "$TMPD/o.json" | "$ROOM" _state --now 2026-09-30T09:00:00Z > "$TMPD/o.state"
+
+expect_in     "o/backdated strike-one stamp ignored (941)" \
+  "$TMPD/o.state" "strike-one stamp older than 60m before comment: ignored (backdated stamp)"
+expect_jq     "o/backdated stamp never recorded (941)" \
+  "$TMPD/o.state" '.tasks | map(select(.task_id=="RC-2026-09-30-941"))[0].strike_one_at == null'
+expect_jq     "o/control: fresh strike-one recorded (942)" \
+  "$TMPD/o.state" '.tasks | map(select(.task_id=="RC-2026-09-30-942"))[0].strike_one_at == "2026-09-30T08:00:00Z"'
+
+# ---------------------------------------------------------------------------
+# (p) lane-less prose STATUS keeps its legacy treatment (replay-safety)
+# A bare STATUS: (no [lane] tag) with a fenced block is a heartbeat, not a
+# cross-lane attack — the historical #1160 board carries two such events
+# (RC-2026-09-28-2874 STATUS, RC-2026-09-27-2852 DONE). 943: bare STATUS
+# records the heartbeat; .illegal stays empty.
+# ---------------------------------------------------------------------------
+
+cat > "$TMPD/p.json" <<'EOF'
+[
+ {"id": 160, "created_at": "2026-09-30T00:00:00Z", "body": "[jill][claim] p943\n\n```room-claim\ntask-id:    RC-2026-09-30-943\nlane:       jill\nfiles:      scripts/room\nlease:      lease=6h\nstate:      working\nreason:     fixture\n```"},
+ {"id": 161, "created_at": "2026-09-30T03:00:00Z", "body": "STATUS: RC-2026-09-30-943 still working, no lane tag on this one.\n\n```room-claim\ntask-id:    RC-2026-09-30-943\nlane:       jill\nfiles:      scripts/room\nlease:      lease=6h\nstate:      working\nreason:     fixture\n```"}
+]
+EOF
+
+"$ROOM" _parse < "$TMPD/p.json" | "$ROOM" _state --now 2026-09-30T04:00:00Z > "$TMPD/p.state"
+
+expect_jq     "p/lane-less STATUS is not an illegal transition (943)" \
+  "$TMPD/p.state" '.illegal | length == 0'
+expect_jq     "p/lane-less STATUS records the heartbeat (943)" \
+  "$TMPD/p.state" '.tasks | map(select(.task_id=="RC-2026-09-30-943"))[0].last_at == "2026-09-30T03:00:00Z"'
+
+# ---------------------------------------------------------------------------
+# (q) a valid handoff ACK is not a cross-lane status (replay-safety)
+# 944: jill hands to quill (poster == from), then [quill]STATUS: ACK —
+#      the ACK carries quill's tag on jill's still-held claim, but it is
+#      the protocol's designated acceptance, not an attack. The transfer
+#      completes and .illegal stays empty.
+# ---------------------------------------------------------------------------
+
+cat > "$TMPD/q.json" <<'EOF'
+[
+ {"id": 170, "created_at": "2026-09-30T00:00:00Z", "body": "[jill][claim] q944\n\n```room-claim\ntask-id:    RC-2026-09-30-944\nlane:       jill\nfiles:      scripts/room\nlease:      lease=6h\nstate:      working\nreason:     fixture\n```"},
+ {"id": 171, "created_at": "2026-09-30T01:00:00Z", "body": "[jill]HANDOFF: RC-2026-09-30-944 to quill\n\n```room-handoff\ntask-id: RC-2026-09-30-944\nfrom: jill\nto: quill\ncontext: legitimate handoff\n```\n\n```room-claim\ntask-id:    RC-2026-09-30-944\nlane:       quill\nfiles:      scripts/room\nlease:      lease=6h\nstate:      working\nreason:     restated\n```"},
+ {"id": 172, "created_at": "2026-09-30T02:00:00Z", "body": "[quill]STATUS: ACK RC-2026-09-30-944"}
+]
+EOF
+
+"$ROOM" _parse < "$TMPD/q.json" | "$ROOM" _state --now 2026-09-30T03:00:00Z > "$TMPD/q.state"
+
+expect_jq     "q/valid ACK is not an illegal transition (944)" \
+  "$TMPD/q.state" '.illegal | length == 0'
+expect_jq     "q/ACK completes the handoff transfer (944 -> quill)" \
+  "$TMPD/q.state" '.tasks | map(select(.task_id=="RC-2026-09-30-944"))[0].lane == "quill"'
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

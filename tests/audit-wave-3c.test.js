@@ -423,3 +423,37 @@ test("M-7(c): an agent acting under its linked identity id can transition its ow
       { from: "agent-a", to, roomId: "commons", recordRoom: "commons" }).receipt.handoffId;
   }
 });
+
+test("L-P2-13: transitionHandoff permission check survives the 500-cap list limit", (t) => {
+  const { store, collab } = collabHarness(t);
+  const accountId = "acct-wave-3c-cap";
+  store.createAccount(accountId, "test");
+  const mk = (threadId) => store.handoffs.create(accountId,
+    {
+      threadId, channel: "room", sourceIds: [threadId],
+      sender: { id: "agent-a", label: "agent-a" },
+      subject: "handoff", occurredAt: new Date(1_000_000).toISOString(),
+      sla: null, triage: { action: "needs_human", reasons: ["test"] },
+      summary: "s", openQuestions: null, pendingActions: null, excerpt: null,
+    },
+    { from: "agent-a", to: "agent-b", roomId: "commons", recordRoom: "commons" }).receipt.handoffId;
+  const targetId = mk("thread-target");
+  for (let i = 0; i < 500; i++) mk(`thread-fill-${i}`);
+  // Age the target past the list's ORDER BY created_at DESC LIMIT 500 cap.
+  store.db.prepare("UPDATE inbox_handoffs SET created_at=? WHERE handoff_id=?").run(1, targetId);
+  const listed = collab.listHandoffs({ accountId, roomId: null }, {});
+  assert.equal(listed.length, 500, "list is capped at 500");
+  assert.ok(!listed.some(h => h.handoffId === targetId), "target is past the cap");
+  // A third party must still be refused — the permission check may not be
+  // skipped just because the handoff fell off the capped list.
+  const scope = { accountId, roomId: null };
+  let forbidden = null;
+  try {
+    collab.transitionHandoff(scope, targetId, "accepted", { by: "agent-c", roomId: "commons" });
+  } catch (e) { forbidden = e; }
+  assert.ok(forbidden, "expected transitionHandoff to throw for a past-the-cap handoff");
+  assert.equal(forbidden.code, "handoff_forbidden");
+  // And the handoff is untouched.
+  const row = store.db.prepare("SELECT status FROM inbox_handoffs WHERE handoff_id=?").get(targetId);
+  assert.equal(row.status, "open");
+});
