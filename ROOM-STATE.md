@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-30T19:58:17Z · board: Uuriko/project-room#1160 · watermark: 5918369928 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=f89c53470eda62585ea29c4c87908c677345dee69dd524edb3692fafe1a2652f -->
+<!-- generated: 2026-09-30T20:28:56Z · board: Uuriko/project-room#1160 · watermark: 5918733223 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=f89c53470eda62585ea29c4c87908c677345dee69dd524edb3692fafe1a2652f -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -42,7 +42,7 @@ docs/openapi.yaml | jillianai | RC-2026-09-28-2870 | working
 docs/openapi.yaml | (none) | RC-2026-09-28-2871 | submitted
 lanes/REGISTRY.md | (none) | RC-2026-09-29-3605 | submitted
 llms.txt | (none) | RC-2026-09-29-3605 | submitted
-scripts/runtime-package.mjs | jill | RC-2026-09-30-3616 | submitted
+scripts/runtime-package.mjs | jill | RC-2026-09-30-3616 | working
 server/activity.mjs | (none) | RC-2026-09-28-2865 | submitted
 server/activity.mjs | (none) | RC-2026-09-28-2880 | submitted
 server/agent-heartbeats.mjs | jill | RC-2026-09-28-3602 | working
@@ -60,9 +60,9 @@ server/http.mjs | (none) | RC-2026-09-28-2872 | submitted
 server/http.mjs | (none) | RC-2026-09-28-2878 | submitted
 server/http.mjs | (none) | RC-2026-09-28-2879 | submitted
 server/http.mjs | (none) | RC-2026-09-28-2880 | submitted
-server/match-events.mjs | jill | RC-2026-09-30-3616 | submitted
-server/match-profiles.mjs | jill | RC-2026-09-30-3616 | submitted
-server/matchmaking-routes.mjs | jill | RC-2026-09-30-3616 | submitted
+server/match-events.mjs | jill | RC-2026-09-30-3616 | working
+server/match-profiles.mjs | jill | RC-2026-09-30-3616 | working
+server/matchmaking-routes.mjs | jill | RC-2026-09-30-3616 | working
 server/moderation.mjs | (none) | RC-2026-09-27-2861 | submitted
 server/notifications.mjs | (none) | RC-2026-09-28-2880 | submitted
 server/oauth-provider.mjs | (none) | RC-2026-09-27-2853 | submitted
@@ -86,7 +86,7 @@ server/thread-mutes.mjs | (none) | RC-2026-09-28-2866 | submitted
 server/work-context.mjs | jillianai | RC-2026-09-28-2876 | working
 server/work-discussion.mjs | (none) | RC-2026-09-28-2875 | submitted
 server/work-discussion.mjs | jillianai | RC-2026-09-28-2876 | working
-server/writer-fence.mjs | jill | RC-2026-09-30-3616 | submitted
+server/writer-fence.mjs | jill | RC-2026-09-30-3616 | working
 src/app.js | (none) | RC-2026-09-28-2879 | submitted
 src/events.js | (none) | RC-2026-09-28-2874 | submitted
 src/events.js | (none) | RC-2026-09-28-2877 | submitted
@@ -107,8 +107,8 @@ tests/dm-privacy.test.js | (none) | RC-2026-09-28-2878 | submitted
 tests/dm-privacy.test.js | (none) | RC-2026-09-28-2879 | submitted
 tests/dm-privacy.test.js | (none) | RC-2026-09-28-2880 | submitted
 tests/dm-privacy.test.js | (none) | RC-2026-09-28-2903 | submitted
-tests/match-profiles.test.js | jill | RC-2026-09-30-3616 | submitted
-tests/matchmaking-routes.test.js | jill | RC-2026-09-30-3616 | submitted
+tests/match-profiles.test.js | jill | RC-2026-09-30-3616 | working
+tests/matchmaking-routes.test.js | jill | RC-2026-09-30-3616 | working
 tests/moderation.test.js | (none) | RC-2026-09-27-2861 | submitted
 tests/oauth-provider-attack-cases.test.js | (none) | RC-2026-09-27-2853 | submitted
 tests/open-questions.test.js | (none) | RC-2026-09-28-2867 | submitted
@@ -122,7 +122,7 @@ tests/room-activation-pack.test.js | (none) | RC-2026-09-28-2879 | submitted
 tests/room-file-history-visibility.test.js | (none) | RC-2026-09-27-2863 | submitted
 tests/room-orientation.test.js | (none) | RC-2026-09-28-2877 | submitted
 tests/room-orientation.test.js | (none) | RC-2026-09-28-2879 | submitted
-tests/runtime-package.test.js | jill | RC-2026-09-30-3616 | submitted
+tests/runtime-package.test.js | jill | RC-2026-09-30-3616 | working
 tests/thread-options.test.js | (none) | RC-2026-09-28-2866 | submitted
 tests/work-context.test.js | jillianai | RC-2026-09-28-2876 | working
 tests/work-discussion.test.js | (none) | RC-2026-09-28-2875 | submitted
@@ -181,5 +181,5 @@ comment-id | lane | task | at
 Uuriko/project-room#266 -> Uuriko/project-room#1160 · watermark 5859826064 · carried-open: RC-2026-09-27-005
 
 ## signals
-board_comments=657 threshold=1500 rotation_due=no watcher=active open_claims=27 prose_open=0 unfenced_prose=0 files_claimed=62 overlap_files=16 watermark=5918369928
+board_comments=659 threshold=1500 rotation_due=no watcher=active open_claims=27 prose_open=0 unfenced_prose=0 files_claimed=62 overlap_files=16 watermark=5918733223
 
