@@ -1895,6 +1895,26 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       .run(hash(token), accountId, account.authEpoch, expiresAt, this.now());
     return token;
   }
+  // M-27: the revoke half of issueAccountAccessKey, exposed separately for
+  // deliver-then-commit issuance (provision). Revokes every account key
+  // except the just-delivered one and clears browser sessions, mirroring
+  // issueAccountAccessKey's end state — but only after delivery succeeded.
+  revokeStaleAccountKeys(accountId, keepToken) {
+    return this.transaction(() => {
+      this.account(accountId);
+      this.db.prepare("UPDATE account_credentials SET revoked=1 WHERE account_id=? AND hash != ?")
+        .run(accountId, hash(keepToken));
+      this.db.prepare(`UPDATE account_session_slots SET revision=revision+1,account_id=NULL,account_auth_epoch=NULL,
+        parent_credential_hash=NULL,authenticated_until=NULL WHERE account_id=?`).run(accountId);
+    });
+  }
+  // Revoke one specific account key (used to retire a minted-but-undelivered key).
+  revokeAccountCredential(accountId, token) {
+    return this.transaction(() => {
+      this.db.prepare("UPDATE account_credentials SET revoked=1 WHERE account_id=? AND hash=?")
+        .run(accountId, hash(token));
+    });
+  }
   authenticateAccountAccessKey(token) {
     if (typeof token !== "string" || !tokenPattern.test(token)) fail(401, "unauthenticated", "Sign in with an active account key");
     const row = this.db.prepare(`SELECT c.*,a.active AS account_active,a.revision AS account_revision,a.auth_epoch AS current_account_auth_epoch
@@ -2486,6 +2506,38 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       } else if (accountId !== null) fail(422, "invalid_account_binding", "Agent credentials are not human account credentials");
       this.db.prepare("UPDATE credentials SET revoked=1 WHERE room_id=? AND member_id=?").run(roomId, memberId);
       return this.insertCredential(roomId, memberId, "access", null, this.now() + lifetimeMs);
+    });
+  }
+  // M-27: the two halves of issueAccessKey, exposed separately so callers
+  // that must DELIVER a key before revoking its predecessors (provision)
+  // can do deliver-then-commit. issueAccessKey itself is unchanged — its
+  // atomic revoke+issue ordering stays load-bearing for every other caller.
+  mintAccessKey(roomId, memberId, lifetimeMs = 7 * 86400000, accountId = null) {
+    return this.transaction(() => {
+      const members = this.room(roomId).state.members;
+      const member = validId(memberId) && Object.hasOwn(members, memberId) && members[memberId];
+      if (!member || member.active === false) fail(403, "access_denied", "Active member required");
+      if (!Number.isSafeInteger(lifetimeMs) || lifetimeMs <= 0 || lifetimeMs > 30 * 86400000) fail(422, "invalid_expiry", "Access keys expire within 30 days");
+      if (member.kind === "human") {
+        const account = this.ensureHumanAccountBinding(roomId, memberId, accountId);
+        if (!account.active) fail(403, "access_denied", "Active account required");
+      } else if (accountId !== null) fail(422, "invalid_account_binding", "Agent credentials are not human account credentials");
+      return this.insertCredential(roomId, memberId, "access", null, this.now() + lifetimeMs);
+    });
+  }
+  // Revoke every key for this member except the just-delivered one, so a
+  // failed delivery never strands the operator on revoked predecessors.
+  revokeStaleRoomKeys(roomId, memberId, keepToken) {
+    return this.transaction(() => {
+      this.db.prepare("UPDATE credentials SET revoked=1 WHERE room_id=? AND member_id=? AND hash != ?")
+        .run(roomId, memberId, hash(keepToken));
+    });
+  }
+  // Revoke one specific room key (used to retire a minted-but-undelivered key).
+  revokeRoomCredential(roomId, memberId, token) {
+    return this.transaction(() => {
+      this.db.prepare("UPDATE credentials SET revoked=1 WHERE room_id=? AND member_id=? AND hash=?")
+        .run(roomId, memberId, hash(token));
     });
   }
   insertCredential(roomId, memberId, kind, parent, expiresAt, identitySecretHash = null) {

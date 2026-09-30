@@ -65,12 +65,16 @@ test("the cursor advances past the highest update_id and the next poll re-asks f
   assert.equal(JSON.parse(fetch.calls[1].options.body).offset, 900003);
 });
 
-test("an explicit offset re-asks from there and redelivered updates are deduped by update_id", async () => {
+test("an explicit offset re-asks from there and redelivers the batch verbatim", async () => {
   const fetch = scriptedFetch([() => okUpdates([updates[0], updates[1]])]);
   const p = poller(fetch);
   assert.equal((await p.getUpdates({ offset: "900001" })).result.length, 2);
   assert.equal(JSON.parse(fetch.calls[0].options.body).offset, 900001);
-  assert.deepEqual((await p.getUpdates({ offset: "900001" })).result, [], "redelivery is dropped");
+  // M-26: explicit offsets redeliver verbatim so a failed downstream import
+  // retried with the same cursor is not silently skipped. Only the
+  // auto-advance path dedupes.
+  assert.deepEqual((await p.getUpdates({ offset: "900001" })).result.map(u => u.update_id), [900001, 900002],
+    "explicit offset redelivers even though the ids were already seen");
   assert.equal(fetch.calls.length, 2);
   await assert.rejects(p.getUpdates({ offset: "nope" }), { code: "invalid_telegram_cursor" });
 });

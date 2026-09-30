@@ -118,8 +118,17 @@ export function x402PayoutInstruction({ payout, feeAddress = null, resource = nu
 }
 
 // onPayout-compatible callback factory: drop straight into createUsdcRail.
-export function x402OnPayout({ feeAddress = null, resource = null, facilitator = null, maxTimeoutSecs = 300 } = {}) {
-  return (payout) => x402PayoutInstruction({ payout, feeAddress, resource, facilitator, maxTimeoutSecs });
+// M-16: the rail ignores the callback's return value, so the generated
+// instruction is handed to `deliver` (when provided) instead of being
+// built and silently dropped. The instruction remains instruction-only —
+// `deliver` receives it for queuing/surfacing, execution stays the owner's tap.
+export function x402OnPayout({ feeAddress = null, resource = null, facilitator = null, maxTimeoutSecs = 300, deliver = null } = {}) {
+  if (deliver !== null && typeof deliver !== "function") throw new X402BridgeError("invalid_input", "deliver must be a function if given");
+  return (payout) => {
+    const instruction = x402PayoutInstruction({ payout, feeAddress, resource, facilitator, maxTimeoutSecs });
+    if (deliver) deliver(instruction);
+    return instruction;
+  };
 }
 
 export { X402BridgeError, RAIL_TO_X402_CHAIN };

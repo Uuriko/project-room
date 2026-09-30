@@ -151,3 +151,24 @@ test("Google sign-in to an email that already has a magic method lands on that a
   assert.equal(oauth.provider, "google");
   assert.equal(f.store.db.prepare("SELECT count(*) AS n FROM accounts WHERE id=?").get(`google:${sub}`).n, 0);
 });
+
+// M-13: a multi-audience token is only accepted when azp names this client.
+// Any-aud-contains-client-id must not suffice — a token minted for another
+// app that happens to list this client id would otherwise pass.
+test("M-13: multi-audience tokens without a matching azp are rejected", async () => {
+  const other = "9999999999-other.apps.googleusercontent.com";
+  await assert.rejects(
+    signIn().verifyIdToken(idToken({ aud: [other, clientId] })),
+    { code: "google_token_invalid" },
+    "aud contains the client id but no azp pins it to us"
+  );
+  await assert.rejects(
+    signIn().verifyIdToken(idToken({ aud: [other, clientId], azp: other })),
+    { code: "google_token_invalid" },
+    "azp naming another client is rejected"
+  );
+  const ok = await signIn().verifyIdToken(idToken({ aud: [other, clientId], azp: clientId, email: "human@example.com", email_verified: true }));
+  assert.equal(ok.email, "human@example.com", "azp matching this client is accepted");
+  const single = await signIn().verifyIdToken(idToken({ email: "human@example.com", email_verified: true }));
+  assert.equal(single.email, "human@example.com", "single-string aud keeps working");
+});

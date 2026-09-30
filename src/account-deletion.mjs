@@ -47,6 +47,7 @@ export const KNOWN_CATEGORIES = Object.freeze({
   media: { priority: 50, dependsOn: ["messages"] },
   activity: { priority: 60, dependsOn: [] },
   integrations: { priority: 70, dependsOn: [] },
+  connected_data: { priority: 75, dependsOn: [] },
   settings: { priority: 80, dependsOn: [] },
   billing: { priority: 90, dependsOn: [] },
   profile: { priority: 100, dependsOn: [] },

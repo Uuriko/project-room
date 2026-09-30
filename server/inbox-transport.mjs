@@ -211,10 +211,16 @@ export class GmailSender {
 // One Telegram sendMessage call for a direct send. Pure request builder, so
 // tests can inspect it without a bot token.
 export function buildTelegramDirectRequest({ to, text }) {
-  if (!/^-?\d{1,20}$/.test(to)) gmailFail(422, "invalid_direct_send", "A Telegram chat id is required.");
+  // M-25: validate against exact representability and send the digit string —
+  // Number(to) would silently corrupt chat ids above 2^53 (they parse to a
+  // different decimal). The BigInt comparison keeps leading zeros working.
+  const chatId = String(to ?? "");
+  const num = Number(chatId);
+  if (!/^-?\d{1,20}$/.test(chatId) || BigInt(chatId) !== BigInt(num))
+    gmailFail(422, "invalid_direct_send", "A Telegram chat id is required.");
   if (typeof text !== "string" || !text.trim() || text.length > 4096 || !text.isWellFormed())
     gmailFail(422, "invalid_direct_send", "Message text must be 1–4096 characters.");
-  return { method: "sendMessage", body: { chat_id: Number(to), text } };
+  return { method: "sendMessage", body: { chat_id: chatId, text } };
 }
 
 export async function sendTelegramDirect({ config, to, text, fetchImpl = globalThis.fetch }) {

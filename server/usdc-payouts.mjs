@@ -172,9 +172,12 @@ export function createUsdcRail({ store, config = {}, onPayout } = {}) {
         // Explicit: instruction only — execution happens outside this module.
         execution: "PENDING_SETTLEMENT",
       });
+      // M-17: the settler callback runs BEFORE the terminal commit. A
+      // throwing settler leaves the bounty in "verified" (retryable) instead
+      // of recorded-and-lost; the throw propagates to the caller.
+      if (onPayout) onPayout(payout);
       set({ ...b, state: "released", payout,
         history: [...b.history, { at: new Date().toISOString(), event: "released", by: "rail" }] });
-      if (onPayout) onPayout(payout);
       return payout;
     },
 
@@ -219,10 +222,13 @@ export function createUsdcRail({ store, config = {}, onPayout } = {}) {
           execution: "PENDING_SETTLEMENT",
         });
       }
+      // M-17: settler first, terminal commit second — same reasoning as
+      // release(): a throwing settler leaves the bounty "disputed"
+      // (retryable) instead of recorded-and-lost.
+      if (onPayout) onPayout(payout);
       set({ ...b, state: "resolved", payout,
         dispute: Object.freeze({ ...b.dispute, ruling, resolvedAt: new Date().toISOString() }),
         history: [...b.history, { at: new Date().toISOString(), event: `dispute_${ruling}`, by: "committee" }] });
-      if (onPayout) onPayout(payout);
       return payout;
     },
 
