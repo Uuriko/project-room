@@ -163,3 +163,46 @@ test("guest keeps the approved read and chat surface", async t => {
     { id: randomUUID(), type: T.MESSAGE_REACTION_SET, data: { messageId, reaction: "like", active: true } });
   assert.ok(react);
 });
+
+// RC-2026-09-30-848: the store injects requestPolicyVersion when it builds a
+// reply-shaped message.posted event, so a guest carrying requestKind:"reply"
+// alone used to land an OPEN reply request past the catalog gate. The command
+// gate now refuses open-mode reply fields for guests; respond-mode stays open
+// for requests addressed to the guest itself.
+test("guest cannot open a reply request through message.posted", async t => {
+  const { store, request, ownerKey } = await serve(t);
+  const guest = await redeemGuest(request, ownerKey, store);
+  const res = await request("/api/rooms/commons/commands", {
+    method: "POST", token: guest.token,
+    data: { id: randomUUID(), type: "message.posted",
+      data: { messageId: randomUUID(), body: "answer me", toMemberId: "owner", requestKind: "reply" } },
+  });
+  await denied(t, res, "guest open reply request");
+  const requests = Object.values(store.room("commons").state.replyRequests ?? {});
+  assert.equal(requests.filter(r => r.requesterId === guest.member.id).length, 0);
+});
+
+test("guest can still answer a reply request addressed to it", async t => {
+  const { store, request, ownerKey } = await serve(t);
+  const guest = await redeemGuest(request, ownerKey, store);
+  const opened = await request("/api/rooms/commons/commands", {
+    method: "POST", token: ownerKey,
+    data: { id: randomUUID(), type: "message.posted",
+      data: { messageId: randomUUID(), body: "guest, what do you think?", toMemberId: guest.member.id, requestKind: "reply" } },
+  });
+  assert.equal(opened.status, 201);
+  const q = await opened.json();
+  const answered = await request("/api/rooms/commons/commands", {
+    method: "POST", token: guest.token,
+    data: { id: randomUUID(), type: "message.posted",
+      data: { messageId: randomUUID(), body: "my answer",
+        replyToId: q.event.data.messageId, responseToRequestId: q.event.data.messageId,
+        expectedRequestRevision: 0, responseOutcome: "answered",
+        toMemberId: "owner", workItemId: null,
+        contextEventId: q.event.id, contextSequence: q.sequence } },
+  });
+  assert.equal(answered.status, 201, `guest respond: expected 201, got ${answered.status}`);
+  const request_ = store.room("commons").state.replyRequests[q.event.data.messageId];
+  assert.equal(request_.status, "answered");
+  assert.equal(request_.terminalActorId, guest.member.id);
+});
