@@ -2,6 +2,18 @@
 // HttpOnly; authentication writes use the current browser slot and CSRF token.
 import { escapeHtml } from "./account-settings-ui.js";
 
+// Shared by startup routing and redemption so malformed reset links do not
+// reserve the invitation journey. This classifies input; it never consumes it.
+export function classifyAuthLink(params) {
+  const hasReset = params.has("reset"), hasMagic = params.has("magic");
+  if (!hasReset && !hasMagic && !params.has("email")) return { kind: "none" };
+  const proof = (params.get(hasReset ? "reset" : "magic") || "").trim();
+  const email = (params.get("email") || "").trim();
+  if (hasReset === hasMagic || params.getAll(hasReset ? "reset" : "magic").length !== 1
+    || params.getAll("email").length !== 1 || !proof || !email) return { kind: "invalid" };
+  return { kind: hasReset ? "reset" : "magic", proof, email };
+}
+
 export function createAuthSigninUI({ accountClient, ensureAccountSession, onSignedIn, onMagicLinkFailure, onBusyChange, beforeSignIn, onSignInUncertain, onMagicLinkRequest, onAccountSwitch, onPasswordResetComplete, onViewChange, onBack }) {
   let container = null;
   let emailMethod = "password", passwordMode = "login", passwordEmail = "";
@@ -241,26 +253,23 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
     let params;
     try { params = new URLSearchParams(window.location.search); }
     catch { return; }
-    const hasReset = params.has("reset"), hasMagic = params.has("magic");
-    if (!hasReset && !hasMagic && !params.has("email")) return;
-    const proof = (params.get(hasReset ? "reset" : "magic") || "").trim();
-    const email = (params.get("email") || "").trim();
-    const ambiguous = hasReset === hasMagic || params.getAll(hasReset ? "reset" : "magic").length !== 1
-      || params.getAll("email").length !== 1;
+    const link = classifyAuthLink(params);
+    if (link.kind === "none") return;
     // Clear every auth parameter even when validation fails or proofs compete.
     params.delete("reset"); params.delete("magic"); params.delete("email");
     const rest = params.toString();
     const clean = window.location.pathname + (rest ? `?${rest}` : "") + window.location.hash;
     try { window.history.replaceState(null, "", clean); } catch { /* URL cleanup may be unavailable */ }
-    if (ambiguous || !proof || !email) {
+    if (link.kind === "invalid") {
       const message = "This sign-in link is incomplete or invalid.";
-      setStatus(`${message} Request a new link.`, true);
       // Mounting hosts finish wiring their other sign-in controls this turn.
       await Promise.resolve();
       onMagicLinkFailure?.(message);
+      setStatus(`${message} Request a new link.`, true);
       return;
     }
-    if (hasReset) {
+    const { proof, email } = link;
+    if (link.kind === "reset") {
       resetCode = proof; resetEmail = email;
       emailMethod = "reset"; resetPhase = "form"; render(); focusView();
       return { pendingPasswordReset: true };

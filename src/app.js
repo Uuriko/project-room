@@ -24,7 +24,7 @@ import { workHelpContext, validateHelpData } from "./work-help.js";
 import { workOffersContext, validateHelpOfferData } from "./help-offers.js";
 import { installInbox } from "./inbox-ui.js";
 import { createAccountSettingsUI } from "./account-settings-ui.js";
-import { createAuthSigninUI } from "./auth-signin-ui.js";
+import { createAuthSigninUI, classifyAuthLink } from "./auth-signin-ui.js";
 import { createAgentSigninUI } from "./agent-signin-ui.js";
 import { stashPendingInvite, clearPendingInvite, takeRestoredInvite, stashPendingJoin, clearPendingJoin, takeRestoredJoin, inviteRequestDoor, defaultRequestPermissions, validateAccessRequestForm, newAccessRequestId, stashAccessRequest, readAccessRequest } from "./invite-context.js";
 import { selectedRoomFromLocation as roomFromLocation, roomIdFromHash, authPanelTitle, roomIdFromNext, ROOM_ACCESS_NOTICE } from "./room-deep-link.js";
@@ -606,7 +606,8 @@ const signinUI = createAuthSigninUI({
     await landAfterSignIn();
   }
 });
-const initialPasswordReset = new URLSearchParams(location.search).has("reset");
+const initialAuthLink = classifyAuthLink(new URLSearchParams(location.search));
+const initialPasswordReset = initialAuthLink.kind === "reset";
 const initialSignin = signinUI.mount($("#auth-signin-ui"));
 
 // Agent sign-in (RC-2026-09-23): agents choose their own account (identity
@@ -1305,6 +1306,9 @@ async function openInvitation(fragment) {
   if (!fragment.valid) return;
   await previewCurrentInvitation();
   if (initialGoogleFailed && invitation.phase === "needs-account") setInvitationFeedback(googleSigninFailureMessage, true);
+  if (initialAuthLink.kind === "invalid" && fragment.secret === initialInvitationFragment?.secret && invitation.phase === "needs-account") {
+    setInvitationFeedback("This sign-in link is incomplete or invalid. Request a new link or sign in below.", true);
+  }
 }
 async function previewCurrentInvitation() {
   const { version, secret } = invitation;

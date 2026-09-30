@@ -268,6 +268,16 @@ test('malformed email links scrub every proof, explain recovery and preserve roo
   assert.equal(destination.searchParams.has('magic'), false);
   assert.equal(destination.searchParams.get('room'), 'commons');
   assert.equal(f.store.db.prepare("SELECT count(*) AS n FROM share_link_joins").get().n, joinsBefore, "preview does not accept the invitation");
+  const slot = f.store.createAccountSessionSlot();
+  const owner = f.store.loginAccountSession(slot.token, f.store.issueAccountAccessKey(f.store.accountForMember('commons', 'owner').id), slot.session.sessionRevision);
+  const token = randomBytes(32).toString('base64url');
+  const issued = f.store.issueInvitation(slot.token, 'commons', { requestId: 'malformed-reset-targeted', token, intendedAccountId: 'reset-browser-account', intendedMemberId: 'malformed-reset-member', displayName: 'Reset browser human', role: 'member', expiresAt: Date.now() + 3600000, expectedIssuerMemberRevision: 0, expectedSessionBinding: owner.sessionBinding });
+  await f.page.goto(`${f.origin}/?room=commons&reset=unusable-proof#invite/${token}`);
+  await f.page.locator('#invitation-dialog').waitFor();
+  assert.equal(new URL(f.page.url()).searchParams.has('reset'), false);
+  await f.page.locator('#invitation-error').filter({ hasText: 'Request a new link' }).waitFor({ state: 'visible' });
+  assert.equal(f.store.db.prepare('SELECT status FROM membership_invitations WHERE id=?').get(issued.invitation.id).status, 'pending');
+  assert.equal(await f.page.locator('#main').isVisible(), false);
   assert.equal(consumes, 0, 'incomplete, ambiguous and duplicate proofs never reach authentication');
   assert.equal(f.delivered.length, 0, 'recovery does not send mail automatically');
 });
