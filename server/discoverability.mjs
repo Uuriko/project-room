@@ -248,6 +248,7 @@ function publicWorkReviewOperation(entry, method) {
     responses["200"].description = "Committed follow-up publication or exact journal replay; not a claim or current-state guarantee.";
     responses["403"].description = "Current active non-guest Room owner required.";
     responses["409"].description = "Stale receipt/review, unavailable original, existing follow-up or changed retry payload.";
+    responses["422"].description = "Invalid fields, unsupported query or unavailable retained reviewer/work policy.";
   }
   return op;
 }

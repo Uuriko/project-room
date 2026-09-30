@@ -12511,9 +12511,9 @@ paths:
           description: "Receipt not found for this room or submitting identity."
         409:
           $ref: "#/components/responses/Conflict"
-          description: "Stale receipt/review, non-revision state, withdrawn original, existing follow-up, changed retry or unavailable retained policy."
+          description: "Stale receipt/review, non-revision state, withdrawn original, existing follow-up or changed retry."
         422:
-          description: "Invalid fields or unsupported query."
+          description: "Invalid fields, unsupported query or unavailable retained reviewer/work policy."
           content:
             application/json:
               schema:
