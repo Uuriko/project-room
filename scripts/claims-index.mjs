@@ -303,6 +303,16 @@ function reduce(events) {
           const tid = e.block["task-id"];
           const t = tid && claims.get(tid);
           if (!t) break;
+          if (e.lane !== t.lane) {
+            // M-49: transitions are lane-scoped. A STATUS: from another lane
+            // must not renew, mutate, or release someone else's claim.
+            unregistered.push({
+              comment_id: e.id, at: e.at, url: e.url, lane: e.lane,
+              kind: "cross-lane-transition", task_hint: tid, errors: [],
+              reason: `STATUS: from lane ${e.lane || "—"} ignored — claim held by ${t.lane || "(released)"}`,
+            });
+            break;
+          }
           const toWord = (e.block.state || "").match(STATE_WORD_RE)?.[0] || e.block.state;
           const fromWord = (t.state || "").match(STATE_WORD_RE)?.[0] || t.state;
           if (e.heartbeat || toWord === fromWord) {
@@ -327,7 +337,16 @@ function reduce(events) {
             pr: e.pr || null, merged_sha: e.merged || null,
             kind: "done", fields: e.receipt,
           };
-          if (t) { t.state = "completed"; t.last_at = e.at; t.receipts.push(rcpt); }
+          if (t) {
+            if (e.lane !== t.lane) {
+              // M-49: a DONE: from another lane must not complete someone else's claim.
+              unregistered.push({
+                comment_id: e.id, at: e.at, url: e.url, lane: e.lane,
+                kind: "cross-lane-transition", task_hint: e.task, errors: [],
+                reason: `DONE: from lane ${e.lane || "—"} ignored — claim held by ${t.lane || "(released)"}`,
+              });
+            } else { t.state = "completed"; t.last_at = e.at; t.receipts.push(rcpt); }
+          }
           else orphanReceipts.push({ ...rcpt, task_hint: e.task });
           break;
         }
@@ -338,7 +357,16 @@ function reduce(events) {
             kind: "receipt", fields: e.receipt,
           };
           const t = e.task && claims.get(e.task);
-          if (t) { t.receipts.push(rcpt); t.last_at = e.at; }
+          if (t) {
+            if (e.lane !== t.lane) {
+              // M-49: a [receipt] from another lane must not attach to someone else's claim.
+              unregistered.push({
+                comment_id: e.id, at: e.at, url: e.url, lane: e.lane,
+                kind: "cross-lane-transition", task_hint: e.task, errors: [],
+                reason: `[receipt] from lane ${e.lane || "—"} ignored — claim held by ${t.lane || "(released)"}`,
+              });
+            } else { t.receipts.push(rcpt); t.last_at = e.at; }
+          }
           else orphanReceipts.push({ ...rcpt, task_hint: e.task });
           break;
         }

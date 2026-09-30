@@ -6,7 +6,8 @@ import { join } from "node:path";
 import {
   GrokHostError, parseNeedsMeBody, parseWakePing, wakeToAttentionItem,
   pendingWakeToItem, attentionKey, selectUnhandled, markHandled, emptyJournal,
-  loadJournal, buildRunPlan, assertPlanSafe, parseAttentionItem, childEnvFor, emptyAttentionNext, countKinds
+  loadJournal, buildRunPlan, assertPlanSafe, parseAttentionItem, childEnvFor, emptyAttentionNext, countKinds,
+  setCursor
 } from "../client/grok-host.mjs";
 import { pull, doctor, ingestWake, writeJournalFile, readJournalFile, loadPendingAccess, rememberPendingAccess, writePendingAccessFile, fileAccessRequest } from "../scripts/grok-room-host.mjs";
 import { saveAgentConnection } from "../client/agent-connection.mjs";
@@ -550,4 +551,49 @@ test("noisy grok output is capped head+tail instead of buffered whole", async t 
   const out = result.executed[0].result.stdout;
   assert.match(out, /truncated/, "capped output carries the truncation marker");
   assert.ok(out.length < 8000, "runner cap applies before the 8000-char journal slice");
+});
+
+// M-53: corrupt pending-access state must fail loudly (never silently forget
+// requests), and the corrupt file must be preserved for forensics.
+test("M-53: corrupt pending-access file fails loudly and is backed up", async t => {
+  const { mkdtempSync: mk, readdirSync: rd, readFileSync: rf, existsSync: ex } = await import("node:fs");
+  const { fileURLToPath } = await import("node:url");
+  const { readPendingAccessFile } = await import("../scripts/grok-room-host.mjs");
+  const root = join(fileURLToPath(import.meta.url), "..", "..", ".tmp");
+  const directory = mk(join(root, "grok-host-m53-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const file = join(directory, "pending-access.json");
+  writeFileSync(file, "{not valid json!!!");
+  assert.throws(() => readPendingAccessFile(file), (err) => {
+    assert.ok(err instanceof GrokHostError);
+    assert.equal(err.code, "invalid_pending_access");
+    return true;
+  });
+  const backups = rd(directory).filter((n) => n.startsWith("pending-access.json.corrupt-"));
+  assert.equal(backups.length, 1, "exactly one corrupt backup preserved");
+  assert.equal(rf(join(directory, backups[0]), "utf8"), "{not valid json!!!");
+  assert.equal(ex(file), false, "corrupt original moved aside");
+});
+
+// M-53: journal writes must replace the file atomically. Observable contract:
+// the destination is swapped in (new inode via rename), never truncated in
+// place — a crash mid-write can never leave a half-written journal.
+test("M-53: journal write replaces the file instead of truncating in place", async t => {
+  const { mkdtempSync: mk, readdirSync: rd, statSync } = await import("node:fs");
+  const { fileURLToPath } = await import("node:url");
+  const root = join(fileURLToPath(import.meta.url), "..", "..", ".tmp");
+  const directory = mk(join(root, "grok-host-m53-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const file = join(directory, "journal.json");
+  writeJournalFile(file, setCursor(emptyJournal(), { rooms: { den: 1 } }));
+  const first = statSync(file);
+  writeJournalFile(file, setCursor(emptyJournal(), { rooms: { den: 2 } }));
+  const second = statSync(file);
+  assert.notEqual(first.ino, second.ino, "second write swapped in a new file (rename), not a truncate");
+  assert.deepEqual(readJournalFile(file).cursor, { rooms: { den: 2 } });
+  assert.deepEqual(
+    rd(directory).filter((n) => n.includes(".tmp-")),
+    [],
+    "no temp write files litter the directory",
+  );
 });

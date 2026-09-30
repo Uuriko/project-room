@@ -3,6 +3,9 @@ import { parseStructuredHeader, splitMultipart, decodeEncodedWords } from '../se
 export function gmailLiveFixture(address = 'morgan@gmail.test') {
   let sequence = 10, historyId = 1000; const history = [];
   const messages = new Map(), drafts = new Map(), calls = [];
+  // Methods the real Gmail messages API exposes on /messages/{id}. Anything
+  // else on a known id is a client bug and must 404 like production.
+  const KNOWN_MESSAGE_ACTIONS = new Set(['modify', 'trash', 'untrash']);
   const make = (id, headers, body, labels = ['INBOX', 'UNREAD']) => ({ id, historyId: String(historyId), internalDate: '1700000000000', threadId: 'thread-1', labelIds: labels, snippet: body, payload: { mimeType: 'text/plain', headers: Object.entries(headers).map(([name, value]) => ({ name, value })), body: { data: Buffer.from(body).toString('base64url') } } });
   messages.set('mail-1', make('mail-1', { From: 'Taylor <taylor@example.com>', To: 'morgan@gmail.test', Subject: 'Friday plan', 'Message-ID': '<original@example.com>', 'Reply-To': 'reply@example.com' }, 'Meet at noon.'));
   const changed = message => { message.historyId = String(++historyId); history.push({ id: String(historyId), messages: [{ id: message.id }] }); };
@@ -40,6 +43,14 @@ export function gmailLiveFixture(address = 'morgan@gmail.test') {
     }
     const [, , id, action] = path.split('/'), message = messages.get(id);
     if (!message) return Response.json({}, { status: 404 });
+    // M-50: the fixture must not accept unknown methods — real Gmail 404s,
+    // and a double that 200s on anything hides misspelled client calls.
+    if (action && !KNOWN_MESSAGE_ACTIONS.has(action)) {
+      return Response.json(
+        { error: { code: 404, message: `unknown messages method: ${action}` } },
+        { status: 404 },
+      );
+    }
     if (action === 'modify') message.labelIds = [...new Set([...message.labelIds.filter(l => !data.removeLabelIds.includes(l)), ...data.addLabelIds])];
     if (action === 'trash') message.labelIds = ['TRASH'];
     if (action === 'untrash') message.labelIds = [];

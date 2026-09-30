@@ -225,11 +225,15 @@ describe('ralph-loop: attempt bounds', () => {
 });
 
 describe('ralph-loop: state persistence', () => {
-  it('round-trips through save/load and tolerates corrupt files', async () => {
+  it('round-trips through save/load and fails closed on corrupt files', async () => {
+    // M-54: a corrupt state file must throw (INVALID_STATE), never silently
+    // reset to blank — the old fail-open forgot in-flight worker slots and
+    // attempt counts, letting the loop over-dispatch past the worker cap.
     const { mkdtempSync, writeFileSync, rmSync } = await import('node:fs');
-    const { tmpdir } = await import('node:os');
     const { join } = await import('node:path');
-    const dir = mkdtempSync(join(tmpdir(), 'ralph-test-'));
+    const { fileURLToPath } = await import('node:url');
+    const root = join(fileURLToPath(import.meta.url), '..', '..', '.tmp');
+    const dir = mkdtempSync(join(root, 'ralph-test-'));
     try {
       const p = join(dir, 'state.json');
       assert.deepEqual(loadState(p), { version: 1, slots: [], attempts: {} });
@@ -238,7 +242,45 @@ describe('ralph-loop: state persistence', () => {
       assert.equal(back.slots[0].blId, 'BL-001');
       assert.equal(back.attempts['BL-001'].count, 1);
       writeFileSync(p, 'not json{{{');
-      assert.deepEqual(loadState(p), { version: 1, slots: [], attempts: {} });
+      assert.throws(() => loadState(p), (err) => {
+        assert.equal(err.code, 'INVALID_STATE');
+        return true;
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('M-54: withStateLock serializes, releases, and clears stale locks', async () => {
+    // Dynamic import: on the pre-fix code withStateLock does not exist, so
+    // this test errors there; the fail-closed loadState test above is the
+    // regression that must fail for its intended reason.
+    const { withStateLock } = await import('../scripts/ralph-loop.mjs');
+    const { mkdtempSync, writeFileSync, rmSync, existsSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+    const root = join(fileURLToPath(import.meta.url), '..', '..', '.tmp');
+    const dir = mkdtempSync(join(root, 'ralph-test-'));
+    try {
+      const p = join(dir, 'state.json');
+      // runs fn and releases the lock, returning fn's value
+      assert.equal(withStateLock(p, () => 42), 42);
+      assert.equal(existsSync(`${p}.lock`), false, 'lock released after fn');
+      // lock released even when fn throws
+      assert.throws(() => withStateLock(p, () => { throw new Error('boom'); }), /boom/);
+      assert.equal(existsSync(`${p}.lock`), false, 'lock released after fn throws');
+      // a live holder makes the second acquisition fail closed
+      assert.throws(() => withStateLock(p, () =>
+        withStateLock(p, () => 'nested'),
+      ), (err) => {
+        assert.equal(err.code, 'STATE_LOCKED');
+        return true;
+      });
+      assert.equal(existsSync(`${p}.lock`), false, 'outer lock released after nested refusal');
+      // a lockfile from a dead pid is stale: cleared, not honored
+      writeFileSync(`${p}.lock`, '999999999');
+      assert.equal(withStateLock(p, () => 'stale-cleared'), 'stale-cleared');
+      assert.equal(existsSync(`${p}.lock`), false);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
