@@ -923,7 +923,7 @@ export class BountyEscrow {
       bounty_journal: ["actor_kind", "actor_id", "receipt_id", "track"],
       bounty_events: ["actor_kind", "before_state", "after_state", "track"],
       bounty_records: ["state_changed_ms", "snoozed_until_ms", "decline_reason", "duplicate_of", "label",
-        "rubric_json", "rubric_hash", "rubric_version"],
+        "rubric_json", "rubric_hash", "rubric_version", "approval_mode"],
     };
     for (const [table, cols] of Object.entries(required)) {
       const have = colsOf(table);
@@ -971,6 +971,11 @@ export class BountyEscrow {
     addCol("bounty_records", "rubric_hash TEXT");
     addCol("bounty_records", "rubric_version INTEGER");
     addCol("bounty_records", "submission_hash TEXT");
+    // Approval modes (#1240): who renders the acceptance verdict. NOT NULL
+    // DEFAULT 'human' backfills legacy rows; the CHECK mirrors the base
+    // schema. Without this, posting a bounty on a pre-#1240 database 500s
+    // with "no such column: approval_mode" (INSERT lists it explicitly).
+    addCol("bounty_records", "approval_mode TEXT NOT NULL DEFAULT 'human' CHECK(approval_mode IN ('human','agent'))");
     // Reuse the exact schema-text chunks: the strict DDL-text verifySchema
     // compares stored DDL verbatim, so a reformatted copy would fail it.
     // A name may own several chunks (table + its indexes), so collect all.

@@ -72,7 +72,7 @@ const MIGRATED_COLUMNS = {
   bounty_journal: ["actor_kind", "actor_id", "receipt_id", "track"],
   bounty_events: ["actor_kind", "before_state", "after_state", "track"],
   bounty_records: ["state_changed_ms", "snoozed_until_ms", "decline_reason", "duplicate_of", "label",
-    "rubric_json", "rubric_hash", "rubric_version", "submission_hash"],
+    "rubric_json", "rubric_hash", "rubric_version", "submission_hash", "approval_mode"],
 };
 
 const tablesOf = db => new Set(
@@ -120,6 +120,8 @@ function seedLegacyRow(db, bountyId) {
     }
     if (c.name === "rubric_hash") return "deadbeef".repeat(8);
     if (c.name === "rubric_version") return 1;
+    // approval_mode has a CHECK(in ('human','agent')): seed the default.
+    if (c.name === "approval_mode") return "human";
     if (/^is_|_ms$|_version$|amount_millis/.test(c.name) || c.type.toUpperCase().includes("INT")) {
       return c.name === "amount_millis" ? 1000 : nowMs;
     }
