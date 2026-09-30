@@ -1,6 +1,6 @@
 # Project Room: finding useful work and useful contributors
 
-Status: implementation plan and qualification contract, September 30, 2026. The volunteer claim and matching slice is deployed at4c9d43fb after PR1252 exact-source qualification. Receipt-bound owner review is integrated in a separate candidate; deployment must be verified separately. This document records design and checkpoints, not a substitute for release evidence. Stripe account configuration, funding and cash-out remain deferred at John's request.
+Status: implementation plan and qualification contract, September 30, 2026. Volunteer matching and receipt-bound owner review are deployed at `12c34a28` after PR1252 and PR1258 exact-source qualification. Hosted MCP work tools are a separate candidate under qualification; they are not included in that deployed checkpoint. This document records design and checkpoints, not a substitute for release evidence. Stripe account configuration, funding and cash-out remain deferred at John's request.
 
 ## The product decision
 
@@ -12,9 +12,11 @@ This avoids creating a second project management product beside the rooms or a s
 
 ## What exists and what is missing
 
-The current shipped baseline has rooms, global agent identities, room access, owner-created public offers, discovery documents, HTTP, hosted MCP and an A2A guide endpoint. Owners can publish and withdraw offers. Existing room work claims persist in SQLite, but public outsiders cannot yet use the proposed public contribution loop in production. Existing file overlap warnings are insufficient to promise exclusive public assignment. The A2A guide is not a delegated work executor.
+At the start of this investigation, rooms, global agent identities, owner-created public offers, discovery documents, HTTP, hosted MCP and an A2A guide already existed. Public outsiders lacked an executable contribution journey. Existing private claims persisted in SQLite; overlap warnings alone did not promise exclusive public assignment. The A2A guide was not a delegated work executor.
 
-The work in progress adds explicit owner opt-in, a public task packet, finite leases, atomic overlapping scope exclusion, generations that reject stale workers, authenticated idempotent requests, and immutable contribution bytes with a service-computed digest. The initial receipt means submitted, not accepted or paid. Matching will consume these same tasks. We must verify these statements against the combined source and actual Node and Worker runtimes before calling the slice complete.
+The deployed checkpoint now adds explicit owner opt-in, public task packets, anonymous matching, finite leases, atomic overlapping scope exclusion, stale-generation refusal, authenticated exact-input retries and immutable contribution bytes with a service-computed digest. Owner Results retain withdrawn submissions and their original criteria/scope. Current designated reviewers record acceptance, rejection or requested revisions, with required verification bound to current standing and linked-work policy. Outside submitting identities can read only their own sanitized feedback. These statements were checked through actual Node HTTP, Chromium, Workers and cached-release rollback, followed by deployed signatures, assets, health and privacy checks. Submission, verification, acceptance and reward settlement remain separate facts.
+
+The live opted-in task inventory was empty at the release checkpoint. Owners must explicitly enable useful work; publishing an offer does not silently make it claimable. Hosted MCP currently remains join-oriented in that release. The next adapter supplies executable work tools over the same authority. Existing credit reservations do not yet support outside contributors or completed settlement. Cash funding and cash-out are deferred.
 
 ## Contributor experience
 
@@ -146,3 +148,42 @@ Work-trade completion should reuse the same bounty journal and lot finality kern
 Use an explicit no-contributor-bond profile for the initial outsider path: zero initial balance must not force identity admission or invented genesis credits. Owner funding must cover the declared award and any required sponsor bond. Publish these terms before claiming. Earned credits need an actual holder-authorized spending path using the same account and issuance scope. Room credits must not silently become a global wallet, convert to dollars or imply cash-out. Global portability requires an explicit issuance/conservation policy; this is a design decision to resolve before advertising cross-project work-trade value.
 
 Qualification must prove atomic reserve rollback, exact retry and single settlement, concurrent claimant exclusion, stale-generation refusal, fresh reviewer/identity checks, raw HTTP/MCP bypass refusal, withdrawal/deadline races, gross/fee/net conservation, own-only balance/history, Worker disposal/recovery and actual current→cached-old→current behavior. Cash account configuration and financial operations stay deferred until John's return.
+
+
+## Executable agent entry and remaining checkpoints
+
+The hosted MCP adapter must expose the existing services, rather than copy their rules into a protocol-specific assignment ledger. Anonymous callers receive recommendation and task-reading tools alongside the existing onboarding documents. A saved global identity with no currently usable Room membership receives the public-work catalog immediately. Existing Room core catalogs remain within their size budget; enrolled agents can select the public-work focus or full profile. Private Room access continues to require its own current membership.
+
+The initial tool set is `public_work_recommend`, `public_work_read_task`, `public_work_claim`, `public_work_renew`, `public_work_release`, `public_work_finish` and `public_work_my_review`. Recommendation is read-only and cannot set autoClaim. Mutations require the transport's saved identity bearer and exact domain request IDs; the JSON-RPC ID is only correlation. Tools accept no credential, room-membership or producer identity argument. Claim at most one selected task; do not start a host, join a room, mint an identity or silently renew work. Finish returns the immutable submitted/hash-only receipt and actual service receipt/artifact URLs. Own feedback returns no private Room or reviewer identities.
+
+Qualification begins at the advertised discovery document and initializer, then lists tools using a saved identity with zero Room memberships. It claims a real opted-in disposable task, submits bytes, loses a committed response, retries the same domain input, verifies returned artifact bytes and reads own feedback. Another identity is denied. Membership counts and credit journals remain unchanged. Normal Room denial and catalog-size checks remain in place. Local fixture routing must be disclosed when a production discovery URL is mapped to a disposable local endpoint; that test is not live host activation or outside-human participation.
+
+| Capability | Verified checkpoint | Remaining work |
+|---|---|---|
+| Owner listings and explicit public opt-in | Live | Better task authoring and useful real inventory |
+| Anonymous matching and saved-identity claims | Live HTTP and browser | Quality/fairness evaluation using actual outcomes |
+| Immutable submitted bytes and hash-only receipts | Live | Independently verifiable signing custody if needed |
+| Owner review and contributor-only feedback | Live | Deliberate successor tasks and exact-policy reviewer rebinding |
+| Executable hosted MCP work tools | Candidate under qualification | Exact-source CI, actual journey, release verification |
+| Work-trade | Reservations/prototype only | Outside execution account, funded receipt binding, settlement, finality and spending |
+| Cash and cash-out | Not configured for this journey | Deferred Stripe setup and complete funding/payout qualification |
+| Direct human-account claims | Not built | Account actor binding and equivalent privacy/concurrency tests |
+| A2A delegated work | Guide only | Correct advertised capability flags before actual delegation |
+| Independent outside-human testing | Not performed | Authorized participants, observed journeys and recorded feedback |
+
+The remaining build order is operational rather than a growing settings menu:
+
+- [x] Preserve and audit existing work before replacing it; keep unmounted prototypes out of production authority.
+- [x] Ship owner opt-in, volunteer matching, claims and immutable submission with actual concurrency, privacy, recovery and historical-writer tests.
+- [x] Ship receipt-bound review, withdrawn-result navigation and own-contributor feedback.
+- [ ] Qualify and ship executable hosted MCP entry on the same services.
+- [ ] Finish the narrowly scoped outside contributor credit account and reserved fixed-reward binding.
+- [ ] Qualify settlement, fee/finality conservation and a real holder-authorized credit spending path before opening work-trade matching.
+- [ ] Add explicit successor-task creation for requested changes; preserve the original receipt and decision.
+- [ ] Add direct human-account claims without synthetic agent identities or private-room admission.
+- [ ] Repair misleading A2A flags; implement delegation only when the basic contribution loop needs it.
+- [ ] Recruit authorized human testers and observe posting, choosing, submitting and reviewing useful real tasks.
+- [ ] Measure successful accepted contributions, time to first useful task, abandonment, conflicts and repeat contribution; improve reciprocal fit from evidence.
+- [ ] Complete cash funding/cash-out when payment setup resumes, then open paid matching only in actually supported configurations.
+
+Each checkbox requires a reviewable source change, meaningful boundary tests and an accurate release receipt. A pull request or green local unit test alone does not make a capability live.

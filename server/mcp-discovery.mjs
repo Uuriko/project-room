@@ -1,3 +1,4 @@
+import { anonymousPublicWorkMcpTools, publicWorkMcpDefinitions } from './mcp-public-work.mjs';
 // Binds the one server card to the tool lists the hosted MCP actually serves.
 import { MCP_SUPPORTED_VERSIONS } from "../client/mcp-stdio.mjs";
 import { ROOM_ORIGIN, ROOM_SOURCE, bindLiveMcpServerCard } from "../deploy/agent-discovery.mjs";
@@ -8,7 +9,7 @@ import { hostedMcpToolDefs } from "./mcp-hosted-tools.mjs";
 import { capabilityVisibleTo } from "./capability-visibility.mjs";
 
 export function livePublicMcpTools() {
-  return MCP_JOIN_TOOLS;
+  return [...MCP_JOIN_TOOLS, ...anonymousPublicWorkMcpTools];
 }
 
 // Same list tools/list returns. Default is the core profile (short blurbs,
@@ -28,6 +29,7 @@ const FOCUS_COMMON_TOOLS = [
 // Actor-selected discovery views, not permission or execution profiles. Include
 // advanced tools from the full catalog without changing direct-call availability.
 export const MCP_TOOL_FOCUSES = Object.freeze({
+  public_work: [],
   conversation: ["room_read_inbox", "room_read_messages", "room_react", "room_request_history", "room_cancel_request", "bond_list", "room_list_peer_dms", "dm_posted"],
   work: ["room_list_work", "room_read_work", "room_read_work_discussion", "room_read_result",
     "room_propose_work", "room_begin_work", "room_accept_work", "room_start_work", "room_block_work",
@@ -41,6 +43,8 @@ export const MCP_TOOL_FOCUSES = Object.freeze({
 });
 
 export function listedMcpTools(profile = "core", aliases = false, agent = null, focus = undefined) {
+  const outside = focus === "public_work" || (profile === "core" && focus === undefined && agent && !(agent.memberships ?? []).some(member => member.active !== false));
+  if (outside) return [...MCP_JOIN_TOOLS, ...publicWorkMcpDefinitions];
   const focusedNames = focus === undefined ? null : new Set([...FOCUS_COMMON_TOOLS, ...MCP_TOOL_FOCUSES[focus]]);
   const source = focusedNames
     ? hostedMcpToolDefs.filter(entry => focusedNames.has(entry.name))
@@ -57,11 +61,11 @@ export function listedMcpTools(profile = "core", aliases = false, agent = null, 
     };
   });
   const listed = [...tools, ...MCP_JOIN_TOOLS];
-  return agent ? listed.filter(tool => capabilityVisibleTo(agent, tool)) : listed;
+  return [...(agent ? listed.filter(tool => capabilityVisibleTo(agent, tool)) : listed), ...(profile === "full" ? publicWorkMcpDefinitions : [])];
 }
 
 export function liveEnrolledMcpTools() {
-  return listedMcpTools("core", false);
+  return listedMcpTools("core", false, null, "public_work");
 }
 
 export function liveMcpServerCardJson() {

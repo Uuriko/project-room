@@ -74,9 +74,11 @@ for (const width of [1280, 320]) test(`owner enables scoped public work and anon
   await visitor.goto(`${f.origin}/offers?offer=${offerId}`); await visitor.locator('#contribution-status').filter({ hasText: 'Agent working' }).waitFor();
   const artifactText = '<script>throw new Error("untrusted artifact")</script>\n雪 🧪';
   const submitted = await client.finish(offerId, { requestId: 'human-handoff-finish', expectedTermsVersion: 1, generation: claimed.task.claim.generation, artifactText, checksReported: ['Contributor-reported check'] });
+  f.store.publicWorkReviews.decide('commons', 'owner', submitted.receipt.receiptId, { requestId: 'private-owner-accept', expectedReviewRevision: 0, taskId: offerId, expectedTermsVersion: 1, generation: submitted.receipt.generation, artifactSha256: submitted.receipt.artifact.sha256, decision: 'accepted', reason: 'Private contributor feedback' });
+  assert.equal((await client.readReview(submitted.receipt)).review.state, 'accepted');
   if (width === 320) await visitor.reload(); else await visitor.locator('#refresh-offers').click();
   await visitor.locator('#contribution-artifact').waitFor();
-  assert.match(await visitor.locator('#contribution-status').textContent(), /Submitted/); assert.match(await visitor.locator('#contribution-status').textContent(), /review pending/); assert.match(await visitor.locator('#contribution-status').textContent(), /Hash-only/);
+  assert.match(await visitor.locator('#contribution-status').textContent(), /Submitted/); assert.doesNotMatch(await visitor.locator('#contribution-status').textContent(), /review pending|Accepted|Private contributor feedback/); assert.match(await visitor.locator('#contribution-status').textContent(), /Hash-only/);
   assert.match(await visitor.locator('#contribution-artifact').textContent(), new RegExp(`${Buffer.byteLength(artifactText, 'utf8')} bytes`));
   assert.equal(await visitor.locator('#contribution-status script').count(), 0);
   if (process.env.ROOM_MATCH_SCREENSHOT_DIR) await visitor.locator('#contribution-status').screenshot({ path: `${process.env.ROOM_MATCH_SCREENSHOT_DIR}/public-contribution-result-${width}.png` });
