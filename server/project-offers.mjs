@@ -3,6 +3,7 @@ import { renderPublicContributionTerms } from '../src/contribution-brief.js';
 // Money remains unconfigured; the independent valueless-credit ledger is unchanged.
 import { canonicalJson } from '../src/audit-receipts.mjs';
 import { validId, roomPolicy } from '../src/events.js';
+import { isGuestAgentMemberId } from './guest-agent-links.mjs';
 
 const fail = (status, code, message) => { throw Object.assign(new Error(message), { status, code }); };
 const check = (ok, message) => { if (!ok) fail(422, 'invalid_project_offer', message); };
@@ -74,6 +75,7 @@ function termsOf(value) {
 function validateReview(state, terms, links) {
   const reviewers = links.reviewerMemberIds;
   check(Array.isArray(reviewers) && reviewers.length > 0 && reviewers.length <= 10, 'Reviewers required');
+  check(reviewers.every(id => !isGuestAgentMemberId(id)), 'Guest passes cannot approve work; choose a durable reviewer');
   const members = reviewers.map(id => state.members[identifier(id)]);
   check(members.every(member => member && member.active !== false), 'Reviewers must be active room members');
   const mode = terms.approvalPolicy.mode;
