@@ -54,6 +54,20 @@ export function joinSuccessCopy() {
   });
 }
 
+export function applyJoinSuccessCopy(root) {
+  const copy = joinSuccessCopy();
+  const byId = id => root.getElementById?.(id) ?? root.querySelector?.("#" + id);
+  const openEl = byId("join-open-room");
+  if (openEl) openEl.textContent = copy.openRoom;
+  const summary = root.querySelector?.("details.join-key-details summary");
+  if (summary) summary.textContent = copy.keySummary;
+  const hint = root.querySelector?.("details.join-key-details .form-hint");
+  if (hint) hint.textContent = copy.keyHint;
+  const heading = root.querySelector?.("#join-success h1");
+  if (heading && heading.childNodes[0]) heading.childNodes[0].textContent = copy.body.replace(/\.$/, "") + ", ";
+  return copy;
+}
+
 export function permissionLabel(permission) {
   return PERMISSION_LABELS[permission] ?? String(permission).replaceAll("_", " ");
 }
@@ -217,6 +231,7 @@ async function boot() {
       return;
     }
     show("join-success");
+    applyJoinSuccessCopy(document);
     const nameEl = $("join-success-name"), roomEl = $("join-success-room");
     if (nameEl) nameEl.textContent = displayName || name;
     if (roomEl) roomEl.textContent = preview.body.roomTitle || roomId;
