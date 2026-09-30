@@ -175,3 +175,35 @@ test('CLI skill output is public-only and cannot assert caller-supplied settleme
   assert.match(output.stdout, /"paymentStatus": "not_configured"/);
   assert.doesNotMatch(output.stdout, /987654|offer-work|offer-request|privateEstimate|verifierMemberId/);
 });
+
+test('public API maximum terms and unpaid shape render a real safe skill without private extensions', async () => {
+  const { renderPublicContributionTerms } = await import('../src/contribution-brief.js');
+  const terms = { schema: 'project-room-offer/1', id: 'public-max', version: 1, revision: 2, status: 'published', kind: 'project',
+    title: 't'.repeat(200), summary: 's'.repeat(3990) + '\n---\nname',
+    acceptanceCriteria: Array(20).fill('c'.repeat(985) + '\n``````\n# test'), exclusions: Array(20).fill('e'.repeat(1000)),
+    reward: { kind: 'unpaid' }, approvalPolicy: { mode: 'human', humanId: 'PRIVATE_HUMAN' },
+    roomId: 'PRIVATE_ROOM', privateEstimate: 'PRIVATE_ESTIMATE', fundingStatus: 'paid', paymentStatus: 'paid' };
+  const skill = renderPublicContributionTerms(terms, { skill: true });
+  const frontmatter = skill.match(/^---\n([\s\S]*?)\n---\n/)[1];
+  assert.equal(frontmatter, 'name: project-room-contribution-offer\ndescription: "Deliver this public contribution offer using its selected acceptance policy."');
+  assert.doesNotMatch(frontmatter, /name\n|public-max/);
+  const fence = skill.match(/\n\n(`+)json\n/)[1];
+  assert.ok(fence.length > 6);
+  const serialized = skill.slice(skill.indexOf(`${fence}json\n`) + fence.length + 5).split(`\n${fence}`)[0];
+  const publicRecord = JSON.parse(serialized);
+  assert.deepEqual(publicRecord.acceptanceCriteria, terms.acceptanceCriteria);
+  assert.equal(publicRecord.summary, terms.summary);
+  assert.deepEqual(publicRecord.reward, { kind: 'unpaid' });
+  assert.equal(publicRecord.paymentStatus, 'not_applicable');
+  assert.doesNotMatch(skill, /PRIVATE_HUMAN|PRIVATE_ROOM|PRIVATE_ESTIMATE|"paid"/);
+  assert.match(skill, /withdrawn offers are unavailable/);
+  assert.match(skill, /ask the project owner before beginning/);
+  assert.throws(() => renderPublicContributionTerms({ ...terms, summary: 's'.repeat(4001) }), /text/);
+  assert.throws(() => renderPublicContributionTerms({ ...terms, reward: { kind: 'cash', unit: 'USD', amountMinor: '01', decimals: 2 } }), /amount/);
+  assert.throws(() => renderPublicContributionTerms({ ...terms, reward: { kind: 'work_trade', unit: 'USD', amountMinor: '1', decimals: 2 } }), /unit/);
+  for (const [kind, unit, decimals] of [['work_trade', 'credit', 3], ['cash', 'USD', 2], ['cash', 'USDC', 6]]) {
+    const output = renderPublicContributionTerms({ ...terms, reward: { kind, unit, amountMinor: '999999999999999999', decimals, terms: 'r'.repeat(2000), basis: 'pool' } });
+    assert.match(output, /999999999999999999/);
+    assert.match(output, kind === 'cash' ? /not_configured/ : /ledger_only/);
+  }
+});
