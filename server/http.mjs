@@ -30,7 +30,7 @@ import { SOURCE_REVISION, BUILD_ID } from "./version.mjs";
 import { agentErrorBody, errorCategory } from "../src/agent-error.mjs";
 import { DiagnosticsLog, supportExportBundle } from "./diagnostics.mjs";
 import { renderRoomExportHtml, EXPORT_HTML_CSP } from "./room-export-html.mjs";
-import { discoveryDoc, isHealthAliasPath, rewriteRoomApiPrefix } from "../deploy/agent-discovery.mjs";
+import { discoveryDoc, isHealthAliasPath, rewriteRoomApiPrefix, EDGE_DOOR_HOSTS } from "../deploy/agent-discovery.mjs";
 import { buildOpenApiJson, discoverabilityErrorOverride, nextActionsForAccessRequest, nextActionsForAccessRequestStatus, nextActionsForInviteRedeem } from "./discoverability.mjs";
 import { MCP_SERVER_CARD_PATH, MCP_DISCOVERY_CACHE_CONTROL, MCP_SERVER_CARD_CORS } from "../src/mcp-server-card.mjs";
 import { SKILLS_CATALOG_PATH } from "../deploy/agent-discovery.mjs";
@@ -577,6 +577,25 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       reject(403, "origin_denied", required ? "Origin header is required" : "Request origin is not allowed");
     }
   }
+  // The public Join-with-code door (getdasha.com/room) is a browser page on
+  // the edge-door hosts, not the room origin. Only the read-only
+  // POST /api/share-links/preview route accepts these origins; every other
+  // route keeps the strict checkOrigin.
+  function isEdgeDoorOrigin(origin) {
+    return typeof origin === "string" && EDGE_DOOR_HOSTS.some(host => origin === `https://${host}`);
+  }
+  // Route-scoped origin relaxation for POST /api/share-links/preview only:
+  // the public Join-with-code door runs on the getdasha edge-door hosts, so
+  // its browser Origin is the door host, not the room origin. This route
+  // accepts those two door origins alongside the room origin; every other
+  // route keeps the strict checkOrigin. Missing and foreign origins are
+  // still denied with the same message checkOrigin(req, true) produces.
+  function checkPreviewOrigin(req) {
+    const origin = req.headers.origin;
+    if (origin !== expectedOrigin() && !isEdgeDoorOrigin(origin)) {
+      reject(403, "origin_denied", "Origin header is required");
+    }
+  }
   // Origin checks are a CSRF defense for cookie/browser sessions. A request
   // presenting an Authorization: Bearer credential is not an ambient-auth
   // browser flow — the bearer credential IS the authentication — so the
@@ -761,7 +780,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const text = req.method === "POST" ? await readText(req, JSON_BODY_BYTES, () => new ServiceError(413, "too_large", "Request is too large")) : "";
         return writeA2aNode(req, res, { bodyText: text });
       }
-      checkOrigin(req);
+      // The global origin gate runs before routing; the share-link preview is
+      // let through for the edge-door origins here, and its route-level
+      // checkPreviewOrigin still requires an Origin header.
+      const previewDoorRequest = req.method === "POST"
+        && (inboundPath === "/api/share-links/preview" || inboundPath === "/room/api/share-links/preview")
+        && isEdgeDoorOrigin(req.headers.origin);
+      if (!previewDoorRequest) checkOrigin(req);
       url.pathname = rewriteRoomApiPrefix(inboundPath);
       if (url.pathname.startsWith("/api/")) res.setHeader("X-Operation-Id", operationId);
       if ((url.pathname === "/api/health" || url.pathname === "/api/health/" || isHealthAliasPath(inboundPath) || isHealthAliasPath(url.pathname)) && ["GET", "HEAD"].includes(req.method)) {
@@ -2556,7 +2581,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return json(res, 200, store.guestInvites.rotate(guestToken, data.roomId, fence));
       }
       if (url.pathname === "/api/share-links/preview" && req.method === "POST") {
-        checkOrigin(req, true);
+        checkPreviewOrigin(req);
         rate(`link-preview:${remoteAddress}`, 30);
         const data = await body(req);
         if (!exact(data, ["linkToken"])) reject(422, "invalid_link", "Invitation link required");

@@ -32,7 +32,9 @@ async function serve(t) {
   // browser request.
   const request = (path, { method = "GET", data, token, origin: withOrigin = false, headers = {} } = {}) => fetch(origin + path, {
     method, headers: {
-      ...(withOrigin ? { Origin: origin } : {}),
+      // true = the server's own origin (browser on the app); a string =
+      // a literal Origin header (browser on another allowed host).
+      ...(withOrigin === true ? { Origin: origin } : typeof withOrigin === "string" ? { Origin: withOrigin } : {}),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(data === undefined ? {} : { "Content-Type": "application/json" }),
       ...headers,
@@ -158,6 +160,26 @@ test("no bearer, no Origin: the gate still bites", async t => {
   const shareBody = await sharePreview.json();
   assert.equal(shareBody.error.code, "origin_denied");
   assert.equal(shareBody.hint, noAuthBody.hint);
+});
+
+test("share-links preview accepts the getdasha edge-door origins, still denies others", async t => {
+  const { request } = await serve(t);
+  // The public Join-with-code door (getdasha.com/room) resolves short codes
+  // from the browser, so its Origin is the door host, not the room origin.
+  // This read-only route accepts exactly those two hosts; missing and
+  // foreign origins keep the strict denial above.
+  for (const door of ["https://www.getdasha.com", "https://getdasha.com"]) {
+    const res = await request("/api/share-links/preview", {
+      method: "POST", origin: door, data: { linkToken: "ABC-DEF-GHJ" },
+    });
+    assert.equal(res.status, 410, `${door} must reach the preview, not origin_denied`);
+    assert.equal((await res.json()).error.code, "link_unavailable");
+  }
+  const foreign = await request("/api/share-links/preview", {
+    method: "POST", origin: "https://evil.example", data: { linkToken: "ABC-DEF-GHJ" },
+  });
+  assert.equal(foreign.status, 403);
+  assert.equal((await foreign.json()).error.code, "origin_denied");
 });
 
 test("browser cookie writes still require Origin (CSRF intact)", async t => {

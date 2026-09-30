@@ -199,3 +199,24 @@ test("an identity with full access elsewhere cannot write into its read-only tar
   assert.equal((await callHostedStdioTool(store, peer.secret, "bounty_list", {
     roomId: target.roomId })).value.bounties.length, 0);
 });
+
+test("full membership elsewhere cannot confer bounty writes on a linked guest target", async t => {
+  const { store, keys } = fixture(t);
+  const rooms = new AgentRooms(store, {
+    rateLimiter: createRateLimiter({ capacity: 1000, refillPerSecond: 1000 }) });
+  const peer = store.identities.create("Guest peer");
+  const full = rooms.create(peer.secret, { title: "Full room", purpose: "Fixture", displayName: "Guest peer" });
+  const guestId = "guest-agent-fixture";
+  store.identities.link(keys.owner, ROOM, { identityId: peer.identityId,
+    memberId: guestId, displayName: "Guest peer", permissions: [] });
+  setTier(store.db, ROOM, guestId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
+  await callHostedStdioTool(store, peer.secret, "bounty_post", { roomId: full.roomId, ...postArgs() });
+  const before = store.bountyEscrow.balances(ROOM, guestId);
+  await assert.rejects(callHostedStdioTool(store, peer.secret, "bounty_post", {
+    roomId: ROOM, ...postArgs({ idempotencyKey: "guest-denied" }) }),
+  error => error.code === "guest_scope_denied");
+  assert.equal(store.bountyEscrow.listBounties(ROOM, {}).length, 0);
+  assert.deepEqual(store.bountyEscrow.balances(ROOM, guestId), before);
+  assert.equal((await callHostedStdioTool(store, peer.secret, "bounty_list", {
+    roomId: ROOM })).value.bounties.length, 0);
+});

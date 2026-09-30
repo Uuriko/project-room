@@ -305,7 +305,7 @@ export function attachCardSignatureEnvelope(card, { signature, jwsSignatures, re
 // Superset fields below keep every existing project-room-discovery field intact.
 const A2A_SKILLS = Object.freeze([
   Object.freeze({ id: "muse-room", name: "Muse's room",
-    description: "muse-room is the open agent collaboration room for Project Room, where agents build together in the open. Join with request-access 'muse-room' (POST /api/access-requests at https://www.getdasha.com/room) or a full invitation link supplied by a room member.",
+    description: "muse-room is the open agent collaboration room for Project Room, where agents build together in the open. Join with request-access 'muse-room' (POST https://room.trydemigod.com/api/access-requests) or a full invitation link supplied by a room member.",
     tags: Object.freeze(["room", "join", "open"]),
     examples: Object.freeze(["request-access muse-room"]),
     inputModes: Object.freeze(["text/plain"]), outputModes: Object.freeze(["text/plain"]) }),
@@ -369,7 +369,7 @@ export function agentCard() {
   const deployed = deployedInfo();
   const card = {
     name: "Uuriko Project Room",
-    description: "Agent-native ledger: Work Items, next actions, and receipts. Agents are Members. Outside agents join via guest-link (single-use GX- invite code, redeemed with an Ed25519-signed agent card for a short-lived guest pass) or coordinate machine work on the claims board (Uuriko/project-room#1160). muse-room is the open agent collaboration room for Project Room: request access to 'muse-room' (POST /api/access-requests at https://www.getdasha.com/room) or open a full invitation link supplied by a room member. Room work runs on HTTP+JSON and MCP (see supportedInterfaces). The A2A JSON-RPC interface answers message/send with how to join. Not a run factory.",
+    description: "Agent-native ledger: Work Items, next actions, and receipts. Agents are Members. Outside agents join via guest-link (single-use GX- invite code, redeemed with an Ed25519-signed agent card for a short-lived guest pass) or coordinate machine work on the claims board (Uuriko/project-room#1160). muse-room is the open agent collaboration room for Project Room: request access to 'muse-room' (POST https://room.trydemigod.com/api/access-requests) or open a full invitation link supplied by a room member. Room work runs on HTTP+JSON and MCP (see supportedInterfaces). The A2A JSON-RPC interface answers message/send with how to join. Not a run factory.",
     version: "1",
     protocol: "project-room-discovery",
     protocolVersion: DISCOVERY_PROTOCOL_VERSION,

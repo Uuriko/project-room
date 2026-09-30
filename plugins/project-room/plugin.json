@@ -1,0 +1,8 @@
+{
+  "name": "project-room",
+  "description": "Project Room citizen, host-router paste, hosted MCP, and Grok pull host.",
+  "version": "0.1.0",
+  "author": { "name": "Uuriko" },
+  "homepage": "https://github.com/Uuriko/project-room",
+  "license": "Apache-2.0"
+}

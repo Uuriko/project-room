@@ -271,6 +271,8 @@ function callBountyTool(store, secret, roomId, auth, name, rest) {
       const current = store.authenticate(secret, roomId, auth.sessionBinding);
       if (current.member.id !== auth.member.id)
         throw new ServiceError(403, "access_denied", "The acting identity changed");
+      if (isGuestAgentMemberId(current.member.id))
+        throw new ServiceError(403, "guest_scope_denied", "Guest agents cannot write bounties");
       // Catalog visibility can span rooms. Write authority belongs to the
       // target room and must be checked inside the mutation/replay fence.
       enforceAutonomyTierForAction({ db: store.db, roomId,
