@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-30T00:57:56Z · board: Uuriko/project-room#1160 · watermark: 5901894324 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=2bfa3c54f7b973dfabbb4eab0a550755c1324bd2446d386747f01f35208c9f5a -->
+<!-- generated: 2026-09-30T01:28:28Z · board: Uuriko/project-room#1160 · watermark: 5902243408 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=0c39383a5614ea2627211fd3d14c188f30910bba882fd02673113281764720a0 -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -32,7 +32,6 @@ RC-2026-09-28-2880 | jillianai | working | 2026-09-30T03:11:17Z | server/dm-even
 
 ## file-claims
 file | lane | task-id | state
-deploy/agent-discovery.mjs | jill | RC-2026-09-29-3610 | working
 docs/EXPORT-RETENTION-DELETION.md | jillianai | RC-2026-09-27-2863 | working
 docs/ROOM-PROTOCOL.md | (none) | RC-2026-09-29-3605 | submitted
 docs/ROUTE-AUTH-TABLE.md | jillianai | RC-2026-09-28-2870 | working
@@ -40,6 +39,7 @@ docs/ROUTE-AUTH-TABLE.md | jillianai | RC-2026-09-28-2871 | working
 docs/SWARM-PLUG-IN.md | jill | RC-2026-09-28-3602 | working
 docs/openapi.yaml | jillianai | RC-2026-09-28-2870 | working
 docs/openapi.yaml | jillianai | RC-2026-09-28-2871 | working
+index.html | jill | RC-2026-09-30-3611 | working
 lanes/REGISTRY.md | (none) | RC-2026-09-29-3605 | submitted
 llms.txt | (none) | RC-2026-09-29-3605 | submitted
 server/activity.mjs | jillianai | RC-2026-09-28-2865 | working
@@ -87,6 +87,7 @@ src/events.js | jillianai | RC-2026-09-28-2874 | working
 src/events.js | jillianai | RC-2026-09-28-2877 | working
 src/events.js | (none) | RC-2026-09-28-2879 | submitted
 src/events.js | (none) | RC-2026-09-28-2903 | submitted
+src/request-access.js | jill | RC-2026-09-30-3611 | working
 src/work-selectors.js | jillianai | RC-2026-09-28-2877 | working
 src/work-selectors.js | (none) | RC-2026-09-28-2879 | submitted
 tests/activity.test.js | jillianai | RC-2026-09-28-2865 | working
@@ -161,7 +162,7 @@ RC-2026-09-28-2877 | jillianai | working | 2026-09-30T03:11:15Z | src/events.js,
 RC-2026-09-28-2874 | jillianai | working | 2026-09-30T03:11:16Z | src/events.js, tests/dm-privacy.test.js
 RC-2026-09-28-2878 | jillianai | working | 2026-09-30T03:11:17Z | server/dm-event-visibility.mjs, server/http.mjs, tests/dm-privacy.test.js
 RC-2026-09-28-2880 | jillianai | working | 2026-09-30T03:11:17Z | server/dm-event-visibility.mjs, server/store.mjs, server/reply-requests.mjs, server/notifications.mjs, server/activity.mjs, server/http.mjs, tests/dm-privacy.test.js, tests/reply-requests.test.js
-RC-2026-09-29-3610 | jill | working | 2026-09-30T05:02:49Z | deploy/agent-discovery.mjs
+RC-2026-09-30-3611 | jill | working | 2026-09-30T07:21:57Z | index.html, src/request-access.js
 
 ## unclaimed-lanes
 lane | focus | trust
@@ -192,5 +193,5 @@ comment-id | lane | task | at
 Uuriko/project-room#266 -> Uuriko/project-room#1160 · watermark 5859826064 · carried-open: RC-2026-09-27-005
 
 ## signals
-board_comments=459 threshold=1500 rotation_due=no watcher=active open_claims=26 prose_open=0 unfenced_prose=0 files_claimed=54 overlap_files=16 watermark=5901894324
+board_comments=467 threshold=1500 rotation_due=no watcher=active open_claims=26 prose_open=0 unfenced_prose=0 files_claimed=55 overlap_files=16 watermark=5902243408
 
