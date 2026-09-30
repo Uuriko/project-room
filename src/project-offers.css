@@ -1,0 +1,489 @@
+:root {
+  color-scheme:light;
+  --ink:#172725;
+  --muted:#65716b;
+  --paper:#f7f6f0;
+  --line:#dce0d7;
+  --accent:#dc673e;
+  --white:#fffef9
+}
+* {
+  box-sizing:border-box
+}
+body {
+  margin:0;
+  background:var(--paper);
+  color:var(--ink);
+  font:16px/1.5 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif
+}
+button,a,textarea {
+  -webkit-tap-highlight-color:transparent
+}
+a {
+  color:inherit;
+  text-underline-offset:4px
+}
+button,textarea {
+  font:inherit
+}
+button {
+  cursor:pointer
+}
+button:disabled {
+  cursor:default;
+  opacity:.55
+}
+[hidden] {
+  display:none!important
+}
+:focus-visible {
+  outline:3px solid var(--accent);
+  outline-offset:4px
+}
+.site-header {
+  max-width:1280px;
+  margin:auto;
+  padding:26px 40px;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  border-bottom:1px solid var(--line)
+}
+.brand {
+  font-weight:750;
+  letter-spacing:-.04em;
+  text-decoration:none;
+  font-size:21px;
+  display:flex;
+  gap:8px;
+  align-items:center
+}
+.brand-dot {
+  width:9px;
+  height:9px;
+  background:var(--accent);
+  border-radius:50%
+}
+.room-link {
+  font-size:14px;
+  text-decoration:none;
+  min-height:44px;
+  display:flex;
+  align-items:center;
+  gap:14px
+}
+main {
+  max-width:1280px;
+  margin:auto;
+  padding:58px 40px 80px
+}
+.eyebrow {
+  text-transform:uppercase;
+  letter-spacing:.16em;
+  font-size:11px;
+  font-weight:700;
+  color:var(--muted);
+  margin:0 0 16px
+}
+h1 {
+  font-size:clamp(46px,6.5vw,82px);
+  line-height:1.05;
+  letter-spacing:-.065em;
+  font-weight:650;
+  margin:0 0 22px
+}
+.intro-copy {
+  font-size:19px;
+  color:var(--muted);
+  max-width:570px;
+  margin:0
+}
+.intro {
+  padding-bottom:48px
+}
+.workspace {
+  display:grid;
+  grid-template-columns:minmax(280px,.8fr) minmax(0,1.5fr);
+  gap:30px;
+  align-items:start
+}
+.section-heading {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  margin-bottom:16px
+}
+.section-heading h2 {
+  font-size:13px;
+  text-transform:uppercase;
+  letter-spacing:.09em;
+  margin:0
+}
+.text-button {
+  border:0;
+  background:transparent;
+  color:var(--muted);
+  padding:10px 0;
+  min-height:44px;
+  font-size:14px
+}
+.text-button:hover {
+  color:var(--ink)
+}
+#list-status {
+  font-size:14px;
+  color:var(--muted);
+  margin:0 0 18px
+}
+#list-status:empty {
+  display:none
+}
+.offer-list {
+  padding:0;
+  margin:0;
+  list-style:none;
+  display:grid;
+  gap:12px
+}
+.offer-card {
+  width:100%;
+  text-align:left;
+  padding:23px;
+  border:1px solid var(--line);
+  border-radius:14px;
+  background:var(--white);
+  transition:border-color .15s
+}
+.offer-card:hover,.offer-card[aria-current=true] {
+  border-color:var(--ink)
+}
+.offer-card[aria-current=true] {
+  box-shadow:inset 3px 0 var(--accent)
+}
+.card-top,.detail-meta {
+  display:flex;
+  flex-wrap:wrap;
+  justify-content:space-between;
+  gap:12px;
+  align-items:center
+}
+.kind {
+  font-size:11px;
+  letter-spacing:.1em;
+  text-transform:uppercase;
+  color:var(--muted)
+}
+.reward-chip {
+  font-size:12px;
+  border-radius:30px;
+  background:#edf0e7;
+  padding:5px 9px;
+  font-weight:600
+}
+.offer-card .card-title {
+  display:block;
+  font-size:19px;
+  line-height:1.3;
+  letter-spacing:-.035em;
+  margin:17px 0 9px;
+  font-weight:650
+}
+.offer-card p {
+  display:-webkit-box;
+  -webkit-line-clamp:3;
+  -webkit-box-orient:vertical;
+  overflow:hidden;
+  font-size:14px;
+  color:var(--muted);
+  margin:0
+}
+.card-arrow {
+  display:block;
+  margin-top:19px;
+  font-size:18px;
+  color:var(--accent)
+}
+.offer-detail {
+  min-width:0;
+  border:1px solid var(--line);
+  background:var(--white);
+  border-radius:20px;
+  padding:36px
+}
+.detail-empty {
+  padding:60px 0 90px;
+  max-width:310px;
+  margin:auto;
+  color:var(--muted)
+}
+.detail-empty h2 {
+  color:var(--ink);
+  font-size:26px;
+  letter-spacing:-.045em
+}
+.empty-mark {
+  display:inline-grid;
+  place-items:center;
+  width:54px;
+  height:54px;
+  background:#edf0e7;
+  border-radius:50%;
+  font-size:30px;
+  color:var(--ink)
+}
+.offer-detail h2 {
+  font-size:clamp(28px,3.2vw,42px);
+  line-height:1.14;
+  letter-spacing:-.045em;
+  margin:23px 0 16px;
+  font-weight:650
+}
+.summary {
+  font-size:17px;
+  color:var(--muted);
+  white-space:pre-wrap
+}
+.terms-grid {
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:20px;
+  padding:23px 0;
+  margin:25px 0;
+  border-top:1px solid var(--line);
+  border-bottom:1px solid var(--line)
+}
+.term-label {
+  display:block;
+  color:var(--muted);
+  font-size:11px;
+  text-transform:uppercase;
+  letter-spacing:.1em;
+  margin-bottom:8px
+}
+.term-value {
+  font-weight:650
+}
+.term-note {
+  font-size:13px;
+  color:var(--muted);
+  margin:6px 0 0
+}
+.detail-section {
+  margin-top:26px
+}
+.detail-section h3 {
+  font-size:14px;
+  margin:0 0 12px
+}
+.detail-section ul {
+  padding-left:20px;
+  margin:0
+}
+.detail-section li {
+  padding-left:3px;
+  margin:8px 0;
+  overflow-wrap:anywhere
+}
+.scope-links {
+  display:flex;
+  gap:20px;
+  flex-wrap:wrap;
+  font-size:13px;
+  margin-top:24px
+}
+.agent-handoff {
+  border-top:1px solid var(--line);
+  margin-top:30px;
+  padding-top:27px
+}
+.agent-handoff h3 {
+  font-size:20px;
+  letter-spacing:-.03em;
+  margin:0 0 8px
+}
+.agent-handoff p {
+  font-size:13px;
+  color:var(--muted);
+  margin:0 0 16px
+}
+.handoff-actions {
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap
+}
+.primary,.secondary {
+  display:inline-flex;
+  justify-content:center;
+  align-items:center;
+  min-height:46px;
+  border-radius:8px;
+  font-size:14px;
+  font-weight:600;
+  padding:11px 18px;
+  text-decoration:none;
+  border:1px solid var(--ink)
+}
+.primary {
+  background:var(--ink);
+  color:var(--white)
+}
+.secondary {
+  background:transparent;
+  color:var(--ink)
+}
+.primary:hover {
+  background:#344640
+}
+.secondary:hover {
+  background:#edf0e7
+}
+#more-offers {
+  width:100%;
+  margin-top:16px
+}
+.prompt-disclosure {
+  margin-top:18px
+}
+.prompt-disclosure summary {
+  font-size:13px;
+  color:var(--muted);
+  cursor:pointer;
+  padding:10px 0
+}
+.prompt-disclosure label {
+  display:block;
+  font-size:13px;
+  margin:10px 0
+}
+textarea {
+  width:100%;
+  height:210px;
+  resize:vertical;
+  padding:14px;
+  border:1px solid var(--line);
+  border-radius:8px;
+  font-size:12px;
+  background:var(--paper);
+  color:var(--ink);
+  overflow-wrap:anywhere
+}
+.detail-status {
+  font-size:13px;
+  color:var(--muted);
+  margin:14px 0 0
+}
+.detail-status:empty {
+  display:none
+}
+.error {
+  color:#9a3321
+}
+.detail-close {
+  display:none
+}
+footer {
+  max-width:1280px;
+  margin:auto;
+  padding:25px 40px;
+  border-top:1px solid var(--line);
+  color:var(--muted);
+  font-size:12px;
+  display:flex;
+  justify-content:space-between;
+  gap:15px
+}
+footer a {
+  white-space:nowrap
+}
+@media(max-width:760px) {
+  .offer-selected .offer-index,.offer-selected .intro {
+    display:none
+  }
+  .site-header {
+    padding:16px 22px
+  }
+  main {
+    padding:35px 22px 50px
+  }
+  .intro {
+    padding-bottom:30px
+  }
+  .intro-copy {
+    font-size:16px
+  }
+  .workspace {
+    grid-template-columns:1fr;
+    gap:22px
+  }
+  .offer-detail {
+    padding:24px;
+    border-radius:14px
+  }
+  .detail-empty {
+    padding:25px 0
+  }
+  .detail-close {
+    display:block
+  }
+  .terms-grid {
+    gap:16px
+  }
+  .offer-detail h2 {
+    font-size:32px
+  }
+  .handoff-actions>* {
+    flex:1
+  }
+  .handoff-actions {
+    gap:8px
+  }
+  footer {
+    padding:22px;
+    flex-direction:column
+  }
+}
+@media(max-width:360px) {
+  .site-header {
+    padding:15px 16px
+  }
+  .brand {
+    font-size:19px
+  }
+  .room-link {
+    font-size:12px
+  }
+  main {
+    padding:30px 16px 40px
+  }
+  .offer-detail {
+    padding:20px
+  }
+  .terms-grid {
+    grid-template-columns:1fr
+  }
+  .handoff-actions {
+    flex-direction:column
+  }
+}
+@media(prefers-reduced-motion:reduce) {
+  * {
+    transition:none!important
+  }
+}
+.card-title,.summary,.offer-detail h2,.term-value,.term-note,.reward-chip {
+  overflow-wrap:anywhere
+}
+.reward-chip {
+  max-width:100%
+}
+.offer-index,.offer-list li,.offer-card {
+  min-width:0;
+}
+.offer-card p {
+  overflow-wrap:anywhere;
+}
+@media(max-width:760px) {
+  .workspace {
+    grid-template-columns:minmax(0,1fr);
+  }
+}
