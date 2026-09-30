@@ -189,3 +189,37 @@ test('offer publication and its exact retry journal appear in private-safe captu
   for (const value of ['recovery-offer:draft', result.summary, result.title, input.requestId, 'commons'])
     assert.equal(serialized.includes(value), false, 'comparison never exposes private offer or receipt rows');
 });
+
+
+test('populated follow-up lineage and exact retry journal appear in private-safe recovery differences', async t => {
+  const f = await fixture(t), store = f.store;
+  const terms = { kind: 'task', title: 'Comparison parent', summary: 'Explicit public revision instructions', acceptanceCriteria: ['Return a revised result'],
+    repositoryUrl: 'https://github.com/example/project', reward: { kind: 'unpaid' }, approvalPolicy: { mode: 'human' } };
+  store.projectOffers.create('commons', 'owner', { requestId: 'comparison-parent-create', offerId: 'comparison-parent', reviewerMemberIds: ['owner'], terms });
+  store.projectOffers.transition('commons', 'owner', 'comparison-parent', 'publish', { requestId: 'comparison-parent-publish', expectedRevision: 1 });
+  store.publicWorkClaims.enable('commons', 'owner', 'comparison-parent', { requestId: 'comparison-parent-enable', expectedRevision: 2, expectedTermsVersion: 1, repositoryRef: 'main', files: ['comparison.txt'] });
+  const producer = store.identities.create('Outside comparison producer');
+  store.publicWorkClaims.act('comparison-parent', producer.secret, 'claim', { requestId: 'comparison-parent-claim', expectedTermsVersion: 1 });
+  const receipt = store.publicWorkClaims.act('comparison-parent', producer.secret, 'finish', { requestId: 'comparison-parent-finish', expectedTermsVersion: 1, generation: 1, artifactText: 'Original captured result', checksReported: [] }).receipt;
+  store.publicWorkReviews.decide('commons', 'owner', receipt.receiptId, { requestId: 'comparison-parent-review', expectedReviewRevision: 0, taskId: 'comparison-parent', expectedTermsVersion: 1,
+    generation: 1, artifactSha256: receipt.artifact.sha256, decision: 'revision_requested', reason: 'Private comparison feedback' });
+  const before = await f.capture();
+  const input = { requestId: 'comparison-follow-up', expectedReviewRevision: 1, taskId: 'comparison-parent', expectedTermsVersion: 1, generation: 1,
+    artifactSha256: receipt.artifact.sha256, successorTaskId: 'comparison-child', terms: { ...terms, title: 'Explicit child scope' }, repositoryRef: 'main', files: ['comparison.txt'] };
+  const outcome = store.publicWorkSuccessors.create('commons', 'owner', receipt.receiptId, input), reference = await f.capture();
+  const report = compare(before, reference);
+  assert.equal(report.status, 'differences_require_review'); assert.equal(report.accessDifferences, false); assert.equal(report.history.equalRooms, 2);
+  assert.equal(delta(report, 'public_work_successors').added, 1); assert.equal(delta(report, 'public_work_successor_requests').added, 1);
+  assert.equal(delta(report, 'project_offers').added, 1); assert.equal(delta(report, 'public_work_tasks').added, 1);
+  for (const table of ['public_work_receipts', 'public_work_reviews', 'public_work_review_requests', 'identity_links', 'bounty_journal'])
+    assert.equal(delta(report, table).added + delta(report, table).removed + delta(report, table).changed, 0, table + ' original facts remain unchanged');
+  const serialized = JSON.stringify(report);
+  for (const value of [producer.secret, producer.identityId, receipt.receiptId, input.requestId, input.successorTaskId, input.terms.summary, 'Private comparison feedback', 'commons'])
+    assert.equal(serialized.includes(value), false, 'recovery differences omit private values and journal contents');
+  const recovered = new RoomStore(reference, { now: f.now });
+  try { assert.deepEqual(recovered.publicWorkSuccessors.create('commons', 'owner', receipt.receiptId, input), outcome); }
+  finally { recovered.close(); }
+  assert.equal(compare(before, reference).tables.find(row => row.table === 'public_work_successor_requests').added, 1);
+  assert.deepEqual(store.publicWorkSuccessors.create('commons', 'owner', receipt.receiptId, input), outcome);
+  assert.equal(compare(reference, await f.capture()).status, 'no_stored_differences', 'exact restored/current retries create no new lineage or journal row');
+});

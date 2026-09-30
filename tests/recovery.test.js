@@ -449,10 +449,27 @@ test("online capture preserves all application tables, identity boundaries and e
   const publicVerified = f.store.publicWorkReviews.verify("commons", "reply-reviewer", publicFinished.receipt.receiptId, publicVerifyInput);
   const publicReviewInput = { ...publicReviewTuple, requestId: "public-recovery-accept", expectedReviewRevision: 1, decision: "accepted" };
   const publicReviewed = f.store.publicWorkReviews.decide("commons", "owner", publicFinished.receipt.receiptId, publicReviewInput);
+  // Populate both follow-up tables through the real owner/domain path so
+  // backup coverage cannot pass by merely listing two empty sidecars.
+  const followTerms = { kind: "task", title: "Recover the explicit revision", summary: "Owner-authored public recovery scope",
+    acceptanceCriteria: ["Return revised bytes"], repositoryUrl: "https://github.com/Uuriko/project-room", reward: { kind: "unpaid" }, approvalPolicy: { mode: "human" } };
+  f.store.projectOffers.create("commons", "owner", { requestId: "follow-parent-create", offerId: "follow-parent", reviewerMemberIds: ["owner"], terms: followTerms });
+  f.store.projectOffers.transition("commons", "owner", "follow-parent", "publish", { requestId: "follow-parent-publish", expectedRevision: 1 });
+  f.store.publicWorkClaims.enable("commons", "owner", "follow-parent", { requestId: "follow-parent-enable", expectedRevision: 2, expectedTermsVersion: 1, repositoryRef: "main", files: ["synthetic/revised.txt"] });
+  f.store.publicWorkClaims.act("follow-parent", publicIdentity.secret, "claim", { requestId: "follow-parent-claim", expectedTermsVersion: 1 });
+  const followReceipt = f.store.publicWorkClaims.act("follow-parent", publicIdentity.secret, "finish", { requestId: "follow-parent-finish", expectedTermsVersion: 1, generation: 1, artifactText: "Original revision bytes", checksReported: [] }).receipt;
+  const followRevision = f.store.publicWorkReviews.decide("commons", "owner", followReceipt.receiptId, { requestId: "follow-parent-revision", expectedReviewRevision: 0,
+    taskId: "follow-parent", expectedTermsVersion: 1, generation: 1, artifactSha256: followReceipt.artifact.sha256, decision: "revision_requested", reason: "Private recovered revision feedback" });
+  const followInput = { requestId: "recovery-create-follow-up", expectedReviewRevision: followRevision.review.revision, taskId: "follow-parent", expectedTermsVersion: 1,
+    generation: 1, artifactSha256: followReceipt.artifact.sha256, successorTaskId: "follow-child", terms: { ...followTerms, title: "Explicit new recovery task" }, repositoryRef: "main", files: ["synthetic/revised.txt"] };
+  const followResult = f.store.publicWorkSuccessors.create("commons", "owner", followReceipt.receiptId, followInput);
+  const followRows = f.store.db.prepare("SELECT * FROM public_work_successors ORDER BY parent_receipt_id").all();
+  const followJournal = f.store.db.prepare("SELECT * FROM public_work_successor_requests ORDER BY request_id").all();
+  assert.equal(followRows.length, 1); assert.equal(followJournal.length, 1);
   const publicReviewRows = f.store.db.prepare("SELECT * FROM public_work_reviews ORDER BY receipt_id").all();
   const publicReviewJournal = f.store.db.prepare("SELECT * FROM public_work_review_requests ORDER BY request_id").all();
   const offerRecords = f.store.projectOffers.ownerList("commons", "owner");
-  assert.equal(offerRecords.offers.length, 4);
+  assert.equal(offerRecords.offers.length, 6);
   assert.deepEqual(new Set(offerRecords.offers.map(offer => offer.status)), new Set(["draft", "published", "withdrawn"]));
   const before = auditRecovery(f.store);
   assert.equal(before.rooms, 2); assert.equal(before.tables.length, 157,
@@ -501,13 +518,19 @@ test("online capture preserves all application tables, identity boundaries and e
     assert.deepEqual(recovered.publicWorkReviews.decide("commons", "owner", publicFinished.receipt.receiptId, publicReviewInput), publicReviewed);
     assert.deepEqual(recovered.db.prepare("SELECT * FROM public_work_reviews ORDER BY receipt_id").all(), publicReviewRows);
     assert.deepEqual(recovered.db.prepare("SELECT * FROM public_work_review_requests ORDER BY request_id").all(), publicReviewJournal);
+    assert.deepEqual(recovered.db.prepare("SELECT * FROM public_work_successors ORDER BY parent_receipt_id").all(), followRows);
+    assert.deepEqual(recovered.db.prepare("SELECT * FROM public_work_successor_requests ORDER BY request_id").all(), followJournal);
+    assert.deepEqual(recovered.publicWorkSuccessors.create("commons", "owner", followReceipt.receiptId, followInput), followResult, "restoration retains the exact original creation outcome");
+    assert.deepEqual(recovered.publicWorkReviews.contributorReview(publicIdentity.secret, followReceipt.receiptId).followUp, followResult.followUp);
+    assert.deepEqual(recovered.publicWorkClaims.receipt(followReceipt.receiptId), followReceipt);
+
     assert.equal(recovered.db.prepare("SELECT enabled FROM public_work_claim_writer_permit").get().enabled, 0);
     for (const offer of f.projectOffers) for (const retry of offer.retries) {
       const result = retry.action === "create" ? recovered.projectOffers.create("commons", "owner", retry.input)
         : recovered.projectOffers.transition("commons", "owner", offer.offerId, retry.action, retry.input);
       assert.deepEqual(result, retry.result, "capture retains exact offer operation receipts");
     }
-    assert.deepEqual(recovered.projectOffers.list().offers.map(offer => offer.id), ["public-recovery", "recovery-offer:published"]);
+    assert.deepEqual(recovered.projectOffers.list().offers.map(offer => offer.id), ["follow-child", "follow-parent", "public-recovery", "recovery-offer:published"]);
     assert.throws(() => recovered.projectOffers.read("recovery-offer:withdrawn"), { code: "offer_not_found" });
 
     assert.equal(recovered.authenticate(f.validSession.token).member.id, "owner");
@@ -543,6 +566,8 @@ test("online capture preserves all application tables, identity boundaries and e
     recovered.close(); recovered = new RoomStore(receipt.filename, { now: f.now });
     assert.deepEqual(auditRecovery(recovered), after);
     assert.equal(recovered.command(f.keys.owner, "commons", next).duplicate, true);
+    assert.deepEqual(recovered.publicWorkSuccessors.create("commons", "owner", followReceipt.receiptId, followInput), followResult, "exact creation retry also survives a second recovered restart");
+    assert.deepEqual(recovered.db.prepare("SELECT * FROM public_work_successor_requests ORDER BY request_id").all(), followJournal);
     assert.deepEqual(recovered.projectOffers.ownerList("commons", "owner"), offerRecords);
     const server = createRoomServer({ store: recovered, origin: "https://room.example.test" });
     await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
