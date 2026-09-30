@@ -173,12 +173,12 @@ test("diffManifests is not fooled by Object.prototype keys", () => {
 test("writeManifest/readManifest round-trip", t => {
   const dir = tempDir(t);
   const path = join(dir, DEFAULT_MANIFEST_NAME);
-  const manifest = buildManifest({ "a.txt": "h1" }, { generatedAt: "2026-09-16T00:00:00.000Z" });
+  const manifest = buildManifest({ "a.txt": "a".repeat(64) }, { generatedAt: "2026-09-16T00:00:00.000Z" });
   assert.equal(manifest.version, 1);
   assert.equal(manifest.assetCount, 1);
   writeManifest(path, manifest);
   const back = readManifest(path);
-  assert.deepEqual(back.assets, { "a.txt": "h1" });
+  assert.deepEqual(back.assets, { "a.txt": "a".repeat(64) });
   assert.equal(back.version, 1);
 });
 

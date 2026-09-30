@@ -64,8 +64,16 @@ function failoverError(code, message, detail) {
  */
 export function createFailover(deps = {}) {
   const clock = deps.clock ?? (() => Date.now());
-  const failureThreshold = deps.failureThreshold ?? DEFAULT_FAILURE_THRESHOLD;
-  const cooldownMs = deps.cooldownMs ?? DEFAULT_COOLDOWN_MS;
+  // NaN/negative/non-finite thresholds silently disable the breaker; fail
+  // closed to the documented defaults instead.
+  const failureThreshold =
+    typeof deps.failureThreshold === 'number' && Number.isFinite(deps.failureThreshold) && deps.failureThreshold > 0
+      ? deps.failureThreshold
+      : DEFAULT_FAILURE_THRESHOLD;
+  const cooldownMs =
+    typeof deps.cooldownMs === 'number' && Number.isFinite(deps.cooldownMs) && deps.cooldownMs >= 0
+      ? deps.cooldownMs
+      : DEFAULT_COOLDOWN_MS;
 
   let idCounter = 0;
   const newId = deps.id ?? (() => `send-${(idCounter += 1)}`);

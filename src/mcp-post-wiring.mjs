@@ -181,6 +181,7 @@ export function createMcpPostWiring(deps = {}) {
 
   /** clientToken → { result, at } for idempotent replays. */
   const idempotency = new Map();
+  const inFlightTokens = new Map(); // clientToken → Promise (L-43 in-flight guard)
 
   function record({ at, actor, action, detail }) {
     const entry = Object.freeze({
@@ -443,44 +444,79 @@ export function createMcpPostWiring(deps = {}) {
         return replay;
       }
 
-      const valid = validateInput(input);
-      record({ actor: agentId, action: 'post-validated', detail: { channel: valid.channel } });
-
-      const allowed = await scopeChecker(agentId, TOOL_NAME);
-      if (!allowed) {
-        record({ actor: agentId, action: 'scope-denied', detail: { tool: TOOL_NAME } });
-        throw mcpError('MCP_SCOPE_DENIED', `Agent '${agentId}' is not scoped for ${TOOL_NAME}`, {
-          agentId,
-          tool: TOOL_NAME,
-        });
+      // In-flight guard: a concurrent same-token request joins the ongoing
+      // backend call instead of posting twice (L-43). The slot is registered
+      // synchronously here — before any await — so a racing caller always
+      // sees it. On failure the slot rejects and the token is released, so a
+      // retry posts fresh rather than wedging.
+      const slotKey = ctx.clientToken != null && ctx.clientToken !== '' ? ctx.clientToken : null;
+      let settleSlot = null;
+      if (slotKey !== null) {
+        const inFlight = inFlightTokens.get(slotKey);
+        if (inFlight) {
+          record({ actor: agentId, action: 'idempotent-join', detail: { clientToken: slotKey } });
+          return inFlight;
+        }
+        let resolveSlot, rejectSlot;
+        const slot = new Promise((resolve, reject) => { resolveSlot = resolve; rejectSlot = reject; });
+        settleSlot = { resolve: resolveSlot, reject: rejectSlot };
+        inFlightTokens.set(slotKey, slot);
       }
 
-      checkRateLimit(agentId);
-
-      const payload = {
-        tool: TOOL_NAME,
-        agentId,
-        channel: valid.channel,
-        text: valid.text,
-        ...(valid.threadId !== undefined ? { threadId: valid.threadId } : {}),
-        ...(valid.attachments !== undefined ? { attachments: valid.attachments } : {}),
-      };
-
-      const backendResult = await callBackend(payload, agentId);
-      const result = Object.freeze({
-        messageId: backendResult?.messageId ?? newId(),
-        postedAt: backendResult?.postedAt ?? clock(),
-      });
-
-      if (ctx.clientToken != null && ctx.clientToken !== '') {
-        idempotency.set(ctx.clientToken, { result, at: clock() });
+      let result;
+      try {
+        result = await executePost();
+      } catch (err) {
+        if (settleSlot !== null) {
+          inFlightTokens.delete(slotKey);
+          settleSlot.reject(err);
+        }
+        throw err;
       }
-      record({
-        actor: agentId,
-        action: 'post-succeeded',
-        detail: { messageId: result.messageId, channel: valid.channel },
-      });
+      if (settleSlot !== null) {
+        inFlightTokens.delete(slotKey);
+        idempotency.set(slotKey, { result, at: clock() });
+        settleSlot.resolve(result);
+      }
       return result;
+
+      async function executePost() {
+        const valid = validateInput(input);
+        record({ actor: agentId, action: 'post-validated', detail: { channel: valid.channel } });
+
+        const allowed = await scopeChecker(agentId, TOOL_NAME);
+        if (!allowed) {
+          record({ actor: agentId, action: 'scope-denied', detail: { tool: TOOL_NAME } });
+          throw mcpError('MCP_SCOPE_DENIED', `Agent '${agentId}' is not scoped for ${TOOL_NAME}`, {
+            agentId,
+            tool: TOOL_NAME,
+          });
+        }
+
+        checkRateLimit(agentId);
+
+        const payload = {
+          tool: TOOL_NAME,
+          agentId,
+          channel: valid.channel,
+          text: valid.text,
+          ...(valid.threadId !== undefined ? { threadId: valid.threadId } : {}),
+          ...(valid.attachments !== undefined ? { attachments: valid.attachments } : {}),
+        };
+
+        const backendResult = await callBackend(payload, agentId);
+        const postResult = Object.freeze({
+          messageId: backendResult?.messageId ?? newId(),
+          postedAt: backendResult?.postedAt ?? clock(),
+        });
+
+        record({
+          actor: agentId,
+          action: 'post-succeeded',
+          detail: { messageId: postResult.messageId, channel: valid.channel },
+        });
+        return postResult;
+      }
     },
   };
 

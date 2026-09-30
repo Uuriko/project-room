@@ -295,8 +295,8 @@ export function createWhatsAppConnect(deps = {}) {
         }
         throw waError(
           'WA_CODE_MISMATCH',
-          `Wrong pairing code for connection ${conn.id} (attempt ${conn.codeAttempts + 1}/${maxCodeAttempts})`,
-          { connectionId: conn.id, codeAttempts: conn.codeAttempts + 1, maxCodeAttempts },
+          `Wrong pairing code for connection ${conn.id} (attempt ${conn.codeAttempts}/${maxCodeAttempts})`,
+          { connectionId: conn.id, codeAttempts: conn.codeAttempts, maxCodeAttempts },
         );
       }
       conn.code = null; // single-use

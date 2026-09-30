@@ -27,41 +27,58 @@ export const PHANTOM_ROUTES = ['/api/open', '/api/auth-config', '/privacy'];
 export async function liveAudit({ origin = LIVE_ORIGIN, fetchImpl = fetch } = {}) {
   const failures = [];
   const note = (ok, code, detail) => { if (!ok) failures.push({ code, detail }); };
-  const get = async path => {
-    const res = await fetchImpl(origin + path, { redirect: 'manual' });
-    const text = await res.text();
-    let json = null;
-    try { json = JSON.parse(text); } catch {}
-    return { res, text, json };
+  const get = async (path, code) => {
+    try {
+      const res = await fetchImpl(origin + path, { redirect: 'manual' });
+      const text = await res.text();
+      let json = null;
+      try { json = JSON.parse(text); } catch {}
+      return { res, text, json };
+    } catch (err) {
+      // A fetch failure must not crash the audit: record a fetch_failed note
+      // for the guard and keep the report structured JSON (L-48).
+      note(false, 'fetch_failed', `${code}: ${err instanceof Error ? err.message : String(err)}`);
+      return { fetchError: true };
+    }
   };
 
-  const version = await get('/api/version');
-  note(version.json?.mode === 'cloudflare-production', 'version_mode', version.json?.mode);
-  note(typeof version.json?.sourceRevision === 'string' && version.json.sourceRevision.length === 40, 'version_sha', version.json?.sourceRevision);
-
-  for (const path of PHANTOM_ROUTES) {
-    const phantom = await get(path);
-    note(phantom.res.status === 404, 'phantom_route', `${path} -> ${phantom.res.status}`);
+  const version = await get('/api/version', 'version');
+  if (!version.fetchError) {
+    note(version.json?.mode === 'cloudflare-production', 'version_mode', version.json?.mode);
+    note(typeof version.json?.sourceRevision === 'string' && version.json.sourceRevision.length === 40, 'version_sha', version.json?.sourceRevision);
   }
 
-  const start = await get(GOOGLE_START_PATH);
-  const location = start.res.headers.get('location') || '';
-  let startUrl;
-  try { startUrl = new URL(location); } catch { startUrl = null; }
-  note(start.res.status === 302, 'google_start_status', start.res.status);
-  note(startUrl?.origin === 'https://accounts.google.com' && startUrl.pathname === '/o/oauth2/v2/auth', 'google_start_host', location.slice(0, 120));
-  note(Boolean(startUrl?.searchParams.get('client_id')?.endsWith('.apps.googleusercontent.com')), 'google_client_id', 'missing');
-  note(startUrl?.searchParams.get('redirect_uri') === origin + GOOGLE_CALLBACK_PATH, 'google_redirect', startUrl?.searchParams.get('redirect_uri'));
-  note(startUrl?.searchParams.get('scope') === GOOGLE_SCOPES, 'google_scope', startUrl?.searchParams.get('scope'));
-  note(startUrl?.searchParams.get('code_challenge_method') === 'S256', 'google_pkce', startUrl?.searchParams.get('code_challenge_method'));
-  note(!location.includes('gmail.readonly'), 'no_gmail_mailbox', 'gmail.readonly present');
+  for (const path of PHANTOM_ROUTES) {
+    const phantom = await get(path, 'phantom_route');
+    if (!phantom.fetchError) {
+      note(phantom.res.status === 404, 'phantom_route', `${path} -> ${phantom.res.status}`);
+    }
+  }
 
-  const ready = await get('/api/ready');
-  note(ready.res.status === 200 && ready.json?.status === 'ready', 'ready', ready.res.status);
+  const start = await get(GOOGLE_START_PATH, 'google_start');
+  if (!start.fetchError) {
+    const location = start.res.headers.get('location') || '';
+    let startUrl;
+    try { startUrl = new URL(location); } catch { startUrl = null; }
+    note(start.res.status === 302, 'google_start_status', start.res.status);
+    note(startUrl?.origin === 'https://accounts.google.com' && startUrl.pathname === '/o/oauth2/v2/auth', 'google_start_host', location.slice(0, 120));
+    note(Boolean(startUrl?.searchParams.get('client_id')?.endsWith('.apps.googleusercontent.com')), 'google_client_id', 'missing');
+    note(startUrl?.searchParams.get('redirect_uri') === origin + GOOGLE_CALLBACK_PATH, 'google_redirect', startUrl?.searchParams.get('redirect_uri'));
+    note(startUrl?.searchParams.get('scope') === GOOGLE_SCOPES, 'google_scope', startUrl?.searchParams.get('scope'));
+    note(startUrl?.searchParams.get('code_challenge_method') === 'S256', 'google_pkce', startUrl?.searchParams.get('code_challenge_method'));
+    note(!location.includes('gmail.readonly'), 'no_gmail_mailbox', 'gmail.readonly present');
+  }
 
-  const home = await get('/');
-  note(home.res.status === 200, 'home', home.res.status);
-  note(!/clerk\.browser\.js|@clerk\/clerk-js/.test(home.text), 'home_no_clerk_sdk', 'clerk sdk');
+  const ready = await get('/api/ready', 'ready');
+  if (!ready.fetchError) {
+    note(ready.res.status === 200 && ready.json?.status === 'ready', 'ready', ready.res.status);
+  }
+
+  const home = await get('/', 'home');
+  if (!home.fetchError) {
+    note(home.res.status === 200, 'home', home.res.status);
+    note(!/clerk\.browser\.js|@clerk\/clerk-js/.test(home.text), 'home_no_clerk_sdk', 'clerk sdk');
+  }
 
   return {
     ok: failures.length === 0,

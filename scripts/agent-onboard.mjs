@@ -258,7 +258,8 @@ export async function onboardMain(argv) {
     } else {
       out = { dryRun: true, notWritten: path, ...out };
     }
-  } else {
+  } else if (cmd !== "checklist" && cmd !== "status") {
+    // Read-only commands must not create or rewrite the state file (L-47).
     saveState(state, path);
   }
   console.log(JSON.stringify(out, null, 2));
