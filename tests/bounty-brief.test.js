@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { bountyContributorBrief, bountyContributorSkillMd, renderBountyPacket } from "../client/bounty-brief.mjs";
+import { bountyContributorBrief, bountyContributorSkillMd, renderBountyPacket, yamlSafeLine } from "../client/bounty-brief.mjs";
 import { parseBriefArgs, briefFromStdinJson } from "../scripts/bounty-brief.mjs";
 
 const bounty = {
@@ -30,6 +30,16 @@ test("skill markdown wraps the same brief", () => {
   assert.match(skill, /^---\nname: project-room-bounty/m);
   assert.match(skill, /Contribute to Project Room bounty b-1/);
   assert.match(skill, /untrusted task data/);
+});
+
+test("skill description stays one YAML line when the title has quotes and newlines", () => {
+  const messy = { ...bounty, title: 'Fix "wake"\nand ship' };
+  const skill = bountyContributorSkillMd(messy, { origin: "https://room.example", roomId: "den" });
+  const descLine = skill.split("\n").find(line => line.startsWith("description:"));
+  assert.ok(descLine);
+  assert.equal(descLine.includes("\n"), false);
+  assert.match(descLine, /Fix 'wake' and ship/);
+  assert.equal(yamlSafeLine('a\n"b"', 20), "a 'b'");
 });
 
 test("invalid bounties fail closed", () => {

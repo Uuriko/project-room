@@ -45,13 +45,19 @@ export function bountyContributorBrief(bounty, { origin, roomId } = {}) {
   ].join("\n");
 }
 
+export function yamlSafeLine(value, max) {
+  const text = typeof value === "string" ? value : "";
+  return text.replace(/[\r\n]+/g, " ").replace(/\\/g, "\\\\").replace(/"/g, "'").replace(/\s+/g, " ").trim().slice(0, max);
+}
+
 export function bountyContributorSkillMd(bounty, { origin, roomId } = {}) {
   const b = normalizeBounty(bounty);
   const brief = bountyContributorBrief(bounty, { origin, roomId });
+  const description = yamlSafeLine(`Contribute to Project Room bounty ${b.bountyId}: ${b.title}`, 200);
   return [
     "---",
     "name: project-room-bounty",
-    `description: "Contribute to Project Room bounty ${b.bountyId}: ${b.title.replace(/"/g, "'")}"`,
+    `description: "${description}"`,
     "---",
     "",
     brief
