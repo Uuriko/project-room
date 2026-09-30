@@ -126,7 +126,11 @@ function indexReviews(reviews) {
 function matchReview(decision, index) {
   const key = scopeKey(decision.accountId, decision.sourceId, decision.messageId);
   let candidates = null, scoped = false;
-  if (decision.accountId !== null && decision.sourceId !== null && index.scoped.has(key)) {
+  if (decision.accountId !== null && decision.sourceId !== null) {
+    // M-21: scoped decisions join on the full triple only. Falling back to
+    // the unscoped index here can match a *different account's* scoped
+    // review, leaking cross-account moderation evidence — return no match.
+    if (!index.scoped.has(key)) return { review: null, scoped: true, ambiguous: false };
     candidates = index.scoped.get(key); scoped = true;
   } else if (index.unscoped.has(decision.messageId)) {
     candidates = index.unscoped.get(decision.messageId);

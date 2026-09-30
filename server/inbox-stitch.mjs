@@ -151,7 +151,10 @@ function jaroWinkler(a, b) {
   if (a === b) return 1;
   const la = a.length, lb = b.length;
   if (!la || !lb) return 0;
-  const range = Math.max(la, lb) / 2 - 1;
+  // M-9: the matching window is floored per the standard definition — a
+  // fractional window indexes b[1.5] → undefined and undercounts matches
+  // for odd max lengths.
+  const range = Math.max(0, Math.floor(Math.max(la, lb) / 2) - 1);
   const ma = new Array(la).fill(false), mb = new Array(lb).fill(false);
   let matches = 0;
   for (let i = 0; i < la; i++) {
