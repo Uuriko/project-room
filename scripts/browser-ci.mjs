@@ -41,7 +41,12 @@ function main() {
   const plan = browserPlan(script);
   const suffix = shard ? `-${shard.index}-of-${shard.total}` : "";
   const destination = `test-results/browser-junit${suffix}.xml`;
-  const receiptPath = `test-results/browser-shard${suffix}.json`;
+  // The receipt filename carries the run attempt: a single-shard re-run
+  // uploads a second receipt for the same shard, and the aggregator keeps
+  // the latest attempt per shard instead of requiring every receipt to
+  // share one attempt number.
+  const attempt = process.env.GITHUB_RUN_ATTEMPT ?? "local";
+  const receiptPath = `test-results/browser-shard${suffix}-attempt-${attempt}.json`;
   const files = shard ? plan.shards[shard.index - 1].files : plan.files;
   if (!files.length) throw new Error("Refusing an empty browser shard");
   mkdirSync(dirname(destination), { recursive: true });

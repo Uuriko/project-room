@@ -152,7 +152,12 @@ jobs:
           node-version: 24
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          pattern: conversation-browser-evidence-*-attempt-${{ github.run_attempt }}
+          # All attempts in this run: a re-run shard uploads under a new attempt
+          # number, and browser-shards-check.mjs keeps the latest attempt per
+          # shard. Scoping this to the aggregator's own attempt broke
+          # single-shard re-runs (the untouched shards' receipts live under
+          # the earlier attempt).
+          pattern: conversation-browser-evidence-*
           path: browser-evidence
           merge-multiple: true
       - name: Require all four successful browser shards from this run

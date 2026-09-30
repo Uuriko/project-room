@@ -32,8 +32,8 @@ test("four CLI shards execute each canonical test once and aggregate only comple
   assert.equal(gate().status, 0);
   for (const state of ["failure", "cancelled", "skipped", ""]) assert.notEqual(gate({ BROWSER_MATRIX_RESULT: state }).status, 0, state);
   assert.notEqual(gate({ GITHUB_SHA: "different-revision" }).status, 0);
-  assert.notEqual(gate({ GITHUB_RUN_ATTEMPT: "2" }).status, 0);
-  const receiptPath = join(dir, "test-results/browser-shard-4-of-4.json");
+  assert.equal(gate({ GITHUB_RUN_ATTEMPT: "2" }).status, 0, "earlier-attempt receipts accepted by a re-run aggregator");
+  const receiptPath = join(dir, "test-results/browser-shard-4-of-4-attempt-1.json");
   const receipt = readFileSync(receiptPath, "utf8");
   rmSync(receiptPath); assert.notEqual(gate().status, 0, "missing successful shard fails closed");
   writeFileSync(receiptPath, receipt);
@@ -46,6 +46,41 @@ test("four CLI shards execute each canonical test once and aggregate only comple
   assert.notEqual(failed.status, 0, "child failure propagates");
   assert.match(failed.stdout, /intentional child failure/);
   assert.notEqual(gate().status, 0, "stale success is replaced by failure receipt");
+});
+
+test("single-shard re-run: latest attempt per shard wins, untouched shards keep earlier receipts", t => {
+  const dir = mkdtempSync(join(tmpdir(), "browser-shards-rerun-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  mkdirSync(join(dir, "scripts"));
+  for (const name of ["browser-ci.mjs", "browser-ci-reporter.mjs", "browser-ci-durations.json", "browser-shards.mjs", "browser-shards-check.mjs"]) cpSync(join("scripts", name), join(dir, "scripts", name));
+  const files = Array.from({ length: 9 }, (_, i) => `scripts/check-${i}.mjs`);
+  for (const [i, file] of files.entries()) writeFileSync(join(dir, file), `import test from 'node:test'; test('browser case ${i}', () => { if (process.env.FAIL_CASE === '${i}') throw new Error('intentional child failure'); });\n`);
+  writeFileSync(join(dir, "package.json"), JSON.stringify({ scripts: { "test:browser": `node --test --test-concurrency=1 ${files.join(" ")}` } }));
+  const base = { ...process.env, GITHUB_SHA: "rerun-revision", GITHUB_RUN_ID: "rerun-run", BROWSER_MATRIX_RESULT: "success" };
+  delete base.NODE_TEST_CONTEXT;
+  const invoke = (args = [], more = {}) => spawnSync(process.execPath, ["scripts/browser-ci.mjs", ...args], { cwd: dir, env: { ...base, ...more }, encoding: "utf8", timeout: 30000 });
+  // Attempt 1: all four shards pass.
+  for (let index = 1; index <= 4; index++) assert.equal(invoke([`--shard=${index}/4`], { GITHUB_RUN_ATTEMPT: "1" }).status, 0);
+  const gate = (more = {}) => spawnSync(process.execPath, ["scripts/browser-shards-check.mjs", "test-results"], { cwd: dir, env: { ...base, GITHUB_RUN_ATTEMPT: "1", ...more }, encoding: "utf8", timeout: 30000 });
+  assert.equal(gate().status, 0);
+  const plan = browserPlan(JSON.parse(readFileSync(join(dir, "package.json"), "utf8")).scripts["test:browser"]);
+  const target = plan.shards.find(shard => shard.files.includes("scripts/check-1.mjs"));
+  const shardArg = `--shard=${target.index}/4`;
+  // Attempt 2: the target shard is re-run and fails. The aggregator (also
+  // attempt 2) sees the failure receipt as the shard's latest and fails
+  // closed, even though an attempt-1 success receipt still exists.
+  assert.notEqual(invoke([shardArg], { GITHUB_RUN_ATTEMPT: "2", FAIL_CASE: "1" }).status, 0);
+  const gate2 = (more = {}) => spawnSync(process.execPath, ["scripts/browser-shards-check.mjs", "test-results"], { cwd: dir, env: { ...base, GITHUB_RUN_ATTEMPT: "2", ...more }, encoding: "utf8", timeout: 30000 });
+  assert.notEqual(gate2().status, 0, "re-run failure supersedes earlier success");
+  assert.notEqual(gate2({ BROWSER_MATRIX_RESULT: "failure" }).status, 0);
+  // Attempt 2 retry: the shard passes. Gate now passes on mixed attempts
+  // (untouched shards from attempt 1; re-run shard from attempt 2).
+  assert.equal(invoke([shardArg], { GITHUB_RUN_ATTEMPT: "2" }).status, 0);
+  assert.equal(gate2().status, 0, "mixed-attempt success passes");
+  // A receipt from a different run fails closed even at a higher attempt.
+  writeFileSync(join(dir, "test-results/browser-shard-1-of-4-attempt-9.json"),
+    JSON.stringify({ index: 1, total: 4, files: [], planHash: "nope", status: 0, signal: null, revision: "rerun-revision", runId: "other-run", runAttempt: "9" }));
+  assert.notEqual(gate2().status, 0, "foreign runId receipt fails closed");
 });
 
 test("canonical suite partition is complete and deterministic with bounded timing estimates", () => {
