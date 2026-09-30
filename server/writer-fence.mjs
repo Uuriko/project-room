@@ -26,6 +26,7 @@ const rebuiltAdditiveTables = ["agent_invite_codes", "wake_queue", "wake_queue_c
 // fence): older writers have no code path to the table, and Inbox.verify()
 // replays the read/unread journal against actual rows as the integrity gate.
 export const unfencedAdditiveTables = Object.freeze([
+  "public_work_tasks", "public_work_requests", "public_work_receipts", "public_work_claim_writer_permit", // Public namespaces use a separate transaction permit; v36 private claims remain compatible.
   "project_offers", "project_offer_requests", // Owner-authored public terms, additive; older writers have no routes.
   "request_runs", // Permanent host reservations; older writers have no execution route.
   "private_inbox_reads",
