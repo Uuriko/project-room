@@ -34,11 +34,28 @@ export function browserPlan(script) {
 export function verifyBrowserShards(plan, receipts, { matrixResult, revision, runId, runAttempt }) {
   if (matrixResult !== "success") throw new Error(`Browser matrix did not succeed: ${matrixResult ?? "missing"}`);
   if (!revision || !runId || !runAttempt) throw new Error("Missing run identity");
-  if (!Array.isArray(receipts) || receipts.length !== SHARD_COUNT) throw new Error("Missing or duplicate browser shard receipts");
+  if (!Array.isArray(receipts) || !receipts.length) throw new Error("Missing browser shard receipts");
+  // A re-run shard uploads a second receipt for the same shard under a new
+  // attempt number. The latest attempt per shard is authoritative: this is
+  // what lets one failed shard be re-run without re-running the whole
+  // matrix, and lets a re-run aggregator accept the untouched shards'
+  // earlier receipts. runId + revision + planHash still bind every receipt
+  // to this exact run and suite.
+  const attemptNumber = receipt => {
+    const n = Number(receipt?.runAttempt);
+    return Number.isFinite(n) ? n : -1;
+  };
+  const latest = new Map();
+  for (const receipt of receipts) {
+    const index = receipt?.index;
+    if (!Number.isInteger(index) || index < 1 || index > SHARD_COUNT) throw new Error("Browser shard receipt has invalid index");
+    const current = latest.get(index);
+    if (!current || attemptNumber(receipt) > attemptNumber(current)) latest.set(index, receipt);
+  }
+  if (latest.size !== SHARD_COUNT) throw new Error("Missing or duplicate browser shard receipts");
   for (const shard of plan.shards) {
-    const matches = receipts.filter(receipt => receipt?.index === shard.index);
-    const receipt = matches[0];
-    if (matches.length !== 1 || receipt.total !== SHARD_COUNT || receipt.status !== 0 || receipt.signal !== null || receipt.planHash !== plan.planHash || receipt.revision !== revision || receipt.runId !== runId || receipt.runAttempt !== runAttempt || JSON.stringify(receipt.files) !== JSON.stringify(shard.files) || !shard.files.length) {
+    const receipt = latest.get(shard.index);
+    if (receipt.total !== SHARD_COUNT || receipt.status !== 0 || receipt.signal !== null || receipt.planHash !== plan.planHash || receipt.revision !== revision || receipt.runId !== runId || JSON.stringify(receipt.files) !== JSON.stringify(shard.files) || !shard.files.length) {
       throw new Error(`Browser shard ${shard.index} has missing, failed, stale or mismatched evidence`);
     }
   }
