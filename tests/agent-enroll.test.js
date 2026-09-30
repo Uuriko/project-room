@@ -420,3 +420,31 @@ test("roomId validates like the other optional fields", async t => {
   const { res } = await h.call("POST", "/api/agents/enroll", { name: "No Room" });
   assert.equal(res.jsonValue.roomJoin, null);
 });
+
+test("H-23: a failing inline room join mints no credential — the shown-once key is never committed-but-undelivered", async t => {
+  // Contract: the guest key is issued only after the inline room join
+  // succeeds (join-then-commit). Credible regression: the old order issued
+  // the shown-once rak_ key first and joined after, so a join failure
+  // committed the key but never delivered it — and the idempotent retry
+  // returns guestToken: null, losing the credential forever.
+  const h = harness(t);
+  const failingJoin = createAgentEnrollRoutes({
+    ...h.deps,
+    accessRequests: { request: () => { throw new ServiceError(500, "join_failed", "room join backend down"); } },
+  });
+  const keyCount = () => h.store.db.prepare("SELECT count(*) AS n FROM agent_api_keys").get().n;
+  const before = keyCount();
+  const res = {};
+  let error = null;
+  try {
+    await failingJoin(
+      { method: "POST", headers: {}, parsedBody: { name: "Join Fail Bot", roomId: "commons" } },
+      res,
+      { url: new URL("/api/agents/enroll", "http://127.0.0.1"), remoteAddress: "127.0.0.1" },
+    );
+  } catch (e) { error = e; }
+  assert.ok(error, "the join failure surfaces instead of a 201 with a lost key");
+  assert.equal(error.code, "join_failed");
+  assert.equal(keyCount(), before, "no API key was committed when the join failed");
+  assert.ok(!("statusCode" in res), "no response was sent with an undelivered credential");
+});

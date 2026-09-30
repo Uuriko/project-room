@@ -371,3 +371,22 @@ describe('work-claim-store', () => {
     assert.ok(seen.has('WC_INVALID_TRANSITION'));
   });
 });
+
+// H-14 regression (audit 2026-09-30): restore must reseed the id counter.
+// Contract: after restore(), the next generated id must not collide with a
+// restored record. Credible regression: pre-fix, restore() never touches
+// idCounter, so the next claim() mints wc-1 again and silently overwrites the
+// restored claim (a live lease holder could vanish). Existing coverage: no
+// restore-after-creation test existed. No new production seams: public
+// claim/snapshot/restore/get API with the default counter-based ids.
+it('H-14: restore reseeds the id counter — a claim after restore cannot reuse a restored id', () => {
+  const { store } = makeStore();
+  const c1 = store.claim(CLAIM(), 'agent');
+  assert.equal(c1.id, 'wc-1');
+  const snap = store.snapshot();
+  const { store: store2 } = makeStore({ start: 2_000_000 });
+  store2.restore(snap, 'agent');
+  const c2 = store2.claim(CLAIM({ taskId: 'B006-3', files: ['src/other.mjs'] }), 'agent');
+  assert.equal(c2.id, 'wc-2', 'new claim must not reuse the restored wc-1');
+  assert.equal(store2.get('wc-1').taskId, 'B006-2', 'restored claim must not be overwritten');
+});

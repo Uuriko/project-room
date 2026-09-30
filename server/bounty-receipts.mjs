@@ -378,8 +378,13 @@ const PAYLOAD_SCHEMAS = {
     keys: ["entries", "entryHashes", "reason", "refundTo"],
     check: p => {
       checkEntries(p);
-      if (!["timeout", "dispute-cancel", "split"].includes(p.reason))
-        fail("invalid_receipt", 'payload.reason must be "timeout", "dispute-cancel" or "split"');
+      // Vocabulary must cover every reason the escrow actually emits (H-21):
+      // "verification-rejected" (rejectWork) and "unverified"
+      // (_settleUnverified) previously failed shape validation, so enabling
+      // receipt signing rolled the whole reject/refund transaction back and
+      // funds stayed locked.
+      if (!["timeout", "dispute-cancel", "split", "verification-rejected", "unverified"].includes(p.reason))
+        fail("invalid_receipt", 'payload.reason must be "timeout", "dispute-cancel", "split", "verification-rejected" or "unverified"');
       nonEmpty(p.refundTo, 256, "payload.refundTo");
     },
   },

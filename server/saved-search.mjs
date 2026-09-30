@@ -10,6 +10,15 @@ export function createSavedSearches({ store } = {}) {
   check(store === undefined || store instanceof Map, "store must be a Map if given");
   const users = store ?? new Map();
   let searchCounter = 0;
+  // H-14: seed the counter from existing store contents. The store is
+  // caller-owned and may be pre-populated; minting ss-1 again would create
+  // duplicate searchIds.
+  for (const searches of users.values()) {
+    for (const s of searches) {
+      const m = /^ss-(\d+)$/.exec(s.searchId);
+      if (m) searchCounter = Math.max(searchCounter, Number(m[1]));
+    }
+  }
   const searchesFor = userId => {
     check(typeof userId === "string" && userId.length > 0, "userId must be a non-empty string");
     if (!users.has(userId)) users.set(userId, []);

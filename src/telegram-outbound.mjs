@@ -51,6 +51,10 @@
  *   TG_SEND_TRANSIENT           — transient sender failure (retryable; a chunk
  *                                 may carry this as its lastError while the
  *                                 message as a whole ends in `failed`)
+ *   TG_BUDGET_EXHAUSTED         — the per-chat rate budget filled mid-send
+ *                                 (interleaved sends); the message ends in
+ *                                 `failed` with sentChunks recorded so the
+ *                                 operator sees exactly what went out
  * Failures are never silent.
  */
 
@@ -419,7 +423,13 @@ export function createTelegramOutbound(deps = {}) {
       const msg = getMessageOrThrow(id);
       assertState(msg, ['queued'], 'send');
 
-      if (pruneWindow(msg.chatId).length >= maxPerWindow) {
+      // Budget is per delivered chunk (each chunk is one Telegram API message),
+      // so the whole message must fit before the first chunk goes out: a
+      // 5-chunk message needs 5 free slots, not 1 (H-15: the old check let a
+      // long message overshoot the window by chunks.length - 1).
+      const chunkCount = msg.chunks.length;
+      const used = pruneWindow(msg.chatId).length;
+      if (used + chunkCount > maxPerWindow) {
         // Over budget: stay queued, loudly. The caller decides when to retry.
         record({
           at: clock(),
@@ -429,7 +439,7 @@ export function createTelegramOutbound(deps = {}) {
           detail: {
             messageId: id,
             reason: 'rate budget exhausted',
-            budget: { used: pruneWindow(msg.chatId).length, maxPerWindow, windowMs },
+            budget: { used, needed: chunkCount, maxPerWindow, windowMs },
           },
         });
         return snapshot(msg);
@@ -438,6 +448,25 @@ export function createTelegramOutbound(deps = {}) {
       transition(msg, 'sending', actor, { chunkCount: msg.chunks.length });
 
       for (let i = 0; i < msg.chunks.length; i += 1) {
+        // Per-chunk budget (H-15): an interleaved send may have consumed the
+        // window since the pre-check. Never emit a chunk into a full window —
+        // the message fails loudly with exactly sentChunks recorded, instead
+        // of silently overshooting the operator's budget.
+        if (pruneWindow(msg.chatId).length >= maxPerWindow) {
+          msg.failedAt = clock();
+          msg.lastError = {
+            code: 'TG_BUDGET_EXHAUSTED',
+            message: `Rate budget exhausted mid-send at chunk ${i} of ${msg.chunks.length} for message ${id}`,
+            chunkIndex: i,
+            attempts: 0,
+          };
+          return transition(msg, 'failed', actor, {
+            code: 'TG_BUDGET_EXHAUSTED',
+            chunkIndex: i,
+            sentChunks: msg.sentChunks,
+            reason: msg.lastError.message,
+          });
+        }
         const payload = {
           chatId: msg.chatId,
           text: msg.chunks[i],
@@ -519,7 +548,9 @@ export function createTelegramOutbound(deps = {}) {
       const sent = [];
       const skipped = [];
       for (const msg of queued) {
-        if (pruneWindow(msg.chatId).length >= maxPerWindow) {
+        // Same whole-message budget check as sendOne: a multi-chunk message
+        // needs all of its chunk slots free, not just one (H-15).
+        if (pruneWindow(msg.chatId).length + msg.chunks.length > maxPerWindow) {
           skipped.push(msg.id);
           continue;
         }

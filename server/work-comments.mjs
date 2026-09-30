@@ -24,6 +24,15 @@ export function createComments({ store } = {}) {
   check(store === undefined || store instanceof Map, "store must be a Map if given");
   const comments = store ?? new Map();
   let commentCounter = 0;
+  // H-14: seed the counter from existing store contents. The store is
+  // caller-owned and may be pre-populated; minting c-1 again would create
+  // duplicate commentIds.
+  for (const list of comments.values()) {
+    for (const c of list) {
+      const m = /^c-(\d+)$/.exec(c.commentId);
+      if (m) commentCounter = Math.max(commentCounter, Number(m[1]));
+    }
+  }
   // Add a comment to a work item. commentId/createdAt are optional and
   // caller-supplied; createdAt defaults to null (no wall-clock read).
   const add = (workItemId, { authorId, text, commentId, createdAt }) => {
