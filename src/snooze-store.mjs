@@ -88,6 +88,21 @@ export function createSnoozeStore(deps = {}) {
   let idCounter = 0;
   const newId = deps.id ?? (() => `snooze-${(idCounter += 1)}`);
 
+  // H-14: after restore()/storage load, the next generated id must not
+  // collide with a restored record. Reseed the counter from the numeric
+  // suffixes present in the map (ids not matching the snooze-N shape, e.g.
+  // from an injected id fn, are ignored). Monotonic: never lowers the
+  // counter. Lives in loadSnapshotObject so both restore() and the eager
+  // storage load at creation are covered.
+  const reseedIdCounter = () => {
+    let max = 0;
+    for (const id of records.keys()) {
+      const m = /^snooze-(\d+)$/.exec(id);
+      if (m) max = Math.max(max, Number(m[1]));
+    }
+    idCounter = Math.max(idCounter, max);
+  };
+
   /** Internal records, keyed by id. */
   const records = new Map();
 
@@ -210,6 +225,7 @@ export function createSnoozeStore(deps = {}) {
     for (const rec of snap.records) {
       records.set(rec.id, { ...rec });
     }
+    reseedIdCounter();
   }
 
   // Eager load: a corrupt persisted state throws at creation, never silently.

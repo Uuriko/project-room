@@ -198,6 +198,19 @@ export function createUnifiedInboxStore(deps = {}) {
   let idCounter = 0;
   const newId = deps.id ?? (() => `msg-${(idCounter += 1)}`);
 
+  // H-14: after restore(), the next generated id must not collide with a
+  // restored record. Reseed the counter from the numeric suffixes present in
+  // the map (ids not matching the msg-N shape, e.g. caller-supplied or from
+  // an injected id fn, are ignored). Monotonic: never lowers the counter.
+  const reseedIdCounter = () => {
+    let max = 0;
+    for (const id of messages.keys()) {
+      const m = /^msg-(\d+)$/.exec(id);
+      if (m) max = Math.max(max, Number(m[1]));
+    }
+    idCounter = Math.max(idCounter, max);
+  };
+
   /** Internal message records, keyed by id. */
   const messages = new Map();
 
@@ -420,6 +433,7 @@ export function createUnifiedInboxStore(deps = {}) {
       for (const message of migrated.messages) {
         messages.set(message.id, { ...message });
       }
+      reseedIdCounter();
       persist();
       emit({ type: 'store-restored', messageId: null });
       return this.snapshot();

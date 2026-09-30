@@ -372,3 +372,23 @@ describe('snooze-store', () => {
     assert.equal(rec.id, 'custom-1');
   });
 });
+
+// H-14 regression (audit 2026-09-30): restore must reseed the id counter.
+// Contract: after restore(), the next generated id must not collide with a
+// restored record. Credible regression: pre-fix, loadSnapshotObject() never
+// touches idCounter, so the next snooze() mints snooze-1 again and silently
+// overwrites the restored record. Existing coverage: no restore-after-
+// creation test existed. No new production seams: public snooze/snapshot/
+// restore/get API with default counter-based ids.
+it('H-14: restore reseeds the id counter — a snooze after restore cannot reuse a restored id', () => {
+  const fc = fakeClock();
+  const store = createSnoozeStore({ clock: fc.clock });
+  const r1 = store.snooze('msg-a', fc.clock() + HOUR, 'note-a');
+  assert.equal(r1.id, 'snooze-1');
+  const snap = store.snapshot();
+  const store2 = createSnoozeStore({ clock: fc.clock });
+  store2.restore(snap);
+  const r2 = store2.snooze('msg-b', fc.clock() + HOUR);
+  assert.equal(r2.id, 'snooze-2', 'new snooze must not reuse the restored snooze-1');
+  assert.equal(store2.get('snooze-1').note, 'note-a', 'restored snooze must not be overwritten');
+});

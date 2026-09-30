@@ -436,3 +436,23 @@ describe('unified-inbox-store', () => {
     });
   });
 });
+
+// H-14 regression (audit 2026-09-30): restore must reseed the id counter.
+// Contract: after restore(), the next generated id must not collide with a
+// restored record. Credible regression: pre-fix, restore() never touches
+// idCounter, so the next upsertMessage() mints msg-1 again and silently
+// overwrites the restored message. Existing coverage: no restore-after-
+// creation test existed. No new production seams: public upsertMessage/
+// snapshot/restore/getMessage API with default counter-based ids.
+it('H-14: restore reseeds the id counter — a message after restore cannot reuse a restored id', () => {
+  const fc = fakeClock();
+  const store = createUnifiedInboxStore({ clock: fc.clock, storage: fakeStorage() });
+  const m1 = store.upsertMessage(MSG());
+  assert.equal(m1.id, 'msg-1');
+  const snap = store.snapshot();
+  const store2 = createUnifiedInboxStore({ clock: fc.clock, storage: fakeStorage() });
+  store2.restore(snap);
+  const m2 = store2.upsertMessage(MSG({ subject: 'Second' }));
+  assert.equal(m2.id, 'msg-2', 'new message must not reuse the restored msg-1');
+  assert.equal(store2.getMessage('msg-1').subject, 'Intro', 'restored message must not be overwritten');
+});
