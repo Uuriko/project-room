@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 
 const helper = fileURLToPath(new URL("../scripts/deploy-live.py", import.meta.url));
 const wireMetadata = script => {
-  const result = spawnSync("python3", ["-c", `
+  const result = spawnSync("python3", ["-B", "-c", `
 import contextlib, importlib.util, io, json, pathlib, sys, tempfile, types, urllib.request
 # No surrogate credential or network can be used by this fixture.
 def forbidden(*args, **kwargs): raise AssertionError("unexpected credential/network call")
