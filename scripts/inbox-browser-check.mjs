@@ -16,7 +16,8 @@ import { normalizeGraphEmail } from "../server/graph-email.mjs";
 import { seedRecordedReply } from "./reply-review-fixture.mjs";
 import { prepareGraphReplyUpdate } from "../server/graph-reply-draft.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
-import { fillAccessKey } from "./auth-signin.mjs";
+import { signInFixture } from "./auth-signin.mjs";
+import { signInFixtureInPlace } from "./in-place-fixture-signin.mjs";
 
 // The attention lane syncs the read horizon (debounced, best-effort) while the
 // room view is up, and every sync bumps read_horizons.updated_at. That write is
@@ -68,8 +69,7 @@ async function setup(t, mobile = false, simulate = false, accountOnly = false) {
   page.on("dialog", dialog => dialog.accept());
   await page.route("**/*", route => { if (new URL(route.request().url()).origin !== origin) { external.push(route.request().url()); return route.abort(); } return route.continue(); });
   await page.goto(origin + (accountOnly ? "/?account=1#pr-view/rooms" : "/?room=commons"));
-  await fillAccessKey(page, accountKey); await page.locator('#auth-form button[type="submit"]').click();
-  await page.locator(accountOnly ? "#account-rooms-panel" : "#main").waitFor({ state: "visible" });
+  await signInFixture(page, accountKey); await page.locator(accountOnly ? "#account-rooms-panel" : "#main").waitFor({ state: "visible" });
   // Opening the inbox lists the connections and opens the first message, two independent round
   // trips; on a phone the opened reader covers the sidebar. Settle both before any sidebar step:
   // the reader rendered, and the connection list rendered (the product unhides the add-connection
@@ -425,8 +425,7 @@ test("provider preview cannot repopulate private content after another tab chang
   const other = await p.context().newPage(); await other.goto(f.origin + "/?room=commons");
   await other.locator("#main").waitFor(); if (await other.locator("#session-menu-button").isVisible()) await other.locator("#session-menu-button").click(); await clickChrome(other, "#signout-button"); await other.locator("#auth-panel").waitFor();
   const guest = f.store.accountForMember("commons", "guest");
-  await fillAccessKey(other, f.store.issueAccountAccessKey(guest.id)); await other.locator('#auth-form button[type="submit"]').click();
-  await other.locator("#main").waitFor(); await p.locator("#auth-panel").waitFor(); release(); await p.waitForLoadState("networkidle");
+  await signInFixture(other, f.store.issueAccountAccessKey(guest.id)); await other.locator("#main").waitFor(); await p.locator("#auth-panel").waitFor(); release(); await p.waitForLoadState("networkidle");
   assert.equal(await p.locator("#inbox-reply-dialog").isVisible(), false);
   assert.equal(await p.locator("#inbox-reply-body").textContent(), ""); assert.equal(await p.locator("#inbox-reply-addresses").textContent(), "");
   for (const id of ["inbox-reply-original-body", "inbox-reply-local-body"]) assert.equal(await p.locator("#" + id).textContent(), "");
@@ -448,8 +447,7 @@ test("opt-in sample mailbox review is usable from account Inbox without entering
   const sample = await createInboxSandbox({ includeEmailReview: true }), browser = await chromium.launch({ headless: true });
   t.after(async () => { await browser.close(); await sample.close(); rmSync(sample.directory, { recursive: true, force: true }); });
   const page = await browser.newPage(); page.setDefaultTimeout(9000);
-  await page.goto(sample.accountUrl); await fillAccessKey(page, sample.accountKey); await page.locator('#auth-form button[type="submit"]').click();
-  await page.locator("#inbox-list").getByText("A small collaboration", { exact: true }).click();
+  await page.goto(sample.accountUrl); await signInFixture(page, sample.accountKey, { returnTo: sample.accountUrl }); await page.locator("#inbox-list").getByText("A small collaboration", { exact: true }).click();
   await page.locator("#inbox-reply-open").click(); await page.locator("#inbox-reply-confirm:not([disabled])").waitFor();
   await page.locator("#inbox-reply-confirm").click(); await page.locator("#inbox-reply-status").filter({ hasText: "Reviewed · not sent" }).waitFor();
   assert.equal(await page.locator("#main").isVisible(), false); assert.equal(sample.provider.submits, 0);
@@ -734,8 +732,7 @@ test("sample reply: a late preview cannot reopen private text after another tab 
   await other.locator("#main").waitFor(); if (await other.locator("#session-menu-button").isVisible()) await other.locator("#session-menu-button").click(); await clickChrome(other, "#signout-button");
   await other.locator("#auth-panel").waitFor();
   const guest = f.store.accountForMember("commons", "guest"), key = f.store.issueAccountAccessKey(guest.id);
-  await fillAccessKey(other, key); await other.locator('#auth-form button[type="submit"]').click();
-  await other.locator("#main").waitFor(); await p.locator("#auth-panel").waitFor(); release();
+  await signInFixture(other, key); await other.locator("#main").waitFor(); await p.locator("#auth-panel").waitFor(); release();
   await p.waitForLoadState("networkidle");
   assert.equal(await p.locator("#inbox-send-dialog").isVisible(), false);
   assert.equal(await p.locator("#inbox-send-body").textContent(), "");
@@ -749,8 +746,7 @@ test("sample launcher: an empty room owner can sign in and finish a sample reply
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
   page.setDefaultTimeout(9000); const errors = [];
   page.on("pageerror", error => errors.push(error.message));
-  await page.goto(sample.url); await fillAccessKey(page, sample.accountKey); await page.locator('#auth-form button[type="submit"]').click();
-  await page.locator("#inbox-reader").waitFor();
+  await page.goto(sample.url); await signInFixture(page, sample.accountKey, { returnTo: sample.url }); await page.locator("#inbox-reader").waitFor();
   assert.equal(await page.locator("#main").isVisible(), false);
   await page.locator("#inbox-draft").fill("Let’s try one small idea.");
   await page.locator("#inbox-save").click(); await page.getByText("Saved · only you", { exact: true }).waitFor();
@@ -780,8 +776,7 @@ test("sample arrival: two samples and existing localhost cookies coexist in one 
   for (const sample of [first, second]) {
     const page = await context.newPage(); pages.push(page); page.setDefaultTimeout(9000);
     page.on("pageerror", error => errors.push(error.message));
-    await page.goto(sample.url); await fillAccessKey(page, sample.accountKey); await page.locator('#auth-form button[type="submit"]').click();
-    await page.locator("#inbox-reader").waitFor();
+    await page.goto(sample.url); await signInFixture(page, sample.accountKey, { returnTo: sample.url }); await page.locator("#inbox-reader").waitFor();
   }
   const [a, b] = pages;
   await a.locator("#inbox-draft").fill("Only in the first sample");
@@ -999,7 +994,7 @@ test("real inbox: another tab changing the browser account clears private conten
   await other.locator("#main").waitFor({ state: "visible" }); if (await other.locator("#session-menu-button").isVisible()) await other.locator("#session-menu-button").click(); await clickChrome(other, "#signout-button");
   await other.locator("#auth-panel").waitFor({ state: "visible" });
   const guest = f.store.accountForMember("commons", "guest"), key = f.store.issueAccountAccessKey(guest.id);
-  await fillAccessKey(other, key); await other.locator('#auth-form button[type="submit"]').click(); await other.locator("#main").waitFor({ state: "visible" });
+  await signInFixture(other, key); await other.locator("#main").waitFor({ state: "visible" });
   await p.locator("#auth-panel").waitFor({ state: "visible" }); release();
   await p.waitForLoadState("networkidle");
   assert.equal(await p.locator("#inbox-draft").inputValue(), "");
@@ -1329,4 +1324,66 @@ for (const mobile of [false, true]) test(`late sample send ${mobile ? 'mobile' :
   await p.getByText('Sample accepted · delivery unconfirmed', { exact: true }).waitFor();
   assert.equal(f.provider.submits, 1); assert.equal(f.provider.count(), 1);
   assert.equal(await p.locator('#inbox-send-preview').isVisible(), false);
+});
+
+for (const target of ["account", "room"]) test(`fixture account sign-in waits for held ${target} startup before restoring its cookie slot`, { timeout: 30000 }, async t => {
+  const f = createAcceptanceFixture(), account = f.store.accountForMember("commons", "owner"), key = f.store.issueAccountAccessKey(account.id);
+  f.store.completeOnboarding(account.id);
+  const server = createRoomServer({ store: f.store });
+  const counts = { get: 0, post: 0 };
+  server.on("request", request => {
+    if (new URL(request.url, "http://fixture.invalid").pathname !== "/api/account-session") return;
+    if (request.method === "GET") counts.get++;
+    if (request.method === "POST") counts.post++;
+  });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const browser = await chromium.launch({ headless: true });
+  t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
+  const page = await browser.newPage();
+  let captured, release;
+  const held = new Promise(resolve => { captured = resolve; });
+  const gate = new Promise(resolve => { release = resolve; });
+  let first = true;
+  await page.route("**/api/account-session", async route => {
+    if (route.request().method() !== "GET" || !first) return route.continue();
+    first = false; captured(); await gate; await route.continue();
+  });
+  t.after(() => release());
+  const url = `http://127.0.0.1:${server.address().port}/?${target === "account" ? "account=1" : "room=commons"}`;
+  await page.goto(url, { waitUntil: "domcontentloaded" }); await held;
+  const login = signInFixture(page, key, { returnTo: url });
+  await page.waitForTimeout(150);
+  assert.deepEqual(counts, { get: 0, post: 0 }, "fixture setup cannot mint a competing slot or commit before browser startup finishes");
+  release(); const actual = await login;
+  assert.equal(actual.authenticated, true); assert.equal(actual.account.id, account.id);
+  assert.equal(counts.post, 1, "one actual credential commit");
+});
+
+
+test("account-only actual password fixture waits for pending login then opens its existing room", { timeout: 25000 }, async t => {
+  const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const browser = await chromium.launch({ headless: true });
+  let release, started;
+  const pending = new Promise(resolve => { release = resolve; }), reached = new Promise(resolve => { started = resolve; });
+  t.after(async () => { release(); await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
+  const page = await browser.newPage(); page.setDefaultTimeout(8000);
+  await page.goto(`http://127.0.0.1:${server.address().port}/?account=1`);
+  await page.locator('#auth-panel').waitFor({ state: 'visible' });
+  await page.route('**/api/auth/password/login', async route => {
+    const response = await route.fetch();
+    assert.equal(response.status(), 200);
+    started(); await pending; await route.fulfill({ response });
+  }, { times: 1 });
+  let completed = false;
+  const login = signInFixtureInPlace(page, f.store, f.keys.owner).then(() => { completed = true; });
+  await reached;
+  assert.equal(await page.locator('#auth-signin-ui [data-signin-form="password"] button[type="submit"]').isDisabled(), true);
+  assert.equal(await page.locator('#main').isVisible(), false);
+  assert.equal(completed, false, 'fixture must not open a room or complete while real login response is pending');
+  release(); await login;
+  assert.equal(await page.locator('#main').isVisible(), true);
+  const account = await (await page.request.get(new URL('/api/account-session', page.url()).href)).json();
+  assert.equal(account.authenticated, true);
+  assert.equal(account.account.id, f.store.accountForMember('commons', 'owner').id);
 });

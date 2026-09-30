@@ -4,7 +4,7 @@ import { rmSync } from "node:fs";
 import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
-import { fillAccessKey } from "./auth-signin.mjs";
+import { signInFixture } from "./auth-signin.mjs";
 import { clickChrome, openSettings, closeSettings } from "./room-chrome.mjs";
 import { EVENT_TYPES } from "../src/events.js";
 
@@ -34,8 +34,7 @@ async function setup(t) {
   });
   const enter = async () => {
     await page.goto(origin);
-    await fillAccessKey(page, fixture.keys.owner);
-    await page.getByRole("button", { name: "Enter room", exact: true }).click();
+    await signInFixture(page, fixture.keys.owner);
     await page.locator("#main").waitFor({ state: "visible" });
   };
   return { page, requests, enter };

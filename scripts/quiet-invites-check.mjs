@@ -6,7 +6,7 @@ import { mkdirSync, rmSync } from 'node:fs';
 import { chromium } from 'playwright';
 import { createAcceptanceFixture } from './acceptance-fixture.mjs';
 import { createRoomServer } from '../server/http.mjs';
-import { fillAccessKey } from "./auth-signin.mjs";
+import { signInFixture } from "./auth-signin.mjs";
 
 for (const touch of [false, true]) {
   test(`quiet invitations ${touch ? 'touch' : 'desktop'}: disclosure, truthful limits, late-list ordering and retry`, { timeout: 60000 }, async t => {
@@ -29,8 +29,7 @@ for (const touch of [false, true]) {
     const page = await context.newPage(); page.setDefaultTimeout(10000);
     const errors = []; page.on('pageerror', error => errors.push(error.message));
     await page.goto(origin);
-    await fillAccessKey(page, fixture.keys.owner);
-    await page.getByRole('button', { name: 'Enter room', exact: true }).click();
+    await signInFixture(page, fixture.keys.owner);
     await page.locator('#main').waitFor({ state: 'visible' });
     await page.waitForFunction(() => document.querySelector('#connection-status').textContent === 'Connected');
     assert.equal(await page.locator('#connection-details').evaluate(el => el.open), false);

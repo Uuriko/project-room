@@ -55,7 +55,7 @@ test("catalog click fills the same Connect join path as the named roster", () =>
   assert.equal(catalogSelection("claude-code").route, "mcp");
   assert.equal(catalogSelection("claude-code").joinPath, "mcp-url");
   assert.equal(catalogSelection("cursor").joinPath, "paste-prompt");
-  assert.equal(catalogSelection("pi").joinPath, "invite-code");
+  assert.equal(catalogSelection("pi").joinPath, "paste-prompt");
   assert.equal(catalogSelection("unknown"), null);
   assert.equal(routeFromDisplayName("Claude Code"), "mcp");
   assert.equal(routeFromDisplayName("Pi"), "mcp");

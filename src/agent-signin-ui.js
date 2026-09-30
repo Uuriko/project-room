@@ -1,6 +1,5 @@
 // Agent sign-in UI (RC-2026-09-23): gives agents a choice at sign-in time —
-// sign in on their own agent account (identity ID + secret), or fall back
-// to the human account sign-in flows. Mounts into the auth panel alongside
+// sign in on their own agent account (identity ID + secret), with a saved identity. Mounts into the auth panel alongside
 // the human sign-in UI.
 //
 // Flow:
@@ -14,18 +13,20 @@
 // verification. The secret (and the Ed25519 claim-signing private key) is
 // shown exactly once with copy/save language; it is never logged or
 // persisted by the page. From there the agent can create its own room
-// (POST /api/agent-rooms — no human owner needed) or redeem an invite code,
-// then the browser session is created and the room opens.
+// (POST /api/agent-rooms — no human owner needed). Existing rooms use
+// invitation links; agents follow the packet with their saved identity.
 import { escapeHtml } from "./account-settings-ui.js";
 import { mountAgentFirstRun } from "./agent-first-run.js";
 
-export function createAgentSigninUI({ onSignedIn, onUseHumanAccount, firstRunActions }) {
+export function createAgentSigninUI({ onSignedIn, firstRunActions }) {
   let container = null;
-  let phase = "credentials"; // or "rooms" | "create" | "created" | "make-room" | "invite"
+  let phase = "credentials"; // or "rooms" | "create" | "created" | "make-room"
   let identityId = "";
   let secret = "";
   let rooms = [];
   let displayName = "";
+  let roomDraftId = "";
+  let roomTitle = "";
   let createdIdentity = null; // { identityId, secret, privateKey } — held only until shown
   let busy = false;
   let error = "";
@@ -43,17 +44,13 @@ export function createAgentSigninUI({ onSignedIn, onUseHumanAccount, firstRunAct
 
   async function apiError(res, fallback) {
     const err = await res.json().catch(() => ({}));
-    return new Error(err.message || err.error || `${fallback} (${res.status})`);
+    const message = err?.error?.message || err?.message || (typeof err?.error === "string" ? err.error : null);
+    return new Error(message || `${fallback} (${res.status})`);
   }
 
   function shellHtml() {
-    const onAgentTab = ["credentials", "rooms", "create", "created", "make-room", "invite"].includes(phase);
     return `<div class="auth-divider"><span>Agent sign-in</span></div>
-      <p class="form-hint">Agents can sign in on their own account, or use the human account sign-in below.</p>
-      <div class="auth-methods" role="group" aria-label="Agent sign-in choice">
-        <button type="button" class="button ${onAgentTab ? "primary" : "ghost"}" data-agent-tab="own">My agent account</button>
-        <button type="button" class="button ghost" data-agent-tab="human">Human account</button>
-      </div>
+      <p class="form-hint">Sign in with your saved identity.</p>
       <div data-agent-panel>${panelHtml()}</div>
       <p class="status form-status" role="alert" data-agent-status>${escapeHtml(error)}</p>`;
   }
@@ -63,23 +60,22 @@ export function createAgentSigninUI({ onSignedIn, onUseHumanAccount, firstRunAct
     if (phase === "create") return createHtml();
     if (phase === "created") return createdHtml();
     if (phase === "make-room") return makeRoomHtml();
-    if (phase === "invite") return inviteHtml();
     return credentialsHtml();
   }
 
   function credentialsHtml() {
     return `<form data-agent-form="credentials" autocomplete="off">
-      <label>Agent identity ID <input name="identityId" type="text" required autocomplete="off" spellcheck="false" maxlength="64" placeholder="ai_..." value="${escapeHtml(identityId)}"></label>
-      <label>Identity secret <input name="secret" type="password" required autocomplete="off" spellcheck="false" maxlength="128" placeholder="Paste your pri_... secret"></label>
+      <label>Agent ID <input name="identityId" type="text" required autocomplete="off" spellcheck="false" maxlength="64" placeholder="ai_..." value="${escapeHtml(identityId)}"></label>
+      <label>Secret <input name="secret" type="password" required autocomplete="off" spellcheck="false" maxlength="128" placeholder="Paste your pri_... secret"></label>
       <button class="button primary" type="submit" ${busy ? "disabled" : ""}>${busy ? "Checking…" : "Continue"}</button>
-      <p class="form-hint">Your secret is sent to this service to verify your identity and open the room, then cleared from this form.</p>
-      <p class="form-hint">New agent? <button type="button" class="text-button" data-agent-new>Create an identity — takes seconds, no email needed.</button></p>
+      <p class="form-hint">Kept only until room sign-in completes.</p>
+      <button type="button" class="text-button" data-agent-new>Create identity</button>
     </form>`;
   }
 
   function createHtml() {
     return `<form data-agent-form="create" autocomplete="off">
-      <p class="form-hint"><strong>Create your agent identity.</strong> Just a display name — no email, no verification, no waiting.</p>
+
       <label>Display name <input name="createName" type="text" required autocomplete="off" spellcheck="false" maxlength="80" placeholder="e.g. Research Helper"></label>
       <button class="button primary" type="submit" ${busy ? "disabled" : ""}>${busy ? "Creating…" : "Create identity"}</button>
       <button type="button" class="text-button" data-agent-back-to-signin>I already have an identity</button>
@@ -89,60 +85,43 @@ export function createAgentSigninUI({ onSignedIn, onUseHumanAccount, firstRunAct
   function createdHtml() {
     const created = createdIdentity ?? {};
     return `<div data-agent-created>
-      <p class="form-hint"><strong>Identity created.</strong> Save these now — the secret is shown
-      <strong>exactly once</strong> and can't be recovered later. We never store it in the page.</p>
+      <p class="form-hint"><strong>Identity created.</strong> Save these privately. The service returns the secret and signing key only at creation.</p>
       <label>Identity ID
         <span class="agent-secret-row"><input type="text" readonly value="${escapeHtml(created.identityId ?? "")}" data-agent-copy-value>
         <button type="button" class="button secondary" data-agent-copy>Copy</button></span></label>
       <label>Identity secret <span class="form-hint">Keep this private — it's your password.</span>
-        <span class="agent-secret-row"><input type="text" readonly value="${escapeHtml(created.secret ?? "")}" data-agent-copy-value data-agent-secret>
+        <span class="agent-secret-row"><input type="password" readonly value="${escapeHtml(created.secret ?? "")}" data-agent-copy-value data-agent-secret>
+        <button type="button" class="text-button" data-agent-reveal aria-pressed="false">Show</button>
         <button type="button" class="button secondary" data-agent-copy>Copy</button></span></label>
       <label>Claim-signing private key <span class="form-hint">Also shown once. Agents use it to sign claims other rooms can verify.</span>
-        <span class="agent-secret-row"><input type="text" readonly value="${escapeHtml(created.privateKey ?? "")}" data-agent-copy-value data-agent-secret>
+        <span class="agent-secret-row"><input type="password" readonly value="${escapeHtml(created.privateKey ?? "")}" data-agent-copy-value data-agent-secret>
+        <button type="button" class="text-button" data-agent-reveal aria-pressed="false">Show</button>
         <button type="button" class="button secondary" data-agent-copy>Copy</button></span></label>
-      <div class="auth-methods" role="group" aria-label="What next">
-        <button type="button" class="button primary" data-agent-create-room>Create my own room</button>
-        <button type="button" class="button secondary" data-agent-have-invite>I have an invite code</button>
-      </div>
-      <p class="form-hint"><button type="button" class="text-button" data-agent-saved>I've saved them — sign me in</button></p>
+      <button type="button" class="button primary" data-agent-saved>I've saved these</button>
     </div>`;
   }
 
   function makeRoomHtml() {
     return `<form data-agent-form="make-room" autocomplete="off">
-      <p class="form-hint"><strong>Create your own room.</strong> You become its owner — no human approval needed.</p>
-      <label>Room name <input name="roomTitle" type="text" required autocomplete="off" spellcheck="false" maxlength="120" placeholder="e.g. Research Lab"></label>
-      <label>Room ID <input name="roomId" type="text" required autocomplete="off" spellcheck="false" maxlength="64" placeholder="letters, digits, dots, dashes"></label>
-      <label>Purpose <input name="roomPurpose" type="text" required autocomplete="off" spellcheck="false" maxlength="1000" placeholder="What is this room for?"></label>
-      <label>Kind <select name="roomKind"><option value="personal">personal</option><option value="organization">organization</option></select></label>
-      <button class="button primary" type="submit" ${busy ? "disabled" : ""}>${busy ? "Creating…" : "Create room & enter"}</button>
-      <button type="button" class="text-button" data-agent-back-to-created>Back</button>
-    </form>`;
-  }
 
-  function inviteHtml() {
-    return `<form data-agent-form="invite" autocomplete="off">
-      <p class="form-hint"><strong>Redeem an invite code.</strong> One-time code from a room member — it joins you to their room.</p>
-      <label>Invite code <input name="inviteCode" type="text" required autocomplete="off" spellcheck="false" maxlength="64" placeholder="Paste the code"></label>
-      <label>Display name <input name="inviteName" type="text" required autocomplete="off" spellcheck="false" maxlength="80" value="${escapeHtml(displayName)}"></label>
-      <button class="button primary" type="submit" ${busy ? "disabled" : ""}>${busy ? "Redeeming…" : "Join room"}</button>
-      <button type="button" class="text-button" data-agent-back-to-created>Back</button>
+      <label>Room name <input name="roomTitle" type="text" required autocomplete="off" spellcheck="false" maxlength="120" placeholder="e.g. Research Lab" value="${escapeHtml(roomTitle)}"></label>
+      <button class="button primary" type="submit" ${busy ? "disabled" : ""}>${busy ? "Creating…" : "Create room & enter"}</button>
+      <button type="button" class="text-button" data-agent-back-to-rooms>Back</button>
     </form>`;
   }
 
   function roomsHtml() {
     if (rooms.length === 0) {
-      return `<p class="form-hint">Signed in as ${escapeHtml(displayName)}, but this identity isn’t linked to any rooms yet. Create your own room or redeem an invite below.</p>
+      return `<p class="form-hint">No rooms yet.</p>
         <div class="auth-methods" role="group" aria-label="What next">
           <button type="button" class="button primary" data-agent-create-room>Create my own room</button>
-          <button type="button" class="button secondary" data-agent-have-invite>I have an invite code</button>
-        </div>
+          </div>
         <button type="button" class="text-button" data-agent-back>Use a different identity</button>`;
     }
     return `<form data-agent-form="rooms">
-      <p class="form-hint">Signed in as ${escapeHtml(displayName)}. Choose a room:</p>
-      <div class="agent-room-list" role="list">
-        ${rooms.map(r => `<button type="button" class="button secondary agent-room-pick" role="listitem" data-room-id="${escapeHtml(r.roomId)}" ${busy ? "disabled" : ""}>${escapeHtml(r.title || r.roomId)}</button>`).join("")}
+      <p class="form-hint">Rooms for ${escapeHtml(displayName)}:</p>
+      <div class="agent-room-list" role="group" aria-label="Your rooms">
+        ${rooms.map(r => `<button type="button" class="button secondary agent-room-pick" data-room-id="${escapeHtml(r.roomId)}" ${busy ? "disabled" : ""}>${escapeHtml(r.title || r.roomId)}</button>`).join("")}
       </div>
       <button type="button" class="text-button" data-agent-back>Use a different identity</button>
     </form>`;
@@ -150,17 +129,30 @@ export function createAgentSigninUI({ onSignedIn, onUseHumanAccount, firstRunAct
 
   function render() {
     if (container) {
+      const hadFocus = container.contains(document.activeElement);
+      const focusedName = document.activeElement?.getAttribute("name");
       container.innerHTML = shellHtml();
       if (error) setError(error);
+      if (hadFocus && !busy) {
+        const target = [...container.querySelectorAll("input")].find(node => node.name === focusedName)
+          || container.querySelector("input:not([type=hidden]), button:not([disabled])");
+        target?.focus();
+      }
     }
   }
 
   async function withBusy(fn) {
     if (busy) return;
+    const returnFocus = container?.contains(document.activeElement);
     busy = true; setError(""); render();
     try { await fn(); }
     catch (e) { setError(e?.message || "Couldn’t sign in. Try again."); }
-    finally { busy = false; render(); }
+    finally {
+      busy = false; render();
+      if (returnFocus && container?.getClientRects().length && document.activeElement === document.body) {
+        container.querySelector("input:not([type=hidden]), button:not([disabled])")?.focus();
+      }
+    }
   }
 
   // Create the 8-hour browser session for identityId in roomId, then hand
@@ -179,33 +171,34 @@ export function createAgentSigninUI({ onSignedIn, onUseHumanAccount, firstRunAct
     if (!res.ok) throw await apiError(res, "Sign-in failed");
     const session = await res.json();
     // Clear credentials from memory the moment the session exists.
-    identityId = ""; secret = ""; createdIdentity = null;
+    identityId = ""; secret = ""; createdIdentity = null; roomDraftId = ""; roomTitle = "";
     await onSignedIn?.(session);
     try { mountAgentFirstRun({ actions: firstRunActions }); }
     catch { /* orientation is optional; never break sign-in */ }
   }
 
   const onClick = async (event) => {
-    const tab = event.target?.closest?.("[data-agent-tab]");
-    if (tab) {
-      if (tab.dataset.agentTab === "human") {
-        onUseHumanAccount?.();
-      } else {
-        phase = "credentials";
-        render();
-      }
-      return;
-    }
+    if (busy) return;
     const t = event.target;
     if (t?.closest?.("[data-agent-new]")) { phase = "create"; render(); return; }
     if (t?.closest?.("[data-agent-back-to-signin]")) { phase = "credentials"; render(); return; }
-    if (t?.closest?.("[data-agent-back-to-created]")) { phase = "created"; render(); return; }
-    if (t?.closest?.("[data-agent-have-invite]")) { phase = "invite"; render(); return; }
+    if (t?.closest?.("[data-agent-back-to-rooms]")) { phase = "rooms"; render(); return; }
     if (t?.closest?.("[data-agent-create-room]")) { phase = "make-room"; render(); return; }
     if (t?.closest?.("[data-agent-back]")) {
       phase = "credentials";
       rooms = [];
       render();
+      return;
+    }
+    const reveal = t?.closest?.("[data-agent-reveal]");
+    if (reveal) {
+      const input = reveal.closest(".agent-secret-row")?.querySelector("[data-agent-secret]");
+      if (input) {
+        const showing = input.type === "password";
+        input.type = showing ? "text" : "password";
+        reveal.textContent = showing ? "Hide" : "Show";
+        reveal.setAttribute("aria-pressed", String(showing));
+      }
       return;
     }
     const copyBtn = t?.closest?.("[data-agent-copy]");
@@ -310,17 +303,19 @@ export function createAgentSigninUI({ onSignedIn, onUseHumanAccount, firstRunAct
     if (kind === "make-room") {
       // The secret may live in the just-created identity or in the regular
       // sign-in secret (the "no rooms yet" path from an existing identity).
-      const created = createdIdentity?.secret ? createdIdentity : { secret };
+      const created = createdIdentity?.secret ? createdIdentity : { identityId, secret };
       if (!created.secret) { setError("Your session expired — sign in again."); phase = "credentials"; return; }
+      roomTitle = (data.roomTitle || "").trim();
+      if (!roomDraftId) roomDraftId = `room-${crypto.randomUUID()}`;
       const payload = {
-        roomId: (data.roomId || "").trim(),
-        title: (data.roomTitle || "").trim(),
-        purpose: (data.roomPurpose || "").trim(),
-        kind: data.roomKind === "organization" ? "organization" : "personal",
+        roomId: roomDraftId,
+        title: roomTitle,
+        purpose: roomTitle,
+        kind: "personal",
         displayName: displayName || created.identityId
       };
       if (!payload.roomId || !payload.title || !payload.purpose) {
-        setError("Room name, room ID, and purpose are all required.");
+        setError("Enter a room name.");
         return;
       }
       await withBusy(async () => {
@@ -335,40 +330,27 @@ export function createAgentSigninUI({ onSignedIn, onUseHumanAccount, firstRunAct
         });
         if (!res.ok) throw await apiError(res, "Couldn't create the room");
         const room = await res.json();
-        await startSession(created.identityId, room.roomId || payload.roomId, created.secret);
+        const createdRoomId = room.roomId || payload.roomId;
+        // Creation is complete even if session establishment loses its response.
+        // Retry the existing room session rather than repeating the room mutation.
+        rooms = [{ roomId: createdRoomId, title: room.title || roomTitle }];
+        phase = "rooms";
+        await startSession(created.identityId, createdRoomId, created.secret);
       });
       return;
     }
 
-    if (kind === "invite") {
-      const code = (data.inviteCode || "").trim();
-      const name = (data.inviteName || "").trim() || displayName;
-      if (!code) { setError("Paste your invite code."); return; }
-      if (!name) { setError("Give your agent a display name."); return; }
-      await withBusy(async () => {
-        const headers = { "Content-Type": "application/json" };
-        const savedSecret = createdIdentity?.secret ?? secret;
-        if (savedSecret) headers["Authorization"] = `Bearer ${savedSecret}`;
-        const res = await fetch("/api/agent-invites/redeem", {
-          method: "POST",
-          headers,
-          body: JSON.stringify({ code, displayName: name }),
-          credentials: "same-origin"
-        });
-        if (!res.ok) throw await apiError(res, "Couldn't redeem the invite");
-        const redeemed = await res.json();
-        // A fresh redemption mints an identity: its secret comes back once.
-        // Otherwise reuse the saved identity secret (created or signed-in).
-        const signinIdentityId = redeemed.identityId;
-        const signinSecret = redeemed.secret ?? savedSecret;
-        if (!signinSecret) throw new Error("Redeemed, but no credential came back — sign in with your saved identity.");
-        await startSession(signinIdentityId, redeemed.roomId, signinSecret);
-      });
-      return;
-    }
+
   };
 
   return {
+    canLeave() { return !busy; },
+    leave() {
+      if (busy) return false;
+      if (createdIdentity && !window.confirm("Leave without saving your agent credentials? They cannot be recovered.")) return false;
+      this.clear();
+      return true;
+    },
     mount(target) {
       container = target;
       render();
@@ -380,6 +362,7 @@ export function createAgentSigninUI({ onSignedIn, onUseHumanAccount, firstRunAct
       identityId = "";
       secret = "";
       rooms = [];
+      roomDraftId = ""; roomTitle = "";
       displayName = "";
       createdIdentity = null;
       busy = false;

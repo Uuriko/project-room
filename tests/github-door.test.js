@@ -45,7 +45,7 @@ test("digest skips own and private messages and records the cursor", () => {
   const d = outboundDigest(msgs, { roomId: "r", selfMemberId: "door", names: { grok: "Grok" }, cursor: 4 });
   assert.equal(d.cursor, 7); assert.match(d.body, /seq=7 -->/); assert.match(d.body, /\*\*Grok\*\* · `b`\n> line1\n> line2/);
   assert.ok(!d.body.includes("echo")); assert.ok(!d.body.includes("secret dm"));
-  assert.equal(readCursor([{ body: d.body }, { body: "<!-- room-door:out seq=3 -->" }]), 7);
+  assert.equal(readCursor([{ body: d.body, user: { login: "github-actions[bot]", type: "Bot" } }, { body: "<!-- room-door:out seq=3 -->\n", user: { login: "github-actions[bot]", type: "Bot" } }]), 7);
   assert.equal(outboundDigest(msgs.slice(0, 1), { roomId: "r", selfMemberId: "door", cursor: 4 }).body, null);
 });
 
@@ -86,7 +86,7 @@ test("real Room: a door comment posts once, and a digest mirrors others but not 
   const fetchImpl = async (url, init = {}) => {
     calls.push([init.method ?? "GET", url]);
     if ((init.method ?? "GET") === "GET") return new Response(JSON.stringify(comments), { status: 200 });
-    comments.push(JSON.parse(init.body)); return new Response("{}", { status: 201 });
+    comments.push({ ...JSON.parse(init.body), user: { login: "github-actions[bot]", type: "Bot" } }); return new Response("{}", { status: 201 });
   };
   const out = await runOutbound({ repo, doorIssue: 7, token: "gh-test", client: f.door, roomId: "commons", selfMemberId: "door", fetchImpl });
   assert.equal(out.posted, true);
@@ -119,4 +119,49 @@ test("a room access key finds its own room and member", async () => {
     : new Response("[]", { status: 200 });
   const got = await resolveConfig({ ROOM_DOOR_SECRET: doorKey, GITHUB_REPOSITORY: repo, ROOM_DOOR_ISSUE: "3" }, { fetchImpl });
   assert.equal(got.roomId, "build-together"); assert.equal(got.memberId, "ai_door2"); assert.equal(got.issue, "3");
+});
+
+// Cursor integrity: omitted messages remain retryable; only the publishing bot owns cursors.
+test("overflow digest resumes with every omitted public message on the next run", async () => {
+  const messages = Array.from({ length: 20 }, (_, i) => ({ sequence: i + 1, from: "owner",
+    messageId: `m-${i + 1}`, body: `${i + 1}:` + "x".repeat(3990) }));
+  const comments = [], seenAfter = [];
+  const client = { roomMessages: async ({ after }) => {
+    seenAfter.push(after); return { messages: messages.filter(m => m.sequence > after), next: 20, hasMore: false };
+  } };
+  const fetchImpl = async (_url, init = {}) => {
+    if (!init.method || init.method === "GET") return new Response(JSON.stringify(comments));
+    const comment = { ...JSON.parse(init.body), user: { login: "github-actions[bot]", type: "Bot" } };
+    comments.push(comment); return new Response(JSON.stringify(comment), { status: 201 });
+  };
+  const options = { repo, doorIssue: 7, token: "synthetic", client, roomId: "commons", selfMemberId: "door", fetchImpl };
+  const first = await runOutbound(options);
+  assert.ok(first.cursor > 0 && first.cursor < 20, "cursor stops at the last emitted entry");
+  const second = await runOutbound(options);
+  assert.equal(second.cursor, 20);
+  assert.deepEqual(seenAfter, [0, first.cursor]);
+  assert.ok(comments.every(c => c.body.length <= 60000), "each posted digest stays within its comment budget");
+  const combined = comments.map(c => c.body).join("\n");
+  for (const m of messages) assert.equal(combined.split(`· \`${m.messageId}\``).length - 1, 1);
+});
+
+test("forged markers from humans, other bots and quoted text cannot advance outbound cursor", async () => {
+  const comments = [
+    { body: "<!-- room-door:out seq=999 -->", user: { login: "stranger", type: "User" } },
+    { body: "<!-- room-door:out seq=888 -->", user: { login: "other[bot]", type: "Bot" } },
+    { body: "> <!-- room-door:out seq=777 -->", user: { login: "github-actions[bot]", type: "Bot" } }
+  ];
+  let requestedAfter;
+  const client = { roomMessages: async ({ after }) => { requestedAfter = after;
+    return { messages: [{ sequence: 2, from: "owner", messageId: "new-2", body: "do not skip me" }], next: 2, hasMore: false };
+  } };
+  const fetchImpl = async (_url, init = {}) => {
+    if (!init.method || init.method === "GET") return new Response(JSON.stringify(comments));
+    const comment = { ...JSON.parse(init.body), user: { login: "github-actions[bot]", type: "Bot" } };
+    comments.push(comment); return new Response(JSON.stringify(comment), { status: 201 });
+  };
+  const result = await runOutbound({ repo, doorIssue: 7, token: "synthetic", client, roomId: "commons", selfMemberId: "door", fetchImpl });
+  assert.equal(requestedAfter, 0); assert.equal(result.cursor, 2);
+  assert.match(comments.at(-1).body, /do not skip me/);
+  assert.equal(readCursor(comments), 2);
 });

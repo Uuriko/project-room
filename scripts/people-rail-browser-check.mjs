@@ -13,7 +13,7 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
-import { fillAccessKey } from "./auth-signin.mjs";
+import { signInFixture } from "./auth-signin.mjs";
 import { makeTestSigner } from "./helpers/signed-evidence.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
 
@@ -73,8 +73,7 @@ test("People rail shows presence, what they're on, loud @handles, and Done chips
   page.on("pageerror", error => errors.push(error.message));
   await page.goto(origin);
   await page.locator("#auth-panel").waitFor({ state: "visible" });
-  await fillAccessKey(page, owner);
-  await page.getByRole("button", { name: "Enter room", exact: true }).click();
+  await signInFixture(page, owner);
   await page.locator("#main").waitFor({ state: "visible" });
   if (!(await page.locator("#people-panel").evaluate(node => node.open))) {
     await page.locator("#people-panel > summary").click();
@@ -97,9 +96,11 @@ test("People rail shows presence, what they're on, loud @handles, and Done chips
   await page.locator("#agent-invite-dialog").waitFor({ state: "visible" });
   assert.match(await page.locator("#agent-invite-dialog").innerText(), /Choose what it can do/);
   await page.locator("#agent-invite-mint").click();
-  const code = page.locator("#agent-invite-code");
+  const code = page.locator("#agent-invite-link");
   await code.waitFor({ state: "visible" });
-  assert.match(await code.inputValue(), /\/join\/RM-/);
+  assert.match(await code.getAttribute("href"), /\/join\/RM-/);
+  assert.equal(await page.locator("#agent-invite-code").count(), 0);
+  assert.equal(await code.textContent(), await code.getAttribute("href"), "selectable link remains available when clipboard fails");
   assert.match(await page.locator("#agent-invite-share").textContent(), /agent-inbox.mjs join/);
   await page.evaluate(() => { Object.defineProperty(navigator, "clipboard", { configurable: true,
     value: { writeText: async text => { globalThis.copiedAgentInvite = text; } } }); });
@@ -107,6 +108,10 @@ test("People rail shows presence, what they're on, loud @handles, and Done chips
   assert.match(await page.evaluate(() => globalThis.copiedAgentInvite), /\/join\/RM-/);
   assert.match(await page.evaluate(() => globalThis.copiedAgentInvite), /^https?:\/\/[^/]+\/join\/RM-/);
   await page.locator("#agent-invite-dialog").screenshot({ path: "test-results/agent-invite-connection.png" });
+  await page.setViewportSize({ width: 390, height: 844 });
+  assert.equal(await page.locator("#agent-invite-dialog").evaluate(node => node.scrollWidth <= node.clientWidth), true, "invitation URL wraps inside the mobile dialog");
+  await page.locator("#agent-invite-dialog").screenshot({ path: "test-results/agent-invite-connection-mobile.png" });
+  await page.setViewportSize({ width: 1360, height: 900 });
   await page.locator("#agent-invite-close").click();
   await page.evaluate(() => { location.hash = "#room/commons"; });
   assert.equal(await page.locator("#people-panel").evaluate(node => node.open), true);

@@ -7,7 +7,7 @@ import { createAcceptanceFixture } from './acceptance-fixture.mjs';
 import { gmailLiveFixture } from './gmail-live-fixture.mjs';
 import { GmailMailbox } from '../server/gmail-mailbox.mjs';
 import { createRoomServer } from '../server/http.mjs';
-import { fillAccessKey } from './auth-signin.mjs';
+import { signInFixture } from './auth-signin.mjs';
 for (const width of [390, 1440]) test(`Gmail compose, save, reply, send, triage and search at ${width}px`, { timeout: 35000 }, async t => {
   const f = createAcceptanceFixture(), provider = gmailLiveFixture(), account = f.store.accountForMember('commons', 'owner');
   f.store.completeOnboarding(account.id); const key = f.store.issueAccountAccessKey(account.id), slot = f.store.createAccountSessionSlot(), session = f.store.loginAccountSession(slot.token, key, 0), m = new GmailMailbox(f.store, provider.config);
@@ -16,8 +16,7 @@ for (const width of [390, 1440]) test(`Gmail compose, save, reply, send, triage 
   const origin = 'http://127.0.0.1:' + server.address().port, browser = await chromium.launch({ headless: true });
   t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(r => server.close(r)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
   const context = await browser.newContext({ viewport: { width, height: 950 } }), page = await context.newPage(), errors = []; page.on('pageerror', e => errors.push(e.message));
-  await page.goto(origin + '/?account=1'); await fillAccessKey(page, key); await page.locator('#auth-form button[type=submit]').click();
-  const root = page.locator('.gmail-workspace'), dialog = page.locator('.gmail-compose');
+  await page.goto(origin + '/?account=1'); await signInFixture(page, key); const root = page.locator('.gmail-workspace'), dialog = page.locator('.gmail-compose');
   await root.locator('[data-reader]').getByText('Meet at noon.', { exact: true }).waitFor();
   await root.getByRole('button', { name: 'All messages', exact: false }).click();
   await page.locator('.inbox-row').filter({ hasText: 'Friday plan' }).click();

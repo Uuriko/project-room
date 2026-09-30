@@ -12,7 +12,7 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
-import { fillAccessKey } from "./auth-signin.mjs";
+import { signInFixture } from "./auth-signin.mjs";
 import { openMemberProfile, ensurePeopleOpen, ensureSidebarClosed } from "./room-chrome.mjs";
 
 test("A3/A4: keyboard disclosures, narrow composer, composer-local failure + retry, explicit disconnect state", { timeout: 90000 }, async t => {
@@ -36,8 +36,7 @@ test("A3/A4: keyboard disclosures, narrow composer, composer-local failure + ret
   page.on("pageerror", error => errors.push(error.message));
   await page.goto(origin);
   await page.locator("#auth-panel").waitFor({ state: "visible" });
-  await fillAccessKey(page, owner);
-  await page.getByRole("button", { name: "Enter room", exact: true }).click();
+  await signInFixture(page, owner);
   await page.locator("#main").waitFor({ state: "visible" });
 
   // A3 keyboard: focus a disclosure summary, toggle with Enter; opening must not
@@ -114,8 +113,7 @@ test("A4: a stream that cannot connect is labeled reconnecting, never silently o
   await page.route("**/api/rooms/commons/stream**", route => route.abort("failed"));
   await page.goto(origin);
   await page.locator("#auth-panel").waitFor({ state: "visible" });
-  await fillAccessKey(page, owner);
-  await page.getByRole("button", { name: "Enter room", exact: true }).click();
+  await signInFixture(page, owner);
   await page.locator("#main").waitFor({ state: "visible" });
   await page.waitForFunction(() => /Reconnecting|interrupted|unavailable/.test(document.querySelector("#connection-status").textContent), null, { timeout: 15000 });
   const statusText = await page.locator("#connection-status").textContent();

@@ -66,3 +66,25 @@ test("real Room: first sync starts at the end, then relays both ways exactly onc
   const again = await sync({ client: door, channel, stateFile, selfMemberId: "door" });
   assert.equal(again.sent, 0); assert.equal(again.received, 0);
 });
+
+test("peer append during an awaited relay is read next time and outbound lines never loop", async t => {
+  const directory = mkdtempSync(join(tmpdir(), "disk-door-concurrent-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const channel = join(directory, "channel.jsonl"), stateFile = join(directory, "state.json");
+  writeFileSync(channel, JSON.stringify({ from: "claude", body: "first" }) + "\n");
+  writeFileSync(stateFile, JSON.stringify({ offset: 0, seq: 0 }));
+  const commands = []; let appended = false;
+  const client = {
+    command: async command => { commands.push(command); },
+    roomMessages: async ({ after }) => {
+      if (!appended) { appended = true; appendFileSync(channel, JSON.stringify({ from: "grok", body: "during relay" }) + "\n"); }
+      return { messages: after < 1 ? [{ sequence: 1, from: "owner", messageId: "room-1", body: "from room" }] : [], next: 1, hasMore: false };
+    }
+  };
+  assert.equal((await sync({ client, channel, stateFile, selfMemberId: "door" })).sent, 1);
+  assert.equal((await sync({ client, channel, stateFile, selfMemberId: "door" })).sent, 1);
+  assert.equal((await sync({ client, channel, stateFile, selfMemberId: "door" })).sent, 0);
+  assert.equal(commands.length, 2);
+  assert.match(commands[1].data.body, /during relay/);
+  assert.ok(commands.every(command => !command.data.body.includes("from room")));
+});

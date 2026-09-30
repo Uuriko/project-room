@@ -14,7 +14,7 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
-import { fillAccessKey } from "./auth-signin.mjs";
+import { signInFixture } from "./auth-signin.mjs";
 
 const command = (type, data, id = crypto.randomUUID()) => ({ id, type, data });
 
@@ -41,8 +41,7 @@ test("owner lets a link-joined agent take work, then assigns it", { timeout: 900
   page.on("pageerror", error => errors.push(error.message));
   await page.goto(origin);
   await page.locator("#auth-panel").waitFor({ state: "visible" });
-  await fillAccessKey(page, owner);
-  await page.getByRole("button", { name: "Enter room", exact: true }).click();
+  await signInFixture(page, owner);
   await page.locator("#main").waitFor({ state: "visible" });
 
   const assignees = async () => page.locator("#assignee-select option").evaluateAll(options => options.map(o => o.value).filter(Boolean));

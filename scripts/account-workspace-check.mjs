@@ -1,3 +1,4 @@
+import { openMagicSignin } from "./signin-browser-journey.mjs";
 import { clickChrome } from "./room-chrome.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -8,12 +9,14 @@ import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { SyntheticInboxTransport } from "../server/inbox-transport.mjs";
 import { SyntheticMailFixture } from "./synthetic-mail-fixture.mjs";
-import { hashPassword } from "../src/password-auth.mjs";
+import { createMagicLinkMailer } from "../server/magic-links.mjs";
 import { randomBytes } from "node:crypto";
-import { fillAccessKey } from "./auth-signin.mjs";
+import { signInFixture } from "./auth-signin.mjs";
 
 async function setup(t, { mobile = false, member = false } = {}) {
   const f = createAcceptanceFixture();
+  const sent = [];
+  const magicLinkMailer = { isConfigured: () => true, sendMagicLink: payload => configuredMailer.sendMagicLink(payload) };
   const accountId = member ? f.store.accountForMember("commons", "guest").id : "inbox-only";
   if (!member) { f.store.createAccount(accountId); f.store.completeOnboarding(accountId); } // Existing inbox owner, with saved mail.
   const key = f.store.issueAccountAccessKey(accountId), slot = f.store.createAccountSessionSlot();
@@ -21,9 +24,10 @@ async function setup(t, { mobile = false, member = false } = {}) {
   f.store.inbox.apply(slot.token, { action: "source.save", requestId: "sample", sourceId: "private", expectedRevision: 0,
     data: { adapter: "synthetic", sender: "friend@example.test", recipient: "me@example.test", subject: "A small hello", paragraphs: ["What shall we make together?"] } }, session.sessionBinding);
   const provider = new SyntheticMailFixture(join(f.directory, "mail.sqlite"));
-  const server = createRoomServer({ store: f.store, streamInterval: 50, syntheticInboxTransport: new SyntheticInboxTransport(f.store.inbox, provider) });
+  const server = createRoomServer({ store: f.store, magicLinkMailer, streamInterval: 50, syntheticInboxTransport: new SyntheticInboxTransport(f.store.inbox, provider) });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = "http://127.0.0.1:" + server.address().port;
+  const configuredMailer = createMagicLinkMailer({ baseUrl: origin, send: async payload => sent.push(payload) });
   const browser = await chromium.launch({ headless: true });
   t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
     provider.close(); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
@@ -37,13 +41,13 @@ async function setup(t, { mobile = false, member = false } = {}) {
   page.on("pageerror", e => errors.push(e.message)); page.on("dialog", d => d.accept());
   t.after(() => { assert.deepEqual(errors, []); assert.deepEqual(outside, []); });
   const login = async (p = page, accessKey = key) => {
-    await p.goto(origin + "/?account=1"); await fillAccessKey(p, accessKey);
-    await p.locator('#auth-form button[type="submit"]').click(); await p.locator("#inbox-panel").waitFor();
+    await p.goto(origin + "/?account=1"); await signInFixture(p, accessKey);
+    await p.locator("#inbox-panel").waitFor();
   };
   const capture = async name => { mkdirSync("test-results/account-workspace", { recursive: true });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     await page.screenshot({ path: "test-results/account-workspace/" + name + ".png" }); };
-  return { ...f, page, context, login, capture, accountId, key, slot, session, origin, provider };
+  return { ...f, sent, page, context, login, capture, accountId, key, slot, session, origin, provider };
 }
 
 for (const mobile of [false, true]) test(`account Inbox ${mobile ? "mobile" : "desktop"}: no membership, direct reply, Rooms, reload and sign-out`, { timeout: 35000 }, async t => {
@@ -97,8 +101,9 @@ test("account-only other-tab replacement clears a held private read and navigati
   const other = await f.context.newPage(); const account = f.store.accountForMember("commons", "owner");
   await other.goto(f.origin + "/?account=1"); await other.locator("#inbox-panel").waitFor();
   if (await other.locator("#session-menu-button").isVisible()) await other.locator("#session-menu-button").click(); await clickChrome(other, "#signout-button"); await other.locator("#auth-panel").waitFor();
-  await fillAccessKey(other, f.store.issueAccountAccessKey(account.id));
-  await other.locator('#auth-form button[type="submit"]').click(); await other.locator("#inbox-panel").waitFor();
+  await other.goto(f.origin + "/?account=1");
+  await signInFixture(other, f.store.issueAccountAccessKey(account.id));
+  await other.locator("#inbox-panel").waitFor();
   await p.locator("#auth-panel").waitFor(); release();
   await p.waitForLoadState("networkidle");
   assert.equal(await p.locator("#inbox-source-body").textContent(), "");
@@ -107,8 +112,7 @@ test("account-only other-tab replacement clears a held private read and navigati
 
 test("legacy member entry does not expose an account Inbox", { timeout: 20000 }, async t => {
   const f = await setup(t), p = f.page;
-  await p.goto(f.origin); await fillAccessKey(p, f.keys.guest); await p.locator('#auth-form button[type="submit"]').click();
-  await p.locator("#main").waitFor(); assert.equal(await p.locator("#workspace-nav").isVisible(), false);
+  await p.goto(f.origin); await signInFixture(p, f.keys.guest); await p.locator("#main").waitFor(); assert.equal(await p.locator("#workspace-nav").isVisible(), false);
 });
 
 test("an account-home invitation joins explicitly and keeps the private draft", { timeout: 25000 }, async t => {
@@ -136,8 +140,8 @@ test("a lost account-only sign-out response clears private text and leaves a usa
   if (await p.locator("#session-menu-button").isVisible()) await p.locator("#session-menu-button").click(); await clickChrome(p, "#signout-button"); await p.locator("#auth-panel").waitFor();
   await p.getByText("Sign-out unconfirmed. Sign in to check your account.", { exact: true }).waitFor();
   assert.equal(await p.locator("#inbox-source-body").textContent(), "");
-  assert.equal(await p.locator("#access-key").isEnabled(), true);
-  await fillAccessKey(p, f.key); await p.locator('#auth-form button[type="submit"]').click(); await p.locator("#inbox-reader").waitFor();
+  assert.equal(await p.locator("#google-signin").isEnabled(), true);
+  await f.login(); await p.locator("#inbox-list [data-source-id=private]").click(); await p.locator("#inbox-reader").waitFor();
 });
 
 test("account confirmation failure keeps the draft and reports uncertainty without signing out", { timeout: 20000 }, async t => {
@@ -156,7 +160,8 @@ test("account confirmation failure keeps the draft and reports uncertainty witho
 test("invitation account replacement warns about an account-only draft and clears the old private view", { timeout: 25000 }, async t => {
   const f = await setup(t), p = f.page; await f.login(); await p.locator("#inbox-reader").waitFor();
   await p.locator("#inbox-draft").fill("Private thought from the original account");
-  f.store.createAccount("invited-account"); f.store.completeOnboarding("invited-account"); const key = f.store.issueAccountAccessKey("invited-account");
+  f.store.createAccount("invited-account"); f.store.completeOnboarding("invited-account"); const email = "invited-account@example.test";
+  f.store.accountLogins.linkMagicMethod("invited-account", { email });
   const owner = f.store.accountForMember("commons", "owner"), slot = f.store.createAccountSessionSlot();
   const auth = f.store.loginAccountSession(slot.token, f.store.issueAccountAccessKey(owner.id), 0);
   const token = randomBytes(32).toString("base64url");
@@ -164,20 +169,31 @@ test("invitation account replacement warns about an account-only draft and clear
     intendedAccountId: "invited-account", intendedMemberId: "invited-person", displayName: "Invited person", role: "member",
     expiresAt: Date.now() + 3600000, expectedIssuerMemberRevision: 0, expectedSessionBinding: auth.sessionBinding });
   await p.evaluate(hash => { location.hash = hash; }, "#invite/" + token);
-  await p.locator("#invitation-accept").click(); await p.locator("#invitation-account-form").waitFor();
-  await p.locator("#invitation-account-key").fill(key);
+  await p.locator("#invitation-accept").click();
+  await p.locator("#invitation-email").click();
+  const requestForm = await openMagicSignin(p);
+  await requestForm.locator('[name="email"]').fill(email);
+  await requestForm.locator('button[type=submit]').click();
+  await p.locator('#invitation-methods [data-magic-manual-code]').click();
+  const form = p.locator('#invitation-methods [data-signin-form="magic-code"]');
+  await form.locator('[name="code"]').fill(f.sent.at(-1).code);
   let warnings = 0; p.removeAllListeners("dialog"); p.on("dialog", d => { warnings++; return d.dismiss(); });
-  await p.locator("#invitation-account-form button").click();
+  await form.locator('button[type=submit]').click();
   assert.equal(warnings, 1); assert.equal(await p.locator("#inbox-draft").inputValue(), "Private thought from the original account");
   p.removeAllListeners("dialog"); p.on("dialog", d => d.accept());
   let release, observed;
   const held = new Promise(resolve => { release = resolve; }), committed = new Promise(resolve => { observed = resolve; });
   t.after(() => release());
-  await p.route("**/api/account-session", async route => {
+  await p.route("**/api/auth/magic/consume", async route => {
     if (route.request().method() !== "POST") return route.continue();
-    const response = await route.fetch(); observed(); await held; return route.fulfill({ response });
+    const response = await route.fetch();
+    if (response.status() === 409) return route.fulfill({ response });
+    assert.equal(response.status(), 201, "hold only the successful retry after explicit account switch");
+    observed(); await held; return route.fulfill({ response });
   });
-  await p.locator("#invitation-account-form button").click(); await committed;
+  await form.locator('button[type=submit]').click();
+  await p.locator('#invitation-methods [data-magic-switch]').click();
+  await committed;
   // Visible is not ready: the existing accept button is disabled during sign-in.
   // Hold the response to qualify that intermediate state, then await confirmation.
   try {
@@ -185,7 +201,7 @@ test("invitation account replacement warns about an account-only draft and clear
     assert.equal(await p.locator("#invitation-accept").isDisabled(), true);
   } finally { release(); }
   await p.waitForFunction(() => document.querySelector("#invitation-dialog").getAttribute("aria-busy") === "false"
-    && !document.querySelector("#invitation-accept").disabled && document.querySelector("#invitation-account-key").value === "");
+    && !document.querySelector("#invitation-accept").disabled && document.querySelector("#invitation-methods").hidden);
   assert.equal(await p.locator("#inbox-draft").inputValue(), "");
   assert.equal(await p.locator("#inbox-source-body").textContent(), "");
   await p.locator("#invitation-dismiss").click(); await p.locator("#inbox-panel").waitFor();
@@ -194,10 +210,10 @@ test("invitation account replacement warns about an account-only draft and clear
 
 for (const mode of ["signup", "login"]) test(`shared invitation: ${mode} returns to the same room without a guest or extra room`, { timeout: 35000 }, async t => {
   const f = await setup(t, { mobile: mode === "signup" }), p = f.page;
-  const email = `${mode}-invitation@example.invalid`, password = "invitation-fixture-password";
+  const email = `${mode}-invitation@example.invalid`;
   if (mode === "login") {
     f.store.createAccount("invitation-existing", "test"); f.store.completeOnboarding("invitation-existing");
-    f.store.accountLogins.linkPasswordMethod("invitation-existing", { email, verifier: hashPassword(password) });
+    f.store.accountLogins.linkMagicMethod("invitation-existing", { email });
   }
   const token = randomBytes(32).toString("base64url");
   f.store.shareLinks.create(f.keys.owner, "commons", { requestId: `invitation-${mode}`, linkToken: token,
@@ -206,13 +222,31 @@ for (const mode of ["signup", "login"]) test(`shared invitation: ${mode} returns
   await p.goto(f.origin + "/#join/" + token);
   await p.locator("#join-link-form").waitFor();
   assert.equal(await p.locator("#join-link-submit").textContent(), "Continue as guest");
-  await p.locator(mode === "signup" ? "#join-account-create" : "#join-account-signin").click();
-  const form = p.locator('#join-account-auth [data-signin-form="password"]');
-  assert.equal(await form.locator(`[data-password-mode="${mode}"]`).getAttribute("aria-pressed"), "true");
-  await form.locator('[name="email"]').fill(email); await form.locator('[name="password"]').fill(password);
+  await p.locator("#join-account-signin").click();
+  const form = await openMagicSignin(p);
+  await form.locator('[name="email"]').fill(email);
   await form.locator('button[type="submit"]').click();
+  await p.locator('#join-account-auth').getByText(/Check .* for your sign-in link/).waitFor();
+  const delivery = f.sent.at(-1);
+  assert.equal(typeof delivery.link, "string", "mailer provides the actual delivered sign-in URL");
+  const consumed = p.waitForResponse(response => new URL(response.url()).pathname === "/api/auth/magic/consume" && response.request().method() === "POST");
+  await p.goto(delivery.link);
+  try { assert.equal((await consumed).status(), 201, "delivered link establishes an account through the real endpoint"); }
+  catch (error) {
+    const diagnosis = await p.evaluate(() => ({ authError: document.querySelector("#auth-link-error").textContent,
+      moduleStatus: document.querySelector("#auth-signin-ui [data-signin-status]").textContent,
+      joinStatus: document.querySelector("#join-link-status").textContent,
+      magicStillInUrl: new URLSearchParams(location.search).has("magic") }));
+    error.message += "\nLink redemption state: " + JSON.stringify(diagnosis); throw error;
+  }
   await p.locator("#join-link-form").waitFor();
-  assert.equal(await p.locator("#join-link-submit").textContent(), "Join room");
+  try { await p.locator("#join-link-submit").filter({ hasText: /^Join room$/ }).waitFor(); }
+  catch (error) {
+    const state = await p.evaluate(() => ({ invitationInUrl: location.hash.startsWith("#join/"),
+      authError: document.querySelector("#auth-link-error").textContent,
+      joinStatus: document.querySelector("#join-link-status").textContent }));
+    error.message += "\nReturn state: " + JSON.stringify(state); throw error;
+  }
   assert.equal(await p.locator("#join-account-choices").isVisible(), false);
   assert.equal(await p.locator("#join-guest-note").isVisible(), false);
   assert.equal(f.store.room("commons").sequence, before, "sign-in alone does not redeem the invitation");
@@ -231,7 +265,7 @@ test("shared invitation: Google handoff preserves invitation and purpose, guest 
   await p.locator("#join-link-name").fill("Keep my name");
   await p.locator("#join-account-signin").click(); await p.locator("#join-account-back").click();
   assert.equal(await p.locator("#join-link-name").inputValue(), "Keep my name");
-  await p.locator("#join-account-create").click();
+  await p.locator("#join-account-signin").click();
   const scopeBounds = await p.locator("#join-link-scope").boundingBox();
   const googleBounds = await p.locator("#join-account-google").boundingBox();
   assert.ok(googleBounds.y >= scopeBounds.y + scopeBounds.height, "Google sign-in does not overlap the invitation text");

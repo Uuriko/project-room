@@ -93,7 +93,8 @@ test("invitation UI retries the same uncertain creation and preserves confirmed 
   const nodes = new Map();
   const node = selector => {
     if (!nodes.has(selector)) nodes.set(selector, {
-      value: "", textContent: "", hidden: false, disabled: false, open: false, dataset: {}, handlers: {},
+      value: "", textContent: "", hidden: false, disabled: false, open: false, dataset: {}, handlers: {}, attributes: {},
+      setAttribute(name, value) { this.attributes[name] = String(value); }, getAttribute(name) { return this.attributes[name] ?? null; },
       classList: { toggle() {} },
       addEventListener(type, handler) { this.handlers[type] = handler; },
       contains() { return false; }, replaceChildren() {}, showModal() { this.open = true; }, close() { this.open = false; },
@@ -155,7 +156,8 @@ test("invitation UI writes a path-aware www /room join URL", async () => {
   const nodes = new Map();
   const node = selector => {
     if (!nodes.has(selector)) nodes.set(selector, {
-      value: "", textContent: "", hidden: false, disabled: false, open: false, dataset: {}, handlers: {},
+      value: "", textContent: "", hidden: false, disabled: false, open: false, dataset: {}, handlers: {}, attributes: {},
+      setAttribute(name, value) { this.attributes[name] = String(value); }, getAttribute(name) { return this.attributes[name] ?? null; },
       classList: { toggle() {} },
       addEventListener(type, handler) { this.handlers[type] = handler; },
       contains() { return false; }, replaceChildren() {}, showModal() { this.open = true; }, close() { this.open = false; },
@@ -189,7 +191,6 @@ test("invitation UI writes a path-aware www /room join URL", async () => {
     assert.equal(node("#share-link-url").value, `https://www.getdasha.com/room/#join/${created.linkToken}`);
     assert.doesNotMatch(node("#share-link-url").value, /^https:\/\/www\.getdasha\.com\/#join\//);
     assert.doesNotMatch(node("#share-link-url").value, /#room\//);
-    assert.equal(node("#share-link-code").value, "ABC-DEF-GHJ");
     ui.resetManagement();
   } finally {
     for (const [key, descriptor] of previous) {
@@ -203,7 +204,8 @@ test("mint unlocks Create before a hanging clipboard write and never uses origin
   const nodes = new Map();
   const node = selector => {
     if (!nodes.has(selector)) nodes.set(selector, {
-      value: "", textContent: "", hidden: false, disabled: false, open: false, dataset: {}, handlers: {},
+      value: "", textContent: "", hidden: false, disabled: false, open: false, dataset: {}, handlers: {}, attributes: {},
+      setAttribute(name, value) { this.attributes[name] = String(value); }, getAttribute(name) { return this.attributes[name] ?? null; },
       classList: { toggle() {} },
       addEventListener(type, handler) { this.handlers[type] = handler; },
       contains() { return false; }, replaceChildren() {}, showModal() { this.open = true; }, close() { this.open = false; },
@@ -215,7 +217,7 @@ test("mint unlocks Create before a hanging clipboard write and never uses origin
   const globals = {
     document: { querySelector: node }, window: { addEventListener() {} },
     location: { hostname: "www.getdasha.com", origin: "https://www.getdasha.com", pathname: "/room/" },
-    navigator: { clipboard: { writeText: () => new Promise(resolve => { finishClipboard = resolve; }) } }
+    navigator: { clipboard: { writeText: value => { assert.match(value, /^https:\/\/www\.getdasha\.com\/room\/#join\/[A-Za-z0-9_-]{43}$/); return new Promise(resolve => { finishClipboard = resolve; }); } } }
   };
   const previous = new Map(Object.keys(globals).map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
   const member = { id: "owner", kind: "human", revision: 1, permissions: ["manage_members"] };
@@ -245,7 +247,7 @@ test("mint unlocks Create before a hanging clipboard write and never uses origin
     assert.doesNotMatch(node("#share-link-url").value, /^https:\/\/www\.getdasha\.com\/#join\//);
     finishClipboard();
     await minted;
-    assert.equal(node("#share-link-status").textContent, "Copied. They open this invite link.");
+    assert.equal(node("#share-link-status").textContent, "Link copied.");
     ui.resetManagement();
   } finally {
     for (const [key, descriptor] of previous) {
@@ -260,7 +262,8 @@ const guestJoinDom = () => {
   let focused = null;
   const node = selector => {
     if (!nodes.has(selector)) nodes.set(selector, {
-      value: "", textContent: "", hidden: false, disabled: false, open: false, dataset: {}, handlers: {},
+      value: "", textContent: "", hidden: false, disabled: false, open: false, dataset: {}, handlers: {}, attributes: {},
+      setAttribute(name, value) { this.attributes[name] = String(value); }, getAttribute(name) { return this.attributes[name] ?? null; },
       classList: { toggle() {} }, addEventListener(type, handler) { this.handlers[type] = handler; },
       contains() { return false; }, replaceChildren() {}, reset() {}, showModal() { this.open = true; }, close() { this.open = false; },
       focus() { focused = selector; },

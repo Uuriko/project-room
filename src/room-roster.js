@@ -121,8 +121,8 @@ export const AGENT_TYPE_CATALOG = Object.freeze([
   Object.freeze({
     id: "pi", label: "Pi", icon: "π",
     bestFor: "A lightweight agent",
-    route: "mcp", access: "contribute", joinPath: "invite-code", connectName: "Pi",
-    dialogHint: "Peer redeem uses an RM- invite, or Create access and import MCP. Same Join spine. No key in chat."
+    route: "mcp", access: "contribute", joinPath: "paste-prompt", connectName: "Pi",
+    dialogHint: "Use agent instructions, or create access and import MCP. No key in chat."
   }),
   Object.freeze({
     id: "grok-bot", label: "Grok Bot", icon: "GB", rosterId: "grok-bot",
@@ -180,7 +180,7 @@ export function catalogDoorHtml() {
     const href = catalogJoinAnchor(row.joinPath);
     return `<a class="agent-type-card" href="${href}" data-agent-type="${htmlText(row.id)}" data-join-path="${htmlText(row.joinPath)}"><span class="agent-type-icon" aria-hidden="true">${htmlText(row.icon)}</span><span class="agent-type-copy"><strong>${htmlText(row.label)}</strong><span>${htmlText(row.bestFor)}</span></span></a>`;
   }).join("");
-  return `<div class="agent-type-catalog" id="agent-type-catalog"><p>Types for this Room only. Each uses the same Join path — packet, short invite code, paste prompt, or MCP URL. Not a public agent store.</p><div class="agent-type-grid">${cards}</div></div>`;
+  return `<div class="agent-type-catalog" id="agent-type-catalog"><p>Types for this Room only. Each uses the same Join path — agent instructions or MCP. Not a public agent store.</p><div class="agent-type-grid">${cards}</div></div>`;
 }
 
 export function suggestedConfigDir(id) {

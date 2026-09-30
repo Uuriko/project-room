@@ -10,7 +10,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
-import { fillAccessKey } from "./auth-signin.mjs";
+import { signInFixture } from "./auth-signin.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { makeTestSigner } from "./helpers/signed-evidence.mjs";
 
@@ -40,8 +40,7 @@ test("invite for a purpose: link opens the invited work item after join", { time
   const inviter = await inviterContext.newPage();
   inviter.setDefaultTimeout(8000); inviter.on("pageerror", error => errors.push(error.message));
   await inviter.goto(origin);
-  await fillAccessKey(inviter, f.keys.owner);
-  await inviter.getByRole("button", { name: "Enter room", exact: true }).click();
+  await signInFixture(inviter, f.keys.owner);
   await inviter.locator("#main").waitFor({ state: "visible" });
   await clickChrome(inviter, "#invite-people-button");
   const purpose = inviter.locator("#share-link-purpose");

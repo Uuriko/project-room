@@ -1,11 +1,8 @@
 #!/usr/bin/env python3
-"""Deploy the project-room Worker (project-room-staging) via Cloudflare API.
-Uses the custom.cloudflare connector credential via surrogate — never touches raw keys.
-
-Metadata is faithful to cloudflare/wrangler.jsonc at the deployed commit,
-with ROOM_ORIGIN kept at the live access origin (room.trydemigod.com).
-Deliberately preserves live behavior otherwise: no migration (DO exists),
-no schedule changes (live has none), routes/custom domains untouched.
+"""Upload either existing Room Worker via the Cloudflare API.
+Uses the custom.cloudflare surrogate only when making a request. Metadata
+reads the selected checked-in Worker topology and preserves live text/secret
+bindings. No migrations, schedules, routes or custom domains are changed.
 
 Usage: deploy-live.py <script_name> <account_id> <public_dir> <bundle_path>
 """
@@ -13,7 +10,6 @@ import sys, os, json, hashlib, base64, mimetypes, uuid
 import urllib.request, urllib.error
 
 sys.path.insert(0, "/opt/hatch/skills/skill-creator/bin")
-from dynamic_credentials import add_surrogate_to_request
 
 ALLOWED_HOSTS = ("api.cloudflare.com",)
 BASE = "https://api.cloudflare.com"
@@ -30,6 +26,7 @@ def api(method, path, body=None, content_type="application/json"):
     if data:
         headers["Content-Type"] = content_type
     req = urllib.request.Request(BASE + path, data=data, headers=headers, method=method)
+    from dynamic_credentials import add_surrogate_to_request
     add_surrogate_to_request(req, "custom.cloudflare", entry_name="access_token", allowed_hosts=ALLOWED_HOSTS)
     try:
         with urllib.request.urlopen(req, timeout=180) as resp:
@@ -40,6 +37,39 @@ def api(method, path, body=None, content_type="application/json"):
         print(raw[:1500].decode("utf-8", "replace"))
         sys.exit(1)
     return json.loads(raw.decode("utf-8"))
+
+def deployment_metadata(script_name):
+    """Select the existing Worker; never turn the entry into a namespace owner.
+
+    The checked-in JSONC currently uses strict JSON. Parse failures fail closed
+    before any upload instead of falling back to guessed deployment settings.
+    """
+    config_path = os.path.join(os.path.dirname(__file__), "..", "cloudflare", "wrangler.jsonc")
+    with open(config_path, encoding="utf8") as config_file:
+        config = json.load(config_file)
+    if script_name == config["name"]:
+        selected = config
+    else:
+        matches = [value for value in config.get("env", {}).values() if value.get("name") == script_name]
+        if len(matches) != 1:
+            raise ValueError("Worker is not uniquely configured in wrangler.jsonc")
+        selected = {**config, **matches[0]}
+    bindings = [{"type": "durable_object_namespace", **binding}
+                for binding in selected["durable_objects"]["bindings"]]
+    bindings.append({"type": "assets", "name": selected["assets"]["binding"]})
+    bindings.extend({"type": "plain_text", "name": name, "text": value}
+                    for name, value in selected.get("vars", {}).items())
+    return {
+        "main_module": "room.js",
+        "compatibility_date": selected["compatibility_date"],
+        "compatibility_flags": selected.get("compatibility_flags", []),
+        "bindings": bindings,
+        "keep_bindings": ["secret_text", "plain_text"],
+        "limits": selected["limits"],
+        "observability": selected["observability"],
+        "assets": {"config": {"run_worker_first": selected["assets"]["run_worker_first"]}},
+    }
+
 
 def build_manifest(public_dir):
     """Hash every regular file under public_dir into the asset manifest.
@@ -76,6 +106,7 @@ def main():
               f"(allowed: {', '.join(ALLOWED_SCRIPT_NAMES)})", file=sys.stderr)
         sys.exit(2)
     SCRIPT = script_name
+    metadata = deployment_metadata(SCRIPT)
 
     # 1. Manifest
     manifest, files = build_manifest(public_dir)
@@ -117,43 +148,10 @@ def main():
             sys.exit(1)
     print("assets uploaded", flush=True)
 
-    # 4. Script upload — metadata mirrors cloudflare/wrangler.jsonc
+    # 4. Upload using the topology selected before any network operation.
     with open(bundle_path, "rb") as f:
         script = f.read()
-    metadata = {
-        "main_module": "room.js",
-        "compatibility_date": "2026-07-30",
-        "compatibility_flags": ["nodejs_compat", "enable_nodejs_http_server_modules", "enable_request_signal", "request_signal_passthrough"],
-        "bindings": [
-            {"type": "durable_object_namespace", "name": "ROOM", "class_name": "ProjectRoom"},
-            {"type": "assets", "name": "ASSETS"},
-            {"type": "plain_text", "name": "ROOM_ORIGIN", "text": "https://room.trydemigod.com"},
-            {"type": "plain_text", "name": "ROOM_DEPLOYMENT", "text": "production"},
-            {"type": "plain_text", "name": "ROOM_GMAIL_ENABLED", "text": "0"},
-            {"type": "plain_text", "name": "ROOM_GMAIL_PILOT_ONLY", "text": "1"},
-            {"type": "plain_text", "name": "ROOM_SERVICE_MODE", "text": "cloudflare-production"},
-        ],
-        # Production CPU budget (mirrors env.production.limits.cpu_ms in
-        # cloudflare/wrangler.jsonc, PR #1065): 30000ms. The production DO
-        # shares this per-invocation budget; 1000ms caused CPU-limit resets
-        # and whole-room 1101/500 failures on 2026-09-25. Never deploy 1000.
-        "limits": {"cpu_ms": 30000},
-        "observability": {"enabled": True, "head_sampling_rate": 1},
-        # Mirror cloudflare/wrangler.jsonc assets config, including
-        # run_worker_first: without it the edge asset worker claims extensionless
-        # HTML paths (e.g. POST /join -> join.html) before the worker runs,
-        # returning an empty 405 and serving the join page untemplated
-        # (QA P1-3, 2026-09-25).
-        # Wire shape per the Cloudflare Workers API (Assets { config, jwt },
-        # Config { html_handling, not_found_handling, run_worker_first }):
-        # the flag lives under config. A top-level run_worker_first in the
-        # assets metadata is silently ignored (first deploy attempt 2026-09-25
-        # kept 405ing); wrangler's internal routerConfig is not the wire shape.
-        "assets": {
-            "jwt": completion_jwt,
-            "config": {"run_worker_first": True},
-        },
-    }
+    metadata["assets"]["jwt"] = completion_jwt
     boundary = "----deployboundary1234"
     parts = [
         f'--{boundary}\r\nContent-Disposition: form-data; name="metadata"\r\nContent-Type: application/json\r\n\r\n'.encode()

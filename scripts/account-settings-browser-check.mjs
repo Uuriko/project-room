@@ -1,3 +1,4 @@
+import { openMagicSignin } from "./signin-browser-journey.mjs";
 import { clickChrome } from "./room-chrome.mjs";
 // Browser coverage for the account settings UI (slice 7, RC-2026-09-17-016):
 // the session menu opens Sign-in & security, the linked methods render with
@@ -11,15 +12,7 @@ import { rmSync } from "node:fs";
 import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
-import { hashPassword } from "../src/password-auth.mjs";
-import { fillAccessKey } from "./auth-signin.mjs";
-
-async function expandSignInOptions(page) {
-  const more = page.locator("#signin-more");
-  const extra = page.locator("#signin-extra");
-  if (await more.count() && await extra.isHidden()) await more.click();
-  await extra.waitFor({ state: "visible" });
-}
+import { signInFixture } from "./auth-signin.mjs";
 
 async function setup(t) {
   const f = createAcceptanceFixture();
@@ -52,8 +45,7 @@ const methodRow = (page, label) => page.locator(".settings-method", { hasText: l
 test("account settings: methods render, disable/enable/remove, recovery codes, honest provider states", { timeout: 45000 }, async t => {
   const { page, origin, key, accountId, f } = await setup(t);
   await page.goto(origin + "/?account=1");
-  await fillAccessKey(page, key);
-  await page.locator('#auth-form button[type="submit"]').click();
+  await signInFixture(page, key);
   await page.locator("#inbox-panel").waitFor();
 
   // Desktop topbar exposes Sign-in & security directly (the session-menu
@@ -101,79 +93,27 @@ test("account settings: methods render, disable/enable/remove, recovery codes, h
   assert.ok(codes.every(code => /^[a-z0-9_-]{8}-[a-z0-9_-]{8}$/.test(code)));
 });
 
-test("sign-in UI: password signup, magic honest-unconfigured, recovery-code login, GitHub honest-unconfigured", { timeout: 60000 }, async t => {
-  const { f, page, origin } = await setup(t);
-  // Each flow gets an isolated context: the account cookie must not leak
-  // between them, or later pages would load already signed in.
-  const freshPage = async () => (await page.context().browser().newContext()).newPage();
-
-  // 1. Email+password create-account through the real UI lands on the account workspace.
-  const signup = await freshPage();
-  await signup.goto(origin + "/?account=1");
-  await expandSignInOptions(signup);
-  await signup.getByRole("button", { name: "Email + password" }).click();
-  await signup.locator('[data-signin-form="password"] [name="email"]').fill("signin-browser@example.invalid");
-  await signup.locator('[data-signin-form="password"] [name="password"]').fill("fixture-password-browser-1");
-  await signup.locator('[data-signin-form="password"] button[type="submit"]').click();
-  await signup.locator("#inbox-panel").waitFor();
-  await signup.locator("#account-setup-dialog").getByRole("heading", { name: "Make Project Room yours" }).waitFor();
-  await signup.locator("#account-setup-dialog").getByRole("button", { name: "Set up later" }).click();
-
-  // 2. Magic link is honest when no mail provider is configured.
-  const magic = await freshPage();
-  await magic.goto(origin + "/?account=1");
-  await expandSignInOptions(magic);
-  await magic.getByRole("button", { name: "Magic link" }).click();
-  await magic.locator('[data-signin-form="magic-request"] [name="email"]').fill("magic-browser@example.invalid");
-  await magic.locator('[data-signin-form="magic-request"] button[type="submit"]').click();
-  await magic.locator("[data-signin-status]").getByText("Email delivery is not configured", { exact: false }).waitFor();
-
-  // 3. Recovery-code login through the real UI lands on the account workspace.
-  const recId = "slice7-browser-recovery";
-  f.store.createAccount(recId, "password-signup");
-  f.store.accountLogins.linkPasswordMethod(recId, { email: "recovery-browser@example.invalid", verifier: "fixture-verifier" });
-  const { codes } = f.store.accountLogins.generateRecoveryCodes(recId);
-  assert.ok(codes.length >= 1);
-  const recovery = await freshPage();
-  await recovery.goto(origin + "/?account=1");
-  await expandSignInOptions(recovery);
-  await recovery.getByRole("button", { name: "Recovery code" }).click();
-  await recovery.locator('[data-signin-form="recovery"] [name="email"]').fill("recovery-browser@example.invalid");
-  await recovery.locator('[data-signin-form="recovery"] [name="code"]').fill(codes[0]);
-  await recovery.locator('[data-signin-form="recovery"] button[type="submit"]').click();
-  await recovery.locator("#inbox-panel").waitFor();
-  assert.equal(f.store.accountLogins.recoveryCodesRemaining(recId), codes.length - 1);
-
-  // 4. GitHub sign-in is honestly unavailable: the fixture has no OAuth
-  // credentials, so the start route serves a readable landing page instead
-  // of sending the user to GitHub.
-  const github = await freshPage();
-  await github.goto(origin + "/?account=1");
-  await expandSignInOptions(github);
-  await Promise.all([
-    github.waitForURL("**/api/auth/github/start"),
-    github.getByRole("button", { name: "Continue with GitHub" }).click(),
-  ]);
-  await github.getByRole("heading", { name: "GitHub sign-in isn’t configured" }).waitFor();
-  await github.getByRole("link", { name: "Back to sign-in" }).click();
-  await github.waitForURL("**/?account=1");
-
-  // 5. The passkey form renders (headless Chromium has no authenticator to complete with).
-  const passkey = await freshPage();
-  await passkey.goto(origin + "/?account=1");
-  await expandSignInOptions(passkey);
-  await passkey.getByRole("button", { name: "Passkey" }).click();
-  await passkey.locator('[data-signin-form="passkey"]').waitFor();
+test("email sign-in reports unconfigured delivery without pretending to send", { timeout: 30000 }, async t => {
+  const { page, origin } = await setup(t);
+  await page.goto(origin + "/?account=1");
+  await openMagicSignin(page);
+  const form = page.locator('#auth-signin-ui [data-signin-form="magic-request"]');
+  await form.locator('[name="email"]').fill("magic-browser@example.invalid");
+  await form.locator('button[type="submit"]').click();
+  await page.locator('#auth-signin-ui [data-signin-status]').filter({ hasText: /not configured|isn.t configured/i }).waitFor();
+  assert.equal(await page.locator("#auth-panel").isVisible(), true);
+  assert.equal(await page.locator("#inbox-panel").isVisible(), false);
 });
 
-test("sign-in UI: magic-link happy path with a configured mailer, password login", { timeout: 60000 }, async t => {
+test("sign-in UI: email link returns to the existing account with a configured mailer", { timeout: 60000 }, async t => {
   const f = createAcceptanceFixture();
   const sent = [];
   const { createMagicLinkMailer } = await import("../server/magic-links.mjs");
-  const mailer = createMagicLinkMailer({ send: async payload => { sent.push(payload); } });
+  const mailer = { isConfigured: () => true, sendMagicLink: payload => configuredMailer.sendMagicLink(payload) };
   const server = createRoomServer({ store: f.store, magicLinkMailer: mailer });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = "http://127.0.0.1:" + server.address().port;
+  const configuredMailer = createMagicLinkMailer({ baseUrl: origin, send: async payload => sent.push(payload) });
   const browser = await chromium.launch({ headless: true });
   t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections();
     await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
@@ -186,31 +126,16 @@ test("sign-in UI: magic-link happy path with a configured mailer, password login
   f.store.accountLogins.linkMagicMethod(magicId, { email: "magic-browser@example.invalid" });
   const magic = await freshPage();
   await magic.goto(origin + "/?account=1");
-  await expandSignInOptions(magic);
-  await magic.getByRole("button", { name: "Magic link" }).click();
-  await magic.locator('[data-signin-form="magic-request"] [name="email"]').fill("magic-browser@example.invalid");
-  await magic.locator('[data-signin-form="magic-request"] button[type="submit"]').click();
-  await magic.locator('[data-signin-form="magic-code"]').waitFor();
-  // Link-first UI: manual code entry is opt-in behind a toggle.
-  await magic.locator('[data-magic-manual-code]').click();
-  await magic.locator('[data-signin-form="magic-code"] [name="code"]').waitFor();
+  await openMagicSignin(magic);
+  await magic.locator('#auth-signin-ui [data-signin-form="magic-request"] [name="email"]').fill("magic-browser@example.invalid");
+  await magic.locator('#auth-signin-ui [data-signin-form="magic-request"] button[type="submit"]').click();
+  await magic.locator("#email-auth-panel").getByText(/Check .* for your sign-in link/).waitFor();
   assert.equal(sent.length, 1);
   assert.ok(typeof sent[0].code === "string" && sent[0].code.length > 0);
-  await magic.locator('[data-signin-form="magic-code"] [name="code"]').fill(sent[0].code);
-  await magic.locator('[data-signin-form="magic-code"] button[type="submit"]').click();
+  assert.equal(typeof sent[0].link, "string");
+  await magic.goto(sent[0].link);
   await magic.locator("#inbox-panel").waitFor();
-
-  // Password login through the real UI (not just signup).
-  const pwId = "slice7-browser-password";
-  f.store.createAccount(pwId, "password-browser-fixture");
-  f.store.accountLogins.linkPasswordMethod(pwId, { email: "pw-browser@example.invalid", verifier: hashPassword("fixture-password-login") });
-  const login = await freshPage();
-  await login.goto(origin + "/?account=1");
-  await expandSignInOptions(login);
-  await login.getByRole("button", { name: "Email + password" }).click();
-  await login.locator('[data-password-mode="login"]').click();
-  await login.locator('[data-signin-form="password"] [name="email"]').fill("pw-browser@example.invalid");
-  await login.locator('[data-signin-form="password"] [name="password"]').fill("fixture-password-login");
-  await login.locator('[data-signin-form="password"] button[type="submit"]').click();
-  await login.locator("#inbox-panel").waitFor();
+  const account = await magic.request.get(origin + "/api/account-session");
+  assert.equal((await account.json()).account.id, magicId, "email verification returns the existing account");
+  assert.doesNotMatch(magic.url(), /magic=/, "one-use credential is stripped from the URL");
 });

@@ -110,6 +110,28 @@ test("start is 503 with honest JSON when Google is not configured", async t => {
   assert.equal(JSON.stringify(body).includes(clientSecret), false);
 });
 
+test("unconfigured Google browser navigation returns to sign-in without minting a session", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f);
+  const res = await fetch(origin + GOOGLE_START_PATH, { redirect: "manual", headers: { Accept: "text/html,application/xhtml+xml" } });
+  assert.equal(res.status, 302);
+  assert.equal(res.headers.get("location"), "/?google=unavailable");
+  assert.equal(res.headers.get("cache-control"), "no-store");
+  assert.equal(res.headers.get("set-cookie"), null);
+  assert.equal(await res.text(), "");
+});
+
+test("configured Google browser navigation still begins the PKCE flow", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f, { googleAuth: googleAuth() });
+  const res = await fetch(origin + GOOGLE_START_PATH, { redirect: "manual", headers: { Accept: "text/html" } });
+  assert.equal(res.status, 302);
+  const authorize = new URL(res.headers.get("location"));
+  assert.equal(authorize.origin, "https://accounts.google.com");
+  assert.equal(authorize.searchParams.get("code_challenge_method"), "S256");
+  assert.ok(accountCookie(res));
+});
+
 test("start rejects non-GET methods", async t => {
   const f = createAcceptanceFixture();
   const origin = await startServer(t, f, { googleAuth: googleAuth() });

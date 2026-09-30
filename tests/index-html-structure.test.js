@@ -54,19 +54,6 @@ test("every id reference in index.html resolves to an element that exists", () =
 // Composer disclosure, keyboard help and recovery are exercised through real
 // browser journeys in scripts/composer-browser-check.mjs, not HTML text matches.
 
-// QA 2026-09-29: the logged-out wall was a bare sign-in panel — "PROJECT ROOM"
-// plus buttons, with no line saying what the product is or how to get in.
-// The wall must carry a tagline that names the way in.
-test("the logged-out sign-in wall explains what the product is and how to get in", () => {
-  const panel = html.match(/<section id="auth-panel"[\s\S]*?<\/section>/);
-  assert.ok(panel, "auth panel exists");
-  const tagline = panel[0].match(/<p id="auth-tagline"[^>]*>([\s\S]*?)<\/p>/);
-  assert.ok(tagline, "auth panel carries a tagline element");
-  const text = tagline[1].replace(/<[^>]*>/g, "").trim();
-  assert.ok(text.length > 20, "tagline is a real sentence, not a stub");
-  assert.match(text, /invite/i, "tagline names the way in");
-});
-
 test("the guard actually detects what it claims to", () => {
   // A gate over a document that happens to be clean proves nothing until it has
   // been shown to fail. These run the same logic over planted input.

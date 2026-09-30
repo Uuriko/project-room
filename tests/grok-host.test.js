@@ -105,16 +105,16 @@ function fixtureDir() {
   return directory;
 }
 
-test("pull journals first sight and is a no-op on the second sight", async t => {
+test("successful pull journals completion and is a no-op on the second sight", async t => {
   const directory = fixtureDir();
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const env = { ROOM_AGENT_CONFIG: directory };
   const body = needsMe([mention(), mention({ id: "msg-2", seq: 5 })]);
   const fetchImpl = async () => new Response(JSON.stringify(body), { status: 200 });
-  const first = await pull({ env, fetchImpl, now: () => 50 });
+  const first = await pull({ env, fetchImpl, execute: true, runner: async () => ({ code: 0 }), now: () => 50 });
   assert.equal(first.planned.length, 2);
-  assert.equal(first.executed.length, 0);
-  const second = await pull({ env, fetchImpl, now: () => 60 });
+  assert.equal(first.executed.length, 2);
+  const second = await pull({ env, fetchImpl, execute: true, runner: async () => ({ code: 0 }), now: () => 60 });
   assert.equal(second.planned.length, 0);
   const journal = readJournalFile(join(directory, "grok-host-journal.json"));
   assert.ok(journal.handled["mention:den:msg-1"]);
@@ -252,9 +252,9 @@ test("pull sends the saved needs-me cursor on the next pass", async t => {
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const handlers = { needsMe: needsMe([mention()]), acks: [] };
   const fetchImpl = roomFetch(handlers);
-  await pull({ env: { ROOM_AGENT_CONFIG: directory }, fetchImpl, now: () => 1 });
+  await pull({ env: { ROOM_AGENT_CONFIG: directory }, fetchImpl, execute: true, runner: async () => ({ code: 0 }), now: () => 1 });
   handlers.needsMe = needsMe([]);
-  await pull({ env: { ROOM_AGENT_CONFIG: directory }, fetchImpl, now: () => 2 });
+  await pull({ env: { ROOM_AGENT_CONFIG: directory }, fetchImpl, execute: true, runner: async () => ({ code: 0 }), now: () => 2 });
   assert.equal(handlers.beats, 2);
   assert.equal(handlers.beatBodies[0].mode, "pull-only");
   assert.equal(handlers.beatBodies[0].workWakes, undefined);
@@ -286,7 +286,7 @@ test("pull merges heartbeat pendingWakes and acks their signal ids", async t => 
     pendingWakes: [{ signalId: "sig-1", kind: "mention", roomId: "den", messageId: "msg-9" }]
   };
   const result = await pull({
-    env: { ROOM_AGENT_CONFIG: directory }, fetchImpl: roomFetch(handlers), now: () => 3
+    env: { ROOM_AGENT_CONFIG: directory }, fetchImpl: roomFetch(handlers), execute: true, runner: async () => ({ code: 0 }), now: () => 3
   });
   assert.equal(result.planned[0].item.id, "msg-9");
   assert.deepEqual(handlers.acks[0].signalIds, ["sig-1"]);
@@ -322,10 +322,10 @@ test("ingestWake journals an agent.wake once", async t => {
     event: "agent.wake", agentId: "ai_x",
     signal: { signalId: "sig-9", messageId: "msg-1", roomId: "den", kind: "mention", seq: 4 }
   };
-  const first = await ingestWake({ env, body, now: () => 4 });
+  const first = await ingestWake({ env, body, execute: true, runner: async () => ({ code: 0 }), now: () => 4 });
   assert.equal(first.key, "mention:den:msg-1");
   assert.equal(first.planned.length, 1);
-  const second = await ingestWake({ env, body, now: () => 5 });
+  const second = await ingestWake({ env, body, execute: true, runner: async () => ({ code: 0 }), now: () => 5 });
   assert.equal(second.planned.length, 0);
   assert.equal(JSON.stringify(first).includes(secret), false);
 });
@@ -338,4 +338,66 @@ test("unauthenticated needs-me becomes a machine-readable failure", async t => {
     pull({ env: { ROOM_AGENT_CONFIG: directory }, fetchImpl }),
     error => error instanceof GrokHostError && error.code === "unauthenticated"
   );
+});
+
+
+test("preview leaves journal and wake acknowledgement untouched so execute can still run", async t => {
+  const directory = fixtureDir(); t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const env = { ROOM_AGENT_CONFIG: directory };
+  const handlers = { needsMe: needsMe([]), acks: [],
+    pendingWakes: [{ signalId: "sig-1", kind: "mention", roomId: "den", messageId: "msg-1" }] };
+  const fetchImpl = roomFetch(handlers);
+  let runs = 0; const runner = async () => { runs++; return { code: 0 }; };
+  const preview = await pull({ env, fetchImpl, runner });
+  assert.equal(preview.planned.length, 1);
+  assert.equal(runs, 0);
+  assert.deepEqual(readJournalFile(join(directory, "grok-host-journal.json")), emptyJournal());
+  assert.deepEqual(handlers.acks, []);
+  const executed = await pull({ env, fetchImpl, execute: true, runner });
+  assert.equal(runs, 1); assert.equal(executed.executed.length, 1);
+  assert.deepEqual(handlers.acks, [{ signalIds: ["sig-1"] }]);
+});
+
+for (const outcome of ["nonzero", "throw"]) {
+  test(`failed ${outcome} runner remains retryable without acknowledgement or cursor advance`, async t => {
+    const directory = fixtureDir(); t.after(() => rmSync(directory, { recursive: true, force: true }));
+    const env = { ROOM_AGENT_CONFIG: directory };
+    const handlers = { needsMe: needsMe([mention()]), acks: [],
+      pendingWakes: [{ signalId: "sig-fail", kind: "mention", roomId: "den", messageId: "msg-1" }] };
+    const fetchImpl = roomFetch(handlers); let runs = 0;
+    const runner = async () => {
+      runs++;
+      if (runs === 1) { if (outcome === "throw") throw new Error("synthetic spawn failure"); return { code: 1 }; }
+      return { code: 0 };
+    };
+    const first = pull({ env, fetchImpl, execute: true, runner });
+    if (outcome === "throw") await assert.rejects(first, /synthetic spawn failure/); else await first;
+    assert.deepEqual(readJournalFile(join(directory, "grok-host-journal.json")), emptyJournal());
+    assert.deepEqual(handlers.acks, []);
+    await pull({ env, fetchImpl, execute: true, runner });
+    assert.equal(runs, 2);
+    assert.deepEqual(handlers.acks, [{ signalIds: ["sig-fail"] }]);
+  });
+}
+
+test("runner output removes the known bearer before returning printable results", async t => {
+  const directory = fixtureDir(); t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const handlers = { needsMe: needsMe([mention()]), acks: [] };
+  const result = await pull({ env: { ROOM_AGENT_CONFIG: directory }, fetchImpl: roomFetch(handlers), execute: true,
+    runner: async () => ({ code: 0, stdout: `before ${secret} after`, stderr: `error ${secret}` }) });
+  assert.equal(JSON.stringify(result).includes(secret), false);
+  assert.equal(result.executed[0].result.stdout, "before [REDACTED] after");
+  assert.equal(result.executed[0].result.stderr, "error [REDACTED]");
+});
+
+
+test("duplicate heartbeat and paged attention runs one handler", async t => {
+  const directory = fixtureDir(); t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const handlers = { needsMe: needsMe([mention(), mention()]), acks: [],
+    pendingWakes: [{ signalId: "sig-duplicate", kind: "mention", roomId: "den", messageId: "msg-1" }] };
+  let runs = 0;
+  const result = await pull({ env: { ROOM_AGENT_CONFIG: directory }, fetchImpl: roomFetch(handlers), execute: true,
+    runner: async () => { runs++; return { code: 0 }; } });
+  assert.equal(runs, 1); assert.equal(result.executed.length, 1);
+  assert.deepEqual(handlers.acks, [{ signalIds: ["sig-duplicate"] }]);
 });

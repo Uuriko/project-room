@@ -16,7 +16,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { RoomStore } from "../server/store.mjs";
+import { AgentRooms } from "../server/agent-rooms.mjs";
+import { createRateLimiter } from "../server/identity-ratelimit.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
+import { createRoomServer } from "../server/http.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
 import { callHostedStdioTool } from "../server/mcp-full-profile.mjs";
 
@@ -124,4 +127,96 @@ test("the retry scope is per-caller: another member's same key executes", async 
   assert.equal(other.value.idempotentReplay, false,
     "a different caller's key must execute, never replay the first caller's body");
   assert.equal(bounties(store, keys).length, 2);
+});
+
+test("target-room read-only authority refuses writes and retry receipts without changing state", async t => {
+  const { store, keys } = fixture(t);
+  const args = postArgs({ idempotencyKey: "authority-retry" });
+  await call(store, keys, "bounty_post", args);
+  const before = store.bountyEscrow.balances(ROOM, AGENT);
+  setTier(store.db, ROOM, AGENT, "t1_readonly", { updatedBy: "owner", nowMs: Date.now() });
+  for (const input of [args, postArgs({ idempotencyKey: "new-denied" })])
+    await assert.rejects(call(store, keys, "bounty_post", input), error => error.code === "agent_readonly");
+  assert.equal(bounties(store, keys).length, 1);
+  assert.deepEqual(store.bountyEscrow.balances(ROOM, AGENT), before);
+  assert.equal((await call(store, keys, "bounty_list", {})).value.bounties.length, 1);
+});
+
+test("MCP lifecycle events publish once and transport-switch retries replay the same receipt", async t => {
+  const { store, keys } = fixture(t);
+  const delivered = [];
+  store.agentPlugin.fanoutRoomEvent = event => delivered.push(event);
+  const server = createRoomServer({ store });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const post = async (bountyId, key) => {
+    const response = await fetch(`${origin}/api/rooms/${ROOM}/bounties/${bountyId}/fund`, {
+      method: "POST", headers: { authorization: `Bearer ${keys[AGENT]}`,
+        "content-type": "application/json", "idempotency-key": key }, body: "{}" });
+    assert.equal(response.status, 200);
+    return response.json();
+  };
+  const args = postArgs({ idempotencyKey: "lifecycle-post" });
+  const posted = await call(store, keys, "bounty_post", args);
+  assert.equal(delivered.length, 1);
+  assert.equal(delivered[0].roomId, ROOM);
+  assert.equal(delivered[0].event.id, `bounty-event-${posted.value.receipt.event.seq}`);
+  assert.equal(delivered[0].event.data.bountyId, posted.value.bounty.bountyId);
+  await call(store, keys, "bounty_post", args);
+  assert.equal(delivered.length, 1);
+  const bountyId = posted.value.bounty.bountyId;
+  const funded = await call(store, keys, "bounty_fund", { bountyId, idempotencyKey: "mcp-first" });
+  assert.deepEqual(await post(bountyId, "mcp-first"),
+    Object.fromEntries(Object.entries(funded.value).filter(([key]) => key !== "idempotentReplay")));
+  assert.equal(delivered.length, 2, "HTTP replay must not deliver the event again");
+  const second = await call(store, keys, "bounty_post", postArgs({ idempotencyKey: "second-post" }));
+  const fromHttp = await post(second.value.bounty.bountyId, "http-first");
+  const replay = await call(store, keys, "bounty_fund", {
+    bountyId: second.value.bounty.bountyId, idempotencyKey: "http-first" });
+  assert.equal(replay.value.idempotentReplay, true);
+  assert.deepEqual({ ...fromHttp, idempotentReplay: true }, replay.value);
+  assert.equal(delivered.length, 4);
+  assert.equal(store.bountyEscrow.balances(ROOM, AGENT).locked, 20);
+});
+
+test("an identity with full access elsewhere cannot write into its read-only target room", async t => {
+  const { store } = fixture(t);
+  const rooms = new AgentRooms(store, {
+    rateLimiter: createRateLimiter({ capacity: 1000, refillPerSecond: 1000 }) });
+  const peer = store.identities.create("Peer");
+  const owner = store.identities.create("Target owner");
+  const full = rooms.create(peer.secret, { title: "Full room", purpose: "Fixture", displayName: "Peer" });
+  const target = rooms.create(owner.secret, { title: "Read room", purpose: "Fixture", displayName: "Owner" });
+  const invite = store.invites.create(owner.secret, target.roomId, { profile: "chat", displayName: "Peer" }, null);
+  const joined = store.invites.redeem(invite.code, { displayName: "Peer", identitySecret: peer.secret });
+  setTier(store.db, target.roomId, joined.memberId ?? joined.member.id, "t1_readonly",
+    { updatedBy: "owner", nowMs: Date.now() });
+  await callHostedStdioTool(store, peer.secret, "bounty_post", { roomId: full.roomId, ...postArgs() });
+  await assert.rejects(callHostedStdioTool(store, peer.secret, "bounty_post", {
+    roomId: target.roomId, ...postArgs() }), error => error.code === "agent_readonly");
+  assert.equal(store.bountyEscrow.listBounties(target.roomId, {}).length, 0);
+  assert.equal((await callHostedStdioTool(store, peer.secret, "bounty_list", {
+    roomId: target.roomId })).value.bounties.length, 0);
+});
+
+test("full membership elsewhere cannot confer bounty writes on a linked guest target", async t => {
+  const { store, keys } = fixture(t);
+  const rooms = new AgentRooms(store, {
+    rateLimiter: createRateLimiter({ capacity: 1000, refillPerSecond: 1000 }) });
+  const peer = store.identities.create("Guest peer");
+  const full = rooms.create(peer.secret, { title: "Full room", purpose: "Fixture", displayName: "Guest peer" });
+  const guestId = "guest-agent-fixture";
+  store.identities.link(keys.owner, ROOM, { identityId: peer.identityId,
+    memberId: guestId, displayName: "Guest peer", permissions: [] });
+  setTier(store.db, ROOM, guestId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
+  await callHostedStdioTool(store, peer.secret, "bounty_post", { roomId: full.roomId, ...postArgs() });
+  const before = store.bountyEscrow.balances(ROOM, guestId);
+  await assert.rejects(callHostedStdioTool(store, peer.secret, "bounty_post", {
+    roomId: ROOM, ...postArgs({ idempotencyKey: "guest-denied" }) }),
+  error => error.code === "guest_scope_denied");
+  assert.equal(store.bountyEscrow.listBounties(ROOM, {}).length, 0);
+  assert.deepEqual(store.bountyEscrow.balances(ROOM, guestId), before);
+  assert.equal((await callHostedStdioTool(store, peer.secret, "bounty_list", {
+    roomId: ROOM })).value.bounties.length, 0);
 });

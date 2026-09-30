@@ -5,7 +5,7 @@ import { spawn } from "node:child_process";
 import { readAgentConnection, ConnectionError } from "../client/agent-connection.mjs";
 import {
   GrokHostError, parseNeedsMeBody, parseWakePing, wakeToAttentionItem,
-  pendingWakeToItem, selectUnhandled, markHandled, setCursor, loadJournal,
+  pendingWakeToItem, attentionKey, selectUnhandled, markHandled, setCursor, loadJournal,
   emptyJournal, buildRunPlan, assertPlanSafe, childEnvFor, emptyAttentionNext
 } from "../client/grok-host.mjs";
 
@@ -156,20 +156,26 @@ function nextFor(code) {
 async function planAndJournal({ connection, items, env, execute, runner, now, extra = {} }) {
   const filename = journalPathFor(env);
   let journal = readJournalFile(filename);
-  if (extra.cursor !== undefined) journal = setCursor(journal, extra.cursor);
-  const fresh = selectUnhandled(items, journal);
+  const distinct = [...new Map(items.map(item => [attentionKey(item), item])).values()];
+  const fresh = selectUnhandled(distinct, journal);
   const secrets = [connection.token];
   const plans = fresh.map(item => assertPlanSafe(buildRunPlan(item, { origin: connection.origin }), secrets));
   const executed = [];
   for (const plan of plans) {
-    journal = markHandled(journal, plan.item, now());
-    writeJournalFile(filename, journal);
-    if (execute) {
-      const result = await (runner ?? defaultRunner)(plan, env, connection);
-      executed.push({ key: plan.key, result });
+    if (!execute) continue;
+    const raw = await (runner ?? defaultRunner)(plan, env, connection);
+    // A child has the bearer in its environment; its output is not trusted.
+    const redact = (value, limit) => typeof value === "string"
+      ? value.replaceAll(connection.token, "[REDACTED]").slice(0, limit) : "";
+    const result = { code: raw?.code, stdout: redact(raw?.stdout, 8000), stderr: redact(raw?.stderr, 2000) };
+    executed.push({ key: plan.key, result });
+    if (result.code === 0) {
+      journal = markHandled(journal, plan.item, now());
+      writeJournalFile(filename, journal);
     }
   }
-  if (extra.cursor !== undefined) {
+  // Preview and unsuccessful execution must not advance past pending work.
+  if (execute && executed.every(entry => entry.result.code === 0) && extra.cursor !== undefined) {
     journal = setCursor(journal, extra.cursor);
     writeJournalFile(filename, journal);
   }
@@ -179,7 +185,7 @@ async function planAndJournal({ connection, items, env, execute, runner, now, ex
 export async function pull({ env = process.env, fetchImpl = fetch, execute = false, runner, now = Date.now } = {}) {
   const connection = connectionFromEnv(env);
   const filename = journalPathFor(env);
-  let journal = readJournalFile(filename);
+  const journal = readJournalFile(filename);
   const beat = await beatPullOnly(connection, { fetchImpl, env });
   const items = [...beat.items];
   let cursor = journal.cursor ?? undefined;
@@ -197,7 +203,12 @@ export async function pull({ env = process.env, fetchImpl = fetch, execute = fal
   const result = await planAndJournal({
     connection, items, env, execute, runner, now, extra: { cursor: cursor ?? null }
   });
-  await ackWakes(connection, beat.signalIds, { fetchImpl });
+  if (execute) {
+    const completedSignals = beat.pendingWakes.filter(wake =>
+      Object.hasOwn(result.journal.handled, attentionKey(pendingWakeToItem(wake))))
+      .map(wake => wake.signalId).filter(id => typeof id === "string" && id.length > 0);
+    await ackWakes(connection, completedSignals, { fetchImpl });
+  }
   const silent = result.plans.length === 0;
   return {
     ok: true,
@@ -237,8 +248,8 @@ async function defaultRunner(plan, env, connection) {
     child.on("close", code => {
       resolve({
         code,
-        stdout: Buffer.concat(stdout).toString("utf8").slice(0, 8000),
-        stderr: Buffer.concat(stderr).toString("utf8").slice(0, 2000)
+        stdout: Buffer.concat(stdout).toString("utf8"),
+        stderr: Buffer.concat(stderr).toString("utf8")
       });
     });
   });

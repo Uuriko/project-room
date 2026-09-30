@@ -1,3 +1,4 @@
+import { openMagicSignin } from "./signin-browser-journey.mjs";
 import { openComposerOptions } from "./room-chrome.mjs";
 import { clickChrome, clickWorkAction } from "./room-chrome.mjs";
 // Cross-session return-brief isolation and bounded accessibility regressions.
@@ -12,7 +13,7 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
-import { fillAccessKey } from "./auth-signin.mjs";
+import { signInFixture } from "./auth-signin.mjs";
 import { openCatchUp } from "./room-chrome.mjs";
 import { makeTestSigner } from "./helpers/signed-evidence.mjs";
 
@@ -71,15 +72,18 @@ test("stale return brief cannot cross a session; skip, local alerts, focus retur
   await page.keyboard.press("Enter");
   assert.equal(await page.evaluate(() => document.activeElement.id), "auth-title");
 
-  // Authentication errors have one local announcement owner, not a duplicate toast.
-  await fillAccessKey(page, "invalid-access-key");
-  await page.getByRole("button", { name: "Enter room", exact: true }).click();
-  await page.locator("#auth-error").waitFor({ state: "visible" });
-  assert.match(await page.locator("#auth-error").textContent(), /Check the access key and try again/);
+  // Email delivery failure has one local announcement owner through the
+  // actual email sign-in screen; this local fixture has no mail provider.
+  await openMagicSignin(page);
+  await page.locator('#auth-signin-ui [name=email]').fill("a11y@example.test");
+  await page.locator('#auth-signin-ui button[type=submit]').click();
+  const emailError = page.locator('#auth-signin-ui [data-signin-status]');
+  await emailError.filter({ hasText: /not configured|isn.t configured/i }).waitFor();
+  assert.equal(await emailError.getAttribute("role"), "alert");
   assert.equal(await page.locator("#status").textContent(), "", "no duplicate global authentication alert");
+  assert.equal(await page.locator("#auth-panel").isVisible(), true);
 
-  await fillAccessKey(page, owner);
-  await page.getByRole("button", { name: "Enter room", exact: true }).click();
+  await signInFixture(page, owner);
   await page.locator("#main").waitFor({ state: "visible" });
 
   const receipt = page.locator('[data-work-record-id="unknown-producer"] .receipt');
@@ -186,11 +190,10 @@ test("stale return brief cannot cross a session; skip, local alerts, focus retur
   holdOwnerBrief = false;
   if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await clickChrome(page, "#signout-button");
   await page.locator("#auth-panel").waitFor({ state: "visible" });
-  assert.equal(await page.evaluate(() => document.activeElement.id), "access-key", "access end moves focus to sign-in");
+  assert.equal(await page.locator('#auth-signin-ui [name="email"]').evaluate(node => node === document.activeElement), true, "access end moves focus to the visible sign-in email");
   assert.match(await page.locator("#auth-error").textContent(), /Session ended; private drafts were cleared/);
   assert.equal(await page.locator("#status").textContent(), "", "sign-out has one local announcement owner");
-  await fillAccessKey(page, maya);
-  await page.getByRole("button", { name: "Enter room", exact: true }).click();
+  await signInFixture(page, maya);
   await page.locator("#main").waitFor({ state: "visible" });
   assert.equal(await page.locator('[data-work-record-id="producer-choice"] [data-action="verify"]').textContent(), "Record independent check", "known distinct producer exposes independent verification");
   assert.equal(await page.locator('[data-work-record-id="producer-unknown-choice"] [data-action="verify"]').textContent(), "Record evidence check", "unknown producer exposes only a non-independent evidence check");

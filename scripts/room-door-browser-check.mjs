@@ -32,36 +32,32 @@ for (const touch of [false, true]) {
     assert.equal(await page.title(), "Project Room");
     assert.match(await page.locator("h1").innerText(), /Project Room/);
     assert.match(await page.locator(".lead").innerText(), /A shared place for people and AI agents to build together/);
-    assert.match(await page.locator(".join-note").innerText(), /Open this invite link to join as a person/);
-    assert.match(await page.locator(".join-note").innerText(), /Joining as a person or an agent is free/);
     assert.match(await page.locator(".spine").innerText(), /Conversations, shared work, and a private Inbox\./);
-    const open = page.getByRole("link", { name: "Open", exact: true });
+    const open = page.getByRole("link", { name: "Open Room", exact: true });
     const joinLink = page.getByRole("link", { name: "Join", exact: true });
     const paste = page.getByRole("link", { name: "Paste a prompt", exact: true });
-    const people = page.getByRole("link", { name: "People", exact: true });
+    const people = page.getByRole("link", { name: "People and agents", exact: true });
     assert.equal(await open.getAttribute("href"), ROOM_ORIGIN);
-    assert.equal(await joinLink.getAttribute("href"), `${ROOM_ORIGIN}/#join/`);
+    assert.equal(await joinLink.count(), 0);
     assert.doesNotMatch(await page.content(), /project-room-staging\.getdasha\.workers\.dev/);
-    assert.equal(await page.locator("#join-code-form").getAttribute("data-room-origin"), ROOM_ORIGIN);
+    assert.equal(await page.locator("#join-code-form").count(), 0);
     assert.equal(await page.locator("#join-empty").getAttribute("hidden"), "");
     assert.equal(await paste.getAttribute("href"), "#join-agent");
     assert.equal(await people.getAttribute("href"), "#people");
     assert.equal(await page.locator(".actions a").count(), 2, "first paint is Start a room + Open");
     assert.equal(await page.getByRole("link", { name: "Start a room", exact: true }).getAttribute("href"), `${ROOM_ORIGIN}/?start=room`);
     assert.equal(await page.locator(".actions .open").count(), 1);
-    assert.equal(await page.locator(".whispers .whisper").count(), 3, "Join, People and Join with code are whispers");
+    assert.equal(await page.locator(".whispers .whisper").count(), 1, "one people-and-agents link");
     assert.equal(await page.getByRole("heading", { name: "Connect", exact: true }).count(), 1);
     assert.equal(await page.getByRole("link", { name: "Connect an agent", exact: true }).count(), 0);
     const mcp = page.getByRole("link", { name: "Add Room as MCP", exact: true });
     assert.equal(await mcp.getAttribute("href"), "https://www.getdasha.com/room/mcp");
     assert.equal(await page.locator("#mcp-join-url").inputValue(), "https://www.getdasha.com/room/mcp");
-    assert.match(await page.locator("#connect").innerText(), /GET snippets\. No OAuth\. No keys\./);
-    assert.match(await page.locator("#connect").innerText(), /Invite code/);
     assert.equal(await page.locator('a[href="/room/mcp"]').count(), 1, "#667 same-bytes link lives under the spine");
-    assert.equal(await page.getByRole("link", { name: "Join with code", exact: true }).getAttribute("href"), "#join-code");
+    assert.equal(await page.getByRole("link", { name: "Join with code", exact: true }).count(), 0);
     await page.goto(`${origin}/room#room/grok-muse-potter-20260918`);
-    assert.equal(await page.getByRole("link", { name: "Open", exact: true }).getAttribute("href"), `${ROOM_ORIGIN}/?room=grok-muse-potter-20260918#room/grok-muse-potter-20260918`);
-    assert.equal(await page.getByRole("link", { name: "People", exact: true }).getAttribute("href"), `${ROOM_ORIGIN}/?room=grok-muse-potter-20260918#room/grok-muse-potter-20260918`);
+    assert.equal(await page.getByRole("link", { name: "Open Room", exact: true }).getAttribute("href"), `${ROOM_ORIGIN}/?room=grok-muse-potter-20260918#room/grok-muse-potter-20260918`);
+    assert.equal(await page.getByRole("link", { name: "People and agents", exact: true }).getAttribute("href"), `${ROOM_ORIGIN}/?room=grok-muse-potter-20260918#room/grok-muse-potter-20260918`);
     await paste.click();
     await page.locator("#join-agent").waitFor();
     const joinText = await page.locator("#join-agent").innerText();
@@ -78,39 +74,14 @@ for (const touch of [false, true]) {
     assert.match(await page.locator("#mcp-join-title").textContent(), /Add Room as MCP/);
     assert.equal(await page.locator("#mcp-join-url").inputValue(), "https://www.getdasha.com/room/mcp");
     assert.match(await mcpJoin.innerText(), /claude mcp add --transport http/i);
-    const joinCode = page.locator("#join-code-form");
-    await joinCode.waitFor();
-    assert.match(await page.locator("#join-code-title").textContent(), /Join with code/);
-    assert.equal(await page.locator("#join-code").getAttribute("placeholder"), "ABC-DEF-GHJ");
     await page.locator("#connect").waitFor();
     // Plain-language copy replaced the shorthand ("Agent handles stay loud", "Member+kit", ...).
-    assert.match(await page.locator("body").innerText(), /Joining as a person or an agent is free/);
     const connectText = await page.locator("#connect").innerText();
-    assert.match(connectText, /Conversations, shared work, and a private Inbox\./);
-    assert.match(connectText, /Create Room/);
-    assert.match(connectText, /bootstrap-agent-room/);
-    assert.match(connectText, /POST \/room\/api\/agent-rooms/);
-    assert.match(connectText, /Invite agents/);
-    assert.match(connectText, /collaborate\/contribute/);
-    assert.match(connectText, /Open this invite link to join as a person/);
-    assert.match(connectText, /#room\/\{roomId\}/);
-    assert.match(connectText, /Open this invite link/);
-    assert.match(connectText, /that is not a shareable invite/);
     assert.doesNotMatch(connectText, /Share https:\/\/www\.getdasha\.com\/room#room/);
     assert.match(connectText, /Start with a prompt/);
     assert.match(connectText, /Automatic replies depend on its host and connection/);
     assert.match(connectText, /Add Room as MCP/);
-    assert.match(connectText, /GET snippets\. No OAuth\. No keys\./);
-    assert.match(connectText, /Invite code/);
-    assert.match(connectText, /Invite teammates and AI agents to work on the same items together/);
     assert.match(connectText, /Rooms are private by default\. Adding an agent never lists the room publicly/);
-    assert.match(connectText, /choose “Use my AI” and paste the agent packet/);
-    assert.match(connectText, /Never paste a room key into a chat/);
-    assert.match(connectText, /Agents keep a visible @handle, and finished work lands as a receipt/);
-    assert.match(connectText, /The room owner issues a short-lived guest invite for a one-off helper\./);
-    assert.match(connectText, /enrolls a lasting agent with its own key/);
-    assert.match(connectText, /one to research, one to edit, one to plan/);
-    assert.match(connectText, /a mid-task steer becomes a handoff note, not a cancellation/);
     assert.match(connectText, /Types for this Room only/);
     assert.match(connectText, /Not a public agent store/);
     assert.match(connectText, /Claude Code/);
@@ -118,7 +89,7 @@ for (const touch of [false, true]) {
     const claude = page.locator('#agent-type-catalog [data-agent-type="claude-code"]');
     assert.equal(await claude.getAttribute("href"), "#mcp-join");
     assert.equal(await page.locator('#agent-type-catalog [data-agent-type="cursor"]').getAttribute("href"), "#join-agent");
-    assert.equal(await page.locator('#agent-type-catalog [data-agent-type="pi"]').getAttribute("href"), "#join-code");
+    assert.equal(await page.locator('#agent-type-catalog [data-agent-type="pi"]').getAttribute("href"), "#join-agent");
     await claude.click();
     await page.locator("#mcp-join").waitFor();
     assert.doesNotMatch(connectText, /marketplace|Agent handles stay loud|Member\+kit|frontier member|Genie/i);
@@ -135,6 +106,7 @@ for (const touch of [false, true]) {
     assert.equal(await page.locator("script").count(), 1);
     assert.doesNotMatch(await page.content(), /# Project Room|Bearer |ROOM_AGENT_TOKEN|Genie/i);
     mkdirSync("test-results", { recursive: true });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, "door fits viewport");
     await page.screenshot({ path: touch ? "test-results/room-door-connect-people-mobile.png" : "test-results/room-door-connect-people-desktop.png", fullPage: true });
     const workspace = await page.request.get(`${origin}/`);
     assert.match(workspace.headers()["content-type"], /text\/html/);
@@ -156,47 +128,12 @@ for (const touch of [false, true]) {
     await page.waitForURL(url => url.hash === `#join/${joinToken}` && url.origin === new URL(ROOM_ORIGIN).origin);
     assert.equal(page.url(), `${ROOM_ORIGIN}/#join/${joinToken}`);
     await page.goto(`${origin}/room#code/abc-def-ghj`);
-    await page.locator("#join-empty").waitFor();
-    // The door resolves a well-formed code asynchronously (POST
-    // /room/api/share-links/preview): the message first shows the "Checking
-    // your code…" loading text, then the verdict. Wait for the verdict.
-    await page.waitForFunction(
-      (sel) => {
-        const el = document.querySelector(sel);
-        const text = (el && el.textContent) || "";
-        return el && !el.hasAttribute("hidden") && text && !/checking your code/i.test(text);
-      },
-      "#join-empty-message",
-      { timeout: 15000 }
-    );
-    assert.equal(await page.locator("#join-empty").getAttribute("hidden"), null);
-    assert.match(await page.locator("#join-empty-message").innerText(), /invalid, already used, or expired/i);
-    assert.equal(await page.locator("#join-empty-recover a[href='#join-code']").count(), 1);
-    assert.equal(await page.locator("#join-empty-recover a[href='#join-agent']").count(), 1);
-    assert.equal(await page.locator("#join-empty-recover a[href='#mcp-join']").count(), 1);
-    assert.match(await page.locator("#join-empty-recover").innerText(), /Open room door/);
-    assert.equal(new URL(page.url()).origin, origin, "fake #code/ stays on the door");
-    await page.goto(`${origin}/room`);
-    await page.locator("#join-code").fill("ABC-DEF-GHJ");
-    await page.locator("#join-code-form button").click();
-    await page.locator("#join-code-status").waitFor();
-    await page.waitForFunction(
-      (sel) => {
-        const el = document.querySelector(sel);
-        const text = (el && el.textContent) || "";
-        return el && !el.hasAttribute("hidden") && text && !/checking your code/i.test(text);
-      },
-      "#join-code-status",
-      { timeout: 15000 }
-    );
-    assert.match(await page.locator("#join-code-status").innerText(), /invalid, already used, or expired/i);
-    assert.equal(await page.locator("#join-code").getAttribute("aria-invalid"), "true");
-    assert.match(await page.locator("#join-empty-message").innerText(), /invalid, already used, or expired/i);
+    await page.waitForURL(url => url.hash === "#code/abc-def-ghj" && url.origin === new URL(ROOM_ORIGIN).origin);
     await page.goto(`${origin}/room#join/`);
     await page.locator("#join-empty").waitFor();
     assert.equal(await page.locator("#join-empty").getAttribute("hidden"), null);
     assert.match(await page.locator("#join-empty").innerText(), /incomplete/i);
-    assert.equal(await page.locator("#join-empty-recover a[href='#join-code']").count(), 1);
+    assert.equal(await page.locator("#join-empty-recover a[href='#join-code']").count(), 0);
     assert.equal(await page.locator("#join-empty-recover a[href='#join-agent']").count(), 1);
     assert.equal(await page.locator("#join-empty-recover a[href='#mcp-join']").count(), 1);
     assert.match(await page.locator("#join-empty-recover").innerText(), /Open room door/);

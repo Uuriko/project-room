@@ -1,4 +1,5 @@
 // LOCAL TEST ONLY: public Room entrypoint never exports this provisioning route.
+import { hashPassword } from '../src/password-auth.mjs';
 import entry, { ProjectRoom } from './room.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { emailContractFixture } from '../scripts/email-contract-fixture.mjs';
@@ -7,6 +8,17 @@ import { seedRecordedReply } from '../scripts/reply-review-fixture.mjs';
 export class HttpTestRoom extends ProjectRoom {
   async fetch(request) {
     const url = new URL(request.url);
+    if (url.pathname === '/__test-password-reset-provision') {
+      const originalPassword = crypto.randomUUID();
+      this.store.createAccount('worker-reset-owner');
+      this.store.accountLogins.linkPasswordMethod('worker-reset-owner', {
+        email: 'worker-reset@example.test', verifier: hashPassword(originalPassword)
+      });
+      return Response.json({ ...this.store.accountLogins.issuePasswordResetCode({ email: 'worker-reset@example.test' }), originalPassword });
+    }
+    if (url.pathname === '/__test-password-reset-state') {
+      return Response.json(this.store.db.prepare('SELECT attempts, consumed_at FROM account_magic_codes').get() ?? null);
+    }
     if (url.pathname === '/__test-emissary-receipt' && request.method === 'POST') {
       const { roomId } = await request.json();
       return Response.json(this.store.emissaryReceipts.record(roomId, {

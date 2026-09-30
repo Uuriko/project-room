@@ -13,7 +13,7 @@ import { createRoomServer } from '../server/http.mjs';
 import { auditRecovery } from '../server/recovery.mjs';
 import { textVersion } from '../server/text-results.mjs';
 import { EVENT_TYPES as T } from '../src/events.js';
-import { fillAccessKey } from "./auth-signin.mjs";
+import { signInFixture } from "./auth-signin.mjs";
 import { openCatchUp } from "./room-chrome.mjs";
 
 for (const multiple of [false, true]) for (const touch of [false, true]) test(`${multiple ? 'alternative contributions' : 'voluntary help'} ${touch ? 'touch' : 'desktop'}: offer, answer, draft, adopt and independently review`, { timeout: 60000 }, async t => {
@@ -82,8 +82,8 @@ for (const multiple of [false, true]) for (const touch of [false, true]) test(`$
   const page = await browser.newPage({ viewport: touch ? { width: 390, height: 844 } : { width: 1280, height: 900 },
     isMobile: touch, hasTouch: touch, reducedMotion: 'reduce' });
   page.setDefaultTimeout(8000); page.on('pageerror', error => errors.push(error.message));
-  await page.goto(origin); await fillAccessKey(page, f.keys.owner);
-  await page.locator('#auth-form button[type=submit]').click(); await page.locator('#main').waitFor({ state: 'visible' });
+  await page.goto(origin); await signInFixture(page, f.keys.owner);
+  await page.locator('#main').waitFor({ state: 'visible' });
   mkdirSync('test-results', { recursive: true }); const prefix = `test-results/${multiple ? 'help-alternatives' : 'help-contribution'}-${touch ? 'touch' : 'desktop'}`;
   await openCatchUp(page);
   // The offer row must be in the DOM before revealMessage can focus it.

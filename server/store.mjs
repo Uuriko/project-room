@@ -181,6 +181,8 @@ const channelOfThreadId = threadId => {
   return match ? match[1] : null;
 };
 const canonical = value => Array.isArray(value) ? `[${value.map(canonical).join(",")}]` : value && typeof value === "object" ? `{${Object.keys(value).sort().map(k => `${JSON.stringify(k)}:${canonical(value[k])}`).join(",")}}` : JSON.stringify(value);
+const targetedEventVisible = (event, viewerId) => event?.type !== T.MESSAGE_POSTED || !event?.data?.toMemberId
+  || event.actorId === viewerId || event.data.toMemberId === viewerId;
 export const provisionalAccountPrefix = "acct-legacy-";
 const provisionalAccountId = (roomId, memberId) => `${provisionalAccountPrefix}${hash(`${roomId}\0${memberId}`).slice(0, 32)}`;
 const accountView = row => row ? { id: row.id, active: Boolean(row.active), revision: row.revision, authEpoch: row.auth_epoch } : null;
@@ -1850,6 +1852,18 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       return this.insertAccountCredential(accountId, this.now() + lifetimeMs);
     });
   }
+  invalidateHumanAccountCredentials(accountId) {
+    return this.transaction(() => {
+      this.account(accountId);
+      this.db.prepare("UPDATE account_credentials SET revoked=1 WHERE account_id=?").run(accountId);
+      this.db.prepare(`UPDATE credentials SET revoked=1 WHERE account_id=? OR EXISTS
+        (SELECT 1 FROM member_accounts m WHERE m.account_id=? AND m.room_id=credentials.room_id AND m.member_id=credentials.member_id)`)
+        .run(accountId, accountId);
+      // Retain slot tombstones referenced by immutable invitation receipts.
+      this.db.prepare(`UPDATE account_session_slots SET revision=revision+1,account_id=NULL,account_auth_epoch=NULL,
+        parent_credential_hash=NULL,authenticated_until=NULL WHERE account_id=?`).run(accountId);
+    });
+  }
   insertAccountCredential(accountId, expiresAt) {
     const count = this.db.prepare("SELECT count(*) AS n FROM account_credentials WHERE account_id=?").get(accountId).n;
     if (count >= 5000) fail(409, "pilot_limit", "Account credential retention limit reached; administrator maintenance required");
@@ -3202,7 +3216,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       for (const [name, value] of [["since", since], ["until", until]]) {
         if (value !== null && (typeof value !== "string" || Number.isNaN(Date.parse(value)))) fail(422, "invalid_cursor", `Invalid ${name} timestamp`);
       }
-      const sequence = this.room(roomId).sequence;
+      const authority = this.roomAuthority(roomId);
+      const sequence = authority.sequence;
       if (after > sequence) fail(409, "cursor_ahead", "Cursor exceeds room history; fetch a fresh snapshot");
       // Round-2 #110: audit filters. The event log is the audit log —
       // every mutation records actorId + at, so "who did what when" is a
@@ -3235,16 +3250,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // still advances past filtered events so pagination cannot stall.
       const viewerId = auth.member.id;
       const identityId = this.bonds.identityForMember(roomId, viewerId);
-      const isOwner = viewerId === this.room(roomId).state.room.ownerId;
-      const visible = events.filter(({ event }) =>
-        (event?.type !== T.MESSAGE_POSTED || !event?.data?.toMemberId
-        || event.actorId === viewerId || event.data.toMemberId === viewerId)
+      const isOwner = viewerId === authority.ownerId;
+      const visible = events.filter(({ event }) => targetedEventVisible(event, viewerId)
         && peerEventVisible(event, { memberId: viewerId, identityId, isOwner }));
       // #658: mention chips ride on message views. One batched query for
       // the whole page (no N+1); only members who can read the room see it.
       const messageIds = visible.filter(({ event }) => event?.type === T.MESSAGE_POSTED).map(({ event }) => event.id);
-      const members = this.room(roomId).state.members ?? {};
-      const chips = this.mentionChipsForEvents(roomId, members, messageIds);
+      const chips = this.mentionChipsForEvents(roomId, authority.members, messageIds);
       for (const { event } of visible) {
         if (event?.type === T.MESSAGE_POSTED && chips.has(event.id)) event.mentions = chips.get(event.id);
       }
@@ -3407,7 +3419,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const brief = buildReturnBrief({ sequence: room.sequence, workItems: room.state.workItems, rows, H, startAfter, C, memberId: auth.member.id });
       const identityId = this.bonds.identityForMember(roomId, auth.member.id);
       const isOwner = auth.member.id === room.state.room.ownerId;
-      brief.history.items = brief.history.items.filter(({ event }) => peerEventVisible(event, { memberId: auth.member.id, identityId, isOwner }));
+      // Derive continuation from scanned rows before removing private events:
+      // an invisible page must still progress within its frozen horizon.
+      brief.history.items = brief.history.items.filter(({ event }) => targetedEventVisible(event, auth.member.id)
+        && peerEventVisible(event, { memberId: auth.member.id, identityId, isOwner }));
       return { roomId, viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null, ...brief };
     });
   }

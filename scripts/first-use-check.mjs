@@ -12,7 +12,7 @@ import { RoomStore } from '../server/store.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { EVENT_TYPES as T } from '../src/events.js';
-import { fillAccessKey } from "./auth-signin.mjs";
+import { signInFixture } from "./auth-signin.mjs";
 
 // UI calming #2 moved "Make this work" into the per-message "⋯" overflow menu;
 // open it first, exactly as a member does.
@@ -47,8 +47,7 @@ for (const touch of [false, true]) {
     await owner.locator('#auth-panel').waitFor({ state: 'visible' });
     assert.equal(await owner.locator('#identity-label').textContent(), 'Not signed in');
     assert.equal(await owner.locator('#auth-error').textContent(), '', 'a normal signed-out visit is not an error');
-    await fillAccessKey(owner, ownerKey);
-    await owner.getByRole('button', { name: 'Enter room', exact: true }).click();
+    await signInFixture(owner, ownerKey);
     await owner.locator('#main').waitFor({ state: 'visible' });
     assert.equal(await owner.getByRole('button', { name: 'Got it', exact: true }).count(), 0, 'chat opens without a redundant tutorial dismissal');
     const firstMessage = owner.getByRole('button', { name: 'Write the first one', exact: true });
@@ -70,7 +69,6 @@ for (const touch of [false, true]) {
     await guest.locator('#main').waitFor({ state: 'visible' });
     assert.equal(await guest.locator('#identity-label').textContent(), 'Maya');
     assert.equal(await guest.locator('#new-work-button').isVisible(), false);
-    assert.equal(await guest.locator('#composer-work-button').isVisible(), false);
     await clickChrome(guest, '#topbar-settings');
     assert.match(await guest.locator('#room-results-list').textContent(), /No completed results yet/);
     await guest.locator('#settings-close').click();

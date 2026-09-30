@@ -95,8 +95,6 @@ test("Demigod door GET /room/mcp is the pasteable join surface", async () => {
   const html = await roomEntry(new Request("https://www.trydemigod.com/room")).text();
   assert.match(html, /Add Room as MCP/);
   assert.match(html, /claude mcp add --transport http/);
-  assert.match(html, /Join with code/);
-  assert.match(html, /ABC-DEF-GHJ/);
 });
 
 test("public join tool descriptions say read-only and disclaim the join", () => {

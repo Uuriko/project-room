@@ -1,3 +1,5 @@
+import { buildMagicLinkUrl } from "./magic-links.mjs";
+
 // Resend mail sender for magic-link sign-in codes.
 //
 // Plugs into the magic-link mailer seam (server/magic-links.mjs): the Room
@@ -19,8 +21,9 @@ const isNonEmptyString = value => typeof value === "string" && value.length > 0;
 // Returns null when no API key is configured (mailer stays unconfigured).
 export function resendMagicLinkSend({ apiKey, from, fetchFn = fetch } = {}) {
   if (!isNonEmptyString(apiKey) || !isNonEmptyString(from)) return null;
-  return async ({ to, code, expiresAt, baseUrl } = {}) => {
-    if (!isNonEmptyString(to) || !isNonEmptyString(code)) {
+  return async ({ to, code, expiresAt, baseUrl, returnTo, purpose = "signin" } = {}) => {
+    const notice = purpose === "password-reset-complete";
+    if (!isNonEmptyString(to) || (!notice && !isNonEmptyString(code))) {
       throw new Error("resendMagicLinkSend requires a recipient and a code");
     }
     const minutes = typeof expiresAt === "number"
@@ -30,21 +33,23 @@ export function resendMagicLinkSend({ apiKey, from, fetchFn = fetch } = {}) {
     // on load. The code stays single-use with a 15-minute expiry, and the
     // plaintext code remains in the body as a fallback for clients that
     // don't render links.
-    const link = isNonEmptyString(baseUrl)
-      ? `${baseUrl.replace(/\/+$/, "")}/?magic=${encodeURIComponent(code)}&email=${encodeURIComponent(to)}`
-      : null;
-    const subject = "Your Project Room sign-in link";
-    const text = link
-      ? `Sign in to Project Room:\n\n${link}\n\n` +
+    const link = notice ? null : buildMagicLinkUrl({ baseUrl, to, code, returnTo, purpose });
+    const resetting = purpose === "password-reset";
+    if (resetting && !link) throw new Error("Password reset email requires a configured app URL");
+    const action = resetting ? "Reset your Project Room password" : "Sign in to Project Room";
+    const subject = notice ? "Your Project Room password was reset" : resetting ? "Reset your Project Room password" : "Your Project Room sign-in link";
+    const notification = "Your Project Room password was reset. Your existing human sign-in sessions were signed out. If you did not make this change, contact your room administrator.";
+    const text = notice ? notification : link
+      ? `${action}:\n\n${link}\n\n` +
         `This link expires in ${minutes} minutes and works once. ` +
-        `If the button doesn't work, enter this code instead: ${code}\n\n` +
+        (resetting ? "Choose a new password after opening the link.\n\n" : `If the button doesn't work, enter this code instead: ${code}\n\n`) +
         `If you didn't request this, you can ignore this email.`
       : `Your Project Room sign-in code is: ${code}\n\n` +
         `It expires in ${minutes} minutes. If you didn't request this, you can ignore this email.`;
-    const html = link
-      ? `<p><a href="${escapeHtml(link)}" style="display:inline-block;padding:12px 24px;background:#4f46e5;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:bold;">Sign in to Project Room</a></p>` +
-        `<p>This link expires in ${minutes} minutes and works once. If the button doesn't work, enter this code instead:</p>` +
-        `<p style="font-size: 24px; font-weight: bold; letter-spacing: 4px;">${escapeHtml(code)}</p>` +
+    const html = notice ? `<p>${notification}</p>` : link
+      ? `<p><a href="${escapeHtml(link)}" style="display:inline-block;padding:12px 24px;background:#4f46e5;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:bold;">${action}</a></p>` +
+        `<p>This link expires in ${minutes} minutes and works once.</p>` +
+        (resetting ? `<p>Choose a new password after opening the link.</p>` : `<p>If the button doesn't work, enter this code instead:</p><p style="font-size: 24px; font-weight: bold; letter-spacing: 4px;">${escapeHtml(code)}</p>`) +
         `<p>If you didn't request this, you can ignore this email.</p>`
       : `<p>Your Project Room sign-in code is:</p>` +
         `<p style="font-size: 24px; font-weight: bold; letter-spacing: 4px;">${escapeHtml(code)}</p>` +

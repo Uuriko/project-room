@@ -11,7 +11,6 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { event, EVENT_TYPES as T } from "../src/events.js";
-import { fillAccessKey } from "./auth-signin.mjs";
 import { openSearch, openSettings, closeSettings } from "./room-chrome.mjs";
 
 const chromiumOptions = process.env.ROOM_TEST_CHROMIUM_PATH
@@ -51,12 +50,16 @@ async function startRoom(t, { events = initialRoom(), prepare = () => ({}) } = {
 
 async function enterRoom(page, accessKey, expectedIdentity) {
   await page.locator("#auth-panel").waitFor({ state: "visible" });
-  await page.waitForFunction(() => {
-    const button = document.querySelector('#auth-form button[type="submit"]');
-    return button && !button.disabled;
+  const origin = new URL(page.url()).origin;
+  assert.equal(new URL(origin).hostname, "127.0.0.1");
+  const response = await page.context().request.post(`${origin}/api/session`, {
+    headers: { Origin: origin }, data: { accessKey }, maxRedirects: 0
   });
-  await fillAccessKey(page, accessKey);
-  await page.getByRole("button", { name: "Enter room", exact: true }).click();
+  assert.equal(response.status(), 201);
+  // Restore through the real refresh control without reloading: pending old
+  // requests and the announcement observer must survive this test boundary.
+  await page.evaluate(() => history.replaceState(null, "", "/"));
+  await page.locator("#refresh-button").evaluate(button => button.click());
   await page.locator("#main").waitFor({ state: "visible" });
   await page.waitForFunction(name => document.querySelector("#identity-label")?.textContent.startsWith(name), expectedIdentity);
 }
@@ -462,7 +465,7 @@ test("composer failures stay discussion-scoped and keyboard sends preserve user 
   release.resolve();
   await page.locator("#auth-panel").waitFor({ state: "visible" });
   assert.equal(await form.getAttribute("aria-busy"), null);
-  assert.equal(await page.evaluate(() => document.activeElement?.id), "access-key",
+  assert.equal(await page.locator('#auth-signin-ui [data-signin-form="password"] [name="email"]').evaluate(node => node === document.activeElement), true,
     "access termination focuses authentication, never the old composer");
   await enterRoom(page, owner, "Room owner");
   assert.equal(await input.inputValue(), "");

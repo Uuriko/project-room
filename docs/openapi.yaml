@@ -194,7 +194,7 @@ paths:
         '401': { description: Account session expired. }
         '403': { description: Origin or CSRF rejected. }
         '413': { description: Request exceeds the payload limit. }
-        '422': { description: Invalid input, draft changed or Gmail needs reconnecting. }
+        '422': { description: "Invalid input, draft changed or Gmail needs reconnecting." }
         '429': { description: Rate limit exceeded. }
         '502': { description: Gmail unavailable. }
         '503': { description: Gmail is not configured. }
@@ -385,7 +385,7 @@ paths:
   /api/rooms/{roomId}/stream:
     get:
       summary: Server-sent events stream
-      description: Live event stream. Resume with Last-Event-ID header or ?after= (the header wins when both are sent). A consumer whose unsent bytes exceed the per-connection cap (64 KiB) receives a final `stream_lagging` event, is closed alone, and resumes by reconnecting with Last-Event-ID. Because EventSource cannot set headers, this route also accepts the account-session selectors in the query string; src/client.js opens `/stream?after=N&auth=account&binding=<sessionBinding>` for a signed-in browser.
+      description: Live event stream. Resume with Last-Event-ID header or ?after= (the header wins when both are sent). A consumer whose unsent bytes exceed the per-connection cap (64 KiB) receives a final `stream_lagging` event, is closed alone, and resumes by reconnecting with Last-Event-ID. An authorization or session-binding refusal emits `access-ended`; other pump failures emit a bounded `unavailable` event and close the transport so EventSource can reconnect without claiming lost account access. Because EventSource cannot set headers, this route also accepts the account-session selectors in the query string; src/client.js opens `/stream?after=N&auth=account&binding=<sessionBinding>` for a signed-in browser.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: Last-Event-ID
@@ -910,9 +910,9 @@ paths:
                 question: { type: string, description: Natural-language question (1-2000 chars) }
                 sources: { type: array, items: { type: string, enum: [room, docs, fetch, provider] }, description: Sources to consult (default all four) }
                 urls: { type: array, items: { type: string }, description: Explicit URLs for the fetch leg (max 10) }
-                maxEvidence: { type: integer, description: Max evidence items (1-20, default 5) }
+                maxEvidence: { type: integer, description: "Max evidence items (1-20, default 5)" }
                 maxAgeMs: { type: integer, description: Freshness passthrough for the fetch leg }
-                planOnly: { type: boolean, description: Return the plan without executing (free, no quota spent) }
+                planOnly: { type: boolean, description: "Return the plan without executing (free, no quota spent)" }
                 tags: { type: array, items: { type: string }, description: Journal tags (max 20) }
       responses:
         '200':
@@ -938,7 +938,7 @@ paths:
                       properties:
                         rank: { type: integer }
                         source: { type: string, enum: [room, docs, fetch, provider] }
-                        id: { type: string, description: Typed stable id, e.g. room:ab12cd34, doc:docs/x.md, fetch:ab12cd34, alexandria:ab12cd34 }
+                        id: { type: string, description: "Typed stable id, e.g. room:ab12cd34, doc:docs/x.md, fetch:ab12cd34, alexandria:ab12cd34" }
                         url: { type: string, nullable: true }
                         title: { type: string }
                         excerpt: { type: string, description: Matched passages in markdown }
@@ -1015,7 +1015,7 @@ paths:
                 required: [valid]
                 properties:
                   valid: { type: boolean }
-                  taskId: { type: string, nullable: true, description: Parsed task-id, or null when the block is missing or has none }
+                  taskId: { type: string, nullable: true, description: "Parsed task-id, or null when the block is missing or has none" }
                   fields: { type: object, description: "Parsed block fields, last-wins on duplicates ({} when no block found)" }
                   errors: { type: array, items: { type: string }, description: Present when valid is false; the exact scripts/room validate_claim error strings }
         '405':
@@ -1609,7 +1609,7 @@ paths:
         '201': { description: Command recorded; body as GET plus receipt (receipt.alreadyPaused / receipt.wasPaused say whether the state changed) }
         '200': { description: Duplicate requestId; historical receipt }
         '403': { description: owner_required }
-        '409': { description: member_inactive, wake_limit (this member's wake receipts are at capacity) or idempotency_conflict }
+        '409': { description: "member_inactive, wake_limit (this member's wake receipts are at capacity) or idempotency_conflict" }
         '422': { description: invalid_pause_command }
   /api/rooms/{roomId}/provider-heartbeats:
     get:
@@ -1811,7 +1811,7 @@ paths:
         '201': { description: Invitation issued and journaled }
         '200': { description: Exact retry of a journaled issuance }
         '403': { description: account_session_required or access_denied }
-        '409': { description: idempotency_conflict, stale revision or token_conflict }
+        '409': { description: "idempotency_conflict, stale revision or token_conflict" }
         '422': { description: invalid_invitation }
   /api/rooms/{roomId}/access-review:
     get:
@@ -1868,7 +1868,7 @@ paths:
                         accountBound: { type: boolean }
                         membershipOrigin: { type: string, enum: [bootstrap, added, invitation] }
                         joinedAt: { type: string, format: date-time, nullable: true }
-                        liveAccessKeys: { type: integer, description: Count of unexpired, unrevoked keys; never the keys }
+                        liveAccessKeys: { type: integer, description: "Count of unexpired, unrevoked keys; never the keys" }
                         latestAccessKeyExpiresAt: { type: string, format: date-time, nullable: true }
                         lastActivityAt: { type: string, format: date-time, nullable: true }
                   guests:
@@ -2102,7 +2102,7 @@ paths:
               type: object
               required: [identityId]
               properties:
-                identityId: { type: string, description: Agent identity id (ai_...), linked into this room }
+                identityId: { type: string, description: "Agent identity id (ai_...), linked into this room" }
       responses:
         '200': { description: The granted membership-administration grant }
         '403': { description: access_denied (owner only) }
@@ -2170,7 +2170,7 @@ paths:
               type: object
               required: [identityId]
               properties:
-                identityId: { type: string, description: Agent identity id (ai_...), linked into this room }
+                identityId: { type: string, description: "Agent identity id (ai_...), linked into this room" }
       responses:
         '200': { description: The granted owner-delegation grant }
         '403': { description: access_denied (owner only) }
@@ -2447,8 +2447,8 @@ paths:
           description: Exclusive event sequence from nextBefore; every page rechecks current access and read cursor.
           schema: { type: integer, minimum: 1 }
       responses:
-        '200': { description: Feed with page unread count, cursor, sequence, basis, pageBefore, nextBefore, mentionAckRate and items; fetching never acknowledges }
-        '401': { description: Credential expired, revoked or access ended }
+        '200': { description: "Feed with page unread count, cursor, sequence, basis, pageBefore, nextBefore, mentionAckRate and items; fetching never acknowledges" }
+        '401': { description: "Credential expired, revoked or access ended" }
         '403': { description: Membership inactive }
         '422': { description: invalid_notification_selection (unknown or repeated query key) or invalid_notification_limit }
   /api/rooms/{roomId}/cursor:
@@ -2614,19 +2614,6 @@ paths:
                         requester: { type: string }
                         reason: { type: [string, 'null'] }
                         at: { type: integer }
-                  next:
-                    type: array
-                    description: >-
-                      Suggested next steps for the calling agent
-                      (reply-dm / work on assignment / answer mention),
-                      each with method + path.
-                    items:
-                      type: object
-                      properties:
-                        action: { type: string }
-                        method: { type: string }
-                        path: { type: string }
-                        description: { type: string }
                   mentions:
                     type: array
                     items:
@@ -3950,8 +3937,8 @@ paths:
                   roomId: { type: string }
                   clusters:
                     type: array
-                    items: { type: object, description: Deduplicated cluster (key, count, severity, reporters, firstSeen, lastSeen) }
-                  your_mark: { type: integer, description: The caller's Mark balance (earned by triage, spent on appeals and filing) }
+                    items: { type: object, description: "Deduplicated cluster (key, count, severity, reporters, firstSeen, lastSeen)" }
+                  your_mark: { type: integer, description: "The caller's Mark balance (earned by triage, spent on appeals and filing)" }
         '401': { description: unauthenticated }
     post:
       summary: File feedback
@@ -4048,7 +4035,7 @@ paths:
                   roomId: { type: string }
                   queue:
                     type: array
-                    items: { type: object, description: Queued feedback item (id, clusterKey, severity, filing_lane, filing_mark, fast_track) }
+                    items: { type: object, description: "Queued feedback item (id, clusterKey, severity, filing_lane, filing_mark, fast_track)" }
         '401': { description: unauthenticated }
   /api/rooms/{roomId}/feedback/notifications:
     get:
@@ -4068,7 +4055,7 @@ paths:
                 properties:
                   notifications:
                     type: array
-                    items: { type: object, description: Notification (seq, type, feedback_id, message, created_at) }
+                    items: { type: object, description: "Notification (seq, type, feedback_id, message, created_at)" }
         '401': { description: unauthenticated }
   /api/rooms/{roomId}/feedback/{feedbackId}:
     get:
@@ -4241,7 +4228,7 @@ paths:
               required: [kind]
               properties:
                 kind: { type: string, enum: [merged, adopted] }
-                ref: { type: string, description: External reference (PR number, doc URL, commit) }
+                ref: { type: string, description: "External reference (PR number, doc URL, commit)" }
       responses:
         '200':
           description: Outcome attributions
@@ -5784,16 +5771,6 @@ paths:
       responses:
         '200': { description: "{ status: ready }" }
         '503': { description: "{ status: unavailable }" }
-  /api/guest-agent-links:
-    get:
-      summary: Guest invite contract document
-      description: >-
-        Open (also HEAD): the static contract for guest invites
-        (status, kind, permissions, access, ttl). Contains no room data.
-        `POST` on this path mints an invite and requires a room credential.
-      security: []
-      responses:
-        '200': { description: Static contract document }
   /api/guest-invites:
     get:
       summary: GX guest-invite contract document
@@ -5916,7 +5893,7 @@ paths:
                 sessionRevision: { type: integer }
       responses:
         '200': { description: "{ remaining, session (account view) }; the slot is now signed in" }
-        '401': { description: invalid_recovery_code (no set, wrong code, or unknown email — same shape) }
+        '401': { description: "invalid_recovery_code (no set, wrong code, or unknown email — same shape)" }
         '403': { description: origin_denied or csrf_denied }
         '422': { description: invalid_recovery_redeem or invalid_email }
         '429': { description: rate_limited }
@@ -6055,7 +6032,7 @@ paths:
         '401': { description: unauthenticated }
         '403': { description: origin_denied }
         '409': { description: password_already_set }
-        '422': { description: invalid_password_set, password_too_short/password_too_long, or no_verified_email }
+        '422': { description: "invalid_password_set, password_too_short/password_too_long, or no_verified_email" }
         '429': { description: rate_limited }
   /api/auth/agent/rooms:
     post:
@@ -6170,11 +6147,12 @@ paths:
               required: [email]
               properties:
                 email: { type: string }
+                returnTo: { type: string, description: "Optional local root path with room/account query and validated invite/join fragment; external URLs and other parameters are refused." }
       responses:
         '200': { description: "{ status: 'sent' } — or { status: 'unavailable', reason: 'mail_not_configured', message } when email delivery is not configured" }
         '401': { description: account_session_required (no slot cookie) }
         '403': { description: origin_denied or csrf_denied }
-        '422': { description: invalid_email_request or invalid_email }
+        '422': { description: "invalid_email_request, invalid_email, or invalid_return_target" }
         '429': { description: rate_limited }
   /api/auth/magic/consume:
     post:
@@ -6215,7 +6193,7 @@ paths:
         '201': { description: "{ authenticated: true, account: { id, revision, authEpoch }, csrf, sessionBinding, sessionRevision, expiresAt, authenticatedUntil } — Set-Cookie account_session" }
         '401': { description: account_session_required (no slot cookie) or invalid_magic_code }
         '403': { description: origin_denied or csrf_denied }
-        '409': { description: Stale expectedSessionRevision, or magic_account_mismatch (slot already signed in to a different account — the code is not burned) }
+        '409': { description: "Stale expectedSessionRevision, or magic_account_mismatch (slot already signed in to a different account — the code is not burned)" }
         '422': { description: invalid_magic_login or invalid_session_revision or invalid_email }
         '429': { description: rate_limited }
   /api/auth/passkey/register/options:
@@ -6294,7 +6272,7 @@ paths:
                 sessionRevision: { type: integer }
       responses:
         '200': { description: "{ authenticated: true, account (account view) }; the slot is now signed in" }
-        '401': { description: passkey_verification_failed (bad challenge, failed assertion, or unknown credential — same shape) }
+        '401': { description: "passkey_verification_failed (bad challenge, failed assertion, or unknown credential — same shape)" }
         '403': { description: origin_denied }
         '409': { description: stale_session_revision }
         '422': { description: invalid_passkey_response or passkey_origin_rejected }
@@ -6325,7 +6303,7 @@ paths:
       responses:
         '201': { description: "account view; the slot is now signed in" }
         '409': { description: already_registered (an account with that email exists) }
-        '422': { description: invalid_signup, invalid_email, or password_too_short/password_too_long }
+        '422': { description: "invalid_signup, invalid_email, or password_too_short/password_too_long" }
         '429': { description: rate_limited }
   /api/auth/password/login:
     post:
@@ -6353,8 +6331,63 @@ paths:
                 sessionRevision: { type: integer }
       responses:
         '200': { description: "account view; the slot is now signed in" }
-        '401': { description: invalid_credentials (wrong password, unknown email, or no password set — same shape) }
+        '401': { description: "invalid_credentials (wrong password, unknown email, or no password set — same shape)" }
         '422': { description: invalid_login or invalid_email }
+        '429': { description: rate_limited }
+  /api/auth/password/reset/request:
+    post:
+      summary: Email a purpose-bound password reset link
+      description: >-
+        Requires the browser account slot, Origin and CSRF. Responds identically
+        for existing and unknown emails. Configured delivery receives a single-use
+        15-minute reset proof; no password or account changes occur on request.
+        Optional returnTo has the same strict local validation as magic sign-in.
+      security:
+        - accountSession: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              required: [email]
+              properties:
+                email: { type: string }
+                returnTo: { type: string }
+      responses:
+        '200': { description: "sent or honest mail_not_configured; no account-existence information" }
+        '401': { description: account_session_required }
+        '403': { description: origin_denied or csrf_denied }
+        '422': { description: "invalid_email_request, invalid_email or invalid_return_target" }
+        '429': { description: rate_limited }
+  /api/auth/password/reset/consume:
+    post:
+      summary: Set a new password after proving mailbox ownership
+      description: >-
+        Requires the account slot, Origin, CSRF and current sessionRevision.
+        Proof is password-reset-only, bound to the active password account,
+        current verifier and auth epoch. Expired, used or invalid proofs fail
+        identically. A signed-in foreign account is refused before proof use.
+        Success atomically changes the verifier, burns proof and revokes target
+        human account and Room credentials/sessions. Membership, invitation
+        authority epochs, unrelated accounts and agent identities remain intact.
+        Does not sign in or accept an invitation; fresh sign-in is required.
+      security:
+        - accountSession: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              required: [email, code, newPassword, sessionRevision]
+              properties:
+                email: { type: string }
+                code: { type: string }
+                newPassword: { type: string, minLength: 10, maxLength: 256 }
+                sessionRevision: { type: integer, minimum: 0 }
+      responses:
+        '200': { description: "{status: password_reset, signInRequired: true}; fresh sign-in required" }
+        '401': { description: account_session_required or invalid_password_reset }
+        '403': { description: origin_denied or csrf_denied }
+        '409': { description: stale_session_revision or reset_account_mismatch; proof remains unused }
+        '422': { description: "invalid_password_reset, invalid_email or password policy failure" }
         '429': { description: rate_limited }
   /api/auth/password/change:
     post:
@@ -6438,7 +6471,7 @@ paths:
                         doc: { type: string }
                         description: { type: string }
         '404': { description: invite_unavailable }
-        '409': { description: invite_already_used, invite_authority_changed or pilot_limit }
+        '409': { description: "invite_already_used, invite_authority_changed or pilot_limit" }
         '410': { description: invite_revoked or invite_expired }
         '422': { description: invalid_invite or invalid_invite_name }
         '429': { description: rate_limited }
@@ -6469,9 +6502,9 @@ paths:
                   roomId: { type: string }
                   roomTitle: { type: string }
                   permissions: { type: array, items: { type: string } }
-                  profile: { type: string, description: chat, contribute, review, collaborate or custom }
+                  profile: { type: string, description: "chat, contribute, review, collaborate or custom" }
                   expiresAt: { type: integer }
-                  inviterDisplayName: { type: string, nullable: true, description: Display name of the invite minter, or null when unavailable }
+                  inviterDisplayName: { type: string, nullable: true, description: "Display name of the invite minter, or null when unavailable" }
         '404': { description: invite_unavailable }
         '409': { description: invite_already_used or invite_authority_changed }
         '410': { description: invite_revoked or invite_expired }
@@ -6511,7 +6544,7 @@ paths:
                 type: object
                 required: [token, jti, roomId, chainId, depth, maxDepth, issuedAt, expiresAt, tier, grantedPermissions, publicKey, next]
                 properties:
-                  token: { type: string, description: Signed bearer token, shown once — the server never stores it }
+                  token: { type: string, description: "Signed bearer token, shown once — the server never stores it" }
                   jti: { type: string }
                   roomId: { type: string }
                   chainId: { type: string }
@@ -6619,7 +6652,7 @@ paths:
                 required: [identityId, secret, roomId, memberId, displayName, permissions, chainId, depth, next]
                 properties:
                   identityId: { type: string }
-                  secret: { type: string, description: Room credential secret, shown once }
+                  secret: { type: string, description: "Room credential secret, shown once" }
                   roomId: { type: string }
                   memberId: { type: string }
                   displayName: { type: string }
@@ -6716,7 +6749,7 @@ paths:
                         title: { type: string }
                         memberId: { type: string }
                         archivedAt: { type: string, nullable: true }
-        '401': { description: Missing, invalid or revoked identity secret }
+        '401': { description: "Missing, invalid or revoked identity secret" }
         '422': { description: Invalid cursor }
         '429': { description: Rate limited }
     post:
@@ -6749,7 +6782,7 @@ paths:
                 displayName: { type: string, maxLength: 80 }
       responses:
         '201': { description: "{ roomId, ownerMemberId, identityId, duplicate: false }" }
-        '200': { description: Idempotent retry (duplicate:true) }
+        '200': { description: "Idempotent retry (duplicate:true)" }
         '401': { description: unauthenticated (unknown identity secret) }
         '409': { description: room_exists or pilot_limit }
         '422': { description: invalid_room_request }
@@ -7351,9 +7384,10 @@ paths:
         this room's signals. Revocation and identity binding are checked again
         after body upload, before the synchronous write.
         Registers (or refreshes) one host: `hostId` (1-128 chars, stable per
-        host), `mode` (`wakeable` — this host can be woken and must register an
-        HTTPS `wakeUrl`; or `pull-only` — the host only polls and may not
-        register a `wakeUrl`). Optional `cadenceSeconds` declares the host's
+        host), optional `mode` (defaults to `wakeable` — the host can wait on
+        `/api/agent-wakes/poll` without a public endpoint, with an optional
+        HTTPS `wakeUrl`; or `pull-only` — the host polls and may not register
+        a `wakeUrl`). Room access keys must explicitly use `pull-only`. Optional `cadenceSeconds` declares the host's
         poll cadence; optional `pushNotification` (`{ url, token,
         authentication? }`) registers a push subscription for the wake path:
         when a room event needs an offline agent, the room POSTs a
@@ -7379,18 +7413,18 @@ paths:
           application/json:
             schema:
               type: object
-              required: [hostId, mode]
+              required: [hostId]
               properties:
                 hostId: { type: string, minLength: 1, maxLength: 128 }
-                mode: { type: string, enum: [wakeable, pull-only] }
-                wakeUrl: { type: string, format: uri, description: required for wakeable hosts (must be https), forbidden for pull-only }
-                cadenceSeconds: { type: number, exclusiveMinimum: 0, description: declared poll cadence in seconds; reachability window is max(180s, cadenceSeconds * 1.5) }
+                mode: { type: string, enum: [wakeable, pull-only], default: wakeable }
+                wakeUrl: { type: string, format: uri, description: "optional for wakeable hosts (must be https), forbidden for pull-only" }
+                cadenceSeconds: { type: number, exclusiveMinimum: 0, description: "declared poll cadence in seconds; reachability window is max(180s, cadenceSeconds * 1.5)" }
                 pushNotification:
                   type: object
                   required: [url, token]
                   properties:
-                    url: { type: string, format: uri, description: https-only push target, must resolve to a public address }
-                    token: { type: string, minLength: 1, maxLength: 500, description: opaque client string, sent as X-Room-Notification-Token; never echoed }
+                    url: { type: string, format: uri, description: "https-only push target, must resolve to a public address" }
+                    token: { type: string, minLength: 1, maxLength: 500, description: "opaque client string, sent as X-Room-Notification-Token; never echoed" }
                     authentication:
                       type: object
                       required: [schemes, credentials]
@@ -7418,6 +7452,40 @@ paths:
         '200': { description: "{ agentId, status, lastSeenAt, hosts: [{ hostId, mode, wakeUrl, lastSeenAt, state }] }" }
         '401': { description: unauthenticated }
         '403': { description: insufficient_scope }
+  /api/agent-wakes/poll:
+    get:
+      summary: Wait for the caller's queued wake signals
+      description: >-
+        Credential: the `pri_` identity secret or a `rak_` API key with
+        `heartbeats:read`. First register a host with `/api/agent-heartbeats`.
+        Returns existing pending signals immediately; otherwise waits until
+        a new mention/DM signal is queued, including for a freshly heartbeating
+        host with a matching active wait, the timeout expires or the client
+        disconnects. Waiting never acknowledges signals. A reconnect replaces
+        only the same host's wait. Room access keys use credential-specific
+        host ids and see only their bound room's signals. Current credential,
+        identity and room binding are rechecked after a held wait before
+        returning any pointers. Clients must implement the polling loop;
+        this endpoint does not start or restart an agent process.
+        30 requests per identity per minute.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: hostId
+          in: query
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9._-]+$' }
+          description: Send the same input host name used for heartbeat reports.
+        - name: waitMs
+          in: query
+          schema: { type: integer, minimum: 0, maximum: 55000, default: 25000 }
+      responses:
+        '200': { description: "{ agentId, pendingWakes, waitedMs, timedOut, next } — queued signals remain until explicit acknowledgment" }
+        '401': { description: 'unknown, revoked or expired credential' }
+        '403': { description: insufficient scope or changed identity/room binding }
+        '404': { description: agent_not_registered }
+        '422': { description: invalid_wake_poll }
+        '429': { description: rate_limited }
   /api/agent-heartbeats/ack:
     post:
       summary: Acknowledge handled wake signals
@@ -7484,7 +7552,7 @@ paths:
                 identityId: { type: string }
       responses:
         '200': { description: The request with status cancelled }
-        '401': { description: Missing, mismatched, stale, or revoked identity credential }
+        '401': { description: "Missing, mismatched, stale, or revoked identity credential" }
         '404': { description: not_found }
         '409': { description: already_decided }
         '422': { description: invalid_request }
@@ -7513,7 +7581,7 @@ paths:
         '201': { description: Agent joined with its own identity and empty work permissions }
         '200': { description: Existing active membership reused }
         '401': { description: Active identity required }
-        '403': { description: Removed access, wrong Origin, or verification required }
+        '403': { description: "Removed access, wrong Origin, or verification required" }
         '409': { description: Room unavailable or full }
         '410': { description: Invitation unavailable }
         '422': { description: Invalid join input }
@@ -7541,7 +7609,7 @@ paths:
                 linkToken: { type: string }
       responses:
         '200': { description: "{ access, identity, link, room: { id, title } }" }
-        '410': { description: link_unavailable (unknown, expired, cancelled or exhausted) }
+        '410': { description: "link_unavailable (unknown, expired, cancelled or exhausted)" }
         '422': { description: invalid_link or wrong_link_kind }
         '429': { description: rate_limited }
   /api/invitations/preview:
@@ -7648,7 +7716,7 @@ paths:
                   description: Signed agent card (name, description, capabilities, publicKey, signature)
       responses:
         '201': { description: Guest credential issued }
-        '200': { description: Exact retry of a journaled redemption, or same-identity seat reuse }
+        '200': { description: "Exact retry of a journaled redemption, or same-identity seat reuse" }
         '401': { description: unauthenticated — identity secret missing or unknown }
         '410': { description: invite_unavailable }
         '422': { description: card_invalid }
@@ -7686,7 +7754,7 @@ paths:
                   description: Self-signed agent card (name, description, capabilities, publicKey, signature, joinRequest)
       responses:
         '201': { description: Guest credential issued }
-        '200': { description: Identical requestId replayed (metadata with replayed:true, credential NOT returned — client must persist the token from the 201) or same card key renewed with a new requestId (fresh credential, old one revoked) }
+        '200': { description: "Identical requestId replayed (metadata with replayed:true, credential NOT returned — client must persist the token from the 201) or same card key renewed with a new requestId (fresh credential, old one revoked)" }
         '401': { description: card signature failed to verify }
         '404': { description: room_not_found }
         '422': { description: card_invalid or stale_card }
@@ -7848,7 +7916,7 @@ paths:
       responses:
         '201': { description: "{ contractVersion: 1, viewer, room: { id, title, memberId, kind, archived, archivedAt }, duplicate: false }" }
         '200': { description: Idempotent replay of the same request (duplicate true) }
-        '403': { description: csrf_denied, origin_denied or room_creation_denied }
+        '403': { description: "csrf_denied, origin_denied or room_creation_denied" }
         '409': { description: room_exists or pilot_limit }
         '422': { description: invalid_room_request }
         '429': { description: rate_limited }
@@ -7967,7 +8035,7 @@ paths:
                 confirmationToken: { type: string }
       responses:
         '200': { description: "{ deleted: true, accountId, receipt: { purged, retained } }" }
-        '401': { description: account_session_required, invalid_session or invalid_confirmation }
+        '401': { description: "account_session_required, invalid_session or invalid_confirmation" }
         '403': { description: origin_denied or csrf_denied }
         '409': { description: plan_changed }
         '422': { description: invalid_deletion or invalid_purge_plan }
@@ -8089,11 +8157,11 @@ paths:
                   syncAvailable: { type: boolean }
                   live: { $ref: '#/components/schemas/TelegramLiveStatus' }
                   registered: { type: boolean, description: The binding's webhook secret hash was stored by this request }
-                  receipt: { type: [object, 'null'], description: page.apply receipt, null when no webhook inbox is wired }
+                  receipt: { type: [object, 'null'], description: "page.apply receipt, null when no webhook inbox is wired" }
                   duplicate: { type: boolean }
                   source: { type: [string, 'null'], enum: [webhook, journal, 'null'] }
                   imported: { type: [integer, 'null'], description: Sources imported by this page }
-        '200': { description: Exact retry of a journaled import, or a registration with no webhook inbox to drain }
+        '200': { description: "Exact retry of a journaled import, or a registration with no webhook inbox to drain" }
         '401': { description: account_session_required }
         '403': { description: csrf_denied or origin_denied }
         '404': { description: channel_connection_not_found (including another account's connection) }
@@ -8171,8 +8239,8 @@ paths:
         '401': { description: account_session_required }
         '403': { description: csrf_denied or origin_denied }
         '404': { description: channel_connection_not_found (disconnecting another account's or an unknown connection) }
-        '409': { description: stale_email_connection (revision moved), email_mailbox_exists, email_mailbox_changed, email_connection_limit, idempotency_conflict }
-        '422': { description: invalid_channel_connection (not configure/disconnect), channel_account_mismatch (profile for another account), invalid_email_import (profile shape) }
+        '409': { description: "stale_email_connection (revision moved), email_mailbox_exists, email_mailbox_changed, email_connection_limit, idempotency_conflict" }
+        '422': { description: "invalid_channel_connection (not configure/disconnect), channel_account_mismatch (profile for another account), invalid_email_import (profile shape)" }
         '429': { description: rate_limited }
   /api/inbox/channel-sends:
     post:
@@ -8216,7 +8284,7 @@ paths:
                   contractVersion: { type: integer, enum: [1] }
                   viewer: { type: object }
                   sourceId: { type: string }
-                  sends: { type: array, items: { type: object, description: Send journal entry (id, sourceId, revision, status, envelope, providerId, createdAt, updatedAt) } }
+                  sends: { type: array, items: { type: object, description: "Send journal entry (id, sourceId, revision, status, envelope, providerId, createdAt, updatedAt)" } }
                   send: { type: object, description: The attempt after this call }
                   simulationAvailable: { type: boolean }
                   channelSend: { $ref: '#/components/schemas/ChannelSendDescriptor' }
@@ -8225,11 +8293,11 @@ paths:
                     properties:
                       at: { type: string, format: date-time }
                       outcome: { type: string, enum: [accepted, rejected, failed] }
-                      code: { type: [string, 'null'], description: fixture, network, rate_limited, server_error, unauthorized or the slugged Telegram description }
+                      code: { type: [string, 'null'], description: "fixture, network, rate_limited, server_error, unauthorized or the slugged Telegram description" }
         '401': { description: account_session_required }
         '403': { description: csrf_denied or origin_denied }
         '404': { description: inbox_source_not_found or inbox_send_not_found }
-        '409': { description: channel_sending_unavailable (no transport for this source), channel_connection_unavailable (Telegram refused the bot token), inbox_transport_mismatch }
+        '409': { description: "channel_sending_unavailable (no transport for this source), channel_connection_unavailable (Telegram refused the bot token), inbox_transport_mismatch" }
         '422': { description: invalid_inbox_send }
         '429': { description: rate_limited }
   /api/inbox/connections/{id}/sync:
@@ -8264,7 +8332,7 @@ paths:
         '201': { description: Page imported; receipt lists per-source revisions }
         '200': { description: Exact retry of a journaled sync }
         '403': { description: csrf_denied or channel_sync_local_only }
-        '409': { description: channel_sync_unsupported, channel_sync_unavailable, channel_webhook_unavailable or a stale cursor }
+        '409': { description: "channel_sync_unsupported, channel_sync_unavailable, channel_webhook_unavailable or a stale cursor" }
         '422': { description: invalid_channel_update }
   /api/inbox/webhooks/{connectionId}:
     post:
@@ -9251,9 +9319,9 @@ paths:
       responses:
         '201': { description: "{ contractVersion: 1, viewer, receipt: { requestId, action, sourceId, ... }, duplicate: false }" }
         '200': { description: Exact retry of a journaled command (duplicate true) }
-        '403': { description: csrf_denied, or a transition reserved for the importer, transport or reply driver }
-        '409': { description: idempotency_conflict, inbox_limit or a stale revision }
-        '422': { description: invalid_inbox_request, invalid_inbox_source, invalid_inbox_draft, invalid_inbox_result or invalid_inbox_share }
+        '403': { description: "csrf_denied, or a transition reserved for the importer, transport or reply driver" }
+        '409': { description: "idempotency_conflict, inbox_limit or a stale revision" }
+        '422': { description: "invalid_inbox_request, invalid_inbox_source, invalid_inbox_draft, invalid_inbox_result or invalid_inbox_share" }
         '429': { description: rate_limited }
   /api/inbox/review:
     post:
@@ -9281,7 +9349,7 @@ paths:
       responses:
         '201': { description: "{ contractVersion, viewer, receipt, duplicate: false }" }
         '200': { description: Exact retry (duplicate true) }
-        '409': { description: idempotency_conflict, reply_update_unresolved or a stale revision }
+        '409': { description: "idempotency_conflict, reply_update_unresolved or a stale revision" }
         '422': { description: invalid_reply_review }
   /api/inbox/simulation:
     post:
@@ -9341,7 +9409,7 @@ paths:
         '200': { description: Duplicate redemption or existing membership }
         '401': { description: No account slot cookie }
         '403': { description: origin_denied or csrf_denied }
-        '409': { description: session_binding_changed, join_changed or pilot_limit }
+        '409': { description: "session_binding_changed, join_changed or pilot_limit" }
         '410': { description: link_unavailable }
         '422': { description: invalid_join or session_binding_required }
         '429': { description: rate_limited }
@@ -9373,10 +9441,19 @@ paths:
         '401': { description: Signed-in account session required }
         '403': { description: csrf_denied }
         '404': { description: invitation_unavailable }
-        '409': { description: Invitation revoked, expired or already accepted }
+        '409': { description: "Invitation revoked, expired or already accepted" }
         '422': { description: invalid_invitation_acceptance }
         '429': { description: rate_limited }
   /api/guest-agent-links:
+    get:
+      summary: Guest invite contract document
+      description: >-
+        Open (also HEAD): the static contract for guest invites
+        (status, kind, permissions, access, ttl). Contains no room data.
+        `POST` on this path mints an invite and requires a room credential.
+      security: []
+      responses:
+        '200': { description: Static contract document }
     post:
       summary: Mint a guest invite as an account-backed owner (room named in the body)
       description: >-
@@ -9403,8 +9480,8 @@ paths:
         '201': { description: Guest-agent member created; the link is the credential }
         '200': { description: Exact retry of a journaled mint }
         '401': { description: unauthenticated }
-        '403': { description: owner_required, account_session_required, access_denied or csrf_denied }
-        '409': { description: stale_member_revision, membership_ended or pilot_limit }
+        '403': { description: "owner_required, account_session_required, access_denied or csrf_denied" }
+        '409': { description: "stale_member_revision, membership_ended or pilot_limit" }
         '422': { description: invalid_link }
         '429': { description: rate_limited }
   /api/rooms/{roomId}:
@@ -9426,7 +9503,7 @@ paths:
       responses:
         '200': { description: Snapshot }
         '401': { description: unauthenticated }
-        '422': { description: invalid_snapshot_view, invalid_help_context or invalid_offer_context }
+        '422': { description: "invalid_snapshot_view, invalid_help_context or invalid_offer_context" }
   /api/rooms/{roomId}/agent-connections:
     get:
       summary: Owner's agent connections
@@ -9485,8 +9562,8 @@ paths:
         '201': { description: "{ receipt, connection, duplicate: false } — receipt echoes identityId on linked creates, unlinkedIdentityId on disconnects that removed a link" }
         '200': { description: Exact retry (duplicate true) }
         '403': { description: owner_required or csrf_denied }
-        '409': { description: idempotency_conflict, stale_member_revision, connection_changed, token_conflict, unsupported_agent_scope or pilot_limit }
-        '422': { description: invalid_connection, invalid_expiry, or identity_link_proof_required (identityId presented without a valid holder proof) }
+        '409': { description: "idempotency_conflict, stale_member_revision, connection_changed, token_conflict, unsupported_agent_scope or pilot_limit" }
+        '422': { description: "invalid_connection, invalid_expiry, or identity_link_proof_required (identityId presented without a valid holder proof)" }
   /api/rooms/{roomId}/agent-invites:
     get:
       summary: Audit the room's one-time agent invite codes
@@ -9548,7 +9625,7 @@ paths:
       responses:
         '200': { description: "{ inviteId, revoked: true }" }
         '403': { description: access_denied }
-        '404': { description: invite_unavailable (unknown, redeemed or already revoked) }
+        '404': { description: "invite_unavailable (unknown, redeemed or already revoked)" }
         '409': { description: invite_ambiguous (more than one active invite shares the handle) }
         '422': { description: invalid_invite }
   /api/rooms/{roomId}/referral-invites:
@@ -9904,8 +9981,8 @@ paths:
               additionalProperties: false
               properties:
                 agentId: { type: string, description: The agent member receiving the edge. }
-                capability: { type: string, description: Closed-vocabulary capability name (e.g. grants:issue). }
-                scope: { type: string, description: Optional narrowing qualifier (colon-separated, optional :* wildcard). }
+                capability: { type: string, description: "Closed-vocabulary capability name (e.g. grants:issue)." }
+                scope: { type: string, description: "Optional narrowing qualifier (colon-separated, optional :* wildcard)." }
                 expiresAt: { type: integer, description: Optional future unix-ms expiry; null means no expiry. }
       responses:
         '201': { description: "{ roomId, grant, evaluatedThrough }" }
@@ -10201,8 +10278,8 @@ paths:
       responses:
         '201': { description: Guest-agent member created }
         '200': { description: Exact retry of a journaled mint }
-        '403': { description: owner_required, account_session_required or csrf_denied }
-        '409': { description: stale_member_revision, membership_ended or pilot_limit }
+        '403': { description: "owner_required, account_session_required or csrf_denied" }
+        '409': { description: "stale_member_revision, membership_ended or pilot_limit" }
         '422': { description: invalid_link }
         '429': { description: rate_limited }
   /api/rooms/{roomId}/guest-invites:
@@ -10414,7 +10491,7 @@ paths:
         '201': { description: "{ ...reminders view, receipt: { requestId, workItemId, revision, state, dueAt }, duplicate: false }" }
         '200': { description: Exact retry (duplicate true) }
         '404': { description: work_not_found }
-        '409': { description: idempotency_conflict, stale_reminder, work_resolved, reminder_limit or reminder_inactive }
+        '409': { description: "idempotency_conflict, stale_reminder, work_resolved, reminder_limit or reminder_inactive" }
         '422': { description: invalid_reminder or invalid_reminder_time }
   /api/rooms/{roomId}/outside-agents:
     get:
@@ -10479,7 +10556,7 @@ paths:
       responses:
         '200': { description: Reservation or status recorded }
         '403': { description: Only the addressed agent may report execution }
-        '409': { description: Owned, changed or closed request; reconcile original attempt }
+        '409': { description: "Owned, changed or closed request; reconcile original attempt" }
         '422': { description: Invalid execution report }
   /api/rooms/{roomId}/reply-context:
     get:
@@ -10572,8 +10649,8 @@ paths:
       responses:
         '201': { description: "{ link, duplicate: false }" }
         '200': { description: Exact retry (duplicate true) }
-        '403': { description: access_denied (non-owner bearer, or no manage_members) }
-        '409': { description: idempotency_conflict, stale_member_revision, token_conflict or pilot_limit }
+        '403': { description: "access_denied (non-owner bearer, or no manage_members)" }
+        '409': { description: "idempotency_conflict, stale_member_revision, token_conflict or pilot_limit" }
         '422': { description: invalid_link or invalid_expiry }
   /api/rooms/{roomId}/share-links-cancel:
     post:
@@ -10596,7 +10673,7 @@ paths:
                 linkId: { type: string }
       responses:
         '200': { description: "{ link }" }
-        '403': { description: access_denied (non-owner bearer, or no manage_members) }
+        '403': { description: "access_denied (non-owner bearer, or no manage_members)" }
         '410': { description: link_unavailable }
         '422': { description: invalid_link }
   /api/rooms/{roomId}/work-changes:
@@ -11066,7 +11143,7 @@ paths:
         credential. Indexable discovery text, not a room read.
       security: []
       responses:
-        '200': { description: text/plain snippets, or JSON when Accept is application/json }
+        '200': { description: "text/plain snippets, or JSON when Accept is application/json" }
     post:
       summary: Hosted MCP JSON-RPC
       description: |
@@ -11200,7 +11277,7 @@ components:
         watchers: { type: array, items: { type: string } }
         deadline: { type: string, format: date-time }
         stateChangedAt: { type: string, format: date-time }
-        timeInStateMs: { type: integer, description: Milliseconds in the current state, computed on read }
+        timeInStateMs: { type: integer, description: "Milliseconds in the current state, computed on read" }
         snoozedUntil: { type: string, format: date-time, nullable: true }
         declineReason: { type: string, nullable: true }
         duplicateOf: { type: string, nullable: true }
@@ -11424,7 +11501,7 @@ components:
         contractVersion: { type: integer, enum: [1] }
         channel: { type: string, enum: [telegram] }
         state: { type: string, enum: [not_configured, invalid, configured], description: Deployment binding state }
-        bindings: { type: array, items: { type: string }, description: Binding names the deployment reads (TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET, TELEGRAM_API_BASE) }
+        bindings: { type: array, items: { type: string }, description: "Binding names the deployment reads (TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET, TELEGRAM_API_BASE)" }
         missing: { type: array, items: { type: string } }
         invalid: { type: array, items: { type: string } }
         webhook: { type: string, enum: [unset, set, matches, differs], description: Stored webhook secret hash versus the binding }
@@ -11642,7 +11719,7 @@ components:
         sha: { type: string, pattern: '^[0-9a-fA-F]{7,40}$' }
         pr: { type: [integer, 'null'], minimum: 1 }
     BoardV2FileClaims:
-      description: File-claims index row: one file and its live claims.
+      description: "File-claims index row: one file and its live claims."
       type: object
       properties:
         file: { type: string }
@@ -11706,7 +11783,7 @@ components:
         reversible: { type: [boolean, 'null'] }
         supersedes: { type: [integer, 'null'] }
     BoardV2MirrorEntry:
-      description: One board-v2 mirror-map entry: a board event seq mapped to a GitHub issue comment.
+      description: "One board-v2 mirror-map entry: a board event seq mapped to a GitHub issue comment."
       type: object
       required: [seq, issue, comment_id]
       properties:
@@ -11730,7 +11807,7 @@ components:
           items: { type: string }
         summary: { type: string }
         createdBy: { type: [string, 'null'] }
-        createdAt: { type: integer, description: Completion time, ms epoch }
+        createdAt: { type: integer, description: "Completion time, ms epoch" }
         blobs:
           type: array
           items: { type: string }
@@ -11763,7 +11840,7 @@ components:
         reservedCents: { type: integer }
         heldCents: { type: integer }
         committedCents: { type: integer }
-        headroomCents: { type: [integer, 'null'], description: allowance minus committed, floored at 0; null without an allowance }
+        headroomCents: { type: [integer, 'null'], description: "allowance minus committed, floored at 0; null without an allowance" }
         overCents: { type: integer }
         sessions:
           type: object

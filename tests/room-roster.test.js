@@ -202,10 +202,6 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(html, /Muse app or WhatsApp/);
   assert.match(html, /id="agent-access-hint"/);
   assert.match(html, /id="inbox-heading"/);
-  assert.match(html, /id="auth-kind-room"/);
-  assert.match(html, /id="access-key-reveal"/);
-  assert.match(html, /id="invite-link"/);
-  assert.match(html, /Paste your key/);
   assert.doesNotMatch(html, /id="people-hint"/);
   assert.doesNotMatch(html, /id="people-wake-hint"/);
   assert.match(html, /id="room-tools"/);
@@ -215,23 +211,15 @@ test("Add agent markup lists the four roster names", () => {
   // UI calming: the sidebar Create Room block was de-jargoned — the one-shot
   // CLI / HTTP route disclosure (bootstrap-agent-room) no longer ships in the UI,
   // along with the #room/{roomId} fragment explanation and the
-  // "Open this invite link to invite a person" sentence.
   assert.match(html, /Message #general/);
   assert.match(html, /id="google-signin"/);
   assert.match(html, /Continue with Google/);
-  assert.match(html, /id="signin-more"/);
-  assert.match(html, /More options/);
-  assert.match(html, /id="signin-extra"/);
-  assert.match(html, /id="invite-redeem"/);
-  assert.match(html, />Open this invite link</);
-  assert.match(html, /Have an invitation\?/);
-  assert.match(html, /Open this invite link/);
+  assert.match(html, /id="agent-signin-button"/);
+  assert.match(html, />Agent sign in</);
+  assert.doesNotMatch(html, /More options/);
   assert.doesNotMatch(html, /share <code>https:\/\/www\.getdasha\.com\/room#room\/\{roomId\}/);
   assert.match(html, /id="auth-room-hint"/);
-  assert.match(html, /id="auth-kind-hint"/);
   assert.match(html, /id="clear-session-menu"/);
-  assert.match(html, /id="share-link-intro"/);
-  assert.match(html, /Open this invite link/);
   assert.match(html, /id="room-sidebar"/);
   assert.match(html, /id="channel-list"/);
   assert.match(html, /id="catchup-dialog"/);
@@ -240,7 +228,6 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(html, /id="agent-connect-route"/);
   assert.match(html, /id="agent-host-snippets"/);
   assert.match(html, /id="agent-capabilities"/);
-  assert.match(html, /Chat packet — no Room key/);
   assert.match(html, /id="agent-copy-checklist"/);
   assert.match(html, /id="agent-key-later"/);
   assert.match(html, /id="agent-connect-advanced"/);
@@ -253,7 +240,6 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(app, /authPanelTitle/);
   assert.match(app, /Open room/);
   assert.match(app, /data-empty-write/);
-  assert.match(app, /data-empty-work/);
   assert.match(app, /No completed results yet/);
   assert.match(html, /id="mention-list"/);
   assert.match(html, />Add agent</);
@@ -292,11 +278,6 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(app, /reactionPills/);
   assert.doesNotMatch(app, /details class="reactions"/);
   assert.doesNotMatch(app, /reaction-menu/);
-  assert.match(html, /id="session-hint"/);
-  assert.match(html, /id="session-restore"/);
-  assert.match(html, /id="reopen-last-room"/);
-  assert.match(html, /id="continue-account"/);
-  assert.match(html, /id="clear-session"/);
   assert.match(html, /id="people-panel"/);
   assert.match(html, /id="connect-agent-button"/);
   assert.doesNotMatch(html, /<details id="people-panel"[^>]*>[\s\S]*?id="connect-agent-button"/);

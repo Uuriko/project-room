@@ -8,7 +8,7 @@ import { randomUUID } from "node:crypto";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
-import { fillAccessKey } from "./auth-signin.mjs";
+import { signInFixture } from "./auth-signin.mjs";
 import { closeCatchUp, openCatchUpPanel } from "./room-chrome.mjs";
 
 for (const mobile of [false, true]) {
@@ -27,8 +27,7 @@ for (const mobile of [false, true]) {
     page.on("pageerror", error => errors.push(error.message));
     page.on("request", request => { if (request.method() === "POST" && request.url().endsWith("/reminders")) writes.push(request.postDataJSON()); });
     await page.clock.install({ time: at });
-    await page.goto(origin); await fillAccessKey(page, f.keys.owner); await page.getByRole("button", { name: "Enter room", exact: true }).click();
-    await page.locator("#main").waitFor({ state: "visible" });
+    await page.goto(origin); await signInFixture(page, f.keys.owner); await page.locator("#main").waitFor({ state: "visible" });
     const card = page.locator('[data-work-record-id="test-handoff"]');
     const open = async () => {
       if (!await card.locator(".work-details").evaluate(node => node.open)) await card.locator(".work-details > summary").click();

@@ -9,7 +9,7 @@ import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { RoomAgentClient } from "../client/room-agent.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
-import { fillAccessKey } from "./auth-signin.mjs";
+import { signInFixture } from "./auth-signin.mjs";
 import { makeTestSigner } from "./helpers/signed-evidence.mjs";
 
 for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["mobile", { width: 390, height: 844 }]]) {
@@ -34,8 +34,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     const errors = []; page.on("pageerror", error => errors.push(error.message));
     const login = async (page, key) => {
       await page.goto(origin);
-      await fillAccessKey(page, key);
-      await page.getByRole("button", { name: "Enter room", exact: true }).click();
+      await signInFixture(page, key);
       await page.locator("#main").waitFor({ state: "visible" });
     };
     await login(page, fixture.keys.owner);

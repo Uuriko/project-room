@@ -4,6 +4,8 @@
 // server against an acceptance-fixture store over loopback; no network calls,
 // no real credentials, all emails and passwords are synthetic fixtures.
 import test from "node:test";
+import { request as httpRequest } from "node:http";
+import { hashPassword, verifyPassword } from "../src/password-auth.mjs";
 import assert from "node:assert/strict";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
@@ -221,4 +223,63 @@ test("change-password requires an authenticated session and policy-checks the ne
   const weak = await post(origin, "/api/auth/password/change", { currentPassword: password(11), newPassword: "short" }, cookie);
   assert.equal(weak.status, 422);
   assert.equal((await errBody(weak)).code, "password_too_short");
+});
+
+for (const mutation of ["logout", "rotate login slot"]) {
+  test(`held password-change body refuses concurrent ${mutation}`, { timeout: 5000 }, async t => {
+    const { f, origin, res } = await signup(t, 30);
+    const token = accountCookie(res), view = await res.json(), cookie = `account_session=${token}`;
+    const payload = JSON.stringify({ currentPassword: password(30), newPassword: "replacement-password-long-enough" });
+    const original = f.store.authenticateAccountSession.bind(f.store);
+    let sawRead; const read = new Promise(resolve => { sawRead = resolve; }); let armed = true;
+    f.store.authenticateAccountSession = (...args) => {
+      const value = original(...args);
+      if (armed && args[0] === token) { armed = false; sawRead(); }
+      return value;
+    };
+    let held;
+    const result = new Promise((resolve, reject) => {
+      held = httpRequest(origin + "/api/auth/password/change", { method: "POST", headers: {
+        Origin: origin, "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload), Cookie: cookie
+      } }, response => { response.resume(); response.on("end", () => resolve(response.statusCode)); });
+      held.on("error", reject); held.write(payload.slice(0, 1));
+    });
+    t.after(() => held.destroy()); await read;
+    if (mutation === "logout") {
+      const logout = await fetch(origin + "/api/account-session", { method: "DELETE", headers: {
+        Origin: origin, "Content-Type": "application/json", Cookie: cookie, "X-CSRF-Token": view.csrf
+      }, body: JSON.stringify({ expectedSessionRevision: view.sessionRevision }) });
+      assert.equal(logout.status, 200);
+    } else {
+      const rotated = await post(origin, "/api/auth/password/login", {
+        email: email(30), password: password(30), sessionToken: token, sessionRevision: view.sessionRevision
+      }, cookie);
+      assert.equal(rotated.status, 200); assert.notEqual(accountCookie(rotated), token);
+    }
+    held.end(payload.slice(1));
+    const status = await result;
+    assert.ok([401, 409].includes(status), `stale password change must be refused, got ${status}`);
+    const oldLogin = await post(origin, "/api/auth/password/login", { email: email(30), password: password(30), ...freshSlot(f) });
+    assert.equal(oldLogin.status, 200, "password remains unchanged and a fresh slot can sign in");
+  });
+}
+
+test("password-change cannot overwrite a verifier changed before its writer transaction", async t => {
+  const { f, origin, res } = await signup(t, 31);
+  const token = accountCookie(res), view = await res.json();
+  const concurrentPassword = "concurrent-replacement-password";
+  const concurrentVerifier = hashPassword(concurrentPassword);
+  const original = f.store.transaction.bind(f.store); let armed = true;
+  // Simulate another writer committing after proof/hash work, before this writer obtains its transaction.
+  f.store.transaction = fn => {
+    if (armed) { armed = false; f.store.accountLogins.setPasswordVerifier(view.account.id, concurrentVerifier); }
+    return original(fn);
+  };
+  const response = await post(origin, "/api/auth/password/change", {
+    currentPassword: password(31), newPassword: "stale-request-password-long-enough"
+  }, `account_session=${token}`);
+  assert.equal(response.status, 409);
+  assert.equal((await errBody(response)).code, "password_changed");
+  assert.equal(verifyPassword(concurrentPassword, f.store.accountLogins.readPasswordVerifier(view.account.id)), true);
+  assert.equal(verifyPassword("stale-request-password-long-enough", f.store.accountLogins.readPasswordVerifier(view.account.id)), false);
 });

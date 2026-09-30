@@ -77,7 +77,7 @@ import {
 } from "./activity.mjs";
 import { listOpenQuestions } from "./open-questions.mjs";
 import { GoogleSignIn, GOOGLE_START_PATH, GOOGLE_CALLBACK_PATH, googlePostLoginPage } from "./google-oauth.mjs";
-import { createMagicLinkMailer, magicLinkUnavailable } from "./magic-links.mjs";
+import { createMagicLinkMailer, magicLinkUnavailable, validateMagicReturnTo } from "./magic-links.mjs";
 import { createRateLimiter } from "./identity-ratelimit.mjs";
 import { normalizeEmail } from "./account-login-methods.mjs";
 import { createPasskeyAuth, resolvePasskeyParams } from "./account-passkeys.mjs";
@@ -200,6 +200,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   }
   // Per-email buckets (hourly) complement the per-address rate() limits below.
   const magicRequestEmailLimiter = createRateLimiter({ capacity: 3, refillPerSecond: 3 / 3600 });
+  const resetRequestEmailLimiter = createRateLimiter({ capacity: 3, refillPerSecond: 3 / 3600 });
+  const resetConsumeEmailLimiter = createRateLimiter({ capacity: 10, refillPerSecond: 10 / 3600 });
   const magicConsumeEmailLimiter = createRateLimiter({ capacity: 10, refillPerSecond: 10 / 3600 });
   const magicEmailLimit = (limiter, normalized) => {
     const checked = limiter.check(rateHash(normalized));
@@ -690,7 +692,17 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           if (lagging()) break;
         }
         if (lagging()) lag();
-      } catch { end('event: access-ended\ndata: {"message":"Access ended; sign in again"}\n\n'); }
+        // Advance past invisible rows only after the complete visible batch
+        // was queued. A lagging stream must resume from its last sent event.
+        else cursor = batch.next;
+      } catch (error) {
+        if ([401, 403].includes(error?.status) || error?.code === "session_binding_changed") {
+          end('event: access-ended\ndata: {"message":"Access ended; sign in again"}\n\n');
+        } else {
+          diagnostics.record({ operationId, at: new Date().toISOString(), status: 503, code: "stream_unavailable", category: "unavailable", route: "/api/rooms/:roomId/stream", roomId });
+          end('event: unavailable\ndata: {"message":"Connection interrupted; reconnect to recover"}\n\n');
+        }
+      }
     };
     timer = setInterval(pump, streamInterval);
     timer.unref();
@@ -807,7 +819,15 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (url.pathname === GOOGLE_START_PATH) {
         if (req.method !== "GET") reject(405, "method_not_allowed", "Method not allowed");
         const signIn = google();
-        if (!signIn) return json(res, 503, { status: "unavailable", reason: "google_not_configured" });
+        if (!signIn) {
+          // Return browser navigations to the sign-in surface, where the
+          // existing OAuth invitation stash restores their destination.
+          if ((req.headers.accept || "").includes("text/html")) {
+            res.writeHead(302, { Location: "/?google=unavailable", "Cache-Control": "no-store" });
+            return res.end();
+          }
+          return json(res, 503, { status: "unavailable", reason: "google_not_configured" });
+        }
         rate(`google-start:${remoteAddress}`, 10);
         let slotToken = cookie(req, accountCookieName), expectedRevision;
         if (slotToken) {
@@ -944,14 +964,15 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         protectWrite(req, slot, false);
         if (url.pathname === "/api/auth/magic/request") {
           const data = await body(req);
-          if (!exact(data, ["email"]) || typeof data.email !== "string") reject(422, "invalid_email_request", "An email address is required");
+          if (!(exact(data, ["email"]) || exact(data, ["email", "returnTo"])) || typeof data.email !== "string") reject(422, "invalid_email_request", "An email address is required");
+          if (Object.hasOwn(data, "returnTo") && validateMagicReturnTo(data.returnTo) === null) reject(422, "invalid_return_target", "A valid local return target is required");
           const normalized = normalizeEmail(data.email);
           if (!normalized) reject(422, "invalid_email", "A valid email address is required");
           rate(`magic-request:${remoteAddress}`, 5);
           magicEmailLimit(magicRequestEmailLimiter, normalized);
           if (!magicMailer.isConfigured()) return json(res, 200, magicLinkUnavailable());
           const issued = store.accountLogins.issueMagicCode({ email: normalized });
-          await magicMailer.sendMagicLink({ to: normalized, code: issued.code, expiresAt: issued.expiresAt });
+          await magicMailer.sendMagicLink({ to: normalized, code: issued.code, expiresAt: issued.expiresAt, ...(Object.hasOwn(data, "returnTo") ? { returnTo: data.returnTo } : {}) });
           return json(res, 200, { status: "sent" });
         }
         const data = await body(req);
@@ -1008,6 +1029,64 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         });
         setCookie(res, accountCookieName, freshSlotToken, Math.max(0, Math.floor((loggedIn.expiresAt - store.now()) / 1000)));
         return json(res, 201, accountView(loggedIn));
+      }
+      if (url.pathname === "/api/auth/password/reset/request" || url.pathname === "/api/auth/password/reset/consume") {
+        if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
+        checkOrigin(req, true);
+        const slotToken = cookie(req, accountCookieName);
+        if (!slotToken) reject(401, "account_session_required", "Start a browser session before resetting a password");
+        const slot = store.accountSessionSlot(slotToken);
+        protectWrite(req, slot, false);
+        const data = await body(req);
+        const requesting = url.pathname.endsWith("/request");
+        if (requesting) {
+          if (!(exact(data, ["email"]) || exact(data, ["email", "returnTo"])) || typeof data.email !== "string") reject(422, "invalid_email_request", "An email address is required");
+          if (Object.hasOwn(data, "returnTo") && validateMagicReturnTo(data.returnTo) === null) reject(422, "invalid_return_target", "A valid local return target is required");
+        } else if (!exact(data, ["email", "code", "newPassword", "sessionRevision"]) || typeof data.email !== "string"
+          || typeof data.code !== "string" || typeof data.newPassword !== "string") reject(422, "invalid_password_reset", "Reset proof, new password and current session revision are required");
+        const normalized = normalizeEmail(data.email);
+        if (!normalized) reject(422, "invalid_email", "A valid email address is required");
+        rate(`password-reset-${requesting ? "request" : "consume"}:${remoteAddress}`, requesting ? 5 : 10);
+        magicEmailLimit(requesting ? resetRequestEmailLimiter : resetConsumeEmailLimiter, normalized);
+        if (requesting) {
+          if (!magicMailer.isConfigured()) return json(res, 200, magicLinkUnavailable());
+          const issued = store.accountLogins.issuePasswordResetCode({ email: normalized });
+          await magicMailer.sendMagicLink({ to: normalized, code: issued.code, expiresAt: issued.expiresAt, purpose: "password-reset",
+            ...(Object.hasOwn(data, "returnTo") ? { returnTo: data.returnTo } : {}) });
+          return json(res, 200, { status: "sent" });
+        }
+        const verifyResetSlot = () => {
+          const currentSlot = store.accountSessionSlot(slotToken);
+          protectWrite(req, currentSlot, false);
+          if (!Number.isSafeInteger(data.sessionRevision) || data.sessionRevision !== currentSlot.sessionRevision) reject(409, "stale_session_revision", "The browser session changed; refresh before resetting");
+          let authenticated = null;
+          try { authenticated = store.authenticateAccountSession(slotToken); }
+          catch (error) { if (error.status !== 401) throw error; }
+          const target = store.accountLogins.passwordResetAccount(normalized);
+          if (authenticated && authenticated.account.id !== target?.accountId) reject(409, "reset_account_mismatch", "This reset is for another account. Sign out before continuing.");
+        };
+        // The body may have been held while another tab changed this slot.
+        verifyResetSlot();
+        const policy = checkPasswordPolicy(data.newPassword);
+        if (policy) reject(422, policy.code, policy.message);
+        const verifier = hashPassword(data.newPassword);
+        const resetFailure = store.transaction(() => {
+          // Recheck inside the writer fence so another process cannot change
+          // the browser slot between authorization and proof consumption.
+          verifyResetSlot();
+          try { store.accountLogins.resetPassword({ email: normalized, code: data.code, verifier }); }
+          catch (error) {
+            // Invalid proof attempts deliberately persist their bounded counter.
+            if (error instanceof ServiceError && error.code === "invalid_password_reset") return error;
+            throw error;
+          }
+          return null;
+        });
+        if (resetFailure) throw resetFailure;
+        // Notification failure cannot undo a committed password change or
+        // turn a used proof into a second mutation. Never include secrets.
+        try { await magicMailer.sendPasswordResetNotice?.({ to: normalized }); } catch { /* Password is already reset. */ }
+        return json(res, 200, { status: "password_reset", signInRequired: true });
       }
       // ---- Password auth (slice 2, RC-2026-09-17-011) ----
       // Email+password login. Signup provisions an `email:<sha256>` account,
@@ -1096,13 +1175,22 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           || typeof data.currentPassword !== "string" || typeof data.newPassword !== "string") {
           reject(422, "invalid_password_change", "The current and new passwords are required");
         }
+        const verifyChangeSession = () => store.authenticateAccountSession(slotToken, null, session.sessionBinding);
+        verifyChangeSession();
         const verifier = store.accountLogins.readPasswordVerifier(session.account.id);
         if (!verifyPassword(data.currentPassword, verifier ?? DUMMY_PASSWORD_VERIFIER)) {
           reject(401, "invalid_credentials", "The current password is incorrect");
         }
         const policy = checkPasswordPolicy(data.newPassword);
         if (policy) reject(422, policy.code, policy.message);
-        store.accountLogins.setPasswordVerifier(session.account.id, hashPassword(data.newPassword));
+        const replacementVerifier = hashPassword(data.newPassword);
+        store.transaction(() => {
+          verifyChangeSession();
+          if (store.accountLogins.readPasswordVerifier(session.account.id) !== verifier) {
+            reject(409, "password_changed", "The password changed; retry with the current password");
+          }
+          store.accountLogins.setPasswordVerifier(session.account.id, replacementVerifier);
+        });
         return json(res, 200, { status: "ok" });
       }
       // ---- GitHub OAuth (slice 4, RC-2026-09-17-013) ----

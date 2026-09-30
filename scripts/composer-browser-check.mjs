@@ -9,7 +9,7 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
-import { fillAccessKey } from "./auth-signin.mjs";
+import { signInFixture } from "./auth-signin.mjs";
 import { openSearch } from "./room-chrome.mjs";
 
 for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["narrow", { width: 320, height: 780 }]]) {
@@ -42,10 +42,8 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     await page.goto(origin);
     const login = async key => {
       await page.locator("#auth-panel").waitFor({ state: "visible" });
-      await fillAccessKey(page, key);
-      await page.getByRole("button", { name: "Enter room", exact: true }).click();
+      await signInFixture(page, key);
       await page.locator("#main").waitFor({ state: "visible" });
-      await page.waitForFunction(() => !document.querySelector("#access-key").disabled);
     };
     await login(owner);
     const input = page.locator("#message-input"), status = page.locator("#composer-status");

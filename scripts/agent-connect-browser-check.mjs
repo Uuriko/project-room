@@ -9,7 +9,7 @@ import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { RoomAgentClient } from "../client/room-agent.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
-import { fillAccessKey } from "./auth-signin.mjs";
+import { signInFixture } from "./auth-signin.mjs";
 
 async function setup(t, mobile = false) {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
@@ -27,8 +27,8 @@ async function setup(t, mobile = false) {
     await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
     f.store.close(); rmSync(f.directory, { recursive: true, force: true }); assert.deepEqual(errors, []); assert.deepEqual(outside, []);
   });
-  await page.goto(origin); await fillAccessKey(page, f.keys.owner);
-  await page.getByRole("button", { name: "Enter room", exact: true }).click(); await page.locator("#main").waitFor({ state: "visible" });
+  await page.goto(origin); await signInFixture(page, f.keys.owner);
+  await page.locator("#main").waitFor({ state: "visible" });
   const reveal = async () => {
     if (!(await page.locator("#room-sidebar").isVisible())) {
       await page.locator("#sidebar-toggle").click();

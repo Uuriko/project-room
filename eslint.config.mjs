@@ -22,7 +22,7 @@ const rules = {
 const languageOptions = { ecmaVersion: "latest", sourceType: "module" };
 
 export default [
-  { ignores: ["server/vendor/", "node_modules/", "**/node_modules/", "cloudflare/dist/", "test-results/", "coverage/", ".data/"] },
+  { ignores: ["server/vendor/", "node_modules/", "**/node_modules/", "cloudflare/dist/", "test-results/", "coverage/", ".data/", ".tmp/"] },
   // Browser bundle (index.html loads src/app.js as a module).
   { files: ["src/**/*.js"], languageOptions: { ...languageOptions, globals: { ...globals.browser } }, rules },
   // Node: server, agent client CLI, scripts, tests, Workers glue, deploy

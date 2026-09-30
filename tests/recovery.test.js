@@ -26,6 +26,10 @@ function fixture(t) {
 
 test("online capture preserves all application tables, identity boundaries and exact retries through recovery and restart", async t => {
   const f = fixture(t);
+  // Historical aliases remain immutable recoverable data after fresh issuance
+  // switched to links only. Preserve substantive coverage of the alias table.
+  f.store.db.prepare("INSERT INTO share_link_codes(code_hash,link_id,created_at) VALUES(?,?,?)")
+    .run(createHash("sha256").update("ABCDEFGHJ").digest("hex"), f.link.link.id, f.now());
   const { identityId } = f.store.identities.create("Recovery agent");
   f.store.identities.link(f.keys.owner, "commons", { identityId, permissions: ["steer"] });
   f.store.invites.create(f.keys.owner, "commons", { permissions: ["steer"] });

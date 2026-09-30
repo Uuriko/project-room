@@ -6,7 +6,7 @@ import { chromium } from 'playwright';
 import { createResultsFixture } from './results-fixture.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { EVENT_TYPES as T } from '../src/events.js';
-import { fillAccessKey } from './auth-signin.mjs';
+import { signInFixture } from './auth-signin.mjs';
 import { ensureSidebarOpen } from './room-chrome.mjs';
 
 for (const mobile of [false, true]) test(`room overview ${mobile ? 'mobile' : 'desktop'}: source-backed orientation preserves writing and updates live`, { timeout: 25000 }, async t => {
@@ -23,7 +23,7 @@ for (const mobile of [false, true]) test(`room overview ${mobile ? 'mobile' : 'd
   const errors = [], outside = [], writes = [];
   page.on('pageerror', e => errors.push(e.message));
   await page.route('**/*', route => { if (new URL(route.request().url()).origin !== origin) { outside.push(route.request().url()); return route.abort(); } return route.continue(); });
-  await page.goto(origin); await fillAccessKey(page, f.keys.owner); await page.locator('#auth-form button[type=submit]').click(); await page.locator('#main').waitFor();
+  await page.goto(origin); await signInFixture(page, f.keys.owner); await page.locator('#main').waitFor();
   page.on('request', r => { if (r.method() !== 'GET' && new URL(r.url()).pathname.startsWith('/api/rooms/')) writes.push(r.url()); });
   await page.locator('#message-input').fill('Keep this room draft');
   const open = async () => { await ensureSidebarOpen(page); await page.locator('#room-overview-open').click(); };

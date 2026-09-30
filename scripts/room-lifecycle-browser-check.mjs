@@ -11,7 +11,7 @@ import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
-import { fillAccessKey } from "./auth-signin.mjs";
+import { signInFixture } from "./auth-signin.mjs";
 import { ensureSidebarClosed, ensureSidebarOpen, openSettings } from "./room-chrome.mjs";
 
 async function setup(t, viewport) {
@@ -34,8 +34,7 @@ async function setup(t, viewport) {
   t.after(() => assert.deepEqual(errors, []));
   const login = async accountId => {
     await page.goto(origin + "/?account=1");
-    await fillAccessKey(page, f.store.issueAccountAccessKey(accountId));
-    await page.locator('#auth-form button[type="submit"]').click();
+    await signInFixture(page, f.store.issueAccountAccessKey(accountId));
     await page.locator("#inbox-panel").waitFor();
   };
   const roomCount = () => f.store.db.prepare("SELECT count(*) AS n FROM rooms").get().n;

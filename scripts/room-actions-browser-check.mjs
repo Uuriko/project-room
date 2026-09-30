@@ -6,7 +6,7 @@ import { mkdirSync, rmSync } from "node:fs";
 import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
-import { fillAccessKey } from "./auth-signin.mjs";
+import { signInFixture } from "./auth-signin.mjs";
 
 async function setup(t, { mobile = false, role = "owner" } = {}) {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 50 });
@@ -27,8 +27,7 @@ async function setup(t, { mobile = false, role = "owner" } = {}) {
     return route.continue();
   });
   page.on("pageerror", error => errors.push(error.message));
-  await page.goto(origin); await fillAccessKey(page, f.keys[role]); await page.getByRole("button", { name: "Enter room", exact: true }).click();
-  await page.locator("#main").waitFor({ state: "visible" });
+  await page.goto(origin); await signInFixture(page, f.keys[role]); await page.locator("#main").waitFor({ state: "visible" });
   page.on("request", request => { if (request.method() !== "GET" && new URL(request.url()).pathname.startsWith("/api/rooms/")) writes.push(new URL(request.url()).pathname); });
   t.after(() => { assert.deepEqual(errors, []); assert.deepEqual(external, []);
     // The attention lane syncs the read horizon (a write) on room entry by
@@ -111,7 +110,7 @@ test("room actions offer only the current member's available flows", { timeout: 
   for (const id of ["new-work", "invite", "agent"]) assert.equal(await f.action(id).count(), 0);
   for (const id of ["write", "search", "catch-up", "people", "results", "how-invite", "how-agent", "how-inbox"]) assert.equal(await f.action(id).count(), 1);
   await f.action("how-inbox").click();
-  assert.match(await f.page.locator("#status").textContent(), /Inbox uses Account key/);
+  assert.match(await f.page.locator("#status").textContent(), /Sign in with Google or email to open your Inbox/);
   await f.capture("guest");
 });
 

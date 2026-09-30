@@ -81,8 +81,9 @@ export async function sync({ client, channel, stateFile, selfMemberId, names = {
   for (let i = 0; i < 20; i++) { const p = await client.roomMessages({ after, limit: 100 }); messages.push(...p.messages); if (!p.hasMore || p.next === after) { after = p.next; break; } after = p.next; }
   const { lines, cursor } = roomLines(messages, { selfMemberId, names, cursor: state.seq });
   if (lines.length) appendFileSync(channel, lines.join("\n") + "\n");
-  const endOffset = lines.length ? readFileSync(channel, "utf8").length : offset;
-  saveState(stateFile, { offset: endOffset, seq: Math.max(cursor, after ?? 0), at: now().toISOString() });
+  // Advance only across the original snapshot. Peers can append during the
+  // awaits above; the next sync reads those lines and skips our own room lines.
+  saveState(stateFile, { offset, seq: Math.max(cursor, after ?? 0), at: now().toISOString() });
   return { sent, received: lines.length, seq: Math.max(cursor, after ?? 0) };
 }
 

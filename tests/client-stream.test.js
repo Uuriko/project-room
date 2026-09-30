@@ -113,3 +113,24 @@ test('a late stream-refresh rejection cannot clear a replacement session', async
   assert.equal(client.session, replacement);
   assert.equal(streams.length, 2);
 });
+
+test('a transient unavailable stream and failed refresh preserve identity and reconnect without ending access', async t => {
+  const { client, streams, emit } = fixture(t);
+  const session = client.session, healthyFetch = client.fetcher;
+  let ended = 0;
+  client.onAccessEnded = () => ended++;
+  client.connect(); await emit('open', 1);
+  client.fetcher = async () => ({ ok: false, status: 503, json: async () => ({ error: { code: 'storage_unavailable', message: 'Temporarily unavailable' } }) });
+  streams[0].emit('unavailable', 1);
+  await emit('error', 2).catch(() => {});
+  await Promise.resolve();
+  assert.equal(client.session, session);
+  assert.equal(ended, 0);
+  client.fetcher = healthyFetch;
+  t.mock.timers.tick(1000);
+  assert.equal(streams.length, 2);
+  assert.match(streams[1].url, /after=7$/);
+  await emit('open', 1);
+  assert.equal(client.session, session);
+  assert.equal(ended, 0);
+});

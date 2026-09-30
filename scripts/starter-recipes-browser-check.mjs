@@ -5,7 +5,7 @@ import { mkdirSync, rmSync } from "node:fs";
 import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
-import { fillAccessKey } from "./auth-signin.mjs";
+import { signInFixture } from "./auth-signin.mjs";
 import { openCatchUp, closeCatchUp, openSettings } from "./room-chrome.mjs";
 
 test("recipe strip: catch-up and next-work chips render from committed state; dismissal is local only", { timeout: 60000 }, async t => {
@@ -24,8 +24,7 @@ test("recipe strip: catch-up and next-work chips render from committed state; di
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, reducedMotion: "reduce" }), errors = [];
   page.setDefaultTimeout(8000); page.on("pageerror", error => errors.push(error.message));
   await page.goto(`http://127.0.0.1:${server.address().port}`);
-  await fillAccessKey(page, f.keys.owner);
-  await page.getByRole("button", { name: "Enter room", exact: true }).click();
+  await signInFixture(page, f.keys.owner);
   await page.locator("#main").waitFor({ state: "visible" });
   await openSettings(page, "room-tools");
   const strip = page.locator("#recipe-strip");

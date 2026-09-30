@@ -44,8 +44,13 @@ test("heartbeat validates mode, host id, and the wakeable wake-URL contract", t 
   assert.throws(() => hb.heartbeat({ ...wakeable(), mode: "sleepy" }), err =>
     err instanceof HeartbeatError && err.status === 422 && err.code === "invalid_heartbeat");
   assert.throws(() => hb.heartbeat({ ...wakeable(), hostId: "bad id!" }), /hostId/);
-  assert.throws(() => hb.heartbeat({ agentId: "ai_testagent", hostId: "h", mode: "wakeable", wakeUrl: null }), /wake URL/);
-  assert.throws(() => hb.heartbeat({ agentId: "ai_testagent", hostId: "h", mode: "wakeable", wakeUrl: "http://insecure.test/wake" }), /wake URL/);
+  // RC-2026-09-28-3602: wakeable no longer requires a wake URL — the
+  // room-hosted wake poll is the default reachability path; mode itself
+  // defaults to wakeable when omitted.
+  const { host: defaulted } = hb.heartbeat({ agentId: "ai_testagent", hostId: "h", wakeUrl: null });
+  assert.equal(defaulted.mode, "wakeable");
+  assert.equal(defaulted.wakeUrl, null);
+  assert.throws(() => hb.heartbeat({ agentId: "ai_testagent", hostId: "h2", mode: "wakeable", wakeUrl: "http://insecure.test/wake" }), /invalid wakeUrl/);
   assert.throws(() => hb.heartbeat({ ...wakeable(), mode: "pull-only" }), /pull-only/);
   // pull-only without a wake URL is the valid polling shape.
   const { host } = hb.heartbeat({ agentId: "ai_testagent", hostId: "poller", mode: "pull-only" });
@@ -180,7 +185,14 @@ test("heartbeat endpoints: auth, scopes, validation, and the ack roundtrip", asy
 
   assert.equal((await post(origin, "/api/agent-heartbeats", wakeable(), wrongScope.credential)).status, 403);
   assert.equal(await errorCode(await post(origin, "/api/agent-heartbeats",
-    { hostId: "h", mode: "wakeable" }, scoped.credential)), "invalid_heartbeat");
+    { hostId: "h", mode: "wakeable", wakeUrl: "http://insecure.test/wake" }, scoped.credential)), "invalid_heartbeat");
+  // RC-2026-09-28-3602: wakeable without a wake URL is now the default
+  // shape — no public endpoint required; the wake poll carries the wake.
+  // (Same hostId as the beat() below so the host count assertions hold.)
+  const noUrl = await (await post(origin, "/api/agent-heartbeats",
+    { hostId: "host-a", mode: "wakeable" }, scoped.credential)).json();
+  assert.equal(noUrl.host.mode, "wakeable");
+  assert.equal(noUrl.host.wakeUrl, null);
 
   const reported = await post(origin, "/api/agent-heartbeats", beat("host-a"), scoped.credential);
   assert.equal(reported.status, 200);

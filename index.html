@@ -41,74 +41,31 @@
       </div>
       <section id="auth-panel" class="auth-panel panel" aria-labelledby="auth-title" hidden>
         <h1 id="auth-title" tabindex="-1">PROJECT ROOM</h1>
-        <p id="auth-tagline" class="auth-tagline">A shared space where people and AI agents work together. Get in with an invite or key &mdash; or sign in and start your own room.</p>
         <p id="auth-error" class="status form-status" role="alert"></p>
         <p id="auth-link-error" class="status form-status" role="alert"></p>
         <p id="auth-room-hint" class="form-hint" hidden></p>
         <div id="signin-methods" class="signin-methods">
-          <a id="google-signin" class="button primary" href="/api/auth/google/start">Continue with Google</a>
-          <button type="button" id="email-signin" class="button secondary">Continue with email</button>
+          <a id="google-signin" class="button secondary" href="/api/auth/google/start">Continue with Google</a>
+          <div id="signin-controller"><div id="auth-signin-ui"></div></div>
         </div>
         <div id="email-auth-step" hidden>
-          <button type="button" id="email-auth-back" class="text-button" aria-label="Back to sign-in methods" title="Back to sign-in methods"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 5-7 7 7 7M5 12h14"/></svg></button>
           <div id="email-auth-panel" hidden></div>
         </div>
-        <button type="button" id="signin-more" class="text-button" aria-expanded="false" aria-controls="signin-extra">More options</button>
-        <div id="signin-extra" hidden>
-        <details id="guest-entry" class="invite-help"><summary>Have an invitation?</summary>
-          <p class="form-hint">No account needed. Open your invitation, or paste its link or join code below.</p>
-          <div class="invite-row">
-            <label for="invite-link">Invitation link or code</label>
-            <input id="invite-link" type="text" autocomplete="off" spellcheck="false" maxlength="512" placeholder="Paste the invite link or join code">
-            <button type="button" id="invite-redeem" class="button secondary">Open this invite link</button>
-          </div>
-          <p id="invite-error" class="status form-status" role="alert"></p>
-        </details>
+        <div id="signin-entry-routes" class="signin-entry-routes">
+        <button type="button" id="agent-signin-button" class="text-button" aria-expanded="false" aria-controls="agent-auth-step">Agent sign in</button>
+        </div>
+        <section id="agent-auth-step" aria-label="Agent sign in" hidden>
+          <button type="button" id="agent-auth-back" class="text-button">Back to sign in</button>
+          <div id="agent-signin-ui"></div>
         <details id="join-agent" class="join-agent">
-          <summary id="join-agent-title">Connect an agent</summary>
-          <p class="form-hint">People and agents can use the same invitation. <a href="/llms.txt">Agent joining instructions</a> work without a browser login.</p>
+          <summary id="join-agent-title">Connect your agent</summary>
+          <p class="form-hint"><a href="/llms.txt">Agent setup guide</a></p>
           <textarea id="join-agent-prompt" readonly rows="3" spellcheck="false" aria-label="Setup prompt for your agent"></textarea>
           <button id="join-agent-copy" class="button" type="button">Copy</button>
           <p id="join-agent-status" class="status form-status" role="status"></p>
-          <details id="join-agent-help"><summary>What your agent does with this</summary>
-            <p>It reads the packet at that address: what this room is, how to join, and which doors it can call.</p>
-            <p>A shared #join/ invitation lets an agent join with its own saved identity for read/chat. Keep the full link, including the part after #. No separate approval or agent code is needed; additional permissions can be granted later.</p>
-            <ul>
-              <li><a id="join-agent-packet" href="/llms.txt">Packet</a> — the instructions themselves</li>
-              <li><a id="join-agent-card" href="/.well-known/agent.json">Agent card</a> — the same thing, machine-readable</li>
-              <li><a id="join-agent-kits" href="/kits.txt">Kits</a> — every door an agent can pull</li>
-            </ul>
-          </details>
+          <div class="agent-discovery-links"><a id="join-agent-card" href="/.well-known/agent.json">Agent card</a> · <a id="join-agent-kits" href="/kits.txt">Tools</a></div>
         </details>
-        <div id="auth-signin-ui"></div>
-        <div id="agent-signin-ui"></div>
-        <details id="key-signin" class="signin-support"><summary>Use a room or account key</summary>
-        <div id="auth-kind" class="auth-kind" role="group" aria-label="What are you signing in with?">
-          <button type="button" id="auth-kind-room" class="button ghost" aria-pressed="true">Room key</button>
-          <button type="button" id="auth-kind-account" class="button ghost" aria-pressed="false">Account key</button>
-        </div>
-        <p id="auth-kind-hint" class="form-hint">Use the key provided by your room owner or saved with your account.</p>
-        <form id="auth-form">
-          <label id="access-key-label" for="access-key">Room key</label>
-          <div class="key-field">
-            <input id="access-key" type="password" autocomplete="off" spellcheck="false" required maxlength="128" placeholder="Paste your key" aria-describedby="auth-error">
-            <button type="button" id="access-key-reveal" class="button ghost" aria-pressed="false">Show</button>
-          </div>
-          <button class="button primary" type="submit">Enter room</button>
-        </form>
-        </details>
-        <details id="signin-help" class="signin-support"><summary>Sign-in help &amp; saved sessions</summary>
-        <div id="session-restore" hidden>
-          <button type="button" id="reopen-last-room" class="button secondary" hidden>Reopen last room</button>
-          <button type="button" id="continue-account" class="button ghost" hidden>Continue to your rooms</button>
-          <button type="button" id="clear-session" class="text-button">Clear saved session on this browser</button>
-        </div>
-        <div class="access-help">
-          <p>Ask the room owner for an invite or key. No invite? Continue with Google above, then create your own room — your first room is free. Keep your key private.</p>
-          <p id="session-hint" class="form-hint">This browser keeps an HttpOnly session cookie — not localStorage. Closing the tab does not sign you out. Account sessions stay signed in for up to 8 hours. Sign out clears the cookie. The last room for this account stays in this browser so the next sign-in can return there.</p>
-        </div>
-        </details>
-        </div>
+        </section>
 
 
       </section>
@@ -124,7 +81,6 @@
         <p id="account-rooms-status" role="status"></p>
         <div id="account-rooms-list"></div>
         <button id="account-rooms-more" class="text-button" type="button" hidden>More</button>
-        <p class="form-hint">Join a room through its invitation.</p>
         <details id="account-room-create" class="account-room-create">
           <summary>New room</summary>
           <form id="account-room-form" class="account-room-form" autocomplete="off">
@@ -366,7 +322,6 @@
               <label class="sr-only" for="message-to-select">Talking to</label>
               <select id="message-to-select" aria-label="Who this message addresses"></select>
               <span class="audience-note" id="audience-note" hidden>Private</span>
-              <button id="composer-work-button" class="text-button" type="button" hidden>New work</button>
             </div>
             <div id="request-mode-bar" class="reply-bar" hidden>
               <span id="request-mode-label"></span>
@@ -495,7 +450,7 @@
           <div class="dialog-head"><h2 id="settings-title">Settings</h2><button id="settings-close" class="button ghost" type="button">Close</button></div>
           <details id="create-room-details" class="create-room-details">
             <summary>Create Room</summary>
-            <p>Start your own room, then invite people to join it. Use Rooms in your account workspace to create a room. If you joined with a room key, sign in to your account first.</p>
+            <p>Start your own room, then invite people to join it. Use Rooms in your account workspace to create a room. Sign in to your account to create a room.</p>
           </details>
           <details id="room-permissions"><summary>Permissions</summary>
             <p class="form-hint">The room owner controls whether members can assign and wake agents across owners.</p>
@@ -536,7 +491,6 @@
           <details id="room-about" class="room-about" open>
             <summary>About</summary>
             <p class="room-purpose"></p>
-            <details id="room-instructions" class="room-instructions"><summary>Instructions</summary><div class="room-instructions-body"></div></details>
             <div class="room-about-actions">
               <button id="room-instructions-open" class="button ghost" type="button">Room instructions</button>
               <button id="room-archive-button" class="button ghost" type="button" hidden>Archive room</button>
@@ -726,13 +680,15 @@
           <div><dt>Expires</dt><dd><time id="invitation-expires"></time></dd></div>
         </dl>
         <p id="invitation-acting-account" class="form-hint" hidden></p>
-        <form id="invitation-account-form" hidden>
-          <label for="invitation-account-key">Account key</label>
-          <input id="invitation-account-key" type="password" autocomplete="off" spellcheck="false" required maxlength="128" aria-describedby="invitation-account-hint invitation-error">
-          <p id="invitation-account-hint" class="form-hint">Use your own account key to accept this membership.</p>
+        <div id="invitation-signin" hidden>
+          <div id="invitation-signin-choices" class="auth-methods">
+            <a id="invitation-google" class="button primary" href="/api/auth/google/start">Continue with Google</a>
+            <button id="invitation-email" class="button secondary" type="button">Continue with email</button>
+          </div>
+          <div id="invitation-methods" hidden></div>
+          <button id="invitation-signin-back" class="text-button" type="button" hidden>Back</button>
           <p id="invitation-account-warning" class="form-hint" hidden>Switching accounts clears this room’s drafts and forms. Save a copy first.</p>
-          <button class="button secondary" type="submit">Sign in to review acceptance</button>
-        </form>
+        </div>
         <p id="invitation-status" class="invitation-feedback" role="status" aria-live="polite"></p>
         <p id="invitation-error" class="invitation-feedback error" role="alert"></p>
         <!-- RC-2026-09-19-071 (QAJ-001): the request-access door. Shown only
@@ -840,7 +796,7 @@
         <ul id="agent-capabilities" class="form-hint agent-capabilities"></ul>
         <details id="agent-connect-advanced" class="agent-advanced"><summary>Advanced</summary>
           <label>How they connect<select id="agent-connect-route" aria-describedby="agent-route-hint">
-            <option value="packet">Chat packet — no Room key</option>
+            <option value="packet">Chat packet</option>
             <option value="mcp" selected>MCP on this Mac</option>
             <option value="direct">Node client on its computer</option>
           </select></label>
@@ -850,7 +806,7 @@
             <label>Access<select id="agent-connect-access"><option value="chat">Read & chat</option><option value="contribute">Contribute work</option><option value="review">Review work</option></select></label>
             <label>Expires in<select id="agent-connect-expiry"><option value="1">1 day</option><option value="7" selected>7 days</option><option value="30">30 days</option></select></label>
           </div>
-          <details id="agent-key-later" hidden><summary>Need a Room key later</summary>
+          <details id="agent-key-later" hidden><summary>Agent credentials</summary>
             <p class="form-hint">Only if this host can store a secret outside chat. Do not paste a key into iMessage, WhatsApp, or Muse.</p>
             <button type="button" id="agent-create-later" class="button ghost">Create access</button>
           </details>
@@ -864,7 +820,7 @@
             <p class="form-hint">Already connected: <strong>Replace key</strong> issues a new setup on the same routes. The old key stops. Addressing in chat still does not start a model.</p>
             <p id="agent-list-status" role="status"></p><ul id="agent-connect-list" class="share-link-list"></ul>
           </details>
-          <details><summary>Using iMessage, Muse, or another chat?</summary><p>Choose <strong>Chat packet</strong> above. Instinct (iMessage) and Muse (Muse app or WhatsApp) can contribute today without a key. Claude Code, Codex, Hermes, OpenCode, and Grok Build use MCP; Cursor can paste a prompt or add Room as MCP; Pi can redeem an invite code; Grok Bot uses the Node client on its computer. The catalog is first-party types for this Room — not a public agent store. See docs/ROOM-ROSTER.md and docs/AGENT-PLUG.md.</p></details>
+          <details><summary>Using iMessage, Muse, or another chat?</summary><p>Choose <strong>Chat packet</strong> above. Instinct (iMessage) and Muse (Muse app or WhatsApp) can contribute today without a key. Claude Code, Codex, Hermes, OpenCode, and Grok Build use MCP; Cursor can paste a prompt or add Room as MCP; Pi uses agent instructions; Grok Bot uses the Node client on its computer. The catalog is first-party types for this Room — not a public agent store. See docs/ROOM-ROSTER.md and docs/AGENT-PLUG.md.</p></details>
         </details>
         <p id="agent-create-note" class="form-hint">Next: connect the agent in its own app.</p>
         <button id="agent-create" type="submit" class="button primary">Create access</button>
@@ -905,8 +861,7 @@
       </form>
       <div id="agent-invite-result" hidden>
         <div id="agent-invite-single">
-          <label for="agent-invite-code">Agent invite link · shown once</label>
-          <input id="agent-invite-code" type="text" readonly autocomplete="off" spellcheck="false">
+          <p><a id="agent-invite-link"></a></p>
           <button id="agent-invite-copy" class="button primary" type="button">Copy invite link</button>
         </div>
         <div id="agent-invite-bulk" hidden>
@@ -922,7 +877,6 @@
     <dialog id="share-link-dialog" aria-labelledby="share-link-title" class="share-dialog">
       <div class="panel-header"><h2 id="share-link-title">Invite people and agents</h2><button id="share-link-close" class="button ghost" type="button" aria-label="Close invitation links">Close</button></div>
         <p id="share-link-intro">Share one link with people or AI agents. They can read the room and chat. They cannot invite others or approve work.</p>
-      <p class="form-hint">Want another admin? After the person or agent joins: People → their ··· member options → Room capabilities → Make room admin. <button id="share-link-admins" type="button" class="text-button">Open People</button></p>
       <p id="share-local-note" class="form-hint" hidden>Local preview: links work only on this Mac.</p>
       <form id="share-link-form">
         <details id="share-settings"><summary>Link limits <span id="share-settings-summary">24 hours · 10 guests</span></summary>
@@ -933,11 +887,9 @@
         <button id="share-link-create" class="button primary" type="submit">Create invite link</button>
       </form>
       <div id="share-link-result" hidden>
-        <label for="share-link-code">Join code</label><input id="share-link-code" type="text" readonly autocomplete="off" spellcheck="false">
-        <button id="share-link-code-copy" class="button primary" type="button">Copy join code</button>
         <label for="share-link-url">Invite link</label><input id="share-link-url" type="text" readonly autocomplete="off" spellcheck="false">
         <button id="share-link-copy" class="button primary" type="button">Copy invite link</button><button id="share-link-another" class="button ghost" type="button">New link</button>
-        <p class="form-hint">Save before closing. The join code and link are shown once. People join in the browser; agents use the same invite with their own identity.</p>
+        <p class="form-hint">Save this link before closing.</p>
         <p id="share-purpose-note" class="form-hint" hidden></p>
         <details id="share-note"><summary>Add a note</summary>
           <label for="share-note-text">Note · optional</label>
@@ -960,15 +912,8 @@
     <dialog id="join-link-dialog" aria-labelledby="join-link-title" class="share-dialog">
       <div class="panel-header"><h2 id="join-link-title">Join this room</h2><button id="join-link-close" class="button ghost" type="button">Close</button></div>
       <p id="join-link-scope">Checking your invitation…</p>
-      <nav id="join-link-recover" class="join-link-recover" hidden>
-        <a href="/room">Open room door</a>
-        <a href="/room#join-code">Join with code</a>
-        <a href="/room#join-agent">Paste a prompt</a>
-        <a href="/room#mcp-join">Add Room as MCP</a>
-      </nav>
       <section id="join-account-choices" hidden aria-label="Join with an account or as a guest">
-        <p>Already have an account?</p>
-        <div class="join-account-actions"><button id="join-account-signin" class="button primary" type="button">Sign in</button><button id="join-account-create" class="button secondary" type="button">Create an account</button></div>
+        <div class="join-account-actions"><button id="join-account-signin" class="button primary" type="button">Sign in</button></div>
         <p class="form-hint">Keep your rooms across visits and devices. Or join below as a guest for a quick conversation.</p>
       </section>
       <section id="join-account-auth" hidden aria-label="Account sign-in">

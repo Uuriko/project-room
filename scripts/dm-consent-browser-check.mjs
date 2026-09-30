@@ -13,7 +13,7 @@ import { chromium } from "playwright";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
-import { fillAccessKey } from "./auth-signin.mjs";
+import { signInFixture } from "./auth-signin.mjs";
 
 const command = (type, data, id = crypto.randomUUID()) => ({ id, type, data });
 
@@ -51,8 +51,7 @@ test("DM consent browser journey: request, approve, revoke, block, errors", { ti
     page.on("pageerror", error => errors.push(String(error?.message ?? error)));
     await page.goto(origin);
     await page.locator("#auth-panel").waitFor({ state: "visible" });
-    await fillAccessKey(page, key);
-    await page.getByRole("button", { name: "Enter room", exact: true }).click();
+    await signInFixture(page, key);
     await page.locator("#main").waitFor({ state: "visible" });
     return { page, errors };
   };

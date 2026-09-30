@@ -44,7 +44,7 @@ for (const touch of [false, true]) {
     const prompt = page.locator('#join-agent-prompt');
     assert.equal(await prompt.isVisible(), false, 'setup instructions start collapsed');
     assert.equal(await page.locator('#join-agent > summary').isVisible(), false);
-    await page.locator('#signin-more').focus();
+    await page.locator('#agent-signin-button').focus();
     await page.keyboard.press('Enter');
     await page.locator('#join-agent > summary').focus();
     await page.keyboard.press('Enter');
@@ -52,8 +52,7 @@ for (const touch of [false, true]) {
     assert.ok(await page.locator('#join-agent-title').isVisible(), 'agent instructions remain discoverable');
 
     // The secondary disclosure contains the agent path.
-    assert.equal(await page.locator('#signin-extra').isVisible(), true, 'secondary routes are revealed together');
-    assert.equal(await page.locator('#signin-more').getAttribute('aria-expanded'), 'true');
+    assert.equal(await page.locator('#agent-signin-button').getAttribute('aria-expanded'), 'true');
 
     // 3. It names the host actually being served, not a written-down address.
     const text = await prompt.inputValue();
@@ -65,11 +64,6 @@ for (const touch of [false, true]) {
     //    to. A Copy button that only copies is useless without one.
     assert.equal(await prompt.getAttribute('readonly'), '', 'shown, not editable');
 
-    // 5. The explanation is behind the disclosure, closed on arrival.
-    const help = page.locator('#join-agent-help');
-    assert.equal(await help.evaluate(node => node.open), false, 'docs start collapsed');
-    assert.equal(await page.locator('#join-agent-help p').first().isVisible(), false);
-
     // 6. None of this is an error state on a normal signed-out arrival.
     assert.equal(await page.locator('#join-agent-status').textContent(), '');
 
@@ -78,10 +72,9 @@ for (const touch of [false, true]) {
     await page.locator('#join-agent-status').filter({ hasText: 'Copied' }).waitFor();
     assert.equal(await page.evaluate(() => navigator.clipboard.readText()), text, 'the clipboard holds what was shown');
 
-    await page.locator('#join-agent-help summary').click();
-    assert.equal(await help.evaluate(node => node.open), true);
-    assert.ok(await page.locator('#join-agent-help p').first().isVisible(), 'the docs are there once asked for');
-    assert.equal(await page.locator('#join-agent-packet').getAttribute('href'), `${origin}/llms.txt`);
+    const instructions = page.locator('#agent-auth-step a[href="/llms.txt"]');
+    assert.equal(await instructions.isVisible(), true);
+    assert.equal(await instructions.getAttribute('href'), '/llms.txt');
 
     // The packet the prompt sends an agent to has to actually answer.
     const response = await page.request.get(`${origin}/llms.txt`);

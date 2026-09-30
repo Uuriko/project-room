@@ -7,7 +7,8 @@ import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
-import { fillAccessKey } from "./auth-signin.mjs";
+import { signInFixture } from "./auth-signin.mjs";
+import { signInFixtureInPlace } from "./in-place-fixture-signin.mjs";
 import { makeTestSigner } from "./helpers/signed-evidence.mjs";
 
 async function setup(t, viewport = { width: 1440, height: 1000 }) {
@@ -29,10 +30,11 @@ async function setup(t, viewport = { width: 1440, height: 1000 }) {
     };
   });
   await page.goto(`http://127.0.0.1:${server.address().port}`);
+  let initialLogin = true;
   const login = async (key = f.keys.owner) => {
     await page.locator("#auth-panel").waitFor({ state: "visible" });
-    await fillAccessKey(page, key);
-    await page.getByRole("button", { name: "Enter room", exact: true }).click();
+    if (initialLogin) { await signInFixture(page, key); initialLogin = false; }
+    else await signInFixtureInPlace(page, f.store, key);
     await page.locator("#main").waitFor({ state: "visible" });
   };
   await login();

@@ -100,3 +100,11 @@ test("no tool description promises money", () => {
     assert.ok(!/\bUSD\b/.test(entry.description), `${entry.name} description names a currency`);
   }
 });
+
+test("optional-key writes do not promise unconditional retry safety", () => {
+  for (const entry of bountyTools) {
+    assert.equal(entry.annotations.idempotentHint, entry.annotations.readOnlyHint);
+    if (!entry.annotations.readOnlyHint)
+      assert.ok(!entry.inputSchema.required.includes("idempotencyKey"));
+  }
+});

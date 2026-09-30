@@ -44,11 +44,16 @@ carry the claim, and the remaining tiers stay visibly open.
       "evidence": {
         "unit": [
           "tests/conversation.test.js",
+          "tests/member-display-names.test.js",
+          "tests/private-history-stream.test.js",
+          "tests/stream-recovery.test.js",
           "tests/work-search.test.js",
           "tests/work-discussion.test.js"
         ],
         "browser": [
           "scripts/browser-check.mjs",
+          "scripts/chat-performance-browser-check.mjs",
+          "scripts/stream-recovery-browser-check.mjs",
           "scripts/work-search-browser-check.mjs"
         ],
         "agent": [],
@@ -95,6 +100,7 @@ carry the claim, and the remaining tiers stay visibly open.
       "evidence": {
         "unit": [
           "tests/return-brief.test.js",
+          "tests/private-history-stream.test.js",
           "tests/return-brief-client.test.js",
           "tests/draft-feedback.test.js"
         ],
@@ -260,7 +266,7 @@ carry the claim, and the remaining tiers stay visibly open.
     },
     {
       "id": "owner-access-review",
-      "claim": "An owner-only, read-only access review names members and grants, guests with expiry, links with remaining joins, agent identities and connections with state, and last activity, with no token, secret or hash — identically from the route and the CLI.",
+      "claim": "An owner-only, read-only access review names members and grants, guests with expiry, links with remaining joins, agent identities and connections with state, and last activity, with no token, secret or hash \u2014 identically from the route and the CLI.",
       "evidence": {
         "unit": [
           "tests/access-review.test.js"
@@ -424,6 +430,29 @@ carry the claim, and the remaining tiers stay visibly open.
         "browser": [
           "scripts/channels-browser-check.mjs"
         ]
+      }
+    },
+    {
+      "id": "human-signin-navigation",
+      "claim": "People can sign in with Google or the visible email/password form, create an account, choose password reset or an email sign-in link under Forgot password, and navigate back on mobile without interrupting pending authentication. Reset links preserve invitation destinations and require fresh sign-in.",
+      "evidence": {
+        "unit": [
+          "tests/auth-signin-ui.test.js",
+          "tests/magic-links-http.test.js",
+          "tests/password-http.test.js",
+          "tests/password-reset.test.js",
+          "tests/password-reset-http.test.js",
+          "tests/google-oauth-http.test.js"
+        ],
+        "browser": [
+          "scripts/email-password-browser-check.mjs",
+          "scripts/password-reset-browser-check.mjs",
+          "scripts/magic-link-browser-check.mjs",
+          "scripts/mobile-signin-history-browser-check.mjs",
+          "scripts/invitation-check.mjs"
+        ],
+        "agent": [],
+        "hosted": []
       }
     }
   ]

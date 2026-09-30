@@ -8,7 +8,7 @@ import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
-import { fillAccessKey } from "./auth-signin.mjs";
+import { signInFixture } from "./auth-signin.mjs";
 import { dialogPrimarySubmit, openSettings } from "./room-chrome.mjs";
 
 async function setup(t, key = "owner") {
@@ -28,8 +28,7 @@ async function setup(t, key = "owner") {
   });
   await page.goto(origin);
   await page.locator("#auth-panel").waitFor({ state: "visible" });
-  await fillAccessKey(page, f.keys[key]); await page.getByRole("button", { name: "Enter room", exact: true }).click();
-  await page.locator("#main").waitFor({ state: "visible" });
+  await signInFixture(page, f.keys[key]); await page.locator("#main").waitFor({ state: "visible" });
   t.after(() => { assert.deepEqual(errors, []); assert.deepEqual(outside, []); });
   return { ...f, page };
 }

@@ -8,7 +8,7 @@ import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { saveAgentConnection } from "../client/agent-connection.mjs";
 import { openMcpTestClient } from "./mcp-test-client.mjs";
-import { fillAccessKey } from "./auth-signin.mjs";
+import { signInFixture } from "./auth-signin.mjs";
 
 async function setup(t, touch = false) {
   const f = createAcceptanceFixture(), workItemId = "native-guide", errors = [], traffic = [];
@@ -32,8 +32,7 @@ async function setup(t, touch = false) {
     page.setDefaultTimeout(8000); page.on("pageerror", e => errors.push(e.message));
     await page.route("**/*", route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
     page.on("request", req => { if (req.method() === "POST" && req.url().endsWith("/commands")) traffic.push(req.postDataJSON()); });
-    await page.goto(origin); await fillAccessKey(page, f.keys[actor]); await page.getByRole("button", { name: "Enter room", exact: true }).click();
-    await page.locator("#main").waitFor({ state: "visible" });
+    await page.goto(origin); await signInFixture(page, f.keys[actor]); await page.locator("#main").waitFor({ state: "visible" });
     const card = page.locator('[data-work-record-id="' + workItemId + '"]');
     const draft = async (native = true, selected = false) => {
       const panel = card.locator(selected ? ".work-help" : ".work-details");

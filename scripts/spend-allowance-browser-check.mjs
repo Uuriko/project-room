@@ -10,7 +10,7 @@ import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { spendAllowance } from "../src/events.js";
-import { fillAccessKey } from "./auth-signin.mjs";
+import { signInFixture } from "./auth-signin.mjs";
 import { openSettings } from "./room-chrome.mjs";
 
 async function setup(t, actor, viewport = { width: 1440, height: 1000 }) {
@@ -26,8 +26,7 @@ async function setup(t, actor, viewport = { width: 1440, height: 1000 }) {
   t.after(() => assert.deepEqual(errors, []));
   await page.goto(`http://127.0.0.1:${server.address().port}`);
   await page.locator("#auth-panel").waitFor({ state: "visible" });
-  await fillAccessKey(page, f.keys[actor]);
-  await page.getByRole("button", { name: "Enter room", exact: true }).click();
+  await signInFixture(page, f.keys[actor]);
   await page.locator("#main").waitFor({ state: "visible" });
   await openSettings(page, "spend-panel");
   const state = () => f.store.room("commons").state;

@@ -165,7 +165,7 @@ function renderConsent(preview) {
 async function boot() {
   const code = parseJoinCode(globalThis.location?.pathname);
   if (!code) {
-    fail({ title: "Invite link problem", message: "This invite link doesn't look right — this page opens invite links that end with /join/ and an invite code. Holding a short share code instead? Paste it in the “Have an invitation?” box on the sign-in page.", retry: false });
+    fail({ title: "Invite link problem", message: "This invitation is invalid. Ask for a new link.", retry: false });
     return;
   }
   const apiBase = serviceApiBase(globalThis.location?.pathname);

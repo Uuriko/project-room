@@ -9,7 +9,7 @@ import { chromium } from "playwright";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
-import { fillAccessKey } from "./auth-signin.mjs";
+import { signInFixture } from "./auth-signin.mjs";
 
 async function boot(t, viewport) {
   const directory = mkdtempSync(join(tmpdir(), "room-final-"));
@@ -27,8 +27,7 @@ async function boot(t, viewport) {
   const origin = `http://127.0.0.1:${server.address().port}`;
   await page.goto(origin);
   await page.locator("#auth-panel").waitFor({ state: "visible" });
-  await fillAccessKey(page, owner);
-  await page.getByRole("button", { name: "Enter room", exact: true }).click();
+  await signInFixture(page, owner);
   await page.locator("#main").waitFor({ state: "visible" });
   return { store, server, page };
 }

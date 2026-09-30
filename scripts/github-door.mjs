@@ -59,8 +59,11 @@ export function inboundCommand({ repo, comment, parsed }) {
 export function readCursor(comments) {
   let best = 0;
   for (const c of comments ?? []) {
-    const m = /<!-- room-door:out seq=(\d+) -->/.exec(c?.body ?? "");
-    if (m) best = Math.max(best, Number(m[1]));
+    // Cursor authority belongs to the workflow publisher, never issue participants.
+    if (c?.user?.login !== "github-actions[bot]" || c.user.type !== "Bot") continue;
+    const m = /^<!-- room-door:out seq=(\d+) -->\n/.exec(c?.body ?? "");
+    const sequence = m ? Number(m[1]) : NaN;
+    if (Number.isSafeInteger(sequence)) best = Math.max(best, sequence);
   }
   return best;
 }
@@ -68,17 +71,20 @@ export function readCursor(comments) {
 const quote = s => s.split("\n").map(line => `> ${line}`).join("\n");
 
 export function outboundDigest(messages, { roomId, selfMemberId, names = {}, cursor = 0 } = {}) {
-  const fresh = (messages ?? []).filter(m => m.sequence > cursor && !m.private && m.from !== selfMemberId);
-  const last = (messages ?? []).reduce((n, m) => Math.max(n, m.sequence ?? 0), cursor);
-  if (!fresh.length) return { body: null, cursor: last };
-  const parts = [`${OUT_MARKER} seq=${last} -->`, `New in \`${roomId}\` (reply here; start a line with \`reply-to: <id>\` to thread):`];
-  let size = parts.join("\n").length;
-  for (const m of fresh) {
+  let last = cursor, emitted = 0;
+  const parts = ["", `New in \`${roomId}\` (reply here; start a line with \`reply-to: <id>\` to thread):`];
+  // Reserve the longest safe cursor marker before packing entries.
+  let size = parts[1].length + `${OUT_MARKER} seq=${Number.MAX_SAFE_INTEGER} -->`.length + 1;
+  for (const m of messages ?? []) {
+    if (m.sequence <= last) continue;
+    if (m.private || m.from === selfMemberId) { last = m.sequence; continue; }
     const who = names[m.from] ?? m.from;
     const entry = `\n**${who}** · \`${m.messageId}\`\n${quote(m.body.length > 4000 ? m.body.slice(0, 3999) + "…" : m.body)}`;
-    if (size + entry.length > DIGEST_LIMIT) { parts.push("\n…more in the room."); break; }
-    parts.push(entry); size += entry.length;
+    if (size + entry.length + 1 > DIGEST_LIMIT) break;
+    parts.push(entry); size += entry.length + 1; emitted++; last = m.sequence;
   }
+  if (!emitted) return { body: null, cursor: last };
+  parts[0] = `${OUT_MARKER} seq=${last} -->`;
   return { body: parts.join("\n"), cursor: last };
 }
 
