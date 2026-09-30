@@ -96,6 +96,7 @@ const assetType = path => path.endsWith(".js") ? "text/javascript" : path.endsWi
   : path.endsWith(".html") ? "text/html" : "text/markdown; charset=utf-8";
 const assets = new Map([
   ["/", ["index.html", "text/html"]],
+  ["/offers", ["offers.html", "text/html"]],
   ...publicAssetPaths.map(path => [`/${path}`, [path, assetType(path)]]),
 ]);
 for (const [url, file] of publicSearchAssets(publicAssetPaths)) assets.set(url, [file, "text/html"]);
@@ -1719,6 +1720,25 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }));
       }
       if (url.pathname === "/api/public/rooms/directory") reject(405, "method_not_allowed", "Method not allowed");
+      const projectOfferPublicMatch = /^\/api\/project-offers\/([^/]{1,128})(?:\/(brief.md))?$/.exec(url.pathname);
+      if (url.pathname === "/api/project-offers" || projectOfferPublicMatch) {
+        if (!["GET", "HEAD"].includes(req.method)) reject(405, "method_not_allowed", "Method not allowed");
+        rate(`project-offers:${remoteAddress}`, 120);
+        if (projectOfferPublicMatch) {
+          // Exact literal guard: route inventory expands the dot-form matcher.
+          if (projectOfferPublicMatch[2] && projectOfferPublicMatch[2] !== "brief.md") reject(404, "not_found", "Not found");
+          if ([...url.searchParams].length) reject(422, "invalid_project_offer", "No detail query parameters accepted");
+          const offerId = pathId(projectOfferPublicMatch[1]);
+          if (projectOfferPublicMatch[2]) {
+            const brief = store.projectOffers.brief(offerId);
+            res.writeHead(200, { "Content-Type": "text/markdown; charset=utf-8", "Cache-Control": "no-store" });
+            return res.end(req.method === "HEAD" ? undefined : brief);
+          }
+          return json(res, 200, store.projectOffers.read(offerId));
+        }
+        if ([...url.searchParams.keys()].some(key => !["limit", "after"].includes(key) || url.searchParams.getAll(key).length !== 1)) reject(422, "invalid_project_offer", "Only limit and after accepted");
+        return json(res, 200, store.projectOffers.list({ limit: url.searchParams.get("limit") ?? 20, after: url.searchParams.get("after") }));
+      }
       // Public opportunity feed (v2): read-only discovery of open work
       // across directory-listed rooms. Decoupled from admission — reading
       // the feed grants nothing; acting on an opportunity uses the normal
@@ -3259,7 +3279,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       // onboarding-funnel was removed on main (replaced by activation-pack);
       // dm-consents + public-face are this branch's consent/face routes.
-      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|context|conversation|stream|cursor|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|export|import|charter|outside-agents|request-runs|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-agent-links|guest-invites|guest-invites-list|guest-invites-revoke|guest-invites-disconnect|guest-invites-revoke-all|guest-invites-upgrade|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|orient|verification-policy|dm-consents|bonds|peer-dms|directory|opportunities|public-face|needs-attention|jev-shadow|mentions|open-questions|human-push|thread-mutes|referrals|referral-invites|activity|activity-read|activity-read-all|activity-unread-count|read-horizon|saved))?$/.exec(url.pathname);
+      const projectOfferPublishMatch = /^\/api\/rooms\/([^/]{1,384})\/project-offers\/([^/]{1,128})\/publish$/.exec(url.pathname);
+      const projectOfferWithdrawMatch = /^\/api\/rooms\/([^/]{1,384})\/project-offers\/([^/]{1,128})\/withdraw$/.exec(url.pathname);
+      const projectOfferActionMatch = projectOfferPublishMatch ?? projectOfferWithdrawMatch;
+      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|context|conversation|stream|cursor|project-offers|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|export|import|charter|outside-agents|request-runs|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-agent-links|guest-invites|guest-invites-list|guest-invites-revoke|guest-invites-disconnect|guest-invites-revoke-all|guest-invites-upgrade|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|orient|verification-policy|dm-consents|bonds|peer-dms|directory|opportunities|public-face|needs-attention|jev-shadow|mentions|open-questions|human-push|thread-mutes|referrals|referral-invites|activity|activity-read|activity-read-all|activity-unread-count|read-horizon|saved))?$/.exec(url.pathname);
       // Round-2 #112: threaded replies share the room funnel below (id decoding,
       // credential selection, read rate limit) with every other room route.
       const threadMatch = /^\/api\/rooms\/([^/]{1,384})\/messages\/([^/]{1,384})\/thread$/.exec(url.pathname);
@@ -3439,13 +3462,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         ?? boardV2EventsMatch ?? boardV2MirrorMatch ?? boardV2HealthMatch;
       // Consent-bound DMs (decide/revoke/unblock) and public-face rotate ride
       // the same funnel: their literal segments must never be mistaken for ids.
-      if (!match && !revokeMatch && !threadMatch && !accessDecideMatch && !delegationGrantMatch && !delegationRevokeMatch && !delegationListMatch && !ownerDelegateGrantMatch && !ownerDelegateRevokeMatch && !ownerDelegateListMatch && !ownershipTransferMatch && !collabMatch && !workClaimMatch
+      if (!projectOfferActionMatch && !match && !revokeMatch && !threadMatch && !accessDecideMatch && !delegationGrantMatch && !delegationRevokeMatch && !delegationListMatch && !ownerDelegateGrantMatch && !ownerDelegateRevokeMatch && !ownerDelegateListMatch && !ownershipTransferMatch && !collabMatch && !workClaimMatch
         && !feedbackMatch && !bountyMatch && !creditsMatch && !boardV2Match
         && !dmConsentDecideMatch && !dmConsentBlockMatch && !dmConsentRevokeMatch && !dmConsentUnblockMatch && !publicFaceRotateMatch
         && !peerDmThreadMatch && !operatorAgentMatch
         && !mentionAckMatch && !mentionSettingsMatch && !savedDeleteMatch && !memberDeactivateMatch
         && !agentGrantsMatch && !agentGrantDeleteMatch && !agentCapabilitiesMatch) reject(404, "not_found", "Not found");
-      const roomId = pathId((match ?? revokeMatch ?? threadMatch ?? accessDecideMatch ?? delegationGrantMatch ?? delegationRevokeMatch ?? delegationListMatch ?? ownerDelegateGrantMatch ?? ownerDelegateRevokeMatch ?? ownerDelegateListMatch ?? ownershipTransferMatch ?? collabMatch ?? workClaimMatch
+      const roomId = pathId((projectOfferActionMatch ?? match ?? revokeMatch ?? threadMatch ?? accessDecideMatch ?? delegationGrantMatch ?? delegationRevokeMatch ?? delegationListMatch ?? ownerDelegateGrantMatch ?? ownerDelegateRevokeMatch ?? ownerDelegateListMatch ?? ownershipTransferMatch ?? collabMatch ?? workClaimMatch
         ?? feedbackMatch ?? bountyMatch ?? creditsMatch ?? boardV2Match
         ?? dmConsentDecideMatch ?? dmConsentBlockMatch ?? dmConsentRevokeMatch ?? dmConsentUnblockMatch ?? publicFaceRotateMatch
         ?? peerDmThreadMatch ?? operatorAgentMatch
@@ -3459,7 +3482,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const mentionEventId = mentionAckMatch ? pathId(mentionAckMatch[2]) : null;
       const savedDeleteMessageId = savedDeleteMatch ? pathId(savedDeleteMatch[2]) : null;
       const deactivateMemberId = memberDeactivateMatch ? pathId(memberDeactivateMatch[2]) : null;
-      const route = match ? (match[2] ?? "") : revokeMatch ? "invitation-revoke" : threadMatch ? "thread" : accessDecideMatch ? "access-decide" : delegationGrantMatch ? "delegation-grant" : delegationRevokeMatch ? "delegation-revoke" : delegationListMatch ? "delegation-list" : ownerDelegateGrantMatch ? "owner-delegate-grant" : ownerDelegateRevokeMatch ? "owner-delegate-revoke" : ownerDelegateListMatch ? "owner-delegate-list"
+      const route = projectOfferActionMatch ? "project-offers" : match ? (match[2] ?? "") : revokeMatch ? "invitation-revoke" : threadMatch ? "thread" : accessDecideMatch ? "access-decide" : delegationGrantMatch ? "delegation-grant" : delegationRevokeMatch ? "delegation-revoke" : delegationListMatch ? "delegation-list" : ownerDelegateGrantMatch ? "owner-delegate-grant" : ownerDelegateRevokeMatch ? "owner-delegate-revoke" : ownerDelegateListMatch ? "owner-delegate-list"
         : dmConsentDecideMatch ? "dm-consent-decide" : dmConsentBlockMatch ? "dm-consent-block" : dmConsentRevokeMatch ? "dm-consent-revoke"
         : dmConsentUnblockMatch ? "dm-consent-unblock" : publicFaceRotateMatch ? "public-face-rotate"
         : peerDmThreadMatch ? "peer-dm-thread" : operatorAgentMatch ? "operator-agent"
@@ -3485,6 +3508,24 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const granted = (auth.apiKeyScopes ?? []).some(scope =>
           scope === requiredScope || (scope.endsWith(":*") && requiredScope.startsWith(scope.slice(0, -1))));
         if (!granted) reject(403, "insufficient_scope", `API key lacks the ${requiredScope} scope`);
+      }
+      if (route === "project-offers") {
+        if (isGuestAgentMemberId(auth.member.id)) reject(403, "owner_only", "Guests cannot manage project offers");
+        if (!projectOfferActionMatch && ["GET", "HEAD"].includes(req.method)) return json(res, 200, store.projectOffers.ownerList(roomId, auth.member.id));
+        if (req.method === "POST") {
+          const data = await body(req);
+          const outcome = store.transaction(() => {
+            // Upload may outlive credential revocation, role change or session rotation.
+            const current = roomAuth(selected, roomId, fence);
+            if (current.member.id !== auth.member.id) reject(403, "access_denied", "The acting identity changed");
+            if (current.kind === "api-key" && !(current.apiKeyScopes ?? []).some(scope => scope === "rooms:write" || scope === "rooms:*")) reject(403, "insufficient_scope", "API key lacks rooms:write");
+            return projectOfferActionMatch
+              ? store.projectOffers.transition(roomId, current.member.id, pathId(projectOfferActionMatch[2]), projectOfferPublishMatch ? "publish" : "withdraw", data)
+              : store.projectOffers.create(roomId, current.member.id, data);
+          });
+          return json(res, projectOfferActionMatch ? 200 : 201, outcome);
+        }
+        reject(405, "method_not_allowed", "Method not allowed");
       }
       // RC-2026-09-19-070: DM privacy. A targeted message (message.posted
       // with data.toMemberId) is visible only to its sender and its addressed

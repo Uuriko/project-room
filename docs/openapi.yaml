@@ -68,6 +68,177 @@ security:
   - queryAuth: []
   - bearerAuth: []
 paths:
+  /api/project-offers:
+    get:
+      summary: Read published project offers
+      security: []
+      description: >-
+        Owner-opted-in published offers only; no room/work/member identifiers or admission secrets.
+        Query limit is 1 through 100 (default 20); after is the prior nextCursor offer ID.
+        Response is offers plus nextCursor; HEAD has the same status and no body.
+      responses:
+        '200': { description: Successful result }
+        '403': { description: Owner authorization required for private routes }
+        '404': { description: Record unavailable }
+        '409': { description: Stale state or changed retry input }
+        '422': { description: Invalid fields }
+    head:
+      summary: Read published project offers
+      security: []
+      description: >-
+        Owner-opted-in published offers only; no room/work/member identifiers or admission secrets.
+        Query limit is 1 through 100 (default 20); after is the prior nextCursor offer ID.
+        Response is offers plus nextCursor; HEAD has the same status and no body.
+      responses:
+        '200': { description: Successful result }
+        '403': { description: Owner authorization required for private routes }
+        '404': { description: Record unavailable }
+        '409': { description: Stale state or changed retry input }
+        '422': { description: Invalid fields }
+  /api/project-offers/{offerId}:
+    get:
+      summary: Read published project offers
+      security: []
+      description: >-
+        Published offer only; drafts, withdrawn offers and archived-room offers return 404.
+        No query parameters accepted. Public terms retain full acceptance criteria.
+        The Markdown brief is derived from the same record and grants no permissions.
+        Cash funding/payment remains not_configured; internal credit is ledger_only and has no cash value.
+      parameters:
+        - { name: offerId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Successful result }
+        '403': { description: Owner authorization required for private routes }
+        '404': { description: Record unavailable }
+        '409': { description: Stale state or changed retry input }
+        '422': { description: Invalid fields }
+    head:
+      summary: Read published project offers
+      security: []
+      description: >-
+        Published offer only; drafts, withdrawn offers and archived-room offers return 404.
+        No query parameters accepted. Public terms retain full acceptance criteria.
+        The Markdown brief is derived from the same record and grants no permissions.
+        Cash funding/payment remains not_configured; internal credit is ledger_only and has no cash value.
+      parameters:
+        - { name: offerId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Successful result }
+        '403': { description: Owner authorization required for private routes }
+        '404': { description: Record unavailable }
+        '409': { description: Stale state or changed retry input }
+        '422': { description: Invalid fields }
+  /api/project-offers/{offerId}/brief.md:
+    get:
+      summary: Read published project offers
+      security: []
+      description: >-
+        Published offer only; drafts, withdrawn offers and archived-room offers return 404.
+        No query parameters accepted. Public terms retain full acceptance criteria.
+        The Markdown brief is derived from the same record and grants no permissions.
+        Cash funding/payment remains not_configured; internal credit is ledger_only and has no cash value.
+      parameters:
+        - { name: offerId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Successful result }
+        '403': { description: Owner authorization required for private routes }
+        '404': { description: Record unavailable }
+        '409': { description: Stale state or changed retry input }
+        '422': { description: Invalid fields }
+    head:
+      summary: Read published project offers
+      security: []
+      description: >-
+        Published offer only; drafts, withdrawn offers and archived-room offers return 404.
+        No query parameters accepted. Public terms retain full acceptance criteria.
+        The Markdown brief is derived from the same record and grants no permissions.
+        Cash funding/payment remains not_configured; internal credit is ledger_only and has no cash value.
+      parameters:
+        - { name: offerId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Successful result }
+        '403': { description: Owner authorization required for private routes }
+        '404': { description: Record unavailable }
+        '409': { description: Stale state or changed retry input }
+        '422': { description: Invalid fields }
+  /api/rooms/{roomId}/project-offers:
+    get:
+      summary: Manage owner-authored project offers
+      description: >-
+        Room-owner-only private draft/status listing. Includes linked work and reviewer IDs.
+      parameters:
+        - { name: roomId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Successful result }
+        '403': { description: Owner authorization required for private routes }
+        '404': { description: Record unavailable }
+        '409': { description: Stale state or changed retry input }
+        '422': { description: Invalid fields }
+    head:
+      summary: Manage owner-authored project offers
+      description: >-
+        Room-owner-only private draft/status listing. Includes linked work and reviewer IDs.
+      parameters:
+        - { name: roomId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Successful result }
+        '403': { description: Owner authorization required for private routes }
+        '404': { description: Record unavailable }
+        '409': { description: Stale state or changed retry input }
+        '422': { description: Invalid fields }
+    post:
+      summary: Manage owner-authored project offers
+      description: >-
+        Owner only. Body requestId, offerId, terms, reviewerMemberIds and optional workItemId.
+        terms requires kind task/project, title, summary, acceptanceCriteria, reward and approvalPolicy.
+        Optional exclusions, public HTTPS repositoryUrl/submissionUrl and deadline. Reward kind is unpaid,
+        work_trade or cash; positive integer-string amountMinor and unit credit/USD/USDC
+        required for rewards; decimals are 3/2/6 respectively. Optional basis fixed/pool and terms.
+        Approval mode human/agent/human_with_agent_review validates active reviewer members.
+        Creates immutable terms version 1 in private draft at revision 1. No caller may set paid/funded.
+        Exact same requestId/body replay returns original result; changed input returns 409.
+      parameters:
+        - { name: roomId, in: path, required: true, schema: { type: string } }
+      responses:
+        '201': { description: Successful result }
+        '403': { description: Owner authorization required for private routes }
+        '404': { description: Record unavailable }
+        '409': { description: Stale state or changed retry input }
+        '422': { description: Invalid fields }
+  /api/rooms/{roomId}/project-offers/{offerId}/publish:
+    post:
+      summary: Manage owner-authored project offers
+      description: >-
+        Owner only. Body requestId and expectedRevision. Publish draft or withdraw published offer;
+        increments revision without changing immutable terms version. Replays are stable.
+        Stale revision returns 409; publication revalidates linked work and reviewer standing.
+        Publication requires owner-authored repositoryUrl or submissionUrl without credentials/query/fragment.
+      parameters:
+        - { name: roomId, in: path, required: true, schema: { type: string } }
+        - { name: offerId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Successful result }
+        '403': { description: Owner authorization required for private routes }
+        '404': { description: Record unavailable }
+        '409': { description: Stale state or changed retry input }
+        '422': { description: Invalid fields }
+  /api/rooms/{roomId}/project-offers/{offerId}/withdraw:
+    post:
+      summary: Manage owner-authored project offers
+      description: >-
+        Owner only. Body requestId and expectedRevision. Publish draft or withdraw published offer;
+        increments revision without changing immutable terms version. Replays are stable.
+        Stale revision returns 409; publication revalidates linked work and reviewer standing.
+        Publication requires owner-authored repositoryUrl or submissionUrl without credentials/query/fragment.
+      parameters:
+        - { name: roomId, in: path, required: true, schema: { type: string } }
+        - { name: offerId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Successful result }
+        '403': { description: Owner authorization required for private routes }
+        '404': { description: Record unavailable }
+        '409': { description: Stale state or changed retry input }
+        '422': { description: Invalid fields }
   /api/rooms/{roomId}/conversation:
     get:
       summary: Read a bounded viewer-scoped conversation window
@@ -1258,6 +1429,13 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
+    head:
+      summary: Read public response headers
+      description: Uses the same public GET policy and status with no response body.
+      security: []
+      responses:
+        '200': { description: Response headers only }
+        '429': { description: Response headers only }
   /api/public/rooms/directory:
     get:
       summary: Public room directory
@@ -5726,6 +5904,12 @@ paths:
       security: []
       responses:
         '200': { description: "{ status: ok, mode }" }
+    head:
+      summary: Read public response headers
+      description: Uses the same public GET policy and status with no response body.
+      security: []
+      responses:
+        '200': { description: Response headers only }
   /api/health/jobs:
     get:
       summary: Cron job heartbeat
@@ -5747,6 +5931,12 @@ paths:
       security: []
       responses:
         '200': { description: "{ status, mode, sourceRevision, buildId }" }
+    head:
+      summary: Read public response headers
+      description: Uses the same public GET policy and status with no response body.
+      security: []
+      responses:
+        '200': { description: Response headers only }
   /api/version/worker:
     get:
       summary: Worker-only deployment signal
@@ -5771,6 +5961,13 @@ paths:
       responses:
         '200': { description: "{ status: ready }" }
         '503': { description: "{ status: unavailable }" }
+    head:
+      summary: Read public response headers
+      description: Uses the same public GET policy and status with no response body.
+      security: []
+      responses:
+        '200': { description: Response headers only }
+        '503': { description: Response headers only }
   /api/guest-invites:
     get:
       summary: GX guest-invite contract document
@@ -5783,6 +5980,12 @@ paths:
       security: []
       responses:
         '200': { description: Static contract document }
+    head:
+      summary: Read public response headers
+      description: Uses the same public GET policy and status with no response body.
+      security: []
+      responses:
+        '200': { description: Response headers only }
   /api/account-session:
     get:
       summary: Browser account-session slot
@@ -7068,6 +7271,15 @@ paths:
       responses:
         '200': { description: "{ agentId, name, description, url, capabilities, skills, version, publicKey, signature, visibility, publishedAt, updatedAt }" }
         '404': { description: unknown_card }
+    head:
+      summary: Read public response headers
+      description: Uses the same public GET policy and status with no response body.
+      security: []
+      parameters:
+        - { name: agentId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Response headers only }
+        '404': { description: Response headers only }
   /api/agents/{identityId}/card:
     get:
       summary: Read an agent's published skill card
@@ -7086,6 +7298,16 @@ paths:
         '200': { description: "{ name, description, skills: [{ id, name, description, tags, examples, inputModes, outputModes, evidence, declaration }], card, provider }" }
         '404': { description: "unknown_skill_card (no published skill card for this identity)" }
         '429': { description: rate_limited }
+    head:
+      summary: Read public response headers
+      description: Uses the same public GET policy and status with no response body.
+      security: []
+      parameters:
+        - { name: identityId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Response headers only }
+        '404': { description: Response headers only }
+        '429': { description: Response headers only }
   /api/agent-skills:
     post:
       summary: Publish your skill set
@@ -9484,6 +9706,12 @@ paths:
         '409': { description: "stale_member_revision, membership_ended or pilot_limit" }
         '422': { description: invalid_link }
         '429': { description: rate_limited }
+    head:
+      summary: Read public response headers
+      description: Uses the same public GET policy and status with no response body.
+      security: []
+      responses:
+        '200': { description: Response headers only }
   /api/rooms/{roomId}:
     get:
       summary: Room snapshot
@@ -11030,6 +11258,15 @@ paths:
       responses:
         '200': { description: "{ identityId, keys: [...] }" }
         '404': { description: identity_not_found }
+    head:
+      summary: Read public response headers
+      description: Uses the same public GET policy and status with no response body.
+      security: []
+      parameters:
+        - { name: identityId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Response headers only }
+        '404': { description: Response headers only }
   /api/agent-identities/{identityId}/keys/rotate:
     post:
       summary: Rotate an agent identity's claim-signing key

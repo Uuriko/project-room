@@ -9,7 +9,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
-import { BountyEscrow, APPROVAL_MODES } from "../server/bounty-escrow.mjs";
+import { BountyEscrow, APPROVAL_MODES, convergeBountyDeployedSchema } from "../server/bounty-escrow.mjs";
 
 const ROOM = "room-test";
 const JILL = "id:agent/jill";      // poster lane
@@ -126,4 +126,67 @@ test("approval mode survives the full lifecycle unchanged", () => {
     escrow.submitWork(ROOM, bounty.bountyId, { claimant: GROK, evidence }).bounty,
     escrow.acceptWork(ROOM, bounty.bountyId, { acceptor: INSTINCT, verifierAttestation: attest() }).bounty,
   ]) assert.equal(seen.approvalMode, "agent", `mode drifted at ${seen.state}`);
+});
+
+test("pre-mode submitted bounties retain both approvers through read-only refusal, migration and reopen", () => {
+  const { escrow, db } = makeEscrow();
+  const inherited = Array.from({ length: 4 }, () => runToSubmitted(escrow, { verifier: INSTINCT }));
+  db.exec("ALTER TABLE bounty_records DROP COLUMN approval_mode");
+  const snapshot = () => ({ schema: db.prepare("SELECT sql FROM sqlite_master WHERE name='bounty_records'").get().sql,
+    journal: db.prepare("SELECT * FROM bounty_journal ORDER BY seq").all(),
+    records: db.prepare("SELECT * FROM bounty_records ORDER BY bounty_id").all() });
+  const before = snapshot();
+  const reopened = makeEscrowWithoutGenesis(db);
+  db.readOnlyTransaction = true;
+  try { assert.throws(() => reopened.listBounties(ROOM), /missing columns: approval_mode/); }
+  finally { db.readOnlyTransaction = false; }
+  assert.deepEqual(snapshot(), before, "read-only refusal must not migrate or move credits");
+  convergeBountyDeployedSchema(db);
+  assert.deepEqual(snapshot().journal, before.journal);
+  const current = makeEscrowWithoutGenesis(db);
+  for (const bounty of inherited) assert.equal(current.getBounty(ROOM, bounty.bountyId).approvalMode, "legacy");
+  expectCode(() => current.acceptWork(ROOM, inherited[0].bountyId, { acceptor: GROK, verifierAttestation: attest() }), "not_authorized");
+  expectCode(() => current.rejectWork(ROOM, inherited[0].bountyId, { rejector: CODEX, reason: "unrelated" }), "not_authorized");
+  assert.equal(current.acceptWork(ROOM, inherited[0].bountyId, { acceptor: INSTINCT, verifierAttestation: attest() }).bounty.state, "accepted");
+  assert.equal(current.acceptWork(ROOM, inherited[1].bountyId, { acceptor: JILL, verifierAttestation: attest() }).bounty.state, "accepted");
+  assert.equal(current.rejectWork(ROOM, inherited[2].bountyId, { rejector: INSTINCT, reason: "failed" }).settlement.kind, "failed");
+  assert.equal(current.rejectWork(ROOM, inherited[3].bountyId, { rejector: JILL, reason: "failed" }).settlement.kind, "failed");
+  const human = runToSubmitted(current, { verifier: INSTINCT });
+  const agent = runToSubmitted(current, { approvalMode: "agent", verifier: INSTINCT });
+  convergeBountyDeployedSchema(db);
+  const final = makeEscrowWithoutGenesis(db);
+  assert.equal(final.getBounty(ROOM, human.bountyId).approvalMode, "human");
+  assert.equal(final.getBounty(ROOM, agent.bountyId).approvalMode, "agent");
+  expectCode(() => final.acceptWork(ROOM, human.bountyId, { acceptor: INSTINCT, verifierAttestation: attest() }), "not_authorized");
+  expectCode(() => final.rejectWork(ROOM, agent.bountyId, { rejector: JILL, reason: "wrong approver" }), "not_authorized");
+  expectCode(() => post(final, { approvalMode: "legacy" }), "invalid_input");
+  assert.equal(final.verifyConservation(ROOM).ok, true);
+  db.close();
+});
+
+function makeEscrowWithoutGenesis(db) {
+  const transaction = fn => {
+    db.exec("SAVEPOINT approval_migration");
+    try { const result = fn(); db.exec("RELEASE approval_migration"); return result; }
+    catch (error) { db.exec("ROLLBACK TO approval_migration"); db.exec("RELEASE approval_migration"); throw error; }
+  };
+  return new BountyEscrow({ db, transaction, readTransaction: transaction }, { now: () => nowMs, allowLegacyStringLanes: true });
+}
+
+test("expanding an already explicit two-mode database never rewrites pinned choices", () => {
+  const { escrow, db } = makeEscrow();
+  const human = runToSubmitted(escrow, { verifier: INSTINCT });
+  const agent = runToSubmitted(escrow, { approvalMode: "agent", verifier: INSTINCT });
+  const ddl = db.prepare("SELECT sql FROM sqlite_master WHERE name='bounty_records'").get().sql
+    .replace("DEFAULT 'legacy'", "DEFAULT 'human'").replace("('legacy','human','agent')", "('human','agent')");
+  db.exec("ALTER TABLE bounty_records RENAME TO records_two_modes");
+  db.exec(ddl);
+  db.exec("INSERT INTO bounty_records SELECT * FROM records_two_modes; DROP TABLE records_two_modes");
+  const before = db.prepare("SELECT * FROM bounty_records ORDER BY bounty_id").all();
+  convergeBountyDeployedSchema(db);
+  assert.deepEqual(db.prepare("SELECT * FROM bounty_records ORDER BY bounty_id").all(), before);
+  const current = makeEscrowWithoutGenesis(db);
+  expectCode(() => current.acceptWork(ROOM, human.bountyId, { acceptor: INSTINCT, verifierAttestation: attest() }), "not_authorized");
+  expectCode(() => current.acceptWork(ROOM, agent.bountyId, { acceptor: JILL, verifierAttestation: attest() }), "not_authorized");
+  db.close();
 });
