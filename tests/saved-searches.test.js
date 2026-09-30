@@ -26,3 +26,19 @@ test("malformed inputs are refused", () => {
   throwsCode(() => saved.save("ada", { name: "", query: "x" }), "invalid_saved");
   throwsCode(() => saved.remove("ada", { searchId: "ghost" }), "invalid_saved");
 });
+
+// H-14 regression (audit 2026-09-30): the manager must seed its id counter
+// from a caller-owned pre-populated store.
+// Contract: createSavedSearches({ store }) with existing searches must mint
+// ids that cannot collide with the stored ones. Credible regression: pre-fix
+// searchCounter starts at 0, so the next save() mints ss-1 again, producing
+// duplicate searchIds. Existing coverage: no pre-populated-store test
+// existed. No new production seams: public createSavedSearches/save/list API.
+test("H-14: a manager built on a pre-populated store seeds its id counter — no duplicate ss-N ids", () => {
+  const store = new Map();
+  store.set("u1", [{ searchId: "ss-1", userId: "u1", name: "x", query: "y", roomId: null }]);
+  const saved = createSavedSearches({ store });
+  const s = saved.save("u1", { name: "z", query: "w" });
+  assert.equal(s.searchId, "ss-2", "new search must not reuse the existing ss-1");
+  assert.equal(saved.list("u1").filter((x) => x.searchId === "ss-1").length, 1, "no duplicate ids");
+});

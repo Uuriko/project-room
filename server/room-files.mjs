@@ -14,6 +14,13 @@ export function createFiles({ store } = {}) {
   check(store === undefined || store instanceof Map, "store must be a Map if given");
   const files = store ?? new Map();
   let fileCounter = 0;
+  // H-14: seed the counter from existing store contents. The store is
+  // caller-owned and may be pre-populated (e.g. rehydrated from
+  // persistence); minting file-1 again would silently overwrite it.
+  for (const key of files.keys()) {
+    const m = /^file-(\d+)$/.exec(key);
+    if (m) fileCounter = Math.max(fileCounter, Number(m[1]));
+  }
   // Register an uploaded file (metadata only).
   const register = ({ roomId, filename, mimeType, sizeBytes, uploaderId }) => {
     check(typeof roomId === "string" && roomId.length > 0, "roomId must be a non-empty string");

@@ -364,3 +364,23 @@ test('coded-error contract: every failure carries .code and never resolves silen
   const last = lc.history('task-1').at(-1);
   assert.equal(last.actor, 'agent');
 });
+
+// H-14 regression (audit 2026-09-30): restore must reseed the id counter.
+// Contract: after restore(), the next generated id must not collide with a
+// restored record. Credible regression: pre-fix, restore() never touches
+// idCounter, so the next create() mints task-1 again and silently overwrites
+// the restored task. Existing coverage: no restore-after-creation test
+// existed (the file's fresh() helper injects its own id fn, bypassing the
+// counter — this test uses the default counter path). No new production
+// seams: public create/snapshot/restore/get API only.
+test('H-14: restore reseeds the id counter — a task created after restore cannot reuse a restored id', () => {
+  const lc = createTaskLifecycle({ clock: fakeClock(), storage: memoryStorage() });
+  const t1 = lc.create({ title: 'first' }, 'agent');
+  assert.equal(t1.id, 'task-1');
+  const snap = lc.snapshot();
+  const lc2 = createTaskLifecycle({ clock: fakeClock(), storage: memoryStorage() });
+  lc2.restore(snap);
+  const t2 = lc2.create({ title: 'second' }, 'agent');
+  assert.equal(t2.id, 'task-2', 'new task must not reuse the restored task-1');
+  assert.equal(lc2.get('task-1').title, 'first', 'restored task must not be overwritten');
+});

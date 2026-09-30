@@ -482,3 +482,22 @@ test('decidedAt/decidedBy recorded on every transition', () => {
   assert.equal(c2.decidedAt, 1020);
   assert.equal(c2.decidedBy, 'a');
 });
+
+// H-14 regression (audit 2026-09-30): restore must reseed the id counter.
+// Contract: after restore(), the next generated id must not collide with a
+// restored record. Credible regression: pre-fix, restore() never touches
+// idCounter, so the next propose() mints ho-1 again and silently overwrites
+// the restored handoff. Existing coverage: no restore-after-creation test
+// existed. No new production seams: public propose/snapshot/restore/get API
+// with the default counter-based id generator (not the injected-id helper).
+test('H-14: restore reseeds the id counter — a handoff proposed after restore cannot reuse a restored id', () => {
+  const store = createHandoffStore({ clock: fakeClock(), storage: memoryStorage() });
+  const h1 = store.propose({ ...PROPOSE }, 'quill');
+  assert.equal(h1.id, 'ho-1');
+  const snap = store.snapshot();
+  const store2 = createHandoffStore({ clock: fakeClock(), storage: memoryStorage() });
+  store2.restore(snap, 'agent');
+  const h2 = store2.propose({ ...PROPOSE, taskId: 'B048-3' }, 'quill');
+  assert.equal(h2.id, 'ho-2', 'new handoff must not reuse the restored ho-1');
+  assert.equal(store2.get('ho-1').taskId, 'B048-2', 'restored handoff must not be overwritten');
+});

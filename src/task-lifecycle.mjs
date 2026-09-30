@@ -156,6 +156,19 @@ export function createTaskLifecycle(deps = {}) {
   let idCounter = 0;
   const newId = deps.id ?? (() => `task-${(idCounter += 1)}`);
 
+  // H-14: after restore(), the next generated id must not collide with a
+  // restored record. Reseed the counter from the numeric suffixes present in
+  // the map (ids not matching the task-N shape, e.g. from an injected id fn,
+  // are ignored). Monotonic: never lowers the counter.
+  const reseedIdCounter = () => {
+    let max = 0;
+    for (const id of tasks.keys()) {
+      const m = /^task-(\d+)$/.exec(id);
+      if (m) max = Math.max(max, Number(m[1]));
+    }
+    idCounter = Math.max(idCounter, max);
+  };
+
   /** Internal task records, keyed by id. */
   const tasks = new Map();
 
@@ -411,6 +424,7 @@ export function createTaskLifecycle(deps = {}) {
       for (const [id, task] of next) {
         tasks.set(id, task);
       }
+      reseedIdCounter();
       persist();
       return tasks.size;
     },
