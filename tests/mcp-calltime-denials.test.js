@@ -125,7 +125,22 @@ test("t1_readonly carve-outs still succeed (no regression)", async t => {
 });
 
 test("guest-class direct calls are denied at call time", async t => {
-  const { owner, guest, roomId, call } = await guestPeer(t);
+  const { store, owner, ownerMemberId, guest, roomId, call } = await guestPeer(t);
+  // This authorization fixture must not depend on live GitHub availability,
+  // rate limits or ambient runner credentials. Keep the real queue handler.
+  const githubReads = [];
+  const sha = "a".repeat(40);
+  store.landQueue.configure({ token: null, fetchImpl: async (url, options) => {
+    assert.equal(options.headers.Authorization, undefined);
+    githubReads.push(url);
+    if (url.endsWith("/pulls/7")) return Response.json({
+      title: "Fixture pull request", merged: false, mergeable: true,
+      mergeable_state: "clean", head: { sha }
+    });
+    if (url.endsWith(`/commits/${sha}/status`)) return Response.json({ state: "pending", total_count: 0, statuses: [] });
+    if (url.includes(`/commits/${sha}/check-runs?`)) return Response.json({ total_count: 0, check_runs: [] });
+    assert.fail(`Unexpected GitHub fixture read: ${url}`);
+  } });
   // Seed a land item so report/remove reach the handler (rather than a
   // missing-item error) on the pre-fix code.
   const added = resultValue(await call("tools/call", {
@@ -134,6 +149,11 @@ test("guest-class direct calls are denied at call time", async t => {
   assert.ok(!added.isError, `owner add_land_item must work: ${JSON.stringify(added).slice(0, 200)}`);
   const itemId = added.item?.itemId ?? added.itemId;
   assert.ok(itemId, "expected a land item id");
+  assert.equal(githubReads.length, 3, "owner seed must exercise the real GitHub-backed queue read");
+  const seeded = store.landQueue.list(roomId, ownerMemberId);
+  assert.equal(seeded.items.length, 1);
+  assert.equal(seeded.items[0].itemId, itemId);
+  assert.equal(seeded.items[0].headSha, sha);
   const cases = [
     ["inbox_put_attachment", { id: "g1", filename: "note.txt", mediaType: "text/plain", data: Buffer.from("hi").toString("base64") }],
     ["webhook_subscribe", { url: "https://example.com/hook", events: ["message.posted"] }],
@@ -149,6 +169,8 @@ test("guest-class direct calls are denied at call time", async t => {
     const value = resultValue(await call("tools/call", { name, arguments: args }, guest.secret));
     assert.equal(denied(value), "guest_scope_denied", `${name}: expected guest_scope_denied`);
   }
+  assert.equal(githubReads.length, 3, "denied guest calls must not fetch GitHub");
+  assert.deepEqual(store.landQueue.list(roomId, ownerMemberId), seeded, "denied calls must not remove or change the seeded item");
 });
 
 test("guest-class hosted stdio chat-hole tools are denied at call time", async t => {
