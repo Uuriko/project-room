@@ -299,3 +299,23 @@ test("H-2 wiring: non-owner outcome recording → 403 not_release_authority; own
   assert.equal(ok.status, 200);
   assert.equal(ok.value.attributions.length, 1);
 });
+
+// H-22 (server/feedback-routes.mjs): HEAD on the notifications route must be
+// a pure metadata read — never a drain. Contract: crawlers/proxies issue
+// HEAD freely; a HEAD request must not destroy queued feedback
+// notifications. Credible regression: the old code evaluated
+// fb.drainNotifications(lane) while building the HEAD response, so one HEAD
+// silently emptied the queue and the next GET came back empty.
+test("H-22: HEAD on notifications never drains the queue", () => {
+  const fb = createFeedbackStore();
+  const id = call({ method: "POST", route: "submit", data: goodFiling("jill"), feedbackStore: fb }).result.value.feedback_id;
+  call({ method: "POST", route: "triage", id, data: { verdict: "junk" }, feedbackStore: fb, lane: "reviewer-a" });
+
+  const head = call({ method: "HEAD", route: "notifications", feedbackStore: fb, lane: "jill" }).result;
+  assert.equal(head.status, 200);
+  assert.equal(head.head, true);
+
+  const get = call({ method: "GET", route: "notifications", feedbackStore: fb, lane: "jill" }).result;
+  assert.equal(get.status, 200);
+  assert.equal(get.value.notifications.length, 1, "the HEAD request left the queued notification untouched");
+});
