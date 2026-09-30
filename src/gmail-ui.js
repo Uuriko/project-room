@@ -18,6 +18,33 @@ export function installGmailWorkspace({ api, ownerKey, onConnectionsChanged = ()
   const call = data => api.request('/gmail/mailbox', { method: 'POST', data: { mailboxId: status?.id, ...data } });
   const fence = () => { const owner = ownerKey(), turn = generation; return () => owner && owner === ownerKey() && turn === generation; };
   const emails = value => (value.match(/[A-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Z0-9-]+(?:\.[A-Z0-9-]+)+/gi) ?? []);
+  // 2026-09-30 (phase-2 gap audit H-P2-5): defense-in-depth HTML
+  // cleaning before innerHTML. The server sanitize-html pass is the
+  // active control; this runs again on the client so a server-side
+  // bypass cannot become script execution in the room UI. Removes
+  // scriptable elements, event-handler attributes, and javascript:/data:
+  // URLs. Not a replacement for the server sanitizer.
+  const sanitizeEmailHtml = (html) => {
+    const doc = new DOMParser().parseFromString(String(html), 'text/html');
+    for (const el of doc.querySelectorAll(
+      'script, style, iframe, object, embed, form, base, meta, link, title, noscript',
+    )) {
+      el.remove();
+    }
+    for (const el of doc.querySelectorAll('*')) {
+      for (const attr of [...el.attributes]) {
+        const name = attr.name.toLowerCase();
+        const value = attr.value.trim().toLowerCase();
+        if (name.startsWith('on')) {
+          el.removeAttribute(attr.name);
+        } else if ((name === 'href' || name === 'src' || name === 'xlink:href') &&
+                   (value.startsWith('javascript:') || value.startsWith('data:text/html'))) {
+          el.removeAttribute(attr.name);
+        }
+      }
+    }
+    return doc.body.innerHTML;
+  };
   const button = (text, fn, parent) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'button ghost'; b.textContent = text; b.addEventListener('click', fn); parent.append(b); return b; };
   function errorText(error) { return ['gmail_reconnect_required', 'gmail_write_permission_required'].includes(error.code) ? 'Reconnect Gmail from All messages to allow sending and organizing email.' : error.code === 'gmail_draft_changed' ? 'This draft changed in Gmail. Close and reopen it before editing.' : error.message || 'Gmail could not complete this request.'; }
   async function list(older = false) {
@@ -48,7 +75,7 @@ export function installGmailWorkspace({ api, ownerKey, onConnectionsChanged = ()
       selected = result.message; const m = selected, reader = $('[data-reader]'); reader.replaceChildren();
       const title = document.createElement('h2'), meta = document.createElement('p'), body = document.createElement('pre'), actions = document.createElement('div'); actions.className = 'gmail-toolbar';
       title.textContent = m.subject || '(No subject)'; meta.textContent = `${m.from} → ${m.to}${m.cc ? ' · Cc: ' + m.cc : ''} · ${m.date}`; body.textContent = m.body || m.snippet;
-      if (m.html) { body.className = 'gmail-html'; body.innerHTML = m.html; }
+      if (m.html) { body.className = 'gmail-html'; body.innerHTML = sanitizeEmailHtml(m.html); }
       reader.append(title, meta, actions, body);
       if (m.attachments.length) { const p = document.createElement('div'); p.className = 'gmail-toolbar'; for (const a of m.attachments) button('Download ' + a.name, () => download(m.id, a.partId), p); reader.append(p); }
       const link = document.createElement('a'); link.textContent = 'Open in Gmail'; link.href = 'https://mail.google.com/mail/u/?authuser=' + encodeURIComponent(status.address) + '#all/' + encodeURIComponent(m.id); link.target = '_blank'; link.rel = 'noopener noreferrer'; reader.append(link);
@@ -157,7 +184,7 @@ export function installGmailWorkspace({ api, ownerKey, onConnectionsChanged = ()
     try {
       const result = await call({ action: 'thread', threadId }); if (!current() || turn !== readTurn) return;
       const box = document.createElement('section'); box.setAttribute('aria-label', 'Conversation');
-      for (const message of result.messages) { const details = document.createElement('details'), summary = document.createElement('summary'), body = document.createElement('div'); summary.textContent = message.from + ' · ' + message.date; if (message.html) body.innerHTML = message.html; else body.textContent = message.body; details.append(summary, body); button('Open message', () => read(message), details); box.append(details); }
+      for (const message of result.messages) { const details = document.createElement('details'), summary = document.createElement('summary'), body = document.createElement('div'); summary.textContent = message.from + ' · ' + message.date; if (message.html) body.innerHTML = sanitizeEmailHtml(message.html); else body.textContent = message.body; details.append(summary, body); button('Open message', () => read(message), details); box.append(details); }
       $('[data-reader]').append(box);
     } catch (error) { if (current()) notice(errorText(error)); }
   }
