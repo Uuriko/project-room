@@ -4010,8 +4010,18 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           return res.end(bytes);
         }
         const lines = [];
+        // R1 (export/import round-trip): the per-viewer filter can drop
+        // targeted DMs the viewer cannot see, leaving sequence gaps in the
+        // file; importEvents demands dense line.sequence === i + 1, so the
+        // export renumbers the visible walk densely. Event bodies carry no
+        // sequence (order + event ids are the stable references; import
+        // rewrites dense row keys anyway), so renumbering is replay-safe
+        // and keeps the export self-consistent for reimport.
+        let exportSequence = 0;
         for (const line of store.exportEvents(selected.token, roomId, fence)) {
-          if (roomEventVisible(line.event)) lines.push(JSON.stringify(line) + "\n");
+          if (!roomEventVisible(line.event)) continue;
+          exportSequence += 1;
+          lines.push(JSON.stringify({ sequence: exportSequence, event: line.event }) + "\n");
         }
         const bytes = Buffer.from(lines.join(""), "utf8");
         res.writeHead(200, { "Content-Type": "application/x-ndjson; charset=utf-8", "Content-Length": bytes.length,

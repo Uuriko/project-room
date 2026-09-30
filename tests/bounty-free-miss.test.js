@@ -54,8 +54,8 @@ const attest = () => ({ at: new Date(nowMs).toISOString(), note: "lgtm",
   citations: [{ criterionId: "c1", verdict: "pass" }] });
 
 // Post -> fund -> claim -> submit.
-function runToSubmitted(escrow, { amount = 10, verifier = null } = {}) {
-  const bounty = post(escrow, { amount, verifierId: verifier });
+function runToSubmitted(escrow, { amount = 10, verifier = null, approvalMode = "human" } = {}) {
+  const bounty = post(escrow, { amount, verifierId: verifier, approvalMode });
   escrow.fundBounty(ROOM, bounty.bountyId, { funder: JILL });
   escrow.claimBounty(ROOM, bounty.bountyId, { claimant: GROK });
   escrow.submitWork(ROOM, bounty.bountyId, { claimant: GROK, evidence });
@@ -228,12 +228,22 @@ test("timeout refund settles unverified: work never completed, escrow to poster,
   expectConserved(escrow);
 });
 
-test("rejectWork authorization: poster or verifier only, never the claimant", () => {
+test("rejectWork authorization: the designated approver only, never the claimant", () => {
   const { escrow } = makeEscrow();
   const bounty = runToSubmitted(escrow, { amount: 10, verifier: INSTINCT });
   expectCode(() => escrow.rejectWork(ROOM, bounty.bountyId, { rejector: GROK, reason: "self" }), "not_authorized");
   expectCode(() => escrow.rejectWork(ROOM, bounty.bountyId, { rejector: CODEX, reason: "stranger" }), "not_authorized");
-  // The designated verifier may reject too.
+  // Human mode: the poster rejects; the verifier may not.
+  expectCode(() => escrow.rejectWork(ROOM, bounty.bountyId, { rejector: INSTINCT, reason: "bad" }), "not_authorized");
+  const { settlement } = escrow.rejectWork(ROOM, bounty.bountyId, { rejector: JILL, reason: "bad" });
+  assert.equal(settlement.kind, "failed");
+  expectConserved(escrow);
+});
+
+test("rejectWork authorization in agent mode: the designated verifier only", () => {
+  const { escrow } = makeEscrow();
+  const bounty = runToSubmitted(escrow, { amount: 10, verifier: INSTINCT, approvalMode: "agent" });
+  expectCode(() => escrow.rejectWork(ROOM, bounty.bountyId, { rejector: JILL, reason: "mine" }), "not_authorized");
   const { settlement } = escrow.rejectWork(ROOM, bounty.bountyId, { rejector: INSTINCT, reason: "bad" });
   assert.equal(settlement.kind, "failed");
   expectConserved(escrow);

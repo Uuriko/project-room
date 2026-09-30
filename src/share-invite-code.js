@@ -29,7 +29,32 @@ export function formatShareInviteCode(normalized) {
 }
 
 export function parseShareInviteCode(value) {
-  return formatShareInviteCode(value);
+  return formatShareInviteCode(extractShareInviteCode(value));
+}
+
+// Tolerant: accept a join URL or link, not just the bare code. The code rides
+// the #code/ hash fragment, a ?code= query param, or the last path segment.
+// The extraction idea is adapted from Agent Room's parseRoomCode
+// (https://github.com/agent-room-alkl/agent-room) — MIT License,
+// Copyright (c) 2026 Agent Room contributors.
+function extractShareInviteCode(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return "";
+  const frag = /#code\/([^/?#\s]+)/i.exec(text);
+  const param = /[?&]code=([^&#\s]+)/i.exec(text);
+  let candidate = text;
+  if (frag) candidate = frag[1];
+  else if (param) candidate = param[1];
+  else if (/^https?:\/\//i.test(text)) {
+    const segs = text.split(/[?#]/)[0].split("/").filter(Boolean);
+    candidate = segs.length ? segs[segs.length - 1] : "";
+  }
+  try {
+    candidate = decodeURIComponent(candidate);
+  } catch {
+    // Keep the raw candidate; normalizeShareInviteCode rejects it if garbage.
+  }
+  return candidate;
 }
 
 export function isShareInviteCode(value) {

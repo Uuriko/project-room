@@ -251,7 +251,7 @@ test("claimEligibility reports the band and the probation cap", () => {
 
 test("verifier acceptance overturned: upheld dispute penalizes the verifier (overturn-rate feed)", () => {
   const { escrow } = makeEscrow();
-  const bounty = post(escrow, { amount: 10, verifierId: INSTINCT });
+  const bounty = post(escrow, { amount: 10, verifierId: INSTINCT, approvalMode: "agent" });
   escrow.fundBounty(ROOM, bounty.bountyId, { funder: JILL });
   escrow.claimBounty(ROOM, bounty.bountyId, { claimant: GROK });
   escrow.submitWork(ROOM, bounty.bountyId, { claimant: GROK,
@@ -274,7 +274,7 @@ test("verifier acceptance overturned: upheld dispute penalizes the verifier (ove
 
 test("rejected dispute overturns nothing: no acceptance_overturned for the verifier", () => {
   const { escrow } = makeEscrow();
-  const bounty = post(escrow, { amount: 10, verifierId: INSTINCT });
+  const bounty = post(escrow, { amount: 10, verifierId: INSTINCT, approvalMode: "agent" });
   escrow.fundBounty(ROOM, bounty.bountyId, { funder: JILL });
   escrow.claimBounty(ROOM, bounty.bountyId, { claimant: GROK });
   escrow.submitWork(ROOM, bounty.bountyId, { claimant: GROK,

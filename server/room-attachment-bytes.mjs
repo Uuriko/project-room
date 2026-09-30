@@ -125,7 +125,7 @@ export class RoomAttachmentBytes {
         COALESCE(SUM(CASE WHEN state IN ('staged','committed') THEN byte_length ELSE 0 END), 0) AS roomBytes,
         COALESCE(SUM(CASE WHEN state IN ('staged','committed') AND uploader_id=? THEN byte_length ELSE 0 END), 0) AS memberBytes,
         COALESCE(SUM(CASE WHEN state='staged' AND uploader_id=? THEN 1 ELSE 0 END), 0) AS stagedCount,
-        COUNT(*) AS records
+        COALESCE(SUM(CASE WHEN state IN ('staged','committed') THEN 1 ELSE 0 END), 0) AS records
         FROM room_attachments WHERE room_id=?`).get(auth.member.id, auth.member.id, roomId);
       if (usage.roomBytes + bytes.length > attachmentLimits.roomBytes
         || usage.memberBytes + bytes.length > attachmentLimits.memberBytes

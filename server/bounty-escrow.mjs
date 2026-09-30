@@ -122,6 +122,11 @@ export const BOUNTY_STATES = Object.freeze([
 ]);
 // Semantic state groups (canonical; display labels stay inside their group).
 export const BOUNTY_GROUPS = Object.freeze(["proposed", "funded", "claimed", "in-review", "paid", "cancelled"]);
+// Approval modes (slop.cash-style): who renders the acceptance verdict.
+// "human" — the poster manually reviews and accepts. "agent" — a designated
+// AI verifier lane judges against the pinned rubric. Chosen at post time,
+// pinned at fund time, immutable after.
+export const APPROVAL_MODES = Object.freeze(["human", "agent"]);
 export function stateGroup(state) {
   switch (state) {
     case "proposed": return "proposed";
@@ -233,6 +238,7 @@ export const bountyEscrowSchema = `
     amount_millis INTEGER NOT NULL CHECK(amount_millis > 0),
     poster TEXT NOT NULL,
     verifier TEXT,
+    approval_mode TEXT NOT NULL DEFAULT 'human' CHECK(approval_mode IN ('human','agent')),
     claimant TEXT,
     state TEXT NOT NULL,
     state_changed_ms INTEGER NOT NULL,
@@ -917,7 +923,7 @@ export class BountyEscrow {
       bounty_journal: ["actor_kind", "actor_id", "receipt_id", "track"],
       bounty_events: ["actor_kind", "before_state", "after_state", "track"],
       bounty_records: ["state_changed_ms", "snoozed_until_ms", "decline_reason", "duplicate_of", "label",
-        "rubric_json", "rubric_hash", "rubric_version"],
+        "rubric_json", "rubric_hash", "rubric_version", "approval_mode"],
     };
     for (const [table, cols] of Object.entries(required)) {
       const have = colsOf(table);
@@ -965,6 +971,11 @@ export class BountyEscrow {
     addCol("bounty_records", "rubric_hash TEXT");
     addCol("bounty_records", "rubric_version INTEGER");
     addCol("bounty_records", "submission_hash TEXT");
+    // Approval modes (#1240): who renders the acceptance verdict. NOT NULL
+    // DEFAULT 'human' backfills legacy rows; the CHECK mirrors the base
+    // schema. Without this, posting a bounty on a pre-#1240 database 500s
+    // with "no such column: approval_mode" (INSERT lists it explicitly).
+    addCol("bounty_records", "approval_mode TEXT NOT NULL DEFAULT 'human' CHECK(approval_mode IN ('human','agent'))");
     // Reuse the exact schema-text chunks: the strict DDL-text verifySchema
     // compares stored DDL verbatim, so a reformatted copy would fail it.
     // A name may own several chunks (table + its indexes), so collect all.
@@ -1222,6 +1233,7 @@ export class BountyEscrow {
       bountyId: row.bounty_id, roomId: row.room_id, title: row.title, criteria: row.criteria,
       amount: toCredits(row.amount_millis), amountMillis: row.amount_millis,
       poster: row.poster, verifier: row.verifier, claimant: row.claimant,
+      approvalMode: row.approval_mode ?? "human",
       state: row.state, group: stateGroup(row.state),
       deadline: new Date(row.deadline_ms).toISOString(), deadlineMs: row.deadline_ms,
       challengeEnds: row.challenge_ends_ms === null ? null : new Date(row.challenge_ends_ms).toISOString(),
@@ -1267,6 +1279,7 @@ export class BountyEscrow {
     return {
       bountyId: row.bounty_id, roomId: row.room_id, title: row.title, criteria: row.criteria,
       amountMillis: row.amount_millis, poster: row.poster, verifier: row.verifier, claimant: row.claimant,
+      approvalMode: row.approval_mode ?? "human",
       state: row.state, stateChangedMs: row.state_changed_ms, deadlineMs: row.deadline_ms,
       challengeEndsMs: row.challenge_ends_ms, disputeId: row.dispute_id, disputeOpenedMs: row.dispute_opened_ms,
       snoozedUntilMs: row.snoozed_until_ms, declineReason: row.decline_reason,
@@ -1324,7 +1337,7 @@ export class BountyEscrow {
   // POST /bounties creates PROPOSED: a holding state outside the claimable
   // work graph and outside metrics. Submission != commitment: no budget is
   // locked, so posting never needs funds.
-  postBounty(roomId, { poster, title, criteria, amount, deadline, verifierId = null, rubric = null, actor } = {}) {
+  postBounty(roomId, { poster, title, criteria, amount, deadline, verifierId = null, approvalMode = "human", rubric = null, actor } = {}) {
     return this.store.transaction(() => {
       this._ensure();
       this.ensureGenesis(roomId);
@@ -1332,6 +1345,7 @@ export class BountyEscrow {
       const act = this._actorFor(roomId, actor, lane);
       check(typeof title === "string" && title.length >= 1 && title.length <= 256, "invalid_input", "title must be 1..256 characters");
       check(typeof criteria === "string" && criteria.length >= 1 && criteria.length <= 2000, "invalid_input", "criteria must be 1..2000 characters");
+      check(APPROVAL_MODES.includes(approvalMode), "invalid_input", `approvalMode must be one of ${APPROVAL_MODES.join(", ")}`);
       const amountMillis = toMillis(amount);
       const deadlineMs = Date.parse(deadline);
       check(Number.isFinite(deadlineMs), "invalid_input", "deadline must be an ISO timestamp");
@@ -1350,6 +1364,10 @@ export class BountyEscrow {
           check(GENESIS_LANES.includes(verifier), "invalid_input", "verifier must be one of the room's agent lanes");
         check(verifier !== lane, "invalid_input", "the verifier must be a third lane, distinct from the poster");
       }
+      // Agent-approve mode needs its approver up front: the designated
+      // verifier is the only identity that may render the verdict.
+      check(approvalMode !== "agent" || verifier !== null, "invalid_input",
+        "agent approvalMode requires a verifierId naming the designated agent verifier");
       // Slice 6: pin the rubric at v1. No explicit rubric -> derive the
       // default single-criterion pin from the acceptance criteria text.
       const pinned = rubric === null || rubric === undefined ? defaultRubricFor(criteria) : canonicalRubric(rubric);
@@ -1357,12 +1375,12 @@ export class BountyEscrow {
       const at = isoNow(this.nowMs());
       const bountyId = this._nextBountyId(roomId);
       this.db.prepare(`INSERT INTO bounty_records
-        (bounty_id, room_id, title, criteria, amount_millis, poster, verifier, claimant, state, state_changed_ms,
+        (bounty_id, room_id, title, criteria, amount_millis, poster, verifier, approval_mode, claimant, state, state_changed_ms,
          deadline_ms, challenge_ends_ms, dispute_id, dispute_opened_ms, snoozed_until_ms, decline_reason,
          duplicate_of, label, evidence_json, attestation_json, resolution_json,
          rubric_json, rubric_hash, rubric_version, created_at, updated_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-        .run(bountyId, roomId, title, criteria, amountMillis, lane, verifier, null, "proposed", this.nowMs(),
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+        .run(bountyId, roomId, title, criteria, amountMillis, lane, verifier, approvalMode, null, "proposed", this.nowMs(),
           deadlineMs, null, null, null, null, null, null, null, null, null, null,
           rubricJson, rubricHash, 1, at, at);
       this.db.prepare(`INSERT INTO bounty_rubric_versions
@@ -1373,7 +1391,7 @@ export class BountyEscrow {
       this._addWatcher(roomId, bountyId, lane, at);
       const event = this._event(roomId, "bounty.proposed",
         { bountyId, actor: act, before: null, after: "proposed",
-          data: { amount, title, rubricVersion: 1, rubricHash } });
+          data: { amount, title, rubricVersion: 1, rubricHash, approvalMode } });
       return { bounty: this._getBounty(roomId, bountyId),
         receipt: { kind: "propose", bountyId, at, actor: act, event } };
     });
@@ -1990,6 +2008,14 @@ export class BountyEscrow {
   // Only the recorded approval converts the locked lot into an attributed
   // lot owned by the claimant — the escrow release is never an implicit
   // side effect. Review policy: distinct_member (acceptor != claimant).
+  // The single identity authorized to render the acceptance verdict for a
+  // bounty's approval mode: the poster in human mode (manual review), the
+  // designated agent verifier in agent mode. Fails closed when agent mode
+  // somehow has no verifier seated — nobody may accept.
+  _approverOf(bounty) {
+    return bounty.approvalMode === "agent" ? bounty.verifier : bounty.poster;
+  }
+
   acceptWork(roomId, bountyId, { acceptor, verifierAttestation, actor } = {}) {
     return this.store.transaction(() => {
       this._ensure();
@@ -1999,7 +2025,11 @@ export class BountyEscrow {
       if (!row) fail("unknown_bounty", `unknown bounty "${bountyId}"`);
       const bounty = this._mutable(row);
       check(bounty.state === "submitted", "invalid_state", `bounty is ${bounty.state}, not awaiting acceptance`);
-      check(lane === bounty.poster || lane === bounty.verifier, "not_authorized", "only the poster or the designated verifier may accept");
+      const approver = this._approverOf(bounty);
+      check(lane === approver, "not_authorized",
+        bounty.approvalMode === "agent"
+          ? "only the designated agent verifier may accept an agent-approved bounty"
+          : "only the poster may accept a human-approved bounty");
       check(lane !== bounty.claimant, "not_authorized", "acceptance must come from an identity distinct from the claimant");
       check(verifierAttestation !== null && typeof verifierAttestation === "object" && !Array.isArray(verifierAttestation)
         && Object.keys(verifierAttestation).length > 0, "invalid_input", "verifierAttestation must be a non-empty object");
@@ -2098,11 +2128,14 @@ export class BountyEscrow {
       const row = this.db.prepare("SELECT * FROM bounty_records WHERE room_id=? AND bounty_id=?").get(roomId, bountyId);
       if (!row) fail("unknown_bounty", `unknown bounty "${bountyId}"`);
       const bounty = this._mutable(row);
-      // Authorization precedes the idempotency replay: only the poster or
-      // the designated verifier (never the claimant) may settle a
-      // rejection — including a replayed one.
-      check(lane === bounty.poster || lane === bounty.verifier, "not_authorized",
-        "only the poster or the designated verifier may reject");
+      // Authorization precedes the idempotency replay: only the designated
+      // approver for the bounty's approval mode (never the claimant) may
+      // settle a rejection — including a replayed one.
+      const approver = this._approverOf(bounty);
+      check(lane === approver, "not_authorized",
+        bounty.approvalMode === "agent"
+          ? "only the designated agent verifier may reject an agent-approved bounty"
+          : "only the poster may reject a human-approved bounty");
       check(lane !== bounty.claimant, "not_authorized",
         "rejection must come from an identity distinct from the claimant");
       const settled = this._settledVerdict(bounty);
