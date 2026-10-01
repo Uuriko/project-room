@@ -2170,7 +2170,7 @@ validated_receipt_tasks() {
             and ([$merged[] | select((.sha // "") | startswith($m))] | length > 0))
            or ($p != null
                and ([$merged[] | select(.num == ($p | tostring))] | length > 0)))]
-    | unique | .[]'
+    | map(.task) | unique | .[]'
   rm -f "$prs_file"
 }
 
