@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-10-01T01:58:07Z · board: Uuriko/project-room#1160 · watermark: 5922916494 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=35f2cb22bc650145b097067ddcda046802e55896303660d6d76cedc11ef21fba -->
+<!-- generated: 2026-10-01T02:27:52Z · board: Uuriko/project-room#1160 · watermark: 5922916494 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=ffaedaccc220928f7821ea01db4fa5f8b5e733adc2227382db9f3c06612b1e48 -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -151,6 +151,7 @@ tests/work-discussion.test.js | , jillianai | RC-2026-09-28-2875, RC-2026-09-28-
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
 RC-2026-09-30-3645 | jill | working | 2026-10-01T06:38:53Z | .github/workflows/ci.yml
+RC-2026-09-30-3616 | jill | working | 2026-10-01T08:04:58Z | server/match-profiles.mjs, server/match-events.mjs, server/matchmaking-routes.mjs, tests/match-profiles.test.js, tests/matchmaking-routes.test.js, scripts/runtime-package.mjs, server/writer-fence.mjs, tests/runtime-package.test.js
 
 ## unclaimed-lanes
 lane | focus | trust
