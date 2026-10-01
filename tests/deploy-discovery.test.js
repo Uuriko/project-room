@@ -60,7 +60,7 @@ test("checked-in deploy/capabilities.mjs matches a fresh inventory", () => {
 test("checked-in capabilities module exports the generated map", () => {
   const keys = Object.keys(CAPABILITIES).filter((k) => k !== "pushNotifications").sort();
   assert.deepEqual(keys, FAMILY_NAMES.slice().sort());
-  assert.equal(CAPABILITIES.pushNotifications, true);
+  assert.equal(CAPABILITIES.pushNotifications, false);
 });
 
 test("card embeds deployed revision and generated capabilities", () => {
@@ -89,9 +89,10 @@ test("unstamped checkout serves the honest dev fallback", () => {
   assert.match(llmsFullTxt(), /deployed-rev dev dev/);
 });
 
-test("pushNotifications is true when this tip can register an HTTPS wakeUrl", () => {
-  // The card is global and signed at build time. Host rows are per identity,
-  // so the flag tracks wake registration + webhook delivery on the tip.
+test("A2A pushNotifications stays false while custom wake and webhook routes stay mounted", () => {
+  // QA2 finding P2-5: the A2A flag is Task push-config, which this server
+  // does not implement. Wake registration and webhook delivery are separate
+  // families and stay true.
   assert.equal(buildCapabilities(["/api/agent-heartbeats"])["agent-heartbeats"], true);
   assert.equal(buildCapabilities(["/api/agent-heartbeats/ack"])["agent-heartbeats"], true);
   assert.equal(buildCapabilities(["/api/agent-webhooks"])["agent-heartbeats"], false);
@@ -99,16 +100,14 @@ test("pushNotifications is true when this tip can register an HTTPS wakeUrl", ()
   const inventoried = buildCapabilities(inventoryRoutes());
   assert.equal(inventoried["agent-heartbeats"], true, "POST /api/agent-heartbeats is mounted");
   assert.equal(inventoried.webhooks, true);
-  assert.equal(pushNotificationsSupported({ webhooks: true, "agent-heartbeats": true }), true);
-  assert.equal(pushNotificationsSupported({ webhooks: true, "agent-heartbeats": false }), false);
-  assert.equal(pushNotificationsSupported({ webhooks: false, "agent-heartbeats": true }), false);
+  assert.equal(pushNotificationsSupported({ webhooks: true, "agent-heartbeats": true }), false);
   assert.equal(pushNotificationsSupported({}), false);
   const card = agentCard();
-  assert.equal(CAPABILITIES.pushNotifications, true);
-  assert.equal(card.capabilities.pushNotifications, true);
+  assert.equal(CAPABILITIES.pushNotifications, false);
+  assert.equal(card.capabilities.pushNotifications, false);
   assert.equal(card.capabilities["agent-heartbeats"], true);
   assert.equal(card.capabilities.webhooks, true);
-  assert.equal(JSON.parse(agentCardJson()).capabilities.pushNotifications, true);
+  assert.equal(JSON.parse(agentCardJson()).capabilities.pushNotifications, false);
 });
 
 test("card JSON parses and keeps the A2A-required capabilities field", () => {

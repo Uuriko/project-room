@@ -16,5 +16,5 @@ export const CAPABILITIES = Object.freeze({
   "spend-allowance": true,
   "web-fetch": true,
   "web-research": true,
-  "pushNotifications": true,
+  "pushNotifications": false,
 });

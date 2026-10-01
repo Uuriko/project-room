@@ -71,7 +71,8 @@ test("skills are non-empty with id/name/description/tags", () => {
 test("capabilities carry the discovery capability flags and security is declared", () => {
   const card = agentCard();
   assert.equal(typeof card.capabilities.streaming, "boolean");
-  assert.equal(card.capabilities.pushNotifications, true, "wakeUrl registration is mounted on this tip");
+  assert.equal(card.capabilities.pushNotifications, false, "A2A task push config is not implemented");
+  assert.equal(card.capabilities.webhooks, true, "custom webhook delivery stays advertised");
   // A2A v1.0 removed the v0.3 stateTransitionHistory capability (#A2A-card-audit 2026-09-24).
   assert.equal(card.capabilities.stateTransitionHistory, undefined, "v0.3 stateTransitionHistory must be dropped");
   assert.ok(card.securitySchemes.digestAuth, "digestAuth scheme declared");
@@ -86,7 +87,8 @@ test("card advertises the guest-link GX- flow and the claims board", () => {
   assert.match(guest.description, /GX-/);
   assert.match(guest.description, /Ed25519/);
   assert.match(card.description, /guest-link/i);
-  assert.match(card.description, /1160/);
+  assert.match(card.description, /work-claim board/);
+  assert.doesNotMatch(card.description, /1160/);
 });
 
 test("signature round-trips with the house Ed25519 standard", () => {
@@ -129,7 +131,7 @@ test("funnel serves the signed-shape card at the well-known path", async t => {
   assert.match(res.headers.get("content-type") ?? "", /application\/json/);
   const card = await res.json();
   assert.equal(card.name, "Uuriko Project Room");
-  assert.equal(card.capabilities.pushNotifications, true);
+  assert.equal(card.capabilities.pushNotifications, false);
   assert.ok(Array.isArray(card.supportedInterfaces));
   assert.ok(Array.isArray(card.skills) && card.skills.length > 0);
   const twin = await (await fetch(`${origin}/.well-known/agent.json`)).json();
