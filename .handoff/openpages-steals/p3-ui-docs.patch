@@ -1,0 +1,195 @@
+diff --git a/docs/openapi.yaml b/docs/openapi.yaml
+index 4de7d649..292af7a6 100644
+--- a/docs/openapi.yaml
++++ b/docs/openapi.yaml
+@@ -1621,6 +1621,7 @@ paths:
+                 filename: { type: string }
+                 mediaType: { type: string }
+                 data: { type: string, description: Canonical base64 file bytes }
++                supersedes: { type: string, description: Optional id of the live file this version replaces. One live child per version. }
+       responses:
+         '201':
+           description: File staged
+@@ -1664,6 +1665,105 @@ paths:
+           description: File or message not found
+         '422':
+           description: messageId is missing or invalid
++  /api/rooms/{roomId}/files/{id}/history:
++    get:
++      summary: Read a room file's version history
++      description: |
++        Returns the version chain (oldest first) that the file id belongs to,
++        with who staged each version (human or agent), via mcp or http, and
++        the current head. Versions the caller cannot see are listed as hidden.
++      parameters:
++        - $ref: '#/components/parameters/RoomId'
++        - name: id
++          in: path
++          required: true
++          schema: { type: string }
++      responses:
++        '200':
++          description: Version chain
++          content:
++            application/json:
++              schema:
++                type: object
++                properties:
++                  roomId: { type: string }
++                  id: { type: string }
++                  head: { type: string }
++                  count: { type: integer }
++                  versions: { type: array, items: { type: object } }
++        '401':
++          description: No room credential
++        '404':
++          description: File not found
++  /api/rooms/{roomId}/files/{id}/restore:
++    post:
++      summary: Restore an older room file version
++      description: |
++        Stages the bytes of an older version as a new version on top of the
++        current head. The restored version is staged and private to the caller
++        until committed onto a message.
++      parameters:
++        - $ref: '#/components/parameters/RoomId'
++        - name: id
++          in: path
++          required: true
++          schema: { type: string, description: The older version to restore }
++      requestBody:
++        required: true
++        content:
++          application/json:
++            schema:
++              type: object
++              required: [id]
++              properties:
++                id: { type: string, description: New file id for the restored version }
++      responses:
++        '201':
++          description: Restored version staged
++        '401':
++          description: No room credential
++        '404':
++          description: File not found
++        '409':
++          description: Version is already the head, or the chain changed
++        '410':
++          description: The version's bytes are no longer stored
++  /api/rooms/{roomId}/workspace-context:
++    get:
++      summary: Read the exact context an agent would get for a query
++      description: |
++        Ranks visible message lines and committed text files against q with
++        BM25, keeps the best lines plus one neighbor in original order within
++        maxTokens, and never truncates by position. Returns the exact text,
++        per-source line counts, and the token budget math.
++      parameters:
++        - $ref: '#/components/parameters/RoomId'
++        - name: q
++          in: query
++          required: false
++          schema: { type: string, maxLength: 500 }
++        - name: maxTokens
++          in: query
++          required: false
++          schema: { type: integer, minimum: 200, maximum: 8000, default: 2000 }
++      responses:
++        '200':
++          description: Workspace context
++          content:
++            application/json:
++              schema:
++                type: object
++                properties:
++                  roomId: { type: string }
++                  policy: { type: string }
++                  budgetTokens: { type: integer }
++                  originalTokens: { type: integer }
++                  keptTokens: { type: integer }
++                  tokensSavedPct: { type: number }
++                  sources: { type: array, items: { type: object } }
++                  context: { type: string }
++        '401':
++          description: No room credential
+   /api/web/fetch:
+     post:
+       summary: Fetch a public web page as markdown and/or deterministic highlights
+diff --git a/index.html b/index.html
+index 2ef4023d..76d0c66b 100644
+--- a/index.html
++++ b/index.html
+@@ -398,6 +398,14 @@
+           <span id="room-kind-badge" class="room-kind-badge" hidden></span>
+           <p id="room-overview-purpose"></p>
+           <div id="room-overview-content" class="room-overview-content"></div>
++          <section class="agent-view" aria-labelledby="agent-view-title">
++            <h3 id="agent-view-title">What agents see</h3>
++            <form id="agent-view-form" class="agent-view-form" role="search">
++              <input id="agent-view-query" name="q" type="search" maxlength="500" required placeholder="Ask about this room" aria-label="Question for agents" autocomplete="off">
++              <button class="button" type="submit">Look</button>
++            </form>
++            <div id="agent-view-result" class="agent-view-result" aria-live="polite"></div>
++          </section>
+         </dialog>
+ 
+         <dialog id="catchup-dialog" aria-labelledby="catchup-title">
+diff --git a/src/app.js b/src/app.js
+index b07ebb9a..6caca937 100644
+--- a/src/app.js
++++ b/src/app.js
+@@ -4829,6 +4829,32 @@ $("#room-overview-open").addEventListener("click", () => {
+   $("#room-overview-dialog").showModal();
+   renderRoomOverview();
+ });
++// "What agents see": the same query-aware context room_workspace_context
++// hands an agent, so a person can check what was kept and what was cut.
++let agentViewFlight = 0;
++$("#agent-view-form").addEventListener("submit", async event => {
++  event.preventDefault();
++  const query = $("#agent-view-query").value.trim();
++  if (!state || !query) return;
++  const flight = ++agentViewFlight;
++  const out = $("#agent-view-result");
++  out.textContent = "Looking…";
++  try {
++    const view = await client.roomRead(`/workspace-context?q=${encodeURIComponent(query)}`);
++    if (flight !== agentViewFlight || !view) return;
++    if (!view.matched) { out.innerHTML = `<p class="form-hint">Nothing in this room matches that yet.</p>`; return; }
++    const link = (kind, id, title, key) => `<a href="${esc(recordHref(kind, id))}" data-open-${kind}="${esc(id)}" data-focus-key="overview:${esc(key)}">${esc(title)}</a>`;
++    const source = item => item.kind === "file"
++      ? `<li>📄 ${esc(item.title ?? item.id)} <span class="form-hint">${item.linesKept}/${item.linesIn} lines</span></li>`
++      : `<li>${link("message", item.id, memberLabel(item.authorId), `agent-view:${item.id}`)} <span class="form-hint">${item.linesKept}/${item.linesIn} lines</span></li>`;
++    out.innerHTML = `<p class="agent-view-stat">${esc(String(view.keptTokens))} of ${esc(String(view.originalTokens))} tokens</p>`
++      + `<p class="form-hint">${esc(String(view.tokensSavedPct))}% cut · ${view.sources.length} ${view.sources.length === 1 ? "source" : "sources"}</p>`
++      + `<ul>${view.sources.map(source).join("")}</ul>`
++      + `<details><summary>Exact text</summary><pre>${esc(view.context)}</pre></details>`;
++  } catch (error) {
++    if (flight === agentViewFlight) out.innerHTML = `<p class="form-hint">${esc(error.message || "Could not load that.")}</p>`;
++  }
++});
+ $("#room-overview-close").addEventListener("click", () => {
+   $("#room-overview-dialog").close();
+   $("#room-overview-open").focus({ preventScroll: true });
+diff --git a/src/styles.css b/src/styles.css
+index df6bb226..77899e26 100644
+--- a/src/styles.css
++++ b/src/styles.css
+@@ -1127,6 +1127,16 @@ summary { overflow-wrap: anywhere; }
+ .room-overview-content ul { list-style: none; margin: 0; padding: 0; }
+ .room-overview-content li { margin: 0 0 1rem; overflow-wrap: anywhere; }
+ .room-overview-content p { margin: .3rem 0; }
++.agent-view { border-top: 1px solid var(--line); margin-top: 1.4rem; padding-top: 1rem; }
++.agent-view h3 { margin: 0 0 .7rem; }
++.agent-view-form { display: flex; gap: .5rem; }
++.agent-view-form input { flex: 1; min-width: 0; }
++.agent-view-result:empty { display: none; }
++.agent-view-result { margin-top: .8rem; }
++.agent-view-stat { font-size: 1.4rem; font-weight: 600; margin: 0; }
++.agent-view-result ul { list-style: none; margin: .5rem 0; padding: 0; }
++.agent-view-result li { margin: 0 0 .3rem; overflow-wrap: anywhere; }
++.agent-view-result pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 18rem; overflow: auto; font-size: .82rem; background: var(--surface-2, rgba(127,127,127,.08)); padding: .6rem; border-radius: 6px; }
+ 
+ /* DM consent (consent-bound DMs, PR #731): per-member Direct messages
+    disclosure and the incoming-request inbox in the People panel. */
