@@ -224,11 +224,14 @@ export class PublicFace {
     return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow"><title>${esc(face.room.title || "Project Room")}</title>
-<style>body{font-family:system-ui,sans-serif;max-width:44rem;margin:2rem auto;padding:0 1rem;color:#1a1a1a}
-header.page{border-bottom:1px solid #ddd;margin-bottom:1rem}article{border-bottom:1px solid #eee;padding:.6rem 0}
-article header{display:flex;gap:.75rem;font-size:.85rem;color:#555}article p{white-space:pre-wrap;margin:.3rem 0 0}
-ul.members{display:flex;flex-wrap:wrap;gap:.4rem;list-style:none;padding:0}ul.members li{border:1px solid #ddd;border-radius:1rem;padding:.15rem .7rem;font-size:.85rem}
-footer{margin-top:2rem;font-size:.8rem;color:#777}</style></head><body>
+<style>:root{color-scheme:dark;--bg:#202127;--panel:#191a20;--panel-raised:#292b33;--panel-hover:#34363f;--line:#393b45;--line-soft:#30323a;--text:#eeedf1;--muted:#aaaab7;--blue:#a9b9ff;--blue-strong:#5555bd;--blue-strong-hover:#6a6ad4;--on-accent:#ffffff;--amber:#ffbf69;--green:#4fd09b;--red:#ff7b7b;--violet:#ad8cff;--card:#191a20;--border:#393b45;--shadow:0 20px 70px rgb(0 0 0 / 32%);--radius-sm:.35rem;--radius-md:.45rem;--radius-lg:.85rem;--radius-xl:1rem;--space-1:.25rem;--space-2:.5rem;--space-3:.75rem;--space-4:1rem;--space-5:1.5rem;--space-6:2rem;--text-xs:.75rem;--text-sm:.875rem;--text-md:1rem;--text-lg:1.25rem;--font-sans:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+[data-theme="light"]{color-scheme:light;--bg:#f4f3f8;--panel:#fffbff;--panel-raised:#e8e7ef;--panel-hover:#dddce6;--line:#c9c8d4;--line-soft:#dddce6;--text:#1c1b22;--muted:#5c5b6a;--blue:#33339a;--blue-strong:#3f3fad;--blue-strong-hover:#33338f;--on-accent:#ffffff;--amber:#8a4b00;--green:#0f6b45;--red:#a32020;--violet:#5b3d99;--card:#fffbff;--border:#c9c8d4;--shadow:0 16px 40px rgb(28 27 34 / 12%)}
+body{font-family:var(--font-sans);max-width:44rem;margin:2rem auto;padding:0 1rem;background:var(--bg);color:var(--text)}
+a{color:var(--blue)}a:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+header.page{border-bottom:1px solid var(--line);margin-bottom:1rem}article{border-bottom:1px solid var(--line-soft);padding:.6rem 0}
+article header{display:flex;gap:.75rem;font-size:.85rem;color:var(--muted)}article p{white-space:pre-wrap;margin:.3rem 0 0}
+ul.members{display:flex;flex-wrap:wrap;gap:.4rem;list-style:none;padding:0}ul.members li{border:1px solid var(--line);border-radius:1rem;padding:.15rem .7rem;font-size:.85rem}
+footer{margin-top:2rem;font-size:.8rem;color:var(--muted)}</style></head><body>
 <header class="page"><h1>${esc(face.room.title || "Project Room")}</h1><p>${esc(face.room.purpose)}</p></header>
 <section><h2>Members</h2><ul class="members">${members}</ul></section>
 <section><h2>Recent activity</h2>${items || "<p>No public messages yet.</p>"}</section>

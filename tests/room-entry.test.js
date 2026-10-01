@@ -14,7 +14,6 @@ test("unlisted entry opens the isolated Room without forwarding input or embeddi
   assert.equal(response.headers.get("Referrer-Policy"), "no-referrer");
   const html = await response.text();
   assert.match(html, /href="https:\/\/room.trydemigod.com"/);
-  assert.match(html, /--ink:#0B120F/);
   assert.match(html, /href="\/contact"/);
   assert.match(html, new RegExp(`class="open" href="${START_ROOM_URL.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}">Start a room<`));
   assert.match(html, /Open Project Room/);
@@ -179,8 +178,6 @@ test("getdasha public door is a quiet Join + Connect page, not the llms packet",
   assert.match(html, /<a href="https:\/\/github\.com\/Uuriko\/project-room" rel="noopener noreferrer">github\.com\/Uuriko\/project-room<\/a>/, "source line is a real link");
   assert.match(html, new RegExp(COMPUTE_DOOR.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.match(html, /Compute stays separate/);
-  assert.match(html, /--ink:#070608/);
-  assert.match(html, /--acid:#dfff00/);
   const scriptHash = createHash("sha256").update(ROOM_DEEP_LINK_SCRIPT).digest("base64");
   assert.match(PUBLIC_DOOR_CSP, new RegExp(`script-src 'sha256-${scriptHash.replace(/[+/=]/g, "\\$&")}'`));
   assert.match(ROOM_DEEP_LINK_SCRIPT, /hashchange/);

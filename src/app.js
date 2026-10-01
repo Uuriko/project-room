@@ -24,7 +24,7 @@ import { replyDraftKey, replyDraftData, validReplyDraft, replyFollowUp, creditQu
 import { workHelpContext, validateHelpData } from "./work-help.js";
 import { workOffersContext, validateHelpOfferData } from "./help-offers.js";
 import { installInbox } from "./inbox-ui.js";
-import { createAccountSettingsUI } from "./account-settings-ui.js";
+import { createAccountSettingsUI, applyStoredTheme, organizeRoomSettings } from "./account-settings-ui.js";
 import { createAuthSigninUI, classifyAuthLink } from "./auth-signin-ui.js";
 import { createAgentSigninUI } from "./agent-signin-ui.js";
 import { stashPendingInvite, clearPendingInvite, takeRestoredInvite, stashPendingJoin, clearPendingJoin, takeRestoredJoin, inviteRequestDoor, defaultRequestPermissions, validateAccessRequestForm, newAccessRequestId, stashAccessRequest, readAccessRequest } from "./invite-context.js";
@@ -38,6 +38,12 @@ import { installHumanPush } from "./human-push.js";
 import { chatSuggestions, ASK_AGENT_AFTER_MS } from "./chat-suggestions.js";
 
 const $ = selector => document.querySelector(selector);
+applyStoredTheme();
+organizeRoomSettings($("#settings-dialog"));
+const accountSettingsButton = $("#account-settings-button");
+if (accountSettingsButton) accountSettingsButton.textContent = "Account";
+const accountSettingsSummary = document.querySelector("#account-settings > summary");
+if (accountSettingsSummary) accountSettingsSummary.textContent = "Account";
 $("#skip-link").addEventListener("click", event => {
   event.preventDefault();
   const target = !$("#inbox-panel").hidden ? "#inbox-heading"
