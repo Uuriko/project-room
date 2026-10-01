@@ -465,7 +465,7 @@ details[open] > .section-summary::before { transform: rotate(45deg); }
 .auth-hero { margin: 0 0 1.5rem; padding: 1rem 1.25rem; border: 1px solid var(--line-soft); border-radius: .75rem; background: var(--panel-raised); }
 .auth-hero-tagline { font-size: 1.02rem; line-height: 1.55; margin: 0 0 .75rem; }
 .auth-hero-links { display: flex; flex-wrap: wrap; gap: .35rem 1.25rem; margin: 0 0 .6rem; }
-.auth-hero .form-hint { margin-top: 0; }
+.auth-hero .form-hint { margin-top: 0; color: var(--muted); }
 .auth-panel p, dialog p { line-height: 1.6; }
 #invitation-summary:empty { display: none; }
 .auth-panel form, #action-fields, #action-form, #invitation-account-form, .invitation-shell { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem; }

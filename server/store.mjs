@@ -4114,16 +4114,24 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // projection already in hand.
   mentionChipsForEvents(roomId, members, eventIds) {
     if (!eventIds.length) return new Map();
-    const placeholders = eventIds.map(() => "?").join(",");
-    const rows = this.db.prepare(
-      `SELECT message_event_id AS messageEventId, mentioned_member_id AS memberId, state
-       FROM mention_states WHERE room_id=? AND message_event_id IN (${placeholders})`
-    ).all(roomId, ...eventIds);
     const chips = new Map();
-    for (const row of rows) {
-      const list = chips.get(row.messageEventId) ?? [];
-      list.push({ memberId: row.memberId, displayName: members[row.memberId]?.displayName ?? row.memberId, state: row.state });
-      chips.set(row.messageEventId, list);
+    // Durable Object SQL allows 100 bound parameters. room_id plus one
+    // placeholder per message exceeds that on a full events page (limit 100),
+    // and the read then fails as HTTP 500 internal_error. Node's SQLite
+    // allows far more binds, so the cap only shows up on the Worker.
+    const chunkSize = 99;
+    for (let i = 0; i < eventIds.length; i += chunkSize) {
+      const chunk = eventIds.slice(i, i + chunkSize);
+      const placeholders = chunk.map(() => "?").join(",");
+      const rows = this.db.prepare(
+        `SELECT message_event_id AS messageEventId, mentioned_member_id AS memberId, state
+         FROM mention_states WHERE room_id=? AND message_event_id IN (${placeholders})`
+      ).all(roomId, ...chunk);
+      for (const row of rows) {
+        const list = chips.get(row.messageEventId) ?? [];
+        list.push({ memberId: row.memberId, displayName: members[row.memberId]?.displayName ?? row.memberId, state: row.state });
+        chips.set(row.messageEventId, list);
+      }
     }
     return chips;
   }

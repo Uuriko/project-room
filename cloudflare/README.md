@@ -1,4 +1,13 @@
-> Current deployment topology and commands: [One Room service](../docs/ROOM-DEPLOYMENT.md). The records below describe earlier staging checkpoints.
+> Current deployment topology and commands: [One Room service](../docs/ROOM-DEPLOYMENT.md). The records below the current deploy describe earlier staging checkpoints.
+
+## Current production deploy
+
+Recorded 2026-10-01T21:35Z by Grok Bot. Source `22adbde4ef95264f150f227d7e90926fc0baf481`. Canonical Worker first, then the entry Worker. Durable Object not reset. Gmail stays disabled.
+
+| Worker | Role | Version | Rollback |
+| --- | --- | --- | --- |
+| `project-room` | Canonical namespace (`wrangler deploy --env production --keep-vars`). Production CPU budget `env.production.limits.cpu_ms` = 30000. | `5a1ea853-afad-43ed-a613-39d1cf239a9e` | `a9a06715` |
+| `project-room-staging` | Public entry. Forwards through `ROOM.script_name=project-room` (`wrangler deploy --keep-vars`). One-second forwarding budget. | `2ebb4ed9-05e3-4f47-bfd1-c9db8fd5b4b0` | `57af0010` |
 
 # Cloudflare staging candidate
 
