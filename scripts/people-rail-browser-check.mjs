@@ -92,7 +92,9 @@ test("People rail shows presence, what they're on, loud @handles, and Done chips
   mkdirSync("test-results", { recursive: true });
   await closeSettings(page);
   await page.locator("#people-panel").screenshot({ path: "test-results/people-rail-create-room.png" });
-  await clickChrome(page, "#invite-agents-button");
+  await clickChrome(page, "#invite-people-button");
+  await page.locator("#share-link-dialog").waitFor({ state: "visible" });
+  await page.locator("#growth-agent-code").click();
   await page.locator("#agent-invite-dialog").waitFor({ state: "visible" });
   assert.match(await page.locator("#agent-invite-dialog").innerText(), /Choose what it can do/);
   await page.locator("#agent-invite-mint").click();

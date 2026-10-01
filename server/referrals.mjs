@@ -20,6 +20,7 @@
 import { randomUUID } from "node:crypto";
 import { event, EVENT_TYPES as T, isRoomArchived } from "../src/events.js";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
+import { ensureActivationColumn, inviteMessage, memberReward, settleActivations } from "./growth-loop.mjs";
 
 // Local ServiceError (mirrors server/store.mjs). We avoid importing from
 // store.mjs here to break the circular dependency for the Workers bundle:
@@ -116,26 +117,58 @@ export class Referrals {
 
   // Board data: referrals newest-first with display names, plus a plain
   // leaderboard ranked by successful referrals (joined only, never minted).
-  // Member-visible; carries no credential data — ids, display names, counts.
+  // Join counts stay on referralCount / myReferralCount. Rewards use
+  // activatedAt: the referee posted, then 24 hours passed. The caller's
+  // personal invite is included so an agent can share it from this GET.
+  // Member-visible; carries no credential data — ids, display names, counts,
+  // and the caller's own invite token.
   board(token, roomId, expectedSessionBinding = null) {
-    const auth = this.store.authenticate(token, roomId, expectedSessionBinding);
-    if (!auth?.member) fail(401, "unauthenticated", "Room membership required");
-    const members = this.store.room(roomId).state.members ?? {};
-    const nameOf = id => members[id]?.displayName ?? id;
-    const rows = this.db.prepare(`SELECT referrer_member_id AS referrerMemberId, referee_member_id AS refereeMemberId,
-        completed_at AS completedAt, via FROM referrals WHERE room_id=? ORDER BY completed_at DESC, referee_member_id ASC`)
-      .all(roomId);
-    const referrals = rows.map(row => ({
-      ...row,
-      referrerDisplayName: nameOf(row.referrerMemberId),
-      refereeDisplayName: nameOf(row.refereeMemberId),
-    }));
-    const counts = new Map();
-    for (const row of rows) counts.set(row.referrerMemberId, (counts.get(row.referrerMemberId) ?? 0) + 1);
-    const leaderboard = [...counts.entries()]
-      .map(([memberId, referralCount]) => ({ memberId, displayName: nameOf(memberId), referralCount }))
-      .sort((a, b) => b.referralCount - a.referralCount || a.displayName.localeCompare(b.displayName));
-    const myReferrals = referrals.filter(r => r.referrerMemberId === auth.member.id);
-    return { roomId, referrals, leaderboard, myReferralCount: myReferrals.length, myReferrals };
+    ensureActivationColumn(this.db);
+    return this.store.transaction(() => {
+      const auth = this.store.authenticate(token, roomId, expectedSessionBinding);
+      if (!auth?.member) fail(401, "unauthenticated", "Room membership required");
+      settleActivations(this.store, roomId);
+      const members = this.store.room(roomId).state.members ?? {};
+      const nameOf = id => members[id]?.displayName ?? id;
+      const rows = this.db.prepare(`SELECT referrer_member_id AS referrerMemberId, referee_member_id AS refereeMemberId,
+          completed_at AS completedAt, via, activated_at AS activatedAt FROM referrals WHERE room_id=? ORDER BY completed_at DESC, referee_member_id ASC`)
+        .all(roomId);
+      const referrals = rows.map(row => ({
+        ...row,
+        referrerDisplayName: nameOf(row.referrerMemberId),
+        refereeDisplayName: nameOf(row.refereeMemberId),
+      }));
+      const counts = new Map();
+      const activeCounts = new Map();
+      for (const row of rows) {
+        counts.set(row.referrerMemberId, (counts.get(row.referrerMemberId) ?? 0) + 1);
+        if (row.activatedAt != null) activeCounts.set(row.referrerMemberId, (activeCounts.get(row.referrerMemberId) ?? 0) + 1);
+      }
+      const leaderboard = [...counts.entries()]
+        .map(([memberId, referralCount]) => ({ memberId, displayName: nameOf(memberId), referralCount, activeCount: activeCounts.get(memberId) ?? 0 }))
+        .sort((a, b) => b.referralCount - a.referralCount || a.displayName.localeCompare(b.displayName));
+      const myReferrals = referrals.filter(r => r.referrerMemberId === auth.member.id);
+      const reward = memberReward(this.store, roomId, auth.member.id);
+      let invite = null;
+      if (this.store.shareLinks) {
+        const personal = this.store.shareLinks.personalInvite(auth, roomId, reward.inviteCap);
+        if (personal?.token) {
+          const title = this.store.room(roomId).state.room?.title;
+          invite = {
+            token: personal.token,
+            hash: `#join/${personal.token}`,
+            expiresAt: personal.link.expiresAt,
+            remainingJoins: personal.link.remainingJoins,
+            maxJoins: personal.link.maxJoins,
+            status: personal.link.status,
+            message: inviteMessage(title),
+          };
+        }
+      }
+      return {
+        roomId, referrals, leaderboard, myReferralCount: myReferrals.length, myReferrals,
+        myActiveCount: reward.activeCount, reward, invite,
+      };
+    });
   }
 }

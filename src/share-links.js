@@ -1,5 +1,28 @@
 import { publicJoinInviteHref } from "./room-deep-link.js";
 import { parseShareInviteCode } from "./share-invite-code.js";
+import { canInviteMembers } from "./events.js";
+
+// Kept in this module so the browser asset list does not need a new file.
+export function inviteMessage(title) {
+  const name = typeof title === "string" && title.trim() ? title.trim() : "this room";
+  return `Join me in ${name}. People and agents work in the same room.\n{url}`;
+}
+
+export function deadInviteCopy() {
+  return {
+    title: "This invite has ended",
+    scope: "Ask the person who invited you for a fresh link.",
+    status: "Sign in and request access.",
+  };
+}
+
+export function rewardLine(reward) {
+  if (!reward || typeof reward.tier !== "string") return "";
+  const credits = (reward.credits ?? 0) + (reward.welcomeCredit ?? 0);
+  const next = reward.next ? ` · ${reward.next.remaining} to ${reward.next.name}` : "";
+  const active = reward.activeCount ?? 0;
+  return `${reward.tier} · ${active} active · ${credits} room credit${credits === 1 ? "" : "s"}${next}`;
+}
 // Invite copy uses publicJoinInviteHref (origin + /room path). Never `${location.origin}/#join/`.
 
 const $ = selector => document.querySelector(selector);
@@ -120,6 +143,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
   let joined = null, previewRoomId = null, previewRoomTitle = null;
   let joinAttempted = false, joinLanded = false, suppressJoinHash = false;
   let managementSession = null, managementGeneration = null, currentLink = null, expiryTimer = null, copyRevision = 0, copying = false;
+  let kitOnly = false;
   const manager = $("#share-link-dialog"), joinDialog = $("#join-link-dialog");
   const status = text => setShareLinkStatus($("#share-link-status"), text);
   const listStatus = text => setShareLinkStatus($("#share-management-status"), text);
@@ -223,9 +247,100 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     const currentRoom = getSession()?.roomId ?? getState()?.room?.id;
     $("#join-switch-warning").hidden = !previewRoomId || !(currentRoom ? currentRoom !== previewRoomId : accountClient.session?.authenticated);
   }
+  const inRoom = () => {
+    const current = member();
+    return Boolean(current && current.active !== false && (getSession()?.roomId || getState()?.room?.id));
+  };
+  function refreshAgentCode() {
+    const code = $("#growth-agent-code");
+    if (!code) return;
+    const state = getState();
+    const id = getSession()?.member?.id;
+    code.hidden = !(state && id && canInviteMembers(state, id));
+  }
+  function applyKitChrome() {
+    const form = $("#share-link-form");
+    const management = $("#share-management");
+    if (form) form.hidden = kitOnly;
+    if (management) management.hidden = kitOnly;
+  }
+  function renderKit(data) {
+    const invite = data?.invite;
+    const url = invite?.token ? humanJoinShareUrl(invite.token) : "";
+    const message = invite?.message && url ? String(invite.message).replaceAll("{url}", url) : "";
+    const urlField = $("#growth-invite-url");
+    if (urlField) urlField.value = url;
+    const messageField = $("#growth-invite-message");
+    if (messageField) messageField.value = message;
+    const rewardEl = $("#growth-reward");
+    if (rewardEl) rewardEl.textContent = rewardLine(data?.reward);
+    const copyLink = $("#growth-copy-link");
+    const copyMessage = $("#growth-copy-message");
+    if (copyLink) copyLink.disabled = !url;
+    if (copyMessage) copyMessage.disabled = !message;
+    const kitStatus = $("#growth-kit-status");
+    if (kitStatus && invite && invite.status && invite.status !== "active") kitStatus.textContent = "This link has ended.";
+    else if (kitStatus && !kitStatus.textContent) kitStatus.textContent = "";
+  }
+  async function loadKit() {
+    const roomId = getSession()?.roomId || getState()?.room?.id;
+    if (!roomId || typeof client?.request !== "function" || typeof client?.path !== "function") return;
+    try {
+      const data = await client.request(client.path("/referrals"), { method: "GET" });
+      renderKit(data);
+    } catch { /* The invite dialog still opens. */ }
+  }
+  async function copyGrowth(value, done) {
+    const kitStatus = $("#growth-kit-status");
+    if (!value) return;
+    try {
+      await navigator.clipboard.writeText(value);
+      if (kitStatus) kitStatus.textContent = done;
+    } catch {
+      if (kitStatus) kitStatus.textContent = "Select and copy.";
+    }
+  }
+  function ensureGrowthChrome() {
+    if (typeof document.createElement !== "function") return;
+    const title = $("#share-link-title");
+    if (title) title.textContent = "Invite";
+    const intro = $("#share-link-intro");
+    if (intro) intro.textContent = "One link for a person or an agent. They land in this room.";
+    if (!$("#growth-kit") && $("#share-link-dialog")) {
+      const section = document.createElement("section");
+      section.id = "growth-kit";
+      section.className = "growth-kit";
+      section.innerHTML = `<p id="growth-reward" class="growth-reward"></p>
+        <label for="growth-invite-url">Your invite link</label>
+        <input id="growth-invite-url" type="text" readonly autocomplete="off" spellcheck="false">
+        <button id="growth-copy-link" class="button primary" type="button">Copy link</button>
+        <label for="growth-invite-message">Message</label>
+        <textarea id="growth-invite-message" rows="3" readonly autocomplete="off" spellcheck="false"></textarea>
+        <button id="growth-copy-message" class="button" type="button">Copy message</button>
+        <button id="growth-agent-code" class="button ghost" type="button" hidden>One-time agent code</button>
+        <p id="growth-kit-status" class="form-status" role="status" aria-live="polite"></p>`;
+      if (intro?.after) intro.after(section);
+      else $("#share-link-dialog").append(section);
+      $("#growth-copy-link")?.addEventListener("click", () => copyGrowth($("#growth-invite-url")?.value, "Link copied."));
+      $("#growth-copy-message")?.addEventListener("click", () => copyGrowth($("#growth-invite-message")?.value, "Message copied."));
+      $("#growth-agent-code")?.addEventListener("click", () => $("#invite-agents-button")?.click());
+    }
+    if (!$("#join-inviter-line") && $("#join-link-scope")) {
+      const line = document.createElement("p");
+      line.id = "join-inviter-line";
+      line.className = "growth-inviter";
+      $("#join-link-scope").before(line);
+    }
+    refreshAgentCode();
+  }
   function sync() {
-    $("#invite-people-button").hidden = !canManage();
-    if (manager.open && !ownsManagement()) resetManagement();
+    $("#invite-people-button").hidden = !(canManage() || inRoom());
+    refreshAgentCode();
+    applyKitChrome();
+    if (manager.open && kitOnly) {
+      const current = member();
+      if (!current || current.active === false) { kitOnly = false; manager.close(); return; }
+    } else if (manager.open && !ownsManagement()) resetManagement();
     else checkResult();
     if (joinDialog.open) updateSwitchWarning();
   }
@@ -291,14 +406,27 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     }
   }
   $("#invite-people-button").addEventListener("click", async () => {
+    const admin = canManage();
+    kitOnly = !admin;
+    if (!admin) {
+      if (!inRoom()) return;
+      applyKitChrome();
+      refreshAgentCode();
+      manager.showModal();
+      await loadKit();
+      return;
+    }
     resetManagement(); const version = ++managementVersion, generation = client.generation;
     managementSession = getSession(); managementGeneration = generation;
     if (!ownsManagement()) return;
+    kitOnly = false;
+    applyKitChrome();
     $("#share-local-note").hidden = !["localhost", "127.0.0.1", "[::1]"].includes(location.hostname);
     refreshPurposes();
+    refreshAgentCode();
     manager.showModal(); $("#share-link-create").focus();
     // Link-list feedback never owns the newer creation/clipboard status.
-    await list(version, generation).catch(() => {});
+    await Promise.all([list(version, generation).catch(() => {}), loadKit()]);
   });
   $("#share-link-close").addEventListener("click", () => { if (!creating) manager.close(); });
   manager.addEventListener("cancel", event => { if (creating) event.preventDefault(); });
@@ -407,6 +535,8 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     $("#join-link-permissions").textContent = ""; $("#join-link-expiry").textContent = "";
     $("#join-link-submit").textContent = "Join room"; $("#join-link-signout").hidden = true;
     $("#join-link-title").textContent = "Join this room"; $("#join-link-scope").textContent = "Checking your invitation…";
+    const invitedBy = $("#join-inviter-line");
+    if (invitedBy) invitedBy.textContent = "";
     joinStatus(""); if (!joinDialog.open) joinDialog.showModal();
     if (!joinSecret) {
       $("#join-link-scope").textContent = "This invitation link is incomplete. Ask for a new link.";
@@ -423,6 +553,8 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       if (version !== joinVersion || !account) return;
       previewRoomId = preview.room.id; previewRoomTitle = preview.room.title;
       $("#join-link-title").textContent = `Join ${preview.room.title}`;
+      const inviterLine = $("#join-inviter-line");
+      if (inviterLine) inviterLine.textContent = preview.inviterDisplayName ? `${preview.inviterDisplayName} invited you.` : "";
       const returning = preview.link.status !== "active";
       $("#join-link-scope").textContent = returning ? "You already belong to this room. Open it without using another invitation place." : "Read history and join the conversation. Everyone in the room can read your messages.";
       $("#join-link-permissions").textContent = preview.access;
@@ -459,6 +591,16 @@ export function installShareLinks({ client, accountClient, getState, getSession,
         $("#join-link-form").hidden = false;
         $("#join-link-scope").textContent = "Checking your earlier join…";
         await performJoin({ resume: true });
+        return;
+      }
+      if (!resume && error?.code === "link_unavailable") {
+        const dead = deadInviteCopy();
+        $("#join-link-title").textContent = dead.title;
+        $("#join-link-scope").textContent = dead.scope;
+        $("#join-account-choices").hidden = false;
+        $("#join-link-form").hidden = true;
+        $("#join-link-retry").hidden = true;
+        joinStatus(dead.status);
         return;
       }
       $("#join-link-scope").textContent = "Unable to open this invitation.";
@@ -627,6 +769,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     if (suppressJoinHash) { suppressJoinHash = false; return; }
     const fragment = consumeJoinFragment(); if (fragment) open(fragment);
   });
+  ensureGrowthChrome();
   return { sync, resetManagement, open, syncAccountSigninBusy,
     pendingFragment: () => joinSecret ? `#join/${joinSecret}${joinFocus ? `/${joinFocus.kind}/${encodeURIComponent(joinFocus.id)}` : ""}` : null,
     async resumeSignedIn() {
