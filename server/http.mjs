@@ -25,6 +25,7 @@ import { listRoomUpdates, listIdentityUpdates, listAccountUpdates, markUpdate, r
 import { handleWorkClaims } from "./work-claim-routes.mjs"; // Work-claim leases/delivery/review (task RC-2026-09-18-041).
 import { handleAgentConnect } from "./routes/agent-connect.mjs";
 import { listMentionReceipts } from "./mention-receipts.mjs";
+import { handleMatchmaking } from "./matchmaking-routes.mjs"; // Arrival surface: declare, offer, match, and human decisions as work.
 import { handleFeedback } from "./feedback-routes.mjs"; // Agent /feedback endpoint (structured bug/feature reports).
 import { handleBountyEscrow } from "./bounty-escrow-routes.mjs"; // Escrowed bounties + credit ledger (agent work exchange, slice 1).
 import { buildOpportunitiesFeed } from "./opportunities.mjs"; // Public opportunity feed v2: read-only open-work discovery, decoupled from admission.
@@ -3239,6 +3240,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // docs/openapi.yaml — the route-docs gate extracts these literals from
       // this file. The /sweep and /duplicates templates are tested before the
       // {id} template so the literal segments are never mistaken for a claim id.
+      const mmSeekerMatch = /^\/api\/rooms\/([^/]{1,384})\/matchmaking\/seeker$/.exec(url.pathname);
+      const mmOfferMatch = /^\/api\/rooms\/([^/]{1,384})\/matchmaking\/openings$/.exec(url.pathname);
+      const mmMatchMatch = /^\/api\/rooms\/([^/]{1,384})\/matchmaking\/match$/.exec(url.pathname);
+      const mmDecisionsMatch = /^\/api\/rooms\/([^/]{1,384})\/matchmaking\/decisions$/.exec(url.pathname);
+      const mmDecisionAnswerMatch = /^\/api\/rooms\/([^/]{1,384})\/matchmaking\/decisions\/([^/]{1,128})\/answer$/.exec(url.pathname);
+      const mmDecisionReadMatch = /^\/api\/rooms\/([^/]{1,384})\/matchmaking\/decisions\/([^/]{1,128})$/.exec(url.pathname);
+      const matchmakingMatch = mmSeekerMatch ?? mmOfferMatch ?? mmMatchMatch ?? mmDecisionsMatch
+        ?? mmDecisionAnswerMatch ?? mmDecisionReadMatch;
       const workClaimsMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims$/.exec(url.pathname);
       const workClaimsStatusMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/status$/.exec(url.pathname);
       const workClaimsSweepMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/sweep$/.exec(url.pathname);
@@ -3344,7 +3353,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         && !dmConsentDecideMatch && !dmConsentBlockMatch && !dmConsentRevokeMatch && !dmConsentUnblockMatch && !publicFaceRotateMatch
         && !peerDmThreadMatch && !operatorAgentMatch
         && !mentionAckMatch && !mentionSettingsMatch && !savedDeleteMatch && !memberDeactivateMatch
-        && !agentGrantsMatch && !agentGrantDeleteMatch && !agentCapabilitiesMatch) reject(404, "not_found", "Not found");
+        && !agentGrantsMatch && !agentGrantDeleteMatch && !agentCapabilitiesMatch
+        && !matchmakingMatch) reject(404, "not_found", "Not found");
       const roomId = pathId((publicWorkRoomReviewMatch ?? projectOfferActionMatch ?? match ?? revokeMatch ?? threadMatch ?? accessDecideMatch ?? delegationGrantMatch ?? delegationRevokeMatch ?? delegationListMatch ?? ownerDelegateGrantMatch ?? ownerDelegateRevokeMatch ?? ownerDelegateListMatch ?? ownershipTransferMatch ?? collabMatch ?? workClaimMatch
         ?? feedbackMatch ?? bountyMatch ?? creditsMatch ?? boardV2Match
         ?? dmConsentDecideMatch ?? dmConsentBlockMatch ?? dmConsentRevokeMatch ?? dmConsentUnblockMatch ?? publicFaceRotateMatch
@@ -3534,6 +3544,32 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           workClaimId: workClaimIdMatch ? pathId(workClaimIdMatch[2]) : null, registry: store.workClaims,
           ...(fetchPullRequest ? { fetchPullRequest } : {}),
           ...(githubToken !== undefined ? { githubToken } : {}),
+          reauthorize: () => {
+            const current = selected.mode === "account" ? store.authenticateAccountSession(selected.token, roomId, fence)
+              : store.authenticate(selected.token, roomId, fence, { allowAccountSession: false });
+            if (current.kind === "api-key") {
+              const required = ["GET", "HEAD"].includes(req.method) ? "rooms:read" : "rooms:write";
+              if (!(current.apiKeyScopes ?? []).some(scope => scope === required || (scope.endsWith(":*") && required.startsWith(scope.slice(0, -1))))) reject(403, "insufficient_scope", `API key lacks the ${required} scope`);
+            }
+            if (isGuestAgentMemberId(current.member.id) && !["GET", "HEAD"].includes(req.method)) reject(403, "guest_scope_denied", "Guest members cannot perform this action");
+            return current;
+          }, helpers: { json, reject, body } });
+      }
+      // Matchmaking (arrival surface): an agent declares what it is here for,
+      // a room declares what an opening needs, and the pure matcher pairs
+      // them. Human decisions enter as routable work on the same surface, so
+      // a question for a person is filtered like any other opening. Shares
+      // the credential, fence and rate-limit checks above.
+      if (matchmakingMatch) {
+        const matchmakingRoute = mmSeekerMatch ? "declare"
+          : mmOfferMatch ? "offer"
+          : mmMatchMatch ? "match"
+          : mmDecisionsMatch ? "decision-open"
+          : mmDecisionAnswerMatch ? "decision-answer" : "decision-read";
+        const matchmakingIdMatch = mmDecisionAnswerMatch ?? mmDecisionReadMatch;
+        return await handleMatchmaking({ req, res, url, store, roomId, auth, matchmakingRoute,
+          matchmakingId: matchmakingIdMatch ? pathId(matchmakingIdMatch[2]) : null,
+          registry: store.matchmaking,
           reauthorize: () => {
             const current = selected.mode === "account" ? store.authenticateAccountSession(selected.token, roomId, fence)
               : store.authenticate(selected.token, roomId, fence, { allowAccountSession: false });
