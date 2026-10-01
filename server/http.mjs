@@ -103,12 +103,17 @@ for (const [url, file] of publicSearchAssets(publicAssetPaths)) assets.set(url, 
 const reject = (status, code, message, headers) => { throw new ServiceError(status, code, message, headers ?? null); };
 // RFC 8288 discovery hints on machine-readable surfaces: the A2A agent card,
 // the llms packet, the skills catalog, and the public HTML door.
-const discoveryLinks = () => [
-  `</.well-known/agent-card.json>; rel="alternate"; type="application/json"`,
-  `</llms.txt>; rel="help"`,
-  `</skills>; rel="describedby"`,
-  `</room>; rel="alternate"; type="text/html"`
-].join(", ");
+const discoveryLinks = url => {
+  // The shared entry host serves other products at its apex. Hosted discovery
+  // must lead to Room; local and independently hosted instances stay local.
+  const base = url.origin === ROOM_ORIGIN || EDGE_DOOR_HOSTS.includes(url.hostname) ? ROOM_ORIGIN : "";
+  return [
+    `<${base}/.well-known/agent-card.json>; rel="alternate"; type="application/json"`,
+    `<${base}/llms.txt>; rel="help"`,
+    `<${base}/skills>; rel="describedby"`,
+    `<${base}/room>; rel="alternate"; type="text/html"`
+  ].join(", ");
+};
 const pathId = encoded => {
   let id;
   try { id = decodeURIComponent(encoded); } catch { reject(404, "not_found", "Not found"); }
@@ -1656,13 +1661,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (wantsPublicDoorHtml(req.headers.accept)) {
           const bytes = Buffer.from(publicRoomDoorHtml());
           res.setHeader("Content-Security-Policy", PUBLIC_DOOR_CSP);
-          res.setHeader("Link", discoveryLinks());
+          res.setHeader("Link", discoveryLinks(url));
           res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": bytes.length });
           return res.end(req.method === "HEAD" ? undefined : bytes);
         }
         const packet = discoveryDoc("/llms.txt");
         res.setHeader("X-Robots-Tag", "all");
-        res.setHeader("Link", discoveryLinks());
+        res.setHeader("Link", discoveryLinks(url));
         const packetBytes = Buffer.from(packet.body);
         res.writeHead(200, { "Content-Type": packet.type, "Content-Length": packetBytes.length });
         return res.end(req.method === "HEAD" ? undefined : packetBytes);
@@ -1677,7 +1682,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (discovery && ["GET", "HEAD"].includes(req.method)) {
         res.setHeader("X-Robots-Tag", "all");
-        res.setHeader("Link", discoveryLinks());
+        res.setHeader("Link", discoveryLinks(url));
         if (discovery === MCP_SERVER_CARD_DOC) {
           res.setHeader("Cache-Control", MCP_DISCOVERY_CACHE_CONTROL);
           for (const [name, value] of Object.entries(MCP_SERVER_CARD_CORS)) res.setHeader(name, value);
@@ -1820,7 +1825,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // the module (never plain not_found, so the invite-only boundary
         // probe counts these routes as served-open rather than unserved).
         res.setHeader("X-Robots-Tag", "noindex, nofollow");
-        res.setHeader("Link", discoveryLinks());
+        res.setHeader("Link", discoveryLinks(url));
         if (publicFeedMatch) {
           const after = url.searchParams.get("after");
           const limit = url.searchParams.get("limit");
@@ -1850,7 +1855,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const aggregate = aggregateReceipts(RECEIPTS_SNAPSHOT);
         // Deliberately public and indexable: this page exists to be found.
         res.setHeader("X-Robots-Tag", "all");
-        res.setHeader("Link", discoveryLinks());
+        res.setHeader("Link", discoveryLinks(url));
         // The generic API middleware defaults to no-store; receipts data
         // changes only when the snapshot is regenerated, so cache it.
         res.setHeader("Cache-Control", "public, max-age=3600");
@@ -1891,7 +1896,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }
         // RFC 8288 discovery hints on the public HTML door too: a cold agent
         // starting at GET / alone can find the agent card from Link headers.
-        res.setHeader("Link", discoveryLinks());
+        res.setHeader("Link", discoveryLinks(url));
         res.writeHead(200, { "Content-Type": `${type}; charset=utf-8` });
         return res.end(req.method === "HEAD" ? undefined : data);
       }
