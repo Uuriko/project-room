@@ -118,9 +118,9 @@ test('a blank title still records the claim, and the event names the id', async 
 });
 
 test('an archived room still records a claim and appends no event', async t => {
-  const { store, owner } = await fixture(t);
-  const key = store.issueAccessKey('commons', 'owner');
-  store.command(key, 'commons', { id: 'archive-room', type: 'room.archived', data: { reason: 'pilot over' } });
+  const { owner } = await fixture(t);
+  // Archive with the owner's own key. Issuing a second key would revoke it.
+  await owner.command({ id: 'archive-room', type: 'room.archived', data: { reason: 'pilot over' } });
   const created = await owner.workClaimCreate({ id: 'after-archive', title: 'Still recorded' });
   assert.equal(created.id, 'after-archive');
   assert.equal((await claimEvents(owner)).length, 0);
