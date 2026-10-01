@@ -115,6 +115,7 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 .button { padding: .58rem .85rem; border: 1px solid transparent; border-radius: .42rem; color: var(--text); font-size: .78rem; font-weight: 600; }
 .button.primary { color: var(--on-accent); background: var(--blue-strong); }
 .button.primary:hover { background: var(--blue-strong-hover); }
+.button.primary.icon-button:hover { color: var(--on-accent); background: var(--blue-strong-hover); }
 .button.secondary { border-color: var(--line); background: var(--panel-raised); }
 .button.secondary:hover, .button.ghost:hover { background: var(--panel-hover); }
 .button.ghost { border-color: var(--line); background: transparent; color: var(--muted); }
