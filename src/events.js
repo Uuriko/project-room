@@ -81,7 +81,11 @@ export const EVENT_TYPES = Object.freeze({
   DM_POSTED: "dm.posted",
   // Land queue receipt. The land_queue table is the source of truth; this
   // event is the thin wake record (pr, head, state, what changed).
-  LAND_UPDATED: "land.updated"
+  LAND_UPDATED: "land.updated",
+  // Work-claim receipt. The work_claims table is the source of truth; this
+  // event is the thin room record of who claimed, renewed, handed off or
+  // released which claim (server/work-claim-events.mjs).
+  WORK_CLAIM_UPDATED: "work_claim.updated"
 });
 
 // Room channels (Phase 2 of the Discord/Slack-like redesign): every room has
@@ -427,7 +431,8 @@ export function applyEvent(current, incoming) {
     [EVENT_TYPES.BOND_ACTIVATED]: recordBond,
     [EVENT_TYPES.BOND_REVOKED]: recordBond,
     [EVENT_TYPES.DM_POSTED]: recordPeerDm,
-    [EVENT_TYPES.LAND_UPDATED]: recordLandUpdate
+    [EVENT_TYPES.LAND_UPDATED]: recordLandUpdate,
+    [EVENT_TYPES.WORK_CLAIM_UPDATED]: recordWorkClaimUpdate
   };
   const handler = handlers[incoming.type];
   if (!Object.hasOwn(handlers, incoming.type)) throw new Error(`Unsupported event type: ${incoming.type}`);
@@ -1297,6 +1302,23 @@ function recordLandUpdate(state, incoming) {
     || data.changed.some(change => !["green", "red", "behind", "merged", "tip"].includes(change))) {
     throw new Error("Event data missing changed");
   }
+}
+
+export const WORK_CLAIM_EVENT_ACTIONS = Object.freeze(["created", "claimed", "state_changed", "reviewed", "released", "reassigned", "renewed", "lease_expired"]);
+const WORK_CLAIM_EVENT_STATES = ["unclaimed", "claimed", "in_progress", "blocked", "done"];
+
+// Thin receipt: validated, never copied into the projection.
+function recordWorkClaimUpdate(state, incoming) {
+  requireMember(state, incoming.actorId);
+  const data = incoming.data ?? {};
+  if (typeof data.workClaim !== "string" || !data.workClaim.trim() || data.workClaim.length > 256) throw new Error("Event data missing workClaim");
+  if (WORK_CLAIM_EVENT_ACTIONS.includes(data.action) === false) throw new Error("Event data missing action");
+  if (!WORK_CLAIM_EVENT_STATES.includes(data.claimState)) throw new Error("Event data missing claimState");
+  if (!(data.ownerId === null || typeof data.ownerId === "string")) throw new Error("Event data missing ownerId");
+  if (!(data.leaseExpiresAt === null || (typeof data.leaseExpiresAt === "string" && !Number.isNaN(Date.parse(data.leaseExpiresAt))))) {
+    throw new Error("Event data missing leaseExpiresAt");
+  }
+  if (!Array.isArray(data.paths)) throw new Error("Event data missing paths");
 }
 
 function recordReferral(state, incoming) {
