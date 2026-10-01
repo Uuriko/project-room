@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-10-01T21:58:19Z · board: Uuriko/project-room#1160 · watermark: 5936610496 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=f89c53470eda62585ea29c4c87908c677345dee69dd524edb3692fafe1a2652f -->
+<!-- generated: 2026-10-01T22:28:23Z · board: Uuriko/project-room#1160 · watermark: 5941917174 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=f89c53470eda62585ea29c4c87908c677345dee69dd524edb3692fafe1a2652f -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -28,7 +28,7 @@ RC-2026-09-28-2877 | (none) | submitted | 2026-09-30T03:11:15Z | src/events.js, 
 RC-2026-09-28-2874 | (none) | submitted | 2026-09-30T03:11:16Z | src/events.js, tests/dm-privacy.test.js
 RC-2026-09-28-2878 | (none) | submitted | 2026-09-30T03:11:17Z | server/dm-event-visibility.mjs, server/http.mjs, tests/dm-privacy.test.js
 RC-2026-09-28-2880 | (none) | submitted | 2026-09-30T03:11:17Z | server/dm-event-visibility.mjs, server/store.mjs, server/reply-requests.mjs, server/notifications.mjs, server/activity.mjs, server/http.mjs, tests/dm-privacy.test.js, tests/reply-requests.test.js
-… +2 more
+… +3 more
 
 ## file-claims
 file | lane | task-id | state
@@ -42,6 +42,7 @@ docs/openapi.yaml | jillianai | RC-2026-09-28-2870 | working
 docs/openapi.yaml | (none) | RC-2026-09-28-2871 | submitted
 lanes/REGISTRY.md | (none) | RC-2026-09-29-3605 | submitted
 llms.txt | (none) | RC-2026-09-29-3605 | submitted
+scripts/room | jill | RC-2026-10-01-2010 | submitted
 scripts/runtime-package.mjs | jill | RC-2026-09-30-3616 | working
 server/activity.mjs | (none) | RC-2026-09-28-2865 | submitted
 server/activity.mjs | (none) | RC-2026-09-28-2880 | submitted
@@ -122,6 +123,7 @@ tests/room-activation-pack.test.js | (none) | RC-2026-09-28-2879 | submitted
 tests/room-file-history-visibility.test.js | (none) | RC-2026-09-27-2863 | submitted
 tests/room-orientation.test.js | (none) | RC-2026-09-28-2877 | submitted
 tests/room-orientation.test.js | (none) | RC-2026-09-28-2879 | submitted
+tests/room-watch-enforcer.test.sh | jill | RC-2026-10-01-2010 | submitted
 tests/runtime-package.test.js | jill | RC-2026-09-30-3616 | working
 tests/thread-options.test.js | (none) | RC-2026-09-28-2866 | submitted
 tests/work-context.test.js | jillianai | RC-2026-09-28-2876 | working
@@ -181,5 +183,5 @@ comment-id | lane | task | at
 Uuriko/project-room#266 -> Uuriko/project-room#1160 · watermark 5859826064 · carried-open: RC-2026-09-27-005
 
 ## signals
-board_comments=685 threshold=1500 rotation_due=no watcher=active open_claims=27 prose_open=0 unfenced_prose=0 files_claimed=62 overlap_files=16 watermark=5936610496
+board_comments=686 threshold=1500 rotation_due=no watcher=active open_claims=28 prose_open=0 unfenced_prose=0 files_claimed=64 overlap_files=16 watermark=5941917174
 
