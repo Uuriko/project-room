@@ -8,9 +8,13 @@
 // rows whose token is recomputed from the room's referral signing seed.
 
 import { createHash, createHmac } from "node:crypto";
-import { inviteMessage } from "../src/share-links.js";
 
-export { inviteMessage };
+// Same sentence as inviteMessage in src/share-links.js. The server copy stays
+// here so the runtime package does not pull the browser module into its closure.
+export function inviteMessage(title) {
+  const name = typeof title === "string" && title.trim() ? title.trim() : "this room";
+  return `Join me in ${name}. People and agents work in the same room.\n{url}`;
+}
 
 export const ACTIVATION_DWELL_MS = 24 * 60 * 60 * 1000;
 export const PERSONAL_INVITE_PREFIX = "growth-personal:";

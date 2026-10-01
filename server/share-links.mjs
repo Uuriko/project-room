@@ -263,9 +263,9 @@ export class ShareLinks {
     const present = row => {
       const generation = generationOf(row);
       if (generation === null) return null;
-      const token = personalInviteToken(this.store.referralInvites.roomKeys(roomId).privateSeed, roomId, memberId, generation);
-      if (hash(token) !== row.token_hash) return null;
-      return { token, link: this.view(row) };
+      const invite = personalInviteToken(this.store.referralInvites.roomKeys(roomId).privateSeed, roomId, memberId, generation);
+      if (hash(invite) !== row.token_hash) return null;
+      return { token: invite, link: this.view(row) };
     };
     const latest = rows[0];
     const usable = row => {
@@ -281,8 +281,8 @@ export class ShareLinks {
     }
     const generation = latest ? (generationOf(latest) ?? 0) + 1 : 0;
     if (!Number.isSafeInteger(generation)) return latest ? present(latest) : null;
-    const token = personalInviteToken(this.store.referralInvites.roomKeys(roomId).privateSeed, roomId, memberId, generation);
-    const tokenHash = hash(token);
+    const invite = personalInviteToken(this.store.referralInvites.roomKeys(roomId).privateSeed, roomId, memberId, generation);
+    const tokenHash = hash(invite);
     const requestId = `${PERSONAL_INVITE_PREFIX}${generation}`;
     const now = this.store.now();
     const expiresAt = now + PERSONAL_INVITE_TTL_MS;
@@ -303,7 +303,7 @@ export class ShareLinks {
         : this.db.prepare("SELECT * FROM share_links WHERE room_id=? AND issuer_account_id IS NULL AND issuer_member_id=? AND request_id=?").get(roomId, memberId, requestId);
       return prior ? present(prior) : (latest ? present(latest) : null);
     }
-    return { token, link: this.view(this.db.prepare("SELECT * FROM share_links WHERE id=?").get(id)) };
+    return { token: invite, link: this.view(this.db.prepare("SELECT * FROM share_links WHERE id=?").get(id)) };
   }
   cancel(token, roomId, id, binding) {
     if (!validId(id)) unavailable();

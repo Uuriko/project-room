@@ -102,9 +102,9 @@ export function installReferralBoard({ client, getState, getSession }) {
     const current = () => epoch === generation && getSession() === session;
     if (!loaded) await load();
     if (!current()) return;
-    const token = lastInvite?.token;
-    if (!token) { status("Your invite link is not ready yet."); return; }
-    const url = humanJoinShareUrl(token);
+    const invite = lastInvite?.token;
+    if (!invite) { status("Your invite link is not ready yet."); return; }
+    const url = humanJoinShareUrl(invite);
     try {
       await navigator.clipboard.writeText(url);
       if (current()) status("Link copied.");

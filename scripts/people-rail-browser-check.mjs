@@ -115,6 +115,8 @@ test("People rail shows presence, what they're on, loud @handles, and Done chips
   await page.locator("#agent-invite-dialog").screenshot({ path: "test-results/agent-invite-connection-mobile.png" });
   await page.setViewportSize({ width: 1360, height: 900 });
   await page.locator("#agent-invite-close").click();
+  await page.locator("#share-link-close").click();
+  await page.locator("#share-link-dialog").waitFor({ state: "hidden" });
   await page.evaluate(() => { location.hash = "#room/commons"; });
   assert.equal(await page.locator("#people-panel").evaluate(node => node.open), true);
   const codex = page.locator('#presence-list .presence-member[data-member-record-id="codex"]');

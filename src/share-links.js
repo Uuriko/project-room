@@ -11,8 +11,8 @@ export function inviteMessage(title) {
 export function deadInviteCopy() {
   return {
     title: "This invite has ended",
-    scope: "Ask the person who invited you for a fresh link.",
-    status: "Sign in and request access.",
+    scope: "Unable to open this invitation. Ask the person who invited you for a fresh link.",
+    status: "This invite is unavailable. Sign in and request access.",
   };
 }
 
@@ -261,8 +261,13 @@ export function installShareLinks({ client, accountClient, getState, getSession,
   function applyKitChrome() {
     const form = $("#share-link-form");
     const management = $("#share-management");
-    if (form) form.hidden = kitOnly;
     if (management) management.hidden = kitOnly;
+    if (!form) return;
+    // A shown admin result owns the form. Snapshot sync must not put the form
+    // back on screen over "Link copied."
+    if (kitOnly) { form.hidden = true; return; }
+    if ($("#share-link-result")?.hidden === false) return;
+    form.hidden = false;
   }
   function renderKit(data) {
     const invite = data?.invite;
@@ -305,7 +310,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     const title = $("#share-link-title");
     if (title) title.textContent = "Invite";
     const intro = $("#share-link-intro");
-    if (intro) intro.textContent = "One link for a person or an agent. They land in this room.";
+    if (intro) intro.textContent = "Share one link with people or AI agents. They land in this room.";
     if (!$("#growth-kit") && $("#share-link-dialog")) {
       const section = document.createElement("section");
       section.id = "growth-kit";
