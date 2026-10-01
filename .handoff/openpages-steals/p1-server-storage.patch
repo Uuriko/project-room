@@ -1,0 +1,401 @@
+diff --git a/server/room-attachment-bytes.mjs b/server/room-attachment-bytes.mjs
+index 19a74bbc..a479ba15 100644
+--- a/server/room-attachment-bytes.mjs
++++ b/server/room-attachment-bytes.mjs
+@@ -15,6 +15,23 @@ import { validateAttachment, AttachmentError } from "./attachments.mjs";
+ import { validId } from "../src/events.js";
+ import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
+ import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
++import { buildWorkspaceContext, isTextMediaType, MAX_QUERY_CHARS, WORKSPACE_CONTEXT_DEFAULT_TOKENS } from "./workspace-context.mjs";
++
++// Version lineage for room files (purely additive, outside the writer fence:
++// older writers have no code path to it). One row per staged file that was
++// uploaded as a new version of another file, or restored from one. actor_kind
++// is the uploader's member kind (human | agent); via is the surface that made
++// the call (mcp | http). room_attachments stays the only byte store.
++export const roomFileVersionsSchema = `CREATE TABLE IF NOT EXISTS room_file_versions (
++  room_id TEXT NOT NULL, id TEXT NOT NULL, supersedes_id TEXT, restored_from_id TEXT,
++  actor_kind TEXT NOT NULL CHECK(actor_kind IN ('human','agent')),
++  via TEXT NOT NULL CHECK(via IN ('mcp','http')), created_at INTEGER NOT NULL,
++  PRIMARY KEY(room_id,id)
++);
++CREATE INDEX IF NOT EXISTS room_file_versions_parent ON room_file_versions(room_id,supersedes_id);`;
++const LIVE = new Set(["staged", "committed"]);
++const MAX_CONTEXT_FILE_BYTES = 262144;
++const MAX_CONTEXT_MESSAGES = 500;
+ 
+ const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
+ 
+@@ -97,7 +114,7 @@ export class RoomAttachmentBytes {
+       WHERE room_id=? AND state='staged' AND expires_at<=?`).run(roomId, now);
+   }
+ 
+-  stage(token, roomId, { id, filename, mediaType, data } = {}) {
++  stage(token, roomId, { id, filename, mediaType, data, supersedes, restoredFrom, via } = {}) {
+     return this.store.transaction(() => {
+       const auth = this.store.authenticate(token, roomId);
+       enforceAutonomyTierForAction({ db: this.db, roomId, state: this.store.room(roomId).state, actor: auth.member, action: "room_put_file", fail });
+@@ -113,6 +130,10 @@ export class RoomAttachmentBytes {
+       const bytes = decodeData(data);
+       const file = checkedFile(filename, mediaType, bytes);
+       const sha = createHash("sha256").update(bytes).digest("hex");
++      if (supersedes !== undefined && supersedes !== null) {
++        if (!validId(supersedes)) fail(422, "invalid_attachment", "supersedes is not a valid attachment id");
++        if (supersedes === id) fail(422, "invalid_attachment", "A file cannot supersede itself");
++      }
+       const existing = this.db.prepare("SELECT * FROM room_attachments WHERE room_id=? AND id=?").get(roomId, id);
+       if (existing) {
+         const same = existing.state === "staged" && existing.uploader_id === auth.member.id
+@@ -133,14 +154,29 @@ export class RoomAttachmentBytes {
+         || usage.records + 1 > attachmentLimits.recordsPerRoom) {
+         fail(409, "attachment_quota", "This room cannot store another file of that size");
+       }
++      if (supersedes) {
++        const parent = this.db.prepare("SELECT * FROM room_attachments WHERE room_id=? AND id=?").get(roomId, supersedes);
++        if (!parent || !this.visibleTo(parent, this.messageIndex(roomId), auth.member.id)) fail(404, "attachment_not_found", "The file to supersede was not found");
++        if (!LIVE.has(parent.state)) fail(410, "attachment_unavailable", "Only a staged or committed file can get a new version");
++        const child = this.liveChild(roomId, supersedes);
++        if (child) fail(409, "file_version_conflict", `That file already has a newer version (${child.id}); supersede the newest version instead`);
++      }
+       const expiresAt = now + attachmentLimits.lifetimeMs;
+       this.db.prepare(`INSERT INTO room_attachments(
+         room_id,id,uploader_id,filename,media_type,byte_length,sha256,bytes,state,created_at,expires_at,message_id
+       ) VALUES(?,?,?,?,?,?,?,?,'staged',?,?,NULL)`).run(
+         roomId, id, auth.member.id, file.filename, file.mediaType, bytes.length, sha, bytes, now, expiresAt
+       );
++      if (supersedes || restoredFrom || via) {
++        this.db.prepare(`INSERT INTO room_file_versions(room_id,id,supersedes_id,restored_from_id,actor_kind,via,created_at)
++          VALUES(?,?,?,?,?,?,?)`).run(roomId, id, supersedes ?? null, restoredFrom ?? null,
++          auth.member.kind === "human" ? "human" : "agent", via === "mcp" ? "mcp" : "http", now);
++      }
+       const row = this.db.prepare("SELECT * FROM room_attachments WHERE room_id=? AND id=?").get(roomId, id);
+-      return { status: "staged", duplicate: false, roomId, attachment: view(row) };
++      const result = { status: "staged", duplicate: false, roomId, attachment: view(row) };
++      if (supersedes) result.supersedes = supersedes;
++      if (restoredFrom) result.restoredFrom = restoredFrom;
++      return result;
+     });
+   }
+ 
+@@ -270,4 +306,127 @@ export class RoomAttachmentBytes {
+       return { status: "committed", duplicate: false, roomId, attachment: view(committed) };
+     });
+   }
++
++  liveChild(roomId, parentId) {
++    return this.db.prepare(`SELECT a.* FROM room_file_versions v JOIN room_attachments a ON a.room_id=v.room_id AND a.id=v.id
++      WHERE v.room_id=? AND v.supersedes_id=? AND a.state IN ('staged','committed') ORDER BY a.created_at DESC, a.id LIMIT 1`).get(roomId, parentId) ?? null;
++  }
++
++  // Whole lineage for one file, oldest first. Versions the caller cannot see
++  // (another member's staged upload, a DM file) are counted but redacted.
++  history(token, roomId, id) {
++    return this.store.readTransaction(() => {
++      const auth = this.store.authenticate(token, roomId);
++      if (!validId(id)) fail(422, "invalid_attachment", "Attachment id is not valid");
++      const messages = this.messageIndex(roomId);
++      const row = this.db.prepare("SELECT * FROM room_attachments WHERE room_id=? AND id=?").get(roomId, id);
++      if (!row || !this.visibleTo(row, messages, auth.member.id)) fail(404, "attachment_not_found", "Attachment not found");
++      const meta = this.db.prepare("SELECT * FROM room_file_versions WHERE room_id=? AND id=?");
++      let rootId = id;
++      for (let hops = 0, seen = new Set([id]); hops < 1000; hops += 1) {
++        const parent = meta.get(roomId, rootId)?.supersedes_id;
++        if (!parent || seen.has(parent)) break;
++        seen.add(parent);
++        rootId = parent;
++      }
++      const chain = [];
++      const seen = new Set();
++      let cursor = rootId;
++      while (cursor && !seen.has(cursor) && chain.length < 1000) {
++        seen.add(cursor);
++        const file = this.db.prepare("SELECT * FROM room_attachments WHERE room_id=? AND id=?").get(roomId, cursor);
++        if (!file) break;
++        chain.push(file);
++        const next = this.liveChild(roomId, cursor) ?? this.db.prepare(`SELECT a.* FROM room_file_versions v JOIN room_attachments a ON a.room_id=v.room_id AND a.id=v.id
++          WHERE v.room_id=? AND v.supersedes_id=? ORDER BY a.created_at DESC, a.id LIMIT 1`).get(roomId, cursor);
++        cursor = next?.id ?? null;
++      }
++      const members = this.store.room(roomId).state.members ?? {};
++      const headIndex = chain.map(file => LIVE.has(file.state)).lastIndexOf(true);
++      const versions = chain.map((file, index) => {
++        const version = index + 1;
++        if (!this.visibleTo(file, messages, auth.member.id)) return { version, id: null, hidden: true, state: "hidden" };
++        const m = meta.get(roomId, file.id);
++        const uploaderKind = members[file.uploader_id]?.kind;
++        return {
++          version, ...view(file),
++          actorKind: m?.actor_kind ?? (uploaderKind === "human" ? "human" : uploaderKind ? "agent" : null),
++          via: m?.via ?? null,
++          supersedes: m?.supersedes_id ?? null,
++          restoredFrom: m?.restored_from_id ?? null,
++          available: LIVE.has(file.state) && file.bytes != null,
++          head: index === headIndex
++        };
++      });
++      const head = versions[headIndex] && !versions[headIndex].hidden ? versions[headIndex].id : null;
++      return { roomId, id, head, count: versions.length, versions };
++    });
++  }
++
++  // Restore = stage the old bytes as a new version on top of the current head.
++  restore(token, roomId, { id, from, via } = {}) {
++    const history = this.history(token, roomId, from);
++    const source = history.versions.find(entry => entry.id === from);
++    if (!source?.available) fail(410, "attachment_unavailable", "That version's bytes are no longer available");
++    if (!history.head) fail(409, "file_version_conflict", "This file has no live version to restore onto");
++    if (history.head === from) fail(409, "file_version_conflict", "That version is already the newest");
++    const row = this.db.prepare("SELECT bytes FROM room_attachments WHERE room_id=? AND id=?").get(roomId, from);
++    return this.stage(token, roomId, {
++      id, filename: source.filename, mediaType: source.mediaType,
++      data: Buffer.from(row.bytes).toString("base64"), supersedes: history.head, restoredFrom: from, via
++    });
++  }
++
++  // Query-aware context over what this member can already read: room chat
++  // (DMs only to their parties, deleted messages skipped) and the newest
++  // version of each visible text file. Read-only.
++  workspaceContext(token, roomId, { query, maxTokens = WORKSPACE_CONTEXT_DEFAULT_TOKENS } = {}) {
++    return this.store.readTransaction(() => {
++      const auth = this.store.authenticate(token, roomId);
++      if (typeof query !== "string" || !query.trim() || query.length > MAX_QUERY_CHARS) {
++        fail(422, "invalid_query", `query is required (1-${MAX_QUERY_CHARS} characters)`);
++      }
++      if (!Number.isSafeInteger(maxTokens)) fail(422, "invalid_query", "maxTokens must be an integer");
++      const viewerId = auth.member.id;
++      const state = this.store.room(roomId).state;
++      const members = state.members ?? {};
++      const name = memberId => members[memberId]?.displayName ?? memberId;
++      const messages = this.messageIndex(roomId);
++      const now = this.store.now();
++      const visibleMessages = (state.messages ?? [])
++        .filter(message => !message.deletedAt && typeof message.body === "string" && message.body.trim())
++        .filter(message => !message.toMemberId || message.authorId === viewerId || message.toMemberId === viewerId)
++        .slice(-MAX_CONTEXT_MESSAGES);
++      // A version only hides its parent from viewers who can see that newer
++      // version; another member's private staged draft must not blank the
++      // shared file for everyone else.
++      const superseded = new Set(this.db.prepare(`SELECT v.supersedes_id AS parent, a.* FROM room_file_versions v JOIN room_attachments a ON a.room_id=v.room_id AND a.id=v.id
++        WHERE v.room_id=? AND v.supersedes_id IS NOT NULL AND a.state IN ('staged','committed')`).all(roomId)
++        .filter(row => !(row.state === "staged" && row.expires_at <= now) && this.visibleTo(row, messages, viewerId))
++        .map(row => row.parent));
++      const decoder = new TextDecoder("utf-8", { fatal: true });
++      const files = this.db.prepare(`SELECT * FROM room_attachments WHERE room_id=? AND state IN ('staged','committed')
++        AND byte_length<=? ORDER BY created_at DESC, id`).all(roomId, MAX_CONTEXT_FILE_BYTES)
++        .filter(row => !(row.state === "staged" && row.expires_at <= now))
++        .filter(row => !superseded.has(row.id) && isTextMediaType(row.media_type) && row.bytes != null)
++        .filter(row => this.visibleTo(row, messages, viewerId))
++        .flatMap(row => {
++          try { return [{ kind: "file", id: row.id, title: row.filename, authorId: row.uploader_id, createdAt: new Date(row.created_at).toISOString(), text: decoder.decode(row.bytes) }]; }
++          catch { return []; }
++        });
++      const sources = [
++        ...visibleMessages.map(message => ({ kind: "message", id: message.id, title: null, authorId: message.authorId,
++          authorName: name(message.authorId), createdAt: message.createdAt ?? null, text: message.body })),
++        ...files
++      ];
++      let built;
++      try { built = buildWorkspaceContext({ sources, query, maxTokens }); }
++      catch (error) { if (error instanceof RangeError) fail(422, "invalid_query", error.message); throw error; }
++      return {
++        roomId, viewerId, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null,
++        viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null,
++        evaluatedAt: new Date(now).toISOString(), ...built
++      };
++    });
++  }
+ }
+diff --git a/server/store.mjs b/server/store.mjs
+index e7784bbc..e2f77ea4 100644
+--- a/server/store.mjs
++++ b/server/store.mjs
+@@ -65,7 +65,7 @@ import { agentRoomSchema } from "./agent-rooms.mjs";
+ import { directSendSchema } from "./inbox-outbox.mjs";
+ import { inboxStitchSchema } from "./inbox-stitch-store.mjs";
+ import { ensureAttachmentSchema, verifyAttachmentSchema } from "./attachment-schema.mjs";
+-import { RoomAttachmentBytes } from "./room-attachment-bytes.mjs";
++import { RoomAttachmentBytes, roomFileVersionsSchema } from "./room-attachment-bytes.mjs";
+ import { InboxAttachmentBytes, inboxAttachmentBytesSchema } from "./inbox-attachment-bytes.mjs";
+ import { BountyEscrow, bountyEscrowSchema, convergeBountyDeployedSchema } from "./bounty-escrow.mjs"; // Escrowed bounties, agent work exchange slice 1.
+ import { selectedWorkContext, currentWorkRecord } from "./work-context.mjs";
+@@ -1217,6 +1217,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
+       // journals above — older writers have no code path to these tables.
+       this.db.exec(inboxStitchSchema);
+       ensureAttachmentSchema(this.db); // Converge the deployed v28-v33 attachment lineage before installing v34 fences.
++      // Room file version lineage: purely additive, outside the writer fence
++      // (see unfencedAdditiveTables); room_attachments stays the byte store.
++      this.db.exec(roomFileVersionsSchema);
+       // Idempotent: recreates fences for tables the additive schemas just
+       // (re)created, and refuses a file whose existing triggers drifted.
+       this.storagePlatform.installWriterFence(this.db);
+diff --git a/server/workspace-context.mjs b/server/workspace-context.mjs
+new file mode 100644
+index 00000000..cad55234
+--- /dev/null
++++ b/server/workspace-context.mjs
+@@ -0,0 +1,150 @@
++// Query-aware workspace context (OpenPages-style "workspace_context").
++//
++// Pure: given the messages and text files a member can already read, score
++// every line against the query with BM25 and keep the best lines (plus one
++// neighbor each side) inside a token budget. Lines keep their original
++// wording and order inside each source; nothing is summarized, and nothing is
++// dropped by position (no head/tail truncation). The query itself is never
++// compressed. The caller owns authorization and visibility.
++
++export const WORKSPACE_CONTEXT_POLICY = "bm25-line-keep-v1";
++export const WORKSPACE_CONTEXT_DEFAULT_TOKENS = 2000;
++export const WORKSPACE_CONTEXT_MAX_TOKENS = 8000;
++export const WORKSPACE_CONTEXT_MIN_TOKENS = 200;
++export const MAX_QUERY_CHARS = 500;
++
++const STOPWORDS = new Set(("a an and are as at be but by can do does for from has have how i if in is it its " +
++  "me my of on or our so that the their them then there these they this to us was we were what when where " +
++  "which who why will with you your").split(" "));
++
++export const roughTokens = text => Math.ceil(String(text ?? "").length / 4);
++
++export function queryTerms(query) {
++  const seen = new Set();
++  for (const term of String(query ?? "").toLowerCase().match(/[\p{L}\p{N}_]+/gu) ?? []) {
++    if (term.length < 2 || STOPWORDS.has(term)) continue;
++    seen.add(term);
++  }
++  return [...seen];
++}
++
++const lineTerms = line => (line.toLowerCase().match(/[\p{L}\p{N}_]+/gu) ?? []);
++
++// sources: [{ kind, id, title, authorId?, createdAt?, text }]
++export function buildWorkspaceContext({ sources, query, maxTokens = WORKSPACE_CONTEXT_DEFAULT_TOKENS }) {
++  const terms = queryTerms(query);
++  if (!terms.length) throw new RangeError("query needs at least one word");
++  const budget = Math.min(WORKSPACE_CONTEXT_MAX_TOKENS, Math.max(WORKSPACE_CONTEXT_MIN_TOKENS, Math.floor(maxTokens)));
++  const phrase = String(query).trim().toLowerCase();
++
++  const units = [];
++  const prepared = sources.map((source, sourceIndex) => {
++    const lines = String(source.text ?? "").split(/\r?\n/);
++    const rows = lines.map((line, lineIndex) => {
++      const words = lineTerms(line);
++      const unit = { sourceIndex, lineIndex, line, words, length: words.length, score: 0 };
++      if (line.trim()) units.push(unit);
++      return unit;
++    });
++    return { ...source, rows };
++  });
++  const originalTokens = prepared.reduce((sum, source) => sum + roughTokens(source.text), 0);
++
++  // BM25 over lines.
++  const k1 = 1.2;
++  const b = 0.75;
++  const n = units.length || 1;
++  const avg = units.reduce((sum, unit) => sum + unit.length, 0) / n || 1;
++  const df = new Map(terms.map(term => [term, 0]));
++  for (const unit of units) {
++    const present = new Set(unit.words);
++    for (const term of terms) if (present.has(term)) df.set(term, df.get(term) + 1);
++  }
++  for (const unit of units) {
++    let score = 0;
++    for (const term of terms) {
++      const tf = unit.words.reduce((count, word) => count + (word === term), 0);
++      if (!tf) continue;
++      const idf = Math.log(1 + (n - df.get(term) + 0.5) / (df.get(term) + 0.5));
++      score += idf * (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * unit.length / avg));
++    }
++    if (score > 0 && phrase.length >= 4 && unit.line.toLowerCase().includes(phrase)) score *= 1.5;
++    unit.score = score;
++  }
++
++  const ranked = units.filter(unit => unit.score > 0)
++    .sort((a, b2) => b2.score - a.score || a.sourceIndex - b2.sourceIndex || a.lineIndex - b2.lineIndex);
++  const kept = new Set();
++  const key = (s, l) => `${s}:${l}`;
++  let used = 0;
++  const headerCost = new Map();
++  const take = (sourceIndex, lineIndex) => {
++    const row = prepared[sourceIndex].rows[lineIndex];
++    if (!row || !row.line.trim() || kept.has(key(sourceIndex, lineIndex))) return true;
++    const header = headerCost.has(sourceIndex) ? 0 : roughTokens(sourceHeader(prepared[sourceIndex])) + 1;
++    const cost = roughTokens(row.line) + 1 + header;
++    if (used + cost > budget) return false;
++    used += cost;
++    headerCost.set(sourceIndex, header);
++    kept.add(key(sourceIndex, lineIndex));
++    return true;
++  };
++  for (const unit of ranked) {
++    if (!take(unit.sourceIndex, unit.lineIndex)) continue;
++    take(unit.sourceIndex, unit.lineIndex - 1);
++    take(unit.sourceIndex, unit.lineIndex + 1);
++  }
++
++  const best = new Map();
++  for (const unit of ranked) if (!best.has(unit.sourceIndex)) best.set(unit.sourceIndex, unit.score);
++  const order = [...best.keys()].filter(index => headerCost.has(index))
++    .sort((a, b2) => best.get(b2) - best.get(a) || a - b2);
++  const blocks = [];
++  const summary = [];
++  for (const sourceIndex of order) {
++    const source = prepared[sourceIndex];
++    const lines = [];
++    let last = -2;
++    let linesKept = 0;
++    for (const row of source.rows) {
++      if (!kept.has(key(sourceIndex, row.lineIndex))) continue;
++      if (last >= 0 && row.lineIndex > last + 1) lines.push("…");
++      lines.push(row.line);
++      last = row.lineIndex;
++      linesKept += 1;
++    }
++    blocks.push(`${sourceHeader(source)}\n${lines.join("\n")}`);
++    summary.push({
++      kind: source.kind, id: source.id, title: source.title ?? null,
++      authorId: source.authorId ?? null, createdAt: source.createdAt ?? null,
++      linesIn: source.rows.filter(row => row.line.trim()).length, linesKept,
++      score: Math.round(best.get(sourceIndex) * 1000) / 1000
++    });
++  }
++  const context = blocks.join("\n\n");
++  const keptTokens = roughTokens(context);
++  return {
++    policy: WORKSPACE_CONTEXT_POLICY,
++    query: String(query),
++    terms,
++    budgetTokens: budget,
++    candidates: prepared.length,
++    matched: best.size,
++    omittedMatches: best.size - order.length,
++    originalTokens,
++    keptTokens,
++    tokensSavedPct: originalTokens ? Math.round(Math.max(0, 1 - keptTokens / originalTokens) * 1000) / 10 : 0,
++    sources: summary,
++    context
++  };
++}
++
++export function sourceHeader(source) {
++  if (source.kind === "file") return `### File: ${source.title ?? source.id} (id ${source.id})`;
++  const who = source.authorName ?? source.authorId ?? "unknown";
++  return `### Message ${source.id} from ${who}${source.createdAt ? ` at ${source.createdAt}` : ""}`;
++}
++
++const TEXT_TYPES = new Set(["application/json", "application/xml", "application/x-yaml", "application/yaml",
++  "application/toml", "application/javascript", "application/x-ndjson", "application/sql"]);
++export const isTextMediaType = type => typeof type === "string" && (type.startsWith("text/") || TEXT_TYPES.has(type) || type.endsWith("+json") || type.endsWith("+xml"));
+diff --git a/server/writer-fence.mjs b/server/writer-fence.mjs
+index 28cf500d..bf5567d5 100644
+--- a/server/writer-fence.mjs
++++ b/server/writer-fence.mjs
+@@ -33,6 +33,10 @@ export const unfencedAdditiveTables = Object.freeze([
+   "request_runs", // Permanent host reservations; older writers have no execution route.
+   "private_inbox_reads",
+   "access_requests",
++  // room_file_versions (file version lineage + actor kind): purely additive
++  // and intentionally NOT fenced; older writers have no code path to it and
++  // room_attachments remains the only byte store.
++  "room_file_versions",
+   // room_access_auto_approve (standing auto-approve rule, RC-2026-09-29-3603):
+   // purely additive and intentionally NOT fenced — older writers have no code
+   // path to it, and the manage_members-only config rule plus the
