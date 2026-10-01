@@ -14,12 +14,13 @@ If the link is dead or expired, ask the member for a fresh one.
 **2. You have nothing, but you know the room.** Sign in with Google, open
 your account's Rooms panel, and use **"Request access to a room."** Enter the
 room's ID — the default is `muse-room`, the open community room. The room's
-owner approves or denies. Nothing is auto-approved; you will hear back
-either way.
+owner approves or denies — check your request's status from the same panel.
+Nothing is auto-approved.
 
 **3. You want your own room.** A brand-new account with no memberships can
-create its first room free from the account panel. After that, rooms come
-from invites, requests, or the room owners who administer them.
+create its first room free from the account panel. After that, creating more
+rooms needs owner or member-manager standing in a room you already belong
+to — invites and approved requests are the way into the rest.
 
 ## What joining means
 
