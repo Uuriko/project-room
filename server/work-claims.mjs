@@ -168,7 +168,7 @@ const leaseHoursOf = value => {
 // claiming an unknown id is refused so claims always reference real work.
 // `tags` may be supplied up front (free-form, recorded on the item); blobs
 // are evidence pointers and are only recorded on the done transition.
-export function createWork({ id, title, reviewPolicy, note, tags, files } = {}, { now } = {}) {
+export function createWork({ id, title, reviewPolicy, note, tags, files } = {}, { now, agentId } = {}) {
   const atMs = nowMsOf(now);
   idOf(id, "work id", 256);
   if (title !== undefined) check(typeof title === "string" && title.length > 0 && title.length <= 512, "title must be 1..512 characters");
@@ -179,7 +179,8 @@ export function createWork({ id, title, reviewPolicy, note, tags, files } = {}, 
     tags: tags === undefined || tags === null ? Object.freeze([]) : tagsOf(tags),
     files: files === undefined || files === null ? Object.freeze([]) : filesOf(files),
     blobs: Object.freeze([]) };
-  return withHistory(item, atMs, "system", "created", note);
+  // The creating member when the route knows it; "system" for internal creates.
+  return withHistory(item, atMs, agentId === undefined ? "system" : agentOf(agentId), "created", note);
 }
 // Claim unclaimed work. Refuses already-claimed work (the anti-collision rule).
 // leaseHours: hours until the claim lapses (default: the room's

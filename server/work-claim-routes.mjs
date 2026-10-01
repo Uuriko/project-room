@@ -40,6 +40,7 @@ import { findDuplicates, DuplicateError } from "./work-duplicates.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { evaluateReceipt } from "./jev-receipts.mjs";
 import { findClaimCollisions } from "./claim-collisions.mjs";
+import { emitWorkClaimEvent } from "./work-claim-events.mjs";
 
 const CLAIM_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 
@@ -109,14 +110,16 @@ const leaseHoursOfBody = data => ("leaseHours" in data ? data.leaseHours : undef
 // Evaluate lease expiry across the room's items; expired claims auto-release
 // (owner cleared, history stamped by releaseExpired). Returns the ids that
 // were released by this sweep.
-function sweepRoom(registry, roomId, nowMs) {
+function sweepRoom(registry, roomId, nowMs, onRelease = () => {}) {
   const entry = registry.list(roomId);
   const swept = releaseExpired(entry, nowMs);
   const released = [];
   // releaseExpired returns a normalized copy of every item, expired or not,
   // so compare states: only a claim that actually lapsed counts as swept.
   swept.forEach((item, index) => {
-    if (item.state === "unclaimed" && entry[index].state !== "unclaimed") { registry.set(roomId, item); released.push(item.id); }
+    if (item.state === "unclaimed" && entry[index].state !== "unclaimed") {
+      registry.set(roomId, item); released.push(item.id); onRelease(item, entry[index]);
+    }
   });
   return released;
 }
@@ -222,8 +225,16 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     db: store.db, roomId, state: { room: { ownerId: store.roomAuthority?.(roomId)?.ownerId } },
     actor: auth.member, action: `${req.method} work-claim ${workClaimRoute}`, fail: reject });
   const nowMs = Date.now();
-  const sweptIds = sweepRoom(registry, roomId, nowMs);
   const caller = auth.member.id;
+  // Every committed claim change appends one work_claim.updated room event
+  // inside this transaction (server/work-claim-events.mjs).
+  const commit = (item, action, extra = {}) => {
+    registry.set(roomId, item);
+    emitWorkClaimEvent(store, roomId, { actorId: extra.actorId ?? caller, item, action, previousOwnerId: extra.previousOwnerId ?? null });
+    return item;
+  };
+  const sweptIds = sweepRoom(registry, roomId, nowMs,
+    (item, before) => emitWorkClaimEvent(store, roomId, { actorId: before.owner, item, action: "lease_expired", previousOwnerId: before.owner }));
   const config = registry.configFor(roomId);
   const roomLike = { workClaims: registry.rawConfig(roomId) };
 
@@ -311,8 +322,8 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     const id = claimIdOf(reject, data.id);
     if (registry.has(roomId, id)) reject(409, "work_claim_exists", `Work claim "${id}" already exists in this room`);
     if (data.reviewPolicy !== undefined && !REVIEW_POLICIES.includes(data.reviewPolicy)) invalidInput(reject, `reviewPolicy one of ${REVIEW_POLICIES.join(", ")}`);
-    const item = runPure(reject, () => createWork({ id, title: data.title, reviewPolicy: data.reviewPolicy, note: data.note, tags: data.tags, files: data.files }, { now: nowMs }));
-    registry.set(roomId, item);
+    const item = runPure(reject, () => createWork({ id, title: data.title, reviewPolicy: data.reviewPolicy, note: data.note, tags: data.tags, files: data.files }, { now: nowMs, agentId: caller }));
+    commit(item, "created");
     return json(res, 201, item);
   }
   if (workClaimRoute === "read" && req.method === "GET") {
@@ -324,7 +335,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     const item = load(claimIdOf(reject, workClaimId));
     if (item.state !== "unclaimed") reject(409, "work_claim_conflict", `Work "${item.id}" is already ${item.state} — release it first`);
     const claimed = runPure(reject, () => claimWork(item, caller, { note: data.note, leaseHours: leaseHoursOfBody(data), files: data.files, room: roomLike, now: nowMs }));
-    registry.set(roomId, claimed);
+    commit(claimed, "claimed");
     // Warn, never block: tell the claimant which declared files other
     // active claims already hold, so the lanes talk before both edit them.
     return json(res, 200, { ...claimed, fileWarnings: fileWarningsFor(registry.list(roomId), claimed) });
@@ -396,7 +407,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
           escalate: receiptDecision.escalate, signals: receiptDecision.signals, at: nowMs });
       } catch { /* shadow-only: never break the done transition */ }
     }
-    registry.set(roomId, updated);
+    commit(updated, "state_changed");
     return json(res, 200, updated);
   }
   if (workClaimRoute === "review" && req.method === "POST") {
@@ -407,7 +418,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     if (!shape(data, { optional: ["note"] })) invalidInput(reject, "{note?}");
     const item = load(claimIdOf(reject, workClaimId));
     const attested = runPure(reject, () => attestWork(item, caller, { note: data.note, now: nowMs }));
-    registry.set(roomId, attested);
+    commit(attested, "reviewed");
     return json(res, 200, attested);
   }
   if (workClaimRoute === "release" && req.method === "POST") {
@@ -424,7 +435,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       registry.set(roomId, item);
     }
     const released = runPure(reject, () => updateWork(item, caller, { state: "unclaimed", note: data.note, now: nowMs }));
-    registry.set(roomId, released);
+    commit(released, "released");
     return json(res, 200, released);
   }
   if (workClaimRoute === "reassign" && req.method === "POST") {
@@ -444,7 +455,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
         `newOwner "${typeof target === "string" ? target : "?"}" is not an active member of this room — reassign names a current memberId`);
     }
     const reassigned = runPure(reject, () => reassignWork(item, caller, target, { note: data.note, now: nowMs }));
-    registry.set(roomId, reassigned);
+    commit(reassigned, "reassigned", { previousOwnerId: caller });
     return json(res, 200, reassigned);
   }
   if (workClaimRoute === "renew" && req.method === "POST") {
@@ -489,7 +500,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     }
     const renewed = runPure(reject, () => renewWork(item, caller,
       { note: data.note, leaseHours: leaseHoursOfBody(data), room: roomLike, now: nowMs }));
-    registry.set(roomId, renewed);
+    commit(renewed, "renewed");
     return json(res, 200, renewed);
   }
   // RFC 9110: a 405 names the resource's valid methods. The route table above
