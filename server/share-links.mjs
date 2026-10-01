@@ -171,6 +171,7 @@ export class ShareLinks {
       this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, row.room_id);
       this.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)")
         .run(row.room_id, identity.identityId, identity.identityId, now);
+      this.creditReferral(row, identity.identityId, now);
       return { roomId: row.room_id, identityId: identity.identityId, memberId: identity.identityId, permissions: [], duplicate: false };
     });
   }
@@ -312,8 +313,18 @@ export class ShareLinks {
       this.store.appendInvitationJournal(record, "accepted");
       this.db.prepare("INSERT INTO share_link_joins VALUES(?,?,?,?,?,?)").run(row.id, invitationId, slot.credentialHash, redemptionId, auth.sessionRevision, fingerprint);
       this.verifyJoin({ link_id: row.id, invitation_id: invitationId, fingerprint });
+      this.creditReferral(row, memberId, now);
       return this.result(slotToken, row.room_id, false);
     });
+  }
+  // A share link is an invite link: a first join credits the link's issuer on
+  // the room's referral board (via "invite"), in the join's transaction, the
+  // same way agent-invite redemption does. Retries return the duplicate path
+  // before reaching here, and the referrals primary key keeps it exactly-once.
+  creditReferral(row, refereeMemberId, at) {
+    const issuer = this.store.room(row.room_id).state.members?.[row.issuer_member_id];
+    if (!this.store.referrals || !issuer || issuer.active === false || row.issuer_member_id === refereeMemberId) return;
+    this.store.referrals.record({ roomId: row.room_id, referrerMemberId: row.issuer_member_id, refereeMemberId, via: "invite", at });
   }
   result(slotToken, roomId, duplicate) {
     const auth = this.store.authenticateAccountSession(slotToken, roomId);
