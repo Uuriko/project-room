@@ -221,11 +221,69 @@ export async function land(lander, { repo, prNumber, claimantMemberId, signal } 
 }
 
 // Event pages arrive as { sequence, event: { type, actorId, data } }.
+// Coordination events get a line that names the claim or PR they moved, so a
+// digest reads as "who changed which lane" instead of a list of event types.
+const leaseText = value => (value ? ` · lease ${value}` : "");
+const summaryOf = event => {
+  const data = event.data ?? {};
+  if (event.type === "work_claim.updated") {
+    const owner = data.ownerId ? `owner ${data.ownerId}` : "unowned";
+    return `claim ${data.workClaim} ${data.action} · ${owner}${leaseText(data.leaseExpiresAt)}${data.paths?.length ? ` · ${data.paths.join(", ")}` : ""}`;
+  }
+  if (event.type === "land.updated") return `land ${data.repo ?? "?"}#${data.prNumber ?? "?"} ${data.state ?? data.change ?? "updated"}`;
+  if (typeof data.body === "string") return data.body.split("\n")[0].slice(0, 160);
+  return event.type ?? "event";
+};
 const eventLine = row => {
   const event = row?.event ?? {};
-  const body = typeof event.data?.body === "string" ? event.data.body.split("\n")[0].slice(0, 160) : null;
-  return { seq: row?.sequence, line: `- seq ${row?.sequence} · ${event.actorId ?? "unknown"} · ${body ?? event.type ?? "event"}` };
+  return { seq: row?.sequence, line: `- seq ${row?.sequence} · ${event.actorId ?? "unknown"} · ${summaryOf(event)}` };
 };
+
+// Who an event concerns: its actor, a claim's owner before or after, a PR's
+// claimant, a DM's addressee, or a member named by @handle in a message.
+const MEMBER_FIELDS = ["ownerId", "previousOwnerId", "claimantMemberId", "toMemberId", "memberId"];
+export function eventConcerns(event, { memberId, handles = [] } = {}) {
+  if (!event || !memberId) return false;
+  if (event.actorId === memberId) return true;
+  const data = event.data ?? {};
+  if (MEMBER_FIELDS.some(field => data[field] === memberId)) return true;
+  if (typeof data.body !== "string") return false;
+  return handles.some(handle => {
+    const name = String(handle).replace(/^@/, "").trim();
+    return name && new RegExp(`(^|[^\\w@])@${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w-])`, "i").test(data.body);
+  });
+}
+
+const typeMatches = (type, filters) => !filters.length
+  || filters.some(filter => type === filter || (typeof type === "string" && type.startsWith(`${filter}.`)));
+
+// One catch-up read for a wake loop: scan from a checkpoint, keep the events
+// that match the type prefixes (and, with mine, concern this member), and hand
+// back the checkpoint to store. The checkpoint advances over everything
+// scanned, so a filter that matches nothing never re-reads the same page.
+export async function tail(client, { after = 0, types = [], mine = false, memberId, handles = [], pageSize = 100, maxPages = 5, signal } = {}) {
+  assertClient(client, ["changes"]);
+  if (!Number.isSafeInteger(after) || after < 0) throw new CoordError("invalid_input", "after must be a nonnegative sequence");
+  if (!Number.isSafeInteger(maxPages) || maxPages < 1 || maxPages > 50) throw new CoordError("invalid_input", "maxPages must be 1 to 50");
+  if (mine && !memberId) throw new CoordError("invalid_input", "mine needs the caller's memberId");
+  const filters = types.map(type => String(type).trim()).filter(Boolean);
+  const events = [];
+  let cursor = after;
+  let hasMore = false;
+  for (let page = 0; page < maxPages; page += 1) {
+    const result = await client.changes(cursor, pageSize, { signal });
+    for (const row of result?.events ?? []) {
+      if (!typeMatches(row.event?.type, filters)) continue;
+      if (mine && !eventConcerns(row.event, { memberId, handles })) continue;
+      events.push({ seq: row.sequence, type: row.event.type, actorId: row.event.actorId, at: row.event.at, summary: summaryOf(row.event) });
+    }
+    const next = Number.isSafeInteger(result?.next) ? result.next : (result?.events?.at(-1)?.sequence ?? cursor);
+    hasMore = Boolean(result?.hasMore) && next > cursor;
+    cursor = Math.max(cursor, next);
+    if (!hasMore) break;
+  }
+  return { after: cursor, hasMore, events };
+}
 
 // Human digest. Every line cites its source: a room sequence number or a
 // claim id, so a reader can open the fact instead of trusting a summary.

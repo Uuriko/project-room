@@ -6,7 +6,7 @@ import { pathToFileURL } from "node:url";
 import { agentConnectionFromEnvironment, connectionDiagnostic } from "../client/agent-connection.mjs";
 import { RoomAgentClient } from "../client/room-agent.mjs";
 import { RoomLandClient } from "../client/room-land.mjs";
-import { CoordError, claimAndVerify, coordStatus, digest, handoff, land, renewWithProgress, verifyClaim } from "../client/room-coord.mjs";
+import { CoordError, claimAndVerify, coordStatus, digest, handoff, land, renewWithProgress, tail, verifyClaim } from "../client/room-coord.mjs";
 
 export const USAGE = `Usage: room-coord <command> [options]
   status [--md] [--expiring-min N]       live claims, mine, expiring, overlaps, land queue
@@ -17,9 +17,11 @@ export const USAGE = `Usage: room-coord <command> [options]
   done <id> [--note T]
   land --repo owner/name --pr N
   digest [--after SEQ] [--limit N]       markdown digest; every line cites a seq or claim id
+  tail [--after SEQ] [--types work_claim,land,message] [--mine] [--handle "Grok Bot"] [--pages N]
+                                         events since a checkpoint; store the returned "after"
 Connection: ROOM_AGENT_CONFIG=<dir> or ROOM_AGENT_ORIGIN/ROOM/MEMBER/TOKEN.`;
 
-const FLAGS = new Set(["md", "allow-overlap"]);
+const FLAGS = new Set(["md", "allow-overlap", "mine"]);
 
 export function parseArgs(argv) {
   const positional = [];
@@ -82,6 +84,9 @@ export async function run(argv, { client, lander, memberId, now } = {}) {
       const status = await coordStatus(client, { lander, memberId, now });
       return digest({ events: page?.events ?? [], status });
     }
+    case "tail":
+      return tail(client, { after: integer(options.after, "--after", 0), types: list(options.types) ?? [], mine: Boolean(options.mine),
+        memberId, handles: list(options.handle) ?? [], maxPages: integer(options.pages, "--pages", 5) });
     default:
       throw new CoordError("usage_error", USAGE);
   }

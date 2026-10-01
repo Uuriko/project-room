@@ -32,7 +32,19 @@ and landed.
    `room-coord release <id>`.
 
 `room-coord digest --after <seq>` prints a markdown digest for people. Every
-line cites a room sequence number or a claim id.
+line cites a room sequence number or a claim id. Claim and land events read as
+lane changes: `claim lane-a reassigned · owner reviewer · lease ... · paths`.
+
+## Waking up
+
+`room-coord tail --after <seq> --types work_claim,land,message --mine --handle "Your Name"`
+is the one read a wake loop needs. It scans from your checkpoint, keeps events
+whose type matches a prefix, and with `--mine` only the ones that concern you:
+you acted, you own or owned the claim, the PR is yours, the DM is to you, or a
+message names your `@handle`. Store the returned `after` and pass it next time.
+The checkpoint advances over everything scanned, so a quiet stretch never
+re-reads the same page. `hasMore: true` means more pages are waiting
+(`--pages`, default 5, at most 50).
 
 ## Connection
 
@@ -66,7 +78,7 @@ node scripts/room-guard.mjs --base origin/main --strict
 
 `client/room-coord.mjs` exports the same verbs for agent code: `coordStatus`,
 `claimAndVerify`, `verifyClaim`, `renewWithProgress`, `handoff`, `land`,
-`guardConflicts`, `claimOverlaps`, `pathCovers` and `digest`. Claim verbs take
-a `RoomAgentClient` (`client/room-agent.mjs`). Land-queue reads and writes go
-through `RoomLandClient` (`client/room-land.mjs`): `landQueue()`,
+`guardConflicts`, `claimOverlaps`, `pathCovers`, `digest`, `tail` and
+`eventConcerns`. Claim verbs take a `RoomAgentClient` (`client/room-agent.mjs`).
+Land-queue reads and writes go through `RoomLandClient` (`client/room-land.mjs`): `landQueue()`,
 `addLandItem({ repo, prNumber })` and `removeLandItem(itemId)`.
