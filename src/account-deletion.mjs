@@ -44,6 +44,9 @@ export const KNOWN_CATEGORIES = Object.freeze({
   sessions: { priority: 20, dependsOn: ["credentials"] },
   notifications: { priority: 30, dependsOn: [] },
   messages: { priority: 40, dependsOn: [] },
+  // QA2 finding P2-11: owned-room disposition runs before memberships drop,
+  // so a personal room is archived before the account leaves it.
+  owned_rooms: { priority: 45, dependsOn: [] },
   media: { priority: 50, dependsOn: ["messages"] },
   activity: { priority: 60, dependsOn: [] },
   integrations: { priority: 70, dependsOn: [] },
@@ -222,6 +225,19 @@ export function summarizePurge(plan) {
     for (const s of retained) lines.push(`  - ${s.category} (${s.itemCount} items): ${s.reason}`);
   }
   if (steps.length === 0) lines.push("No data categories in inventory: nothing to purge.");
+  const rooms = isPlainObject(plan?.rooms) ? plan.rooms : null;
+  if (rooms) {
+    const names = list => (Array.isArray(list) ? list : [])
+      .filter(room => isPlainObject(room) && typeof room.id === "string")
+      .map(room => `${typeof room.title === "string" && room.title ? room.title : room.id} (${room.id})`);
+    const write = (label, list) => {
+      const named = names(list);
+      if (named.length) lines.push(`${label}: ${named.join(", ")}.`);
+    };
+    write("Personal rooms archived and purged", rooms.archive);
+    write("Shared rooms kept with another owner", rooms.transfer);
+    write("Shared rooms blocking deletion until ownership is transferred", rooms.blocked);
+  }
   return Object.freeze({
     accountId: isPlainObject(plan) ? plan.accountId ?? null : null,
     purgeCount: purged.length,

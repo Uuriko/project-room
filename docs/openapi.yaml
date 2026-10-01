@@ -8955,8 +8955,12 @@ paths:
         ordered purge plan for the caller's account (wired to
         src/account-deletion.mjs) and returns the human-readable
         confirmation summary plus a short-lived confirmationToken bound to
-        (account, plan). The token is redeemed at POST /api/account/delete.
-        10 per address per minute.
+        (account, plan), including owned-room dispositions. QA2 finding
+        P2-11: a solely owned personal room is archived and its messages
+        and files are purged; a shared room with another owner is
+        transferred; a shared room with other members and no other owner
+        is listed on plan.rooms.blocked. The token is redeemed at
+        POST /api/account/delete. 10 per address per minute.
       security:
         - accountSession: []
       responses:
@@ -8970,11 +8974,17 @@ paths:
         RC-2026-09-19-078. Account-session write (X-CSRF-Token, Origin).
         Body is `{ confirmationToken }` from GET /api/account/deletion/plan.
         The plan is rebuilt from the live store and the token verified
-        against it: changed data 409s as plan_changed. On success the
-        account's credentials, sessions, login methods, passkeys, room
-        memberships, and profile data are purged, the account is
-        deactivated and scrubbed, and the account_session cookie is
-        cleared. Audit rows stay under legal hold. 5 per address per minute.
+        against it, including owned-room dispositions: changed data 409s
+        as plan_changed. QA2 finding P2-11: when the account solely owns
+        a shared room that still has other members and no other owner,
+        deletion 409s as transfer_ownership_required and lists those rooms;
+        nothing is deleted. On success, solely owned personal rooms are
+        archived and their messages and files purged, shared rooms with
+        another owner are transferred, and the account's credentials,
+        sessions, login methods, passkeys, room memberships, and profile
+        data are purged. The account is deactivated and scrubbed, and
+        the account_session cookie is cleared. Audit rows and the
+        deactivated tombstone stay under legal hold. 5 per address per minute.
       security:
         - accountSession: []
       requestBody:
@@ -8990,7 +9000,7 @@ paths:
         '200': { description: "{ deleted: true, accountId, receipt: { purged, retained } }" }
         '401': { description: "account_session_required, invalid_session or invalid_confirmation" }
         '403': { description: origin_denied or csrf_denied }
-        '409': { description: plan_changed }
+        '409': { description: "plan_changed, or transfer_ownership_required with rooms: [{ id, title, kind }]" }
         '422': { description: invalid_deletion or invalid_purge_plan }
         '429': { description: rate_limited }
   /api/inbox/connections:
