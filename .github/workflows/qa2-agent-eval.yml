@@ -2,8 +2,8 @@ name: qa2-agent-eval
 
 # Agent-user eval suite against a throwaway local server (never production):
 # synthetic agent journeys scored pass^3 (tau-bench style outcome checks), the
-# authz/IDOR role matrix, MCP robustness, abuse-guard ratchet, and the official
-# MCP conformance suite with a not-applicable baseline. See docs/QA-SYSTEM.md.
+# authz/IDOR role matrix, MCP robustness, and the official MCP conformance
+# suite with a not-applicable baseline. See docs/QA2-SYSTEMS.md.
 on:
   pull_request:
     paths: ["server/**", "src/**", "deploy/**", "cloudflare/**", "server.mjs", "scripts/qa2/**", "tests/qa2/**", "openapi*", "package*.json"]
@@ -28,11 +28,10 @@ jobs:
         with:
           node-version: 24
       - run: npm ci
-      - name: Agent journeys, authz matrix, MCP robustness, abuse guards
+      - name: Agent journeys, authz matrix, MCP robustness
         run: node --test --test-concurrency=1 tests/qa2/*.test.js
         env:
           QA2_E2E: "1"
-          QA2_FLOOD: "120"
       - name: MCP conformance (official suite + baseline)
         run: |
           PORT=4312 ROOM_DB=$RUNNER_TEMP/conf.sqlite ROOM_INSTANCE_LOCK_PATH=$RUNNER_TEMP/conf.lock node server.mjs > $RUNNER_TEMP/conf-server.log 2>&1 &

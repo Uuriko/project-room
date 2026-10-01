@@ -39,8 +39,8 @@ jobs:
       - name: Synthetic agent journey
         if: always()
         run: node scripts/qa2/agent-journeys.mjs --origin https://room.trydemigod.com --json journeys.json --md journeys.md || (cat journeys.md >> "$GITHUB_STEP_SUMMARY"; node -e 'const r=require("./journeys.json");const bad=r.summary.filter(s=>!s.passAt1&&s.id!=="J5");process.exit(bad.length?1:0)')
-      - if: always()
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
         with:
           name: qa2-synthetic-${{ github.run_id }}
           path: |
