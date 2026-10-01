@@ -93,6 +93,97 @@ export function toRegistrationResponse(credential) {
   };
 }
 
+// Appearance follows the room palette. Dark is the default so a fresh
+// session matches the rest of the product. "system" tracks the OS only
+// after an explicit choice.
+const THEME_KEY = "project-room-theme";
+let systemQuery = null;
+
+export function readThemePreference() {
+  try {
+    const value = globalThis.localStorage?.getItem(THEME_KEY);
+    return value === "light" || value === "system" ? value : "dark";
+  } catch {
+    return "dark";
+  }
+}
+
+function resolvedTheme(preference) {
+  if (preference === "light") return "light";
+  if (preference === "system") {
+    return globalThis.matchMedia?.("(prefers-color-scheme: light)")?.matches ? "light" : "dark";
+  }
+  return "dark";
+}
+
+export function applyTheme(preference) {
+  const mode = resolvedTheme(preference);
+  const root = globalThis.document?.documentElement;
+  if (!root) return mode;
+  if (mode === "light") root.dataset.theme = "light";
+  else delete root.dataset.theme;
+  if (root.style) root.style.colorScheme = mode;
+  return mode;
+}
+
+function onSystemTheme() {
+  if (readThemePreference() === "system") applyTheme("system");
+}
+
+function bindSystemTheme(preference) {
+  systemQuery?.removeEventListener?.("change", onSystemTheme);
+  systemQuery = null;
+  if (preference !== "system" || !globalThis.matchMedia) return;
+  systemQuery = globalThis.matchMedia("(prefers-color-scheme: light)");
+  systemQuery.addEventListener?.("change", onSystemTheme);
+}
+
+export function applyStoredTheme() {
+  const preference = readThemePreference();
+  bindSystemTheme(preference);
+  return applyTheme(preference);
+}
+
+export function storeTheme(preference) {
+  const next = preference === "light" || preference === "system" ? preference : "dark";
+  try { globalThis.localStorage?.setItem(THEME_KEY, next); } catch { /* private mode */ }
+  bindSystemTheme(next);
+  return applyTheme(next);
+}
+
+// Room Settings is a flat list in index.html (that file is owned by another
+// PR). Group the existing controls into the same sections as account settings
+// without removing them, so Results-only mode and the settings opener still
+// find each panel by id.
+export function organizeRoomSettings(dialog, doc = globalThis.document) {
+  if (!dialog || dialog.dataset?.settingsGrouped === "true" || !doc?.createElement) return;
+  const groups = [
+    ["Room", ["create-room-details", "room-about"], "The room’s name, purpose, and instructions."],
+    ["Agents & connections", ["room-permissions", "room-tools"], "Who can assign agents, and the room’s suggestions."],
+    ["Billing / plan", ["usage-panel", "spend-panel"], "Usage is what agents reported. Spend is this room’s allowance, not a subscription."],
+    ["Advanced", ["advanced-room-tools", "record-panel", "room-health"], "Landing, referrals, history, and owner-only health."]
+  ];
+  const results = dialog.querySelector("#results-panel");
+  for (const [label, ids, hint] of groups) {
+    const nodes = ids.map(id => dialog.querySelector(`#${id}`)).filter(Boolean);
+    if (!nodes.length) continue;
+    const section = doc.createElement("section");
+    section.className = "settings-group";
+    const titleId = `settings-group-${label.toLowerCase().replace(/[^a-z]+/g, "-").replace(/^-|-$/g, "")}`;
+    section.setAttribute("aria-labelledby", titleId);
+    const heading = doc.createElement("h3");
+    heading.className = "settings-group-title";
+    heading.id = titleId;
+    heading.textContent = label;
+    const note = doc.createElement("p");
+    note.className = "form-hint";
+    note.textContent = hint;
+    section.append(heading, note, ...nodes);
+    dialog.insertBefore(section, results);
+  }
+  dialog.dataset.settingsGrouped = "true";
+}
+
 // --- HTML rendering ---
 function methodRowHtml(method) {
   const id = escapeHtml(method.id);
@@ -160,20 +251,42 @@ function mailSectionHtml(providers) {
       : `<p class="form-hint">Email delivery isn\u2019t configured on this Room, so magic links are unavailable.</p>`);
 }
 
+function section(id, title, body) {
+  return `<section class="settings-section" aria-labelledby="${id}"><h3 id="${id}">${title}</h3>${body}</section>`;
+}
+
+function appearanceHtml() {
+  const selected = readThemePreference();
+  const option = (value, label) => `<label><input type="radio" name="theme" value="${value}"${selected === value ? " checked" : ""}> ${label}</label>`;
+  return `<fieldset class="settings-appearance"><legend>Appearance</legend>${option("dark", "Dark")}${option("light", "Light")}${option("system", "Match system")}</fieldset>`;
+}
+
+function profileSectionHtml(methods) {
+  const emails = [...new Set(methods.map(method => method.email).filter(Boolean))];
+  const identity = emails.length
+    ? `<ul class="settings-identity">${emails.map(email => `<li>${escapeHtml(email)}</li>`).join("")}</ul>`
+    : `<p class="settings-empty">No email on this account yet. Add a sign-in method under Advanced.</p>`;
+  return section("settings-profile-title", "Profile", identity + appearanceHtml());
+}
+
 export function settingsHtml({ methods = [], providers = null } = {}) {
   const rows = methods.map(methodRowHtml).join("");
+  const methodsBody = methods.length > 0
+    ? `<ul class="settings-methods">${rows}</ul><p class="form-hint">Keep at least one active method \u2014 the last one can\u2019t be disabled or removed.</p>`
+    : `<p class="settings-empty">No sign-in methods are linked yet.</p>`;
   return `<div class="account-settings">`
     + `<p class="form-hint" role="status" data-settings-status hidden></p>`
-    + `<h3>Linked sign-in methods</h3>`
-    + (methods.length > 0
-      ? `<ul class="settings-methods">${rows}</ul><p class="form-hint">Keep at least one active method \u2014 the last one can\u2019t be disabled or removed.</p>`
-      : `<p class="form-hint">No sign-in methods are linked yet.</p>`)
-    + `<h3>Add a sign-in method</h3>`
-    + passwordSectionHtml(methods)
-    + passkeySectionHtml()
-    + oauthSectionHtml(providers)
-    + recoverySectionHtml(methods)
-    + mailSectionHtml(providers)
+    + profileSectionHtml(methods)
+    + section("settings-notifications-title", "Notifications",
+      `<p class="settings-empty">Nothing to configure here yet. Room notifications stay in Catch up.</p>`)
+    + section("settings-agents-title", "Agents &amp; connections", oauthSectionHtml(providers) + mailSectionHtml(providers))
+    + section("settings-billing-title", "Billing / plan",
+      `<p class="settings-empty">No plan is billed from account settings. A room\u2019s spend allowance is under Settings, in Billing / plan.</p>`)
+    + section("settings-advanced-title", "Advanced",
+      `<h3>Linked sign-in methods</h3>${methodsBody}`
+      + passwordSectionHtml(methods)
+      + passkeySectionHtml()
+      + recoverySectionHtml(methods))
     + `</div>`;
 }
 
@@ -298,11 +411,22 @@ export function createAccountSettingsUI({ accountClient, credentials = null } = 
     submitPasswordForm(form);
   };
 
+  const onChange = event => {
+    const input = event.target;
+    if (!input || input.name !== "theme" || !container?.contains(input)) return;
+    storeTheme(input.value);
+  };
+
   const mount = next => {
-    if (container) { container.removeEventListener("click", onClick); container.removeEventListener("submit", onSubmit); }
+    if (container) {
+      container.removeEventListener("click", onClick);
+      container.removeEventListener("submit", onSubmit);
+      container.removeEventListener("change", onChange);
+    }
     container = next;
     container.addEventListener("click", onClick);
     container.addEventListener("submit", onSubmit);
+    container.addEventListener("change", onChange);
     return refresh();
   };
 

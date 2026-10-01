@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import {
   methodLabel, methodDetail, formatMethodDate,
   base64urlToBytes, bytesToBase64url, toRegistrationPublicKey,
-  toRegistrationResponse, settingsHtml, createAccountSettingsUI
+  toRegistrationResponse, settingsHtml, createAccountSettingsUI, storeTheme, applyStoredTheme
 } from "../src/account-settings-ui.js";
 
 test("methodLabel names every method type honestly", () => {
@@ -87,14 +87,57 @@ test("settingsHtml shows linked methods with actions and honest provider states"
   assert.ok(html.includes("Google sign-in isn\u2019t configured on this Room."), "unconfigured Google is honest");
   assert.ok(html.includes("Email delivery isn\u2019t configured on this Room"), "unconfigured mail is honest");
   assert.ok(html.includes("data-form=\"password-change\""), "an existing password offers change, not set");
+  for (const heading of ["Profile", "Notifications", "Agents &amp; connections", "Billing / plan", "Advanced", "Linked sign-in methods"]) {
+    assert.ok(html.includes(heading), heading);
+  }
+  assert.ok(html.includes("Nothing to configure here yet. Room notifications stay in Catch up."));
+  assert.ok(html.includes("No plan is billed from account settings."));
+  assert.ok(html.includes("a@b.c"), "profile lists the account email");
 });
 
 test("settingsHtml offers password set when none exists and recovery generation", () => {
   const html = settingsHtml({ methods: [], providers: null });
   assert.ok(html.includes("No sign-in methods are linked yet."));
+  assert.ok(html.includes("No email on this account yet. Add a sign-in method under Advanced."));
   assert.ok(html.includes("data-form=\"password-set\""));
   assert.ok(html.includes("Generate recovery codes"));
   assert.ok(html.includes("GitHub sign-in isn\u2019t configured on this Room."));
+});
+
+test("storeTheme paints light or dark and remembers the choice", () => {
+  const root = { dataset: {}, style: {} };
+  const saved = { document: globalThis.document, localStorage: globalThis.localStorage, matchMedia: globalThis.matchMedia };
+  const bag = new Map();
+  let matches = false;
+  globalThis.document = { documentElement: root };
+  globalThis.localStorage = {
+    getItem: key => bag.get(key) ?? null,
+    setItem: (key, value) => bag.set(key, value)
+  };
+  globalThis.matchMedia = () => ({ matches, addEventListener() {}, removeEventListener() {} });
+  try {
+    assert.equal(storeTheme("light"), "light");
+    assert.equal(root.dataset.theme, "light");
+    assert.equal(root.style.colorScheme, "light");
+    assert.equal(bag.get("project-room-theme"), "light");
+    assert.equal(storeTheme("nope"), "dark");
+    assert.equal(root.dataset.theme, undefined);
+    assert.equal(root.style.colorScheme, "dark");
+    matches = true;
+    assert.equal(storeTheme("system"), "light");
+    assert.equal(root.dataset.theme, "light");
+    matches = false;
+    assert.equal(applyStoredTheme(), "dark");
+    assert.equal(root.dataset.theme, undefined);
+    assert.equal(bag.get("project-room-theme"), "system");
+  } finally {
+    if (saved.document === undefined) delete globalThis.document;
+    else globalThis.document = saved.document;
+    if (saved.localStorage === undefined) delete globalThis.localStorage;
+    else globalThis.localStorage = saved.localStorage;
+    if (saved.matchMedia === undefined) delete globalThis.matchMedia;
+    else globalThis.matchMedia = saved.matchMedia;
+  }
 });
 
 // --- Wired behavior with stubs ---
