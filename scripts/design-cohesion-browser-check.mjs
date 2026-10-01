@@ -10,6 +10,9 @@ import { createRoomServer } from "../server/http.mjs";
 import { signInFixture } from "./auth-signin.mjs";
 import { openSettings } from "./room-chrome.mjs";
 import { ROOM_ENTRY_HTML, publicRoomDoorHtml } from "../deploy/room-entry.mjs";
+import { contrastRatio } from "../src/design-tokens.js";
+
+const hex = rgb => "#" + rgb.match(/\d+/g).slice(0, 3).map(n => Number(n).toString(16).padStart(2, "0")).join("");
 
 const shots = "/opt/cursor/artifacts/design";
 
@@ -43,6 +46,14 @@ test("shared tokens, focus, and settings sections render together", { timeout: 6
   await page.locator("#auth-title").waitFor();
   const bg = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--bg").trim());
   assert.equal(bg, "#202127");
+  const hint = await page.locator("#auth-hero > .form-hint").evaluate(node => {
+    const color = getComputedStyle(node).color;
+    const background = getComputedStyle(node.parentElement).backgroundColor;
+    return { color, background };
+  });
+  const hintRatio = contrastRatio(hex(hint.color), hex(hint.background));
+  assert.ok(hintRatio >= 4.5, `#auth-hero hint ${hint.color} on ${hint.background} is ${hintRatio.toFixed(2)}:1`);
+  assert.equal(hex(hint.color), "#aaaab7");
   await page.keyboard.press("Tab");
   const outline = await page.evaluate(() => {
     const style = getComputedStyle(document.activeElement);
