@@ -79,7 +79,7 @@ function refusal(fn) {
 }
 
 test("anonymous mints are budgeted per address and per network", () => {
-  let now = Date.parse("2026-06-01T00:00:00Z");
+  const now = Date.parse("2026-06-01T00:00:00Z");
   const store = openStore({ after: () => {} }, () => now);
   try {
     const ids = mint(store, { addressDailyLimit: 1, networkDailyLimit: 2 });
@@ -93,16 +93,16 @@ test("anonymous mints are budgeted per address and per network", () => {
     const other = ids.create("Addr Three", anon("198.51.101.4"));
     assert.equal(other.displayName, "Addr Three");
 
-    const networked = mint(store, { addressDailyLimit: 10, networkDailyLimit: 2, anonymousDailyLimit: 10 });
+    const networked = mint(store, { addressDailyLimit: 10, networkDailyLimit: 2 });
     networked.create("Net One", anon("203.0.113.1"));
     networked.create("Net Two", anon("203.0.113.2"));
     const crowded = refusal(() => networked.create("Net Three", anon("203.0.113.3")));
     assert.equal(crowded.status, 429);
     assert.match(crowded.message, /network budget/);
-    const nextNetwork = networked.create("Net Four", anon("203.0.113.200"));
+    const nextNetwork = networked.create("Net Four", anon("203.0.114.1"));
     assert.equal(nextNetwork.displayName, "Net Four");
 
-    const v6 = mint(store, { networkDailyLimit: 1, addressDailyLimit: 10, anonymousDailyLimit: 10 });
+    const v6 = mint(store, { networkDailyLimit: 1, addressDailyLimit: 10 });
     v6.create("V6 One", anon("2001:db8:1:2::1"));
     const samePrefix = refusal(() => v6.create("V6 Two", anon("2001:db8:1:2::abcd")));
     assert.match(samePrefix.message, /network budget/);
@@ -134,22 +134,28 @@ test("minute and daily budgets stop anonymous mints and leave in-process mints a
     assert.match(second.message, /Too many identity mints from this address/);
     assert.equal(second.headers["Retry-After"], "60");
 
-    const daily = mint(store, { anonymousDailyLimit: 1, addressDailyLimit: 10, networkDailyLimit: 10 });
+  } finally {
+    store.close();
+  }
+
+  const dailyStore = openStore({ after: () => {} }, () => now);
+  try {
+    const daily = mint(dailyStore, { anonymousDailyLimit: 1, addressDailyLimit: 10, networkDailyLimit: 10 });
     daily.create("Day One", anon("192.0.2.30"));
     const over = refusal(() => daily.create("Day Two", anon("192.0.2.31")));
     assert.match(over.message, /daily budget/);
     assert.equal(over.headers["Retry-After"], "3600");
     const invited = daily.create("Invited");
     assert.match(invited.secret, /^pri_/);
-    assert.equal(stored(store, invited.identityId).mintAddress, null);
-    assert.equal(countOf(store), 3);
+    assert.equal(stored(dailyStore, invited.identityId).mintAddress, null);
+    assert.equal(countOf(dailyStore), 2);
 
     now += 25 * 60 * 60 * 1000;
     const rolled = daily.create("Day Three", anon("192.0.2.30"));
     assert.equal(rolled.displayName, "Day Three");
-    assert.equal(countOf(store), 4);
+    assert.equal(countOf(dailyStore), 3);
   } finally {
-    store.close();
+    dailyStore.close();
   }
 });
 
@@ -209,7 +215,7 @@ test("proof is required after the free quota, and recoverable replay does not sp
 });
 
 test("anonymous identities that never activate expire; auth, link, and post keep them", async () => {
-  let now = Date.parse("2026-06-04T00:00:00Z");
+  const now = Date.parse("2026-06-04T00:00:00Z");
   const store = openStore({ after: () => {} }, () => now);
   try {
     const ids = mint(store);
