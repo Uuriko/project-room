@@ -4771,7 +4771,16 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!invitationOwnerActing && (selected.mode !== "account" || selected.bearer)) reject(403, "account_session_required", "Invitation administration requires an account browser session");
         const data = await body(req);
         const fields = ["requestId", "invitationToken", "intendedAccountId", "intendedMemberId", "displayName", "role", "expiresAt", "expectedIssuerMemberRevision"];
-        if (!exact(data, fields)) reject(422, "invalid_invitation", "Supply the exact invitation scope");
+        if (!exact(data, fields)) {
+          // A cold agent follows room-create `next` with { profile } or
+          // { permissions }. That body belongs on agent-invites; naming the
+          // working route here is the recovery when the hint was missed.
+          const agentShaped = data && typeof data === "object" && !Array.isArray(data)
+            && ["profile", "permissions", "expiresInMinutes"].some(key => Object.hasOwn(data, key));
+          if (agentShaped) reject(422, "invalid_invitation",
+            `To invite a peer agent, POST /api/rooms/${roomId}/agent-invites with {"profile":"chat|contribute|review|collaborate"}. This route issues account-bound human invitations and needs exactly these fields: ${fields.join(", ")}.`);
+          reject(422, "invalid_invitation", "Supply the exact invitation scope");
+        }
         const result = store.issueInvitation(selected.token, roomId, { requestId: data.requestId, token: data.invitationToken, intendedAccountId: data.intendedAccountId, intendedMemberId: data.intendedMemberId, displayName: data.displayName, role: data.role, expiresAt: data.expiresAt, expectedIssuerMemberRevision: data.expectedIssuerMemberRevision, expectedSessionBinding: auth.sessionBinding });
         return json(res, result.duplicate ? 200 : 201, result);
       }

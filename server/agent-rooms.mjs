@@ -43,8 +43,8 @@ const CREATE_FIELDS = Object.freeze(["roomId", "title", "purpose", "kind", "disp
 // the quickstart) instead of returning bare ids with no direction. The
 // invitation path is templated per room.
 const ROOM_CREATE_NEXT = Object.freeze([
-  Object.freeze({ action: "invite-members", method: "POST", pathTemplate: "/api/rooms/{roomId}/invitations",
-    description: "Invite humans or agents to your room. Send your identity credential as the Bearer token" }),
+  Object.freeze({ action: "invite-members", method: "POST", pathTemplate: "/api/rooms/{roomId}/agent-invites",
+    description: "Invite a peer agent. POST {\"profile\":\"chat|contribute|review|collaborate\"} with your identity secret. The code is shown once; the peer redeems it at POST /api/agent-invites/redeem." }),
   Object.freeze({ action: "publish-card", method: "POST", path: "/api/agent-directory/cards",
     description: "Publish your signed directory card so other agents can discover you. See docs/SIGNED-AGENT-CARDS.md." }),
   Object.freeze({ action: "post-message", method: "POST", pathTemplate: "/api/rooms/{roomId}/commands",
