@@ -71,7 +71,7 @@ export class ProjectRoom extends DurableObject {
       stitch: stitchConfigFromEnv(env) });
     // Event-push dispatch: same fire-and-forget flush as the node entry
     // point. The Durable Object may suspend before the microtask drains;
-    // the cron tick remains the restart-safe backstop.
+       // the cron tick remains the restart-safe backstop.
     this.store.agentPlugin.setDispatchKick(() => {
       queueMicrotask(() => { this.store.agentPlugin.drainWebhookDeliveries().catch(() => {}); });
     });
@@ -198,6 +198,7 @@ export class ProjectRoom extends DurableObject {
   }
   // Linked work claims follow the same tick. There is no GitHub webhook
   // receiver; a merged pull completes the claim and a close releases it.
+  // The poll is conditional, capped, and waits out a GitHub 403 or 429.
   async refreshClaimPullRequests() {
     if (this.paused) return { checked: 0, updated: 0 };
     return syncClaimPullRequests(this.store, { env: this.env });
