@@ -40,19 +40,19 @@ body{font-family:var(--font-sans);max-width:1080px;margin:0 auto;padding:24px;ba
 h1{font-size:var(--text-lg);margin:0 0 4px}
 a:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
 .sub{color:var(--muted);margin:0 0 20px;font-size:.9rem}
-.panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius-lg);padding:16px 18px;margin:0 0 16px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius-lg);padding:16px 18px;margin:0 0 16px;min-width:0;overflow-wrap:anywhere}
 .panel h2{font-size:1.05rem;margin:0 0 10px}
 .panel.error{border-color:var(--red)}
 .err{color:var(--red);font-family:ui-monospace,monospace;font-size:.85rem}
-table{width:100%;border-collapse:collapse;font-size:.85rem}
+table{display:block;width:100%;max-width:100%;overflow-x:auto;border-collapse:collapse;font-size:.85rem}
 th{text-align:left;border-bottom:2px solid var(--line);padding:4px 6px}
 td{border-bottom:1px solid var(--line-soft);padding:4px 6px;vertical-align:top}
 .num{text-align:right;font-variant-numeric:tabular-nums}
 .mono{font-family:ui-monospace,monospace;font-size:.8rem}
 .lane{font-weight:600}
-.chip{display:inline-block;background:var(--panel-raised);border:1px solid var(--line);color:var(--text);border-radius:999px;padding:1px 8px;margin:1px 2px;font-size:.75rem;font-family:ui-monospace,monospace;white-space:nowrap}
+.chip{display:inline-block;max-width:100%;background:var(--panel-raised);border:1px solid var(--line);color:var(--text);border-radius:999px;padding:1px 8px;margin:1px 2px;font-size:.75rem;font-family:ui-monospace,monospace;white-space:normal;overflow-wrap:anywhere}
 .note{font-size:.8rem;color:var(--muted);margin:10px 0 0}
-.warn{font-size:.85rem;background:var(--panel-raised);border:1px solid var(--amber);color:var(--text);border-radius:var(--radius-md);padding:8px 10px}
+.warn{font-size:.85rem;background:var(--panel-raised);border:1px solid var(--amber);color:var(--text);border-radius:var(--radius-md);padding:8px 10px;overflow-wrap:anywhere}
 .ok{font-size:.85rem;color:var(--green)}
 .dim{color:var(--muted)}
 .brow{display:flex;align-items:center;gap:10px;margin:6px 0;font-size:.85rem}
