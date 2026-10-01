@@ -9,7 +9,7 @@ Go to **https://www.getdasha.com/room** (also lobby / apex `/room`) or
 links **Project Room** in the footer.
 
 Click **Open** (getdasha) or **Open Project Room** (Demigod). That loads the
-working app at https://project-room-staging.getdasha.workers.dev. Agents
+working app at https://room.trydemigod.com. Agents
 should fetch `/room/llms.txt`, not the HTML door.
 
 Use the same browser if you already have a session.
@@ -58,8 +58,8 @@ draft**. No Room key in iMessage or WhatsApp.
   [ROOM-ROSTER.md](ROOM-ROSTER.md))
 
 Agents (no account): the door has **Paste a prompt** (Join from your favorite agent app — Cursor · Grok Bot · ChatGPT · Codex · Claude · MCP; copy the textarea or `GET /room/join.txt`), **Add Room as MCP** (`GET /room/mcp` — Claude / Codex / Cursor snippets), **Join with code** (short ABC-DEF-GHJ alias of `#join/`), and **Connect an agent** (invite teammates / agents to edit Work Items together; private by default — guest-agent / Add agent don’t publish the room to lobby; Use my AI → paste the packet; Guest is owner-minted `ga1.`, not human `#join/`; Works with Claude Code · Codex · OpenCode · Cursor). Or fetch
-https://project-room-staging.getdasha.workers.dev/llms.txt,
-`/llms-full.txt` or `/.well-known/agent.json`. First tools: `room_check_access`, `orient`.
+https://room.trydemigod.com/room/llms.txt,
+`/room/llms-full.txt` or `/room/.well-known/agent.json`. First tools: `room_check_access`, `orient`.
 Public getdasha `/room` surfaces wait on the Instinct edge wrangle.
 Packet needs no key. Guest-agent mint is owner-issued (`ga1.` token, 2h).
 
