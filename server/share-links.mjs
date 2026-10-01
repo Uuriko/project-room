@@ -8,7 +8,7 @@ import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { refuseArchivedWrite } from "./room-lifecycle.mjs";
 import { classifyJoinToken } from "./guest-agent-links.mjs";
 import { normalizeShareInviteCode, parseShareInviteCode } from "../src/share-invite-code.js";
-import { PERSONAL_INVITE_PREFIX, PERSONAL_INVITE_TTL_MS, personalInviteToken } from "./growth-loop.mjs";
+import { PERSONAL_INVITE_PREFIX, PERSONAL_INVITE_TTL_MS, personalInviteToken, rememberReferee } from "./growth-loop.mjs";
 
 // Agent admissions reuse the durable membership event as their receipt. The
 // link ID is public metadata; neither the invitation token nor its hash is exposed.
@@ -150,7 +150,7 @@ export class ShareLinks {
         inviterDisplayName };
     });
   }
-  joinAgent(identitySecret, linkToken, displayName) {
+  joinAgent(identitySecret, linkToken, displayName, trace = {}) {
     if (typeof displayName !== "string" || !displayName.trim() || displayName.length > 80 || /[\u0000-\u001f\u007f]/.test(displayName))
       fail(422, "invalid_join", "Choose an agent name of 1–80 characters");
     return this.store.transaction(() => {
@@ -189,7 +189,7 @@ export class ShareLinks {
       this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, row.room_id);
       this.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)")
         .run(row.room_id, identity.identityId, identity.identityId, now);
-      this.creditReferral(row, identity.identityId, now);
+      this.creditReferral(row, identity.identityId, now, trace);
       return { roomId: row.room_id, identityId: identity.identityId, memberId: identity.identityId, permissions: [], duplicate: false };
     });
   }
@@ -315,7 +315,7 @@ export class ShareLinks {
       return { link: this.view(this.db.prepare("SELECT * FROM share_links WHERE id=?").get(id)) };
     });
   }
-  join(slotToken, linkToken, { displayName, redemptionId, expectedSessionRevision, expectedSessionBinding, revokeRoomToken = null }) {
+  join(slotToken, linkToken, { displayName, redemptionId, expectedSessionRevision, expectedSessionBinding, revokeRoomToken = null, clientAddress = null, clientSession = null }) {
     if (typeof displayName !== "string" || !displayName.trim() || displayName.length > 80 || /[\u0000-\u001f\u007f]/.test(displayName)
       || typeof redemptionId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(redemptionId)
       || !Number.isSafeInteger(expectedSessionRevision)) fail(422, "invalid_join", "Enter a name of 1–80 characters and try joining again");
@@ -401,7 +401,7 @@ export class ShareLinks {
       this.store.appendInvitationJournal(record, "accepted");
       this.db.prepare("INSERT INTO share_link_joins VALUES(?,?,?,?,?,?)").run(row.id, invitationId, slot.credentialHash, redemptionId, auth.sessionRevision, fingerprint);
       this.verifyJoin({ link_id: row.id, invitation_id: invitationId, fingerprint });
-      this.creditReferral(row, memberId, now);
+      this.creditReferral(row, memberId, now, { address: clientAddress, session: clientSession ?? slotToken });
       return this.result(slotToken, row.room_id, false);
     });
   }
@@ -409,10 +409,11 @@ export class ShareLinks {
   // the room's referral board (via "invite"), in the join's transaction, the
   // same way agent-invite redemption does. Retries return the duplicate path
   // before reaching here, and the referrals primary key keeps it exactly-once.
-  creditReferral(row, refereeMemberId, at) {
+  creditReferral(row, refereeMemberId, at, trace = {}) {
     const issuer = this.store.room(row.room_id).state.members?.[row.issuer_member_id];
     if (!this.store.referrals || !issuer || issuer.active === false || row.issuer_member_id === refereeMemberId) return;
     this.store.referrals.record({ roomId: row.room_id, referrerMemberId: row.issuer_member_id, refereeMemberId, via: "invite", at });
+    rememberReferee(this.store, row.room_id, refereeMemberId, trace);
   }
   result(slotToken, roomId, duplicate) {
     const auth = this.store.authenticateAccountSession(slotToken, roomId);

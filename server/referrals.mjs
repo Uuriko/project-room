@@ -20,7 +20,7 @@
 import { randomUUID } from "node:crypto";
 import { event, EVENT_TYPES as T, isRoomArchived } from "../src/events.js";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
-import { ensureActivationColumn, inviteMessage, memberReward, settleActivations } from "./growth-loop.mjs";
+import { ensureActivationColumn, ensurePayoutColumns, inviteMessage, memberReward, settleActivations, stampIssuer } from "./growth-loop.mjs";
 
 // Local ServiceError (mirrors server/store.mjs). We avoid importing from
 // store.mjs here to break the circular dependency for the Workers bundle:
@@ -122,8 +122,9 @@ export class Referrals {
   // personal invite is included so an agent can share it from this GET.
   // Member-visible; carries no credential data — ids, display names, counts,
   // and the caller's own invite token.
-  board(token, roomId, expectedSessionBinding = null) {
+  board(token, roomId, expectedSessionBinding = null, trace = null) {
     ensureActivationColumn(this.db);
+    ensurePayoutColumns(this.db);
     return this.store.transaction(() => {
       const auth = this.store.authenticate(token, roomId, expectedSessionBinding);
       if (!auth?.member) fail(401, "unauthenticated", "Room membership required");
@@ -131,7 +132,9 @@ export class Referrals {
       const members = this.store.room(roomId).state.members ?? {};
       const nameOf = id => members[id]?.displayName ?? id;
       const rows = this.db.prepare(`SELECT referrer_member_id AS referrerMemberId, referee_member_id AS refereeMemberId,
-          completed_at AS completedAt, via, activated_at AS activatedAt FROM referrals WHERE room_id=? ORDER BY completed_at DESC, referee_member_id ASC`)
+          completed_at AS completedAt, via, activated_at AS activatedAt FROM referrals
+          WHERE room_id=? AND (payout_block IS NULL OR payout_block != 'trace')
+          ORDER BY completed_at DESC, referee_member_id ASC`)
         .all(roomId);
       const referrals = rows.map(row => ({
         ...row,
@@ -152,6 +155,7 @@ export class Referrals {
       let invite = null;
       if (this.store.shareLinks) {
         const personal = this.store.shareLinks.personalInvite(auth, roomId, reward.inviteCap);
+        stampIssuer(this.store, roomId, auth.member.id, trace ?? {});
         if (personal?.token) {
           const title = this.store.room(roomId).state.room?.title;
           invite = {

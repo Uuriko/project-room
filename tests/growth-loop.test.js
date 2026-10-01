@@ -11,8 +11,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
-import { ACTIVATION_DWELL_MS, GROWTH_FUNDING, GROWTH_ROOM_ORIGIN, PERSONAL_INVITE_PREFIX } from "../server/growth-loop.mjs";
+import { ACTIVATION_DWELL_MS, GROWTH_FUNDING, GROWTH_ROOM_ORIGIN, PAYOUT_DAILY_CAP, PAYOUT_WINDOW_MS, PERSONAL_INVITE_PREFIX, noteIdentityMint } from "../server/growth-loop.mjs";
+import { llmsTxt, agentsJson } from "../deploy/agent-discovery.mjs";
 import { AgentRooms } from "../server/agent-rooms.mjs";
+import { createRoomServer } from "../server/http.mjs";
 
 function openStore(t) {
   const directory = mkdtempSync(join(tmpdir(), "room-growth-"));
@@ -137,4 +139,77 @@ test("an agent spends one growth credit for a room after the daily bucket is emp
   assert.equal(funded.duplicate, false);
   assert.equal(store.db.prepare("SELECT funded_by FROM agent_room_ownership WHERE room_id=?").get("growth-room").funded_by, GROWTH_FUNDING);
   assert.throws(() => rooms.create(agent.secret, request("growth-room-2")), { status: 429, code: "rate_limited" });
+});
+
+function payoutRow(store, memberId) {
+  return store.db.prepare("SELECT payout_block AS block, activated_at AS activatedAt FROM referrals WHERE referee_member_id=?").get(memberId);
+}
+
+test("an inviter's own agents do not earn credits, and other payouts stop at the daily cap", t => {
+  assert.match(llmsTxt(), /GET \/api\/rooms\/\{roomId\}\/referrals/);
+  assert.match(agentsJson(), /\/api\/rooms\/\{roomId\}\/referrals/);
+  const { store, ownerKey, advance } = openStore(t);
+  const ownerInvite = store.referrals.board(ownerKey, "commons").invite;
+  const ada = joinHuman(store, ownerInvite.token, "Ada");
+  const adaAccount = accountIdFor(store, ada.memberId);
+  const adaInvite = store.referrals.board(ada.slot.token, "commons", ada.binding(), {
+    address: "198.51.100.8", session: "ada-browser",
+  }).invite;
+
+  const byAddress = store.identities.create("Address puppet");
+  store.shareLinks.joinAgent(byAddress.secret, adaInvite.token, "Address puppet", { address: "198.51.100.8" });
+  const bySession = store.identities.create("Session puppet");
+  noteIdentityMint(store, bySession.identityId, { session: "ada-browser", address: "198.51.100.50" });
+  store.shareLinks.joinAgent(bySession.secret, adaInvite.token, "Session puppet", { address: "198.51.100.50" });
+  const byOwner = store.identities.create("Owned puppet");
+  noteIdentityMint(store, byOwner.identityId, { accountId: adaAccount, address: "198.51.100.77", session: "other-browser" });
+  store.shareLinks.joinAgent(byOwner.secret, adaInvite.token, "Owned puppet", { address: "198.51.100.77" });
+  const stranger = store.identities.create("Stranger");
+  store.shareLinks.joinAgent(stranger.secret, adaInvite.token, "Stranger", { address: "203.0.113.9" });
+  for (const identity of [byAddress, bySession, byOwner, stranger]) post(store, identity.secret, `hello from ${identity.displayName}`);
+  advance(ACTIVATION_DWELL_MS);
+  const adaLogin = accountLogin(store, adaAccount);
+  const board = store.referrals.board(adaLogin.token, "commons", adaLogin.binding);
+  assert.equal(board.myReferralCount, 4);
+  assert.equal(board.myActiveCount, 1);
+  assert.equal(board.reward.credits, 1);
+  assert.equal(payoutRow(store, byAddress.identityId).block, "address");
+  assert.equal(payoutRow(store, bySession.identityId).block, "session");
+  assert.equal(payoutRow(store, byOwner.identityId).block, "owner");
+  assert.equal(payoutRow(store, stranger.identityId).block, null);
+  assert.equal(typeof payoutRow(store, stranger.identityId).activatedAt, "number");
+  const strangerLogin = store.referrals.board(stranger.secret, "commons");
+  assert.equal(strangerLogin.reward.welcomeCredit, 1);
+  assert.equal(store.referrals.board(byAddress.secret, "commons").reward.welcomeCredit, 0);
+
+  const capped = store.referrals.board(ownerKey, "commons").invite;
+  const friends = [];
+  for (let i = 0; i < PAYOUT_DAILY_CAP + 1; i += 1) friends.push(joinHuman(store, capped.token, `Friend ${i}`));
+  for (const friend of friends) post(store, friend.slot.token, "present", friend.binding());
+  advance(ACTIVATION_DWELL_MS);
+  const cappedBoard = store.referrals.board(ownerKey, "commons");
+  assert.equal(cappedBoard.myActiveCount, PAYOUT_DAILY_CAP);
+  advance(PAYOUT_WINDOW_MS);
+  assert.equal(store.referrals.board(ownerKey, "commons").myActiveCount, PAYOUT_DAILY_CAP + 1);
+});
+
+test("identity mint and the invite board record the same client address", async t => {
+  const { store, ownerKey } = openStore(t);
+  const server = createRoomServer({ store });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise(resolve => { server.close(resolve); }));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const board = await fetch(`${origin}/api/rooms/commons/referrals`, { headers: { authorization: `Bearer ${ownerKey}` } });
+  assert.equal(board.status, 200);
+  const minted = await fetch(`${origin}/api/agent-identities`, {
+    method: "POST",
+    headers: { "content-type": "application/json", origin },
+    body: JSON.stringify({ displayName: "Minted nearby" }),
+  });
+  assert.equal(minted.status, 201);
+  const created = await minted.json();
+  const issuer = store.db.prepare("SELECT referee_address AS address FROM referrals WHERE referrer_member_id=? AND payout_block='trace'").get("owner");
+  const mint = store.db.prepare("SELECT growth_mint_address AS address FROM agent_identities WHERE identity_id=?").get(created.identityId);
+  assert.equal(typeof issuer.address, "string");
+  assert.equal(mint.address, issuer.address);
 });
