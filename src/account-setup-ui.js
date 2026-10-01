@@ -2,10 +2,13 @@
 // or answers are kept in browser storage.
 // inRoom: when setup opens over a room (for example after Start a room), it
 // asks for a name only and does not send the person to Gmail.
-export function installAccountSetup({ api, owns, onInbox, gmailNotice = "", inRoom = () => false }) {
+// When Gmail isn't available for the account, the email step is left out
+// (two steps, not three). Setup ends in the person's room: /?start=room is the
+// same Start a room entry the door uses, which opens (or makes) their room.
+export function installAccountSetup({ api, owns, onInbox, onRoom = () => location.assign('/?start=room'), gmailNotice = "", inRoom = () => false }) {
   const dialog = document.createElement('dialog'); dialog.id = 'account-setup-dialog'; dialog.className = 'account-setup-dialog';
   dialog.setAttribute('aria-labelledby', 'account-setup-title'); document.body.append(dialog);
-  let current = null, busy = false, generation = 0, checked = false, naming = false, flight = null;
+  let current = null, busy = false, generation = 0, checked = false, naming = false, flight = null, emailOff = false;
   const waiters = [];
   dialog.addEventListener('close', () => { naming = false; waiters.splice(0).forEach(done => done()); });
   const el = (tag, text, className) => { const node = document.createElement(tag); if (text) node.textContent = text; if (className) node.className = className; return node; };
@@ -25,10 +28,10 @@ export function installAccountSetup({ api, owns, onInbox, gmailNotice = "", inRo
   }
   function render() {
     if (!owns() || !current) return;
-    const step = current.step;
+    const step = emailOff && current.step === 1 ? 2 : current.step;
     let answers = () => ({});
     const roomFirst = step === 0 && (naming || inRoom());
-    const progress = el('p', roomFirst ? '' : `Step ${step + 1} of 3`, 'form-hint'); progress.hidden = roomFirst;
+    const progress = el('p', roomFirst ? '' : emailOff ? `Step ${step === 0 ? 1 : 2} of 2` : `Step ${step + 1} of 3`, 'form-hint'); progress.hidden = roomFirst;
     const title = el('h2', ['Make Project Room yours', 'Connect your email', 'You’re ready'][step]); title.id = 'account-setup-title'; title.tabIndex = -1;
     const status = el('p', '', 'form-hint'); status.setAttribute('role', 'status');
     const content = el('div', '', 'account-setup-content'), actions = el('div', '', 'account-setup-actions');
@@ -40,7 +43,7 @@ export function installAccountSetup({ api, owns, onInbox, gmailNotice = "", inRo
       answers = () => ({ name: name.value.trim(), purpose: purpose.value });
       actions.append(roomFirst
         ? button('Done', () => run(async () => { await save({ name: name.value.trim(), purpose: purpose.value, completed: true }); dialog.close(); }), true)
-        : button('Continue', () => run(async () => { await save({ name: name.value.trim(), purpose: purpose.value, step: 1 }); render(); }), true));
+        : button('Continue', () => run(async () => { await save({ name: name.value.trim(), purpose: purpose.value, step: emailOff ? 2 : 1 }); render(); }), true));
     } else if (step === 1) {
       content.append(el('p', 'Read, send, and organize Gmail here.'));
       if (gmailNotice) content.append(el('p', gmailNotice, 'form-hint'));
@@ -65,8 +68,11 @@ export function installAccountSetup({ api, owns, onInbox, gmailNotice = "", inRo
       }).catch(() => { if (connection.isConnected) connection.textContent = 'Couldn’t check Gmail. Try again later.'; });
       actions.append(button('Back', () => run(async () => { await save({ step: 0 }); render(); })), next);
     } else {
-      content.append(el('p', 'Your inbox is private. Choose what to share when you bring a message into a room.'));
-      actions.append(button('Back', () => run(async () => { await save({ step: 1 }); render(); })), button('Open my inbox', () => run(async () => { await save({ completed: true }); dialog.close(); onInbox(); }), true));
+      content.append(el('p', 'Your room is where you work with people and agents. Invite someone or connect an agent, then send the first message.'));
+      content.append(el('p', 'Your inbox stays private. You choose what to bring into a room.', 'form-hint'));
+      const finish = then => () => run(async () => { await save({ completed: true }); dialog.close(); then(); });
+      actions.append(button('Back', () => run(async () => { await save({ step: emailOff ? 0 : 1 }); render(); })),
+        button('Open my room', finish(() => { if (!inRoom()) onRoom(); }), true), button('Open my inbox', finish(onInbox)));
     }
     if (step !== 1 && !roomFirst) actions.append(button('Set up later', () => run(async () => { await save({ ...answers(), completed: true }); dialog.close(); })));
     dialog.replaceChildren(progress, title, content, status, actions);
@@ -93,7 +99,10 @@ export function installAccountSetup({ api, owns, onInbox, gmailNotice = "", inRo
       try {
         const value = await api.request('/setup'); if (turn !== generation || !owns()) return;
         current = value.setup;
-        if (force || !current.completed) render();
+        if (!force && current.completed) return;
+        const gmail = await api.request('/gmail').catch(() => null); if (turn !== generation || !owns()) return;
+        emailOff = gmail?.state === 'unavailable';
+        render();
       } catch { if (turn === generation) checked = false; }
     },
     // Re-render an open dialog, e.g. once a room has opened under it.
