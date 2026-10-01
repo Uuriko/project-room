@@ -646,11 +646,31 @@ export class RoomAgentClient {
   // Personal to this credential's member, never included in shared orientation.
   reminders(request) { return this.#request("/reminders", request); }
   // Work claims (RC-2026-09-18-041): the room's claim registry with leases,
-  // delivery modes and review policies. Claim/update/release/reassign are
-  // owner-gated server-side; reads need room membership only.
-  workClaims({ queue, signal } = {}) {
-    const suffix = queue ? `/work-claims?queue=${encodeURIComponent(queue)}` : "/work-claims";
-    return this.#request(suffix, undefined, signal);
+  // delivery modes and review policies. Creating, claiming, renewing, and
+  // updating need a contribute, review, or collaborate profile (or the room
+  // owner, or a human with contribute rights). Reads need room membership.
+  // A call without limit or cursor follows nextCursor so coordination sees
+  // the whole board; pass either to take a single page.
+  async workClaims({ queue, limit, cursor, signal } = {}) {
+    const params = new URLSearchParams();
+    if (queue) params.set("queue", queue);
+    if (limit !== undefined) params.set("limit", String(limit));
+    if (cursor) params.set("cursor", cursor);
+    const path = params.size ? `/work-claims?${params}` : "/work-claims";
+    const page = await this.#request(path, undefined, signal);
+    if (cursor || limit !== undefined || !page?.hasMore || typeof page.nextCursor !== "string") return page;
+    const claims = [...(page.claims ?? [])];
+    let next = page.nextCursor;
+    const seen = new Set();
+    for (let hop = 0; hop < 20 && next && !seen.has(next); hop += 1) {
+      seen.add(next);
+      const moreParams = new URLSearchParams(params);
+      moreParams.set("cursor", next);
+      const more = await this.#request(`/work-claims?${moreParams}`, undefined, signal);
+      claims.push(...(more?.claims ?? []));
+      next = more?.hasMore && typeof more.nextCursor === "string" ? more.nextCursor : null;
+    }
+    return { ...page, claims, hasMore: false, nextCursor: null };
   }
   workClaimCreate({ id, title, reviewPolicy, note, tags, files, dependsOn, pullRequest } = {}, { signal } = {}) {
     if (typeof id !== "string" || !id) throw new Error("Choose a work claim id");
@@ -687,9 +707,9 @@ export class RoomAgentClient {
       { progressMessageId, ...(note === undefined ? {} : { note }),
         ...(leaseHours === undefined ? {} : { leaseHours }) }, signal);
   }
-  releaseWorkItem(id, { note, signal } = {}) {
+  releaseWorkItem(id, { note, reason, signal } = {}) {
     return this.#request(`/work-claims/${encodeURIComponent(id)}/release`,
-      { ...(note === undefined ? {} : { note }) }, signal);
+      { ...(note === undefined ? {} : { note }), ...(reason === undefined ? {} : { reason }) }, signal);
   }
   reassignWorkItem(id, { newOwner, note, signal } = {}) {
     if (typeof newOwner !== "string" || !newOwner) throw new Error("Choose the new owner");
@@ -711,7 +731,7 @@ export class RoomAgentClient {
   async workComplete(id, { deliveryMode, note, reviewedBy, tags, blobs, signal } = {}) {
     return this.updateWorkItem(id, { state: "done", note, deliveryMode, reviewedBy, tags, blobs, signal });
   }
-  async workRelease(id, { note, signal } = {}) { return this.releaseWorkItem(id, { note, signal }); }
+  async workRelease(id, { note, reason, signal } = {}) { return this.releaseWorkItem(id, { note, reason, signal }); }
   // Selected task only; the normal authenticated snapshot never leaves this client.
   async workPacket(workItemId, options = {}) {
     return workPacket((await this.snapshot()).state, workItemId, options);
