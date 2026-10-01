@@ -497,7 +497,14 @@ function validateEnvelope(incoming) {
       || typeof value.behind !== "boolean"
       || !["mergeable", "behind", "conflict", "unknown", "merged"].includes(value.mergeable)
       || typeof value.merged !== "boolean")) throw new Error(`Invalid ${key}`);
-    if (!["string", "boolean", "number"].includes(typeof value) && !["permissions", "paths", "checksClaimed", "capabilities", "preferences", "budget", "outputs", "segments", "signedEvidence", "labels", "scopes", "acceptedScopes", "changed", "state"].includes(key)) throw new Error(`Invalid ${key}`);
+    // work_claim.updated names the pull a merge or close settled. The handler
+    // requires it only for those actions; the envelope only admits this shape.
+    if (key === "pullRequest" && (!value || typeof value !== "object" || Array.isArray(value)
+      || typeof value.url !== "string"
+      || !/^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/pull\/[1-9]\d{0,9}$/.test(value.url)
+      || (value.outcome !== "merged" && value.outcome !== "closed")
+      || Object.keys(value).length !== 2)) throw new Error(`Invalid ${key}`);
+    if (!["string", "boolean", "number"].includes(typeof value) && !["permissions", "paths", "checksClaimed", "capabilities", "preferences", "budget", "outputs", "segments", "signedEvidence", "labels", "scopes", "acceptedScopes", "changed", "state", "pullRequest"].includes(key)) throw new Error(`Invalid ${key}`);
   }
 }
 
@@ -1304,7 +1311,7 @@ function recordLandUpdate(state, incoming) {
   }
 }
 
-export const WORK_CLAIM_EVENT_ACTIONS = Object.freeze(["created", "claimed", "state_changed", "reviewed", "released", "reassigned", "renewed", "lease_expired"]);
+export const WORK_CLAIM_EVENT_ACTIONS = Object.freeze(["created", "claimed", "state_changed", "reviewed", "released", "reassigned", "renewed", "lease_expired", "pr_merged", "pr_closed"]);
 const WORK_CLAIM_EVENT_STATES = ["unclaimed", "claimed", "in_progress", "blocked", "done"];
 
 // Thin receipt: validated, never copied into the projection.
@@ -1319,6 +1326,13 @@ function recordWorkClaimUpdate(state, incoming) {
     throw new Error("Event data missing leaseExpiresAt");
   }
   if (!Array.isArray(data.paths)) throw new Error("Event data missing paths");
+  if (data.action === "pr_merged" || data.action === "pr_closed") {
+    const pull = data.pullRequest;
+    const outcome = data.action === "pr_merged" ? "merged" : "closed";
+    if (!pull || typeof pull.url !== "string" || !/^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/pull\/[1-9]\d{0,9}$/.test(pull.url) || pull.outcome !== outcome) {
+      throw new Error("Event data missing pullRequest");
+    }
+  }
 }
 
 function recordReferral(state, incoming) {

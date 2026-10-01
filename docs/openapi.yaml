@@ -3775,9 +3775,17 @@ paths:
         `rooms:read`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
+        - name: queue
+          in: query
+          schema: { type: string, enum: [ready] }
+          description: |
+            `ready` lists claims nobody holds whose dependencies are all done.
+            An empty dependency list is ready. A missing dependency is not.
       responses:
         '200':
-          description: The room's work claims
+          description: |
+            The room's work claims. With `queue=ready`, only unheld claims
+            whose dependencies are done: `{ roomId, queue: "ready", swept, claims }`.
           content:
             application/json:
               schema:
@@ -3823,7 +3831,15 @@ paths:
                   type: array
                   items: { type: string, maxLength: 512 }
                   maxItems: 64
-                  description: Repo-relative paths this work will touch. Used to warn other claimants about overlaps.
+                  description: Repo-relative paths this work will touch. A later claim that overlaps a live lease is refused.
+                dependsOn:
+                  type: array
+                  items: { type: string, pattern: '[A-Za-z0-9_-]{1,128}' }
+                  maxItems: 16
+                  description: Other claim ids that must be done before this claim is ready. A claim cannot depend on itself.
+                pullRequest:
+                  type: string
+                  description: https://github.com/{owner}/{repo}/pull/{number}. A merge completes the claim; a close releases it.
       responses:
         '201':
           description: The created unclaimed item
@@ -3841,7 +3857,11 @@ paths:
         Evaluates lease expiry across the room's claims (also evaluated
         lazily on every work-claims request) and auto-releases expired
         claims to unclaimed with a stamped history entry. Returns the ids
-        released by this sweep. API keys need `rooms:write`.
+        released by this sweep. Also polls linked pull requests: a merge
+        completes the claim and a close without a merge releases it, and
+        each settlement appends a work_claim.updated room event. There is
+        no inbound GitHub webhook; this sweep and the per-minute cron are
+        the poll. API keys need `rooms:write`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       requestBody:
@@ -3864,6 +3884,13 @@ paths:
                     type: array
                     items: { type: string }
                   sweptAt: { type: string, format: date-time }
+                  pullRequests:
+                    type: object
+                    description: Linked pull requests looked up on this sweep
+                    properties:
+                      checked: { type: integer }
+                      updated: { type: integer }
+                      rateLimited: { type: boolean }
         '401': { description: unauthenticated }
         '422': { description: invalid_claim_input }
   /api/rooms/{roomId}/work-claims/duplicates:
@@ -3938,8 +3965,11 @@ paths:
         rule: an already-claimed item gets 409 `work_claim_conflict`).
         `leaseHours` sets the claim lease in hours (default: the room's
         configured default, else 24h; max 720h); `null` opts out of leases
-        entirely. The item records `claimedAt` and `leaseExpiresAt`. API
-        keys need `rooms:write`.
+        entirely. The item records `claimedAt` and `leaseExpiresAt`.
+        Declared files are an exclusive lease: overlap with another live
+        claim is 409 `file_lease_conflict`, naming the holder, the files,
+        and `leaseExpiresAt`. `advisory: true` records the claim anyway and
+        returns `fileWarnings`. API keys need `rooms:write`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: claimId
@@ -3960,11 +3990,21 @@ paths:
                   items: { type: string, maxLength: 512 }
                   maxItems: 64
                   description: Repo-relative paths this claim will touch. Replaces the item's files when given.
+                advisory:
+                  type: boolean
+                  description: True keeps overlap as fileWarnings and still claims. Omitted or false refuses overlap with 409.
+                dependsOn:
+                  type: array
+                  items: { type: string }
+                  description: Replaces the claim's dependencies when given.
+                pullRequest:
+                  type: [string, 'null']
+                  description: Links or clears the GitHub pull request URL.
       responses:
         '200':
           description: |
-            The claimed item, plus `fileWarnings`: other active claims that
-            declare any of the same files. A warning never blocks the claim.
+            The claimed item. `fileWarnings` names other live claims on the
+            same files when `advisory` is true; otherwise it is empty.
           content:
             application/json:
               schema:
@@ -3987,7 +4027,11 @@ paths:
                                   owner: { type: [string, 'null'] }
         '401': { description: unauthenticated }
         '404': { description: work_claim_not_found }
-        '409': { description: work_claim_conflict }
+        '409':
+          description: |
+            work_claim_conflict when the item is already claimed.
+            file_lease_conflict when declared files overlap a live lease.
+            The body names holder { claimId, owner }, files, and leaseExpiresAt.
         '422': { description: invalid_claim_input }
   /api/rooms/{roomId}/work-claims/{claimId}/update:
     post:
@@ -10742,7 +10786,9 @@ paths:
         Optional state and after (ISO timestamp) filters. Timeouts are
         evaluated lazily on read — expired delivered/acknowledged rows flip
         to timed_out in the read. 403 mention_forbidden when a non-owner
-        queries another member.
+        queries another member. `view=receipts` is the sender's copy of
+        mentions they sent: each row was delivered, and read/acked is true
+        once the mentioned member acknowledged it or answered it.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: memberId
@@ -10754,8 +10800,12 @@ paths:
         - name: after
           in: query
           schema: { type: string, format: date-time }
+        - name: view
+          in: query
+          schema: { type: string, enum: [receipts] }
+          description: receipts returns the caller's sent mentions and whether each was read or acked
       responses:
-        '200': { description: "{ roomId, memberId, mentions: [{ messageEventId, memberId, state, displayName, createdAt, timeoutAt, decidedAt }] }" }
+        '200': { description: "{ roomId, memberId, mentions: [{ messageEventId, memberId, state, displayName, createdAt, timeoutAt, decidedAt }] } or, for view=receipts, { roomId, senderId, receipts: [{ messageEventId, memberId, displayName, delivered, state, read, acked, createdAt, timeoutAt, decidedAt }] }" }
         '403': { description: mention_forbidden }
   /api/rooms/{roomId}/open-questions:
     get:
@@ -13704,6 +13754,20 @@ components:
           type: array
           items: { type: string }
           description: Repo-relative paths the work declares it will touch (normalized, sorted)
+        dependsOn:
+          type: array
+          items: { type: string }
+          description: Claim ids that must be done before this claim is ready
+        pullRequest:
+          type: [object, 'null']
+          description: Linked GitHub pull request. outcome merged completes the claim; closed releases it.
+          properties:
+            url: { type: string }
+            repo: { type: string }
+            number: { type: integer }
+            outcome: { type: [string, 'null'], enum: [merged, closed] }
+            syncedAt: { type: [string, 'null'], format: date-time }
+            nextPollAt: { type: [number, 'null'] }
         attestations:
           type: array
           items:

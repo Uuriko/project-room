@@ -22,13 +22,13 @@ const eventTitle = item => {
   return title.trim() ? title : item.id;
 };
 
-export function workClaimEventData(item, action, { previousOwnerId = null, paths = undefined } = {}) {
+export function workClaimEventData(item, action, { previousOwnerId = null, paths = undefined, pullRequest = undefined } = {}) {
   if (!WORK_CLAIM_ACTIONS.includes(action)) throw new Error(`Unknown work claim action: ${action}`);
   // Release and lease expiry clear files on the item. Callers pass the paths
   // that were held so the receipt still says which lane opened up.
   const listed = paths === undefined ? (item.files ?? []) : paths;
   if (!Array.isArray(listed)) throw new Error("Work claim paths must be a list");
-  return {
+  const data = {
     workClaim: item.id,
     action,
     claimState: item.state,
@@ -38,11 +38,19 @@ export function workClaimEventData(item, action, { previousOwnerId = null, paths
     title: eventTitle(item),
     paths: [...listed]
   };
+  if (action === "pr_merged" || action === "pr_closed") {
+    const pull = pullRequest ?? item.pullRequest;
+    data.pullRequest = {
+      url: pull?.url,
+      outcome: action === "pr_merged" ? "merged" : "closed"
+    };
+  }
+  return data;
 }
 
 // Handler unit tests drive the routes with a registry-only store; events need
 // the real event log, so a store without one records nothing here.
-export function emitWorkClaimEvent(store, roomId, { actorId, item, action, previousOwnerId = null, atMs = null, paths = undefined }) {
+export function emitWorkClaimEvent(store, roomId, { actorId, item, action, previousOwnerId = null, atMs = null, paths = undefined, pullRequest = undefined }) {
   if (!store?.db || typeof store.room !== "function") return null;
   const room = store.room(roomId);
   // The event log refuses anything after archive (applyEvent throws). Skip
@@ -58,7 +66,7 @@ export function emitWorkClaimEvent(store, roomId, { actorId, item, action, previ
     actorId: actor && actor.active !== false ? actorId : room.state.room.ownerId,
     roomId,
     at: new Date(stamp).toISOString(),
-    data: workClaimEventData(item, action, { previousOwnerId, paths })
+    data: workClaimEventData(item, action, { previousOwnerId, paths, pullRequest })
   });
   const state = applyEvent(room.state, incoming);
   const sequence = room.sequence + 1;

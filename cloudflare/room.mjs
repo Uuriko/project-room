@@ -24,6 +24,7 @@ import { routeInboundEmail, emailRoutingLimits, emailRoutingRejections, connecti
 import { emailConnection } from '../server/email-envelope.mjs';
 import { isEmailProfile } from '../server/channel-connection.mjs';
 import { runLiveStoreRetention } from '../server/retention-run.mjs';
+import { syncClaimPullRequests } from '../server/claim-pr-sync.mjs';
 import { HEARTBEAT_STORAGE_KEY, applyOutcomes, jobHealthResponse, jobHealthUnavailable, jobHealthView, runCronJobs } from './job-heartbeat.mjs';
 import { SOURCE_REVISION, BUILD_ID } from '../server/version.mjs';
 
@@ -195,6 +196,12 @@ export class ProjectRoom extends DurableObject {
     this.store.landQueue.configure({ env: this.env });
     return this.store.landQueue.refreshDue();
   }
+  // Linked work claims follow the same tick. There is no GitHub webhook
+  // receiver; a merged pull completes the claim and a close releases it.
+  async refreshClaimPullRequests() {
+    if (this.paused) return { checked: 0, updated: 0 };
+    return syncClaimPullRequests(this.store, { env: this.env });
+  }
   // Scans only disposable web-fetch/research logs. The deletion flag is
   // explicit; authoritative room and security audit journals are excluded.
   planRetention() {
@@ -325,6 +332,7 @@ export default {
       'channel-drain': () => room.drainChannelBacklog(),
       'webhook-dispatch': () => room.drainWebhookDeliveries(),
       'land-queue': () => room.refreshLandQueue(),
+      'claim-prs': () => room.refreshClaimPullRequests(),
       'retention': () => room.planRetention()
     });
     try { await room.recordCronTick(outcomes); }
