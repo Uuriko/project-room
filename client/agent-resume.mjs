@@ -40,9 +40,9 @@ async function beforeAbort(promise, signal) {
   finally { signal.removeEventListener('abort', listener); }
 }
 
-export async function resumeAgent({ connection, fetchImpl = fetch, sinceVersion, attentionCursor, maxPages = 2,
+export async function resumeAgent({ connection, fetchImpl = fetch, sinceVersion, attentionCursor, focus, maxPages = 2,
   timeoutMs = 10000, signal, maxResponseBytes = 262144 } = {}) {
-  if (!connection?.memberId || !Number.isInteger(maxPages) || maxPages < 1 || maxPages > 5
+  if (focus !== undefined && focus !== 'replies' || !connection?.memberId || !Number.isInteger(maxPages) || maxPages < 1 || maxPages > 5
     || !Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 15000
     || !Number.isInteger(maxResponseBytes) || maxResponseBytes < 1024 || maxResponseBytes > 1048576
     || sinceVersion !== undefined && !/^[a-f0-9]{64}$/.test(sinceVersion)
@@ -73,6 +73,7 @@ export async function resumeAgent({ connection, fetchImpl = fetch, sinceVersion,
     connection: { status: 'unconfirmed' }, toolProfile: { transport: 'hosted_mcp', profile: 'full' }, contextVersion: null, authoritySummary: null,
     observedThroughBySource: {}, attention: [], ownClaims: [], obligations: [], pendingReconciliations: { status: 'not_read' },
     incompleteSources: [], nextReads: [], metrics };
+  if (focus === 'replies') Object.assign(out, { focus, openRequests: [], optionalConversations: [] });
   const safe = () => { if (JSON.stringify(out).includes(connection.token)) throw invalid(); return out; };
   const incomplete = (source, error) => out.incompleteSources.push({ source, ...connectionDiagnostic(error) });
   const contextRead = async version => {
@@ -96,8 +97,8 @@ export async function resumeAgent({ connection, fetchImpl = fetch, sinceVersion,
     out.observedThroughBySource.context = { evaluatedThrough: value.evaluatedThrough, cursors: value.cursors, notModified: value.not_modified === true };
     if (value.not_modified) return;
     out.authoritySummary = pick(value.roster.find(member => member.id === connection.memberId), ['id', 'kind', 'active', 'permissions']);
-    out.obligations = value.focusWork.map(item => pick(item, ['id', 'title', 'state', 'revision', 'nextAction', 'nextMemberId', 'needsAttention']));
-    out.ownClaims = value.locks.filter(lock => lock.holderId === connection.memberId)
+    out.obligations = focus === 'replies' ? [] : value.focusWork.map(item => pick(item, ['id', 'title', 'state', 'revision', 'nextAction', 'nextMemberId', 'needsAttention']));
+    out.ownClaims = focus === 'replies' ? [] : value.locks.filter(lock => lock.holderId === connection.memberId)
       .map(lock => pick(lock, ['workItemId', 'repository', 'ref', 'paths', 'expiresAt', 'status']));
     out.nextReads = out.nextReads.filter(read => read.source !== 'work');
     for (const item of out.obligations) out.nextReads.push({ source: 'work', tool: 'room_read_work', arguments: { roomId: connection.roomId, workItemId: item.id } });
@@ -123,7 +124,7 @@ export async function resumeAgent({ connection, fetchImpl = fetch, sinceVersion,
       checkedCursor(parsed.cursor);
       metrics.attentionPages++;
       // Other rooms remain outside this command's content scope.
-      items.push(...parsed.items.filter(item => item.roomId === connection.roomId)
+      items.push(...parsed.items.filter(item => item.roomId === connection.roomId && (focus !== 'replies' || ['mention', 'dm'].includes(item.kind)))
         .map(item => ({ ...pick(item, ['kind', 'roomId', 'seq', 'id']), nextRead: attentionRead(item) })));
       cursor = parsed.cursor; more = parsed.hasMore;
       if (!more) break;
@@ -136,6 +137,26 @@ export async function resumeAgent({ connection, fetchImpl = fetch, sinceVersion,
       out.nextReads.push({ source: 'attention', action: 'continue_with_returned_cursor' });
     }
   } catch (error) { incomplete('attention', error); }
+  if (focus === 'replies') {
+    // Optional conversation observations are a bounded delta, not an unhandled inbox.
+    out.optionalConversations = out.attention;
+    try {
+      // Current obligations are read independently of any observation continuation.
+      const listing = await client.replyRequests({ direction: 'incoming', status: 'open', signal: stop });
+      if (listing.viewerId !== connection.memberId || listing.viewerAccountId !== null || listing.viewerAuthEpoch !== null) throw invalid();
+      out.openRequests = listing.requests.map(request => ({
+        ...pick(request, ['id', 'requesterId', 'workItemId', 'revision']),
+        nextRead: { tool: 'room_read_request', arguments: { roomId: connection.roomId, requestMessageId: request.id } }
+      }));
+      const requiredIds = new Set(out.openRequests.map(request => request.id));
+      out.attention = out.attention.filter(item => !requiredIds.has(item.id));
+      out.optionalConversations = out.attention;
+      out.nextReads = out.nextReads.filter(read => read.source !== 'attention' || read.action);
+      for (const item of out.attention) out.nextReads.push({ source: 'attention', ...item.nextRead });
+      out.observedThroughBySource.openRequests = { evaluatedThrough: listing.evaluatedThrough, selection: { direction: 'incoming', status: 'open' } };
+      for (const request of out.openRequests) out.nextReads.push({ source: 'openRequests', ...request.nextRead });
+    } catch (error) { incomplete('openRequests', error); }
+  }
   // Fresh compact read, not a cached grant. Changed context replaces the earlier projection.
   try {
     const fresh = await contextRead(initial.context_version);
@@ -148,6 +169,7 @@ export async function resumeAgent({ connection, fetchImpl = fetch, sinceVersion,
     }
   } catch (error) {
     out.contextVersion = null; out.authoritySummary = null; out.observedThroughBySource = {};
+    if (focus === 'replies') { out.openRequests = []; out.optionalConversations = []; }
     out.attention = []; out.obligations = []; out.ownClaims = []; out.nextReads = [];
     incomplete('connection', error);
   }

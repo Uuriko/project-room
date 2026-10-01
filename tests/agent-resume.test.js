@@ -168,6 +168,8 @@ test('CLI help/invalid arguments never touch config or network and errors are sa
   assert.equal(JSON.parse(printed.at(-1)).code, 'invalid_config');
   assert.equal(printed.join('').includes(connection.token), false);
   assert.equal(JSON.parse(printed[1]).code, 'usage_error');
+  assert.equal(await main(['--focus', 'other'], { env: {}, write: x => printed.push(x), fetchImpl }), 1);
+  assert.equal(JSON.parse(printed.at(-1)).code, 'usage_error');
 });
 
 test('real HTTP compact resume measures bytes against existing full snapshot and conditional repeat', async t => {
@@ -226,4 +228,86 @@ test('real HTTP compact resume measures bytes against existing full snapshot and
   assert.equal(ended.connection.status, 'unconfirmed');
   assert.deepEqual(ended.attention, []); assert.deepEqual(ended.obligations, []); assert.deepEqual(ended.observedThroughBySource, {});
   console.log(JSON.stringify({ benchmark: 'synthetic30messages1000chars', baselineRequests, baselineBytes, first: first.metrics, repeat: repeat.metrics }));
+});
+
+// Contract: current open addressed requests survive an advanced observation cursor.
+// Failure: delta-only resume loses an unanswered old question; the existing real HTTP
+// cost test has no reply requests. No production seam: actual Room commands and HTTP.
+test('reply-only resume retains old open requests independently of delta observations and clears revoked reads', async t => {
+  const store = new RoomStore(':memory:');
+  const owner = store.identities.create('Owner'), worker = store.identities.create('Worker');
+  new AgentRooms(store).create(owner.secret, { roomId: 'commons', title: 'Replies', purpose: 'Reply fixture', kind: 'personal' });
+  store.identities.link(owner.secret, 'commons', { identityId: worker.identityId, memberId: 'reply-worker', displayName: 'Worker', permissions: [] });
+  store.dmConsents.request('commons', owner.identityId, 'reply-worker', 'Fixture');
+  store.dmConsents.decide('commons', 'reply-worker', owner.identityId, 'approve');
+  store.command(owner.secret, 'commons', { id: 'old-open', type: 'message.posted', data: {
+    messageId: 'old-open', body: 'private-question-sentinel', toMemberId: 'reply-worker', requestKind: 'reply' } });
+  store.command(owner.secret, 'commons', { id: 'reply-work', type: 'work.proposed', data: { workItemId: 'reply-work', title: 'Private work', definitionOfDone: 'Review', accountableMemberId: 'reply-worker', mode: 'read' } });
+  const server = createRoomServer({ store }); await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); });
+  const config = { origin: `http://127.0.0.1:${server.address().port}`, roomId: 'commons', memberId: 'reply-worker', token: worker.secret };
+  const initial = await resumeAgent({ connection: config });
+  const fromBeginning = await resumeAgent({ connection: config, focus: 'replies' });
+  assert.deepEqual(fromBeginning.openRequests.map(request => request.id), ['old-open']);
+  assert.equal(fromBeginning.optionalConversations.some(item => item.id === 'old-open' || item.kind === 'direct_ask'), false);
+  assert.equal(fromBeginning.nextReads.filter(read => read.arguments?.requestMessageId === 'old-open').length, 1);
+  assert.equal(fromBeginning.nextReads.some(read => read.source === 'attention'), false);
+  const options = { connection: config, focus: 'replies', sinceVersion: initial.contextVersion, attentionCursor: initial.observedThroughBySource.attention.cursor };
+  const resumed = await resumeAgent(options);
+  assert.deepEqual((resumed.openRequests ?? []).map(request => request.id), ['old-open']);
+  assert.equal(resumed.attention.some(item => item.id === 'old-open'), false);
+  assert.deepEqual(resumed.incompleteSources, []);
+  assert.equal(resumed.metrics.requests, 4);
+  assert.deepEqual(resumed.obligations, []); assert.deepEqual(resumed.ownClaims, []);
+  assert.equal(Object.hasOwn(resumed.openRequests[0], 'answerBasis'), false);
+  assert.equal(JSON.stringify(resumed).includes('private-question-sentinel'), false);
+  assert.equal(JSON.stringify(resumed).includes(worker.secret), false);
+  assert.deepEqual(resumed.openRequests[0].nextRead, { tool: 'room_read_request', arguments: { roomId: 'commons', requestMessageId: 'old-open' } });
+  store.command(worker.secret, 'commons', { id: 'ordinary', type: 'message.posted', data: {
+    messageId: 'ordinary', body: 'ordinary-reply-sentinel', replyToId: 'old-open', toMemberId: owner.identityId } });
+  assert.deepEqual((await resumeAgent(options)).openRequests.map(request => request.id), ['old-open']);
+  const capped = await resumeAgent({ ...options, maxPages: 1, fetchImpl: async (url, init) => {
+    const response = await fetch(url, init);
+    if (!String(url).includes('/needs-me')) return response;
+    const value = await response.json(); value.hasMore = true;
+    return Response.json(value);
+  } });
+  assert.deepEqual(capped.openRequests.map(request => request.id), ['old-open']);
+  assert.equal(capped.observedThroughBySource.attention.hasMore, true);
+  assert.ok(capped.incompleteSources.some(source => source.source === 'attention' && source.code === 'page_limit'));
+  const partial = await resumeAgent({ ...options, fetchImpl: async (url, init) =>
+    String(url).includes('/reply-requests') ? Response.json({}, { status: 503 }) : fetch(url, init) });
+  assert.equal(partial.connection.status, 'credential_accepted');
+  assert.deepEqual(partial.openRequests, []);
+  assert.ok(partial.incompleteSources.some(source => source.source === 'openRequests'));
+  assert.equal(partial.observedThroughBySource.openRequests, undefined);
+  const mismatched = await resumeAgent({ ...options, fetchImpl: async (url, init) => {
+    const response = await fetch(url, init);
+    if (!String(url).includes('/reply-requests')) return response;
+    const value = await response.json(); value.viewerId = owner.identityId;
+    return Response.json(value);
+  } });
+  assert.deepEqual(mismatched.openRequests, []);
+  assert.ok(mismatched.incompleteSources.some(source => source.source === 'openRequests'));
+  const client = new RoomAgentClient(config);
+  let conversation = await client.replyContext('old-open', { limit: 1 });
+  while (conversation.page.hasMore) conversation = await client.replyContext('old-open', { cursor: conversation.page.nextCursor, limit: 1 });
+  assert.ok(conversation.current.answerBasis);
+  await client.replyAction('room_respond_to_request', { requestId: 'formal-answer', responseToRequestId: 'old-open',
+    ...conversation.current.answerBasis, responseOutcome: 'answered', toMemberId: owner.identityId, workItemId: null, body: 'Explicit answer' });
+  assert.deepEqual((await resumeAgent(options)).openRequests, []);
+  // A different current request ensures final revocation discards gathered refs.
+  store.command(owner.secret, 'commons', { id: 'another-open', type: 'message.posted', data: {
+    messageId: 'another-open', body: 'private-question-two', toMemberId: 'reply-worker', requestKind: 'reply' } });
+  let revoked = false;
+  const ended = await resumeAgent({ ...options, fetchImpl: async (url, init) => {
+    const response = await fetch(url, init);
+    if (String(url).includes('/reply-requests') && !revoked) {
+      await response.clone().text(); store.identities.unlink(owner.secret, 'commons', worker.identityId); revoked = true;
+    }
+    return response;
+  } });
+  assert.equal(ended.connection.status, 'unconfirmed');
+  assert.deepEqual(ended.openRequests, []); assert.deepEqual(ended.optionalConversations, []);
+  assert.deepEqual(ended.nextReads, []); assert.deepEqual(ended.observedThroughBySource, {});
 });

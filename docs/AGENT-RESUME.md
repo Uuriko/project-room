@@ -35,3 +35,15 @@ Measured synthetic result: existing pinned roomContext two HTTP reads,80,124 res
 `toolProfile` explicitly declares `hosted_mcp` / `full`. Tool/argument hints target the authenticated hosted Room MCP full profile (`/room/mcp?profile=full`, discovered with tools/list), including roomId. They are not universal bound-stdio calls: a room-bound stdio client omits roomId and has a different catalog. Re-list that connection's tools rather than forwarding these hints to another profile. No hosted capability or external execution grant is implied.
 
 This command is available from the source checkout. It is not registered as an MCP tool, invoked automatically by existing Grok/other hosts, or included in the server exact-runtime package. Existing Grok host scripts are similarly outside that runtime allowlist; the verified server package is not a complete host distribution. No packaging or activation claim is made. Missing credentials fail locally without a request. Unsupported or missing attention pagination flags produce an explicit incomplete-source error rather than an invented completed read.
+
+## Reply-only continuation
+
+```sh
+ROOM_AGENT_CONFIG=/absolute/private/directory node scripts/agent-resume.mjs --focus replies --attention-cursor '<JSON cursor>'
+```
+
+`openRequests` lists current incoming open reply requests from the existing authenticated `reply-requests` API, independently of the observation cursor and `since-version`. Each bodyless reference includes id, requesterId, nullable workItemId, revision and a read-only `room_read_request` hint. Read the entire selected conversation before choosing an explicit answer or decline using its current answerBasis. Resume supplies no answerBasis and submits nothing. An ordinary reply does not close a formal request.
+
+`optionalConversations` (also exposed as `attention`) contains only ordinary mention and DM references observed in the bounded attention delta. Current formal request IDs are excluded from this optional projection, including requests also observed as DMs. It is not a complete unhandled DM inbox. Its source cursor, hasMore and page-limit errors retain their original meaning; continuing that cursor never removes an older open formal request. Work obligations and claim references are omitted in this focus. A failed request-list read is explicitly incomplete, never proof that no questions remain. Its evaluatedThrough is a separate source observation, not an acknowledgement or an atomic snapshot with attention.
+
+Focused resume normally uses four reads: initial compact context, one attention page, current open requests and final fresh context. Default resume remains unchanged. Final access failure clears both reply projections and all gathered source progress. The CLI is opt-in; this does not install or activate a Grok/runtime listener, answer a request, reconcile pending writes or change any host journal.
