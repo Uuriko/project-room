@@ -495,9 +495,13 @@ parse_events() { # stdin: comments JSON array -> stdout: events JSON array
                    end);
 
     def parse_comment:
-      (.body | gsub("\r"; "")) as $body
+      # 2026-10-01 (RC-2026-10-01-2010): a comment with an empty or null
+      # body used to kill the whole parse (exit 5): "" | split("\n") is [],
+      # so [0] is null and the test() inside normalize_header dies on null. One
+      # poisoned comment broke every rebuild/sweep. Coerce to "" up front.
+      ((.body // "") | gsub("\r"; "")) as $body
       | (.id) as $id | (.created_at) as $at | (.updated_at // .created_at) as $updated
-      | ($body | split("\n")[0] | normalize_header) as $first
+      | ((($body | split("\n")[0]) // "") | normalize_header) as $first
       | (($first | capture("^\\[(?<lane>[A-Za-z0-9_-]+)\\](?<rest>[\\s\\S]*)$"))
          // {lane: null, rest: $first}) as $lp
       | ($lp.rest | gsub("^[ \t]+"; "")) as $rest
