@@ -2,19 +2,23 @@
 //
 // Authoring gate:
 // 1. Anonymous mints cannot pass the address, network, daily, or per-minute
-//    budgets; a proof is required once the free quota is spent; anonymous
+//    budgets; a proof is required once the free quota is spent; the 428
+//    proof object is enough to compute a nonce the server accepts; anonymous
 //    rows that never authenticate, post, or get linked expire; auth, link,
-//    and post keep them; invite-style and recoverable replays do not spend
-//    a new slot; the HTTP routes pass the client address and proof.
-// 2. Dropping a budget check, the proof check, the expiry delete, or the
-//    HTTP anonymous argument fails these tests.
+//    post, a room membership, an invite, and a pending claim keep them;
+//    invite-style and recoverable replays do not spend a new slot; the HTTP
+//    routes pass the client address and proof; llms.txt and agents.json name
+//    the same proof recipe.
+// 2. Dropping a budget check, the proof check, a proof-body field, the
+//    expiry delete, a membership/invite/claim exclusion, or the HTTP
+//    anonymous argument fails these tests.
 // 3. Existing tests cover the 5000-row cap and the 30/minute pre-body
 //    limiter only.
 // 4. Limits are the same constructor options production uses. The bucket,
 //    verify, and solve helpers are the production functions.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -22,6 +26,9 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
+import { encodeRow } from "../server/persisted-row.mjs";
+import { GUEST_CREDENTIAL_TTL_MIN_MS } from "../server/guest-invites.mjs";
+import { agentsJson, llmsTxt } from "../deploy/agent-discovery.mjs";
 import {
   AgentIdentities,
   IDENTITY_POW_BITS,
@@ -76,6 +83,39 @@ function refusal(fn) {
     return error;
   }
   assert.fail("expected a refusal");
+}
+
+function assertProofRecipe(proof, displayName, now) {
+  const name = displayName.trim();
+  const bucket = Math.floor(now / IDENTITY_POW_WINDOW_MS);
+  assert.equal(proof.algorithm, "sha256-prefix");
+  assert.equal(proof.hash, "sha256");
+  assert.equal(proof.encoding, "hex");
+  assert.equal(proof.bits, IDENTITY_POW_BITS);
+  assert.equal(proof.prefix, "0".repeat(IDENTITY_POW_BITS / 4));
+  assert.equal(proof.input, "{bucket}:{trimmedDisplayName}:{nonce}");
+  assert.equal(proof.challenge, `${bucket}:${name}`);
+  assert.equal(proof.bucket, bucket);
+  assert.deepEqual(proof.acceptBuckets, [bucket - 1, bucket, bucket + 1]);
+  assert.equal(proof.windowMs, IDENTITY_POW_WINDOW_MS);
+  assert.equal(proof.nonce, "^[A-Za-z0-9_-]{1,43}$");
+  assert.deepEqual(proof.resend, { method: "POST", fields: ["displayName", "proof"] });
+}
+
+function nonceFromProof(proof, displayName) {
+  const name = displayName.trim();
+  const pattern = new RegExp(proof.nonce);
+  for (let i = 0; i < 200_000; i++) {
+    const nonce = i.toString(36);
+    if (!pattern.test(nonce)) continue;
+    const material = proof.input
+      .replaceAll("{bucket}", String(proof.bucket))
+      .replaceAll("{trimmedDisplayName}", name)
+      .replaceAll("{nonce}", nonce);
+    const hex = createHash(proof.hash).update(material).digest(proof.encoding);
+    if (typeof hex === "string" && hex.startsWith(proof.prefix)) return nonce;
+  }
+  throw new Error("proof body did not yield a nonce");
 }
 
 test("anonymous mints are budgeted per address and per network", () => {
@@ -168,10 +208,9 @@ test("proof is required after the free quota, and recoverable replay does not sp
     assert.equal(missing.status, 428);
     assert.equal(missing.code, "proof_required");
     assert.equal(missing.message, "Identity mint proof required");
-    assert.equal(missing.detail.proof.algorithm, "sha256-prefix");
-    assert.equal(missing.detail.proof.bits, IDENTITY_POW_BITS);
-    assert.equal(missing.detail.proof.challenge, `${Math.floor(now / IDENTITY_POW_WINDOW_MS)}:Needs Proof`);
-    const proof = solveOnServer("Needs Proof", now);
+    assertProofRecipe(missing.detail.proof, "Needs Proof", now);
+    const proof = nonceFromProof(missing.detail.proof, "Needs Proof");
+    assert.equal(verifyIdentityMintProof("Needs Proof", proof, now), true);
     const minted = locked.create("Needs Proof", anon("198.51.100.20", proof));
     assert.match(minted.secret, /^pri_/);
     let bad = "badnonce";
@@ -256,6 +295,91 @@ test("anonymous identities that never activate expire; auth, link, and post keep
   }
 });
 
+test("cleanup keeps a membership, an invite, or a pending claim", () => {
+  const now = Date.parse("2026-06-06T00:00:00Z");
+  const store = openStore({ after: () => {} }, () => now);
+  try {
+    const ids = mint(store);
+    const made = name => ids.create(name, anon("198.51.100.70"));
+    const seat = made("Guest Seat");
+    const guestRedeemed = made("Guest Redeemed");
+    const invitee = made("Invitee");
+    const minter = made("Minter");
+    const revokedMinter = made("Revoked Minter");
+    const referred = made("Referred");
+    const claimed = made("Claimed");
+    const legacyClaim = made("Legacy Claim");
+    const finished = made("Finished Claim");
+    const roomClaim = made("Room Claim");
+    const released = made("Released Claim");
+    const bare = made("Bare");
+    const old = now - 8 * DAY;
+    const kept = [seat, guestRedeemed, invitee, minter, referred, claimed, legacyClaim, roomClaim];
+    const dropped = [revokedMinter, finished, released, bare];
+    store.transaction(() => {
+      store.db.prepare("UPDATE agent_identities SET created_at=? WHERE identity_id IN (" + [...kept, ...dropped].map(() => "?").join(",") + ")")
+        .run(old, ...[...kept, ...dropped].map(row => row.identityId));
+      store.db.prepare(`INSERT INTO guest_invites(
+        id, code_hash, room_id, tier, credential_ttl_ms, guest_label, minted_by_member_id,
+        issue_request_id, created_at, redeem_by, status
+      ) VALUES(?,?,?,?,?,?,?,?,?,?,?)`).run(
+        "gi-seat", "a".repeat(64), "commons", "observer", GUEST_CREDENTIAL_TTL_MIN_MS, "Seat", "owner",
+        "req-seat", old, old + GUEST_CREDENTIAL_TTL_MIN_MS, "active"
+      );
+      store.db.prepare(`INSERT INTO guest_members(member_id, room_id, guest_identity_id, tier, invite_id, created_at)
+        VALUES(?,?,?,?,?,?)`).run("gm-seat", "commons", seat.identityId, "observer", "gi-seat", old);
+      store.db.prepare(`INSERT INTO guest_invites(
+        id, code_hash, room_id, tier, credential_ttl_ms, guest_label, minted_by_member_id,
+        issue_request_id, created_at, redeem_by, status, redeemed_by_identity_id
+      ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+        "gi-redeem", "b".repeat(64), "commons", "observer", GUEST_CREDENTIAL_TTL_MIN_MS, "Redeemed", "owner",
+        "req-redeem", old, old + GUEST_CREDENTIAL_TTL_MIN_MS, "redeemed", guestRedeemed.identityId
+      );
+      const invite = store.db.prepare(`INSERT INTO agent_invite_codes(
+        code_hash, room_id, created_by, permissions_json, created_at, expires_at, redeemed_at, redeemed_identity_id, revoked_at
+      ) VALUES(?,?,?,?,?,?,?,?,?)`);
+      invite.run("c".repeat(64), "commons", "owner", "[]", old, old + DAY, old, invitee.identityId, null);
+      invite.run("d".repeat(64), "commons", minter.identityId, "[]", old, old + DAY, null, null, null);
+      invite.run("e".repeat(64), "commons", revokedMinter.identityId, "[]", old, old + DAY, null, null, old);
+      store.db.prepare(`INSERT INTO referral_invites(
+        jti, room_id, chain_id, inviter_member_id, depth, max_depth, created_at, expires_at, status, redeemed_identity_id
+      ) VALUES(?,?,?,?,?,?,?,?,?,?)`).run(
+        "jti-referred", "commons", "chain", "owner", 0, 1, old, old + DAY, "redeemed", referred.identityId
+      );
+      const claim = store.db.prepare("INSERT INTO work_claims(room_id, claim_id, item_json, updated_at) VALUES(?,?,?,?)");
+      claim.run("commons", "held", JSON.stringify(encodeRow("work-claim", { id: "held", state: "claimed", owner: claimed.identityId })), old);
+      claim.run("commons", "legacy", JSON.stringify({ id: "legacy", state: "in_progress", owner: legacyClaim.identityId }), old);
+      claim.run("commons", "finished", JSON.stringify(encodeRow("work-claim", { id: "finished", state: "done", owner: finished.identityId })), old);
+      claim.run("commons", "empty", JSON.stringify(encodeRow("work-claim", { id: "empty", state: "claimed", owner: null })), old);
+      const projection = JSON.parse(store.db.prepare("SELECT projection FROM rooms WHERE id='commons'").get().projection);
+      projection.workItems = {
+        ...(projection.workItems ?? {}),
+        "wi-held": { id: "wi-held", claim: { holderId: roomClaim.identityId, status: "active", expiresAt: "2099-01-01T00:00:00.000Z" } },
+        "wi-released": { id: "wi-released", claim: { holderId: released.identityId, status: "released" } },
+      };
+      store.db.prepare("UPDATE rooms SET projection=? WHERE id='commons'").run(JSON.stringify(projection));
+    });
+    assert.equal(ids.expireInactive(), dropped.length);
+    for (const row of kept) assert.ok(stored(store, row.identityId), row.displayName);
+    for (const row of dropped) assert.equal(stored(store, row.identityId), undefined, row.displayName);
+    assert.equal(store.db.prepare("SELECT count(*) AS n FROM agent_invite_codes").get().n, 3);
+    assert.equal(store.db.prepare("SELECT count(*) AS n FROM work_claims").get().n, 4);
+  } finally {
+    store.close();
+  }
+});
+
+test("llms.txt and agents.json name the identity mint proof recipe", () => {
+  const packet = llmsTxt();
+  const agents = JSON.stringify(agentsJson());
+  for (const text of [packet, agents]) {
+    assert.match(text, /428 proof_required/);
+    assert.match(text, /\{bucket\}:\{trimmedDisplayName\}:\{nonce\}/);
+    assert.match(text, /proof\.prefix/);
+    assert.match(text, /proof\.acceptBuckets/);
+  }
+});
+
 test("HTTP mint accepts a quiet signup, then requires proof and enforces the address budget", async t => {
   const directory = mkdtempSync(join(tmpdir(), "identity-mint-http-"));
   const store = new RoomStore(join(directory, "room.sqlite"));
@@ -312,11 +436,11 @@ test("HTTP mint accepts a quiet signup, then requires proof and enforces the add
   assert.equal(challenge.category, "input");
   assert.ok(challenge.hint);
   assert.ok(challenge.next.length > 0);
-  assert.equal(challenge.proof.algorithm, "sha256-prefix");
-  assert.equal(challenge.proof.bits, IDENTITY_POW_BITS);
+  assert.equal(challenge.hint, "Resend displayName with proof. See proof.");
+  assertProofRecipe(challenge.proof, "Needs Proof", store.now());
   const proved = await post("/api/agent-identities", {
     displayName: "Needs Proof",
-    proof: solveOnServer("Needs Proof", store.now()),
+    proof: nonceFromProof(challenge.proof, "Needs Proof"),
   });
   assert.equal(proved.status, 201);
 

@@ -359,14 +359,26 @@ export class AgentIdentities {
     });
   }
 
+  // Enough for a raw HTTP or MCP client to mint a nonce without the Node
+  // client: SHA-256 hex of {bucket}:{trimmedDisplayName}:{nonce} must start
+  // with prefix, nonce matches nonce, and bucket is one of acceptBuckets.
   proofDetail(name, now) {
     const bucket = Math.floor(now / IDENTITY_POW_WINDOW_MS);
+    const prefix = "0".repeat(this.powBits / 4);
     return {
       proof: {
         algorithm: "sha256-prefix",
+        hash: "sha256",
+        encoding: "hex",
         bits: this.powBits,
+        prefix,
+        input: "{bucket}:{trimmedDisplayName}:{nonce}",
         challenge: `${bucket}:${name}`,
+        bucket,
+        acceptBuckets: [bucket - 1, bucket, bucket + 1],
         windowMs: IDENTITY_POW_WINDOW_MS,
+        nonce: PROOF_NONCE.source,
+        resend: { method: "POST", fields: ["displayName", "proof"] },
       },
     };
   }
@@ -406,10 +418,56 @@ export class AgentIdentities {
     }
   }
 
-  // Drops anonymous rows that were never authenticated, posted, or linked.
-  // Runs inside the caller's transaction when one is open, so a refused
-  // mint rolls the delete back with it. Rows without a mint address are
-  // invite and in-process identities and are kept.
+  // Keep an anonymous row that still holds a room membership, an invite, or
+  // a pending claim. Clauses are static and only added when the table exists.
+  // NULL owners are excluded so a claim without an owner cannot make NOT IN
+  // unknown for every identity.
+  retentionClauses() {
+    const table = name => this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name);
+    const clauses = ["AND identity_id NOT IN (SELECT identity_id FROM identity_links)"];
+    if (table("agent_room_ownership")) {
+      clauses.push("AND identity_id NOT IN (SELECT identity_id FROM agent_room_ownership)");
+    }
+    if (table("guest_members")) {
+      clauses.push("AND identity_id NOT IN (SELECT guest_identity_id FROM guest_members)");
+    }
+    if (table("agent_invite_codes")) {
+      clauses.push(`AND identity_id NOT IN (
+        SELECT redeemed_identity_id FROM agent_invite_codes WHERE redeemed_identity_id IS NOT NULL
+        UNION SELECT created_by FROM agent_invite_codes WHERE revoked_at IS NULL
+      )`);
+    }
+    if (table("referral_invites")) {
+      clauses.push("AND identity_id NOT IN (SELECT redeemed_identity_id FROM referral_invites WHERE redeemed_identity_id IS NOT NULL)");
+    }
+    if (table("guest_invites")) {
+      clauses.push("AND identity_id NOT IN (SELECT redeemed_by_identity_id FROM guest_invites WHERE redeemed_by_identity_id IS NOT NULL)");
+    }
+    if (table("work_claims")) {
+      clauses.push(`AND identity_id NOT IN (
+        SELECT owner_id FROM (
+          SELECT COALESCE(json_extract(item_json, '$.data.owner'), json_extract(item_json, '$.owner')) AS owner_id
+          FROM work_claims
+          WHERE COALESCE(json_extract(item_json, '$.data.state'), json_extract(item_json, '$.state'))
+            IN ('claimed', 'in_progress', 'blocked')
+        ) WHERE owner_id IS NOT NULL
+      )`);
+    }
+    if (table("rooms")) {
+      clauses.push(`AND NOT EXISTS (
+        SELECT 1 FROM rooms, json_each(rooms.projection, '$.workItems') AS item
+        WHERE json_extract(item.value, '$.claim.holderId') = agent_identities.identity_id
+          AND json_extract(item.value, '$.claim.status') = 'active'
+      )`);
+    }
+    return clauses.join("\n");
+  }
+
+  // Drops anonymous rows that were never authenticated, posted, or linked
+  // and that hold no membership, invite, or pending claim. Runs inside the
+  // caller's transaction when one is open, so a refused mint rolls the
+  // delete back with it. Rows without a mint address are invite and
+  // in-process identities and are kept.
   expireInactive() {
     if (this.store.readOnly) return 0;
     if (!this.db.isTransaction) return this.store.transaction(() => this.expireInactive());
@@ -417,14 +475,11 @@ export class AgentIdentities {
     const table = name => this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name);
     if (!table("agent_identities") || !table("identity_links")) return 0;
     const cutoff = this.store.now() - this.activationWindowMs;
-    const ownershipClause = table("agent_room_ownership")
-      ? "AND identity_id NOT IN (SELECT identity_id FROM agent_room_ownership)"
-      : "";
+    const keep = this.retentionClauses();
     const rows = this.db.prepare(`
       SELECT identity_id AS identityId FROM agent_identities
       WHERE mint_address IS NOT NULL AND activated_at IS NULL AND revoked_at IS NULL AND created_at < ?
-        AND identity_id NOT IN (SELECT identity_id FROM identity_links)
-        ${ownershipClause}
+        ${keep}
     `).all(cutoff);
     let removed = 0;
     for (const row of rows) {
@@ -434,8 +489,7 @@ export class AgentIdentities {
       const changed = this.db.prepare(`
         DELETE FROM agent_identities
         WHERE identity_id=? AND mint_address IS NOT NULL AND activated_at IS NULL AND revoked_at IS NULL
-          AND identity_id NOT IN (SELECT identity_id FROM identity_links)
-          ${ownershipClause}
+          ${keep}
       `).run(row.identityId);
       removed += changed.changes;
     }

@@ -344,7 +344,7 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
   if (reasonCode === "proof_required") {
     return {
       status: "action_required", reason: "proof_required",
-      hint: "Resend with proof.",
+      hint: "Resend displayName with proof. See proof.",
       next: [command("Resend displayName with proof")]
     };
   }
