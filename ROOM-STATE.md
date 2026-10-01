@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-30T23:58:23Z · board: Uuriko/project-room#1160 · watermark: 5921867811 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=2423be05c6f78934bd43279c9b53b103fdd2418ca44eeb2f4f72ab487fbe28eb -->
+<!-- generated: 2026-10-01T00:28:19Z · board: Uuriko/project-room#1160 · watermark: 5921964466 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=f89c53470eda62585ea29c4c87908c677345dee69dd524edb3692fafe1a2652f -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -28,12 +28,11 @@ RC-2026-09-28-2877 | (none) | submitted | 2026-09-30T03:11:15Z | src/events.js, 
 RC-2026-09-28-2874 | (none) | submitted | 2026-09-30T03:11:16Z | src/events.js, tests/dm-privacy.test.js
 RC-2026-09-28-2878 | (none) | submitted | 2026-09-30T03:11:17Z | server/dm-event-visibility.mjs, server/http.mjs, tests/dm-privacy.test.js
 RC-2026-09-28-2880 | (none) | submitted | 2026-09-30T03:11:17Z | server/dm-event-visibility.mjs, server/store.mjs, server/reply-requests.mjs, server/notifications.mjs, server/activity.mjs, server/http.mjs, tests/dm-privacy.test.js, tests/reply-requests.test.js
-… +3 more
+… +2 more
 
 ## file-claims
 file | lane | task-id | state
 .github/workflows/ci.yml | jill | RC-2026-09-30-3645 | working
-deploy/agent-discovery.mjs | jill | RC-2026-09-30-3648 | working
 docs/EXPORT-RETENTION-DELETION.md | (none) | RC-2026-09-27-2863 | submitted
 docs/ROOM-PROTOCOL.md | (none) | RC-2026-09-29-3605 | submitted
 docs/ROUTE-AUTH-TABLE.md | jillianai | RC-2026-09-28-2870 | working
@@ -151,7 +150,7 @@ tests/work-discussion.test.js | , jillianai | RC-2026-09-28-2875, RC-2026-09-28-
 
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
-RC-2026-09-30-3648 | jill | working | 2026-10-01T05:57:13Z | deploy/agent-discovery.mjs
+(none)
 
 ## unclaimed-lanes
 lane | focus | trust
@@ -163,6 +162,7 @@ Jillian | documentation | standard
 
 ## recent-receipts
 task-id | merged | comment-id
+RC-2026-09-30-3648 | ec126c5cb1d66cc569a7c5e5db1e1c9ed520efdb | 5921964466
 RC-2026-09-30-3647 | 7e350527 | 5921776291
 RC-2026-09-30-3644 | 0f76c5b12bb7450ed53554c9af0f5be326079df0 | 5917829012
 RC-2026-09-30-3643 | bdeedc6c | 5917151838
@@ -172,7 +172,6 @@ RC-2026-09-30-3637 | bdeedc6c | 5917142115
 RC-2026-09-30-3640 | f61cee13 | 5915559151
 RC-2026-09-30-3636 | 9cc86f52 | 5914996786
 RC-2026-09-30-3634 | 43ffc3484b03e8af37eb3536940b85ffe66ff7da | 5913994237
-RC-2026-09-30-3635 | f08dd69f76fec5e3d764626a41028005c8a593e2 | 5911902837
 
 ## prose-claims-needing-fence
 comment-id | lane | task | at
@@ -182,5 +181,5 @@ comment-id | lane | task | at
 Uuriko/project-room#266 -> Uuriko/project-room#1160 · watermark 5859826064 · carried-open: RC-2026-09-27-005
 
 ## signals
-board_comments=662 threshold=1500 rotation_due=no watcher=active open_claims=28 prose_open=0 unfenced_prose=0 files_claimed=63 overlap_files=16 watermark=5921867811
+board_comments=664 threshold=1500 rotation_due=no watcher=active open_claims=27 prose_open=0 unfenced_prose=0 files_claimed=62 overlap_files=16 watermark=5921964466
 
