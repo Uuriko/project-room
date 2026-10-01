@@ -88,7 +88,7 @@ await browser.close();
 // sitemap coverage
 const sm = await (await fetch(`${origin}/sitemap.xml`)).text().catch(() => "");
 const indexed = results.filter(r => r.indexable && r.status === 200).map(r => r.path);
-const missingFromSitemap = indexed.filter(p => !sm.includes(`${p === "/" ? "" : p}</loc>`) && !(p === "/" && /\/\<\/loc>/.test(sm)));
+const missingFromSitemap = indexed.filter(p => !sm.includes(`${p === "/" ? "" : p}</loc>`) && !(p === "/" && /\/<\/loc>/.test(sm)));
 const fail = results.filter(r => r.problems.length);
 console.log(`public pages: ${results.length} checked, ${fail.length} failing`);
 for (const r of results) console.log(`${r.problems.length ? "FAIL" : "ok  "} ${r.path} [${r.status}] ${[...r.problems, ...(r.waived ?? []).map(w => `known: ${w}`), ...r.warnings.map(w => `warn: ${w}`)].join("; ")}`);
