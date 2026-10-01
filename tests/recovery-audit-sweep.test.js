@@ -8,6 +8,7 @@ import { textVersion } from "../server/text-results.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
 import { AccessRequests } from "../server/access-requests.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
+import { emitWorkClaimEvent } from "../server/work-claim-events.mjs";
 
 // A gate for one bug class, found three times in one day.
 //
@@ -249,6 +250,24 @@ function sweep() {
   if (!fixture.store.db.prepare("SELECT 1 FROM events WHERE room_id='commons' AND json_extract(body,'$.type')=? LIMIT 1").get(T.LAND_UPDATED))
     broke.push(`${T.LAND_UPDATED}: the sweep never got this event into the log, so nothing was audited`);
 
+  // work_claim.updated is not a command. A board claim change emits it, and
+  // the receipt must replay without moving the projection (the work_claims
+  // table stays the source of truth). Archive comes next, which closes the log.
+  try {
+    const emitted = emitWorkClaimEvent(fixture.store, "commons", {
+      actorId: "owner",
+      action: "claimed",
+      item: {
+        id: "sweep-claim", title: "Sweep claim", state: "claimed", owner: "owner",
+        leaseExpiresAt: null, files: ["src/sweep.js"]
+      }
+    });
+    exercised.add(emitted.event.type);
+    auditRecovery(fixture.store);
+  } catch (error) { broke.push(`${T.WORK_CLAIM_UPDATED}: ${error.message}`); }
+  if (!fixture.store.db.prepare("SELECT 1 FROM events WHERE room_id='commons' AND json_extract(body,'$.type')=? LIMIT 1").get(T.WORK_CLAIM_UPDATED))
+    broke.push(`${T.WORK_CLAIM_UPDATED}: the sweep never got this event into the log, so nothing was audited`);
+
   // Last, because both end the room's normal life.
   step(T.OWNERSHIP_TRANSFERRED, "owner", { toMemberId: "producer", reason: "handing the room over" });
   step(T.ROOM_ARCHIVED, "producer", { reason: "pilot over" });
@@ -287,6 +306,7 @@ test("the event surface has not grown without this sweep noticing", () => {
   // before a renewal is even reachable. The reducer's validation is covered
   // by tests/lease-renewal.test.js instead.
   // land.updated is exercised above via report_tip (it is not a command).
-  assert.equal(Object.values(T).length, 53,
+  // work_claim.updated is exercised above via emitWorkClaimEvent (it is not a command).
+  assert.equal(Object.values(T).length, 54,
     "EVENT_TYPES changed: add the new type to this sweep, then update this count");
 });
