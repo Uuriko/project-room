@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-10-01T00:28:19Z · board: Uuriko/project-room#1160 · watermark: 5921964466 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=f89c53470eda62585ea29c4c87908c677345dee69dd524edb3692fafe1a2652f -->
+<!-- generated: 2026-10-01T00:58:23Z · board: Uuriko/project-room#1160 · watermark: 5921964466 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=35f2cb22bc650145b097067ddcda046802e55896303660d6d76cedc11ef21fba -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -150,7 +150,7 @@ tests/work-discussion.test.js | , jillianai | RC-2026-09-28-2875, RC-2026-09-28-
 
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
-(none)
+RC-2026-09-30-3645 | jill | working | 2026-10-01T06:38:53Z | .github/workflows/ci.yml
 
 ## unclaimed-lanes
 lane | focus | trust
