@@ -34,7 +34,7 @@ async function fixture(t) {
 
 const claimEvents = async client => (await client.changes(0, 100)).events
   .filter(row => row.event.type === 'work_claim.updated')
-  .map(row => ({ seq: row.sequence, actor: row.event.actorId, ...row.event.data }));
+  .map(row => ({ seq: row.sequence, actor: row.event.actorId, at: row.event.at, ...row.event.data }));
 
 test('each claim change appends one event naming the member, the action, the owner and the files', async t => {
   const { owner, peer } = await fixture(t);
@@ -42,6 +42,11 @@ test('each claim change appends one event naming the member, the action, the own
   assert.equal(created.history[0].agentId, 'owner', 'creation is attributed to the creating member');
   const claimed = await owner.claimWorkItem('lane-a', { leaseHours: 2 });
   await owner.updateWorkItem('lane-a', { state: 'in_progress' });
+  await peer.reviewWorkItem('lane-a', { note: 'looks right' });
+  // Renewals cite a public progress message posted after the lease started.
+  await new Promise(resolve => setTimeout(resolve, 2));
+  const progress = (await owner.say('Lane A is moving')).event.data.messageId;
+  await owner.renewWorkItem('lane-a', { progressMessageId: progress, leaseHours: 3 });
   await owner.reassignWorkItem('lane-a', { newOwner: 'reviewer', note: 'handoff' });
   await peer.releaseWorkItem('lane-a', { note: 'parked' });
 
@@ -50,13 +55,18 @@ test('each claim change appends one event naming the member, the action, the own
     ['owner', 'created', 'unclaimed', null],
     ['owner', 'claimed', 'claimed', 'owner'],
     ['owner', 'state_changed', 'in_progress', 'owner'],
+    ['reviewer', 'reviewed', 'in_progress', 'owner'],
+    ['owner', 'renewed', 'in_progress', 'owner'],
     ['owner', 'reassigned', 'in_progress', 'reviewer'],
     ['reviewer', 'released', 'unclaimed', null]
   ]);
   assert.ok(events.every(e => e.workClaim === 'lane-a' && e.title === 'Lane A'));
-  assert.deepEqual(events[1].paths, ['server/a.mjs']);
+  assert.ok(events.every(e => e.paths.length === 1 && e.paths[0] === 'server/a.mjs'),
+    'release still names the files that were held, which the item itself clears');
   assert.equal(events[1].leaseExpiresAt, claimed.leaseExpiresAt);
-  assert.equal(events[3].previousOwnerId, 'owner');
+  assert.equal(events[0].at, created.history[0].at, 'the receipt uses the same clock as the claim history');
+  assert.equal(events[5].previousOwnerId, 'owner');
+  assert.equal(events[6].previousOwnerId, undefined);
   assert.ok(events.every((e, i) => i === 0 || e.seq > events[i - 1].seq), 'events land in commit order');
 });
 
@@ -70,14 +80,18 @@ test('a refused claim change appends no event', async t => {
   assert.equal((await claimEvents(owner)).length, before);
 });
 
-test('a lapsed lease is swept with a lease_expired event for the previous owner', async t => {
+test('a lapsed lease is swept once, naming the previous owner and the files that were freed', async t => {
   const { store, owner } = await fixture(t);
-  await owner.workClaim('short', { leaseHours: 1 });
+  await owner.workClaim('short', { files: ['docs/held.md'], leaseHours: 1 });
   const row = store.workClaims.get('commons', 'short');
   store.workClaims.set('commons', { ...row, leaseExpiresAt: new Date(Date.now() - 1000).toISOString() });
   await owner.workClaims();
-  const [expired] = (await claimEvents(owner)).filter(e => e.action === 'lease_expired');
-  assert.deepEqual([expired.actor, expired.claimState, expired.ownerId, expired.previousOwnerId], ['owner', 'unclaimed', null, 'owner']);
+  await owner.workClaims();
+  const expired = (await claimEvents(owner)).filter(e => e.action === 'lease_expired');
+  assert.equal(expired.length, 1, 'a later read of the board does not emit the expiry again');
+  assert.deepEqual([expired[0].actor, expired[0].claimState, expired[0].ownerId, expired[0].previousOwnerId], ['owner', 'unclaimed', null, 'owner']);
+  assert.deepEqual(expired[0].paths, ['docs/held.md']);
+  assert.deepEqual(store.workClaims.get('commons', 'short').files, []);
 });
 
 test('the full event log, claim events included, replays from an empty room', async t => {
@@ -89,6 +103,27 @@ test('the full event log, claim events included, replays from an empty room', as
   for (const { body } of rows) state = applyEvent(state, JSON.parse(body));
   assert.equal(state.room.id, 'commons');
   assert.ok(rows.some(({ body }) => JSON.parse(body).type === 'work_claim.updated'));
+  const projection = JSON.parse(store.db.prepare('SELECT projection FROM rooms WHERE id=?').get('commons').projection);
+  assert.deepEqual(projection.eventLog, []);
+  assert.equal(projection.workClaims, undefined, 'the claim stays in the work_claims table, not the room projection');
+});
+
+test('a blank title still records the claim, and the event names the id', async t => {
+  const { owner } = await fixture(t);
+  const created = await owner.workClaimCreate({ id: 'blank-title', title: '   ' });
+  assert.equal(created.title, '   ');
+  const [event] = await claimEvents(owner);
+  assert.equal(event.action, 'created');
+  assert.equal(event.title, 'blank-title');
+});
+
+test('an archived room still records a claim and appends no event', async t => {
+  const { store, owner } = await fixture(t);
+  const key = store.issueAccessKey('commons', 'owner');
+  store.command(key, 'commons', { id: 'archive-room', type: 'room.archived', data: { reason: 'pilot over' } });
+  const created = await owner.workClaimCreate({ id: 'after-archive', title: 'Still recorded' });
+  assert.equal(created.id, 'after-archive');
+  assert.equal((await claimEvents(owner)).length, 0);
 });
 
 test('a member cannot forge a claim event through the command path', async t => {

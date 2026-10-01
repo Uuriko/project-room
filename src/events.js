@@ -1312,7 +1312,7 @@ function recordWorkClaimUpdate(state, incoming) {
   requireMember(state, incoming.actorId);
   const data = incoming.data ?? {};
   if (typeof data.workClaim !== "string" || !data.workClaim.trim() || data.workClaim.length > 256) throw new Error("Event data missing workClaim");
-  if (!WORK_CLAIM_EVENT_ACTIONS.includes(data.action)) throw new Error("Event data missing action");
+  if (WORK_CLAIM_EVENT_ACTIONS.includes(data.action) === false) throw new Error("Event data missing action");
   if (!WORK_CLAIM_EVENT_STATES.includes(data.claimState)) throw new Error("Event data missing claimState");
   if (!(data.ownerId === null || typeof data.ownerId === "string")) throw new Error("Event data missing ownerId");
   if (!(data.leaseExpiresAt === null || (typeof data.leaseExpiresAt === "string" && !Number.isNaN(Date.parse(data.leaseExpiresAt))))) {

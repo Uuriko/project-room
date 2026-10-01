@@ -229,12 +229,26 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   // Every committed claim change appends one work_claim.updated room event
   // inside this transaction (server/work-claim-events.mjs).
   const commit = (item, action, extra = {}) => {
+    // A release clears files on the item. Read the held paths first so the
+    // receipt names the lane that opened, then write the claim and the event
+    // in this same transaction.
+    const prior = action === "released" ? registry.get(roomId, item.id) : null;
     registry.set(roomId, item);
-    emitWorkClaimEvent(store, roomId, { actorId: extra.actorId ?? caller, item, action, previousOwnerId: extra.previousOwnerId ?? null });
+    emitWorkClaimEvent(store, roomId, {
+      actorId: extra.actorId ?? caller,
+      item,
+      action,
+      previousOwnerId: extra.previousOwnerId ?? null,
+      atMs: nowMs,
+      paths: action === "released" ? (prior?.files ?? []) : undefined
+    });
     return item;
   };
   const sweptIds = sweepRoom(registry, roomId, nowMs,
-    (item, before) => emitWorkClaimEvent(store, roomId, { actorId: before.owner, item, action: "lease_expired", previousOwnerId: before.owner }));
+    (item, before) => emitWorkClaimEvent(store, roomId, {
+      actorId: before.owner, item, action: "lease_expired", previousOwnerId: before.owner,
+      atMs: nowMs, paths: before.files ?? []
+    }));
   const config = registry.configFor(roomId);
   const roomLike = { workClaims: registry.rawConfig(roomId) };
 
@@ -454,8 +468,9 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       reject(422, "work_reassign_unknown_member",
         `newOwner "${typeof target === "string" ? target : "?"}" is not an active member of this room — reassign names a current memberId`);
     }
+    const previousOwnerId = item.owner;
     const reassigned = runPure(reject, () => reassignWork(item, caller, target, { note: data.note, now: nowMs }));
-    commit(reassigned, "reassigned", { previousOwnerId: caller });
+    commit(reassigned, "reassigned", { previousOwnerId });
     return json(res, 200, reassigned);
   }
   if (workClaimRoute === "renew" && req.method === "POST") {
