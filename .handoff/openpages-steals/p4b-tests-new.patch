@@ -1,0 +1,181 @@
+diff --git a/tests/room-file-upload.test.js b/tests/room-file-upload.test.js
+index 04830719..3f3c19f3 100644
+--- a/tests/room-file-upload.test.js
++++ b/tests/room-file-upload.test.js
+@@ -66,3 +66,49 @@ test("room file routes stage a composer upload and commit it onto a message", as
+   const listed = await (await request("/api/rooms/commons/files")).json();
+   assert.equal(listed.files.some(file => file.id === "file-1" && file.messageId === "msg-1" && file.state === "committed"), true);
+ });
++
++test("room file version, restore and workspace-context routes serve members only", async t => {
++  const directory = mkdtempSync(join(tmpdir(), "project-room-file-versions-"));
++  const store = new RoomStore(join(directory, "room.sqlite"));
++  store.initialize(initialRoom());
++  const owner = store.issueAccessKey("commons", "owner");
++  store.command(owner, "commons", { id: crypto.randomUUID(), type: T.MEMBER_ADDED, data: { memberId: "human", displayName: "human", kind: "human", permissions: ["accept_work", "complete_work", "verify"] } });
++  const human = store.issueAccessKey("commons", "human");
++  const server = createRoomServer({ store, streamInterval: 15 });
++  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
++  const origin = `http://127.0.0.1:${server.address().port}`;
++  t.after(() => { server.closeStreams(); server.closeAllConnections(); server.close(); store.close(); rmSync(directory, { recursive: true, force: true }); });
++  const request = (path, { token = human, method = "GET", data } = {}) => fetch(`${origin}${path}`, {
++    method,
++    headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(data === undefined ? {} : { "Content-Type": "application/json" }) },
++    ...(data === undefined ? {} : { body: JSON.stringify(data) })
++  });
++  const put = (id, text, supersedes) => request("/api/rooms/commons/files", {
++    method: "POST",
++    data: { id, filename: "plan.md", mediaType: "text/markdown", data: Buffer.from(text).toString("base64"), ...(supersedes ? { supersedes } : {}) }
++  });
++
++  assert.equal((await put("plan-v1", "launch on tuesday with the zebra checklist")).status, 201);
++  store.command(human, "commons", { id: crypto.randomUUID(), type: T.MESSAGE_POSTED, data: { messageId: "msg-v1", body: "plan v1" } });
++  assert.equal((await request("/api/rooms/commons/files/plan-v1/commit", { method: "POST", data: { messageId: "msg-v1" } })).status, 200);
++  assert.equal((await put("plan-v2", "launch on friday with the zebra checklist", "plan-v1")).status, 201);
++  assert.equal((await put("plan-fork", "a fork", "plan-v1")).status, 409);
++
++  assert.equal((await request("/api/rooms/commons/files/plan-v1/history", { token: null })).status, 401);
++  const history = await (await request("/api/rooms/commons/files/plan-v1/history")).json();
++  assert.equal(history.count, 2);
++  assert.equal(history.head, "plan-v2");
++  assert.deepEqual(history.versions.map(version => version.via), ["http", "http"]);
++
++  assert.equal((await request("/api/rooms/commons/files/plan-v2/restore", { method: "POST", data: { id: "plan-v3" } })).status, 409);
++  assert.equal((await request("/api/rooms/commons/files/plan-v1/restore", { method: "POST", data: { id: "plan-v3" } })).status, 201);
++  assert.equal((await (await request("/api/rooms/commons/files/plan-v1/history")).json()).head, "plan-v3");
++
++  assert.equal((await request("/api/rooms/commons/workspace-context?q=zebra", { token: null })).status, 401);
++  assert.equal((await request("/api/rooms/commons/workspace-context?q=zebra&maxTokens=50")).status, 422);
++  assert.equal((await request("/api/rooms/commons/workspace-context?q=zebra&extra=1")).status, 422);
++  const context = await (await request("/api/rooms/commons/workspace-context?q=zebra%20checklist")).json();
++  assert.equal(context.policy, "bm25-line-keep-v1");
++  assert.match(context.context, /zebra checklist/);
++  assert.ok(context.keptTokens <= context.budgetTokens);
++});
+diff --git a/tests/room-file-versions-context.test.js b/tests/room-file-versions-context.test.js
+new file mode 100644
+index 00000000..74e8356b
+--- /dev/null
++++ b/tests/room-file-versions-context.test.js
+@@ -0,0 +1,121 @@
++import test from "node:test";
++import assert from "node:assert/strict";
++import { mkdtempSync, rmSync } from "node:fs";
++import { tmpdir } from "node:os";
++import { join } from "node:path";
++import { RoomStore } from "../server/store.mjs";
++import { createRoomServer } from "../server/http.mjs";
++import { AgentRooms } from "../server/agent-rooms.mjs";
++import { setTier } from "../server/autonomy-tiers.mjs";
++import { buildWorkspaceContext, queryTerms } from "../server/workspace-context.mjs";
++
++function serve(t, { now = () => Date.now() } = {}) {
++  const directory = mkdtempSync(join(tmpdir(), "room-versions-"));
++  const store = new RoomStore(join(directory, "room.sqlite"), { now });
++  const rooms = new AgentRooms(store);
++  const server = createRoomServer({ store });
++  return new Promise(resolve => server.listen(0, "127.0.0.1", () => {
++    t.after(async () => {
++      server.closeStreams(); server.closeAllConnections();
++      await new Promise(done => server.close(done));
++      store.close(); rmSync(directory, { recursive: true, force: true });
++    });
++    resolve({ origin: `http://127.0.0.1:${server.address().port}`, store, rooms });
++  }));
++}
++
++async function call(origin, name, args, secret) {
++  const response = await fetch(`${origin}/room/mcp`, {
++    method: "POST",
++    headers: { "Content-Type": "application/json", Authorization: `Bearer ${secret}` },
++    body: JSON.stringify({ jsonrpc: "2.0", id: "t", method: "tools/call", params: { name, arguments: args } })
++  });
++  const body = await response.json();
++  return { status: response.status, body, value: body.result?.structuredContent, isError: body.result?.isError === true };
++}
++
++const b64 = text => Buffer.from(text).toString("base64");
++
++async function room(t) {
++  let now = 1_700_000_000_000;
++  const ctx = await serve(t, { now: () => (now += 1000) });
++  const owner = ctx.store.identities.create("Owner");
++  const peer = ctx.store.identities.create("Peer");
++  const created = ctx.rooms.create(owner.secret, { roomId: "ver-den", title: "Ver den", purpose: "Versions", kind: "personal", displayName: "Owner" });
++  ctx.store.identities.link(owner.secret, created.roomId, { identityId: peer.identityId, displayName: "Peer", permissions: [] });
++  setTier(ctx.store.db, created.roomId, peer.identityId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
++  return { ...ctx, owner, peer, roomId: created.roomId };
++}
++
++test("pure workspace context keeps matching lines in order, never the query, within budget", () => {
++  assert.deepEqual(queryTerms("What is the deploy plan for the worker?"), ["deploy", "plan", "worker"]);
++  assert.throws(() => buildWorkspaceContext({ sources: [], query: "the a of" }), RangeError);
++  const filler = Array.from({ length: 200 }, (_, i) => `unrelated chatter line ${i} about lunch`).join("\n");
++  const built = buildWorkspaceContext({
++    query: "rollback plan for the worker",
++    sources: [
++      { kind: "message", id: "m1", authorId: "a", text: "lunch?" },
++      { kind: "file", id: "f1", title: "plan.md", text: `${filler}\nWorker rollback plan: redeploy 0a200dfe\n${filler}` },
++      { kind: "message", id: "m2", authorId: "b", text: "the worker rollback is wrangler rollback" }
++    ]
++  });
++  assert.equal(built.policy, "bm25-line-keep-v1");
++  assert.ok(built.context.includes("Worker rollback plan: redeploy 0a200dfe"), "middle of a big file survives");
++  assert.ok(built.context.includes("wrangler rollback"));
++  assert.ok(!built.context.includes("lunch?"));
++  assert.ok(built.keptTokens <= built.budgetTokens);
++  assert.ok(built.tokensSavedPct > 80);
++  assert.deepEqual(built.sources.map(s => s.id).sort(), ["f1", "m2"]);
++});
++
++test("room files version, show who changed them, restore, and feed workspace context", async t => {
++  const { origin, owner, peer, roomId } = await room(t);
++  const v1 = await call(origin, "room_put_file", { roomId, id: "spec-1", filename: "spec.md", mediaType: "text/markdown", data: b64("# Spec\nlaunch date is friday\n") }, owner.secret);
++  assert.equal(v1.value.status, "staged");
++  const post = await call(origin, "room_post_message", { roomId, id: "c1", messageId: "msg-1", body: "spec attached" }, owner.secret);
++  assert.equal(post.value.status, "posted");
++  assert.equal((await call(origin, "room_commit_file", { roomId, id: "spec-1", messageId: "msg-1" }, owner.secret)).value.status, "committed");
++
++  const v2 = await call(origin, "room_put_file", { roomId, id: "spec-2", filename: "spec.md", mediaType: "text/markdown", data: b64("# Spec\nlaunch date is monday\n"), supersedes: "spec-1" }, peer.secret);
++  assert.equal(v2.value.supersedes, "spec-1");
++  const fork = await call(origin, "room_put_file", { roomId, id: "spec-x", filename: "spec.md", mediaType: "text/markdown", data: b64("fork"), supersedes: "spec-1" }, owner.secret);
++  assert.equal(fork.isError || fork.status >= 400, true, "cannot fork an already-superseded version");
++  assert.match(JSON.stringify(fork.body), /file_version_conflict/);
++
++  // The peer's staged v2 is private to the peer until committed.
++  const ownerHistory = await call(origin, "room_file_history", { roomId, id: "spec-1" }, owner.secret);
++  assert.equal(ownerHistory.value.count, 2);
++  assert.equal(ownerHistory.value.versions[1].hidden, true);
++  const peerHistory = await call(origin, "room_file_history", { roomId, id: "spec-2" }, peer.secret);
++  assert.equal(peerHistory.value.head, "spec-2");
++  assert.deepEqual(peerHistory.value.versions.map(v => [v.id, v.version, v.via]), [["spec-1", 1, "mcp"], ["spec-2", 2, "mcp"]]);
++  assert.ok(peerHistory.value.versions.every(v => ["human", "agent"].includes(v.actorKind)));
++  assert.equal(peerHistory.value.versions[1].via, "mcp");
++  assert.equal(peerHistory.value.versions[1].supersedes, "spec-1");
++
++  // Context for the owner only sees the committed v1 (v2 is the peer's private draft).
++  const ownerCtx = await call(origin, "room_workspace_context", { roomId, query: "launch date" }, owner.secret);
++  assert.ok(ownerCtx.value.context.includes("friday"));
++  assert.ok(!ownerCtx.value.context.includes("monday"));
++  // The peer sees its own newest version, and the superseded v1 drops out.
++  const peerCtx = await call(origin, "room_workspace_context", { roomId, query: "launch date" }, peer.secret);
++  assert.ok(peerCtx.value.context.includes("monday"));
++  assert.ok(!peerCtx.value.context.includes("friday"));
++  assert.ok(peerCtx.value.sources.some(s => s.kind === "file" && s.id === "spec-2"));
++  assert.equal(typeof peerCtx.value.tokensSavedPct, "number");
++
++  // Restore v1 on top of v2.
++  const restored = await call(origin, "room_restore_file", { roomId, id: "spec-3", from: "spec-1" }, peer.secret);
++  assert.equal(restored.value.status, "staged");
++  assert.equal(restored.value.supersedes, "spec-2");
++  assert.equal(restored.value.restoredFrom, "spec-1");
++  const after = await call(origin, "room_file_history", { roomId, id: "spec-1" }, peer.secret);
++  assert.deepEqual(after.value.versions.map(v => v.id), ["spec-1", "spec-2", "spec-3"]);
++  assert.equal(after.value.head, "spec-3");
++  assert.equal(after.value.versions[2].restoredFrom, "spec-1");
++  const again = await call(origin, "room_restore_file", { roomId, id: "spec-4", from: "spec-3" }, peer.secret);
++  assert.match(JSON.stringify(again.body), /already the newest/);
++
++  const empty = await call(origin, "room_workspace_context", { roomId, query: "the of" }, owner.secret);
++  assert.match(JSON.stringify(empty.body), /invalid_query|query needs/);
++});
