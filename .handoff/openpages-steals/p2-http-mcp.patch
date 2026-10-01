@@ -1,0 +1,189 @@
+diff --git a/scripts/candidate-runtime-fixture.mjs b/scripts/candidate-runtime-fixture.mjs
+index ac12a108..5c3cd934 100644
+--- a/scripts/candidate-runtime-fixture.mjs
++++ b/scripts/candidate-runtime-fixture.mjs
+@@ -86,6 +86,7 @@ export function candidateRuntimeFixture(repository, directory) {
+   paths.add('server/attention.mjs');
+   paths.add('server/room-lifecycle.mjs');
+   paths.add('server/attachment-schema.mjs');
++  paths.add('server/workspace-context.mjs'); // BM25 line-keep workspace context (imported by server/room-attachment-bytes.mjs)
+   paths.add('server/room-attachment-bytes.mjs'); // room_attachments byte store (imported by server/store.mjs and server/http.mjs)
+   paths.add('server/inbox-attachment-bytes.mjs'); // identity inbox attachment bytes (imported by server/store.mjs)
+   paths.add('server/attachments.mjs'); // filename and extension checks (imported by server/room-attachment-bytes.mjs)
+diff --git a/scripts/runtime-package.mjs b/scripts/runtime-package.mjs
+index dbd6080c..05aed76f 100644
+--- a/scripts/runtime-package.mjs
++++ b/scripts/runtime-package.mjs
+@@ -148,6 +148,7 @@ optional.push("server/action-classes.mjs");
+ optional.push("server/room-lifecycle.mjs");
+ optional.push("server/room-norms.mjs"); // RC-2026-09-18-043: coordination norms defaults (pure; consumed by the activation-pack route)
+ optional.push("server/attachment-schema.mjs");
++optional.push("server/workspace-context.mjs"); // BM25 line-keep workspace context (imported by server/room-attachment-bytes.mjs)
+ optional.push("server/room-attachment-bytes.mjs"); // room_attachments byte store (imported by server/store.mjs and server/http.mjs)
+ optional.push("server/inbox-attachment-bytes.mjs"); // identity inbox attachment bytes (imported by server/store.mjs)
+ optional.push("server/attachments.mjs"); // filename and extension checks (imported by server/room-attachment-bytes.mjs)
+diff --git a/server/http.mjs b/server/http.mjs
+index a9303172..3f2b81d0 100644
+--- a/server/http.mjs
++++ b/server/http.mjs
+@@ -3295,6 +3295,44 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
+       // Stage bytes, list them, then commit a staged file onto a message.
+       const roomFilesMatch = /^\/api\/rooms\/([^/]{1,384})\/files$/.exec(url.pathname);
+       const roomFileCommitMatch = /^\/api\/rooms\/([^/]{1,384})\/files\/([^/]{1,384})\/commit$/.exec(url.pathname);
++      const roomFileHistoryMatch = /^\/api\/rooms\/([^/]{1,384})\/files\/([^/]{1,384})\/history$/.exec(url.pathname);
++      const roomFileRestoreMatch = /^\/api\/rooms\/([^/]{1,384})\/files\/([^/]{1,384})\/restore$/.exec(url.pathname);
++      const workspaceContextMatch = /^\/api\/rooms\/([^/]{1,384})\/workspace-context$/.exec(url.pathname);
++      if (roomFileHistoryMatch || roomFileRestoreMatch || workspaceContextMatch) {
++        const match = roomFileHistoryMatch || roomFileRestoreMatch || workspaceContextMatch;
++        const roomId = pathId(match[1]);
++        const writing = Boolean(roomFileRestoreMatch);
++        const selected = roomCredentials(req, url);
++        const fence = selected.mode === "account" ? accountBinding(req, null) : expectedBinding(req);
++        const auth = roomAuth(selected, roomId, fence);
++        if (selected.bearer && auth.credentialScope !== "room") reject(403, "access_denied", "Bearer account sessions are not accepted");
++        if (!selected.bearer && auth.kind !== "session") reject(401, "unauthenticated", "Browser session required");
++        if (auth.kind === "api-key") {
++          const requiredScope = writing ? "rooms:write" : "rooms:read";
++          const granted = (auth.apiKeyScopes ?? []).some(scope =>
++            scope === requiredScope || (scope.endsWith(":*") && requiredScope.startsWith(scope.slice(0, -1))));
++          if (!granted) reject(403, "insufficient_scope", `API key lacks the ${requiredScope} scope`);
++        }
++        if (!writing) {
++          if (req.method !== "GET") reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET" });
++          rate(`read:${auth.credentialHash}`, 600);
++          if (roomFileHistoryMatch) return json(res, 200, store.roomAttachments.history(selected.token, roomId, pathId(roomFileHistoryMatch[2])));
++          const params = url.searchParams;
++          if ([...params.keys()].some(key => !["q", "maxTokens", "auth"].includes(key) || params.getAll(key).length !== 1)) {
++            reject(422, "invalid_query", "q and maxTokens are the accepted parameters");
++          }
++          const maxTokens = params.has("maxTokens") ? Number(params.get("maxTokens")) : 2000;
++          if (!Number.isSafeInteger(maxTokens) || maxTokens < 200 || maxTokens > 8000) reject(422, "invalid_query", "maxTokens must be an integer from 200 to 8000");
++          return json(res, 200, store.roomAttachments.workspaceContext(selected.token, roomId, { query: params.get("q") ?? "", maxTokens }));
++        }
++        if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
++        protectWrite(req, auth, selected.bearer);
++        rate(`write:${auth.credentialHash}`, 60);
++        const data = await body(req);
++        if (!exact(data, ["id"]) || typeof data.id !== "string") reject(422, "invalid_attachment", "id (the new version id) is required");
++        const restored = store.roomAttachments.restore(selected.token, roomId, { id: data.id, from: pathId(roomFileRestoreMatch[2]), via: "http" });
++        return json(res, restored.duplicate ? 200 : 201, restored);
++      }
+       if (roomFilesMatch || roomFileCommitMatch) {
+         const roomId = pathId((roomFilesMatch || roomFileCommitMatch)[1]);
+         const fileId = roomFileCommitMatch ? pathId(roomFileCommitMatch[2]) : null;
+@@ -3325,10 +3363,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
+         }
+         const data = await body(req, { limit: mcpAttachmentBodyBytes });
+         if (!data || typeof data.id !== "string" || typeof data.filename !== "string" || typeof data.mediaType !== "string" || typeof data.data !== "string"
+-          || !exact(data, ["id", "filename", "mediaType", "data"])) {
+-          reject(422, "invalid_attachment", "id, filename, mediaType, and data are required");
++          || !(exact(data, ["id", "filename", "mediaType", "data"]) || exact(data, ["id", "filename", "mediaType", "data", "supersedes"]))
++          || (data.supersedes !== undefined && typeof data.supersedes !== "string")) {
++          reject(422, "invalid_attachment", "id, filename, mediaType, and data are required; supersedes is optional");
+         }
+-        const staged = store.roomAttachments.stage(selected.token, roomId, data);
++        const staged = store.roomAttachments.stage(selected.token, roomId, { ...data, via: "http" });
+         return json(res, staged.duplicate ? 200 : 201, staged);
+       }
+       // onboarding-funnel was removed on main (replaced by activation-pack);
+diff --git a/server/mcp-discovery.mjs b/server/mcp-discovery.mjs
+index e668963d..de13c126 100644
+--- a/server/mcp-discovery.mjs
++++ b/server/mcp-discovery.mjs
+@@ -22,7 +22,7 @@ export function livePublicMcpTools() {
+ // never present-but-denying. Omit it for the public/unfiltered lists
+ // (server card, join surface), which stay full by design.
+ const FOCUS_COMMON_TOOLS = [
+-  "room_check_access", "room_needs_me", "get_room_context", "room_read_request",
++  "room_check_access", "room_needs_me", "get_room_context", "room_workspace_context", "room_read_request",
+   "room_list_requests", "room_reply", "room_respond_to_request", "room_request_reply", "room_post_message"
+ ];
+ 
+@@ -35,7 +35,7 @@ export const MCP_TOOL_FOCUSES = Object.freeze({
+     "room_propose_work", "room_begin_work", "room_accept_work", "room_start_work", "room_block_work",
+     "room_resolve_blocker", "room_post_draft", "room_submit_text_result", "room_record_completion",
+     "room_record_handoff", "room_acquire_claim", "room_renew_claim", "room_release_claim",
+-    "room_list_files", "room_get_file", "room_put_file", "room_commit_file"],
++    "room_list_files", "room_get_file", "room_put_file", "room_commit_file", "room_file_history", "room_restore_file", "room_workspace_context"],
+   review: ["room_list_work", "room_read_work", "room_read_work_discussion", "room_read_result",
+     "room_record_verification", "room_list_files", "room_get_file", "list_land_queue"],
+   automation: ["wake_register", "wake_clear", "wake_pause", "wake_resume", "heartbeat_set",
+diff --git a/server/mcp-hosted-tools.mjs b/server/mcp-hosted-tools.mjs
+index 122d431d..a57b8a42 100644
+--- a/server/mcp-hosted-tools.mjs
++++ b/server/mcp-hosted-tools.mjs
+@@ -109,8 +109,23 @@ export const hostedRoomTools = [
+     id: { ...idField, description: "Client attachment id. Stable across retries. Single-use in the room." },
+     filename: { type: "string", minLength: 1, maxLength: 255 },
+     mediaType: { type: "string", minLength: 1, maxLength: 255 },
+-    data: { type: "string", maxLength: base64LengthForBytes(attachmentLimits.fileBytes), description: "Canonical base64 file bytes. No whitespace." }
++    data: { type: "string", maxLength: base64LengthForBytes(attachmentLimits.fileBytes), description: "Canonical base64 file bytes. No whitespace." },
++    supersedes: { type: "string" }
+   }, ["roomId", "id", "filename", "mediaType", "data"]), false),
++  tool("room_file_history", "List every version of a room file, oldest first: who uploaded it (actorKind human or agent, via mcp or http), when, sha256, and which version is the head. Pass any version's id. Versions you cannot see are counted but redacted. Metadata only: no bytes.", schema({
++    roomId: roomIdField,
++    id: { ...idField, description: "Any version's attachment id." }
++  }, ["roomId", "id"])),
++  tool("room_restore_file", "Restore an older version of a room file by staging its bytes as a new version on top of the current head. Nothing is deleted. The new version is staged (visible to you) until you commit it with room_commit_file.", schema({
++    roomId: roomIdField,
++    id: { ...idField, description: "New attachment id for the restored version. Single-use." },
++    from: { ...idField, description: "Version id to restore, from room_file_history." }
++  }, ["roomId", "id", "from"]), false),
++  tool("room_workspace_context", "Query-aware room context: scores every line of the room chat you can read and the newest version of each text file against your query, and returns only the best lines (plus neighbors) in original wording, grouped by source, inside a token budget. Returns sources, originalTokens, keptTokens, and tokensSavedPct so you can see what was cut. The query is never compressed. Read-only; cite sources by id.", schema({
++    roomId: roomIdField,
++    query: { type: "string", minLength: 1, maxLength: 500, description: "What you are working on or asking." },
++    maxTokens: { type: "integer", minimum: 200, maximum: 8000, default: 2000, description: "Budget for the returned context." }
++  }, ["roomId", "query"])),
+   tool("room_list_files", "List staged and committed room files for a room this identity belongs to. Metadata only: no bytes. Discarded and expired files are omitted.", schema({ roomId: roomIdField }, ["roomId"])),
+   tool("room_get_file", "Download one room file from room_attachments. Returns canonical base64 in attachment.data plus sha256. Current room members can read staged and committed files. Discarded, expired, and deleted files are unavailable.", schema({
+     roomId: roomIdField,
+diff --git a/server/mcp-room-profile.mjs b/server/mcp-room-profile.mjs
+index d0d9de64..d294fad0 100644
+--- a/server/mcp-room-profile.mjs
++++ b/server/mcp-room-profile.mjs
+@@ -159,7 +159,13 @@ function validRoomArgs(name, args) {
+   if (name === "room_put_file") {
+     return validId(args.id) && typeof args.filename === "string" && args.filename.length > 0 && args.filename.length <= 255
+       && typeof args.mediaType === "string" && args.mediaType.length > 0 && args.mediaType.length <= 255
+-      && validAttachmentData(args.data);
++      && validAttachmentData(args.data) && (args.supersedes === undefined || validId(args.supersedes));
++  }
++  if (name === "room_file_history") return validId(args.id);
++  if (name === "room_restore_file") return validId(args.id) && validId(args.from);
++  if (name === "room_workspace_context") {
++    return typeof args.query === "string" && args.query.trim().length > 0 && args.query.length <= 500
++      && (args.maxTokens === undefined || Number.isSafeInteger(args.maxTokens) && args.maxTokens >= 200 && args.maxTokens <= 8000);
+   }
+   if (name === "room_list_files") return true;
+   if (name === "room_get_file" || name === "room_discard_file") return validId(args.id);
+@@ -454,9 +460,15 @@ function callRoomTool(store, secret, identity, name, args, agentRooms) {
+   if (name === "room_list_peer_dms") return listPeerDms(store, secret, args);
+   if (name === "room_put_file") {
+     return store.roomAttachments.stage(secret, roomId, {
+-      id: args.id, filename: args.filename, mediaType: args.mediaType, data: args.data
++      id: args.id, filename: args.filename, mediaType: args.mediaType, data: args.data,
++      ...(args.supersedes === undefined ? {} : { supersedes: args.supersedes }), via: "mcp"
+     });
+   }
++  if (name === "room_file_history") return store.roomAttachments.history(secret, roomId, args.id);
++  if (name === "room_restore_file") return store.roomAttachments.restore(secret, roomId, { id: args.id, from: args.from, via: "mcp" });
++  if (name === "room_workspace_context") {
++    return store.roomAttachments.workspaceContext(secret, roomId, { query: args.query, maxTokens: args.maxTokens ?? 2000 });
++  }
+   if (name === "room_list_files") return store.roomAttachments.list(secret, roomId);
+   if (name === "room_get_file") return store.roomAttachments.get(secret, roomId, args.id);
+   if (name === "room_discard_file") return store.roomAttachments.discard(secret, roomId, args.id);
+diff --git a/src/room-mcp-join.js b/src/room-mcp-join.js
+index 93f2760c..dd7283ee 100644
+--- a/src/room-mcp-join.js
++++ b/src/room-mcp-join.js
+@@ -40,6 +40,9 @@ export const HOSTED_ROOM_MCP_TOOLS = Object.freeze([
+   "dm_posted",
+   "room_list_peer_dms",
+   "room_put_file",
++  "room_file_history",
++  "room_restore_file",
++  "room_workspace_context",
+   "room_list_files",
+   "room_get_file",
+   "room_discard_file",
