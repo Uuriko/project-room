@@ -225,12 +225,12 @@ export async function handleWorkClaims(options) {
     if (budget > nowMs) {
       pullBatch = { results: [], rateLimitedUntil: budget, skipped: true };
     } else {
-      const token = options.githubToken === undefined
-        ? (process.env.GITHUB_TOKEN || process.env.GH_TOKEN || null)
-        : options.githubToken;
+      const credential = options.githubToken !== undefined
+        ? options.githubToken
+        : (process.env.GITHUB_TOKEN || process.env.GH_TOKEN || null);
       pullBatch = await collectPullRequestLookups(registry.list(options.roomId), {
         fetchImpl: options.fetchPullRequest ?? fetch,
-        token: token || null,
+        token: credential || null,
         nowMs
       });
     }
