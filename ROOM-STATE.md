@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-10-01T03:58:54Z · board: Uuriko/project-room#1160 · watermark: 5924171871 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=ffaedaccc220928f7821ea01db4fa5f8b5e733adc2227382db9f3c06612b1e48 -->
+<!-- generated: 2026-10-01T04:28:14Z · board: Uuriko/project-room#1160 · watermark: 5924512079 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=ffaedaccc220928f7821ea01db4fa5f8b5e733adc2227382db9f3c06612b1e48 -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -163,6 +163,7 @@ Jillian | documentation | standard
 
 ## recent-receipts
 task-id | merged | comment-id
+RC-2026-09-30-3612 | 43cd6f0b7e674473a4a08fa78ea7087c9e2673a3 | 5924512079
 RC-2026-09-30-3648 | ec126c5cb1d66cc569a7c5e5db1e1c9ed520efdb | 5921964466
 RC-2026-09-30-3647 | 7e350527 | 5921776291
 RC-2026-09-30-3644 | 0f76c5b12bb7450ed53554c9af0f5be326079df0 | 5917829012
@@ -172,7 +173,6 @@ RC-2026-09-30-3641 | bdeedc6c | 5917145565
 RC-2026-09-30-3637 | bdeedc6c | 5917142115
 RC-2026-09-30-3640 | f61cee13 | 5915559151
 RC-2026-09-30-3636 | 9cc86f52 | 5914996786
-RC-2026-09-30-3634 | 43ffc3484b03e8af37eb3536940b85ffe66ff7da | 5913994237
 
 ## prose-claims-needing-fence
 comment-id | lane | task | at
@@ -182,5 +182,5 @@ comment-id | lane | task | at
 Uuriko/project-room#266 -> Uuriko/project-room#1160 · watermark 5859826064 · carried-open: RC-2026-09-27-005
 
 ## signals
-board_comments=666 threshold=1500 rotation_due=no watcher=active open_claims=27 prose_open=0 unfenced_prose=0 files_claimed=62 overlap_files=16 watermark=5924171871
+board_comments=668 threshold=1500 rotation_due=no watcher=active open_claims=27 prose_open=0 unfenced_prose=0 files_claimed=62 overlap_files=16 watermark=5924512079
 
