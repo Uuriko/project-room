@@ -19,6 +19,11 @@
 #     mention must not count as a landed deliverable (subject-line form
 #     `RC-<id>:` required). Each fails on the pre-1130 regexes and passes
 #     after the tightening.
+#     (r) validated backfill receipts must suppress re-flagging: a
+#     room-receipt anchored to a real merged PR (real case: the 2026-10-01
+#     false-positive missing-receipts digest) is not re-flagged, while a
+#     fabricated SHA still is. Each fails on the pre-fix object-emitting
+#     validated_receipt_tasks and passes after the task-id-lines repair.
 #     Observable at the script's own fixture boundary: `_sweep-plan` and
 #     `_receipts-plan` output for fixture board comments.
 #  2. Credible regression: a later edit to scripts/room that drops any of
@@ -592,6 +597,43 @@ expect_jq     "q/valid ACK is not an illegal transition (944)" \
   "$TMPD/q.state" '.illegal | length == 0'
 expect_jq     "q/ACK completes the handoff transfer (944 -> quill)" \
   "$TMPD/q.state" '.tasks | map(select(.task_id=="RC-2026-09-30-944"))[0].lane == "quill"'
+
+# ---------------------------------------------------------------------------
+# (r) validated backfill receipts must suppress re-flagging (RC-2026-10-01-2001)
+# Real case: the 2026-10-01 false-positive missing-receipts digest. The
+# lane's validated backfill receipt was posted BEFORE the digest run, so
+# the digest-closeout path (comments after the last digest) cannot see
+# it — only the VALIDATED-receipts path can suppress the re-flag.
+# 930: completed; backfill room-receipt cites a REAL merged SHA (anchored
+#      to a merged PR in ROOM_TEST_PRS_JSON); an earlier digest already
+#      listed it (the false-positive shape). Must NOT be re-flagged.
+# 931: completed; backfill room-receipt cites a FABRICATED SHA (no merged
+#      PR matches); same earlier digest. Must still be flagged — the
+#      negative control proving the suppression is not unconditional.
+# On the pre-fix code validated_receipt_tasks emits receipt OBJECTS, so
+# scan_task_rows' index($t) never matches and 930 is wrongly re-flagged.
+# ---------------------------------------------------------------------------
+
+cat > "$TMPD/r.json" <<'EOF'
+[
+ {"id": 180, "created_at": "2026-09-30T00:00:00Z", "body": "[jill][claim] r930\n\n```room-claim\ntask-id:    RC-2026-10-01-930\nlane:       jill\nfiles:      scripts/room\nlease:      lease=6h\nstate:      working\nreason:     fixture\n```"},
+ {"id": 181, "created_at": "2026-09-30T12:00:00Z", "body": "[jill]DONE: RC-2026-10-01-930 finished"},
+ {"id": 182, "created_at": "2026-09-30T00:05:00Z", "body": "[jill][claim] r931\n\n```room-claim\ntask-id:    RC-2026-10-01-931\nlane:       jill\nfiles:      scripts/other\nlease:      lease=6h\nstate:      working\nreason:     fixture\n```"},
+ {"id": 183, "created_at": "2026-09-30T12:05:00Z", "body": "[jill]DONE: RC-2026-10-01-931 finished"},
+ {"id": 184, "created_at": "2026-09-30T13:00:00Z", "body": "[jill][receipt] RC-2026-10-01-930 landed (backfill)\n\nMerged as a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4.\n\n```room-receipt\ntask-id:    RC-2026-10-01-930\nlane:       jill\nstate:      completed\npr:         #1101\nmerged:      a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4\n```"},
+ {"id": 185, "created_at": "2026-09-30T13:05:00Z", "body": "[jill][receipt] RC-2026-10-01-931 landed (backfill)\n\nMerged as deadbeefdeadbeefdeadbeefdeadbeefdeadbeef.\n\n```room-receipt\ntask-id:    RC-2026-10-01-931\nlane:       jill\nstate:      completed\npr:         #9999\nmerged:      deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n```"},
+ {"id": 186, "created_at": "2026-09-30T14:00:00Z", "body": "[room-watch] missing receipts (24h SLO)\n\nThe following completed tasks have no room-receipt block on the board:\n\n- TASK RC-2026-10-01-930 (jill, completed 2026-09-30T12:00:00Z)\n- TASK RC-2026-10-01-931 (jill, completed 2026-09-30T12:05:00Z)"}
+]
+EOF
+
+export ROOM_TEST_PRS_JSON='[{"number":1101,"merged_at":"2026-09-30T13:30:00Z","merge_commit_sha":"a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4","title":"[jill] r930 work","body":"RC-2026-10-01-930: done."}]'
+
+"$ROOM" _receipts-plan --now 2026-10-01T14:30:00Z < "$TMPD/r.json" > "$TMPD/r.out" || true
+
+expect_not_in "r/validated backfill receipt is not re-flagged (930)" \
+  "$TMPD/r.out" "RC-2026-10-01-930"
+expect_in     "r/fabricated backfill receipt is still flagged (931)" \
+  "$TMPD/r.out" "RC-2026-10-01-931"
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
