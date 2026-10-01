@@ -12,6 +12,7 @@ import { renderReceiptsHtml } from "../server/receipts-page.mjs";
 import { renderRoomExportHtml } from "../server/room-export-html.mjs";
 import { renderStatusPage } from "../src/health-status.mjs";
 import { PublicFace, roomPublicFaceSchema } from "../server/public-face.mjs";
+import { HEALTH_PAGE_STYLE } from "../scripts/room-health.mjs";
 
 const RETIRED = /#dfff00|#0B120F|#070608|#fafaf7|#205bb0|#dc673e/i;
 
@@ -53,7 +54,8 @@ const surfaces = {
   "public face": faceHtml(),
   receipts,
   "room export": renderRoomExportHtml([]),
-  "status page": renderStatusPage({})
+  "status page": renderStatusPage({}),
+  "room health": readFileSync(new URL("../docs/room-health.html", import.meta.url), "utf8")
 };
 
 test("every surface embeds the same dark and light tokens", () => {
@@ -62,4 +64,5 @@ test("every surface embeds the same dark and light tokens", () => {
     assert.ok(html.includes(LIGHT_DECLARATIONS), `${name} is missing the light tokens`);
     assert.doesNotMatch(html, RETIRED, `${name} still ships a retired palette`);
   }
+  assert.ok(surfaces["room health"].includes(HEALTH_PAGE_STYLE), "published room health page uses the generator stylesheet");
 });
