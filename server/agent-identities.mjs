@@ -9,7 +9,7 @@
 // are owner-only, and unlinking deactivates the room member.
 
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { fastIdentityHash, hashIdentitySecret, isFastIdentityHash, legacyIdentityHash, scryptIdentityHash } from "./identity-secret-hash.mjs";
+import { fastIdentityHashCandidates, forgetIdentityVerifier, isV2IdentityHash, legacyIdentityHash, scryptIdentityHash } from "./identity-secret-hash.mjs";
 import { ServiceError } from "./store.mjs";
 import { generateKeyPair as generateEd25519KeyPair } from "./agent-card-signing.mjs";
 import { memberCan } from "../src/events.js";
@@ -51,6 +51,10 @@ export function ensureIdentitySecretSchema(db) {
   if (!exists) return;
   const columns = new Set(db.prepare("PRAGMA table_info(agent_identities)").all().map(column => column.name));
   if (!columns.has("revoked_at")) db.exec("ALTER TABLE agent_identities ADD COLUMN revoked_at INTEGER");
+  // Second HMAC, written when ROOM_IDENTITY_HASH_KEY is set, so a deploy
+  // that omits the secret still matches the built-in fallback verifier.
+  if (!columns.has("fallback_secret_hash")) db.exec("ALTER TABLE agent_identities ADD COLUMN fallback_secret_hash TEXT");
+  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS agent_identities_fallback_secret_hash ON agent_identities(fallback_secret_hash) WHERE fallback_secret_hash IS NOT NULL");
 }
 
 // Additive columns for anonymous-mint budgets and inactivity expiry.
@@ -236,6 +240,7 @@ export class AgentIdentities {
     proofFreePerAddress = ANONYMOUS_PROOF_FREE_PER_ADDRESS,
     activationWindowMs = IDENTITY_ACTIVATION_WINDOW_MS,
     powBits = IDENTITY_POW_BITS,
+    hashKey = undefined,
   } = {}) {
     const positive = (label, value) => {
       if (!Number.isInteger(value) || value < 1) throw new Error(`${label} must be a positive integer`);
@@ -261,6 +266,9 @@ export class AgentIdentities {
     this.pendingActivation = new Set();
     this.pendingHashUpgrades = new Map();
     this.capacitySchemaReady = false;
+    // undefined → process.env (Node and tests). null → no configured key,
+    // built-in fallback only (Worker deploy that has not set the secret).
+    this.hashKey = hashKey === undefined ? process.env : hashKey;
   }
 
   // Creates a new global agent identity. The secret is shown once and only
@@ -280,6 +288,7 @@ export class AgentIdentities {
     if (suppliedSecret !== undefined && !/^pri_[A-Za-z0-9_-]{43}$/.test(suppliedSecret))
       fail(422, "invalid_identity", "Recoverable registration requires a generated identity credential");
     return this.store.transaction(() => {
+      ensureIdentitySecretSchema(this.db);
       ensureIdentityCapacitySchema(this.db);
       this.capacitySchemaReady = true;
       this.expireInactive();
@@ -287,18 +296,11 @@ export class AgentIdentities {
       if (recoveredId) {
         const existing = this.db.prepare("SELECT * FROM agent_identities WHERE identity_id=?").get(recoveredId);
         if (existing) {
-          const fast = fastIdentityHash(suppliedSecret);
-          const matches = existing.secret_hash === fast
-            || existing.secret_hash === legacyIdentityHash(suppliedSecret)
-            || existing.secret_hash === scryptIdentityHash(suppliedSecret);
-          if (existing.revoked_at !== null || !matches)
+          // Same lookup as bearer auth: HMAC and sha256 first, scrypt only
+          // when this row is still a v2 verifier.
+          const matched = existing.revoked_at === null && this.rowForSecret(suppliedSecret, { identityId: recoveredId });
+          if (!matched)
             fail(409, "identity_credential_changed", "Identity credential changed; use the current saved identity");
-          // One-time upgrade off scrypt or bare sha256. The fast verifier is
-          // written in this same transaction.
-          if (!isFastIdentityHash(existing.secret_hash)) {
-            this.db.prepare("UPDATE agent_identities SET secret_hash=? WHERE identity_id=? AND secret_hash=?")
-              .run(fast, recoveredId, existing.secret_hash);
-          }
           this.noteActivated(recoveredId);
           return { identityId: recoveredId, displayName: existing.display_name, duplicate: true,
             next: SIGNUP_NEXT, nextActions: nextActionsForIdentityMint() };
@@ -330,8 +332,10 @@ export class AgentIdentities {
       if (count >= this.identityLimit) fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
       const identityId = recoveredId ?? `ai_${base64url(randomBytes(12))}`;
       const secret = suppliedSecret ?? `${IDENTITY_SECRET_PREFIX}${base64url(randomBytes(32))}`;
-      this.db.prepare("INSERT INTO agent_identities(identity_id,secret_hash,display_name,created_at,activated_at,mint_address,mint_network) VALUES(?,?,?,?,?,?,?)")
-        .run(identityId, hashIdentitySecret(secret), name, now, activatedAt, mintAddress, mintNetwork);
+      ensureIdentitySecretSchema(this.db);
+      const verifier = this.verifierColumns(secret);
+      this.db.prepare("INSERT INTO agent_identities(identity_id,secret_hash,fallback_secret_hash,display_name,created_at,activated_at,mint_address,mint_network) VALUES(?,?,?,?,?,?,?,?)")
+        .run(identityId, verifier.secretHash, verifier.fallbackHash, name, now, activatedAt, mintAddress, mintNetwork);
       // Bind the identity's Ed25519 claim-signing key at issuance: the
       // public key is registered in the agent-key registry (the
       // operator-attested binding — see server/agent-key-registry.mjs) and
@@ -661,35 +665,97 @@ export class AgentIdentities {
     });
   }
 
-  // Fast verifier first. Legacy sha256 and v2 scrypt are tried only on a
-  // miss, so a current credential never pays scrypt. A hit on an old
-  // verifier schedules the one-time upgrade to the fast hash.
-  rowForSecret(secret, select) {
-    const fast = fastIdentityHash(secret);
-    let row = select(fast);
-    if (row) return row;
-    row = select(legacyIdentityHash(secret));
-    if (!row) row = select(scryptIdentityHash(secret));
+  // Active HMAC plus the built-in fallback when a Worker/Node key is set.
+  verifierColumns(secret) {
+    const [secretHash, fallback] = fastIdentityHashCandidates(secret, this.hashKey);
+    return { secretHash, fallbackHash: fallback && fallback !== secretHash ? fallback : null };
+  }
+
+  selectVerifier(hash, identityId) {
+    const sql = `SELECT identity_id AS identityId, display_name AS displayName, secret_hash AS secretHash
+      FROM agent_identities WHERE revoked_at IS NULL AND `;
+    if (identityId) {
+      return this.db.prepare(sql + "identity_id=? AND (secret_hash=? OR fallback_secret_hash=?)").get(identityId, hash, hash);
+    }
+    return this.db.prepare(sql + "(secret_hash=? OR fallback_secret_hash=?)").get(hash, hash);
+  }
+
+  // HMAC (active key and built-in fallback) and legacy sha256 are indexed
+  // lookups. Scrypt runs only for a candidate that is still v2: the row
+  // selected by identity id, or — when the caller has no id — one digest
+  // used to find an unupgraded row. A well-formed secret that matches
+  // neither, and that is not needed to recognize a remaining v2 row, does
+  // not run the KDF. At most one scrypt per call; the module cache makes a
+  // second call in the same request free.
+  rowForSecret(secret, { identityId = null } = {}) {
+    const hmacs = fastIdentityHashCandidates(secret, this.hashKey);
+    const legacy = legacyIdentityHash(secret);
+    for (const hash of hmacs) {
+      const row = this.selectVerifier(hash, identityId);
+      if (!row) continue;
+      this.maybeUpgradeFastRow(row, secret);
+      return row;
+    }
+    const legacyRow = this.selectVerifier(legacy, identityId);
+    if (legacyRow) {
+      this.upgradeStoredHash(legacyRow.identityId, secret, legacyRow.secretHash);
+      return legacyRow;
+    }
+    if (identityId) {
+      const row = this.db.prepare(`SELECT identity_id AS identityId, display_name AS displayName, secret_hash AS secretHash
+        FROM agent_identities WHERE identity_id=? AND revoked_at IS NULL`).get(identityId);
+      // Known id whose verifier is already HMAC or sha256 was handled above.
+      // A miss here is an unknown secret for that id, unless the row is v2.
+      if (!row || !isV2IdentityHash(row.secretHash)) return null;
+      if (scryptIdentityHash(secret) !== row.secretHash) return null;
+      this.upgradeStoredHash(row.identityId, secret, row.secretHash);
+      return row;
+    }
+    // Bearer calls do not carry an identity id. A remaining v2 row can be
+    // found only by its scrypt verifier, so one KDF runs while any such row
+    // is left. After that row upgrades, an unknown secret returns here
+    // without a KDF. Identity-id callers never reach this branch.
+    if (!this.hasUnindexedScryptRow()) return null;
+    const digested = scryptIdentityHash(secret);
+    const row = this.selectVerifier(digested, null);
     if (!row) return null;
-    const identityId = row.identityId ?? row.identity_id;
-    const secretHash = row.secretHash;
-    if (identityId && secretHash && !isFastIdentityHash(secretHash)) this.upgradeStoredHash(identityId, secret, secretHash);
+    this.upgradeStoredHash(row.identityId, secret, row.secretHash);
     return row;
+  }
+
+  // A row found by HMAC is current unless the stored primary is still the
+  // built-in fallback and a Worker/Node key is now configured.
+  maybeUpgradeFastRow(row, secret) {
+    const next = this.verifierColumns(secret);
+    if (row.secretHash === next.secretHash) return;
+    this.upgradeStoredHash(row.identityId, secret, row.secretHash);
+  }
+
+  hasUnindexedScryptRow() {
+    if (this._unindexedScrypt === false) return false;
+    const columns = new Set(this.db.prepare("PRAGMA table_info(agent_identities)").all().map(column => column.name));
+    const row = columns.has("fallback_secret_hash")
+      ? this.db.prepare("SELECT 1 FROM agent_identities WHERE secret_hash LIKE 'v2:%' AND revoked_at IS NULL LIMIT 1").get()
+      : this.db.prepare("SELECT 1 FROM agent_identities WHERE secret_hash LIKE 'v2:%' LIMIT 1").get();
+    if (!row) this._unindexedScrypt = false;
+    return !!row;
   }
 
   // Conditional on the exact verifier just matched, so a concurrent
   // rotate/revoke that lands first wins. Read transactions cannot write;
   // the upgrade flushes after the read commits, same as activation stamps.
   upgradeStoredHash(identityId, secret, previousHash) {
-    if (!identityId || !previousHash || isFastIdentityHash(previousHash) || this.store.readOnly) return;
-    const next = fastIdentityHash(secret);
+    if (!identityId || !previousHash || this.store.readOnly) return;
+    const next = this.verifierColumns(secret);
+    if (previousHash === next.secretHash) return;
+    this._unindexedScrypt = undefined;
     if ((this.store.readTransactionDepth ?? 0) > 0) {
       this.pendingHashUpgrades.set(identityId, { next, previousHash });
       queueMicrotask(() => this.flushHashUpgrades());
       return;
     }
-    this.db.prepare("UPDATE agent_identities SET secret_hash=? WHERE identity_id=? AND secret_hash=? AND revoked_at IS NULL")
-      .run(next, identityId, previousHash);
+    this.db.prepare("UPDATE agent_identities SET secret_hash=?, fallback_secret_hash=? WHERE identity_id=? AND secret_hash=? AND revoked_at IS NULL")
+      .run(next.secretHash, next.fallbackHash, identityId, previousHash);
   }
 
   flushHashUpgrades() {
@@ -713,8 +779,8 @@ export class AgentIdentities {
     if (!pending.length) return;
     try {
       this.store.transaction(() => {
-        const update = this.db.prepare("UPDATE agent_identities SET secret_hash=? WHERE identity_id=? AND secret_hash=? AND revoked_at IS NULL");
-        for (const [identityId, { next, previousHash }] of pending) update.run(next, identityId, previousHash);
+        const update = this.db.prepare("UPDATE agent_identities SET secret_hash=?, fallback_secret_hash=? WHERE identity_id=? AND secret_hash=? AND revoked_at IS NULL");
+        for (const [identityId, { next, previousHash }] of pending) update.run(next.secretHash, next.fallbackHash, identityId, previousHash);
       });
     } catch { /* a closed store must not surface on the read that queued this */ }
   }
@@ -726,8 +792,7 @@ export class AgentIdentities {
   authenticateIdentitySecret(identityId, secret) {
     if (typeof identityId !== "string" || !IDENTITY_ID_PATTERN.test(identityId)) fail(401, "unauthenticated", "Unknown agent identity");
     if (!isIdentitySecret(secret)) fail(401, "unauthenticated", "Unknown agent identity");
-    const select = this.db.prepare("SELECT identity_id AS identityId, display_name AS displayName, secret_hash AS secretHash FROM agent_identities WHERE identity_id=? AND secret_hash=? AND revoked_at IS NULL");
-    const row = this.rowForSecret(secret, hash => select.get(identityId, hash));
+    const row = this.rowForSecret(secret, { identityId });
     if (!row) fail(401, "unauthenticated", "Unknown or revoked agent identity secret");
     this.noteActivated(row.identityId);
     return { identityId: row.identityId, displayName: row.displayName };
@@ -740,17 +805,19 @@ export class AgentIdentities {
   // identity is rejected — revoke is the final state.
   rotate(identityId, secret) {
     const identity = this.authenticateIdentitySecret(identityId, secret);
+    forgetIdentityVerifier(secret);
     return this.store.transaction(() => {
       const row = this.db.prepare("SELECT revoked_at AS revokedAt, secret_hash AS secretHash FROM agent_identities WHERE identity_id=?").get(identityId);
       if (!row) fail(404, "identity_not_found", "No such agent identity");
       if (row.revokedAt !== null) fail(409, "identity_revoked", "This identity's secret is revoked; it cannot rotate");
       const newSecret = `${IDENTITY_SECRET_PREFIX}${base64url(randomBytes(32))}`;
+      const next = this.verifierColumns(newSecret);
       // Conditional update on the CURRENT stored hash (authenticate above
-      // already upgraded a legacy row to v2): a concurrent revoke/rotate
-      // that lands first must win — the stale rotation is rejected instead
-      // of resurrecting a revoked secret or double-issuing.
-      const changed = this.db.prepare("UPDATE agent_identities SET secret_hash=?, revoked_at=NULL WHERE identity_id=? AND revoked_at IS NULL AND secret_hash=?")
-        .run(hashIdentitySecret(newSecret), identityId, row.secretHash);
+      // already upgraded a legacy row): a concurrent revoke/rotate that
+      // lands first must win — the stale rotation is rejected instead of
+      // resurrecting a revoked secret or double-issuing.
+      const changed = this.db.prepare("UPDATE agent_identities SET secret_hash=?, fallback_secret_hash=?, revoked_at=NULL WHERE identity_id=? AND revoked_at IS NULL AND secret_hash=?")
+        .run(next.secretHash, next.fallbackHash, identityId, row.secretHash);
       if (changed.changes !== 1) fail(409, "secret_changed", "The secret changed during rotation; re-read state and retry");
       return { identityId, displayName: identity.displayName, secret: newSecret, rotatedAt: this.store.now() };
     });
@@ -766,6 +833,7 @@ export class AgentIdentities {
   // identity must not keep operating through a key it minted earlier.
   revoke(identityId, secret) {
     const identity = this.authenticateIdentitySecret(identityId, secret);
+    forgetIdentityVerifier(secret);
     return this.store.transaction(() => {
       const row = this.db.prepare("SELECT revoked_at AS revokedAt FROM agent_identities WHERE identity_id=?").get(identityId);
       if (!row) fail(404, "identity_not_found", "No such agent identity");
@@ -867,8 +935,7 @@ export class AgentIdentities {
   // "unknown secret".
   resolveGlobalIdentitySecret(secret) {
     if (!isIdentitySecret(secret)) return null;
-    const select = this.db.prepare("SELECT identity_id AS identityId, display_name AS displayName, secret_hash AS secretHash FROM agent_identities WHERE secret_hash=? AND revoked_at IS NULL");
-    const row = this.rowForSecret(secret, hash => select.get(hash));
+    const row = this.rowForSecret(secret);
     if (!row) return null;
     this.noteActivated(row.identityId);
     return { identityId: row.identityId, displayName: row.displayName };
@@ -881,11 +948,10 @@ export class AgentIdentities {
   // row may be cached in memory; the authorization decision is not.
   resolveIdentityAuth(secret, roomId) {
     if (!roomId) return null;
-    const select = this.db.prepare("SELECT identity_id, secret_hash AS secretHash FROM agent_identities WHERE secret_hash=? AND revoked_at IS NULL");
-    const row = this.rowForSecret(secret, hash => select.get(hash));
+    const row = this.rowForSecret(secret);
     if (!row) return null;
-    this.noteActivated(row.identity_id);
-    return this.resolveIdentityLink(row.identity_id, roomId);
+    this.noteActivated(row.identityId);
+    return this.resolveIdentityLink(row.identityId, roomId);
   }
 
   // Resolves a known identityId to its linked room member, or null. Used by

@@ -78,7 +78,7 @@ export class ProjectRoom extends DurableObject {
     this.paused = maintenanceEnabled(env.ROOM_MAINTENANCE);
     if (this.paused) return;
     this.store = new RoomStore(null, { database: new DurableDatabase(ctx.storage), storagePlatform: durableStorage,
-      stitch: stitchConfigFromEnv(env) });
+      stitch: stitchConfigFromEnv(env), identityHashKey: env.ROOM_IDENTITY_HASH_KEY ?? null });
     // Event-push dispatch: same fire-and-forget flush as the node entry
     // point. The Durable Object may suspend before the microtask drains;
     // the cron tick remains the restart-safe backstop.

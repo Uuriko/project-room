@@ -717,7 +717,7 @@ function agentWakeTargetIds(state, senderMemberId, data) {
 }
 
 export class RoomStore {
-  constructor(filename, { now = () => Date.now(), readOnly = false, database, storagePlatform = nodeStorage, storageFailureThreshold = STORAGE_FAILURE_THRESHOLD, stitch = null } = {}) {
+  constructor(filename, { now = () => Date.now(), readOnly = false, database, storagePlatform = nodeStorage, storageFailureThreshold = STORAGE_FAILURE_THRESHOLD, stitch = null, identityHashKey = undefined } = {}) {
     if (!Number.isInteger(storageFailureThreshold) || storageFailureThreshold < 1) throw new Error("Storage failure threshold must be a positive integer");
     // Cross-channel thread stitching (task #19): stitch is the frozen
     // { salt, epoch, enabled, bindings } triple from stitchConfigFromEnv, or
@@ -737,7 +737,7 @@ export class RoomStore {
     this.db = database ?? new DatabaseSync(filename, { readOnly });
     this.storagePlatform = storagePlatform;
     this.shareLinks = new ShareLinks(this);
-    this.identities = new AgentIdentities(this);
+    this.identities = new AgentIdentities(this, { hashKey: identityHashKey });
     this.delegation = new MembershipDelegation(this);
     this.delegationJournal = new MembershipDelegationJournal(this);
     this.ownerDelegates = new OwnerDelegates(this);
