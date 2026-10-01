@@ -8,7 +8,7 @@ import { RoomLandClient } from '../client/room-land.mjs';
 import { RoomStore } from '../server/store.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { createRoomServer } from '../server/http.mjs';
-import { CoordError, claimAndVerify, coordStatus, digest, handoff, land, pathCovers, renewWithProgress, verifyClaim } from '../client/room-coord.mjs';
+import { CoordError, claimAndVerify, closeClaim, coordStatus, digest, handoff, isLiveClaim, land, pathCovers, renewWithProgress, verifyClaim } from '../client/room-coord.mjs';
 import { parseArgs, run } from '../scripts/room-coord.mjs';
 
 const PR_SHA = 'd'.repeat(40);
@@ -47,6 +47,8 @@ test('a directory claim covers the files beneath it and nothing beside it', () =
     ['server/http.mjs', 'server/http.mjs', true],
     ['server/h', 'server/http.mjs', false],
     ['server/http.mjs', 'server', false],
+    ['server/./http.mjs', 'server/http.mjs', true],
+    ['server/http.mjs', 'server/./http.mjs', true],
     ['docs', 'docs-site/index.md', false]
   ]) assert.equal(pathCovers(held, file), covered, `${held} vs ${file}`);
   assert.throws(() => pathCovers('../outside', 'server/a.mjs'), coded('invalid_path'));
@@ -69,16 +71,91 @@ test('claims are confirmed by reading the room record back, and held files refus
   assert.equal(overlapping.owner, 'reviewer');
 });
 
+test('a claim that loses the race is released, and omitted files still refuse an overlap', async t => {
+  const { owner, peer } = await fixture(t);
+  let reads = 0;
+  const racing = {
+    workClaims: async options => {
+      reads += 1;
+      if (reads === 1) {
+        const stale = await owner.workClaims(options);
+        await peer.workClaim('intruder', { files: ['docs'], leaseHours: 2 });
+        return stale;
+      }
+      return owner.workClaims(options);
+    },
+    workClaim: (id, body) => owner.workClaim(id, body),
+    workClaimGet: (id, options) => owner.workClaimGet(id, options),
+    releaseWorkItem: (id, body) => owner.releaseWorkItem(id, body)
+  };
+  await assert.rejects(claimAndVerify(racing, 'racer', { memberId: 'owner', files: ['docs/shared.md'], leaseHours: 2 }),
+    error => coded('claim_conflict')(error) && error.details.released === true
+      && error.details.conflicts[0].heldPath === 'docs' && error.details.conflicts[0].file === 'docs/shared.md');
+  assert.equal((await owner.workClaimGet('racer')).state, 'unclaimed');
+  assert.equal((await peer.workClaimGet('intruder')).owner, 'reviewer');
+
+  await owner.workClaimCreate({ id: 'kept', files: ['server/kept.mjs'] });
+  await peer.workClaim('keepsake', { files: ['server/kept.mjs'], leaseHours: 1 });
+  await assert.rejects(claimAndVerify(owner, 'kept', { memberId: 'owner', leaseHours: 1 }), coded('claim_conflict'));
+  const kept = await owner.workClaimGet('kept');
+  assert.equal(kept.state, 'unclaimed');
+  assert.equal(kept.history.some(entry => entry.action === 'claimed'), false);
+});
+
+test('renewal of a missing claim fails before a progress line is posted', async t => {
+  const { owner } = await fixture(t);
+  await assert.rejects(renewWithProgress(owner, 'missing-claim', 'nothing to report', { memberId: 'owner' }),
+    error => error instanceof CoordError && error.code === 'work_claim_not_found');
+  const bodies = (await owner.changes(0, 100)).events
+    .filter(row => row.event.type === 'message.posted')
+    .map(row => row.event.data.body);
+  assert.equal(bodies.some(body => String(body).includes('[missing-claim]')), false);
+});
+
+test('done closes a claimed or blocked item by moving it through in progress', async t => {
+  const { owner } = await fixture(t);
+  await claimAndVerify(owner, 'finish-claimed', { memberId: 'owner', leaseHours: 1 });
+  const claimed = await run(['done', 'finish-claimed', '--note', 'shipped'], { client: owner, memberId: 'owner' });
+  assert.equal(claimed.state, 'done');
+  assert.equal(claimed.history.at(-1).note, 'shipped');
+  assert.equal(claimed.history.at(-2).note, 'started to close');
+  assert.deepEqual(claimed.history.map(entry => entry.action).slice(-3), ['claimed', 'state:in_progress', 'state:done']);
+
+  await claimAndVerify(owner, 'finish-blocked', { memberId: 'owner', leaseHours: 1 });
+  await owner.updateWorkItem('finish-blocked', { state: 'blocked' });
+  const blocked = await closeClaim(owner, 'finish-blocked', { memberId: 'owner', note: 'unblocked and shipped' });
+  assert.equal(blocked.state, 'done');
+  assert.equal(blocked.history.at(-1).action, 'state:done');
+  assert.equal(blocked.history.at(-2).action, 'state:in_progress');
+
+  await claimAndVerify(owner, 'finish-started', { memberId: 'owner', leaseHours: 1 });
+  await owner.updateWorkItem('finish-started', { state: 'in_progress' });
+  const started = await closeClaim(owner, 'finish-started', { memberId: 'owner', note: 'shipped' });
+  assert.equal(started.state, 'done');
+  assert.equal(started.history.some(entry => entry.note === 'started to close'), false);
+
+  await owner.workClaimCreate({ id: 'needs-review', reviewPolicy: 'distinct_member' });
+  await claimAndVerify(owner, 'needs-review', { memberId: 'owner', leaseHours: 1 });
+  await assert.rejects(closeClaim(owner, 'needs-review', { memberId: 'owner', note: 'shipped' }),
+    error => error instanceof CoordError && error.code === 'work_review_rejected');
+  assert.equal((await owner.workClaimGet('needs-review')).state, 'in_progress');
+});
+
 test('a record that is not a live lease held by the caller is never treated as a claim', () => {
   const now = Date.parse('2026-10-01T12:00:00Z');
   const live = { id: 'w', state: 'claimed', owner: 'me', leaseExpiresAt: '2026-10-01T13:00:00Z' };
   assert.equal(verifyClaim(live, { memberId: 'me', now }).id, 'w');
   assert.equal(verifyClaim({ ...live, leaseExpiresAt: null }, { memberId: 'me', now }).id, 'w');
+  // Four minutes past the stamp is still live: a client clock that far ahead
+  // of the room must not drop the lease. Six minutes past is not.
+  assert.equal(verifyClaim({ ...live, leaseExpiresAt: '2026-10-01T11:56:00Z' }, { memberId: 'me', now }).id, 'w');
+  assert.equal(isLiveClaim({ ...live, leaseExpiresAt: '2026-10-01T11:56:00Z' }, now), true);
+  assert.equal(isLiveClaim({ ...live, leaseExpiresAt: '2026-10-01T11:54:00Z' }, now), false);
   for (const record of [
     null,
     { ...live, state: 'unclaimed', owner: null },
     { ...live, owner: 'someone-else' },
-    { ...live, leaseExpiresAt: '2026-10-01T11:59:59Z' },
+    { ...live, leaseExpiresAt: '2026-10-01T11:54:00Z' },
     { ...live, state: 'done' }
   ]) assert.throws(() => verifyClaim(record, { memberId: 'me', now }), coded('claim_not_verified'));
 });

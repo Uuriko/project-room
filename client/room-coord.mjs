@@ -18,6 +18,10 @@ export class CoordError extends Error {
 
 const LIVE_STATES = new Set(["claimed", "in_progress", "blocked"]);
 const DEFAULT_EXPIRING_MS = 60 * 60 * 1000;
+// A client clock a few minutes off the room's must not drop a live lease or
+// refuse to confirm one. Five minutes matches the room's own skew window;
+// past that, the lease is not live.
+export const LEASE_CLOCK_SKEW_MS = 5 * 60 * 1000;
 
 const assertClient = (client, methods) => {
   if (!client || typeof client !== "object") throw new CoordError("invalid_client", "A Room client is required");
@@ -37,14 +41,35 @@ const nowFrom = options => {
   return now;
 };
 
-// Repo paths: trim, drop leading ./, collapse duplicate slashes, drop trailing
-// slashes. Case is preserved because repo paths are case-sensitive.
+// A 4xx from the room is a refusal (conflict, missing claim, review policy),
+// not a connection failure. Transport errors stay errors so the CLI can exit 3.
+export function translateRoomError(error) {
+  if (error instanceof CoordError) throw error;
+  const status = error?.status;
+  if (Number.isInteger(status) && status >= 400 && status < 500) {
+    const code = typeof error.code === "string" && error.code ? error.code : "room_refused";
+    throw new CoordError(code, typeof error.message === "string" && error.message ? error.message : "Room refused the request", { status });
+  }
+  throw error;
+}
+
+const callRoom = async fn => {
+  try { return await fn(); }
+  catch (error) { translateRoomError(error); }
+};
+
+// Repo paths: trim, drop leading ./, collapse duplicate slashes, drop `.`
+// segments and trailing slashes. `..` is rejected rather than resolved, so a
+// path cannot climb out of the repo. Case is preserved because repo paths
+// are case-sensitive.
 export function normalizePath(path) {
   if (typeof path !== "string" || !path.trim()) throw new CoordError("invalid_path", "Paths must be non-empty strings");
   let p = path.trim().replace(/\\/g, "/").replace(/\/+/g, "/");
   while (p.startsWith("./")) p = p.slice(2);
   while (p.length > 1 && p.endsWith("/")) p = p.slice(0, -1);
-  if (!p || p === "." || p.startsWith("/") || p.split("/").includes("..")) throw new CoordError("invalid_path", `Path ${JSON.stringify(path)} must stay inside the repo`);
+  if (p.split("/").includes("..")) throw new CoordError("invalid_path", `Path ${JSON.stringify(path)} must stay inside the repo`);
+  p = p.split("/").filter(part => part !== "." && part !== "").join("/");
+  if (!p || p.startsWith("/")) throw new CoordError("invalid_path", `Path ${JSON.stringify(path)} must stay inside the repo`);
   return p;
 }
 
@@ -56,14 +81,31 @@ export function pathCovers(claimed, file) {
   return a === b || b.startsWith(`${a}/`);
 }
 
+// A held path the room stored but this client cannot normalize covers nothing.
+// One bad claim must not crash the guard for every commit.
+const covers = (claimed, file) => {
+  try { return pathCovers(claimed, file); }
+  catch (error) {
+    if (error instanceof CoordError && error.code === "invalid_path") return false;
+    throw error;
+  }
+};
+
 const leaseMs = claim => (claim.leaseExpiresAt ? Date.parse(claim.leaseExpiresAt) : NaN);
+
+const leaseIsCurrent = (claim, now) => {
+  if (claim.leaseExpiresAt == null) return true;
+  const expires = leaseMs(claim);
+  return Number.isFinite(expires) && expires + LEASE_CLOCK_SKEW_MS > now;
+};
 
 export function isLiveClaim(claim, now = Date.now()) {
   if (!claim || !LIVE_STATES.has(claim.state) || typeof claim.owner !== "string" || !claim.owner) return false;
-  if (claim.leaseExpiresAt == null) return true;
-  const expires = leaseMs(claim);
-  return Number.isFinite(expires) && expires > now;
+  return leaseIsCurrent(claim, now);
 }
+
+const claimFiles = claim => (Array.isArray(claim?.files) ? claim.files : []);
+const idText = value => (typeof value === "string" ? value : "");
 
 const claimsOf = value => {
   const claims = Array.isArray(value) ? value : value?.claims;
@@ -80,16 +122,16 @@ export function guardConflicts(claims, files, { memberId, now } = {}) {
   const conflicts = [];
   for (const claim of claimsOf(claims)) {
     if (!isLiveClaim(claim, at) || claim.owner === me) continue;
-    for (const held of claim.files ?? []) {
+    for (const held of claimFiles(claim)) {
       for (const file of wanted) {
-        if (pathCovers(held, file)) {
+        if (covers(held, file)) {
           conflicts.push({ file, heldPath: normalizePath(held), claimId: claim.id, owner: claim.owner,
             title: claim.title ?? null, leaseExpiresAt: claim.leaseExpiresAt ?? null });
         }
       }
     }
   }
-  return conflicts.sort((x, y) => (x.file === y.file ? x.claimId.localeCompare(y.claimId) : x.file.localeCompare(y.file)));
+  return conflicts.sort((x, y) => (x.file === y.file ? idText(x.claimId).localeCompare(idText(y.claimId)) : x.file.localeCompare(y.file)));
 }
 
 // Live claims whose file lists overlap (exact or directory prefix).
@@ -103,10 +145,10 @@ export function claimOverlaps(claims, { now } = {}) {
       const b = live[j];
       if (a.owner === b.owner) continue;
       const paths = new Set();
-      for (const pa of a.files ?? []) {
-        for (const pb of b.files ?? []) {
-          if (pathCovers(pa, pb)) paths.add(normalizePath(pb));
-          else if (pathCovers(pb, pa)) paths.add(normalizePath(pa));
+      for (const pa of claimFiles(a)) {
+        for (const pb of claimFiles(b)) {
+          if (covers(pa, pb)) paths.add(normalizePath(pb));
+          else if (covers(pb, pa)) paths.add(normalizePath(pa));
         }
       }
       if (paths.size) overlaps.push({ claims: [a.id, b.id].sort(), owners: [a.owner, b.owner].sort(), paths: [...paths].sort() });
@@ -133,7 +175,10 @@ export async function coordStatus(client, { lander, memberId, now, expiringWithi
     at: new Date(at).toISOString(),
     live: live.map(brief),
     mine: memberId ? live.filter(claim => claim.owner === memberId).map(brief) : [],
-    expiring: live.filter(claim => Number.isFinite(leaseMs(claim)) && leaseMs(claim) - at <= expiringWithinMs).map(brief),
+    expiring: live.filter(claim => {
+      const expires = leaseMs(claim);
+      return Number.isFinite(expires) && expires - at <= expiringWithinMs + LEASE_CLOCK_SKEW_MS;
+    }).map(brief),
     unclaimed: claims.filter(claim => claim.state === "unclaimed").map(brief),
     overlaps: claimOverlaps(claims, { now: at }),
     landQueue: land === null ? null : Array.isArray(land.items) ? land.items : []
@@ -151,7 +196,7 @@ export function verifyClaim(record, { memberId, now } = {}) {
   else {
     if (!LIVE_STATES.has(claim.state)) problems.push(`state is ${claim.state ?? "missing"}`);
     if (memberId && claim.owner !== memberId) problems.push(`owner is ${claim.owner ?? "nobody"}`);
-    if (claim.leaseExpiresAt != null && !(leaseMs(claim) > at)) problems.push("lease is not in the future");
+    if (!leaseIsCurrent(claim, at)) problems.push("lease is not in the future");
   }
   if (problems.length) throw new CoordError("claim_not_verified", `Room did not confirm the claim: ${problems.join("; ")}`, { claim: claim ?? null });
   return claim;
@@ -160,18 +205,52 @@ export function verifyClaim(record, { memberId, now } = {}) {
 // Claim (creating the item if it is new), then read it back and verify.
 // Conflicting live claims on the same files fail before anything is written
 // unless allowOverlap is set.
+const conflictsFor = async (client, files, { memberId, claimId, now, signal }) =>
+  guardConflicts(await callRoom(() => client.workClaims({ signal })), files, { memberId, now })
+    .filter(conflict => conflict.claimId !== claimId);
+
+// Files already declared on an item, when the caller did not name new ones.
+// A missing item has nothing declared. Any other refusal propagates.
+const declaredFiles = async (client, claimId, signal) => {
+  try {
+    const record = await client.workClaimGet(claimId, { signal });
+    return claimFiles(record?.claim ?? record).map(normalizePath);
+  } catch (error) {
+    if (error?.status === 404) return [];
+    translateRoomError(error);
+  }
+};
+
 export async function claimAndVerify(client, id, { memberId, title, files, leaseHours, note, tags, allowOverlap = false, now, signal } = {}) {
-  assertClient(client, ["workClaims", "workClaim", "workClaimGet"]);
+  assertClient(client, ["workClaims", "workClaim", "workClaimGet", "releaseWorkItem"]);
   const claimId = assertId(id, "Claim id");
   const at = nowFrom({ now });
   const wanted = files === undefined ? undefined : files.map(normalizePath);
-  if (wanted?.length && !allowOverlap) {
-    const conflicts = guardConflicts(await client.workClaims({ signal }), wanted, { memberId, now: at })
-      .filter(conflict => conflict.claimId !== claimId);
+  // Omitted files keep the item's declaration, so that declaration is what
+  // the overlap check has to see. An explicit list replaces it.
+  const declared = wanted ?? (allowOverlap ? [] : await declaredFiles(client, claimId, signal));
+  if (declared.length && !allowOverlap) {
+    const conflicts = await conflictsFor(client, declared, { memberId, claimId, now: at, signal });
     if (conflicts.length) throw new CoordError("claim_conflict", "Another member holds a live claim on these files", { conflicts });
   }
-  await client.workClaim(claimId, { title, files: wanted, leaseHours, note, tags, signal });
-  return verifyClaim(await client.workClaimGet(claimId, { signal }), { memberId, now: at });
+  await callRoom(() => client.workClaim(claimId, { title, files: wanted, leaseHours, note, tags, signal }));
+  const claim = verifyClaim(await callRoom(() => client.workClaimGet(claimId, { signal })), { memberId, now: at });
+  // The pre-check can lose a race: both members read a clear board, then both
+  // write. Read the board again after the room confirms this claim, and
+  // release it when someone else's live claim now covers the files.
+  const held = claimFiles(claim);
+  if (held.length && !allowOverlap) {
+    const conflicts = await conflictsFor(client, held, { memberId, claimId, now: at, signal });
+    if (conflicts.length) {
+      let released = false;
+      try {
+        await client.releaseWorkItem(claimId, { note: "released after a conflicting claim won the race", signal });
+        released = true;
+      } catch { released = false; }
+      throw new CoordError("claim_conflict", "Another member holds a live claim on these files", { conflicts, released });
+    }
+  }
+  return claim;
 }
 
 const postMessage = async (client, body, { signal } = {}) => {
@@ -186,9 +265,13 @@ const postMessage = async (client, body, { signal } = {}) => {
 export async function renewWithProgress(client, id, progress, { memberId, leaseHours, now, signal } = {}) {
   assertClient(client, ["command", "renewWorkItem", "workClaimGet"]);
   const claimId = assertId(id, "Claim id");
-  const messageId = await postMessage(client, `[${claimId}] ${progress}`, { signal });
-  await client.renewWorkItem(claimId, { progressMessageId: messageId, note: progress, leaseHours, signal });
-  return { messageId, claim: verifyClaim(await client.workClaimGet(claimId, { signal }), { memberId, now }) };
+  const at = nowFrom({ now });
+  // Post only after the room shows a live lease. A missing or lapsed claim
+  // must not leave a progress line that never renewed anything.
+  verifyClaim(await callRoom(() => client.workClaimGet(claimId, { signal })), { memberId, now: at });
+  const messageId = await callRoom(() => postMessage(client, `[${claimId}] ${progress}`, { signal }));
+  await callRoom(() => client.renewWorkItem(claimId, { progressMessageId: messageId, note: progress, leaseHours, signal }));
+  return { messageId, claim: verifyClaim(await callRoom(() => client.workClaimGet(claimId, { signal })), { memberId, now: at }) };
 }
 
 // Structured handoff: reassign the lease, verify the receiver holds it, then
@@ -199,8 +282,10 @@ export async function handoff(client, id, { to, toHandle, summary, next, now, si
   const claimId = assertId(id, "Claim id");
   const receiver = assertId(to, "Receiver member id");
   const done = assertId(summary, "Handoff summary");
-  await client.reassignWorkItem(claimId, { newOwner: receiver, note: done, signal });
-  const claim = verifyClaim(await client.workClaimGet(claimId, { signal }), { memberId: receiver, now });
+  const at = nowFrom({ now });
+  verifyClaim(await callRoom(() => client.workClaimGet(claimId, { signal })), { now: at });
+  await callRoom(() => client.reassignWorkItem(claimId, { newOwner: receiver, note: done, signal }));
+  const claim = verifyClaim(await callRoom(() => client.workClaimGet(claimId, { signal })), { memberId: receiver, now: at });
   const lines = [
     `Handoff ${claimId} to ${toHandle ? `@${toHandle.replace(/^@/, "")}` : receiver}`,
     `Done: ${done}`,
@@ -208,8 +293,37 @@ export async function handoff(client, id, { to, toHandle, summary, next, now, si
     ...(claim.files?.length ? [`Files: ${claim.files.join(", ")}`] : []),
     ...(claim.leaseExpiresAt ? [`Lease until ${claim.leaseExpiresAt}`] : [])
   ];
-  const messageId = await postMessage(client, lines.join("\n"), { signal });
+  const messageId = await callRoom(() => postMessage(client, lines.join("\n"), { signal }));
   return { messageId, claim };
+}
+
+// Release, then read the record back. The room's response is the result;
+// a release that did not clear the owner is not done.
+export async function releaseAndVerify(client, id, { note, signal } = {}) {
+  assertClient(client, ["releaseWorkItem", "workClaimGet"]);
+  const claimId = assertId(id, "Claim id");
+  await callRoom(() => client.releaseWorkItem(claimId, { note, signal }));
+  const record = await callRoom(() => client.workClaimGet(claimId, { signal }));
+  const claim = record?.claim ?? record;
+  if (claim?.state !== "unclaimed") throw new CoordError("claim_not_verified", "Room did not confirm the release", { claim: claim ?? null });
+  return claim;
+}
+
+// Close the claim and read that back. Claimed and blocked work cannot move
+// straight to done; the room's state machine requires in_progress in between.
+// A review policy that needs another member still refuses the close.
+export async function closeClaim(client, id, { memberId, note, now, signal } = {}) {
+  assertClient(client, ["workClaimGet", "updateWorkItem", "workComplete"]);
+  const claimId = assertId(id, "Claim id");
+  const current = verifyClaim(await callRoom(() => client.workClaimGet(claimId, { signal })), { memberId, now });
+  if (current.state === "claimed" || current.state === "blocked") {
+    await callRoom(() => client.updateWorkItem(claimId, { state: "in_progress", note: "started to close", signal }));
+  }
+  await callRoom(() => client.workComplete(claimId, { note, signal }));
+  const record = await callRoom(() => client.workClaimGet(claimId, { signal }));
+  const claim = record?.claim ?? record;
+  if (claim?.state !== "done") throw new CoordError("claim_not_verified", "Room did not confirm the work is done", { claim: claim ?? null });
+  return claim;
 }
 
 // Put a PR in the room's land queue so CI state flows back into the room.
@@ -217,20 +331,31 @@ export async function land(lander, { repo, prNumber, claimantMemberId, signal } 
   assertClient(lander, ["addLandItem"]);
   if (typeof repo !== "string" || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo)) throw new CoordError("invalid_input", "repo must be owner/name");
   if (!Number.isSafeInteger(prNumber) || prNumber < 1) throw new CoordError("invalid_input", "prNumber must be a positive integer");
-  return lander.addLandItem({ repo, prNumber, claimantMemberId, signal });
+  return callRoom(() => lander.addLandItem({ repo, prNumber, claimantMemberId, signal }));
 }
 
 // Event pages arrive as { sequence, event: { type, actorId, data } }.
 // Coordination events get a line that names the claim or PR they moved, so a
 // digest reads as "who changed which lane" instead of a list of event types.
 const leaseText = value => (value ? ` · lease ${value}` : "");
+// land.updated is the room's wake payload: `pr` is the number and `state`
+// is the check rollup ({ checks, behind, mergeable, merged }), not a string.
+const landSummary = data => {
+  const pr = Number.isSafeInteger(data.pr) ? data.pr : Number.isSafeInteger(data.prNumber) ? data.prNumber : "?";
+  const rollup = data.state;
+  const checks = rollup && typeof rollup === "object" ? rollup.checks : typeof rollup === "string" ? rollup : null;
+  const changed = Array.isArray(data.changed) ? data.changed.filter(item => typeof item === "string" && item !== checks) : [];
+  const extra = changed.length ? changed.join(", ") : typeof data.change === "string" && data.change !== checks ? data.change : null;
+  const detail = [checks, extra].filter(Boolean).join(" · ");
+  return `land ${data.repo ?? "?"}#${pr}${detail ? ` ${detail}` : " updated"}`;
+};
 const summaryOf = event => {
   const data = event.data ?? {};
   if (event.type === "work_claim.updated") {
     const owner = data.ownerId ? `owner ${data.ownerId}` : "unowned";
     return `claim ${data.workClaim} ${data.action} · ${owner}${leaseText(data.leaseExpiresAt)}${data.paths?.length ? ` · ${data.paths.join(", ")}` : ""}`;
   }
-  if (event.type === "land.updated") return `land ${data.repo ?? "?"}#${data.prNumber ?? "?"} ${data.state ?? data.change ?? "updated"}`;
+  if (event.type === "land.updated") return landSummary(data);
   if (typeof data.body === "string") return data.body.split("\n")[0].slice(0, 160);
   return event.type ?? "event";
 };
@@ -257,6 +382,19 @@ export function eventConcerns(event, { memberId, handles = [] } = {}) {
 const typeMatches = (type, filters) => !filters.length
   || filters.some(filter => type === filter || (typeof type === "string" && type.startsWith(`${filter}.`)));
 
+// A wake is someone else's act that names you. Your own messages never
+// qualify. land.updated is the exception to the actor check: the room records
+// the claimant as the actor when CI moves their pull request, and that
+// update is still their business.
+const wakesMe = (event, { memberId, handles }) => {
+  if (!event || !memberId) return false;
+  const type = typeof event.type === "string" ? event.type : "";
+  if (event.actorId === memberId && type.startsWith("message")) return false;
+  if (type.startsWith("land.")) return event.data?.claimantMemberId === memberId;
+  if (event.actorId === memberId) return false;
+  return eventConcerns(event, { memberId, handles });
+};
+
 // One catch-up read for a wake loop: scan from a checkpoint, keep the events
 // that match the type prefixes (and, with mine, were made by someone else and
 // concern this member), and hand back the checkpoint to store. The checkpoint
@@ -265,6 +403,7 @@ const typeMatches = (type, filters) => !filters.length
 export async function tail(client, { after = 0, types = [], mine = false, memberId, handles = [], pageSize = 100, maxPages = 5, signal } = {}) {
   assertClient(client, ["changes"]);
   if (!Number.isSafeInteger(after) || after < 0) throw new CoordError("invalid_input", "after must be a nonnegative sequence");
+  if (!Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > 100) throw new CoordError("invalid_input", "pageSize must be 1 to 100");
   if (!Number.isSafeInteger(maxPages) || maxPages < 1 || maxPages > 50) throw new CoordError("invalid_input", "maxPages must be 1 to 50");
   if (mine && !memberId) throw new CoordError("invalid_input", "mine needs the caller's memberId");
   const filters = types.map(type => String(type).trim()).filter(Boolean);
@@ -272,15 +411,19 @@ export async function tail(client, { after = 0, types = [], mine = false, member
   let cursor = after;
   let hasMore = false;
   for (let page = 0; page < maxPages; page += 1) {
-    const result = await client.changes(cursor, pageSize, { signal });
-    for (const row of result?.events ?? []) {
+    const result = await callRoom(() => client.changes(cursor, pageSize, { signal }));
+    const rows = result?.events;
+    if (!Array.isArray(rows)) throw new CoordError("invalid_response", "Room returned no event page");
+    for (const row of rows) {
       if (!typeMatches(row.event?.type, filters)) continue;
-      // A wake read is for what others did: your own posts never wake you.
-      if (mine && (row.event?.actorId === memberId || !eventConcerns(row.event, { memberId, handles }))) continue;
+      if (mine && !wakesMe(row.event, { memberId, handles })) continue;
       events.push({ seq: row.sequence, type: row.event.type, actorId: row.event.actorId, at: row.event.at, summary: summaryOf(row.event) });
     }
-    const next = Number.isSafeInteger(result?.next) ? result.next : (result?.events?.at(-1)?.sequence ?? cursor);
-    hasMore = Boolean(result?.hasMore) && next > cursor;
+    const next = Number.isSafeInteger(result?.next) ? result.next : (rows.at(-1)?.sequence ?? cursor);
+    // A checkpoint that does not move while the room says more pages are
+    // waiting would either spin or, if reported as caught up, skip the rest.
+    if (result?.hasMore && !(next > cursor)) throw new CoordError("invalid_response", "Room reported more events but the checkpoint did not advance");
+    hasMore = Boolean(result?.hasMore);
     cursor = Math.max(cursor, next);
     if (!hasMore) break;
   }

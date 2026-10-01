@@ -6,7 +6,7 @@ import { pathToFileURL } from "node:url";
 import { agentConnectionFromEnvironment, connectionDiagnostic } from "../client/agent-connection.mjs";
 import { RoomAgentClient } from "../client/room-agent.mjs";
 import { RoomLandClient } from "../client/room-land.mjs";
-import { CoordError, claimAndVerify, coordStatus, digest, handoff, land, renewWithProgress, tail, verifyClaim } from "../client/room-coord.mjs";
+import { CoordError, claimAndVerify, closeClaim, coordStatus, digest, handoff, land, releaseAndVerify, renewWithProgress, tail, translateRoomError, verifyClaim } from "../client/room-coord.mjs";
 
 export const USAGE = `Usage: room-coord <command> [options]
   status [--md] [--expiring-min N]       live claims, mine, expiring, overlaps, land queue
@@ -51,7 +51,12 @@ const required = (value, label) => {
   return value;
 };
 
-export async function run(argv, { client, lander, memberId, now } = {}) {
+export async function run(argv, deps = {}) {
+  try { return await runCommand(argv, deps); }
+  catch (error) { translateRoomError(error); }
+}
+
+async function runCommand(argv, { client, lander, memberId, now } = {}) {
   const { command, positional, options } = parseArgs(argv);
   const id = positional[0];
   switch (command) {
@@ -69,11 +74,9 @@ export async function run(argv, { client, lander, memberId, now } = {}) {
       return handoff(client, required(id, "Claim id"), { to: required(options.to, "--to"), toHandle: options.handle,
         summary: required(options.summary, "--summary"), next: options.next, now });
     case "release":
-      await client.releaseWorkItem(required(id, "Claim id"), { note: options.note });
-      return client.workClaimGet(id);
+      return releaseAndVerify(client, required(id, "Claim id"), { note: options.note });
     case "done":
-      await client.workComplete(required(id, "Claim id"), { note: options.note });
-      return client.workClaimGet(id);
+      return closeClaim(client, required(id, "Claim id"), { memberId, note: options.note, now });
     case "verify":
       return verifyClaim(await client.workClaimGet(required(id, "Claim id")), { memberId, now });
     case "land":

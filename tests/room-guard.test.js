@@ -85,6 +85,8 @@ test('changed files come from the staged index, or from the branch range against
   git(['add', 'staged.txt']);
   assert.deepEqual(gitChangedFiles({ git }), ['staged.txt']);
   assert.deepEqual(gitChangedFiles({ git, base: 'main' }), ['committed.txt']);
+  git(['mv', 'committed.txt', 'moved.txt']);
+  assert.deepEqual(gitChangedFiles({ git }).sort(), ['committed.txt', 'moved.txt', 'staged.txt']);
 });
 
 test('guard arguments reject unknown options and options missing their value', () => {
@@ -93,4 +95,23 @@ test('guard arguments reject unknown options and options missing their value', (
   assert.match(parseGuardArgs(['--files']).error, /needs a value/);
   assert.match(parseGuardArgs(['--base', '--strict']).error, /needs a value/);
   assert.match(parseGuardArgs(['--force']).error, /Unknown option --force/);
+  assert.match(parseGuardArgs(['--files', 'a.mjs', '--base', 'main']).error, /either --files or --base/);
+});
+
+test('a lease a few minutes past its stamp still blocks, and a bad path does not crash the guard', async () => {
+  const at = Date.parse('2026-10-01T12:00:00Z');
+  const claim = leaseExpiresAt => ({ claims: [{ id: 'held', state: 'claimed', owner: 'owner', leaseExpiresAt, files: ['server/a.mjs'] }] });
+  const client = leaseExpiresAt => strictDouble({ workClaims: async () => claim(leaseExpiresAt) });
+  assert.equal((await runGuard({ files: ['server/a.mjs'], client: client('2026-10-01T11:56:00.000Z'), memberId: 'reviewer', now: at })).code, 1);
+  assert.equal((await runGuard({ files: ['server/a.mjs'], client: client('2026-10-01T11:54:00.000Z'), memberId: 'reviewer', now: at })).code, 0);
+
+  const mixed = strictDouble({ workClaims: async () => ({ claims: [
+    { id: 'bad', state: 'claimed', owner: 'other', leaseExpiresAt: '2026-10-01T13:00:00.000Z', files: ['../outside', 'docs/locked.md'] },
+    { id: 'text', state: 'claimed', owner: 'other', leaseExpiresAt: '2026-10-01T13:00:00.000Z', files: 'docs/locked.md' }
+  ] }) });
+  const blocked = await runGuard({ files: ['docs/locked.md', 'docs/free.md'], client: mixed, memberId: 'me', now: at });
+  assert.equal(blocked.code, 1);
+  assert.deepEqual(blocked.conflicts.map(conflict => conflict.claimId), ['bad']);
+  const usage = await runGuard({ files: ['../outside'], client: strictDouble({ workClaims: async () => { throw new Error('room should not be called'); } }), memberId: 'me' });
+  assert.equal(usage.code, 2);
 });

@@ -60,15 +60,36 @@ test('tail returns only the events that concern the caller and a checkpoint that
 test('claim and land events read as lane changes in the digest and count as the owner\'s business', () => {
   const claimRow = { sequence: 9, event: { type: 'work_claim.updated', actorId: 'owner',
     data: { workClaim: 'lane-a', action: 'reassigned', ownerId: 'reviewer', previousOwnerId: 'owner', leaseExpiresAt: '2026-10-02T00:00:00.000Z', paths: ['server/a.mjs'] } } };
-  const landRow = { sequence: 10, event: { type: 'land.updated', actorId: 'owner', data: { repo: 'acme/demo', prNumber: 7, state: 'green' } } };
+  const landRow = { sequence: 10, event: { type: 'land.updated', actorId: 'owner', data: {
+    itemId: 'land-1', repo: 'acme/demo', pr: 7, claimantMemberId: 'reviewer', head: 'd'.repeat(40),
+    state: { checks: 'green', behind: false, mergeable: 'mergeable', merged: false }, changed: ['green'] } } };
   assert.equal(digest({ events: [claimRow, landRow] }), [
     '## Activity (2 events)',
     '- seq 9 · owner · claim lane-a reassigned · owner reviewer · lease 2026-10-02T00:00:00.000Z · server/a.mjs',
     '- seq 10 · owner · land acme/demo#7 green'
   ].join('\n'));
   assert.equal(eventConcerns(claimRow.event, { memberId: 'reviewer' }), true);
-  assert.equal(eventConcerns(landRow.event, { memberId: 'reviewer' }), false);
+  assert.equal(eventConcerns(landRow.event, { memberId: 'reviewer' }), true);
+  assert.equal(eventConcerns(landRow.event, { memberId: 'stranger' }), false);
   assert.equal(eventConcerns({ type: 'message.posted', actorId: 'x', data: { body: 'cc @Grok Bot.' } }, { memberId: 'g', handles: ['@Grok Bot'] }), true);
+});
+
+test('tail wakes the claimant for a land update recorded in their name, and stops when the checkpoint stalls', async () => {
+  const sha = 'd'.repeat(40);
+  const land = { sequence: 4, event: { type: 'land.updated', actorId: 'reviewer', at: '2026-10-01T00:00:00.000Z', data: {
+    itemId: 'land-1', repo: 'acme/demo', pr: 7, claimantMemberId: 'reviewer', head: sha,
+    state: { checks: 'green', behind: false, mergeable: 'mergeable', merged: false }, changed: ['green'] } } };
+  const ownNote = { sequence: 5, event: { type: 'message.posted', actorId: 'reviewer', at: '2026-10-01T00:00:01.000Z', data: { body: 'my own note' } } };
+  const mention = { sequence: 6, event: { type: 'message.posted', actorId: 'owner', at: '2026-10-01T00:00:02.000Z', data: { body: 'ping @Reviewer' } } };
+  const page = { events: [land, ownNote, mention], next: 6, hasMore: false };
+  const woken = await tail({ changes: async () => page }, { mine: true, memberId: 'reviewer', handles: ['Reviewer'] });
+  assert.deepEqual(woken.events.map(event => event.summary), ['land acme/demo#7 green', 'ping @Reviewer']);
+
+  await assert.rejects(tail({ changes: async () => ({ events: [], next: 4, hasMore: true }) }, { after: 4 }), coded('invalid_response'));
+  let calls = 0;
+  const sized = { changes: async () => { calls += 1; return { events: [], next: 0, hasMore: false }; } };
+  await assert.rejects(tail(sized, { pageSize: 0 }), coded('invalid_input'));
+  assert.equal(calls, 0);
 });
 
 test('the tail command refuses a bad checkpoint before reading', async t => {
