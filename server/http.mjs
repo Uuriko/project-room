@@ -2805,11 +2805,17 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if ((url.pathname === "/join" || url.pathname === "/room/join" || url.pathname === "/api/join") && req.method === "POST") {
         rate(`join:${remoteAddress}`, 20);
         const data = await body(req);
-        if (!(exact(data, ["displayName"]) || exact(data, ["displayName", "inviteCode"]))) {
-          reject(422, "invalid_join", "displayName and an optional inviteCode are the accepted fields");
+        const hasProof = Boolean(data) && Object.hasOwn(data, "proof");
+        const hasInvite = Boolean(data) && Object.hasOwn(data, "inviteCode");
+        const joinFields = ["displayName", ...(hasInvite ? ["inviteCode"] : []), ...(hasProof ? ["proof"] : [])];
+        if (!data || !exact(data, joinFields)) {
+          reject(422, "invalid_join", "displayName, an optional inviteCode, and an optional proof are the accepted fields");
         }
         const name = typeof data.displayName === "string" ? data.displayName.trim() : "";
         if (!name || name.length > 80) reject(422, "invalid_join", "displayName must be 1-80 characters");
+        if (hasProof && (typeof data.proof !== "string" || !/^[A-Za-z0-9_-]{1,43}$/.test(data.proof))) {
+          reject(422, "invalid_join", "proof is invalid");
+        }
         if (typeof data.inviteCode === "string" && data.inviteCode.trim()) {
           const redeemed = store.invites.redeem(data.inviteCode, { displayName: name });
           // Jev-harness admission gate, shadow mode (docs/JEV-GATES.md):
@@ -2841,7 +2847,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const { identity, room } = store.transaction(() => {
           // Atomic: a failed room creation rolls the identity insert back
           // with it, so no orphan identity can survive a half-done join.
-          const createdIdentity = store.identities.create(name);
+          const createdIdentity = store.identities.create(name, {
+            anonymous: { address: String(remoteAddress ?? ""), proof: data.proof },
+          });
           const createdRoom = agentRooms.create(createdIdentity.secret, {
             roomId: `personal-${createdIdentity.identityId}`,
             title: `${name}'s room`,
@@ -3005,18 +3013,27 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const revokeMatch = /^\/api\/rooms\/([^/]{1,384})\/invitations\/([^/]{1,384})\/revoke$/.exec(url.pathname);
       // Round-2 #101: creating an agent identity is open (an identity alone
       // grants nothing); linking it into a room is owner-only per room.
-      // Because the route is unauthenticated it is bounded twice: the
-      // per-address rate limit here, and the IDENTITY_LIMIT table cap that
-      // store.identities.create enforces inside its insert transaction
-      // (409 pilot_limit, no row written) — like the credentials table.
+      // Unauthenticated mints are bounded by the per-address limiter here,
+      // plus the address, network, and daily budgets inside create
+      // (429 rate_limited / 428 proof_required) and the IDENTITY_LIMIT cap
+      // (409 pilot_limit, no row written).
       if ((url.pathname === "/api/agent-identities" || url.pathname === "/api/identity-create") && req.method === "POST") {
         rate(`identity-create:${remoteAddress}`, 30);
         const data = await body(req);
-        if (!(exact(data, ["displayName"]) || exact(data, ["displayName", "recoverable"]) && data.recoverable === true)
-          || typeof data.displayName !== "string") reject(422, "invalid_identity", "displayName is required");
+        const hasProof = Boolean(data) && Object.hasOwn(data, "proof");
+        const recoverable = data?.recoverable === true;
+        const fields = ["displayName", ...(recoverable ? ["recoverable"] : []), ...(hasProof ? ["proof"] : [])];
+        if (!data || !exact(data, fields) || typeof data.displayName !== "string"
+          || (Object.hasOwn(data, "recoverable") && data.recoverable !== true)) reject(422, "invalid_identity", "displayName is required");
+        if (hasProof && (typeof data.proof !== "string" || !/^[A-Za-z0-9_-]{1,43}$/.test(data.proof))) {
+          reject(422, "invalid_identity", "proof is invalid");
+        }
         const registrationCredential = data.recoverable ? bearer(req) : undefined;
         if (data.recoverable && !registrationCredential) reject(401, "unauthenticated", "Saved registration credential required");
-        return json(res, 201, store.identities.create(data.displayName, { secret: registrationCredential }));
+        return json(res, 201, store.identities.create(data.displayName, {
+          secret: registrationCredential,
+          anonymous: { address: String(remoteAddress ?? ""), proof: data.proof },
+        }));
       }
       // POST-only mint. GET must not look like a missing route (404) or an
       // auth challenge (401): there is nothing to authenticate.
@@ -4818,6 +4835,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const errorBody = errorOverride
         ? { error: { code, message }, ...errorOverride, operationId, category }
         : { ...agentErrorBody({ httpStatus, code, message, roomId, workItemId }), operationId, category };
+      if (error.detail && typeof error.detail === "object" && !Array.isArray(error.detail)) {
+        for (const [key, value] of Object.entries(error.detail)) {
+          if (!["error", "status", "reason", "hint", "next", "operationId", "category"].includes(key)) errorBody[key] = value;
+        }
+      }
       json(res, httpStatus, errorBody);
     }
   });

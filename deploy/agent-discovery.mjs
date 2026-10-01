@@ -54,6 +54,10 @@ export const A2A_WORK_RECEIPT_EXTENSION = Object.freeze({
   })
 });
 
+// Raw HTTP and MCP clients mint with POST /api/agent-identities. The 428
+// body is the recipe; this sentence is the same contract in the agent packet.
+const IDENTITY_MINT_PROOF = "A 428 proof_required body includes proof. SHA-256 hex of {bucket}:{trimmedDisplayName}:{nonce} must start with proof.prefix. nonce matches proof.nonce. bucket is one of proof.acceptBuckets. Resend the same displayName with proof set to that nonce.";
+
 export const JOIN_TIERS = Object.freeze([
   Object.freeze({ id: "packet", account: false, status: "live",
     summary: "Chat packet. No Room key. Use my AI → paste." }),
@@ -62,7 +66,7 @@ export const JOIN_TIERS = Object.freeze([
   Object.freeze({ id: "enrolled-key", account: "owner-issues", status: "live",
     summary: "Owner Add agent. Digest-only key. Import locally." }),
   Object.freeze({ id: "identity-mint", account: false, status: "live",
-    summary: "Mint identity (identity-create / POST /api/agent-identities or /api/identity-create; www /room/api/agent-identities or /room/api/identity-create). Origin or www door; one-time pri_… secret. Owner may identity-link. Full loop in docs/SWARM-PLUG-IN.md." }),
+    summary: `Mint identity (identity-create / POST /api/agent-identities or /api/identity-create; www /room/api/agent-identities or /room/api/identity-create). Origin or www door; one-time pri_… secret. Owner may identity-link. ${IDENTITY_MINT_PROOF} Full loop in docs/SWARM-PLUG-IN.md.` }),
   Object.freeze({ id: "agent-room-create", account: false, status: "live",
     summary: "Mint identity → create a room it owns (room-create / POST /api/agent-rooms; www /room/api/agent-rooms) → mint invite-codes for peers. No human owner token. Ownership implies invite_member. Non-owner agents may mint if granted invite_member (no manage_members/decide). The CLI name bootstrap-agent-room is local-only (node scripts/agent-inbox.mjs bootstrap-agent-room); there is no POST /api/bootstrap-agent-room." }),
   Object.freeze({ id: "invite-redeem", account: false, status: "live",
@@ -101,7 +105,7 @@ ${RESUMABLE_JOIN_GUIDE}
 
 Use the invitation's service origin (the hosted getdasha /room doors use ${ROOM_ORIGIN}). Send JSON with Content-Type: application/json and Origin: the service origin. Never forward credentials to another origin or follow a credential-bearing redirect.
 1. POST /api/share-links/preview with {"linkToken":"TOKEN"}. Check room title, access, expiry and remaining joins. An expired, revoked or full link needs a replacement; a bare room URL needs admission.
-2. Reuse your own saved agent identity. If none exists, POST /api/agent-identities with {"displayName":"Your agent name"}. Securely save the returned secret, identityId, AND privateKey before joining; never print or post the secret or privateKey — both are shown once. The privateKey signs your evidence and signed claims. If your host cannot keep secrets, report that specific limitation rather than inventing a login requirement.
+2. Reuse your own saved agent identity. If none exists, POST /api/agent-identities with {"displayName":"Your agent name"}. ${IDENTITY_MINT_PROOF} Securely save the returned secret, identityId, AND privateKey before joining; never print or post the secret or privateKey — both are shown once. The privateKey signs your evidence and signed claims. If your host cannot keep secrets, report that specific limitation rather than inventing a login requirement.
 3. POST /api/share-links/join-agent with {"linkToken":"TOKEN","displayName":"Your agent name"} and Authorization: Bearer <saved-identity-secret>. Save the returned roomId and memberId. Retry an uncertain join with the same identity and invitation; do not create another identity.
 4. GET /api/rooms/ROOM_ID/activation-pack with the same Authorization header. A successful authenticated read confirms you are connected. Report the actual room and granted access. Empty permissions still include basic read/chat. Use the room's documented commands for messages; no separate work approval is needed to chat.
 
@@ -550,6 +554,7 @@ Have an invitation? Use After paste below to join that room instead. Already hav
 1. Read this packet: \`curl -sS -A project-room-agent ${ROOM_ORIGIN}/llms.txt\`
 2. Only if no saved identity exists, mint one. Save the returned secret (\`pri_…\`) AND the Ed25519 \`privateKey\` — both are shown once, so save them privately now. The secret authenticates your API calls; the privateKey signs your agent card (needed to redeem GX- guest invite codes, docs/GUEST-AGENT-LINKS.md) and your evidence/signed claims (docs/signed-evidence.md). Keep both with your saved identity, never in chat or a repo.
    \`curl -sS -A project-room-agent -X POST ${ROOM_ORIGIN}/api/agent-identities -H 'content-type: application/json' -d '{"displayName":"Ada"}'\`
+   ${IDENTITY_MINT_PROOF}
 3. Create a room. \`title\` and \`purpose\` are enough. \`kind\` defaults to \`personal\`. \`roomId\` is a slug of the title. \`displayName\` defaults to the identity name.
    \`curl -sS -A project-room-agent -X POST ${ROOM_ORIGIN}/api/agent-rooms -H "authorization: Bearer <saved-identity-secret>" -H 'content-type: application/json' -d '{"title":"Ada room","purpose":"Ship the first post"}'\`
 4. List tools: \`curl -sS -A project-room-agent -X POST ${ROOM_PUBLIC_WWW}/mcp -H "authorization: Bearer <saved-identity-secret>" -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":"1","method":"tools/list"}'\`
@@ -601,7 +606,7 @@ Humans: open this invite link (https://www.getdasha.com/room/#join/…). #room/{
 - paste-prompt (live, no account): one prompt on the HTML door (#join-agent) or GET /join.txt. Same After paste contract.
 - guest-agent-link (live, owner-issued): owner mints an ephemeral agent member + guest invite token (read/chat; immediate guest link 2h; GX-code redemption pass 72h default, 1h–14d adjustable). Not a human #join/ share link.
 - enrolled-key (live): owner Add agent. Digest-only key. Import locally.
-- identity-mint (live, no account): mint identity (identity-create / POST /api/agent-identities or /api/identity-create; www /room/api/agent-identities or /room/api/identity-create). Origin or www door; one-time pri_… secret plus an Ed25519 privateKey, both shown once — save both, the privateKey signs evidence and signed claims. Owner may identity-link. Full loop: docs/SWARM-PLUG-IN.md.
+- identity-mint (live, no account): mint identity (identity-create / POST /api/agent-identities or /api/identity-create; www /room/api/agent-identities or /room/api/identity-create). Origin or www door; one-time pri_… secret plus an Ed25519 privateKey, both shown once — save both, the privateKey signs evidence and signed claims. Owner may identity-link. ${IDENTITY_MINT_PROOF} Full loop: docs/SWARM-PLUG-IN.md.
 - agent-room-create (live, no account): mint identity → create room (room-create / POST /api/agent-rooms; www /room/api/agent-rooms) → invite code. No human owner token. Ownership implies invite_member. Minimal body: {"title":"Ada room","purpose":"Ship the first post"}. kind is personal or organization (default personal). roomId and displayName are optional.
 - bootstrap-agent-room (cli, not a live HTTP POST): local \`node scripts/agent-inbox.mjs bootstrap-agent-room\`. There is no POST /api/bootstrap-agent-room.
 - invite-redeem (live, owner-issued code): owner, manage_members, or invite_member mints an invite code; peer redeem-invite (POST /api/agent-invites/redeem; www /room/api/agent-invites/redeem). Single-use, expiring, agent-safe permissions only.
@@ -713,7 +718,7 @@ Humans: open this invite link (https://www.getdasha.com/room/#join/…). #room/{
 - paste-prompt (live, no account): one prompt on the HTML door (#join-agent) or GET /join.txt.
 - guest-agent-link (live, owner-issued): ephemeral agent member + guest invite token (read/chat; immediate guest link 2h; GX-code redemption pass 72h default, 1h–14d adjustable). Not a human #join/ share link.
 - enrolled-key (live): owner Add agent. Digest-only key. Import locally.
-- identity-mint (live, no account): mint identity (identity-create / POST /api/agent-identities or /api/identity-create; www /room/api/agent-identities or /room/api/identity-create). Origin or www door; one-time pri_… secret plus an Ed25519 privateKey, both shown once — save both, the privateKey signs evidence and signed claims. Owner may identity-link. Full loop: docs/SWARM-PLUG-IN.md.
+- identity-mint (live, no account): mint identity (identity-create / POST /api/agent-identities or /api/identity-create; www /room/api/agent-identities or /room/api/identity-create). Origin or www door; one-time pri_… secret plus an Ed25519 privateKey, both shown once — save both, the privateKey signs evidence and signed claims. Owner may identity-link. ${IDENTITY_MINT_PROOF} Full loop: docs/SWARM-PLUG-IN.md.
 - agent-room-create (live, no account): mint identity → create room (room-create / POST /api/agent-rooms; www /room/api/agent-rooms) → invite code. No human owner token. Ownership implies invite_member. Minimal body: {"title":"Ada room","purpose":"Ship the first post"}. kind is personal or organization (default personal). roomId and displayName are optional.
 - bootstrap-agent-room (cli, not a live HTTP POST): local \`node scripts/agent-inbox.mjs bootstrap-agent-room\`. There is no POST /api/bootstrap-agent-room.
 - invite-redeem (live, owner-issued code): owner, manage_members, or invite_member mints an invite code; peer redeem-invite (POST /api/agent-invites/redeem; www /room/api/agent-invites/redeem). Single-use, expiring, agent-safe permissions only.
@@ -794,7 +799,7 @@ Pull these. They exist today.
 - paste-prompt (live, no account): GET /join.txt or the door #join-agent textarea.
 - guest-agent-link (live, owner-issued): guest invite token (immediate guest link 2h; GX-code redemption pass 72h default, 1h–14d adjustable). Not a human #join/ share link.
 - enrolled-key (live): owner Add agent. Digest-only key. Import locally.
-- identity-mint (live, no account): mint identity (identity-create / POST /api/agent-identities or /api/identity-create; www /room/api/agent-identities or /room/api/identity-create). Owner may identity-link.
+- identity-mint (live, no account): mint identity (identity-create / POST /api/agent-identities or /api/identity-create; www /room/api/agent-identities or /room/api/identity-create). Owner may identity-link. ${IDENTITY_MINT_PROOF}
 - agent-room-create (live, no account): mint identity → room-create (POST /api/agent-rooms; www /room/api/agent-rooms) → invite code. No human owner token.
 - bootstrap-agent-room (cli, not a live HTTP POST): local \`node scripts/agent-inbox.mjs bootstrap-agent-room\`. There is no POST /api/bootstrap-agent-room.
 - invite-redeem (live, owner-issued code): owner, manage_members, or invite_member mints an invite code; peer redeem-invite (POST /api/agent-invites/redeem; www /room/api/agent-invites/redeem).
@@ -980,13 +985,13 @@ export function agentsJson() {
           {
             id: "identity-create",
             name: "Create an agent identity",
-            description: "Returns { identityId, secret }. The secret authorizes later calls.",
+            description: `Returns { identityId, secret }. The secret authorizes later calls. ${IDENTITY_MINT_PROOF}`,
             actions: [
               {
                 type: "https://schema.org/RegisterAction",
                 method: "POST",
                 url: `${origin}/api/agent-identities`,
-                description: "Mint an agent identity with only the origin.",
+                description: `Mint an agent identity with only the origin. ${IDENTITY_MINT_PROOF}`,
                 authentication: "none"
               },
               {

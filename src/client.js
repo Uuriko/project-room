@@ -27,6 +27,25 @@ export function verifyAccessSummary(value, { roomId, workItemId }) {
   return summary;
 }
 
+export const IDENTITY_MINT_POW_BITS = 12;
+export const IDENTITY_MINT_POW_WINDOW_MS = 10 * 60 * 1000;
+
+// Same challenge as server/agent-identities.mjs solveIdentityMintProof:
+// sha256(`${bucket}:${trim(displayName)}:${nonce}`) with bucket = floor(now / window).
+export async function solveIdentityMintProof(displayName, now = Date.now(), bits = IDENTITY_MINT_POW_BITS) {
+  const name = typeof displayName === "string" ? displayName.trim() : "";
+  const bucket = Math.floor(now / IDENTITY_MINT_POW_WINDOW_MS);
+  const prefix = "0".repeat(bits / 4);
+  const encoder = new TextEncoder();
+  for (let i = 0; i < 1_000_000; i++) {
+    const nonce = i.toString(36);
+    const digest = await crypto.subtle.digest("SHA-256", encoder.encode(`${bucket}:${name}:${nonce}`));
+    const hex = [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, "0")).join("");
+    if (hex.startsWith(prefix)) return nonce;
+  }
+  throw new Error("proof search exhausted");
+}
+
 const accountSessionError = message => {
   const error = new Error(message);
   error.status = 401;
@@ -169,8 +188,9 @@ export class AccountClient {
   // dead invitation mints a self-serve identity (an identity alone grants
   // nothing) and files an access request the room owner can approve or
   // deny. Both calls are unauthenticated by design; credentials omitted.
-  mintAccessIdentity(displayName) {
-    return this.request("/api/agent-identities", { method: "POST", credentials: "omit", data: { displayName } });
+  async mintAccessIdentity(displayName) {
+    const proof = await solveIdentityMintProof(displayName);
+    return this.request("/api/agent-identities", { method: "POST", credentials: "omit", data: { displayName, proof } });
   }
   submitAccessRequest({ roomId, identityId, displayName, requestedPermissions, note, referredBy, requestId }) {
     return this.request("/api/access-requests", { method: "POST", credentials: "omit",

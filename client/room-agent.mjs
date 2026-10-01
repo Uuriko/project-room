@@ -5,7 +5,7 @@ import { validId, PERMISSIONS, WORK_STATES, AGENT_AUTONOMY_PERMISSIONS, MAX_MESS
 import { nextWorkStep, workActions, reusableWorkDefinition, workCollaboration, workResume } from "../src/workflow.js";
 import { isDeepStrictEqual } from "node:util";
 import { searchWork, completedResults, currentResult } from "../src/work-selectors.js";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { workPacket, resultDraft, verifyWorkResult, resumeMarkdown } from "../src/work-packet.js";
 import { submitWorkAction } from "./work-actions.mjs";
 import { submitHelpAction } from "./help-actions.mjs";
@@ -170,9 +170,28 @@ function requireIdentitySecret(secret) {
     throw new RoomClientError(0, "invalid_config", "A valid identity secret is required");
 }
 
+// Same challenge as server/agent-identities.mjs. Kept here so the CLI does
+// not import the browser client. tests/identity-mint-capacity.test.js locks
+// the two solvers to the server verifier.
+export const IDENTITY_MINT_POW_BITS = 12;
+export const IDENTITY_MINT_POW_WINDOW_MS = 10 * 60 * 1000;
+
+export function solveIdentityMintProof(displayName, now = Date.now(), bits = IDENTITY_MINT_POW_BITS) {
+  const name = typeof displayName === "string" ? displayName.trim() : "";
+  const bucket = Math.floor(now / IDENTITY_MINT_POW_WINDOW_MS);
+  const prefix = "0".repeat(bits / 4);
+  for (let i = 0; i < 1_000_000; i++) {
+    const nonce = i.toString(36);
+    const hex = createHash("sha256").update(`${bucket}:${name}:${nonce}`).digest("hex");
+    if (hex.startsWith(prefix)) return nonce;
+  }
+  throw new Error("proof search exhausted");
+}
+
 // Mint an identity without a room credential; store the returned secret securely.
 export async function createAgentIdentity(origin, displayName, options = {}) {
-  const value = await discoveryRequest(origin, "/api/agent-identities", { method: "POST", body: { displayName, ...(options.identitySecret ? { recoverable: true } : {}) }, token: options.identitySecret }, options);
+  const proof = solveIdentityMintProof(displayName);
+  const value = await discoveryRequest(origin, "/api/agent-identities", { method: "POST", body: { displayName, proof, ...(options.identitySecret ? { recoverable: true } : {}) }, token: options.identitySecret }, options);
   if (options.identitySecret && value?.identityId) value.secret = options.identitySecret;
   if (typeof value?.identityId !== "string" || typeof value?.secret !== "string") throw new RoomClientError(200, "invalid_response", "Room returned an invalid identity");
   return value;
