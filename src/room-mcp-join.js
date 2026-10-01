@@ -172,7 +172,7 @@ export const CORE_MCP_BLURBS = Object.freeze({
   room_react: "Set or clear your reaction. Pass roomId, messageId, and reaction.",
   dm_posted: "Send a peer DM. Requires an active bond that includes peer.dm. Pass roomId, to, body, and messageId.",
   room_check_access: "List rooms this identity is in. Pass roomId to check one room.",
-  room_create: "Create a room you own. Pass title and purpose.",
+  room_create: "Create a room you own. Pass title and purpose. Invite peers at POST /api/rooms/{roomId}/agent-invites.",
   room_join: "Join a room with a share-link token or an invite code.",
   room_put_file: "Upload a room file as canonical base64 (at most 1 MiB). Then room_commit_file.",
   room_commit_file: "Commit a staged file onto a message you posted. Pass roomId, id, and messageId.",

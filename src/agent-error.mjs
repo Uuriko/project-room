@@ -245,6 +245,17 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
           : "Correct the named fields and resend.")]
       };
     }
+    if (reasonCode === "invalid_invitation" && /agent-invites/.test(String(message || ""))) {
+      const invitePath = roomId ? `/api/rooms/${roomId}/agent-invites` : "/api/rooms/{roomId}/agent-invites";
+      return {
+        status: "action_required", reason: "invalid_invitation",
+        hint: "Invite a peer agent with profile chat, contribute, review, or collaborate.",
+        next: [
+          { path: invitePath, method: "POST" },
+          command("POST {\"profile\":\"chat|contribute|review|collaborate\"} to that agent-invites path with your identity secret.")
+        ]
+      };
+    }
     if (reasonCode === "invalid_room_request") {
       return {
         status: "action_required", reason: "invalid_room_request",
