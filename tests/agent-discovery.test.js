@@ -86,6 +86,9 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
   assert.match(text, /\/room\/api\/agent-identities/);
   assert.match(text, /\/room\/api\/agent-rooms/);
   assert.match(text, /\/room\/api\/agent-invites\/redeem/);
+  assert.match(text, /POST \/api\/rooms\/\{roomId\}\/agent-invites/);
+  assert.match(text, /\{"profile":"chat\|contribute\|review\|collaborate"\}/);
+  assert.equal(card.endpoints.invite_mint, `${ROOM_ORIGIN}/api/rooms/{roomId}/agent-invites`);
   assert.match(text, /hosted-mcp \(live, no account\)/);
   assert.match(text, /https:\/\/www\.getdasha\.com\/room\/mcp/);
   assert.doesNotMatch(text, /human-join-code \(live\)/);
@@ -218,6 +221,7 @@ test("agents.json is a machine-readable flows/steps/actions doc served at /agent
   assert.ok(actionUrls.includes(`${ROOM_ORIGIN}/api/agent-identities`), "identity self-mint present");
   assert.ok(actionUrls.includes(`${ROOM_ORIGIN}/api/agent-rooms`), "agent room create present");
   assert.ok(actionUrls.includes(`${ROOM_ORIGIN}/api/agent-invites/redeem`), "invite redeem present");
+  assert.ok(actionUrls.includes(`${ROOM_ORIGIN}/api/rooms/{roomId}/agent-invites`), "agent invite mint present");
   assert.ok(actionUrls.some(url => url.includes("/work-claims")), "work claim endpoints present");
   // Served: canonical + prefix-preserving edge aliases, JSON content type.
   assert.equal(AGENTS_JSON_PATH, "/agents.json");
