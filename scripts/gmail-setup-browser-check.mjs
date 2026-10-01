@@ -5,7 +5,7 @@ import { chromium } from 'playwright';
 import { createAcceptanceFixture } from './acceptance-fixture.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { signInFixture } from './auth-signin.mjs';
-for (const width of [390, 1440]) test(`new account setup saves answers, resumes, skips and reopens at ${width}px`, async t => {
+for (const width of [390, 1440]) test(`new account setup without Gmail is two steps, resumes, and ends in the room at ${width}px`, async t => {
   const f = createAcceptanceFixture(), account = f.store.accountForMember('commons', 'owner');
   f.store.db.prepare('UPDATE accounts SET onboarded=0 WHERE id=?').run(account.id);
   const key = f.store.issueAccountAccessKey(account.id), server = createRoomServer({ store: f.store });
@@ -15,26 +15,27 @@ for (const width of [390, 1440]) test(`new account setup saves answers, resumes,
   const page = await browser.newPage({ viewport: { width, height: 900 } }), errors = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.goto(origin + '/?account=1'); await signInFixture(page, key); const dialog = page.locator('#account-setup-dialog'); await dialog.waitFor({ state: 'visible' });
+  await dialog.getByText('Step 1 of 2', { exact: true }).waitFor();
   await page.locator('#setup-name').fill('Morgan'); await page.locator('#setup-purpose').selectOption('team');
   await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
-  await dialog.getByRole('heading', { name: 'Connect your email' }).waitFor();
-  assert.equal(await dialog.getByRole('checkbox').count(), 0);
-  assert.doesNotMatch(await dialog.innerText(), /Outlook|Slack|Discord|Telegram|WhatsApp|coming later/);
-  await dialog.getByText('Gmail isn’t available for this account yet.', { exact: false }).waitFor();
-  assert.equal(await dialog.getByRole('button', { name: 'Connect Gmail', exact: true }).count(), 0);
-  await dialog.getByRole('button', { name: 'Skip', exact: true }).click();
+  // Gmail isn't configured for this server, so the email step is left out.
   await dialog.getByRole('heading', { name: 'You’re ready' }).waitFor();
+  await dialog.getByText('Step 2 of 2', { exact: true }).waitFor();
+  assert.equal(await dialog.getByRole('button', { name: 'Connect Gmail', exact: true }).count(), 0);
+  assert.doesNotMatch(await dialog.innerText(), /Connect your email|Outlook|Slack|Discord|Telegram|WhatsApp|coming later/);
   await page.reload(); await dialog.getByRole('heading', { name: 'You’re ready' }).waitFor();
   const saved = JSON.parse(f.store.db.prepare('SELECT data_json FROM account_setup WHERE account_id=?').get(account.id).data_json);
   assert.deepEqual(saved.platforms, []); assert.equal(saved.purpose, 'team'); assert.equal(saved.name, 'Morgan');
   await dialog.getByRole('button', { name: 'Back', exact: true }).click();
-  await dialog.getByRole('heading', { name: 'Connect your email' }).waitFor();
+  await dialog.getByRole('heading', { name: 'Make Project Room yours' }).waitFor();
+  await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
+  await dialog.getByRole('heading', { name: 'You’re ready' }).waitFor();
   mkdirSync('test-results/gmail-setup', { recursive: true });
   await page.screenshot({ path: `test-results/gmail-setup/setup-${width}.png`, fullPage: true });
   assert.ok(await dialog.evaluate(el => el.scrollWidth <= el.clientWidth + 1));
-  await dialog.getByRole('button', { name: 'Skip', exact: true }).click();
-  await dialog.getByRole('button', { name: 'Set up later', exact: true }).click(); await dialog.waitFor({ state: 'hidden' });
-  await page.reload(); await page.locator('#inbox-panel').waitFor({ state: 'visible' });
+  await dialog.getByRole('button', { name: 'Open my room', exact: true }).click(); await dialog.waitFor({ state: 'hidden' });
+  await page.locator('#message-input').waitFor({ state: 'visible' });
+  await page.goto(origin + '/?account=1'); await page.locator('#inbox-panel').waitFor({ state: 'visible' });
   assert.equal(await dialog.isVisible(), false);
   await page.getByText('Manage inbox', { exact: true }).click(); await page.getByRole('button', { name: 'Personalize setup' }).click();
   await dialog.getByRole('heading', { name: 'You’re ready' }).waitFor();
