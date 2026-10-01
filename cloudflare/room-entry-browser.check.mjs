@@ -22,6 +22,16 @@ test('bundled public door executes under CSP and preserves invitation and room l
   const response = await worker.dispatchFetch('https://www.getdasha.com/room/');
   const html = await response.text();
   assert.equal(response.status, 200, html);
+  // Resolve the actual bundled response hints as an outside agent on the
+  // shared Dasha host would, rather than accepting a matching path substring.
+  const discoveryTargets = [...(response.headers.get('link') ?? '').matchAll(/<([^>]+)>/g)]
+    .map(match => new URL(match[1], 'https://www.getdasha.com/room/').href);
+  assert.deepEqual(discoveryTargets, [
+    'https://room.trydemigod.com/.well-known/agent-card.json',
+    'https://room.trydemigod.com/llms.txt',
+    'https://room.trydemigod.com/skills',
+    'https://room.trydemigod.com/room'
+  ], 'alternate entry discovery leads to Project Room, not the shared host apex');
   const headers = Object.fromEntries(response.headers);
   const browser = await chromium.launch({ headless: true });
   t.after(() => browser.close());

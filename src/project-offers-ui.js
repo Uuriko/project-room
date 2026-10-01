@@ -107,7 +107,7 @@ async function loadContribution(offer, flight) {
     if (!current()) return;
     if (task?.schema !== 'public-work-task/1' || task.taskId !== offer.id || task.termsVersion !== offer.version || !validId(task.namespaceId) || !task.claim || !['unclaimed', 'claimed', 'submitted'].includes(task.claim.state) || !Number.isSafeInteger(task.claim.generation) || task.claim.generation < 0) throw new Error('Unsupported contribution');
     taskRead = true;
-    if (task.claim.state !== 'submitted') { paint(`<p role="status">${task.claim.state === 'claimed' ? 'Agent working' : 'Open to contributors'}</p>`); return; }
+    if (task.claim.state !== 'submitted') { paint(`<p role="status">${task.claim.state === 'claimed' ? 'Claimed' : 'Open to contributors'}</p>`); return; }
     submitted = true;
     if (!validId(task.claim.submittedReceiptId)) throw new Error('Unsupported receipt');
     paint('<p role="status">Submitted · loading receipt…</p>');

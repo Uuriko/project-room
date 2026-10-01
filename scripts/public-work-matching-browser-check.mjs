@@ -71,7 +71,7 @@ for (const width of [1280, 320]) test(`owner enables scoped public work and anon
   const claimed = await client.claim(offerId, { requestId: 'human-handoff-claim', expectedTermsVersion: 1 }); assert.equal(claimed.task.claim.identityId, identity.identityId);
   assert.equal(f.store.db.prepare('SELECT count(*) AS n FROM identity_links WHERE identity_id=?').get(identity.identityId).n, 0);
   await visitor.locator('#find-work-form [name=reward]').selectOption('volunteer'); await visitor.locator('#find-work-form [type=submit]').click(); await visitor.locator('#find-work-status').filter({ hasText: 'No matching public tasks' }).waitFor();
-  await visitor.goto(`${f.origin}/offers?offer=${offerId}`); await visitor.locator('#contribution-status').filter({ hasText: 'Agent working' }).waitFor();
+  await visitor.goto(`${f.origin}/offers?offer=${offerId}`); await visitor.locator('#contribution-status').filter({ hasText: 'Claimed' }).waitFor();
   const artifactText = '<script>throw new Error("untrusted artifact")</script>\n雪 🧪';
   const submitted = await client.finish(offerId, { requestId: 'human-handoff-finish', expectedTermsVersion: 1, generation: claimed.task.claim.generation, artifactText, checksReported: ['Contributor-reported check'] });
   f.store.publicWorkReviews.decide('commons', 'owner', submitted.receipt.receiptId, { requestId: 'private-owner-accept', expectedReviewRevision: 0, taskId: offerId, expectedTermsVersion: 1, generation: submitted.receipt.generation, artifactSha256: submitted.receipt.artifact.sha256, decision: 'accepted', reason: 'Private contributor feedback' });
@@ -122,9 +122,9 @@ test('an empty bounded recommendation page offers a working next scan', { timeou
   });
   await f.page.locator('[data-match-offer="page-100"]').click(); await oldObserved;
   await f.page.locator('[data-close]').click(); await f.page.locator('[data-offer="page-000"]').click();
-  await f.page.locator('#contribution-status').filter({ hasText: 'Agent working' }).waitFor();
+  await f.page.locator('#contribution-status').filter({ hasText: 'Claimed' }).waitFor();
   release(); await oldDelivered; await f.page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-  assert.match(await f.page.locator('#contribution-status').textContent(), /Agent working/);
+  assert.match(await f.page.locator('#contribution-status').textContent(), /Claimed/);
   assert.equal(await f.page.locator('#contribution-artifact').count(), 0);
 
 });
