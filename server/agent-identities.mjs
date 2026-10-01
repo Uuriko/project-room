@@ -526,11 +526,20 @@ export class AgentIdentities {
   }
 
   flushActivation() {
-    if (this.store.readOnly) {
+    // isTransaction throws once the database is closed. A read can queue this
+    // microtask and the caller can close the store before it runs.
+    if (this.store.readOnly || this.db.isOpen === false) {
       this.pendingActivation.clear();
       return;
     }
-    if ((this.store.readTransactionDepth ?? 0) > 0 || this.db.isTransaction) {
+    let busy = false;
+    try {
+      busy = (this.store.readTransactionDepth ?? 0) > 0 || this.db.isTransaction;
+    } catch {
+      this.pendingActivation.clear();
+      return;
+    }
+    if (busy) {
       queueMicrotask(() => this.flushActivation());
       return;
     }

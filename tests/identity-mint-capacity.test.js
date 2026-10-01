@@ -8,10 +8,11 @@
 //    post, a room membership, an invite, and a pending claim keep them;
 //    invite-style and recoverable replays do not spend a new slot; the HTTP
 //    routes pass the client address and proof; llms.txt and agents.json name
-//    the same proof recipe.
+//    the same proof recipe. Closing the store before a deferred activation
+//    flushes does not throw.
 // 2. Dropping a budget check, the proof check, a proof-body field, the
-//    expiry delete, a membership/invite/claim exclusion, or the HTTP
-//    anonymous argument fails these tests.
+//    expiry delete, a membership/invite/claim exclusion, the closed-store
+//    guard, or the HTTP anonymous argument fails these tests.
 // 3. Existing tests cover the 5000-row cap and the 30/minute pre-body
 //    limiter only.
 // 4. Limits are the same constructor options production uses. The bucket,
@@ -366,6 +367,22 @@ test("cleanup keeps a membership, an invite, or a pending claim", () => {
     assert.equal(store.db.prepare("SELECT count(*) AS n FROM work_claims").get().n, 4);
   } finally {
     store.close();
+  }
+});
+
+test("closing the store drops a deferred activation instead of throwing", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "identity-mint-close-"));
+  const store = new RoomStore(join(directory, "room.sqlite"));
+  try {
+    store.initialize(initialRoom("commons"));
+    const created = mint(store).create("Late Close", anon("198.51.100.9"));
+    store.readTransaction(() => {
+      assert.ok(store.identities.resolveGlobalIdentitySecret(created.secret));
+    });
+    store.close();
+    await new Promise(resolve => setImmediate(resolve));
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
   }
 });
 
