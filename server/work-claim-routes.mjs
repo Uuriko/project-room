@@ -41,8 +41,8 @@ import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { evaluateReceipt } from "./jev-receipts.mjs";
 import { findClaimCollisions } from "./claim-collisions.mjs";
 import { emitWorkClaimEvent } from "./work-claim-events.mjs";
-import { fileLeaseConflictBody, fileLeaseConflicts, readyClaims } from "./claim-coordination.mjs";
-import { collectPullRequestLookups, commitPullRequestLookup } from "./claim-pr-sync.mjs";
+import { fileLeaseConflictBody, fileLeaseConflicts, holdForRateLimit, readyClaims } from "./claim-coordination.mjs";
+import { collectPullRequestLookups, commitPullRequestLookup, readClaimPullBudget, writeClaimPullBudget } from "./claim-pr-sync.mjs";
 import { agentErrorBody } from "../src/agent-error.mjs";
 
 const CLAIM_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
@@ -218,18 +218,24 @@ export async function handleWorkClaims(options) {
   // round trip never holds the room write lock. No webhook receiver is
   // mounted; sweep is the member-triggered poll, and the cron uses the same
   // lookup. An empty room, or a sweep with nothing due, does not call fetch.
-  let pullLookups = [];
+  let pullBatch = { results: [], rateLimitedUntil: null, skipped: false };
   if (options.workClaimRoute === "sweep") {
-    const token = options.githubToken === undefined
-      ? (process.env.GITHUB_TOKEN || process.env.GH_TOKEN || null)
-      : options.githubToken;
-    pullLookups = await collectPullRequestLookups(registry.list(options.roomId), {
-      fetchImpl: options.fetchPullRequest ?? fetch,
-      token: token || null,
-      nowMs: Date.now()
-    });
+    const nowMs = Date.now();
+    const budget = readClaimPullBudget(options.store);
+    if (budget > nowMs) {
+      pullBatch = { results: [], rateLimitedUntil: budget, skipped: true };
+    } else {
+      const token = options.githubToken === undefined
+        ? (process.env.GITHUB_TOKEN || process.env.GH_TOKEN || null)
+        : options.githubToken;
+      pullBatch = await collectPullRequestLookups(registry.list(options.roomId), {
+        fetchImpl: options.fetchPullRequest ?? fetch,
+        token: token || null,
+        nowMs
+      });
+    }
   }
-  const run = () => handleWorkClaimsCore({ ...options, registry, pullLookups,
+  const run = () => handleWorkClaimsCore({ ...options, registry, pullBatch,
     auth: reauthorize ? reauthorize() : options.auth,
     helpers: { ...helpers, body: () => requestData, json: (_res, status, value) => ({ status, value }) },
   });
@@ -242,7 +248,7 @@ export async function handleWorkClaims(options) {
   }
 }
 
-function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRoute, workClaimId, helpers, registry, pullLookups = [] }) {
+function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRoute, workClaimId, helpers, registry, pullBatch = { results: [], rateLimitedUntil: null, skipped: false } }) {
   const { json, reject, body } = helpers;
   if (req.method !== "GET" && req.method !== "HEAD") enforceAutonomyTierForAction({
     db: store.db, roomId, state: { room: { ownerId: store.roomAuthority?.(roomId)?.ownerId } },
@@ -336,15 +342,20 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     if (!shape(data, {})) invalidInput(reject, "an empty JSON object");
     let updated = 0;
     let checked = 0;
-    let rateLimited = false;
-    for (const result of pullLookups) {
-      if (result.kind === "rateLimited" || result.kind === "unconfigured") {
-        rateLimited = result.kind === "rateLimited";
-        break;
-      }
+    const rateLimited = pullBatch.skipped || pullBatch.rateLimitedUntil != null;
+    for (const result of pullBatch.results) {
+      if (result.kind === "rateLimited") continue;
       const current = registry.get(roomId, result.claimId);
       checked += 1;
       if (commitPullRequestLookup(store, registry, roomId, current, result, nowMs)) updated += 1;
+    }
+    if (pullBatch.rateLimitedUntil && !pullBatch.skipped) {
+      for (const item of registry.list(roomId)) {
+        if (!item.pullRequest?.url || item.pullRequest.outcome) continue;
+        if (!["claimed", "in_progress", "blocked"].includes(item.state)) continue;
+        registry.set(roomId, holdForRateLimit(registry.get(roomId, item.id), nowMs, pullBatch.rateLimitedUntil));
+      }
+      writeClaimPullBudget(store, pullBatch.rateLimitedUntil, nowMs);
     }
     return json(res, 200, {
       roomId, released: sweptIds, sweptAt: new Date(nowMs).toISOString(),
