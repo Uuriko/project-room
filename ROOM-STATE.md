@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-10-01T06:28:05Z · board: Uuriko/project-room#1160 · watermark: 5925966073 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=ffaedaccc220928f7821ea01db4fa5f8b5e733adc2227382db9f3c06612b1e48 -->
+<!-- generated: 2026-10-01T06:59:08Z · board: Uuriko/project-room#1160 · watermark: 5926021772 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=f98c97a2719af8369c635df2ce8638edaae18fdfd470b4ce3e3a2a7c74ad3413 -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -150,7 +150,6 @@ tests/work-discussion.test.js | , jillianai | RC-2026-09-28-2875, RC-2026-09-28-
 
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
-RC-2026-09-30-3645 | jill | working | 2026-10-01T06:38:53Z | .github/workflows/ci.yml
 RC-2026-09-30-3616 | jill | working | 2026-10-01T08:04:58Z | server/match-profiles.mjs, server/match-events.mjs, server/matchmaking-routes.mjs, tests/match-profiles.test.js, tests/matchmaking-routes.test.js, scripts/runtime-package.mjs, server/writer-fence.mjs, tests/runtime-package.test.js
 
 ## unclaimed-lanes
@@ -163,6 +162,7 @@ Jillian | documentation | standard
 
 ## recent-receipts
 task-id | merged | comment-id
+RC-2026-09-30-3613 | c5da2b6b7adffd072ccd74e0e953bdc67fd871e4 | 5926021772
 RC-2026-09-30-3650 | b1a30a386f1a710e2e8947f6f5bd0c8d38a2f7e6 | 5925966073
 RC-2026-09-30-3614 | none | 5924808741
 RC-2026-09-30-3611 | d988ea5616024cac85a5552c79520919c1f80912 | 5924808504
@@ -172,7 +172,6 @@ RC-2026-09-30-3648 | ec126c5cb1d66cc569a7c5e5db1e1c9ed520efdb | 5921964466
 RC-2026-09-30-3647 | 7e350527 | 5921776291
 RC-2026-09-30-3644 | 0f76c5b12bb7450ed53554c9af0f5be326079df0 | 5917829012
 RC-2026-09-30-3643 | bdeedc6c | 5917151838
-RC-2026-09-30-3642 | bdeedc6c | 5917148777
 
 ## prose-claims-needing-fence
 comment-id | lane | task | at
@@ -182,5 +181,5 @@ comment-id | lane | task | at
 Uuriko/project-room#266 -> Uuriko/project-room#1160 · watermark 5859826064 · carried-open: RC-2026-09-27-005
 
 ## signals
-board_comments=679 threshold=1500 rotation_due=no watcher=active open_claims=27 prose_open=0 unfenced_prose=0 files_claimed=62 overlap_files=16 watermark=5925966073
+board_comments=680 threshold=1500 rotation_due=no watcher=active open_claims=27 prose_open=0 unfenced_prose=0 files_claimed=62 overlap_files=16 watermark=5926021772
 
