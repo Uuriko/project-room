@@ -112,10 +112,10 @@ async function runTrial(trial) {
     const p = await http("POST", `${R()}/commands`, { token: S.a.secret, body: cmd("bond.propose", { to: S.b.identityId }) });
     const bondId = p.json?.event?.data?.bondId;
     await http("POST", `${R()}/commands`, { token: S.b.secret, body: cmd("bond.accept", { bondId }) });
-    const secret = `journey-dm-${stamp}`;
-    await http("POST", `${R()}/commands`, { token: S.a.secret, body: cmd("dm.posted", { messageId: randomUUID(), to: S.b.identityId, body: secret }) });
+    const dmBody = `journey-dm-${stamp}`;
+    await http("POST", `${R()}/commands`, { token: S.a.secret, body: cmd("dm.posted", { messageId: randomUUID(), to: S.b.identityId, body: dmBody }) });
     const n = await http("GET", "/api/needs-me", { token: S.b.secret });
-    rec.pass = (n.json?.items ?? []).some(i => i.kind === "dm" && String(i.summary).includes(secret));
+    rec.pass = (n.json?.items ?? []).some(i => i.kind === "dm" && String(i.summary).includes(dmBody));
   });
   await task("J8", "Work-claim lifecycle: create, claim, progress, done", async rec => {
     const createDoc = documented("/work-claims\"") && /POST[^\n]{0,80}work-claims/.test(Object.values(corpus).join("\n"));
