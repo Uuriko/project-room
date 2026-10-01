@@ -121,3 +121,74 @@ test("the cron poll completes a linked claim the same way a sweep does", async t
   assert.equal(store.workClaims.get("commons", "cron-lane").state, "done");
   assert.equal(claimEvents(store).at(-1).data.action, "pr_merged");
 });
+
+test("a GitHub 403 backs off every open pull until the reset, and the next tick does not call again", async t => {
+  const { store, call } = await room(t);
+  await call("create", null, { id: "quiet" });
+  await call("claim", "quiet", {});
+  await call("create", null, { id: "waiting", pullRequest: "https://github.com/Uuriko/project-room/pull/11" });
+  await call("create", null, { id: "lane", pullRequest: URL_A });
+  await call("claim", "lane", {});
+  await call("create", null, { id: "other", pullRequest: "https://github.com/Uuriko/project-room/pull/9" });
+  await call("claim", "other", {});
+  const nowMs = Date.parse("2026-10-01T12:00:00Z");
+  const resetMs = nowMs + 30 * 60_000;
+  const calls = [];
+  const fetchImpl = async (endpoint, init) => {
+    calls.push({ endpoint, headers: init?.headers ?? {} });
+    return {
+      ok: false,
+      status: 403,
+      headers: { get(name) {
+        if (name.toLowerCase() === "x-ratelimit-remaining") return "0";
+        if (name.toLowerCase() === "x-ratelimit-reset") return String(resetMs / 1000);
+        return null;
+      } },
+      text: async () => "{\"message\":\"API rate limit exceeded\"}",
+    };
+  };
+  const first = await syncClaimPullRequests(store, { fetchImpl, token: null, nowMs });
+  assert.equal(first.rateLimited, true);
+  assert.equal(calls.length, 1, "one unauthenticated lookup per tick");
+  assert.equal(calls[0].headers.Authorization, undefined);
+  assert.doesNotMatch(calls[0].endpoint, /\/pulls\/11$/);
+  assert.equal(store.workClaims.get("commons", "lane").pullRequest.rateLimitedUntil, resetMs);
+  assert.equal(store.workClaims.get("commons", "other").pullRequest.rateLimitedUntil, resetMs);
+  assert.equal(store.workClaims.get("commons", "waiting").state, "unclaimed");
+  assert.equal(store.workClaims.get("commons", "waiting").pullRequest.rateLimitedUntil, null);
+  const second = await syncClaimPullRequests(store, { fetchImpl, token: null, nowMs: nowMs + 60_000 });
+  assert.equal(second.checked, 0);
+  assert.equal(second.rateLimited, true);
+  assert.equal(calls.length, 1);
+});
+
+test("an open pull sends If-None-Match, and a 304 keeps the claim", async t => {
+  const { store, call } = await room(t);
+  await call("create", null, { id: "lane", pullRequest: URL_A });
+  await call("claim", "lane", {});
+  const nowMs = Date.parse("2026-10-01T12:00:00Z");
+  const calls = [];
+  const fetchImpl = async (_endpoint, init) => {
+    calls.push(init?.headers ?? {});
+    if (calls.length === 1) {
+      return {
+        ok: true, status: 200,
+        headers: { get: name => name.toLowerCase() === "etag" ? 'W/"pull-1"' : null },
+        text: async () => "{\"merged\":false,\"state\":\"open\"}",
+      };
+    }
+    return {
+      ok: false, status: 304,
+      headers: { get: name => name.toLowerCase() === "etag" ? 'W/"pull-1"' : null },
+      text: async () => "",
+    };
+  };
+  await syncClaimPullRequests(store, { fetchImpl, env: { GITHUB_TOKEN: "ghs_test" }, nowMs });
+  assert.equal(calls[0].Authorization, "Bearer ghs_test");
+  assert.equal(calls[0]["If-None-Match"], undefined);
+  await syncClaimPullRequests(store, { fetchImpl, env: { GITHUB_TOKEN: "ghs_test" }, nowMs: nowMs + 60_000 });
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1]["If-None-Match"], 'W/"pull-1"');
+  assert.equal(store.workClaims.get("commons", "lane").state, "claimed");
+  assert.equal(store.workClaims.get("commons", "lane").pullRequest.outcome, null);
+});
