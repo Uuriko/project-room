@@ -7,6 +7,8 @@
 // (server/http.mjs, follow-up slice): GET /api/health -> healthReply(...),
 // GET /status -> renderStatusPage(...) as text/html.
 
+import { DARK_DECLARATIONS, LIGHT_DECLARATIONS } from "./design-tokens.js";
+
 export const HEALTH_OK = "healthy";
 export const HEALTH_DEGRADED = "degraded";
 export const HEALTH_UNHEALTHY = "unhealthy";
@@ -123,15 +125,18 @@ export function renderStatusPage(payload) {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${service} status</title>
 <style>
-body{font-family:system-ui,-apple-system,sans-serif;margin:2rem auto;max-width:44rem;padding:0 1rem;color:#111}
+:root{color-scheme:dark;${DARK_DECLARATIONS}}
+[data-theme="light"]{color-scheme:light;${LIGHT_DECLARATIONS}}
+body{font-family:var(--font-sans);margin:2rem auto;max-width:44rem;padding:0 1rem;background:var(--bg);color:var(--text)}
+a:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
 .pill{display:inline-block;padding:.25rem .75rem;border-radius:999px;font-weight:600}
-.pill-ok{background:#dff5e1;color:#14532d}
-.pill-warn{background:#fef3c7;color:#92400e}
-.pill-bad{background:#fee2e2;color:#991b1b}
+.pill-ok{background:#12351f;color:#a7e8bd}
+.pill-warn{background:#3a2a10;color:#ffbf69}
+.pill-bad{background:#3d1414;color:#ffb0b0}
 table{border-collapse:collapse;width:100%;margin-top:1rem}
-th,td{border:1px solid #ddd;padding:.5rem;text-align:left}
-.ok{color:#15803d;font-weight:600}
-.bad{color:#b91c1c;font-weight:600}
+th,td{border:1px solid var(--line);padding:.5rem;text-align:left}
+.ok{color:var(--green);font-weight:600}
+.bad{color:var(--red);font-weight:600}
 dl{display:grid;grid-template-columns:9rem 1fr;gap:.25rem 1rem}
 dt{font-weight:600}dd{margin:0}
 </style>
