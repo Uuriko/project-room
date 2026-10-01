@@ -71,7 +71,7 @@ export class ProjectRoom extends DurableObject {
       stitch: stitchConfigFromEnv(env) });
     // Event-push dispatch: same fire-and-forget flush as the node entry
     // point. The Durable Object may suspend before the microtask drains;
-       // the cron tick remains the restart-safe backstop.
+    // the cron tick remains the restart-safe backstop.
     this.store.agentPlugin.setDispatchKick(() => {
       queueMicrotask(() => { this.store.agentPlugin.drainWebhookDeliveries().catch(() => {}); });
     });
