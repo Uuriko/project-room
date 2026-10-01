@@ -212,6 +212,45 @@ test("eventsAfter attaches mention chips to message events in one batch", t => {
   const nonMessage = page.events.find(({ event }) => event.type !== T.MESSAGE_POSTED);
   if (nonMessage) assert.equal(nonMessage.event.mentions, undefined, "non-message events carry no chips");
 });
+
+// Production GET /api/rooms/:id/events?limit=100 returns 500 internal_error
+// once the page is 100 message.posted rows. Durable Object SQL allows 100
+// bound parameters; mention chips bound room_id plus every message id in one
+// statement (101). limit=20 stayed under the cap. Node SQLite allows thousands
+// of binds, so the suite has to enforce the platform cap itself.
+test("a full page of 100 messages still returns when SQL rejects more than 100 binds", t => {
+  const f = setup(t);
+  const before = f.store.room("commons").sequence;
+  const mentioned = post(f, "owner", "@alice on a full page");
+  // Live chat is burst-limited. The injected clock refills the bucket
+  // without waiting; the jump stays inside the mention timeout.
+  for (let i = 1; i < 100; i += 1) {
+    f.clock.now += 2000;
+    post(f, "owner", `plain ${i}`);
+  }
+  const db = f.store.db, prepare = db.prepare.bind(db);
+  db.prepare = sql => {
+    const stmt = prepare(sql);
+    const placeholders = (String(sql).match(/\?/g) || []).length;
+    const limited = method => (...args) => {
+      if (placeholders > 100 || args.length > 100) throw new Error(`too many SQL variables: ${Math.max(placeholders, args.length)}`);
+      return method.apply(stmt, args);
+    };
+    return new Proxy(stmt, {
+      get(target, prop, receiver) {
+        if (prop === "all" || prop === "get" || prop === "run" || prop === "iterate" || prop === "bind") return limited(target[prop]);
+        const value = Reflect.get(target, prop, receiver);
+        return typeof value === "function" ? value.bind(target) : value;
+      }
+    });
+  };
+  const page = f.store.eventsAfter(f.keys.alice, "commons", before, 100, null);
+  const messages = page.events.filter(({ event }) => event.type === T.MESSAGE_POSTED);
+  assert.equal(messages.length, 100);
+  assert.equal(page.hasMore, false);
+  const chip = page.events.find(({ event }) => event.id === mentioned);
+  assert.deepEqual(chip.event.mentions.map(m => m.memberId), ["alice"]);
+});
 // --- HTTP routes ---------------------------------------------------------------
 
 import { createRoomServer } from "../server/http.mjs";

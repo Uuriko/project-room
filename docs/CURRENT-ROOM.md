@@ -16,16 +16,22 @@ Do not continue from a ChatGPT worktree or the stale project-root
 This is the single deployment record. What the repo can prove: the Worker
 source is `cloudflare/` (`wrangler.jsonc`, `room.mjs`), the door HTML source
 is `deploy/room-entry.mjs`, and the CI `cloudflare` job runs the Worker
-runtime checks plus `wrangler deploy --dry-run` on every PR. Nothing in the repo records a real
-publish; the live version and its source commit are owner-to-confirm from the
-Cloudflare dashboard. Last owner-reported publish: 10 September 2026, version
-`a5f91f99-833c-4ae8-a3a3-3f1920206f52` from `main` `fce335d` (Infer good
-defaults and hide extra chrome); Durable Object not reset. (The older
-`cloudflare/README.md` status paragraph — app `fb90a70`, Worker `901be347…`,
-7 September — is the previous acceptance record, superseded here.) Every
-merge since `fce335d` (including the schema 28 store) is in this tree but not
-on the Worker until the next publish; live `/room` updates with the next
-demigod-html publish.
+runtime checks plus `wrangler deploy --dry-run` on every PR. Procedure:
+[ROOM-DEPLOYMENT.md](ROOM-DEPLOYMENT.md) — canonical Worker first, then the
+entry Worker. Durable Object not reset. Gmail stays disabled.
+
+| | |
+| --- | --- |
+| Deployed | 2026-10-01T21:35Z by Grok Bot |
+| Source | `22adbde4ef95264f150f227d7e90926fc0baf481` |
+| `project-room` (canonical, `env.production`) | version `5a1ea853-afad-43ed-a613-39d1cf239a9e` |
+| `project-room-staging` (public entry) | version `2ebb4ed9-05e3-4f47-bfd1-c9db8fd5b4b0` |
+| Rollback | `project-room` `a9a06715`; `project-room-staging` `57af0010` |
+
+Earlier records stay historical: 10 September 2026, version
+`a5f91f99-833c-4ae8-a3a3-3f1920206f52` from `main` `fce335d`, and the
+7 September staging acceptance in `cloudflare/README.md` (app `fb90a70`,
+Worker `901be347…`).
 
 ## GitHub About (John, in the UI)
 
