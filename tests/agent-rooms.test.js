@@ -60,8 +60,9 @@ test("an identity creates a room self-serve and becomes its owner", async t => {
     ["invite-members", "publish-card", "post-message", "read-quickstart"]);
   assert.ok(created.next.every(n => typeof n.description === "string" && (n.path || n.doc)),
     "every next step names a path or doc plus what to do");
-  assert.equal(created.next[0].path, "/api/rooms/agent-den/invitations",
+  assert.equal(created.next[0].path, "/api/rooms/agent-den/agent-invites",
     "room-scoped next steps are templated with the new roomId");
+  assert.equal(created.nextActions[0].path, "/api/rooms/agent-den/agent-invites");
   // The projection names the agent member as owner with the full set...
   const authority = store.roomAuthority("agent-den");
   assert.equal(authority.ownerId, identity.identityId);
@@ -369,6 +370,45 @@ test("HTTP: owner transfers ownership; non-owner is refused", async t => {
   });
   assert.equal(noReason.status, 200);
   assert.equal(noReason.body.ownerId, "owner");
+});
+
+test("HTTP: a cold agent follows room-create next hints and invites a peer", async t => {
+  const { post } = await httpFixture(t);
+  const minted = await post("/api/agent-identities", { data: { displayName: "Cold Agent" } });
+  assert.equal(minted.status, 201, JSON.stringify(minted.body));
+  const created = await post("/api/agent-rooms", {
+    token: minted.body.secret,
+    data: { title: "Cold Den", purpose: "Invite a peer from the next hint." }
+  });
+  assert.equal(created.status, 201, JSON.stringify(created.body));
+  const invite = created.body.next.find(step => step.action === "invite-members");
+  const inviteAction = created.body.nextActions.find(step => step.action === "invite-members");
+  assert.equal(invite?.method, "POST");
+  assert.equal(inviteAction?.method, "POST");
+  assert.equal(invite.path, inviteAction.path);
+  assert.match(invite.path, /\/api\/rooms\/[^/]+\/agent-invites$/);
+  assert.match(invite.description, /chat\|contribute\|review\|collaborate/);
+  const mintedInvite = await post(invite.path, {
+    token: minted.body.secret,
+    data: { profile: "chat" }
+  });
+  assert.equal(mintedInvite.status, 201, JSON.stringify(mintedInvite.body));
+  assert.match(mintedInvite.body.code, /^RM-/);
+  const agentBody = await post(`/api/rooms/${created.body.roomId}/invitations`, {
+    token: minted.body.secret,
+    data: { profile: "collaborate" }
+  });
+  assert.equal(agentBody.status, 422);
+  assert.equal(agentBody.body.error.code, "invalid_invitation");
+  assert.match(agentBody.body.error.message, /\/agent-invites/);
+  assert.match(agentBody.body.error.message, /chat\|contribute\|review\|collaborate/);
+  assert.ok(agentBody.body.next.some(step => step.path?.endsWith("/agent-invites") && step.method === "POST"));
+  const humanMiss = await post(`/api/rooms/${created.body.roomId}/invitations`, {
+    token: minted.body.secret,
+    data: { requestId: "req-1" }
+  });
+  assert.equal(humanMiss.status, 422);
+  assert.equal(humanMiss.body.error.message, "Supply the exact invitation scope");
 });
 
 test("HTTP: agent owner mints an invite; a peer redeems — no human owner token", async t => {
