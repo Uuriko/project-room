@@ -598,6 +598,7 @@ async function callWakeTool(store, secret, identity, name, args) {
     return store.wakeQueue.resume(secret, args.roomId, request, null, { memberId: args.memberId ?? null });
   }
   if (name === "webhook_subscribe") {
+    await store.agentPlugin.assertWebhookUrl(args.url);
     const { subscription } = store.agentPlugin.subscribeWebhook({
       identityId: agentId, url: args.url, events: args.events, secret: args.secret ?? null
     });

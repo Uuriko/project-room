@@ -11,7 +11,7 @@
 // Pure module: all state is caller-owned (a Map), no network I/O.
 // Frozen outputs; malformed inputs throw WebhookSubscriptionError (coded).
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { validateWebhookUrl, WAKE_PING_EVENT } from "./outbound-webhooks.mjs";
+import { assertAgentWebhookUrlPublic, validateWebhookUrl, WAKE_PING_EVENT } from "./outbound-webhooks.mjs";
 import { EVENT_TYPES } from "../src/events.js";
 
 class WebhookSubscriptionError extends Error {
@@ -46,6 +46,25 @@ const SENTINEL_PATTERN = new RegExp(`^${SENTINEL_PREFIX}[A-Za-z0-9_-]{1,64}$`);
 export const EVENT_CATALOG = Object.freeze([...Object.values(EVENT_TYPES).sort(), WAKE_PING_EVENT]);
 const WILDCARD = "*";
 const unknownEvents = events => events.filter(e => e !== WILDCARD && !EVENT_CATALOG.includes(e));
+// Subscribe-time public-address gate. Shape errors stay
+// invalid_subscription. A hostname that resolves into blocked space, or a
+// known metadata name, is 422 webhook_url_not_public and is not stored.
+// `lookup` is injectable (dns.lookup-compatible, { all: true }); omitted,
+// Node uses dns.lookup and Workers skips DNS.
+export async function assertSubscriptionWebhookUrl(url, options) {
+  try {
+    return await assertAgentWebhookUrlPublic(url, options);
+  } catch (error) {
+    if (error?.code === "webhook_url_not_public") {
+      const wrapped = new WebhookSubscriptionError("webhook_url_not_public", error.message);
+      wrapped.status = 422;
+      throw wrapped;
+    }
+    if (error?.name === "WebhookError") fail("invalid_subscription", error.message);
+    throw error;
+  }
+}
+
 export function assertKnownEvents(events) {
   const unknown = unknownEvents(events);
   if (unknown.length > 0) {
@@ -199,18 +218,22 @@ export function createAgentWebhookSubscriptions({ store, clock, id } = {}) {
   };
 
   // Record a delivery attempt (the HTTP sender calls this after trying).
-  const recordAttempt = (deliveryId, { ok, error = null }) => {
+  // terminal: the attempt can never succeed (SSRF refusal, permanent
+  // receiver rejection). The journal keeps the reason and the row leaves
+  // the retry set (dead_letter). A later drain does not pick it up.
+  const recordAttempt = (deliveryId, { ok, error = null, terminal = false } = {}) => {
     check(typeof deliveryId === "string" && deliveryId.length > 0, "deliveryId must be a non-empty string");
     check(typeof ok === "boolean", "ok must be a boolean");
     for (const sub of subs.values()) {
       const idx = sub.deliveries.findIndex(d => d.deliveryId === deliveryId);
       if (idx >= 0) {
         const prior = sub.deliveries[idx];
+        const refused = terminal === true && ok === false;
         const updated = {
           ...prior,
-          state: ok ? "delivered" : "failed",
+          state: ok ? "delivered" : (refused ? "dead_letter" : "failed"),
           attempts: prior.attempts + 1,
-          error: ok ? null : String(error ?? "delivery failed"),
+          error: ok ? null : String(error ?? (refused ? "webhook_url_not_public" : "delivery failed")),
         };
         sub.deliveries[idx] = updated;
         return Object.freeze({ deliveryId, state: updated.state, attempts: updated.attempts });
