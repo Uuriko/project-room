@@ -1,7 +1,6 @@
 // Public, secret-free discovery for AI agents. No people-data. No tokens.
 // Served from the Room Worker (root + /room aliases) and the Demigod door.
 import { CAPABILITIES } from "./capabilities.mjs";
-import { pushNotificationsSupported } from "./push-notifications-supported.mjs";
 import { SOURCE_REVISION, BUILD_ID } from "../server/version.mjs";
 import { AGENT_CARD_KEY_ID, AGENT_CARD_AGENT_ID, AGENT_CARD_PUBLIC_KEY, AGENT_CARD_JWKS_PATH } from "./agent-card-key.mjs";
 import { AGENT_CARD_SIGNATURE, AGENT_CARD_SIGNED_REVISION, AGENT_CARD_UNSIGNED_REASON, AGENT_CARD_JWS_SIGNATURES } from "./agent-card-signed.mjs";
@@ -470,11 +469,12 @@ export function agentCard() {
       version: deployed.version
     }),
     // QA2 finding P2-5: A2A capabilities.pushNotifications means Task push
-    // config. This server does not implement it. Custom wake URLs and
-    // webhook delivery stay on agent-heartbeats and webhooks. The assignment
-    // after the spread wins if a generated map still says true.
+    // config. This server does not implement it, so the flag is false even
+    // when the generated map says otherwise. Custom wake URLs and webhook
+    // delivery stay on agent-heartbeats and webhooks. The predicate lives in
+    // deploy/push-notifications-supported.mjs and is what the generator emits.
     capabilities: Object.freeze({ streaming: false, ...CAPABILITIES,
-      pushNotifications: pushNotificationsSupported(CAPABILITIES), stale: deployed.stale,
+      pushNotifications: false, stale: deployed.stale,
       // A2A work-receipt extension: any A2A client fetching this card can
       // discover receipt support. Declarative only; required:false.
       extensions: Object.freeze([A2A_WORK_RECEIPT_EXTENSION]) })
