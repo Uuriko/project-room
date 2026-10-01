@@ -634,6 +634,19 @@ test("hosted MCP lists and calls the land queue tools", async t => {
   assert.equal(JSON.stringify(added).includes(owner.secret), false);
 });
 
+test("a spent cron budget does not read GitHub for a due pull request", async t => {
+  const { store, ownerKey, clock } = fixture(t);
+  const { memberId } = linkOffline(store, ownerKey);
+  const github = mockGitHub(() => snapshot({ checks: "green" }));
+  store.landQueue.configure({ token: TOKEN, fetchImpl: github.fetchImpl });
+  await store.landQueue.add("commons", memberId, { repo: "acme/demo", prNumber: 969 });
+  const duringAdd = github.calls.length;
+  const summary = await store.landQueue.refreshDue({ now: clock.now + 10 * 60 * 1000, deadline: 0 });
+  assert.equal(summary.budgetExceeded, 1);
+  assert.equal(summary.checked, 0);
+  assert.equal(github.calls.length, duringAdd);
+});
+
 test("the board card shows the pull request, short head, checks, behind, and tip", () => {
   assert.equal(shortSha(SHA), "aaaaaaa");
   assert.equal(shortSha("abc"), "");

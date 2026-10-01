@@ -24,8 +24,19 @@ import { routeInboundEmail, emailRoutingLimits, emailRoutingRejections, connecti
 import { emailConnection } from '../server/email-envelope.mjs';
 import { isEmailProfile } from '../server/channel-connection.mjs';
 import { runLiveStoreRetention } from '../server/retention-run.mjs';
-import { HEARTBEAT_STORAGE_KEY, applyOutcomes, jobHealthResponse, jobHealthUnavailable, jobHealthView, runCronJobs } from './job-heartbeat.mjs';
+import { CRON_JOB_BUDGET_MS, HEARTBEAT_STORAGE_KEY, applyOutcomes, jobHealthResponse, jobHealthUnavailable, jobHealthView, runCronJobs } from './job-heartbeat.mjs';
 import { SOURCE_REVISION, BUILD_ID } from '../server/version.mjs';
+import { edgePublicResponse } from './edge-public.mjs';
+import { appDurationMs, logRoomRequest, requestPath, withServerTiming } from './request-timing.mjs';
+
+// Let a request that arrived while this cron RPC was queued run before the
+// job's synchronous work closes the input gate again.
+function yieldToQueuedRequests() {
+  return new Promise(resolve => setTimeout(resolve, 0));
+}
+function cronDeadline() {
+  return Date.now() + CRON_JOB_BUDGET_MS;
+}
 
 // The DO transport may erase the original error type. Report availability,
 // without exposing backend details or claiming that a mutation rolled back.
@@ -127,16 +138,25 @@ export class ProjectRoom extends DurableObject {
     this.handler = httpServerHandler(this.server);
   }
   async fetch(request) {
-    if (this.paused) return maintenanceResponse(request);
-    try { return await this.requestSignals.run(request.signal, () => this.handler.fetch(request)); }
+    const started = Date.now();
+    const respond = response => {
+      const appMs = Date.now() - started;
+      console.info(JSON.stringify({
+        event: 'room.do_request', method: request.method, path: requestPath(request.url), status: response.status, appMs
+      }));
+      return withServerTiming(response, 'app', appMs);
+    };
+    if (this.paused) return respond(maintenanceResponse(request));
+    try { return respond(await this.requestSignals.run(request.signal, () => this.handler.fetch(request))); }
     finally { this.ctx.waitUntil(this.store.humanPush.flush()); }
   }
 
   async syncGmailMailboxes() {
     if (this.paused) return { completed: 0 };
+    await yieldToQueuedRequests();
     // Unconfigured Gmail is visible in /api/health/jobs instead of looking like a quiet success.
     if (!this.gmailSync) return { completed: 0, configured: false };
-    return this.gmailSync.tick();
+    return this.gmailSync.tick({ deadline: cronDeadline() });
   }
 
   // Cron heartbeat: the Worker records each tick's per-job outcome here after
@@ -174,8 +194,9 @@ export class ProjectRoom extends DurableObject {
   // never imported. Runs in the DO so no connection data leaves it.
   async drainChannelBacklog() {
     if (this.paused) throw new Error('Room paused');
+    await yieldToQueuedRequests();
     const drainer = new ChannelDrainer({ store: this.store, webhooks: this.channelWebhooks });
-    return drainer.tick();
+    return drainer.tick({ deadline: cronDeadline() });
   }
   // RC-2026-09-19-064 — signed webhook dispatch RPC for the Worker's cron
   // trigger. Sweeps due deliveries (pending/failed with next_attempt_at <=
@@ -184,6 +205,7 @@ export class ProjectRoom extends DurableObject {
   // exponential backoff. Runs in the DO so signing secrets never leave it.
   async drainWebhookDeliveries() {
     if (this.paused) throw new Error('Room paused');
+    await yieldToQueuedRequests();
     return this.store.agentPlugin.drainWebhookDeliveries();
   }
   // Land queue: gentle GitHub poll on the per-minute cron. Merged and closed
@@ -192,13 +214,15 @@ export class ProjectRoom extends DurableObject {
   // token itself is never logged.
   async refreshLandQueue() {
     if (this.paused) return { checked: 0, updated: 0, unconfigured: 0 };
+    await yieldToQueuedRequests();
     this.store.landQueue.configure({ env: this.env });
-    return this.store.landQueue.refreshDue();
+    return this.store.landQueue.refreshDue({ deadline: cronDeadline() });
   }
   // Scans only disposable web-fetch/research logs. The deletion flag is
   // explicit; authoritative room and security audit journals are excluded.
-  planRetention() {
+  async planRetention() {
     if (this.paused) return { dryRun: true, deleted: 0, skipped: "paused" };
+    await yieldToQueuedRequests();
     return runLiveStoreRetention({ store: this.store, env: this.env,
       now: new Date().toISOString(), record: plan => { this.lastRetentionPlan = plan; } });
   }
@@ -219,6 +243,13 @@ export class ProjectRoom extends DurableObject {
 
 export default {
   async fetch(request, env) {
+    const started = Date.now();
+    const finish = (response, servedBy) => {
+      const totalMs = Date.now() - started;
+      const appMs = appDurationMs(response.headers);
+      logRoomRequest({ method: request.method, path: requestPath(request.url), status: response.status, totalMs, servedBy, appMs });
+      return withServerTiming(response, 'total', totalMs);
+    };
     // getdasha edge doors: rewrite onto the Room origin BEFORE the origin
     // check so the worker Host reaches the guard, not the browser Host - the
     // guard 403s anything that is not ROOM_ORIGIN. Packets keep /room;
@@ -232,11 +263,11 @@ export default {
       // The /room* route also catches /rooms, /roommates and similar lookalikes
       // (an exact pattern would drop /room?ref= query strings). Those are simply
       // not pages here: answer 404, not the 403 meant for a spoofed Host.
-      return new Response('Not found', { status: 404, headers: { 'Cache-Control': 'no-store' } });
+      return finish(new Response('Not found', { status: 404, headers: { 'Cache-Control': 'no-store' } }), 'worker');
     }
     const url = new URL(request.url);
     // Never derive the trusted origin from a caller-controlled Host header.
-    if (url.origin !== roomOrigin(env).origin) return new Response('Unexpected host', { status: 403 });
+    if (url.origin !== roomOrigin(env).origin) return finish(new Response('Unexpected host', { status: 403 }), 'worker');
     // Storage/DO-independent version signal: answered entirely from module
     // scope and env, never touching the Durable Object, so deploy
     // verification stays available when the DO is down (2026-09-25 outage:
@@ -251,18 +282,22 @@ export default {
         status: 'ok', servedBy: 'worker', sourceRevision: SOURCE_REVISION, buildId: BUILD_ID, ...deployment,
         durableObject: { name: 'invite-only-pilot', id: env.ROOM.idFromName('invite-only-pilot').toString() }
       });
-      return new Response(request.method === 'HEAD' ? null : body, { status: 200, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' } });
+      return finish(new Response(request.method === 'HEAD' ? null : body, { status: 200, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' } }), 'worker');
     }
-    if (maintenanceEnabled(env.ROOM_MAINTENANCE)) return maintenanceResponse(request);
+    if (maintenanceEnabled(env.ROOM_MAINTENANCE)) return finish(maintenanceResponse(request), 'worker');
+    // HTML, script, and discovery documents are static. Answering them here
+    // keeps a cold or busy Durable Object from blanking the page.
+    const edge = await edgePublicResponse(request, env, url);
+    if (edge) return finish(edge, 'edge');
     // Read-only cron heartbeat (per-job lastSuccessAt / lastError). 503 when a
     // job is stale or failing, so a plain status check catches dead crons.
     if ((url.pathname === '/api/health/jobs' || url.pathname === '/api/health/jobs/') && (request.method === 'GET' || request.method === 'HEAD')) {
       const head = request.method === 'HEAD';
-      try { return jobHealthResponse(await env.ROOM.getByName('invite-only-pilot').readJobHealth(), { head }); }
-      catch (error) { console.error(`[job-heartbeat] read failed: ${error?.message ?? error}`); return jobHealthUnavailable({ head }); }
+      try { return finish(jobHealthResponse(await env.ROOM.getByName('invite-only-pilot').readJobHealth(), { head }), 'durable-object'); }
+      catch (error) { console.error(`[job-heartbeat] read failed: ${error?.message ?? error}`); return finish(jobHealthUnavailable({ head }), 'durable-object'); }
     }
     const address = request.headers.get('CF-Connecting-IP');
-    if (!address || !isIP(address)) return new Response('Visitor address unavailable', { status: 403 });
+    if (!address || !isIP(address)) return finish(new Response('Visitor address unavailable', { status: 403 }), 'worker');
     const headers = new Headers(request.headers);
     // Worker Request.url is the external authority. The Node bridge needs it
     // explicitly; a local runtime's transport Host can be a loopback address.
@@ -277,11 +312,11 @@ export default {
       // DO construction can fail before its fetch handler exists. Contain that
       // failure here; never retry a request whose write outcome may be unknown.
       console.error('[room] request failed at Durable Object boundary');
-      return roomUnavailableResponse(request);
+      return finish(roomUnavailableResponse(request), 'durable-object');
     }
     const authFailure = response.headers.get('X-Room-Auth-Failure');
     if (authFailure && /^[a-z][a-z0-9_]{0,63}$/.test(authFailure)) console.warn(`room authentication failed: ${authFailure}; ${response.headers.get("X-Room-Auth-Diagnostic") || ""}`);
-    return response;
+    return finish(response, 'durable-object');
   },
 
   // E1 — Cloudflare Email Routing calls this for every message a routing rule
