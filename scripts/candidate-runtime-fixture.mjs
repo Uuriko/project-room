@@ -69,6 +69,8 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('src/human-push.js'); paths.add('src/human-push-display.js'); paths.add('push-sw.js'); // Human push button, lock-screen text, service worker
   paths.add('join.html'); // Self-serve join page
   paths.add('src/join.js'); // Join page logic
+  paths.add('favicon.svg'); paths.add('icon.svg'); paths.add('manifest.webmanifest');
+  paths.add('src/public-a11y.css');
   paths.add('src/referral-board.js'); // Referral board (imported by src/app.js)
   paths.add('src/work-item-session.js');
   paths.add('src/work-recipes.js');

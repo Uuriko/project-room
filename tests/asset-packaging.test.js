@@ -6,6 +6,7 @@ import { join, posix } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { assetPaths, buildAssets } from '../cloudflare/build-assets.mjs';
+import { templateAssetPaths } from '../deploy/public-assets.mjs';
 import { RoomStore } from '../server/store.mjs';
 import { createRoomServer } from '../server/http.mjs';
 
@@ -16,15 +17,16 @@ async function fixture(t) {
 }
 test('asset build produces and refreshes exactly the allowlisted application files', async t => {
   const output = await fixture(t);
-  assert.equal(await buildAssets(output), assetPaths.length);
+  const packaged = [...assetPaths, ...templateAssetPaths];
+  assert.equal(await buildAssets(output), packaged.length);
   await writeFile(new URL('src/app.js', output), 'stale generated asset');
   await buildAssets(output);
   // Derived from the allowlist rather than written down: 'connectors' was
   // added to publicAssets and this line still said ['index.html', 'src'].
-  const topLevel = [...new Set(assetPaths.map(path => path.includes('/') ? path.slice(0, path.indexOf('/')) : path))].sort();
+  const topLevel = [...new Set(packaged.map(path => path.includes('/') ? path.slice(0, path.indexOf('/')) : path))].sort();
   assert.deepEqual((await readdir(output)).sort(), topLevel);
-  assert.deepEqual((await readdir(new URL('src/', output))).sort(), assetPaths.filter(p => p.startsWith('src/')).map(p => p.slice(4)).sort());
-  for (const file of assetPaths) assert.deepEqual(await readFile(new URL(file, output)), await readFile(new URL('../' + file, import.meta.url)));
+  assert.deepEqual((await readdir(new URL('src/', output))).sort(), packaged.filter(p => p.startsWith('src/')).map(p => p.slice(4)).sort());
+  for (const file of packaged) assert.deepEqual(await readFile(new URL(file, output)), await readFile(new URL('../' + file, import.meta.url)));
   const config = JSON.parse(await readFile(new URL('../cloudflare/wrangler.jsonc', import.meta.url), 'utf8'));
   assert.equal(config.build.command, 'node ../scripts/stamp-version.mjs && node ../scripts/build-capabilities.mjs && node ../scripts/sign-agent-card.mjs && node build-assets.mjs', 'deploy stamps the committed revision before building exact assets');
 });
