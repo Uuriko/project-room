@@ -31,6 +31,44 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { DARK_DECLARATIONS, LIGHT_DECLARATIONS } from '../src/design-tokens.js';
+
+// Same tokens as the product. Dark is the default; light is opt-in.
+export const HEALTH_PAGE_STYLE = `:root{color-scheme:dark;${DARK_DECLARATIONS}}
+[data-theme="light"]{color-scheme:light;${LIGHT_DECLARATIONS}}
+body{font-family:var(--font-sans);max-width:1080px;margin:0 auto;padding:24px;background:var(--bg);color:var(--text)}
+h1{font-size:var(--text-lg);margin:0 0 4px}
+a:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.sub{color:var(--muted);margin:0 0 20px;font-size:.9rem}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius-lg);padding:16px 18px;margin:0 0 16px}
+.panel h2{font-size:1.05rem;margin:0 0 10px}
+.panel.error{border-color:var(--red)}
+.err{color:var(--red);font-family:ui-monospace,monospace;font-size:.85rem}
+table{width:100%;border-collapse:collapse;font-size:.85rem}
+th{text-align:left;border-bottom:2px solid var(--line);padding:4px 6px}
+td{border-bottom:1px solid var(--line-soft);padding:4px 6px;vertical-align:top}
+.num{text-align:right;font-variant-numeric:tabular-nums}
+.mono{font-family:ui-monospace,monospace;font-size:.8rem}
+.lane{font-weight:600}
+.chip{display:inline-block;background:var(--panel-raised);border:1px solid var(--line);color:var(--text);border-radius:999px;padding:1px 8px;margin:1px 2px;font-size:.75rem;font-family:ui-monospace,monospace;white-space:nowrap}
+.note{font-size:.8rem;color:var(--muted);margin:10px 0 0}
+.warn{font-size:.85rem;background:var(--panel-raised);border:1px solid var(--amber);color:var(--text);border-radius:var(--radius-md);padding:8px 10px}
+.ok{font-size:.85rem;color:var(--green)}
+.dim{color:var(--muted)}
+.brow{display:flex;align-items:center;gap:10px;margin:6px 0;font-size:.85rem}
+.blabel{width:150px;flex:none}
+.bar{display:inline-block;height:14px;background:var(--blue);border-radius:3px;min-width:4px}
+.bar.stale{background:var(--red)}
+.bar.cap{background:linear-gradient(90deg,var(--blue),var(--blue-strong))}
+.bnum{font-variant-numeric:tabular-nums;font-weight:600}
+.bval{font-size:.85rem}
+.statgrid{display:flex;gap:12px;flex-wrap:wrap}
+.stat{border:1px solid var(--line);border-radius:var(--radius-md);padding:10px 16px;min-width:100px;text-align:center;background:var(--panel-raised)}
+.stat .sv{display:block;font-size:1.6rem;font-weight:700;font-variant-numeric:tabular-nums}
+.stat .sl{font-size:.75rem;color:var(--muted)}
+.stat.good .sv{color:var(--green)}.stat.bad .sv{color:var(--red)}.stat.pend .sv{color:var(--amber)}
+.spark{width:100%;max-width:420px;height:60px;margin-top:8px}
+.expired td{background:color-mix(in srgb, var(--red) 22%, var(--panel))}`;
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..');
@@ -402,7 +440,7 @@ function render(data) {
                     const max = Math.max(...pressure.series.map((x) => x.count), 1);
                     const h = Math.max(2, (d.count / max) * 56);
                     const x = (i / Math.max(pressure.series.length - 1, 1)) * 276;
-                    return `<rect x="${x.toFixed(1)}" y="${(58 - h).toFixed(1)}" width="14" height="${h.toFixed(1)}" fill="#7aa2f7"><title>${d.day}: ${d.count}/day</title></rect>`;
+                    return `<rect x="${x.toFixed(1)}" y="${(58 - h).toFixed(1)}" width="14" height="${h.toFixed(1)}" fill="var(--blue)"><title>${d.day}: ${d.count}/day</title></rect>`;
                   })
                   .join('') +
                 `</svg><p class="note">comments/day, trailing 14 days</p>`
@@ -434,46 +472,7 @@ function render(data) {
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Room health — Uuriko/project-room</title>
 <style>
-:root{color-scheme:light dark}
-body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;max-width:1080px;margin:0 auto;padding:24px;background:#f7f7f5;color:#1a1a1a}
-@media(prefers-color-scheme:dark){body{background:#141412;color:#e8e6e0}}
-h1{font-size:1.6rem;margin:0 0 4px}
-.sub{color:#666;margin:0 0 20px;font-size:.9rem}
-@media(prefers-color-scheme:dark){.sub{color:#aaa}}
-.panel{background:#fff;border:1px solid #e2e2de;border-radius:10px;padding:16px 18px;margin:0 0 16px}
-@media(prefers-color-scheme:dark){.panel{background:#1d1d1a;border-color:#333}}
-.panel h2{font-size:1.05rem;margin:0 0 10px}
-.panel.error{border-color:#d66}
-.err{color:#a33;font-family:monospace;font-size:.85rem}
-table{width:100%;border-collapse:collapse;font-size:.85rem}
-th{text-align:left;border-bottom:2px solid #ddd;padding:4px 6px}
-td{border-bottom:1px solid #eee;padding:4px 6px;vertical-align:top}
-@media(prefers-color-scheme:dark){th{border-color:#444}td{border-color:#2a2a2a}}
-.num{text-align:right;font-variant-numeric:tabular-nums}
-.mono{font-family:ui-monospace,monospace;font-size:.8rem}
-.lane{font-weight:600}
-.chip{display:inline-block;background:#eef2ff;border:1px solid #c9d4ff;border-radius:999px;padding:1px 8px;margin:1px 2px;font-size:.75rem;font-family:ui-monospace,monospace;white-space:nowrap}
-@media(prefers-color-scheme:dark){.chip{background:#24304d;border-color:#3a4a75}}
-.note{font-size:.8rem;color:#666;margin:10px 0 0}
-@media(prefers-color-scheme:dark){.note{color:#aaa}}
-.warn{font-size:.85rem;background:#fff7e6;border:1px solid #f0d9a0;border-radius:6px;padding:8px 10px}
-.ok{font-size:.85rem;color:#2a7a2a}
-.dim{color:#999}
-.brow{display:flex;align-items:center;gap:10px;margin:6px 0;font-size:.85rem}
-.blabel{width:150px;flex:none}
-.bar{display:inline-block;height:14px;background:#7aa2f7;border-radius:3px;min-width:4px}
-.bar.stale{background:#e06666}
-.bar.cap{background:linear-gradient(90deg,#7aa2f7,#5b8def)}
-.bnum{font-variant-numeric:tabular-nums;font-weight:600}
-.bval{font-size:.85rem}
-.statgrid{display:flex;gap:12px;flex-wrap:wrap}
-.stat{border:1px solid #e2e2de;border-radius:8px;padding:10px 16px;min-width:100px;text-align:center}
-.stat .sv{display:block;font-size:1.6rem;font-weight:700;font-variant-numeric:tabular-nums}
-.stat .sl{font-size:.75rem;color:#666}
-.stat.good .sv{color:#2a7a2a}.stat.bad .sv{color:#c0392b}.stat.pend .sv{color:#b8860b}
-.spark{width:100%;max-width:420px;height:60px;margin-top:8px}
-.expired td{background:#fdeaea}
-@media(prefers-color-scheme:dark){.expired td{background:#3a2222}}
+${HEALTH_PAGE_STYLE}
 </style></head>
 <body>
 <h1>🪔 Room health — Uuriko/project-room</h1>
