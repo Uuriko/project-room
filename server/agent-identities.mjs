@@ -15,7 +15,11 @@ import { memberCan } from "../src/events.js";
 import { nextActionsForIdentityMint } from "./discoverability.mjs";
 import { checkAgentDisplayName } from "./display-name-guard.mjs";
 
-const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
+const fail = (status, code, message, headers = null, detail = null) => {
+  const error = new ServiceError(status, code, message, headers);
+  if (detail) error.detail = detail;
+  throw error;
+};
 
 export const agentIdentitySchema = `
   CREATE TABLE IF NOT EXISTS agent_identities (
@@ -46,6 +50,24 @@ export function ensureIdentitySecretSchema(db) {
   if (!exists) return;
   const columns = new Set(db.prepare("PRAGMA table_info(agent_identities)").all().map(column => column.name));
   if (!columns.has("revoked_at")) db.exec("ALTER TABLE agent_identities ADD COLUMN revoked_at INTEGER");
+}
+
+// Additive columns for anonymous-mint budgets and inactivity expiry.
+// Existing rows are marked activated so a deploy does not expire identities
+// that were already issued. New anonymous rows leave activated_at null until
+// they authenticate, post, or are linked.
+export function ensureIdentityCapacitySchema(db) {
+  const exists = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='agent_identities'").get();
+  if (!exists) return;
+  const columns = new Set(db.prepare("PRAGMA table_info(agent_identities)").all().map(column => column.name));
+  if (!columns.has("activated_at")) {
+    db.exec("ALTER TABLE agent_identities ADD COLUMN activated_at INTEGER");
+    db.exec("UPDATE agent_identities SET activated_at=created_at WHERE activated_at IS NULL");
+  }
+  if (!columns.has("mint_address")) db.exec("ALTER TABLE agent_identities ADD COLUMN mint_address TEXT");
+  if (!columns.has("mint_network")) db.exec("ALTER TABLE agent_identities ADD COLUMN mint_network TEXT");
+  db.exec("CREATE INDEX IF NOT EXISTS agent_identities_mint_address ON agent_identities(mint_address, created_at)");
+  db.exec("CREATE INDEX IF NOT EXISTS agent_identities_mint_network ON agent_identities(mint_network, created_at)");
 }
 
 // RC-2026-09-24-210: identity-holder proof-of-possession for identityId
@@ -108,10 +130,96 @@ const hashIdentitySecret = secret => v2Hash(secret);
 const hashCandidates = secret => [v2Hash(secret), legacyHash(secret)];
 const isV2Hash = stored => typeof stored === "string" && stored.startsWith(IDENTITY_HASH_PREFIX);
 
-// Identity creation is unauthenticated (an identity alone grants nothing),
-// so the table is bounded like the credentials table in store.mjs: a hard
-// cap checked inside the insert transaction, not just a per-IP rate limit.
+// Identity creation is unauthenticated (an identity alone grants nothing).
+// The hard row cap is necessary but not sufficient: anonymous HTTP mints
+// are also budgeted per address, per network, and per rolling day, and a
+// short proof-of-work is required once an address passes its free quota.
+// Anonymous rows that never authenticate, post, or get linked expire, so
+// unused signups do not hold the cap. Invite and in-process mints are not
+// anonymous and do not spend these budgets.
 export const IDENTITY_LIMIT = 5000;
+export const IDENTITY_MINT_WINDOW_MS = 24 * 60 * 60 * 1000;
+export const IDENTITY_ACTIVATION_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+export const ANONYMOUS_MINT_DAILY_LIMIT = 200;
+export const ANONYMOUS_ADDRESS_DAILY_LIMIT = 20;
+export const ANONYMOUS_NETWORK_DAILY_LIMIT = 80;
+export const ANONYMOUS_ADDRESS_MINUTE_LIMIT = 8;
+export const ANONYMOUS_PROOF_FREE_PER_ADDRESS = 8;
+// 12 leading zero bits (three hex zeros). Clients reproduce
+// sha256(`${bucket}:${trim(displayName)}:${nonce}`) with
+// bucket = floor(now / IDENTITY_POW_WINDOW_MS). The previous and next
+// bucket are accepted so a clock a few minutes off still matches.
+export const IDENTITY_POW_BITS = 12;
+export const IDENTITY_POW_WINDOW_MS = 10 * 60 * 1000;
+const MINT_MINUTE_MS = 60 * 1000;
+const PROOF_NONCE = /^[A-Za-z0-9_-]{1,43}$/;
+
+const hashMintKey = value => createHash("sha256").update(`project-room-mint-v1:${value}`).digest("hex");
+
+export function normalizeMintAddress(address) {
+  if (typeof address !== "string" || !address.trim()) return "unknown";
+  let ip = address.trim().toLowerCase();
+  if (ip.startsWith("::ffff:")) ip = ip.slice("::ffff:".length);
+  return ip;
+}
+
+function expandIPv6(ip) {
+  if (!ip.includes(":") || ip.includes(".")) return null;
+  const halves = ip.split("::");
+  if (halves.length > 2) return null;
+  const head = halves[0] ? halves[0].split(":") : [];
+  const tail = halves.length === 2 ? (halves[1] ? halves[1].split(":") : []) : [];
+  const missing = 8 - head.length - tail.length;
+  if (missing < 0) return null;
+  const parts = [...head, ...Array(missing).fill("0"), ...tail];
+  if (parts.length !== 8 || parts.some(part => !/^[0-9a-f]{1,4}$/.test(part))) return null;
+  return parts.map(part => part.padStart(4, "0"));
+}
+
+export function mintNetworkPrefix(address) {
+  const ip = normalizeMintAddress(address);
+  if (ip === "unknown") return "unknown";
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) {
+    const parts = ip.split(".");
+    if (parts.every(part => Number(part) <= 255)) return `${parts[0]}.${parts[1]}.${parts[2]}.0/24`;
+  }
+  const groups = expandIPv6(ip);
+  if (groups) return `${groups.slice(0, 4).join(":")}::/64`;
+  return "unknown";
+}
+
+export function anonymousMintBuckets(address) {
+  const normalized = normalizeMintAddress(address);
+  return Object.freeze({
+    address: hashMintKey(`addr:${normalized}`),
+    network: hashMintKey(`net:${mintNetworkPrefix(normalized)}`),
+  });
+}
+
+export function verifyIdentityMintProof(displayName, proof, now = Date.now(), bits = IDENTITY_POW_BITS) {
+  if (typeof proof !== "string" || !PROOF_NONCE.test(proof)) return false;
+  const name = typeof displayName === "string" ? displayName.trim() : "";
+  if (!name || !Number.isInteger(bits) || bits < 4 || bits % 4 !== 0) return false;
+  const bucket = Math.floor(now / IDENTITY_POW_WINDOW_MS);
+  const prefix = "0".repeat(bits / 4);
+  for (const candidate of [bucket - 1, bucket, bucket + 1]) {
+    const hex = createHash("sha256").update(`${candidate}:${name}:${proof}`).digest("hex");
+    if (hex.startsWith(prefix)) return true;
+  }
+  return false;
+}
+
+export function solveIdentityMintProof(displayName, now = Date.now(), bits = IDENTITY_POW_BITS) {
+  const name = typeof displayName === "string" ? displayName.trim() : "";
+  const bucket = Math.floor(now / IDENTITY_POW_WINDOW_MS);
+  const prefix = "0".repeat(bits / 4);
+  for (let i = 0; i < 1_000_000; i++) {
+    const nonce = i.toString(36);
+    const hex = createHash("sha256").update(`${bucket}:${name}:${nonce}`).digest("hex");
+    if (hex.startsWith(prefix)) return nonce;
+  }
+  throw new Error("proof search exhausted");
+}
 
 // Machine-readable next steps for a brand-new agent. The signup response
 // is the first thing a cold agent sees: instead of returning a secret with
@@ -136,13 +244,50 @@ const SIGNUP_NEXT = Object.freeze([
 ]);
 
 export class AgentIdentities {
-  constructor(store, { identityLimit = IDENTITY_LIMIT } = {}) { this.store = store; this.db = store.db; this.identityLimit = identityLimit; }
+  constructor(store, {
+    identityLimit = IDENTITY_LIMIT,
+    anonymousDailyLimit = ANONYMOUS_MINT_DAILY_LIMIT,
+    addressDailyLimit = ANONYMOUS_ADDRESS_DAILY_LIMIT,
+    networkDailyLimit = ANONYMOUS_NETWORK_DAILY_LIMIT,
+    addressMinuteLimit = ANONYMOUS_ADDRESS_MINUTE_LIMIT,
+    proofFreePerAddress = ANONYMOUS_PROOF_FREE_PER_ADDRESS,
+    activationWindowMs = IDENTITY_ACTIVATION_WINDOW_MS,
+    powBits = IDENTITY_POW_BITS,
+  } = {}) {
+    const positive = (label, value) => {
+      if (!Number.isInteger(value) || value < 1) throw new Error(`${label} must be a positive integer`);
+    };
+    positive("identityLimit", identityLimit);
+    positive("anonymousDailyLimit", anonymousDailyLimit);
+    positive("addressDailyLimit", addressDailyLimit);
+    positive("networkDailyLimit", networkDailyLimit);
+    positive("addressMinuteLimit", addressMinuteLimit);
+    positive("activationWindowMs", activationWindowMs);
+    if (!Number.isInteger(proofFreePerAddress) || proofFreePerAddress < 0) throw new Error("proofFreePerAddress must be a non-negative integer");
+    if (!Number.isInteger(powBits) || powBits < 4 || powBits > 32 || powBits % 4 !== 0) throw new Error("powBits must be a multiple of 4 between 4 and 32");
+    this.store = store;
+    this.db = store.db;
+    this.identityLimit = identityLimit;
+    this.anonymousDailyLimit = anonymousDailyLimit;
+    this.addressDailyLimit = addressDailyLimit;
+    this.networkDailyLimit = networkDailyLimit;
+    this.addressMinuteLimit = addressMinuteLimit;
+    this.proofFreePerAddress = proofFreePerAddress;
+    this.activationWindowMs = activationWindowMs;
+    this.powBits = powBits;
+    this.pendingActivation = new Set();
+    this.capacitySchemaReady = false;
+  }
 
   // Creates a new global agent identity. The secret is shown once and only
   // its hash is stored. An identity alone grants nothing: a room owner must
   // link it into each room. The response carries SIGNUP_NEXT so a cold
   // agent knows its first moves without asking a human.
-  create(displayName, { secret: suppliedSecret } = {}) {
+  //
+  // `anonymous` marks an unauthenticated HTTP mint. Those rows spend the
+  // address, network, and daily budgets and stay inactive until the holder
+  // authenticates, posts, or is linked. Invite and in-process mints omit it.
+  create(displayName, { secret: suppliedSecret, anonymous } = {}) {
     const name = typeof displayName === "string" ? displayName.trim() : "";
     if (!name || name.length > 80) fail(422, "invalid_identity", "displayName must be 1-80 characters");
     // RC-2026-09-19-086: reject C0 control chars like share-link join does
@@ -151,6 +296,9 @@ export class AgentIdentities {
     if (suppliedSecret !== undefined && !/^pri_[A-Za-z0-9_-]{43}$/.test(suppliedSecret))
       fail(422, "invalid_identity", "Recoverable registration requires a generated identity credential");
     return this.store.transaction(() => {
+      ensureIdentityCapacitySchema(this.db);
+      this.capacitySchemaReady = true;
+      this.expireInactive();
       const recoveredId = suppliedSecret === undefined ? null : `ai_${legacyHash(suppliedSecret).slice(0, 40)}`;
       if (recoveredId) {
         const existing = this.db.prepare("SELECT * FROM agent_identities WHERE identity_id=?").get(recoveredId);
@@ -164,6 +312,7 @@ export class AgentIdentities {
             this.db.prepare("UPDATE agent_identities SET secret_hash=? WHERE identity_id=? AND secret_hash=?")
               .run(v2, recoveredId, existing.secret_hash);
           }
+          this.noteActivated(recoveredId);
           return { identityId: recoveredId, displayName: existing.display_name, duplicate: true,
             next: SIGNUP_NEXT, nextActions: nextActionsForIdentityMint() };
         }
@@ -179,13 +328,23 @@ export class AgentIdentities {
         .filter(row => canonical(row.displayName) !== canonical(name));
       const checked = checkAgentDisplayName(name, { activeNames });
       if (!checked.safe) fail(422, "invalid_identity", "displayName contains unsafe characters");
+      const now = this.store.now();
+      let activatedAt = now;
+      let mintAddress = null;
+      let mintNetwork = null;
+      if (anonymous && typeof anonymous === "object") {
+        const buckets = anonymousMintBuckets(anonymous.address);
+        this.admitAnonymous(name, buckets, anonymous.proof, anonymous.requireProof !== false, now);
+        activatedAt = null;
+        mintAddress = buckets.address;
+        mintNetwork = buckets.network;
+      }
       const count = this.db.prepare("SELECT count(*) AS n FROM agent_identities").get().n;
       if (count >= this.identityLimit) fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
-      const now = this.store.now();
       const identityId = recoveredId ?? `ai_${base64url(randomBytes(12))}`;
       const secret = suppliedSecret ?? `${IDENTITY_SECRET_PREFIX}${base64url(randomBytes(32))}`;
-      this.db.prepare("INSERT INTO agent_identities(identity_id,secret_hash,display_name,created_at) VALUES(?,?,?,?)")
-        .run(identityId, hashIdentitySecret(secret), name, now);
+      this.db.prepare("INSERT INTO agent_identities(identity_id,secret_hash,display_name,created_at,activated_at,mint_address,mint_network) VALUES(?,?,?,?,?,?,?)")
+        .run(identityId, hashIdentitySecret(secret), name, now, activatedAt, mintAddress, mintNetwork);
       // Bind the identity's Ed25519 claim-signing key at issuance: the
       // public key is registered in the agent-key registry (the
       // operator-attested binding — see server/agent-key-registry.mjs) and
@@ -198,6 +357,137 @@ export class AgentIdentities {
         publicKey: keyPair.publicKey, privateKey: keyPair.privateKey,
         next: SIGNUP_NEXT, nextActions: nextActionsForIdentityMint() };
     });
+  }
+
+  proofDetail(name, now) {
+    const bucket = Math.floor(now / IDENTITY_POW_WINDOW_MS);
+    return {
+      proof: {
+        algorithm: "sha256-prefix",
+        bits: this.powBits,
+        challenge: `${bucket}:${name}`,
+        windowMs: IDENTITY_POW_WINDOW_MS,
+      },
+    };
+  }
+
+  admitAnonymous(name, buckets, proof, requireProof, now) {
+    const dayStart = now - IDENTITY_MINT_WINDOW_MS;
+    const addressDay = this.db.prepare(
+      "SELECT count(*) AS n FROM agent_identities WHERE mint_address=? AND created_at>=?"
+    ).get(buckets.address, dayStart).n;
+    const presented = typeof proof === "string" && proof.length > 0;
+    if (presented && !verifyIdentityMintProof(name, proof, now, this.powBits)) {
+      fail(428, "proof_required", "Identity mint proof required", null, this.proofDetail(name, now));
+    }
+    if (!presented && requireProof && addressDay >= this.proofFreePerAddress) {
+      fail(428, "proof_required", "Identity mint proof required", null, this.proofDetail(name, now));
+    }
+    const addressMinute = this.db.prepare(
+      "SELECT count(*) AS n FROM agent_identities WHERE mint_address=? AND created_at>=?"
+    ).get(buckets.address, now - MINT_MINUTE_MS).n;
+    if (addressMinute >= this.addressMinuteLimit) {
+      fail(429, "rate_limited", "Too many identity mints from this address", { "Retry-After": "60" });
+    }
+    if (addressDay >= this.addressDailyLimit) {
+      fail(429, "rate_limited", "Identity mint address budget reached", { "Retry-After": "3600" });
+    }
+    const networkDay = this.db.prepare(
+      "SELECT count(*) AS n FROM agent_identities WHERE mint_network=? AND created_at>=?"
+    ).get(buckets.network, dayStart).n;
+    if (networkDay >= this.networkDailyLimit) {
+      fail(429, "rate_limited", "Identity mint network budget reached", { "Retry-After": "3600" });
+    }
+    const globalDay = this.db.prepare(
+      "SELECT count(*) AS n FROM agent_identities WHERE mint_address IS NOT NULL AND created_at>=?"
+    ).get(dayStart).n;
+    if (globalDay >= this.anonymousDailyLimit) {
+      fail(429, "rate_limited", "Identity mint daily budget reached", { "Retry-After": "3600" });
+    }
+  }
+
+  // Drops anonymous rows that were never authenticated, posted, or linked.
+  // Runs inside the caller's transaction when one is open, so a refused
+  // mint rolls the delete back with it. Rows without a mint address are
+  // invite and in-process identities and are kept.
+  expireInactive() {
+    if (this.store.readOnly) return 0;
+    if (!this.db.isTransaction) return this.store.transaction(() => this.expireInactive());
+    ensureIdentityCapacitySchema(this.db);
+    const table = name => this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name);
+    if (!table("agent_identities") || !table("identity_links")) return 0;
+    const cutoff = this.store.now() - this.activationWindowMs;
+    const ownershipClause = table("agent_room_ownership")
+      ? "AND identity_id NOT IN (SELECT identity_id FROM agent_room_ownership)"
+      : "";
+    const rows = this.db.prepare(`
+      SELECT identity_id AS identityId FROM agent_identities
+      WHERE mint_address IS NOT NULL AND activated_at IS NULL AND revoked_at IS NULL AND created_at < ?
+        AND identity_id NOT IN (SELECT identity_id FROM identity_links)
+        ${ownershipClause}
+    `).all(cutoff);
+    let removed = 0;
+    for (const row of rows) {
+      if (this.store.agentPlugin && table("agent_api_keys")) this.store.agentPlugin.revokeApiKeysForIdentity(row.identityId);
+      if (table("identity_link_codes")) this.db.prepare("DELETE FROM identity_link_codes WHERE identity_id=?").run(row.identityId);
+      if (table("agent_skill_cards")) this.db.prepare("DELETE FROM agent_skill_cards WHERE identity_id=?").run(row.identityId);
+      const changed = this.db.prepare(`
+        DELETE FROM agent_identities
+        WHERE identity_id=? AND mint_address IS NOT NULL AND activated_at IS NULL AND revoked_at IS NULL
+          AND identity_id NOT IN (SELECT identity_id FROM identity_links)
+          ${ownershipClause}
+      `).run(row.identityId);
+      removed += changed.changes;
+    }
+    return removed;
+  }
+
+  capacityReady() {
+    if (this.capacitySchemaReady) return true;
+    const columns = new Set(this.db.prepare("PRAGMA table_info(agent_identities)").all().map(column => column.name));
+    if (!columns.has("activated_at")) return false;
+    this.capacitySchemaReady = true;
+    return true;
+  }
+
+  // Authentication, a post, or a link keeps an anonymous identity. Read
+  // transactions cannot write, so those stamps flush after the read commits.
+  noteActivated(identityId) {
+    if (!identityId || this.store.readOnly) return;
+    if ((this.store.readTransactionDepth ?? 0) > 0) {
+      if (!this.pendingActivation.has(identityId)) {
+        this.pendingActivation.add(identityId);
+        queueMicrotask(() => this.flushActivation());
+      }
+      return;
+    }
+    this.stampActivated(identityId);
+  }
+
+  stampActivated(identityId) {
+    if (this.store.readOnly || !this.capacityReady()) return;
+    this.db.prepare(
+      "UPDATE agent_identities SET activated_at=? WHERE identity_id=? AND activated_at IS NULL AND revoked_at IS NULL"
+    ).run(this.store.now(), identityId);
+  }
+
+  flushActivation() {
+    if (this.store.readOnly) {
+      this.pendingActivation.clear();
+      return;
+    }
+    if ((this.store.readTransactionDepth ?? 0) > 0 || this.db.isTransaction) {
+      queueMicrotask(() => this.flushActivation());
+      return;
+    }
+    const ids = [...this.pendingActivation];
+    this.pendingActivation.clear();
+    if (!ids.length) return;
+    try {
+      this.store.transaction(() => {
+        for (const id of ids) this.stampActivated(id);
+      });
+    } catch { /* a closed store must not surface on the read that queued this */ }
   }
 
   get(identityId) {
@@ -259,6 +549,7 @@ export class AgentIdentities {
         this.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)")
           .run(roomId, identityId, resolvedMemberId, this.store.now());
         if (settleAccessRequests) this.closePendingAccessRequests(roomId, identityId, auth.member.id);
+        this.noteActivated(identityId);
         return { roomId, identityId, memberId: resolvedMemberId, relinked: true };
       }
       const memberName = displayName?.trim() || identity.displayName;
@@ -282,6 +573,7 @@ export class AgentIdentities {
       this.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)")
         .run(roomId, identityId, resolvedMemberId, this.store.now());
       if (settleAccessRequests) this.closePendingAccessRequests(roomId, identityId, auth.member.id);
+      this.noteActivated(identityId);
       return { roomId, identityId, memberId: resolvedMemberId };
     });
   }
@@ -344,6 +636,7 @@ export class AgentIdentities {
       .get(identityId, v2, legacy);
     if (!row) fail(401, "unauthenticated", "Unknown or revoked agent identity secret");
     if (!isV2Hash(row.secretHash)) this.upgradeLegacyHash(identityId, secret);
+    this.noteActivated(row.identityId);
     return { identityId: row.identityId, displayName: row.displayName };
   }
 
@@ -486,6 +779,7 @@ export class AgentIdentities {
       .get(v2, legacy);
     if (!row) return null;
     if (!isV2Hash(row.secretHash)) this.upgradeLegacyHash(row.identityId, secret);
+    this.noteActivated(row.identityId);
     return { identityId: row.identityId, displayName: row.displayName };
   }
 
@@ -499,6 +793,7 @@ export class AgentIdentities {
     const row = this.db.prepare("SELECT identity_id, secret_hash AS secretHash FROM agent_identities WHERE secret_hash IN (?, ?) AND revoked_at IS NULL").get(v2, legacy);
     if (!row) return null;
     if (!isV2Hash(row.secretHash)) this.upgradeLegacyHash(row.identity_id, secret);
+    this.noteActivated(row.identity_id);
     return this.resolveIdentityLink(row.identity_id, roomId);
   }
 
@@ -511,6 +806,7 @@ export class AgentIdentities {
     if (!link) return null;
     const member = this.store.roomAuthority(roomId).members[link.member_id];
     if (!member || member.active === false) return null;
+    this.noteActivated(identityId);
     return { identityId, member };
   }
 

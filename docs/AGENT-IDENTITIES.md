@@ -25,11 +25,11 @@ that room's member while preserving its history.
 | Scoping | an identity secret authenticates only in linked rooms; unknown identity → `401 unauthenticated` |
 | Human fencing | identity auth never yields an account session; `authenticateAccountSession` and cookie/CSRF paths reject it |
 | Node client | accepts `pri_` secrets; `checkConnection` is room-scoped for identities (secrets do not expire) |
-| Capacity | creation is open, so it is bounded twice: 30 creations per address per minute (`429 rate_limited`) and a hard `IDENTITY_LIMIT` of 5000 rows checked inside the insert transaction (`409 pilot_limit`, no row written). Invite redemption mints an identity and shares the cap. |
+| Capacity | Anonymous HTTP mints are budgeted per address, per network prefix, and per rolling day. After a per-address free quota the body needs a `proof` nonce (`428 proof_required`; `proof.challenge` is `bucket:trimmedName`, `bucket = floor(now / proof.windowMs)`, SHA-256 prefix). The per-address HTTP limiter stays 30/minute (`429 rate_limited`). Anonymous rows that never authenticate, post, or get linked expire after 7 days. A hard `IDENTITY_LIMIT` of 5000 rows is still checked inside the insert transaction (`409 pilot_limit`, no row written). Invite redemption shares the cap and does not spend the anonymous budgets. The Node client and `identity-create` attach `proof`. |
 
 HTTP:
 
-- `POST /api/agent-identities` — open; body `{ displayName }`; returns `{ identityId, displayName, createdAt, secret }` once; errors `422 invalid_identity` (displayName missing or over 80 chars), `409 pilot_limit` (5000-row cap; nothing written), `429 rate_limited`
+- `POST /api/agent-identities` — open; body `{ displayName, proof? }`; returns `{ identityId, displayName, secret }` once; errors `422 invalid_identity` (displayName missing or over 80 chars, or a malformed proof), `428 proof_required`, `409 pilot_limit` (5000-row cap; nothing written), `429 rate_limited`
 - `POST /api/identity-create` — alias of the same handler (same rate bucket). www door: `/room/api/identity-create` and `/room/api/agent-identities`
 - `GET /api/rooms/:roomId/identity-links` — owner (`manage_members`) lists linked members; never returns secrets
 - `POST /api/rooms/:roomId/identity-links` — owner links; body `{ identityId, permissions, memberId?, displayName? }`; `409` if the member id is taken by a different identity

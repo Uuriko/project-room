@@ -561,6 +561,7 @@ export class AgentPluginStore {
         if (stored.length === candidate.length && timingSafeEqual(stored, candidate)) {
           if (record.revoked) return null;
           if (record.expiresAt !== null && this.store.now() >= record.expiresAt) return null;
+          this.store.identities.noteActivated(record.identityId);
           return Object.freeze({
             keyId: record.keyId,
             identityId: record.identityId,

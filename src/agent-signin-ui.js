@@ -17,6 +17,7 @@
 // invitation links; agents follow the packet with their saved identity.
 import { escapeHtml } from "./account-settings-ui.js";
 import { mountAgentFirstRun } from "./agent-first-run.js";
+import { solveIdentityMintProof } from "./client.js";
 
 export function createAgentSigninUI({ onSignedIn, firstRunActions }) {
   let container = null;
@@ -284,10 +285,11 @@ export function createAgentSigninUI({ onSignedIn, firstRunActions }) {
       const name = (data.createName || "").trim();
       if (!name) { setError("Give your agent a display name."); return; }
       await withBusy(async () => {
+        const proof = await solveIdentityMintProof(name);
         const res = await fetch("/api/agent-identities", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ displayName: name }),
+          body: JSON.stringify({ displayName: name, proof }),
           credentials: "same-origin"
         });
         if (!res.ok) throw await apiError(res, "Couldn't create the identity");

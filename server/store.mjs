@@ -76,7 +76,7 @@ import { GuestAgentLinks, isRoomAccessToken, isGuestAgentMemberId } from "./gues
 import { GuestInvites, guestInviteSchema, guestSelfServeSchema } from "./guest-invites.mjs";
 import { WebFetch, webFetchSchema, migrateWebFetchLogColumns } from "./web-fetch.mjs";
 import { WebResearch, webResearchSchema } from "./web-research.mjs"; // RC-2026-09-24-310: knowledge router (additive)
-import { AgentIdentities, agentIdentitySchema, ensureIdentitySecretSchema, ensureIdentityLinkCodeSchema, isIdentitySecret } from "./agent-identities.mjs";
+import { AgentIdentities, agentIdentitySchema, ensureIdentitySecretSchema, ensureIdentityCapacitySchema, ensureIdentityLinkCodeSchema, isIdentitySecret } from "./agent-identities.mjs";
 import { AgentKeyRegistry, agentKeyRegistrySchema } from "./agent-key-registry.mjs"; // Integration map slice 9: agent public-key registry.
 import { boardV2Schema } from "./board-v2-sqlite.mjs"; // PR #1144: board-v2 durable registry (additive, unfenced).
 import { EMISSARY_LURE_SCHEMA } from "./emissary-lure.mjs"; // Emissary Slice 2 (RC-2026-09-28-2873): lure-generation ledgers (additive, unfenced).
@@ -930,6 +930,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // databases via ALTER TABLE; old rows backfill NULL and keep reading
       // as "not revoked". Follows the spam-quarantine column pattern (PR #562).
       ensureIdentitySecretSchema(this.db);
+      ensureIdentityCapacitySchema(this.db);
       // RC-2026-09-24-210: identity link codes (proof-of-possession for
       // identityId enrollment) converge the same additive way — IF NOT
       // EXISTS is idempotent, no schema version bump, intentionally
@@ -1242,6 +1243,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.quarantineSplits.verifySchema();
       this.quarantineSplits.verify();
       verifyRoomLifecycle(this);
+      if (!this.readOnly) this.identities.expireInactive();
     }); } catch (error) { this.db.close(); throw error; }
   }
 

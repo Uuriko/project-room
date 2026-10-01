@@ -341,6 +341,13 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
       next: [command("Retry after Retry-After")]
     };
   }
+  if (reasonCode === "proof_required") {
+    return {
+      status: "action_required", reason: "proof_required",
+      hint: "Resend with proof.",
+      next: [command("Resend displayName with proof")]
+    };
+  }
   if (httpStatus >= 500 || ["internal_error", "maintenance"].includes(reasonCode)) {
     return {
       status: "failed", reason: reasonCode === "request_failed" ? "internal_error" : reasonCode,

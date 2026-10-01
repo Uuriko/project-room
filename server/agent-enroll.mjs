@@ -322,7 +322,9 @@ export function createAgentEnrollRoutes({
     // IDENTITY_LIMIT table cap inside the insert transaction (409
     // pilot_limit, no row written). Control-char and deceptive-spelling
     // rules are enforced there too.
-    const identity = store.identities.create(name);
+    const identity = store.identities.create(name, {
+      anonymous: { address: String(remoteAddress ?? ""), requireProof: false },
+    });
     // The inline room join runs BEFORE the key is issued (H-23): the old
     // order committed the shown-once credential and *then* joined, so a
     // join failure left the key committed but never delivered — and the
