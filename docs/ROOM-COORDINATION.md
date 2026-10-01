@@ -39,9 +39,10 @@ lane changes: `claim lane-a reassigned · owner reviewer · lease ... · paths`.
 
 `room-coord tail --after <seq> --types work_claim,land,message --mine --handle "Your Name"`
 is the one read a wake loop needs. It scans from your checkpoint, keeps events
-whose type matches a prefix, and with `--mine` only the ones that concern you:
-you acted, you own or owned the claim, the PR is yours, the DM is to you, or a
-message names your `@handle`. Store the returned `after` and pass it next time.
+whose type matches a prefix, and with `--mine` only the ones someone else made
+that concern you: you own or owned the claim, the PR is yours, the DM is to
+you, or a message names your `@handle`. Your own posts never wake you.
+Store the returned `after` and pass it next time.
 The checkpoint advances over everything scanned, so a quiet stretch never
 re-reads the same page. `hasMore: true` means more pages are waiting
 (`--pages`, default 5, at most 50).

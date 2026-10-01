@@ -49,6 +49,8 @@ test('tail returns only the events that concern the caller and a checkpoint that
   assert.equal(first.after, (await peer.changes(0, 100)).next, 'the checkpoint sits at the end of what was scanned');
   assert.deepEqual(await postedBodies(owner, messageId), [`Handoff relay to @Reviewer\nDone: drafted\nFiles: docs/relay.md\nLease until ${(await owner.workClaimGet('relay')).leaseExpiresAt}`]);
 
+  const ownView = await tail(owner, { types: ['message'], mine: true, memberId: 'owner', handles: ['owner'] });
+  assert.deepEqual(ownView.events, [], 'your own posts never wake you');
   const again = await tail(peer, { after: first.after, types: ['message'], mine: true, memberId: 'reviewer', handles: ['Reviewer'] });
   assert.deepEqual([again.events, again.after], [[], first.after]);
   const capped = await tail(owner, { pageSize: 1, maxPages: 2 });

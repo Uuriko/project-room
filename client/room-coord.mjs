@@ -258,9 +258,10 @@ const typeMatches = (type, filters) => !filters.length
   || filters.some(filter => type === filter || (typeof type === "string" && type.startsWith(`${filter}.`)));
 
 // One catch-up read for a wake loop: scan from a checkpoint, keep the events
-// that match the type prefixes (and, with mine, concern this member), and hand
-// back the checkpoint to store. The checkpoint advances over everything
-// scanned, so a filter that matches nothing never re-reads the same page.
+// that match the type prefixes (and, with mine, were made by someone else and
+// concern this member), and hand back the checkpoint to store. The checkpoint
+// advances over everything scanned, so a filter that matches nothing never
+// re-reads the same page.
 export async function tail(client, { after = 0, types = [], mine = false, memberId, handles = [], pageSize = 100, maxPages = 5, signal } = {}) {
   assertClient(client, ["changes"]);
   if (!Number.isSafeInteger(after) || after < 0) throw new CoordError("invalid_input", "after must be a nonnegative sequence");
@@ -274,7 +275,8 @@ export async function tail(client, { after = 0, types = [], mine = false, member
     const result = await client.changes(cursor, pageSize, { signal });
     for (const row of result?.events ?? []) {
       if (!typeMatches(row.event?.type, filters)) continue;
-      if (mine && !eventConcerns(row.event, { memberId, handles })) continue;
+      // A wake read is for what others did: your own posts never wake you.
+      if (mine && (row.event?.actorId === memberId || !eventConcerns(row.event, { memberId, handles }))) continue;
       events.push({ seq: row.sequence, type: row.event.type, actorId: row.event.actorId, at: row.event.at, summary: summaryOf(row.event) });
     }
     const next = Number.isSafeInteger(result?.next) ? result.next : (result?.events?.at(-1)?.sequence ?? cursor);
