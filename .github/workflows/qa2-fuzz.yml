@@ -1,0 +1,31 @@
+name: qa2-fuzz
+
+# Nightly OpenAPI fuzzing (Schemathesis 4.x, stateful + coverage phases) against a
+# throwaway local server. Gate: no 5xx, no 2xx that violates the published schema.
+# Spec drift (undocumented 4xx, rejected schema-valid input) is uploaded as artifacts.
+on:
+  schedule:
+    - cron: "23 10 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - uses: astral-sh/setup-uv@v6
+      - run: npm ci
+      - run: scripts/qa2/fuzz.sh qa2-fuzz-out
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa2-fuzz-${{ github.run_id }}
+          path: qa2-fuzz-out
+          retention-days: 14
