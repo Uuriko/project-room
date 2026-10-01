@@ -635,5 +635,40 @@ expect_not_in "r/validated backfill receipt is not re-flagged (930)" \
 expect_in     "r/fabricated backfill receipt is still flagged (931)" \
   "$TMPD/r.out" "RC-2026-10-01-931"
 
+# ---------------------------------------------------------------------------
+# (s) empty/null comment bodies must not kill the parse (RC-2026-10-01-2010)
+# QA fuzz: parse_events exited 5 on a comment with an empty or null body —
+# "" | split("\n") is [], so [0] is null and the test() inside
+# normalize_header dies on null. One poisoned comment broke every
+# rebuild/sweep (the whole board goes stale). The parser must coerce to ""
+# and reduce such comments to harmless prose events.
+# Negative control: a valid receipt fence in the same batch still parses
+# as a receipt — the repair must not swallow real events.
+# On the pre-fix code _parse exits 5 and emits nothing.
+# ---------------------------------------------------------------------------
+
+cat > "$TMPD/s.json" <<'EOF'
+[
+ {"id": 190, "created_at": "2026-10-01T00:00:00Z", "body": ""},
+ {"id": 191, "created_at": "2026-10-01T00:01:00Z", "body": null},
+ {"id": 192, "created_at": "2026-10-01T00:02:00Z", "body": "[jill][receipt] RC-2026-10-01-940\n\n```room-receipt\ntask-id:    RC-2026-10-01-940\nlane:       jill\nstate:      completed\npr:         #1101\nmerged:      a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4\n```"}
+]
+EOF
+
+s_rc=0
+"$ROOM" _parse < "$TMPD/s.json" > "$TMPD/s.out" 2> "$TMPD/s.err" || s_rc=$?
+
+if [ "$s_rc" -eq 0 ]; then
+  pass=$((pass + 1)); printf 'ok   %s\n' "s/_parse exits 0 on empty/null bodies"
+else
+  fail=$((fail + 1)); printf 'FAIL %s\n  _parse exited %s\n' "s/_parse exits 0 on empty/null bodies" "$s_rc"
+fi
+expect_jq "s/empty body reduces to prose (190)" \
+  "$TMPD/s.out" '[.[] | select(.id == 190)] | .[0].kind == "prose"'
+expect_jq "s/null body reduces to prose (191)" \
+  "$TMPD/s.out" '[.[] | select(.id == 191)] | .[0].kind == "prose"'
+expect_jq "s/valid receipt still parses as receipt (192)" \
+  "$TMPD/s.out" '[.[] | select(.id == 192)] | .[0].kind == "receipt"'
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
