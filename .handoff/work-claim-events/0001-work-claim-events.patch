@@ -1,0 +1,386 @@
+From 7f0a5838a540e63bf4751de634f22a7c80a669e8 Mon Sep 17 00:00:00 2001
+From: Grok Bot <grok@trydemigod.com>
+Date: Thu, 1 Oct 2026 14:09:24 -0700
+Subject: [PATCH] Work claims: every claim change is a room event with the real
+ actor
+
+---
+ server/work-claim-events.mjs    |  57 +++++++++++++++++
+ server/work-claim-routes.mjs    |  33 ++++++----
+ server/work-claims.mjs          |   5 +-
+ src/events.js                   |  26 +++++++-
+ tests/work-claim-events.test.js | 110 ++++++++++++++++++++++++++++++++
+ 5 files changed, 216 insertions(+), 15 deletions(-)
+ create mode 100644 server/work-claim-events.mjs
+ create mode 100644 tests/work-claim-events.test.js
+
+diff --git a/server/work-claim-events.mjs b/server/work-claim-events.mjs
+new file mode 100644
+index 0000000..0835368
+--- /dev/null
++++ b/server/work-claim-events.mjs
+@@ -0,0 +1,57 @@
++// Work-claim room events. A claim, renewal, handoff or release used to change
++// only the work_claims table: nobody saw it in the room, the event tail, the
++// digest or an agent's wake feed, so agents re-announced every claim in chat.
++// Each committed claim change now appends one thin `work_claim.updated` room
++// event, attributed to the member who made it. The work_claims table stays the
++// source of truth; the event carries a pointer and the state a reader needs.
++// (claimState, not state: the envelope reserves data.state for land.updated.)
++//
++// Same append path as the land queue (server/land-queue.mjs #emit): the event
++// row and the projection update run inside the caller's claim transaction, so
++// a claim and its event commit or roll back together.
++import { randomUUID } from "node:crypto";
++import { EVENT_TYPES, WORK_CLAIM_EVENT_ACTIONS, applyEvent, event } from "../src/events.js";
++
++export const WORK_CLAIM_ACTIONS = WORK_CLAIM_EVENT_ACTIONS;
++
++export function workClaimEventData(item, action, { previousOwnerId = null } = {}) {
++  if (!WORK_CLAIM_ACTIONS.includes(action)) throw new Error(`Unknown work claim action: ${action}`);
++  return {
++    workClaim: item.id,
++    action,
++    claimState: item.state,
++    ownerId: item.owner ?? null,
++    ...(previousOwnerId ? { previousOwnerId } : {}),
++    leaseExpiresAt: item.leaseExpiresAt ?? null,
++    title: item.title ?? item.id,
++    paths: [...(item.files ?? [])]
++  };
++}
++
++// Handler unit tests drive the routes with a registry-only store; events need
++// the real event log, so a store without one records nothing here.
++export function emitWorkClaimEvent(store, roomId, { actorId, item, action, previousOwnerId = null }) {
++  if (!store?.db || typeof store.room !== "function") return null;
++  const room = store.room(roomId);
++  const actor = room.state.members?.[actorId];
++  const incoming = event({
++    id: randomUUID(),
++    idempotencyKey: randomUUID(),
++    type: EVENT_TYPES.WORK_CLAIM_UPDATED,
++    actorId: actor && actor.active !== false ? actorId : room.state.room.ownerId,
++    roomId,
++    at: new Date(typeof store.now === "function" ? store.now() : Date.now()).toISOString(),
++    data: workClaimEventData(item, action, { previousOwnerId })
++  });
++  const state = applyEvent(room.state, incoming);
++  const sequence = room.sequence + 1;
++  store.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
++  const compact = { ...state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
++  store.db.prepare("UPDATE rooms SET sequence=?, projection=? WHERE id=?").run(sequence, JSON.stringify(compact), roomId);
++  try {
++    if (store.agentPlugin) store.agentPlugin.fanoutRoomEvent({ roomId, event: incoming });
++  } catch (error) {
++    console.error("work claim fan-out failed:", error?.message ?? error);
++  }
++  return { sequence, event: incoming };
++}
+diff --git a/server/work-claim-routes.mjs b/server/work-claim-routes.mjs
+index a711ce9..1203b83 100644
+--- a/server/work-claim-routes.mjs
++++ b/server/work-claim-routes.mjs
+@@ -40,6 +40,7 @@ import { findDuplicates, DuplicateError } from "./work-duplicates.mjs";
+ import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
+ import { evaluateReceipt } from "./jev-receipts.mjs";
+ import { findClaimCollisions } from "./claim-collisions.mjs";
++import { emitWorkClaimEvent } from "./work-claim-events.mjs";
+ 
+ const CLAIM_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
+ 
+@@ -109,14 +110,16 @@ const leaseHoursOfBody = data => ("leaseHours" in data ? data.leaseHours : undef
+ // Evaluate lease expiry across the room's items; expired claims auto-release
+ // (owner cleared, history stamped by releaseExpired). Returns the ids that
+ // were released by this sweep.
+-function sweepRoom(registry, roomId, nowMs) {
++function sweepRoom(registry, roomId, nowMs, onRelease = () => {}) {
+   const entry = registry.list(roomId);
+   const swept = releaseExpired(entry, nowMs);
+   const released = [];
+   // releaseExpired returns a normalized copy of every item, expired or not,
+   // so compare states: only a claim that actually lapsed counts as swept.
+   swept.forEach((item, index) => {
+-    if (item.state === "unclaimed" && entry[index].state !== "unclaimed") { registry.set(roomId, item); released.push(item.id); }
++    if (item.state === "unclaimed" && entry[index].state !== "unclaimed") {
++      registry.set(roomId, item); released.push(item.id); onRelease(item, entry[index]);
++    }
+   });
+   return released;
+ }
+@@ -222,8 +225,16 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
+     db: store.db, roomId, state: { room: { ownerId: store.roomAuthority?.(roomId)?.ownerId } },
+     actor: auth.member, action: `${req.method} work-claim ${workClaimRoute}`, fail: reject });
+   const nowMs = Date.now();
+-  const sweptIds = sweepRoom(registry, roomId, nowMs);
+   const caller = auth.member.id;
++  // Every committed claim change appends one work_claim.updated room event
++  // inside this transaction (server/work-claim-events.mjs).
++  const commit = (item, action, extra = {}) => {
++    registry.set(roomId, item);
++    emitWorkClaimEvent(store, roomId, { actorId: extra.actorId ?? caller, item, action, previousOwnerId: extra.previousOwnerId ?? null });
++    return item;
++  };
++  const sweptIds = sweepRoom(registry, roomId, nowMs,
++    (item, before) => emitWorkClaimEvent(store, roomId, { actorId: before.owner, item, action: "lease_expired", previousOwnerId: before.owner }));
+   const config = registry.configFor(roomId);
+   const roomLike = { workClaims: registry.rawConfig(roomId) };
+ 
+@@ -311,8 +322,8 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
+     const id = claimIdOf(reject, data.id);
+     if (registry.has(roomId, id)) reject(409, "work_claim_exists", `Work claim "${id}" already exists in this room`);
+     if (data.reviewPolicy !== undefined && !REVIEW_POLICIES.includes(data.reviewPolicy)) invalidInput(reject, `reviewPolicy one of ${REVIEW_POLICIES.join(", ")}`);
+-    const item = runPure(reject, () => createWork({ id, title: data.title, reviewPolicy: data.reviewPolicy, note: data.note, tags: data.tags, files: data.files }, { now: nowMs }));
+-    registry.set(roomId, item);
++    const item = runPure(reject, () => createWork({ id, title: data.title, reviewPolicy: data.reviewPolicy, note: data.note, tags: data.tags, files: data.files }, { now: nowMs, agentId: caller }));
++    commit(item, "created");
+     return json(res, 201, item);
+   }
+   if (workClaimRoute === "read" && req.method === "GET") {
+@@ -324,7 +335,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
+     const item = load(claimIdOf(reject, workClaimId));
+     if (item.state !== "unclaimed") reject(409, "work_claim_conflict", `Work "${item.id}" is already ${item.state} — release it first`);
+     const claimed = runPure(reject, () => claimWork(item, caller, { note: data.note, leaseHours: leaseHoursOfBody(data), files: data.files, room: roomLike, now: nowMs }));
+-    registry.set(roomId, claimed);
++    commit(claimed, "claimed");
+     // Warn, never block: tell the claimant which declared files other
+     // active claims already hold, so the lanes talk before both edit them.
+     return json(res, 200, { ...claimed, fileWarnings: fileWarningsFor(registry.list(roomId), claimed) });
+@@ -396,7 +407,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
+           escalate: receiptDecision.escalate, signals: receiptDecision.signals, at: nowMs });
+       } catch { /* shadow-only: never break the done transition */ }
+     }
+-    registry.set(roomId, updated);
++    commit(updated, "state_changed");
+     return json(res, 200, updated);
+   }
+   if (workClaimRoute === "review" && req.method === "POST") {
+@@ -407,7 +418,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
+     if (!shape(data, { optional: ["note"] })) invalidInput(reject, "{note?}");
+     const item = load(claimIdOf(reject, workClaimId));
+     const attested = runPure(reject, () => attestWork(item, caller, { note: data.note, now: nowMs }));
+-    registry.set(roomId, attested);
++    commit(attested, "reviewed");
+     return json(res, 200, attested);
+   }
+   if (workClaimRoute === "release" && req.method === "POST") {
+@@ -424,7 +435,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
+       registry.set(roomId, item);
+     }
+     const released = runPure(reject, () => updateWork(item, caller, { state: "unclaimed", note: data.note, now: nowMs }));
+-    registry.set(roomId, released);
++    commit(released, "released");
+     return json(res, 200, released);
+   }
+   if (workClaimRoute === "reassign" && req.method === "POST") {
+@@ -444,7 +455,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
+         `newOwner "${typeof target === "string" ? target : "?"}" is not an active member of this room — reassign names a current memberId`);
+     }
+     const reassigned = runPure(reject, () => reassignWork(item, caller, target, { note: data.note, now: nowMs }));
+-    registry.set(roomId, reassigned);
++    commit(reassigned, "reassigned", { previousOwnerId: caller });
+     return json(res, 200, reassigned);
+   }
+   if (workClaimRoute === "renew" && req.method === "POST") {
+@@ -489,7 +500,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
+     }
+     const renewed = runPure(reject, () => renewWork(item, caller,
+       { note: data.note, leaseHours: leaseHoursOfBody(data), room: roomLike, now: nowMs }));
+-    registry.set(roomId, renewed);
++    commit(renewed, "renewed");
+     return json(res, 200, renewed);
+   }
+   // RFC 9110: a 405 names the resource's valid methods. The route table above
+diff --git a/server/work-claims.mjs b/server/work-claims.mjs
+index cfb1b58..6093e0f 100644
+--- a/server/work-claims.mjs
++++ b/server/work-claims.mjs
+@@ -168,7 +168,7 @@ const leaseHoursOf = value => {
+ // claiming an unknown id is refused so claims always reference real work.
+ // `tags` may be supplied up front (free-form, recorded on the item); blobs
+ // are evidence pointers and are only recorded on the done transition.
+-export function createWork({ id, title, reviewPolicy, note, tags, files } = {}, { now } = {}) {
++export function createWork({ id, title, reviewPolicy, note, tags, files } = {}, { now, agentId } = {}) {
+   const atMs = nowMsOf(now);
+   idOf(id, "work id", 256);
+   if (title !== undefined) check(typeof title === "string" && title.length > 0 && title.length <= 512, "title must be 1..512 characters");
+@@ -179,7 +179,8 @@ export function createWork({ id, title, reviewPolicy, note, tags, files } = {},
+     tags: tags === undefined || tags === null ? Object.freeze([]) : tagsOf(tags),
+     files: files === undefined || files === null ? Object.freeze([]) : filesOf(files),
+     blobs: Object.freeze([]) };
+-  return withHistory(item, atMs, "system", "created", note);
++  // The creating member when the route knows it; "system" for internal creates.
++  return withHistory(item, atMs, agentId === undefined ? "system" : agentOf(agentId), "created", note);
+ }
+ // Claim unclaimed work. Refuses already-claimed work (the anti-collision rule).
+ // leaseHours: hours until the claim lapses (default: the room's
+diff --git a/src/events.js b/src/events.js
+index bc7b145..86a830a 100644
+--- a/src/events.js
++++ b/src/events.js
+@@ -81,7 +81,11 @@ export const EVENT_TYPES = Object.freeze({
+   DM_POSTED: "dm.posted",
+   // Land queue receipt. The land_queue table is the source of truth; this
+   // event is the thin wake record (pr, head, state, what changed).
+-  LAND_UPDATED: "land.updated"
++  LAND_UPDATED: "land.updated",
++  // Work-claim receipt. The work_claims table is the source of truth; this
++  // event is the thin room record of who claimed, renewed, handed off or
++  // released which claim (server/work-claim-events.mjs).
++  WORK_CLAIM_UPDATED: "work_claim.updated"
+ });
+ 
+ // Room channels (Phase 2 of the Discord/Slack-like redesign): every room has
+@@ -427,7 +431,8 @@ export function applyEvent(current, incoming) {
+     [EVENT_TYPES.BOND_ACTIVATED]: recordBond,
+     [EVENT_TYPES.BOND_REVOKED]: recordBond,
+     [EVENT_TYPES.DM_POSTED]: recordPeerDm,
+-    [EVENT_TYPES.LAND_UPDATED]: recordLandUpdate
++    [EVENT_TYPES.LAND_UPDATED]: recordLandUpdate,
++    [EVENT_TYPES.WORK_CLAIM_UPDATED]: recordWorkClaimUpdate
+   };
+   const handler = handlers[incoming.type];
+   if (!Object.hasOwn(handlers, incoming.type)) throw new Error(`Unsupported event type: ${incoming.type}`);
+@@ -1299,6 +1304,23 @@ function recordLandUpdate(state, incoming) {
+   }
+ }
+ 
++export const WORK_CLAIM_EVENT_ACTIONS = Object.freeze(["created", "claimed", "state_changed", "reviewed", "released", "reassigned", "renewed", "lease_expired"]);
++const WORK_CLAIM_EVENT_STATES = ["unclaimed", "claimed", "in_progress", "blocked", "done"];
++
++// Thin receipt: validated, never copied into the projection.
++function recordWorkClaimUpdate(state, incoming) {
++  requireMember(state, incoming.actorId);
++  const data = incoming.data ?? {};
++  if (typeof data.workClaim !== "string" || !data.workClaim.trim() || data.workClaim.length > 256) throw new Error("Event data missing workClaim");
++  if (!WORK_CLAIM_EVENT_ACTIONS.includes(data.action)) throw new Error("Event data missing action");
++  if (!WORK_CLAIM_EVENT_STATES.includes(data.claimState)) throw new Error("Event data missing claimState");
++  if (!(data.ownerId === null || typeof data.ownerId === "string")) throw new Error("Event data missing ownerId");
++  if (!(data.leaseExpiresAt === null || (typeof data.leaseExpiresAt === "string" && !Number.isNaN(Date.parse(data.leaseExpiresAt))))) {
++    throw new Error("Event data missing leaseExpiresAt");
++  }
++  if (!Array.isArray(data.paths)) throw new Error("Event data missing paths");
++}
++
+ function recordReferral(state, incoming) {
+   requireFields(incoming.data, ["referrerMemberId", "refereeMemberId", "via", "completedAt"]);
+   const { referrerMemberId, refereeMemberId, via } = incoming.data;
+diff --git a/tests/work-claim-events.test.js b/tests/work-claim-events.test.js
+new file mode 100644
+index 0000000..c6d9641
+--- /dev/null
++++ b/tests/work-claim-events.test.js
+@@ -0,0 +1,110 @@
++// Work-claim changes become room events: before this, claims lived only in the
++// work_claims table, so the room, the event tail and agents' wake feeds never
++// saw a claim, a renewal, a handoff or a release, and agents re-announced every
++// claim in chat. Each committed change now appends one work_claim.updated event
++// attributed to the member who made it, and a refused change appends nothing.
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import { RoomAgentClient } from '../client/room-agent.mjs';
++import { RoomStore } from '../server/store.mjs';
++import { initialRoom } from '../server/bootstrap.mjs';
++import { createRoomServer } from '../server/http.mjs';
++import { applyEvent, emptyRoomState } from '../src/events.js';
++import { workClaimEventData } from '../server/work-claim-events.mjs';
++
++async function fixture(t) {
++  const store = new RoomStore(':memory:');
++  store.initialize(initialRoom('commons'));
++  const ownerKey = store.issueAccessKey('commons', 'owner');
++  store.command(ownerKey, 'commons', { id: 'add-reviewer', type: 'member.added',
++    data: { memberId: 'reviewer', displayName: 'Reviewer', kind: 'human', permissions: [] } });
++  const peerKey = store.issueAccessKey('commons', 'reviewer');
++  const server = createRoomServer({ store });
++  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
++  t.after(async () => {
++    server.closeStreams(); server.closeAllConnections();
++    await new Promise(resolve => server.close(resolve));
++    store.close();
++  });
++  const origin = `http://127.0.0.1:${server.address().port}`;
++  return { store,
++    owner: new RoomAgentClient({ origin, roomId: 'commons', token: ownerKey }),
++    peer: new RoomAgentClient({ origin, roomId: 'commons', token: peerKey }) };
++}
++
++const claimEvents = async client => (await client.changes(0, 100)).events
++  .filter(row => row.event.type === 'work_claim.updated')
++  .map(row => ({ seq: row.sequence, actor: row.event.actorId, ...row.event.data }));
++
++test('each claim change appends one event naming the member, the action, the owner and the files', async t => {
++  const { owner, peer } = await fixture(t);
++  const created = await owner.workClaimCreate({ id: 'lane-a', title: 'Lane A', files: ['server/a.mjs'] });
++  assert.equal(created.history[0].agentId, 'owner', 'creation is attributed to the creating member');
++  const claimed = await owner.claimWorkItem('lane-a', { leaseHours: 2 });
++  await owner.updateWorkItem('lane-a', { state: 'in_progress' });
++  await owner.reassignWorkItem('lane-a', { newOwner: 'reviewer', note: 'handoff' });
++  await peer.releaseWorkItem('lane-a', { note: 'parked' });
++
++  const events = await claimEvents(owner);
++  assert.deepEqual(events.map(e => [e.actor, e.action, e.claimState, e.ownerId]), [
++    ['owner', 'created', 'unclaimed', null],
++    ['owner', 'claimed', 'claimed', 'owner'],
++    ['owner', 'state_changed', 'in_progress', 'owner'],
++    ['owner', 'reassigned', 'in_progress', 'reviewer'],
++    ['reviewer', 'released', 'unclaimed', null]
++  ]);
++  assert.ok(events.every(e => e.workClaim === 'lane-a' && e.title === 'Lane A'));
++  assert.deepEqual(events[1].paths, ['server/a.mjs']);
++  assert.equal(events[1].leaseExpiresAt, claimed.leaseExpiresAt);
++  assert.equal(events[3].previousOwnerId, 'owner');
++  assert.ok(events.every((e, i) => i === 0 || e.seq > events[i - 1].seq), 'events land in commit order');
++});
++
++test('a refused claim change appends no event', async t => {
++  const { owner, peer } = await fixture(t);
++  await owner.workClaim('held', { files: ['docs/x.md'] });
++  const before = (await claimEvents(owner)).length;
++  await assert.rejects(peer.claimWorkItem('held'), error => error.status === 409);
++  await assert.rejects(peer.releaseWorkItem('held'), error => error.status === 403);
++  await assert.rejects(owner.reassignWorkItem('held', { newOwner: 'nobody-here' }), error => error.status === 422);
++  assert.equal((await claimEvents(owner)).length, before);
++});
++
++test('a lapsed lease is swept with a lease_expired event for the previous owner', async t => {
++  const { store, owner } = await fixture(t);
++  await owner.workClaim('short', { leaseHours: 1 });
++  const row = store.workClaims.get('commons', 'short');
++  store.workClaims.set('commons', { ...row, leaseExpiresAt: new Date(Date.now() - 1000).toISOString() });
++  await owner.workClaims();
++  const [expired] = (await claimEvents(owner)).filter(e => e.action === 'lease_expired');
++  assert.deepEqual([expired.actor, expired.claimState, expired.ownerId, expired.previousOwnerId], ['owner', 'unclaimed', null, 'owner']);
++});
++
++test('the full event log, claim events included, replays from an empty room', async t => {
++  const { store, owner } = await fixture(t);
++  await owner.workClaim('replayed', { files: ['src/r.js'], leaseHours: 1 });
++  await owner.releaseWorkItem('replayed', { note: 'parked' });
++  const rows = store.db.prepare('SELECT body FROM events WHERE room_id=? ORDER BY sequence').all('commons');
++  let state = emptyRoomState();
++  for (const { body } of rows) state = applyEvent(state, JSON.parse(body));
++  assert.equal(state.room.id, 'commons');
++  assert.ok(rows.some(({ body }) => JSON.parse(body).type === 'work_claim.updated'));
++});
++
++test('a member cannot forge a claim event through the command path', async t => {
++  const { store } = await fixture(t);
++  const key = store.issueAccessKey('commons', 'reviewer');
++  const item = { id: 'w', state: 'claimed', owner: 'reviewer', leaseExpiresAt: null, title: 'w', files: [] };
++  assert.throws(() => store.command(key, 'commons', { id: 'forged', type: 'work_claim.updated', data: workClaimEventData(item, 'claimed') }));
++  const rows = store.db.prepare("SELECT body FROM events WHERE room_id=?").all('commons');
++  assert.ok(!rows.some(({ body }) => JSON.parse(body).type === 'work_claim.updated'));
++});
++
++test('the event payload refuses an action the reducer does not know', () => {
++  const item = { id: 'w', state: 'claimed', owner: 'a', leaseExpiresAt: null, title: 'w', files: [] };
++  assert.throws(() => workClaimEventData(item, 'teleported'), /Unknown work claim action/);
++  assert.throws(() => applyEvent(emptyRoomState(), {
++    id: 'e1', idempotencyKey: 'k1', roomId: 'commons', type: 'work_claim.updated', actorId: 'owner', at: new Date().toISOString(),
++    data: { ...workClaimEventData(item, 'claimed'), action: 'teleported' }
++  }));
++});
+-- 
+2.47.3
+
