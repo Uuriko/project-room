@@ -466,6 +466,13 @@ details[open] > .section-summary::before { transform: rotate(45deg); }
 .app-shell:has(#auth-panel:not([hidden])) .connection-bar:has([data-state="signed-out"]) { display: none; }
 .auth-panel h1 { margin-bottom: 1.5rem; overflow-wrap: anywhere; }
 .auth-panel h1 { font-size: clamp(1.7rem, 4vw, 1.9rem); line-height: 1.2; text-wrap: balance; }
+/* RC-2026-09-30-3650 (human-door P0-1): the logged-out hero. A raised card
+   under the brand heading so a logged-out human sees what Project Room is
+   and where to go, instead of a bare sign-in wall. */
+.auth-hero { margin: 0 0 1.5rem; padding: 1rem 1.25rem; border: 1px solid var(--line-soft); border-radius: .75rem; background: var(--panel-raised); }
+.auth-hero-tagline { font-size: 1.02rem; line-height: 1.55; margin: 0 0 .75rem; }
+.auth-hero-links { display: flex; flex-wrap: wrap; gap: .35rem 1.25rem; margin: 0 0 .6rem; }
+.auth-hero .form-hint { margin-top: 0; }
 .auth-panel p, dialog p { line-height: 1.6; }
 #invitation-summary:empty { display: none; }
 .auth-panel form, #action-fields, #action-form, #invitation-account-form, .invitation-shell { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem; }
