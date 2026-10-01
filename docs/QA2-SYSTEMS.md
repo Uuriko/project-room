@@ -11,9 +11,9 @@ A `KNOWN` entry is an already-triaged miss. The suite stays green while it is li
 | `tests/qa2/agent-journeys.test.js` | the task id in `KNOWN` (it now passes `pass^k`) and/or `KNOWN_UNDISCOVERABLE` (the route is now in public discovery) |
 | `scripts/qa2/authz-matrix.mjs` | the role in that action's `known` list |
 | `scripts/qa2/baselines/mcp-conformance-baseline.yml` | the scenario id (a stale baseline entry fails the conformance run) |
-| `.github/workflows/qa2-synthetic.yml` | the matching `--known` waiver on the public-pages step, and the `J5` exception on the journey step once J5 passes |
+| `.github/workflows/qa2-synthetic.yml` | the matching `--known` waiver on the public-pages step, and the `J5` exception on the journey step once the production journey passes J5 |
 
-Today: J5 is known and undiscoverable (room-create `next` points at the human invitation route, QA2-P1-2). J8 and J11 are undiscoverable (work-claim create/states and `room.archived` are not in the public corpus, QA2-P2). The authz matrix allows the owner-reassign cell (`QA2-F`). The fuzz job is `continue-on-error` until QA2 P2-1 (agent-invite discovery / OpenAPI drift) is on main; remove that flag in the PR that lands the fix.
+Today: J5 passes and is discoverable (#1304 points room-create `next` at `/agent-invites`), so it is not in `KNOWN` or `KNOWN_UNDISCOVERABLE`. J8 and J11 are still undiscoverable (work-claim create/states and `room.archived` are not in the public corpus). The authz matrix allows the owner-reassign cell (`QA2-F`). Production had not deployed #1304 when this landed (`sourceRevision` `22adbde4`), so the synthetic journey step still accepts a J5 miss until that deploy is live; delete the exception once the production journey passes J5. The fuzz job stays `continue-on-error`: a JSON-RPC error from `POST /mcp` is still `{ jsonrpc, id, error }`, not `ErrorEnvelope`, so `response_schema_conformance` fails. Remove that flag when the published schema matches the body.
 
 ## What each check does
 

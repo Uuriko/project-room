@@ -15,9 +15,9 @@ jobs:
   fuzz:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # QA2 P2-1: the agent-invite discovery / OpenAPI drift fix is not on main,
-    # so the hard gate (no 5xx, 2xx schema conformance) still fails. Remove
-    # continue-on-error in the PR that lands that fix.
+    # QA2 P2-1: #1304 documented the missing statuses. POST /mcp still returns
+    # a JSON-RPC error object, not ErrorEnvelope, so response_schema_conformance
+    # fails. Remove continue-on-error when that body matches the published schema.
     continue-on-error: true
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4

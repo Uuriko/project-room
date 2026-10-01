@@ -5,8 +5,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { enabled, startServer, runChecker } from "./helpers.js";
 
-const KNOWN = new Set(["J5"]); // QA2-P1-2: room-create `next` points agents at the human invitation route
-const KNOWN_UNDISCOVERABLE = new Set(["J5", "J8", "J11"]); // QA2-P2: work-claim create/states and room.archived undocumented
+const KNOWN = new Set(); // J5 (QA2-P1-2) passes after #1304: room-create next points at agent-invites
+const KNOWN_UNDISCOVERABLE = new Set(["J8", "J11"]); // work-claim create/states and room.archived undocumented
 
 test("agent journeys: pass^3 with no unexpected failures", { skip: !enabled, timeout: 10 * 60_000 }, async () => {
   const server = await startServer();
