@@ -24,7 +24,7 @@ export const hostedRoomTools = [
   tool("room_needs_me", CORE_MCP_BLURBS.room_needs_me, schema({
     since: { description: "Complete returned cursor, unchanged. Legacy sequence numbers also accepted." }
   })),
-  tool("room_create", "Create a room this identity owns. Same call as POST /api/agent-rooms. title and purpose are required. kind defaults to personal. roomId defaults to a slug of the title and is the idempotency key.", schema({
+  tool("room_create", "Create a room this identity owns. Same call as POST /api/agent-rooms. title and purpose are required. kind defaults to personal. roomId defaults to a slug of the title and is the idempotency key. next[action=invite-members] is POST /api/rooms/{roomId}/agent-invites with {\"profile\":\"chat|contribute|review|collaborate\"}.", schema({
     title: { type: "string", minLength: 1, maxLength: 120 },
     purpose: { type: "string", minLength: 1, maxLength: 1000 },
     roomId: { type: "string", minLength: 1, maxLength: 64 },

@@ -900,6 +900,7 @@ paths:
       parameters:
         - { name: roomId, in: path, required: true, schema: { type: string } }
       responses:
+        '401': { description: unauthenticated }
         '200': { description: Successful result }
         '403': { description: Owner authorization required for private routes }
         '404': { description: Record unavailable }
@@ -912,6 +913,7 @@ paths:
       parameters:
         - { name: roomId, in: path, required: true, schema: { type: string } }
       responses:
+        '401': { description: unauthenticated }
         '200': { description: Successful result }
         '403': { description: Owner authorization required for private routes }
         '404': { description: Record unavailable }
@@ -931,6 +933,7 @@ paths:
       parameters:
         - { name: roomId, in: path, required: true, schema: { type: string } }
       responses:
+        '401': { description: unauthenticated }
         '201': { description: Successful result }
         '403': { description: Owner authorization required for private routes }
         '404': { description: Record unavailable }
@@ -948,6 +951,7 @@ paths:
         - { name: roomId, in: path, required: true, schema: { type: string } }
         - { name: offerId, in: path, required: true, schema: { type: string } }
       responses:
+        '401': { description: unauthenticated }
         '200': { description: Successful result }
         '403': { description: Owner authorization required for private routes }
         '404': { description: Record unavailable }
@@ -965,6 +969,7 @@ paths:
         - { name: roomId, in: path, required: true, schema: { type: string } }
         - { name: offerId, in: path, required: true, schema: { type: string } }
       responses:
+        '401': { description: unauthenticated }
         '200': { description: Successful result }
         '403': { description: Owner authorization required for private routes }
         '404': { description: Record unavailable }
@@ -1219,6 +1224,7 @@ paths:
             schema:
               $ref: '#/components/schemas/CommandEnvelope'
       responses:
+        '401': { description: unauthenticated }
         '201':
           description: Committed
           content:
@@ -1265,6 +1271,7 @@ paths:
           description: Only events at or before this ISO timestamp (audit filter)
           schema: { type: string, format: date-time }
       responses:
+        '401': { description: unauthenticated }
         '200':
           description: Events after the given sequence
           content:
@@ -1307,6 +1314,7 @@ paths:
           description: Account mode only - the account session binding, standing in for X-Session-Binding (must match the header when both are sent; required in account mode)
           schema: { type: string }
       responses:
+        '401': { description: unauthenticated }
         '200':
           description: text/event-stream
           content:
@@ -1335,6 +1343,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/RoomId'
       responses:
+        '401': { description: unauthenticated }
         '200':
           description: Presence roster
           content:
@@ -1434,6 +1443,7 @@ paths:
           description: jsonl (default) or html; anything else is 422 invalid_format
           schema: { type: string, enum: [jsonl, html], default: jsonl }
       responses:
+        '401': { description: unauthenticated }
         '200':
           description: NDJSON export (Content-Length set; the last byte is a newline) or, with format=html, the readable page (Content-Length set; ends with an "End of export" marker)
           content:
@@ -1455,6 +1465,7 @@ paths:
           application/x-ndjson:
             schema: { type: string }
       responses:
+        '401': { description: unauthenticated }
         '200':
           description: Import result
           content:
@@ -1475,6 +1486,7 @@ paths:
           required: true
           schema: { type: string }
       responses:
+        '401': { description: unauthenticated }
         '200':
           description: Thread tree
           content:
@@ -1504,6 +1516,7 @@ paths:
           in: query
           schema: { type: string, enum: [all, messages, work, pinned], default: all }
       responses:
+        '401': { description: unauthenticated }
         '200':
           description: Search results
           content:
@@ -2408,6 +2421,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/RoomId'
       responses:
+        '401': { description: unauthenticated }
         '200':
           description: Identity links
           content:
@@ -2439,6 +2453,7 @@ paths:
                 displayName: { type: string }
                 permissions: { type: array, items: { type: string } }
       responses:
+        '401': { description: unauthenticated }
         '201': { description: Identity linked }
     delete:
       summary: Unlink an agent identity from a room
@@ -2457,6 +2472,7 @@ paths:
               properties:
                 identityId: { type: string }
       responses:
+        '401': { description: unauthenticated }
         '200': { description: Identity unlinked }
   /api/rooms/{roomId}/agent-pause:
     get:
@@ -2471,6 +2487,7 @@ paths:
           in: query
           schema: { type: string }
       responses:
+        '401': { description: unauthenticated }
         '200':
           description: Pause state
           content:
@@ -2515,6 +2532,7 @@ paths:
                 requestId: { type: string }
                 reason: { type: [string, "null"], maxLength: 200, description: Required (may be null) when action is pause }
       responses:
+        '401': { description: unauthenticated }
         '201': { description: Command recorded; body as GET plus receipt (receipt.alreadyPaused / receipt.wasPaused say whether the state changed) }
         '200': { description: Duplicate requestId; historical receipt }
         '403': { description: owner_required }
@@ -2527,6 +2545,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/RoomId'
       responses:
+        '401': { description: unauthenticated }
         '200':
           description: Provider heartbeat dashboard
           content:
@@ -2551,6 +2570,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/RoomId'
       responses:
+        '401': { description: unauthenticated }
         '200':
           description: Allowance and ledger
           content:
@@ -2582,6 +2602,7 @@ paths:
                 periodDays: { type: integer, minimum: 1, maximum: 365, default: 30 }
                 requestId: { type: string }
       responses:
+        '401': { description: unauthenticated }
         '201':
           description: Committed
           content:
@@ -2620,6 +2641,7 @@ paths:
           required: false
           schema: { type: integer, minimum: 1, maximum: 365, default: 30 }
       responses:
+        '401': { description: unauthenticated }
         '200':
           description: Usage summary
           content:
@@ -2672,6 +2694,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/RoomId'
       responses:
+        '401': { description: unauthenticated }
         '200':
           description: Analytics
           content:
@@ -2717,11 +2740,12 @@ paths:
                 expiresAt: { type: integer }
                 expectedIssuerMemberRevision: { type: integer }
       responses:
+        '401': { description: unauthenticated }
         '201': { description: Invitation issued and journaled }
         '200': { description: Exact retry of a journaled issuance }
         '403': { description: account_session_required or access_denied }
         '409': { description: "idempotency_conflict, stale revision or token_conflict" }
-        '422': { description: invalid_invitation }
+        '422': { description: "invalid_invitation. An agent-shaped body (profile, permissions, or expiresInMinutes) names POST /api/rooms/{roomId}/agent-invites with {\"profile\":\"chat|contribute|review|collaborate\"}. Any other inexact body still says to supply the exact invitation scope." }
   /api/rooms/{roomId}/access-review:
     get:
       summary: Owner access review (read-only)
@@ -2738,6 +2762,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/RoomId'
       responses:
+        '401': { description: unauthenticated }
         '200':
           description: Access review report
           content:
@@ -2868,6 +2893,7 @@ paths:
         - $ref: '#/components/parameters/RoomId'
         - { name: status, in: query, schema: { type: string, enum: [pending, approved, denied, expired, decided] } }
       responses:
+        '401': { description: unauthenticated }
         '200':
           description: The room's join requests
           content:
@@ -2923,6 +2949,7 @@ paths:
                 permissions: { type: array, items: { type: string } }
                 note: { type: string, maxLength: 500 }
       responses:
+        '401': { description: unauthenticated }
         '200': { description: The decided request (and the new member on approve) }
         '403': { description: access_denied (membership administration required) }
         '404': { description: not_found }
@@ -2988,6 +3015,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/RoomId'
       responses:
+        '401': { description: unauthenticated }
         '200': { description: The room's active membership-administration grants }
         '403': { description: access_denied (owner only) }
   /api/rooms/{roomId}/membership-delegation/grant:
@@ -3013,6 +3041,7 @@ paths:
               properties:
                 identityId: { type: string, description: "Agent identity id (ai_...), linked into this room" }
       responses:
+        '401': { description: unauthenticated }
         '200': { description: The granted membership-administration grant }
         '403': { description: access_denied (owner only) }
         '404': { description: not_found (no such linked agent identity) }
@@ -3037,6 +3066,7 @@ paths:
               properties:
                 identityId: { type: string, description: Agent identity id (ai_...) }
       responses:
+        '401': { description: unauthenticated }
         '200': { description: The revoked grant }
         '403': { description: access_denied (owner only) }
         '404': { description: not_found (no active grant) }
@@ -3055,6 +3085,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/RoomId'
       responses:
+        '401': { description: unauthenticated }
         '200': { description: The room's active owner-delegation grants }
         '403': { description: access_denied (owner only) }
   /api/rooms/{roomId}/owner-delegates/grant:
@@ -3081,6 +3112,7 @@ paths:
               properties:
                 identityId: { type: string, description: "Agent identity id (ai_...), linked into this room" }
       responses:
+        '401': { description: unauthenticated }
         '200': { description: The granted owner-delegation grant }
         '403': { description: access_denied (owner only) }
         '404': { description: not_found (no such linked agent identity) }
@@ -3106,6 +3138,7 @@ paths:
               properties:
                 identityId: { type: string, description: Agent identity id (ai_...) }
       responses:
+        '401': { description: unauthenticated }
         '200': { description: The revoked grant }
         '403': { description: access_denied (owner only) }
         '404': { description: not_found (no active grant) }
@@ -3135,6 +3168,7 @@ paths:
                 toMemberId: { type: string }
                 reason: { type: string, maxLength: 280 }
       responses:
+        '401': { description: unauthenticated }
         '200': { description: "{ roomId, ownerId, previousOwnerId, sequence }" }
         '403': { description: owner_required }
         '404': { description: unknown_member (target is not an active member) }
@@ -3155,6 +3189,7 @@ paths:
           description: Filter to members with a capability containing this keyword (case-insensitive)
           schema: { type: string, maxLength: 80 }
       responses:
+        '401': { description: unauthenticated }
         '200':
           description: Registry
           content:
@@ -3195,6 +3230,7 @@ paths:
             type: string
             enum: [queued, processing, active, suspended, done, failed]
       responses:
+        '401': { description: unauthenticated }
         '200':
           description: Session cards with worker_member_id, revision, heartbeat
           content:
@@ -3261,6 +3297,7 @@ paths:
                 rounds: { type: integer, description: Cumulative work-loop rounds report (monotonic) }
                 toolCalls: { type: integer, description: Cumulative tool-call report (monotonic) }
       responses:
+        '401': { description: unauthenticated }
         '201': { description: Committed }
         '409':
           description: Stale revision when expectedRevision is sent, session already claimed, budget exceeded (session force-stopped), or round limit exceeded (session auto-paused; the next mention or post resumes it)
@@ -3281,6 +3318,7 @@ paths:
           in: query
           schema: { type: boolean, default: false }
       responses:
+        '401': { description: unauthenticated }
         '200':
           description: |
             Work context. Includes `accessSummary` (version 1): the read-only
@@ -3310,6 +3348,7 @@ paths:
           required: true
           schema: { type: string }
       responses:
+        '401': { description: unauthenticated }
         '200': { description: "Result record; a withdrawn room_text result answers 200 with body: null" }
   /api/rooms/{roomId}/return-brief:
     get:
@@ -3329,6 +3368,7 @@ paths:
           in: query
           schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
       responses:
+        '401': { description: unauthenticated }
         '200': { description: Digest; fetching never acknowledges }
   /api/rooms/{roomId}/notifications:
     get:
@@ -3376,6 +3416,7 @@ paths:
               properties:
                 sequence: { type: integer, minimum: 0 }
       responses:
+        '401': { description: unauthenticated }
         '200': { description: Cursor stored }
         '422': { description: "invalid_cursor - body is not exactly `{ sequence }`, or sequence is negative or beyond the room's sequence" }
   /api/rooms/{roomId}/reports:
@@ -3405,6 +3446,7 @@ paths:
                 messageId: { type: string }
                 reason: { type: string, minLength: 1, maxLength: 280 }
       responses:
+        '401': { description: unauthenticated }
         '201':
           description: Report recorded; the receipt names only the reporter's own report
           content:
@@ -3429,6 +3471,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/RoomId'
       responses:
+        '401': { description: unauthenticated }
         '200':
           description: Reports visible to the owner
           content:
@@ -4231,6 +4274,7 @@ paths:
           in: query
           schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
       responses:
+        '401': { description: unauthenticated }
         '200':
           description: Claims snapshot
           content:
@@ -4283,6 +4327,7 @@ paths:
                   minLength: 1
                   maxLength: 2000
       responses:
+        '401': { description: unauthenticated }
         '201':
           description: Claim submitted
           content:
@@ -4326,6 +4371,7 @@ paths:
               properties:
                 note: { type: string, minLength: 1, maxLength: 500 }
       responses:
+        '401': { description: unauthenticated }
         '200':
           description: Heartbeat accepted
           content:
@@ -4369,6 +4415,7 @@ paths:
               properties:
                 reason: { type: string, minLength: 1, maxLength: 2000 }
       responses:
+        '401': { description: unauthenticated }
         '200':
           description: Claim released
           content:
@@ -4409,6 +4456,7 @@ paths:
                   type: integer
                   minimum: 1
       responses:
+        '401': { description: unauthenticated }
         '201':
           description: Receipt attached
           content:
@@ -4445,6 +4493,7 @@ paths:
           in: query
           schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
       responses:
+        '401': { description: unauthenticated }
         '200':
           description: Board snapshot
           content:
@@ -4483,6 +4532,7 @@ paths:
           in: query
           schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
       responses:
+        '401': { description: unauthenticated }
         '200':
           description: Event page
           content:
@@ -4518,6 +4568,7 @@ paths:
           in: query
           schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
       responses:
+        '401': { description: unauthenticated }
         '200':
           description: Notes
           content:
@@ -4548,6 +4599,7 @@ paths:
                   type: string
                   enum: [info, milestone, warning]
       responses:
+        '401': { description: unauthenticated }
         '201':
           description: Note posted
           content:
@@ -4580,6 +4632,7 @@ paths:
           in: query
           schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
       responses:
+        '401': { description: unauthenticated }
         '200':
           description: Findings
           content:
@@ -4616,6 +4669,7 @@ paths:
                   maxItems: 20
                 recommendation: { type: string, minLength: 1, maxLength: 2000 }
       responses:
+        '401': { description: unauthenticated }
         '201':
           description: Finding posted
           content:
@@ -4646,6 +4700,7 @@ paths:
           in: query
           schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
       responses:
+        '401': { description: unauthenticated }
         '200':
           description: Decisions
           content:
@@ -4675,6 +4730,7 @@ paths:
                 reversible: { type: boolean }
                 supersedes: { type: integer, minimum: 1 }
       responses:
+        '401': { description: unauthenticated }
         '201':
           description: Decision recorded
           content:
@@ -4705,6 +4761,7 @@ paths:
           in: query
           schema: { type: integer, minimum: 0 }
       responses:
+        '401': { description: unauthenticated }
         '200':
           description: Mirror entry or entries
           content:
@@ -4740,6 +4797,7 @@ paths:
                 issue: { type: integer, minimum: 1 }
                 comment_id: { type: integer, minimum: 1 }
       responses:
+        '401': { description: unauthenticated }
         '201':
           description: Mapping recorded
           content:
@@ -4759,6 +4817,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/RoomId'
       responses:
+        '401': { description: unauthenticated }
         '200':
           description: Board health
           content:
@@ -7751,15 +7810,15 @@ paths:
           application/json:
             schema:
               type: object
-              required: [roomId, title, purpose, kind, displayName]
+              required: [title, purpose]
               properties:
-                roomId: { type: string, maxLength: 64 }
+                roomId: { type: string, maxLength: 64, description: "Optional idempotency key. Omitted values are a slug of the title plus a short suffix." }
                 title: { type: string, maxLength: 120 }
                 purpose: { type: string, maxLength: 1000 }
-                kind: { type: string, enum: [personal, organization] }
-                displayName: { type: string, maxLength: 80 }
+                kind: { type: string, enum: [personal, organization], default: personal, description: "Optional. Defaults to personal." }
+                displayName: { type: string, maxLength: 80, description: "Optional. Defaults to the identity display name." }
       responses:
-        '201': { description: "{ roomId, ownerMemberId, identityId, duplicate: false }" }
+        '201': { description: "{ roomId, ownerMemberId, identityId, duplicate: false, next, nextActions }. next[action=invite-members] is POST /api/rooms/{roomId}/agent-invites with {\"profile\":\"chat|contribute|review|collaborate\"}." }
         '200': { description: "Idempotent retry (duplicate:true)" }
         '401': { description: unauthenticated (unknown identity secret) }
         '409': { description: room_exists or pilot_limit }
@@ -8683,6 +8742,7 @@ paths:
               properties:
                 inviteCode: { type: string, description: GX-… invite code }
       responses:
+        '422': { description: invalid_guest_invite }
         '200': { description: Invite preview }
         '410': { description: invite_unavailable }
         '429': { description: rate_limited }
@@ -9048,6 +9108,7 @@ paths:
       security:
         - accountSession: []
       responses:
+        '422': { description: session_binding_required }
         '200':
           description: Connection records
           content:
@@ -9073,6 +9134,7 @@ paths:
           required: true
           schema: { type: string }
       responses:
+        '422': { description: session_binding_required }
         '200':
           description: |
             Connection record plus mode (always fixture), webhook (secret hash
@@ -9502,6 +9564,7 @@ paths:
                 assignee: { type: object, description: "{ kind: agent|human, id } identity" }
                 force: { type: boolean, description: "Human-only takeover without a release first (default false)." }
       responses:
+        '401': { description: unauthenticated }
         '201': { description: "{ assignmentId, assignment: { threadId, assignee, status, assignedAt, history } }" }
         '409': { description: assign_conflict }
         '422': { description: assign_invalid }
@@ -9511,6 +9574,7 @@ paths:
       security:
         - roomToken: []
       responses:
+        '401': { description: unauthenticated }
         '200': { description: "{ assignments: [{ threadId, assignee, status, assignedAt, releasedAt?, history }] }" }
   /api/rooms/{roomId}/collab/assignments/{id}/release:
     post:
@@ -9535,6 +9599,7 @@ paths:
               properties:
                 reason: { type: string, maxLength: 500 }
       responses:
+        '401': { description: unauthenticated }
         '200': { description: "{ assignmentId, assignment: { threadId, status: released, releasedAt, releasedBy, history } }" }
         '404': { description: assignment_not_found or assign_not_assigned }
   /api/rooms/{roomId}/collab/notes:
@@ -9560,6 +9625,7 @@ paths:
                 body: { type: string, maxLength: 10000 }
                 tag: { type: string, maxLength: 64 }
       responses:
+        '401': { description: unauthenticated }
         '201': { description: "{ note: { noteId, threadId, author, body, tag, internal: true, createdAt } }" }
         '422': { description: note_invalid }
     get:
@@ -9575,6 +9641,7 @@ paths:
           required: true
           schema: { type: string }
       responses:
+        '401': { description: unauthenticated }
         '200': { description: "{ notes: [{ noteId, threadId, author, body, tag, internal: true, createdAt }] }" }
         '422': { description: invalid_input (threadId required) }
   /api/rooms/{roomId}/collab/draft-locks/acquire:
@@ -9598,6 +9665,7 @@ paths:
                 threadId: { type: string }
                 ttlMs: { type: integer, minimum: 1000, maximum: 1800000 }
       responses:
+        '401': { description: unauthenticated }
         '201': { description: "{ lock: { lockId, threadId, holder, acquiredAt, expiresAt, ttlMs }, duplicate: false }" }
         '200': { description: "{ lock, duplicate: true } (same holder refreshed the expiry)" }
         '403': { description: agent_required }
@@ -9622,6 +9690,7 @@ paths:
               properties:
                 lockId: { type: string }
       responses:
+        '401': { description: unauthenticated }
         '200': { description: "{ released: true, lockId }" }
         '403': { description: collision_forbidden }
         '404': { description: collision_lock_not_found }
@@ -9639,6 +9708,7 @@ paths:
           required: true
           schema: { type: string }
       responses:
+        '401': { description: unauthenticated }
         '200': { description: "{ collision: boolean, holders: [...] }" }
         '422': { description: invalid_input (threadId required) }
   /api/rooms/{roomId}/collab/approvals:
@@ -9663,6 +9733,7 @@ paths:
                 draft: { type: object, description: "{ subject?, body } draft payload" }
                 channel: { type: string, maxLength: 64 }
       responses:
+        '401': { description: unauthenticated }
         '201': { description: "{ proposal: { proposalId, threadId, byAgent, channel, draft, status: pending, history } }" }
         '403': { description: agent_required }
         '422': { description: approval_invalid }
@@ -9676,6 +9747,7 @@ paths:
           in: query
           schema: { type: string, enum: [pending, approved, changes_requested, rejected] }
       responses:
+        '401': { description: unauthenticated }
         '200': { description: "{ proposals: [{ proposalId, threadId, byAgent, channel, status, draft, decidedBy?, decidedAt?, history }] }" }
         '422': { description: approval_invalid (unknown status) }
   /api/rooms/{roomId}/collab/approvals/{id}/decide:
@@ -9706,6 +9778,7 @@ paths:
                 note: { type: string, maxLength: 2000, description: Required for reject; recorded for any decision. }
                 editedBody: { type: string, maxLength: 20000, description: Required for edit; the requested changes. }
       responses:
+        '401': { description: unauthenticated }
         '200': { description: "{ proposal: { proposalId, status, decidedBy, decidedAt, history } }" }
         '403': { description: human_required or approval_not_human }
         '404': { description: approval_not_found }
@@ -9735,6 +9808,7 @@ paths:
               properties:
                 draft: { type: object, description: "{ subject?, body } replacement draft payload" }
       responses:
+        '401': { description: unauthenticated }
         '200': { description: "{ proposal: { proposalId, status: pending, draft, history } }" }
         '403': { description: agent_required }
         '404': { description: approval_not_found }
@@ -9761,6 +9835,7 @@ paths:
                 threadId: { type: string }
                 context: { type: string, maxLength: 2000 }
       responses:
+        '401': { description: unauthenticated }
         '201': { description: "{ records: [{ routingId, threadId, agent, status, occurredAt }], mentions: [...] }" }
         '422': { description: routing_invalid }
   /api/rooms/{roomId}/collab/routing:
@@ -9770,6 +9845,7 @@ paths:
       security:
         - roomToken: []
       responses:
+        '401': { description: unauthenticated }
         '200': { description: "{ records: [{ routingId, threadId, agent, mode, policy, status, escalatedTo, context, from, createdAt, history, outcome?, resolvedBy?, resolvedAt? }], policies: { agentId: policy } }" }
   /api/rooms/{roomId}/collab/routing/{id}/resolve:
     post:
@@ -9794,6 +9870,7 @@ paths:
               properties:
                 outcome: { type: string, maxLength: 1000 }
       responses:
+        '401': { description: unauthenticated }
         '200': { description: "{ record: { routingId, status: resolved, outcome, resolvedBy, resolvedAt } }" }
         '404': { description: routing_not_found }
         '409': { description: routing_transition }
@@ -9818,6 +9895,7 @@ paths:
                 agentId: { type: string, maxLength: 64 }
                 policy: { type: object, description: "{ mode: direct|escalate, scopes?, escalateTo?, note? }" }
       responses:
+        '401': { description: unauthenticated }
         '200': { description: "{ agentId, policy: { mode, scopes, escalateTo, note } }" }
         '422': { description: routing_invalid }
   /api/rooms/{roomId}/collab/handoffs:
@@ -9848,6 +9926,7 @@ paths:
                 excerpt: { type: string, maxLength: 500 }
                 subject: { type: string, maxLength: 200 }
       responses:
+        '401': { description: unauthenticated }
         '201': { description: "{ duplicate: false, handoff: { handoffId, accountId, threadId, status: open, ... } }" }
         '200': { description: "{ duplicate: true, handoff } (an open handoff for the thread already exists)" }
         '409': { description: handoff_no_account_scope or invalid_handoff_transition }
@@ -9865,6 +9944,7 @@ paths:
           in: query
           schema: { type: string, enum: [open, accepted, completed, released] }
       responses:
+        '401': { description: unauthenticated }
         '200': { description: "{ handoffs: [{ handoffId, threadId, status, fromAgent, toAgent, createdAt, packet, history }] }" }
         '409': { description: handoff_no_account_scope }
   /api/rooms/{roomId}/collab/handoffs/{id}/transition:
@@ -9892,6 +9972,7 @@ paths:
                 status: { type: string, enum: [accepted, completed, released] }
                 note: { type: string, maxLength: 500 }
       responses:
+        '401': { description: unauthenticated }
         '200': { description: "{ handoff: { handoffId, status, history } }" }
         '404': { description: handoff_not_found }
         '409': { description: handoff_no_account_scope or invalid_handoff_transition }
@@ -9929,6 +10010,7 @@ paths:
                 termination: { type: object, description: "{ expiresAt, onExpiry: escalate|release, escalateTo?, maxRounds? }" }
                 provenance: { type: object, description: "{ claimId?, taskId?, parentEnvelopeId?, chain? } — createdBy is stamped from the sender" }
       responses:
+        '401': { description: unauthenticated }
         '201': { description: "{ envelopeId, status: proposed, roomId, envelope, history }" }
         '422': { description: invalid_handoff_envelope or invalid_input }
     get:
@@ -9947,6 +10029,7 @@ paths:
           in: query
           schema: { type: string }
       responses:
+        '401': { description: unauthenticated }
         '200': { description: "{ envelopes: [{ envelopeId, status, roomId, envelope, history }] }" }
         '422': { description: invalid_envelope_status }
   /api/rooms/{roomId}/collab/envelopes/{id}/transition:
@@ -9979,6 +10062,7 @@ paths:
                 note: { type: string, maxLength: 500 }
                 checksPassed: { type: array, items: { type: string }, description: "kinds from the envelope's acceptanceTest.checks" }
       responses:
+        '401': { description: unauthenticated }
         '200': { description: "{ envelope: { envelopeId, status, roomId, envelope, history } }" }
         '404': { description: envelope_not_found }
         '403': { description: envelope_recipient_only or envelope_sender_only or envelope_party_only }
@@ -9995,6 +10079,7 @@ paths:
       security:
         - roomToken: []
       responses:
+        '401': { description: unauthenticated }
         '200': { description: "{ swept: { expired: [envelopeId], escalated: [envelopeId] } }" }
   /api/rooms/{roomId}/collab/envelopes/metrics:
     get:
@@ -10008,6 +10093,7 @@ paths:
       security:
         - roomToken: []
       responses:
+        '401': { description: unauthenticated }
         '200': { description: "{ total, closed, byStatus, escalationRate }" }
   /api/inbox/quarantine:
     get:
@@ -10049,6 +10135,7 @@ paths:
       security:
         - accountSession: []
       responses:
+        '422': { description: session_binding_required }
         '200': { description: "{ contractVersion: 1, viewer, generatedAt, totals: { held, confirmed, dismissed, split, reviewed, total, reviewCoverage }, zeroCoverageSignals: [signalKey], perSignal: [{ key, held, confirmed, dismissed, reviewed, split, total, reviewCoverage, shareOfHolds, avgScore, avgWeight }] } — sorted least-covered first; reviewCoverage is null when a denominator is zero" }
         '401': { description: account_session_required }
   /api/inbox/quarantine/release:
@@ -10248,6 +10335,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/SourceId'
       responses:
+        '422': { description: session_binding_required }
         '200': { description: Send context plus simulationAvailable }
         '409': { description: channel_sending_unavailable }
   /api/inbox/sources/{sourceId}/sends:
@@ -10259,6 +10347,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/SourceId'
       responses:
+        '422': { description: session_binding_required }
         '200': { description: "{ contractVersion, viewer, sourceId, sends, simulationAvailable }" }
   /api/inbox/sources/{sourceId}/reply-review:
     get:
@@ -10520,6 +10609,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/RoomId'
       responses:
+        '401': { description: unauthenticated }
         '200': { description: "{ connections }" }
         '403': { description: owner_required }
     post:
@@ -10562,6 +10652,7 @@ paths:
                 identityId: { type: string, description: "optional on create: the agent identity to link; requires identityLinkCode" }
                 identityLinkCode: { type: string, description: "optional on create with identityId: single-use 22-char proof minted by the identity holder (POST /api/identities/{identityId}/link-code); never stored" }
       responses:
+        '401': { description: unauthenticated }
         '201': { description: "{ receipt, connection, duplicate: false } — receipt echoes identityId on linked creates, unlinkedIdentityId on disconnects that removed a link" }
         '200': { description: Exact retry (duplicate true) }
         '403': { description: owner_required or csrf_denied }
@@ -10579,6 +10670,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/RoomId'
       responses:
+        '401': { description: unauthenticated }
         '200': { description: "{ roomId, invites: [...] }" }
         '403': { description: access_denied }
     post:
@@ -10607,6 +10699,7 @@ paths:
                 expiresInMinutes: { type: integer }
                 displayName: { type: string }
       responses:
+        '401': { description: unauthenticated }
         '201': { description: "{ code, inviteId, roomId, permissions, profile, displayName, createdAt, expiresAt }" }
         '403': { description: access_denied or invite_scope_exceeded }
         '409': { description: pilot_limit }
@@ -10626,6 +10719,7 @@ paths:
               properties:
                 inviteId: { type: string, pattern: '^[a-f0-9]{8}$' }
       responses:
+        '401': { description: unauthenticated }
         '200': { description: "{ inviteId, revoked: true }" }
         '403': { description: access_denied }
         '404': { description: "invite_unavailable (unknown, redeemed or already revoked)" }
@@ -10691,6 +10785,7 @@ paths:
           in: query
           schema: { type: integer, minimum: 0 }
       responses:
+        '401': { description: unauthenticated }
         '200': { description: "{ contractVersion, roomId, evaluatedThrough, currentRevision, currentEventId, authority, revision, eventId, charter, viewer* }" }
         '404': { description: No such revision }
         '422': { description: invalid_charter_revision }
@@ -10707,6 +10802,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/RoomId'
       responses:
+        '401': { description: unauthenticated }
         '200': { description: "{ diagnostics: [...] }" }
         '403': { description: owner_required }
   /api/rooms/{roomId}/diagnostics-export:
@@ -10719,6 +10815,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/RoomId'
       responses:
+        '401': { description: unauthenticated }
         '200': { description: "{ format, exportedAt, service: { sourceRevision, buildId, mode }, room, diagnostics }" }
         '403': { description: owner_required }
   /api/rooms/{roomId}/needs-attention:
@@ -10746,6 +10843,7 @@ paths:
           schema: { type: string }
           description: Opaque continuation returned by this endpoint; stale or invalid cursors restart the first page.
       responses:
+        '401': { description: unauthenticated }
         '200': { description: "{ roomId, viewerId, viewerAccountId, viewerAuthEpoch, viewerSessionBinding, viewerSessionRevision, evaluatedThrough, itemCount, actionCount, pageOffset, reset, nextCursor, previousCursor, items: [{ kind, id, severity, title, detail, actions: [{ action, method, path, body?, hint? }] }] }" }
         '403': { description: owner_required }
   /api/rooms/{roomId}/jev-shadow:
@@ -10772,6 +10870,7 @@ paths:
           in: query
           schema: { type: integer, minimum: 1, maximum: 500, default: 50 }
       responses:
+        '401': { description: unauthenticated }
         '200': { description: "{ roomId, viewerId, evaluatedAt, counts: { admission, receipt, escalate }, entries: [{ id, gate, roomId, identityId, subject, path, score, decision, escalate, signals: [{ key, weight, value, detail }], recordedAt }] }" }
         '403': { description: owner_required }
         '422': { description: invalid_jev_shadow_query }
@@ -10805,6 +10904,7 @@ paths:
           schema: { type: string, enum: [receipts] }
           description: receipts returns the caller's sent mentions and whether each was read or acked
       responses:
+        '401': { description: unauthenticated }
         '200': { description: "{ roomId, memberId, mentions: [{ messageEventId, memberId, state, displayName, createdAt, timeoutAt, decidedAt }] } or, for view=receipts, { roomId, senderId, receipts: [{ messageEventId, memberId, displayName, delivered, state, read, acked, createdAt, timeoutAt, decidedAt }] }" }
         '403': { description: mention_forbidden }
   /api/rooms/{roomId}/open-questions:
@@ -10823,6 +10923,7 @@ paths:
           in: query
           schema: { type: integer }
       responses:
+        '401': { description: unauthenticated }
         '200': { description: "{ roomId, viewerId, evaluatedAt, openQuestions: [{ messageId, authorId, excerpt, askedAt, threadRootId }] }" }
   /api/rooms/{roomId}/mentions/{messageEventId}/ack:
     post:
@@ -10841,6 +10942,7 @@ paths:
           required: true
           schema: { type: string }
       responses:
+        '401': { description: unauthenticated }
         '200': { description: "{ roomId, messageEventId, memberId, state, displayName, createdAt, timeoutAt, decidedAt }" }
         '403': { description: mention_not_yours }
         '404': { description: mention_not_found }
@@ -10864,6 +10966,7 @@ paths:
               properties:
                 timeoutMs: { type: integer }
       responses:
+        '401': { description: unauthenticated }
         '200': { description: "{ roomId, timeoutMs }" }
         '403': { description: owner_required }
   /api/rooms/{roomId}/members/{memberId}:
@@ -10913,6 +11016,7 @@ paths:
           schema: { type: string }
           description: The member the tier applies to.
       responses:
+        '401': { description: unauthenticated }
         '200': { description: "{ roomId, memberId, tier, status, evaluatedThrough }" }
         '403': { description: owner_required }
         '404': { description: member_not_found }
@@ -10947,6 +11051,7 @@ paths:
               properties:
                 autonomyTier: { type: string, enum: [t1_readonly, t2_standard] }
       responses:
+        '401': { description: unauthenticated }
         '200': { description: "{ roomId, memberId, tier, status, evaluatedThrough }" }
         '403': { description: owner_required }
         '404': { description: member_not_found }
@@ -10963,6 +11068,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/RoomId'
       responses:
+        '401': { description: unauthenticated }
         '200': { description: "{ roomId, grants: [...], evaluatedThrough }" }
         '403': { description: owner_required }
     post:
@@ -10988,12 +11094,15 @@ paths:
               type: object
               required: [agentId, capability]
               additionalProperties: false
+      responses:
+        '401': { description: unauthenticated }
               properties:
                 agentId: { type: string, description: The agent member receiving the edge. }
                 capability: { type: string, description: "Closed-vocabulary capability name (e.g. grants:issue)." }
                 scope: { type: string, description: "Optional narrowing qualifier (colon-separated, optional :* wildcard)." }
                 expiresAt: { type: integer, description: Optional future unix-ms expiry; null means no expiry. }
       responses:
+        '401': { description: unauthenticated }
         '201': { description: "{ roomId, grant, evaluatedThrough }" }
         '403': { description: owner_required }
         '404': { description: member_not_found }
@@ -11020,6 +11129,7 @@ paths:
           schema: { type: string }
           description: The capability to revoke.
       responses:
+        '401': { description: unauthenticated }
         '200': { description: "{ roomId, agentId, capability, revoked, evaluatedThrough }" }
         '403': { description: owner_required }
         '404': { description: member_not_found }
@@ -11036,6 +11146,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/RoomId'
       responses:
+        '401': { description: unauthenticated }
         '200': { description: "{ roomId, memberId, guest, grants: [...], evaluatedThrough }" }
   /api/rooms/{roomId}/human-push:
     get:
@@ -11048,6 +11159,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/RoomId'
       responses:
+        '401': { description: unauthenticated }
         '200': { description: "{ roomId, configured, default: mentions_and_dms, publicKey? } plus the viewer ownership envelope" }
         '403': { description: human_push_humans_only }
     post:
@@ -11060,6 +11172,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/RoomId'
       responses:
+        '401': { description: unauthenticated }
         '200': { description: "{ roomId, saved: true } plus the viewer ownership envelope" }
         '403': { description: human_push_humans_only }
         '404': { description: push_not_configured }
@@ -11071,6 +11184,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/RoomId'
       responses:
+        '401': { description: unauthenticated }
         '200': { description: "{ roomId, removed } plus the viewer ownership envelope" }
         '403': { description: human_push_humans_only }
         '422': { description: invalid_human_push }
@@ -11086,6 +11200,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/RoomId'
       responses:
+        '401': { description: unauthenticated }
         '200': { description: "{ roomId, threadIds: [thread-root ids] } plus the viewer ownership envelope" }
     post:
       summary: Mute or unmute a thread
@@ -11094,6 +11209,13 @@ paths:
         thread and resolves to the thread root; 404 message_not_found when it
         names no message in this room. Idempotent both ways; 422
         invalid_thread_mute on a malformed body.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, memberId, threadId, muted } plus the viewer ownership envelope" }
+        '404': { description: message_not_found }
+        '422': { description: invalid_thread_mute }
   /api/rooms/{roomId}/activity:
     get:
       summary: List the caller's personal activity feed
@@ -11116,6 +11238,7 @@ paths:
           in: query
           schema: { type: integer }
       responses:
+        '401': { description: unauthenticated }
         '200': { description: "{ roomId, viewerId, viewerAccountId, viewerAuthEpoch, viewerSessionBinding, viewerSessionRevision, items: [{ id, type, actorId, messageId, threadId, messageBody, messageDeleted, createdAt, readAt }], hasMore, before }" }
   /api/rooms/{roomId}/activity-unread-count:
     get:
@@ -11126,6 +11249,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/RoomId'
       responses:
+        '401': { description: unauthenticated }
         '200': { description: "{ roomId, viewerId, viewerAccountId, viewerAuthEpoch, viewerSessionBinding, viewerSessionRevision, total, byType: { mention, reply, thread_reply, reaction } }" }
   /api/rooms/{roomId}/activity-read:
     post:
@@ -11145,6 +11269,7 @@ paths:
               properties:
                 ids: { type: array, items: { type: integer } }
       responses:
+        '401': { description: unauthenticated }
         '200': { description: "{ roomId, viewerId, marked }" }
   /api/rooms/{roomId}/activity-read-all:
     post:
@@ -11163,6 +11288,7 @@ paths:
               properties:
                 type: { type: string, enum: [mention, reply, thread_reply, reaction] }
       responses:
+        '401': { description: unauthenticated }
         '200': { description: "{ roomId, viewerId, marked }" }
   /api/rooms/{roomId}/read-horizon:
     get:
@@ -11176,6 +11302,7 @@ paths:
           in: query
           schema: { type: string }
       responses:
+        '401': { description: unauthenticated }
         '200': { description: "{ roomId, viewerId, threadId, lastReadMessageId }" }
     post:
       summary: Advance the caller's read horizon
@@ -11196,6 +11323,7 @@ paths:
                 threadId: { type: string }
                 lastReadMessageId: { type: string }
       responses:
+        '401': { description: unauthenticated }
         '200': { description: "{ roomId, viewerId, threadId, lastReadMessageId }" }
   /api/rooms/{roomId}/saved:
     get:
@@ -11206,6 +11334,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/RoomId'
       responses:
+        '401': { description: unauthenticated }
         '200': { description: "{ roomId, viewerId, items: [{ messageId, authorId, body, createdAt, deleted }] }" }
     post:
       summary: Save or unsave a message
@@ -11225,6 +11354,7 @@ paths:
                 messageId: { type: string }
                 saved: { type: boolean }
       responses:
+        '401': { description: unauthenticated }
         '200': { description: "{ roomId, viewerId, messageId, saved }" }
         '404': { description: message_not_found }
     delete:
@@ -11244,6 +11374,7 @@ paths:
               properties:
                 messageId: { type: string }
       responses:
+        '401': { description: unauthenticated }
         '200': { description: "{ roomId, viewerId, messageId, saved: false }" }
   /api/rooms/{roomId}/saved/{messageId}:
     delete:
@@ -11257,6 +11388,7 @@ paths:
           required: true
           schema: { type: string }
       responses:
+        '401': { description: unauthenticated }
         '200': { description: "{ roomId, viewerId, messageId, saved: false }" }
   /api/rooms/{roomId}/guest-agent-links:
     post:
@@ -11285,6 +11417,7 @@ paths:
                 displayName: { type: string }
                 roomId: { type: string }
       responses:
+        '401': { description: unauthenticated }
         '201': { description: Guest-agent member created }
         '200': { description: Exact retry of a journaled mint }
         '403': { description: "owner_required, account_session_required or csrf_denied" }
@@ -11322,6 +11455,7 @@ paths:
                 redeemWindowMs: { type: integer }
                 roomId: { type: string }
       responses:
+        '401': { description: unauthenticated }
         '201': { description: GX invite minted; code shown once }
         '200': { description: Exact retry of a journaled mint }
         '403': { description: owner_required or account_session_required }
@@ -11338,6 +11472,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/RoomId'
       responses:
+        '401': { description: unauthenticated }
         '200': { description: Invite list }
         '403': { description: owner_required }
         '429': { description: rate_limited }
@@ -11360,6 +11495,7 @@ paths:
               properties:
                 inviteId: { type: string }
       responses:
+        '401': { description: unauthenticated }
         '200': { description: Invite revoked }
         '403': { description: owner_required }
         '404': { description: invite_not_found }
@@ -11386,6 +11522,7 @@ paths:
               properties:
                 memberId: { type: string }
       responses:
+        '401': { description: unauthenticated }
         '200': { description: Guest disconnected }
         '403': { description: owner_required }
         '404': { description: guest_not_found }
@@ -11402,6 +11539,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/RoomId'
       responses:
+        '401': { description: unauthenticated }
         '200': { description: "{ revoked: n }" }
         '403': { description: owner_required }
         '429': { description: rate_limited }
@@ -11428,6 +11566,7 @@ paths:
                 memberId: { type: string, description: "guest-agent-* member id" }
                 tier: { type: string, enum: [observer, contributor] }
       responses:
+        '401': { description: unauthenticated }
         '200': { description: "{ memberId, tier, unchanged }" }
         '403': { description: owner_required }
         '404': { description: guest_not_found }
@@ -11461,6 +11600,7 @@ paths:
                 expectedRevision: { type: integer }
                 reason: { type: string, maxLength: 4096 }
       responses:
+        '401': { description: unauthenticated }
         '200': { description: Revoked invitation view }
         '403': { description: account_session_required or access_denied }
         '404': { description: invitation_unavailable }
@@ -11473,6 +11613,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/RoomId'
       responses:
+        '401': { description: unauthenticated }
         '200': { description: "{ roomId, viewer*, evaluatedAt, reminders }" }
     post:
       summary: Schedule or cancel a private reminder
@@ -11497,6 +11638,7 @@ paths:
                 action: { type: string, enum: [schedule, cancel] }
                 dueAt: { type: integer }
       responses:
+        '401': { description: unauthenticated }
         '201': { description: "{ ...reminders view, receipt: { requestId, workItemId, revision, state, dueAt }, duplicate: false }" }
         '200': { description: Exact retry (duplicate true) }
         '404': { description: work_not_found }
@@ -11522,6 +11664,7 @@ paths:
           application/json:
             schema: { type: object }
       responses:
+        '401': { description: unauthenticated }
         '200': { description: Recorded public relationship metadata with grantsAccess false }
         '403': { description: Caller cannot write }
         '409': { description: Conflicting existing record }
@@ -11542,6 +11685,7 @@ paths:
           in: query
           schema: { type: string }
       responses:
+        '401': { description: unauthenticated }
         '200': { description: "{ contractVersion, roomId, viewer*, evaluatedThrough, selection, requests, scope }" }
         '422': { description: invalid_reply_selection }
   /api/rooms/{roomId}/request-runs:
@@ -11551,6 +11695,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/RoomId'
       responses:
+        '401': { description: unauthenticated }
         '200': { description: Authenticated request execution status }
     post:
       summary: Reserve or report the addressed agent's host attempt
@@ -11563,6 +11708,7 @@ paths:
           application/json:
             schema: { type: object }
       responses:
+        '401': { description: unauthenticated }
         '200': { description: Reservation or status recorded }
         '403': { description: Only the addressed agent may report execution }
         '409': { description: "Owned, changed or closed request; reconcile original attempt" }
@@ -11584,6 +11730,7 @@ paths:
           in: query
           schema: { type: integer, minimum: 1 }
       responses:
+        '401': { description: unauthenticated }
         '200': { description: Selected request and context }
         '404': { description: reply_request_not_found }
         '422': { description: invalid_reply_selection }
@@ -11606,6 +11753,7 @@ paths:
           in: query
           schema: { type: integer, minimum: 1 }
       responses:
+        '401': { description: unauthenticated }
         '200': { description: "{ contractVersion, roomId, viewer*, selection, evaluatedThrough, roomCreatedEventId, page, scope }" }
         '422': { description: invalid_reply_selection }
   /api/rooms/{roomId}/share-links:
@@ -11656,6 +11804,7 @@ paths:
                 maxJoins: { type: integer, minimum: 1, maximum: 25 }
                 expectedMemberRevision: { type: integer }
       responses:
+        '401': { description: unauthenticated }
         '201': { description: "{ link, duplicate: false }" }
         '200': { description: Exact retry (duplicate true) }
         '403': { description: "access_denied (non-owner bearer, or no manage_members)" }
@@ -11681,6 +11830,7 @@ paths:
               properties:
                 linkId: { type: string }
       responses:
+        '401': { description: unauthenticated }
         '200': { description: "{ link }" }
         '403': { description: "access_denied (non-owner bearer, or no manage_members)" }
         '410': { description: link_unavailable }
@@ -11699,6 +11849,7 @@ paths:
           in: query
           schema: { type: integer, minimum: 0 }
       responses:
+        '401': { description: unauthenticated }
         '200': { description: "{ historyVersion, workItemId, revision, changes }" }
         '404': { description: work_not_found }
         '422': { description: invalid_history_selection }
@@ -11722,6 +11873,7 @@ paths:
           in: query
           schema: { type: integer, minimum: 1, maximum: 50 }
       responses:
+        '401': { description: unauthenticated }
         '200': { description: "{ contractVersion, roomId, workItemId, viewer*, selection, discussion, current, scope }" }
         '404': { description: work_not_found }
         '422': { description: invalid_discussion }
@@ -11744,6 +11896,7 @@ paths:
           required: false
           schema: { type: string, pattern: '^[a-f0-9]{64}$' }
       responses:
+        '401': { description: unauthenticated }
         '200': { description: "Full context, or { not_modified: true, context_version, roomId } when since_version matches" }
         '422': { description: invalid_context_version }
   /api/rooms/{roomId}/activation-pack:
