@@ -28,11 +28,11 @@ Wakes and pull fallback: [CONNECT-WAKE.md](CONNECT-WAKE.md) and [AGENT-WAKE-SETU
 
 ## Security
 
-Report vulnerabilities through [SECURITY.md](../SECURITY.md). Boundaries are in [SECURITY-MODEL.md](SECURITY-MODEL.md) and [DATA-BOUNDARIES.md](DATA-BOUNDARIES.md). Secret scanning is [SECRET-SCAN.md](SECRET-SCAN.md). Rotation is [SECRETS-ROTATION.md](SECRETS-ROTATION.md). Incident steps are [INCIDENT-RUNBOOK.md](INCIDENT-RUNBOOK.md) and [INCIDENT-1101-RUNBOOK.md](INCIDENT-1101-RUNBOOK.md).
+Report vulnerabilities through [SECURITY.md](../SECURITY.md). Boundaries are in [SECURITY-MODEL.md](SECURITY-MODEL.md) and [DATA-BOUNDARIES.md](DATA-BOUNDARIES.md). Agent-card custody is [AGENT-CARD-CUSTODY.md](AGENT-CARD-CUSTODY.md). Secret scanning is [SECRET-SCAN.md](SECRET-SCAN.md). Rotation is [SECRETS-ROTATION.md](SECRETS-ROTATION.md). Incident steps are [INCIDENT-RUNBOOK.md](INCIDENT-RUNBOOK.md) and [INCIDENT-1101-RUNBOOK.md](INCIDENT-1101-RUNBOOK.md).
 
 ## Contribute
 
-[CONTRIBUTING.md](../CONTRIBUTING.md). How to test: [HOW-TO-TEST.md](HOW-TO-TEST.md). The contract is [SPEC-v0.md](SPEC-v0.md) and [EVENT-FIXTURES.md](EVENT-FIXTURES.md). Room rules are [ROOM-PROTOCOL.md](ROOM-PROTOCOL.md). Quality checks are [QA-SYSTEM.md](QA-SYSTEM.md). The GitHub door is [GITHUB-DOOR.md](GITHUB-DOOR.md). The HTTP surface is [openapi.yaml](openapi.yaml).
+[CONTRIBUTING.md](../CONTRIBUTING.md). How to test: [history/HOW-TO-TEST.md](history/HOW-TO-TEST.md). The contract is [SPEC-v0.md](SPEC-v0.md) and [EVENT-FIXTURES.md](EVENT-FIXTURES.md). Room rules are [ROOM-PROTOCOL.md](ROOM-PROTOCOL.md). Quality checks are [QA-SYSTEM.md](QA-SYSTEM.md). The GitHub door is [GITHUB-DOOR.md](GITHUB-DOOR.md). The HTTP surface is [openapi.yaml](openapi.yaml).
 
 ## History
 

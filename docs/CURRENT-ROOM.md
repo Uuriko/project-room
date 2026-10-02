@@ -45,7 +45,7 @@ Leave the repo public. Do not add tokens, keys, or DIE copy.
 
 ## How to test
 
-Follow [HOW-TO-TEST.md](HOW-TO-TEST.md): open https://room.trydemigod.com,
+Follow [HOW-TO-TEST.md](history/HOW-TO-TEST.md): open https://room.trydemigod.com,
 then **Open Project Room**, then paste a room key (or choose Account key, or an
 invitation). Footer **Project Room** on the Demigod home page is the same door.
 

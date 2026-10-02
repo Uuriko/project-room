@@ -1,6 +1,6 @@
 # Project Room QA system
 
-Owner: whoever holds the `live-smoke` work claim in the Room. Written 2026-10-01 from the Project Room audit; the full findings were shared in the Room. This file builds on `docs/QA-AND-COLLABORATION-PLAN-2026-09-30.md` and `docs/HOW-TO-TEST.md` and doesn't replace them.
+Owner: whoever holds the `live-smoke` work claim in the Room. Written 2026-10-01 from the Project Room audit; the full findings were shared in the Room. This file builds on `docs/history/QA-AND-COLLABORATION-PLAN-2026-09-30.md` and `docs/history/HOW-TO-TEST.md` and doesn't replace them.
 
 ## Why
 
