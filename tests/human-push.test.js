@@ -276,3 +276,23 @@ test("a rolled-back post never sends and short-name ambiguity includes agents", 
   assert.equal(calls.length, 0, "revocation before network send suppresses queued delivery");
   assert.equal(store.humanPush.inflight.size, 0, "settled delivery promises are released");
 });
+
+test("PUSH_DECLARATIVE=on adds a declarative body under 4KB and still hides the message", async t => {
+  const previous = process.env.PUSH_DECLARATIVE;
+  process.env.PUSH_DECLARATIVE = "on";
+  t.after(() => {
+    if (previous === undefined) delete process.env.PUSH_DECLARATIVE;
+    else process.env.PUSH_DECLARATIVE = previous;
+  });
+  const { store, send, calls, ownerKey, mayaKey } = await boot(t);
+  store.humanPush.save(mayaKey, "commons", browserSub("https://fcm.googleapis.com/fcm/send/maya"));
+  send(ownerKey, T.MESSAGE_POSTED, { messageId: "m-declarative", body: `@Maya ${SECRET}` });
+  await store.humanPush.flush();
+  const opened = await openPush(calls[0]);
+  assert.equal(opened.web_push, 8030);
+  assert.equal(opened.notification.tag, "room:commons");
+  assert.equal(opened.notification.navigate_url, "/?room=commons");
+  assert.equal(opened.counts.mention, 1);
+  assert.equal(JSON.stringify(opened).includes(SECRET), false);
+  assert.ok(Buffer.byteLength(JSON.stringify(opened)) < 4096);
+});

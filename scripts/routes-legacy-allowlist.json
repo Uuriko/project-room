@@ -775,6 +775,14 @@
     },
     {
       "method": "GET",
+      "path": "/api/operator/export"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/operator/export"
+    },
+    {
+      "method": "GET",
       "path": "/api/opportunities.json"
     },
     {
@@ -4278,6 +4286,14 @@
     {
       "method": "POST",
       "path": "/api/oauth/sessions/revoke-all"
+    },
+    {
+      "method": "GET",
+      "path": "/api/operator/export"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/operator/export"
     },
     {
       "method": "GET",

@@ -26,10 +26,12 @@ on:
 permissions:
   contents: read
 
-# Cancel superseded PR checks; preserve every main/manual run independently.
+# One in-flight run per pull request and per ref. A newer push cancels
+# superseded queued and in-progress runs in that group; the newest run stays.
+# workflow_dispatch is keyed by run id so a manual run stays independent.
 concurrency:
-  group: ${{ github.workflow }}-pr-${{ github.event.pull_request.number || github.run_id }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ${{ github.event_name == 'workflow_dispatch' && format('{0}-dispatch-{1}', github.workflow, github.run_id) || format('{0}-{1}', github.workflow, github.ref) }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 jobs:
   schema-gate:
