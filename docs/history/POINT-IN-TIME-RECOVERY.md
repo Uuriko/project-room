@@ -1,7 +1,7 @@
 # Point-in-time recovery (F002)
 
 This document sits on top of the F001 backup automation
-([docs/BACKUP-AUTOMATION.md](../BACKUP-AUTOMATION.md)). F001 produces an
+([BACKUP-AUTOMATION.md](BACKUP-AUTOMATION.md)). F001 produces an
 unattended, verified chain of room snapshots. This document explains how to
 use that chain for point-in-time recovery: pick the snapshot whose
 point-in-time is closest to (and not after) the moment you want to recover
@@ -22,7 +22,7 @@ watermark sidecar pinning `{ version, backedUpAt, rooms[id, sequence],
 events }`.
 
 The runner never deletes old backups — retention pruning is an operator
-policy applied outside the script (see [BACKUP-AUTOMATION.md](../BACKUP-AUTOMATION.md)).
+policy applied outside the script (see [BACKUP-AUTOMATION.md](BACKUP-AUTOMATION.md)).
 
 Cadence is the configured schedule (`--schedule`, default `daily`; the
 recommended production value is `hourly`). The state file
@@ -127,7 +127,7 @@ mv /var/room/room.sqlite.restored /var/room/room.sqlite
 ```
 
 The `verifyRestoredBackup` import signature (named export of
-`scripts/backup-verify.mjs`) is documented in [BACKUP-AUTOMATION.md](../BACKUP-AUTOMATION.md)
+`scripts/backup-verify.mjs`) is documented in [BACKUP-AUTOMATION.md](BACKUP-AUTOMATION.md)
 and exercised by the F001 cycle itself — this is the same verification, not
 a second tool.
 

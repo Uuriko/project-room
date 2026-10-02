@@ -50,7 +50,7 @@ node scripts/restore-rehearsal.mjs
 
 The first command backs up your database and checks the snapshot. The latter two
 use synthetic data to exercise recovery behavior; they do not restore your live
-database. See [BACKUP-AUTOMATION.md](BACKUP-AUTOMATION.md) for scheduling, retention
+database. See [history/BACKUP-AUTOMATION.md](history/BACKUP-AUTOMATION.md) for scheduling, retention
 and authority reconciliation. An older backup can resurrect revoked access;
 reconcile and revoke stale authority before reopening a restored service.
 
