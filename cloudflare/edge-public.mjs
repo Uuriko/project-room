@@ -17,6 +17,8 @@ let openApiCache = null;
 const assetType = path => path.endsWith('.js') ? 'text/javascript'
   : path.endsWith('.css') ? 'text/css'
   : path.endsWith('.html') ? 'text/html'
+  : path.endsWith('.png') ? 'image/png'
+  : path.endsWith('.svg') ? 'image/svg+xml'
   : 'text/markdown; charset=utf-8';
 
 const assets = new Map([
@@ -60,11 +62,21 @@ function methodNotAllowed(headers, allow) {
 // `asset` is a file served from env.ASSETS. `discovery` and `openapi` are
 // generated documents with no per-caller data. The skills catalog is not
 // here: the Durable Object injects the live member layer.
+// GR1: www.getdasha.com/room/<page> keeps the prefix through the worker rewrite.
+// The same packaged document is served, with a canonical Link on the room host.
+function roomMarketingPath(pathname) {
+  if (!pathname.startsWith('/room/')) return null;
+  const rest = pathname.slice('/room'.length);
+  // /room/ is the public door, not the app shell.
+  if (rest === '/' || rest === '') return null;
+  return assets.has(rest) ? rest : null;
+}
+
 export function classifyEdgePath(pathname) {
   if (pathname === '/openapi.json' || pathname === '/room/openapi.json') return 'openapi';
   const doc = discoveryDoc(pathname);
   if (doc && doc !== skillsDoc) return 'discovery';
-  if (assets.has(pathname)) return 'asset';
+  if (assets.has(pathname) || roomMarketingPath(pathname)) return 'asset';
   return null;
 }
 
@@ -127,17 +139,19 @@ function discoveryResponse(request, url) {
 
 async function assetResponse(request, env, url) {
   const headers = baseHeaders(url);
-  headers.set('Link', discoveryLinks(url));
-  const canonical = publicSearchCanonical(url.pathname, publicAssetPaths);
+  const servedPath = roomMarketingPath(url.pathname) ?? url.pathname;
+  const canonical = publicSearchCanonical(servedPath, publicAssetPaths);
+  const canonicalTarget = canonical && reviewedPublicSearchPaths.includes(canonical) ? canonical : null;
+  headers.set('Link', canonicalTarget ? `${discoveryLinks(url)}, <${ROOM_ORIGIN}${canonicalTarget}>; rel="canonical"` : discoveryLinks(url));
   // About and compare pages have no scripts. The app shell and offers page keep
   // the room policy from baseHeaders so their modules load.
   if (canonical && publicSearchMarketingPolicy(canonical)) headers.set('Content-Security-Policy', PUBLIC_SEARCH_CSP);
-  if (canonical && !url.search && canonical !== url.pathname) {
+  if (canonical && !url.search && canonical !== servedPath) {
     headers.set('Location', canonical);
     return new Response(null, { status: 301, headers });
   }
   if (canonical && !url.search && reviewedPublicSearchPaths.includes(canonical)) headers.set('X-Robots-Tag', 'all');
-  const [file, type] = assets.get(url.pathname);
+  const [file, type] = assets.get(servedPath);
   const bytes = await loadCachedAsset(env, file);
   if (!bytes) {
     // A reviewed page with no packaged bytes is an error, not a public
@@ -147,7 +161,7 @@ async function assetResponse(request, env, url) {
     headers.set('Content-Type', 'text/plain; charset=utf-8');
     return new Response(request.method === 'HEAD' ? null : 'Not found\n', { status: 404, headers });
   }
-  const contentType = type.includes('charset') ? type : `${type}; charset=utf-8`;
+  const contentType = type.startsWith('image/') && !type.includes('svg') ? type : (type.includes('charset') ? type : `${type}; charset=utf-8`);
   headers.set('Content-Type', contentType);
   headers.set('Content-Length', String(bytes.byteLength));
   return new Response(request.method === 'HEAD' ? null : bytes, { status: 200, headers });

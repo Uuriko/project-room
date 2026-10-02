@@ -136,6 +136,22 @@ let startRoomIntent = (() => {
     return window.sessionStorage.getItem(START_ROOM_KEY) === "1";
   } catch { return false; }
 })();
+// --- GR1: a public receipt footer lands on /?start=room&ref=<owner name>.
+// Stash the name and prefill "Who referred you?" on the access-request form.
+const RECEIPT_REF_KEY = "pr-receipt-ref";
+try {
+  const refUrl = new URL(location.href);
+  const ref = refUrl.searchParams.get("ref");
+  if (ref && ref.length <= 80 && !/[\u0000-\u001f\u007f]/.test(ref)) {
+    window.sessionStorage.setItem(RECEIPT_REF_KEY, ref);
+    refUrl.searchParams.delete("ref");
+    history.replaceState(history.state, "", refUrl.pathname + refUrl.search + refUrl.hash);
+  }
+} catch { /* storage or the URL may be blocked */ }
+function receiptReferrer() {
+  try { return window.sessionStorage.getItem(RECEIPT_REF_KEY) || ""; } catch { return ""; }
+}
+// --- end GR1 ---
 function consumeStartRoomIntent() {
   const wanted = startRoomIntent;
   startRoomIntent = false;
@@ -1420,6 +1436,10 @@ function openRequestAccessForm() {
   $("#invitation-request-access").hidden = true;
   const stashed = readAccessRequest(window.sessionStorage, door.roomId);
   if (stashed?.displayName) $("#invitation-request-name").value = stashed.displayName;
+  // GR1: prefill the receipt footer referrer when the field is still empty.
+  const referred = $("#invitation-request-referred");
+  const fromReceipt = receiptReferrer();
+  if (referred && !referred.value && fromReceipt) referred.value = fromReceipt;
   $("#invitation-request-form").hidden = false;
   $("#invitation-request-status").textContent = stashed
     ? `You already asked to join “${door.roomTitle}” from this browser. Sending again files a second request for the owner.`
@@ -1842,6 +1862,7 @@ function render() {
   syncReports();
   syncRoomHealth();
   syncRoomTrust();
+  syncPublicReceipts(); // GR1 owner control for the public receipts page
   $("#event-count").textContent = `${client.sequence}`;
   renderReturnBrief({ timelineRendered: true });
   setText("#decision-count", state.eventLog.filter(e => e.type === T.DECISION_RECORDED).length || "");
@@ -4636,6 +4657,35 @@ $("#room-trust-toggle").addEventListener("click", async () => {
     if (state) syncRoomTrust();
   }
 });
+// --- GR1 public receipts: owner-only, default off. ---
+let publicReceiptsBusy = false;
+function syncPublicReceipts() {
+  const control = $("#public-receipts-control");
+  const box = $("#public-receipts-toggle");
+  if (!control || !box) return;
+  const viewerId = session?.member?.id;
+  const show = Boolean(state && viewerId && viewerId === state.room.ownerId);
+  control.hidden = !show;
+  if (!show) return;
+  box.checked = state.room.publicReceipts?.enabled === true;
+  box.disabled = publicReceiptsBusy;
+}
+$("#public-receipts-toggle")?.addEventListener("change", async () => {
+  if (!state || publicReceiptsBusy || session?.member?.id !== state.room.ownerId) return;
+  const enabled = $("#public-receipts-toggle").checked;
+  publicReceiptsBusy = true;
+  syncPublicReceipts();
+  try {
+    await client.send({ id: crypto.randomUUID(), type: T.ROOM_PUBLIC_RECEIPTS_SET, data: { enabled } });
+  } catch (error) {
+    notice(error.message || "Public receipts were not changed.", true);
+    if (state) $("#public-receipts-toggle").checked = state.room.publicReceipts?.enabled === true;
+  } finally {
+    publicReceiptsBusy = false;
+    if (state) syncPublicReceipts();
+  }
+});
+// --- end GR1 ---
 // Room policy (issue #6 A4): when the owner made review or approval mandatory,
 // the proposer sees the requirement locked on with the reason. The server
 // enforces it regardless of what a client sends; this is only the honest view.

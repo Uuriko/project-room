@@ -73,6 +73,7 @@ function sweep() {
   step(T.ROOM_POLICY_SET, "owner", { requireIndependentReview: true, requireOwnerDecision: true });
   step(T.ROOM_SPEND_ALLOWANCE_SET, "owner", { allowanceCents: 10000, periodDays: 30 });
   step(T.ROOM_TRUST_SET, "owner", { enabled: false });
+  step(T.ROOM_PUBLIC_RECEIPTS_SET, "owner", { enabled: true });
   step(T.NOTIFICATION_PREFERENCES_SET, "producer", { preferences: { mentions: "all" } });
   step(T.MEMBER_STATUS_UPDATED, "producer", { memberId: "producer", message: "Working on the agenda" });
   step(T.CAPABILITIES_ADVERTISED, "producer", { capabilities: ["text"] });
@@ -307,6 +308,6 @@ test("the event surface has not grown without this sweep noticing", () => {
   // by tests/lease-renewal.test.js instead.
   // land.updated is exercised above via report_tip (it is not a command).
   // work_claim.updated is exercised above via emitWorkClaimEvent (it is not a command).
-  assert.equal(Object.values(T).length, 54,
+  assert.equal(Object.values(T).length, 55,
     "EVENT_TYPES changed: add the new type to this sweep, then update this count");
 });

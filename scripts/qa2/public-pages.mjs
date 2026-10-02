@@ -13,7 +13,12 @@ const arg = (n, d) => { const i = argv.indexOf(`--${n}`); return i > 0 ? argv[i 
 const origin = arg("origin", "http://127.0.0.1:4173");
 const shots = arg("shots"), baseline = arg("baseline");
 const compare = ["project-room-vs-slack", "project-room-vs-discord", "agent-collaboration-tool", "multi-agent-workspace", "ai-agent-coordination", "project-room-vs-agent-room"];
-const pages = ["/", "/about", "/offers", "/join.html", "/receipts", ...compare.map(s => `/compare/${s}`)];
+// GR1: a receipt the sitemap names is a public page. An empty or unreachable sitemap skips it.
+const sitemapText = await fetch(`${origin}/sitemap.xml`).then(r => r.text()).catch(() => "");
+const receiptLoc = sitemapText.match(/<loc>[^<]*\/receipts\/[^<]+<\/loc>/);
+let receiptPath = null;
+if (receiptLoc) { try { receiptPath = new URL(receiptLoc[0].replace(/<\/?loc>/g, "")).pathname; } catch { receiptPath = null; } }
+const pages = ["/", "/about", "/offers", "/join.html", "/receipts", ...compare.map(s => `/compare/${s}`), ...(receiptPath ? [receiptPath] : [])];
 const known = (arg("known", "") || "").split(",").filter(Boolean).map(k => { const i = k.indexOf(":"); return [k.slice(0, i), k.slice(i + 1)]; }); // e.g. "/:color-contrast,/join.html:broken link"
 const waived = (path, problem) => known.some(([p, sub]) => p === path && problem.includes(sub));
 
@@ -85,8 +90,8 @@ for (const path of pages) {
   results.push(rec); await context.close();
 }
 await browser.close();
-// sitemap coverage
-const sm = await (await fetch(`${origin}/sitemap.xml`)).text().catch(() => "");
+// sitemap coverage (fetched above so a named receipt can be checked)
+const sm = sitemapText;
 const indexed = results.filter(r => r.indexable && r.status === 200).map(r => r.path);
 const missingFromSitemap = indexed.filter(p => !sm.includes(`${p === "/" ? "" : p}</loc>`) && !(p === "/" && /\/<\/loc>/.test(sm)));
 const fail = results.filter(r => r.problems.length);

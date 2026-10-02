@@ -209,8 +209,9 @@ test("discovery surfaces carry Link headers", async t => {
     assert.ok(link.includes("/skills"), `Link on ${path} points at the skills catalog`);
     assert.ok(link.includes("/.well-known/agent-card.json"), `Link on ${path} points at the agent card`);
     const targets = [...link.matchAll(/<([^>]+)>/g)].map(match => new URL(match[1], origin + path).href);
-    assert.deepEqual(targets, ["/.well-known/agent-card.json", "/llms.txt", "/skills", "/room"]
-      .map(target => origin + target), "local discovery stays on this instance");
+    const expected = ["/.well-known/agent-card.json", "/llms.txt", "/skills", "/room"].map(target => origin + target);
+    if (path === "/room") expected.push("https://room.trydemigod.com/room");
+    assert.deepEqual(targets, expected, "local discovery stays on this instance");
   }
 });
 
