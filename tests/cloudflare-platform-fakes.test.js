@@ -132,6 +132,7 @@ test("scheduled RPC hits real ProjectRoom methods and fails on an unknown one", 
     "refreshLandQueue",
     "refreshClaimPullRequests",
     "planRetention",
+    "backfillPublicReadModel",
     "recordCronTick",
     "verifyRoomIntegrity"
   ]);
