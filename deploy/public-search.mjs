@@ -1,3 +1,5 @@
+import { connectSnippets } from "../server/connect-snippets.mjs";
+
 export const comparisonSlugs = Object.freeze([
   "project-room-vs-slack",
   "project-room-vs-discord",
@@ -7,7 +9,11 @@ export const comparisonSlugs = Object.freeze([
   "project-room-vs-agent-room",
 ]);
 const comparePaths = comparisonSlugs.map(slug => `/compare/${slug}`);
-export const reviewedPublicSearchPaths = Object.freeze(["/", "/offers", "/about", ...comparePaths, "/receipts"]);
+const agentDocRoutes = Object.freeze([
+  ["/docs/agents", "docs/agents/index.html"],
+  ...connectSnippets.map(tool => [tool.docsPath, tool.htmlFile]),
+]);
+export const reviewedPublicSearchPaths = Object.freeze(["/", "/offers", "/about", ...comparePaths, "/receipts", ...agentDocRoutes.map(([path]) => path)]);
 export const PUBLIC_PAGE_LASTMOD = "2026-10-02";
 // About and compare documents ship no first-party scripts. Cloudflare injects
 // its Web Analytics beacon at the edge, so script-src and connect-src name
@@ -64,7 +70,7 @@ export function publicHtmlNotFoundPath(pathname) {
 const staticPages = Object.freeze([["/", "index.html"], ["/offers", "offers.html"], ["/about", "about.html"]]);
 export function publicSearchAssets(registered) {
   const paths = new Set(registered);
-  return new Map([...staticPages, ...comparisonSlugs.map(slug => [`/compare/${slug}`, `compare/${slug}.html`])]
+  return new Map([...staticPages, ...comparisonSlugs.map(slug => [`/compare/${slug}`, `compare/${slug}.html`]), ...agentDocRoutes]
     .filter(([, file]) => paths.has(file)));
 }
 export function publicSearchCanonical(pathname, registered) {
@@ -72,13 +78,14 @@ export function publicSearchCanonical(pathname, registered) {
   if (routes.has(pathname)) return pathname;
   if (pathname === "/index.html") return routes.has("/") ? "/" : null;
   if (pathname === "/about.html") return routes.has("/about") ? "/about" : null;
+  if (pathname === "/docs/agents/index.html") return routes.has("/docs/agents") ? "/docs/agents" : null;
   const candidate = pathname.endsWith(".html") ? pathname.slice(0, -5) : null;
   return candidate && routes.has(candidate) ? candidate : null;
 }
 // About and compare keep the marketing CSP above. The app shell and offers
 // page keep the room policy so their stylesheets and modules load.
 export function publicSearchMarketingPolicy(pathname) {
-  return pathname === "/about" || (typeof pathname === "string" && pathname.startsWith("/compare/"));
+  return pathname === "/about" || (typeof pathname === "string" && (pathname.startsWith("/compare/") || pathname === "/docs/agents" || pathname.startsWith("/docs/agents/")));
 }
 export function publicSearchSitemap(origin, entries) {
   const escape = text => text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll('"', "&quot;");
