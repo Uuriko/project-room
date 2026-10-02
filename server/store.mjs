@@ -29,6 +29,7 @@ import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 import { buildReturnBrief, resolveHistoryWindow, RETURN_BRIEF_DEFAULT_LIMIT } from "./return-brief.mjs";
 import { enforceSpendAllowance } from "./spend-allowance.mjs";
 import { ensureAutonomyTiersSchema, enforceAutonomyTiers } from "./autonomy-tiers.mjs";
+import { ensureOperatorActionsSchema, OPERATOR_ACTIONS_SCHEMA } from "./operator-actions.mjs"; // CP-ADMIN-0: append-only operator audit.
 import { ensureGrantsSchema } from "./grants.mjs";
 import { canonicalInvitationData, invitationJournalEntry, invitationJournalSchema, replayInvitationJournal } from "./invitation-journal.mjs";
 import { invitationJoinedEvent, assertInvitationMembershipEvidence } from "./invitation-evidence.mjs";
@@ -980,7 +981,7 @@ function roomSchemaStamp() {
     accessRequestSchema, membershipDelegationSchema, membershipDelegationJournalSchema,
     ownerDelegateSchema, agentRoomSchema, oauthPendingSchema, gmailSchema, requestRunSchema,
     directSendSchema, inboxStitchSchema, RETIRED_BOARD_V2_SCHEMA, EMISSARY_LURE_SCHEMA,
-    agentKeyRegistrySchema, INTEGRITY_SNAPSHOT_SCHEMA,
+    agentKeyRegistrySchema, INTEGRITY_SNAPSHOT_SCHEMA, OPERATOR_ACTIONS_SCHEMA,
     INTEGRITY_JOB_CURSOR_SCHEMA, INTEGRITY_ROOM_STATE_SCHEMA, INTEGRITY_SWEEP_COLUMN,
     ROOM_SCHEMA_STAMP_SCHEMA, LOOKUP_INDEXES,
     PUBLIC_READ_MODEL_SCHEMA
@@ -1289,6 +1290,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // IF NOT EXISTS is idempotent, no schema version bump. Replaces the
       // slice 1/3 agent_operator_controls table (module removed).
       ensureAutonomyTiersSchema(this.db);
+      // CP-ADMIN-0: operator audit log. IF NOT EXISTS is idempotent, no schema
+      // version bump, intentionally outside the writer fence (see
+      // unfencedAdditiveTables). Append-only triggers reject UPDATE and DELETE.
+      ensureOperatorActionsSchema(this.db);
       // UFO-steal slice 1 (RC-2026-09-27-2728): per-agent capability grant
       // edges — purely additive table, IF NOT EXISTS is idempotent, no
       // schema version bump.
