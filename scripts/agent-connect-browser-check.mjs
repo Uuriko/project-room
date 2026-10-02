@@ -69,8 +69,11 @@ test("browser owner issues digest-only setup; a real external client imports, re
   await f.open(); await f.capture("desktop-form"); await f.create();
   await f.page.locator("#agent-setup").waitFor({ state: "visible" });
   assert.equal(await f.page.locator("#agent-import-checklist").isVisible(), true);
-  assert.match(await f.page.locator("#agent-import-checklist").innerText(), /pbpaste \| node scripts\/agent-inbox\.mjs import/);
+  assert.match(await f.page.locator("#agent-import-checklist").innerText(), /room_check_access/);
   assert.match(await f.page.locator("#agent-import-route").innerText(), /room_check_access/);
+  assert.equal(await f.page.locator("#agent-local-client").evaluate(node => node.open), false);
+  await f.page.locator("#agent-local-client > summary").click();
+  assert.match(await f.page.locator("#agent-local-command").innerText(), /pbpaste \| node scripts\/agent-inbox\.mjs import/);
   await f.capture("desktop-ready"); const config = await f.config();
   assert.equal(JSON.stringify(requests).includes(config.token), false); assert.equal(requests[0].keyHash.length, 64);
   const env = { PATH: process.env.PATH }, directory = join(f.directory, "connection");
@@ -105,6 +108,15 @@ test("browser owner issues digest-only setup; a real external client imports, re
 test("agent type catalog renders and click fills the same join path", { timeout: 25000 }, async t => {
   const f = await setup(t);
   await f.open();
+  assert.equal(await f.page.locator("#agent-connect-advanced").evaluate(node => node.open), false);
+  assert.equal(await f.page.locator("#agent-connect-access").isVisible(), true);
+  assert.equal(await f.page.locator("#agent-connect-access").inputValue(), "contribute");
+  mkdirSync("/opt/cursor/artifacts/screenshots", { recursive: true });
+  await f.page.setViewportSize({ width: 1280, height: 800 });
+  await f.page.screenshot({ path: "/opt/cursor/artifacts/screenshots/add-agent-1280.png" });
+  await f.page.setViewportSize({ width: 390, height: 844 });
+  await f.page.screenshot({ path: "/opt/cursor/artifacts/screenshots/add-agent-390.png" });
+  await f.page.setViewportSize({ width: 1440, height: 1000 });
   const catalog = f.page.locator("#agent-type-catalog");
   await catalog.waitFor({ state: "visible" });
   for (const id of ["claude-code", "codex", "cursor", "hermes", "opencode", "pi", "grok-bot", "grok-build", "instinct", "muse"]) {

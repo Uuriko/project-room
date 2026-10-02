@@ -736,8 +736,8 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
   // POST /api/agent-heartbeats — an agent host reports liveness. mode
   // defaults to wakeable and wakeUrl is optional: with no public endpoint
   // the host waits on GET /api/agent-wakes/poll instead. The response
-  // carries the agent's queued wake signals (mentions/DMs that arrived
-  // while the agent was offline); the host acknowledges them via
+  // carries the agent's queued wake signals (one per mention or DM for
+  // every registered host); the host acknowledges them via
   // POST /api/agent-heartbeats/ack once handled. GET reads the agent's
   // host presence. heartbeats:report posts and acks; heartbeats:read
   // reads. The owner identity secret grants both. A room access key for a
@@ -772,7 +772,8 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     else if (data.pushNotification !== undefined && data.pushNotification !== null) {
       await store.agentHeartbeats.assertPushDns(data.pushNotification.url);
     }
-    const { host, pendingWakes, pushConfigured, pushSuspended, reachability } = store.transaction(() => {
+    // Q3-B: the store page includes `more` when pendingWakes is truncated.
+    const { host, pendingWakes, more, pushConfigured, pushSuspended, reachability } = store.transaction(() => {
       auth = heartbeatActor(req, requiredScope("heartbeats:report"));
       if (auth.identityId !== initialIdentity) reject(403, "identity_changed", "Credential identity changed during request");
       let hostId = data.hostId;
@@ -794,7 +795,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
       action: "rearm-push", method: "POST", path: "/api/agent-heartbeats",
       description: "Your push subscription was suspended after 3 failed deliveries; POST a fresh pushNotification to re-arm.",
     }));
-    return json(res, 200, { agentId: auth.identityId, host, pendingWakes, next, pushConfigured, reachability });
+    return json(res, 200, { agentId: auth.identityId, host, pendingWakes, more: more === true, next, pushConfigured, reachability });
   });
 
   const ackHeartbeats = translate(async (req, res, { remoteAddress }) => {

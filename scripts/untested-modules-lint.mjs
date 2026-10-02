@@ -30,7 +30,6 @@ const GRANDFATHERED = [
   "agent-invites.mjs",
   "attention.mjs",
   "conversation-sync.mjs",
-  "human-push.mjs",
   "opportunities.mjs",
   "project-offers.mjs",
   "request-runs.mjs",

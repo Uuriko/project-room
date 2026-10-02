@@ -7,6 +7,9 @@ name: qa2-agent-eval
 # docs/QA2-SYSTEMS.md.
 on:
   pull_request:
+    # Coarse prefilter on the pushing commit. Merge commits still match when
+    # main touched these paths; jobs.changes re-checks the merge-base diff
+    # (scripts/ci-changes.mjs EVAL_PATTERNS — keep the two lists in sync).
     paths: ["server/**", "src/**", "deploy/**", "cloudflare/**", "server.mjs", "scripts/qa2/**", "tests/qa2/**", "openapi*", "package*.json"]
   schedule:
     - cron: "41 9 * * *"
@@ -15,12 +18,35 @@ on:
 permissions:
   contents: read
 
+# One in-flight run per pull request and per ref. A newer push cancels
+# superseded queued and in-progress runs; the newest run stays.
+# workflow_dispatch is keyed by run id so a manual run stays independent.
 concurrency:
-  group: qa2-agent-eval-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.event_name == 'workflow_dispatch' && format('{0}-dispatch-{1}', github.workflow, github.run_id) || format('{0}-{1}', github.workflow, github.ref) }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 jobs:
+  changes:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      eval: ${{ steps.plan.outputs.eval }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0 # Three-dot diff against the PR base needs history on both sides.
+      - id: plan
+        env:
+          EVENT_NAME: pull_request
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node scripts/ci-changes.mjs
   eval:
+    needs: changes
+    # Skip only when the merge-base diff explicitly misses the eval paths.
+    # Schedule, workflow_dispatch, and a failed filter still run the suite.
+    if: always() && !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.eval != 'false')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -28,6 +54,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
+          cache: npm
       - run: npm ci
       - name: Agent journeys, authz matrix, abuse guards, MCP robustness
         run: node --test --test-concurrency=1 tests/qa2/*.test.js

@@ -1,3 +1,7 @@
+import AxeBuilder from "@axe-core/playwright";
+import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
+import { emailContractFixture } from "./email-contract-fixture.mjs";
+import { normalizeGraphEmail } from "../server/graph-email.mjs";
 import { openMagicSignin } from "./signin-browser-journey.mjs";
 import { openComposerOptions } from "./room-chrome.mjs";
 import { clickChrome, clickWorkAction } from "./room-chrome.mjs";
@@ -209,4 +213,84 @@ test("stale return brief cannot cross a session; skip, local alerts, focus retur
   assert.match(attention, /Maya-only return item/);
   assert.doesNotMatch(attention, /Owner-only return item/, "late owner response cannot overwrite Maya's brief");
   assert.match(await page.locator("#rb-history-list").textContent(), /work completed reporter Room owner.*producer unknown — not reported/i, "return history separates reporter from unknown producer");
+});
+
+async function seriousAxe(page, include) {
+  const result = await new AxeBuilder({ page }).include(include).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"]).analyze();
+  const serious = result.violations.filter(item => item.impact === "serious" || item.impact === "critical");
+  assert.deepEqual(serious.map(item => `${item.impact} ${item.id} ${item.nodes?.[0]?.target?.join(" ")}`), []);
+}
+
+test("board, settings, and join error have no serious axe findings; pages do not violate CSP", { timeout: 90000 }, async t => {
+  const fixture = createAcceptanceFixture();
+  const account = fixture.store.accountForMember("commons", "owner");
+  const accountKey = fixture.store.issueAccountAccessKey(account.id);
+  const slot = fixture.store.createAccountSessionSlot();
+  const session = fixture.store.loginAccountSession(slot.token, accountKey, 0);
+  const raw = emailContractFixture();
+  raw.connection.accountId = account.id;
+  const apply = request => fixture.store.email.apply(slot.token, request, session.sessionBinding);
+  apply({ action: "connection.configure", requestId: crypto.randomUUID(), connectionId: raw.connection.id, expectedRevision: 0, profile: raw.connection });
+  const parent = structuredClone(raw.message);
+  parent.id = "AQMkCspParent="; parent.changeKey = "CQAAcsp-parent=";
+  parent.internetMessageId = "<csp-parent@example.test>"; parent.conversationId = "AAQkCspConv=";
+  parent.subject = "CSP thread"; parent.body.content = "Parent."; parent.internetMessageHeaders = [];
+  const parentOptions = structuredClone(raw.options);
+  parentOptions.attachmentObservation.messageId = parent.id;
+  parentOptions.attachmentObservation.messageRevision = parent.changeKey;
+  const importMessage = (message, options) => {
+    const envelope = normalizeGraphEmail(raw.connection, message, options);
+    const state = fixture.store.email.state(slot.token, raw.connection.id, message.parentFolderId, session.sessionBinding);
+    apply({ action: "page.apply", requestId: crypto.randomUUID(), connectionId: raw.connection.id, connectionRevision: 1,
+      folderId: message.parentFolderId, expectedRevision: state.folder?.revision ?? 0, expectedCursor: state.expectedCursor,
+      cursor: crypto.randomUUID(), complete: true, reset: state.needsReset, observations: [{ kind: "message", expectedSourceRevision: 0, envelope }] });
+    return envelope.sourceId;
+  };
+  const parentId = importMessage(parent, parentOptions);
+  const child = structuredClone(raw.message);
+  child.id = "AQMkCspChild="; child.changeKey = "CQAAcsp-child=";
+  child.internetMessageId = "<csp-child@example.test>"; child.conversationId = "AAQkCspConv=";
+  child.subject = "Re: CSP thread"; child.body.content = "Reply."; child.hasAttachments = false;
+  child.internetMessageHeaders = [{ name: "In-Reply-To", value: "<csp-parent@example.test>" }];
+  importMessage(child, { idType: "immutable", attachmentObservation: { messageId: child.id, messageRevision: child.changeKey, complete: true, items: [] } });
+  const server = createRoomServer({ store: fixture.store, streamInterval: 40 });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
+  t.after(async () => {
+    await browser.close(); server.closeStreams(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve)); fixture.store.close();
+    rmSync(fixture.directory, { recursive: true, force: true });
+  });
+  const page = await (await browser.newContext({ viewport: { width: 1280, height: 800 } })).newPage();
+  page.setDefaultTimeout(8000);
+  const csp = [];
+  const sessionProbes = [];
+  page.on("console", message => { if (/violates the following Content Security Policy/i.test(message.text())) csp.push(message.text()); });
+  page.on("request", request => { if (new URL(request.url()).pathname === "/api/session") sessionProbes.push(request.method()); });
+  await page.goto(origin + "/");
+  await page.locator("#auth-panel").waitFor({ state: "visible" });
+  await page.keyboard.press("Tab");
+  assert.equal(await page.evaluate(() => document.activeElement?.id), "skip-link");
+  assert.deepEqual(sessionProbes, []);
+  await page.goto(origin + "/?account=1");
+  await signInFixture(page, accountKey);
+  await clickChrome(page, "#account-settings-button");
+  await page.locator("#account-settings[open]").waitFor();
+  await page.locator("[data-action='delete-account']").waitFor();
+  await seriousAxe(page, "#account-settings");
+  await page.goto(origin + "/?room=commons");
+  await page.locator("#main").waitFor({ state: "visible" });
+  await page.locator("#tasks-board-open").click();
+  await page.locator("#board-dialog").waitFor({ state: "visible" });
+  await seriousAxe(page, "#board-dialog");
+  await page.locator("#board-close").click();
+  await clickChrome(page, "#nav-inbox");
+  await page.locator(`[data-source-id="${parentId}"]`).click();
+  await page.locator("#inbox-thread-toggle").click();
+  await page.locator("#inbox-thread-list button").first().waitFor();
+  await page.goto(origin + "/join?code=x");
+  await page.locator("#join-error").waitFor({ state: "visible" });
+  await seriousAxe(page, "main");
+  assert.deepEqual(csp, []);
 });
