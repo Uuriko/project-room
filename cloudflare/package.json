@@ -12,5 +12,11 @@
     "esbuild": "0.28.2",
     "wrangler": "4.116.0"
   },
-  "license": "Apache-2.0"
+  "license": "Apache-2.0",
+  "pnpm": {
+    "overrides": {
+      "sharp": "0.35.4",
+      "undici": "7.29.1"
+    }
+  }
 }

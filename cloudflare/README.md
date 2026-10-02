@@ -76,12 +76,15 @@ and visitor-address adapters, not a second product.
 The rationale for its `limits` and `observability` values lives here instead.
 
 - Top-level `limits.cpu_ms` is 1000. Production (`env.production.limits.cpu_ms`)
-  is 30000. The Durable Object constructor used to JSON.parse every event on
-  open (provenance repair and the help-history audit), which is what made a
-  cold `invite-only-pilot` spend seconds of CPU and allocate past the 128 MB
-  isolate limit. Current projections now skip the message log: channel and
-  supersession repair read SQL extracts, and only legacy work markers load the
-  provenance event types. `tests/cold-start-budget.test.js` fails if a
+  is 30000. A cold `invite-only-pilot` used to spend seconds of CPU in the
+  constructor (full event replay) and that CPU was charged to whichever RPC
+  woke the object — in production, `drainChannelBacklog`, about 14 seconds.
+  Hibernation after ~10 seconds idle, and a tail attach or detach, are what
+  start a new object. The object now opens with deferred integrity (checksum
+  only; full verify is a yielding cron job) and does not drain channel or
+  email backlog on the constructor or the first request. With no channel
+  configured the drain returns immediately; otherwise it continues in
+  `waitUntil` slices. `tests/cold-start-budget.test.js` fails if a
   200,000-event reopen costs 500 ms of CPU or more. The limit still applies
   only on the Paid plan's Standard usage model (Free plan is a fixed 10 ms);
   the platform maximum is 300,000.
@@ -98,10 +101,11 @@ The rationale for its `limits` and `observability` values lives here instead.
 
 Use Node 24.19+ and pnpm. Wrangler 4.116 needs Node >= 22
 (`@cloudflare/kv-asset-handler` declares that engines range); this repo's own
-engines stay `>=24.19.0`. pnpm 12 does not read the `pnpm` field in
-`package.json`, so dependency overrides live in `pnpm-workspace.yaml` and must
-match `pnpm-lock.yaml` or `pnpm install --frozen-lockfile` fails with
-`ERR_PNPM_LOCKFILE_CONFIG_MISMATCH`. From `cloudflare/`:
+engines stay `>=24.19.0`. pnpm 10 (CI) reads `pnpm.overrides` in
+`package.json`. pnpm 12 ignores that field, so the same overrides also live
+in `pnpm-workspace.yaml`. Both must match `pnpm-lock.yaml` or
+`pnpm install --frozen-lockfile` fails with `ERR_PNPM_LOCKFILE_CONFIG_MISMATCH`.
+From `cloudflare/`:
 
 ```sh
 pnpm install --frozen-lockfile --ignore-scripts

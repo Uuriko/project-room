@@ -130,10 +130,29 @@ open-path change parsed every event twice.
 | Before (full event JSON.parse) | 1087 | 884 | +235 MB |
 | After (skip a current message log) | 40 | 39 | +6 MB |
 
-The +235 MB spike is large enough to cross the 128 MB isolate limit and
-replace the isolate. `tests/cold-start-budget.test.js` fails if this reopen
-costs 500 ms of CPU or more. Each open also logs `room.cold_start` with
-`durationMs`, `cpuMs`, `rooms`, `events`, `projectionBytes`, and `heapBytes`.
+Production freezes on 2026-10-01 were not a memory eviction and not a
+five-minute timer. Cloudflare hibernates this Durable Object after about 10
+seconds with no requests, and attaching or detaching `wrangler tail` resets
+it ("Durable Object reset because its code was updated") with no deploy.
+The waking RPC was `drainChannelBacklog`: 14400 ms CPU and 16871 ms wall,
+then canceled. A warm event is about 1 ms of CPU. Requests queue at the
+input gate (`app;dur=0`) until that rebuild finishes.
+
+The constructor still must stay cheap, because its CPU is charged to the
+waking RPC. The Durable Object opens with `integrity: "deferred"`: a current
+schema skips event replay, invitation replay, help replay, and the event-type
+index. A rooms-and-invitations checksum is logged and compared with
+`integrity_snapshot`. The full check runs from cron (`verifyRoomIntegrity`),
+yields between invitations, and skips the event log unless a projection still
+carries a legacy marker. With zero channel connections the drain RPC returns
+immediately; a configured drain continues in `waitUntil` slices that yield
+the input gate. `/api/health` returns 200 from the Worker within 1 second
+when the object is rebuilding, with `durableObject.ready: false`.
+
+`tests/cold-start-budget.test.js` fails if a 200,000-event reopen, eager or
+deferred, costs 500 ms of CPU or more. Each open logs `room.cold_start`
+(`durationMs`, `cpuMs`, `rooms`, `sequences`, `projectionBytes`). The first
+request logs `phase: "first_request"` with `constructMs` and `firstRequestMs`.
 
 ## Caveats
 

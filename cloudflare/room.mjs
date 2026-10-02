@@ -83,7 +83,7 @@ export class ProjectRoom extends DurableObject {
     this.paused = maintenanceEnabled(env.ROOM_MAINTENANCE);
     if (this.paused) return;
     this.store = new RoomStore(null, { database: new DurableDatabase(ctx.storage), storagePlatform: durableStorage,
-      stitch: stitchConfigFromEnv(env), identityHashKey: env.ROOM_IDENTITY_HASH_KEY ?? null });
+      stitch: stitchConfigFromEnv(env), identityHashKey: env.ROOM_IDENTITY_HASH_KEY ?? null, integrity: "deferred" });
     // Event-push dispatch: same fire-and-forget flush as the node entry
     // point. The Durable Object may suspend before the microtask drains;
     // the cron tick remains the restart-safe backstop.
@@ -144,8 +144,19 @@ export class ProjectRoom extends DurableObject {
   }
   async fetch(request) {
     const started = Date.now();
+    const cold = this.store?.coldStart;
     const respond = response => {
       const appMs = Date.now() - started;
+      if (cold && !this.coldStartRequestLogged) {
+        this.coldStartRequestLogged = true;
+        const line = {
+          event: 'room.cold_start', phase: 'first_request',
+          constructMs: cold.durationMs, firstRequestMs: appMs,
+          rooms: cold.rooms ?? 0, sequences: cold.sequences ?? 0, projectionBytes: cold.projectionBytes ?? 0
+        };
+        if (Number.isFinite(cold.cpuMs)) line.constructCpuMs = cold.cpuMs;
+        console.info(JSON.stringify(line));
+      }
       console.info(JSON.stringify({
         event: 'room.do_request', method: request.method, path: requestPath(request.url), status: response.status, appMs
       }));
@@ -200,8 +211,40 @@ export class ProjectRoom extends DurableObject {
   async drainChannelBacklog() {
     if (this.paused) throw new Error('Room paused');
     await yieldToQueuedRequests();
-    const drainer = new ChannelDrainer({ store: this.store, webhooks: this.channelWebhooks });
-    return drainer.tick({ deadline: cronDeadline() });
+    const drainer = this.channelDrainer ??= new ChannelDrainer({ store: this.store, webhooks: this.channelWebhooks });
+    const gate = drainer.configured();
+    if (!gate.configured) return { skipped: 1, configured: false, connections: 0 };
+    if (this.channelDrainInflight) return { started: 0, background: 1, inflight: 1, connections: gate.connections };
+    const work = this.#drainChannelsInBackground(drainer);
+    this.ctx.waitUntil(work);
+    return { started: 1, background: 1, connections: gate.connections };
+  }
+  // Runs after the RPC returns. The first await opens the input gate before
+  // any journal scan, and tick yields again between connections. Not an RPC.
+  async #drainChannelsInBackground(drainer) {
+    this.channelDrainInflight = true;
+    try {
+      await yieldToQueuedRequests();
+      const summary = await drainer.tick({ deadline: cronDeadline(), yieldBetween: () => yieldToQueuedRequests() });
+      console.info(JSON.stringify({
+        event: 'room.channel_drain', connections: summary.connections ?? 0, deferred: summary.deferred ?? 0,
+        errors: summary.errors ?? 0, budgetExceeded: summary.budgetExceeded ? 1 : 0
+      }));
+      return summary;
+    } catch (error) {
+      console.error(`[channel-drain] background tick failed: ${error?.message ?? error}`);
+      return { errors: 1 };
+    } finally {
+      this.channelDrainInflight = false;
+    }
+  }
+  // Snapshot plus checksum on the rooms and invitation tables. A match returns
+  // immediately. A mismatch replays invitations and legacy projections in
+  // slices that yield the input gate. Never called from the constructor.
+  async verifyRoomIntegrity() {
+    if (this.paused) return { skipped: 1, paused: 1 };
+    await yieldToQueuedRequests();
+    return this.store.verifyRoomIntegrity({ yieldBetween: () => yieldToQueuedRequests(), deadline: cronDeadline() });
   }
   // RC-2026-09-19-064 — signed webhook dispatch RPC for the Worker's cron
   // trigger. Sweeps due deliveries (pending/failed with next_attempt_at <=
@@ -384,6 +427,14 @@ export default {
     });
     try { await room.recordCronTick(outcomes); }
     catch (error) { console.error(`[job-heartbeat] record failed: ${error?.message ?? error}`); }
+    try {
+      const integrity = await room.verifyRoomIntegrity();
+      const line = { event: 'room.integrity' };
+      for (const key of ['matched', 'skipped', 'verified', 'budgetExceeded', 'invitations', 'paused']) {
+        if (typeof integrity?.[key] === 'number') line[key] = integrity[key];
+      }
+      console.info(JSON.stringify(line));
+    } catch (error) { console.error(`[integrity] ${error?.message ?? error}`); }
     const failed = outcomes.filter(outcome => !outcome.ok).map(outcome => outcome.job);
     if (failed.length) throw new Error(`cron jobs failed: ${failed.join(', ')}`);
   }

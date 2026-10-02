@@ -48,6 +48,17 @@ test("cold start on a large message log stays within the CPU budget", () => {
       assert.ok(record.cpuMs < COLD_START_CPU_BUDGET_MS, `cold start used ${record.cpuMs}ms CPU`);
       assert.equal(reopened.room("commons").state.channels[DEFAULT_CHANNEL_ID].id, DEFAULT_CHANNEL_ID);
     } finally { reopened.close(); }
+    const { lines: deferredLines, value: deferred } = captureInfo(() => new RoomStore(filename, { integrity: "deferred" }));
+    try {
+      const record = JSON.parse(deferredLines.find(line => line.includes('"event":"room.cold_start"')));
+      assert.equal(record.integrity, "deferred");
+      assert.equal(record.integrityMatch, 0);
+      assert.equal(record.events, undefined);
+      assert.equal(record.sequences, EVENTS);
+      assert.ok(record.projectionBytes > 0);
+      assert.ok(record.cpuMs < COLD_START_CPU_BUDGET_MS, `deferred cold start used ${record.cpuMs}ms CPU`);
+      assert.equal(deferred.room("commons").state.channels[DEFAULT_CHANNEL_ID].id, DEFAULT_CHANNEL_ID);
+    } finally { deferred.close(); }
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
@@ -73,6 +84,46 @@ test("reopen still repairs a legacy channel and a missing proposer", () => {
       const state = reopened.room("commons").state;
       assert.equal(state.channels[DEFAULT_CHANNEL_ID].id, DEFAULT_CHANNEL_ID);
       assert.equal(state.workItems["legacy-job"].proposedById, "owner");
+    } finally { reopened.close(); }
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("deferred open leaves a legacy projection until the integrity job repairs it", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "project-room-cold-deferred-"));
+  const filename = join(directory, "room.sqlite");
+  const store = new RoomStore(filename);
+  try {
+    store.initialize(initialRoom());
+    const legacy = JSON.parse(store.db.prepare("SELECT projection FROM rooms WHERE id='commons'").get().projection);
+    delete legacy.channels;
+    legacy.workItems = { "legacy-job": { id: "legacy-job", title: "Legacy", state: "proposed" } };
+    const sequence = store.db.prepare("SELECT sequence FROM rooms WHERE id='commons'").get().sequence;
+    store.db.prepare("UPDATE rooms SET projection=? WHERE id='commons'").run(JSON.stringify(legacy));
+    store.db.prepare("INSERT INTO events(room_id, sequence, id, body) VALUES(?,?,?,?)").run(
+      "commons", sequence + 1, "legacy-propose",
+      JSON.stringify({ id: "legacy-propose", type: "work.proposed", roomId: "commons", actorId: "owner", data: { workItemId: "legacy-job" } })
+    );
+  } finally { store.close(); }
+  try {
+    const reopened = new RoomStore(filename, { integrity: "deferred" });
+    try {
+      const before = reopened.room("commons").state;
+      assert.equal(before.channels, undefined);
+      assert.equal(before.workItems["legacy-job"].proposedById, undefined);
+      const stalled = await reopened.verifyRoomIntegrity({ deadline: 0, yieldBetween: async () => {} });
+      assert.equal(stalled.budgetExceeded, 1);
+      assert.equal(stalled.verified, 0);
+      assert.equal(reopened.room("commons").state.channels, undefined);
+      let yields = 0;
+      const repaired = await reopened.verifyRoomIntegrity({ yieldBetween: async () => { yields += 1; } });
+      assert.equal(repaired.verified, 1);
+      assert.ok(yields >= 1);
+      const after = reopened.room("commons").state;
+      assert.equal(after.channels[DEFAULT_CHANNEL_ID].id, DEFAULT_CHANNEL_ID);
+      assert.equal(after.workItems["legacy-job"].proposedById, "owner");
+      const again = await reopened.verifyRoomIntegrity({ yieldBetween: async () => { yields += 1; } });
+      assert.equal(again.matched, 1);
+      assert.equal(again.skipped, 1);
     } finally { reopened.close(); }
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });

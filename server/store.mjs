@@ -191,12 +191,14 @@ function startColdStart() {
 // One structured line per open, including a failed open, so the next isolate
 // restart can be read from Workers Logs without a tail attached. No event
 // bodies, projections, or secrets.
-function logColdStart(started, db, failed) {
+function logColdStart(started, db, failed, extra = {}) {
   const record = { event: "room.cold_start", durationMs: Math.round(performance.now() - started.wall) };
   if (failed) {
     record.failed = true;
     if (failed instanceof Error && failed.message) record.error = failed.message.slice(0, 180);
   }
+  if (extra.integrity) record.integrity = extra.integrity;
+  if (extra.integrityMatch != null) record.integrityMatch = extra.integrityMatch;
   try {
     if (started.cpu && typeof process.cpuUsage === "function") {
       const cpu = process.cpuUsage(started.cpu);
@@ -211,16 +213,22 @@ function logColdStart(started, db, failed) {
   } catch { /* workerd may omit memoryUsage */ }
   try {
     if (db && db.isOpen !== false) {
-      const counts = db.prepare("SELECT COUNT(*) AS rooms, COALESCE(SUM(LENGTH(projection)), 0) AS projectionBytes FROM rooms").get();
-      const events = db.prepare("SELECT COUNT(*) AS events FROM events").get();
+      const counts = db.prepare("SELECT COUNT(*) AS rooms, COALESCE(SUM(sequence), 0) AS sequences, COALESCE(SUM(LENGTH(projection)), 0) AS projectionBytes FROM rooms").get();
       if (counts) {
         record.rooms = counts.rooms;
+        record.sequences = counts.sequences;
         record.projectionBytes = counts.projectionBytes;
       }
-      if (events) record.events = events.events;
+      // Deferred opens must not walk the event log. Sequence sum and
+      // projection bytes are the state size; COUNT(*) on events is not.
+      if (!extra.skipEventCount) {
+        const events = db.prepare("SELECT COUNT(*) AS events FROM events").get();
+        if (events) record.events = events.events;
+      }
     }
   } catch { /* schema not installed, or the handle is already closing */ }
   console.info(JSON.stringify(record));
+  return record;
 }
 
 function repairInvalidSupersessions(state) {
@@ -891,9 +899,18 @@ function agentWakeTargetIds(state, senderMemberId, data) {
   return [...agentWakeTargets(state, senderMemberId, data).keys()];
 }
 
+const INTEGRITY_SNAPSHOT_SCHEMA = `CREATE TABLE IF NOT EXISTS integrity_snapshot (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  checksum TEXT NOT NULL,
+  verified_at INTEGER NOT NULL
+)`;
+
 export class RoomStore {
-  constructor(filename, { now = () => Date.now(), readOnly = false, database, storagePlatform = nodeStorage, storageFailureThreshold = STORAGE_FAILURE_THRESHOLD, stitch = null, identityHashKey = undefined } = {}) {
+  constructor(filename, { now = () => Date.now(), readOnly = false, database, storagePlatform = nodeStorage, storageFailureThreshold = STORAGE_FAILURE_THRESHOLD, stitch = null, identityHashKey = undefined, integrity = "eager" } = {}) {
     const coldStart = startColdStart();
+    if (integrity !== "eager" && integrity !== "deferred") throw new Error("integrity must be eager or deferred");
+    if (readOnly && integrity === "deferred") throw new Error("Read-only integrity checks stay eager");
+    this.integrityMode = integrity;
     if (!Number.isInteger(storageFailureThreshold) || storageFailureThreshold < 1) throw new Error("Storage failure threshold must be a positive integer");
     // Cross-channel thread stitching (task #19): stitch is the frozen
     // { salt, epoch, enabled, bindings } triple from stitchConfigFromEnv, or
@@ -1035,6 +1052,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     }
     this.storagePlatform.configure(this.db, false);
     this.storagePlatform.registerWriter(this.db);
+    // A current deferred open (the Durable Object) must not replay events,
+    // invitations, or help history, and must not build the event-type index.
+    // Those scans are the integrity job's work. An older schema still migrates
+    // and repairs here; that path runs once per upgrade, not on every wake.
+    const deferIntegrity = this.integrityMode === "deferred" && version === STORE_SCHEMA_VERSION;
     try { this.transaction(() => {
     // Reread under the write lock: another startup may have upgraded while we waited.
     if (this.storagePlatform.version(this.db) !== version) throw new Error("Database changed during startup; retry with the current service");
@@ -1084,7 +1106,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       || this.db.prepare("SELECT 1 FROM rooms,json_tree(rooms.projection) WHERE json_tree.key='externalProducer' LIMIT 1").get()
       || version >= 2 && this.db.prepare("SELECT 1 FROM projection_checkpoints,json_tree(projection_checkpoints.projection) WHERE json_tree.key='externalProducer' LIMIT 1").get()))
       throw new Error("Pre-v26 outside credit history requires operator reconciliation");
-    this.repairProjectionProvenance({ upgradeV1: version === 1 });
+    if (!deferIntegrity) this.repairProjectionProvenance({ upgradeV1: version === 1 });
     if (version === 1 || version === 2) this.migrateIdentityV3(version);
     if (version === 1 || version === 2 || version === 3) this.migrateInvitationsV4();
       if (version < 5) this.migrateInvitationJournalV5();
@@ -1400,7 +1422,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // (re)created, and refuses a file whose existing triggers drifted.
       this.storagePlatform.installWriterFence(this.db);
       this.storagePlatform.verifyWriterFence(this.db);
-      this.verifyInvitationAudit();
+      this.db.exec(INTEGRITY_SNAPSHOT_SCHEMA);
+      if (!deferIntegrity) this.verifyInvitationAudit();
       this.shareLinks.verify();
       this.reminders.verifySchema();
       this.wakeQueue.verifySchema();
@@ -1412,7 +1435,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // here, so a restart preserves the intent exactly once (W4-45 done-when).
       if (!this.readOnly) this.wakeQueue.recover(this.now());
       this.agentConnections.verify();
-      this.verifyHelpHistory();
+      if (!deferIntegrity) this.verifyHelpHistory();
       this.inbox.verify();
       this.email.verify();
       verifyAttachmentSchema(this.db);
@@ -1422,8 +1445,86 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.quarantineSplits.verify();
       verifyRoomLifecycle(this);
       if (!this.readOnly) this.identities.expireInactive();
-    }); } catch (error) { logColdStart(coldStart, this.db, error); this.db.close(); throw error; }
-    logColdStart(coldStart, this.db, false);
+    }); } catch (error) { this.coldStart = logColdStart(coldStart, this.db, error, { integrity: this.integrityMode }); this.db.close(); throw error; }
+    this.coldStart = logColdStart(coldStart, this.db, false, this.coldStartExtra(deferIntegrity));
+  }
+
+  coldStartExtra(deferIntegrity) {
+    const extra = { integrity: this.integrityMode };
+    if (!deferIntegrity) return extra;
+    extra.skipEventCount = true;
+    try {
+      extra.integrityMatch = this.readIntegritySnapshot() === this.integrityChecksum().text ? 1 : 0;
+    } catch { extra.integrityMatch = 0; }
+    return extra;
+  }
+
+  // Rooms, projection bytes, and invitation rows. Not the event log.
+  integrityChecksum() {
+    return this.readTransaction(() => {
+      const rooms = this.db.prepare("SELECT COUNT(*) AS rooms, COALESCE(SUM(sequence), 0) AS sequences, COALESCE(SUM(LENGTH(projection)), 0) AS projectionBytes FROM rooms").get();
+      const invitations = this.db.prepare("SELECT COUNT(*) AS invitations FROM membership_invitations").get();
+      const journal = this.db.prepare("SELECT COUNT(*) AS entries, COALESCE(SUM(sequence), 0) AS sequences FROM membership_invitation_journal").get();
+      const text = [rooms.rooms, rooms.sequences, rooms.projectionBytes, invitations.invitations, journal.entries, journal.sequences].join(":");
+      return { text, rooms: rooms.rooms, sequences: rooms.sequences, projectionBytes: rooms.projectionBytes, invitations: invitations.invitations };
+    });
+  }
+  readIntegritySnapshot() {
+    try { return this.db.prepare("SELECT checksum FROM integrity_snapshot WHERE id=1").get()?.checksum ?? null; }
+    catch { return null; }
+  }
+  writeIntegritySnapshot(text) {
+    this.transaction(() => {
+      this.db.prepare("INSERT INTO integrity_snapshot(id, checksum, verified_at) VALUES(1, ?, ?) ON CONFLICT(id) DO UPDATE SET checksum=excluded.checksum, verified_at=excluded.verified_at")
+        .run(text, this.now());
+    });
+  }
+  helpProjectionPresent() {
+    return this.readTransaction(() => Boolean(this.db.prepare(`
+      SELECT 1 AS present FROM rooms WHERE json_type(projection, '$.helpOffers') IS NOT NULL
+      UNION
+      SELECT 1 FROM rooms, json_each(rooms.projection, '$.workItems') AS item
+      WHERE json_type(item.value, '$.helpWanted') IS NOT NULL
+      UNION
+      SELECT 1 FROM projection_checkpoints WHERE json_type(projection, '$.helpOffers') IS NOT NULL
+      UNION
+      SELECT 1 FROM projection_checkpoints, json_each(projection_checkpoints.projection, '$.workItems') AS item
+      WHERE json_type(item.value, '$.helpWanted') IS NOT NULL
+      LIMIT 1
+    `).get()));
+  }
+  // Full invitation, help, and provenance check. Yields between invitations so
+  // a cron tick can open the input gate. A matching snapshot returns without
+  // reading event bodies. The constructor does not call this.
+  async verifyRoomIntegrity({ yieldBetween = async () => {}, deadline = Infinity } = {}) {
+    if (this.readOnly) throw new Error("Read-only stores do not run the integrity job");
+    if (typeof yieldBetween !== "function") throw new TypeError("yieldBetween must be a function");
+    const before = this.integrityChecksum();
+    if (this.readIntegritySnapshot() === before.text) {
+      await yieldBetween();
+      return { matched: 1, skipped: 1, verified: 0, invitations: before.invitations };
+    }
+    await yieldBetween();
+    if (Date.now() > deadline) return { matched: 0, skipped: 0, verified: 0, budgetExceeded: 1 };
+    const orphan = this.readTransaction(() => this.db.prepare("SELECT 1 FROM membership_invitation_journal j LEFT JOIN membership_invitations i ON i.id=j.invitation_id WHERE i.id IS NULL LIMIT 1").get());
+    if (orphan) fail(503, "invitation_integrity_error", "Invitation record requires operator reconciliation");
+    const ids = this.readTransaction(() => this.db.prepare("SELECT id FROM membership_invitations ORDER BY id").all().map(row => row.id));
+    for (const id of ids) {
+      if (Date.now() > deadline) return { matched: 0, skipped: 0, verified: 0, budgetExceeded: 1 };
+      this.verifyInvitationRecord(id);
+      await yieldBetween();
+    }
+    if (this.helpProjectionPresent()) {
+      if (Date.now() > deadline) return { matched: 0, skipped: 0, verified: 0, budgetExceeded: 1 };
+      this.verifyHelpHistory();
+      await yieldBetween();
+    }
+    if (Date.now() > deadline) return { matched: 0, skipped: 0, verified: 0, budgetExceeded: 1 };
+    this.repairProjectionProvenance({ upgradeV1: false, ensureIndex: false });
+    await yieldBetween();
+    const after = this.integrityChecksum();
+    this.writeIntegritySnapshot(after.text);
+    return { matched: 0, skipped: 0, verified: 1, invitations: after.invitations };
   }
 
   verifyHelpHistory() {
@@ -1787,14 +1888,16 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // Chat messages are not an input. A current projection is repaired from SQL extracts
   // (default channel, invalid supersession links) and does not JSON.parse the log.
   // Rooms that still carry a legacy marker load only the provenance event types.
-  repairProjectionProvenance({ upgradeV1 = false } = {}) {
+  repairProjectionProvenance({ upgradeV1 = false, ensureIndex = true } = {}) {
     this.transaction(() => {
       // A v1 projection was produced under v1 transition rules. Preserve its repaired,
       // conservative form as an immutable recovery checkpoint; all later v2 events replay
       // normally from there. This keeps legacy event bodies byte-for-byte append-only without
       // weakening the current reducer to accept rules that no longer apply.
       this.db.exec("CREATE TABLE IF NOT EXISTS projection_checkpoints (room_id TEXT PRIMARY KEY REFERENCES rooms(id), sequence INTEGER NOT NULL, projection TEXT NOT NULL)");
-      this.ensureEventTypeIndex();
+      // The expression index cannot yield mid-build. Deferred wakes and the
+      // integrity cron skip it; eager opens still create it inside this transaction.
+      if (ensureIndex) this.ensureEventTypeIndex();
       if (upgradeV1) {
         const rooms = this.db.prepare("SELECT id, sequence, projection FROM rooms ORDER BY id").all();
         this.replayProvenance(rooms, { upgradeV1: true });
