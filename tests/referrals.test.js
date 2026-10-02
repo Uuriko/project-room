@@ -4,7 +4,6 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -121,7 +120,7 @@ test("ambiguous display names do not falsely attribute", t => {
   // Live member.added refuses a second folded name. Rows already stored can
   // still fold together, so this fixture replays unstamped historical events.
   // A matching answer then attributes nothing.
-  let room = store.room(roomId);
+  const room = store.room(roomId);
   let state = room.state;
   let sequence = room.sequence;
   store.transaction(() => {
