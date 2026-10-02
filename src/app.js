@@ -6887,8 +6887,18 @@ if (initialInvitationFragment && !initialPasswordReset) openInvitation(initialIn
   chooseRoomAction = id => { if (id === "board") { openBoard(); return; } priorChoose(id); };
   let chatPaint = null;
   const paintChat = () => {
-    chatPaint ??= import("./board-ui.js");
-    void chatPaint.then(module => { if (state) module.paintClaimChat(state, $("#message-list")); });
+    // A navigation or a dropped connection rejects the import. Catch it so
+    // that cancellation is not an unhandled page error, and retry next paint.
+    if (!chatPaint) {
+      const pending = import("./board-ui.js").catch(() => null);
+      chatPaint = pending;
+      void pending.then(module => {
+        if (!module) { if (chatPaint === pending) chatPaint = null; return; }
+        if (state) module.paintClaimChat(state, $("#message-list"));
+      });
+      return;
+    }
+    void chatPaint.then(module => { if (module && state) module.paintClaimChat(state, $("#message-list")); });
   };
   const priorRender = render;
   render = () => { if (!state) { board.reset(); return; } priorRender(); board.sync(); };
