@@ -355,6 +355,11 @@ export const unfencedAdditiveTables = Object.freeze([
   // row only means the next cron rechecks. The constructor never uses it to
   // decide to replay the event log.
   "integrity_snapshot",
+  // room_schema_stamp: one hash of the DDL this process applies. A match
+  // skips schema setup on the next wake. integrity_job_cursor: which
+  // deferred integrity step the cron runs next. Neither is room content.
+  "room_schema_stamp",
+  "integrity_job_cursor",
   // Public page read model. Written when an owner opts in, and removed when
   // they opt out. Older writers have no path to these tables. Public pages
   // read only these rows. The constructor creates the empty tables; the

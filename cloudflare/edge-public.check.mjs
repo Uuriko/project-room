@@ -116,6 +116,8 @@ test('static assets and discovery documents do not enter the Durable Object', as
     const healthBody = await health.json();
     assert.equal(healthBody.status, 'ok');
     assert.deepEqual(healthBody.durableObject, { ready: true, status: 200 });
+    assert.equal(healthBody.do.status, 'ok');
+    assert.equal(typeof healthBody.do.ms, 'number');
   } finally {
     await mf.dispose();
   }

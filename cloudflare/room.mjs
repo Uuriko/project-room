@@ -156,7 +156,7 @@ export class ProjectRoom extends DurableObject {
           constructMs: cold.durationMs, firstRequestMs: appMs,
           rooms: cold.rooms ?? 0, sequences: cold.sequences ?? 0, projectionBytes: cold.projectionBytes ?? 0
         };
-        if (Number.isFinite(cold.cpuMs)) line.constructCpuMs = cold.cpuMs;
+        if (cold.phases) line.phases = cold.phases;
         console.info(JSON.stringify(line));
       }
       console.info(JSON.stringify({
@@ -392,8 +392,8 @@ export default {
         timeoutMs: HEALTH_PROBE_TIMEOUT_MS,
         start: () => env.ROOM.getByName('invite-only-pilot').fetch(new Request(request, { headers })),
         waitUntil: ctx?.waitUntil?.bind(ctx),
-        onSnapshot: snapshot => ({ response: healthProbeResponse(snapshot, request), servedBy: 'durable-object' }),
-        onUnready: readiness => ({ response: healthLivenessResponse(request, { mode, deployment, readiness }), servedBy: 'worker' })
+        onSnapshot: (snapshot, timing) => ({ response: healthProbeResponse(snapshot, request, timing), servedBy: 'durable-object' }),
+        onUnready: (readiness, timing) => ({ response: healthLivenessResponse(request, { mode, deployment, readiness, ...timing }), servedBy: 'worker' })
       });
       return finish(probed.response, probed.servedBy);
     }
