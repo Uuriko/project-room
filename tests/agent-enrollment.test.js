@@ -144,8 +144,8 @@ test("capacity limits never prevent ending active access and do not permit react
   const f = fixture(t); f.apply(f.request);
   const room = f.store.room.bind(f.store);
   // A synthetic capped view isolates both limits; it is not a recovery fixture.
-  f.store.room = id => { const result = room(id); result.sequence = Math.max(10000, result.sequence);
-    result.state.capacityFixture = "x".repeat(4 * 1024 * 1024); return result; };
+  f.store.room = id => { const result = room(id); return { sequence: Math.max(10000, result.sequence),
+    state: { ...result.state, capacityFixture: "x".repeat(4 * 1024 * 1024) } }; };
   const request = { action: "disconnect", requestId: randomUUID(), memberId: f.request.memberId,
     expectedOwnerRevision: 0, expectedGeneration: 1, expectedMemberRevision: 0 };
   assert.equal(f.apply(request).connection.status, "disconnected");

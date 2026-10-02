@@ -1,9 +1,9 @@
 // Upgrade compatibility fence, not authentication against a database administrator.
 // Older service connections do not register this function, so ordinary writes fail
 // after the schema transaction commits, even if the connection predates migration.
-export const STORE_SCHEMA_VERSION = 36;
+export const STORE_SCHEMA_VERSION = 37;
 export const WRITER_FUNCTION = `project_room_writer_v${STORE_SCHEMA_VERSION}`;
-export const writerVersions = Object.freeze([6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36]);
+export const writerVersions = Object.freeze([6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37]);
 const v6Tables = ["rooms", "events", "commands", "accounts", "member_accounts", "account_access_events",
   "credentials", "cursors", "projection_checkpoints", "account_credentials", "account_session_slots",
   "membership_invitations", "membership_invitation_events", "membership_invitation_journal"];
@@ -361,10 +361,13 @@ export const unfencedAdditiveTables = Object.freeze([
   "room_schema_stamp",
   "integrity_job_cursor"
 ]);
-export const applicationTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables, ...unfencedAdditiveTables])]);
+// messages (MSG-1) is fenced at v37 only. v34–v36 files do not have the
+// table or its triggers; verifyWriterFence(36) must not require them.
 const v34FencedTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables])]);
+const v37FencedTables = Object.freeze([...v34FencedTables, "messages"]);
+export const applicationTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables, ...unfencedAdditiveTables, "messages"])]);
 const tablesFor = version => version <= 27 ? ({ 6: v6Tables, 7: v7Tables, 8: v8Tables, 9: v14Tables, 10: v14Tables, 11: v14Tables, 12: v14Tables, 13: v14Tables, 14: v14Tables, 15: v17Tables, 16: v17Tables, 17: v17Tables, 18: tables, 19: tables, 20: tables, 21: tables, 22: tables, 23: tables, 24: tables, 25: tables, 26: tables, 27: v27Tables })[version]
-  : version === 28 ? v27Tables : version <= 33 ? deployedV28Tables : v34FencedTables;
+  : version === 28 ? v27Tables : version <= 33 ? deployedV28Tables : version <= 36 ? v34FencedTables : v37FencedTables;
 export const fenceDefinitions = version => Object.freeze(tablesFor(version).flatMap(table => ["INSERT", "UPDATE", "DELETE"].map(operation => {
   const name = `writer_v${version}_${table}_${operation.toLowerCase()}`;
   return Object.freeze({ name, sql: `CREATE TRIGGER ${name} BEFORE ${operation} ON ${table} BEGIN SELECT CASE WHEN project_room_writer_v${version}() IS NOT ${version} THEN RAISE(ABORT,'unsupported database writer') END; END` });
@@ -400,7 +403,7 @@ export function registerWriter(db) {
   db.function("project_room_writer_v25", () => 25);
   db.function("project_room_writer_v26", () => 26);
   db.function("project_room_writer_v27", () => 27);
-  for (const version of [28, 29, 30, 31, 32, 33, 34, 35]) db.function(`project_room_writer_v${version}`, () => version);
+  for (const version of [28, 29, 30, 31, 32, 33, 34, 35, 36]) db.function(`project_room_writer_v${version}`, () => version);
   db.function(WRITER_FUNCTION, () => STORE_SCHEMA_VERSION);
 }
 

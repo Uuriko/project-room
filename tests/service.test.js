@@ -359,7 +359,7 @@ test("v2 migration preserves credentials and never merges matching Room member i
 
   let store = new RoomStore(filename);
   const alpha = store.authenticate(tokens[0]), beta = store.authenticate(tokens[1]);
-  assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, 36);
+  assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, 37);
   assert.notEqual(alpha.account.id, beta.account.id, "matching legacy member ids are not identity proof across Rooms");
   assert.equal(alpha.account.authEpoch, 0); assert.equal(beta.account.authEpoch, 0);
   assert.equal(store.authenticate(sessions[0]).account.id, alpha.account.id);
@@ -411,7 +411,7 @@ test("an exact-scope write claim can be released at event and projection capacit
   store.command(owner, "commons", command(T.WORK_ACCEPTED, { workItemId: "capacity-claim", expectedRevision: 0 }));
   store.command(owner, "commons", command(T.CLAIM_ACQUIRED, { workItemId: "capacity-claim", expectedRevision: 1,
     repository: "Uuriko/project-room", ref: "main", paths: ["src/**"], expiresAt: "2099-01-01T00:00:00.000Z" }));
-  const state = store.room("commons").state;
+  const state = structuredClone(store.room("commons").state);
   state.messages.push({ body: "x".repeat(4 * 1024 * 1024) });
   store.db.prepare("UPDATE rooms SET sequence=10000,projection=? WHERE id='commons'").run(JSON.stringify(state));
   assert.throws(() => store.command(owner, "commons", command(T.WORK_STARTED, { workItemId: "capacity-claim", expectedRevision: 2 })), { code: "pilot_limit" });
@@ -433,7 +433,7 @@ test("open work can be completed, unblocked, and superseded at event and project
   store.command(owner, "commons", command(T.WORK_BLOCKED, { workItemId: "cap-blocked", expectedRevision: 1, reason: "Waiting on review", nextAction: "Owner reviews" }));
   store.command(owner, "commons", command(T.WORK_PROPOSED, { workItemId: "cap-old", title: "Retired at capacity", definitionOfDone: "Replaced", accountableMemberId: "owner" }));
   store.command(owner, "commons", command(T.WORK_PROPOSED, { workItemId: "cap-new", title: "Replacement", definitionOfDone: "Carries the goal", accountableMemberId: "owner" }));
-  const state = store.room("commons").state;
+  const state = structuredClone(store.room("commons").state);
   state.messages.push({ body: "x".repeat(4 * 1024 * 1024) });
   store.db.prepare("UPDATE rooms SET sequence=10000,projection=? WHERE id='commons'").run(JSON.stringify(state));
   // Acquisition and ordinary progress remain capped.

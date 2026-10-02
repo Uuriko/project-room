@@ -27,7 +27,7 @@ test('additive migration restores missing offer tables without changing prior ro
 test('publication revalidates current reviewer kind and archived rooms never expose published offers', t => {
   const { store } = fixture(t);
   store.projectOffers.create('commons', 'owner', input());
-  const row = store.room('commons'); row.state.members.owner.kind = 'agent';
+  const row = structuredClone(store.room('commons')); row.state.members.owner.kind = 'agent';
   store.db.prepare('UPDATE rooms SET projection=? WHERE id=?').run(JSON.stringify(row.state), 'commons');
   assert.throws(() => store.projectOffers.transition('commons', 'owner', 'public-work', 'publish', { requestId: 'publish', expectedRevision: 1 }), error => error.code === 'invalid_project_offer');
   row.state.members.owner.kind = 'human';
@@ -49,7 +49,7 @@ test('USD, USDC and internal milli-credit amounts do not authorize or imply paym
 });
 
 test('agent-only review cannot contradict human-required Room or linked-work policy', t => {
-  const { store } = fixture(t); const row = store.room('commons');
+  const { store } = fixture(t); const row = structuredClone(store.room('commons'));
   row.state.members.agent = { id: 'agent', kind: 'agent', active: true, displayName: 'Agent reviewer', permissions: ['verify'] };
   row.state.room.policy = { requireOwnerDecision: true, requireIndependentReview: false };
   store.db.prepare('UPDATE rooms SET projection=? WHERE id=?').run(JSON.stringify(row.state), 'commons');
@@ -64,7 +64,7 @@ test('review permissions changing before the writer transaction cannot publish a
   const original = store.transaction.bind(store); let armed = true;
   store.transaction = fn => {
     if (armed) {
-      armed = false; const { state } = store.room('commons'); state.members.owner.permissions = [];
+      armed = false; const state = structuredClone(store.room('commons').state); state.members.owner.permissions = [];
       store.db.prepare('UPDATE rooms SET projection=? WHERE id=?').run(JSON.stringify(state), 'commons');
     }
     return original(fn);

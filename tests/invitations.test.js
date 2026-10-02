@@ -126,7 +126,7 @@ test("a pending invitation grants its account no Room read authority", t => {
 test("invitation acceptance at the projection cap fails cleanly without creating membership", t => {
   const f = fixture(t), issued = invitation(f), room = f.store.room.bind(f.store);
   // Isolate the capacity policy without constructing thousands of unrelated events.
-  f.store.room = id => { const result = room(id); result.state.capacityFixture = "x".repeat(4 * 1024 * 1024); return result; };
+  f.store.room = id => { const result = room(id); return { sequence: result.sequence, state: { ...result.state, capacityFixture: "x".repeat(4 * 1024 * 1024) } }; };
   assert.throws(() => f.store.acceptInvitation(f.target.token, issued.rawToken, {
     redemptionId: redemption(), expectedRevision: 0, expectedSessionBinding: f.target.session.sessionBinding
   }), { code: "pilot_limit", status: 409 });
@@ -450,7 +450,7 @@ test("v3 to v4 is additive and a failed migration leaves the v3 database untouch
   store.close();
 
   store = new RoomStore(filename);
-  assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, 36);
+  assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, 37);
   assert.deepEqual({
     rooms: store.db.prepare("SELECT * FROM rooms ORDER BY id").all().map(row => ({ ...row })),
     events: store.db.prepare("SELECT * FROM events ORDER BY room_id,sequence").all().map(row => ({ ...row })),
