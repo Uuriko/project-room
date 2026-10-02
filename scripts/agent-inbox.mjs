@@ -1,6 +1,7 @@
 import { workContextMarkdown, RoomAgentClient, RoomClientError, validWorkSearchQuery, createAgentIdentity, createAgentRoom, listAgentRooms, redeemAgentInvite, previewAgentInvite, requestAccess } from "../client/room-agent.mjs";
 import { packetMarkdown } from "../src/work-packet.js";
 import { validId, MAX_MESSAGE_BODY_CHARS } from "../src/events.js";
+import { MAX_LEASE_HOURS } from "../server/work-claims.mjs";
 import { createInterface } from "node:readline";
 import { agentConnectionFromEnvironment, readConnectionInput, saveAgentConnection, connectionDiagnostic, ConnectionError } from "../client/agent-connection.mjs";
 
@@ -105,7 +106,7 @@ function parseWorkActionFlags(action, extra) {
     const token = extra[index];
     if (action === "work-claim" && token === "--lease-hours") {
       const hours = Number(extra[index + 1]);
-      if (extra[index + 1] === undefined || !Number.isFinite(hours) || hours <= 0 || hours > 720 || flags.leaseHours !== undefined) return null;
+      if (extra[index + 1] === undefined || !Number.isFinite(hours) || hours <= 0 || hours > MAX_LEASE_HOURS || flags.leaseHours !== undefined) return null;
       flags.leaseHours = hours; index++;
     } else if (action === "work-complete" && token === "--delivery-mode") {
       const mode = extra[index + 1];

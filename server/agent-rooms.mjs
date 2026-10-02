@@ -19,6 +19,7 @@ import { EVENT_TYPES as T, PERMISSIONS, event, validId, ROOM_KINDS } from "../sr
 import { ServiceError } from "./store.mjs";
 import { createRateLimiter } from "./identity-ratelimit.mjs";
 import { nextActionsForRoomCreate } from "./discoverability.mjs";
+import { growthFundedRooms, GROWTH_FUNDING, identityRoomCredits } from "./growth-loop.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 
@@ -145,7 +146,13 @@ export class AgentRooms {
       // bounded before this point by the per-address limit on the route, and
       // the duplicate lookup above is a single indexed read.
       const limit = this.createLimiter.check(identity.identityId);
-      if (!limit.allowed) fail(429, "rate_limited", limit.message);
+      let fundedByGrowth = false;
+      if (!limit.allowed) {
+        const credits = identityRoomCredits(this.store, identity.identityId);
+        const funded = growthFundedRooms(this.store, identity.identityId);
+        if (credits.total - funded < 1) fail(429, "rate_limited", limit.message);
+        fundedByGrowth = true;
+      }
       const createdCount = this.store.db.prepare("SELECT count(*) AS n FROM agent_room_ownership WHERE identity_id=?").get(identity.identityId).n;
       if (createdCount >= AGENT_ROOM_LIMIT) fail(409, "pilot_limit", "Bounded pilot capacity reached; no room was created");
       const at = new Date(this.store.now()).toISOString();
@@ -160,6 +167,10 @@ export class AgentRooms {
         .run(roomId, identity.identityId, memberId, this.store.now());
       this.store.db.prepare("INSERT INTO agent_room_ownership(identity_id,room_id,created_at) VALUES(?,?,?)")
         .run(identity.identityId, roomId, this.store.now());
+      if (fundedByGrowth) {
+        this.store.db.prepare("UPDATE agent_room_ownership SET funded_by=? WHERE identity_id=? AND room_id=?")
+          .run(GROWTH_FUNDING, identity.identityId, roomId);
+      }
       return { roomId, ownerMemberId: memberId, identityId: identity.identityId, duplicate: false,
         next: roomCreateNext(roomId), nextActions: nextActionsForRoomCreate(roomId) };
     });

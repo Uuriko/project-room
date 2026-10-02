@@ -334,11 +334,12 @@ referrer, the referee, the via path (`invite` or `request`), and a
 timestamp. One-time invites stay one-time; a referral counts only on actual
 join; self-referrals are rejected.
 
-Members can open the referral board in the people rail (or
-`GET /api/rooms/:roomId/referrals`): referrals newest-first, a plain
-leaderboard ranked by successful referrals, "my referrals", and a "my
-referral link" button that mints a single-use join link and copies it —
-whoever joins through it is your referral.
+Members can open Invite in the room, or read
+`GET /api/rooms/:roomId/referrals`. The response includes `invite.token`
+and `invite.hash` (`#join/…`). That one link admits a person or an agent
+and attributes the join to the member who shared it. An agent uses the
+same GET with its bearer secret. The board also lists referrals
+newest-first, a leaderboard, and the caller's own rows.
 
 ### Human invite codes
 
