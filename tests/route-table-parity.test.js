@@ -1,8 +1,8 @@
-// Route table (batch RT-0). The table is empty, so the live server still
-// answers from the legacy chain. These tests own that fallthrough, the
-// dispatcher's 405 Allow contract, and the gates that keep the OpenAPI
-// document and the legacy allowlist honest. Recorded per-route parity rows
-// join this file as later groups leave the legacy chain.
+// Route table (batch RT). These tests own fallthrough for paths still on the
+// legacy chain, the dispatcher's 405 Allow contract, the inbox mount's
+// session checks, and the gates that keep the OpenAPI document and the
+// legacy allowlist honest. Recorded per-route parity rows join this file
+// as later groups leave the legacy chain.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
@@ -11,6 +11,7 @@ import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { ServiceError } from "../server/service-error.mjs";
 import { ROUTES, assertRouteRow, assertRouteTable } from "../server/routes/table.mjs";
+import { INBOX_ROUTES } from "../server/routes/inbox.mjs";
 import { dispatchRoute } from "../server/routes/dispatch.mjs";
 import { EVENT_TYPES } from "../src/events.js";
 import { allowlistProblems, extractLegacyRoutes, loadRouteSources } from "../scripts/routes-inventory.mjs";
@@ -23,7 +24,7 @@ function listen(server) {
   return new Promise(resolve => server.listen(0, "127.0.0.1", () => resolve(`http://127.0.0.1:${server.address().port}`)));
 }
 
-test("an empty route table leaves health and unknown paths on the legacy chain", async t => {
+test("paths outside the route table stay on the legacy chain", async t => {
   const fixture = createAcceptanceFixture();
   const server = createRoomServer({ store: fixture.store });
   const origin = await listen(server);
@@ -91,6 +92,68 @@ test("a known path with the wrong method answers 405 and Allow", async t => {
   assert.deepEqual(await ok.json(), { id: "room-1" });
   const other = await fetch(`${origin}/api/other`);
   assert.equal(other.status, 404);
+});
+
+test("inbox mounts require an account session before they choose a method", async t => {
+  const fixture = createAcceptanceFixture();
+  const account = fixture.store.accountForMember("commons", "owner");
+  const key = fixture.store.issueAccountAccessKey(account.id);
+  const slot = fixture.store.createAccountSessionSlot();
+  const session = { token: slot.token, ...fixture.store.loginAccountSession(slot.token, key, 0) };
+  const server = createRoomServer({ store: fixture.store });
+  const origin = await listen(server);
+  t.after(async () => {
+    server.closeStreams();
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    fixture.store.close();
+  });
+  const headers = { Cookie: `account_session=${session.token}`, "X-Session-Binding": session.sessionBinding };
+
+  const anonymous = await fetch(`${origin}/api/inbox`);
+  assert.equal(anonymous.status, 422);
+  assert.equal((await anonymous.json()).error.code, "session_binding_required");
+
+  const missingSession = await fetch(`${origin}/api/inbox`, { headers: { "X-Session-Binding": "a".repeat(64) } });
+  assert.equal(missingSession.status, 401);
+  assert.equal((await missingSession.json()).error.code, "unauthenticated");
+
+  const bearer = await fetch(`${origin}/api/inbox`, { headers: { Authorization: "Bearer not-a-session" } });
+  assert.equal(bearer.status, 401);
+  assert.equal((await bearer.json()).error.code, "account_session_required");
+
+  const list = await fetch(`${origin}/api/inbox`, { headers });
+  assert.equal(list.status, 200);
+  assert.equal((await list.json()).contractVersion, 1);
+
+  const wrongMethod = await fetch(`${origin}/api/inbox`, { method: "POST", headers });
+  assert.equal(wrongMethod.status, 404);
+  assert.equal((await wrongMethod.json()).error.code, "not_found");
+
+  const missingCsrf = await fetch(`${origin}/api/inbox/commands`, {
+    method: "POST",
+    headers: { ...headers, Origin: origin, "Content-Type": "application/json" },
+    body: "{}",
+  });
+  assert.equal(missingCsrf.status, 403);
+  assert.equal((await missingCsrf.json()).error.code, "csrf_denied");
+
+  const bearerWrite = await fetch(`${origin}/api/inbox/commands`, {
+    method: "POST",
+    headers: { Authorization: "Bearer not-a-session", "Content-Type": "application/json" },
+    body: "{}",
+  });
+  assert.equal(bearerWrite.status, 401);
+  assert.equal((await bearerWrite.json()).error.code, "account_session_required");
+
+  const setup = await fetch(`${origin}/api/inbox/setup`, { method: "DELETE", headers });
+  assert.equal(setup.status, 405);
+  assert.equal((await setup.json()).error.code, "method_not_allowed");
+
+  const listRow = INBOX_ROUTES.find(row => row.id === "inbox.list");
+  assert.equal(listRow.auth, "account");
+  assert.equal(listRow.mount, true);
+  assert.equal(listRow.path, "/api/inbox");
 });
 
 test("docs/openapi.yaml parses as OpenAPI 3.1", () => {
