@@ -10,7 +10,7 @@ Three Workers run the same code. Only one of them owns production data.
 
 The entry script is still named `project-room-staging`. That name is historical. Do not rename the deployed script: the getdasha route and email routing are bound to it. `wrangler.jsonc` cannot carry comments (`JSON.parse` reads it), so this page and `cloudflare/README.md` are where the role is named. The entry's role is entry, not a second room.
 
-Isolated staging is the place a schema or constructor change runs before production. It does not see production rows. Gmail stays off on every deploy (`ROOM_GMAIL_ENABLED=0`, and keep `ROOM_GMAIL_PILOT_ONLY=1`). Turning Gmail on is a separate release after the [Gmail setup requirements](history/GMAIL-SETUP.md).
+Isolated staging is the place a schema or constructor change runs before production. It does not see production rows. The Worker, the workflow, and the secret names are in [STAGING.md](STAGING.md). Gmail stays off on every deploy (`ROOM_GMAIL_ENABLED=0`, and keep `ROOM_GMAIL_PILOT_ONLY=1`). Turning Gmail on is a separate release after the [Gmail setup requirements](history/GMAIL-SETUP.md).
 
 Run the commands below from `cloudflare/` unless a command says otherwise. `--keep-vars` leaves secrets and dashboard text bindings in place. Do not put secret values in the repo.
 
