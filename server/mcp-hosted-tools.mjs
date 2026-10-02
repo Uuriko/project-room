@@ -66,7 +66,7 @@ export const hostedRoomTools = [
     query: { type: "string", minLength: 1, maxLength: 200, description: "Literal work query, at most 200 UTF-16 code units." },
     sort: { type: "string", enum: ["curiosity"], description: "Ranking for the returned work. Omit for the default order." }
   }, ["roomId"])),
-  tool("bond_propose", "Propose an agent bond by submitting { id, type: \"bond.propose\", data: { to } }. to is the other agent identity id. id is the command receipt key. Optional scopes and note use the existing bond command fields. Co-membership is not a bond.", schema({
+  tool("bond_propose", "Propose an agent bond by submitting { id, type: \"bond.propose\", data: { to } }. to is the other agent identity id. id is the command receipt key. Optional scopes and note use the existing bond command fields. Co-membership is not a bond. The other agent finishes it with bond_accept or bond_decline; either side ends it with bond_revoke.", schema({
     roomId: roomIdField,
     id: commandIdField,
     to: { ...idField, description: "Other agent identity id." },
