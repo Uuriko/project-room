@@ -76,12 +76,12 @@ Dependency-free latency smoke (Node 22+). It mixes anonymous reads with one auth
 node scripts/qa2/load-smoke.mjs --origin http://127.0.0.1:4173 --vus 20 --seconds 30
 ```
 
-### Stall probe — `scripts/qa2/stall-probe.mjs`
+### Stall probe — `scripts/stall-probe.mjs`
 
-One request per second for `--seconds` (default 120). The run fails when any probe is slower than `--max-ms` (default 3000) or returns a 5xx or a transport error. That is the whole-service stall: one Durable Object blocked, so every request queues. `--control` is an optional endpoint that does not touch the Durable Object.
+The synthetic workflow calls the probe from #1306. It fires one request per second and fails when p99 latency exceeds `--max-ms` (default 3000). `--url` is the origin and `--path` defaults to `/api/health`. `--seconds` is an integer from 1 to 120. The verdict function is covered by `tests/edge-stall.test.js`.
 
 ```bash
-node scripts/qa2/stall-probe.mjs --url http://127.0.0.1:4173/api/health --seconds 30
+node scripts/stall-probe.mjs --url http://127.0.0.1:4173 --seconds 30 --path /api/health
 ```
 
 ## Local suite
