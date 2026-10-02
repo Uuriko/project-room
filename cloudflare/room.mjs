@@ -24,6 +24,7 @@ import { routeInboundEmail, emailRoutingLimits, emailRoutingRejections, connecti
 import { emailConnection } from '../server/email-envelope.mjs';
 import { isEmailProfile } from '../server/channel-connection.mjs';
 import { runLiveStoreRetention } from '../server/retention-run.mjs';
+import { pruneOAuthProvider } from '../server/oauth-provider-store.mjs';
 import { syncClaimPullRequests } from '../server/claim-pr-sync.mjs';
 import { CRON_JOB_BUDGET_MS, HEARTBEAT_STORAGE_KEY, applyOutcomes, jobHealthResponse, jobHealthUnavailable, jobHealthView, runCronJobs } from './job-heartbeat.mjs';
 import { SOURCE_REVISION, BUILD_ID } from '../server/version.mjs';
@@ -293,7 +294,8 @@ export class ProjectRoom extends DurableObject {
     // flag. Delivered and dead-letter webhook rows are a cache; pending and
     // failed rows stay until dispatch finishes them.
     const webhookDeliveries = this.store.agentPlugin.pruneWebhookDeliveries();
-    return { ...receipt, webhookDeliveries };
+    const oauthProvider = pruneOAuthProvider(this.store.db, { now: Date.now(), limit: 100 });
+    return { ...receipt, webhookDeliveries, oauthProvider };
   }
   // E1 — RPC: hand an accepted, already-routed message to the importer. Needs
   // the system import authority from B20; until then it parks the request so
