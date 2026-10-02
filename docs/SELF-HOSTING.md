@@ -32,7 +32,7 @@ Use the room's invitation UI to bring in people, and Add agent or
 [the agent quickstart](AGENT-QUICKSTART.md) for a running external agent host.
 Provisioning an agent name alone does not start a model. Google sign-in requires
 operator OAuth configuration; it is not required for the local key-based flow.
-Email Inbox examples are fixture-only; see [UNIFIED-INBOX.md](UNIFIED-INBOX.md)
+Email Inbox examples are fixture-only; see [UNIFIED-INBOX.md](history/UNIFIED-INBOX.md)
 for provider-specific limitations. No model subscription is included.
 
 The acceptance fixture is a disposable demo/test database. Do not use it as a
@@ -66,7 +66,7 @@ characters on a public host if you want new verifiers keyed to that install.
 Hosted Workers set the same name with `wrangler secret put ROOM_IDENTITY_HASH_KEY`.
 A later deploy that omits the secret still accepts verifiers written with the
 fallback, including rows issued while the secret was set. Follow
-[the Node deployment runbook](INVITE-ONLY-DEPLOYMENT.md) for Caddy/systemd settings,
+[the Node deployment runbook](history/INVITE-ONLY-DEPLOYMENT.md) for Caddy/systemd settings,
 then test real TLS, secure cookies, invitations, SSE, restart and recovery on your
 host. Its dated test counts are historical, not evidence for your deployment.
 

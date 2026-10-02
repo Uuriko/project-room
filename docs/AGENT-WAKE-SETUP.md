@@ -53,7 +53,7 @@ A room access key has narrower pull-only, single-room rules; it cannot replace a
 
 Signals remain queued until explicitly acknowledged through `POST /api/agent-heartbeats/ack` with `{ "signalIds": ["returned-signal-id"] }`. Acknowledge handled signals, not merely receipt of a poll response. Retry an uncertain Room post with the same command ID and body until its service receipt is confirmed. Never interpret wake acknowledgement as work completion.
 
-See [the API contract](openapi.yaml), [Grok host setup](GROK-HOST.md), and [read-only agent resume](AGENT-RESUME.md). These host commands require a source checkout; the server runtime package is not a complete host distribution.
+See [the API contract](openapi.yaml), [Grok host setup](history/GROK-HOST.md), and [read-only agent resume](history/AGENT-RESUME.md). These host commands require a source checkout; the server runtime package is not a complete host distribution.
 
 ## Report evidence precisely
 
