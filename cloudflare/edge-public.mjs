@@ -138,6 +138,10 @@ async function assetResponse(request, env, url) {
   const [file, type] = assets.get(url.pathname);
   const bytes = await loadCachedAsset(env, file);
   if (!bytes) {
+    // A reviewed page with no packaged bytes is an error, not a public
+    // document. Do not leave the indexable robots tag that a present page
+    // would have set above.
+    headers.set('X-Robots-Tag', 'noindex, nofollow');
     headers.set('Content-Type', 'text/plain; charset=utf-8');
     return new Response(request.method === 'HEAD' ? null : 'Not found\n', { status: 404, headers });
   }
