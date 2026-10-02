@@ -13,7 +13,15 @@ export const emailRoutingLimits = Object.freeze({ rawBytes: mimeLimits.rawBytes,
 // Reasons handed to message.setReject(): short, ASCII, no message content.
 export const emailRoutingRejections = Object.freeze({
   unknownRecipient: "Unknown recipient", tooLarge: "Message too large", malformed: "Message could not be parsed",
-  unavailable: "Mailbox temporarily unavailable" });
+  unavailable: "Mailbox temporarily unavailable",
+  // Inbox is shelved. SMTP must not accept mail that has nowhere durable to go.
+  notAccepted: "Inbound email is not accepted" });
+// A durable consumer persists the message before SMTP is told it was accepted.
+// The Inbox importer is not wired (it still needs an owner session), so this
+// stays null and the Worker rejects the message instead of parking it in memory.
+export function durableInboundEmailConsumer() {
+  return null;
+}
 export class EmailRoutingError extends Error {
   constructor(code, reason) { super(code); this.name = "EmailRoutingError"; this.code = code; this.reason = reason; }
 }
