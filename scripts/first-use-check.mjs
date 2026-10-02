@@ -154,11 +154,12 @@ for (const touch of [false, true]) {
     assert.equal(await owner.locator('#work-title-input').inputValue(), 'a'.repeat(99), 'title limit does not split an emoji');
     await owner.locator('#cancel-work-button').click();
 
-    // Self-chosen names must not become ambiguous after simplifying display text.
-    store.command(ownerKey, 'commons', { id: crypto.randomUUID(), type: T.MEMBER_ADDED,
-      data: { memberId: 'second-maya', displayName: 'Maya', kind: 'human', permissions: [] } });
-    await owner.waitForFunction(() => document.querySelector('.message-meta strong')?.textContent.includes('guest-'));
-    await guest.waitForFunction(() => document.querySelector('#identity-label')?.textContent.includes('guest-'));
+    // A second live member cannot take the guest's exact name. The label stays
+    // the name they chose, because the duplicate never joins.
+    assert.throws(() => store.command(ownerKey, 'commons', { id: crypto.randomUUID(), type: T.MEMBER_ADDED,
+      data: { memberId: 'second-maya', displayName: 'Maya', kind: 'human', permissions: [] } }),
+      error => error.code === 'display_name_unavailable');
+    assert.equal(await guest.locator('#identity-label').textContent(), 'Maya');
     if (await guest.locator("#session-menu-button").isVisible()) await guest.locator("#session-menu-button").click(); await clickChrome(guest, "#signout-button");
     await guest.locator('#auth-panel').waitFor({ state: 'visible' });
     assert.equal(await guest.locator('#identity-label').getAttribute('title'), null, 'sign-out clears private attribution');
