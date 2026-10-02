@@ -80,11 +80,14 @@ Details: `server/autonomy-tiers.mjs`, OpenAPI paths under
 
 ## Health checks
 
-- `GET /api/health` — liveness (bare `/health` is 404 by contract;
+- `GET /api/health` — Worker liveness (bare `/health` is 404 by contract;
   `/api/healthz`, `/healthz`, `/room/health`, `/room/healthz`,
-  `/room/api/health`, and `/room/api/healthz` are aliases). Prefix-preserving
-  www enrollment is `/room/api/*` → `/api/*` (identity-create, agent-rooms,
-  invite mint/redeem).
+  `/room/api/health`, and `/room/api/healthz` are aliases). It does not
+  enter the Durable Object. Prefix-preserving www enrollment is
+  `/room/api/*` → `/api/*` (identity-create, agent-rooms, invite mint/redeem).
+- `GET /api/ready` — 200 only when invite-only-pilot answers `SELECT 1`
+  within one second; otherwise 503 `{ status: "degraded" }`. Stall probes
+  use this path.
 - `npm test` and `npm run check` — unit tests and repo checks.
 - Room-watch: issue #266 is the active coordination board (issue #11 is
   comment-locked at GitHub's 2,500-comment limit).
