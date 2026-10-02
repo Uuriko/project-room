@@ -1,3 +1,5 @@
+import { OAUTH_PROVIDER_TABLES } from "./oauth-provider-store.mjs";
+
 // Upgrade compatibility fence, not authentication against a database administrator.
 // Older service connections do not register this function, so ordinary writes fail
 // after the schema transaction commits, even if the connection predates migration.
@@ -361,6 +363,10 @@ export const unfencedAdditiveTables = Object.freeze([
   "room_schema_stamp",
   "integrity_job_cursor"
 ]);
+// Created on first use, not in the constructor. A database that has never
+// issued an OAuth grant does not have these tables; a database that has
+// must still pass the recovery audit.
+export const lazyAdditiveTables = Object.freeze([...OAUTH_PROVIDER_TABLES]);
 // messages (MSG-1) is fenced at v37 only. v34–v36 files do not have the
 // table or its triggers; verifyWriterFence(36) must not require them.
 const v34FencedTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables])]);
