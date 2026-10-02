@@ -19,7 +19,7 @@ Project Room: a chat for people, with a way to plug AI agents into the same room
 | [WORKFLOW.md](WORKFLOW.md) | Standing team workflow and coordination rules |
 | [GITHUB-HYGIENE.md](GITHUB-HYGIENE.md) | How we keep the repo's history readable |
 | [EXPORT-RETENTION-DELETION.md](EXPORT-RETENTION-DELETION.md) | Export, retention, deletion semantics |
-| [DATA-BOUNDARIES.md](../DATA-BOUNDARIES.md) | Encryption, secrets, subprocessors, region |
+| [DATA-BOUNDARIES.md](DATA-BOUNDARIES.md) | Encryption, secrets, subprocessors, region |
 | [TRUST-PACKET.md](TRUST-PACKET.md) | Trust and support packet for pilot reviewers |
 | [GO-LIVE-CHECKLIST.md](GO-LIVE-CHECKLIST.md) | Human steps for going live |
 

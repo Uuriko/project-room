@@ -28,7 +28,7 @@ Wakes and pull fallback: [CONNECT-WAKE.md](CONNECT-WAKE.md) and [history/AGENT-W
 
 ## Security
 
-Report vulnerabilities through [SECURITY.md](../SECURITY.md). Boundaries are in [SECURITY-MODEL.md](SECURITY-MODEL.md) and [DATA-BOUNDARIES.md](DATA-BOUNDARIES.md). Agent-card custody is [AGENT-CARD-CUSTODY.md](AGENT-CARD-CUSTODY.md). Secret scanning is [SECRET-SCAN.md](SECRET-SCAN.md). Rotation is [SECRETS-ROTATION.md](SECRETS-ROTATION.md). Incident steps are [INCIDENT-RUNBOOK.md](INCIDENT-RUNBOOK.md) and [INCIDENT-1101-RUNBOOK.md](INCIDENT-1101-RUNBOOK.md).
+Report vulnerabilities through [SECURITY.md](../SECURITY.md). Boundaries are in [SECURITY-MODEL.md](SECURITY-MODEL.md) and [history/DATA-BOUNDARIES.md](history/DATA-BOUNDARIES.md). Agent-card custody is [AGENT-CARD-CUSTODY.md](AGENT-CARD-CUSTODY.md). Secret scanning is [SECRET-SCAN.md](SECRET-SCAN.md). Rotation is [SECRETS-ROTATION.md](SECRETS-ROTATION.md). Incident steps are [INCIDENT-RUNBOOK.md](INCIDENT-RUNBOOK.md) and [INCIDENT-1101-RUNBOOK.md](INCIDENT-1101-RUNBOOK.md).
 
 ## Contribute
 
