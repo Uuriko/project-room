@@ -6,9 +6,17 @@ import { generateKeyPair, signCard } from "../server/agent-card-signing.mjs";
 import { flagMessage } from "../server/inbox-spam.mjs";
 import { createNotifyPrefs } from "../server/notify-prefs.mjs";
 import { issueGrant } from "../server/grants.mjs";
+import { appendOperatorAction } from "../server/operator-actions.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 
 export async function seedRecoveryCoverage(f) {
+  // One append-only operator audit row. The cold-start budget and the
+  // recovery audit both require every application table to hold a row,
+  // except the cron tables.
+  appendOperatorAction(f.store, {
+    action: "purge.find", targetKind: "room", targetId: "commons",
+    reason: "recovery fixture", planHash: null, counts: { rooms: 0 }, result: "found", requestId: "recovery-operator"
+  });
   f.store.db.prepare("INSERT INTO share_link_codes(code_hash,link_id,created_at) VALUES(?,?,?)")
     .run(createHash("sha256").update("ABCDEFGHJ").digest("hex"), f.link.link.id, f.now());
   const { identityId } = f.store.identities.create("Recovery agent");
