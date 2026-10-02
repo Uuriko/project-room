@@ -13,7 +13,12 @@ const KIND_LABEL = {
   claim_lease: "Claim lease",
 };
 
-export function createNeedsAttentionCard({ client, section, getState = () => null }) {
+export function createNeedsAttentionCard(options) {
+  const { client, section, getState } = options;
+  // The original two-argument dependency contract is owner-rollup-only. A
+  // supplied state provider enables member-request UI and must stay fail-closed
+  // while that provider is empty during navigation or access teardown.
+  const hasRoomState = Object.hasOwn(options, "getState");
   const list = section.querySelector("#attention-list");
   const count = section.querySelector("#attention-count");
   const status = section.querySelector("#attention-status");
@@ -24,15 +29,17 @@ export function createNeedsAttentionCard({ client, section, getState = () => nul
   const next = section.querySelector("#attention-next");
   let currentReport = null, epoch = 0, busy = false, partial = null, observed = null, activeScope = null, authority = null;
   function viewer() {
-    const state = getState(), session = client.session;
-    const member = state?.members?.[session?.member?.id] ?? session?.member;
+    const state = typeof getState === "function" ? getState() : null, session = client.session;
+    const member = hasRoomState ? (state?.room?.id === session?.roomId ? state?.members?.[session?.member?.id] : null) : session?.member;
     return { member, owner: Boolean(member && state?.room?.ownerId === member.id) };
   }
   function canReview() {
+    if (!hasRoomState) return Boolean(client.session);
     const { member } = viewer();
     return Boolean(member?.active !== false && member?.permissions?.includes("manage_members"));
   }
   function canGrant(permission) {
+    if (!hasRoomState) return true; // Legacy reader authenticates the owner.
     const { member, owner } = viewer();
     return owner || Boolean(member?.permissions?.includes(permission));
   }
@@ -52,7 +59,9 @@ export function createNeedsAttentionCard({ client, section, getState = () => nul
   const RETRY_DELAY_MS = 30000;
 
   function owns(ticket, session, generation) {
-    return ticket === epoch && session === client.session && generation === client.generation && canReview();
+    if (ticket !== epoch || session !== client.session || generation !== client.generation) return false;
+    if (!canReview()) { hide(); return false; }
+    return true;
   }
   function clearRetry() {
     if (retryTimer !== null) { clearTimeout(retryTimer); retryTimer = null; }
@@ -62,7 +71,7 @@ export function createNeedsAttentionCard({ client, section, getState = () => nul
     const retryTicket = ++epoch, retrySession = client.session, retryGeneration = client.generation;
     retryTimer = setTimeout(() => {
       retryTimer = null;
-      if (owns(retryTicket, retrySession, retryGeneration) && client.session) refresh();
+      if (owns(retryTicket, retrySession, retryGeneration) && client.session) return refresh();
     }, RETRY_DELAY_MS);
   }
   function setBusy(value) {
@@ -168,7 +177,7 @@ export function createNeedsAttentionCard({ client, section, getState = () => nul
 
   async function decide(report, itemIndex, actionIndex, permissions = null) {
     if (busy || report !== currentReport || !client.session || !canReview()) return;
-    if (!client.ownsAccountSession()) { hide(); client.endAccess(); return; }
+    if (hasRoomState && !client.ownsAccountSession()) { hide(); client.endAccess(); return; }
     const item = report?.items?.[itemIndex], action = item?.actions?.[actionIndex];
     if (!action?.path || action.method !== "POST" || !action.body) return;
     const body = permissions ? { ...action.body, permissions } : action.body;
@@ -193,7 +202,7 @@ export function createNeedsAttentionCard({ client, section, getState = () => nul
 
   async function refresh(cursor = null) {
     if (!client.session || !canReview()) { hide(); return; }
-    if (!client.ownsAccountSession()) { hide(); client.endAccess(); return; }
+    if (hasRoomState && !client.ownsAccountSession()) { hide(); client.endAccess(); return; }
     clearRetry();
     const ticket = ++epoch, session = client.session, generation = client.generation;
     const focused = document.activeElement;
@@ -202,15 +211,17 @@ export function createNeedsAttentionCard({ client, section, getState = () => nul
     try {
       let report = await client.needsAttention(cursor);
       if (!owns(ticket, session, generation)) return;
-      const queue = await client.request(client.path("/access-requests?status=pending"));
-      if (!owns(ticket, session, generation)) return;
-      if (queue?.roomId !== session.roomId || !Array.isArray(queue.requests)) throw new Error("The request queue could not be confirmed");
-      const requests = queue.requests.map(requestItem), byId = new Map(requests.map(item => [item.id, item]));
-      // Owners retain their paged rollup; admins receive only the request queue
-      // their existing manage_members authority permits, never the owner rollup.
-      report = report ? { ...report, items: report.items.map(item => item.kind === "access_request" ? byId.get(item.id) : item).filter(Boolean) }
-        : { items: requests, itemCount: requests.length, pageOffset: 0 };
-      if (partial && !report.items.some(item => item.id === partial.id)) partial = null;
+      if (hasRoomState) {
+        const queue = await client.request(client.path("/access-requests?status=pending"));
+        if (!owns(ticket, session, generation)) return;
+        if (queue?.roomId !== session.roomId || !Array.isArray(queue.requests)) throw new Error("The request queue could not be confirmed");
+        const requests = queue.requests.map(requestItem), byId = new Map(requests.map(item => [item.id, item]));
+        // Owners retain their paged rollup; admins receive only the request queue
+        // their existing manage_members authority permits, never the owner rollup.
+        report = report ? { ...report, items: report.items.map(item => item.kind === "access_request" ? byId.get(item.id) : item).filter(Boolean) }
+          : { items: requests, itemCount: requests.length, pageOffset: 0 };
+      }
+      if (partial && !report?.items.some(item => item.id === partial.id)) partial = null;
       render(report);
       if (focused === previous || focused === next) {
         // Avoid leaving keyboard focus on a now-disabled paging control.
@@ -221,7 +232,7 @@ export function createNeedsAttentionCard({ client, section, getState = () => nul
       if ([401, 403].includes(error.status) || error.code === "session_binding_changed") {
         hide(); if (error.status === 401 || error.code === "session_binding_changed") client.handleFailure(error); return;
       }
-      currentReport = null; partial = null; list.replaceChildren();
+      currentReport = null; partial = null; list.innerHTML = "";
       setBusy(false);
       setStatus(`Could not load: ${error.message}`);
       // E-H1: unhide so the owner sees the error and the Refresh button, and
@@ -236,18 +247,24 @@ export function createNeedsAttentionCard({ client, section, getState = () => nul
   previous.addEventListener("click", () => { if (!busy && currentReport?.previousCursor) refresh(currentReport.previousCursor); });
   next.addEventListener("click", () => { if (!busy && currentReport?.nextCursor) refresh(currentReport.nextCursor); });
   function sync() {
+    if (!hasRoomState) return;
     if (!client.session || !canReview()) { hide(); return; }
     const identity = `${client.generation}:${client.session.roomId}:${client.session.member.id}`;
     if (identity !== activeScope) { hide(); activeScope = identity; }
     const { member, owner } = viewer(), grants = `${owner}:${member.permissions.join(",")}`;
     if (authority !== grants && currentReport) {
       if (partial) partial.selected = new Set([...partial.selected].filter(canGrant));
+      const wasBusy = busy;
       render(currentReport);
+      setBusy(wasBusy);
     }
     authority = grants;
     const next = `${identity}:${client.sequence}`;
-    if (next === observed || busy || partial) return;
+    if (next === observed) return;
     observed = next;
+    // Preserve the reader's selected page and unsent partial selection. Manual
+    // Next/Previous still exercise the server's stale-continuation reset.
+    if (busy || partial || currentReport?.pageOffset > 0) return;
     void refresh();
   }
   return { refresh, hide, sync };
@@ -261,7 +278,7 @@ export function installMemberPermissions({ client, getState, getSession }) {
   const current = () => {
     const session = getSession(), state = getState();
     const member = session && state?.members?.[session.member.id];
-    return session && member?.active !== false && member ? { session, state, member, generation: client.generation } : null;
+    return session && state?.room?.id === session.roomId && member?.active !== false && member ? { session, state, member, generation: client.generation } : null;
   };
   const owns = value => {
     const now = current();

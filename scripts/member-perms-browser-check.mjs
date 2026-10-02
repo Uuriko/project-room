@@ -4,6 +4,8 @@
 // sending unselected grants, duplicating a committed request after response loss,
 // or painting the previous member's callback into a new session. HTTP tests do
 // not mount the UI; these use no production test seams or fabricated API replies.
+// The two happy-path viewports additionally guard mobile reachability and native
+// keyboard activation; Escape review dismissal must restore the initiating focus.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
@@ -27,7 +29,7 @@ function deferred() {
   return { promise, resolve };
 }
 
-async function setup(t) {
+async function setup(t, { width = 1440 } = {}) {
   const store = new RoomStore(":memory:");
   store.initialize(initialRoom());
   const keys = { owner: store.issueAccessKey("commons", "owner") };
@@ -56,7 +58,7 @@ async function setup(t) {
   browser = await chromium.launch({ headless: true,
     ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
   const login = async memberId => {
-    const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, reducedMotion: "reduce" });
+    const context = await browser.newContext({ viewport: { width, height: 1000 }, reducedMotion: "reduce" });
     const page = await context.newPage();
     page.setDefaultTimeout(10000);
     page.on("pageerror", error => errors.push(error.message));
@@ -81,10 +83,12 @@ async function setup(t) {
   };
 }
 
-async function ask(page, memberId = "requester") {
+async function ask(page, memberId = "requester", { keyboard = false } = {}) {
   await openMemberProfile(page, memberId);
   const reply = page.waitForResponse(response => isPermissionRequest(response.request()));
-  await ownRow(page, memberId).getByRole("button", { name: "Ask to take work", exact: true }).click();
+  const button = ownRow(page, memberId).getByRole("button", { name: "Ask to take work", exact: true });
+  if (keyboard) { await button.focus(); await button.press("Enter"); }
+  else await button.click();
   const response = await reply;
   assert.equal(response.status(), 201, await response.text());
   return response.json();
@@ -99,8 +103,8 @@ async function decide(page, label, expectedStatus = 200) {
   return response.json();
 }
 
-test("a basic member requests work permissions, the owner approves, and the member can claim work", { timeout: 60000 }, async t => {
-  const f = await setup(t);
+for (const width of [390, 1280]) test(`a basic member requests by keyboard at ${width}px, the owner approves, and the member can claim work`, { timeout: 60000 }, async t => {
+  const f = await setup(t, { width });
   assert.equal((await f.api("/api/rooms/commons/work-claims", "owner", { id: "permission-work", title: "Permission browser work" })).status, 201);
   assert.equal((await f.api("/api/rooms/commons/work-claims/permission-work/claim", "requester", {})).status, 403);
   const page = await f.login("requester");
@@ -108,11 +112,12 @@ test("a basic member requests work permissions, the owner approves, and the memb
   assert.equal(await ownRow(page).getByRole("button", { name: "Ask to take work", exact: true }).count(), 1);
   assert.equal(await ownRow(page, "other").getByRole("button", { name: "Ask to take work", exact: true }).count(), 0,
     "a member cannot file a request as somebody else");
-  const request = await ask(page);
+  const request = await ask(page, "requester", { keyboard: true });
   assert.equal(request.kind, "permissions");
   assert.equal(request.memberId, "requester");
   assert.deepEqual(request.requestedPermissions, ["accept_work", "complete_work"]);
   await ownRow(page).locator("[data-permission-request-status]").filter({ hasText: "Waiting for review." }).waitFor();
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true, "request controls fit the viewport");
   assert.equal(f.pending().length, 1);
   assert.deepEqual(f.permissions("requester"), [], "asking does not grant authority");
   assert.equal(await ownRow(page).getByRole("button", { name: "Ask to take work", exact: true }).count(), 0);
@@ -126,6 +131,7 @@ test("a basic member requests work permissions, the owner approves, and the memb
   assert.match(await row.locator(".attention-detail").textContent(), /accept_work/);
   assert.match(await row.locator(".attention-detail").textContent(), /complete_work/);
   assert.equal(await attentionRow(owner, "Ordinary Joiner").locator(".attention-kind").textContent(), "Join request");
+  assert.equal(await owner.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true, "review controls fit the viewport");
   await decide(owner, "Approve");
   await row.waitFor({ state: "detached" });
   await page.locator("#message-list").getByText(new RegExp(`Approved permission request ${request.requestId}`)).waitFor();
@@ -137,6 +143,7 @@ test("a basic member requests work permissions, the owner approves, and the memb
   await page.locator('[aria-labelledby="board-col-claimed"] article[data-claim-id="permission-work"]').waitFor();
   assert.equal(await page.locator("#board-status").textContent(), "Claimed 'Permission browser work'");
   assert.equal(f.store.workClaims.get("commons", "permission-work").owner, "requester");
+  assert.equal(await page.locator("#board-dialog").evaluate(node => node.scrollWidth <= node.clientWidth + 1), true, "the claim dialog fits its viewport");
 });
 
 test("an admin can cancel partial review, approve only selected permissions, and decline the remainder", { timeout: 60000 }, async t => {
@@ -165,8 +172,18 @@ test("an admin can cancel partial review, approve only selected permissions, and
   assert.equal(writes, 0, "opening, selecting and cancelling sends no decision");
   assert.equal(f.store.room("commons").sequence, sequence, "cancel appends no room event");
   assert.equal(f.pending().length, 1);
+  const partialButton = row.getByRole("button", { name: "Approve partial", exact: true });
+  assert.equal(await partialButton.evaluate(node => node === document.activeElement), true, "Cancel returns focus to partial review");
 
-  await row.getByRole("button", { name: "Approve partial", exact: true }).click();
+  await partialButton.click();
+  await selection.getByRole("checkbox", { name: "accept_work", exact: true }).focus();
+  await admin.keyboard.press("Escape");
+  await selection.waitFor({ state: "detached" });
+  assert.equal(await partialButton.evaluate(node => node === document.activeElement), true, "Escape returns focus to partial review");
+  assert.equal(writes, 0, "Escape dismisses without submitting a decision");
+  assert.equal(f.store.room("commons").sequence, sequence, "Escape appends no room event");
+
+  await partialButton.click();
   await selection.getByRole("checkbox", { name: "accept_work", exact: true }).check();
   assert.equal(await selection.getByRole("checkbox", { name: "complete_work", exact: true }).isChecked(), false);
   const approved = await decide(admin, "Approve selected");
