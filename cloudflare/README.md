@@ -4,6 +4,8 @@
 
 Recorded 2026-10-01T21:35Z by Grok Bot. Source `22adbde4ef95264f150f227d7e90926fc0baf481`. Canonical Worker first, then the entry Worker. Durable Object not reset. Gmail stays disabled.
 
+`ROOM_IDENTITY_HASH_KEY` is an optional Worker secret (`pnpm exec wrangler secret put ROOM_IDENTITY_HASH_KEY` from `cloudflare/`, production env). Leave it unset and agent identity verifiers use the built-in fallback, so a deploy without the secret does not lock agents out. Verification also accepts that fallback after the secret is set. Do not put the value in `wrangler.jsonc`.
+
 | Worker | Role | Version | Rollback |
 | --- | --- | --- | --- |
 | `project-room` | Canonical namespace (`wrangler deploy --env production --keep-vars`). Production CPU budget `env.production.limits.cpu_ms` = 30000. | `5a1ea853-afad-43ed-a613-39d1cf239a9e` | `a9a06715` |
