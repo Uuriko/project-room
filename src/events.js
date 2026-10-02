@@ -1,4 +1,5 @@
 import { canonicalReaction, foldedReactionMap, MAX_REACTIONS_PER_MESSAGE } from "./emoji.js";
+import { assertMemberDisplayNameAvailable } from "./display-name-guard.js";
 import { proposalContext, nativeTextEvidence, reportedProducer, validateResultSegments } from "./work-packet.js";
 import { CHARTER_TYPE, charterFromEvent } from "./room-charter.js";
 import { REPLY_CANCELLED, prepareReplyPost, recordReplyPost, cancelReplyRequest } from "./reply-requests.js";
@@ -354,6 +355,9 @@ export const INVITATION_ROLE_POLICIES = Object.freeze({
 export const INVITATION_ROLE_POLICY_VERSION = 1;
 export const INVITATION_ROLES = INVITATION_ROLE_POLICIES[INVITATION_ROLE_POLICY_VERSION];
 export const MEMBERSHIP_AUTHORITY_POLICY_VERSION = 2;
+// Live member.added commands stamp this. Events written before it omit the
+// field and keep replaying, including a bootstrap owner named "Room owner".
+export const DISPLAY_NAME_POLICY_VERSION = 1;
 
 export function validId(value) {
   return typeof value === "string" && /^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127}$/.test(value) && !["constructor", "prototype", "__proto__"].includes(value);
@@ -762,6 +766,12 @@ function addMember(state, incoming) {
     if (requireMember(state, incoming.data.accountableHumanId).kind !== "human") throw new Error("Accountable sponsor must be a human member");
   }
   if (isBootstrapOwner && !incoming.data.permissions.includes("manage_members")) throw new Error("Owner must retain membership administration");
+  // Reserved, duplicate, confusable, and control-character names are refused
+  // on the live command path. The bootstrap owner is exempt so a room can
+  // still be created under "Room owner". Older events omit the policy stamp.
+  if (!isBootstrapOwner && incoming.data.displayNamePolicyVersion === DISPLAY_NAME_POLICY_VERSION) {
+    assertMemberDisplayNameAvailable(incoming.data.displayName, state.members);
+  }
   // Round-2 #101: a member record may be bound to a global agent identity.
   if (incoming.data.identityId != null
     && (typeof incoming.data.identityId !== "string" || incoming.data.identityId.length > 64)) throw new Error("identityId must be a short string");
@@ -1610,7 +1620,9 @@ function acquireClaim(state, incoming) {
   const item = mutableWorkItem(state, incoming, [WORK_STATES.ACCEPTED, WORK_STATES.WORKING, WORK_STATES.BLOCKED]);
   if (item.mode !== "write") throw new Error("Read-only work does not use a write claim");
   if (incoming.actorId !== item.accountableMemberId) throw new Error("Only the accountable member may acquire this claim");
-  requirePermission(state, incoming.actorId, "write_external");
+  // A claim records scope. It does not grant write_external; write-mode
+  // completion still requires that permission. Live commands admit only a
+  // board writer (mayWriteBoardClaims). Replaying an older claim is unchanged.
   requireFields(incoming.data, ["repository", "ref", "paths", "expiresAt"]);
   if (!Array.isArray(incoming.data.paths) || incoming.data.paths.length === 0) throw new Error("Claim paths must be explicit");
   if (!Number.isFinite(Date.parse(incoming.data.expiresAt)) || Date.parse(incoming.data.expiresAt) <= Date.parse(incoming.at)) throw new Error("Claim expiry must be in the future");

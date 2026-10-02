@@ -307,11 +307,10 @@ test("the event surface has not grown without this sweep noticing", () => {
   // decide: teach the sweep to exercise it, or record that it cannot be. Either
   // is fine. Silently adding an event no auditor models is what is not.
   //
-  // claim.renewed is not exercised here: it needs a leased write-claim
-  // plus the holder's public progress message, and the sweep fixture's
-  // producer holds no write_external grant, so claim.acquired is refused
-  // before a renewal is even reachable. The reducer's validation is covered
-  // by tests/lease-renewal.test.js instead.
+  // claim.renewed is not exercised here: it needs an active claim plus the
+  // holder's public progress message posted after that claim. The sweep does
+  // not acquire one. The reducer's validation is covered by
+  // tests/lease-renewal.test.js instead.
   // land.updated is exercised above via report_tip (it is not a command).
   // work_claim.updated is exercised above via emitWorkClaimEvent (it is not a command).
   assert.equal(Object.values(T).length, 59,
