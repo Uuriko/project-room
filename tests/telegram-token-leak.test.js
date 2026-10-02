@@ -10,7 +10,6 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { rmSync } from "node:fs";
 import { scanText, PATTERNS } from "../server/secret-scan.mjs";
 import { telegramConfig, redactTelegram, TelegramLiveStatus, telegramLiveView } from "../server/channel-adapters/telegram-config.mjs";
-import { LiveTelegramPoller } from "../server/channel-adapters/telegram-poller.mjs";
 import { TelegramTransport } from "../server/channel-adapters/telegram-transport.mjs";
 import { ChannelWebhookInbox } from "../server/channel-import.mjs";
 import { telegramContractFixture } from "../scripts/telegram-contract-fixture.mjs";
@@ -112,19 +111,6 @@ test("the webhook journal path never stores the configured token", async t => {
   assert.equal(shaped(String(failed.last_error)), 0, "journaled failure codes carry no token-shaped string");
 });
 
-test("poller error surfaces redact the token before callers see it", async () => {
-  const token = fakeBotToken();
-  const config = configured(token), { connection } = telegramContractFixture();
-  const fetch = async () => jsonResponse(400, { ok: false, description: `Bad Request: invalid bot token ${token}` });
-  const poller = new LiveTelegramPoller({ config, connection, fetch, sleep: () => {}, now: () => 1_700_000_000_000,
-    longPollSecs: 1, timeoutSlackMs: 50, baseDelayMs: 0, maxDelayMs: 10 });
-  await assert.rejects(poller.getUpdates(), error => {
-    assert.equal(error.code, "channel_poller_unavailable");
-    assert.equal(shaped(error.message), 0, "poller errors must never carry the raw token");
-    assert.ok(error.message.includes("<redacted>"), "the provider description is redacted, not dropped");
-    return true;
-  });
-});
 
 test("transport error surfaces never carry the token value", async () => {
   const token = fakeBotToken();

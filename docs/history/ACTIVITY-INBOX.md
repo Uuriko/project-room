@@ -105,13 +105,7 @@ failed Receipts and exceptions that are not chat.
 
 ## Isolated stub
 
-`activity-inbox/` is a pure helper, same isolation as `contribution-rollup/`
-(that package lives on [#17](https://github.com/Uuriko/project-room/pull/17);
-this stub does not import or rewrite it). No `server/` or `src/` imports.
-
-```sh
-cd activity-inbox && npm test
-```
+The activity-inbox package was removed from this repository. The notes below are historical.
 
 `projectActivity({ viewer, events, receipts })` returns `{ rows }`. Default
 tier `mentions_and_exceptions`. Fixture cases: ack-needed, failed-receipt,
