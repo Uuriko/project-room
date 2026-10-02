@@ -29,7 +29,7 @@ import { CRON_JOB_BUDGET_MS, HEARTBEAT_STORAGE_KEY, applyOutcomes, jobHealthResp
 import { SOURCE_REVISION, BUILD_ID } from '../server/version.mjs';
 import { edgePublicResponse } from './edge-public.mjs';
 import { appDurationMs, logRoomRequest, requestPath, withServerTiming } from './request-timing.mjs';
-import { HEALTH_PROBE_TIMEOUT_MS, createHealthProbe, healthLivenessResponse, healthProbeResponse } from './health-probe.mjs';
+import { HEALTH_PROBE_TIMEOUT_MS, createHealthProbe, healthLivenessResponse, readyProbeResponse, workerLivenessResponse } from './health-probe.mjs';
 
 // One probe per isolate. Concurrent health checks during a cold start share
 // it; a finished probe does not cache, so the next check sees a fresh answer.
@@ -166,6 +166,14 @@ export class ProjectRoom extends DurableObject {
     if (this.paused) return respond(maintenanceResponse(request));
     try { return respond(await this.requestSignals.run(request.signal, () => this.handler.fetch(request))); }
     finally { this.ctx.waitUntil(this.store.humanPush.flush()); }
+  }
+
+  // Readiness is one statement. It does not open the room, replay events, or
+  // scan a table. A paused object has no database, so it is not ready.
+  probeStorage() {
+    if (this.paused || !this.store) return { ok: false };
+    const row = this.store.db.prepare("SELECT 1 AS ok").get();
+    return { ok: row?.ok === 1 };
   }
 
   async syncGmailMailboxes() {
@@ -375,16 +383,24 @@ export default {
     headers.delete('X-Real-IP');
     headers.delete('X-Forwarded-For');
     const healthPath = url.pathname.length > 1 && url.pathname.endsWith('/') ? url.pathname.slice(0, -1) : url.pathname;
-    // Liveness is the Worker. Readiness is a short probe of invite-only-pilot.
-    // A cold constructor must not turn this check into room_unavailable.
+    const deployment = env.ROOM_DEPLOYMENT === 'production' || env.ROOM_DEPLOYMENT === 'staging' ? env.ROOM_DEPLOYMENT : undefined;
+    const mode = env.ROOM_SERVICE_MODE ?? 'cloudflare-staging';
+    // Liveness is the Worker. It does not construct or query the Durable Object.
     if ((healthPath === '/api/health' || isHealthAliasPath(url.pathname)) && (request.method === 'GET' || request.method === 'HEAD')) {
-      const deployment = env.ROOM_DEPLOYMENT === 'production' || env.ROOM_DEPLOYMENT === 'staging' ? env.ROOM_DEPLOYMENT : undefined;
-      const mode = env.ROOM_SERVICE_MODE ?? 'cloudflare-staging';
+      return finish(workerLivenessResponse(request, { mode, deployment }), 'worker');
+    }
+    // Readiness is SELECT 1 on invite-only-pilot, bounded by the probe budget.
+    // A cold constructor must not turn this check into room_unavailable.
+    if (healthPath === '/api/ready' && (request.method === 'GET' || request.method === 'HEAD')) {
       const probed = await durableObjectHealth({
         timeoutMs: HEALTH_PROBE_TIMEOUT_MS,
-        start: () => env.ROOM.getByName('invite-only-pilot').fetch(new Request(request, { headers })),
+        start: async () => {
+          const result = await env.ROOM.getByName('invite-only-pilot').probeStorage();
+          if (!result?.ok) throw new Error('storage probe failed');
+          return new Response(JSON.stringify({ status: 'ok' }), { status: 200, headers: { 'Content-Type': 'application/json; charset=utf-8' } });
+        },
         waitUntil: ctx?.waitUntil?.bind(ctx),
-        onSnapshot: (snapshot, timing) => ({ response: healthProbeResponse(snapshot, request, timing), servedBy: 'durable-object' }),
+        onSnapshot: (snapshot, timing) => ({ response: readyProbeResponse(snapshot, request, { mode, deployment, elapsedMs: timing.elapsedMs }), servedBy: 'durable-object' }),
         onUnready: (readiness, timing) => ({ response: healthLivenessResponse(request, { mode, deployment, readiness, ...timing }), servedBy: 'worker' })
       });
       return finish(probed.response, probed.servedBy);

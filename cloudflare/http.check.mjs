@@ -122,20 +122,23 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     for (const bot of ['GPTBot', 'OAI-SearchBot', 'ChatGPT-User', 'ClaudeBot', 'Claude-SearchBot', 'PerplexityBot', 'Meta-ExternalAgent']) {
       assert.match(robotsBody, new RegExp(`User-agent: ${bot}`), bot);
     }
-    const healthShape = async path => {
-      const body = await json(await call(path));
-      if (body.do) body.do = { status: body.do.status, statusCode: body.do.statusCode, ms: typeof body.do.ms };
-      return body;
-    };
+    const healthShape = async path => json(await call(path));
     const leftoverHealth = await healthShape('/room/health');
-    assert.equal(leftoverHealth.status, 'ok');
-    assert.equal(leftoverHealth.do.status, 'ok');
-    assert.equal(leftoverHealth.do.ms, 'number');
+    assert.deepEqual(leftoverHealth, { status: 'ok', mode: 'cloudflare-staging' });
     assert.deepEqual(leftoverHealth, await healthShape('/api/health'));
     assert.deepEqual(await healthShape('/api/healthz'), leftoverHealth);
     assert.deepEqual(await healthShape('/healthz'), leftoverHealth);
     assert.deepEqual(await healthShape('/room/healthz'), leftoverHealth);
     assert.deepEqual(await healthShape('/room/api/healthz'), leftoverHealth);
+    const ready = await json(await call('/api/ready'));
+    assert.equal(ready.status, 'ready');
+    assert.equal(ready.mode, 'cloudflare-staging');
+    assert.equal(ready.do.status, 'ok');
+    assert.equal(ready.do.statusCode, 200);
+    assert.equal(typeof ready.do.ms, 'number');
+    const readyHead = await call('/api/ready', { method: 'HEAD' });
+    assert.equal(readyHead.status, 200);
+    assert.equal(await readyHead.text(), '');
     const kits = await call('/room/kits');
     assert.equal(kits.status, 200);
     assert.match(kits.headers.get('content-type'), /text\/plain/);
