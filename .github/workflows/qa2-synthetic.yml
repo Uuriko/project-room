@@ -31,7 +31,7 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: npm i --no-save @axe-core/playwright@4
       - name: Stall probe
-        run: node scripts/stall-probe.mjs --url https://room.trydemigod.com --path /api/health --seconds 120 --max-ms 3000 > stall.json
+        run: node scripts/stall-probe.mjs --url https://room.trydemigod.com --path /api/ready --seconds 120 --max-ms 3000 > stall.json
       - name: Public pages gate
         if: always()
         # Waivers are tracked QA2 findings; delete each one when its fix deploys.

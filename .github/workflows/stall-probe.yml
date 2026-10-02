@@ -14,7 +14,7 @@ on:
       path:
         description: Path on that origin
         required: true
-        default: /api/health
+        default: /api/ready
       max_ms:
         description: Fail when p99 latency exceeds this many milliseconds
         required: true

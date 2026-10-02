@@ -21,6 +21,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { demoteToReadonly } from "../server/autonomy-tiers.mjs";
+import { solveIdentityMintProof } from "../server/agent-identities.mjs";
 import { generateKeyPair, signCard } from "../server/agent-card-signing.mjs";
 
 async function serve(t, ownerId = "owner") {
@@ -50,12 +51,12 @@ async function get(origin, path, token) {
 
 // An agent member with work permissions, so the referral flow can prove it
 // lands strangers at the lower tier regardless of the inviter's own power.
-async function enrollInviter(store, origin, ownerKey) {
-  const created = await post(origin, "/api/agent-identities", { displayName: "Inviter" });
+async function enrollInviter(store, origin, ownerKey, displayName = "Inviter") {
+  const created = await post(origin, "/api/agent-identities", { displayName });
   assert.equal(created.status, 201);
   store.identities.link(ownerKey, "commons", {
-    identityId: created.json.identityId, displayName: "Inviter",
-    permissions: ["steer", "accept_work", "complete_work", "verify"],
+    identityId: created.json.identityId, displayName,
+    permissions: ["steer", "accept_work", "complete_work", "verify", "invite_member"],
   });
   return { identityId: created.json.identityId, secret: created.json.secret };
 }
@@ -75,6 +76,14 @@ function craftToken(store, { jti = randomUUID(), chainId = randomUUID(), roomId 
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'minted')`
   ).run(jti, roomId, chainId, inviter, depth, maxDepth, issuedAt, expiresAt);
   return { token, jti, chainId };
+}
+
+function grantInvite(store, ownerKey, memberId) {
+  const member = store.room("commons").state.members[memberId];
+  const permissions = [...new Set([...(member.permissions ?? []), "invite_member"])];
+  store.command(ownerKey, "commons", { id: randomUUID(), type: T.MEMBER_ACCESS_CHANGED, data: {
+    memberId, expectedMemberRevision: member.revision, permissions, active: true,
+  } });
 }
 
 test("happy path: mint, preview, redeem lands a read+chat stranger; chain continues one deeper", async t => {
@@ -109,7 +118,8 @@ test("happy path: mint, preview, redeem lands a read+chat stranger; chain contin
   assert.deepEqual(member.permissions, []);
   assert.ok(!("referredBy" in member), "member record must not carry the inviter");
 
-  // The chain continues: the redeemed stranger mints at depth 1, same chain.
+  // The chain continues once the stranger can invite: they mint at depth 1.
+  grantInvite(store, ownerKey, redeemed.json.memberId);
   const second = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, redeemed.json.secret);
   assert.equal(second.status, 201);
   assert.equal(second.json.depth, 1);
@@ -153,7 +163,8 @@ test("depth cap binds mint and redeem; cap rejections are journaled", async t =>
   const redeemed = await post(origin, "/api/referral-invites/redeem", { token: first.json.token, displayName: "DepthZero" });
   assert.equal(redeemed.status, 201);
 
-  // ...the depth-0 member mints depth 1 (the cap is inclusive)...
+  // ...the depth-0 member, once they can invite, mints depth 1 (the cap is inclusive)...
+  grantInvite(store, ownerKey, redeemed.json.memberId);
   const last = await post(origin, "/api/referral-invites/mint", { roomId: "commons", maxDepth: 1 }, redeemed.json.secret);
   assert.equal(last.status, 201);
   assert.equal(last.json.depth, 1);
@@ -161,6 +172,7 @@ test("depth cap binds mint and redeem; cap rejections are journaled", async t =>
   assert.equal(deep.status, 201);
 
   // ...but the depth-1 member is AT the cap: minting fails and is journaled.
+  grantInvite(store, ownerKey, deep.json.memberId);
   const capped = await post(origin, "/api/referral-invites/mint", { roomId: "commons", maxDepth: 1 }, deep.json.secret);
   assert.equal(capped.status, 409);
   assert.equal(capped.json.error.code, "referral_depth_exceeded");
@@ -181,10 +193,12 @@ test("descendants cannot raise an inherited chain cap", async t => {
   const inviter = await enrollInviter(store, origin, ownerKey);
   const first = await post(origin, "/api/referral-invites/mint", { roomId: "commons", maxDepth: 1 }, inviter.secret);
   const zero = await post(origin, "/api/referral-invites/redeem", { token: first.json.token, displayName: "Depth zero" });
+  grantInvite(store, ownerKey, zero.json.memberId);
   const second = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, zero.json.secret);
   assert.equal(second.status, 201);
   assert.equal(second.json.maxDepth, 1, "unspecified descendant cap inherits the original");
   const one = await post(origin, "/api/referral-invites/redeem", { token: second.json.token, displayName: "Depth one" });
+  grantInvite(store, ownerKey, one.json.memberId);
   const raised = await post(origin, "/api/referral-invites/mint", { roomId: "commons", maxDepth: 12 }, one.json.secret);
   assert.equal(raised.status, 409);
   assert.equal(raised.json.error.code, "referral_depth_exceeded");
@@ -345,11 +359,12 @@ test("existing invite-code redemption still works alongside referral invites", a
 // Instinct's #996-family finding: POST /api/referral-invites/mint signs and
 // inserts ledger rows directly (no store.command), so a demoted t1_readonly
 // agent could mint signed invite tokens. Minting is a membership write and
-// must refuse t1 callers; t2 agents, human members, and the room owner pass.
+// must refuse t1 callers. A member without invite rights is refused too.
+// t2 agents who can invite, a human granted invite_member, and the owner pass.
 test("tier gate: t1_readonly agents cannot mint referral invites; t2, humans, and the owner can", async t => {
   const { store, origin, ownerKey } = await serve(t);
-  const t2 = await enrollInviter(store, origin, ownerKey);
-  const t1 = await enrollInviter(store, origin, ownerKey);
+  const t2 = await enrollInviter(store, origin, ownerKey, "Inviter");
+  const t1 = await enrollInviter(store, origin, ownerKey, "Inviter Two");
   demoteToReadonly(store.db, "commons", t1.identityId, { updatedBy: "owner" });
   store.command(ownerKey, "commons", { id: randomUUID(), type: T.MEMBER_ADDED,
     data: { memberId: "human1", displayName: "Human One", kind: "human", permissions: [] } });
@@ -361,6 +376,12 @@ test("tier gate: t1_readonly agents cannot mint referral invites; t2, humans, an
 
   const okT2 = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, t2.secret);
   assert.equal(okT2.status, 201);
+  const refusedHuman = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, humanKey);
+  assert.equal(refusedHuman.status, 403);
+  assert.equal(refusedHuman.json.error.code, "invite_not_permitted");
+  assert.equal(refusedHuman.json.reason, "invite_not_permitted");
+  assert.ok(Array.isArray(refusedHuman.json.next));
+  grantInvite(store, ownerKey, "human1");
   const okHuman = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, humanKey);
   assert.equal(okHuman.status, 201);
   const okOwner = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, ownerKey);
@@ -429,9 +450,75 @@ test("guest members cannot mint referral invites", async t => {
 
   const attempt = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, guest.token);
   assert.equal(attempt.status, 403);
-  assert.equal(attempt.json?.error?.code, "guest_scope_denied");
+  assert.equal(attempt.json?.error?.code, "invite_not_permitted");
+  assert.equal(attempt.json?.reason, "invite_not_permitted");
+  assert.ok(Array.isArray(attempt.json?.next));
   // The owner audit ledger must not record a minted token for the guest.
   assert.equal(store.db.prepare(
     "SELECT count(*) n FROM referral_invites WHERE inviter_member_id = ? AND status = 'minted'"
   ).get(guest.member.id).n, 0);
+});
+
+test("a chat member keeps their referral board and cannot mint until they can invite", async t => {
+  const { store, origin, ownerKey } = await serve(t);
+  const minted = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, ownerKey);
+  const redeemed = await post(origin, "/api/referral-invites/redeem", { token: minted.json.token, displayName: "Chat Member" });
+  assert.equal(redeemed.status, 201);
+  const board = await get(origin, "/api/rooms/commons/referrals", redeemed.json.secret);
+  assert.equal(board.status, 200);
+  const refused = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, redeemed.json.secret);
+  assert.equal(refused.status, 403);
+  assert.equal(refused.json.error.code, "invite_not_permitted");
+  assert.equal(store.db.prepare("SELECT count(*) n FROM referral_invites WHERE inviter_member_id=?").get(redeemed.json.memberId).n, 0);
+});
+
+test("a new referral redeem shares the anonymous identity mint limiter", async t => {
+  const { origin, ownerKey } = await serve(t);
+  for (let i = 0; i < 8; i++) {
+    const minted = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, ownerKey);
+    assert.equal(minted.status, 201, `mint ${i}`);
+    const redeemed = await post(origin, "/api/referral-invites/redeem", { token: minted.json.token, displayName: `Free ${i}` });
+    assert.equal(redeemed.status, 201, `redeem ${i}`);
+    assert.equal(typeof redeemed.json.secret, "string");
+  }
+  const ninth = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, ownerKey);
+  const withoutProof = await post(origin, "/api/referral-invites/redeem", { token: ninth.json.token, displayName: "Needs proof" });
+  assert.equal(withoutProof.status, 428);
+  assert.equal(withoutProof.json.error.code, "proof_required");
+  const proof = solveIdentityMintProof("Needs proof");
+  const limited = await fetch(`${origin}/api/referral-invites/redeem`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: origin },
+    body: JSON.stringify({ token: ninth.json.token, displayName: "Needs proof", proof }),
+  });
+  const limitedBody = await limited.json();
+  assert.equal(limited.status, 429);
+  assert.equal(limitedBody.error.code, "identity_mint_limited");
+  assert.equal(limited.headers.get("retry-after"), "60");
+  assert.equal(ninth.json.token.length > 0, true);
+});
+
+test("a referral redeem attaches an existing identity instead of minting another", async t => {
+  const { store, origin, ownerKey } = await serve(t);
+  const existing = store.identities.create("Already Here");
+  const before = store.db.prepare("SELECT count(*) n FROM agent_identities").get().n;
+  const minted = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, ownerKey);
+  const attached = await post(origin, "/api/referral-invites/redeem", { token: minted.json.token }, existing.secret);
+  assert.equal(attached.status, 201);
+  assert.equal(attached.json.attached, true);
+  assert.equal(attached.json.secret, undefined);
+  assert.equal(attached.json.memberId, existing.identityId);
+  assert.equal(store.db.prepare("SELECT count(*) n FROM agent_identities").get().n, before);
+  assert.equal(store.room("commons").state.members[existing.identityId].displayName, "Already Here");
+
+  const again = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, ownerKey);
+  const bad = await post(origin, "/api/referral-invites/redeem", { token: again.json.token, displayName: "Nope" }, "pri_" + "x".repeat(43));
+  assert.equal(bad.status, 401);
+  assert.equal(bad.json.error.code, "auth_required");
+  assert.equal(store.db.prepare("SELECT status FROM referral_invites WHERE jti=?").get(again.json.jti).status, "minted");
+
+  const taken = await post(origin, "/api/referral-invites/redeem", { token: again.json.token }, existing.secret);
+  assert.equal(taken.status, 409);
+  assert.equal(taken.json.error.code, "identity_already_linked");
+  assert.equal(store.room("commons").state.members[existing.identityId].active, true);
 });
