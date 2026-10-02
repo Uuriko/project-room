@@ -236,6 +236,7 @@ optional.push("server/google-oauth.mjs"); // Google sign-in (imported by server/
 optional.push("server/github-oauth.mjs"); // GitHub sign-in (imported by server/http.mjs)
 optional.push("server/oauth-provider.mjs"); // OAuth2 authorization server for connectors (imported by server/http.mjs)
 optional.push("server/oauth-provider-store.mjs"); // Durable hashed OAuth grants (imported by server/oauth-provider.mjs, server/writer-fence.mjs, and cloudflare/room.mjs)
+optional.push("server/abuse-rate-buckets.mjs"); // Durable abuse rate buckets (imported by server/http.mjs, server/writer-fence.mjs, and cloudflare/room.mjs)
 optional.push("connectors/muse.md"); // Muse custom-connector brief (served at /connectors/muse.md)
 optional.push("server/account-login-methods.mjs"); // Multi-method login model (imported by server/store.mjs)
 optional.push("server/account-deletion.mjs"); // RC-2026-09-19-078: deletion executor (imported by server/http.mjs; imports the src planner below)
