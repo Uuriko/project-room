@@ -43,7 +43,7 @@ export default [
     languageOptions: { ...languageOptions, globals: { ...globals.node, ...globals.browser } },
   },
   {
-    files: ["scripts/*-check.mjs", "scripts/*-exercise.mjs", "scripts/*-journey.mjs", "scripts/qa2/public-pages.mjs"],
+    files: ["scripts/*-check.mjs", "scripts/*-exercise.mjs", "scripts/*-journey.mjs", "scripts/qa2/public-pages.mjs", "scripts/build-og-atlas.mjs"],
     languageOptions: { ...languageOptions, globals: { ...globals.node, ...globals.browser } },
   },
 ];

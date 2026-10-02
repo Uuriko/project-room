@@ -12,6 +12,8 @@
     "test:browser:ci": "node scripts/browser-ci.mjs",
     "check": "node scripts/check.mjs",
     "lint": "node scripts/lint.mjs && node scripts/reachability.mjs --check",
+    "build:og-atlas": "node scripts/build-og-atlas.mjs",
+    "github-app:check": "node scripts/github-app-check.mjs",
     "provision": "node scripts/provision.mjs",
     "audit:invitations": "node scripts/audit-invitations.mjs",
     "test:handoff": "node --test tests/agent-handoff.test.js",
