@@ -30,4 +30,6 @@ test("isolated staging owns its Durable Object and does not take production rout
   assert.equal(staging.vars.ROOM_ORIGIN, "https://project-room-stage.getdasha.workers.dev");
   assert.equal(staging.vars.ROOM_DEPLOYMENT, "staging");
   assert.equal(staging.vars.ROOM_GMAIL_ENABLED, "0");
+  assert.equal(staging.vars.ROOM_SECURITY_CONTACT, "potter@trydemigod.com");
+  assert.equal(release.env.production.vars.ROOM_SECURITY_CONTACT, "potter@trydemigod.com");
 });

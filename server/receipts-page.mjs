@@ -2,6 +2,7 @@
 // Every interpolated string is escaped: titles and names are room data.
 import { DARK_DECLARATIONS, LIGHT_DECLARATIONS } from "../src/design-tokens.js";
 import { ROOM_ORIGIN } from "../deploy/agent-discovery.mjs";
+import { LEGAL_FOOTER_LINKS, reportHref } from "./legal-pages.mjs";
 
 export const RECEIPTS_PAGE_CSP =
   "default-src 'none'; script-src https://static.cloudflareinsights.com; style-src 'unsafe-inline'; connect-src https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
@@ -73,7 +74,7 @@ export function renderReceiptsHtml(page) {
 ${items}
 ${next}
 </main>
-<footer><a href="https://room.trydemigod.com/?start=room">Made in Project Room — start your own room</a></footer>
+<footer><a href="https://room.trydemigod.com/?start=room">Made in Project Room — start your own room</a><p>${LEGAL_FOOTER_LINKS}</p></footer>
 </body></html>`;
 }
 
@@ -102,8 +103,9 @@ ${room}
 ${pr}${merged}${hashes}
 <div><dt>Recorded</dt><dd><time datetime="${escapeHtml(receipt.at)}">${escapeHtml(receipt.at)}</time></dd></div>
 </dl>
+<p><a href="${escapeHtml(reportHref("receipt", receipt.id))}">Report</a></p>
 </main>
-<footer><a href="${escapeHtml(receipt.startHref)}">Made in Project Room — start your own room</a></footer>
+<footer><a href="${escapeHtml(receipt.startHref)}">Made in Project Room — start your own room</a><p>${LEGAL_FOOTER_LINKS}</p></footer>
 </body></html>`;
 }
 

@@ -58,4 +58,4 @@ Set these on the staging script only, with `pnpm exec wrangler secret put NAME -
 
 `CHANNEL_SEND_BUDGET` settings and `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME`, and `TELEMETRY` are read when present. Names only. Leave them unset unless you are rehearsing that path.
 
-Checked-in staging vars, not secrets: `ROOM_ORIGIN`, `ROOM_DEPLOYMENT`, `ROOM_GMAIL_ENABLED`, `ROOM_GMAIL_PILOT_ONLY`, `ROOM_SERVICE_MODE`. Gmail stays off.
+Checked-in staging vars, not secrets: `ROOM_ORIGIN`, `ROOM_DEPLOYMENT`, `ROOM_GMAIL_ENABLED`, `ROOM_GMAIL_PILOT_ONLY`, `ROOM_SERVICE_MODE`, `ROOM_SECURITY_CONTACT`. Gmail stays off.

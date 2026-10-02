@@ -1521,6 +1521,10 @@ summary { overflow-wrap: anywhere; }
 .settings-form { display: grid; gap: var(--space-3); }
 .settings-identity { margin: 0; padding-left: 1.1rem; }
 #settings-dialog details > summary { min-height: 44px; cursor: pointer; }
+/* Not a scroll anchor: on a phone the inbox scrolls the document, and anchoring
+   to this footer sends a restored reading position to the bottom. */
+.site-footer { margin: 2rem 1rem 1rem; color: var(--muted); font-size: var(--text-sm); overflow-anchor: none; }
+.site-footer a { color: inherit; }
 
 /* Updates destination. Styles live here so the page content policy allows them. */
 #updates-dialog { width: min(40rem, calc(100vw - 1.5rem)); max-height: min(36rem, calc(100vh - 2rem)); }
