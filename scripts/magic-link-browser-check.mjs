@@ -60,9 +60,20 @@ test("magic link: fresh visit with ?magic= signs straight in", { timeout: 60000 
     { waitUntil: "networkidle" });
   // Zero typing signs in; the account menu exposes the authenticated identity.
   await page.locator("#auth-panel").waitFor({ state: "hidden" });
-  if (await page.locator("#account-setup-dialog").isVisible()) await page.keyboard.press("Escape");
+  const nameDialog = page.locator("#account-setup-dialog");
+  try {
+    await nameDialog.waitFor({ state: "visible", timeout: 4000 });
+    await page.keyboard.press("Escape");
+    await nameDialog.waitFor({ state: "hidden" });
+  } catch { /* the name step already finished */ }
+  // A sign-in with no chosen room opens that account's room.
+  await page.waitForURL(/[?&]room=personal-/);
+  await page.locator("#main").waitFor({ state: "visible" });
   await page.locator("#session-menu-button").click();
-  await page.locator("#identity-label", { hasText: "Personal account" }).waitFor({ state: "visible" });
+  const label = page.locator("#identity-label");
+  await label.waitFor({ state: "visible" });
+  assert.notEqual((await label.textContent()).trim(), "");
+  assert.notEqual(await label.textContent(), "Not signed in");
   // The one-tap token is stripped from the URL so it cannot leak via referrers.
   assert.doesNotMatch(page.url(), /magic=/, "magic param is removed from the URL");
 });

@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "updated": "2026-10-01",
+  "reason": "Starting allowance from the 1 Oct 2026 production measurement. ready.medianMs is 1000 until a measured median replaces it in a pull request. That 1000 ms figure is the stall-probe ceiling used as a starting allowance, not a measured ready median.",
+  "ready": { "medianMs": 1000 },
+  "paths": {
+    "agentDocs": { "step": "firstPost", "medianMs": 770, "calls": 5, "closeReachable": false },
+    "agentMcp": { "step": "firstPost", "medianMs": null, "calls": null, "closeReachable": false },
+    "agentCode": { "step": "firstClose", "medianMs": null, "calls": null, "closeReachable": false },
+    "humanHome": { "step": "firstPost", "medianMs": 4100, "calls": null, "closeReachable": false },
+    "humanInvite": { "step": "firstPost", "medianMs": 2840, "calls": null, "closeReachable": false }
+  }
+}
