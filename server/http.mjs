@@ -12,6 +12,7 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypt
 import { ServiceError } from "./store.mjs";
 import { peerEventVisible, visibleBonds } from "./bonds.mjs";
 import { clientAddress, STREAM_INTERVAL_DEFAULT_MS } from "./deployment.mjs";
+import { isWorkersRuntime } from "./ip-blocklist.mjs";
 import { validId, memberCan, MAX_MESSAGE_COMMAND_BYTES } from "../src/events.js";
 import { SyntheticInboxTransport, FixtureChannelSender, GmailSender, gmailCredentialsFor, sendTelegramDirect } from "./inbox-transport.mjs";
 import { createSendBudgetRegistry } from "./channel-send-budgets.mjs";
@@ -32,6 +33,7 @@ import { SOURCE_REVISION, BUILD_ID } from "./version.mjs";
 import { agentErrorBody, errorCategory } from "../src/agent-error.mjs";
 import { DiagnosticsLog, supportExportBundle } from "./diagnostics.mjs";
 import { renderRoomExportHtml, EXPORT_HTML_CSP } from "./room-export-html.mjs";
+import { redactEventPage, redactEventRows, redactMessageTree, redactSnapshotState } from "./redact-read.mjs";
 import { discoveryDoc, isHealthAliasPath, rewriteRoomApiPrefix, EDGE_DOOR_HOSTS, ROOM_ORIGIN } from "../deploy/agent-discovery.mjs";
 import { noteIdentityMint } from "./growth-loop.mjs";
 import { buildOpenApiJson, discoverabilityErrorOverride, nextActionsForAccessRequest, nextActionsForAccessRequestStatus, nextActionsForInviteRedeem } from "./discoverability.mjs";
@@ -117,6 +119,47 @@ for (const name of ["favicon.svg", "icon.svg", "manifest.webmanifest"]) {
   if (asset) assets.set(`/room/${name}`, asset);
 }
 const reject = (status, code, message, headers) => { throw new ServiceError(status, code, message, headers ?? null); };
+
+// RFC 9116. Contact comes from ROOM_SECURITY_CONTACT. A bare address becomes
+// a mailto URI. Anything else must already be mailto: or https:, with no
+// line breaks. Unset or unusable values serve 404.
+let securityContactWarned = false;
+function securityContactFrom(raw) {
+  if (typeof raw !== "string") return null;
+  const trimmed = raw.trim();
+  if (!trimmed || /[\r\n]/.test(trimmed)) return null;
+  const contact = trimmed.includes(":") ? trimmed : `mailto:${trimmed}`;
+  if (!/^mailto:/i.test(contact) && !/^https:\/\//i.test(contact)) return null;
+  return contact;
+}
+function securityTxtDocument(contact, now = Date.now()) {
+  const expires = new Date(now + 365 * 24 * 60 * 60 * 1000).toISOString().replace(/\.\d{3}Z$/, "Z");
+  return `Contact: ${contact}\nExpires: ${expires}\n`;
+}
+function warnMissingSecurityContact() {
+  if (securityContactWarned) return;
+  securityContactWarned = true;
+  console.warn("ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404");
+}
+function warnMissingSecurityContactCheck() {
+  if (!securityContactFrom(process.env.ROOM_SECURITY_CONTACT)) warnMissingSecurityContact();
+}
+function writeSecurityTxt(req, res) {
+  if (req.method !== "GET" && req.method !== "HEAD") reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET, HEAD" });
+  const contact = securityContactFrom(process.env.ROOM_SECURITY_CONTACT);
+  if (!contact) {
+    warnMissingSecurityContact();
+    res.statusCode = 404;
+    res.setHeader("Content-Type", "text/plain; charset=utf-8");
+    res.end(req.method === "HEAD" ? undefined : "Not found\n");
+    return;
+  }
+  const body = securityTxtDocument(contact);
+  res.statusCode = 200;
+  res.setHeader("Content-Type", "text/plain; charset=utf-8");
+  res.setHeader("Content-Length", String(Buffer.byteLength(body)));
+  res.end(req.method === "HEAD" ? undefined : body);
+}
 // RFC 8288 discovery hints on machine-readable surfaces: the A2A agent card,
 // the llms packet, the skills catalog, and the public HTML door.
 const discoveryLinks = url => {
@@ -236,6 +279,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // config never holds up startup and the card reports "not configured".
   if (typeof telegram?.configured !== "boolean" || !Array.isArray(telegram.bindings)) throw new Error("Telegram configuration must come from telegramConfig()");
   if (deployment !== undefined && deployment !== "production" && deployment !== "staging") throw new Error("deployment must be production or staging");
+  // The Worker reads ROOM_SECURITY_CONTACT from its binding in edge-public.
+  // Logging process.env here would warn on every isolate that has no env var.
+  if (!isWorkersRuntime()) warnMissingSecurityContactCheck();
   const deploymentField = deployment ? { deployment } : {};
   // Google sign-in is off unless the caller passes googleConfig(env, origin).
   // The sign-in helper is created lazily so its PKCE/state table lives as long
@@ -338,6 +384,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // scoped tokens for the Project Room API. One instance per server (one per
   // Durable Object in production); client registry comes from config.
   const oauthProvider = createOAuthProvider({
+    db: store.db,
     clock: () => store.now(),
     // F-01 reuse signal: refresh-token reuse (possible theft) revokes the
     // whole token family inside the provider; log it as a structured
@@ -672,6 +719,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Content-Length": Buffer.byteLength(body) });
     res.end(head ? undefined : body);
   }
+  // Read-time message redaction (server/redact-read.mjs). Responses that
+  // return events, the room projection, or an export show the tombstone for
+  // a deleted message and only the current body after an edit. The log
+  // itself is not rewritten.
+  function projectionMessages(id) {
+    return store.room(id).state.messages;
+  }
   // Bounded request reader shared by JSON and NDJSON routes. A declared
   // oversize is refused immediately while draining in the background: a stalled
   // sender must not hold a connection open until its request timeout. For
@@ -734,7 +788,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     const pump = () => {
       if (res.destroyed || res.writableEnded) { cleanup(); return; }
       try {
-        const batch = store.eventsAfter(token, roomId, cursor, 100, binding);
+        const batch = redactEventPage(store.eventsAfter(token, roomId, cursor, 100, binding), projectionMessages(roomId));
         if (!batch.events.length) res.write(": connected transport only\n\n");
         for (const item of batch.events) {
           res.write(`id: ${item.sequence}\nevent: room-event\ndata: ${JSON.stringify(item)}\n\n`);
@@ -775,12 +829,18 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     // Cloudflare Web Analytics injects its beacon at the edge. The app does not
     // add that script; this document policy is what lets the beacon run.
     res.setHeader("Content-Security-Policy", "default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'");
+    // SEC-1: lock unused powerful features and cross-origin window access.
+    res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()");
+    res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
     try {
       if (req.headers.host !== new URL(expectedOrigin()).host) reject(403, "host_denied", "Unexpected host");
       let remoteAddress;
       try { remoteAddress = resolveClientAddress(req); }
       catch { reject(403, "proxy_denied", "Invalid proxy configuration"); }
       const url = new URL(req.url, expectedOrigin()), loopback = ["127.0.0.1", "::1"].includes(remoteAddress);
+      if (url.pathname === "/.well-known/security.txt" || url.pathname === "/room/.well-known/security.txt") {
+        return writeSecurityTxt(req, res);
+      }
       // Jev-harness admission gate, shadow mode (docs/JEV-GATES.md): score
       // the join with the cheap classifier, journal the would-be decision,
       // then proceed unchanged. Shadow mode never enforces — this helper
@@ -3205,8 +3265,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (url.pathname === "/api/agent-invites/redeem" && req.method !== "POST") {
         reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
       }
-      // Signed referral invites: any active member mints a bearer token and
-      // carries it out-of-band — the server never sends or dispatches it.
+      // Signed referral invites: the owner, or a member who can invite, mints
+      // a bearer token and carries it out-of-band — the server never sends it.
       // Redemption is unauthenticated (the token is the credential) and
       // lands the stranger at the fixed read+chat tier.
       if (url.pathname === "/api/referral-invites/mint" && req.method === "POST") {
@@ -3229,13 +3289,25 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (url.pathname === "/api/referral-invites/redeem" && req.method === "POST") {
         rate(`referral-invite-redeem:${remoteAddress}`, 20);
         const data = await body(req);
-        const withName = Object.hasOwn(data, "displayName");
-        if (!(exact(data, withName ? ["token", "displayName"] : ["token"]))
+        // SEC-1: a bearer attaches an existing identity. A new join shares
+        // the anonymous mint limiter, so proof is accepted on this body.
+        const fields = ["token"];
+        if (Object.hasOwn(data, "displayName")) fields.push("displayName");
+        if (Object.hasOwn(data, "proof")) fields.push("proof");
+        const proofOk = !Object.hasOwn(data, "proof") || (typeof data.proof === "string" && /^[A-Za-z0-9_-]{1,43}$/.test(data.proof));
+        if (!exact(data, fields)
             || typeof data.token !== "string"
-            || (withName && typeof data.displayName !== "string")) {
-          reject(422, "invalid_invite", "token and optional displayName are the accepted fields");
+            || (Object.hasOwn(data, "displayName") && typeof data.displayName !== "string")
+            || !proofOk) {
+          reject(422, "invalid_invite", "token, optional displayName, and optional proof are the accepted fields");
         }
-        const redeemedReferral = store.referralInvites.redeem({ token: data.token, displayName: data.displayName });
+        const redeemedReferral = store.referralInvites.redeem({
+          token: data.token,
+          displayName: data.displayName,
+          identitySecret: bearer(req) || null,
+          address: String(remoteAddress ?? ""),
+          proof: data.proof,
+        });
         // Jev-harness admission gate, shadow mode (docs/JEV-GATES.md):
         // score the join, journal the would-be decision, admit anyway.
         jevShadowAdmission("referral-invite:redeem", { roomId: redeemedReferral.roomId, identityId: redeemedReferral.identityId,
@@ -3986,7 +4058,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!dmMessageVisible(thread.thread)) reject(404, "message_not_found", "Message not found");
         const stripDmReplies = message => ({ ...message,
           replies: (message.replies ?? []).filter(dmMessageVisible).map(stripDmReplies) });
-        return json(res, 200, { ...thread, thread: stripDmReplies(thread.thread) });
+        return json(res, 200, { ...thread, thread: redactMessageTree(stripDmReplies(thread.thread)) });
       }
       if (!route && req.method === "GET") {
         const params = url.searchParams;
@@ -4014,7 +4086,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             eventLog: (snapshot.state.eventLog ?? []).filter(roomEventVisible),
             pins: (snapshot.state.pins ?? []).filter(pin => visibleIds.has(pin.messageId)) };
           if (snapshot.state.bonds) nextState.bonds = visibleBonds(snapshot.state.bonds, peerContext);
-          snapshot.state = nextState;
+          snapshot.state = redactSnapshotState(nextState);
         }
         return json(res, 200, snapshot);
       }
@@ -4231,7 +4303,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const format = url.searchParams.get("format") ?? "jsonl";
         if (!["jsonl", "html"].includes(format) || url.searchParams.getAll("format").length > 1) reject(422, "invalid_format", "format is jsonl (default) or html");
         if (format === "html") {
-          const rows = [...store.exportEvents(selected.token, roomId, fence)].filter(({ event }) => roomEventVisible(event));
+          const rows = redactEventRows([...store.exportEvents(selected.token, roomId, fence)].filter(({ event }) => roomEventVisible(event)), projectionMessages(roomId));
           const bytes = Buffer.from(renderRoomExportHtml(rows, { roomId }), "utf8");
           res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": bytes.length,
             "Content-Security-Policy": EXPORT_HTML_CSP,
@@ -4246,9 +4318,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // sequence (order + event ids are the stable references; import
         // rewrites dense row keys anyway), so renumbering is replay-safe
         // and keeps the export self-consistent for reimport.
-        let exportSequence = 0;
+        const visible = [];
         for (const line of store.exportEvents(selected.token, roomId, fence)) {
           if (!roomEventVisible(line.event)) continue;
+          visible.push(line);
+        }
+        let exportSequence = 0;
+        for (const line of redactEventRows(visible, projectionMessages(roomId))) {
           exportSequence += 1;
           lines.push(JSON.stringify({ sequence: exportSequence, event: line.event }) + "\n");
         }
@@ -4838,9 +4914,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           reject(422, "invalid_event_cursor",
             "events uses the query parameter after (a sequence number), not afterSequence. Retry with after set to the last sequence you handled. A refused afterSequence is not a filter and does not mean you are caught up.");
         }
-        return json(res, 200, store.eventsAfter(selected.token, roomId,
+        return json(res, 200, redactEventPage(store.eventsAfter(selected.token, roomId,
           Number(params.get("after") || 0), Number(params.get("limit") || 100),
-          { actor: params.get("actor"), since: params.get("since"), until: params.get("until"), expectedSessionBinding: fence }));
+          { actor: params.get("actor"), since: params.get("since"), until: params.get("until"), expectedSessionBinding: fence }), projectionMessages(roomId)));
       }
       if (route === "agent-inbox" && req.method === "GET") {
         // RC-2026-09-18-012: agent-scoped unified inbox. Agent members only
@@ -4892,7 +4968,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (route === "return-brief" && req.method === "GET") {
         const horizon = url.searchParams.get("horizon"), after = url.searchParams.get("after"), cursor = url.searchParams.get("cursor"), limit = url.searchParams.get("limit");
-        return json(res, 200, store.returnBrief(selected.token, roomId, { horizon: horizon === null ? null : Number(horizon), after: after === null ? null : Number(after), cursor: cursor === null ? null : Number(cursor), limit: limit === null ? undefined : Number(limit), expectedSessionBinding: fence }));
+        const brief = store.returnBrief(selected.token, roomId, { horizon: horizon === null ? null : Number(horizon), after: after === null ? null : Number(after), cursor: cursor === null ? null : Number(cursor), limit: limit === null ? undefined : Number(limit), expectedSessionBinding: fence });
+        if (brief?.history) brief.history.items = redactEventRows(brief.history.items, projectionMessages(roomId));
+        return json(res, 200, brief);
       }
       if (route === "cursor" && req.method === "POST") {
         const data = await body(req);
