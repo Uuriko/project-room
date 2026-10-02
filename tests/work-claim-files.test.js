@@ -22,6 +22,7 @@ const call = (registry, member, route, id, body) => handleWorkClaims({
     jill: { id: "jill", kind: "agent", active: true, permissions: ["accept_work", "complete_work", "manage_claims"] },
     claude: { id: "claude", kind: "agent", active: true, permissions: ["accept_work", "complete_work", "manage_claims"] },
     grokbot: { id: "grokbot", kind: "agent", active: true, permissions: ["accept_work", "complete_work", "manage_claims"] },
+    ada: { id: "ada", kind: "agent", active: true, permissions: ["accept_work", "complete_work", "manage_claims"] },
   } }) },
   roomId: "room1",
   auth: { member: { id: member, kind: "agent", permissions: [] } },
