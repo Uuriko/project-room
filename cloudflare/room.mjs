@@ -23,6 +23,7 @@ import { isEdgeDoorUrl, EDGE_DOOR_HOSTS, rewriteRoomApiPrefix, isHealthAliasPath
 import { durableInboundEmailConsumer, emailRoutingLimits, emailRoutingRejections } from '../server/email-routing-inbound.mjs';
 import { RETENTION_TABLES, runLiveStoreRetention } from '../server/retention-run.mjs';
 import { backfillPublicReadModel as fillPublicReadModel } from '../server/public-read-model.mjs';
+import { pruneOAuthProvider } from '../server/oauth-provider-store.mjs';
 import { syncClaimPullRequests } from '../server/claim-pr-sync.mjs';
 import { CRON_JOB_BUDGET_MS, HEARTBEAT_STORAGE_KEY, applyOutcomes, jobHealthResponse, jobHealthUnavailable, jobHealthView, runCronJobs } from './job-heartbeat.mjs';
 import { SOURCE_REVISION, BUILD_ID } from '../server/version.mjs';
@@ -293,19 +294,23 @@ export class ProjectRoom extends DurableObject {
       record: plan => { this.lastRetentionPlan = plan; } });
     await this.ctx.storage.put(RETENTION_CURSOR_KEY, (tableIndex + 1) % RETENTION_TABLES.length);
     // Delivered and dead-letter webhook rows are a cache. Pending and failed
-    // rows stay until dispatch finishes them.
+    // rows stay until dispatch finishes them. Expired OAuth grants are the
+    // same kind of cache: a room that has never issued one has no table.
     let webhookDeliveries = { deleted: 0 };
+    let oauthProvider = { pruned: 0 };
     try {
       webhookDeliveries = this.store.agentPlugin.pruneWebhookDeliveries();
+      oauthProvider = pruneOAuthProvider(this.store.db, { now: Date.now(), limit: 100 });
     } finally {
       console.info(JSON.stringify({
         event: 'room.retention', table: receipt.table, deleted: receipt.deleted,
         dryRun: receipt.dryRun ? 1 : 0, budgetExceeded: receipt.budgetExceeded ? 1 : 0,
         eligible: receipt.categories?.[receipt.table]?.eligible ?? 0,
-        webhookDeleted: webhookDeliveries?.deleted ?? 0
+        webhookDeleted: webhookDeliveries?.deleted ?? 0,
+        oauthPruned: oauthProvider?.pruned ?? 0
       }));
     }
-    return { ...receipt, webhookDeliveries };
+    return { ...receipt, webhookDeliveries, oauthProvider };
   }
 }
 
