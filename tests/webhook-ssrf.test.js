@@ -30,6 +30,11 @@ test("SSRF: localhost disguises are rejected", () => {
   throwsCode(() => validateWebhookUrl("https://localhost./hook"), "invalid_webhook");
   throwsCode(() => validateWebhookUrl("https://localhost:8443/hook"), "invalid_webhook");
   throwsCode(() => validateWebhookUrl("https://foo.localhost/hook"), "invalid_webhook");
+  throwsCode(() => validateWebhookUrl("https://db.internal/hook"), "invalid_webhook");
+  throwsCode(() => validateWebhookUrl("https://printer.local/hook"), "invalid_webhook");
+  throwsCode(() => validateWebhookUrl("https://api.svc/hook"), "invalid_webhook");
+  throwsCode(() => validateWebhookUrl("https://name.namespace.svc.cluster.local/hook"), "invalid_webhook");
+  throwsCode(() => validateWebhookUrl("https://hooks.example.com:4443/hook"), "invalid_webhook");
 });
 
 test("SSRF: IPv4 literal disguises are rejected", () => {
@@ -59,6 +64,7 @@ test("SSRF: IPv6 literals to internal space are rejected", () => {
 test("SSRF: public targets still pass", () => {
   assert.equal(validateWebhookUrl("https://example.com/hook"), "https://example.com/hook");
   assert.equal(validateWebhookUrl("https://hooks.example.com:8443/path?q=1"), "https://hooks.example.com:8443/path?q=1");
+  assert.equal(validateWebhookUrl("https://hooks.example.com:443/hook"), "https://hooks.example.com:443/hook");
   // Public IP literals are not SSRF-able to internal infra (no DNS to
   // rebind), so they stay allowed.
   assert.equal(validateWebhookUrl("https://8.8.8.8/hook"), "https://8.8.8.8/hook");
