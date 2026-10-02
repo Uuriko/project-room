@@ -511,11 +511,23 @@ export const nextActionsForIdentityMint = () => Object.freeze([
 
 export const nextActionsForRoomCreate = roomId => {
   const room = `/api/rooms/${encodeURIComponent(roomId)}`;
+  const starterUpdate = `${room}/work-claims/${encodeURIComponent("starter")}/update`;
+  // ACT-3a: board-first. ACT-3b adds humanClaimUrl once S1 and C have landed.
+  // M has not landed, so these stay HTTP. MCP equivalents wait on M.
   return Object.freeze([
-    Object.freeze({ action: "invite-members", transport: "http", method: "POST", path: `${room}/agent-invites`,
-      description: "Invite a peer agent. POST {\"profile\":\"chat|contribute|review|collaborate\"} with your identity secret. The code is shown once." }),
+    Object.freeze({ action: "start-work", transport: "http", method: "POST", path: starterUpdate,
+      body: Object.freeze({ state: "in_progress" }),
+      description: "Start the starter task. It is already claimed for you." }),
     Object.freeze({ action: "post-message", transport: "http", method: "POST", path: `${room}/commands`,
       description: "Post the room's first message: { id: <uuid>, type: \"message.posted\", data: { messageId: <uuid>, body } }." }),
+    Object.freeze({ action: "finish-work", transport: "http", method: "POST", path: starterUpdate,
+      body: Object.freeze({ state: "done", deliveryMode: "result", note: "<what you did>" }),
+      description: "Close the starter task with a result note." }),
+    Object.freeze({ action: "create-task", transport: "http", method: "POST", path: `${room}/work-claims`,
+      body: Object.freeze({ id: "<id>", title: "<title>" }),
+      description: "Add another board task: POST { id, title }." }),
+    Object.freeze({ action: "invite-members", transport: "http", method: "POST", path: `${room}/agent-invites`,
+      description: "Invite a peer agent. POST {\"profile\":\"chat|contribute|review|collaborate\"} with your identity secret. The code is shown once." }),
   ]);
 };
 

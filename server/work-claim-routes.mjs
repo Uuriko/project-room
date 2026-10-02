@@ -42,6 +42,7 @@ import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { evaluateReceipt } from "./jev-receipts.mjs";
 import { findClaimCollisions } from "./claim-collisions.mjs";
 import { emitWorkClaimEvent } from "./work-claim-events.mjs";
+import { ROOM_GUIDE_ID } from "./room-guide.mjs";
 import { fileLeaseConflictBody, fileLeaseConflicts, holdForRateLimit, readyClaims } from "./claim-coordination.mjs";
 import { collectPullRequestLookups, commitPullRequestLookup, readClaimPullBudget, readRoomDeployStatus, writeClaimPullBudget } from "./claim-pr-sync.mjs";
 import { enqueueClaimWake } from "./work-claim-events.mjs";
@@ -115,8 +116,9 @@ const leaseHoursOfBody = data => ("leaseHours" in data ? data.leaseHours : undef
 
 // Writes (create, claim, renew, update) need a contribute, review, or
 // collaborate profile, the room owner, or a human who holds contribute
-// rights. Reading stays open to every member. Rooms whose authority does
-// not name an owner are fixture registries: they do not model profiles.
+// rights. Reading stays open to every member. A room that names no owner
+// does not open the board: only an explicit member with one of those
+// profiles can mutate.
 const WORK_CLAIM_PROFILES = Object.freeze({
   contribute: ["accept_work", "complete_work"],
   review: ["verify"],
@@ -131,17 +133,20 @@ function resolveWorkClaimAccess(store, roomId, auth) {
   if (typeof store?.roomAuthority === "function") {
     try { authority = store.roomAuthority(roomId); } catch { authority = null; }
   }
-  const enforced = typeof authority?.ownerId === "string" && authority.ownerId.length > 0;
-  const live = enforced ? authority.members?.[auth.member.id] : null;
-  const member = live && typeof live === "object"
+  const ownerId = typeof authority?.ownerId === "string" && authority.ownerId.length > 0 ? authority.ownerId : null;
+  const members = authority?.members;
+  const memberId = auth?.member?.id;
+  const listed = members && typeof members === "object" && typeof memberId === "string"
+    && Object.hasOwn(members, memberId) && members[memberId];
+  const member = listed && typeof listed === "object"
     ? {
       ...auth.member,
-      ...live,
-      id: auth.member.id,
-      permissions: Array.isArray(live.permissions) ? live.permissions : (auth.member.permissions ?? []),
+      ...listed,
+      id: memberId,
+      permissions: Array.isArray(listed.permissions) ? listed.permissions : (auth.member.permissions ?? []),
     }
-    : auth.member;
-  return { authority, enforced, member };
+    : null;
+  return { authority, ownerId, member };
 }
 
 function holdsProfile(permissions, profile) {
@@ -149,25 +154,22 @@ function holdsProfile(permissions, profile) {
 }
 
 function mayWriteWorkClaims(access) {
-  if (!access.enforced) return true;
   const member = access.member;
   if (!member || member.active === false) return false;
-  if (member.id === access.authority.ownerId) return true;
+  if (access.ownerId && member.id === access.ownerId) return true;
   const permissions = new Set(member.permissions ?? []);
   if (member.kind === "human") return permissions.has("accept_work") || permissions.has("complete_work");
   return holdsProfile(permissions, "contribute") || holdsProfile(permissions, "review") || holdsProfile(permissions, "collaborate");
 }
 
 function mayManageAnyClaim(access) {
-  if (!access.enforced) return false;
   const member = access.member;
   if (!member || member.active === false) return false;
-  if (member.id === access.authority.ownerId) return true;
+  if (access.ownerId && member.id === access.ownerId) return true;
   return (member.permissions ?? []).includes("manage_claims");
 }
 
 function mayOptOutOfLease(access) {
-  if (!access.enforced) return true;
   return mayManageAnyClaim(access);
 }
 
@@ -408,11 +410,26 @@ export async function handleWorkClaims(options) {
   }
 }
 
+// ACT-1a: Room Guide may claim and close only claims tagged starter. This is
+// the HTTP choke point (the handler cannot be wrapped, and server/http.mjs is
+// out of scope). It runs before the owner check so a non-starter claim is
+// guide_starter_only, not work_not_owner. C's capability check, when it lands,
+// should keep this refusal.
+function refuseRoomGuideOffStarter(registry, roomId, auth, workClaimId, method, reject) {
+  if (method === "GET" || method === "HEAD") return;
+  if (auth?.member?.id !== ROOM_GUIDE_ID) return;
+  const item = typeof workClaimId === "string" ? registry.get(roomId, workClaimId) : null;
+  if (!item?.tags?.includes("starter")) {
+    reject(403, "guide_starter_only", "Room Guide can only claim and close starter tasks.");
+  }
+}
+
 function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRoute, workClaimId, helpers, registry, pullBatch = { results: [], rateLimitedUntil: null, skipped: false }, deployStatus = null }) {
   const { json, reject, body } = helpers;
   if (req.method !== "GET" && req.method !== "HEAD") enforceAutonomyTierForAction({
     db: store.db, roomId, state: { room: { ownerId: store.roomAuthority?.(roomId)?.ownerId } },
     actor: auth.member, action: `${req.method} work-claim ${workClaimRoute}`, fail: reject });
+  refuseRoomGuideOffStarter(registry, roomId, auth, workClaimId, req.method, reject);
   const nowMs = Date.now();
   const caller = auth.member.id;
   // Every committed claim change appends one work_claim.updated room event

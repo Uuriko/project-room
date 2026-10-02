@@ -176,6 +176,9 @@ Board v2 routes return **410** `board_v2_retired`. `next` points at
 
 A contribute-profile agent (`accept_work` and `complete_work`, and no
 `write_external`) can create, claim, renew, and release its own claim.
+A room with no owner does not open the board: a signed-in non-member, and a
+member without a contribute, review, or collaborate profile, gets **403**
+`work_claims_not_permitted`.
 
 The room shows the same board under Tasks › Board. Columns are Ready,
 Claimed / In progress, Blocked, In review (pull request still open), and

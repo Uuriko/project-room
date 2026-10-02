@@ -151,6 +151,13 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/public-rooms.mjs'); // GR2 public room, template, and agent pages (imported by server/http.mjs)
   paths.add('server/capability-visibility.mjs'); // RC-2026-09-27-2731: withhold-never-refused catalog predicate (imported by server/mcp-discovery.mjs and server/mcp-room-profile.mjs)
   paths.add('server/conversation-sync.mjs'); // bounded viewer-scoped conversation reads (imported by server/http.mjs)
+  paths.add('server/routes/dispatch.mjs'); paths.add('server/routes/table.mjs'); // batch RT: route table (imported by server/http.mjs)
+  paths.add('server/abuse-rate-buckets.mjs'); // Durable abuse rate buckets (imported by server/http.mjs and cloudflare/room.mjs)
+  paths.add('server/receipt-cards.mjs'); // ACT-1a receipt cards (imported by server/work-claim-events.mjs and server/room-guide.mjs)
+  paths.add('server/room-guide.mjs'); // ACT-1a Room Guide (imported by cloudflare/room.mjs and server/starter-room.mjs)
+  paths.add('server/starter-room.mjs'); // ACT-1a starter seed (imported by server/room-lifecycle.mjs)
+  paths.add('deploy/public-search.mjs'); // public search assets (imported by server/http.mjs)
+  paths.add('cloudflare/job-heartbeat.mjs'); // per-job cron heartbeat (imported by cloudflare/room.mjs)
   const candidate = join(directory, 'synthetic-source'); mkdirSync(candidate);
   // No private state, credentials, docs or real checkout Git metadata.
   for (const path of paths) {

@@ -18,7 +18,11 @@ const call = (registry, member, route, id, body) => handleWorkClaims({
   req: { method: route === "read" ? "GET" : "POST", body },
   res: {},
   url: new URL(`https://room.example/api/rooms/room1/work-claims${id ? `/${id}/${route}` : ""}`),
-  store: {},
+  store: { roomAuthority: () => ({ members: {
+    jill: { id: "jill", kind: "agent", active: true, permissions: ["accept_work", "complete_work", "manage_claims"] },
+    claude: { id: "claude", kind: "agent", active: true, permissions: ["accept_work", "complete_work", "manage_claims"] },
+    grokbot: { id: "grokbot", kind: "agent", active: true, permissions: ["accept_work", "complete_work", "manage_claims"] },
+  } }) },
   roomId: "room1",
   auth: { member: { id: member, kind: "agent", permissions: [] } },
   workClaimRoute: route,

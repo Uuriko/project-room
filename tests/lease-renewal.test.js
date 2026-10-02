@@ -227,7 +227,10 @@ const fakeHelpers = () => {
 const runRoute = async ({ route, id, body = {}, memberId = "quill", registry, storeMessages = [] }) => {
   const helpers = fakeHelpers();
   const store = {
-    roomAuthority: () => ({ members: { quill: { id: "quill" }, grok: { id: "grok" } } }),
+    roomAuthority: () => ({ members: {
+      quill: { id: "quill", kind: "agent", active: true, permissions: ["accept_work", "complete_work"] },
+      grok: { id: "grok", kind: "agent", active: true, permissions: ["accept_work", "complete_work"] },
+    } }),
     room: () => ({ sequence: 1, state: { messages: storeMessages } }),
   };
   try {
