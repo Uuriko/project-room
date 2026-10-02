@@ -123,7 +123,7 @@ async function lookupPull(pullRequest, { fetchImpl, token, nowMs }) {
 const SHA = /^[0-9a-f]{40}$/;
 
 function rateLimitResult(response, token, nowMs) {
-  let message = "";
+  const message = "";
   const remaining = responseHeader(response, "x-ratelimit-remaining");
   const until = rateLimitUntil({
     status: response.status,
