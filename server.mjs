@@ -1,5 +1,3 @@
-import { GmailMailbox } from './server/gmail-mailbox.mjs';
-import { startGmailSync } from './server/gmail-sync.mjs';
 import { mkdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { RoomStore } from "./server/store.mjs";
@@ -7,14 +5,12 @@ import { stitchConfigFromEnv } from "./server/inbox-stitch.mjs";
 import { createRoomServer } from "./server/http.mjs";
 import { telegramConfig } from "./server/channel-adapters/telegram-config.mjs";
 import { defaultServerArgs } from "./server/boot-options.mjs";
-import { ChannelDrainer, createChannelDrainScheduler, channelDrainLimits } from "./server/channel-drain.mjs";
+import { wireNodeJobs } from "./server/jobs.mjs";
 import { deploymentConfig } from "./server/deployment.mjs";
 import { createServer } from "node:http";
 import { maintenanceEnabled, maintenanceReply } from "./server/maintenance.mjs";
 import { growthCollector } from "./src/growth-emit.js";
 import { loadFromFile, saveToFile } from "./src/growth-persistence.js";
-import { createWatcher } from "./src/growth-watch.js";
-import { createScheduler, defaultGrowthRules, DEFAULT_INTERVAL_MS } from "./src/growth-scheduler.js";
 import { createGrowthHttp } from "./src/growth-http.js";
 import { acquireInstanceLock } from "./server/instance-lock.mjs";
 import { validateCriticalConfig } from "./server/boot-config.mjs";
@@ -51,21 +47,18 @@ try {
 } catch (error) { instanceLock?.release(); throw error; }
 // Event-push dispatch: after an event commit journals webhook deliveries,
 // flush them fire-and-forget so the signed POSTs leave without waiting for
-// the cron tick (which stays the restart-safe backstop). The kick never
+// the job tick (which stays the restart-safe backstop). The kick never
 // blocks the request path — the drain runs on a microtask and failures
-// stay in the durable retry queue.
+// stay in the durable retry queue. The same scheduler retries webhooks,
+// polls the land queue and linked claims, and runs retention and integrity.
 if (store) store.landQueue.configure({ env: process.env });
-if (store) store.agentPlugin.setDispatchKick(() => {
-  queueMicrotask(() => { store.agentPlugin.drainWebhookDeliveries().catch(() => {}); });
-});
 // Track C C13/C14 — growth scheduler state. Declared before the server is
 // created so the C14 read-only HTTP surface can close over live status via
 // a getter evaluated per request (the scheduler itself starts after listen).
-let growthScheduler = null;
+let nodeJobs = null;
 let growthIntervalMs = 0;
 // Task 9 — channel drain scheduler state. Declared before the server is
 // created so the listen callback can report its status (same as growth).
-let channelDrainScheduler = null;
 let channelDrainIntervalMs = 0;
 // Track C C14 — read-only growth HTTP surface (GET /growth/summary,
 // /growth/digest, /growth/health). Pure reads over the collector and the
@@ -73,8 +66,8 @@ let channelDrainIntervalMs = 0;
 // paused (maintenance) mode, where the minimal handler takes over.
 const growthHttp = paused ? null : createGrowthHttp({
   collector: growthCollector,
-  getSchedulerStatus: () => growthScheduler
-    ? { running: growthScheduler.isRunning(), tickCount: growthScheduler.getTickCount(), intervalMs: growthIntervalMs }
+  getSchedulerStatus: () => nodeJobs?.growthEnabled
+    ? { running: nodeJobs.isRunning(), tickCount: nodeJobs.getGrowthTickCount(), intervalMs: growthIntervalMs }
     : { running: false, tickCount: 0, intervalMs: growthIntervalMs }
 });
 const serverArgs = paused ? null : defaultServerArgs({ store, origin, streamInterval, trustedLocalProxy: production, telegram: telegramConfig(process.env), growth: growthHttp });
@@ -88,8 +81,7 @@ const server = paused ? createServer((req, res) => {
     res.writeHead(reply.status, reply.headers); res.end(req.method === "HEAD" ? undefined : reply.body);
   } catch { res.writeHead(400, { "Cache-Control": "no-store" }); res.end(); }
 }) : createRoomServer(serverArgs);
-const gmailScheduler = !paused && serverArgs.gmailAuth ? startGmailSync(new GmailMailbox(store, serverArgs.gmailAuth)) : null;
-server.on('close', () => gmailScheduler?.stop());
+server.on('close', () => nodeJobs?.stop());
 // Track C C11 — growth collector persistence. The snapshot lives in its own
 // JSON file next to the store file; it never touches the store schema. Any
 // failure here only costs analytics history, never boot or shutdown.
@@ -115,45 +107,28 @@ server.listen(port, host, () => {
   console.log(`Project Room ${paused ? "paused" : production ? "invite-only pilot" : "local pilot"}: ${origin}`);
   // C13 readiness note: the listen line above must stay the first stdout write,
   // because packaging tests treat first stdout data as "server ready".
-  if (!paused) console.log(growthScheduler && growthScheduler.isRunning()
+  if (!paused) console.log(nodeJobs?.growthEnabled && nodeJobs.isRunning()
     ? `[growth] scheduler started (tick every ${growthIntervalMs}ms)`
     : "[growth] scheduler disabled");
-  if (!paused) console.log(channelDrainScheduler && channelDrainScheduler.isRunning()
+  if (!paused) console.log(nodeJobs?.channelEnabled && nodeJobs.isRunning()
     ? `[channel-drain] scheduler started (tick every ${channelDrainIntervalMs}ms)`
     : "[channel-drain] scheduler disabled");
 });
-// Track C C13 — growth scheduler. Drives the C12 watcher on a fixed
-// cadence and logs triggered alert hits (no delivery anywhere). Any
-// failure here only costs alert logging, never boot or shutdown.
-if (!paused) {
+// One scheduler for every node job in server/jobs.mjs. Growth watch and
+// channel drain keep their previous intervals. Webhook retry, land-queue,
+// claim polls, retention, and integrity run here too.
+if (!paused && store) {
   try {
-    const growthWatcher = createWatcher({ collector: growthCollector, rules: defaultGrowthRules() });
-    const envInterval = process.env.GROWTH_WATCH_INTERVAL_MS;
-    const intervalMs = envInterval === undefined || envInterval === "" ? DEFAULT_INTERVAL_MS : Number(envInterval);
-    growthIntervalMs = intervalMs;
-    growthScheduler = createScheduler({ watcher: growthWatcher, intervalMs });
-    growthScheduler.start();
+    nodeJobs = wireNodeJobs(store, {
+      env: process.env,
+      channelWebhooks: serverArgs.channelWebhooks,
+      gmailAuth: serverArgs.gmailAuth
+    });
+    growthIntervalMs = nodeJobs.growthIntervalMs;
+    channelDrainIntervalMs = nodeJobs.channelIntervalMs;
   } catch (error) {
-    growthScheduler = null;
-    console.warn(`[growth] scheduler disabled: ${error?.message ?? error}`);
-  }
-}
-// Task 9 — scheduled auto-drain of pending_channel_updates. The drainer scans
-// the journal on a fixed cadence and poison-screens pending slices (both are
-// session-free); the inbox import itself stays owner-session bound until the
-// B20 system import authority exists, so slices are honestly deferred, never
-// imported. Any failure here only costs drain latency, never boot or shutdown.
-if (!paused && serverArgs.channelWebhooks) {
-  try {
-    const drainer = new ChannelDrainer({ store, webhooks: serverArgs.channelWebhooks });
-    const envInterval = process.env.CHANNEL_DRAIN_INTERVAL_MS;
-    const intervalMs = envInterval === undefined || envInterval === "" ? channelDrainLimits.intervalMs : Number(envInterval);
-    channelDrainIntervalMs = intervalMs;
-    channelDrainScheduler = createChannelDrainScheduler({ drainer, intervalMs });
-    channelDrainScheduler.start();
-  } catch (error) {
-    channelDrainScheduler = null;
-    console.warn(`[channel-drain] scheduler disabled: ${error?.message ?? error}`);
+    nodeJobs = null;
+    console.warn(`[jobs] scheduler disabled: ${error?.message ?? error}`);
   }
 }
 let closing = false;
@@ -161,10 +136,8 @@ function close() {
   if (closing) return;
   closing = true;
   if (!paused) {
-    try { growthScheduler?.stop(); }
-    catch (error) { console.warn(`[growth] scheduler stop failed: ${error?.message ?? error}`); }
-    try { channelDrainScheduler?.stop(); }
-    catch (error) { console.warn(`[channel-drain] scheduler stop failed: ${error?.message ?? error}`); }
+    try { nodeJobs?.stop(); }
+    catch (error) { console.warn(`[jobs] scheduler stop failed: ${error?.message ?? error}`); }
     try { saveToFile(growthSnapshotPath, growthCollector); }
     catch (error) { console.warn(`[growth] snapshot write failed: ${error?.message ?? error}`); }
   }

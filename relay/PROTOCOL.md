@@ -18,9 +18,9 @@ An operator mints a Room agent invite with `profile: "contribute"`, then stores 
 }
 ```
 
-`displayName` is optional. `profile`, when present, must be `contribute`. The returned code is `<machineId>.<verifier>`. It is single use and expires 15 minutes after minting. `POST /admin/enroll-codes/<machineId>/expire` revokes an unused code immediately.
+`rooms` (1..8 ids) is accepted in place of `roomId`. The enroll reply's `roomId` is the first room. `roomOrigin` and `displayName` are optional and are stored on the enroll record. `profile`, when present, must be `contribute`. The returned code is `<machineId>.<verifier>`. It is single use and expires 15 minutes after minting. `POST /admin/enroll-codes/<machineId>/expire` revokes an unused code immediately.
 
-`POST /v0/enroll` with `{ "code" }` returns the body in machine/PROTOCOL.md. `relayUrl` is `wss://<relay>/v0/machines/link`. The machine token is returned once. The relay stores only its SHA-256. A wrong token is HTTP 401. The token is not accepted as a query parameter.
+`POST /v0/enroll` with `{ "code" }` returns the body in machine/PROTOCOL.md. `POST /enroll` is the same handler with `Deprecation: true`, kept for one release. `relayUrl` is taken from the host that served the enroll request: `wss://<host>/v0/machines/link` (or `ws://` when the enroll request was not https). The machine id is the first label of the machine token, not a path segment. The machine token is returned once. The relay stores only its SHA-256. A wrong token is HTTP 401. The token is not accepted as a query parameter.
 
 A second connection for the same machine closes the previous socket with code `4001` and reason `replaced`. Calls still in flight on the old socket fail with `409 link_replaced`.
 
@@ -36,7 +36,7 @@ The daemon answers `{ "type": "result", "id", "ok", "result" | "error" }`. A res
 
 ## Tools
 
-`tools/list` returns the default allowlist in machine/PROTOCOL.md. A name outside that list is refused with `403 tool_not_allowed` and is not forwarded. There is no host shell.
+`tools/list` returns the default allowlist in machine/PROTOCOL.md. A name outside that list is refused with `403 tool_not_allowed` and is not forwarded. There is no host shell. Hello does not change that list.
 
 ## Lease tokens
 
@@ -55,11 +55,13 @@ Room mints Ed25519 compact JWS lease tokens. The relay verifies them with `ROOM_
 | `exp` | Unix seconds, no further than 15 minutes out |
 | `jti` | Token id. A live token may be presented again. Room revokes one by listing its `jti` on halt |
 
-Phase 0 passthrough does not use these tokens. The caller sends a Room identity secret or agent API key, and the relay reads the board.
+Phase 0 passthrough does not use these tokens. The caller sends a Room identity secret or agent API key, and the relay reads the board. A call is forwarded with `caller.verified: true` only after that check succeeds. Until `ROOM_RESOURCE_LEASE_PUBLIC_JWK` is set, lease-token calls stay `503 lease_verifier_unconfigured`.
 
 ## Slots
 
 A board file `resource/<machineId>/<slot>` is one slot. `slot` is `desk` or `scratch`. Of the active, unexpired claims of `kind: "work"` on that path, the earliest `claimedAt` holds it. `done`, `unclaimed`, a lapsed `leaseExpiresAt`, another kind, and the other slot do not.
+
+The daemon itself accepts only `desk` and `scratch`. The relay still forwards the slot the board claim names.
 
 ## Control plane
 

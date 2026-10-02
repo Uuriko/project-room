@@ -200,7 +200,9 @@ export async function createAgentIdentity(origin, displayName, options = {}) {
 export async function redeemAgentInvite(origin, code, displayName, options = {}) {
   const value = await discoveryRequest(origin, "/api/agent-invites/redeem", { method: "POST", body: { code, displayName }, token: options.identitySecret }, options);
   if (options.identitySecret && value?.identityId) value.secret = options.identitySecret;
-  if (typeof value?.identityId !== "string" || typeof value?.secret !== "string" || typeof value?.memberId !== "string")
+  const roomToken = value?.mcpToken?.credential;
+  if (typeof value?.identityId !== "string" || typeof value?.memberId !== "string"
+    || typeof roomToken !== "string" || !roomToken.startsWith("rak_"))
     throw new RoomClientError(200, "invalid_response", "Room returned an invalid invite redemption");
   return value;
 }
@@ -262,7 +264,7 @@ export class RoomAgentClient {
   #memberId;
   constructor({ origin, roomId, token, memberId, fetchImpl = globalThis.fetch }) {
     assertServiceOrigin(origin);
-    if (!validId(roomId) || typeof token !== "string" || !/^(?:[A-Za-z0-9_-]{43}|ga1\.[A-Za-z0-9_-]{43}|pri_[A-Za-z0-9_-]{43,128})$/.test(token)) throw new Error("A valid Room and access key are required");
+    if (!validId(roomId) || typeof token !== "string" || !/^(?:[A-Za-z0-9_-]{43}|ga1\.[A-Za-z0-9_-]{43}|pri_[A-Za-z0-9_-]{43,128}|rak_[A-Za-z0-9_-]{16,256})$/.test(token)) throw new Error("A valid Room and access key are required");
     if (memberId !== undefined && !validId(memberId)) throw new Error("Choose a valid expected agent member");
     this.#origin = origin; this.#roomId = roomId; this.#token = token; this.#fetch = fetchImpl;
     this.#memberId = memberId;
@@ -338,7 +340,7 @@ export class RoomAgentClient {
     if (!this.#memberId) throw new RoomClientError(0, "member_required", "Configure the expected agent member before checking access");
     // Round-2 #101: identity secrets are room-scoped at use, so /api/session
     // (which has no room) cannot resolve them. Check against the room path.
-    if (this.#token.startsWith("pri_")) return this.#checkIdentityConnection({ signal });
+    if (this.#token.startsWith("pri_") || this.#token.startsWith("rak_")) return this.#checkIdentityConnection({ signal });
     const value = await this.#fetchPath("/api/session", undefined, signal), member = value?.member;
     // Round-2 #101: identity secrets do not expire (credentialKind "identity",
     // expiresAt null); room keys still require a real expiry.
@@ -704,8 +706,12 @@ export class RoomAgentClient {
   }
   renewWorkItem(id, { progressMessageId, note, leaseHours, signal } = {}) {
     return this.#request(`/work-claims/${encodeURIComponent(id)}/renew`,
-      { progressMessageId, ...(note === undefined ? {} : { note }),
+      { ...(progressMessageId === undefined ? {} : { progressMessageId }), ...(note === undefined ? {} : { note }),
         ...(leaseHours === undefined ? {} : { leaseHours }) }, signal);
+  }
+  workClaimConfig({ maxMemberOpenClaims, signal } = {}) {
+    if (maxMemberOpenClaims === undefined) return this.#request("/work-claims/config", undefined, signal);
+    return this.#request("/work-claims/config", { maxMemberOpenClaims }, signal);
   }
   releaseWorkItem(id, { note, reason, signal } = {}) {
     return this.#request(`/work-claims/${encodeURIComponent(id)}/release`,

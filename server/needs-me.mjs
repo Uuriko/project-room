@@ -10,10 +10,12 @@
 // changes do not advance the room sequence, so they use updated_at.
 // Pass cursor back unchanged while hasMore is true, even for an empty page.
 // Continuation adds roomAfter, landIds (timestamp tie breakers), and an optional
-// numeric floor. Reading discovers items; it never acknowledges or resolves them.
+// numeric floor. Answered, handled, and cleared updates leave this list even
+// when the caller does not pass a cursor.
 
 import { ServiceError } from "./store.mjs";
 import { nextWorkStep } from "../src/workflow.js";
+import { retiredNeedsMeKeys } from "./updates.mjs";
 
 const MAX_ROOMS = 40;
 const MAX_PER_KIND = 8;
@@ -268,7 +270,19 @@ function mentionHorizon(store, roomId, memberId, after, through) {
 // The cursor acknowledges discovery, not completion. Only advance through
 // sequence groups returned in full; multiple attention kinds may share an event.
 export function collectNeedsMe(store, secret, { since } = {}) {
-  const identity = store.identities.resolveGlobalIdentitySecret(secret);
+  let identity = null;
+  let allowedRooms = null;
+  if (typeof secret === "string" && secret.startsWith("rak_")) {
+    const record = store.agentPlugin.verifyPresentedApiKey(secret);
+    if (!record) fail(401, "unauthenticated", "Unknown, revoked, or expired API key");
+    allowedRooms = record.scopes.filter(scope => scope.startsWith("mcp:room:")).map(scope => scope.slice("mcp:room:".length));
+    if (allowedRooms.length === 0) fail(403, "insufficient_scope", "This key is limited to its room");
+    const row = store.identities.get(record.identityId);
+    if (!row) fail(401, "unauthenticated", "Unknown or revoked identity credential");
+    identity = { identityId: row.identityId, displayName: row.displayName };
+  } else {
+    identity = store.identities.resolveGlobalIdentitySecret(secret);
+  }
   if (!identity) fail(401, "unauthenticated", "Unknown or revoked identity secret");
   const parsed = parseNeedsMeSince(since);
   const links = store.db.prepare(
@@ -285,6 +299,7 @@ export function collectNeedsMe(store, secret, { since } = {}) {
   let roomAfter = parsed.roomAfter ?? "";
   let hasMore = links.length > MAX_ROOMS;
   for (const link of links.slice(0, MAX_ROOMS)) {
+    if (allowedRooms && !allowedRooms.includes(link.roomId)) { roomAfter = link.roomId; continue; }
     if (link.archivedAt) { roomAfter = link.roomId; continue; }
     // Do not silently acknowledge a room whose authority/projection failed.
     const authority = store.roomAuthority(link.roomId);
@@ -308,7 +323,8 @@ export function collectNeedsMe(store, secret, { since } = {}) {
         if (kind.length > MAX_PER_KIND) through = Math.min(through, kind[MAX_PER_KIND].seq - 1);
         for (const item of kind) push(candidates, item);
       }
-      candidates = candidates.filter(item => item.seq <= through).sort((a, b) => a.seq - b.seq);
+      const retired = retiredNeedsMeKeys(store, link.roomId, link.memberId);
+      candidates = candidates.filter(item => item.seq <= through && !retired.has(`${item.kind}:${item.id}`)).sort((a, b) => a.seq - b.seq);
       const remaining = MAX_ITEMS - items.length;
       if (candidates.length > remaining) {
         through = Math.min(through, candidates[remaining].seq - 1);

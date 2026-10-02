@@ -8,13 +8,15 @@ on:
 permissions:
   contents: read
 
-# One in-flight run per pull request. Pushes to main share `test-main` with
-# cancel-in-progress, so a newer tip cancels superseded queued and in-progress
-# main runs and the newest tip is the one that stays. workflow_dispatch is
-# keyed by run id: a manual run neither cancels the tip nor is cancelled by it.
+# Pull requests each have their own group and cancel their own older runs.
+# Pushes to main share `test-main` and do not cancel the run already in
+# progress: GitHub finishes that main SHA and keeps only the newest pending
+# run (any older pending run in the group is cancelled). A main SHA can
+# therefore finish `test` between merges. workflow_dispatch is keyed by run
+# id: a manual run neither cancels the tip nor is cancelled by it.
 concurrency:
   group: ${{ github.event_name == 'workflow_dispatch' && format('{0}-dispatch-{1}', github.workflow, github.run_id) || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'test-main') || format('{0}-{1}', github.workflow, github.ref) }}
-  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+  cancel-in-progress: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main') && github.event_name != 'workflow_dispatch' }}
 
 jobs:
   # Pull requests only. Push to main skips this job so the full matrix starts
@@ -225,7 +227,7 @@ jobs:
         working-directory: cloudflare
         env:
           WRANGLER_SEND_METRICS: "false"
-        run: node --test compatibility.check.mjs store.check.mjs http.check.mjs google-auth.check.mjs bootstrap.check.mjs reminder-upgrade.check.mjs agent-upgrade.check.mjs maintenance.check.mjs recovery-switch.check.mjs scheduled-rpc.check.mjs version-signal.check.mjs edge-public.check.mjs webhook-doh.check.mjs health-probe.check.mjs public-search.check.mjs project-offers.check.mjs public-work-claims.check.mjs public-work-reviews.check.mjs public-work-mcp.check.mjs public-work-successors.check.mjs agent-wake.check.mjs webhook-delivery-budget.check.mjs operator-auth.check.mjs browser.check.mjs release-pause-browser.check.mjs room-entry-browser.check.mjs
+        run: node --test compatibility.check.mjs store.check.mjs http.check.mjs google-auth.check.mjs bootstrap.check.mjs reminder-upgrade.check.mjs agent-upgrade.check.mjs maintenance.check.mjs recovery-switch.check.mjs scheduled-rpc.check.mjs jobs-alarm.check.mjs version-signal.check.mjs edge-public.check.mjs webhook-doh.check.mjs health-probe.check.mjs public-search.check.mjs project-offers.check.mjs public-work-claims.check.mjs public-work-reviews.check.mjs public-work-mcp.check.mjs public-work-successors.check.mjs agent-wake.check.mjs webhook-delivery-budget.check.mjs operator-auth.check.mjs browser.check.mjs release-pause-browser.check.mjs room-entry-browser.check.mjs
       - name: Build exact assets and validate the deployment bundle
         working-directory: cloudflare
         env:

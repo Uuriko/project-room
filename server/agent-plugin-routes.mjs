@@ -222,7 +222,8 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
             path: `/api/agent-keys/${encodeURIComponent(k.keyId)}/revoke`,
             description: `Revoke ${k.keyId}: the key stops working immediately. Use rotate instead when you need continuity.` }),
         ]);
-    return json(res, 200, { keys, next });
+    const identityUsage = store.identities.mcpUsage(auth.identityId);
+    return json(res, 200, { keys, next, identityUsage });
   });
 
   // Both actions here are destructive and neither reads a body, so an empty

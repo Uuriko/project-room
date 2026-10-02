@@ -139,22 +139,24 @@ test("a redeemed agent follows the page through orient and a finished starter", 
   calls += 1;
   assert.equal(redeemed.status, 201);
   const joined = await redeemed.json();
-  assert.match(joined.secret, /^pri_/);
+  assert.match(joined.mcpToken.credential, /^rak_/);
+  assert.equal(joined.secret, undefined);
   assert.equal(joined.displayName, "Probe Agent");
   assert.equal(joined.connect.mcpUrl, connectFields().mcpUrl);
   assert.equal(joined.connect.claude, connectFields().claude);
-  assert.equal(JSON.stringify(joined.connect).includes(joined.secret), false);
+  assert.equal(JSON.stringify(joined.connect).includes(joined.mcpToken.credential), false);
   assert.equal(joined.starter.claimId, "starter");
   assert.equal(joined.starter.title, "Starter task");
+  const roomToken = joined.mcpToken.credential;
   const listed = await send(origin, "/mcp", {
-    method: "POST", token: joined.secret, body: { jsonrpc: "2.0", id: "1", method: "tools/list" },
+    method: "POST", token: roomToken, body: { jsonrpc: "2.0", id: "1", method: "tools/list" },
   });
   calls += 1;
   assert.equal(listed.status, 200, listed.text);
   assert.ok(Array.isArray(listed.json.result?.tools) && listed.json.result.tools.length > 0);
   const orientCurl = steps.find(step => step.url.endsWith("/orient"));
   const oriented = await fetch(orientCurl.url, {
-    headers: { authorization: orientCurl.headers.authorization.replace("$PROJECT_ROOM_SECRET", joined.secret) },
+    headers: { authorization: orientCurl.headers.authorization.replace("$PROJECT_ROOM_SECRET", roomToken) },
   });
   calls += 1;
   assert.equal(oriented.status, 200);
@@ -167,7 +169,7 @@ test("a redeemed agent follows the page through orient and a finished starter", 
   for (const step of board) {
     const response = await fetch(step.url, {
       method: step.method,
-      headers: { ...step.headers, authorization: step.headers.authorization.replace("$PROJECT_ROOM_SECRET", joined.secret) },
+      headers: { ...step.headers, authorization: step.headers.authorization.replace("$PROJECT_ROOM_SECRET", roomToken) },
       body: step.data,
     });
     calls += 1;

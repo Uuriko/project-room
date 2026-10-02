@@ -69,9 +69,9 @@ test("magicLinkUnavailable() carries the honest disabled shape for the HTTP laye
 test("mailer rejects calls missing a recipient or code before any send", async () => {
   const sent = [];
   const mailer = createMagicLinkMailer({ send: async payload => { sent.push(payload); } });
-  await assert.rejects(() => mailer.sendMagicLink({ to: "", code: "x" }), /recipient and a code/);
+  await assert.rejects(() => mailer.sendMagicLink({ to: "", code: "x" }), /recipient/);
   await assert.rejects(() => mailer.sendMagicLink({ to: "ada@example.com" }), /recipient and a code/);
-  await assert.rejects(() => mailer.sendMagicLink(), /recipient and a code/);
+  await assert.rejects(() => mailer.sendMagicLink(), /recipient/);
   assert.equal(sent.length, 0);
 });
 

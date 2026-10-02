@@ -136,7 +136,7 @@ test("missing server contract never initializes v3 or clears retained notices; m
   for (const damage of [s => s.replyRequestContractVersion = 2, s => s.state.replyRequests = null,
     s => s.state.replyRequests = [], s => Object.values(s.state.replyRequests)[0].revision++,
     s => delete s.state.members.owner]) {
-    const s = await f.client.snapshot(); damage(s);
+    const s = structuredClone(await f.client.snapshot()); damage(s);
     await assert.rejects(f.pull({ client: { ...f.client, snapshot: async () => s } }));
     assert.deepEqual(rows(f.config.directory), before);
   }

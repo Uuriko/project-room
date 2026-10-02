@@ -147,15 +147,19 @@ export function klmEst({ clicks = 0, chars = 0, words = 0 } = {}) {
   return { seconds: Math.round(seconds * 10) / 10, label: "est." };
 }
 
-function fill(parsed, { secret, roomId } = {}) {
+function fill(parsed, { secret, roomToken, roomId } = {}) {
   const headers = { ...parsed.headers };
   let data = parsed.data;
-  if (secret) {
-    for (const key of Object.keys(headers)) {
-      headers[key] = headers[key].replaceAll("<saved-identity-secret>", secret).replaceAll("$PROJECT_ROOM_SECRET", secret);
-    }
-    if (data) data = data.replaceAll("<saved-identity-secret>", secret).replaceAll("$PROJECT_ROOM_SECRET", secret);
-  }
+  const room = roomToken || secret;
+  const apply = value => {
+    if (typeof value !== "string") return value;
+    let next = value;
+    if (secret) next = next.replaceAll("<saved-identity-secret>", secret);
+    if (room) next = next.replaceAll("<room-mcp-token>", room).replaceAll("$PROJECT_ROOM_SECRET", room);
+    return next;
+  };
+  for (const key of Object.keys(headers)) headers[key] = apply(headers[key]);
+  data = apply(data);
   if (roomId && data) data = data.replaceAll('"roomId":"ROOM"', `"roomId":"${roomId}"`);
   return { ...parsed, headers, data };
 }

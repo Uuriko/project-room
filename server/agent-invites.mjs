@@ -154,6 +154,7 @@ export class AgentInvites {
     // Owner delegates (server/owner-delegates.mjs) arrive via
     // store.authenticate with the delegate flag stamped on the member copy.
     const auth = this.store.authenticate(token, roomId, expectedSessionBinding);
+    if (auth.account) this.store.accountLogins.assertEmailVerified(auth.account.id);
     const authority = this.store.roomAuthority(roomId);
     if (!auth.delegate && !canInviteMembers(authority, auth.member.id)) fail(403, "access_denied", "Invite grant required");
     // Minting invites is a membership write: the read-only autonomy tier
@@ -229,8 +230,11 @@ export class AgentInvites {
         const linked = this.db.prepare("SELECT member_id FROM identity_links WHERE room_id=? AND identity_id=?").get(row.room_id, existingIdentity.identityId);
         const member = linked && this.store.room(row.room_id).state.members[linked.member_id];
         if (!member?.active) fail(403, "access_ended", "Membership is no longer active");
+        const mcpToken = this.store.agentPlugin.issueOnboardingMcpToken({
+          identityId: existingIdentity.identityId, roomId: row.room_id, label: member.displayName
+        });
         return withConnect(this.store, row.room_id, member.id, { identityId: existingIdentity.identityId, roomId: row.room_id, memberId: member.id,
-          displayName: member.displayName, permissions: member.permissions, duplicate: true,
+          displayName: member.displayName, permissions: member.permissions, duplicate: true, mcpToken,
           next: redeemNext(row.room_id, member.displayName), nextActions: nextActionsForInviteRedeem(row.room_id) });
       }
       if (row.revoked_at != null) fail(410, "invite_revoked", "Invite code was revoked");
@@ -316,12 +320,14 @@ export class AgentInvites {
       if (row.created_by !== memberId) {
         this.store.referrals.record({ roomId: row.room_id, referrerMemberId: row.created_by, refereeMemberId: memberId, via: "invite", at: now });
       }
-      // No account session, no member_accounts row: the identity secret is the
-      // only credential. The secret is shown once, like identity-create. The
-      // response carries the same machine-readable next[] shape as signup
-      // (RC-2026-09-18-018), tailored to the invite path, so a redeemed agent
-      // knows its first moves without asking a human.
-      return withConnect(this.store, row.room_id, memberId, { identityId: identity.identityId, ...(existingIdentity ? { duplicate: false } : { secret: identity.secret }), roomId: row.room_id, memberId, displayName: name, permissions,
+      // Onboarding returns a room-scoped MCP token. The identity credential
+      // stays in the store and is not included in this response. Connect
+      // steps name the MCP URL; they do not carry the token.
+      const mcpToken = this.store.agentPlugin.issueOnboardingMcpToken({
+        identityId: identity.identityId, roomId: row.room_id, label: name
+      });
+      return withConnect(this.store, row.room_id, memberId, { identityId: identity.identityId, ...(existingIdentity ? { duplicate: false } : {}), mcpToken,
+        roomId: row.room_id, memberId, displayName: name, permissions,
         next: redeemNext(row.room_id, name), nextActions: nextActionsForInviteRedeem(row.room_id) });
     });
   }

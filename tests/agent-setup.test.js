@@ -14,7 +14,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { openMcpTestClient } from "../scripts/mcp-test-client.mjs";
 import { connectRoom, setupTarget } from "../client/agent-setup.mjs";
 import { openSetupJournal } from "../client/setup-journal.mjs";
-import { readAgentConnection } from "../client/agent-connection.mjs";
+import { readAgentConnection, saveAgentConnection } from "../client/agent-connection.mjs";
 import { createAgentIdentity, redeemAgentInvite } from "../client/room-agent.mjs";
 const run = promisify(execFile), secret = () => "pri_" + randomBytes(32).toString("base64url");
 async function fixture(t) {
@@ -133,7 +133,9 @@ test("CLI returns nonsecret connection and reuses a saved identity without repla
     const pack = await host.call("room_list_work"); assert.equal(pack.result.isError, undefined);
   } finally { await host.close(); }
 
-  const other = await f.connect({ target: f.invite("lab").code, directory: join(f.root, "other"), identityFrom: result.configDirectory });
+  const identityDir = join(f.root, "identity");
+  saveAgentConnection(identityDir, { version: 1, origin: saved.origin, roomId: result.roomId, memberId: result.memberId, token: saved.secret });
+  const other = await f.connect({ target: f.invite("lab").code, directory: join(f.root, "other"), identityFrom: identityDir });
   assert.equal(other.identityId, result.identityId);
 });
 test("target parsing refuses human login links and cross-origin ambiguity", () => {

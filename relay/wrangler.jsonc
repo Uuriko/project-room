@@ -3,8 +3,9 @@
   "main": "src/index.mjs",
   "compatibility_date": "2026-07-30",
   "compatibility_flags": ["nodejs_compat"],
-  "workers_dev": false,
+  "workers_dev": true,
   "preview_urls": false,
+  "routes": [{ "pattern": "relay.trydemigod.com", "custom_domain": true }],
   "durable_objects": {
     "bindings": [{ "name": "MACHINE", "class_name": "MachineLink" }]
   },

@@ -258,7 +258,8 @@ test("HTTP: prefix-preserving /room/api/* aliases identity-create, agent-rooms, 
   });
   assert.equal(redeemed.status, 201, JSON.stringify(redeemed.body));
   assert.equal(redeemed.body.roomId, "edge-den");
-  assert.match(redeemed.body.secret, /^pri_/);
+  assert.equal(redeemed.body.secret, undefined);
+  assert.match(redeemed.body.mcpToken.credential, /^rak_/);
   assert.equal(store.roomAuthority("edge-den").ownerId, minted.body.identityId);
   const missing = await post("/room/api/not-a-route", { data: { displayName: "Nope" } });
   assert.equal(missing.status, 404);
@@ -294,7 +295,10 @@ test("client prefixes /room/api on www.getdasha.com and leaves workers.dev canon
       return Response.json({ roomId: "edge-den", ownerMemberId: "ai_edge", identityId: "ai_edge", duplicate: false }, { status: 201 });
     }
     if (url.endsWith("/api/agent-invites/redeem") || url.endsWith("/room/api/agent-invites/redeem")) {
-      return Response.json({ identityId: "ai_peer", secret: "pri_p", memberId: "ai_peer", roomId: "edge-den", permissions: ["read"] }, { status: 201 });
+      return Response.json({
+        identityId: "ai_peer", memberId: "ai_peer", roomId: "edge-den", permissions: ["read"],
+        mcpToken: { credential: "rak_" + "p".repeat(32) }
+      }, { status: 201 });
     }
     return Response.json({ error: { code: "not_found" } }, { status: 404 });
   };
@@ -436,9 +440,10 @@ test("HTTP: agent owner mints an invite; a peer redeems — no human owner token
   assert.equal(redeemed.status, 201, JSON.stringify(redeemed.body));
   assert.equal(redeemed.body.roomId, "grok-den");
   assert.match(redeemed.body.identityId, /^ai_/);
-  assert.match(redeemed.body.secret, /^pri_/);
+  assert.equal(redeemed.body.secret, undefined);
+  assert.match(redeemed.body.mcpToken.credential, /^rak_/);
   assert.deepEqual(redeemed.body.permissions, minted.body.permissions);
-  const peer = store.authenticate(redeemed.body.secret, "grok-den");
+  const peer = store.authenticate(redeemed.body.mcpToken.credential, "grok-den");
   assert.equal(peer.member.id, redeemed.body.identityId);
   assert.equal(peer.member.kind, "agent");
   assert.equal(store.roomAuthority("grok-den").ownerId, owner.identityId);
@@ -488,7 +493,8 @@ test("CLI: identity-create → room-create → invite-code → peer redeem-invit
 
   const redeemed = await cli(origin, ["redeem-invite", minted.json.code, "Muse", "--yes"]);
   assert.equal(redeemed.status, 0, redeemed.stderr);
-  assert.match(redeemed.json.secret, /^pri_/);
+  assert.match(redeemed.json.mcpToken.credential, /^rak_/);
+  assert.equal(redeemed.json.secret, undefined);
   assert.equal(redeemed.json.roomId, "grok-muse-dogfood");
   assert.notEqual(redeemed.json.identityId, identityId);
 
@@ -501,7 +507,7 @@ test("CLI: identity-create → room-create → invite-code → peer redeem-invit
   const peerConnected = await cli(origin, ["connect", join(peerDir, "muse")], {
     ROOM_AGENT_ROOM: "grok-muse-dogfood",
     ROOM_AGENT_MEMBER: redeemed.json.identityId,
-    ROOM_AGENT_TOKEN: redeemed.json.secret,
+    ROOM_AGENT_TOKEN: redeemed.json.mcpToken.credential,
   });
   assert.equal(peerConnected.status, 0, peerConnected.stderr);
   const peerChecked = await cli(origin, ["check"], { ROOM_AGENT_CONFIG: join(peerDir, "muse") });
@@ -570,7 +576,7 @@ test("CLI: bootstrap-agent-room one-shot → peer redeem → check + orient + he
   const peerConnected = await cli(origin, ["connect", join(peerDir, "muse")], {
     ROOM_AGENT_ROOM: "boot-den",
     ROOM_AGENT_MEMBER: redeemed.json.identityId,
-    ROOM_AGENT_TOKEN: redeemed.json.secret,
+    ROOM_AGENT_TOKEN: redeemed.json.mcpToken.credential,
   });
   assert.equal(peerConnected.status, 0, peerConnected.stderr);
   const peerChecked = await cli(origin, ["check"], { ROOM_AGENT_CONFIG: join(peerDir, "muse") });

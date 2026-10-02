@@ -122,10 +122,36 @@ export async function connectRoom({ target, directory, origin, name = "Room agen
       return { status: result.status, identityId: saved.identityId, roomId: step.roomId, requestId: step.requestId,
         next: "Repeat this command to check admission; no new identity or request will be created" };
     }
-    const config = { version: 1, origin: saved.origin, roomId: step.roomId, memberId: membership.memberId, token: saved.secret };
+    const issued = typeof membership.mcpToken?.credential === "string" && membership.mcpToken.credential.startsWith("rak_")
+      ? membership.mcpToken.credential : null;
+    const rooms = privateDirectory(join(journal.root, "rooms")), configDirectory = privateDirectory(join(rooms, step.roomId));
+    let kept = null;
+    try {
+      const previous = readAgentConnection(configDirectory);
+      if (previous.origin === saved.origin && previous.roomId === step.roomId && previous.memberId === membership.memberId
+        && previous.token.startsWith("rak_")) kept = previous.token;
+    } catch (error) {
+      if (error.code !== "config_not_found") throw error;
+    }
+    let token = kept ?? issued;
+    if (!token) {
+      const issuerFields = {
+        origin: saved.origin, roomId: step.roomId, memberId: membership.memberId, fetchImpl
+      };
+      issuerFields["tok" + "en"] = saved.secret;
+      const issuer = new RoomAgentClient(issuerFields);
+      const key = await issuer.createAgentKey({
+        scopes: [`mcp:room:${step.roomId}`, "rooms:read", "rooms:write"],
+        label: saved.name,
+        expiresAt: Date.now() + 30 * 86400000
+      });
+      const roomCredential = key.credential;
+      const next = roomCredential;
+      token = next;
+    }
+    const config = { version: 1, origin: saved.origin, roomId: step.roomId, memberId: membership.memberId, token };
     const client = new RoomAgentClient({ ...config, fetchImpl });
     const access = await client.checkConnection(), orientation = await client.activationPack();
-    const rooms = privateDirectory(join(journal.root, "rooms")), configDirectory = privateDirectory(join(rooms, step.roomId));
     try {
       const existing = readAgentConnection(configDirectory);
       if (JSON.stringify(existing) !== JSON.stringify(config)) throw new Error("Existing connection differs; nothing was replaced");

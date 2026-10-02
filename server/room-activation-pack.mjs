@@ -11,6 +11,7 @@
 import { roomOrientation } from "../src/work-selectors.js";
 import { pinnedMessages, roomKind, roomPolicy, WORK_STATES, roomTrust } from "../src/events.js";
 import { annotateOrientation, claimNote, withContentTrust } from "./content-trust.mjs";
+import { buildOrient } from "./orient.mjs";
 
 /**
  * Activation pack schema (returned by buildActivationPack).
@@ -138,7 +139,7 @@ const pinnedOf = ({ messageId, pinnedById, pinnedAt, message }) => ({
 const cursorOf = sequence =>
   Buffer.from(JSON.stringify({ v: 1, seq: sequence }), "utf8").toString("base64url");
 
-export function buildActivationPack(store, roomSlug) {
+export function buildActivationPack(store, roomSlug, viewerId = null) {
   // Unknown rooms fail here with the store's 404 (room_not_found).
   const { sequence, state } = store.room(roomSlug);
   if (!state.room) throw new Error("Room projection is missing its room record");
@@ -151,7 +152,7 @@ export function buildActivationPack(store, roomSlug) {
     .filter(item => item && OPEN_WORK_STATES.has(item.state))
     .sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0))
     .map(item => workOf(item, now));
-  return withContentTrust({
+  const pack = withContentTrust({
     room: {
       slug: state.room.id,
       title: state.room.title,
@@ -169,4 +170,8 @@ export function buildActivationPack(store, roomSlug) {
     eventCursor: cursorOf(sequence),
     generatedAt: now
   });
+  if (typeof viewerId === "string" && viewerId && state.members?.[viewerId]) {
+    pack.orient = buildOrient(store, roomSlug, viewerId, { text: false });
+  }
+  return pack;
 }

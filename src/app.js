@@ -18,6 +18,7 @@ import { installAgentConnections } from "./agent-connections.js";
 import { catalogById } from "./room-roster.js";
 import { installRoomInstructions } from "./room-instructions.js";
 import { createNeedsAttentionCard } from "./needs-attention.js";
+import { mountUpdates } from "./updates-ui.js";
 import { installReminders } from "./reminders.js";
 import { installPortableWork, installResultCopy } from "./portable-work.js";
 import { replyDraftKey, replyDraftData, validReplyDraft, replyFollowUp, creditQuestion, confirmsReplyCommand, REPLY_CANCELLED } from "./reply-requests.js";
@@ -557,6 +558,10 @@ landQueueUI = lazyDisclosure({ panel: $("#land-queue-panel"),
 instructionsUI = installRoomInstructions({ client, getState: () => state, onSaved: text => notice(text) });
 // #662: owner "needs your attention" card (owner-gated; hidden for everyone else).
 const ownerAttentionCard = createNeedsAttentionCard({ client, section: $("#needs-attention") });
+// UPDATES HOOK (U batch). Palette Catch up, Activity, Mentions, and Saved for
+// later open this destination with the matching filter. Room UI v2 removes
+// the old entries later. The badge counts actionable updates only.
+const updatesUi = mountUpdates({ client, host: document.querySelector(".room-main") });
 portableWorkUI = installPortableWork({ client, getState: () => state, onSaved: messageId => {
   const visible = conversation?.byId.has(messageId);
   if (visible) revealMessage(messageId);
@@ -4157,6 +4162,7 @@ function chooseRoomAction(id) {
   const entry = roomActionEntries().find(value => value.id === id);
   if (!entry) { renderRoomActions(); $("#room-actions-query").focus(); return; }
   closeRoomActions(false);
+  if (updatesUi.openAction(id)) return;
   if (id === "how-invite") {
     const button = $("#invite-people-button");
     if (button && !button.hidden) { button.click(); return; }
@@ -5121,7 +5127,7 @@ const actionSpecs = {
   complete: [T.WORK_COMPLETED, "Post actual evidence", area("summary", "What did you complete?") + field("evidenceUrl", "Evidence URL (HTTPS, display only)", "url") + field("evidenceVersion", "Exact commit or artifact version (display only)") + area("nextAction", "Next handoff") + area("signedEvidence", "Signed evidence JSON (room-signed-evidence/1 — required; paste the object your agent identity key signed)")],
   claim: [T.CLAIM_ACQUIRED, "Record authorized write scope", field("repository", "Repository (owner/name)") + field("ref", "Branch or exact revision") + area("paths", "Paths or folder/**, one per line") + field("expiresAt", "Expiry (ISO timestamp, with timezone)") + "<p>Reserves matching scope in this room. External permission is separate.</p>"],
   release: [T.CLAIM_RELEASED, "Release this scope?", "<p>Other work can reserve it next. This does not stop an outside agent or change the work's result. Confirm any outside activity separately.</p>"],
-  renew: [T.CLAIM_RENEWED, "Renew this scope", field("progressMessageId", "Progress message id — post a progress update in the room first, then paste its message id") + field("expiresAt", "New expiry (ISO timestamp, with timezone)") + "<p>Extends the reservation. The progress update must be a public message you posted after the current lease started.</p>"],
+  renew: [T.CLAIM_RENEWED, "Renew this scope", field("expiresAt", "New expiry (ISO timestamp, with timezone)") + field("progressMessageId", "Progress message id (optional evidence)") + "<p>Extends the reservation. A heartbeat is enough. If you cite a message, it must be a public message you posted after the current lease started.</p>"],
   verify: [T.VERIFICATION_RECORDED, "Record an evidence check", '<label>Result<select name="result" required><option value="">Choose after checking</option><option value="pass">Pass</option><option value="fail">Finding / fail</option></select></label>' + area("summary", "What did you check at this exact version?")],
   decide: [T.OWNER_DECISION_RECORDED, "Record your decision", '<label>Decision<select name="decision" required><option value="">Choose</option><option value="approved">Approve</option><option value="changes_requested">Request changes</option><option value="rejected">Reject</option></select></label>' + area("reason", "Reason") + field("sourceMessageId", "Source message id — post your rationale in the room first, then paste its message id") + "<p>Approval does not merge, deploy, or spend money.</p>" ]
 };

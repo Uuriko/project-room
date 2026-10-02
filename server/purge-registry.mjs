@@ -96,6 +96,16 @@ const ROWS = [
     }
   },
   {
+    "table": "account_security_events",
+    "key": "account_id",
+    "action": "delete",
+    "match": {
+      "account": [
+        "account_id"
+      ]
+    }
+  },
+  {
     "table": "account_session_slots",
     "key": "account_id",
     "action": "delete",
@@ -916,6 +926,16 @@ const ROWS = [
     }
   },
   {
+    "table": "messages",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
     "table": "owner_delegate_grants",
     "key": "room_id",
     "action": "delete",
@@ -1106,6 +1126,26 @@ const ROWS = [
   },
   {
     "table": "private_reminders",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
+    "table": "private_update_commands",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
+    "table": "private_update_marks",
     "key": "room_id",
     "action": "delete",
     "match": {

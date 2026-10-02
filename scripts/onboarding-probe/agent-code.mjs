@@ -31,13 +31,25 @@ async function openAccount(origin, stamp) {
     }),
   });
   jar.store(signup);
+  let csrf = signup.json?.csrf;
+  let binding = signup.json?.sessionBinding;
+  let extraBytes = 0;
+  let calls = 2;
+  if (signup.status === 202 && jar.header()) {
+    const session = await probeFetch(`${origin}/api/account-session`, { headers: { origin, cookie: jar.header() } });
+    jar.store(session);
+    csrf = session.json?.csrf ?? csrf;
+    binding = session.json?.sessionBinding ?? binding;
+    extraBytes = session.bytes;
+    calls += 1;
+  }
   return {
-    calls: 2,
-    bytes: first.bytes + signup.bytes,
+    calls,
+    bytes: first.bytes + signup.bytes + extraBytes,
     status: signup.status,
     cookie: jar.header(),
-    csrf: signup.json?.csrf,
-    binding: signup.json?.sessionBinding,
+    csrf,
+    binding,
   };
 }
 
@@ -59,7 +71,7 @@ export async function runAgentCode({ target, outDir = null, created = emptyCreat
   const session = await openAccount(origin, stamp);
   calls += session.calls;
   steps.push({ step: "signup", t: elapsed(started), calls, bytes: session.bytes, status: session.status });
-  if (session.status !== 201) {
+  if (session.status !== 201 && session.status !== 202) {
     confusions.push("Probe owner signup did not succeed.");
     return finish(outDir, blank(steps, confusions));
   }
@@ -91,7 +103,10 @@ export async function runAgentCode({ target, outDir = null, created = emptyCreat
   steps.push({ step: "mint-code", t: elapsed(started), calls, bytes: invite.bytes, status: invite.status });
   const code = invite.json?.code;
   if (!code) {
-    confusions.push("The probe owner did not receive an invite code.");
+    const reason = invite.json?.error?.code === "email_unverified"
+      ? "The probe owner account is unverified, so it cannot mint an invite."
+      : "The probe owner did not receive an invite code.";
+    confusions.push(reason);
     return finish(outDir, blank(steps, confusions));
   }
   const page = await probeFetch(`${origin}/a/${encodeURIComponent(code)}`, { headers: { accept: "*/*" } });
@@ -114,18 +129,19 @@ export async function runAgentCode({ target, outDir = null, created = emptyCreat
   calls += redeemed.calls;
   steps.push({ step: "redeem", t: elapsed(started), calls, bytes: redeemed.bytes, status: redeemed.response.status });
   const joined = redeemed.response.json ?? {};
-  if (redeemed.response.status >= 300 || typeof joined.secret !== "string") {
-    confusions.push("Redeem from the invite page did not return a secret.");
+  const roomToken = joined.mcpToken?.credential;
+  if (redeemed.response.status >= 300 || typeof roomToken !== "string") {
+    confusions.push("Redeem from the invite page did not return a room token.");
     return finish(outDir, blank(steps, confusions));
   }
-  created.identities.push({ id: joined.identityId, secret: joined.secret });
+  created.identities.push({ id: joined.identityId, secret: roomToken });
   const firstPost = { t: elapsed(started), calls };
   const rest = curls.filter(curl => curl !== redeem && curl.url.includes("/work-claims/"));
   const closeReachable = rest.some(curl => (curl.data || "").includes('"done"'));
   let firstClose = null;
   if (!closeReachable) confusions.push("The invite page did not include a done call.");
   for (const curl of rest) {
-    const done = await executeCurl(curl, { secret: joined.secret });
+    const done = await executeCurl(curl, { secret: roomToken });
     calls += done.calls;
     const step = { step: (curl.data || "").includes('"done"') ? "done" : "board", t: elapsed(started), calls, bytes: done.bytes, status: done.response.status };
     steps.push(step);

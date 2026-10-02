@@ -83,6 +83,8 @@ test("findAccountByVerifiedEmail links magic and password methods to one account
   store.createAccount("acct-2", "test");
   logins.linkPasswordMethod("acct-1", { email: "ada@example.com", verifier: "v" });
   logins.linkMagicMethod("acct-2", { email: "bob@example.com" });
+  assert.equal(logins.findAccountByVerifiedEmail("ADA@example.com"), null);
+  logins.markEmailVerified("acct-1", "ada@example.com");
   assert.equal(logins.findAccountByVerifiedEmail("ADA@example.com"), "acct-1");
   assert.equal(logins.findAccountByVerifiedEmail("bob@example.com"), "acct-2");
   assert.equal(logins.findAccountByVerifiedEmail("nobody@example.com"), null);

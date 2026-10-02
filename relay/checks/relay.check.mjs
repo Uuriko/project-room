@@ -52,6 +52,9 @@ test("an enroll code works once, expires, and stays bound to its room", async ()
     label: "Ada's desk", roomId: "room_alpha", ownerMemberId: "mem_ada", inviteCode: "RM-0123456789ABCDEF", displayName: "Ada desk",
   });
   assert.equal(minted.status, 201);
+  assert.equal(minted.body.inviteCode, "RM-0123456789ABCDEF");
+  assert.equal(minted.body.roomId, "room_alpha");
+  assert.equal(minted.body.displayName, "Ada desk");
   const delta = Date.parse(minted.body.expiresAt) - Date.now();
   assert.ok(delta > 14 * 60 * 1000 && delta < 16 * 60 * 1000, `expiresAt was ${delta} ms out`);
   const tampered = `${minted.body.code.slice(0, -1)}${minted.body.code.endsWith("a") ? "b" : "a"}`;
@@ -60,6 +63,7 @@ test("an enroll code works once, expires, and stays bound to its room", async ()
   assert.equal(refused.body.error, "code_invalid");
   const issued = await enroll(on, minted.body.code);
   assert.equal(issued.status, 200);
+  assert.equal(issued.headers.get("deprecation"), null);
   assert.equal(issued.body.machineId, minted.body.machineId);
   assert.equal(issued.body.roomId, "room_alpha");
   assert.equal(issued.body.inviteCode, "RM-0123456789ABCDEF");
@@ -122,6 +126,8 @@ test("a wrong link token is refused and a reconnect replaces the socket", async 
   const closed = await until(() => first.closeInfo(), 2000);
   assert.equal(closed.code, 4001);
   assert.match(closed.reason, /replaced/);
+  const bye = await until(() => first.seen.find(msg => msg.type === "bye") ?? null, 2000);
+  assert.deepEqual(bye, { type: "bye" });
   const again = await postCall(off, machine.machineId, { tool: "desktop.screenshot", arguments: {} }, {
     authorization: `Bearer ${tokenFor(off, machine.machineId)}`,
   });

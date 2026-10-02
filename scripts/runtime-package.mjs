@@ -14,8 +14,7 @@ const v12Assets = [...v11Assets, "src/reply-requests.js"];
 const v13Assets = [...v12Assets, "src/work-help.js"];
 const v14Assets = [...v13Assets, "src/help-offers.js"];
 const inboxAssets = [...v14Assets, "src/inbox-client.js", "src/inbox-ui.js", "src/inbox-quarantine-ui.js"];
-export const publicAssets = [inboxAssets[0], "about.html", "offers.html", "src/project-offers-ui.js", "src/owner-project-offers-ui.js", "src/project-offers.css", "favicon.svg", "icon.svg", "manifest.webmanifest", "push-sw.js", inboxAssets[1], "src/member-display-names.js", "src/room-layout.js", ...inboxAssets.slice(2, 4), "src/display-name-guard.js", ...inboxAssets.slice(4, 6), "src/human-push.js", "src/human-push-display.js", ...inboxAssets.slice(6), "src/account-setup-ui.js", "src/gmail-ui.js", "src/inbox-send-ui.js", "src/room-roster.js", "src/account-settings-ui.js", "src/auth-signin-ui.js", "src/agent-signin-ui.js", "src/agent-first-run.js", "src/invite-context.js", "src/request-access.js", "src/room-deep-link.js", "src/browser-session.js", "src/composer-files.js", "src/session-expiry.js", "src/agent-invite-ui.js", "src/referral-board.js", "src/land-queue-board.js", "src/board-ui.js", "src/board.css", "src/join.js", "src/work-item-session.js", "src/work-loops.js", "src/work-recipes.js", "src/chat-suggestions.js", "src/share-invite-code.js", "src/handoff-envelope-ui.js", "src/dm-consents.js", "src/friend-bond.js", "src/needs-attention.js", "src/emoji.js", "src/emoji-catalog.js", "src/public-a11y.css", "connectors/muse.md", "compare/project-room-vs-slack.html", "compare/project-room-vs-discord.html", "compare/agent-collaboration-tool.html", "compare/multi-agent-workspace.html", "compare/ai-agent-coordination.html", "compare/project-room-vs-agent-room.html", "og/home.png", "og/about.png", "og/offers.png", "og/compare.png", "og/receipts.png", "offline.html", "icons/icon-192.png", "icons/icon-512.png", "icons/maskable-512.png", "icons/apple-touch-icon-180.png", "src/pwa-install.js", "src/push-ask.js"];
-// Read the selected source's explicit asset declaration, never today's list for
+export const publicAssets = [inboxAssets[0], "about.html", "offers.html", "src/project-offers-ui.js", "src/owner-project-offers-ui.js", "src/project-offers.css", "favicon.svg", "icon.svg", "manifest.webmanifest", "push-sw.js", inboxAssets[1], "src/member-display-names.js", "src/room-layout.js", ...inboxAssets.slice(2, 4), "src/display-name-guard.js", ...inboxAssets.slice(4, 6), "src/human-push.js", "src/human-push-display.js", ...inboxAssets.slice(6), "src/account-setup-ui.js", "src/gmail-ui.js", "src/inbox-send-ui.js", "src/room-roster.js", "src/account-settings-ui.js", "src/auth-signin-ui.js", "src/agent-signin-ui.js", "src/agent-first-run.js", "src/invite-context.js", "src/request-access.js", "src/room-deep-link.js", "src/browser-session.js", "src/composer-files.js", "src/session-expiry.js", "src/agent-invite-ui.js", "src/referral-board.js", "src/land-queue-board.js", "src/board-ui.js", "src/board.css", "src/join.js", "src/work-item-session.js", "src/work-loops.js", "src/work-recipes.js", "src/chat-suggestions.js", "src/share-invite-code.js", "src/handoff-envelope-ui.js", "src/dm-consents.js", "src/friend-bond.js", "src/needs-attention.js", "src/updates-ui.js", "src/emoji.js", "src/emoji-catalog.js", "src/public-a11y.css", "connectors/muse.md", "compare/project-room-vs-slack.html", "compare/project-room-vs-discord.html", "compare/agent-collaboration-tool.html", "compare/multi-agent-workspace.html", "compare/ai-agent-coordination.html", "compare/project-room-vs-agent-room.html", "og/home.png", "og/about.png", "og/offers.png", "og/compare.png", "og/receipts.png", "offline.html", "icons/icon-192.png", "icons/icon-512.png", "icons/maskable-512.png", "icons/apple-touch-icon-180.png", "src/pwa-install.js", "src/push-ask.js"];// Read the selected source's explicit asset declaration, never today's list for
 // an older schema. Parse only this repository's data-only array/spread/map shape;
 // do not execute packaged JavaScript. Missing advertised assets remain errors.
 function assetsFor(files) {
@@ -59,7 +58,7 @@ optional.push("server/conversation-sync.mjs"); // bounded viewer-scoped conversa
 optional.push("src/dm-consents.js"); // DM consent browser view-model + API helpers (imported by src/app.js)
 optional.push("src/friend-bond.js"); // Friend / Bond People chrome (imported by src/app.js and src/client.js)
 optional.push("src/room-layout.js", "src/member-display-names.js");
-optional.push("src/needs-attention.js"); // #662: owner "needs your attention" card (imported by src/app.js)
+optional.push("src/needs-attention.js", "src/updates-ui.js"); // #662: owner "needs your attention" card (imported by src/app.js)
 optional.push("src/emoji.js", "src/emoji-catalog.js"); // Unicode emoji catalog + reaction identity (imported by src/app.js, src/conversation.js, src/events.js)
 optional.push("src/display-name-guard.js"); // Member display-name admission (imported by src/events.js and re-exported by server/display-name-guard.mjs)
 optional.push("src/presence-state.js"); // #660: pure presence/working-state derivation (imported by server/store.mjs)
@@ -184,12 +183,14 @@ optional.push("server/inbox-collab-routes.mjs"); // Lane C: collab HTTP routes (
 optional.push("server/content-trust.mjs"); // structured untrusted markers for member-authored text (leaf; imported by store, http surfaces, MCP)
 optional.push("server/room-activation-pack.mjs"); // quill lane RC-2026-09-18-040: room activation pack (imported by server/http.mjs)
 optional.push("server/orient.mjs"); // jill lane RC-2026-09-28: orient endpoint builder (imported by server/http.mjs; pure, imports ../src/* only)
+optional.push("server/updates.mjs"); // Updates projection (imported by server/http.mjs, server/needs-me.mjs, server/orient.mjs, server/store.mjs)
 optional.push("server/work-claims.mjs"); // RC-2026-09-18-041: pure work-claim state machine (imported by server/work-claim-routes.mjs)
 optional.push("server/work-claim-sqlite.mjs");
 optional.push("server/persisted-row.mjs"); // RC-2026-09-27-2730: replay-safe persisted-row envelope + move-tolerant kind codec (imported by server/work-claim-sqlite.mjs, server/dispatch-journal.mjs, server/bounty-escrow.mjs; pure, no imports)
 optional.push("server/claim-collisions.mjs");
 optional.push("server/work-claim-routes.mjs"); // RC-2026-09-18-041: work-claim HTTP routes (imported by server/http.mjs)
 optional.push("server/work-claim-events.mjs"); // work_claim.updated receipts (imported by server/work-claim-routes.mjs; imports src/events.js)
+optional.push("server/work-claim-mirror.mjs"); // projection claims mirrored onto the work-claims board (imported by server/store.mjs)
 optional.push("server/receipt-cards.mjs"); // ACT-1a: in-room receipt cards (imported by server/work-claim-events.mjs and server/room-guide.mjs)
 optional.push("server/room-guide.mjs"); // ACT-1a: Room Guide demo agent (imported by cloudflare/room.mjs and server/starter-room.mjs)
 optional.push("server/starter-room.mjs"); // ACT-1a: starter seed (imported by server/room-lifecycle.mjs)
@@ -265,6 +266,7 @@ optional.push("src/land-queue-board.js"); // Land-queue board card (imported by 
 optional.push("src/board-ui.js", "src/board.css"); // Tasks › Board (imported by src/app.js)
 optional.push("server/room-export-html.mjs");
 optional.push("server/room-export.mjs", "cloudflare/room-backup.mjs");
+optional.push("server/jobs.mjs"); // shared job registry (imported by cloudflare/job-heartbeat.mjs and server.mjs)
 optional.push("server/redact-read.mjs"); // read-time message tombstone (imported by server/http.mjs and the MCP room tools)
 optional.push("about.html");
 optional.push("join.html"); // Self-serve join template (loaded by GET /join, not a raw URL)
@@ -287,6 +289,7 @@ optional.push("src/design-tokens.js"); // token declarations embedded in the pub
 optional.push("server/boot-options.mjs"); // imported by server.mjs: default boot args incl. ChannelWebhookInbox
 optional.push("server/instance-lock.mjs"); // imported by server.mjs: single-instance boot lock for the on-disk database
 optional.push("server/boot-config.mjs"); // imported by server.mjs: fail-loud critical-config boot gate (RC-2026-09-27-2732)
+optional.push("server/messages-store.mjs"); // MSG-1: messages table written with each message event (imported by server/store.mjs)
 optional.push("server/pins.mjs");
 optional.push("server/notifications.mjs");
 optional.push("server/open-questions.mjs"); // F1: open-questions radar read (imported by server/http.mjs)
@@ -323,7 +326,7 @@ function runtimeMetadata(files) {
   const schema = /export const STORE_SCHEMA_VERSION = (\d+);/.exec(files.get("server/writer-fence.mjs").toString());
   const pkg = JSON.parse(files.get("package.json"));
   const config = JSON.parse(files.get("cloudflare/wrangler.jsonc"));
-  check(["8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "31", "32", "33", "34", "35", "36"].includes(schema?.[1]) && typeof pkg.engines?.node === "string",
+  check(["8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "31", "32", "33", "34", "35", "36", "37"].includes(schema?.[1]) && typeof pkg.engines?.node === "string",
     `unsupported store schema ${schema?.[1] ?? "unparseable"} or missing package.json engines.node`);
   return { schemaVersion: Number(schema[1]), node: pkg.engines.node, cloudflare: { compatibilityDate: config.compatibility_date,
     compatibilityFlags: config.compatibility_flags, durableObjects: config.durable_objects, migrations: config.migrations } };

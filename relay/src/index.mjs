@@ -9,7 +9,7 @@ import { errorResponse, json, readJson } from "./http.mjs";
 import { MachineLink } from "./machine-link.mjs";
 import { log, recentLogs } from "./redact.mjs";
 import {
-  ENROLL_TTL_MS, MAX_SMALL_BYTES, SERVER_NAME, challengeHeader, isInviteCode, isLabel, isMachineId, isMemberId, isRoomId, missingSecrets, passthroughEnabled,
+  ENROLL_TTL_MS, MAX_SMALL_BYTES, SERVER_NAME, challengeHeader, isInviteCode, isLabel, isMachineId, isMemberId, isRoomId, missingSecrets, passthroughEnabled, roomOriginOf,
 } from "./protocol.mjs";
 
 export { MachineLink };
@@ -25,6 +25,7 @@ export default {
       return response;
     } catch (error) {
       const response = errorResponse(error, authenticateHeader(error, request));
+      const aliased = url.pathname === "/enroll" ? deprecatedResponse(response, { deprecation: "true" }) : response;
       log({
         method: request.method,
         path: url.pathname,
@@ -33,7 +34,7 @@ export default {
         error: error instanceof RelayError ? error.code : "internal",
       });
       if (!(error instanceof RelayError)) console.error(JSON.stringify({ message: "relay request failed" }));
-      return response;
+      return aliased;
     }
   },
 };
@@ -47,7 +48,9 @@ async function route(request, env, url) {
   const expire = /^\/admin\/enroll-codes\/([^/]+)\/expire$/.exec(url.pathname);
   if (expire && request.method === "POST") return expireEnroll(request, env, expire[1]);
   if (url.pathname === "/admin/logs" && request.method === "GET") return adminLogs(request, env);
-  if (url.pathname === "/v0/enroll" && request.method === "POST") return enroll(request, env);
+  if ((url.pathname === "/v0/enroll" || url.pathname === "/enroll") && request.method === "POST") {
+    return enroll(request, env, { deprecated: url.pathname === "/enroll" });
+  }
   if (url.pathname === "/v0/machines/link") return linkByToken(request, env, url);
   const match = MACHINE_ROUTE.exec(url.pathname);
   if (!match) throw relayError(404, "not_found", "Not found");
@@ -88,7 +91,7 @@ async function mintEnroll(request, env) {
   await requireAdmin(env, request);
   const { value } = await readJson(request, MAX_SMALL_BYTES, "Request body");
   if (!isLabel(value.label)) throw relayError(422, "invalid_enroll", "label must be 1..80 characters without control characters");
-  if (!isRoomId(value.roomId)) throw relayError(422, "invalid_enroll", "roomId must be a short id");
+  const { roomId, rooms } = enrollRooms(value);
   if (!isMemberId(value.ownerMemberId)) throw relayError(422, "invalid_enroll", "ownerMemberId must be a short id");
   if (!isInviteCode(value.inviteCode)) throw relayError(422, "invalid_enroll", "inviteCode must be an operator-minted Room code");
   if (value.profile !== undefined && value.profile !== "contribute") {
@@ -97,6 +100,7 @@ async function mintEnroll(request, env) {
   if (value.displayName !== undefined && !isLabel(value.displayName)) {
     throw relayError(422, "invalid_enroll", "displayName must be 1..80 characters without control characters");
   }
+  const roomOrigin = enrollOrigin(value);
   const machineId = `mch_${randomHex(8)}`;
   const verifier = randomB64url(32);
   const expiresAt = new Date(Date.now() + ENROLL_TTL_MS).toISOString();
@@ -106,11 +110,12 @@ async function mintEnroll(request, env) {
     body: JSON.stringify({
       machineId,
       label: value.label,
-      roomId: value.roomId,
-      rooms: [value.roomId],
+      roomId,
+      rooms,
       ownerMemberId: value.ownerMemberId,
       inviteCode: value.inviteCode,
       displayName: value.displayName ?? null,
+      roomOrigin,
       codeHash: await sha256Hex(verifier),
       expiresAt,
     }),
@@ -122,33 +127,62 @@ async function mintEnroll(request, env) {
     machineId,
     expiresAt,
     label: value.label,
-    roomId: value.roomId,
+    roomId,
     ownerMemberId: value.ownerMemberId,
     inviteCode: value.inviteCode,
     ...(value.displayName ? { displayName: value.displayName } : {}),
+    ...(roomOrigin ? { roomOrigin } : {}),
   });
 }
 
-async function enroll(request, env) {
+async function enroll(request, env, { deprecated = false } = {}) {
+  const finish = response => (deprecated ? deprecatedResponse(response) : response);
   let value;
   try {
     ({ value } = await readJson(request, MAX_SMALL_BYTES, "Request body"));
   } catch (error) {
     if (error instanceof RelayError && (error.code === "invalid_json" || error.code === "json_required")) {
-      return json(401, { error: "code_invalid" });
+      return finish(json(401, { error: "code_invalid" }));
     }
     throw error;
   }
   const parsed = parseCode(value.code);
-  if (!parsed) return json(401, { error: "code_invalid" });
+  if (!parsed) return finish(json(401, { error: "code_invalid" }));
   const response = await machine(env, parsed.machineId).fetch(new Request("https://machine.internal/enroll", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ verifier: parsed.verifier }),
   }));
-  if (!response.ok) return response;
+  if (!response.ok) return finish(response);
   const issued = await response.json();
-  return json(200, publicEnroll(issued, request, env));
+  return finish(json(200, publicEnroll(issued, request, env)));
+}
+
+function deprecatedResponse(response) {
+  const headers = new Headers(response.headers);
+  headers.set("deprecation", "true");
+  return new Response(response.body, { status: response.status, headers });
+}
+
+function enrollRooms(value) {
+  if (Array.isArray(value.rooms)) {
+    if (value.rooms.length < 1 || value.rooms.length > 8 || value.rooms.some(room => !isRoomId(room))) {
+      throw relayError(422, "invalid_enroll", "rooms must list 1..8 room ids");
+    }
+    if (value.roomId !== undefined && value.roomId !== value.rooms[0]) {
+      throw relayError(422, "invalid_enroll", "roomId must be the first room");
+    }
+    return { roomId: value.rooms[0], rooms: value.rooms };
+  }
+  if (!isRoomId(value.roomId)) throw relayError(422, "invalid_enroll", "roomId must be a short id");
+  return { roomId: value.roomId, rooms: [value.roomId] };
+}
+
+function enrollOrigin(value) {
+  if (value.roomOrigin === undefined || value.roomOrigin === null || value.roomOrigin === "") return "";
+  const origin = roomOriginOf(value.roomOrigin);
+  if (!origin) throw relayError(422, "invalid_enroll", "roomOrigin must be an http(s) origin");
+  return origin;
 }
 
 function publicEnroll(issued, request, env) {
@@ -167,7 +201,8 @@ function publicEnroll(issued, request, env) {
     relayUrl: linkUrl.toString(),
   };
   if (typeof issued.displayName === "string" && issued.displayName) body.displayName = issued.displayName;
-  const origin = typeof env.ROOM_ORIGIN === "string" ? env.ROOM_ORIGIN.replace(/\/$/, "") : "";
+  const stored = typeof issued.roomOrigin === "string" ? issued.roomOrigin : "";
+  const origin = stored || (typeof env.ROOM_ORIGIN === "string" ? env.ROOM_ORIGIN.replace(/\/$/, "") : "");
   if (origin) body.roomOrigin = origin;
   return body;
 }

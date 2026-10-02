@@ -30,6 +30,7 @@ function emptyState(machineId) {
     ownerMemberId: "",
     inviteCode: "",
     displayName: null,
+    roomOrigin: "",
     resourceId: null,
     tokenHash: null,
     enroll: null,
@@ -168,10 +169,12 @@ export class MachineLink extends DurableObject {
 
   async webSocketClose(ws) {
     if (this.live === ws) this.live = null;
+    if (!this.daemon()) await this.disarmHeartbeat();
   }
 
   async webSocketError(ws) {
     if (this.live === ws) this.live = null;
+    if (!this.daemon()) await this.disarmHeartbeat();
   }
 
   send(ws, payload) {
@@ -189,6 +192,7 @@ export class MachineLink extends DurableObject {
       this.state.ownerMemberId = value.ownerMemberId;
       this.state.inviteCode = value.inviteCode;
       this.state.displayName = value.displayName ?? null;
+      this.state.roomOrigin = value.roomOrigin || "";
       this.state.enroll = { codeHash: value.codeHash, expiresAt: value.expiresAt, used: false };
       this.dirty = true;
     });
@@ -217,6 +221,7 @@ export class MachineLink extends DurableObject {
           ownerMemberId: this.state.ownerMemberId,
           inviteCode: this.state.inviteCode,
           displayName: this.state.displayName,
+          roomOrigin: this.state.roomOrigin,
         };
       });
     } catch (error) {
@@ -262,6 +267,7 @@ export class MachineLink extends DurableObject {
       this.live = server;
       for (const socket of this.ctx.getWebSockets()) {
         if (socket !== server) {
+          this.send(socket, { type: "bye" });
           try { socket.close(4001, "replaced"); } catch { /* already closed */ }
         }
       }
@@ -525,6 +531,10 @@ export class MachineLink extends DurableObject {
     });
     if (request.method === "HEAD") return new Response(null, { status: 200, headers: { "cache-control": "no-store" } });
     return json(200, body);
+  }
+
+  async disarmHeartbeat() {
+    try { await this.ctx.storage.deleteAlarm(); } catch { /* no alarm was set */ }
   }
 }
 

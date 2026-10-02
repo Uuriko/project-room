@@ -113,7 +113,7 @@ for (const status of ["pending", "accepted", "revoked"]) test(`v4 ${status} migr
   f.store.db.exec("DROP TABLE private_email_folders; DROP TABLE private_email_commands; DROP TABLE private_email_connections; DROP TABLE private_inbox_drafts; DROP TABLE private_inbox_versions; DROP TABLE private_inbox_sources; DROP TABLE private_inbox_commands; DROP TABLE agent_connection_operations; DROP TABLE agent_connections; DROP TABLE private_reminder_commands; DROP TABLE private_reminders; DROP TABLE membership_invitation_journal; PRAGMA user_version=4");
   f.close();
   const migrated = f.reopen();
-  assert.equal(migrated.db.prepare("PRAGMA user_version").get().user_version, 36);
+  assert.equal(migrated.db.prepare("PRAGMA user_version").get().user_version, 37);
   assert.deepEqual({ ...f.record() }, record);
   assert.deepEqual(migrated.db.prepare("SELECT * FROM membership_invitation_events WHERE invitation_id=? ORDER BY sequence").all(f.id).map(row => ({ ...row })), audits);
   assert.deepEqual(migrated.db.prepare("SELECT * FROM events ORDER BY room_id,sequence").all().map(row => ({ ...row })), events);
@@ -167,7 +167,7 @@ test("damaged invited-member projection fails closed during access and startup; 
   const restoredPath = join(f.filename, "..", "restored.sqlite");
   copyFileSync(f.filename, restoredPath);
   f.reopen();
-  const damaged = f.store.room("commons").state;
+  const damaged = structuredClone(f.store.room("commons").state);
   delete damaged.members.target.membershipOrigin;
   f.store.db.prepare("UPDATE rooms SET projection=? WHERE id='commons'").run(JSON.stringify(damaged));
   assert.throws(() => f.store.snapshot(f.target.token, "commons"), { code: "invitation_integrity_error" });
@@ -182,7 +182,7 @@ test("read-only audit refuses a v4 input without migrating or creating a journal
   const f = fixture(t);
   f.store.db.exec("DROP TABLE private_email_folders; DROP TABLE private_email_commands; DROP TABLE private_email_connections; DROP TABLE private_inbox_drafts; DROP TABLE private_inbox_versions; DROP TABLE private_inbox_sources; DROP TABLE private_inbox_commands; DROP TABLE agent_connection_operations; DROP TABLE agent_connections; DROP TABLE private_reminder_commands; DROP TABLE private_reminders; DROP TABLE membership_invitation_journal; PRAGMA user_version=4");
   f.close();
-  assert.throws(() => new RoomStore(f.filename, { readOnly: true }), /requires schema v36/);
+  assert.throws(() => new RoomStore(f.filename, { readOnly: true }), /requires schema v37/);
   const raw = new DatabaseSync(f.filename, { readOnly: true });
   try {
     assert.equal(raw.prepare("PRAGMA user_version").get().user_version, 4);

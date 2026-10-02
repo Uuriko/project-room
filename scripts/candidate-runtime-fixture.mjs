@@ -106,6 +106,11 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/spend-allowance.mjs');
   paths.add('server/autonomy-tiers.mjs'); // Graduated autonomy tiers (imported by server/store.mjs and server/http.mjs)
   paths.add('server/grants.mjs'); // UFO-steal slice 1 (imported by server/store.mjs and server/http.mjs)
+  paths.add('server/messages-store.mjs'); // MSG-1: messages table written with each message event (imported by server/store.mjs)
+  paths.add('server/abuse-rate-buckets.mjs'); // Durable abuse rate buckets (imported by server/http.mjs, server/writer-fence.mjs, and cloudflare/room.mjs)
+  paths.add('server/receipt-cards.mjs'); // ACT-1a: in-room receipt cards (imported by server/work-claim-events.mjs and server/room-guide.mjs)
+  paths.add('server/room-guide.mjs'); // ACT-1a: Room Guide (imported by cloudflare/room.mjs and server/starter-room.mjs)
+  paths.add('server/starter-room.mjs'); // ACT-1a: starter seed (imported by server/room-lifecycle.mjs)
   paths.add('server/pins.mjs');
   paths.add('server/account-login-methods.mjs'); // Multi-method login model (imported by server/store.mjs)
   paths.add('server/account-deletion.mjs'); // RC-2026-09-19-078: deletion executor (imported by server/http.mjs)
@@ -165,6 +170,8 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/receipt-cards.mjs'); // in-room receipt cards (imported by server/work-claim-events.mjs and server/room-guide.mjs)
   paths.add('server/room-guide.mjs'); // Room Guide demo agent (imported by cloudflare/room.mjs)
   paths.add('server/starter-room.mjs'); // starter seed (imported by server/room-lifecycle.mjs)
+  paths.add('deploy/public-search.mjs'); // public search assets (imported by server/http.mjs)
+  paths.add('cloudflare/job-heartbeat.mjs'); // per-job cron heartbeat (imported by cloudflare/room.mjs)
   paths.add('server/routes/agent-connect.mjs'); // GET /a/<code> (imported by server/http.mjs)
   paths.add('server/connect-snippets.mjs'); // DX-1a connect table (imported by deploy/public-search.mjs)
   for (const path of publicAssetPaths) paths.add(path);

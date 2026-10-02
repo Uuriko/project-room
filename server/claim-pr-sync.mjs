@@ -20,8 +20,8 @@ import { closeWhenLive, notePullMerged, recordCi } from "./work-claims.mjs";
 import { SOURCE_REVISION } from "./version.mjs";
 import {
   PULL_CANDIDATE_CAP, PULL_MISSING_BACKOFF_MS, holdForRateLimit, nextPullBackoff,
-  pullRequestDue, pullRequestOutcomeFromApi, pullRequestOutcomeFromWebhook,
-  rateLimitUntil, rememberPoll, rollupClaimCi, settlePullRequest, usableEtag
+  batchPullOutcome, pullLinks, pullRequestDue, pullRequestOutcomeFromApi, pullRequestOutcomeFromWebhook,
+  pullsReadyToSettle, rateLimitUntil, recordPullOutcome, rememberPoll, rollupClaimCi, settlePullRequest, usableEtag
 } from "./claim-coordination.mjs";
 
 const LOOKUP_LIMIT = 4;
@@ -282,15 +282,22 @@ function ciReadDue(item, nowMs) {
 // was settled (completed or released). A rate limit is not written here;
 // the caller holds every due claim until the reset.
 export function commitPullRequestLookup(store, registry, roomId, item, result, nowMs) {
-  if (!item?.pullRequest || item.pullRequest.url !== result.url || item.pullRequest.outcome) return false;
-  if (result.kind === "merged" && (item.kind === "land" || item.kind === "deploy")) {
-    const noted = notePullMerged(item, result.mergedSha, nowMs);
-    if (!noted) return false;
-    registry.set(roomId, noted);
-    return false;
-  }
+  const linked = pullLinks(item).find(pull => pull.url === result.url && !pull.outcome);
+  if (!linked) return false;
+  if (item.pullRequest?.url !== result.url) item = { ...item, pullRequest: linked };
   if (result.kind === "merged" || result.kind === "closed") {
-    const settled = settlePullRequest(item, result.kind, nowMs);
+    const recorded = recordPullOutcome(item, result.url, result.kind, nowMs);
+    if (!pullsReadyToSettle(recorded)) {
+      registry.set(roomId, recorded);
+      return false;
+    }
+    if ((recorded.kind === "land" || recorded.kind === "deploy") && batchPullOutcome(recorded) === "merged") {
+      const noted = notePullMerged(recorded, result.mergedSha, nowMs);
+      if (!noted) return false;
+      registry.set(roomId, { ...noted, pullRequests: recorded.pullRequests });
+      return false;
+    }
+    const settled = settlePullRequest(recorded, batchPullOutcome(recorded), nowMs);
     if (!settled) return false;
     registry.set(roomId, settled.item);
     emitWorkClaimEvent(store, roomId, {
@@ -485,7 +492,7 @@ export function applyPullRequestWebhook(store, payload, { nowMs = Date.now() } =
   for (const roomId of roomIds) {
     store.workClaims.transaction(() => {
       for (const item of store.workClaims.list(roomId)) {
-        if (item.pullRequest?.url !== decision.url) continue;
+        if (!pullLinks(item).some(pull => pull.url === decision.url && !pull.outcome)) continue;
         const settled = commitPullRequestLookup(store, store.workClaims, roomId, item, {
           claimId: item.id, url: decision.url, kind: decision.outcome
         }, nowMs);

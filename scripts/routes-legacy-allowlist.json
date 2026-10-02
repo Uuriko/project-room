@@ -374,6 +374,10 @@
       "path": "/api/auth/agent/session"
     },
     {
+      "method": "POST",
+      "path": "/api/auth/email/verify"
+    },
+    {
       "method": "GET",
       "path": "/api/auth/github/callback"
     },
@@ -2451,6 +2455,54 @@
     },
     {
       "method": "GET",
+      "path": "/api/rooms/{id}/updates"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/updates"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/updates"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/updates/{id}/clear"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/updates/{id}/clear"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/updates/{id}/clear"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/updates/{id}/done"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/updates/{id}/done"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/updates/{id}/done"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/updates/{id}/read"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/updates/{id}/read"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/updates/{id}/read"
+    },
+    {
+      "method": "GET",
       "path": "/api/rooms/{id}/usage"
     },
     {
@@ -2559,6 +2611,18 @@
     },
     {
       "method": "GET",
+      "path": "/api/rooms/{id}/work-claims/config"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/work-claims/config"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/work-claims/config"
+    },
+    {
+      "method": "GET",
       "path": "/api/rooms/{id}/work-claims/duplicates"
     },
     {
@@ -2628,6 +2692,14 @@
     {
       "method": "POST",
       "path": "/api/share-links/preview"
+    },
+    {
+      "method": "GET",
+      "path": "/api/updates"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/updates"
     },
     {
       "method": "GET",
@@ -3886,6 +3958,10 @@
     {
       "method": "POST",
       "path": "/api/auth/agent/session"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/email/verify"
     },
     {
       "method": "GET",
@@ -5781,6 +5857,54 @@
     },
     {
       "method": "GET",
+      "path": "/api/rooms/{id}/updates"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/updates"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/updates"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/updates/{id}/clear"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/updates/{id}/clear"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/updates/{id}/clear"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/updates/{id}/done"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/updates/{id}/done"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/updates/{id}/done"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/updates/{id}/read"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/updates/{id}/read"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/updates/{id}/read"
+    },
+    {
+      "method": "GET",
       "path": "/api/rooms/{id}/usage"
     },
     {
@@ -5889,6 +6013,18 @@
     },
     {
       "method": "GET",
+      "path": "/api/rooms/{id}/work-claims/config"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/work-claims/config"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/work-claims/config"
+    },
+    {
+      "method": "GET",
       "path": "/api/rooms/{id}/work-claims/duplicates"
     },
     {
@@ -5958,6 +6094,14 @@
     {
       "method": "POST",
       "path": "/api/share-links/preview"
+    },
+    {
+      "method": "GET",
+      "path": "/api/updates"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/updates"
     },
     {
       "method": "GET",
