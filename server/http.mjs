@@ -93,6 +93,7 @@ import { hashPassword, verifyPassword, checkPasswordPolicy, DUMMY_PASSWORD_VERIF
 import { buildGitHubAuthUrl, codeChallengeFor, createPendingStore, exchangeCodeForToken, fetchGitHubUser,
   GitHubOAuthError, GITHUB_START_PATH, GITHUB_CALLBACK_PATH, githubPostLoginPage, githubUnavailablePage } from "./github-oauth.mjs";
 import { createOAuthProvider, OAUTH_SCOPES } from "./oauth-provider.mjs";
+import { dispatchRoute } from "./routes/dispatch.mjs";
 
 const roomCookieName = "room_session";
 const accountCookieName = "account_session";
@@ -839,6 +840,15 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (!previewDoorRequest) checkOrigin(req);
       url.pathname = rewriteRoomApiPrefix(inboundPath);
       if (url.pathname.startsWith("/api/")) res.setHeader("X-Operation-Id", operationId);
+      // Route table (batch RT). A matched row is finished here, including
+      // 405 Allow on a known path. Anything else falls through to the
+      // legacy chain below until that chain is empty.
+      if (await dispatchRoute({
+        req, res, url, store, remoteAddress, loopback, operationId,
+        json, reject, rate, cookie, setCookie, bearer, body, readText,
+        roomAuth, roomCredentials, expectedBinding, accountBinding,
+        checkOrigin, protectWrite, exact, pathId, expectedOrigin,
+      })) return;
       if ((url.pathname === "/api/health" || url.pathname === "/api/health/" || isHealthAliasPath(inboundPath) || isHealthAliasPath(url.pathname)) && ["GET", "HEAD"].includes(req.method)) {
         return json(res, 200, { status: "ok", mode: serviceMode, ...deploymentField }, req.method === "HEAD");
       }

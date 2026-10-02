@@ -1,0 +1,6983 @@
+{
+  "note": "Legacy routes still served outside server/routes/table.mjs. baseline is the RT-0 set and only shrinks. routes is the set still in the legacy chain.",
+  "baseline": [
+    {
+      "method": "GET",
+      "path": "/.well-known/agent-card.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/.well-known/agent-card.json"
+    },
+    {
+      "method": "GET",
+      "path": "/.well-known/agent-plugin-manifest.json"
+    },
+    {
+      "method": "GET",
+      "path": "/.well-known/agent.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/.well-known/agent.json"
+    },
+    {
+      "method": "GET",
+      "path": "/.well-known/ai-catalog.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/.well-known/ai-catalog.json"
+    },
+    {
+      "method": "GET",
+      "path": "/.well-known/ard.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/.well-known/ard.json"
+    },
+    {
+      "method": "GET",
+      "path": "/.well-known/feedback"
+    },
+    {
+      "method": "HEAD",
+      "path": "/.well-known/feedback"
+    },
+    {
+      "method": "GET",
+      "path": "/.well-known/governance.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/.well-known/governance.json"
+    },
+    {
+      "method": "GET",
+      "path": "/.well-known/jwks.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/.well-known/jwks.json"
+    },
+    {
+      "method": "GET",
+      "path": "/.well-known/mcp"
+    },
+    {
+      "method": "HEAD",
+      "path": "/.well-known/mcp"
+    },
+    {
+      "method": "GET",
+      "path": "/.well-known/mcp.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/.well-known/mcp.json"
+    },
+    {
+      "method": "GET",
+      "path": "/.well-known/oauth-authorization-server"
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/a2a"
+    },
+    {
+      "method": "POST",
+      "path": "/a2a"
+    },
+    {
+      "method": "GET",
+      "path": "/agent-card.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/agent-card.json"
+    },
+    {
+      "method": "GET",
+      "path": "/agent.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/agent.json"
+    },
+    {
+      "method": "GET",
+      "path": "/agents"
+    },
+    {
+      "method": "HEAD",
+      "path": "/agents"
+    },
+    {
+      "method": "GET",
+      "path": "/agents.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/agents.json"
+    },
+    {
+      "method": "GET",
+      "path": "/agents.md"
+    },
+    {
+      "method": "HEAD",
+      "path": "/agents.md"
+    },
+    {
+      "method": "GET",
+      "path": "/AGENTS.md"
+    },
+    {
+      "method": "HEAD",
+      "path": "/AGENTS.md"
+    },
+    {
+      "method": "POST",
+      "path": "/api/access-requests"
+    },
+    {
+      "method": "GET",
+      "path": "/api/access-requests/{id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/access-requests/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/account-rooms"
+    },
+    {
+      "method": "POST",
+      "path": "/api/account-rooms"
+    },
+    {
+      "method": "POST",
+      "path": "/api/account-rooms/from-template"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/account-session"
+    },
+    {
+      "method": "GET",
+      "path": "/api/account-session"
+    },
+    {
+      "method": "POST",
+      "path": "/api/account-session"
+    },
+    {
+      "method": "POST",
+      "path": "/api/account/delete"
+    },
+    {
+      "method": "GET",
+      "path": "/api/account/deletion/plan"
+    },
+    {
+      "method": "POST",
+      "path": "/api/account/ensure-default-room"
+    },
+    {
+      "method": "GET",
+      "path": "/api/account/onboarding"
+    },
+    {
+      "method": "POST",
+      "path": "/api/account/onboarding/complete"
+    },
+    {
+      "method": "GET",
+      "path": "/api/account/profile"
+    },
+    {
+      "method": "POST",
+      "path": "/api/account/profile"
+    },
+    {
+      "method": "GET",
+      "path": "/api/account/retention"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent-directory"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-directory/cards"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/agent-directory/cards/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent-heartbeats"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-heartbeats"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-heartbeats/ack"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-identities"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent-identities/{id}/keys"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-identities/{id}/keys/revoke"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-identities/{id}/keys/rotate"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-identities/{id}/revoke"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-identities/{id}/rotate"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent-identities/{id}/verification"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/agent-identities/{id}/verify"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-identities/{id}/verify"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent-invites/preview"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-invites/redeem"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent-keys"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-keys"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-keys/{id}/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent-manifest"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent-rooms"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-rooms"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-skills"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent-wakes/poll"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent-webhooks"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-webhooks"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/agent-webhooks/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent-webhooks/{id}/deliveries"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-webhooks/{id}/verify-delivery"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent-webhooks/dead-letter"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent-webhooks/deliveries"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-webhooks/deliveries/{id}/redrive"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent-webhooks/metrics"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-webhooks/process"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agents/{id}/card"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agents/directory"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agents/directory/{id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/agent/rooms"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/agent/session"
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/github/callback"
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/github/link/start"
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/github/start"
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/gmail/callback"
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/google/callback"
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/google/link/start"
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/google/start"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/magic/consume"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/magic/request"
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/methods"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/methods/disable"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/methods/enable"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/methods/remove"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/passkey/authenticate/finish"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/passkey/authenticate/options"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/passkey/register/finish"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/passkey/register/options"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/password/change"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/password/login"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/password/reset/consume"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/password/reset/request"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/password/set"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/password/signup"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/recovery-codes/generate"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/recovery-codes/redeem"
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/recovery-codes/status"
+    },
+    {
+      "method": "POST",
+      "path": "/api/claims/validate"
+    },
+    {
+      "method": "GET",
+      "path": "/api/guest-agent-links"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/guest-agent-links"
+    },
+    {
+      "method": "POST",
+      "path": "/api/guest-agent-links"
+    },
+    {
+      "method": "POST",
+      "path": "/api/guest-agent-links/join"
+    },
+    {
+      "method": "POST",
+      "path": "/api/guest-agent-links/preview"
+    },
+    {
+      "method": "GET",
+      "path": "/api/guest-invites"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/guest-invites"
+    },
+    {
+      "method": "POST",
+      "path": "/api/guest-invites/preview"
+    },
+    {
+      "method": "POST",
+      "path": "/api/guest-invites/redeem"
+    },
+    {
+      "method": "POST",
+      "path": "/api/guest-invites/request"
+    },
+    {
+      "method": "POST",
+      "path": "/api/guest-invites/rotate"
+    },
+    {
+      "method": "GET",
+      "path": "/api/health"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/health"
+    },
+    {
+      "method": "GET",
+      "path": "/api/health/jobs"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/health/jobs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/healthz"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/healthz"
+    },
+    {
+      "method": "POST",
+      "path": "/api/identities/{id}/link-code"
+    },
+    {
+      "method": "POST",
+      "path": "/api/identity-create"
+    },
+    {
+      "method": "GET",
+      "path": "/api/inbox"
+    },
+    {
+      "method": "POST",
+      "path": "/api/inbox"
+    },
+    {
+      "method": "POST",
+      "path": "/api/inbox/channel-sends"
+    },
+    {
+      "method": "POST",
+      "path": "/api/inbox/commands"
+    },
+    {
+      "method": "GET",
+      "path": "/api/inbox/connections"
+    },
+    {
+      "method": "GET",
+      "path": "/api/inbox/connections/{id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/inbox/connections/{id}/reconnect"
+    },
+    {
+      "method": "POST",
+      "path": "/api/inbox/connections/{id}/sync"
+    },
+    {
+      "method": "POST",
+      "path": "/api/inbox/connections/commands"
+    },
+    {
+      "method": "GET",
+      "path": "/api/inbox/gmail"
+    },
+    {
+      "method": "POST",
+      "path": "/api/inbox/gmail"
+    },
+    {
+      "method": "GET",
+      "path": "/api/inbox/gmail/connect"
+    },
+    {
+      "method": "POST",
+      "path": "/api/inbox/gmail/connect"
+    },
+    {
+      "method": "GET",
+      "path": "/api/inbox/gmail/disconnect"
+    },
+    {
+      "method": "POST",
+      "path": "/api/inbox/gmail/disconnect"
+    },
+    {
+      "method": "GET",
+      "path": "/api/inbox/gmail/mailbox"
+    },
+    {
+      "method": "POST",
+      "path": "/api/inbox/gmail/mailbox"
+    },
+    {
+      "method": "GET",
+      "path": "/api/inbox/gmail/sync"
+    },
+    {
+      "method": "POST",
+      "path": "/api/inbox/gmail/sync"
+    },
+    {
+      "method": "GET",
+      "path": "/api/inbox/quarantine"
+    },
+    {
+      "method": "GET",
+      "path": "/api/inbox/quarantine/coverage"
+    },
+    {
+      "method": "POST",
+      "path": "/api/inbox/quarantine/dismiss"
+    },
+    {
+      "method": "POST",
+      "path": "/api/inbox/quarantine/release"
+    },
+    {
+      "method": "POST",
+      "path": "/api/inbox/quarantine/split"
+    },
+    {
+      "method": "POST",
+      "path": "/api/inbox/review"
+    },
+    {
+      "method": "GET",
+      "path": "/api/inbox/search"
+    },
+    {
+      "method": "GET",
+      "path": "/api/inbox/setup"
+    },
+    {
+      "method": "POST",
+      "path": "/api/inbox/setup"
+    },
+    {
+      "method": "POST",
+      "path": "/api/inbox/simulation"
+    },
+    {
+      "method": "GET",
+      "path": "/api/inbox/sla/dashboard"
+    },
+    {
+      "method": "GET",
+      "path": "/api/inbox/sources/{id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/inbox/sources/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/inbox/sources/{id}/attachments"
+    },
+    {
+      "method": "GET",
+      "path": "/api/inbox/sources/{id}/attachments/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/inbox/sources/{id}/reply-review"
+    },
+    {
+      "method": "GET",
+      "path": "/api/inbox/sources/{id}/room-results"
+    },
+    {
+      "method": "POST",
+      "path": "/api/inbox/sources/{id}/room-results"
+    },
+    {
+      "method": "GET",
+      "path": "/api/inbox/sources/{id}/send-context"
+    },
+    {
+      "method": "POST",
+      "path": "/api/inbox/sources/{id}/send-context"
+    },
+    {
+      "method": "GET",
+      "path": "/api/inbox/sources/{id}/sends"
+    },
+    {
+      "method": "POST",
+      "path": "/api/inbox/sources/{id}/sends"
+    },
+    {
+      "method": "GET",
+      "path": "/api/inbox/sources/{id}/share-context"
+    },
+    {
+      "method": "POST",
+      "path": "/api/inbox/sources/{id}/share-context"
+    },
+    {
+      "method": "GET",
+      "path": "/api/inbox/threads"
+    },
+    {
+      "method": "GET",
+      "path": "/api/inbox/webhooks/{connectionId}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/inbox/webhooks/{connectionId}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/invitations/accept"
+    },
+    {
+      "method": "POST",
+      "path": "/api/invitations/preview"
+    },
+    {
+      "method": "POST",
+      "path": "/api/join"
+    },
+    {
+      "method": "GET",
+      "path": "/api/needs-me"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/needs-me"
+    },
+    {
+      "method": "GET",
+      "path": "/api/oauth/sessions"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/oauth/sessions/{id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/oauth/sessions/revoke-all"
+    },
+    {
+      "method": "GET",
+      "path": "/api/opportunities.json"
+    },
+    {
+      "method": "GET",
+      "path": "/api/project-offers"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/project-offers"
+    },
+    {
+      "method": "GET",
+      "path": "/api/project-offers/{id}"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/project-offers/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/project-offers/{id}/brief.md"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/project-offers/{id}/brief.md"
+    },
+    {
+      "method": "POST",
+      "path": "/api/public-work/match"
+    },
+    {
+      "method": "GET",
+      "path": "/api/public-work/receipts/{id}"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/public-work/receipts/{id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/public-work/receipts/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/public-work/receipts/{id}/artifact"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/public-work/receipts/{id}/artifact"
+    },
+    {
+      "method": "POST",
+      "path": "/api/public-work/receipts/{id}/artifact"
+    },
+    {
+      "method": "GET",
+      "path": "/api/public-work/receipts/{id}/review"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/public-work/receipts/{id}/review"
+    },
+    {
+      "method": "GET",
+      "path": "/api/public-work/tasks"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/public-work/tasks"
+    },
+    {
+      "method": "POST",
+      "path": "/api/public-work/tasks"
+    },
+    {
+      "method": "GET",
+      "path": "/api/public-work/tasks/{id}"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/public-work/tasks/{id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/public-work/tasks/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/public-work/tasks/{id}/claim"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/public-work/tasks/{id}/claim"
+    },
+    {
+      "method": "POST",
+      "path": "/api/public-work/tasks/{id}/claim"
+    },
+    {
+      "method": "GET",
+      "path": "/api/public-work/tasks/{id}/finish"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/public-work/tasks/{id}/finish"
+    },
+    {
+      "method": "POST",
+      "path": "/api/public-work/tasks/{id}/finish"
+    },
+    {
+      "method": "GET",
+      "path": "/api/public-work/tasks/{id}/release"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/public-work/tasks/{id}/release"
+    },
+    {
+      "method": "POST",
+      "path": "/api/public-work/tasks/{id}/release"
+    },
+    {
+      "method": "GET",
+      "path": "/api/public-work/tasks/{id}/renew"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/public-work/tasks/{id}/renew"
+    },
+    {
+      "method": "POST",
+      "path": "/api/public-work/tasks/{id}/renew"
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/receipts"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/public/receipts"
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/rooms/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/rooms/{id}/feed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/rooms/directory"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ready"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/ready"
+    },
+    {
+      "method": "POST",
+      "path": "/api/referral-invites/mint"
+    },
+    {
+      "method": "POST",
+      "path": "/api/referral-invites/preview"
+    },
+    {
+      "method": "POST",
+      "path": "/api/referral-invites/redeem"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/access-requests"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/access-requests/{id}/decide"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/access-review"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/activation-pack"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/activity"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/activity-read"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/activity-read-all"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/activity-unread-count"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/add_land_item"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/add_land_item"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/add_land_item"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/agent-capabilities"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/agent-connections"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/agent-connections"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/agent-grants"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/agent-grants"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/rooms/{id}/agent-grants/{id}/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/agent-inbox"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/rooms/{id}/agent-invites"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/agent-invites"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/agent-invites"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/agent-pause"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/agent-pause"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/rooms/{id}/board/v2/board"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/board/v2/board"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/board/v2/board"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/rooms/{id}/board/v2/board"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/board/v2/board"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/rooms/{id}/board/v2/board"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/rooms/{id}/board/v2/claims"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/board/v2/claims"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/board/v2/claims"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/rooms/{id}/board/v2/claims"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/board/v2/claims"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/rooms/{id}/board/v2/claims"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/rooms/{id}/board/v2/claims/{id}/heartbeat"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/board/v2/claims/{id}/heartbeat"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/board/v2/claims/{id}/heartbeat"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/rooms/{id}/board/v2/claims/{id}/heartbeat"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/board/v2/claims/{id}/heartbeat"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/rooms/{id}/board/v2/claims/{id}/heartbeat"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/rooms/{id}/board/v2/claims/{id}/receipts"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/board/v2/claims/{id}/receipts"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/board/v2/claims/{id}/receipts"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/rooms/{id}/board/v2/claims/{id}/receipts"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/board/v2/claims/{id}/receipts"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/rooms/{id}/board/v2/claims/{id}/receipts"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/rooms/{id}/board/v2/claims/{id}/release"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/board/v2/claims/{id}/release"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/board/v2/claims/{id}/release"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/rooms/{id}/board/v2/claims/{id}/release"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/board/v2/claims/{id}/release"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/rooms/{id}/board/v2/claims/{id}/release"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/rooms/{id}/board/v2/decisions"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/board/v2/decisions"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/board/v2/decisions"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/rooms/{id}/board/v2/decisions"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/board/v2/decisions"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/rooms/{id}/board/v2/decisions"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/rooms/{id}/board/v2/events"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/board/v2/events"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/board/v2/events"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/rooms/{id}/board/v2/events"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/board/v2/events"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/rooms/{id}/board/v2/events"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/rooms/{id}/board/v2/findings"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/board/v2/findings"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/board/v2/findings"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/rooms/{id}/board/v2/findings"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/board/v2/findings"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/rooms/{id}/board/v2/findings"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/rooms/{id}/board/v2/health"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/board/v2/health"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/board/v2/health"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/rooms/{id}/board/v2/health"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/board/v2/health"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/rooms/{id}/board/v2/health"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/rooms/{id}/board/v2/mirror-map"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/board/v2/mirror-map"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/board/v2/mirror-map"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/rooms/{id}/board/v2/mirror-map"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/board/v2/mirror-map"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/rooms/{id}/board/v2/mirror-map"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/rooms/{id}/board/v2/notes"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/board/v2/notes"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/board/v2/notes"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/rooms/{id}/board/v2/notes"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/board/v2/notes"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/rooms/{id}/board/v2/notes"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/bonds"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/bounties"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/bounties"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/bounties"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/bounties/{id}/accept"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/bounties/{id}/accept"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/bounties/{id}/accept"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/bounties/{id}/claim"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/bounties/{id}/claim"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/bounties/{id}/claim"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/bounties/{id}/decline"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/bounties/{id}/decline"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/bounties/{id}/decline"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/bounties/{id}/dispute"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/bounties/{id}/dispute"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/bounties/{id}/dispute"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/bounties/{id}/dispute/decide"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/bounties/{id}/dispute/decide"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/bounties/{id}/dispute/decide"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/bounties/{id}/duplicate"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/bounties/{id}/duplicate"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/bounties/{id}/duplicate"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/bounties/{id}/finalize"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/bounties/{id}/finalize"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/bounties/{id}/finalize"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/bounties/{id}/fund"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/bounties/{id}/fund"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/bounties/{id}/fund"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/bounties/{id}/reject"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/bounties/{id}/reject"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/bounties/{id}/reject"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/bounties/{id}/rubric"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/bounties/{id}/rubric"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/bounties/{id}/rubric"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/bounties/{id}/snooze"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/bounties/{id}/snooze"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/bounties/{id}/snooze"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/bounties/{id}/submit"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/bounties/{id}/submit"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/bounties/{id}/submit"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/bounties/{id}/watch"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/bounties/{id}/watch"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/bounties/{id}/watch"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/bounties/reputation-reviews"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/bounties/reputation-reviews"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/bounties/reviews"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/bounties/reviews"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/bounties/sybil-flags"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/bounties/sybil-flags"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/bounties/sybil-flags/{id}/confirm"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/bounties/sybil-flags/{id}/confirm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/bounties/sybil-flags/{id}/confirm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/bounties/sybil-flags/{id}/dismiss"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/bounties/sybil-flags/{id}/dismiss"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/bounties/sybil-flags/{id}/dismiss"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/capabilities"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/charter"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/collab/approvals"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/collab/approvals"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/collab/approvals"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/collab/approvals/{id}/decide"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/collab/approvals/{id}/decide"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/collab/approvals/{id}/decide"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/collab/approvals/{id}/resubmit"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/collab/approvals/{id}/resubmit"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/collab/approvals/{id}/resubmit"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/collab/assignments"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/collab/assignments"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/collab/assignments"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/collab/assignments/{id}/release"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/collab/assignments/{id}/release"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/collab/assignments/{id}/release"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/collab/draft-locks"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/collab/draft-locks"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/collab/draft-locks/acquire"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/collab/draft-locks/acquire"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/collab/draft-locks/acquire"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/collab/draft-locks/release"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/collab/draft-locks/release"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/collab/draft-locks/release"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/collab/envelopes"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/collab/envelopes"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/collab/envelopes"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/collab/envelopes/{id}/transition"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/collab/envelopes/{id}/transition"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/collab/envelopes/{id}/transition"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/collab/envelopes/metrics"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/collab/envelopes/metrics"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/collab/envelopes/sweep"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/collab/envelopes/sweep"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/collab/envelopes/sweep"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/collab/handoffs"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/collab/handoffs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/collab/handoffs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/collab/handoffs/{id}/transition"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/collab/handoffs/{id}/transition"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/collab/handoffs/{id}/transition"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/collab/notes"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/collab/notes"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/collab/notes"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/collab/routing"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/collab/routing"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/collab/routing/{id}/resolve"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/collab/routing/{id}/resolve"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/collab/routing/{id}/resolve"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/collab/routing/mentions"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/collab/routing/mentions"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/collab/routing/mentions"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/collab/routing/policy"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/collab/routing/policy"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/collab/routing/policy"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/commands"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/context"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/conversation"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/credits/balances/{id}"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/credits/balances/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/credits/epoch/close"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/credits/epoch/close"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/credits/epoch/close"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/credits/history/{id}"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/credits/history/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/credits/transfer"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/credits/transfer"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/credits/transfer"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/cursor"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/diagnostics"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/diagnostics-export"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/directory"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/directory"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/dm-consents"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/dm-consents"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/dm-consents/{id}/decide"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/dm-consents/block"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/dm-consents/revoke"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/dm-consents/unblock"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/events"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/export"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/feedback"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/feedback"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/feedback"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/feedback/{id}"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/feedback/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/feedback/{id}/appeal"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/feedback/{id}/appeal"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/feedback/{id}/appeal"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/feedback/{id}/appeal/decision"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/feedback/{id}/appeal/decision"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/feedback/{id}/appeal/decision"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/feedback/{id}/outcome"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/feedback/{id}/outcome"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/feedback/{id}/outcome"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/feedback/{id}/triage"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/feedback/{id}/triage"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/feedback/{id}/triage"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/feedback/notifications"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/feedback/notifications"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/feedback/queue"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/feedback/queue"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/files"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/files"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/files"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/files/{id}/commit"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/files/{id}/commit"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/files/{id}/commit"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/guest-agent-links"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/guest-invites"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/guest-invites-disconnect"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/guest-invites-list"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/guest-invites-revoke"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/guest-invites-revoke-all"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/guest-invites-upgrade"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/rooms/{id}/human-push"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/human-push"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/human-push"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/rooms/{id}/identity-links"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/identity-links"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/identity-links"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/import"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/invitations"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/invitations"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/invitations/{id}/revoke"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/jev-shadow"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/list_land_queue"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/list_land_queue"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/list_land_queue"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/rooms/{id}/members/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/membership-delegation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/membership-delegation/grant"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/membership-delegation/revoke"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/mentions"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/mentions/{id}/ack"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/mentions/settings"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/messages/{id}/thread"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/needs-attention"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/next-actions"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/next-actions-dismiss"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/next-actions-dismissals"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/next-actions-suppressions"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/rooms/{id}/next-actions-suppressions"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/notifications"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/open-questions"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/operator/agents/{id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/rooms/{id}/operator/agents/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/opportunities"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/opportunities"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/orient"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/outside-agents"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/outside-agents"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/owner-delegates"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/owner-delegates/grant"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/owner-delegates/revoke"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/ownership/transfer"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/peer-dms"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/peer-dms/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/pins"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/pins"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/presence"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/project-offers"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/project-offers"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/project-offers"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/project-offers/{id}/claims"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/project-offers/{id}/claims"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/project-offers/{id}/claims"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/project-offers/{id}/publish"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/project-offers/{id}/publish"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/project-offers/{id}/publish"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/project-offers/{id}/withdraw"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/project-offers/{id}/withdraw"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/project-offers/{id}/withdraw"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/provider-heartbeats"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/public-face"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/public-face"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/public-face/rotate"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/public-work/receipts/{id}"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/public-work/receipts/{id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/public-work/receipts/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/public-work/receipts/{id}/decide"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/public-work/receipts/{id}/decide"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/public-work/receipts/{id}/decide"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/public-work/receipts/{id}/follow-up"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/public-work/receipts/{id}/follow-up"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/public-work/receipts/{id}/follow-up"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/public-work/receipts/{id}/verify"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/public-work/receipts/{id}/verify"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/public-work/receipts/{id}/verify"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/public-work/results"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/public-work/results"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/public-work/results"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/read-horizon"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/read-horizon"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/receipts"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/receipts"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/referral-invites"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/referrals"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/reminders"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/reminders"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/remove_land_item"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/remove_land_item"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/remove_land_item"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/reply-context"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/reply-history"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/reply-requests"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/report_tip"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/report_tip"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/report_tip"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/reports"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/reports"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/request-runs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/request-runs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/return-brief"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/rooms/{id}/saved"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/saved"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/saved"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/rooms/{id}/saved/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/search"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/share-links"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/share-links"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/share-links-cancel"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/spend-allowance"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/spend-allowance"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/thread-mutes"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/thread-mutes"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/usage"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/verification-policy"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/verification-policy"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/work-changes"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/work-claims"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/work-claims"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/work-claims"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/work-claims/{id}"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/work-claims/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/work-claims/{id}/claim"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/work-claims/{id}/claim"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/work-claims/{id}/claim"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/work-claims/{id}/reassign"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/work-claims/{id}/reassign"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/work-claims/{id}/reassign"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/work-claims/{id}/release"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/work-claims/{id}/release"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/work-claims/{id}/release"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/work-claims/{id}/renew"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/work-claims/{id}/renew"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/work-claims/{id}/renew"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/work-claims/{id}/review"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/work-claims/{id}/review"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/work-claims/{id}/review"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/work-claims/{id}/update"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/work-claims/{id}/update"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/work-claims/{id}/update"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/work-claims/duplicates"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/work-claims/duplicates"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/work-claims/status"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/work-claims/status"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/work-claims/sweep"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/work-claims/sweep"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/work-claims/sweep"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/work-context"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/work-discussion"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/work-result"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/work-sessions"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/work-sessions"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/session"
+    },
+    {
+      "method": "GET",
+      "path": "/api/session"
+    },
+    {
+      "method": "POST",
+      "path": "/api/session"
+    },
+    {
+      "method": "POST",
+      "path": "/api/share-links/join"
+    },
+    {
+      "method": "POST",
+      "path": "/api/share-links/join-agent"
+    },
+    {
+      "method": "POST",
+      "path": "/api/share-links/preview"
+    },
+    {
+      "method": "GET",
+      "path": "/api/version"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/version"
+    },
+    {
+      "method": "GET",
+      "path": "/api/version/worker"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/version/worker"
+    },
+    {
+      "method": "POST",
+      "path": "/api/web/fetch"
+    },
+    {
+      "method": "POST",
+      "path": "/api/web/research"
+    },
+    {
+      "method": "GET",
+      "path": "/apps.md"
+    },
+    {
+      "method": "HEAD",
+      "path": "/apps.md"
+    },
+    {
+      "method": "GET",
+      "path": "/apps.txt"
+    },
+    {
+      "method": "HEAD",
+      "path": "/apps.txt"
+    },
+    {
+      "method": "GET",
+      "path": "/CLAUDE.md"
+    },
+    {
+      "method": "HEAD",
+      "path": "/CLAUDE.md"
+    },
+    {
+      "method": "GET",
+      "path": "/favicon.ico"
+    },
+    {
+      "method": "HEAD",
+      "path": "/favicon.ico"
+    },
+    {
+      "method": "GET",
+      "path": "/healthz"
+    },
+    {
+      "method": "HEAD",
+      "path": "/healthz"
+    },
+    {
+      "method": "POST",
+      "path": "/join"
+    },
+    {
+      "method": "GET",
+      "path": "/join.html"
+    },
+    {
+      "method": "HEAD",
+      "path": "/join.html"
+    },
+    {
+      "method": "GET",
+      "path": "/join.txt"
+    },
+    {
+      "method": "HEAD",
+      "path": "/join.txt"
+    },
+    {
+      "method": "GET",
+      "path": "/kit.md"
+    },
+    {
+      "method": "HEAD",
+      "path": "/kit.md"
+    },
+    {
+      "method": "GET",
+      "path": "/kit.txt"
+    },
+    {
+      "method": "HEAD",
+      "path": "/kit.txt"
+    },
+    {
+      "method": "GET",
+      "path": "/kits"
+    },
+    {
+      "method": "HEAD",
+      "path": "/kits"
+    },
+    {
+      "method": "GET",
+      "path": "/kits.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/kits.json"
+    },
+    {
+      "method": "GET",
+      "path": "/kits.md"
+    },
+    {
+      "method": "HEAD",
+      "path": "/kits.md"
+    },
+    {
+      "method": "GET",
+      "path": "/kits.txt"
+    },
+    {
+      "method": "HEAD",
+      "path": "/kits.txt"
+    },
+    {
+      "method": "GET",
+      "path": "/llms-full.txt"
+    },
+    {
+      "method": "HEAD",
+      "path": "/llms-full.txt"
+    },
+    {
+      "method": "GET",
+      "path": "/llms.txt"
+    },
+    {
+      "method": "HEAD",
+      "path": "/llms.txt"
+    },
+    {
+      "method": "GET",
+      "path": "/mcp"
+    },
+    {
+      "method": "HEAD",
+      "path": "/mcp"
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/mcp"
+    },
+    {
+      "method": "POST",
+      "path": "/mcp"
+    },
+    {
+      "method": "GET",
+      "path": "/mcp/claude"
+    },
+    {
+      "method": "HEAD",
+      "path": "/mcp/claude"
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/mcp/claude"
+    },
+    {
+      "method": "POST",
+      "path": "/mcp/claude"
+    },
+    {
+      "method": "GET",
+      "path": "/mcp/codex"
+    },
+    {
+      "method": "HEAD",
+      "path": "/mcp/codex"
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/mcp/codex"
+    },
+    {
+      "method": "POST",
+      "path": "/mcp/codex"
+    },
+    {
+      "method": "GET",
+      "path": "/mcp/cursor"
+    },
+    {
+      "method": "HEAD",
+      "path": "/mcp/cursor"
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/mcp/cursor"
+    },
+    {
+      "method": "POST",
+      "path": "/mcp/cursor"
+    },
+    {
+      "method": "GET",
+      "path": "/mcp/server-card"
+    },
+    {
+      "method": "HEAD",
+      "path": "/mcp/server-card"
+    },
+    {
+      "method": "GET",
+      "path": "/oauth/authorize"
+    },
+    {
+      "method": "POST",
+      "path": "/oauth/authorize"
+    },
+    {
+      "method": "POST",
+      "path": "/oauth/revoke"
+    },
+    {
+      "method": "POST",
+      "path": "/oauth/token"
+    },
+    {
+      "method": "GET",
+      "path": "/openapi.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/openapi.json"
+    },
+    {
+      "method": "GET",
+      "path": "/p/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/project-room/.well-known/agent-card.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/project-room/.well-known/agent-card.json"
+    },
+    {
+      "method": "GET",
+      "path": "/project-room/.well-known/agent.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/project-room/.well-known/agent.json"
+    },
+    {
+      "method": "GET",
+      "path": "/project-room/.well-known/governance.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/project-room/.well-known/governance.json"
+    },
+    {
+      "method": "GET",
+      "path": "/project-room/.well-known/jwks.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/project-room/.well-known/jwks.json"
+    },
+    {
+      "method": "GET",
+      "path": "/project-room/.well-known/mcp"
+    },
+    {
+      "method": "HEAD",
+      "path": "/project-room/.well-known/mcp"
+    },
+    {
+      "method": "GET",
+      "path": "/project-room/.well-known/mcp.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/project-room/.well-known/mcp.json"
+    },
+    {
+      "method": "GET",
+      "path": "/project-room/agents.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/project-room/agents.json"
+    },
+    {
+      "method": "GET",
+      "path": "/project-room/join.txt"
+    },
+    {
+      "method": "HEAD",
+      "path": "/project-room/join.txt"
+    },
+    {
+      "method": "GET",
+      "path": "/project-room/kits.txt"
+    },
+    {
+      "method": "HEAD",
+      "path": "/project-room/kits.txt"
+    },
+    {
+      "method": "GET",
+      "path": "/project-room/llms-full.txt"
+    },
+    {
+      "method": "HEAD",
+      "path": "/project-room/llms-full.txt"
+    },
+    {
+      "method": "GET",
+      "path": "/project-room/llms.txt"
+    },
+    {
+      "method": "HEAD",
+      "path": "/project-room/llms.txt"
+    },
+    {
+      "method": "GET",
+      "path": "/project-room/mcp/server-card"
+    },
+    {
+      "method": "HEAD",
+      "path": "/project-room/mcp/server-card"
+    },
+    {
+      "method": "GET",
+      "path": "/project-room/skills"
+    },
+    {
+      "method": "HEAD",
+      "path": "/project-room/skills"
+    },
+    {
+      "method": "GET",
+      "path": "/receipts"
+    },
+    {
+      "method": "HEAD",
+      "path": "/receipts"
+    },
+    {
+      "method": "GET",
+      "path": "/robots.txt"
+    },
+    {
+      "method": "HEAD",
+      "path": "/robots.txt"
+    },
+    {
+      "method": "GET",
+      "path": "/room"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room"
+    },
+    {
+      "method": "GET",
+      "path": "/room/.well-known/agent-card.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/.well-known/agent-card.json"
+    },
+    {
+      "method": "GET",
+      "path": "/room/.well-known/agent.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/.well-known/agent.json"
+    },
+    {
+      "method": "GET",
+      "path": "/room/.well-known/governance.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/.well-known/governance.json"
+    },
+    {
+      "method": "GET",
+      "path": "/room/.well-known/jwks.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/.well-known/jwks.json"
+    },
+    {
+      "method": "GET",
+      "path": "/room/.well-known/mcp"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/.well-known/mcp"
+    },
+    {
+      "method": "GET",
+      "path": "/room/.well-known/mcp.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/.well-known/mcp.json"
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/room/a2a"
+    },
+    {
+      "method": "POST",
+      "path": "/room/a2a"
+    },
+    {
+      "method": "GET",
+      "path": "/room/agent.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/agent.json"
+    },
+    {
+      "method": "GET",
+      "path": "/room/agents"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/agents"
+    },
+    {
+      "method": "GET",
+      "path": "/room/agents.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/agents.json"
+    },
+    {
+      "method": "GET",
+      "path": "/room/agents.md"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/agents.md"
+    },
+    {
+      "method": "GET",
+      "path": "/room/AGENTS.md"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/AGENTS.md"
+    },
+    {
+      "method": "GET",
+      "path": "/room/api/health"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/api/health"
+    },
+    {
+      "method": "GET",
+      "path": "/room/api/healthz"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/api/healthz"
+    },
+    {
+      "method": "GET",
+      "path": "/room/apps"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/apps"
+    },
+    {
+      "method": "GET",
+      "path": "/room/apps.md"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/apps.md"
+    },
+    {
+      "method": "GET",
+      "path": "/room/apps.txt"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/apps.txt"
+    },
+    {
+      "method": "GET",
+      "path": "/room/CLAUDE.md"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/CLAUDE.md"
+    },
+    {
+      "method": "GET",
+      "path": "/room/cursor.md"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/cursor.md"
+    },
+    {
+      "method": "GET",
+      "path": "/room/CURSOR.md"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/CURSOR.md"
+    },
+    {
+      "method": "GET",
+      "path": "/room/favicon.ico"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/favicon.ico"
+    },
+    {
+      "method": "GET",
+      "path": "/room/gemini.md"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/gemini.md"
+    },
+    {
+      "method": "GET",
+      "path": "/room/GEMINI.md"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/GEMINI.md"
+    },
+    {
+      "method": "GET",
+      "path": "/room/health"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/health"
+    },
+    {
+      "method": "GET",
+      "path": "/room/healthz"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/healthz"
+    },
+    {
+      "method": "POST",
+      "path": "/room/join"
+    },
+    {
+      "method": "GET",
+      "path": "/room/join.html"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/join.html"
+    },
+    {
+      "method": "GET",
+      "path": "/room/join.txt"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/join.txt"
+    },
+    {
+      "method": "GET",
+      "path": "/room/kit"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/kit"
+    },
+    {
+      "method": "GET",
+      "path": "/room/kit.md"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/kit.md"
+    },
+    {
+      "method": "GET",
+      "path": "/room/kit.txt"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/kit.txt"
+    },
+    {
+      "method": "GET",
+      "path": "/room/kits"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/kits"
+    },
+    {
+      "method": "GET",
+      "path": "/room/kits.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/kits.json"
+    },
+    {
+      "method": "GET",
+      "path": "/room/kits.md"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/kits.md"
+    },
+    {
+      "method": "GET",
+      "path": "/room/kits.txt"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/kits.txt"
+    },
+    {
+      "method": "GET",
+      "path": "/room/llms"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/llms"
+    },
+    {
+      "method": "GET",
+      "path": "/room/llms-full.txt"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/llms-full.txt"
+    },
+    {
+      "method": "GET",
+      "path": "/room/llms.txt"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/llms.txt"
+    },
+    {
+      "method": "GET",
+      "path": "/room/mcp"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/mcp"
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/room/mcp"
+    },
+    {
+      "method": "POST",
+      "path": "/room/mcp"
+    },
+    {
+      "method": "GET",
+      "path": "/room/mcp/claude"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/mcp/claude"
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/room/mcp/claude"
+    },
+    {
+      "method": "POST",
+      "path": "/room/mcp/claude"
+    },
+    {
+      "method": "GET",
+      "path": "/room/mcp/codex"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/mcp/codex"
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/room/mcp/codex"
+    },
+    {
+      "method": "POST",
+      "path": "/room/mcp/codex"
+    },
+    {
+      "method": "GET",
+      "path": "/room/mcp/cursor"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/mcp/cursor"
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/room/mcp/cursor"
+    },
+    {
+      "method": "POST",
+      "path": "/room/mcp/cursor"
+    },
+    {
+      "method": "GET",
+      "path": "/room/mcp/server-card"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/mcp/server-card"
+    },
+    {
+      "method": "GET",
+      "path": "/room/openapi.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/openapi.json"
+    },
+    {
+      "method": "GET",
+      "path": "/room/readme.md"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/readme.md"
+    },
+    {
+      "method": "GET",
+      "path": "/room/README.md"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/README.md"
+    },
+    {
+      "method": "GET",
+      "path": "/room/skill"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/skill"
+    },
+    {
+      "method": "GET",
+      "path": "/room/skill.md"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/skill.md"
+    },
+    {
+      "method": "GET",
+      "path": "/room/skills"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/skills"
+    },
+    {
+      "method": "GET",
+      "path": "/room/tools"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/tools"
+    },
+    {
+      "method": "GET",
+      "path": "/room/tools.md"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/tools.md"
+    },
+    {
+      "method": "GET",
+      "path": "/room/tools.txt"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/tools.txt"
+    },
+    {
+      "method": "GET",
+      "path": "/sitemap.xml"
+    },
+    {
+      "method": "HEAD",
+      "path": "/sitemap.xml"
+    },
+    {
+      "method": "GET",
+      "path": "/skill.md"
+    },
+    {
+      "method": "HEAD",
+      "path": "/skill.md"
+    },
+    {
+      "method": "GET",
+      "path": "/skills"
+    },
+    {
+      "method": "HEAD",
+      "path": "/skills"
+    },
+    {
+      "method": "GET",
+      "path": "/templates"
+    },
+    {
+      "method": "HEAD",
+      "path": "/templates"
+    },
+    {
+      "method": "GET",
+      "path": "/templates.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/templates.json"
+    },
+    {
+      "method": "GET",
+      "path": "/tools.md"
+    },
+    {
+      "method": "HEAD",
+      "path": "/tools.md"
+    },
+    {
+      "method": "GET",
+      "path": "/tools.txt"
+    },
+    {
+      "method": "HEAD",
+      "path": "/tools.txt"
+    }
+  ],
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/.well-known/agent-card.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/.well-known/agent-card.json"
+    },
+    {
+      "method": "GET",
+      "path": "/.well-known/agent-plugin-manifest.json"
+    },
+    {
+      "method": "GET",
+      "path": "/.well-known/agent.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/.well-known/agent.json"
+    },
+    {
+      "method": "GET",
+      "path": "/.well-known/ai-catalog.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/.well-known/ai-catalog.json"
+    },
+    {
+      "method": "GET",
+      "path": "/.well-known/ard.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/.well-known/ard.json"
+    },
+    {
+      "method": "GET",
+      "path": "/.well-known/feedback"
+    },
+    {
+      "method": "HEAD",
+      "path": "/.well-known/feedback"
+    },
+    {
+      "method": "GET",
+      "path": "/.well-known/governance.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/.well-known/governance.json"
+    },
+    {
+      "method": "GET",
+      "path": "/.well-known/jwks.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/.well-known/jwks.json"
+    },
+    {
+      "method": "GET",
+      "path": "/.well-known/mcp"
+    },
+    {
+      "method": "HEAD",
+      "path": "/.well-known/mcp"
+    },
+    {
+      "method": "GET",
+      "path": "/.well-known/mcp.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/.well-known/mcp.json"
+    },
+    {
+      "method": "GET",
+      "path": "/.well-known/oauth-authorization-server"
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/a2a"
+    },
+    {
+      "method": "POST",
+      "path": "/a2a"
+    },
+    {
+      "method": "GET",
+      "path": "/agent-card.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/agent-card.json"
+    },
+    {
+      "method": "GET",
+      "path": "/agent.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/agent.json"
+    },
+    {
+      "method": "GET",
+      "path": "/agents"
+    },
+    {
+      "method": "HEAD",
+      "path": "/agents"
+    },
+    {
+      "method": "GET",
+      "path": "/agents.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/agents.json"
+    },
+    {
+      "method": "GET",
+      "path": "/agents.md"
+    },
+    {
+      "method": "HEAD",
+      "path": "/agents.md"
+    },
+    {
+      "method": "GET",
+      "path": "/AGENTS.md"
+    },
+    {
+      "method": "HEAD",
+      "path": "/AGENTS.md"
+    },
+    {
+      "method": "POST",
+      "path": "/api/access-requests"
+    },
+    {
+      "method": "GET",
+      "path": "/api/access-requests/{id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/access-requests/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/account-rooms"
+    },
+    {
+      "method": "POST",
+      "path": "/api/account-rooms"
+    },
+    {
+      "method": "POST",
+      "path": "/api/account-rooms/from-template"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/account-session"
+    },
+    {
+      "method": "GET",
+      "path": "/api/account-session"
+    },
+    {
+      "method": "POST",
+      "path": "/api/account-session"
+    },
+    {
+      "method": "POST",
+      "path": "/api/account/delete"
+    },
+    {
+      "method": "GET",
+      "path": "/api/account/deletion/plan"
+    },
+    {
+      "method": "POST",
+      "path": "/api/account/ensure-default-room"
+    },
+    {
+      "method": "GET",
+      "path": "/api/account/onboarding"
+    },
+    {
+      "method": "POST",
+      "path": "/api/account/onboarding/complete"
+    },
+    {
+      "method": "GET",
+      "path": "/api/account/profile"
+    },
+    {
+      "method": "POST",
+      "path": "/api/account/profile"
+    },
+    {
+      "method": "GET",
+      "path": "/api/account/retention"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent-directory"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-directory/cards"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/agent-directory/cards/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent-heartbeats"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-heartbeats"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-heartbeats/ack"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-identities"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent-identities/{id}/keys"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-identities/{id}/keys/revoke"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-identities/{id}/keys/rotate"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-identities/{id}/revoke"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-identities/{id}/rotate"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent-identities/{id}/verification"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/agent-identities/{id}/verify"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-identities/{id}/verify"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent-invites/preview"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-invites/redeem"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent-keys"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-keys"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-keys/{id}/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent-manifest"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent-rooms"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-rooms"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-skills"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent-wakes/poll"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent-webhooks"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-webhooks"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/agent-webhooks/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent-webhooks/{id}/deliveries"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-webhooks/{id}/verify-delivery"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent-webhooks/dead-letter"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent-webhooks/deliveries"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-webhooks/deliveries/{id}/redrive"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent-webhooks/metrics"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-webhooks/process"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agents/{id}/card"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agents/directory"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agents/directory/{id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/agent/rooms"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/agent/session"
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/github/callback"
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/github/link/start"
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/github/start"
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/gmail/callback"
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/google/callback"
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/google/link/start"
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/google/start"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/magic/consume"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/magic/request"
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/methods"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/methods/disable"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/methods/enable"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/methods/remove"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/passkey/authenticate/finish"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/passkey/authenticate/options"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/passkey/register/finish"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/passkey/register/options"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/password/change"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/password/login"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/password/reset/consume"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/password/reset/request"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/password/set"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/password/signup"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/recovery-codes/generate"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/recovery-codes/redeem"
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/recovery-codes/status"
+    },
+    {
+      "method": "POST",
+      "path": "/api/claims/validate"
+    },
+    {
+      "method": "GET",
+      "path": "/api/guest-agent-links"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/guest-agent-links"
+    },
+    {
+      "method": "POST",
+      "path": "/api/guest-agent-links"
+    },
+    {
+      "method": "POST",
+      "path": "/api/guest-agent-links/join"
+    },
+    {
+      "method": "POST",
+      "path": "/api/guest-agent-links/preview"
+    },
+    {
+      "method": "GET",
+      "path": "/api/guest-invites"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/guest-invites"
+    },
+    {
+      "method": "POST",
+      "path": "/api/guest-invites/preview"
+    },
+    {
+      "method": "POST",
+      "path": "/api/guest-invites/redeem"
+    },
+    {
+      "method": "POST",
+      "path": "/api/guest-invites/request"
+    },
+    {
+      "method": "POST",
+      "path": "/api/guest-invites/rotate"
+    },
+    {
+      "method": "GET",
+      "path": "/api/health"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/health"
+    },
+    {
+      "method": "GET",
+      "path": "/api/health/jobs"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/health/jobs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/healthz"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/healthz"
+    },
+    {
+      "method": "POST",
+      "path": "/api/identities/{id}/link-code"
+    },
+    {
+      "method": "POST",
+      "path": "/api/identity-create"
+    },
+    {
+      "method": "GET",
+      "path": "/api/inbox"
+    },
+    {
+      "method": "POST",
+      "path": "/api/inbox"
+    },
+    {
+      "method": "POST",
+      "path": "/api/inbox/channel-sends"
+    },
+    {
+      "method": "POST",
+      "path": "/api/inbox/commands"
+    },
+    {
+      "method": "GET",
+      "path": "/api/inbox/connections"
+    },
+    {
+      "method": "GET",
+      "path": "/api/inbox/connections/{id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/inbox/connections/{id}/reconnect"
+    },
+    {
+      "method": "POST",
+      "path": "/api/inbox/connections/{id}/sync"
+    },
+    {
+      "method": "POST",
+      "path": "/api/inbox/connections/commands"
+    },
+    {
+      "method": "GET",
+      "path": "/api/inbox/gmail"
+    },
+    {
+      "method": "POST",
+      "path": "/api/inbox/gmail"
+    },
+    {
+      "method": "GET",
+      "path": "/api/inbox/gmail/connect"
+    },
+    {
+      "method": "POST",
+      "path": "/api/inbox/gmail/connect"
+    },
+    {
+      "method": "GET",
+      "path": "/api/inbox/gmail/disconnect"
+    },
+    {
+      "method": "POST",
+      "path": "/api/inbox/gmail/disconnect"
+    },
+    {
+      "method": "GET",
+      "path": "/api/inbox/gmail/mailbox"
+    },
+    {
+      "method": "POST",
+      "path": "/api/inbox/gmail/mailbox"
+    },
+    {
+      "method": "GET",
+      "path": "/api/inbox/gmail/sync"
+    },
+    {
+      "method": "POST",
+      "path": "/api/inbox/gmail/sync"
+    },
+    {
+      "method": "GET",
+      "path": "/api/inbox/quarantine"
+    },
+    {
+      "method": "GET",
+      "path": "/api/inbox/quarantine/coverage"
+    },
+    {
+      "method": "POST",
+      "path": "/api/inbox/quarantine/dismiss"
+    },
+    {
+      "method": "POST",
+      "path": "/api/inbox/quarantine/release"
+    },
+    {
+      "method": "POST",
+      "path": "/api/inbox/quarantine/split"
+    },
+    {
+      "method": "POST",
+      "path": "/api/inbox/review"
+    },
+    {
+      "method": "GET",
+      "path": "/api/inbox/search"
+    },
+    {
+      "method": "GET",
+      "path": "/api/inbox/setup"
+    },
+    {
+      "method": "POST",
+      "path": "/api/inbox/setup"
+    },
+    {
+      "method": "POST",
+      "path": "/api/inbox/simulation"
+    },
+    {
+      "method": "GET",
+      "path": "/api/inbox/sla/dashboard"
+    },
+    {
+      "method": "GET",
+      "path": "/api/inbox/sources/{id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/inbox/sources/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/inbox/sources/{id}/attachments"
+    },
+    {
+      "method": "GET",
+      "path": "/api/inbox/sources/{id}/attachments/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/inbox/sources/{id}/reply-review"
+    },
+    {
+      "method": "GET",
+      "path": "/api/inbox/sources/{id}/room-results"
+    },
+    {
+      "method": "POST",
+      "path": "/api/inbox/sources/{id}/room-results"
+    },
+    {
+      "method": "GET",
+      "path": "/api/inbox/sources/{id}/send-context"
+    },
+    {
+      "method": "POST",
+      "path": "/api/inbox/sources/{id}/send-context"
+    },
+    {
+      "method": "GET",
+      "path": "/api/inbox/sources/{id}/sends"
+    },
+    {
+      "method": "POST",
+      "path": "/api/inbox/sources/{id}/sends"
+    },
+    {
+      "method": "GET",
+      "path": "/api/inbox/sources/{id}/share-context"
+    },
+    {
+      "method": "POST",
+      "path": "/api/inbox/sources/{id}/share-context"
+    },
+    {
+      "method": "GET",
+      "path": "/api/inbox/threads"
+    },
+    {
+      "method": "GET",
+      "path": "/api/inbox/webhooks/{connectionId}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/inbox/webhooks/{connectionId}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/invitations/accept"
+    },
+    {
+      "method": "POST",
+      "path": "/api/invitations/preview"
+    },
+    {
+      "method": "POST",
+      "path": "/api/join"
+    },
+    {
+      "method": "GET",
+      "path": "/api/needs-me"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/needs-me"
+    },
+    {
+      "method": "GET",
+      "path": "/api/oauth/sessions"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/oauth/sessions/{id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/oauth/sessions/revoke-all"
+    },
+    {
+      "method": "GET",
+      "path": "/api/opportunities.json"
+    },
+    {
+      "method": "GET",
+      "path": "/api/project-offers"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/project-offers"
+    },
+    {
+      "method": "GET",
+      "path": "/api/project-offers/{id}"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/project-offers/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/project-offers/{id}/brief.md"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/project-offers/{id}/brief.md"
+    },
+    {
+      "method": "POST",
+      "path": "/api/public-work/match"
+    },
+    {
+      "method": "GET",
+      "path": "/api/public-work/receipts/{id}"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/public-work/receipts/{id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/public-work/receipts/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/public-work/receipts/{id}/artifact"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/public-work/receipts/{id}/artifact"
+    },
+    {
+      "method": "POST",
+      "path": "/api/public-work/receipts/{id}/artifact"
+    },
+    {
+      "method": "GET",
+      "path": "/api/public-work/receipts/{id}/review"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/public-work/receipts/{id}/review"
+    },
+    {
+      "method": "GET",
+      "path": "/api/public-work/tasks"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/public-work/tasks"
+    },
+    {
+      "method": "POST",
+      "path": "/api/public-work/tasks"
+    },
+    {
+      "method": "GET",
+      "path": "/api/public-work/tasks/{id}"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/public-work/tasks/{id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/public-work/tasks/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/public-work/tasks/{id}/claim"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/public-work/tasks/{id}/claim"
+    },
+    {
+      "method": "POST",
+      "path": "/api/public-work/tasks/{id}/claim"
+    },
+    {
+      "method": "GET",
+      "path": "/api/public-work/tasks/{id}/finish"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/public-work/tasks/{id}/finish"
+    },
+    {
+      "method": "POST",
+      "path": "/api/public-work/tasks/{id}/finish"
+    },
+    {
+      "method": "GET",
+      "path": "/api/public-work/tasks/{id}/release"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/public-work/tasks/{id}/release"
+    },
+    {
+      "method": "POST",
+      "path": "/api/public-work/tasks/{id}/release"
+    },
+    {
+      "method": "GET",
+      "path": "/api/public-work/tasks/{id}/renew"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/public-work/tasks/{id}/renew"
+    },
+    {
+      "method": "POST",
+      "path": "/api/public-work/tasks/{id}/renew"
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/receipts"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/public/receipts"
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/rooms/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/rooms/{id}/feed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/rooms/directory"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ready"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/ready"
+    },
+    {
+      "method": "POST",
+      "path": "/api/referral-invites/mint"
+    },
+    {
+      "method": "POST",
+      "path": "/api/referral-invites/preview"
+    },
+    {
+      "method": "POST",
+      "path": "/api/referral-invites/redeem"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/access-requests"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/access-requests/{id}/decide"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/access-review"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/activation-pack"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/activity"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/activity-read"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/activity-read-all"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/activity-unread-count"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/add_land_item"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/add_land_item"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/add_land_item"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/agent-capabilities"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/agent-connections"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/agent-connections"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/agent-grants"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/agent-grants"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/rooms/{id}/agent-grants/{id}/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/agent-inbox"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/rooms/{id}/agent-invites"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/agent-invites"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/agent-invites"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/agent-pause"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/agent-pause"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/rooms/{id}/board/v2/board"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/board/v2/board"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/board/v2/board"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/rooms/{id}/board/v2/board"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/board/v2/board"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/rooms/{id}/board/v2/board"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/rooms/{id}/board/v2/claims"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/board/v2/claims"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/board/v2/claims"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/rooms/{id}/board/v2/claims"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/board/v2/claims"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/rooms/{id}/board/v2/claims"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/rooms/{id}/board/v2/claims/{id}/heartbeat"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/board/v2/claims/{id}/heartbeat"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/board/v2/claims/{id}/heartbeat"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/rooms/{id}/board/v2/claims/{id}/heartbeat"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/board/v2/claims/{id}/heartbeat"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/rooms/{id}/board/v2/claims/{id}/heartbeat"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/rooms/{id}/board/v2/claims/{id}/receipts"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/board/v2/claims/{id}/receipts"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/board/v2/claims/{id}/receipts"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/rooms/{id}/board/v2/claims/{id}/receipts"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/board/v2/claims/{id}/receipts"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/rooms/{id}/board/v2/claims/{id}/receipts"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/rooms/{id}/board/v2/claims/{id}/release"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/board/v2/claims/{id}/release"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/board/v2/claims/{id}/release"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/rooms/{id}/board/v2/claims/{id}/release"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/board/v2/claims/{id}/release"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/rooms/{id}/board/v2/claims/{id}/release"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/rooms/{id}/board/v2/decisions"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/board/v2/decisions"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/board/v2/decisions"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/rooms/{id}/board/v2/decisions"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/board/v2/decisions"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/rooms/{id}/board/v2/decisions"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/rooms/{id}/board/v2/events"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/board/v2/events"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/board/v2/events"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/rooms/{id}/board/v2/events"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/board/v2/events"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/rooms/{id}/board/v2/events"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/rooms/{id}/board/v2/findings"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/board/v2/findings"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/board/v2/findings"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/rooms/{id}/board/v2/findings"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/board/v2/findings"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/rooms/{id}/board/v2/findings"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/rooms/{id}/board/v2/health"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/board/v2/health"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/board/v2/health"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/rooms/{id}/board/v2/health"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/board/v2/health"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/rooms/{id}/board/v2/health"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/rooms/{id}/board/v2/mirror-map"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/board/v2/mirror-map"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/board/v2/mirror-map"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/rooms/{id}/board/v2/mirror-map"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/board/v2/mirror-map"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/rooms/{id}/board/v2/mirror-map"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/rooms/{id}/board/v2/notes"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/board/v2/notes"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/board/v2/notes"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/rooms/{id}/board/v2/notes"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/board/v2/notes"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/rooms/{id}/board/v2/notes"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/bonds"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/bounties"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/bounties"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/bounties"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/bounties/{id}/accept"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/bounties/{id}/accept"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/bounties/{id}/accept"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/bounties/{id}/claim"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/bounties/{id}/claim"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/bounties/{id}/claim"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/bounties/{id}/decline"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/bounties/{id}/decline"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/bounties/{id}/decline"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/bounties/{id}/dispute"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/bounties/{id}/dispute"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/bounties/{id}/dispute"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/bounties/{id}/dispute/decide"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/bounties/{id}/dispute/decide"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/bounties/{id}/dispute/decide"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/bounties/{id}/duplicate"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/bounties/{id}/duplicate"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/bounties/{id}/duplicate"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/bounties/{id}/finalize"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/bounties/{id}/finalize"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/bounties/{id}/finalize"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/bounties/{id}/fund"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/bounties/{id}/fund"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/bounties/{id}/fund"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/bounties/{id}/reject"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/bounties/{id}/reject"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/bounties/{id}/reject"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/bounties/{id}/rubric"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/bounties/{id}/rubric"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/bounties/{id}/rubric"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/bounties/{id}/snooze"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/bounties/{id}/snooze"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/bounties/{id}/snooze"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/bounties/{id}/submit"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/bounties/{id}/submit"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/bounties/{id}/submit"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/bounties/{id}/watch"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/bounties/{id}/watch"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/bounties/{id}/watch"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/bounties/reputation-reviews"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/bounties/reputation-reviews"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/bounties/reviews"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/bounties/reviews"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/bounties/sybil-flags"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/bounties/sybil-flags"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/bounties/sybil-flags/{id}/confirm"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/bounties/sybil-flags/{id}/confirm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/bounties/sybil-flags/{id}/confirm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/bounties/sybil-flags/{id}/dismiss"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/bounties/sybil-flags/{id}/dismiss"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/bounties/sybil-flags/{id}/dismiss"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/capabilities"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/charter"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/collab/approvals"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/collab/approvals"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/collab/approvals"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/collab/approvals/{id}/decide"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/collab/approvals/{id}/decide"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/collab/approvals/{id}/decide"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/collab/approvals/{id}/resubmit"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/collab/approvals/{id}/resubmit"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/collab/approvals/{id}/resubmit"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/collab/assignments"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/collab/assignments"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/collab/assignments"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/collab/assignments/{id}/release"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/collab/assignments/{id}/release"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/collab/assignments/{id}/release"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/collab/draft-locks"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/collab/draft-locks"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/collab/draft-locks/acquire"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/collab/draft-locks/acquire"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/collab/draft-locks/acquire"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/collab/draft-locks/release"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/collab/draft-locks/release"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/collab/draft-locks/release"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/collab/envelopes"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/collab/envelopes"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/collab/envelopes"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/collab/envelopes/{id}/transition"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/collab/envelopes/{id}/transition"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/collab/envelopes/{id}/transition"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/collab/envelopes/metrics"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/collab/envelopes/metrics"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/collab/envelopes/sweep"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/collab/envelopes/sweep"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/collab/envelopes/sweep"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/collab/handoffs"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/collab/handoffs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/collab/handoffs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/collab/handoffs/{id}/transition"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/collab/handoffs/{id}/transition"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/collab/handoffs/{id}/transition"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/collab/notes"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/collab/notes"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/collab/notes"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/collab/routing"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/collab/routing"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/collab/routing/{id}/resolve"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/collab/routing/{id}/resolve"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/collab/routing/{id}/resolve"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/collab/routing/mentions"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/collab/routing/mentions"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/collab/routing/mentions"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/collab/routing/policy"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/collab/routing/policy"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/collab/routing/policy"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/commands"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/context"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/conversation"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/credits/balances/{id}"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/credits/balances/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/credits/epoch/close"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/credits/epoch/close"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/credits/epoch/close"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/credits/history/{id}"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/credits/history/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/credits/transfer"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/credits/transfer"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/credits/transfer"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/cursor"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/diagnostics"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/diagnostics-export"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/directory"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/directory"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/dm-consents"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/dm-consents"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/dm-consents/{id}/decide"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/dm-consents/block"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/dm-consents/revoke"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/dm-consents/unblock"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/events"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/export"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/feedback"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/feedback"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/feedback"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/feedback/{id}"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/feedback/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/feedback/{id}/appeal"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/feedback/{id}/appeal"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/feedback/{id}/appeal"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/feedback/{id}/appeal/decision"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/feedback/{id}/appeal/decision"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/feedback/{id}/appeal/decision"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/feedback/{id}/outcome"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/feedback/{id}/outcome"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/feedback/{id}/outcome"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/feedback/{id}/triage"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/feedback/{id}/triage"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/feedback/{id}/triage"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/feedback/notifications"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/feedback/notifications"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/feedback/queue"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/feedback/queue"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/files"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/files"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/files"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/files/{id}/commit"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/files/{id}/commit"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/files/{id}/commit"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/guest-agent-links"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/guest-invites"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/guest-invites-disconnect"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/guest-invites-list"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/guest-invites-revoke"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/guest-invites-revoke-all"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/guest-invites-upgrade"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/rooms/{id}/human-push"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/human-push"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/human-push"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/rooms/{id}/identity-links"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/identity-links"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/identity-links"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/import"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/invitations"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/invitations"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/invitations/{id}/revoke"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/jev-shadow"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/list_land_queue"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/list_land_queue"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/list_land_queue"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/rooms/{id}/members/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/membership-delegation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/membership-delegation/grant"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/membership-delegation/revoke"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/mentions"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/mentions/{id}/ack"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/mentions/settings"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/messages/{id}/thread"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/needs-attention"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/next-actions"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/next-actions-dismiss"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/next-actions-dismissals"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/next-actions-suppressions"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/rooms/{id}/next-actions-suppressions"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/notifications"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/open-questions"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/operator/agents/{id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/rooms/{id}/operator/agents/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/opportunities"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/opportunities"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/orient"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/outside-agents"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/outside-agents"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/owner-delegates"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/owner-delegates/grant"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/owner-delegates/revoke"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/ownership/transfer"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/peer-dms"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/peer-dms/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/pins"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/pins"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/presence"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/project-offers"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/project-offers"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/project-offers"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/project-offers/{id}/claims"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/project-offers/{id}/claims"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/project-offers/{id}/claims"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/project-offers/{id}/publish"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/project-offers/{id}/publish"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/project-offers/{id}/publish"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/project-offers/{id}/withdraw"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/project-offers/{id}/withdraw"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/project-offers/{id}/withdraw"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/provider-heartbeats"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/public-face"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/public-face"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/public-face/rotate"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/public-work/receipts/{id}"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/public-work/receipts/{id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/public-work/receipts/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/public-work/receipts/{id}/decide"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/public-work/receipts/{id}/decide"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/public-work/receipts/{id}/decide"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/public-work/receipts/{id}/follow-up"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/public-work/receipts/{id}/follow-up"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/public-work/receipts/{id}/follow-up"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/public-work/receipts/{id}/verify"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/public-work/receipts/{id}/verify"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/public-work/receipts/{id}/verify"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/public-work/results"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/public-work/results"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/public-work/results"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/read-horizon"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/read-horizon"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/receipts"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/receipts"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/referral-invites"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/referrals"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/reminders"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/reminders"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/remove_land_item"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/remove_land_item"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/remove_land_item"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/reply-context"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/reply-history"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/reply-requests"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/report_tip"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/report_tip"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/report_tip"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/reports"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/reports"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/request-runs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/request-runs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/return-brief"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/rooms/{id}/saved"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/saved"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/saved"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/rooms/{id}/saved/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/search"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/share-links"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/share-links"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/share-links-cancel"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/spend-allowance"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/spend-allowance"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/thread-mutes"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/thread-mutes"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/usage"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/verification-policy"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/verification-policy"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/work-changes"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/work-claims"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/work-claims"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/work-claims"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/work-claims/{id}"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/work-claims/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/work-claims/{id}/claim"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/work-claims/{id}/claim"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/work-claims/{id}/claim"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/work-claims/{id}/reassign"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/work-claims/{id}/reassign"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/work-claims/{id}/reassign"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/work-claims/{id}/release"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/work-claims/{id}/release"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/work-claims/{id}/release"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/work-claims/{id}/renew"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/work-claims/{id}/renew"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/work-claims/{id}/renew"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/work-claims/{id}/review"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/work-claims/{id}/review"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/work-claims/{id}/review"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/work-claims/{id}/update"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/work-claims/{id}/update"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/work-claims/{id}/update"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/work-claims/duplicates"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/work-claims/duplicates"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/work-claims/status"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/work-claims/status"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/work-claims/sweep"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/work-claims/sweep"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/work-claims/sweep"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/work-context"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/work-discussion"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/work-result"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/work-sessions"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/work-sessions"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/session"
+    },
+    {
+      "method": "GET",
+      "path": "/api/session"
+    },
+    {
+      "method": "POST",
+      "path": "/api/session"
+    },
+    {
+      "method": "POST",
+      "path": "/api/share-links/join"
+    },
+    {
+      "method": "POST",
+      "path": "/api/share-links/join-agent"
+    },
+    {
+      "method": "POST",
+      "path": "/api/share-links/preview"
+    },
+    {
+      "method": "GET",
+      "path": "/api/version"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/version"
+    },
+    {
+      "method": "GET",
+      "path": "/api/version/worker"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/version/worker"
+    },
+    {
+      "method": "POST",
+      "path": "/api/web/fetch"
+    },
+    {
+      "method": "POST",
+      "path": "/api/web/research"
+    },
+    {
+      "method": "GET",
+      "path": "/apps.md"
+    },
+    {
+      "method": "HEAD",
+      "path": "/apps.md"
+    },
+    {
+      "method": "GET",
+      "path": "/apps.txt"
+    },
+    {
+      "method": "HEAD",
+      "path": "/apps.txt"
+    },
+    {
+      "method": "GET",
+      "path": "/CLAUDE.md"
+    },
+    {
+      "method": "HEAD",
+      "path": "/CLAUDE.md"
+    },
+    {
+      "method": "GET",
+      "path": "/favicon.ico"
+    },
+    {
+      "method": "HEAD",
+      "path": "/favicon.ico"
+    },
+    {
+      "method": "GET",
+      "path": "/healthz"
+    },
+    {
+      "method": "HEAD",
+      "path": "/healthz"
+    },
+    {
+      "method": "POST",
+      "path": "/join"
+    },
+    {
+      "method": "GET",
+      "path": "/join.html"
+    },
+    {
+      "method": "HEAD",
+      "path": "/join.html"
+    },
+    {
+      "method": "GET",
+      "path": "/join.txt"
+    },
+    {
+      "method": "HEAD",
+      "path": "/join.txt"
+    },
+    {
+      "method": "GET",
+      "path": "/kit.md"
+    },
+    {
+      "method": "HEAD",
+      "path": "/kit.md"
+    },
+    {
+      "method": "GET",
+      "path": "/kit.txt"
+    },
+    {
+      "method": "HEAD",
+      "path": "/kit.txt"
+    },
+    {
+      "method": "GET",
+      "path": "/kits"
+    },
+    {
+      "method": "HEAD",
+      "path": "/kits"
+    },
+    {
+      "method": "GET",
+      "path": "/kits.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/kits.json"
+    },
+    {
+      "method": "GET",
+      "path": "/kits.md"
+    },
+    {
+      "method": "HEAD",
+      "path": "/kits.md"
+    },
+    {
+      "method": "GET",
+      "path": "/kits.txt"
+    },
+    {
+      "method": "HEAD",
+      "path": "/kits.txt"
+    },
+    {
+      "method": "GET",
+      "path": "/llms-full.txt"
+    },
+    {
+      "method": "HEAD",
+      "path": "/llms-full.txt"
+    },
+    {
+      "method": "GET",
+      "path": "/llms.txt"
+    },
+    {
+      "method": "HEAD",
+      "path": "/llms.txt"
+    },
+    {
+      "method": "GET",
+      "path": "/mcp"
+    },
+    {
+      "method": "HEAD",
+      "path": "/mcp"
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/mcp"
+    },
+    {
+      "method": "POST",
+      "path": "/mcp"
+    },
+    {
+      "method": "GET",
+      "path": "/mcp/claude"
+    },
+    {
+      "method": "HEAD",
+      "path": "/mcp/claude"
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/mcp/claude"
+    },
+    {
+      "method": "POST",
+      "path": "/mcp/claude"
+    },
+    {
+      "method": "GET",
+      "path": "/mcp/codex"
+    },
+    {
+      "method": "HEAD",
+      "path": "/mcp/codex"
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/mcp/codex"
+    },
+    {
+      "method": "POST",
+      "path": "/mcp/codex"
+    },
+    {
+      "method": "GET",
+      "path": "/mcp/cursor"
+    },
+    {
+      "method": "HEAD",
+      "path": "/mcp/cursor"
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/mcp/cursor"
+    },
+    {
+      "method": "POST",
+      "path": "/mcp/cursor"
+    },
+    {
+      "method": "GET",
+      "path": "/mcp/server-card"
+    },
+    {
+      "method": "HEAD",
+      "path": "/mcp/server-card"
+    },
+    {
+      "method": "GET",
+      "path": "/oauth/authorize"
+    },
+    {
+      "method": "POST",
+      "path": "/oauth/authorize"
+    },
+    {
+      "method": "POST",
+      "path": "/oauth/revoke"
+    },
+    {
+      "method": "POST",
+      "path": "/oauth/token"
+    },
+    {
+      "method": "GET",
+      "path": "/openapi.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/openapi.json"
+    },
+    {
+      "method": "GET",
+      "path": "/p/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/project-room/.well-known/agent-card.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/project-room/.well-known/agent-card.json"
+    },
+    {
+      "method": "GET",
+      "path": "/project-room/.well-known/agent.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/project-room/.well-known/agent.json"
+    },
+    {
+      "method": "GET",
+      "path": "/project-room/.well-known/governance.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/project-room/.well-known/governance.json"
+    },
+    {
+      "method": "GET",
+      "path": "/project-room/.well-known/jwks.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/project-room/.well-known/jwks.json"
+    },
+    {
+      "method": "GET",
+      "path": "/project-room/.well-known/mcp"
+    },
+    {
+      "method": "HEAD",
+      "path": "/project-room/.well-known/mcp"
+    },
+    {
+      "method": "GET",
+      "path": "/project-room/.well-known/mcp.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/project-room/.well-known/mcp.json"
+    },
+    {
+      "method": "GET",
+      "path": "/project-room/agents.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/project-room/agents.json"
+    },
+    {
+      "method": "GET",
+      "path": "/project-room/join.txt"
+    },
+    {
+      "method": "HEAD",
+      "path": "/project-room/join.txt"
+    },
+    {
+      "method": "GET",
+      "path": "/project-room/kits.txt"
+    },
+    {
+      "method": "HEAD",
+      "path": "/project-room/kits.txt"
+    },
+    {
+      "method": "GET",
+      "path": "/project-room/llms-full.txt"
+    },
+    {
+      "method": "HEAD",
+      "path": "/project-room/llms-full.txt"
+    },
+    {
+      "method": "GET",
+      "path": "/project-room/llms.txt"
+    },
+    {
+      "method": "HEAD",
+      "path": "/project-room/llms.txt"
+    },
+    {
+      "method": "GET",
+      "path": "/project-room/mcp/server-card"
+    },
+    {
+      "method": "HEAD",
+      "path": "/project-room/mcp/server-card"
+    },
+    {
+      "method": "GET",
+      "path": "/project-room/skills"
+    },
+    {
+      "method": "HEAD",
+      "path": "/project-room/skills"
+    },
+    {
+      "method": "GET",
+      "path": "/receipts"
+    },
+    {
+      "method": "HEAD",
+      "path": "/receipts"
+    },
+    {
+      "method": "GET",
+      "path": "/robots.txt"
+    },
+    {
+      "method": "HEAD",
+      "path": "/robots.txt"
+    },
+    {
+      "method": "GET",
+      "path": "/room"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room"
+    },
+    {
+      "method": "GET",
+      "path": "/room/.well-known/agent-card.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/.well-known/agent-card.json"
+    },
+    {
+      "method": "GET",
+      "path": "/room/.well-known/agent.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/.well-known/agent.json"
+    },
+    {
+      "method": "GET",
+      "path": "/room/.well-known/governance.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/.well-known/governance.json"
+    },
+    {
+      "method": "GET",
+      "path": "/room/.well-known/jwks.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/.well-known/jwks.json"
+    },
+    {
+      "method": "GET",
+      "path": "/room/.well-known/mcp"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/.well-known/mcp"
+    },
+    {
+      "method": "GET",
+      "path": "/room/.well-known/mcp.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/.well-known/mcp.json"
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/room/a2a"
+    },
+    {
+      "method": "POST",
+      "path": "/room/a2a"
+    },
+    {
+      "method": "GET",
+      "path": "/room/agent.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/agent.json"
+    },
+    {
+      "method": "GET",
+      "path": "/room/agents"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/agents"
+    },
+    {
+      "method": "GET",
+      "path": "/room/agents.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/agents.json"
+    },
+    {
+      "method": "GET",
+      "path": "/room/agents.md"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/agents.md"
+    },
+    {
+      "method": "GET",
+      "path": "/room/AGENTS.md"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/AGENTS.md"
+    },
+    {
+      "method": "GET",
+      "path": "/room/api/health"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/api/health"
+    },
+    {
+      "method": "GET",
+      "path": "/room/api/healthz"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/api/healthz"
+    },
+    {
+      "method": "GET",
+      "path": "/room/apps"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/apps"
+    },
+    {
+      "method": "GET",
+      "path": "/room/apps.md"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/apps.md"
+    },
+    {
+      "method": "GET",
+      "path": "/room/apps.txt"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/apps.txt"
+    },
+    {
+      "method": "GET",
+      "path": "/room/CLAUDE.md"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/CLAUDE.md"
+    },
+    {
+      "method": "GET",
+      "path": "/room/cursor.md"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/cursor.md"
+    },
+    {
+      "method": "GET",
+      "path": "/room/CURSOR.md"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/CURSOR.md"
+    },
+    {
+      "method": "GET",
+      "path": "/room/favicon.ico"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/favicon.ico"
+    },
+    {
+      "method": "GET",
+      "path": "/room/gemini.md"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/gemini.md"
+    },
+    {
+      "method": "GET",
+      "path": "/room/GEMINI.md"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/GEMINI.md"
+    },
+    {
+      "method": "GET",
+      "path": "/room/health"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/health"
+    },
+    {
+      "method": "GET",
+      "path": "/room/healthz"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/healthz"
+    },
+    {
+      "method": "POST",
+      "path": "/room/join"
+    },
+    {
+      "method": "GET",
+      "path": "/room/join.html"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/join.html"
+    },
+    {
+      "method": "GET",
+      "path": "/room/join.txt"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/join.txt"
+    },
+    {
+      "method": "GET",
+      "path": "/room/kit"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/kit"
+    },
+    {
+      "method": "GET",
+      "path": "/room/kit.md"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/kit.md"
+    },
+    {
+      "method": "GET",
+      "path": "/room/kit.txt"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/kit.txt"
+    },
+    {
+      "method": "GET",
+      "path": "/room/kits"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/kits"
+    },
+    {
+      "method": "GET",
+      "path": "/room/kits.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/kits.json"
+    },
+    {
+      "method": "GET",
+      "path": "/room/kits.md"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/kits.md"
+    },
+    {
+      "method": "GET",
+      "path": "/room/kits.txt"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/kits.txt"
+    },
+    {
+      "method": "GET",
+      "path": "/room/llms"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/llms"
+    },
+    {
+      "method": "GET",
+      "path": "/room/llms-full.txt"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/llms-full.txt"
+    },
+    {
+      "method": "GET",
+      "path": "/room/llms.txt"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/llms.txt"
+    },
+    {
+      "method": "GET",
+      "path": "/room/mcp"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/mcp"
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/room/mcp"
+    },
+    {
+      "method": "POST",
+      "path": "/room/mcp"
+    },
+    {
+      "method": "GET",
+      "path": "/room/mcp/claude"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/mcp/claude"
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/room/mcp/claude"
+    },
+    {
+      "method": "POST",
+      "path": "/room/mcp/claude"
+    },
+    {
+      "method": "GET",
+      "path": "/room/mcp/codex"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/mcp/codex"
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/room/mcp/codex"
+    },
+    {
+      "method": "POST",
+      "path": "/room/mcp/codex"
+    },
+    {
+      "method": "GET",
+      "path": "/room/mcp/cursor"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/mcp/cursor"
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/room/mcp/cursor"
+    },
+    {
+      "method": "POST",
+      "path": "/room/mcp/cursor"
+    },
+    {
+      "method": "GET",
+      "path": "/room/mcp/server-card"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/mcp/server-card"
+    },
+    {
+      "method": "GET",
+      "path": "/room/openapi.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/openapi.json"
+    },
+    {
+      "method": "GET",
+      "path": "/room/readme.md"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/readme.md"
+    },
+    {
+      "method": "GET",
+      "path": "/room/README.md"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/README.md"
+    },
+    {
+      "method": "GET",
+      "path": "/room/skill"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/skill"
+    },
+    {
+      "method": "GET",
+      "path": "/room/skill.md"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/skill.md"
+    },
+    {
+      "method": "GET",
+      "path": "/room/skills"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/skills"
+    },
+    {
+      "method": "GET",
+      "path": "/room/tools"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/tools"
+    },
+    {
+      "method": "GET",
+      "path": "/room/tools.md"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/tools.md"
+    },
+    {
+      "method": "GET",
+      "path": "/room/tools.txt"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/tools.txt"
+    },
+    {
+      "method": "GET",
+      "path": "/sitemap.xml"
+    },
+    {
+      "method": "HEAD",
+      "path": "/sitemap.xml"
+    },
+    {
+      "method": "GET",
+      "path": "/skill.md"
+    },
+    {
+      "method": "HEAD",
+      "path": "/skill.md"
+    },
+    {
+      "method": "GET",
+      "path": "/skills"
+    },
+    {
+      "method": "HEAD",
+      "path": "/skills"
+    },
+    {
+      "method": "GET",
+      "path": "/templates"
+    },
+    {
+      "method": "HEAD",
+      "path": "/templates"
+    },
+    {
+      "method": "GET",
+      "path": "/templates.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/templates.json"
+    },
+    {
+      "method": "GET",
+      "path": "/tools.md"
+    },
+    {
+      "method": "HEAD",
+      "path": "/tools.md"
+    },
+    {
+      "method": "GET",
+      "path": "/tools.txt"
+    },
+    {
+      "method": "HEAD",
+      "path": "/tools.txt"
+    }
+  ]
+}
