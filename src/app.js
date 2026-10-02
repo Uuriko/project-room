@@ -229,7 +229,7 @@ let instructionsUI = null;
 let inboxUI = null;
 let state = null, session = null, pendingMessage = null, pendingWork = null, pendingAction = null;
 // JDOT-COH-NAV begin
-let updatesUi = null;
+let updatesUi = null, resetNavigationBoard = null;
 const workNavigationOrigins = new Map();
 let activeWorkNavigation = null, activeWorkNavigationId = null, workNavigationEpoch = 0, workHistoryReplayKey = null;
 // JDOT-COH-NAV end
@@ -2691,6 +2691,9 @@ function revealMessage(id) {
   // inside the conversation without moving the surrounding page unnecessarily.
   const list = $("#message-list");
   if (row && row.offsetHeight > list.clientHeight) list.scrollTop += row.getBoundingClientRect().top - list.getBoundingClientRect().top;
+  // JDOT-COH-NAV begin
+  syncWorkReturnControl();
+  // JDOT-COH-NAV end
 }
 function focusRecord(node) {
   if (!node) return;
@@ -2754,6 +2757,7 @@ function syncWorkReturnControl() {
   button.textContent = origin ? `Back to ${origin.type === "updates" ? "Updates" : origin.type === "board" ? "Board" : "conversation"}` : "Back to room";
 }
 function clearWorkNavigation() {
+  resetNavigationBoard?.();
   workNavigationEpoch++; workNavigationOrigins.clear(); activeWorkNavigation = null; activeWorkNavigationId = null; workHistoryReplayKey = null;
   const button = $("#work-navigation-return");
   if (button) { button.hidden = true; button.disabled = false; }
@@ -2776,29 +2780,47 @@ function captureWorkOrigin(extra = {}) {
     boardScroll: board.scrollTop, boardBodyScroll: $("#work-board").scrollTop,
     boardColumnsScroll: $("#work-board .board-columns")?.scrollLeft ?? 0 };
 }
+function sameWorkOrigin(a, b) {
+  if (a.type !== b.type) return false;
+  if (a.type === "updates") return a.updates?.itemId === b.updates?.itemId && a.updates?.filter === b.updates?.filter;
+  if (a.type === "board") return a.claimId === b.claimId;
+  const key = value => value.focusKey || value.searchWorkId || (value.messageId && `${value.messageId}|${value.messageWorkId}`);
+  return key(a) ? key(a) === key(b) : a.focus === b.focus;
+}
+function showWorkDestination(kind, id, presentation = "details") {
+  workNavigationEpoch++; updatesUi?.close();
+  if ($("#board-dialog").open) $("#board-dialog").close();
+  if (kind === "work" && presentation === "drafts") { revealDrafts(id); activeWorkNavigationId = id; }
+  else if (kind === "work") revealWork(id); else revealMessage(id);
+  syncWorkReturnControl();
+}
 function navigateWorkRecord(kind, id, extra = {}) {
   if (!workNavigationContext() || busy) return false;
   if (kind === "work" ? !Object.hasOwn(state.workItems, id) || state.workItems[id]?.id !== id : !conversation?.byId.has(id)) {
     notice("That source is no longer available in this room.", true); return false;
   }
-  const target = recordHref(kind, id);
+  const presentation = extra.presentation ?? "details";
+  const target = recordHref(kind, id), origin = { ...captureWorkOrigin(extra), presentation };
   const current = currentWorkOrigin();
-  if (current?.target === target && location.hash === target) {
-    if (kind === "work") revealWork(id); else revealMessage(id);
+  if (current?.target === target && location.hash === target && history.state?.roomWorkTarget === activeWorkNavigation) {
+    // A new surface can inspect the same task without a second URL entry.
+    // Its return context changes, while the existing origin entry/ticket survives.
+    if (!sameWorkOrigin(current, origin)) workNavigationOrigins.set(activeWorkNavigation,
+      { ...origin, url: current.url, previous: current.previous, target, targetUrl: current.targetUrl });
+    else if (current.presentation !== presentation) workNavigationOrigins.set(activeWorkNavigation, { ...current, presentation });
+    workHistoryReplayKey = null; showWorkDestination(kind, id, presentation);
     return true;
   }
-  const origin = captureWorkOrigin(extra), ticket = crypto.randomUUID();
-  origin.target = target;
+  const ticket = crypto.randomUUID();
+  origin.target = target; origin.targetUrl = new URL(target, location.href).href;
   workNavigationOrigins.set(ticket, origin);
-  // Only this opaque ticket travels in history; drafts and origin details stay in memory.
-  history.replaceState({ ...workHistoryState(), roomWorkOrigin: ticket }, "", location.href);
+  // Preserve this entry's own target when it also becomes the next entry's origin.
+  // Only opaque tickets travel in history; private context stays in memory.
+  const entry = history.state && typeof history.state === "object" ? history.state : {};
+  history.replaceState({ ...entry, roomWorkOrigin: ticket }, "", location.href);
   history.pushState({ ...workHistoryState(), roomWorkTarget: ticket }, "", target);
-  activeWorkNavigation = ticket; workHistoryReplayKey = null; workNavigationEpoch++;
-  updatesUi?.cancelPending();
-  if ($("#updates-dialog")?.open) $("#updates-dialog").close();
-  if ($("#board-dialog").open) $("#board-dialog").close();
-  if (kind === "work") revealWork(id); else revealMessage(id);
-  syncWorkReturnControl();
+  activeWorkNavigation = ticket; workHistoryReplayKey = null;
+  showWorkDestination(kind, id, presentation);
   return true;
 }
 async function restoreWorkOrigin(ticket) {
@@ -2811,6 +2833,18 @@ async function restoreWorkOrigin(ticket) {
   if (activeChannelId !== origin.channelId) setActiveChannel(origin.channelId);
   switchThread(origin.threadId && conversation.threads.has(origin.threadId) ? origin.threadId : null);
   if (origin.mode) setRequestMode(origin.mode);
+  activeWorkNavigationId = null;
+  const priorOrigin = currentWorkOrigin(origin.previous);
+  const priorTarget = priorOrigin?.target;
+  const priorWork = /^#pr-record\/work\/(.+)$/.exec(priorTarget ?? "");
+  if (priorWork) {
+    const id = decodeFragment(priorWork[1]), card = id && workRecord(id);
+    if (card) {
+      const section = priorOrigin.presentation === "drafts" ? card.querySelector(".work-drafts") : card.querySelector(".work-details");
+      if (section) section.open = true;
+      activeWorkNavigationId = id;
+    }
+  }
   const input = $("#message-input");
   input.setSelectionRange(...origin.selection); input.scrollTop = origin.composerScroll;
   $("#message-list").scrollTop = origin.listScroll;
@@ -2842,9 +2876,9 @@ function returnToCurrentRoom() {
   if (detail) detail.open = false;
   activeWorkNavigationId = null;
   history.replaceState(workHistoryState(), "", "#pr-view/rooms");
-  if ($("#updates-dialog")?.open) $("#updates-dialog").close();
+  updatesUi?.close();
   if ($("#board-dialog").open) $("#board-dialog").close();
-  if (workNavigationContext()) { inboxUI?.showRooms(); focusRecord($("#conversation-title")); }
+  if (workNavigationContext()) { inboxUI?.showRooms(); switchThread(null); focusRecord($("#conversation-title")); }
   syncWorkReturnControl();
 }
 function replayWorkNavigation() {
@@ -2853,20 +2887,22 @@ function replayWorkNavigation() {
   const key = `${location.href}|${target ?? ""}|${back ?? ""}|${workNavigationContext()}`;
   if (key === workHistoryReplayKey) return true;
   workHistoryReplayKey = key;
-  const origin = currentWorkOrigin(target ?? back);
-  if (!origin) {
-    activeWorkNavigation = null; updatesUi?.cancelPending();
-    // A reloaded/new-tab entry has no private origin. Resolve only the current URL.
-    if (state) revealLocationHash();
-    syncWorkReturnControl(); return true;
-  }
-  if (target) {
-    activeWorkNavigation = target; workNavigationEpoch++; updatesUi?.cancelPending();
-    if ($("#updates-dialog")?.open) $("#updates-dialog").close();
+  const targetOrigin = currentWorkOrigin(target), backOrigin = currentWorkOrigin(back);
+  const returning = backOrigin && backOrigin.url === location.href && (!targetOrigin || activeWorkNavigation === back);
+  if (returning) { void restoreWorkOrigin(back); return true; }
+  if (targetOrigin && targetOrigin.targetUrl === location.href) {
+    activeWorkNavigation = target; workNavigationEpoch++; updatesUi?.close();
     if ($("#board-dialog").open) $("#board-dialog").close();
-    revealLocationHash(); syncWorkReturnControl();
-  } else void restoreWorkOrigin(back);
-  return true;
+    const work = /^#pr-record\/work\/(.+)$/.exec(location.hash);
+    if (work && targetOrigin.presentation === "drafts" && state?.workItems[decodeFragment(work[1])]) revealDrafts(decodeFragment(work[1]));
+    else revealLocationHash();
+    syncWorkReturnControl();
+    return true;
+  }
+  activeWorkNavigation = null; updatesUi?.cancelPending();
+  // Reloaded/new-tab entries have no private origin: resolve the current URL only.
+  if (state) revealLocationHash();
+  syncWorkReturnControl(); return true;
 }
 $("#work-navigation-return").addEventListener("click", () => {
   if (busy) return;
@@ -4436,7 +4472,7 @@ $("#main").addEventListener("click", e => {
     revealMessage(link.dataset.openMessage);
   } else if (link.dataset.openWork) {
     // JDOT-COH-NAV begin
-    if (navigateWorkRecord("work", link.dataset.openWork) && link.hasAttribute('data-view-drafts')) revealDrafts(link.dataset.openWork);
+    navigateWorkRecord("work", link.dataset.openWork, link.hasAttribute("data-view-drafts") ? { presentation: "drafts" } : {});
     // JDOT-COH-NAV end
   } else if (link.dataset.openMember) {
     history.replaceState(null, "", recordHref("member", link.dataset.openMember));
@@ -7101,6 +7137,9 @@ if (initialInvitationFragment && !initialPasswordReset) openInvitation(initialIn
     load: () => import("./board-ui.js"),
     install: module => module.installWorkBoard({ client, getState: () => state, getSession: () => session }),
     onError: () => notice("Could not load the board. Close and reopen to retry.", true) });
+  // JDOT-COH-NAV begin
+  resetNavigationBoard = () => { $("#board-dialog").close(); $("#board-panel").open = false; board.reset(); };
+  // JDOT-COH-NAV end
   const openBoard = () => {
     const dialog = $("#board-dialog");
     if (!dialog.open) dialog.showModal();
@@ -7114,7 +7153,9 @@ if (initialInvitationFragment && !initialPasswordReset) openInvitation(initialIn
   roomActionEntries = () => priorEntries().map(entry => entry.id === "landing"
     ? { id: "board", label: "Board", words: "tasks board claims ci review lease land", always: true } : entry);
   const priorChoose = chooseRoomAction;
-  chooseRoomAction = id => { if (id === "board") { openBoard(); return; } priorChoose(id); };
+  // JDOT-COH-NAV begin
+  chooseRoomAction = id => { if (id === "board") { closeRoomActions(false); openBoard(); return; } priorChoose(id); };
+  // JDOT-COH-NAV end
   const paintChat = () => { if (state) paintClaimChat(state, $("#message-list")); };
   const priorRender = render;
   render = () => { if (!state) { board.reset(); return; } priorRender(); board.sync(); };

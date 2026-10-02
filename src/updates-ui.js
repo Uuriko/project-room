@@ -231,5 +231,5 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
       .observe(main, { attributes: true, attributeFilter: ["hidden"] });
   }
   paintBadge();
-  return { open, restore, reset, cancelPending, openAction(id) { const next = PALETTE[id]; if (!next) return false; open(next); return true; } };
+  return { open, restore, reset, cancelPending, close() { cancelPending(); if (dialog.open) dialog.close(); }, openAction(id) { const next = PALETTE[id]; if (!next) return false; open(next); return true; } };
 }

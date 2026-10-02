@@ -8,6 +8,7 @@ import AxeBuilder from "@axe-core/playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { signInFixture } from "./auth-signin.mjs";
+import { openSearch } from "./room-chrome.mjs";
 
 const shots = "/opt/cursor/artifacts/screenshots";
 
@@ -255,6 +256,27 @@ test("board columns, keyboard claim, linked work returns, chat line, 390px, and 
     await axe(page);
     await page.locator("#board-close").click();
   }
+
+  // Same task, new source surface: Search -> task A -> Board -> task A.
+  // The Board must close and become the return destination without pushing A twice.
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await openSearch(page);
+  await page.locator("#message-search").fill("Canonical work behind the Board card");
+  await page.locator(`#search-list [data-open-work="${workId}"]`).press("Enter");
+  await page.waitForFunction(id => document.activeElement?.dataset.workRecordId === id, workId);
+  assert.equal(await page.locator("#work-navigation-return").innerText(), "Back to conversation");
+  const sameTargetHistoryLength = await page.evaluate(() => history.length);
+  await page.keyboard.press("Control+k");
+  await page.locator("#room-actions-query").fill("board");
+  await page.keyboard.press("Enter");
+  await linked.press("Enter");
+  await assertWork();
+  assert.equal(await page.evaluate(() => history.length), sameTargetHistoryLength);
+  await page.locator("#work-navigation-return").press("Enter");
+  await dialog.waitFor({ state: "visible" });
+  await page.waitForFunction(id => document.activeElement?.closest("article")?.dataset.claimId === id, claimId);
+  assert.equal(await linked.evaluate(node => node === document.activeElement), true);
+  assert.deepEqual(navigationState(), beforeNavigation);
 });
 
 function seedClaim(store, item) {

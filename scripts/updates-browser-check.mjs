@@ -10,7 +10,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { signInFixture } from "./auth-signin.mjs";
-import { clickChrome } from "./room-chrome.mjs";
+import { clickChrome, openSearch } from "./room-chrome.mjs";
 import { makeTestSigner } from "./helpers/signed-evidence.mjs";
 
 const command = (type, data, id = crypto.randomUUID()) => ({ id, type, data });
@@ -39,6 +39,13 @@ test("Updates navigation keeps review, draft and return context at 1280px and 39
   page.setDefaultTimeout(8000);
   const errors = [];
   page.on("pageerror", error => errors.push(error.message));
+  const selectUpdatesFilter = async (name, filter) => {
+    await page.getByRole("tab", { name }).click();
+    await page.waitForFunction(id => {
+      const tab = document.querySelector(`[data-update-filter="${id}"]`);
+      return tab?.getAttribute("aria-selected") === "true" && document.querySelector("#updates-status")?.textContent === "";
+    }, filter);
+  };
   await page.goto(origin);
   await page.locator("#auth-panel").waitFor({ state: "visible" });
   await signInFixture(page, owner);
@@ -50,13 +57,14 @@ test("Updates navigation keeps review, draft and return context at 1280px and 39
   assert.equal(await page.locator("#updates-count").textContent(), "");
 
   const agent = store.issueAccessKey("commons", "agent");
-  const messageId = "updates-message-only";
+  const messageId = "updates-message-only", threadId = "updates-thread-root";
+  store.command(owner, "commons", command(T.MESSAGE_POSTED, { messageId: threadId, body: "Starting review discussion." }));
   store.command(agent, "commons", command(T.MESSAGE_POSTED, {
-    messageId, body: "please confirm the empty-room plan", toMemberId: "owner"
+    messageId, body: "please confirm the empty-room plan", toMemberId: "owner", replyToId: threadId
   }));
   await page.locator("#topbar-updates").click();
   await page.locator("#updates-dialog").waitFor({ state: "visible" });
-  await page.getByRole("tab", { name: "Needs me" }).click();
+  await selectUpdatesFilter("Needs me", "needs");
   await page.locator(".updates-row").waitFor();
   assert.match(await page.locator(".updates-row").innerText(), /please confirm the empty-room plan/);
   assert.match(await page.locator("#updates-count").textContent(), /^1$/);
@@ -70,15 +78,29 @@ test("Updates navigation keeps review, draft and return context at 1280px and 39
   await page.getByRole("button", { name: /Open please confirm/ }).click();
   await page.locator("#updates-dialog").waitFor({ state: "hidden" });
   await page.waitForFunction(id => document.activeElement?.dataset.messageRecordId === id, messageId);
+  await page.locator("#thread-bar").waitFor({ state: "visible" });
+  await page.reload();
+  await page.locator("#main").waitFor({ state: "visible" });
+  await page.locator("#thread-bar").waitFor({ state: "visible" });
+  assert.equal(await page.locator("#work-navigation-return").textContent(), "Back to room");
+  const replyDraft = "Keep this reply when I return to the room.";
+  await page.locator("#message-input").fill(replyDraft);
+  await page.locator("#work-navigation-return").press("Enter");
+  await page.locator("#thread-bar").waitFor({ state: "hidden" });
+  await page.locator(`[data-message-id="${threadId}"][data-message-action="reply"]`).click();
+  await page.locator("#thread-bar").waitFor({ state: "visible" });
+  assert.equal(await page.locator("#message-input").inputValue(), replyDraft, "fallback leaves the reply through the normal draft-saving path");
+  await page.locator("#message-input").fill("");
+  await page.locator("#thread-back").click();
   await clickChrome(page, "#room-actions-open");
   await page.locator("#room-actions-query").fill("Catch up");
   await page.locator("[data-room-action=catch-up]").click();
   await page.locator("#updates-dialog").waitFor({ state: "visible" });
-  await page.getByRole("tab", { name: "Saved" }).click();
+  await selectUpdatesFilter("Saved", "saved");
   await page.locator(".updates-row").waitFor();
   assert.match(await page.locator(".updates-row").innerText(), /read/);
   await page.getByRole("button", { name: /Done please confirm/ }).click();
-  await page.getByRole("tab", { name: "Needs me" }).click();
+  await selectUpdatesFilter("Needs me", "needs");
   await page.getByText("Nothing needs you.").waitFor();
   assert.equal(await page.locator("#updates-count").textContent(), "");
 
@@ -126,7 +148,7 @@ test("Updates navigation keeps review, draft and return context at 1280px and 39
   for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: 844 });
     await page.locator("#topbar-updates").click();
-    await page.getByRole("tab", { name: "All activity" }).click();
+    await selectUpdatesFilter("All activity", "all");
     await openReview(review.id).waitFor();
     await openReview(review.id).scrollIntoViewIfNeeded();
     await openReview(review.id).focus();
@@ -169,6 +191,93 @@ test("Updates navigation keeps review, draft and return context at 1280px and 39
     await page.locator("#updates-close").click();
   }
   assert.equal(store.db.prepare("SELECT COUNT(*) AS count FROM private_update_commands").get().count, marksBefore + 2);
+
+  // A history entry can be both A's destination and B's origin. Returning
+  // from B must preserve A's original Updates return, including after Forward.
+  await page.setViewportSize({ width: 1280, height: 844 });
+  await page.locator("#topbar-updates").click();
+  await selectUpdatesFilter("All activity", "all");
+  await openReview(review.id).scrollIntoViewIfNeeded();
+  await openReview(review.id).focus();
+  const nestedScroll = await page.locator("#updates-dialog").evaluate(node => node.scrollTop);
+  const beforeNestedMarks = store.db.prepare("SELECT COUNT(*) AS count FROM private_update_commands").get().count;
+  await openReview(review.id).press("Enter");
+  await page.locator("#updates-dialog").waitFor({ state: "hidden" });
+  await openSearch(page);
+  await page.locator("#message-search").fill("Review exact result 2");
+  await page.locator('#search-list [data-open-work="review:next"]').press("Enter");
+  const assertNestedTask = async (id, backLabel) => {
+    await page.waitForFunction(expected => location.hash === expected, `#pr-record/work/${encodeURIComponent(id)}`);
+    await page.waitForFunction(({ workId, label }) => {
+      const task = [...document.querySelectorAll("[data-work-record-id]")].find(node => node.dataset.workRecordId === workId);
+      return task?.querySelector(".work-details")?.open && document.querySelector("#work-navigation-return")?.textContent === label;
+    }, { workId: id, label: backLabel });
+    assert.equal(await page.locator("#updates-dialog").isVisible(), false);
+    assert.equal(await card(id).count(), 1);
+  };
+  await assertNestedTask(reviewIds[1], "Back to conversation");
+  await page.goBack();
+  await assertNestedTask(reviewIds[0], "Back to Updates");
+  await page.goForward();
+  await assertNestedTask(reviewIds[1], "Back to conversation");
+  await page.locator("#work-navigation-return").press("Enter");
+  await assertNestedTask(reviewIds[0], "Back to Updates");
+  await page.locator("#work-navigation-return").press("Enter");
+  await page.locator("#updates-dialog").waitFor({ state: "visible" });
+  await page.waitForFunction(id => document.activeElement?.closest("[data-update-id]")?.dataset.updateId === id, review.id);
+  assert.equal(await page.getByRole("tab", { name: "All activity" }).getAttribute("aria-selected"), "true");
+  assert.ok(Math.abs(await page.locator("#updates-dialog").evaluate(node => node.scrollTop) - nestedScroll) <= 2);
+  assert.equal(await page.locator("#message-input").inputValue(), draft);
+  assert.equal(await page.locator("#message-to-select").inputValue(), "agent");
+  assert.deepEqual(await page.locator("#message-input").evaluate(node => [node.selectionStart, node.selectionEnd, node.selectionDirection]), [5, 12, "forward"]);
+  await page.goForward();
+  await assertNestedTask(reviewIds[0], "Back to Updates");
+  await page.locator("#work-navigation-return").press("Enter");
+  await page.locator("#updates-dialog").waitFor({ state: "visible" });
+  await page.waitForFunction(id => document.activeElement?.closest("[data-update-id]")?.dataset.updateId === id, review.id);
+  assert.equal(store.db.prepare("SELECT COUNT(*) AS count FROM private_update_commands").get().count, beforeNestedMarks + 1,
+    "nested task navigation and every history replay issue only the original Updates read mark");
+  assert.equal(JSON.stringify(store.room("commons")), roomBefore);
+
+  // Opening the already-current task from a new surface replaces its return
+  // context, closes that modal, and does not add a duplicate destination entry.
+  await page.locator("#updates-close").click();
+  await openSearch(page);
+  await page.locator("#message-search").fill("Review exact result 1");
+  await page.locator('#search-list [data-open-work="review:current"]').press("Enter");
+  await assertNestedTask(reviewIds[0], "Back to conversation");
+  const sameTargetHistoryLength = await page.evaluate(() => history.length);
+  await page.locator("#topbar-updates").click();
+  await openReview(review.id).press("Enter");
+  await page.locator("#updates-dialog").waitFor({ state: "hidden" });
+  await page.waitForFunction(id => document.activeElement?.dataset.workRecordId === id, reviewIds[0]);
+  assert.equal(await page.locator("#work-navigation-return").textContent(), "Back to Updates");
+  assert.equal(await page.evaluate(() => history.length), sameTargetHistoryLength);
+  await page.locator("#work-navigation-return").press("Enter");
+  await page.locator("#updates-dialog").waitFor({ state: "visible" });
+  await page.waitForFunction(id => document.activeElement?.closest("[data-update-id]")?.dataset.updateId === id, review.id);
+
+  // Another real client handles the item while its task is open. Returning to
+  // Saved keeps the filter and uses its tab when the original row disappeared.
+  await selectUpdatesFilter("Saved", "saved");
+  await openReview(review.id).press("Enter");
+  await page.locator("#updates-dialog").waitFor({ state: "hidden" });
+  const sessionResponse = await page.request.get(`${origin}/api/session`);
+  assert.equal(sessionResponse.ok(), true);
+  const { csrf } = await sessionResponse.json();
+  const handled = await page.request.post(`${origin}/api/rooms/commons/updates/${encodeURIComponent(review.id)}/done`, {
+    headers: { Origin: origin, "X-CSRF-Token": csrf }, data: { requestId: crypto.randomUUID() }
+  });
+  assert.equal(handled.status(), 200, await handled.text());
+  await page.locator("#work-navigation-return").press("Enter");
+  await page.locator("#updates-dialog").waitFor({ state: "visible" });
+  await page.waitForFunction(() => document.activeElement?.dataset.updateFilter === "saved");
+  assert.equal(await row(review.id).count(), 0);
+  assert.equal(await page.getByRole("tab", { name: "Saved" }).getAttribute("aria-selected"), "true");
+  assert.equal(await page.locator("#message-input").inputValue(), draft);
+  await selectUpdatesFilter("All activity", "all");
+  await openReview(review.id).waitFor();
+  await page.locator("#updates-close").click();
 
   // Delay only delivery of a real HTTP response: the real server owns the mark.
   // Closing or newer navigation must retire the pending Open, including a null
