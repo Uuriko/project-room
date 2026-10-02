@@ -249,6 +249,36 @@ test("new marks distinguish missing basis from malformed basis without writing",
   assert.equal(current.state, "unread");
 });
 
+// The receipt and mark form one durable operation. A real SQLite failure
+// after the mark upsert must roll it back, without a production injection seam.
+test("a failed receipt insert rolls back its private mark and leaves the request retryable", async t => {
+  const { store, ownerKey, request } = serve(t);
+  const agentKey = addAgent(store, "commons", ownerKey);
+  ask(store, "commons", ownerKey, "agent");
+  const item = (await request("/api/rooms/commons/updates", { token: agentKey })).body.items[0];
+  store.db.exec(`CREATE TEMP TRIGGER fail_update_receipt BEFORE INSERT ON private_update_commands
+    WHEN EXISTS (SELECT 1 FROM private_update_marks
+      WHERE room_id=NEW.room_id AND member_id=NEW.member_id AND action='done')
+    BEGIN SELECT RAISE(ABORT, 'synthetic update receipt failure'); END`);
+  const before = persistedUpdates(store);
+  const path = `/api/rooms/commons/updates/${item.id}/done`;
+  const data = { requestId: randomUUID(), expectedBasis: item.basisToken };
+  const refused = await request(path, { method: "POST", token: agentKey, data });
+  assert.equal(refused.status, 500, "the receipt trigger fires only after the mark exists within the transaction");
+  assert.deepEqual(persistedUpdates(store), before, "receipt failure rolls back the mark without changing the shared journal");
+  const current = (await request("/api/rooms/commons/updates", { token: agentKey })).body.items[0];
+  assert.equal(current.state, "unread");
+  assert.equal(current.basisToken, item.basisToken);
+  store.db.exec("DROP TRIGGER fail_update_receipt");
+  const retry = await request(path, { method: "POST", token: agentKey, data });
+  assert.equal(retry.status, 200);
+  assert.equal(retry.body.duplicate, false, "the failed transaction consumed no request id");
+  assert.equal(retry.body.item.state, "handled");
+  assert.equal(persistedUpdates(store).marks.length, before.marks.length + 1);
+  assert.equal(persistedUpdates(store).receipts.length, before.receipts.length + 1);
+  assert.deepEqual(persistedUpdates(store).journal, before.journal);
+});
+
 test("pages stay stable and a restarted store keeps the mark", async t => {
   const directory = mkdtempSync(join(tmpdir(), "room-updates-restart-"));
   const file = join(directory, "room.sqlite");
