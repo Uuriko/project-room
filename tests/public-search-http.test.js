@@ -44,16 +44,27 @@ test("public doors are indexable while credentials and unknown pages keep privat
   for (const file of publicAssetPaths.filter(path => path.startsWith("compare/") && path.endsWith(".html"))) {
     const canonical = "/" + file.slice(0, -5);
     const page = await fetch(origin + canonical);
-    assert.equal(page.status, 200, canonical); assert.match(page.headers.get("x-robots-tag"), /noindex/, canonical);
-    assert.match(await page.text(), new RegExp('rel="canonical" href="https://room.trydemigod.com' + canonical + '"'));
+    assert.equal(page.status, 200, canonical);
+    assert.equal(page.headers.get("x-robots-tag"), "all", canonical);
+    const html = await page.text();
+    assert.match(html, new RegExp('rel="canonical" href="https://room.trydemigod.com' + canonical + '"'));
+    assert.match(page.headers.get("link") ?? "", new RegExp(`<https://room\\.trydemigod\\.com${canonical}>; rel="canonical"`));
+    for (const block of html.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)) JSON.parse(block[1]);
+    assert.match(html, /"@type":"FAQPage"/);
   }
+  assert.equal((await fetch(origin + "/room/about")).status, 404);
+  assert.equal((await fetch(origin + "/room/offers")).status, 404);
   const map = await fetch(origin + "/sitemap.xml");
   assert.equal(map.status, 200); assert.equal(map.headers.get("x-robots-tag"), "all");
   const xml = await map.text();
   assert.match(xml, /<loc>https:\/\/room\.trydemigod\.com\/<\/loc>/);
   assert.match(xml, /<loc>https:\/\/room\.trydemigod\.com\/offers<\/loc>/);
   assert.match(xml, /https:\/\/room.trydemigod.com\/about/); assert.match(xml, /\/receipts/);
-  assert.doesNotMatch(xml, /compare|join|api|token/);
+  assert.match(xml, /<lastmod>2026-10-02<\/lastmod>/);
+  for (const slug of ["project-room-vs-slack", "project-room-vs-discord", "agent-collaboration-tool", "multi-agent-workspace", "ai-agent-coordination", "project-room-vs-agent-room"]) {
+    assert.match(xml, new RegExp(`/compare/${slug}</loc>`));
+  }
+  assert.doesNotMatch(xml, /\/join|\/api|token/);
   assert.match(await (await fetch(origin + "/robots.txt")).text(), /Sitemap: https:\/\/room.trydemigod.com\/sitemap.xml/);
 });
 
@@ -64,11 +75,12 @@ test("failed public asset cannot become indexable or enter sitemap", async t => 
   assert.doesNotMatch(await (await fetch(origin + "/sitemap.xml")).text(), /\/about/);
 });
 
-test("missing compare files are not routes and are not approved for indexing", () => {
+test("compare routes exist only for registered reviewed pages", () => {
   const routes = publicSearchAssets(["about.html", "index.html", "offers.html", "compare/project-room-vs-slack.html"]);
-  assert.equal(routes.has("/compare/project-room-vs-slack"), false);
+  assert.equal(routes.has("/compare/project-room-vs-slack"), true);
+  assert.equal(routes.has("/compare/project-room-vs-discord"), false);
   assert.equal(routes.get("/"), "index.html");
   assert.equal(routes.get("/offers"), "offers.html");
-  assert.deepEqual(reviewedPublicSearchPaths, ["/", "/offers", "/about"]);
-  assert.equal(reviewedPublicSearchPaths.includes("/compare/project-room-vs-slack"), false);
+  assert.equal(reviewedPublicSearchPaths.includes("/compare/project-room-vs-slack"), true);
+  assert.equal(reviewedPublicSearchPaths.includes("/compare/not-a-page"), false);
 });

@@ -24,7 +24,10 @@ export const REPO = "Uuriko/project-room";
 export const GITHUB_API = "https://api.github.com";
 export const SAME_HOSTS = ["room.trydemigod.com", "www.getdasha.com", "getdasha.com"];
 
-export const PUBLIC_PAGES = ["/", "/about", "/offers", "/receipts", "/join"];
+export const PUBLIC_PAGES = ["/", "/about", "/offers", "/receipts", "/join",
+  "/compare/project-room-vs-slack", "/compare/project-room-vs-discord",
+  "/compare/agent-collaboration-tool", "/compare/multi-agent-workspace",
+  "/compare/ai-agent-coordination", "/compare/project-room-vs-agent-room"];
 
 export const DISCOVERY = [
   { path: "/llms.txt", type: "text/plain" },
@@ -165,6 +168,14 @@ export async function liveSmoke({ origin = LIVE_ORIGIN, githubApi = GITHUB_API, 
     if (r.res.status !== 200) add("page_status", `${path} -> ${r.res.status}`);
     else if (mediaType(r.res) !== "text/html") add("page_type", `${path} -> ${mediaType(r.res)}`);
     if (path === "/about" && crawlAllowed && /noindex/i.test(r.res.headers.get("x-robots-tag") || "")) add("noindex_public", `${path} sends X-Robots-Tag noindex`);
+  }
+  const sitemap = await get("/sitemap.xml");
+  const receiptLoc = sitemap?.text?.match(/<loc>[^<]*\/receipts\/[^<]+<\/loc>/);
+  if (receiptLoc) {
+    const path = new URL(receiptLoc[0].replace(/<\/?loc>/g, "")).pathname;
+    const detail = await get(path, { headers: { accept: "text/html" } });
+    if (detail && detail.res.status !== 200) add("page_status", `${path} -> ${detail.res.status}`);
+    else if (detail && mediaType(detail.res) !== "text/html") add("page_type", `${path} -> ${mediaType(detail.res)}`);
   }
   const missing = await get(`/__live-smoke-missing-${now}`, { headers: { accept: "text/html" } });
   if (missing && (missing.res.status !== 404 || mediaType(missing.res) !== "text/html")) add("html_404", `${missing.res.status} ${mediaType(missing.res)}`);

@@ -38,12 +38,19 @@ test('actual Worker public search routes load packaged HTML and preserve private
     }
     for (const file of publicAssetPaths.filter(path => path.startsWith('compare/') && path.endsWith('.html'))) {
       const canonical = '/' + file.slice(0, -5);
-      const page = await call(present, canonical); assert.equal(page.status, 200, canonical); assert.match(page.headers.get('x-robots-tag'), /noindex/, canonical);
+      const page = await call(present, canonical); assert.equal(page.status, 200, canonical); assert.equal(page.headers.get('x-robots-tag'), 'all', canonical);
       assert.match(await page.text(), new RegExp('rel="canonical" href="https://room.trydemigod.com' + canonical + '"'));
     }
+    const doorAbout = await present.dispatchFetch('https://www.getdasha.com/room/about', { method: 'GET', redirect: 'manual', headers: { 'CF-Connecting-IP': '192.0.2.1' } });
+    assert.equal(doorAbout.status, 200);
+    assert.equal(doorAbout.headers.get('x-robots-tag'), 'all');
+    assert.match(doorAbout.headers.get('link') ?? '', /<https:\/\/room\.trydemigod\.com\/about>; rel="canonical"/);
+    const doorOffers = await present.dispatchFetch('https://www.getdasha.com/room/offers', { method: 'GET', redirect: 'manual', headers: { 'CF-Connecting-IP': '192.0.2.1' } });
+    assert.equal(doorOffers.status, 200);
+    assert.match(doorOffers.headers.get('link') ?? '', /<https:\/\/room\.trydemigod\.com\/offers>; rel="canonical"/);
     const map = await call(present, '/sitemap.xml'); assert.equal(map.status, 200); assert.equal(map.headers.get('x-robots-tag'), 'all');
     const sitemap = await map.text(); assert.match(sitemap, /\/about/); assert.match(sitemap, /<loc>https:\/\/room\.trydemigod\.com\/<\/loc>/);
-    assert.match(sitemap, /<loc>https:\/\/room\.trydemigod\.com\/offers<\/loc>/); assert.doesNotMatch(sitemap, /compare/);
+    assert.match(sitemap, /<loc>https:\/\/room\.trydemigod\.com\/offers<\/loc>/); assert.match(sitemap, /\/compare\/project-room-vs-slack/);
   } finally { await present.dispose(); }
   const absent = start(true);
   try {

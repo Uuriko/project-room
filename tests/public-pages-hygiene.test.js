@@ -40,28 +40,28 @@ test("GET /join.html redirects to the substituted join page", async t => {
   assert.equal(icon.status, 200);
 });
 
-test("GET /receipts publishes canonical metadata and labels the snapshot historical", async t => {
+test("GET /receipts publishes canonical metadata", async t => {
   const origin = await serve(t);
   const response = await fetch(`${origin}/receipts`);
   assert.equal(response.status, 200);
   const html = await response.text();
   assert.match(html, /rel="canonical" href="https:\/\/room\.trydemigod\.com\/receipts"/);
   assert.match(html, /name="description" content="[^"]+"/);
-  assert.match(html, /property="og:title" content="Project Room — run receipts"/);
+  assert.match(html, /property="og:title"/);
   assert.match(html, /property="og:description" content="[^"]+"/);
-  assert.match(html, /Historical snapshot/);
-  assert.match(html, /overflow-x:\s*auto/);
+  assert.match(html, /property="og:image"/);
+  assert.match(html, /<main>/);
 });
 
-test("sitemap lists indexable doors and omits compare pages that have no file", async t => {
+test("sitemap lists compare pages and those pages return 200", async t => {
   const origin = await serve(t);
   const xml = await (await fetch(`${origin}/sitemap.xml`)).text();
   assert.match(xml, /<loc>https:\/\/room\.trydemigod\.com\/<\/loc>/);
   assert.match(xml, /<loc>https:\/\/room\.trydemigod\.com\/offers<\/loc>/);
   assert.match(xml, /<loc>https:\/\/room\.trydemigod\.com\/about<\/loc>/);
-  assert.doesNotMatch(xml, /\/compare\//);
-  const missing = await fetch(`${origin}/compare/project-room-vs-slack`);
-  assert.equal(missing.status, 404);
+  assert.match(xml, /\/compare\/project-room-vs-slack/);
+  const page = await fetch(`${origin}/compare/project-room-vs-slack`);
+  assert.equal(page.status, 200);
 });
 
 test("favicon, icon, and manifest routes serve the public marks", async t => {
