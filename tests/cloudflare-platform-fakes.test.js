@@ -130,6 +130,7 @@ test("scheduled RPC hits real ProjectRoom methods and fails on an unknown one", 
     "drainChannelBacklog",
     "drainWebhookDeliveries",
     "refreshLandQueue",
+    "refreshClaimPullRequests",
     "planRetention",
     "recordCronTick"
   ]);

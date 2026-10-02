@@ -41,6 +41,9 @@ import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { evaluateReceipt } from "./jev-receipts.mjs";
 import { findClaimCollisions } from "./claim-collisions.mjs";
 import { emitWorkClaimEvent } from "./work-claim-events.mjs";
+import { fileLeaseConflictBody, fileLeaseConflicts, holdForRateLimit, readyClaims } from "./claim-coordination.mjs";
+import { collectPullRequestLookups, commitPullRequestLookup, readClaimPullBudget, writeClaimPullBudget } from "./claim-pr-sync.mjs";
+import { agentErrorBody } from "../src/agent-error.mjs";
 
 const CLAIM_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 
@@ -211,15 +214,41 @@ export async function handleWorkClaims(options) {
   const { req, res, helpers, reauthorize } = options;
   const registry = options.registry ?? options.store.workClaims ?? defaultRegistry;
   const requestData = req.method === "POST" ? await helpers.body(req) : undefined;
-  const run = () => handleWorkClaimsCore({ ...options, registry,
+  // Pull-request lookups happen before the claim transaction so a GitHub
+  // round trip never holds the room write lock. No webhook receiver is
+  // mounted; sweep is the member-triggered poll, and the cron uses the same
+  // lookup. An empty room, or a sweep with nothing due, does not call fetch.
+  let pullBatch = { results: [], rateLimitedUntil: null, skipped: false };
+  if (options.workClaimRoute === "sweep") {
+    const nowMs = Date.now();
+    const budget = readClaimPullBudget(options.store);
+    if (budget > nowMs) {
+      pullBatch = { results: [], rateLimitedUntil: budget, skipped: true };
+    } else {
+      const credential = options.githubToken !== undefined
+        ? options.githubToken
+        : (process.env.GITHUB_TOKEN || process.env.GH_TOKEN || null);
+      pullBatch = await collectPullRequestLookups(registry.list(options.roomId), {
+        fetchImpl: options.fetchPullRequest ?? fetch,
+        token: credential || null,
+        nowMs
+      });
+    }
+  }
+  const run = () => handleWorkClaimsCore({ ...options, registry, pullBatch,
     auth: reauthorize ? reauthorize() : options.auth,
     helpers: { ...helpers, body: () => requestData, json: (_res, status, value) => ({ status, value }) },
   });
-  const result = registry.transaction ? registry.transaction(run) : run();
-  return helpers.json(res, result.status, result.value);
+  try {
+    const result = registry.transaction ? registry.transaction(run) : run();
+    return helpers.json(res, result.status, result.value);
+  } catch (error) {
+    if (error?.code === "file_lease_conflict" && error.body) return helpers.json(res, 409, error.body);
+    throw error;
+  }
 }
 
-function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRoute, workClaimId, helpers, registry }) {
+function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRoute, workClaimId, helpers, registry, pullBatch = { results: [], rateLimitedUntil: null, skipped: false } }) {
   const { json, reject, body } = helpers;
   if (req.method !== "GET" && req.method !== "HEAD") enforceAutonomyTierForAction({
     db: store.db, roomId, state: { room: { ownerId: store.roomAuthority?.(roomId)?.ownerId } },
@@ -231,8 +260,8 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   const commit = (item, action, extra = {}) => {
     // A release clears files on the item. Read the held paths first so the
     // receipt names the lane that opened, then write the claim and the event
-    // in this same transaction.
-    const prior = action === "released" ? registry.get(roomId, item.id) : null;
+    // in this same transaction. A pull request that closes does the same.
+    const prior = action === "released" || action === "pr_closed" ? registry.get(roomId, item.id) : null;
     registry.set(roomId, item);
     emitWorkClaimEvent(store, roomId, {
       actorId: extra.actorId ?? caller,
@@ -240,7 +269,8 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       action,
       previousOwnerId: extra.previousOwnerId ?? null,
       atMs: nowMs,
-      paths: action === "released" ? (prior?.files ?? []) : undefined
+      paths: action === "released" || action === "pr_closed" ? (prior?.files ?? []) : undefined,
+      pullRequest: extra.pullRequest
     });
     return item;
   };
@@ -262,6 +292,16 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   };
 
   if (workClaimRoute === "list" && req.method === "GET") {
+    const params = url?.searchParams ?? new URLSearchParams();
+    for (const key of params.keys()) {
+      if (!["queue", "auth"].includes(key) || params.getAll(key).length !== 1) {
+        invalidInput(reject, "only a single queue query parameter");
+      }
+    }
+    if (params.has("queue")) {
+      if (params.get("queue") !== "ready") invalidInput(reject, "queue=ready");
+      return json(res, 200, { roomId, queue: "ready", swept: sweptIds, claims: readyClaims(registry.list(roomId)) });
+    }
     return json(res, 200, { roomId, swept: sweptIds, claims: registry.list(roomId) });
   }
   if (workClaimRoute === "receipts" && req.method === "GET") {
@@ -300,7 +340,27 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   if (workClaimRoute === "sweep" && req.method === "POST") {
     const data = body(req);
     if (!shape(data, {})) invalidInput(reject, "an empty JSON object");
-    return json(res, 200, { roomId, released: sweptIds, sweptAt: new Date(nowMs).toISOString() });
+    let updated = 0;
+    let checked = 0;
+    const rateLimited = pullBatch.skipped || pullBatch.rateLimitedUntil != null;
+    for (const result of pullBatch.results) {
+      if (result.kind === "rateLimited") continue;
+      const current = registry.get(roomId, result.claimId);
+      checked += 1;
+      if (commitPullRequestLookup(store, registry, roomId, current, result, nowMs)) updated += 1;
+    }
+    if (pullBatch.rateLimitedUntil && !pullBatch.skipped) {
+      for (const item of registry.list(roomId)) {
+        if (!item.pullRequest?.url || item.pullRequest.outcome) continue;
+        if (!["claimed", "in_progress", "blocked"].includes(item.state)) continue;
+        registry.set(roomId, holdForRateLimit(registry.get(roomId, item.id), nowMs, pullBatch.rateLimitedUntil));
+      }
+      writeClaimPullBudget(store, pullBatch.rateLimitedUntil, nowMs);
+    }
+    return json(res, 200, {
+      roomId, released: sweptIds, sweptAt: new Date(nowMs).toISOString(),
+      pullRequests: { checked, updated, ...(rateLimited ? { rateLimited: true } : {}) }
+    });
   }
   if (workClaimRoute === "duplicates" && req.method === "GET") {
     // Linear-style "similar issues": fuzzy match over the room's claim
@@ -332,11 +392,11 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   }
   if (workClaimRoute === "create" && req.method === "POST") {
     const data = body(req);
-    if (!shape(data, { required: ["id"], optional: ["title", "reviewPolicy", "note", "tags", "files"] })) invalidInput(reject, "{id, title?, reviewPolicy?, note?, tags?, files?}");
+    if (!shape(data, { required: ["id"], optional: ["title", "reviewPolicy", "note", "tags", "files", "dependsOn", "pullRequest"] })) invalidInput(reject, "{id, title?, reviewPolicy?, note?, tags?, files?, dependsOn?, pullRequest?}");
     const id = claimIdOf(reject, data.id);
     if (registry.has(roomId, id)) reject(409, "work_claim_exists", `Work claim "${id}" already exists in this room`);
     if (data.reviewPolicy !== undefined && !REVIEW_POLICIES.includes(data.reviewPolicy)) invalidInput(reject, `reviewPolicy one of ${REVIEW_POLICIES.join(", ")}`);
-    const item = runPure(reject, () => createWork({ id, title: data.title, reviewPolicy: data.reviewPolicy, note: data.note, tags: data.tags, files: data.files }, { now: nowMs, agentId: caller }));
+    const item = runPure(reject, () => createWork({ id, title: data.title, reviewPolicy: data.reviewPolicy, note: data.note, tags: data.tags, files: data.files, dependsOn: data.dependsOn, pullRequest: data.pullRequest }, { now: nowMs, agentId: caller }));
     commit(item, "created");
     return json(res, 201, item);
   }
@@ -345,14 +405,31 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   }
   if (workClaimRoute === "claim" && req.method === "POST") {
     const data = body(req);
-    if (!shape(data, { optional: ["note", "leaseHours", "files"] })) invalidInput(reject, "{note?, leaseHours?, files?}");
+    if (!shape(data, { optional: ["note", "leaseHours", "files", "advisory", "dependsOn", "pullRequest"] })) invalidInput(reject, "{note?, leaseHours?, files?, advisory?, dependsOn?, pullRequest?}");
+    if ("advisory" in data && typeof data.advisory !== "boolean") invalidInput(reject, "advisory true or false");
     const item = load(claimIdOf(reject, workClaimId));
     if (item.state !== "unclaimed") reject(409, "work_claim_conflict", `Work "${item.id}" is already ${item.state} — release it first`);
-    const claimed = runPure(reject, () => claimWork(item, caller, { note: data.note, leaseHours: leaseHoursOfBody(data), files: data.files, room: roomLike, now: nowMs }));
+    const claimed = runPure(reject, () => claimWork(item, caller, {
+      note: data.note, leaseHours: leaseHoursOfBody(data), files: data.files,
+      dependsOn: data.dependsOn, pullRequest: data.pullRequest, room: roomLike, now: nowMs
+    }));
+    // Exclusive file lease. Overlap with another live claim is a 409 that
+    // names the holder, the files, and when that lease ends. advisory: true
+    // keeps the older warn-and-proceed behavior.
+    const conflicts = fileLeaseConflicts(registry.list(roomId), claimed);
+    if (conflicts.length > 0 && data.advisory !== true) {
+      const conflict = fileLeaseConflictBody(claimed, conflicts);
+      const body = {
+        ...agentErrorBody({ httpStatus: 409, code: "file_lease_conflict", message: conflict.error.message, roomId, workItemId: claimed.id }),
+        ...conflict
+      };
+      const error = new Error(body.error.message);
+      error.code = "file_lease_conflict";
+      error.body = body;
+      throw error;
+    }
     commit(claimed, "claimed");
-    // Warn, never block: tell the claimant which declared files other
-    // active claims already hold, so the lanes talk before both edit them.
-    return json(res, 200, { ...claimed, fileWarnings: fileWarningsFor(registry.list(roomId), claimed) });
+    return json(res, 200, { ...claimed, fileWarnings: data.advisory === true ? fileWarningsFor(registry.list(roomId), claimed) : [] });
   }
   if (workClaimRoute === "update" && req.method === "POST") {
     const data = body(req);

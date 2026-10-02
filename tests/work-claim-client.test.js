@@ -35,7 +35,15 @@ test('SDK retains declared files, overlap warnings, and completion receipt metad
   assert.deepEqual(created.tags, ['migration']);
   await client.claimWorkItem('holder');
   await client.workClaimCreate({ id: 'candidate' });
-  const claim = await client.claimWorkItem('candidate', { files: ['src/shared.js', 'docs/claims.md'] });
+  await assert.rejects(client.claimWorkItem('candidate', { files: ['src/shared.js', 'docs/claims.md'] }), error => {
+    assert.equal(error.status, 409);
+    assert.equal(error.code, 'file_lease_conflict');
+    assert.deepEqual(error.holder, { claimId: 'holder', owner: 'owner' });
+    assert.deepEqual(error.files, ['src/shared.js']);
+    assert.equal(typeof error.leaseExpiresAt, 'string');
+    return true;
+  });
+  const claim = await client.claimWorkItem('candidate', { files: ['src/shared.js', 'docs/claims.md'], advisory: true });
   assert.equal(claim.state, 'claimed');
   assert.deepEqual(claim.fileWarnings, [{ file: 'src/shared.js', heldBy: [{ id: 'holder', owner: 'owner' }] }]);
   await client.updateWorkItem('candidate', { state: 'in_progress' });

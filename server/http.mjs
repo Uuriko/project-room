@@ -20,6 +20,7 @@ import { handleInboxCollab } from "./inbox-collab-routes.mjs"; // Lane C inbox c
 import { buildActivationPack } from "./room-activation-pack.mjs"; // Room activation pack (quill lane, RC-2026-09-18-040).
 import { buildOrient } from "./orient.mjs"; // Orient endpoint (jill lane, RC-2026-09-28 — the URL outside agents guess; ryska's 404).
 import { handleWorkClaims } from "./work-claim-routes.mjs"; // Work-claim leases/delivery/review (task RC-2026-09-18-041).
+import { listMentionReceipts } from "./mention-receipts.mjs";
 import { handleFeedback } from "./feedback-routes.mjs"; // Agent /feedback endpoint (structured bug/feature reports).
 import { handleBountyEscrow } from "./bounty-escrow-routes.mjs"; // Escrowed bounties + credit ledger (agent work exchange, slice 1).
 import { buildOpportunitiesFeed } from "./opportunities.mjs"; // Public opportunity feed v2: read-only open-work discovery, decoupled from admission.
@@ -4332,10 +4333,18 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (route === "mentions" && req.method === "GET") {
         // #658: member-readable mention list. memberId defaults to the
         // caller; an owner may query another member (feeds #662's card).
+        // view=receipts is the sender's copy: delivered, then read/acked.
         const params = url.searchParams;
-        if ([...params.keys()].some(key => !["state", "after", "memberId", "auth"].includes(key) || params.getAll(key).length !== 1)) {
-          reject(422, "invalid_mention_query", "state, after and memberId are the accepted query parameters");
+        if ([...params.keys()].some(key => !["state", "after", "memberId", "auth", "view"].includes(key) || params.getAll(key).length !== 1)) {
+          reject(422, "invalid_mention_query", "state, after, memberId and view are the accepted query parameters");
         }
+        if (params.get("view") === "receipts") {
+          if (params.has("state") || params.has("after") || params.has("memberId")) {
+            reject(422, "invalid_mention_query", "view=receipts does not take state, after, or memberId");
+          }
+          return json(res, 200, listMentionReceipts(store, selected.token, roomId, fence));
+        }
+        if (params.has("view")) reject(422, "invalid_mention_query", "view must be receipts");
         return json(res, 200, store.listMentions(selected.token, roomId, {
           state: params.get("state"), after: params.get("after"), memberId: params.get("memberId"),
         }, fence));

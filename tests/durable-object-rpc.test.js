@@ -167,6 +167,7 @@ test("RPC stub calls target a class that extends DurableObject", () => {
     "planRetention",
     "readJobHealth",
     "recordCronTick",
+    "refreshClaimPullRequests",
     "refreshLandQueue",
     "syncGmailMailboxes"
   ]);
@@ -209,6 +210,7 @@ test("scheduled handler invokes cron RPC on the real ProjectRoom shape", async (
     "drainWebhookDeliveries",
     "planRetention",
     "recordCronTick",
+    "refreshClaimPullRequests",
     "refreshLandQueue",
     "syncGmailMailboxes"
   ]);

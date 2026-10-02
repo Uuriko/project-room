@@ -42,6 +42,7 @@
 // reviewedBy that has such a recorded attestation (for non-self policies).
 // Naming another member without their attestation is rejected — the
 // previous "name anyone" behavior was a confused-deputy flaw.
+import { parsePullRequestUrl } from "./claim-coordination.mjs";
 const STATES = ["unclaimed", "claimed", "in_progress", "blocked", "done"];
 const TRANSITIONS = {
   unclaimed: ["claimed"],
@@ -82,6 +83,60 @@ const filesOf = value => {
     return p;
   });
   return Object.freeze([...new Set(normalized)].sort());
+};
+const DEPENDS_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
+const MAX_DEPENDS = 16;
+const dependsOnOf = (value, selfId) => {
+  check(Array.isArray(value), "dependsOn must be an array");
+  check(value.length <= MAX_DEPENDS, `dependsOn must list at most ${MAX_DEPENDS} claims`);
+  const ids = value.map(id => {
+    check(typeof id === "string" && DEPENDS_PATTERN.test(id), "each dependsOn entry must be a claim id");
+    check(id !== selfId, "a claim cannot depend on itself");
+    return id;
+  });
+  return Object.freeze([...new Set(ids)].sort());
+};
+const pullRequestOf = value => {
+  if (value === undefined || value === null) return null;
+  const url = typeof value === "string" ? value : value?.url;
+  const parsed = parsePullRequestUrl(typeof url === "string" ? url : "");
+  check(parsed, "pullRequest must be an https://github.com/{owner}/{repo}/pull/{number} URL");
+  let outcome = null;
+  let syncedAt = null;
+  let nextPollAt = null;
+  let etag = null;
+  let rateLimitedUntil = null;
+  let pollBackoffMs = null;
+  if (value !== null && typeof value === "object") {
+    if (value.outcome !== undefined && value.outcome !== null) {
+      check(value.outcome === "merged" || value.outcome === "closed", "pullRequest outcome must be merged or closed");
+      outcome = value.outcome;
+    }
+    if (value.syncedAt !== undefined && value.syncedAt !== null) {
+      check(typeof value.syncedAt === "string" && Number.isFinite(Date.parse(value.syncedAt)), "pullRequest syncedAt must be an ISO timestamp");
+      syncedAt = value.syncedAt;
+    }
+    if (value.nextPollAt !== undefined && value.nextPollAt !== null) {
+      check(typeof value.nextPollAt === "number" && Number.isFinite(value.nextPollAt), "pullRequest nextPollAt must be a millisecond timestamp");
+      nextPollAt = value.nextPollAt;
+    }
+    if (value.etag !== undefined && value.etag !== null) {
+      check(typeof value.etag === "string" && value.etag.length > 0 && value.etag.length <= 200 && /^[\x21-\x7E]+$/.test(value.etag), "pullRequest etag must be a short printable token");
+      etag = value.etag;
+    }
+    if (value.rateLimitedUntil !== undefined && value.rateLimitedUntil !== null) {
+      check(typeof value.rateLimitedUntil === "number" && Number.isFinite(value.rateLimitedUntil), "pullRequest rateLimitedUntil must be a millisecond timestamp");
+      rateLimitedUntil = value.rateLimitedUntil;
+    }
+    if (value.pollBackoffMs !== undefined && value.pollBackoffMs !== null) {
+      check(typeof value.pollBackoffMs === "number" && Number.isFinite(value.pollBackoffMs) && value.pollBackoffMs >= 0, "pullRequest pollBackoffMs must be a non-negative number");
+      pollBackoffMs = value.pollBackoffMs;
+    }
+  }
+  return Object.freeze({
+    url: parsed.url, repo: parsed.repo, number: parsed.number, outcome, syncedAt, nextPollAt,
+    etag, rateLimitedUntil, pollBackoffMs
+  });
 };
 const blobsOf = value => {
   check(Array.isArray(value), "blobs must be an array");
@@ -136,12 +191,14 @@ const workOf = value => {
   const tags = value.tags === undefined || value.tags === null ? Object.freeze([]) : tagsOf(value.tags);
   const blobs = value.blobs === undefined || value.blobs === null ? Object.freeze([]) : blobsOf(value.blobs);
   const files = value.files === undefined || value.files === null ? Object.freeze([]) : filesOf(value.files);
+  const dependsOn = value.dependsOn === undefined || value.dependsOn === null ? Object.freeze([]) : dependsOnOf(value.dependsOn, value.id);
+  const pullRequest = pullRequestOf(value.pullRequest);
   return { id: value.id, title: value.title ?? value.id, state: value.state ?? "unclaimed",
     owner: value.owner ?? null, history: Array.isArray(value.history) ? value.history : [],
     claimedAt: value.claimedAt ?? null, leaseStartAt: value.leaseStartAt ?? null, leaseExpiresAt: value.leaseExpiresAt ?? null,
     deliveryMode: value.deliveryMode ?? null, reviewPolicy: value.reviewPolicy ?? null,
     reviewedBy: value.reviewedBy ?? null, attestations: Object.freeze(attestations),
-    tags, files, blobs };
+    tags, files, blobs, dependsOn, pullRequest };
 };
 const agentOf = value => idOf(value, "agent id", 128);
 const stamp = (atMs, agentId, action, note) =>
@@ -168,7 +225,7 @@ const leaseHoursOf = value => {
 // claiming an unknown id is refused so claims always reference real work.
 // `tags` may be supplied up front (free-form, recorded on the item); blobs
 // are evidence pointers and are only recorded on the done transition.
-export function createWork({ id, title, reviewPolicy, note, tags, files } = {}, { now, agentId } = {}) {
+export function createWork({ id, title, reviewPolicy, note, tags, files, dependsOn, pullRequest } = {}, { now, agentId } = {}) {
   const atMs = nowMsOf(now);
   idOf(id, "work id", 256);
   if (title !== undefined) check(typeof title === "string" && title.length > 0 && title.length <= 512, "title must be 1..512 characters");
@@ -178,20 +235,24 @@ export function createWork({ id, title, reviewPolicy, note, tags, files } = {}, 
     reviewPolicy: reviewPolicy ?? null, reviewedBy: null, attestations: Object.freeze([]),
     tags: tags === undefined || tags === null ? Object.freeze([]) : tagsOf(tags),
     files: files === undefined || files === null ? Object.freeze([]) : filesOf(files),
-    blobs: Object.freeze([]) };
+    blobs: Object.freeze([]),
+    dependsOn: dependsOn === undefined || dependsOn === null ? Object.freeze([]) : dependsOnOf(dependsOn, id),
+    pullRequest: pullRequestOf(pullRequest) };
   // The creating member when the route knows it; "system" for internal creates.
   return withHistory(item, atMs, agentId === undefined ? "system" : agentOf(agentId), "created", note);
 }
 // Claim unclaimed work. Refuses already-claimed work (the anti-collision rule).
 // leaseHours: hours until the claim lapses (default: the room's
 // defaultLeaseHours, else 24h); null opts out — the claim never expires.
-export function claimWork(work, agentId, { note, leaseHours, files, room, now } = {}) {
+export function claimWork(work, agentId, { note, leaseHours, files, dependsOn, pullRequest, room, now } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
   check(item.state === "unclaimed", `work "${item.id}" is already ${item.state} — release it first`);
   const wanted = leaseHoursOf(leaseHours);
   const effective = wanted === null ? null : wanted ?? roomWorkClaimConfig(room).defaultLeaseHours;
   const claimed = { ...item, state: "claimed", owner: agent, claimedAt: isoOf(atMs),
     files: files === undefined || files === null ? item.files : filesOf(files),
+    dependsOn: dependsOn === undefined ? item.dependsOn : dependsOnOf(dependsOn ?? [], item.id),
+    pullRequest: pullRequest === undefined ? item.pullRequest : pullRequestOf(pullRequest),
     leaseStartAt: effective === null ? null : isoOf(atMs),
     leaseExpiresAt: effective === null ? null : isoOf(atMs + effective * 3600 * 1000) };
   return withHistory(claimed, atMs, agent, "claimed",
