@@ -3992,14 +3992,6 @@
       "path": "/api/auth/google/start"
     },
     {
-      "method": "POST",
-      "path": "/api/auth/magic/consume"
-    },
-    {
-      "method": "POST",
-      "path": "/api/auth/magic/request"
-    },
-    {
       "method": "GET",
       "path": "/api/auth/methods"
     },
@@ -4017,43 +4009,7 @@
     },
     {
       "method": "POST",
-      "path": "/api/auth/passkey/authenticate/finish"
-    },
-    {
-      "method": "POST",
-      "path": "/api/auth/passkey/authenticate/options"
-    },
-    {
-      "method": "POST",
-      "path": "/api/auth/passkey/register/finish"
-    },
-    {
-      "method": "POST",
-      "path": "/api/auth/passkey/register/options"
-    },
-    {
-      "method": "POST",
-      "path": "/api/auth/password/change"
-    },
-    {
-      "method": "POST",
-      "path": "/api/auth/password/login"
-    },
-    {
-      "method": "POST",
-      "path": "/api/auth/password/reset/consume"
-    },
-    {
-      "method": "POST",
-      "path": "/api/auth/password/reset/request"
-    },
-    {
-      "method": "POST",
       "path": "/api/auth/password/set"
-    },
-    {
-      "method": "POST",
-      "path": "/api/auth/password/signup"
     },
     {
       "method": "POST",
