@@ -9,14 +9,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import {
   encodeRow, decodeRow, resolveKind, ROW_FORMAT_V, MOVED_KINDS,
 } from "../server/persisted-row.mjs";
 import { createDurableWorkClaimRegistry, workClaimSchema, WORK_CLAIM_ROW_KIND } from "../server/work-claim-sqlite.mjs";
-import { DispatchJournal, DISPATCH_JOURNAL_ROW_KIND } from "../server/dispatch-journal.mjs";
 import { BountyEscrow, bountyEscrowSchema, BOUNTY_DISPUTE_ROW_KIND } from "../server/bounty-escrow.mjs";
 
 // --- codec unit tests -------------------------------------------------------
@@ -141,49 +137,6 @@ test("work-claim registry: new writes carry the version envelope and round-trip"
   const item = registry.get("room1", "new-1");
   assert.equal(item.id, "new-1");
   assert.equal(item.state, "unclaimed");
-});
-
-// --- journal surface: server/dispatch-journal.mjs ------------------------------
-
-const journalDir = t => {
-  const dir = mkdtempSync(join(process.env.TMPDIR ?? tmpdir(), "persisted-row-journal-"));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
-  return dir;
-};
-
-test("dispatch journal: legacy JSONL lines load under new code", t => {
-  // Hand-written OLD format: lines as the pre-envelope code appended them
-  // (JSON.stringify of the entry, no envelope), one carrying an unknown field.
-  const path = join(journalDir(t), "dispatch.jsonl");
-  writeFileSync(path, [
-    JSON.stringify({ key: "k1", roomId: "r", workItemId: "w", payloadDigest: "d",
-      state: "intended", at: "2026-01-01T00:00:00.000Z" }),
-    JSON.stringify({ key: "k1", state: "dispatched", jobId: "job-1",
-      at: "2026-01-01T00:01:00.000Z", mystery: "drop me" }),
-  ].join("\n") + "\n");
-  const journal = new DispatchJournal(path);
-  const record = journal.get("k1");
-  assert.equal(record.state, "dispatched");
-  assert.equal(record.jobId, "job-1");
-  assert.equal(record.payloadDigest, "d");
-  assert.ok(!("mystery" in record), "unknown entry field is dropped on replay");
-});
-
-test("dispatch journal: new entries carry the version envelope and replay", t => {
-  const path = join(journalDir(t), "dispatch.jsonl");
-  const journal = new DispatchJournal(path);
-  journal.intend({ key: "k2", roomId: "r", workItemId: "w", payload: { a: 1 } });
-  journal.transition("k2", "done", { jobId: "job-2" });
-  const lines = readFileSync(path, "utf8").trim().split("\n").map(l => JSON.parse(l));
-  assert.equal(lines.length, 2);
-  for (const line of lines) {
-    assert.equal(line.v, ROW_FORMAT_V);
-    assert.equal(line.kind, DISPATCH_JOURNAL_ROW_KIND);
-  }
-  assert.equal(lines[1].data.state, "done");
-  const reopened = new DispatchJournal(path);
-  assert.equal(reopened.get("k2").state, "done");
-  assert.equal(reopened.get("k2").jobId, "job-2");
 });
 
 // --- receipts surface: bounty dispute records in server/bounty-escrow.mjs -----

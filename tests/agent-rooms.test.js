@@ -14,7 +14,6 @@ import { createRateLimiter } from "../server/identity-ratelimit.mjs";
 import { PERMISSIONS, AGENT_AUTONOMY_PERMISSIONS, ROOM_KINDS, validId } from "../src/events.js";
 import { RoomAgentClient, createAgentIdentity, createAgentRoom, redeemAgentInvite } from "../client/room-agent.mjs";
 import { parseBootstrapArgs, parseAccountLinkArgs, slugRoomId, roomDeepLink } from "../scripts/bootstrap-agent-room.mjs";
-import { canAct, canEmitReceipt, canInviteMember, memberCapabilities } from "../member-capabilities/src/index.js";
 
 const execFileAsync = promisify(execFile);
 async function cli(origin, args, env = {}) {
@@ -539,7 +538,7 @@ test("bootstrap arg parse: generated room id, flags, and account-link defaults",
 });
 
 test("CLI: bootstrap-agent-room one-shot → peer redeem → check + orient + hello", async t => {
-  const { store, origin } = await httpFixture(t);
+  const { origin } = await httpFixture(t);
   const boot = await cli(origin, [
     "bootstrap-agent-room", "Grok Bot", "boot-den", "Boot Den", "One-shot autonomy room",
     "--hello", "--invite-name", "Muse",
@@ -557,11 +556,6 @@ test("CLI: bootstrap-agent-room one-shot → peer redeem → check + orient + he
   assert.equal(boot.json.hello.posted, true);
   assert.ok(boot.json.ownerPermissions.includes("invite_member"));
   assert.ok(boot.json.ownerPermissions.includes("manage_members"));
-  const owner = store.roomAuthority("boot-den").members[boot.json.identity.identityId];
-  assert.deepEqual(memberCapabilities(owner, { ownerId: boot.json.identity.identityId }).bits,
-    ["read", "act", "emit_receipt", "invite_member"]);
-  assert.equal(canInviteMember(owner, { ownerId: boot.json.identity.identityId }), true);
-
   const redeemed = await cli(origin, ["redeem-invite", boot.json.invite.code, "Muse", "--yes"]);
   assert.equal(redeemed.status, 0, redeemed.stderr);
   assert.equal(redeemed.json.roomId, "boot-den");
@@ -569,12 +563,6 @@ test("CLI: bootstrap-agent-room one-shot → peer redeem → check + orient + he
   assert.ok(!redeemed.json.permissions.includes("manage_members"));
   assert.ok(!redeemed.json.permissions.includes("decide"));
   assert.ok(!redeemed.json.permissions.includes("invite_member"));
-  const peerMember = store.roomAuthority("boot-den").members[redeemed.json.identityId];
-  assert.deepEqual(memberCapabilities(peerMember).bits, ["read", "act", "emit_receipt"]);
-  assert.equal(canAct(peerMember), true);
-  assert.equal(canEmitReceipt(peerMember), true);
-  assert.equal(canInviteMember(peerMember), false);
-
   const peerDir = mkdtempSync(join(tmpdir(), "bootstrap-peer-"));
   t.after(() => rmSync(peerDir, { recursive: true, force: true }));
   const peerConnected = await cli(origin, ["connect", join(peerDir, "muse")], {

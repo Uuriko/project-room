@@ -117,7 +117,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/retention-run.mjs'); // dry-run retention caller (imported by cloudflare/room.mjs)
   paths.add('server/retention.mjs'); // analytics retention planner (imported by server/retention-run.mjs)
   paths.add('server/audit-retention.mjs'); // audit retention planner (imported by server/retention-run.mjs)
-  for (const path of ['server/sla-clocks.mjs', 'server/sla-urgent-notify.mjs', 'server/sla-sweep.mjs', 'server/sla-sweep-hooks.mjs', 'server/sla-breach-journal.mjs', 'server/morning-digest.mjs', 'server/digest-mode.mjs', 'server/inbox-triage.mjs']) paths.add(path); // Tasks 21/24/26 (imported by server/inbox.mjs)
+  for (const path of ['server/sla-clocks.mjs', 'server/sla-breach-journal.mjs', 'server/inbox-triage.mjs']) paths.add(path); // Tasks 21/24/26 (imported by server/inbox.mjs)
   paths.add('server/inbox-handoff.mjs'); // Task 23 (imported by server/inbox.mjs and server/store.mjs)
   for (const path of ['server/inbox-assign.mjs', 'server/inbox-internal-notes.mjs', 'server/inbox-collision.mjs', 'server/inbox-approval.mjs', 'server/inbox-agent-routing.mjs', 'server/inbox-collab-store.mjs', 'server/inbox-collab-routes.mjs']) paths.add(path); // Lane C inbox collaboration (task RC-2026-09-18-011)
   paths.add('server/content-trust.mjs'); // structured untrusted markers (imported by server/http.mjs surfaces and MCP)
@@ -145,7 +145,6 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/receipts-page.mjs'); // Public run-receipts page aggregation + rendering (imported by server/http.mjs)
   paths.add('server/receipts-data.mjs'); // Generated run-receipts snapshot (imported by server/http.mjs)
   paths.add('server/capability-visibility.mjs'); // RC-2026-09-27-2731: withhold-never-refused catalog predicate (imported by server/mcp-discovery.mjs and server/mcp-room-profile.mjs)
-  paths.add('server/capability-registry.mjs'); // Integration slice #11: typed capability registry (library module; pure, no imports of its own)
   for (const path of ['server/board-v2.mjs', 'server/board-v2-sqlite.mjs', 'server/board-v2-durable.mjs']) paths.add(path); // RC-2026-09-27-2720: board-v2 HTTP wiring (imported by server/http.mjs)
   paths.add('server/conversation-sync.mjs'); // bounded viewer-scoped conversation reads (imported by server/http.mjs)
   const candidate = join(directory, 'synthetic-source'); mkdirSync(candidate);
