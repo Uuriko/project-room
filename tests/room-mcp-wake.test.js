@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { AgentRooms } from "../server/agent-rooms.mjs";
+import { initialRoom } from "../server/bootstrap.mjs";
 
 const JOIN_TOOLS = ["room_join_packet", "room_join_kits", "room_join_prompt", "room_mcp_snippet"];
 const WAKE_TOOLS = [
@@ -257,7 +258,7 @@ test("wake.pause and wake.resume use the room wake-queue pause path", async t =>
     roomId: created.roomId, memberId: created.ownerMemberId, requestId: "pause-peer", reason: "no"
   }, peer.secret);
   assert.equal(cross.value.status, 403);
-  assert.equal(cross.value.code, "owner_required");
+  assert.equal(cross.value.code, "wake_pause_not_permitted");
   assert.equal(store.wakeQueue.pauseStatus(created.roomId, created.ownerMemberId), null);
 
   const paused = await call(origin, "wake.pause", {
@@ -288,4 +289,36 @@ test("wake.pause and wake.resume use the room wake-queue pause path", async t =>
   const extra = await call(origin, "wake.resume", { roomId: created.roomId, note: "no" }, owner.secret);
   assert.equal(extra.body.error.code, -32602);
   assert.equal(extra.body.error.data.reason, "invalid_arguments");
+});
+
+test("a session cookie without a bearer secret gets the anonymous MCP catalog", async t => {
+  const { origin, store } = await serve(t);
+  store.initialize(initialRoom("commons"));
+  const accessKey = store.issueAccessKey("commons", "owner");
+  const login = await fetch(`${origin}/api/session`, {
+    method: "POST",
+    headers: { Origin: origin, "Content-Type": "application/json" },
+    body: JSON.stringify({ accessKey }),
+  });
+  assert.equal(login.status, 201);
+  const cookie = login.headers.get("set-cookie").split(";")[0];
+  const listed = await fetch(`${origin}/room/mcp`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Cookie: cookie },
+    body: JSON.stringify({ jsonrpc: "2.0", id: "t", method: "tools/list" }),
+  });
+  const catalog = await listed.json();
+  assert.deepEqual(catalog.result.tools.map(tool => tool.name), [...JOIN_TOOLS, "public_work_recommend", "public_work_read_task"]);
+  const roomCall = await fetch(`${origin}/room/mcp`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Cookie: cookie },
+    body: JSON.stringify({ jsonrpc: "2.0", id: "t", method: "tools/call", params: { name: "wake_register", arguments: { hostId: "host-1", wakeUrl: WAKE_URL } } }),
+  });
+  const denied = await roomCall.json();
+  assert.equal(denied.result, undefined);
+  assert.equal(denied.error.data.reason, "auth_required");
+  const bearer = store.identities.create("Cookie contrast");
+  const withBearer = await rpc(origin, "tools/list", { profile: "full" }, bearer.secret);
+  const names = (await withBearer.json()).result.tools.map(tool => tool.name);
+  assert.equal(names.includes("wake_register"), true);
 });
