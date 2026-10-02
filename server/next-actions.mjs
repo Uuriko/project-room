@@ -22,10 +22,8 @@
 //   profile-gap       0.30 missing capabilities, 0.25 description-only (normal)
 //   all-clear         0.00 — emitted only when nothing else qualifies, so a
 //                     response is never an unexplained empty list. (low)
-// Dormant kinds (action: null, never a fabricated path): claim-review (needs
-// evidence-gated completion), receipt-verify (needs signed receipt tiers),
-// poll-closing (no poll store yet), stale-thread (no per-member thread
-// snapshot wired yet). Each names what would unblock it in `reason`.
+// Orient is the packet agents should read. This list only names actions that
+// have a real route; the old "(coming soon)" kinds are gone.
 //
 // Item ids are stable per (kind, underlying object): sha256 hex of
 // kind + "|" + ref key, so a dismiss survives re-ranking and a materially
@@ -219,25 +217,6 @@ export function buildNextActions({ agent, snapshots, dismissals = [], suppressio
       }),
       dismissable: true,
     });
-  }
-
-  // Dormant kinds: real signals, no backing route yet. action: null, never fabricated.
-  const dormant = [
-    ["claim-review", "independent verification queue not yet built (evidence-gated completion)"],
-    ["receipt-verify", "signed delivery-receipt tiers not yet built"],
-    ["poll-closing", "no poll store in this room yet"],
-    ["stale-thread", "per-member thread snapshots not wired to the nudge detector yet"],
-  ];
-  for (const [kind, why] of dormant) {
-    if (suppressed.has(kind)) continue;
-    const id = itemIdOf(kind, "dormant");
-    if (dismissedActive.has(id)) continue;
-    items.push(Object.freeze({
-      id, kind, title: `${kind} (coming soon)`,
-      reason: `dormant: ${why}`,
-      score: 0.05, scoreReason: "dormant kind — listed so the surface is honest, never ranked above live work",
-      urgency: "low", ref: Object.freeze({}), action: null, dismissable: true,
-    }));
   }
 
   // Never an unexplained empty list.

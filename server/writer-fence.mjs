@@ -88,6 +88,12 @@ export const unfencedAdditiveTables = Object.freeze([
   // to an existing (room_id, member_id).
   "private_next_action_dismissals",
   "private_next_action_suppressions",
+  // private_update_marks + private_update_commands (Updates projection):
+  // per-member read/done/clear marks. Purely additive and intentionally NOT
+  // fenced — older writers have no code path to them, and every row is scoped
+  // to an existing room member. A new source revision stops matching the mark.
+  "private_update_marks",
+  "private_update_commands",
   // inbox_handoff_rooms records which room a collab-route handoff was made in,
   // so an agent acting under the owner's account is held to that room. Purely
   // additive beside inbox_handoffs, with no path from any older writer.

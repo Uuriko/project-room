@@ -18,6 +18,7 @@ import { AgentPluginError } from "./agent-plugin-store.mjs";
 import { EVENT_CATALOG, WebhookSubscriptionError } from "./agent-webhook-subscriptions.mjs";
 import { BOND_SCOPES } from "./bonds.mjs";
 import { buildActivationPack } from "./room-activation-pack.mjs";
+import { buildOrient } from "./orient.mjs";
 import { randomUUID } from "node:crypto";
 import { validId, ROOM_KINDS, MAX_MESSAGE_BODY_CHARS } from "../src/events.js";
 import { nextWorkStep } from "../src/workflow.js";
@@ -421,13 +422,16 @@ function callRoomTool(store, secret, identity, name, args, agentRooms) {
     };
   }
   if (name === "room_activation_pack") {
-    store.authenticate(secret, roomId);
-    return buildActivationPack(store, roomId);
+    const auth = store.authenticate(secret, roomId);
+    return buildActivationPack(store, roomId, auth.member.id);
   }
   if (name === "get_room_context") {
-    return store.roomContext(secret, roomId, {
+    const context = store.roomContext(secret, roomId, {
       sinceVersion: args.since_version === undefined ? null : args.since_version
     });
+    if (context.not_modified) return context;
+    const auth = store.authenticate(secret, roomId);
+    return { ...context, orient: buildOrient(store, roomId, auth.member.id, { text: false, token: secret }) };
   }
   if (name === "room_list_events") {
     const auth = store.authenticate(secret, roomId);

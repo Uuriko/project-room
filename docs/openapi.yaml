@@ -1275,6 +1275,14 @@ paths:
           in: query
           description: Only events at or before this ISO timestamp (audit filter)
           schema: { type: string, format: date-time }
+        - name: tail
+          in: query
+          description: |
+            Newest N events in ascending order, plus `next` to continue forward
+            with `after`. An integer from 1 to 200. Send `tail` alone: combining
+            it with `after`, `limit`, `actor`, `since`, `until`, or `afterSequence`
+            is 422 `invalid_event_cursor`.
+          schema: { type: integer, minimum: 1, maximum: 200 }
       responses:
         '401': { description: unauthenticated }
         '200':
@@ -8193,6 +8201,159 @@ paths:
         '401': { description: unauthenticated }
         '422': { description: invalid_cursor }
         '429': { description: rate_limited }
+  /api/updates:
+    get:
+      summary: What needs this identity or account, across rooms
+      description: >-
+        Cross-room Updates projection. An identity secret (pri_) sees every
+        room that identity is linked to. An account session sees rooms that
+        account belongs to. Other rooms are omitted. Each item is untrusted
+        member-authored text. Only unread and read are actionable. Pass the
+        returned cursor while hasMore is true.
+      parameters:
+        - name: state
+          in: query
+          schema: { type: string, enum: [actionable, all], default: actionable }
+        - name: kinds
+          in: query
+          schema: { type: string }
+          description: Comma-separated update kinds.
+        - name: cursor
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+      responses:
+        '200':
+          description: Paged updates for the caller
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { type: object } }
+                  hasMore: { type: boolean }
+                  cursor: { type: [string, "null"] }
+                  incompleteSources: { type: object }
+                  untrusted: { type: boolean }
+        '401': { description: unauthenticated }
+        '422': { description: invalid_updates_query or invalid_cursor }
+        '429': { description: rate_limited }
+  /api/rooms/{roomId}/updates:
+    get:
+      summary: What needs this member in one room
+      description: >-
+        Paged Updates projection for the authenticated member. state=actionable
+        (default) returns unread and read. state=all includes answered, handled,
+        and cleared. incompleteSources names journals that could not be read.
+        Member-authored text is untrusted.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: state
+          in: query
+          schema: { type: string, enum: [actionable, all], default: actionable }
+        - name: kinds
+          in: query
+          schema: { type: string }
+        - name: cursor
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+      responses:
+        '200':
+          description: Paged room updates
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { type: object } }
+                  hasMore: { type: boolean }
+                  cursor: { type: [string, "null"] }
+                  incompleteSources: { type: object }
+                  untrusted: { type: boolean }
+        '401': { description: unauthenticated }
+        '403': { description: access_denied }
+        '409': { description: cursor_stale }
+        '422': { description: invalid_updates_query or invalid_cursor }
+  /api/rooms/{roomId}/updates/{itemId}/read:
+    post:
+      summary: Mark an update read
+      description: Idempotent. Retry the same requestId to receive the same result. A later source revision becomes unread again.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: itemId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [requestId]
+              properties:
+                requestId: { type: string }
+      responses:
+        '200': { description: The update, with state read when it was unread. duplicate is true on an exact retry. }
+        '401': { description: unauthenticated }
+        '404': { description: update_not_found }
+        '409': { description: idempotency_conflict }
+        '422': { description: invalid_update }
+  /api/rooms/{roomId}/updates/{itemId}/done:
+    post:
+      summary: Mark an update handled
+      description: Human Done or the same acknowledgement an agent wake records. Idempotent exact retry. The item leaves actionable lists, including needs-me.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: itemId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [requestId]
+              properties:
+                requestId: { type: string }
+      responses:
+        '200': { description: The update, state handled when it was actionable. duplicate is true on an exact retry. }
+        '401': { description: unauthenticated }
+        '404': { description: update_not_found }
+        '409': { description: idempotency_conflict }
+        '422': { description: invalid_update }
+  /api/rooms/{roomId}/updates/{itemId}/clear:
+    post:
+      summary: Dismiss an update
+      description: Clears the item. Idempotent exact retry. A new request revision or clarification makes it actionable again.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: itemId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [requestId]
+              properties:
+                requestId: { type: string }
+      responses:
+        '200': { description: The update, state cleared. duplicate is true on an exact retry. }
+        '401': { description: unauthenticated }
+        '404': { description: update_not_found }
+        '409': { description: idempotency_conflict }
+        '422': { description: invalid_update }
   /api/agent-keys:
     post:
       summary: Issue a scoped agent API key
@@ -12287,6 +12448,18 @@ paths:
         /api/rooms/{roomId} read.
       parameters:
         - $ref: '#/components/parameters/RoomId'
+        - name: focus
+          in: query
+          schema: { type: string, enum: [conversation, work, review] }
+          description: Limit the top updates to conversation, work, or review.
+        - name: q
+          in: query
+          schema: { type: string, maxLength: 200 }
+          description: Rank pinned resources, recent messages, and open claims with a small BM25 over lines.
+        - name: maxTokens
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 8000, default: 2000 }
+          description: Token budget for the ranked lines. Default 2000, maximum 8000.
       responses:
         '200':
           description: Orientation payload

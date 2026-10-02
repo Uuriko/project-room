@@ -670,6 +670,6 @@ test("the board card shows the pull request, short head, checks, behind, and tip
   const page = readFileSync(new URL("../index.html", import.meta.url), "utf8");
   assert.match(page, /id="land-queue-panel"/);
   assert.match(page, /id="land-queue-list"/);
-  const worker = readFileSync(new URL("../cloudflare/room.mjs", import.meta.url), "utf8");
-  assert.match(worker, /room\.refreshLandQueue\(\)/);
+  const registry = readFileSync(new URL("../server/jobs.mjs", import.meta.url), "utf8");
+  assert.match(registry, /refreshLandQueue\(\)/);
 });

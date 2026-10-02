@@ -104,24 +104,12 @@ test("all-clear item appears when nothing else qualifies", () => {
       workClaims: [], bounties: [], newcomers: [],
       card: { capabilities: ["x"], skills: [], description: "done" },
     },
-    suppressions: [{ kind: "claim-review" }, { kind: "receipt-verify" }, { kind: "poll-closing" }, { kind: "stale-thread" }],
+    suppressions: [],
   });
   const clear = out.items.find(i => i.kind === "all-clear");
   assert.ok(clear, "all-clear present");
   assert.equal(clear.score, 0);
   assert.equal(clear.action, null);
-});
-
-// (1) Dormant kinds surface honestly with null action — never a fabricated
-// path. (2) Regression: a dormancy slips through with an invented route and
-// agents 404 against it. (3) New module.
-test("dormant kinds carry action null, never a fabricated route", () => {
-  const dormant = build().items.filter(i => ["claim-review", "receipt-verify", "poll-closing", "stale-thread"].includes(i.kind));
-  assert.equal(dormant.length, 4);
-  for (const item of dormant) {
-    assert.equal(item.action, null, `${item.kind} has no action`);
-    assert.match(item.reason, /dormant:/, `${item.kind} names its dormancy`);
-  }
 });
 
 // (1) Every emitted action.api resolves to a real route — the zero-lookup-tax
@@ -202,17 +190,18 @@ test("dismissals and suppressions are private per member", t => {
   const f = createAcceptanceFixture();
   t.after(() => { f.store.close(); });
   const ownerToken = f.keys.owner, guestToken = f.keys.guest, na = f.store.nextActions;
-  // Same store, different members: owner dismisses a SHARED-id item
-  // (dormant kinds key on the kind, not the viewer), guest unaffected.
-  const sharedItem = na.list(ownerToken, "commons", { limit: 50 }).items.find(i => i.kind === "claim-review");
-  assert.ok(sharedItem, "fixture yields a shared claim-review item");
-  na.dismiss(ownerToken, "commons", sharedItem.id, {});
-  na.putSuppressions(ownerToken, "commons", { suppressions: [{ kind: "poll-closing" }] });
+  const ownerList = na.list(ownerToken, "commons", { limit: 50 });
+  const target = ownerList.items.find(i => i.kind === "profile-gap" || i.kind === "bounty-match");
+  assert.ok(target, "fixture yields a dismissable item");
+  na.dismiss(ownerToken, "commons", target.id, {});
+  na.putSuppressions(ownerToken, "commons", { suppressions: [{ kind: target.kind }] });
   const guestList = na.list(guestToken, "commons", { limit: 50 });
-  assert.ok(guestList.items.some(i => i.id === sharedItem.id), "guest still sees the owner's dismissed shared item");
-  assert.ok(guestList.items.some(i => i.kind === "poll-closing"), "guest still sees suppressed-for-owner kind");
   assert.equal(guestList.dismissedCount, 0);
   assert.equal(guestList.suppressedCount, 0);
+  assert.ok(guestList.items.some(i => i.kind === target.kind), "guest still sees their own item of that kind");
+  const ownerAfter = na.list(ownerToken, "commons", { limit: 50 });
+  assert.equal(ownerAfter.suppressedCount, 1);
+  assert.equal(ownerAfter.items.some(i => i.kind === target.kind), false);
 });
 
 // (1) Suppressions are replace-all: one PUT swaps the whole set.

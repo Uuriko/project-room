@@ -18,6 +18,7 @@ import { installAgentConnections } from "./agent-connections.js";
 import { catalogById } from "./room-roster.js";
 import { installRoomInstructions } from "./room-instructions.js";
 import { createNeedsAttentionCard } from "./needs-attention.js";
+import { mountUpdates } from "./updates-ui.js";
 import { installReminders } from "./reminders.js";
 import { installPortableWork, installResultCopy } from "./portable-work.js";
 import { replyDraftKey, replyDraftData, validReplyDraft, replyFollowUp, creditQuestion, confirmsReplyCommand, REPLY_CANCELLED } from "./reply-requests.js";
@@ -557,6 +558,10 @@ landQueueUI = lazyDisclosure({ panel: $("#land-queue-panel"),
 instructionsUI = installRoomInstructions({ client, getState: () => state, onSaved: text => notice(text) });
 // #662: owner "needs your attention" card (owner-gated; hidden for everyone else).
 const ownerAttentionCard = createNeedsAttentionCard({ client, section: $("#needs-attention") });
+// UPDATES HOOK (U batch). Palette Catch up, Activity, Mentions, and Saved for
+// later open this destination with the matching filter. Room UI v2 removes
+// the old entries later. The badge counts actionable updates only.
+const updatesUi = mountUpdates({ client, host: document.querySelector(".room-main") });
 portableWorkUI = installPortableWork({ client, getState: () => state, onSaved: messageId => {
   const visible = conversation?.byId.has(messageId);
   if (visible) revealMessage(messageId);
@@ -4166,6 +4171,7 @@ function chooseRoomAction(id) {
   const entry = roomActionEntries().find(value => value.id === id);
   if (!entry) { renderRoomActions(); $("#room-actions-query").focus(); return; }
   closeRoomActions(false);
+  if (updatesUi.openAction(id)) return;
   if (id === "how-invite") {
     const button = $("#invite-people-button");
     if (button && !button.hidden) { button.click(); return; }

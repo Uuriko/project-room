@@ -26,14 +26,14 @@ import { backfillPublicReadModel as fillPublicReadModel } from '../server/public
 import { pruneAbuseRateBuckets } from '../server/abuse-rate-buckets.mjs';
 import { pruneOAuthProvider } from '../server/oauth-provider-store.mjs';
 import { syncClaimPullRequests } from '../server/claim-pr-sync.mjs';
-import { CRON_JOB_BUDGET_MS, HEARTBEAT_STORAGE_KEY, applyOutcomes, cronIntegrationConfigured, jobHealthResponse, jobHealthUnavailable, jobHealthView, runCronJobs } from './job-heartbeat.mjs';
+import { CRON_JOB_BUDGET_MS, HEARTBEAT_STORAGE_KEY, applyOutcomes, jobHealthResponse, jobHealthUnavailable, jobHealthView, runCronJobs, selectWorkerJobs } from './job-heartbeat.mjs';
+import { ALARM_RETRY_MS, JOBS, earliestFutureAlarm, jobIsDue, lastRanFrom } from '../server/jobs.mjs';
 import { countOpenPublicReports } from '../server/legal-store.mjs'; // open public-report count on GET /api/health/jobs
 import { SOURCE_REVISION, BUILD_ID } from '../server/version.mjs';
 import { edgePublicResponse } from './edge-public.mjs';
 import { appDurationMs, logRoomRequest, requestPath, withServerTiming } from './request-timing.mjs';
 import { HEALTH_PROBE_TIMEOUT_MS, createHealthProbe, healthLivenessResponse, readyProbeResponse, workerLivenessResponse } from './health-probe.mjs';
 import { exportNdjsonStream, operatorExportResponse } from '../server/room-export.mjs';
-import { writeDailyBackup } from './room-backup.mjs';
 import { flushRoomGuide, installGuideCommandHook } from '../server/room-guide.mjs';
 
 // One probe per isolate. Concurrent health checks during a cold start share
@@ -97,7 +97,11 @@ export class ProjectRoom extends DurableObject {
     // point. The Durable Object may suspend before the microtask drains;
     // the cron tick remains the restart-safe backstop.
     this.store.agentPlugin.setDispatchKick(() => {
-      queueMicrotask(() => { this.store.agentPlugin.drainWebhookDeliveries().catch(() => {}); });
+      queueMicrotask(() => {
+        this.store.agentPlugin.drainWebhookDeliveries().catch(() => {}).finally(() => {
+          this.#armJobAlarm().catch(() => {});
+        });
+      });
     });
     bootstrapRoom(this.store, env);
     this.store.landQueue.configure({ env });
@@ -182,6 +186,8 @@ export class ProjectRoom extends DurableObject {
       this.ctx.waitUntil(this.store.humanPush.flush());
       // ACT-1a: post-request flush for a Room Guide step the command hook left queued.
       this.ctx.waitUntil(Promise.resolve(flushRoomGuide(this.store)));
+      // A commit in this request may have queued webhook, land, or claim work.
+      this.ctx.waitUntil(this.#armJobAlarm().catch(() => {}));
     }
   }
 
@@ -211,7 +217,7 @@ export class ProjectRoom extends DurableObject {
     return { recorded: Array.isArray(outcomes) ? outcomes.length : 0 };
   }
   async readJobHealth() {
-    const view = jobHealthView(await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY), Date.now(), this.env);
+    const view = jobHealthView(await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY), Date.now(), this.env, this.store);
     return { ...view, publicReports: countOpenPublicReports(this.store) };
   }
 
@@ -334,6 +340,82 @@ export class ProjectRoom extends DurableObject {
       }));
     }
     return { ...receipt, webhookDeliveries, oauthProvider, abuseRateBuckets };
+  }
+  // Due jobs only. Slow jobs (retention, integrity, backup) run from the
+  // safety-net cron. Fast jobs run from the alarm when their nextDueAt arrives.
+  async #runDueJobs({ includeSlow }) {
+    const stored = await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY);
+    const lastRan = lastRanFrom(stored);
+    const now = Date.now();
+    const selected = selectWorkerJobs(this.env, this.store).filter(job => {
+      if (job.slow && !includeSlow) return false;
+      return jobIsDue(job, this.store, now, lastRan[job.name]);
+    });
+    const runners = {};
+    for (const job of selected) {
+      runners[job.name] = () => job.run(this.store, {
+        deadline: Date.now() + (job.budgetMs ?? CRON_JOB_BUDGET_MS),
+        env: this.env, room: this, now: () => Date.now()
+      });
+    }
+    const outcomes = await runCronJobs(runners);
+    if (outcomes.length) {
+      try { await this.recordCronTick(outcomes); }
+      catch (error) { console.error(`[job-heartbeat] record failed: ${error?.message ?? error}`); }
+    }
+    return outcomes;
+  }
+  // Set the alarm only when the new time is earlier than the one already set.
+  // Nothing queued deletes a leftover alarm so an idle room is not woken.
+  async #armJobAlarm({ retryDelayMs = 0 } = {}) {
+    if (this.paused || !this.store) return { armed: false, alarmAt: null };
+    const now = Date.now();
+    const stored = await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY);
+    let when = earliestFutureAlarm(JOBS, {
+      env: this.env, store: this.store, now, lastRan: lastRanFrom(stored), runtime: "worker"
+    });
+    if (retryDelayMs > 0) {
+      const retryAt = now + retryDelayMs;
+      when = when == null ? retryAt : Math.min(when, retryAt);
+    }
+    const current = await this.ctx.storage.getAlarm();
+    if (when == null) {
+      if (current != null) await this.ctx.storage.deleteAlarm();
+      return { armed: false, alarmAt: null };
+    }
+    if (current != null && current <= when) return { armed: false, alarmAt: current };
+    await this.ctx.storage.setAlarm(when);
+    return { armed: true, alarmAt: when };
+  }
+  // Safety-net RPC. Runs anything already due, then re-arms a missing alarm.
+  // Reading storage wakes the object, so the Worker cron cannot check "is
+  // anything due?" without this wake. The cron stays at 30 minutes.
+  async ensureJobAlarm() {
+    if (this.paused || !this.store) return { skipped: "paused", armed: false };
+    const outcomes = await this.#runDueJobs({ includeSlow: true });
+    const armed = await this.#armJobAlarm();
+    const failed = outcomes.filter(outcome => !outcome.ok && !JOBS.find(job => job.name === outcome.job)?.slow);
+    if (failed.length) throw new Error(`cron jobs failed: ${failed.map(outcome => outcome.job).join(", ")}`);
+    return { ...armed, ran: outcomes.map(outcome => outcome.job) };
+  }
+  // Platform alarm. A throw is rescheduled so a failed tick is not dropped.
+  async alarm() {
+    if (this.paused || !this.store) return;
+    let retryDelayMs = 0;
+    try {
+      const outcomes = await this.#runDueJobs({ includeSlow: false });
+      const failed = outcomes.filter(outcome => !outcome.ok);
+      if (failed.length) {
+        retryDelayMs = ALARM_RETRY_MS;
+        throw new Error(`cron jobs failed: ${failed.map(outcome => outcome.job).join(", ")}`);
+      }
+    } catch (error) {
+      if (!retryDelayMs) retryDelayMs = ALARM_RETRY_MS;
+      throw error;
+    } finally {
+      try { await this.#armJobAlarm({ retryDelayMs }); }
+      catch (error) { console.error(`[jobs] alarm re-arm failed: ${error?.message ?? error}`); }
+    }
   }
   // Operator and cron export. Returns a stream of NDJSON; callers must not log it.
   exportRoomNdjson() {
@@ -474,43 +556,16 @@ export default {
     catch { message.setReject(emailRoutingRejections.unavailable); }
   },
 
-  // Task 9 — Worker cron (see triggers.crons in wrangler.jsonc): drain the
-  // Telegram webhook journal on a schedule. The tick runs inside the Durable
-  // Object via RPC; a failing tick is logged, never retried by the cron.
-  // RC-2026-09-19-064: the same tick also sweeps due signed-webhook
-  // deliveries (pending -> delivered | failed -> dead_letter).
-  // Every job's outcome is recorded as a heartbeat (GET /api/health/jobs), and
-  // any failed job makes the scheduled invocation itself fail so Cron Events and
-  // tail show an exception instead of a green "ok" over swallowed warnings.
+  // Safety-net cron (wrangler production trigger is every 30 minutes).
+  // Reading Durable Object storage always wakes it, so this handler cannot
+  // ask "is anything due?" from the Worker. It makes one RPC that runs jobs
+  // already due and re-arms the alarm when one is missing. Webhook retries,
+  // land-queue polls, and claim polls run from ProjectRoom.alarm() at the
+  // next due time. A failed fast job fails this invocation so Cron Events
+  // show the exception.
   async scheduled(event, env, ctx) {
     if (maintenanceEnabled(env.ROOM_MAINTENANCE)) return;
     const room = env.ROOM.getByName('invite-only-pilot');
-    const runners = {
-      'gmail-sync': () => room.syncGmailMailboxes(),
-      'channel-drain': () => room.drainChannelBacklog(),
-      'webhook-dispatch': () => room.drainWebhookDeliveries(),
-      'land-queue': () => room.refreshLandQueue(),
-      'claim-prs': () => room.refreshClaimPullRequests(),
-      'retention': () => room.planRetention(),
-      'public-read-model': () => room.backfillPublicReadModel()
-    };
-    for (const name of Object.keys(runners)) {
-      if (!cronIntegrationConfigured(name, env)) delete runners[name];
-    }
-    const outcomes = await runCronJobs(runners);
-    try { await room.recordCronTick(outcomes); }
-    catch (error) { console.error(`[job-heartbeat] record failed: ${error?.message ?? error}`); }
-    try {
-      const integrity = await room.verifyRoomIntegrity();
-      const line = { event: 'room.integrity' };
-      for (const key of ['matched', 'skipped', 'verified', 'budgetExceeded', 'invitations', 'paused', 'checked', 'swept']) {
-        if (typeof integrity?.[key] === 'number') line[key] = integrity[key];
-      }
-      console.info(JSON.stringify(line));
-    } catch (error) { console.error(`[integrity] ${error?.message ?? error}`); }
-    try { await writeDailyBackup(env, room); }
-    catch (error) { console.error(`[room-backup] ${error?.message ?? error}`); }
-    const failed = outcomes.filter(outcome => !outcome.ok).map(outcome => outcome.job);
-    if (failed.length) throw new Error(`cron jobs failed: ${failed.join(', ')}`);
+    await room.ensureJobAlarm();
   }
 };

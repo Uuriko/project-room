@@ -5,11 +5,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { register } from "node:module";
 import { pathToFileURL, fileURLToPath } from "node:url";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { RoomStore } from "../server/store.mjs";
+import { initialRoom } from "../server/bootstrap.mjs";
 import {
-  CRON_JOBS, HEARTBEAT_STORAGE_KEY, applyOutcomes, compactSummary, jobHealthView, redactError, runCronJobs, summaryFailure
+  CRON_JOBS, applyOutcomes, compactSummary, jobHealthView, redactError, runCronJobs, summaryFailure
 } from "../cloudflare/job-heartbeat.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -61,9 +63,12 @@ function roomStub(overrides = {}) {
   return { stub, self, calls };
 }
 
-test("every cron job in scheduled() has a heartbeat entry", () => {
-  assert.deepEqual(CRON_JOBS.map(job => job.name).sort(), ["channel-drain", "claim-prs", "gmail-sync", "land-queue", "public-read-model", "retention", "webhook-dispatch"]);
-  for (const job of CRON_JOBS) assert.equal(job.periodSeconds, 60);
+test("every worker job has a heartbeat entry and its cadence", () => {
+  assert.deepEqual(CRON_JOBS.map(job => job.name), [
+    "gmail-sync", "channel-drain", "webhook-dispatch", "land-queue", "claim-prs",
+    "retention", "integrity", "public-read-model", "room-backup"
+  ]);
+  assert.deepEqual(CRON_JOBS.map(job => job.periodSeconds), [60, 60, 60, 60, 60, 3600, 3600, 60, 86400]);
 });
 
 test("runCronJobs runs one job at a time and yields between them", async () => {
@@ -129,7 +134,15 @@ test("jobHealthView marks stale beyond 3x period and failing on errors", () => {
   assert.equal(jobHealthView(fresh, now).status, "ok");
   const view = jobHealthView(fresh, now + 181_000);
   assert.equal(view.status, "stale");
-  assert.ok(view.jobs.every(job => job.stale && job.staleAfterSeconds === 180));
+  for (const job of view.jobs) {
+    if (job.periodSeconds === 60) {
+      assert.equal(job.stale, true, job.name);
+      assert.equal(job.staleAfterSeconds, 180);
+    } else {
+      assert.equal(job.stale, false, job.name);
+      assert.ok(job.staleAfterSeconds > 180, job.name);
+    }
+  }
   const failing = applyOutcomes(fresh, [{ job: "land-queue", ok: false, at: now, error: RPC_ERROR }]);
   const failingView = jobHealthView(failing, now);
   const land = failingView.jobs.find(job => job.name === "land-queue");
@@ -141,46 +154,55 @@ test("jobHealthView marks stale beyond 3x period and failing on errors", () => {
   assert.equal(jobHealthView(undefined, now).status, "stale", "never-run jobs are stale");
 });
 
-test("scheduled() records a heartbeat and fails the invocation when a job fails", async () => {
-  const { stub, self, calls } = roomStub({ refreshLandQueue: () => Promise.reject(new Error(RPC_ERROR)) });
-  const warn = console.warn; console.warn = () => {};
-  try {
-    await assert.rejects(worker.scheduled({ cron: "* * * * *" }, { ROOM_MAINTENANCE: "0", ROOM: { getByName: () => stub } }, { waitUntil() {} }),
-      /cron jobs failed: land-queue/);
-  } finally { console.warn = warn; }
-  assert.ok(calls.includes("recordCronTick"));
-  const stored = self.ctx.storage.map.get(HEARTBEAT_STORAGE_KEY);
-  assert.equal(stored["land-queue"].consecutiveFailures, 1);
-  assert.ok(Number.isFinite(stored.retention.lastSuccessAt));
+test("scheduled() makes one safety-net call and fails the invocation when that call fails", async () => {
+  const { stub, calls } = roomStub({
+    ensureJobAlarm: () => Promise.reject(new Error("cron jobs failed: land-queue"))
+  });
+  await assert.rejects(worker.scheduled({ cron: "*/30 * * * *" }, { ROOM_MAINTENANCE: "0", ROOM: { getByName: () => stub } }, { waitUntil() {} }),
+    /cron jobs failed: land-queue/);
+  assert.deepEqual(calls, ["ensureJobAlarm"]);
 });
 
-test("scheduled() resolves when every configured job succeeds", async () => {
-  const { stub, self, calls } = roomStub();
-  const env = { ROOM_MAINTENANCE: "0", ROOM: { getByName: () => stub } };
-  await worker.scheduled({ cron: "* * * * *" }, env, { waitUntil() {} });
-  assert.equal(calls.includes("syncGmailMailboxes"), false);
-  assert.equal(calls.includes("drainChannelBacklog"), false);
-  assert.ok(calls.includes("planRetention"));
-  const view = jobHealthView(self.ctx.storage.map.get(HEARTBEAT_STORAGE_KEY), Date.now(), env);
-  assert.equal(view.status, "ok");
-  assert.equal(view.jobs.find(job => job.name === "gmail-sync").status, "unconfigured");
-  assert.equal(view.jobs.find(job => job.name === "channel-drain").status, "unconfigured");
-  assert.equal(view.jobs.find(job => job.name === "gmail-sync").stale, false);
-  assert.equal(view.jobs.find(job => job.name === "retention").status, "ok");
-});
-
-test("scheduled() runs gmail and channel drain when those integrations are configured", async () => {
+test("scheduled() resolves after the safety-net call when the room is quiet", async () => {
   const { stub, calls } = roomStub();
-  const env = {
-    ROOM_MAINTENANCE: "0",
-    ROOM_GMAIL_ENABLED: "1",
-    TELEGRAM_BOT_TOKEN: "123456789:AAFakeFakeFakeFakeFakeFakeFakeFakeFa",
-    TELEGRAM_WEBHOOK_SECRET: "webhook-secret-16",
-    ROOM: { getByName: () => stub }
-  };
-  await worker.scheduled({ cron: "* * * * *" }, env, { waitUntil() {} });
-  assert.ok(calls.includes("syncGmailMailboxes"));
-  assert.ok(calls.includes("drainChannelBacklog"));
+  const env = { ROOM_MAINTENANCE: "0", ROOM_GMAIL_ENABLED: "0", ROOM: { getByName: () => stub } };
+  await worker.scheduled({ cron: "*/30 * * * *" }, env, { waitUntil() {} });
+  assert.deepEqual(calls, ["ensureJobAlarm"]);
+});
+
+test("gmail and channel drain stay disabled, not stale, when nothing is configured", () => {
+  const directory = mkdtempSync(join(tmpdir(), "room-job-gates-"));
+  const store = new RoomStore(join(directory, "room.sqlite"));
+  try {
+    store.initialize(initialRoom("commons"));
+    const now = Date.parse("2026-09-24T22:00:00Z");
+    const alwaysOn = ["retention", "integrity", "public-read-model"];
+    const fresh = applyOutcomes({}, alwaysOn.map(job => ({ job, ok: true, at: now, summary: { checked: 1 } })));
+    const env = { ROOM_GMAIL_ENABLED: "0" };
+    const view = jobHealthView(fresh, now, env, store);
+    const gmail = view.jobs.find(job => job.name === "gmail-sync");
+    const channel = view.jobs.find(job => job.name === "channel-drain");
+    assert.equal(gmail.status, "disabled");
+    assert.equal(gmail.stale, false);
+    assert.equal(gmail.reason, "Gmail is off");
+    assert.equal(channel.status, "disabled");
+    assert.equal(channel.stale, false);
+    assert.equal(channel.reason, "No channel update is waiting");
+    assert.equal(view.jobs.find(job => job.name === "retention").status, "ok");
+    assert.equal(view.status, "ok");
+    assert.equal(JSON.stringify(view).includes('"configured":false'), false);
+    assert.equal(view.jobs.some(job => job.status === "unconfigured"), false);
+    store.db.prepare(`INSERT INTO agent_webhook_deliveries
+      (delivery_id, idempotency_key, subscription_id, agent_id, event_type, payload_json, signature, state, attempts, next_attempt_at, created_at, updated_at)
+      VALUES ('del_due', 'manual:del_due', 'sub_due', 'ai_due', 'message.posted', '{}', 'sig', 'pending', 0, ?, ?, ?)`)
+      .run(now, now, now);
+    const waiting = jobHealthView(fresh, now, env, store).jobs.find(job => job.name === "webhook-dispatch");
+    assert.equal(waiting.status, "stale");
+    assert.equal(waiting.reason, null);
+  } finally {
+    store.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("GET /api/health/jobs is read-only, no-store, and 503 when stale", async () => {

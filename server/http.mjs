@@ -18,6 +18,7 @@ import { createSendBudgetRegistry } from "./channel-send-budgets.mjs";
 import { handleInboxCollab } from "./inbox-collab-routes.mjs"; // Lane C inbox collaboration (task RC-2026-09-18-011).
 import { buildActivationPack } from "./room-activation-pack.mjs"; // Room activation pack (quill lane, RC-2026-09-18-040).
 import { buildOrient } from "./orient.mjs"; // Orient endpoint (jill lane, RC-2026-09-28 — the URL outside agents guess; ryska's 404).
+import { listRoomUpdates, listIdentityUpdates, listAccountUpdates, markUpdate, readEventTail } from "./updates.mjs"; // Updates projection (U batch).
 import { handleWorkClaims } from "./work-claim-routes.mjs"; // Work-claim leases/delivery/review (task RC-2026-09-18-041).
 import { handleAgentConnect } from "./routes/agent-connect.mjs";
 import { listMentionReceipts } from "./mention-receipts.mjs";
@@ -3242,6 +3243,65 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (url.pathname === "/api/needs-me") {
         reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET" });
       }
+      // UPDATES — one projection of what needs the caller now. Room lists and
+      // marks ride the same credential funnel as other room routes. Cross-room
+      // reads accept an identity secret or an account session. needs-me stays
+      // as a compatibility view and retires handled items.
+      const updatesListMatch = /^\/api\/rooms\/([^/]{1,384})\/updates$/.exec(url.pathname);
+      const updatesReadMatch = /^\/api\/rooms\/([^/]{1,384})\/updates\/([^/]{1,128})\/read$/.exec(url.pathname);
+      const updatesDoneMatch = /^\/api\/rooms\/([^/]{1,384})\/updates\/([^/]{1,128})\/done$/.exec(url.pathname);
+      const updatesClearMatch = /^\/api\/rooms\/([^/]{1,384})\/updates\/([^/]{1,128})\/clear$/.exec(url.pathname);
+      const updatesMarkMatch = updatesReadMatch ?? updatesDoneMatch ?? updatesClearMatch;
+      const updatesQuery = () => {
+        const params = url.searchParams;
+        const allowed = new Set(["state", "kinds", "cursor", "limit", "auth", "binding"]);
+        if ([...params.keys()].some(key => !allowed.has(key) || params.getAll(key).length !== 1)) {
+          reject(422, "invalid_updates_query", "state, kinds, cursor, and limit are the updates query parameters");
+        }
+        const query = {};
+        if (params.has("state")) query.state = params.get("state");
+        if (params.has("kinds")) query.kinds = params.get("kinds");
+        if (params.has("cursor")) query.cursor = params.get("cursor");
+        if (params.has("limit")) query.limit = Number(params.get("limit"));
+        return query;
+      };
+      if (url.pathname === "/api/updates" && (req.method === "GET" || req.method === "HEAD")) {
+        rate(`updates:${remoteAddress}`, 60);
+        const secret = bearer(req);
+        if (secret) {
+          if (!isIdentitySecret(secret)) reject(401, "unauthenticated", "Cross-room updates need an identity secret or an account session");
+          return json(res, 200, listIdentityUpdates(store, secret, updatesQuery()), req.method === "HEAD");
+        }
+        const token = cookie(req, accountCookieName);
+        if (!token) reject(401, "unauthenticated", "Identity secret or account session required");
+        return json(res, 200, listAccountUpdates(store, token, accountBinding(req, url), updatesQuery()), req.method === "HEAD");
+      }
+      if (url.pathname === "/api/updates") reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET" });
+      if (updatesListMatch || updatesMarkMatch) {
+        const roomId = pathId((updatesListMatch ?? updatesMarkMatch)[1]);
+        const selected = roomCredentials(req, url);
+        const fence = selected.mode === "account" ? accountBinding(req, null) : expectedBinding(req);
+        const auth = roomAuth(selected, roomId, fence);
+        if (selected.bearer && auth.credentialScope !== "room") reject(403, "access_denied", "Bearer account sessions are not accepted");
+        if (!selected.bearer && auth.kind !== "session") reject(401, "unauthenticated", "Browser session required");
+        if (auth.kind === "api-key") {
+          const requiredScope = updatesListMatch ? "rooms:read" : "rooms:write";
+          const granted = (auth.apiKeyScopes ?? []).some(scope => scope === requiredScope || (scope.endsWith(":*") && requiredScope.startsWith(scope.slice(0, -1))));
+          if (!granted) reject(403, "insufficient_scope", `API key lacks the ${requiredScope} scope`);
+        }
+        rate(`read:${auth.credentialHash}`, 600);
+        if (updatesListMatch) {
+          if (!["GET", "HEAD"].includes(req.method)) reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET, HEAD" });
+          return json(res, 200, listRoomUpdates(store, selected.token, roomId, updatesQuery(), fence), req.method === "HEAD");
+        }
+        if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
+        protectWrite(req, auth, selected.bearer);
+        rate(`write:${auth.credentialHash}`, 60);
+        const data = await body(req);
+        if (!exact(data, ["requestId"]) || typeof data.requestId !== "string") reject(422, "invalid_update", "requestId is the only accepted field");
+        const action = updatesReadMatch ? "read" : updatesDoneMatch ? "done" : "clear";
+        return json(res, 200, markUpdate(store, selected.token, roomId, pathId(updatesMarkMatch[2]), action, data.requestId, fence));
+      }
       const accessStatusMatch = /^\/api\/access-requests\/([^/]{1,64})$/.exec(url.pathname);
       if (accessStatusMatch && req.method === "GET") {
         // The only open route with no per-address bound. It is not an
@@ -3970,7 +4030,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // cursor). Rides the standard room credential funnel above; unknown
       // rooms answer 404 room_not_found from the store.
       if (route === "activation-pack" && req.method === "GET") {
-        return json(res, 200, buildActivationPack(store, roomId));
+        return json(res, 200, buildActivationPack(store, roomId, viewerId));
       }
       // ORIENT — jill lane RC-2026-09-28 (ryska's 404): the URL outside
       // agents guess by analogy with /activation-pack. Read-only,
@@ -3980,7 +4040,15 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // room credential funnel above; unknown rooms answer 404
       // room_not_found from the store.
       if (route === "orient" && req.method === "GET") {
-        return json(res, 200, buildOrient(store, roomId, viewerId));
+        const params = url.searchParams;
+        const allowed = new Set(["focus", "q", "maxTokens", "auth", "binding"]);
+        if ([...params.keys()].some(key => !allowed.has(key) || params.getAll(key).length !== 1)) {
+          reject(422, "invalid_orient", "focus, q, and maxTokens are the orient query parameters");
+        }
+        return json(res, 200, buildOrient(store, roomId, viewerId, {
+          focus: params.get("focus"), q: params.get("q"), maxTokens: params.get("maxTokens"),
+          token: selected.token, binding: fence
+        }));
       }
       if (route === "verification-policy" && req.method === "GET") {
         // RC-2026-09-18-049: read the room's verified-agents gate policy.
@@ -4697,9 +4765,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if ([...params.keys()].some(key => !["since_version", "auth"].includes(key) || params.getAll(key).length !== 1)) {
           reject(422, "invalid_context_version", "since_version is the only context query parameter");
         }
-        return json(res, 200, store.roomContext(selected.token, roomId, {
+        const context = store.roomContext(selected.token, roomId, {
           sinceVersion: params.has("since_version") ? params.get("since_version") : null, expectedSessionBinding: fence
-        }));
+        });
+        if (context.not_modified) return json(res, 200, context);
+        return json(res, 200, { ...context, orient: buildOrient(store, roomId, viewerId, { text: false, token: selected.token, binding: fence }) });
       }
       if (route === "bonds" && req.method === "GET") {
         return json(res, 200, { bonds: store.bonds.listForMember(roomId, auth.member.id) });
@@ -4718,6 +4788,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (params.has("afterSequence")) {
           reject(422, "invalid_event_cursor",
             "events uses the query parameter after (a sequence number), not afterSequence. Retry with after set to the last sequence you handled. A refused afterSequence is not a filter and does not mean you are caught up.");
+        }
+        if (params.has("tail")) {
+          if ([...params.keys()].some(key => !["tail", "auth"].includes(key) || params.getAll(key).length !== 1)) {
+            reject(422, "invalid_event_cursor", "tail is used alone, as an integer from 1 to 200");
+          }
+          const tail = Number(params.get("tail"));
+          return json(res, 200, redactEventPage(readEventTail(store, selected.token, roomId, tail, fence), projectionMessages(roomId)));
         }
         return json(res, 200, redactEventPage(store.eventsAfter(selected.token, roomId,
           Number(params.get("after") || 0), Number(params.get("limit") || 100),

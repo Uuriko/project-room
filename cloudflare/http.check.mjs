@@ -367,7 +367,7 @@ test('getdasha entry and canonical browser app share identities, rooms and invit
   assert.equal(productionVars.ROOM_ORIGIN, 'https://room.trydemigod.com');
   assert.equal(productionVars["ROOM_DEPLOYMENT"], 'production');
   assert.deepEqual(release.triggers.crons, []);
-  assert.deepEqual(release.env.production.triggers.crons, ['* * * * *']);
+  assert.deepEqual(release.env.production.triggers.crons, ['*/30 * * * *']);
   // Isolated staging owns its Durable Object. It must not inherit the entry
   // binding that points at production, and it must not take the public routes.
   assert.equal(release.name, 'project-room-staging');

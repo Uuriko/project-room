@@ -10,10 +10,12 @@
 // changes do not advance the room sequence, so they use updated_at.
 // Pass cursor back unchanged while hasMore is true, even for an empty page.
 // Continuation adds roomAfter, landIds (timestamp tie breakers), and an optional
-// numeric floor. Reading discovers items; it never acknowledges or resolves them.
+// numeric floor. Answered, handled, and cleared updates leave this list even
+// when the caller does not pass a cursor.
 
 import { ServiceError } from "./store.mjs";
 import { nextWorkStep } from "../src/workflow.js";
+import { retiredNeedsMeKeys } from "./updates.mjs";
 
 const MAX_ROOMS = 40;
 const MAX_PER_KIND = 8;
@@ -321,7 +323,8 @@ export function collectNeedsMe(store, secret, { since } = {}) {
         if (kind.length > MAX_PER_KIND) through = Math.min(through, kind[MAX_PER_KIND].seq - 1);
         for (const item of kind) push(candidates, item);
       }
-      candidates = candidates.filter(item => item.seq <= through).sort((a, b) => a.seq - b.seq);
+      const retired = retiredNeedsMeKeys(store, link.roomId, link.memberId);
+      candidates = candidates.filter(item => item.seq <= through && !retired.has(`${item.kind}:${item.id}`)).sort((a, b) => a.seq - b.seq);
       const remaining = MAX_ITEMS - items.length;
       if (candidates.length > remaining) {
         through = Math.min(through, candidates[remaining].seq - 1);
