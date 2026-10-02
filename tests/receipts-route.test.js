@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
-import { collectPublicReceipts } from "../server/receipts-live.mjs";
+import { collectPublicReceipts, projectPublicWorkReceipt } from "../server/receipts-live.mjs";
 
 const HASH = `sha256:${"ab".repeat(32)}`;
 const PWR = `pwr_${"cd".repeat(32)}`;
@@ -23,13 +23,14 @@ async function serve(t) {
   const adaKey = store.issueAccessKey("commons", "ada");
   store.workClaims.set("commons", {
     id: "claim-1", title: "Ship the door", state: "done", owner: "ada",
-    history: [{ action: "pr_merged", actor: "owner", at: "2026-10-01T00:00:00.000Z" }],
+    history: [{ action: "pr_merged", agentId: "owner", actor: "ada", at: "2026-10-01T00:00:00.000Z" }],
     pullRequest: { url: "https://github.com/Uuriko/project-room/pull/9", outcome: "merged", syncedAt: "2026-10-01T12:00:00.000Z" },
     blobs: [HASH], updatedAt: "2026-10-01T12:00:00.000Z",
   });
   const publicWork = { schema: "public-work-receipt/1", receiptId: PWR, namespaceId: "commons", identityId: "ai_public", title: "Public task", createdAt: "2026-10-01T00:00:00.000Z", artifact: { sha256: "cd".repeat(32) } };
   store.db.prepare("INSERT INTO public_work_receipts VALUES (?,?,?,?,?,?,?,?,?,?)").run(
     PWR, "offer-1", "commons", 1, "ai_public", "note", "cd".repeat(32), 4, JSON.stringify(publicWork), Date.now());
+  projectPublicWorkReceipt(store, publicWork, "cd".repeat(32));
   const server = createRoomServer({ store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); rmSync(directory, { recursive: true, force: true }); });
@@ -86,6 +87,7 @@ test("a private room's claim stays hidden until the owner publishes, and a non-o
   assert.equal(body.room, null);
   assert.deepEqual(body.agents, ["Ada"]);
   assert.deepEqual(body.humans, ["Room owner"]);
+  assert.equal(page.text.includes("ada"), false);
   store.roomDirectory.set("commons", "owner", true);
   const named = await raw(origin, `/receipts/${id}`);
   assert.match(named.text, /Project Room Commons/);

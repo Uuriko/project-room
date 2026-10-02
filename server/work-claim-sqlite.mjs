@@ -54,7 +54,7 @@ const parse = text => {
   return value;
 };
 
-export function createDurableWorkClaimRegistry(db, { now = () => Date.now(), transaction = fn => fn() } = {}) {
+export function createDurableWorkClaimRegistry(db, { now = () => Date.now(), transaction = fn => fn(), onChange = null } = {}) {
   if (!db || typeof db.prepare !== "function") throw new TypeError("a SQLite database handle is required");
   // Prepare lazily: RoomStore constructs services before its atomic schema migration.
   const statement = sql => ({
@@ -92,12 +92,14 @@ export function createDurableWorkClaimRegistry(db, { now = () => Date.now(), tra
     set(roomId, item) {
       if (!item || typeof item.id !== "string") throw new TypeError("work claim item needs an id");
       upsert.run(roomId, item.id, JSON.stringify(encodeRow(WORK_CLAIM_ROW_KIND, item)), now());
+      if (typeof onChange === "function") onChange(roomId);
       return item;
     },
     list(roomId) { return selectRoom.all(roomId).map(row => decodeItem(row.item_json)); },
     has(roomId, id) { return selectOne.get(roomId, id) != null; },
     delete(roomId, id) {
       db.prepare("DELETE FROM work_claims WHERE room_id=? AND claim_id=?").run(roomId, id);
+      if (typeof onChange === "function") onChange(roomId);
     },
     configure(roomId, config) {
       if (config !== undefined && config !== null) {
