@@ -131,7 +131,7 @@ test("reused code fails: the second enrollment with a fresh requestId burns", t 
   const identity = f.store.identities.create("Atomic Agent");
   const minted = f.store.identities.mintLinkCode(identity.identityId, identity.secret);
   f.apply(f.createRequest({ identityId: identity.identityId, identityLinkCode: minted.linkCode }));
-  expectProofFailure(t, () => f.apply(f.createRequest({ identityId: identity.identityId, identityLinkCode: minted.linkCode })));
+  expectProofFailure(t, () => f.apply(f.createRequest({ identityId: identity.identityId, identityLinkCode: minted.linkCode, displayName: "My assistant again" })));
   assert.equal(f.store.db.prepare("SELECT COUNT(*) n FROM identity_links").get().n, 1, "exactly one link survives");
 });
 
@@ -181,7 +181,7 @@ test("mintLinkCode stores only the hash, capped per identity, and prunes expired
   f.apply(f.createRequest({ identityId: identity.identityId, identityLinkCode: minted.linkCode }));
   const other = f.store.identities.create("Second Agent");
   const otherMint = f.store.identities.mintLinkCode(other.identityId, other.secret);
-  f.apply(f.createRequest({ identityId: other.identityId, identityLinkCode: otherMint.linkCode }));
+  f.apply(f.createRequest({ identityId: other.identityId, identityLinkCode: otherMint.linkCode, displayName: "Second assistant" }));
   assert.doesNotThrow(() => f.store.agentConnections.verify());
 });
 

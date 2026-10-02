@@ -22,9 +22,8 @@
 //     browser that opens the file inline runs nothing and loads nothing.
 //   - tombstoned messages render as "deleted" with no body and no edit
 //     history — the same visibility rule the projection applies. The JSONL
-//     export still carries the history (docs/EXPORT-RETENTION-DELETION.md);
-//     this format is the one meant for people, so it shows the room as the
-//     room showed it.
+//     export applies that same rule before it is written
+//     (docs/history/EXPORT-RETENTION-DELETION.md).
 import { createHash } from "node:crypto";
 import { EVENT_TYPES as T } from "../src/events.js";
 
@@ -215,7 +214,7 @@ export function renderRoomExportHtml(rows, { roomId, generatedAt = new Date().to
     `<dt>Exported</dt><dd><time datetime="${attr(generatedAt)}">${when(generatedAt)}</time></dd>`,
     `<dt>History</dt><dd>${count} event${count === 1 ? "" : "s"}${count ? `, sequence ${first} to ${last}` : ""}${lastAt ? `, last at <time datetime="${attr(lastAt)}">${when(lastAt)}</time>` : ""}</dd>`,
     "</dl>",
-    "<p class=\"lede\">A point-in-time, read-only copy of this room's conversation and work, as members saw it. Deleted messages are shown as deleted without their text. The complete machine-readable history is the JSONL export.</p>",
+    "<p class=\"lede\">A point-in-time, read-only copy of this room's conversation and work. Deleted messages are shown as deleted without their text. The JSONL export is the machine-readable copy of the same view.</p>",
     "</header>");
 
   out.push("<section aria-labelledby=\"members\">", `<h2 id="members">Members (${members.size})</h2>`, "<ul class=\"members\">");
