@@ -26,10 +26,12 @@ const coverage = spawnSync(process.execPath, ["scripts/journey-coverage.mjs"], {
 if (coverage.status !== 0) process.exit(coverage.status || 1);
 const shadows = spawnSync(process.execPath, ["scripts/check-no-shadow-imports.mjs"], { stdio: "inherit" });
 if (shadows.status !== 0) process.exit(shadows.status || 1);
-// --- Route documentation gate (re-audit 2026-09-14, M4) ---
-// Every /api route template server/http.mjs serves is described in
-// docs/openapi.yaml, and nothing described there has gone unserved.
-const routeDocs = spawnSync(process.execPath, ["scripts/route-docs-check.mjs"], { stdio: "inherit" });
+// --- Route documentation gate (batch RT) ---
+// docs/openapi.yaml must parse, every served template must stay documented,
+// and every documented operation must be a route-table row or a legacy
+// allowlist row. Generation from the table replaces this once the legacy
+// chain is empty.
+const routeDocs = spawnSync(process.execPath, ["scripts/openapi-gen.mjs", "--check"], { stdio: "inherit" });
 if (routeDocs.status !== 0) process.exit(routeDocs.status || 1);
 // --- end route documentation gate ---
 const schema = spawnSync(process.execPath, ["scripts/check-schema-version.mjs"], { stdio: "inherit" });
