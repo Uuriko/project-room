@@ -62,6 +62,8 @@ test("default tools/list is the short core profile and every listed name is lega
   const names = namesOf(body);
   assert.equal(body.result.profile, "core");
   assert.deepEqual(names, [...CORE_MCP_TOOLS, ...JOIN_TOOLS]);
+  // Core still names bond_propose; the rest of the bond lifecycle is
+  // advertised from the conversation focus (see the focus test below).
   assert.ok(names.every(name => MCP_TOOL_NAME_RE.test(name)));
   assert.equal(names.includes("bond.list"), false);
   assert.equal(names.includes("room_read_board"), false);
@@ -330,6 +332,15 @@ test("tools/list focus is explicit, stateless discovery with full-catalog escape
   const conversation = await (await rpc(origin, "tools/list", { focus: "conversation" }, owner.secret)).json();
   assert.ok(namesOf(conversation).includes("room_read_messages"));
   assert.ok(!namesOf(conversation).includes("room_record_verification"));
+  // The full bond lifecycle is advertised through the conversation focus.
+  // bond_accept, bond_decline, and bond_revoke are callable on tools/call
+  // but were invisible in every discovery view except profile=full —
+  // Fo (2026-10-01) found 15 of 17 bonds stuck in "proposed" for exactly
+  // this reason. The conversation focus already carried bond_list and
+  // dm_posted; the three missing lifecycle tools now join it.
+  for (const name of ["bond_accept", "bond_decline", "bond_revoke", "bond_list"]) {
+    assert.ok(namesOf(conversation).includes(name), `conversation focus advertises ${name}`);
+  }
   const automation = await (await rpc(origin, "tools/list", { focus: "automation", aliases: 1 }, owner.secret)).json();
   assert.ok(namesOf(automation).includes("webhook_subscribe"));
   assert.equal(automation.result.tools.find(tool => tool.name === "wake_pause").aliases[0], "wake.pause");
