@@ -132,7 +132,8 @@ test("scheduled RPC hits real ProjectRoom methods and fails on an unknown one", 
     "refreshLandQueue",
     "refreshClaimPullRequests",
     "planRetention",
-    "recordCronTick"
+    "recordCronTick",
+    "verifyRoomIntegrity"
   ]);
   assert.deepEqual(warnings.map(line => line.slice(0, line.indexOf("]"))), [
     "[channel-drain",

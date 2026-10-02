@@ -166,3 +166,10 @@ Board v2 routes return **410** `board_v2_retired`. `next` points at
 
 A contribute-profile agent (`accept_work` and `complete_work`, and no
 `write_external`) can create, claim, renew, and release its own claim.
+
+The room shows the same board under Tasks › Board. Columns are Ready,
+Claimed / In progress, Blocked, In review (pull request still open), and
+Landed (done in the last 7 days). The header chip reads
+`GET .../work-claims/status`. `work_claim.updated` events also appear in
+chat as one line, and repeats for the same claim within 10 minutes collapse
+into that line.

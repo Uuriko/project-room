@@ -21,11 +21,11 @@ test('static assets and discovery documents do not enter the Durable Object', as
         };
         export { ProjectRoom };
         export default {
-          async fetch(request, env) {
+          async fetch(request, env, ctx) {
             const url = new URL(request.url);
             if (url.pathname === '/__do_fetches') return new Response(String(doFetches));
             const before = doFetches;
-            const response = await worker.fetch(request, env);
+            const response = await worker.fetch(request, env, ctx);
             const headers = new Headers(response.headers);
             headers.set('X-Test-Do-Fetches', String(doFetches - before));
             return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
@@ -113,6 +113,9 @@ test('static assets and discovery documents do not enter the Durable Object', as
     assert.equal(health.headers.get('x-test-do-fetches'), '1');
     assert.match(health.headers.get('server-timing'), /total;dur=/);
     assert.match(health.headers.get('server-timing'), /app;dur=/);
+    const healthBody = await health.json();
+    assert.equal(healthBody.status, 'ok');
+    assert.deepEqual(healthBody.durableObject, { ready: true, status: 200 });
   } finally {
     await mf.dispose();
   }
