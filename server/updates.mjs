@@ -383,7 +383,7 @@ export function listRoomUpdates(store, token, roomId, query = {}, binding = null
     const projected = projectRoom(store, roomId, auth.member.id, auth.identityId ?? store.bonds?.identityForMember?.(roomId, auth.member.id) ?? null);
     const viewer = `member:${roomId}:${auth.member.id}`;
     return {
-      roomId, viewerId: auth.member.id, untrusted: true,
+      ...viewerEcho(auth, roomId), untrusted: true,
       incompleteSources: mergeFlags([projected.flags]),
       ...page(projected.items, query, viewer)
     };
@@ -402,6 +402,18 @@ function accountRooms(store, accountId) {
       return member && member.active !== false;
     } catch { return false; }
   });
+}
+
+function viewerEcho(auth, roomId) {
+  // The browser treats a room read without this echo as a session change and signs out.
+  return {
+    roomId,
+    viewerId: auth.member.id,
+    viewerAccountId: auth.account?.id ?? null,
+    viewerAuthEpoch: auth.account?.authEpoch ?? null,
+    viewerSessionBinding: auth.sessionBinding,
+    viewerSessionRevision: auth.sessionRevision ?? null
+  };
 }
 
 function listAcross(store, rooms, identityId, viewer, query) {
@@ -446,7 +458,7 @@ export function markUpdate(store, token, roomId, itemId, action, requestId, bind
     ).get(roomId, auth.member.id, requestId);
     if (prior) {
       if (prior.fingerprint !== fingerprint) fail(409, "idempotency_conflict", "Request id already used for a different update");
-      return { ...JSON.parse(prior.response), duplicate: true };
+      return { ...JSON.parse(prior.response), ...viewerEcho(auth, roomId), duplicate: true };
     }
     const projected = projectRoom(store, roomId, auth.member.id, auth.identityId ?? null);
     const raw = projected.items.find(item => item.id === itemId);
@@ -463,7 +475,7 @@ export function markUpdate(store, token, roomId, itemId, action, requestId, bind
       ).run(roomId, auth.member.id, itemId, storedAction, raw.basis, store.now());
     }
     const response = {
-      roomId, requestId, duplicate: false,
+      ...viewerEcho(auth, roomId), requestId, duplicate: false,
       item: publish({ ...raw, state: next })
     };
     store.db.prepare("INSERT INTO private_update_commands (room_id,member_id,request_id,fingerprint,response) VALUES(?,?,?,?,?)")

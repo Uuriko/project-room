@@ -10,6 +10,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { signInFixture } from "./auth-signin.mjs";
+import { clickChrome } from "./room-chrome.mjs";
 
 const command = (type, data, id = crypto.randomUUID()) => ({ id, type, data });
 
@@ -65,7 +66,7 @@ test("Updates counts only actionable items and the palette filters work at 390px
 
   await page.getByRole("button", { name: /Open please confirm/ }).click();
   await page.locator("#updates-dialog").waitFor({ state: "hidden" });
-  await page.locator("#room-actions-open").click();
+  await clickChrome(page, "#room-actions-open");
   await page.locator("#room-actions-query").fill("Catch up");
   await page.locator("[data-room-action=catch-up]").click();
   await page.locator("#updates-dialog").waitFor({ state: "visible" });

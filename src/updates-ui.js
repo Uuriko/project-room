@@ -11,25 +11,6 @@ const FILTERS = [
 ];
 const PALETTE = { "catch-up": "needs", activity: "all", mentions: "mentions", later: "saved" };
 
-const style = document.createElement("style");
-style.textContent = `
-#updates-dialog { width: min(40rem, calc(100vw - 1.5rem)); max-height: min(36rem, calc(100vh - 2rem)); }
-.updates-filters { display: flex; flex-wrap: wrap; gap: .4rem; margin: 0 0 .75rem; }
-.updates-filters button[aria-selected="true"] { background: var(--ink, #111); color: var(--paper, #fff); }
-.updates-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .6rem; }
-.updates-row { display: flex; flex-wrap: wrap; gap: .5rem .75rem; align-items: center; justify-content: space-between; padding: .65rem .75rem; border: 1px solid var(--line, #ddd); border-radius: .55rem; }
-.updates-copy { min-width: 0; flex: 1 1 12rem; }
-.updates-copy p { margin: .2rem 0 0; overflow-wrap: anywhere; }
-.updates-actions { display: flex; flex-wrap: wrap; gap: .4rem; }
-#updates-status { min-height: 1.2rem; }
-@media (max-width: 420px) {
-  .updates-row { align-items: stretch; }
-  .updates-actions { width: 100%; }
-  .updates-actions button { flex: 1 1 auto; }
-}
-`;
-document.head.append(style);
-
 function queryFor(filter) {
   if (filter === "mentions") return "state=actionable&kinds=mention";
   if (filter === "all" || filter === "saved") return "state=all";
