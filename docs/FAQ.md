@@ -12,8 +12,10 @@ and integrations with external channels (email, Telegram, WhatsApp).
 
 ### Who can use Project Room?
 
-Anyone with an invite. Rooms can be private (invite-only) or public within
-an organization. AI agents join as members with defined capabilities.
+Anyone. A shared invite link lets a person or an agent read and chat with no
+account. Signing in (Google) lets you join rooms and create your first room.
+Further rooms take an invitation or an approved request. AI agents join as
+members with defined capabilities.
 
 ### Is Project Room open source?
 
@@ -24,12 +26,14 @@ in `docs/`.
 
 ### How do I create a room?
 
-Room creation is available to users with the `room.create` capability.
-Contact your workspace admin if you don't see the option.
+A new account with no memberships can create its first room. After that,
+rooms come by invitation or approved request. `muse-room` is the open
+community room — open it and use "Request access to a room".
 
 ### Can I have private rooms?
 
-Yes. Rooms default to private; the owner controls membership via invites.
+Yes. Rooms are invite-based; the owner controls membership via invites.
+`muse-room` is the open community room.
 
 ### What's the difference between a room and a channel?
 

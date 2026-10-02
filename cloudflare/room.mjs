@@ -16,7 +16,7 @@ import { ChannelDrainer } from '../server/channel-drain.mjs';
 import { DurableDatabase, durableStorage } from './storage.mjs';
 import { bootstrapRoom } from './bootstrap.mjs';
 import { maintenanceEnabled, maintenanceResponse } from '../server/maintenance.mjs';
-import { isEdgeDoorUrl, EDGE_DOOR_HOSTS, rewriteRoomApiPrefix } from '../deploy/agent-discovery.mjs';
+import { isEdgeDoorUrl, EDGE_DOOR_HOSTS, rewriteRoomApiPrefix, isHealthAliasPath } from '../deploy/agent-discovery.mjs';
 // E1 — email inbound (Worker email() handler). These must come after the
 // imports above: server/channel-adapters/index.mjs has a module-init order
 // constraint and is only safely evaluated after store.mjs/http.mjs.
@@ -29,6 +29,11 @@ import { CRON_JOB_BUDGET_MS, HEARTBEAT_STORAGE_KEY, applyOutcomes, jobHealthResp
 import { SOURCE_REVISION, BUILD_ID } from '../server/version.mjs';
 import { edgePublicResponse } from './edge-public.mjs';
 import { appDurationMs, logRoomRequest, requestPath, withServerTiming } from './request-timing.mjs';
+import { HEALTH_PROBE_TIMEOUT_MS, createHealthProbe, healthLivenessResponse, healthProbeResponse } from './health-probe.mjs';
+
+// One probe per isolate. Concurrent health checks during a cold start share
+// it; a finished probe does not cache, so the next check sees a fresh answer.
+const durableObjectHealth = createHealthProbe();
 
 // Let a request that arrived while this cron RPC was queued run before the
 // job's synchronous work closes the input gate again.
@@ -79,7 +84,7 @@ export class ProjectRoom extends DurableObject {
     this.paused = maintenanceEnabled(env.ROOM_MAINTENANCE);
     if (this.paused) return;
     this.store = new RoomStore(null, { database: new DurableDatabase(ctx.storage), storagePlatform: durableStorage,
-      stitch: stitchConfigFromEnv(env), identityHashKey: env.ROOM_IDENTITY_HASH_KEY ?? null });
+      stitch: stitchConfigFromEnv(env), identityHashKey: env.ROOM_IDENTITY_HASH_KEY ?? null, integrity: "deferred" });
     // Event-push dispatch: same fire-and-forget flush as the node entry
     // point. The Durable Object may suspend before the microtask drains;
     // the cron tick remains the restart-safe backstop.
@@ -140,8 +145,19 @@ export class ProjectRoom extends DurableObject {
   }
   async fetch(request) {
     const started = Date.now();
+    const cold = this.store?.coldStart;
     const respond = response => {
       const appMs = Date.now() - started;
+      if (cold && !this.coldStartRequestLogged) {
+        this.coldStartRequestLogged = true;
+        const line = {
+          event: 'room.cold_start', phase: 'first_request',
+          constructMs: cold.durationMs, firstRequestMs: appMs,
+          rooms: cold.rooms ?? 0, sequences: cold.sequences ?? 0, projectionBytes: cold.projectionBytes ?? 0
+        };
+        if (Number.isFinite(cold.cpuMs)) line.constructCpuMs = cold.cpuMs;
+        console.info(JSON.stringify(line));
+      }
       console.info(JSON.stringify({
         event: 'room.do_request', method: request.method, path: requestPath(request.url), status: response.status, appMs
       }));
@@ -196,8 +212,40 @@ export class ProjectRoom extends DurableObject {
   async drainChannelBacklog() {
     if (this.paused) throw new Error('Room paused');
     await yieldToQueuedRequests();
-    const drainer = new ChannelDrainer({ store: this.store, webhooks: this.channelWebhooks });
-    return drainer.tick({ deadline: cronDeadline() });
+    const drainer = this.channelDrainer ??= new ChannelDrainer({ store: this.store, webhooks: this.channelWebhooks });
+    const gate = drainer.configured();
+    if (!gate.configured) return { skipped: 1, configured: false, connections: 0 };
+    if (this.channelDrainInflight) return { started: 0, background: 1, inflight: 1, connections: gate.connections };
+    const work = this.#drainChannelsInBackground(drainer);
+    this.ctx.waitUntil(work);
+    return { started: 1, background: 1, connections: gate.connections };
+  }
+  // Runs after the RPC returns. The first await opens the input gate before
+  // any journal scan, and tick yields again between connections. Not an RPC.
+  async #drainChannelsInBackground(drainer) {
+    this.channelDrainInflight = true;
+    try {
+      await yieldToQueuedRequests();
+      const summary = await drainer.tick({ deadline: cronDeadline(), yieldBetween: () => yieldToQueuedRequests() });
+      console.info(JSON.stringify({
+        event: 'room.channel_drain', connections: summary.connections ?? 0, deferred: summary.deferred ?? 0,
+        errors: summary.errors ?? 0, budgetExceeded: summary.budgetExceeded ? 1 : 0
+      }));
+      return summary;
+    } catch (error) {
+      console.error(`[channel-drain] background tick failed: ${error?.message ?? error}`);
+      return { errors: 1 };
+    } finally {
+      this.channelDrainInflight = false;
+    }
+  }
+  // Snapshot plus checksum on the rooms and invitation tables. A match returns
+  // immediately. A mismatch replays invitations and legacy projections in
+  // slices that yield the input gate. Never called from the constructor.
+  async verifyRoomIntegrity() {
+    if (this.paused) return { skipped: 1, paused: 1 };
+    await yieldToQueuedRequests();
+    return this.store.verifyRoomIntegrity({ yieldBetween: () => yieldToQueuedRequests(), deadline: cronDeadline() });
   }
   // RC-2026-09-19-064 — signed webhook dispatch RPC for the Worker's cron
   // trigger. Sweeps due deliveries (pending/failed with next_attempt_at <=
@@ -225,7 +273,14 @@ export class ProjectRoom extends DurableObject {
   async refreshClaimPullRequests() {
     if (this.paused) return { checked: 0, updated: 0 };
     await yieldToQueuedRequests();
-    return syncClaimPullRequests(this.store, { env: this.env });
+    // Same 5s budget as the other cron RPCs. The poll itself also stops
+    // before the next GitHub call and caps each request to the time left,
+    // so a slow pull cannot hold this tick open for the full fetch timeout.
+    return syncClaimPullRequests(this.store, {
+      env: this.env,
+      deadline: cronDeadline(),
+      yieldBetween: () => yieldToQueuedRequests()
+    });
   }
   // Scans only disposable web-fetch/research logs. The deletion flag is
   // explicit; authoritative room and security audit journals are excluded.
@@ -251,7 +306,7 @@ export class ProjectRoom extends DurableObject {
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const started = Date.now();
     const finish = (response, servedBy) => {
       const totalMs = Date.now() - started;
@@ -314,6 +369,21 @@ export default {
     headers.set('X-Room-Visitor-IP', address);
     headers.delete('X-Real-IP');
     headers.delete('X-Forwarded-For');
+    const healthPath = url.pathname.length > 1 && url.pathname.endsWith('/') ? url.pathname.slice(0, -1) : url.pathname;
+    // Liveness is the Worker. Readiness is a short probe of invite-only-pilot.
+    // A cold constructor must not turn this check into room_unavailable.
+    if ((healthPath === '/api/health' || isHealthAliasPath(url.pathname)) && (request.method === 'GET' || request.method === 'HEAD')) {
+      const deployment = env.ROOM_DEPLOYMENT === 'production' || env.ROOM_DEPLOYMENT === 'staging' ? env.ROOM_DEPLOYMENT : undefined;
+      const mode = env.ROOM_SERVICE_MODE ?? 'cloudflare-staging';
+      const probed = await durableObjectHealth({
+        timeoutMs: HEALTH_PROBE_TIMEOUT_MS,
+        start: () => env.ROOM.getByName('invite-only-pilot').fetch(new Request(request, { headers })),
+        waitUntil: ctx?.waitUntil?.bind(ctx),
+        onSnapshot: snapshot => ({ response: healthProbeResponse(snapshot, request), servedBy: 'durable-object' }),
+        onUnready: readiness => ({ response: healthLivenessResponse(request, { mode, deployment, readiness }), servedBy: 'worker' })
+      });
+      return finish(probed.response, probed.servedBy);
+    }
     let response;
     try {
       response = await env.ROOM.getByName('invite-only-pilot').fetch(new Request(request, { headers }));
@@ -374,6 +444,14 @@ export default {
     });
     try { await room.recordCronTick(outcomes); }
     catch (error) { console.error(`[job-heartbeat] record failed: ${error?.message ?? error}`); }
+    try {
+      const integrity = await room.verifyRoomIntegrity();
+      const line = { event: 'room.integrity' };
+      for (const key of ['matched', 'skipped', 'verified', 'budgetExceeded', 'invitations', 'paused']) {
+        if (typeof integrity?.[key] === 'number') line[key] = integrity[key];
+      }
+      console.info(JSON.stringify(line));
+    } catch (error) { console.error(`[integrity] ${error?.message ?? error}`); }
     const failed = outcomes.filter(outcome => !outcome.ok).map(outcome => outcome.job);
     if (failed.length) throw new Error(`cron jobs failed: ${failed.join(', ')}`);
   }

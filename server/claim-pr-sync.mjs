@@ -11,6 +11,8 @@
 //   - looks up at most one pull per tick without a token, four with one
 //   - waits out 403/429 until x-ratelimit-reset or retry-after
 //   - reads at most 32 candidate rows and refuses a body over 64 KiB
+//   - stops before the next lookup once `deadline` has passed, and aborts
+//     the in-flight request at the sooner of 5s and the time remaining
 // The token (GITHUB_TOKEN or GH_TOKEN) is never logged or stored. Public
 // repositories still answer when it is absent.
 import { emitWorkClaimEvent, enqueueClaimWake } from "./work-claim-events.mjs";
@@ -74,16 +76,19 @@ async function readJson(response) {
   return { error: true };
 }
 
-async function lookupPull(pullRequest, { fetchImpl, token, nowMs }) {
+async function lookupPull(pullRequest, { fetchImpl, token, nowMs, deadline = Infinity }) {
   const [owner, name] = pullRequest.repo.split("/");
   const endpoint = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/pulls/${pullRequest.number}`;
   const headers = githubHeaders(token);
   const cached = usableEtag(pullRequest.etag);
   if (cached) headers["If-None-Match"] = cached;
+  const budgetMs = deadline - Date.now();
+  if (budgetMs <= 0) return { kind: "budget" };
   let response;
   try {
-    response = await fetchImpl(endpoint, { headers, signal: AbortSignal.timeout(5000) });
+    response = await fetchImpl(endpoint, { headers, signal: AbortSignal.timeout(Math.min(5000, budgetMs)) });
   } catch {
+    if (Date.now() > deadline) return { kind: "budget" };
     return { kind: "error" };
   }
   const etag = usableEtag(responseHeader(response, "etag")) || cached;
@@ -138,11 +143,14 @@ function rateLimitResult(response, token, nowMs) {
 }
 
 // One signal endpoint (combined status or check runs). Counts as one request.
-async function fetchCommitDocument(url, { fetchImpl, token, nowMs }) {
+async function fetchCommitDocument(url, { fetchImpl, token, nowMs, deadline = Infinity }) {
+  const budgetMs = deadline - Date.now();
+  if (budgetMs <= 0) return { kind: "budget" };
   let response;
   try {
-    response = await fetchImpl(url, { headers: githubHeaders(token), signal: AbortSignal.timeout(5000) });
+    response = await fetchImpl(url, { headers: githubHeaders(token), signal: AbortSignal.timeout(Math.min(5000, budgetMs)) });
   } catch {
+    if (Date.now() > deadline) return { kind: "budget" };
     return { kind: "error" };
   }
   if (response.status === 403 || response.status === 429) return rateLimitResult(response, token, nowMs);
@@ -154,24 +162,26 @@ async function fetchCommitDocument(url, { fetchImpl, token, nowMs }) {
 
 // Combined commit status, then check runs, inside the calls still left in
 // this tick. A missing call leaves the cursor where the next tick continues.
-async function readCommitCi(pullRequest, headSha, { fetchImpl, token, nowMs, budget }) {
+async function readCommitCi(pullRequest, headSha, { fetchImpl, token, nowMs, budget, deadline = Infinity }) {
   const [owner, name] = pullRequest.repo.split("/");
   const base = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/commits/${headSha}`;
   let status = null;
   let checkRuns = [];
   let cursor = pullRequest.ciCursor === "checks" ? "checks" : "status";
   if (cursor === "status") {
-    if (budget.remaining <= 0) return { cursor, partial: true };
+    if (budget.remaining <= 0 || Date.now() > deadline) return { cursor, partial: true, budget: Date.now() > deadline };
     budget.remaining -= 1;
-    const read = await fetchCommitDocument(`${base}/status`, { fetchImpl, token, nowMs });
+    const read = await fetchCommitDocument(`${base}/status`, { fetchImpl, token, nowMs, deadline });
+    if (read.kind === "budget") return { cursor, partial: true, budget: true, status };
     if (read.kind === "rateLimited" || read.kind === "unconfigured") return read;
     if (read.kind === "ok") status = read.body;
     cursor = "checks";
   }
   if (cursor === "checks") {
-    if (budget.remaining <= 0) return { cursor, partial: true, status };
+    if (budget.remaining <= 0 || Date.now() > deadline) return { cursor, partial: true, status, budget: Date.now() > deadline };
     budget.remaining -= 1;
-    const read = await fetchCommitDocument(`${base}/check-runs`, { fetchImpl, token, nowMs });
+    const read = await fetchCommitDocument(`${base}/check-runs`, { fetchImpl, token, nowMs, deadline });
+    if (read.kind === "budget") return { cursor, partial: true, budget: true, status };
     if (read.kind === "rateLimited" || read.kind === "unconfigured") return { ...read, status, cursor };
     if (read.kind === "ok") checkRuns = Array.isArray(read.body?.check_runs) ? read.body.check_runs : [];
     cursor = "done";
@@ -188,13 +198,14 @@ function delayFor(item, kind, token) {
 // Look up due claims. Pull, combined status, and check runs share one request
 // budget (one call without a token, four with one). A claim whose status
 // read is unfinished stays due so the next tick spends the budget there.
-// Stops on a rate limit or a rejected token. Does not write.
-export async function collectPullRequestLookups(items, { fetchImpl = fetch, token = null, nowMs = Date.now(), limit = null } = {}) {
+// Stops on a rate limit, a rejected token, or the cron deadline. Does not write.
+export async function collectPullRequestLookups(items, { fetchImpl = fetch, token = null, nowMs = Date.now(), limit = null, deadline = Infinity, yieldBetween = null } = {}) {
   const budget = { remaining: limit ?? (token ? LOOKUP_LIMIT : LOOKUP_LIMIT_NO_TOKEN) };
   const due = (items ?? []).filter(item => pullRequestDue(item, nowMs) || ciReadDue(item, nowMs));
   const results = [];
   const seen = new Map();
   let rateLimitedUntil = null;
+  let budgetExceeded = false;
   for (const item of due) {
     const url = item.pullRequest.url;
     const prior = seen.get(url);
@@ -203,20 +214,23 @@ export async function collectPullRequestLookups(items, { fetchImpl = fetch, toke
       continue;
     }
     if (budget.remaining <= 0 || rateLimitedUntil) break;
+    if (Date.now() > deadline) { budgetExceeded = true; break; }
     const continuing = (item.pullRequest.ciCursor === "status" || item.pullRequest.ciCursor === "checks") && SHA.test(item.ci?.headSha ?? "");
     let looked;
     if (continuing) {
       looked = { kind: "open", etag: item.pullRequest.etag, headSha: item.ci.headSha, continued: true };
     } else {
       budget.remaining -= 1;
-      looked = await lookupPull(item.pullRequest, { fetchImpl, token, nowMs });
+      looked = await lookupPull(item.pullRequest, { fetchImpl, token, nowMs, deadline });
+      if (looked.kind === "budget") { budgetExceeded = true; break; }
     }
     if (looked.kind === "open" && SHA.test(looked.headSha ?? "") && looked.kind !== "rateLimited") {
       const signals = await readCommitCi(
         { ...item.pullRequest, ciCursor: continuing ? item.pullRequest.ciCursor : "status" },
         looked.headSha,
-        { fetchImpl, token, nowMs, budget }
+        { fetchImpl, token, nowMs, budget, deadline }
       );
+      if (signals.budget) budgetExceeded = true;
       if (signals.kind === "rateLimited") {
         looked = { ...looked, kind: "rateLimited", rateLimitedUntil: signals.rateLimitedUntil, ciCursor: signals.cursor };
       } else if (signals.kind === "unconfigured") {
@@ -225,6 +239,16 @@ export async function collectPullRequestLookups(items, { fetchImpl = fetch, toke
         looked = { ...looked, ci: signals.ci, ciCursor: signals.cursor };
       } else if (signals.cursor) {
         looked = { ...looked, ciCursor: signals.cursor };
+      }
+      if (signals.budget) {
+        const result = {
+          claimId: item.id, url,
+          delayMs: looked.ciCursor && looked.ciCursor !== "done" ? 0 : delayFor(item, looked.kind, token),
+          ...looked
+        };
+        seen.set(url, result);
+        results.push(result);
+        break;
       }
     }
     const result = {
@@ -235,13 +259,14 @@ export async function collectPullRequestLookups(items, { fetchImpl = fetch, toke
     };
     seen.set(url, result);
     results.push(result);
+    if (typeof yieldBetween === "function") await yieldBetween();
     if (looked.kind === "rateLimited") {
       rateLimitedUntil = looked.rateLimitedUntil;
       break;
     }
     if (looked.kind === "unconfigured") break;
   }
-  return { results, rateLimitedUntil };
+  return { results, rateLimitedUntil, budgetExceeded };
 }
 
 function ciReadDue(item, nowMs) {
@@ -388,15 +413,16 @@ function loadDueClaims(store, nowMs) {
 
 // Poll every room that has an open pull link. A shared reset skips the tick
 // before any request. A missing token does not fail the tick.
-export async function syncClaimPullRequests(store, { env = null, fetchImpl = fetch, nowMs = Date.now(), token = undefined } = {}) {
+export async function syncClaimPullRequests(store, { env = null, fetchImpl = fetch, nowMs = Date.now(), token = undefined, deadline = Infinity, yieldBetween = null } = {}) {
   if (!store?.db || !store.workClaims) return { checked: 0, updated: 0 };
   closeDeployedClaims(store, nowMs);
   const access = token === undefined ? githubToken(env ?? process.env) : token;
+  if (Date.now() > deadline) return { checked: 0, updated: 0, budgetExceeded: 1 };
   if (readClaimPullBudget(store) > nowMs) return { checked: 0, updated: 0, rateLimited: true };
   const due = loadDueClaims(store, nowMs);
   if (due.length === 0) return { checked: 0, updated: 0 };
   const batch = await collectPullRequestLookups(due.map(entry => entry.item), {
-    fetchImpl, token: access, nowMs
+    fetchImpl, token: access, nowMs, deadline, yieldBetween
   });
   const roomOf = new Map(due.map(entry => [entry.item.id, entry.roomId]));
   let checked = 0;
@@ -421,7 +447,7 @@ export async function syncClaimPullRequests(store, { env = null, fetchImpl = fet
       writeClaimPullBudget(store, batch.rateLimitedUntil, nowMs);
     }
   });
-  return { checked, updated, ...(rateLimited ? { rateLimited: true } : {}) };
+  return { checked, updated, ...(rateLimited ? { rateLimited: true } : {}), ...(batch.budgetExceeded ? { budgetExceeded: 1 } : {}) };
 }
 
 function closeDeployedClaims(store, nowMs) {

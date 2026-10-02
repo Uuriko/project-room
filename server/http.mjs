@@ -4523,8 +4523,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (route === "access-decide" && req.method === "POST") {
         const data = await body(req);
-        if (!exact(data, ["decision", "permissions", "note"])) {
-          reject(422, "invalid_request", "decision, permissions, note are the accepted fields");
+        // Docs (and decide() below) treat permissions/note as optional; only
+        // decision is required. Reject unknown fields, not missing optionals.
+        const keys = Object.keys(data ?? {});
+        if (!keys.includes("decision") || keys.some(k => !["decision", "permissions", "note"].includes(k))) {
+          reject(422, "invalid_request", "decision is required; permissions and note are optional");
         }
         const decided = accessRequests.decide(selected.token, roomId, accessRequestId, data, fence);
         // Jev-harness admission gate, shadow mode (docs/JEV-GATES.md): an
