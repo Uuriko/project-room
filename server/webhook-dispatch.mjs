@@ -212,7 +212,7 @@ async function checkDispatchTarget(target, dnsResolvers) {
 // right now is "retry". dnsResolvers ({ lookup } or { resolve4, resolve6 })
 // is injectable so tests never touch the network; omitted, Node uses
 // dns.lookup({ all: true }) and pins the socket to those addresses.
-// Workers skip DNS (hostname denylist only) and use fetch.
+// Workers resolve through DNS-over-HTTPS and use fetch (no pin API).
 //
 // M-1 fix (RC-2026-09-25): the connection is pinned to the addresses the
 // check vetted. On Node the default transport is pinnedDispatchPost (a

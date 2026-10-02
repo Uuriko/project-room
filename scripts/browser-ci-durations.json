@@ -96,6 +96,7 @@
     "scripts/work-resume-browser-check.mjs": 2600,
     "scripts/work-reuse-browser-check.mjs": 14800,
     "scripts/work-search-browser-check.mjs": 3300,
-    "scripts/workflow-browser-check.mjs": 14100
+    "scripts/workflow-browser-check.mjs": 14100,
+    "scripts/join-next-browser-check.mjs": 12000
   }
 }
