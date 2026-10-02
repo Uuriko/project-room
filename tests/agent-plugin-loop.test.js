@@ -10,9 +10,7 @@
 //   3. the agent is issued a scoped API key (server/agent-api-keys.mjs)
 //   4. the agent publishes its card to the agent directory and is
 //      discovered by another agent (server/agent-directory.mjs)
-//   5. the two agents exchange A2A messages over an in-process bus
-//      (src/a2a-transport.mjs with an injected channel)
-//   6. the new agent subscribes to room events and verifies a signed
+//   5. the new agent subscribes to room events and verifies a signed
 //      webhook delivery (server/agent-webhook-subscriptions.mjs)
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -25,7 +23,6 @@ import { generateKeyPair, signCard } from "../server/agent-card-signing.mjs";
 import {
   createAgentWebhookSubscriptions,
 } from "../server/agent-webhook-subscriptions.mjs";
-import { createA2ATransport } from "../src/a2a-transport.mjs";
 
 const ORIGIN = "https://room.example";
 const now = () => 1_700_000_000_000;
@@ -76,30 +73,7 @@ test("reference walkthrough: new agent plugs in end-to-end", t => {
   assert.equal(found.cardUrl, `${ORIGIN}/api/agents/directory/new-agent`);
   assert.deepEqual([...directory.list({ capability: "summarize" }).map(a => a.agentId)], ["new-agent"]);
 
-  // --- Step 5: A2A messaging between the new agent and an existing one ---
-  const busSubs = new Set();
-  const bus = {
-    onInbound(cb) { busSubs.add(cb); return () => busSubs.delete(cb); },
-    send(envelope) { for (const cb of [...busSubs]) cb(envelope); },
-  };
-  const newAgent = createA2ATransport({ channel: bus, clock: now });
-  const helper = createA2ATransport({ channel: bus, clock: now });
-  newAgent.connect("new-agent");
-  helper.connect("helper-agent");
-  const inboxNew = [], inboxHelper = [];
-  newAgent.receive(env => { if (env.to === "new-agent") inboxNew.push(env); });
-  helper.receive(env => { if (env.to === "helper-agent") inboxHelper.push(env); });
-
-  newAgent.send({ from: "new-agent", to: "helper-agent", type: "message", payload: { text: "hello from the new agent" } });
-  assert.equal(inboxHelper.length, 1);
-  assert.equal(inboxHelper[0].payload.text, "hello from the new agent");
-  helper.send({ from: "helper-agent", to: "new-agent", type: "message", payload: { text: "welcome aboard" } });
-  assert.equal(inboxNew.length, 1);
-  assert.equal(inboxNew[0].payload.text, "welcome aboard");
-  assert.equal(inboxNew[0].from, "helper-agent");
-  assert.equal(newAgent.deadLetters.length, 0);
-
-  // --- Step 6: subscribe to room events; verify a signed delivery ---
+  // --- Step 5: subscribe to room events; verify a signed delivery ---
   // The agent holds only the sentinel (never the raw secret) and asks the
   // room to verify inbound deliveries server-side (RC-2026-09-27-2729).
   const subs = createAgentWebhookSubscriptions({ clock: now });

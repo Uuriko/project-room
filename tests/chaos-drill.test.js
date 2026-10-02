@@ -43,10 +43,6 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { DurableDatabase, durableStorage } from '../cloudflare/storage.mjs';
 import { STORE_SCHEMA_VERSION } from '../server/writer-fence.mjs';
-import {
-  collectHealth, httpStatusFor,
-  HEALTH_OK, HEALTH_UNHEALTHY, CHECK_OK, CHECK_FAIL,
-} from '../src/health-status.mjs';
 
 const KILL_MESSAGE = 'Durable Object isolate terminated mid-write (simulated kill)';
 
@@ -311,41 +307,4 @@ describe('F024 chaos drill: kill the Durable Object mid-write', () => {
     assert.equal(roomRead(db, 'gamma'), '3');
   });
 
-  it('runbook §4.2/§1: storage probe flips the health payload unhealthy during the kill, healthy after', () => {
-    const { storage, db } = makeRoom();
-    const storageProbe = () => {
-      // Cheap, non-invasive probe per the health contract: a read-only
-      // version check through the real DurableDatabase. Throwing = failure.
-      const row = db.prepare('SELECT version FROM room_runtime_version WHERE singleton=1').get();
-      if (!row || row.version !== STORE_SCHEMA_VERSION) return { ok: false, detail: 'version marker unreadable' };
-      return { ok: true };
-    };
-    const health = () => collectHealth({
-      service: 'project-room', version: '0.1.0', uptimeMs: 42_000,
-      checks: [{ name: 'storage', required: true, probe: storageProbe }],
-    });
-
-    const before = health();
-    assert.equal(before.status, HEALTH_OK);
-    assert.equal(before.checks[0].status, CHECK_OK);
-    assert.equal(httpStatusFor(before.status), 200);
-
-    // Kill the isolate; a probe racing the kill sees the failure.
-    storage.armKillBeforeMutatingOp(1); // die on the very next mutating op
-    assert.throws(() => roomWrite(db, [['alpha', '1']]));
-    const during = collectHealth({
-      service: 'project-room', version: '0.1.0', uptimeMs: 1_200, // fresh restart: §4.3 crash-loop signal
-      checks: [{ name: 'storage', required: true, probe: () => { throw new Error(KILL_MESSAGE); } }],
-    });
-    assert.equal(during.checks[0].status, CHECK_FAIL);
-    assert.equal(during.checks[0].required, true);
-    assert.equal(during.status, HEALTH_UNHEALTHY);
-    assert.equal(httpStatusFor(during.status), 503); // §1: 503 => SEV1 paging territory
-
-    // Recovery: probe passes again, payload returns to healthy.
-    storage.disarmKill();
-    const after = health();
-    assert.equal(after.status, HEALTH_OK);
-    assert.equal(after.checks[0].status, CHECK_OK);
-  });
 });

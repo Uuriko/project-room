@@ -117,14 +117,7 @@ Authenticate the Member; then project buttons from that grant.
 
 ## Isolated stub
 
-`act-components/` is a pure helper, same isolation as `activity-inbox/`
-([#75](https://github.com/Uuriko/project-room/pull/75)) and
-`contribution-rollup/` ([#17](https://github.com/Uuriko/project-room/pull/17)).
-It does not import or rewrite those packages. No `server/` or `src/` imports.
-
-```sh
-cd act-components && npm test
-```
+The act-components package was removed from this repository. The notes below are historical.
 
 `availableComponents({ event, viewer, receipt })` returns `{ components }`.
 Fixture cases: approve/reject on `work.proposed`; Open-in-Compute when a
