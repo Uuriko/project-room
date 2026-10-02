@@ -1,10 +1,11 @@
-import { telegramConfig } from "../server/channel-adapters/telegram-config.mjs";
+import { JOBS as REGISTRY, jobDisabledReason, jobEnabled, jobNextDue } from "../server/jobs.mjs";
 
 // Per-job cron heartbeat. Every scheduled job records lastRunAt, lastSuccessAt
 // and a redacted lastError in the Durable Object, and GET /api/health/jobs reads
 // it back without auth. A job whose lastSuccessAt is older than 3x its period is
-// stale. This is the signal that was missing when every cron tick failed with a
-// DO RPC error for weeks while page health checks stayed green.
+// stale. A disabled job is not stale. This is the signal that was missing when
+// every cron tick failed with a DO RPC error for weeks while page health checks
+// stayed green.
 
 export const HEARTBEAT_STORAGE_KEY = 'cron:job-heartbeats:v1';
 export const STALE_PERIODS = 3;
@@ -12,24 +13,24 @@ export const STALE_PERIODS = 3;
 // then it stops at the next item so a slow tick cannot pin the input gate.
 export const CRON_JOB_BUDGET_MS = 5000;
 
-// The production trigger is "* * * * *". A tick runs every job whose integration is configured.
-export const CRON_JOBS = Object.freeze([
-  Object.freeze({ name: 'gmail-sync', periodSeconds: 60, redactErrors: true }),
-  Object.freeze({ name: 'channel-drain', periodSeconds: 60 }),
-  Object.freeze({ name: 'webhook-dispatch', periodSeconds: 60 }),
-  Object.freeze({ name: 'land-queue', periodSeconds: 60 }),
-  Object.freeze({ name: 'claim-prs', periodSeconds: 60 }),
-  Object.freeze({ name: 'retention', periodSeconds: 60 }),
-  Object.freeze({ name: 'public-read-model', periodSeconds: 60 })
-]);
+// Worker jobs, in registry order. The safety-net cron is every 30 minutes;
+// due work runs from the Durable Object alarm instead.
+export const CRON_JOBS = Object.freeze(REGISTRY.filter(job => job.runtimes.includes("worker")).map(job => Object.freeze({
+  name: job.name,
+  periodSeconds: Math.round(job.cadenceMs / 1000),
+  redactErrors: job.redactErrors === true
+})));
 const JOBS = new Map(CRON_JOBS.map(job => [job.name, job]));
 
-// Env-only. A missing integration does not get a Durable Object call every minute.
-// Data-dependent work (a land-queue row, a pending webhook) still runs.
-export function cronIntegrationConfigured(name, env = {}) {
-  if (name === "gmail-sync") return env?.ROOM_GMAIL_ENABLED === "1";
-  if (name === "channel-drain") return telegramConfig(env ?? {}).configured === true;
-  return true;
+export function selectWorkerJobs(env, store) {
+  return REGISTRY.filter(job => job.runtimes.includes("worker") && jobEnabled(job, env, store));
+}
+
+// Kept for callers that still ask by name. The registry gate is the source.
+export function cronIntegrationConfigured(name, env = {}, store = null) {
+  const job = REGISTRY.find(item => item.name === name);
+  if (!job) return false;
+  return jobEnabled(job, env, store);
 }
 const MAX_ERROR = 240;
 const MAX_SUMMARY_KEYS = 12;
@@ -130,31 +131,38 @@ export function applyOutcomes(previous, outcomes) {
 const iso = ms => (Number.isFinite(ms) ? new Date(ms).toISOString() : null);
 
 // Public read model. Stale = no success within STALE_PERIODS periods.
-export function jobHealthView(stored, now = Date.now(), env = null) {
+// A disabled job is listed with a reason and is not stale. Gates stay unknown
+// when both env and store are omitted, so a stored heartbeat can still be read.
+export function jobHealthView(stored, now = Date.now(), env = null, store = null) {
+  const gatesKnown = env != null || store != null;
   const jobs = CRON_JOBS.map(job => {
     const record = stored?.[job.name] ?? {};
     const staleAfterSeconds = job.periodSeconds * STALE_PERIODS;
-    const configured = env == null || cronIntegrationConfigured(job.name, env);
+    const source = REGISTRY.find(item => item.name === job.name);
+    const enabled = !gatesKnown || (source ? jobEnabled(source, env ?? {}, store) : true);
+    const reason = enabled || !source ? null : jobDisabledReason(source, env ?? {}, store);
+    const next = enabled && source && store ? jobNextDue(source, store, now, record.lastRunAt) : null;
+    const waiting = Number.isFinite(next) && next > now;
     const ageSeconds = Number.isFinite(record.lastSuccessAt) ? Math.max(0, Math.round((now - record.lastSuccessAt) / 1000)) : null;
-    const stale = configured && (ageSeconds === null || ageSeconds > staleAfterSeconds);
-    const failing = configured && (record.consecutiveFailures ?? 0) > 0;
+    const stale = enabled && !waiting && (ageSeconds === null || ageSeconds > staleAfterSeconds);
+    const failing = enabled && (record.consecutiveFailures ?? 0) > 0;
     return {
       name: job.name,
       periodSeconds: job.periodSeconds,
       staleAfterSeconds,
-      configured,
       lastRunAt: iso(record.lastRunAt),
       lastSuccessAt: iso(record.lastSuccessAt),
-      secondsSinceSuccess: configured ? ageSeconds : null,
+      secondsSinceSuccess: enabled ? ageSeconds : null,
       lastError: record.lastError ?? null,
       lastErrorAt: iso(record.lastErrorAt),
       consecutiveFailures: record.consecutiveFailures ?? 0,
       lastSummary: record.lastSummary ?? null,
       stale,
-      status: !configured ? 'unconfigured' : stale ? 'stale' : failing ? 'failing' : 'ok'
+      reason,
+      status: !enabled ? 'disabled' : stale ? 'stale' : failing ? 'failing' : 'ok'
     };
   });
-  const active = jobs.filter(job => job.status !== 'unconfigured');
+  const active = jobs.filter(job => job.status !== 'disabled');
   const status = active.some(job => job.stale) ? 'stale' : active.some(job => job.status === 'failing') ? 'failing' : 'ok';
   return { schema: 'room.job-health/1', status, generatedAt: iso(now), staleAfterPeriods: STALE_PERIODS, jobs };
 }

@@ -109,45 +109,26 @@ test("scheduled RPC hits real ProjectRoom methods and fails on an unknown one", 
   const originalError = console.error;
   console.warn = (...args) => { warnings.push(args.join(" ")); };
   console.error = (...args) => { errors.push(args.join(" ")); };
-  // #992: the room instance is paused, so the two drain jobs throw.
-  // Gmail and Telegram are configured here so those jobs are eligible;
-  // an unconfigured integration is skipped before the paused object is
-  // called. runCronJobs warns and continues; scheduled() records the
-  // tick (that write fails because paused startup must not open
-  // storage), then rejects so Cron Events show channel-drain and
-  // webhook-dispatch.
+  // A paused room has no store. The safety-net RPC returns before it
+  // touches storage, so a maintenance cron does not warn or reject.
   try {
-    await assert.rejects(worker.scheduled({ cron: "* * * * *" }, {
+    await worker.scheduled({ cron: "*/30 * * * *" }, {
       ROOM_MAINTENANCE: "0",
       ROOM_GMAIL_ENABLED: "1",
       TELEGRAM_BOT_TOKEN: "123456789:AAFakeFakeFakeFakeFakeFakeFakeFakeFa",
       TELEGRAM_WEBHOOK_SECRET: "webhook-secret-16",
       ROOM_ORIGIN: "https://room.example.test",
       ROOM: namespace
-    }, { waitUntil(promise) { pending.push(promise); } }), /cron jobs failed: channel-drain, webhook-dispatch/);
+    }, { waitUntil(promise) { pending.push(promise); } });
     await Promise.all(pending);
   } finally {
     console.warn = original;
     console.error = originalError;
   }
   assert.deepEqual(names, ["invite-only-pilot"]);
-  assert.deepEqual(invoked, [
-    "syncGmailMailboxes",
-    "drainChannelBacklog",
-    "drainWebhookDeliveries",
-    "refreshLandQueue",
-    "refreshClaimPullRequests",
-    "planRetention",
-    "backfillPublicReadModel",
-    "recordCronTick",
-    "verifyRoomIntegrity"
-  ]);
-  assert.deepEqual(warnings.map(line => line.slice(0, line.indexOf("]"))), [
-    "[channel-drain",
-    "[webhook-dispatch"
-  ]);
-  assert.ok(warnings.every(line => /Room paused/.test(line)), warnings.join("\n"));
-  assert.deepEqual(errors, ["[job-heartbeat] record failed: paused startup must not open storage"]);
+  assert.deepEqual(invoked, ["ensureJobAlarm"]);
+  assert.deepEqual(warnings, []);
+  assert.deepEqual(errors, []);
   assert.throws(() => stub.notARealCronMethod(), /does not implement the method "notARealCronMethod"/);
   assert.equal((await stub.syncGmailMailboxes()).completed, 0);
 });
