@@ -7,7 +7,14 @@ import { retentionDecisions } from "./audit-retention.mjs";
 
 export const RETENTION_DELETION_ENV = "ROOM_RETENTION_ALLOW_DELETION";
 const DEFAULT_POLICIES = Object.freeze({ events: 30, aggregates: 365 });
-export const DISPOSABLE_LOG_DAYS = Object.freeze({ web_fetch_log: 30, web_research_log: 30 });
+// One table per cron tick, in this order. These logs are telemetry.
+// Room events, unread activity, pending webhook deliveries, and invitation
+// journals are not in this list and are never deleted here.
+export const RETENTION_TABLES = Object.freeze([
+  Object.freeze({ table: "web_fetch_log", days: 30, idColumn: "request_id" }),
+  Object.freeze({ table: "web_research_log", days: 30, idColumn: "request_id" })
+]);
+export const DISPOSABLE_LOG_DAYS = Object.freeze(Object.fromEntries(RETENTION_TABLES.map(spec => [spec.table, spec.days])));
 export const RETENTION_BATCH_LIMIT = 100;
 
 class RetentionRunError extends Error {
@@ -17,6 +24,11 @@ const fail = message => { throw new RetentionRunError(message); };
 
 export function retentionDeletionAllowed(env) {
   return !!env && env[RETENTION_DELETION_ENV] === "1";
+}
+
+// Live retention applies unless an operator sets the flag to exactly "0".
+export function liveRetentionApplies(env) {
+  return !env || env[RETENTION_DELETION_ENV] !== "0";
 }
 
 const freezePlan = plan => Object.freeze({
@@ -73,39 +85,47 @@ export function scheduledRetentionTick({ env, now, record, deleteRecord } = {}) 
 
 export { RetentionRunError };
 
-// Store-backed retention is intentionally narrower than the generic planner:
-// these two logs are non-authoritative telemetry. Room events, commands,
-// account_access_events, invitations and legal-hold audit rows are excluded.
-// Every cycle is bounded. Rerunning it advances past the last batch, without
-// deleting any row whose age cannot be proven from its integer timestamp.
-export function runLiveStoreRetention({ store, env, now, limit = RETENTION_BATCH_LIMIT, record } = {}) {
+// Store-backed retention applies one disposable log per call. Room events,
+// commands, account_access_events, invitations, unread activity, and pending
+// or failed webhook deliveries are excluded. The batch stops at `limit` rows
+// or when `deadline` passes. A row is deleted only when its integer timestamp
+// is older than that table's policy. Set ROOM_RETENTION_ALLOW_DELETION=0 to
+// plan without deleting.
+export function runLiveStoreRetention({ store, env, now, limit = RETENTION_BATCH_LIMIT, tableIndex = 0, deadline = Infinity, record } = {}) {
   const db = store?.db;
   if (!db || typeof db.prepare !== "function" || typeof store.transaction !== "function") fail("A live store with a transaction adapter is required");
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > RETENTION_BATCH_LIMIT) fail("Invalid retention batch limit");
+  if (!Number.isSafeInteger(tableIndex)) fail("Invalid retention table");
+  if (!(deadline === Infinity || Number.isFinite(deadline))) fail("Invalid retention deadline");
   const clock = now === undefined ? Date.now() : Date.parse(now);
   if (!Number.isSafeInteger(clock) || clock < 0) fail("Invalid retention clock");
-  const allowDeletion = retentionDeletionAllowed(env);
-  const details = {};
-  let deleted = 0;
-  // Serialize the scan and writes. A failed category rolls back the whole
-  // batch rather than leaving an unreported partial purge.
+  const spec = RETENTION_TABLES[(tableIndex % RETENTION_TABLES.length + RETENTION_TABLES.length) % RETENTION_TABLES.length];
+  const apply = liveRetentionApplies(env);
+  // One table, one transaction. A failure rolls this table's batch back.
   return store.transaction(() => {
-    for (const [table, days] of Object.entries(DISPOSABLE_LOG_DAYS)) {
-      const cutoff = clock - days * 86400000;
-      // Identifiers come only from this closed, hardcoded table list.
-      const rows = db.prepare(`SELECT request_id FROM ${table} WHERE created_at<? ORDER BY created_at,request_id LIMIT ?`).all(cutoff, limit);
-      if (allowDeletion) {
-        const erase = db.prepare(`DELETE FROM ${table} WHERE request_id=? AND created_at<?`);
-        for (const row of rows) deleted += erase.run(row.request_id, cutoff).changes;
+    const cutoff = clock - spec.days * 86400000;
+    const rows = db.prepare(`SELECT ${spec.idColumn} AS id FROM ${spec.table} WHERE created_at<? ORDER BY created_at,${spec.idColumn} LIMIT ?`).all(cutoff, limit);
+    let deleted = 0;
+    let budgetExceeded = false;
+    if (apply) {
+      const erase = db.prepare(`DELETE FROM ${spec.table} WHERE ${spec.idColumn}=? AND created_at<?`);
+      for (const row of rows) {
+        if (Date.now() > deadline) { budgetExceeded = true; break; }
+        deleted += erase.run(row.id, cutoff).changes;
       }
-      details[table] = { cutoff: new Date(cutoff).toISOString(), eligible: rows.length,
-        moreMayRemain: rows.length === limit };
     }
-    const receipt = Object.freeze({ dryRun: !allowDeletion, liveStoreScanned: true, deleted,
-      deletionRequested: allowDeletion, deletionApplied: allowDeletion,
-      batchLimitPerCategory: limit, recordedAt: new Date(clock).toISOString(),
-      excluded: Object.freeze(["events", "commands", "account_access_events", "membership_invitation_events"]),
-      categories: Object.freeze(details) });
+    const receipt = Object.freeze({
+      dryRun: !apply, liveStoreScanned: true, deleted, table: spec.table,
+      deletionRequested: true, deletionApplied: apply, budgetExceeded,
+      batchLimit: limit, recordedAt: new Date(clock).toISOString(),
+      excluded: Object.freeze(["events", "commands", "account_access_events", "membership_invitation_events", "activity_events", "agent_webhook_deliveries"]),
+      categories: Object.freeze({
+        [spec.table]: Object.freeze({
+          cutoff: new Date(cutoff).toISOString(), eligible: rows.length, deleted,
+          moreMayRemain: budgetExceeded || rows.length === limit
+        })
+      })
+    });
     if (typeof record === "function") record(receipt);
     return receipt;
   });

@@ -14,20 +14,28 @@ test('static assets and discovery documents do not enter the Durable Object', as
       contents: `
         import worker, { ProjectRoom } from './room.mjs';
         let doFetches = 0;
+        let doProbes = 0;
         const original = ProjectRoom.prototype.fetch;
         ProjectRoom.prototype.fetch = async function(request) {
           doFetches += 1;
           return original.call(this, request);
+        };
+        const originalProbe = ProjectRoom.prototype.probeStorage;
+        ProjectRoom.prototype.probeStorage = function() {
+          doProbes += 1;
+          return originalProbe.call(this);
         };
         export { ProjectRoom };
         export default {
           async fetch(request, env, ctx) {
             const url = new URL(request.url);
             if (url.pathname === '/__do_fetches') return new Response(String(doFetches));
-            const before = doFetches;
+            const fetchesBefore = doFetches;
+            const probesBefore = doProbes;
             const response = await worker.fetch(request, env, ctx);
             const headers = new Headers(response.headers);
-            headers.set('X-Test-Do-Fetches', String(doFetches - before));
+            headers.set('X-Test-Do-Fetches', String(doFetches - fetchesBefore));
+            headers.set('X-Test-Do-Probes', String(doProbes - probesBefore));
             return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
           }
         };
@@ -121,14 +129,21 @@ test('static assets and discovery documents do not enter the Durable Object', as
 
     const health = await call('/api/health', { ip: '192.0.2.9' });
     assert.equal(health.status, 200, await health.clone().text());
-    assert.equal(health.headers.get('x-test-do-fetches'), '1');
+    assert.equal(health.headers.get('x-test-do-fetches'), '0');
+    assert.equal(health.headers.get('x-test-do-probes'), '0');
     assert.match(health.headers.get('server-timing'), /total;dur=/);
-    assert.match(health.headers.get('server-timing'), /app;dur=/);
     const healthBody = await health.json();
-    assert.equal(healthBody.status, 'ok');
-    assert.deepEqual(healthBody.durableObject, { ready: true, status: 200 });
-    assert.equal(healthBody.do.status, 'ok');
-    assert.equal(typeof healthBody.do.ms, 'number');
+    assert.deepEqual(healthBody, { status: 'ok', mode: 'cloudflare-staging', deployment: 'staging' });
+
+    const ready = await call('/api/ready', { ip: '192.0.2.9' });
+    assert.equal(ready.status, 200, await ready.clone().text());
+    assert.equal(ready.headers.get('x-test-do-fetches'), '0');
+    assert.equal(ready.headers.get('x-test-do-probes'), '1');
+    const readyBody = await ready.json();
+    assert.equal(readyBody.status, 'ready');
+    assert.equal(readyBody.do.status, 'ok');
+    assert.equal(readyBody.do.statusCode, 200);
+    assert.equal(typeof readyBody.do.ms, 'number');
   } finally {
     await mf.dispose();
   }
