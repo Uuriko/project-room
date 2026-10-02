@@ -58,9 +58,11 @@ test("server card and /.well-known/mcp.json are one document from the live tool 
   const card = JSON.parse(responses[0]);
   assert.equal(card.name, MCP_SERVER_CARD_NAME);
   assert.equal(card.name, registry.name);
+  // Registry listing copy is server.json's description. This card keeps the
+  // capability sentence the server serves. POS-1a updates the server.json field.
   assert.equal(card.description, MCP_SERVER_CARD_DESCRIPTION);
-  assert.equal(card.description, registry.description);
   assert.equal(card.description.length <= 100, true);
+  assert.equal(registry.description.length <= 100, true);
   assert.equal(card.version, ROOM_MCP_SERVER_VERSION);
   assert.equal(card.url, "https://www.getdasha.com/room/mcp");
   assert.equal(card.remotes[0].url, card.url);

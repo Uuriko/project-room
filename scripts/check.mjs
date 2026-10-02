@@ -34,6 +34,8 @@ if (routeDocs.status !== 0) process.exit(routeDocs.status || 1);
 // --- end route documentation gate ---
 const schema = spawnSync(process.execPath, ["scripts/check-schema-version.mjs"], { stdio: "inherit" });
 if (schema.status !== 0) process.exit(schema.status || 1);
+// Registry manifest: offline field check. The publish workflow adds --against-registry.
+if (spawnSync(process.execPath, ["scripts/server-json-check.mjs"], { stdio: "inherit" }).status !== 0) process.exit(1);
 // Lint gate (eslint.config.mjs): correctness-only rules, errors fail, warnings allowed.
 // Skipped with a notice when the eslint devDependency is not installed (no `npm ci`).
 {
