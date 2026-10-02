@@ -180,11 +180,11 @@ test("descendants cannot raise an inherited chain cap", async t => {
   const { store, origin, ownerKey } = await serve(t);
   const inviter = await enrollInviter(store, origin, ownerKey);
   const first = await post(origin, "/api/referral-invites/mint", { roomId: "commons", maxDepth: 1 }, inviter.secret);
-  const zero = await post(origin, "/api/referral-invites/redeem", { token: first.json.token });
+  const zero = await post(origin, "/api/referral-invites/redeem", { token: first.json.token, displayName: "Depth zero" });
   const second = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, zero.json.secret);
   assert.equal(second.status, 201);
   assert.equal(second.json.maxDepth, 1, "unspecified descendant cap inherits the original");
-  const one = await post(origin, "/api/referral-invites/redeem", { token: second.json.token });
+  const one = await post(origin, "/api/referral-invites/redeem", { token: second.json.token, displayName: "Depth one" });
   const raised = await post(origin, "/api/referral-invites/mint", { roomId: "commons", maxDepth: 12 }, one.json.secret);
   assert.equal(raised.status, 409);
   assert.equal(raised.json.error.code, "referral_depth_exceeded");
