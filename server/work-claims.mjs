@@ -14,8 +14,9 @@
 // without a lease behave exactly as before (never expire). Leases are
 // configurable per room: a room object carrying
 //   room.workClaims = { defaultLeaseHours, reviewPolicy }
-// overrides the defaults; see roomWorkClaimConfig. The default lease cap is
-// 720h (30 days).
+// overrides the defaults; see roomWorkClaimConfig. The lease cap is 168h
+// (7 days). null opts out only when the route has already allowed it
+// (room owner or manage_claims).
 //
 // Delivery modes: the done transition accepts { deliveryMode } in
 // { result, merged, production } — how the work was delivered — persisted on
@@ -149,7 +150,10 @@ const blobsOf = value => {
 // against the same shape stored tags must have).
 export const isReceiptTag = value => typeof value === "string" && TAG_PATTERN.test(value);
 const DEFAULT_LEASE_HOURS = 24;
-const MAX_LEASE_HOURS = 720;
+const MAX_LEASE_HOURS = 168;
+export const DEFAULT_MAX_OPEN_CLAIMS = 200;
+export const DEFAULT_MAX_MEMBER_OPEN_CLAIMS = 20;
+const CONFIG_CAP_CEILING = 10000;
 const DEFAULT_REVIEW_POLICY = "self_attested";
 const ACTIVE_CLAIM_STATES = ["claimed", "in_progress", "blocked"];
 class ClaimError extends Error { constructor(code, message) { super(message); this.name = "ClaimError"; this.code = code; } }
@@ -204,16 +208,32 @@ const agentOf = value => idOf(value, "agent id", 128);
 const stamp = (atMs, agentId, action, note) =>
   Object.freeze({ at: isoOf(atMs), agentId, action, note: note ?? null });
 const withHistory = (work, atMs, agentId, action, note) =>
-  Object.freeze({ ...work, history: Object.freeze([...work.history, stamp(atMs, agentId, action, note)]) });
+  Object.freeze({ ...work, updatedAt: isoOf(atMs), history: Object.freeze([...work.history, stamp(atMs, agentId, action, note)]) });
+// Board order is updatedAt desc, then id. A later history stamp wins when a
+// writer appended history without refreshing updatedAt.
+export function claimUpdatedAt(item) {
+  const history = Array.isArray(item?.history) ? item.history : [];
+  const historyAt = history.length > 0 && typeof history[history.length - 1]?.at === "string" ? history[history.length - 1].at : "";
+  const stored = typeof item?.updatedAt === "string" ? item.updatedAt : "";
+  return historyAt > stored ? historyAt : (stored || historyAt);
+}
+const positiveCap = (value, fallback) =>
+  Number.isSafeInteger(value) && value >= 1 && value <= CONFIG_CAP_CEILING ? value : fallback;
 // Room config hook: resolve per-room work-claim defaults from an optional
 // room object. Rooms opt in by carrying workClaims = { defaultLeaseHours,
-// reviewPolicy }; anything missing or invalid falls back to the defaults.
+// reviewPolicy, maxOpenClaims, maxMemberOpenClaims }; anything missing or
+// invalid falls back to the defaults.
 export function roomWorkClaimConfig(room) {
   const raw = room?.workClaims ?? {};
   const defaultLeaseHours = typeof raw.defaultLeaseHours === "number" && raw.defaultLeaseHours > 0 && raw.defaultLeaseHours <= MAX_LEASE_HOURS
     ? raw.defaultLeaseHours : DEFAULT_LEASE_HOURS;
   const reviewPolicy = REVIEW_POLICIES.includes(raw.reviewPolicy) ? raw.reviewPolicy : DEFAULT_REVIEW_POLICY;
-  return Object.freeze({ defaultLeaseHours, reviewPolicy });
+  return Object.freeze({
+    defaultLeaseHours,
+    reviewPolicy,
+    maxOpenClaims: positiveCap(raw.maxOpenClaims, DEFAULT_MAX_OPEN_CLAIMS),
+    maxMemberOpenClaims: positiveCap(raw.maxMemberOpenClaims, DEFAULT_MAX_MEMBER_OPEN_CLAIMS),
+  });
 }
 const leaseHoursOf = value => {
   if (value === null || value === undefined) return value; // null = explicit opt-out of leases
@@ -290,13 +310,16 @@ export function renewWork(work, agentId, { note, leaseHours, room, now } = {}) {
 // four are recorded on the item and then frozen with the done state. tags
 // and blobs are only meaningful on the done transition and are refused
 // anywhere else.
-export function updateWork(work, agentId, { state, note, deliveryMode, reviewedBy, tags, blobs, now } = {}) {
+export function updateWork(work, agentId, { state, note, deliveryMode, reviewedBy, tags, blobs, now, authority = false } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
-  check(item.owner === agent, `work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can update it`);
+  check(authority === true || item.owner === agent, `work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can update it`);
   check(item.state !== "done", `work "${item.id}" is done and immutable`);
   if (state !== undefined) {
     check(STATES.includes(state), `state must be one of ${STATES.join(", ")}`);
-    check(TRANSITIONS[item.state].includes(state), `cannot move "${item.id}" from ${item.state} to ${state}`);
+    const allowed = TRANSITIONS[item.state] ?? [];
+    const allowedLabel = next => next === "unclaimed" ? "released" : next;
+    check(allowed.includes(state),
+      `cannot move "${item.id}" from ${item.state} to ${state} — allowed: ${item.state} -> ${allowed.map(allowedLabel).join("|") || "none"}`);
   }
   if (deliveryMode !== undefined && deliveryMode !== null) {
     check(state === "done", "deliveryMode is only recorded on the done transition");
@@ -348,9 +371,9 @@ export function attestWork(work, agentId, { note, now } = {}) {
 }
 // Reassign: the owner hands work to another agent (stays in the same state).
 // Attestations are cleared — reviews belong to the previous owner's round.
-export function reassignWork(work, agentId, newOwner, { note, now } = {}) {
+export function reassignWork(work, agentId, newOwner, { note, now, authority = false } = {}) {
   const item = workOf(work), agent = agentOf(agentId), target = agentOf(newOwner), atMs = nowMsOf(now);
-  check(item.owner === agent, `work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can reassign it`);
+  check(authority === true || item.owner === agent, `work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can reassign it`);
   check(item.state !== "done", `work "${item.id}" is done and immutable`);
   return withHistory({ ...item, owner: target, attestations: Object.freeze([]) }, atMs, agent, `reassigned:${target}`, note);
 }
@@ -409,4 +432,4 @@ export function unclaimedWork(items) {
   check(Array.isArray(items), "items must be a list");
   return items.map(workOf).filter(item => item.state === "unclaimed");
 }
-export { ClaimError, STATES, TRANSITIONS, DELIVERY_MODES, REVIEW_POLICIES, DEFAULT_LEASE_HOURS, MAX_LEASE_HOURS };
+export { ClaimError, STATES, TRANSITIONS, DELIVERY_MODES, REVIEW_POLICIES, DEFAULT_LEASE_HOURS, MAX_LEASE_HOURS, ACTIVE_CLAIM_STATES };
