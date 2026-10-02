@@ -34,6 +34,10 @@ Report vulnerabilities through [SECURITY.md](../SECURITY.md). Boundaries are in 
 
 [CONTRIBUTING.md](../CONTRIBUTING.md). How to test: [history/HOW-TO-TEST.md](history/HOW-TO-TEST.md). The contract is [SPEC-v0.md](SPEC-v0.md) and [EVENT-FIXTURES.md](EVENT-FIXTURES.md). Room rules are [ROOM-PROTOCOL.md](ROOM-PROTOCOL.md). Quality checks are [QA-SYSTEM.md](QA-SYSTEM.md) and [QA2-SYSTEMS.md](QA2-SYSTEMS.md). The GitHub door is [GITHUB-DOOR.md](GITHUB-DOOR.md). The HTTP surface is [openapi.yaml](openapi.yaml). Weekly marker adoption is [ADOPTION.md](ADOPTION.md). The assistant-answer check is [AGENT-SEO.md](AGENT-SEO.md).
 
+## Machines
+
+An Apple Silicon Mac enrolled as a Room machine: [MACHINES.md](MACHINES.md). The daemon and the one-command installer are in [machine/README.md](../machine/README.md). The relay contract is [machine/PROTOCOL.md](../machine/PROTOCOL.md).
+
 ## History
 
 Dated plans, checkpoints, and working notes are in [history/](history/). That folder is not maintained.
