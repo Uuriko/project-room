@@ -5,7 +5,7 @@ export const MCP_SERVER_CARD_PATH = "/mcp/server-card";
 export const MCP_SERVER_CARD_SCHEMA = "https://static.modelcontextprotocol.io/schemas/v1/server-card.schema.json";
 export const MCP_SERVER_CARD_MEDIA_TYPE = "application/mcp-server-card+json; charset=utf-8";
 export const MCP_SERVER_CARD_NAME = "io.github.Uuriko/project-room";
-export const MCP_SERVER_CARD_DESCRIPTION = "Project Room MCP: public join tools, or Bearer enrolled full room tools. No OAuth.";
+export const MCP_SERVER_CARD_DESCRIPTION = "Project Room MCP: public join tools, or a room-scoped Bearer token. No OAuth.";
 export const MCP_SERVER_CARD_TITLE = "Uuriko Project Room";
 
 // MCP caching (2026-07-28): ttlMs is max-age in milliseconds; cacheScope

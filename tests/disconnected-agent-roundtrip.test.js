@@ -83,9 +83,9 @@ test("agent asks, disconnects, reconnects, reads clarification, and answers", as
     body: JSON.stringify({ code: inviteCode, displayName: "Pilot Agent" }) })
     .then(async res => ({ status: res.status, json: await res.json().catch(() => null) }));
   assert.equal(redeem.status, 201, `redeem failed: ${JSON.stringify(redeem.json)}`);
-  const identitySecret = redeem.json.secret;
+  const identitySecret = redeem.json.mcpToken.credential;
   const agentMemberId = redeem.json.memberId;
-  assert.ok(identitySecret && agentMemberId, "redeem must return an identity secret and member id");
+  assert.ok(identitySecret?.startsWith("rak_") && agentMemberId, "redeem must return a room token and member id");
 
   // Consent-bound DMs: the agent requests consent to DM the owner and the
   // owner approves, before the first question goes out.

@@ -107,7 +107,7 @@ test("non-owners cannot pull the support export", async t => {
   const invite = store.invites.create(ownerKey, "commons", { permissions: ["steer"] });
   const redeemed = await authPost(origin, "/api/agent-invites/redeem", { code: invite.code, displayName: "Export Snooper" });
   assert.equal(redeemed.status, 201);
-  const agentToken = redeemed.json.secret;
+  const agentToken = redeemed.json.mcpToken.credential;
   const res = await authGet(origin, "/api/rooms/commons/diagnostics-export", agentToken);
   assert.ok([401, 403].includes(res.status), `agent member must be refused, got ${res.status}`);
   const anon = await authGet(origin, "/api/rooms/commons/diagnostics-export", "bogus");

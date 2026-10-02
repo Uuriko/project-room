@@ -226,7 +226,19 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
       if (await beforeSignIn?.() === false) return;
       await withBusy(async () => {
         const session = await authedSession();
-        const view = await authApi(session, `/api/auth/password/${passwordMode}`, { email: passwordEmail, password: fields.password, sessionRevision: session.sessionRevision });
+        if (passwordMode === "signup") {
+          const reply = await api(session, "/api/auth/password/signup", { email: passwordEmail, password: fields.password, sessionRevision: session.sessionRevision });
+          if (reply?.status !== "check_email" || typeof reply.mailConfigured !== "boolean") throw new Error("Couldn’t create the account. Try again.");
+          const restored = await accountClient.restore();
+          if (restored?.authenticated) {
+            await onSignedIn?.(restored);
+            setStatus(reply.mailConfigured ? "Check your email for a verification code." : "Email delivery isn’t configured, so this account stays unverified.");
+          } else {
+            setStatus("Check your email for a sign-in link.");
+          }
+          return;
+        }
+        const view = await authApi(session, "/api/auth/password/login", { email: passwordEmail, password: fields.password, sessionRevision: session.sessionRevision });
         await finish(view);
       }); return;
     }

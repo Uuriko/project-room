@@ -36,6 +36,10 @@ function stubClient(routes = {}) {
     currentSession() { return this.session; },
     owns(generation, session) { return this.generation === generation && this.session === session; },
     invalidate(generation, session) { if (!this.owns(generation, session)) return false; this.generation++; this.session = null; return true; },
+    async restore() {
+      this.calls.push({ path: "/api/account-session", data: null });
+      return { authenticated: true, account: { id: "restored" } };
+    },
     async request(path, { data } = {}) {
       calls.push({ path, data });
       const reply = routes[path];
@@ -165,7 +169,7 @@ test("confirmed different-account switch logs out once and retries the unburned 
 });
 
 test("contextual password login and creation use the guarded authentication routes", async () => {
-  const { ui, container, client, signins } = mount({ "/api/auth/password/login": { authenticated: true, account: { id: "a" } }, "/api/auth/password/signup": { authenticated: true, account: { id: "b" } } });
+  const { ui, container, client, signins } = mount({ "/api/auth/password/login": { authenticated: true, account: { id: "a" } }, "/api/auth/password/signup": { status: "check_email", mailConfigured: false } });
   await container.listeners.click[0](clickOnDataset("email-method", { emailMethod: "password" }));
   assert.match(container.innerHTML, /autocomplete="current-password"/);
   await container.listeners.submit[0](submitForm("password", { email: "p@example.invalid", password: "synthetic-password" }));

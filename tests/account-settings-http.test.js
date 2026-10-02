@@ -82,14 +82,12 @@ async function passwordAccount(t, n) {
   const slot = f.store.createAccountSessionSlot();
   const res = await post(origin, "/api/auth/password/signup",
     { email, password: password(n), sessionToken: slot.token, sessionRevision: slot.session.sessionRevision });
-  assert.equal(res.status, 201);
-  const body = await res.json();
-  // QAS-702: signup rotates the slot token — the fresh cookie (and the
-  // response's csrf) is the session; the presented token is dead.
+  assert.equal(res.status, 202);
   const fresh = /account_session=([A-Za-z0-9_-]{43})/.exec(res.headers.get("set-cookie") ?? "")?.[1];
   assert.ok(fresh, "signup sets the rotated slot cookie");
-  return { f, origin, accountId: body.account.id, email,
-    creds: { cookie: `account_session=${fresh}`, csrf: body.csrf } };
+  const session = f.store.authenticateAccountSession(fresh);
+  return { f, origin, accountId: session.account.id, email,
+    creds: { cookie: `account_session=${fresh}`, csrf: session.csrf } };
 }
 
 const errBody = async res => (await res.json()).error;
@@ -108,7 +106,8 @@ test("GET /api/auth/methods lists safe descriptors and provider status", async t
   assert.equal(res.status, 200);
   const body = await res.json();
   const types = body.methods.map(m => m.type).sort();
-  assert.deepEqual(types, ["magic", "password"]);
+  assert.deepEqual(types, ["password"]);
+  assert.equal(body.methods[0].verifiedAt, null);
   for (const method of body.methods) {
     assert.ok(method.id && method.label, "descriptor carries id and label");
     assert.ok(Number.isSafeInteger(method.createdAt), "descriptor carries createdAt");
@@ -127,6 +126,7 @@ test("GET /api/auth/methods lists safe descriptors and provider status", async t
 
 test("disable/enable/remove mutate one method; the last active method is protected", async t => {
   const { f, origin, accountId, creds } = await passwordAccount(t, 2);
+  f.store.accountLogins.linkMagicMethod(accountId, { email: "slice7-2-extra@example.invalid" });
   const methods = () => f.store.accountLogins.listMethods(accountId);
   const passwordMethod = methods().find(m => m.type === "password");
   const magicMethod = methods().find(m => m.type === "magic");
@@ -307,9 +307,9 @@ test("password signup works through the cookie slot with CSRF", async t => {
   const slot = f.store.createAccountSessionSlot();
   const res = await postCookie(origin, "/api/auth/password/signup",
     { email: "cookie-signup@example.invalid", password: password(11), sessionRevision: slot.session.sessionRevision }, slot);
-  assert.equal(res.status, 201);
+  assert.equal(res.status, 202);
   const body = await res.json();
-  assert.equal(body.authenticated, true);
+  assert.equal(body.status, "check_email");
   assert.ok(/account_session=/.test(res.headers.get("set-cookie") || ""));
 });
 
@@ -339,7 +339,7 @@ test("password login works through the cookie slot", async t => {
   const signupSlot = f.store.createAccountSessionSlot();
   const created = await postCookie(origin, "/api/auth/password/signup",
     { email, password: password(21), sessionRevision: signupSlot.session.sessionRevision }, signupSlot);
-  assert.equal(created.status, 201);
+  assert.equal(created.status, 202);
   const loginSlot = f.store.createAccountSessionSlot();
   const res = await postCookie(origin, "/api/auth/password/login",
     { email, password: password(21), sessionRevision: loginSlot.session.sessionRevision }, loginSlot);
@@ -378,8 +378,10 @@ test("recovery redeem works through the cookie slot", async t => {
   const signupSlot = f.store.createAccountSessionSlot();
   const created = await postCookie(origin, "/api/auth/password/signup",
     { email, password: password(22), sessionRevision: signupSlot.session.sessionRevision }, signupSlot);
-  assert.equal(created.status, 201);
-  const accountId = (await created.json()).account.id;
+  assert.equal(created.status, 202);
+  const fresh = /account_session=([A-Za-z0-9_-]{43})/.exec(created.headers.get("set-cookie") ?? "")?.[1];
+  const accountId = f.store.authenticateAccountSession(fresh).account.id;
+  f.store.accountLogins.markEmailVerified(accountId, email);
   const { codes } = f.store.accountLogins.generateRecoveryCodes(accountId);
   const slot = f.store.createAccountSessionSlot();
   const res = await postCookie(origin, "/api/auth/recovery-codes/redeem",
@@ -395,6 +397,6 @@ test("the explicit body sessionToken path still works", async t => {
   // No cookie, no CSRF: the body token is the bearer secret, as before.
   const res = await post(origin, "/api/auth/password/signup",
     { email: "body-token@example.invalid", password: password(23), sessionToken: slot.token, sessionRevision: slot.session.sessionRevision });
-  assert.equal(res.status, 201);
-  assert.equal((await res.json()).authenticated, true);
+  assert.equal(res.status, 202);
+  assert.equal((await res.json()).status, "check_email");
 });
