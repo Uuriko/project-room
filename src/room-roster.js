@@ -59,7 +59,7 @@ export const ROOM_ROSTER = Object.freeze([
     productUrl: "https://docs.x.ai/grok-bot/computer-and-apps",
     contributed: false,
     dialogHint: "Reuse the Bot’s saved connection on its own computer. Check access and configure a supported listener or pull fallback. Verify a directed Room reply; shared OS secrets remain shared.",
-    today: "Install the Room client in the Bot runtime, import the private setup there, set ROOM_AGENT_CONFIG, then node scripts/agent-inbox.mjs check. Mac localhost does not reach a hosted Bot.",
+    today: "Reuse the saved connection and call room_check_access. If you run the Room client locally, import the private setup on that computer. Mac localhost does not reach a hosted Bot.",
     later: "Same direct client. Do not reuse Grok Build’s key. Bots share OS secrets even with separate Room names.",
     capabilityQuestion: "Can you run Node 24.19+ in this computer, reach the approved HTTPS Project Room, and read ROOM_AGENT_CONFIG from a private local directory without putting the key in chat? Do not install anything, start work, or request credentials yet."
   })
@@ -319,23 +319,26 @@ export function capabilitySummary(access) {
   return chat;
 }
 
-export function setupChecklist({ route = "mcp", configDir = "/absolute/private/room-agent" } = {}) {
+export function localClientSteps({ route = "mcp", configDir = "/absolute/private/room-agent" } = {}) {
   const importLine = importCommand(configDir);
   const check = `ROOM_AGENT_CONFIG=${configDir} node scripts/agent-inbox.mjs check`;
+  if (route === "packet") return [`Optional later import if the host can store a secret: ${importLine}`, check];
+  if (route === "direct") return [`On that computer, import only if needed: ${importLine}`, check];
+  return [`Import only if needed: ${importLine}`, check];
+}
+
+export function setupChecklist({ route = "mcp", configDir = "/absolute/private/room-agent" } = {}) {
   if (route === "packet") {
     return [
       "No Room key in iMessage, WhatsApp, Muse, or any chat.",
       "Today: Use my AI → send the reviewed packet in that assistant’s existing thread → Paste AI draft.",
-      `Optional later import if the host can store a secret: ${importLine}`,
-      check,
       "Clear the clipboard."
     ];
   }
   if (route === "direct") {
     return [
       "Reuse your saved connection; copy private setup only if none exists.",
-      `On that computer, import only if needed: ${importLine}`,
-      check,
+      "On that computer, follow the local Room client steps only if you run the client there.",
       "Configure a supported scheduler or wake listener; otherwise keep an explicit pull fallback.",
       "Verify a directed message and its linked Room reply before calling the setup wakeable.",
       "Do not reuse another agent’s directory. Keep the key out of prompts.",
@@ -344,9 +347,7 @@ export function setupChecklist({ route = "mcp", configDir = "/absolute/private/r
   }
   return [
     "Reuse your saved connection; copy private setup only if none exists.",
-    `Import only if needed: ${importLine}`,
-    check,
-    "Merge an MCP snippet only if needed (Grok Build TOML, or Claude/Cursor JSON under Advanced hosts). Do not put the key in a prompt.",
+    "Merge the MCP snippet for this host (Grok Build TOML, or Claude/Cursor JSON under Advanced hosts). Do not put the key in a prompt.",
     "Restart the host only if its configuration changed. First tool: room_check_access.",
     "Configure this runtime’s supported scheduler or wake listener; otherwise keep an explicit pull fallback.",
     "Verify a directed message and its linked Room reply before calling the setup wakeable.",
@@ -388,6 +389,9 @@ export function reconnectCopy({ displayName, route, configDir } = {}) {
   const lines = [
     `Plug-in steps for ${name} (${resolved}). No private key in this text.`,
     ...setupChecklist({ route: resolved, configDir: dir }),
+    "",
+    "If you run the Room client locally:",
+    ...localClientSteps({ route: resolved, configDir: dir }),
     `Reconnect / diagnose: ROOM_AGENT_CONFIG=${dir} node scripts/agent-inbox.mjs doctor`
   ];
   if (resolved === "mcp") {

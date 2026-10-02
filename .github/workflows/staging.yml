@@ -1,0 +1,95 @@
+name: staging
+
+# Deploy main to the isolated staging Worker (env.staging, script
+# project-room-stage) and check it. This never deploys production.
+# Without the CLOUDFLARE_API_TOKEN Actions secret the job says so and
+# succeeds, so a missing credential cannot fail main.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: staging-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - name: Require the Cloudflare token
+        id: gate
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Isolated staging skipped::CLOUDFLARE_API_TOKEN is not set. Staging was not deployed. Add that Actions secret to enable deploys of project-room-stage. See docs/STAGING.md."
+            {
+              echo "## Isolated staging"
+              echo ""
+              echo "Skipped. \`CLOUDFLARE_API_TOKEN\` is not configured, so this push did not deploy staging and did not fail main."
+              echo ""
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        if: steps.gate.outputs.ready == 'true'
+        with:
+          version: 10
+      - if: steps.gate.outputs.ready == 'true'
+        run: npm ci
+      - if: steps.gate.outputs.ready == 'true'
+        run: pnpm --dir cloudflare install --frozen-lockfile --ignore-scripts
+      - name: Deploy isolated staging
+        if: steps.gate.outputs.ready == 'true'
+        working-directory: cloudflare
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          WRANGLER_SEND_METRICS: "false"
+        run: |
+          set -o pipefail
+          pnpm exec wrangler deploy --env staging --keep-vars | tee "$RUNNER_TEMP/wrangler-deploy.txt"
+          node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            const config = JSON.parse(readFileSync("wrangler.jsonc", "utf8"));
+            const origin = config.env.staging.vars.ROOM_ORIGIN;
+            const log = readFileSync(process.env.RUNNER_TEMP + "/wrangler-deploy.txt", "utf8");
+            const hosts = [...log.matchAll(/https:\/\/[a-z0-9-]+\.[a-z0-9-]+\.workers\.dev/g)].map(match => match[0]);
+            if (hosts.length && !hosts.includes(origin)) {
+              console.error("Staging deployed at " + hosts.join(", ") + " but ROOM_ORIGIN is " + origin + ". Update env.staging.vars.ROOM_ORIGIN to the printed host and redeploy.");
+              process.exit(1);
+            }
+            console.log("Staging origin " + origin);
+          '
+      - name: Cold-start budget
+        if: steps.gate.outputs.ready == 'true'
+        run: node scripts/cold-start-probe.mjs --base https://project-room-stage.getdasha.workers.dev --max-ms 2000 | tee cold-start.json
+      - if: steps.gate.outputs.ready == 'true'
+        run: npx playwright install --with-deps chromium
+      - if: steps.gate.outputs.ready == 'true'
+        run: npm i --no-save @axe-core/playwright@4
+      - name: Smoke and browser checks
+        if: steps.gate.outputs.ready == 'true'
+        env:
+          ROOM_SMOKE_ORIGIN: https://project-room-stage.getdasha.workers.dev
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/live-smoke.mjs --browser | tee staging-smoke.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: steps.gate.outputs.ready == 'true'
+        with:
+          name: staging-probe-${{ github.run_id }}
+          path: |
+            cold-start.json
+            staging-smoke.json
+          retention-days: 14
