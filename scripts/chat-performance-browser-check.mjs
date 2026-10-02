@@ -12,6 +12,7 @@ import { signInFixture } from './auth-signin.mjs';
 import { openSettings, clickChrome } from './room-chrome.mjs';
 import { signInFixtureInPlace } from './in-place-fixture-signin.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
+import { admitHistoricalMember } from './unstamped-member.mjs';
 
 test('ordinary chat arrivals preserve historical DOM and fetch only changed request subscriptions', { timeout: 30000 }, async t => {
   const f = createAcceptanceFixture({ dmConsent: true });
@@ -100,7 +101,7 @@ test('snapshot labels update duplicates while preserving focus and selection, an
     globalThis.auditSelectedText = selection.toString();
     document.querySelector('[data-member-record-id="owner"] .member-profile > summary').focus();
   });
-  f.store.command(f.keys.owner, 'commons', { id: 'introduce-duplicate', type: 'member.added', data: { memberId: 'duplicate-owner', displayName: ' room OWNER ', kind: 'human', permissions: [] } });
+  admitHistoricalMember(f.store, 'commons', 'owner', { memberId: 'duplicate-owner', displayName: ' room OWNER ', kind: 'human', permissions: [] });
   await original.locator('.message-meta strong').filter({ hasText: /^Room owner \(owner\)$/ }).waitFor();
   assert.equal(await profile.evaluate(el => el.open), true);
   const preserved = await page.evaluate(() => ({ body: globalThis.retainedAuditBody === document.querySelector('[data-message-record-id="test-welcome"] .message-body'), selected: getSelection().toString() === globalThis.auditSelectedText, focus: document.activeElement?.dataset.focusKey }));

@@ -23,7 +23,7 @@ async function setup(t, { action = "complete", mobile = false, live = true } = {
     }
     return send(type, data, actor);
   };
-  send(T.MEMBER_ADDED, { memberId: "human-reviewer", displayName: "Test reviewer", kind: "human", permissions: ["verify"] });
+  send(T.MEMBER_ADDED, { memberId: "human-reviewer", displayName: "Second reviewer", kind: "human", permissions: ["verify"] });
   f.keys["human-reviewer"] = f.store.issueAccessKey("commons", "human-reviewer");
   send(T.WORK_PROPOSED, { workItemId: workId, title: "Synthetic room result", definitionOfDone: "A versioned result with a clear next step.",
     accountableMemberId: "owner", independentVerificationRequired: true, verifierMemberId: "human-reviewer", ownerDecisionRequired: true, humanDecisionMakerId: "owner", mode: action === "claim" ? "write" : "read" });

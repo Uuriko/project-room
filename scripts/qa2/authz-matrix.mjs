@@ -15,21 +15,16 @@ import { randomUUID, randomBytes } from "node:crypto";
 import { writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createQaClient } from "./lib/client.mjs";
 
 const arg = (n, d) => { const i = argv.indexOf(`--${n}`); return i > 0 ? argv[i + 1] : d; };
 const origin = arg("origin", "http://127.0.0.1:4173");
 const UA = "project-room-qa2-authz/1";
+const client = createQaClient({ origin, userAgent: UA });
 const stamp = Date.now().toString(36);
 
 async function req(method, path, { token, body } = {}) {
-  const headers = { "user-agent": UA, accept: "application/json" };
-  if (body !== undefined) { headers["content-type"] = "application/json"; headers.origin = origin; }
-  if (token) headers.authorization = `Bearer ${token}`;
-  try {
-    const r = await fetch(origin + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
-    const text = await r.text(); let json = null; try { json = JSON.parse(text); } catch {}
-    return { status: r.status, json, text };
-  } catch (e) { return { status: 0, json: null, text: String(e) }; }
+  return client.request(method, path, { token, body, accept: "application/json" });
 }
 const must = (r, what) => { if (r.status < 200 || r.status >= 300) throw new Error(`${what}: HTTP ${r.status} ${r.text.slice(0, 200)}`); return r.json; };
 const recovery = join(tmpdir(), `qa2-authz-${stamp}.json`); // secrets for manual cleanup if the run dies; 0600, deleted on success
