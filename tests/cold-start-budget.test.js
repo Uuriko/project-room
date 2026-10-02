@@ -10,9 +10,9 @@ import { createRecoveryFixture } from "../scripts/recovery-fixture.mjs";
 import { seedRecoveryCoverage } from "../scripts/recovery-coverage.mjs";
 import { applicationTables } from "../server/writer-fence.mjs";
 
-// Same empty tables as the recovery audit. Cron-written rows stay empty on
-// open. A public room page and its backfill cursor stay empty until an owner
-// opts in and the cron records the cursor.
+// Same empty tables as tests/recovery.test.js. Cron-written rows stay empty
+// on open. public_rooms stays empty until an owner opts in.
+// public_read_model_backfill stays empty until the cron writes the cursor.
 const EMPTY_UNTIL_CRON = new Map([
   ["membership_delegation_pending", "stays empty until the cron"],
   ["room_access_auto_approve", "stays empty until the cron"],
