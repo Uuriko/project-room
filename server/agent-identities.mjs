@@ -620,12 +620,10 @@ export class AgentIdentities {
       }
       const memberName = displayName?.trim() || identity.displayName;
       // Compare against active room members inside the writer transaction,
-      // not an earlier snapshot. Exact-name duplicates already exist in the
-      // room protocol, so preserve them; block deceptive alternate spellings
-      // of an active name, and reject mixed-script/invisible names outright.
-      // Same-identity relinks preserve their existing path above.
-      // Preserve ordinary case/space variants already supported by the
-      // protocol; NFKC width/style lookalikes remain distinct and are blocked.
+      // not an earlier snapshot. Exact duplicates and reserved labels are
+      // refused by the live member.added guard. This check still blocks
+      // deceptive alternate spellings, mixed scripts, and invisible characters
+      // before that command. Same-identity relinks keep the path above.
       const canonical = value => value.trim().replace(/\p{White_Space}+/gu, " ").toLowerCase();
       const activeNames = Object.values(this.store.room(roomId).state.members)
         .filter(member => member.active !== false && member.id !== resolvedMemberId

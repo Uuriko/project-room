@@ -26,6 +26,9 @@ test('actual Worker public search routes load packaged HTML and preserve private
   const present = start(false);
   try {
     const page = await call(present, '/about'); assert.equal(page.status, 200); assert.equal(page.headers.get('x-robots-tag'), 'all');
+    assert.match(page.headers.get('content-security-policy'), /default-src 'none'/);
+    assert.match(page.headers.get('content-security-policy'), /script-src https:\/\/static\.cloudflareinsights\.com/);
+    assert.match(page.headers.get('content-security-policy'), /connect-src https:\/\/cloudflareinsights\.com/);
     assert.match(page.headers.get('content-security-policy'), /style-src 'unsafe-inline'/);
     assert.match(page.headers.get('content-type'), /text\/html/); assert.match(await page.text(), /Work with your agents in one room/);
     const head = await call(present, '/about', 'HEAD'); assert.equal(head.status, 200); assert.equal(await head.text(), '');

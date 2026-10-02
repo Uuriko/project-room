@@ -110,12 +110,18 @@ test("scheduled RPC hits real ProjectRoom methods and fails on an unknown one", 
   console.warn = (...args) => { warnings.push(args.join(" ")); };
   console.error = (...args) => { errors.push(args.join(" ")); };
   // #992: the room instance is paused, so the two drain jobs throw.
-  // runCronJobs warns and continues; scheduled() records the tick (that
-  // write fails because paused startup must not open storage), then
-  // rejects so Cron Events show channel-drain and webhook-dispatch.
+  // Gmail and Telegram are configured here so those jobs are eligible;
+  // an unconfigured integration is skipped before the paused object is
+  // called. runCronJobs warns and continues; scheduled() records the
+  // tick (that write fails because paused startup must not open
+  // storage), then rejects so Cron Events show channel-drain and
+  // webhook-dispatch.
   try {
     await assert.rejects(worker.scheduled({ cron: "* * * * *" }, {
       ROOM_MAINTENANCE: "0",
+      ROOM_GMAIL_ENABLED: "1",
+      TELEGRAM_BOT_TOKEN: "123456789:AAFakeFakeFakeFakeFakeFakeFakeFakeFa",
+      TELEGRAM_WEBHOOK_SECRET: "webhook-secret-16",
       ROOM_ORIGIN: "https://room.example.test",
       ROOM: namespace
     }, { waitUntil(promise) { pending.push(promise); } }), /cron jobs failed: channel-drain, webhook-dispatch/);

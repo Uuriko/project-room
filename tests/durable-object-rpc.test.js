@@ -241,8 +241,12 @@ test("scheduled handler invokes cron RPC on the real ProjectRoom shape", async (
     }
   });
   const pending = [];
+  // Gmail and Telegram must be configured or scheduled() never calls those RPC methods.
   await worker.scheduled({ cron: "* * * * *" }, {
     ROOM_MAINTENANCE: "0",
+    ROOM_GMAIL_ENABLED: "1",
+    TELEGRAM_BOT_TOKEN: "123456789:AAFakeFakeFakeFakeFakeFakeFakeFakeFa",
+    TELEGRAM_WEBHOOK_SECRET: "webhook-secret-16",
     ROOM: { getByName(value) { name = value; return stub; } }
   }, { waitUntil(promise) { pending.push(promise); } });
   await Promise.all(pending);

@@ -154,11 +154,33 @@ test("scheduled() records a heartbeat and fails the invocation when a job fails"
   assert.ok(Number.isFinite(stored.retention.lastSuccessAt));
 });
 
-test("scheduled() resolves when every job succeeds", async () => {
-  const { stub, self } = roomStub();
-  await worker.scheduled({ cron: "* * * * *" }, { ROOM_MAINTENANCE: "0", ROOM: { getByName: () => stub } }, { waitUntil() {} });
-  const view = jobHealthView(self.ctx.storage.map.get(HEARTBEAT_STORAGE_KEY), Date.now());
+test("scheduled() resolves when every configured job succeeds", async () => {
+  const { stub, self, calls } = roomStub();
+  const env = { ROOM_MAINTENANCE: "0", ROOM: { getByName: () => stub } };
+  await worker.scheduled({ cron: "* * * * *" }, env, { waitUntil() {} });
+  assert.equal(calls.includes("syncGmailMailboxes"), false);
+  assert.equal(calls.includes("drainChannelBacklog"), false);
+  assert.ok(calls.includes("planRetention"));
+  const view = jobHealthView(self.ctx.storage.map.get(HEARTBEAT_STORAGE_KEY), Date.now(), env);
   assert.equal(view.status, "ok");
+  assert.equal(view.jobs.find(job => job.name === "gmail-sync").status, "unconfigured");
+  assert.equal(view.jobs.find(job => job.name === "channel-drain").status, "unconfigured");
+  assert.equal(view.jobs.find(job => job.name === "gmail-sync").stale, false);
+  assert.equal(view.jobs.find(job => job.name === "retention").status, "ok");
+});
+
+test("scheduled() runs gmail and channel drain when those integrations are configured", async () => {
+  const { stub, calls } = roomStub();
+  const env = {
+    ROOM_MAINTENANCE: "0",
+    ROOM_GMAIL_ENABLED: "1",
+    TELEGRAM_BOT_TOKEN: "123456789:AAFakeFakeFakeFakeFakeFakeFakeFakeFa",
+    TELEGRAM_WEBHOOK_SECRET: "webhook-secret-16",
+    ROOM: { getByName: () => stub }
+  };
+  await worker.scheduled({ cron: "* * * * *" }, env, { waitUntil() {} });
+  assert.ok(calls.includes("syncGmailMailboxes"));
+  assert.ok(calls.includes("drainChannelBacklog"));
 });
 
 test("GET /api/health/jobs is read-only, no-store, and 503 when stale", async () => {

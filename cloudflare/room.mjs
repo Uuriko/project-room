@@ -23,13 +23,15 @@ import { isEdgeDoorUrl, EDGE_DOOR_HOSTS, rewriteRoomApiPrefix, isHealthAliasPath
 import { durableInboundEmailConsumer, emailRoutingLimits, emailRoutingRejections } from '../server/email-routing-inbound.mjs';
 import { RETENTION_TABLES, runLiveStoreRetention } from '../server/retention-run.mjs';
 import { backfillPublicReadModel as fillPublicReadModel } from '../server/public-read-model.mjs';
+import { pruneAbuseRateBuckets } from '../server/abuse-rate-buckets.mjs';
 import { pruneOAuthProvider } from '../server/oauth-provider-store.mjs';
 import { syncClaimPullRequests } from '../server/claim-pr-sync.mjs';
-import { CRON_JOB_BUDGET_MS, HEARTBEAT_STORAGE_KEY, applyOutcomes, jobHealthResponse, jobHealthUnavailable, jobHealthView, runCronJobs } from './job-heartbeat.mjs';
+import { CRON_JOB_BUDGET_MS, HEARTBEAT_STORAGE_KEY, applyOutcomes, cronIntegrationConfigured, jobHealthResponse, jobHealthUnavailable, jobHealthView, runCronJobs } from './job-heartbeat.mjs';
 import { SOURCE_REVISION, BUILD_ID } from '../server/version.mjs';
 import { edgePublicResponse } from './edge-public.mjs';
 import { appDurationMs, logRoomRequest, requestPath, withServerTiming } from './request-timing.mjs';
 import { HEALTH_PROBE_TIMEOUT_MS, createHealthProbe, healthLivenessResponse, readyProbeResponse, workerLivenessResponse } from './health-probe.mjs';
+import { flushRoomGuide, installGuideCommandHook } from '../server/room-guide.mjs';
 
 // One probe per isolate. Concurrent health checks during a cold start share
 // it; a finished probe does not cache, so the next check sees a fresh answer.
@@ -86,6 +88,8 @@ export class ProjectRoom extends DurableObject {
     if (this.paused) return;
     this.store = new RoomStore(null, { database: new DurableDatabase(ctx.storage), storagePlatform: durableStorage,
       stitch: stitchConfigFromEnv(env), identityHashKey: env.ROOM_IDENTITY_HASH_KEY ?? null, integrity: "deferred" });
+    // ACT-1a: one delimited call. Room Guide advances after commands. ACT-4 owns nudges.
+    installGuideCommandHook(this.store);
     // Event-push dispatch: same fire-and-forget flush as the node entry
     // point. The Durable Object may suspend before the microtask drains;
     // the cron tick remains the restart-safe backstop.
@@ -166,7 +170,11 @@ export class ProjectRoom extends DurableObject {
     };
     if (this.paused) return respond(maintenanceResponse(request));
     try { return respond(await this.requestSignals.run(request.signal, () => this.handler.fetch(request))); }
-    finally { this.ctx.waitUntil(this.store.humanPush.flush()); }
+    finally {
+      this.ctx.waitUntil(this.store.humanPush.flush());
+      // ACT-1a: post-request flush for a Room Guide step the command hook left queued.
+      this.ctx.waitUntil(Promise.resolve(flushRoomGuide(this.store)));
+    }
   }
 
   // Readiness is one statement. It does not open the room, replay events, or
@@ -180,7 +188,8 @@ export class ProjectRoom extends DurableObject {
   async syncGmailMailboxes() {
     if (this.paused) return { completed: 0 };
     await yieldToQueuedRequests();
-    // Unconfigured Gmail is visible in /api/health/jobs instead of looking like a quiet success.
+    // The minute cron does not call this when Gmail is off. A direct call still
+    // says so, instead of looking like a mailbox that had nothing to sync.
     if (!this.gmailSync) return { completed: 0, configured: false };
     return this.gmailSync.tick({ deadline: cronDeadline() });
   }
@@ -194,7 +203,7 @@ export class ProjectRoom extends DurableObject {
     return { recorded: Array.isArray(outcomes) ? outcomes.length : 0 };
   }
   async readJobHealth() {
-    return jobHealthView(await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY), Date.now());
+    return jobHealthView(await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY), Date.now(), this.env);
   }
 
   // Task 9 — auto-drain RPC for the Worker's cron trigger. Scans the webhook
@@ -232,9 +241,10 @@ export class ProjectRoom extends DurableObject {
       this.channelDrainInflight = false;
     }
   }
-  // Snapshot plus checksum on the rooms and invitation tables. A match returns
-  // immediately. A mismatch replays invitations and legacy projections in
-  // slices that yield the input gate. Never called from the constructor.
+  // Changed rooms update the checksum. One room per tick is reread so a
+  // projection that changes without a new event is still caught. A mismatch
+  // replays invitations and legacy projections in slices that yield the
+  // input gate. Never called from the constructor.
   async verifyRoomIntegrity() {
     if (this.paused) return { skipped: 1, paused: 1 };
     await yieldToQueuedRequests();
@@ -294,23 +304,27 @@ export class ProjectRoom extends DurableObject {
       record: plan => { this.lastRetentionPlan = plan; } });
     await this.ctx.storage.put(RETENTION_CURSOR_KEY, (tableIndex + 1) % RETENTION_TABLES.length);
     // Delivered and dead-letter webhook rows are a cache. Pending and failed
-    // rows stay until dispatch finishes them. Expired OAuth grants are the
-    // same kind of cache: a room that has never issued one has no table.
+    // rows stay until dispatch finishes them. Expired OAuth grants and abuse
+    // buckets are the same kind of cache: a room that has never saved one
+    // has no table.
     let webhookDeliveries = { deleted: 0 };
     let oauthProvider = { pruned: 0 };
+    let abuseRateBuckets = { pruned: 0 };
     try {
       webhookDeliveries = this.store.agentPlugin.pruneWebhookDeliveries();
       oauthProvider = pruneOAuthProvider(this.store.db, { now: Date.now(), limit: 100 });
+      abuseRateBuckets = pruneAbuseRateBuckets(this.store.db, { now: Date.now(), limit: 100 });
     } finally {
       console.info(JSON.stringify({
         event: 'room.retention', table: receipt.table, deleted: receipt.deleted,
         dryRun: receipt.dryRun ? 1 : 0, budgetExceeded: receipt.budgetExceeded ? 1 : 0,
         eligible: receipt.categories?.[receipt.table]?.eligible ?? 0,
         webhookDeleted: webhookDeliveries?.deleted ?? 0,
-        oauthPruned: oauthProvider?.pruned ?? 0
+        oauthPruned: oauthProvider?.pruned ?? 0,
+        abuseRatePruned: abuseRateBuckets?.pruned ?? 0
       }));
     }
-    return { ...receipt, webhookDeliveries, oauthProvider };
+    return { ...receipt, webhookDeliveries, oauthProvider, abuseRateBuckets };
   }
 }
 
@@ -457,7 +471,7 @@ export default {
   async scheduled(event, env, ctx) {
     if (maintenanceEnabled(env.ROOM_MAINTENANCE)) return;
     const room = env.ROOM.getByName('invite-only-pilot');
-    const outcomes = await runCronJobs({
+    const runners = {
       'gmail-sync': () => room.syncGmailMailboxes(),
       'channel-drain': () => room.drainChannelBacklog(),
       'webhook-dispatch': () => room.drainWebhookDeliveries(),
@@ -465,13 +479,17 @@ export default {
       'claim-prs': () => room.refreshClaimPullRequests(),
       'retention': () => room.planRetention(),
       'public-read-model': () => room.backfillPublicReadModel()
-    });
+    };
+    for (const name of Object.keys(runners)) {
+      if (!cronIntegrationConfigured(name, env)) delete runners[name];
+    }
+    const outcomes = await runCronJobs(runners);
     try { await room.recordCronTick(outcomes); }
     catch (error) { console.error(`[job-heartbeat] record failed: ${error?.message ?? error}`); }
     try {
       const integrity = await room.verifyRoomIntegrity();
       const line = { event: 'room.integrity' };
-      for (const key of ['matched', 'skipped', 'verified', 'budgetExceeded', 'invitations', 'paused']) {
+      for (const key of ['matched', 'skipped', 'verified', 'budgetExceeded', 'invitations', 'paused', 'checked', 'swept']) {
         if (typeof integrity?.[key] === 'number') line[key] = integrity[key];
       }
       console.info(JSON.stringify(line));

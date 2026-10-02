@@ -15,7 +15,9 @@ const helpers = {
 const call = (registry, route, id, body) => handleWorkClaims({
   req: { method: route === "list" ? "GET" : "POST", body }, res: {},
   url: new URL("https://room.example/api/rooms/room1/work-claims"),
-  store: {}, roomId: "room1", auth: { member: { id: "agent1", kind: "agent", permissions: [] } },
+  store: { roomAuthority: () => ({ members: {
+    agent1: { id: "agent1", kind: "agent", active: true, permissions: ["accept_work", "complete_work"] },
+  } }) }, roomId: "room1", auth: { member: { id: "agent1", kind: "agent", permissions: [] } },
   workClaimRoute: route, workClaimId: id, helpers, registry,
 });
 

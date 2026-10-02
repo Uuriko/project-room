@@ -7,6 +7,7 @@ import { createAcceptanceFixture } from './acceptance-fixture.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { signInFixture } from "./auth-signin.mjs";
 import { ensurePeopleOpen, ensureSidebarClosed, openSearch } from "./room-chrome.mjs";
+import { admitHistoricalMember } from "./unstamped-member.mjs";
 
 for (const touch of [false, true]) test(`quiet attribution ${touch ? 'touch' : 'desktop'}: short summaries, exact choices, live duplicate names`, { timeout: 45000 }, async t => {
   const f = createAcceptanceFixture({ dmConsent: true }), server = createRoomServer({ store: f.store, streamInterval: 50 });
@@ -58,7 +59,7 @@ for (const touch of [false, true]) test(`quiet attribution ${touch ? 'touch' : '
   mkdirSync('test-results', { recursive: true });
   await page.screenshot({ path: `test-results/quiet-attribution-${touch ? 'touch' : 'desktop'}-unique.png` });
   const reply = record('naming-root').locator('[data-message-action="reply"]'); await reply.focus();
-  send('owner', 'member.added', { memberId: duplicate, displayName: ' jordan ', kind: 'human', permissions: [] });
+  admitHistoricalMember(f.store, 'commons', 'owner', { memberId: duplicate, displayName: ' jordan ', kind: 'human', permissions: [] });
   await page.waitForFunction(id => document.querySelector('[data-message-record-id="naming-directed"] .audience-chip').textContent.includes(id), jordan);
   assert.equal(await reply.evaluate(node => node === document.activeElement), true, 'background identity change preserves action focus');
   assert.match(await record('naming-root').locator('.message-meta strong').textContent(), new RegExp(jordan));
