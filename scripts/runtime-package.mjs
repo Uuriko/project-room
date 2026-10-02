@@ -14,7 +14,7 @@ const v12Assets = [...v11Assets, "src/reply-requests.js"];
 const v13Assets = [...v12Assets, "src/work-help.js"];
 const v14Assets = [...v13Assets, "src/help-offers.js"];
 const inboxAssets = [...v14Assets, "src/inbox-client.js", "src/inbox-ui.js", "src/inbox-quarantine-ui.js"];
-export const publicAssets = [inboxAssets[0], "about.html", "offers.html", "src/project-offers-ui.js", "src/owner-project-offers-ui.js", "src/project-offers.css", "favicon.svg", "icon.svg", "manifest.webmanifest", "push-sw.js", inboxAssets[1], "src/member-display-names.js", "src/room-layout.js", ...inboxAssets.slice(2, 6), "src/human-push.js", "src/human-push-display.js", ...inboxAssets.slice(6), "src/account-setup-ui.js", "src/gmail-ui.js", "src/inbox-send-ui.js", "src/room-roster.js", "src/account-settings-ui.js", "src/auth-signin-ui.js", "src/agent-signin-ui.js", "src/agent-first-run.js", "src/invite-context.js", "src/request-access.js", "src/room-deep-link.js", "src/browser-session.js", "src/composer-files.js", "src/session-expiry.js", "src/agent-invite-ui.js", "src/referral-board.js", "src/land-queue-board.js", "src/join.js", "src/work-item-session.js", "src/work-loops.js", "src/work-recipes.js", "src/chat-suggestions.js", "src/share-invite-code.js", "src/handoff-envelope-ui.js", "src/dm-consents.js", "src/friend-bond.js", "src/needs-attention.js", "src/emoji.js", "src/emoji-catalog.js", "src/public-a11y.css", "connectors/muse.md"];
+export const publicAssets = [inboxAssets[0], "about.html", "offers.html", "src/project-offers-ui.js", "src/owner-project-offers-ui.js", "src/project-offers.css", "favicon.svg", "icon.svg", "manifest.webmanifest", "push-sw.js", inboxAssets[1], "src/member-display-names.js", "src/room-layout.js", ...inboxAssets.slice(2, 6), "src/human-push.js", "src/human-push-display.js", ...inboxAssets.slice(6), "src/account-setup-ui.js", "src/gmail-ui.js", "src/inbox-send-ui.js", "src/room-roster.js", "src/account-settings-ui.js", "src/auth-signin-ui.js", "src/agent-signin-ui.js", "src/agent-first-run.js", "src/invite-context.js", "src/request-access.js", "src/room-deep-link.js", "src/browser-session.js", "src/composer-files.js", "src/session-expiry.js", "src/agent-invite-ui.js", "src/referral-board.js", "src/land-queue-board.js", "src/join.js", "src/work-item-session.js", "src/work-loops.js", "src/work-recipes.js", "src/chat-suggestions.js", "src/share-invite-code.js", "src/handoff-envelope-ui.js", "src/dm-consents.js", "src/friend-bond.js", "src/needs-attention.js", "src/emoji.js", "src/emoji-catalog.js", "src/public-a11y.css", "connectors/muse.md", "compare/project-room-vs-slack.html", "compare/project-room-vs-discord.html", "compare/agent-collaboration-tool.html", "compare/multi-agent-workspace.html", "compare/ai-agent-coordination.html", "compare/project-room-vs-agent-room.html", "og/home.png", "og/about.png", "og/offers.png", "og/compare.png", "og/receipts.png"];
 // Read the selected source's explicit asset declaration, never today's list for
 // an older schema. Parse only this repository's data-only array/spread/map shape;
 // do not execute packaged JavaScript. Missing advertised assets remain errors.
@@ -257,6 +257,8 @@ optional.push("server/room-export-html.mjs");
 optional.push("about.html");
 optional.push("join.html"); // Self-serve join template (loaded by GET /join, not a raw URL)
 optional.push("favicon.svg", "icon.svg", "manifest.webmanifest", "src/public-a11y.css");
+optional.push("compare/project-room-vs-slack.html", "compare/project-room-vs-discord.html", "compare/agent-collaboration-tool.html", "compare/multi-agent-workspace.html", "compare/ai-agent-coordination.html", "compare/project-room-vs-agent-room.html"); // AEO buyer-intent pages (public assets)
+optional.push("og/home.png", "og/about.png", "og/offers.png", "og/compare.png", "og/receipts.png"); // GR1 static share images
 optional.push("src/join.js"); // Join page logic (public asset, imported by join.html)
 optional.push("server/access-review.mjs");
 optional.push("server/access-requests.mjs", "server/identity-ratelimit.mjs");
@@ -264,7 +266,8 @@ optional.push("server/room-flood-guard.mjs"); // per (room, member) chat post bu
 optional.push("server/membership-delegation.mjs"); // RC-2026-09-18-038: owner-granted membership administration (imported by server/store.mjs)
 optional.push("server/usage-summary.mjs");
 optional.push("server/channel-adapters/telegram-config.mjs", "server/channel-adapters/telegram-transport.mjs", "scripts/telegram-set-webhook.mjs", "scripts/telegram-rotate-webhook.mjs");
-optional.push("server/receipts-page.mjs", "server/receipts-data.mjs"); // public run-receipts page + generated board snapshot (imported by server/http.mjs)
+optional.push("server/receipts-page.mjs", "server/receipts-live.mjs"); // public receipts page + live room reader (imported by server/http.mjs)
+optional.push("src/design-tokens.js"); // token declarations embedded in the public receipts page
 optional.push("server/boot-options.mjs"); // imported by server.mjs: default boot args incl. ChannelWebhookInbox
 optional.push("server/instance-lock.mjs"); // imported by server.mjs: single-instance boot lock for the on-disk database
 optional.push("server/boot-config.mjs"); // imported by server.mjs: fail-loud critical-config boot gate (RC-2026-09-27-2732)

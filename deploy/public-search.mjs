@@ -1,8 +1,15 @@
-export const reviewedPublicSearchPaths = Object.freeze(["/", "/offers", "/about"]);
+export const comparisonSlugs = Object.freeze([
+  "project-room-vs-slack",
+  "project-room-vs-discord",
+  "agent-collaboration-tool",
+  "multi-agent-workspace",
+  "ai-agent-coordination",
+  "project-room-vs-agent-room",
+]);
+const comparePaths = comparisonSlugs.map(slug => `/compare/${slug}`);
+export const reviewedPublicSearchPaths = Object.freeze(["/", "/offers", "/about", ...comparePaths, "/receipts"]);
+export const PUBLIC_PAGE_LASTMOD = "2026-10-02";
 export const PUBLIC_SEARCH_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
-// A compare URL is advertised only when its HTML file is listed here and registered
-// as a public asset. Slugs whose files were never added 404'd on the origin.
-export const comparisonSlugs = Object.freeze([]);
 const staticPages = Object.freeze([["/", "index.html"], ["/offers", "offers.html"], ["/about", "about.html"]]);
 export function publicSearchAssets(registered) {
   const paths = new Set(registered);
@@ -22,9 +29,16 @@ export function publicSearchCanonical(pathname, registered) {
 export function publicSearchMarketingPolicy(pathname) {
   return pathname === "/about" || (typeof pathname === "string" && pathname.startsWith("/compare/"));
 }
-export function publicSearchSitemap(origin, paths) {
-  const escape = text => text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('"', '&quot;');
+export function publicSearchSitemap(origin, entries) {
+  const escape = text => text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll('"', "&quot;");
+  const rows = entries.map(entry => {
+    const path = typeof entry === "string" ? entry : entry.path;
+    const lastmod = typeof entry === "string" ? PUBLIC_PAGE_LASTMOD : entry.lastmod;
+    const loc = `<loc>${escape(new URL(path, origin).href)}</loc>`;
+    const mod = lastmod ? `<lastmod>${escape(lastmod)}</lastmod>` : "";
+    return `  <url>${loc}${mod}</url>`;
+  });
   return '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
-    + paths.map(path => `  <url><loc>${escape(new URL(path, origin).href)}</loc></url>`).join('\n')
-    + '\n</urlset>\n';
+    + rows.join("\n")
+    + "\n</urlset>\n";
 }

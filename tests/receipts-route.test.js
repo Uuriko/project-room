@@ -1,6 +1,6 @@
-// HTTP tests for the public run-receipts page (/receipts) and its JSON
-// twin (/api/public/receipts): anonymous 200, cache headers, robots posture,
-// no-auth boundary, and snapshot sanity against the generated module.
+// Public receipts: a private room stays off the page until its owner opts in,
+// a non-owner cannot opt in, and an already-public work receipt does not
+// wait for that switch. Served by the real HTTP server and RoomStore.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -9,80 +9,92 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
-import { RECEIPTS_SNAPSHOT } from "../server/receipts-data.mjs";
+import { collectPublicReceipts } from "../server/receipts-live.mjs";
+
+const HASH = `sha256:${"ab".repeat(32)}`;
+const PWR = `pwr_${"cd".repeat(32)}`;
 
 async function serve(t) {
   const directory = mkdtempSync(join(tmpdir(), "project-room-receipts-route-"));
   const store = new RoomStore(join(directory, "room.sqlite"));
   store.initialize(initialRoom("commons"));
+  const ownerKey = store.issueAccessKey("commons", "owner");
+  store.command(ownerKey, "commons", { id: "add-ada", type: "member.added", data: { memberId: "ada", displayName: "Ada", kind: "agent", permissions: ["accept_work"] } });
+  const adaKey = store.issueAccessKey("commons", "ada");
+  store.workClaims.set("commons", {
+    id: "claim-1", title: "Ship the door", state: "done", owner: "ada",
+    history: [{ action: "pr_merged", actor: "owner", at: "2026-10-01T00:00:00.000Z" }],
+    pullRequest: { url: "https://github.com/Uuriko/project-room/pull/9", outcome: "merged", syncedAt: "2026-10-01T12:00:00.000Z" },
+    blobs: [HASH], updatedAt: "2026-10-01T12:00:00.000Z",
+  });
+  const publicWork = { schema: "public-work-receipt/1", receiptId: PWR, namespaceId: "commons", identityId: "ai_public", title: "Public task", createdAt: "2026-10-01T00:00:00.000Z", artifact: { sha256: "cd".repeat(32) } };
+  store.db.prepare("INSERT INTO public_work_receipts VALUES (?,?,?,?,?,?,?,?,?,?)").run(
+    PWR, "offer-1", "commons", 1, "ai_public", "note", "cd".repeat(32), 4, JSON.stringify(publicWork), Date.now());
   const server = createRoomServer({ store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); rmSync(directory, { recursive: true, force: true }); });
-  return `http://127.0.0.1:${server.address().port}`;
+  return { origin: `http://127.0.0.1:${server.address().port}`, store, ownerKey, adaKey };
 }
 
-async function raw(origin, path, { method = "GET", headers = {} } = {}) {
-  const res = await fetch(`${origin}${path}`, { method, headers: { Origin: origin, ...headers } });
+async function raw(origin, path, { method = "GET", headers = {}, body } = {}) {
+  const res = await fetch(`${origin}${path}`, { method, headers: { Origin: origin, ...headers }, body });
   const text = await res.text();
   return { status: res.status, headers: res.headers, text };
 }
 
-test("GET /receipts is a public, cacheable HTML page", async t => {
-  const origin = await serve(t);
-  const res = await raw(origin, "/receipts");
-  assert.equal(res.status, 200);
-  assert.match(res.headers.get("content-type") ?? "", /text\/html/);
-  assert.equal(res.headers.get("cache-control"), "public, max-age=3600");
-  assert.equal(res.headers.get("x-robots-tag"), "all");
-  assert.ok(res.headers.get("content-security-policy")?.includes("default-src 'none'"), "script-free CSP");
-  assert.ok(res.text.includes("<title>Project Room — run receipts</title>"));
-  assert.ok(res.text.includes("Run receipts"));
-  assert.ok(!res.text.includes("<script"), "no scripts on the page");
-});
-
-test("GET /api/public/receipts is a public, cacheable JSON aggregate", async t => {
-  const origin = await serve(t);
-  const res = await raw(origin, "/api/public/receipts");
-  assert.equal(res.status, 200);
-  assert.match(res.headers.get("content-type") ?? "", /application\/json/);
-  assert.equal(res.headers.get("cache-control"), "public, max-age=3600");
-  const body = JSON.parse(res.text);
-  assert.equal(typeof body.generatedAt, "string");
-  assert.equal(body.board, "Uuriko/project-room#266");
-  assert.deepEqual(Object.keys(body.totals).sort(), ["failed", "open", "receipts", "reported", "verified"]);
-  assert.equal(body.totals.receipts, body.receipts.length);
-  assert.equal(body.totals.verified + body.totals.failed + body.totals.open + body.totals.reported, body.totals.receipts);
-  for (const receipt of body.receipts) {
-    assert.ok(["verified", "failed", "open", "reported"].includes(receipt.result), `bad result ${receipt.result}`);
-    assert.equal(typeof receipt.commentUrl, "string");
-  }
-});
-
-test("receipts routes need no credential and reject other methods", async t => {
-  const origin = await serve(t);
-  for (const path of ["/receipts", "/api/public/receipts"]) {
-    const head = await raw(origin, path, { method: "HEAD" });
-    assert.equal(head.status, 200, `${path} HEAD`);
-    const post = await raw(origin, path, { method: "POST" });
-    assert.equal(post.status, 405, `${path} POST`);
-  }
-});
-
-test("generated snapshot is internally consistent", () => {
-  assert.ok(Array.isArray(RECEIPTS_SNAPSHOT.receipts) && RECEIPTS_SNAPSHOT.receipts.length > 0, "snapshot has receipts");
-  assert.match(RECEIPTS_SNAPSHOT.generatedAt, /^\d{4}-\d{2}-\d{2}T/);
-  assert.equal(typeof RECEIPTS_SNAPSHOT.commentsScanned, "number");
-  assert.match(RECEIPTS_SNAPSHOT.upstreamMain, /^[0-9a-f]{40}$/);
-  const seen = new Set();
-  for (const receipt of RECEIPTS_SNAPSHOT.receipts) {
-    assert.match(receipt.date, /^\d{4}-\d{2}-\d{2}$/);
-    assert.ok(receipt.commentUrl.includes("#issuecomment-"));
-    if (receipt.task && receipt.sha) {
-      const key = `${receipt.task}${receipt.sha}`;
-      assert.ok(!seen.has(key), `duplicate task+sha ${key}`);
-      seen.add(key);
-    }
-    if (receipt.shaFull) assert.match(receipt.shaFull, /^[0-9a-f]{40}$/);
-    if (receipt.result === "verified") assert.ok(receipt.shaFull, "verified receipts carry the full SHA");
-  }
+test("a private room's claim stays hidden until the owner publishes, and a non-owner cannot publish", async t => {
+  const { origin, store, ownerKey, adaKey } = await serve(t);
+  const hidden = await raw(origin, "/receipts");
+  assert.equal(hidden.status, 200);
+  assert.equal(hidden.headers.get("x-robots-tag"), "all");
+  assert.equal(hidden.text.includes("Ship the door"), false);
+  assert.equal(hidden.text.includes("Project Room Commons"), false);
+  assert.match(hidden.text, /Public task/);
+  const missing = await raw(origin, "/receipts/wcr_doesnotexist0123456789abcdef");
+  assert.equal(missing.status, 404);
+  const denied = await raw(origin, "/api/rooms/commons/commands", {
+    method: "POST",
+    headers: { authorization: `Bearer ${adaKey}`, "content-type": "application/json" },
+    body: JSON.stringify({ id: "nope", type: "room.public_receipts_set", data: { enabled: true } }),
+  });
+  assert.equal(denied.status, 422);
+  assert.equal(store.room("commons").state.room.publicReceipts, undefined);
+  assert.equal((await raw(origin, "/receipts")).text.includes("Ship the door"), false);
+  const allowed = await raw(origin, "/api/rooms/commons/commands", {
+    method: "POST",
+    headers: { authorization: `Bearer ${ownerKey}`, "content-type": "application/json" },
+    body: JSON.stringify({ id: "publish", type: "room.public_receipts_set", data: { enabled: true } }),
+  });
+  assert.equal(allowed.status, 201);
+  const listed = await raw(origin, "/receipts");
+  assert.match(listed.text, /Ship the door/);
+  assert.equal(listed.text.includes("Project Room Commons"), false);
+  const id = collectPublicReceipts(store).find(item => item.title === "Ship the door")?.id;
+  assert.match(id, /^wcr_[a-f0-9]{32}$/);
+  const page = await raw(origin, `/receipts/${id}`);
+  assert.equal(page.status, 200);
+  assert.match(page.text, /<main>/);
+  assert.match(page.text, /<footer>/);
+  assert.match(page.text, /Made in Project Room — start your own room/);
+  assert.match(page.text, /ref=Room(\+|%20)owner/);
+  assert.match(page.text, new RegExp(HASH));
+  assert.match(page.text, /github.com\/Uuriko\/project-room\/pull\/9/);
+  assert.equal(page.text.includes("Project Room Commons"), false);
+  const json = await raw(origin, `/receipts/${id}.json`);
+  const body = JSON.parse(json.text);
+  assert.equal(body.schema, "project-room-public-receipt/1");
+  assert.equal(body.room, null);
+  assert.deepEqual(body.agents, ["Ada"]);
+  assert.deepEqual(body.humans, ["Room owner"]);
+  store.roomDirectory.set("commons", "owner", true);
+  const named = await raw(origin, `/receipts/${id}`);
+  assert.match(named.text, /Project Room Commons/);
+  const off = await raw(origin, "/api/rooms/commons/commands", {
+    method: "POST",
+    headers: { authorization: `Bearer ${ownerKey}`, "content-type": "application/json" },
+    body: JSON.stringify({ id: "unpublish", type: "room.public_receipts_set", data: { enabled: false } }),
+  });
+  assert.equal(off.status, 201);
+  assert.equal((await raw(origin, `/receipts/${id}`)).status, 404);
+  assert.match((await raw(origin, "/receipts")).text, /Public task/);
 });

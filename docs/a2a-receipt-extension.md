@@ -97,13 +97,10 @@ receipts under the extension URI as the metadata key:
 }
 ```
 
-Each entry is a full Receipt Standard v1 receipt
-(see `spec/receipt-standard-v1.md`): a signed statement binding an identity
-to a statement about work — what it touched (`surface`), what it claims
-(`declaration`), what was mechanically measured (`observations`), and,
-priced explicitly, what was **not** verified (`limitations`, mandatory
-non-empty). The receipt carries hashes, not content; content is fetched
-separately and recomputed by the verifier.
+The public receipt page does not serve this shape. `/receipts/<id>.json`
+is an unsigned `project-room-public-receipt/1` record (`docs/RECEIPTS-PAGE.md`).
+A signed attestation, if a later binding adds one, would still carry hashes
+rather than content.
 
 Multiple receipts per message are allowed (e.g. one per work item). An empty
 `receipts` array is legal and means "no attestations on this message".
