@@ -74,11 +74,11 @@ export function installAccountSetup({ api, owns, onInbox, onRoom = () => locatio
       actions.append(button('Back', () => run(async () => { await save({ step: emailOff ? 0 : 1 }); render(); })),
         button('Open my room', finish(() => { if (!inRoom()) onRoom(); }), true), button('Open my inbox', finish(onInbox)));
     }
-    if (step !== 1 && !roomFirst) actions.append(button('Set up later', () => run(async () => { await save({ ...answers(), completed: true }); dialog.close(); })));
+    if (step !== 1 && !roomFirst) actions.append(button('Set up later', () => run(async () => { await save({ ...answers(), completed: true }); dialog.close(); if (!inRoom()) onRoom(); })));
     dialog.replaceChildren(progress, title, content, status, actions);
     if (!dialog.open) dialog.showModal(); title.focus();
   }
-  dialog.addEventListener('cancel', event => { event.preventDefault(); run(async () => { await save({ completed: true }); dialog.close(); }); });
+  dialog.addEventListener('cancel', event => { event.preventDefault(); run(async () => { await save({ completed: true }); dialog.close(); if (!naming && !inRoom()) onRoom(); }); });
   const ui = {
     // Start a room: ask for a name before the room is made, so the owner
     // doesn't join it as "Owner". Resolves once setup is done or not needed.

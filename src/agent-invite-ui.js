@@ -31,7 +31,9 @@ export function agentInviteJoinLink(code, locationLike = globalThis.location) {
 
 export function agentInviteHandoff(code, locationLike = globalThis.location) {
   const link = agentInviteJoinLink(code, locationLike);
-  return { link, code, text: `Join me in Project Room: ${link}\nOr from a Project Room runtime checkout, run:\nnode scripts/agent-inbox.mjs join ${JSON.stringify(link)} ./room-connection --name "My agent"\nReview the room and permissions, then repeat with --accept. Keep and reuse room-connection to resume or join another room. No human account is required. This connects room access; a running host is needed to answer requests.` };
+  const hosted = `Join me in Project Room: ${link}\nConnect with the Room MCP server, then call room_check_access.`;
+  const local = `node scripts/agent-inbox.mjs join ${JSON.stringify(link)} ./room-connection --name "My agent"\nReview the room and permissions, then repeat with --accept. Keep and reuse room-connection to resume or join another room. No human account is required. This connects room access; a running host is needed to answer requests.`;
+  return { link, code, hosted, local, text: `${hosted}\nIf you run the Room client locally:\n${local}` };
 }
 
 // Mint one invite and build its self-serve join link. The caller loops for
@@ -89,6 +91,12 @@ export function installAgentInvites({ client, getState, getSession }) {
     if ($("#agent-invite-another")) $("#agent-invite-another").disabled = busy;
   }
 
+  function paintHandoff(code) {
+    const handoff = agentInviteHandoff(code);
+    if ($("#agent-invite-hosted")) $("#agent-invite-hosted").textContent = handoff.hosted;
+    if ($("#agent-invite-share")) $("#agent-invite-share").textContent = handoff.local;
+  }
+
   function renderLinks() {
     const list = $("#agent-invite-links");
     if (!list) return;
@@ -110,6 +118,7 @@ export function installAgentInvites({ client, getState, getSession }) {
     form.reset();
     if ($("#agent-invite-profile")) $("#agent-invite-profile").value = "contribute";
     if ($("#agent-invite-count")) $("#agent-invite-count").value = "1";
+    if ($("#agent-invite-hosted")) $("#agent-invite-hosted").textContent = "";
     if ($("#agent-invite-share")) $("#agent-invite-share").textContent = "";
     renderLinks();
     status("");
@@ -168,10 +177,10 @@ export function installAgentInvites({ client, getState, getSession }) {
       }
       if (!owns()) return;
       minted = links;
-      if (count === 1) {
-        if ($("#agent-invite-share")) $("#agent-invite-share").textContent = agentInviteHandoff(links[0].code).text;
-      } else {
+      if (count === 1) paintHandoff(links[0].code);
+      else {
         renderLinks();
+        if ($("#agent-invite-hosted")) $("#agent-invite-hosted").textContent = "";
         if ($("#agent-invite-share")) $("#agent-invite-share").textContent = inviteLinksText(links);
       }
       status(count === 1 ? "Invite ready. Copy the link and give it to your agent." : `${count} invites ready. Copy the links — each works once.`);
@@ -180,9 +189,8 @@ export function installAgentInvites({ client, getState, getSession }) {
       // A failed mint keeps the links that already succeeded.
       if (links.length) {
         minted = links;
-        if (count === 1) {
-          if ($("#agent-invite-share")) $("#agent-invite-share").textContent = agentInviteHandoff(links[0].code).text;
-        } else {
+        if (count === 1) paintHandoff(links[0].code);
+        else {
           renderLinks();
           if ($("#agent-invite-share")) $("#agent-invite-share").textContent = inviteLinksText(links);
         }

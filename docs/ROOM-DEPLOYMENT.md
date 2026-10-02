@@ -125,4 +125,63 @@ The on-disk Node server still uses `scripts/backup-room.mjs`, which copies a sql
 
 `scripts/deploy-live.py` deploys one named script through the Cloudflare API. It mirrors `cloudflare/wrangler.jsonc` and uses the `custom.cloudflare` surrogate credential. It does not print secrets. Upload metadata includes `keep_bindings: ["secret_text", "plain_text"]`. It does not add migrations, change schedules, or move public routes.
 
-Use the Wrangler steps above for a normal release. The helper is for the case where Wrangler itself cannot upload. Usage: `deploy-live.py <script_name> <account_id> <public_dir> <bundle_path>`. `project-room` is canonical. `project-room-staging` is the entry. `project-room-stage` is isolated staging.
+Use the Wrangler steps above for a normal release. The helper is for the case where Wrangler itself cannot upload. It requires the same release authorization as a normal deploy and is covered by local metadata tests. Usage: `deploy-live.py <script_name> <account_id> <public_dir> <bundle_path>`. `project-room` is canonical. `project-room-staging` is the entry. `project-room-stage` is isolated staging.
+
+## External probes
+
+`project-room-external-probe` is a separate Worker. It is not part of
+`cloudflare/room.mjs` and it does not share that Worker's cron. Every 5
+minutes it checks the public room. Cloudflare Health Checks belong to Load
+Balancing, which this deployment does not use. This Worker uses the Cloudflare
+account that already runs Room.
+
+`PROBE_ORIGIN` defaults to `https://room.trydemigod.com`. Each run calls:
+
+- `GET /api/ready`. The check passes when the JSON body has `"status": "ready"`.
+- `POST /mcp` with an anonymous JSON-RPC `tools/list`. The request sends no
+  `Authorization` header. The check passes when the result lists at least one
+  named tool.
+- `GET /llms.txt`. The check passes when the response is `text/plain` and
+  contains the packet heading `# Uuriko Project Room`.
+
+A run fails when any check fails or times out (10 seconds). The streak lives
+in the `PROBE_STATE` KV binding. One failed run does not notify anyone. The
+second failed run in a row notifies once. Later failures in that same incident
+do not notify again. When a later run passes, the Worker sends one recovery
+notice and clears the incident.
+
+The 6-hour GitHub schedules stay the deep checks: `live-smoke.yml` and
+`qa2-synthetic.yml`. This Worker is the 5-minute outage signal.
+
+Notices go to two destinations. Each one stays quiet until its secret is set.
+The Worker never writes the token or the webhook URL into the notice or the
+KV value.
+
+`PROBE_ALERT_WEBHOOK_URL` is an HTTPS POST URL. A Cloudflare generic webhook
+notification URL fits here. `http://` is accepted only for `127.0.0.1` and
+`localhost`. When the secret is unset or not a valid URL, the Worker sends no
+webhook request.
+
+The room post uses an existing agent connection: `ROOM_AGENT_ORIGIN`,
+`ROOM_AGENT_ROOM`, and `ROOM_AGENT_TOKEN`. `PROBE_ROOM_ORIGIN`,
+`PROBE_ROOM_ID`, and `PROBE_ROOM_TOKEN` each override the matching
+connection name when the notice should go to a different room. The token is
+an identity that can post `message.posted`. The Worker posts only when the
+origin, room id, and token are all present and valid after that override.
+Otherwise it does not post.
+
+Deploy this Worker on its own, after the room Worker. The checked-in KV id is
+the all-zero placeholder, not a live namespace. Replace it before the first
+deploy. Until `PROBE_STATE` is a real namespace, the Worker cannot remember a
+streak, so it does not notify. The config is
+[external-probe.wrangler.jsonc](../cloudflare/external-probe.wrangler.jsonc).
+
+```sh
+cd cloudflare
+npx wrangler kv namespace create PROBE_STATE --config external-probe.wrangler.jsonc
+npx wrangler secret put PROBE_ALERT_WEBHOOK_URL --config external-probe.wrangler.jsonc
+npx wrangler secret put ROOM_AGENT_ORIGIN --config external-probe.wrangler.jsonc
+npx wrangler secret put ROOM_AGENT_ROOM --config external-probe.wrangler.jsonc
+npx wrangler secret put ROOM_AGENT_TOKEN --config external-probe.wrangler.jsonc
+npx wrangler deploy --config external-probe.wrangler.jsonc
+```

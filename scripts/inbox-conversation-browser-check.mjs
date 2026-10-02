@@ -100,7 +100,7 @@ for (const mobile of [false, true]) test(`conversation and attachments ${mobile 
   assert.ok(labels.some(l => l.includes("(this message)")), "the open message is marked");
   const marked = labels[0].includes("(this message)") ? 0 : 1;
   assert.equal(await buttons.nth(marked).isDisabled(), true);
-  const indents = [await buttons.nth(0).evaluate(el => el.style.marginLeft), await buttons.nth(1).evaluate(el => el.style.marginLeft)];
+  const indents = [await buttons.nth(0).evaluate(el => getComputedStyle(el).marginLeft), await buttons.nth(1).evaluate(el => getComputedStyle(el).marginLeft)];
   assert.ok(indents.some(m => m !== "0px" && m !== ""), "the reply entry is depth-indented");
   // An entry opens its source in the reader.
   const other = marked === 0 ? 1 : 0;

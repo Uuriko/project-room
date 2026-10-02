@@ -875,6 +875,7 @@
         <p id="agent-roster-hint" class="form-hint"></p>
         <p id="agent-packet-today" class="form-hint" hidden>Use my AI, then paste the draft. No key in chat.</p>
         <ul id="agent-capabilities" class="form-hint agent-capabilities"></ul>
+        <label>Access<select id="agent-connect-access"><option value="chat">Read & chat</option><option value="contribute" selected>Contribute work</option><option value="review">Review work</option></select></label>
         <details id="agent-connect-advanced" class="agent-advanced"><summary>Advanced</summary>
           <label>How they connect<select id="agent-connect-route" aria-describedby="agent-route-hint">
             <option value="packet">Chat packet</option>
@@ -884,7 +885,6 @@
           <p id="agent-route-hint" class="form-hint"></p>
           <p id="agent-access-hint" class="form-hint"></p>
           <div class="share-settings">
-            <label>Access<select id="agent-connect-access"><option value="chat">Read & chat</option><option value="contribute">Contribute work</option><option value="review">Review work</option></select></label>
             <label>Expires in<select id="agent-connect-expiry"><option value="1">1 day</option><option value="7" selected>7 days</option><option value="30">30 days</option></select></label>
           </div>
           <details id="agent-key-later" hidden><summary>Agent credentials</summary>
@@ -909,6 +909,7 @@
       <section id="agent-setup" hidden>
         <ol id="agent-import-checklist"></ol>
         <p id="agent-import-route" class="form-hint"></p>
+        <details id="agent-local-client"><summary>If you run the Room client locally</summary><pre id="agent-local-command" class="form-hint"></pre></details>
         <button id="agent-copy-checklist" type="button" class="button ghost">Copy plug-in steps</button>
         <details id="agent-private-details"><summary>Reveal private setup</summary>
           <p class="form-hint">Keep this out of chats, shared files and repositories.</p>
@@ -951,7 +952,8 @@
           <button id="agent-invite-copy-all" class="button primary" type="button">Copy all links</button>
         </div>
         <button id="agent-invite-another" class="button ghost" type="button">New invite</button>
-        <details class="agent-invite-instructions"><summary>Connection instructions</summary><pre id="agent-invite-share" class="form-hint"></pre></details>
+        <p id="agent-invite-hosted"></p>
+        <details class="agent-invite-instructions"><summary>If you run the Room client locally</summary><pre id="agent-invite-share" class="form-hint"></pre></details>
       </div>
       <p id="agent-invite-status" class="form-status" role="status" aria-live="polite"></p>
     </dialog>
