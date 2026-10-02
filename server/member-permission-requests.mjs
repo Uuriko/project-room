@@ -119,7 +119,9 @@ export class MemberPermissionRequests {
     const messageId = randomUUID();
     const body = decision === "approve"
       ? `Approved permission request ${row.request_id} for ${row.display_name}. Approved permissions: ${granted.join(", ") || "none added"}. Existing access is preserved.`
-      : `Declined permission request ${row.request_id} for ${row.display_name}. Existing access is unchanged.${note?.trim() ? ` ${note.trim()}` : ""}`;
+      : `Declined permission request ${row.request_id} for ${row.display_name}. Existing access is unchanged.`;
+    // Optional review notes retain the request record's narrower visibility;
+    // the public receipt and notification announce only the decision.
     // Existing message commands retain ordinary actor authority, archival and
     // capacity checks. The surrounding decision transaction makes this atomic.
     this.store.command(token, roomId, { id: randomUUID(), type: T.MESSAGE_POSTED,

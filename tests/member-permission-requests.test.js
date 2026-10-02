@@ -136,6 +136,24 @@ test("decision notifications use current message text and respect deletion", asy
   assert.equal((await f.feed(f.token)).body.notifications.some(item => item.requestId === "decision_text"), false);
 });
 
+test("private decision notes stay in the request record, not public outcome receipts", async t => {
+  const f = await setup(t);
+  const requests = new AccessRequests(f.store);
+  requests.requestForMember(f.token, "commons", { permissions: ["accept_work"], requestId: "private_note" });
+  const note = "Private review detail";
+  const declined = requests.decide(f.owner, "commons", "private_note", { decision: "deny", note });
+  assert.equal(declined.decisionNote, note);
+  const ownStatus = await f.request(`/api/access-requests/private_note?identityId=${f.identity.identityId}`, f.token);
+  assert.equal(ownStatus.body.decisionNote, note);
+  const message = f.store.room("commons").state.messages.find(item => item.id === declined.decisionMessageId);
+  assert.match(message.body, /^Declined permission request/);
+  assert.ok(!message.body.includes(note));
+  assert.ok(!JSON.stringify([...f.store.exportEvents(f.owner, "commons")]).includes(note));
+  const outcome = (await f.feed(f.token)).body.notifications.find(item => item.requestId === "private_note");
+  assert.equal(outcome.outcome, "denied");
+  assert.ok(!outcome.note.includes(note));
+});
+
 test("RT handler rows preserve the GET queue and share quota across both POST aliases", async t => {
   const f = await setup(t);
   const accessRequests = new AccessRequests(f.store);
