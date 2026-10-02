@@ -224,14 +224,12 @@ test("expired claim rejects new work while its original successful acquisition r
   assert.equal(current.next.action, "claim"); assert.equal(current.work.revision, 2);
 });
 
-test("managed contributor can accept but cannot acquire outside-write authority through MCP", { timeout: 30000 }, async t => {
+test("managed contributor acquires a write claim without write_external", { timeout: 30000 }, async t => {
   const f = await fixture(t), contributor = await f.enroll("managed-contributor", "contribute"), workItemId = "managed-write";
   f.send(T.WORK_PROPOSED, { workItemId, title: "Scoped work", definitionOfDone: "Result", accountableMemberId: "managed-contributor",
     mode: "write", independentVerificationRequired: false, ownerDecisionRequired: false });
   await recorded(contributor.mcp, "room_accept_work", { requestId: "accept-managed-write", workItemId, expectedRevision: 0 });
-  const before = auditRecovery(f.store).dataSha256;
-  const result = (await contributor.mcp.call("room_acquire_claim", { requestId: "no-outside-grant", workItemId, expectedRevision: 1, ...f.manifest.scope })).result;
-  assert.equal(result.structuredContent.code, "command_rejected");
-  assert.equal(auditRecovery(f.store).dataSha256, before);
-  assert.equal((await read(contributor.mcp, workItemId)).work.claim, null);
+  const acquired = await recorded(contributor.mcp, "room_acquire_claim", { requestId: "board-writer-claim", workItemId, expectedRevision: 1, ...f.manifest.scope });
+  assert.equal(acquired.duplicate, false);
+  assert.equal((await read(contributor.mcp, workItemId)).work.claim.holderId, "managed-contributor");
 });
