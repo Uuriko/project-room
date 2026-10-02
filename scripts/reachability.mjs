@@ -32,6 +32,12 @@ export const KEEP = [
   "server/recovery.mjs",
   "server/secret-scan.mjs",
   "server/spam-shadow-report.mjs",
+  // HB-1a. Wired by HB-1b and NOTIFY. Email send stays inert until then.
+  "server/notify-policy.mjs",
+  "server/notify-email.mjs",
+  "server/channel-adapters/webhook-secret.mjs",
+  "server/channel-adapters/slack-webhook.mjs",
+  "server/channel-adapters/discord-webhook.mjs",
   // Updates batch. Keep even when this walk calls them orphans.
   "server/needs-me.mjs",
   "server/attention.mjs",
