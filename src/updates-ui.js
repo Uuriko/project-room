@@ -207,16 +207,15 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
         const page = await client.roomRead(`/updates?${queryFor(next)}&limit=50${after ? `&cursor=${encodeURIComponent(after)}` : ""}`);
         if (!page || !current()) return null;
         if (!Array.isArray(page.items)) throw new Error("Could not read this Updates page.");
-        let progressed = false;
         for (const item of page.items) {
           if (!item || typeof item.id !== "string") throw new Error("Could not read this Updates page.");
-          const previous = merged.get(item.id);
-          if (!previous || previous.basisToken !== item.basisToken) progressed = true;
           merged.set(item.id, item);
         }
+        // Cursor progress, not visible/unique row count, advances a page.
+        // Sparse filtered pages still consume this finite replay budget.
         pages++; unavailable ||= partialSources(page); more = page.hasMore === true;
         const following = typeof page.cursor === "string" && page.cursor ? page.cursor : null;
-        if (more && (!following || seen.has(following) || !progressed)) {
+        if (more && (!following || seen.has(following))) {
           after = null; stalled = true; break;
         }
         after = more ? following : null;

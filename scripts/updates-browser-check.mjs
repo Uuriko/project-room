@@ -465,6 +465,60 @@ test("Updates navigation keeps review, draft and return context at 1280px and 39
   assert.equal(store.db.prepare("SELECT COUNT(*) AS count FROM private_update_marks WHERE member_id=?").get("reader-b").count, 0);
   assert.equal(store.db.prepare("SELECT action FROM private_update_marks WHERE room_id=? AND member_id=? AND item_id=?").get("commons", "reader-a", oldUpdateId).action, "read");
   assert.equal(JSON.stringify([store.room("commons"), store.room("updates-other")]), lifecycleBefore, "stale callbacks cannot mutate either room's shared state");
+
+  // Reuse the real account/Rooms lifecycle with a held second page, whose
+  // authorized contents must never enter the replacement reader's window.
+  for (let index = 0; index < 70; index++) send(agent, T.MESSAGE_POSTED, {
+    messageId: `reader-a-page-${index}`, body: `Reader A pagination ${index}`, toMemberId: "reader-a"
+  });
+  const pagingMarksBefore = store.db.prepare("SELECT COUNT(*) AS count FROM private_update_commands").get().count;
+  for (const boundary of ["room", "account", "authority"]) {
+    if (await page.locator("#updates-dialog").isVisible()) await page.locator("#updates-close").click();
+    await page.locator("#message-input").fill("");
+    await clickChrome(page, "#signout-button");
+    await loginAccount("navigation-account-a", "Reader A");
+    await page.locator("#topbar-updates").click();
+    await selectUpdatesFilter("Needs me", "needs");
+    assert.equal(await page.locator(".updates-row").count(), 50);
+    const delayedPage = await holdUpdatesPage(page, "actionable");
+    await page.locator("#updates-load-more").click();
+    const oldPage = await delayedPage.entered;
+    assert.equal(oldPage.viewerId, "reader-a");
+    assert.equal(oldPage.items.length, 21);
+    if (boundary === "authority") {
+      const member = store.room("commons").state.members["reader-a"];
+      send(owner, T.MEMBER_ACCESS_CHANGED, { memberId: member.id, expectedMemberRevision: member.revision,
+        permissions: member.permissions, active: false });
+      await page.locator("#main").waitFor({ state: "hidden" });
+    } else {
+      await page.locator("#updates-close").click();
+      if (boundary === "room") await openAccountRoom("updates-other");
+      else {
+        await clickChrome(page, "#signout-button");
+        await loginAccount("navigation-account-b", "Reader B");
+      }
+      await page.locator("#message-input").fill(`Keep ${boundary} replacement draft`);
+      await showOnlyUpdate(boundary === "room" ? "Private update in the other room" : "Private update for Reader B");
+    }
+    const destination = page.url();
+    await delayedPage.finish();
+    assert.equal(await page.evaluate(() => performance.timeOrigin), oldDocument, "the old page callback survives in the same document");
+    assert.equal(page.url(), destination);
+    for (const item of oldPage.items) assert.equal(await row(item.id).count(), 0, `${boundary} retires every old-reader page row`);
+    if (boundary === "authority") {
+      assert.equal(await page.locator(".updates-row").count(), 0);
+      assert.equal(await page.locator("#updates-dialog").isVisible(), false);
+      assert.equal(await page.locator("#updates-count").textContent(), "");
+      assert.equal(await page.locator("#work-navigation-return").isVisible(), false);
+    } else {
+      assert.equal(await page.locator(".updates-row").count(), 1);
+      assert.match(await page.locator("#updates-summary").textContent(), /\b1 loaded\b/);
+      assert.equal(await page.locator("#message-input").inputValue(), `Keep ${boundary} replacement draft`);
+      assert.doesNotMatch(await page.locator("#updates-dialog").innerText(), /Reader A pagination/);
+    }
+    assert.equal(store.db.prepare("SELECT COUNT(*) AS count FROM private_update_commands").get().count, pagingMarksBefore,
+      "retired page reads do not invent or retry private marks");
+  }
   assert.deepEqual(errors, []);
 });
 
@@ -953,6 +1007,7 @@ test("Updates page older authorized work, keep honest counts and restore the cap
     assert.equal(await page.locator("#updates-dialog").evaluate(node => node.scrollWidth <= node.clientWidth + 1), true);
     assert.ok((await page.locator("#updates-dialog").boundingBox()).width <= width);
     mkdirSync("test-results", { recursive: true });
+    await page.locator("#updates-summary").scrollIntoViewIfNeeded();
     await page.screenshot({ path: `test-results/updates-pagination-return-${width}.png`, animations: "disabled" });
     await page.locator("#updates-close").click();
   }
@@ -982,6 +1037,7 @@ test("Updates page older authorized work, keep honest counts and restore the cap
   assert.deepEqual(requests.slice(beforeLargerReturn), currentPages.map((_, index) => ({ state: "all", cursor: index ? currentPages[index - 1].cursor : null })));
   assert.ok(Math.abs(await page.locator("#updates-dialog").evaluate(node => node.scrollTop) - largerScroll) <= 2);
   assert.equal(await f.more.isVisible() && !await f.more.isDisabled(), false, "hasMore=false exposes no enabled continuation");
+  assert.equal(await page.locator("#updates-count").textContent(), "100+", "the last activity page is never mistaken for the actionable total");
 
   // An older Saved target can disappear while away, without replacing Saved
   // with another filter or treating the first two pages as the whole list.
@@ -998,6 +1054,27 @@ test("Updates page older authorized work, keep honest counts and restore the cap
   assert.equal(await page.getByRole("tab", { name: "Saved" }).getAttribute("aria-selected"), "true");
   assert.equal(requests.length - beforeMissingReturn, 2);
   assert.doesNotMatch(await page.locator(".updates-list").innerText(), /Nothing in this filter|Nothing needs you/);
+
+  await f.selectUpdatesFilter("All activity", "all");
+  currentPages = await f.readPages();
+  await f.loadMore(currentPages.slice(0, 2).flatMap(value => value.items));
+  await f.action(review.id, "open").click();
+  await page.locator("#updates-dialog").waitFor({ state: "hidden" });
+  for (let index = 0; index < 10; index++) f.post(`moved-target-${index}`);
+  currentPages = await f.readPages();
+  assert.equal(currentPages.slice(0, 2).flatMap(value => value.items).some(item => item.id === review.id), false);
+  const beforeDisplacedReturn = requests.length;
+  await page.locator("#work-navigation-return").click();
+  await page.locator("#updates-dialog").waitFor({ state: "visible" });
+  await page.waitForFunction(() => document.activeElement?.dataset.updateFilter === "all");
+  await f.waitRows(currentPages.slice(0, 2).flatMap(value => value.items), { status: null });
+  assert.equal(requests.length - beforeDisplacedReturn, 2);
+  assert.match(await page.locator("#updates-status").textContent(), /outside.*loaded|load more/i);
+  assert.doesNotMatch(await page.locator("#updates-status").textContent(), /no longer|unavailable|not found/i,
+    "a target beyond the captured prefix is not declared missing");
+  assert.equal(await f.row(review.id).count(), 0, "return never restores cached source text outside its fresh window");
+  await f.loadMore(currentPages.flatMap(value => value.items));
+  assert.equal(await f.row(review.id).count(), 1, "the displaced source is still reachable with explicit Load more");
   assert.deepEqual(f.errors, []);
 });
 
@@ -1058,7 +1135,7 @@ test("Updates restart a real stale cursor once, retain the window on transport r
 
   // Corrupt only continuation metadata on a genuine server response. This
   // guards the client's termination contract, not server cursor generation.
-  for (const fault of ["repeated cursor", "empty continuation"]) {
+  for (const fault of ["repeated cursor", "missing required cursor"]) {
     await f.openUpdates();
     const beforeFault = requests.length;
     let deliveries = 0;
@@ -1070,7 +1147,7 @@ test("Updates restart a real stale cursor once, retain the window on transport r
       const body = await response.json();
       deliveries++;
       if (fault === "repeated cursor") body.cursor = url.searchParams.get("cursor");
-      else body.items = [];
+      else body.cursor = null;
       await route.fulfill({ response, json: body });
     };
     const routePattern = /\/api\/rooms\/commons\/updates\?/;
@@ -1200,5 +1277,136 @@ test("Updates fence repeated Load more and held real pages across filter, Close,
   }
   assert.equal(f.countCommands(), commandsBefore, "paging and canceled page deliveries create no private marks");
   assert.equal(JSON.stringify(store.room("commons")), sharedBefore);
+  assert.deepEqual(f.errors, []);
+});
+
+test("Updates accept advancing opaque cursors even when a page adds no new rows", { timeout: 120000 }, async t => {
+  const f = await pagingJourney(t);
+  const { page, pages, requests } = f;
+  for (const contents of ["empty", "duplicates"]) {
+    await f.openUpdates();
+    const before = requests.length;
+    let deliveries = 0;
+    const pattern = /\/api\/rooms\/commons\/updates\?/;
+    const advancing = async route => {
+      const url = new URL(route.request().url());
+      if (url.searchParams.get("cursor") !== pages[0].cursor) return route.continue();
+      const response = await route.fetch();
+      assert.equal(response.status(), 200);
+      const body = await response.json();
+      assert.equal(body.cursor, pages[1].cursor);
+      body.items = contents === "empty" ? [] : pages[0].items;
+      deliveries++;
+      await route.fulfill({ response, json: body });
+    };
+    await page.route(pattern, advancing);
+    const continuation = page.waitForResponse(response => new URL(response.url()).searchParams.get("cursor") === pages[0].cursor);
+    await f.more.click();
+    await continuation;
+    await f.waitRows(pages[0].items);
+    assert.equal(await f.more.textContent(), "Load more", "an advancing cursor is usable even when no new row is visible");
+    assert.equal(await f.more.isDisabled(), false);
+    assert.equal(deliveries, 1);
+    assert.equal(requests.length - before, 1, "an empty page consumes one explicit click, not an automatic crawl");
+    await f.loadMore([...pages[0].items, ...pages[2].items]);
+    assert.deepEqual(requests.slice(before), [
+      { state: "all", cursor: pages[0].cursor }, { state: "all", cursor: pages[1].cursor }
+    ]);
+    assert.match(await page.locator("#updates-summary").textContent(), /\b76 loaded\b/);
+    assert.equal(await f.more.isVisible() && !await f.more.isDisabled(), false);
+    await page.unroute(pattern, advancing);
+    await page.locator("#updates-close").click();
+  }
+  assert.deepEqual(f.errors, []);
+});
+
+test("Updates preserve the exact uncertain operation and neutral recovery across older-page loading", { timeout: 120000 }, async t => {
+  const f = await pagingJourney(t);
+  const { page, origin, review, pages, store } = f;
+  await f.openUpdates();
+  await f.loadMore(pages.slice(0, 2).flatMap(value => value.items));
+  const commandsBefore = f.countCommands();
+  const readUrl = origin + f.path(review.id, "open");
+  let enter, release, deliveries = 0;
+  const entered = new Promise(resolve => { enter = resolve; });
+  const held = new Promise(resolve => { release = resolve; });
+  const readReceipts = [];
+  const holdRead = async route => {
+    const response = await route.fetch();
+    assert.equal(response.status(), 200);
+    readReceipts.push(await response.json());
+    if (++deliveries === 1) { enter(); await held; }
+    await route.fulfill({ response });
+  };
+  await page.route(readUrl, holdRead);
+  await f.action(review.id, "open").click();
+  await entered;
+  const original = f.attempts.at(-1);
+  const committed = f.mark(review.id);
+  assert.equal(original.body.expectedBasis, review.basisToken);
+  assert.equal(f.countCommands(), commandsBefore + 1);
+  const destination = page.url();
+  await f.loadMore(pages.flatMap(value => value.items));
+  const finishedRead = page.waitForEvent("requestfinished", request => request.url() === readUrl);
+  release();
+  await finishedRead;
+  await f.waitRetry(review.id, "open");
+  assert.equal(page.url(), destination, "Load more retires the pending Open without discarding its operation");
+  assert.equal(f.attempts.length, 1, "paging never automatically repeats a private mark");
+  const current = await f.revise(review.sourceRef.workItemId);
+  await f.selectUpdatesFilter("All activity", "all");
+  await f.waitRetry(review.id, "open");
+  assert.match(await f.row(review.id).locator(".updates-copy p").textContent(), / · unread$/);
+  const exactRetry = f.responseFor(review.id, "open");
+  await f.action(review.id, "open").click();
+  assert.equal((await exactRetry).status(), 200);
+  await f.waitChanged();
+  assert.deepEqual(f.attempts.at(-1), original, "page refresh cannot advance the uncertain request id or displayed basis");
+  assert.equal(readReceipts[1].duplicate, true);
+  assert.equal(readReceipts[1].item.basisToken, review.basisToken);
+  assert.equal(f.countCommands(), commandsBefore + 1);
+  assert.deepEqual(f.mark(review.id), committed);
+  assert.equal(page.url(), destination, "historical success cannot navigate using the fresh page's revision");
+  await page.unroute(readUrl, holdRead);
+
+  await f.selectUpdatesFilter("Needs me", "needs");
+  const needs = await f.readPages("actionable");
+  await f.loadMore(needs.slice(0, 2).flatMap(value => value.items));
+  const doneUrl = origin + f.path(current.id, "done");
+  let doneDeliveries = 0;
+  const loseDone = async route => {
+    const response = await route.fetch();
+    assert.equal(response.status(), 200);
+    return ++doneDeliveries === 1 ? route.abort("failed") : route.fulfill({ response });
+  };
+  await page.route(doneUrl, loseDone);
+  await f.action(current.id, "done").click();
+  await f.waitRetry(current.id, "done");
+  const doneAttempt = f.attempts.at(-1), doneMark = f.mark(current.id);
+  assert.equal(doneAttempt.body.expectedBasis, current.basisToken);
+  assert.notEqual(doneAttempt.body.requestId, original.body.requestId);
+  await f.selectUpdatesFilter("Needs me", "needs");
+  await f.waitRetry(current.id, "done");
+  assert.equal(await f.row(current.id).locator(".updates-copy strong").textContent(), "Earlier update action");
+  assert.doesNotMatch(await f.row(current.id).innerText(), /Review older-paged-review/);
+  assert.match(await page.locator("#updates-summary").textContent(), /\b100 loaded\b/);
+  assert.equal(await page.locator(".updates-row").count(), 101, "the neutral recovery control is excluded from the loaded count");
+  await f.more.click();
+  await page.waitForFunction(() => /\b125 loaded\b/.test(document.querySelector("#updates-summary")?.textContent ?? ""));
+  await f.waitRetry(current.id, "done");
+  assert.equal(await f.row(current.id).locator(".updates-copy strong").textContent(), "Earlier update action");
+  assert.equal(f.attempts.length, 3, "neither refresh nor Load more retries the uncertain Done");
+  const sharedBeforeRetry = JSON.stringify(store.room("commons"));
+  const confirmed = f.responseFor(current.id, "done");
+  await f.action(current.id, "done").click();
+  const response = await confirmed;
+  assert.equal(response.status(), 200);
+  assert.equal((await response.json()).duplicate, true);
+  await f.row(current.id).waitFor({ state: "detached" });
+  assert.deepEqual(f.attempts.at(-1), doneAttempt);
+  assert.equal(f.countCommands(), commandsBefore + 2);
+  assert.deepEqual(f.mark(current.id), doneMark);
+  assert.equal(JSON.stringify(store.room("commons")), sharedBeforeRetry);
+  await page.unroute(doneUrl, loseDone);
   assert.deepEqual(f.errors, []);
 });
