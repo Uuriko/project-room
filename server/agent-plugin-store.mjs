@@ -108,6 +108,11 @@ export const agentPluginSchema = `
     ON agent_webhook_deliveries(state, next_attempt_at);
   CREATE INDEX IF NOT EXISTS agent_webhook_deliveries_agent
     ON agent_webhook_deliveries(agent_id, state, created_at);
+  -- Startup hydrates the newest deliveries per subscription. This pair lets
+  -- that read stop after 100 rows. CREATE INDEX IF NOT EXISTS builds it once
+  -- on a database that already has rows.
+  CREATE INDEX IF NOT EXISTS agent_webhook_deliveries_sub_created
+    ON agent_webhook_deliveries(subscription_id, created_at);
   -- RC-2026-09-18-049: agent verification tiers. A row attests that a room
   -- owner vouches for the identity (verifiedBy = attesting owner's member
   -- id); absence of a row means the identity is unverified. A second table
@@ -129,6 +134,40 @@ export const agentPluginSchema = `
 // waits before the drain looks at it again. Keeps it pending without letting
 // it block the head of the due queue.
 export const SKIPPED_RECHECK_MS = 10 * 60 * 1000;
+
+// The in-memory journal keeps this many newest rows per subscription.
+// Retention keeps those, plus delivered and dead-letter rows inside the
+// window below. Pending and failed rows are never pruned: they can still
+// be attempted.
+export const WEBHOOK_DELIVERY_KEEP = 100;
+export const WEBHOOK_DELIVERY_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+export const WEBHOOK_DELIVERY_PRUNE_BATCH = 500;
+
+// Indexed per subscription. ORDER BY created_at matches the previous
+// "newest 100" selection when timestamps differ; rowid breaks ties without
+// a sort of the whole subscription. Callers reverse the rows so the cache
+// stays oldest-first, matching the previous ORDER BY created_at ASC.
+export const RECENT_WEBHOOK_DELIVERIES_SQL =
+  `SELECT * FROM agent_webhook_deliveries
+   WHERE subscription_id = ?
+   ORDER BY created_at DESC, rowid DESC
+   LIMIT ${WEBHOOK_DELIVERY_KEEP}`;
+
+function cachedDelivery(row) {
+  return {
+    deliveryId: row.delivery_id,
+    subscriptionId: row.subscription_id,
+    agentId: row.agent_id,
+    url: null, // never hydrated: journal views are secret-safe
+    eventType: row.event_type,
+    data: JSON.parse(row.payload_json).data ?? {},
+    signature: null, // never hydrated: signatures stay in the table
+    state: row.state,
+    attempts: row.attempts,
+    error: row.last_error,
+    createdAt: row.created_at,
+  };
+}
 
 export class AgentPluginError extends Error {
   constructor(status, code, message) {
@@ -251,34 +290,20 @@ export class AgentPluginStore {
     // RC-2026-09-19-064: the durable delivery journal now lives in
     // agent_webhook_deliveries (restart-safe); the in-memory journal is a
     // bounded cache hydrated from it so the pure module stays consistent.
+    // One indexed LIMIT per subscription. A correlated "newest 100" subquery
+    // scanned the whole table once per row and froze every cold start.
     const hasDeliveriesTable = this.db.prepare(
       "SELECT 1 FROM sqlite_master WHERE type='table' AND name='agent_webhook_deliveries'").get();
-    const deliveriesBySub = new Map();
-    if (hasDeliveriesTable) {
-      for (const row of this.db.prepare(
-        `SELECT * FROM agent_webhook_deliveries WHERE delivery_id IN (
-           SELECT delivery_id FROM agent_webhook_deliveries d2
-           WHERE d2.subscription_id = agent_webhook_deliveries.subscription_id
-           ORDER BY created_at DESC LIMIT 100
-         ) ORDER BY created_at ASC`).all()) {
-        const list = deliveriesBySub.get(row.subscription_id) ?? [];
-        list.push({
-          deliveryId: row.delivery_id,
-          subscriptionId: row.subscription_id,
-          agentId: row.agent_id,
-          url: null, // never hydrated: journal views are secret-safe
-          eventType: row.event_type,
-          data: JSON.parse(row.payload_json).data ?? {},
-          signature: null, // never hydrated: signatures stay in the table
-          state: row.state,
-          attempts: row.attempts,
-          error: row.last_error,
-          createdAt: row.created_at,
-        });
-        deliveriesBySub.set(row.subscription_id, list);
-      }
-    }
+    const recentDeliveries = hasDeliveriesTable ? this.db.prepare(RECENT_WEBHOOK_DELIVERIES_SQL) : null;
     for (const row of this.db.prepare("SELECT * FROM agent_webhook_subs").all()) {
+      let deliveries;
+      if (recentDeliveries) {
+        const rows = recentDeliveries.all(row.subscription_id);
+        // Empty SQL falls through to journal_json, matching the previous
+        // "no grouped rows" path for a subscription that has never been
+        // written to the delivery table.
+        if (rows.length) deliveries = rows.reverse().map(cachedDelivery);
+      }
       this.subs.set(row.subscription_id, {
         subscriptionId: row.subscription_id,
         agentId: row.agent_id,
@@ -287,8 +312,7 @@ export class AgentPluginStore {
         secret: row.secret,
         enabled: row.enabled === 1,
         createdAt: row.created_at,
-        deliveries: deliveriesBySub.get(row.subscription_id)
-          ?? JSON.parse(row.journal_json ?? "[]"),
+        deliveries: deliveries ?? JSON.parse(row.journal_json ?? "[]"),
       });
     }
     // RC-2026-09-18-049: verification attestations and per-room gate policy.
@@ -1067,6 +1091,53 @@ export class AgentPluginStore {
     if (typeof this.dispatchKick !== "function") return false;
     try { this.dispatchKick(); return true; }
     catch { return false; }
+  }
+
+  // Drop delivered and dead-letter rows that are both outside the newest
+  // WEBHOOK_DELIVERY_KEEP per subscription and older than the retention
+  // window. Pending and failed rows stay: they can still be attempted.
+  // One cron tick deletes at most WEBHOOK_DELIVERY_PRUNE_BATCH rows; the
+  // next tick continues. The cache drops any id this batch removed.
+  pruneWebhookDeliveries({ now = this.store.now() } = {}) {
+    if (!Number.isSafeInteger(now)) throw new Error("Invalid webhook delivery retention clock");
+    const cutoff = now - WEBHOOK_DELIVERY_RETENTION_MS;
+    return this.mutate(() => {
+      const doomed = this.db.prepare(
+        `SELECT delivery_id FROM (
+           SELECT delivery_id, state, created_at,
+                  ROW_NUMBER() OVER (
+                    PARTITION BY subscription_id
+                    ORDER BY created_at DESC, rowid DESC
+                  ) AS rn
+           FROM agent_webhook_deliveries
+         )
+         WHERE state IN ('delivered', 'dead_letter')
+           AND rn > ?
+           AND created_at < ?
+         ORDER BY created_at ASC, delivery_id ASC
+         LIMIT ?`
+      ).all(WEBHOOK_DELIVERY_KEEP, cutoff, WEBHOOK_DELIVERY_PRUNE_BATCH);
+      const remove = this.db.prepare(
+        "DELETE FROM agent_webhook_deliveries WHERE delivery_id=? AND state IN ('delivered','dead_letter')");
+      const gone = new Set();
+      let deleted = 0;
+      for (const { delivery_id } of doomed) {
+        deleted += remove.run(delivery_id).changes;
+        gone.add(delivery_id);
+      }
+      if (gone.size) {
+        for (const sub of this.subs.values()) {
+          if (!Array.isArray(sub.deliveries) || sub.deliveries.length === 0) continue;
+          const next = sub.deliveries.filter(delivery => !gone.has(delivery.deliveryId));
+          if (next.length !== sub.deliveries.length) sub.deliveries = next;
+        }
+      }
+      return Object.freeze({
+        deleted,
+        moreMayRemain: doomed.length === WEBHOOK_DELIVERY_PRUNE_BATCH,
+        batchLimit: WEBHOOK_DELIVERY_PRUNE_BATCH,
+      });
+    });
   }
 
   // Sweep due deliveries (pending/failed with next_attempt_at <= now).

@@ -85,6 +85,8 @@ test('unpaused retention RPC preserves dry-run, opt-in deletion and atomic rollb
       assert.equal(receipt.liveStoreScanned, true);
       assert.equal(receipt.deleted, deletion ? 2 : 0);
       assert.equal(receipt.categories.web_fetch_log.eligible, 1);
+      assert.equal(receipt.webhookDeliveries.deleted, 0);
+      assert.equal(receipt.webhookDeliveries.moreMayRemain, false);
       assert.deepEqual(await call('counts'), {
         fetch: deletion ? 1 : 2, research: deletion ? 1 : 2, events: before.events
       });
