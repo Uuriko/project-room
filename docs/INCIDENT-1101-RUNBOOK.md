@@ -41,7 +41,7 @@ On recurrence: capture Worker and DO exceptions plus Cron Events before changing
   scans that pressure DO memory).
 - R7: DO boot budget + migration rehearsal in staging.
 - R4: cron/serving failure-domain split (design first).
-- W3: `scripts/watch-deploy-drift.mjs` for drift + recurrence detection.
+- W3: `scripts/watch-deploy-drift.mjs`, scheduled by `.github/workflows/deploy-drift.yml`, for drift + recurrence detection. It reads public endpoints and fails when production lags main by more than 5 commits or 24 hours.
 
 ## What NOT to do
 

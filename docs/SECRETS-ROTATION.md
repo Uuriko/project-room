@@ -1,17 +1,16 @@
 # Secrets Rotation Runbook (F005)
 
 Operational maturity for the project's credential story: a single, repeatable
-procedure for rotating every secret type the room uses. TOTP enrollment and
-verification live in the **F018 TOTP module** (`src/totp-2fa.mjs`, see
-`docs/TOTP-2FA.md`); passkey support is the **F019 passkey module** (planned
-slice, not yet in the tree). Audit-receipt signing is F020
+procedure for rotating every secret type the room uses. There is no
+`src/totp-2fa.mjs` and the server does not enroll TOTP. Passkeys are
+implemented: `server/account-passkeys.mjs` wires the WebAuthn ceremonies in
+`src/passkey-login.mjs`. Audit-receipt signing is F020
 (`src/audit-receipts.mjs`). Local account access keys are described in
-`docs/SERVICE.md`.
+`docs/SERVICE.md`. Recovery codes live in `server/account-login-methods.mjs`.
 
 **No real secrets appear in this document.** Every value shown is a placeholder.
-Treat a real secret the way `docs/TOTP-2FA.md` does: generate once, store
-server-side, never log it, never persist a provisioning URI beyond the
-enrollment screen.
+Generate a secret once, store it server-side, never log it, and never persist
+a provisioning URI beyond the enrollment screen.
 
 Every rotation below follows the same five-phase pattern:
 
@@ -29,11 +28,11 @@ Every rotation below follows the same five-phase pattern:
 
 | Secret type | Where it lives | Owner module | Storage rule |
 |---|---|---|---|
-| TOTP enrollment seeds | Server-side, one per owner account | F018 `src/totp-2fa.mjs` (`generateSecret()`) | Stored once against the account; never in logs, QR URIs not cached |
-| Passkey credentials (public keys + credential IDs) | Server-side credential store | F019 passkey module (planned slice) | Private key material never leaves the authenticator; store public key + credential ID per account |
+| TOTP enrollment seeds | Not stored. `src/totp-2fa.mjs` is not in the tree | None | There is no TOTP seed to rotate |
+| Passkey credentials (public keys + credential IDs) | Server-side credential store | `server/account-passkeys.mjs` (`src/passkey-login.mjs`) | Private key material never leaves the authenticator; store public key + credential ID per account |
 | Local account access keys | Server-side account store; printed once to the operator | Service layer (`docs/SERVICE.md` `--account-key`); 7-day keys | One active key per account; revoked copies unusable |
 | Audit-receipt signing key | Supplied by the caller of `src/audit-receipts.mjs` (`issueReceipt` / `verifyChain`) — never hardcoded, never read from env inside the module | F020 `src/audit-receipts.mjs` (HMAC-SHA256) | Operator-held; keep outside the receipt chain itself |
-| Recovery codes | Salted hashes, server-side, per account | TOTP recovery slice (follow-up to F018) | Single-use; shown once at enrollment; burn on use; audit-logged |
+| Recovery codes | Salted hashes, server-side, per account | `server/account-login-methods.mjs` (`generateRecoveryCodes`) | Single-use; shown once at generation; burn on use |
 | Operator/API tokens | Room host config / deployment environment | Deployment (outside the tree) | Shortest TTL the deployment supports |
 
 ## 2. Rotation cadences
@@ -43,65 +42,46 @@ high-risk accounts, loosen none without writing down why.
 
 | Secret type | Scheduled rotation | Event-driven rotation |
 |---|---|---|
-| TOTP seeds | **On demand only.** TOTP seeds do not expire on a schedule; rotating a working seed adds risk, not security. Rotate when the device is lost, replaced, or the recovery-code path was used. | Device loss, authenticator app reset, suspected seed exposure, break-glass recovery-code use |
+| TOTP seeds | None. The server does not enroll TOTP, so there is no seed to rotate. | Not applicable |
 | Passkey credentials | **On demand only.** Rotate by registering a replacement credential and deleting the old registration. | Authenticator lost/sold/reset, account compromise |
 | Local account access keys | Every 7 days (the issued TTL), or immediately via `--account-key` rotation | Suspected compromise; account suspension/re-activation cycle (`docs/SERVICE.md`: suspension increments the authorization epoch and revokes both account and Room credentials) |
 | Audit-receipt signing key | **Annually**, or whenever the operator roster changes | Suspected key exposure |
-| Recovery codes | Re-issued whenever a TOTP re-enrollment happens; burned individually on use | Code set partially used → top up only after re-confirming the TOTP device |
+| Recovery codes | Re-issued by generating a new set, which replaces the previous hashes | Code set partially used, or suspected exposure of a shown code |
 | Operator/API tokens | Per the deployment's TTL; re-issue on any operator change | Operator departure, suspected leak |
 
 ## 3. Rotation procedures
 
-### 3.1 TOTP seed rotation (F018)
+### 3.1 TOTP seed rotation
 
-The account's TOTP seed is the one secret in this table that only the owner
-can complete — the new seed must be provisioned into the owner's authenticator
-app, so the owner has to be reachable.
+`src/totp-2fa.mjs` is not in the tree. The server has no TOTP enrollment and
+stores no TOTP seed, so this runbook has no TOTP generate, confirm, or
+cutover step. `docs/history/TOTP-2FA.md` describes a module that was not
+shipped.
 
-1. **Generate.** Server-side, call `generateSecret()` from `src/totp-2fa.mjs`.
-   Hold it as *pending*; do not overwrite the current seed yet.
-2. **Distribute.** Build the provisioning URI with `provisioningUri({ issuer,
-   account, secret })` and render the QR on an authenticated owner-only
-   screen. Same rule as enrollment: do not log, cache, or persist the URI
-   beyond the screen.
-3. **Confirm (the overlap).** Require the owner to type the current code from
-   their app and verify with `verifyCode(code, newSecret)`. This is the
-   overlap window: the *old* seed still gates logins until this step succeeds.
-4. **Cutover.** Only after a successful confirmation: store the new seed
-   against the account and flip the account to the new seed.
-5. **Revoke old.** Delete the old seed from the account record. There is no
-   dual-accept window for TOTP (two live seeds would double the code-guessing
-   surface), which is exactly why step 3 must succeed first.
-6. **Re-issue recovery codes.** A TOTP re-enrollment always burns the old
-   recovery-code set and issues a fresh set of 8–10 single-use codes (store
-   salted hashes; show once; require the owner to acknowledge saving them).
+### 3.2 Passkey credential rotation
 
-Rollback: if step 3 fails (mis-scanned QR), nothing changed — the old seed is
-still the only active one. Discard the pending seed and restart at step 1.
-Never cut over to an unconfirmed seed.
+Passkey registration and sign-in are live. `server/account-passkeys.mjs`
+issues the WebAuthn challenge and stores the public key and credential id.
+The private key stays on the authenticator.
 
-### 3.2 Passkey credential rotation (F019)
+1. **Generate.** With a signed-in account session, `POST /api/auth/passkey/register/options`,
+   then `POST /api/auth/passkey/register/finish` with the authenticator's
+   response. The server creates the registration challenge; the private key
+   never crosses the wire.
+2. **Distribute / register.** `finishRegistration` verifies the attestation
+   and stores the credential public key and credential id against the account.
+3. **Overlap window.** Keep the old credential while the owner confirms the
+   new one with `POST /api/auth/passkey/authenticate/options` and
+   `POST /api/auth/passkey/authenticate/finish`.
+4. **Cutover.** After that confirming sign-in, the new credential is active.
+5. **Revoke old.** `POST /api/auth/methods/remove` deletes the replaced
+   passkey method. Other authenticators on the account stay. The last active
+   sign-in method cannot be removed.
 
-F019 is the passkey module slice; these are the procedure requirements that
-slice must satisfy, stated here so the runbook stays accurate when it lands.
-
-1. **Generate.** The new credential is generated on the owner's authenticator
-   via the standard WebAuthn registration ceremony. The server creates the
-   registration challenge; the private key never crosses the wire.
-2. **Distribute / register.** The server verifies the attestation and stores
-   the credential public key + credential ID against the account as *pending*.
-3. **Overlap window.** Keep the old credential registration active while the
-   owner confirms the new one with a real sign-in using the new passkey.
-4. **Cutover.** After the confirming sign-in, mark the new registration
-   active and the old one revoked.
-5. **Revoke old.** Delete the old credential ID and public key from the
-   account record.
-
-Rollback: until step 4, the old credential is untouched — discard the pending
-registration and restart. Passkey rotation must support multiple active
-credentials per account (owners legitimately have two authenticators), so
-"revoke old" here means revoking the *specific replaced* credential, not
-wiping the account's whole credential set.
+Rollback: until step 5, the old credential still signs in. Discard an
+unfinished registration by letting its challenge expire (five minutes) and
+start again. "Revoke old" means that one credential, not every passkey on
+the account.
 
 ### 3.3 Local account access key rotation
 
@@ -169,8 +149,7 @@ checkpoint log must record two cutovers. Never re-sign old receipts.
   sign-in, a real signed receipt), never just confirming it was stored.
 - **Keep the old secret recoverable during the overlap window, and only
   during it.** "Recoverable" means retrievable by the operator — not
-  co-active with the new secret where the module forbids it (TOTP allows no
-  dual-accept; see 3.1).
+  co-active with the new secret where the module forbids it.
 - **Revocation is the last step, not the first.** A rotation that starts with
   revocation is a lockout, not a rotation.
 - **Log every rotation** as an audit event: what type, which account, when,
@@ -192,9 +171,10 @@ Assume the secret is already in hostile hands; speed beats elegance.
 2. **Rotate from a clean state.** Run the standard procedure for the secret
    type (section 3), but skip the overlap window: old secret dead, new
    secret live, no dual-accept.
-3. **Re-issue dependents.** A compromised TOTP seed means fresh recovery
-   codes too. A compromised signing key means a new checkpoint per 3.4 and a
-   review of receipts signed during the exposure window.
+3. **Re-issue dependents.** A suspected account compromise means a new
+   recovery-code set: `generateRecoveryCodes` replaces the previous hashes.
+   A compromised signing key means a new checkpoint per 3.4 and a review of
+   receipts signed during the exposure window.
 4. **Verify and audit.** Run the full verification checklist (section 6) and
    log the incident as an audit event: suspected-compromise flag, scope of
    what was rotated, exposure window estimate.
@@ -216,14 +196,12 @@ closed.
 - [ ] No copy of the old secret remains in operator notes, chat history,
       screenshots, or provisioning URIs
 
-### TOTP (F018)
-- [ ] `verifyCode` succeeds with the new seed and the ±1-step window policy
-      from `docs/TOTP-2FA.md`
-- [ ] Fresh recovery-code set issued, old set burned, owner acknowledged
-      saving the new set
+### TOTP
+- [ ] No step. The server does not enroll TOTP.
 
-### Passkey (F019)
+### Passkey
 - [ ] New credential completed a real sign-in ceremony
+      (`/api/auth/passkey/authenticate/finish`)
 - [ ] Only the intended credential registration was revoked (other
       authenticators on the account untouched)
 
@@ -240,15 +218,13 @@ closed.
 
 This runbook does not cover:
 
-- **Initial enrollment** of TOTP (F018 enrollment flow is in
-  `docs/TOTP-2FA.md`) or the first-ever passkey registration (F019 slice).
-- **Recovery codes as a product surface** — generation rules are referenced
-  from F018's recovery-code guidance; the dedicated recovery slice owns the
-  storage schema and break-glass UX.
-- **The F019 passkey module itself** — this runbook states the rotation
-  procedure it must satisfy, but the module (registration ceremony,
-  attestation verification, credential store schema) is a separate slice and
-  not yet in the tree.
+- **TOTP enrollment.** `src/totp-2fa.mjs` is not in the tree, so there is
+  no enrollment flow to rotate.
+- **First-ever passkey registration** is the same ceremony as section 3.2;
+  this runbook covers replacing a credential that already exists.
+- **Recovery-code storage** is `account_recovery_codes` in
+  `server/account-login-methods.mjs`. Generating a set replaces the previous
+  hashes and returns the plaintext codes once.
 - **Room-scoped keys and legacy Room credentials** — `docs/SERVICE.md` notes
   account-key rotation does not revoke legacy Room-scoped keys; rotating
   those is a separate procedure this runbook does not define.
