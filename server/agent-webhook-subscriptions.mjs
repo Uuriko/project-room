@@ -50,7 +50,7 @@ const unknownEvents = events => events.filter(e => e !== WILDCARD && !EVENT_CATA
 // invalid_subscription. A hostname that resolves into blocked space, or a
 // known metadata name, is 422 webhook_url_not_public and is not stored.
 // `lookup` is injectable (dns.lookup-compatible, { all: true }); omitted,
-// Node uses dns.lookup and Workers skips DNS.
+// Node uses dns.lookup and Workers resolves through DNS-over-HTTPS.
 export async function assertSubscriptionWebhookUrl(url, options) {
   try {
     return await assertAgentWebhookUrlPublic(url, options);
