@@ -196,3 +196,12 @@ jobs:
           name: cloudflare-browser-evidence
           path: cloudflare/test-results/
           if-no-files-found: ignore
+  # Branch protection requires a check named "test". The package workflows that
+  # used that job id are gone. This job keeps the name and passes only when
+  # the suite jobs above have succeeded.
+  test:
+    needs: [contract, lint, unit, browser, cloudflare]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: echo "contract, lint, unit, browser, and cloudflare succeeded"

@@ -35,7 +35,7 @@ import { createRateLimiter } from "./identity-ratelimit.mjs";
 // scripts/runtime-package.mjs).
 import { event, EVENT_TYPES as T, isRoomArchived, memberCan } from "../src/events.js";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
-import { checkAgentDisplayName } from "./display-name-guard.mjs";
+import { assertMemberDisplayNameAvailable, checkAgentDisplayName } from "./display-name-guard.mjs";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 
 // Local ServiceError (mirrors server/store.mjs). We avoid importing from
@@ -218,6 +218,9 @@ export class AccessRequests {
       if (pending >= MAX_PENDING_PER_IDENTITY_ROOM) {
         fail(409, "too_many_requests", `At most ${MAX_PENDING_PER_IDENTITY_ROOM} pending requests per room`);
       }
+      // The requested name is the member name an approval will store. Refuse
+      // it before the request or its timeline event is written.
+      assertMemberDisplayNameAvailable(name, this.store.room(roomId).state.members);
       const now = this.store.now();
       this.db.prepare(`INSERT INTO access_requests(
           request_id, room_id, identity_id, display_name, requested_permissions,
@@ -414,6 +417,15 @@ export class AccessRequests {
     if (room.sequence + 1 >= MAX_ROOM_EVENTS || countActiveMembers(room.state.members) >= MAX_MEMBERS_PER_ROOM) {
       return { approved: false, pendingNote: "This room is at pilot capacity; the request waits for an owner decision." };
     }
+    // Reserved, duplicate, confusable, and control-character names never
+    // become a member here. A name that fails only the older mixed-script
+    // check still waits for the owner, as before.
+    try {
+      assertMemberDisplayNameAvailable(row.display_name, room.state.members);
+    } catch (error) {
+      if (error.code !== "display_name_unavailable") throw error;
+      return { approved: false, pendingNote: "That display name is unavailable, so the request waits for an owner decision." };
+    }
     // Deceptive-name guard, same as AgentIdentities.link(): a confusing or
     // duplicate name never auto-admits — it waits for owner review.
     const canonical = value => value.trim().replace(/\p{White_Space}+/gu, " ").toLowerCase();
@@ -598,6 +610,7 @@ export class AccessRequests {
         fail(403, "access_denied", "Delegated membership administration cannot grant manage_members");
       }
       const identities = this.store.identities;
+      assertMemberDisplayNameAvailable(row.display_name, this.store.room(roomId).state.members);
       // Referral attribution: match the "who referred you?" text against
       // member display names. A unique match attributes the join; anything
       // else joins with no referrer and the approval proceeds unchanged.

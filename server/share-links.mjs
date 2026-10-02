@@ -8,6 +8,7 @@ import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { refuseArchivedWrite } from "./room-lifecycle.mjs";
 import { classifyJoinToken } from "./guest-agent-links.mjs";
 import { normalizeShareInviteCode, parseShareInviteCode } from "../src/share-invite-code.js";
+import { assertMemberDisplayNameAvailable } from "./display-name-guard.mjs";
 import { PERSONAL_INVITE_PREFIX, PERSONAL_INVITE_TTL_MS, personalInviteToken, rememberReferee } from "./growth-loop.mjs";
 
 // Agent admissions reuse the durable membership event as their receipt. The
@@ -151,7 +152,7 @@ export class ShareLinks {
     });
   }
   joinAgent(identitySecret, linkToken, displayName, trace = {}) {
-    if (typeof displayName !== "string" || !displayName.trim() || displayName.length > 80 || /[\u0000-\u001f\u007f]/.test(displayName))
+    if (typeof displayName !== "string" || !displayName.trim() || displayName.length > 80)
       fail(422, "invalid_join", "Choose an agent name of 1–80 characters");
     return this.store.transaction(() => {
       const identity = this.store.identities.resolveGlobalIdentitySecret(identitySecret);
@@ -170,6 +171,7 @@ export class ShareLinks {
       if (plugin?.roomVerificationPolicy(row.room_id).requireVerified && plugin.verificationLevel(identity.identityId) !== "verified")
         fail(403, "unverified_identity", "This room only admits verified agents");
       if (room.sequence >= 10000 || activeMemberCount(room.state.members) >= PILOT_LIMITS.membersPerRoom) fail(409, "pilot_limit", "This room is full");
+      assertMemberDisplayNameAvailable(displayName.trim(), room.state.members);
       const id = agentJoinPrefix(row) + hash(identity.identityId).slice(0, 28), now = this.store.now();
       // A personal invite from a member who cannot mint invites is still
       // admitted: the room owner performs the membership write, and the
@@ -316,7 +318,7 @@ export class ShareLinks {
     });
   }
   join(slotToken, linkToken, { displayName, redemptionId, expectedSessionRevision, expectedSessionBinding, revokeRoomToken = null, clientAddress = null, clientSession = null }) {
-    if (typeof displayName !== "string" || !displayName.trim() || displayName.length > 80 || /[\u0000-\u001f\u007f]/.test(displayName)
+    if (typeof displayName !== "string" || !displayName.trim() || displayName.length > 80
       || typeof redemptionId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(redemptionId)
       || !Number.isSafeInteger(expectedSessionRevision)) fail(422, "invalid_join", "Enter a name of 1–80 characters and try joining again");
     return this.store.transaction(() => {
@@ -354,6 +356,7 @@ export class ShareLinks {
         }
       }
       const room = this.store.room(row.room_id), now = this.store.now();
+      assertMemberDisplayNameAvailable(displayName.trim(), room.state.members);
       if (room.sequence >= 10000 || activeMemberCount(room.state.members) >= PILOT_LIMITS.membersPerRoom) fail(409, "pilot_limit", "This room is full; ask its owner for help");
       if (!auth) {
         // An expired/revoked prior identity needs an explicit sign-out before a

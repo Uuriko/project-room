@@ -36,6 +36,7 @@
 
 import { createHash, createPrivateKey, createPublicKey, randomUUID, sign as edSign, verify as edVerify } from "node:crypto";
 import { ServiceError } from "./store.mjs";
+import { assertMemberDisplayNameAvailable } from "./display-name-guard.mjs";
 import { generateKeyPair } from "./agent-card-signing.mjs";
 import { refuseArchivedWrite } from "./room-lifecycle.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
@@ -397,6 +398,9 @@ export class ReferralInvites {
       if (Object.keys(room.state.members).length > 5000) fail(409, "pilot_limit", "Room member limit reached; no data was changed");
 
       const name = String(displayName ?? "Referred agent").trim();
+      // Mint copies this string onto the new member. Refuse it before the
+      // identity row exists.
+      assertMemberDisplayNameAvailable(name, room.state.members);
       const identity = this.store.identities.create(name);
       const identityId = identity.identityId;
       if (!MEMBER_ID_PATTERN.test(identityId)) fail(500, "invite_failed", "Generated member id is invalid");
