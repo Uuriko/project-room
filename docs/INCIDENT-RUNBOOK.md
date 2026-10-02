@@ -255,6 +255,10 @@ Don't declare for these — work them through the normal lanes:
 If a "not an incident" recurs weekly, it is telling you the monitor or the
 threshold needs tuning — file that as work, not as an incident.
 
+A leftover QA room, identity, or orphaned personal room is not an incident.
+Purge it with the operator tools in docs/OPERATOR.md, then record the audit
+row in the Room.
+
 ---
 
 *Last reviewed: 2026-09-16. Review this doc after every SEV1/SEV2 postmortem,
