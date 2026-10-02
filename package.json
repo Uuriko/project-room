@@ -16,7 +16,12 @@
     "audit:invitations": "node scripts/audit-invitations.mjs",
     "test:handoff": "node --test tests/agent-handoff.test.js",
     "agent:inbox": "node scripts/agent-inbox.mjs",
-    "agent:roster": "node scripts/room-roster.mjs"
+    "agent:roster": "node scripts/room-roster.mjs",
+    "qa3:authz-board": "node scripts/qa3/authz-board.mjs",
+    "qa3:content-trust": "node scripts/qa3/content-trust.mjs",
+    "qa3:public-scan-budget": "node scripts/qa3/public-scan-budget.mjs",
+    "qa3:sse-contract": "node scripts/qa3/sse-contract.mjs",
+    "qa3:board-growth": "node scripts/qa3/board-growth.mjs"
   },
   "engines": {
     "node": ">=24.19.0"
