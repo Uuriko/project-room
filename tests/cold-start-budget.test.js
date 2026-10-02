@@ -52,7 +52,8 @@ test("cold start on a large message log stays within the CPU budget", () => {
     try {
       const record = JSON.parse(deferredLines.find(line => line.includes('"event":"room.cold_start"')));
       assert.equal(record.integrity, "deferred");
-      assert.equal(record.integrityMatch, 0);
+      assert.equal(record.integrityMatch, undefined);
+      assert.equal(record.phases.checksum.rowsRead, 0);
       assert.equal(record.events, undefined);
       assert.equal(record.sequences, EVENTS);
       assert.ok(record.projectionBytes > 0);

@@ -31,7 +31,7 @@ import { ensureAutonomyTiersSchema, enforceAutonomyTiers } from "./autonomy-tier
 import { ensureGrantsSchema } from "./grants.mjs";
 import { canonicalInvitationData, invitationJournalEntry, invitationJournalSchema, replayInvitationJournal } from "./invitation-journal.mjs";
 import { invitationJoinedEvent, assertInvitationMembershipEvidence } from "./invitation-evidence.mjs";
-import { STORE_SCHEMA_VERSION, registerWriter, installWriterFence, verifyWriterFence } from "./writer-fence.mjs";
+import { STORE_SCHEMA_VERSION, fenceDefinitions, registerWriter, installWriterFence, verifyWriterFence } from "./writer-fence.mjs";
 import { migrateRoomLifecycleV28, verifyRoomLifecycle, refuseArchivedWrite, createAccountRoom, accountRoomEntry, ACCOUNT_ROOM_SELECT, archivedAtOf } from "./room-lifecycle.mjs";
 import { ShareLinks, shareLinkSchema, shareLinkCodeSchema } from "./share-links.mjs";
 import { DmConsents, dmConsentSchema } from "./dm-consents.mjs";
@@ -245,6 +245,7 @@ function logColdStart(started, db, failed, extra = {}) {
   }
   if (extra.integrity) record.integrity = extra.integrity;
   if (extra.integrityMatch != null) record.integrityMatch = extra.integrityMatch;
+  if (extra.phases) record.phases = extra.phases;
   try {
     if (started.cpu && typeof process.cpuUsage === "function") {
       const cpu = process.cpuUsage(started.cpu);
@@ -952,10 +953,50 @@ function agentWakeTargetIds(state, senderMemberId, data) {
   return [...agentWakeTargets(state, senderMemberId, data).keys()];
 }
 
+// Hash of the DDL this process knows how to apply. A stored match means
+// schema setup and the writer fence already ran for this code, so a wake
+// can skip both. Fence SQL is included: a trigger change must reinstall.
+function roomSchemaStamp() {
+  const hash = createHash("sha256");
+  hash.update(String(STORE_SCHEMA_VERSION));
+  const parts = [
+    invitationSchema, agentIdentitySchema, accountLoginMethodsSchema, agentInviteSchema,
+    referralInviteSchema, referralSchema, emissaryGraphSchema, emissaryReceiptSchema,
+    shareLinkSchema, shareLinkCodeSchema, reminderSchema, agentConnectionSchema,
+    inboxSchema, inboxReadSchema, emailImportSchema, wakeQueueSchema, wakeQueuePauseSchema,
+    attentionSchema, workClaimSchema, nextActionsSchema, agentHeartbeatSchema, workWakeSchema,
+    landQueueSchema, inboxAttachmentBytesSchema, membersDirectorySchema, channelJournalSchema,
+    telegramLiveStatusSchema, spamQuarantineSchema, jevShadowSchema, dmConsentSchema, bondSchema,
+    roomPublicFaceSchema, roomDirectorySchema, guestInviteSchema, guestSelfServeSchema,
+    webFetchSchema, webResearchSchema, mentionStateSchema, activitySchema, threadMutesSchema,
+    humanPushSchema, quarantineThreadSplitSchema, slaBreachAlertSchema, inboxHandoffSchema,
+    inboxHandoffRoomSchema, handoffEnvelopeSchema, agentPluginSchema, inboxCollabSchema,
+    moderationSchema, bountyEscrowSchema, projectOffersSchema, publicWorkClaimsSchema,
+    publicWorkClaimFenceSchema, publicWorkReviewsSchema, publicWorkSuccessorsSchema,
+    accessRequestSchema, membershipDelegationSchema, membershipDelegationJournalSchema,
+    ownerDelegateSchema, agentRoomSchema, oauthPendingSchema, gmailSchema, requestRunSchema,
+    directSendSchema, inboxStitchSchema, RETIRED_BOARD_V2_SCHEMA, EMISSARY_LURE_SCHEMA,
+    agentKeyRegistrySchema, INTEGRITY_SNAPSHOT_SCHEMA,
+    INTEGRITY_JOB_CURSOR_SCHEMA, ROOM_SCHEMA_STAMP_SCHEMA
+  ];
+  for (const part of parts) hash.update("\0").update(part ?? "");
+  for (const def of fenceDefinitions(STORE_SCHEMA_VERSION)) hash.update("\0").update(def.name).update(def.sql);
+  return hash.digest("hex");
+}
+
 const INTEGRITY_SNAPSHOT_SCHEMA = `CREATE TABLE IF NOT EXISTS integrity_snapshot (
   id INTEGER PRIMARY KEY CHECK (id = 1),
   checksum TEXT NOT NULL,
   verified_at INTEGER NOT NULL
+)`;
+const INTEGRITY_JOB_CURSOR_SCHEMA = `CREATE TABLE IF NOT EXISTS integrity_job_cursor (
+  singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+  step INTEGER NOT NULL
+)`;
+const ROOM_SCHEMA_STAMP_SCHEMA = `CREATE TABLE IF NOT EXISTS room_schema_stamp (
+  singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+  version INTEGER NOT NULL,
+  stamp TEXT NOT NULL
 )`;
 
 export class RoomStore {
@@ -1113,7 +1154,31 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     try { this.transaction(() => {
     // Reread under the write lock: another startup may have upgraded while we waited.
     if (this.storagePlatform.version(this.db) !== version) throw new Error("Database changed during startup; retry with the current service");
-    if (version >= 6) this.storagePlatform.verifyWriterFence(this.db, version);
+    const phases = {};
+    const phaseAt = { name: "schema", t: performance.now(), rows: Number(this.db.rowsRead ?? 0) };
+    const phase = name => {
+      const now = performance.now();
+      const rows = Number(this.db.rowsRead ?? 0);
+      phases[phaseAt.name] = { ms: Math.round(now - phaseAt.t), rowsRead: rows - phaseAt.rows };
+      phaseAt.name = name;
+      phaseAt.t = now;
+      phaseAt.rows = rows;
+    };
+    this.coldStartPhases = phases;
+    // A wake of an already-current database skips schema setup, fence
+    // install, and the delivery hydration. Integrity replays run on the cron.
+    const stampMatches = deferIntegrity && version === STORE_SCHEMA_VERSION && this.schemaStampMatches();
+    if (version >= 6 && !stampMatches) this.storagePlatform.verifyWriterFence(this.db, version);
+    if (stampMatches) {
+      phase("fence");
+      phase("plugin");
+      this.agentPlugin.load();
+      phase("verifies");
+      if (!this.readOnly) this.wakeQueue.recover(this.now());
+      phase("checksum");
+      phases.checksum = { ms: 0, rowsRead: 0 };
+      return;
+    }
     if (version > 0 && version < 12) {
       // Legacy fixture import allowed ignored scalar fields. Never reinterpret a
       // previously stored policy marker, even when it is null or behind a checkpoint.
@@ -1257,7 +1322,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // unmatched row stays NULL and the mint path refuses it fail-closed.
       const chainColumns = new Set(this.db.prepare("PRAGMA table_info(referral_chain_members)").all().map(c => c.name));
       if (!chainColumns.has("max_depth")) this.db.exec("ALTER TABLE referral_chain_members ADD COLUMN max_depth INTEGER");
-      this.db.exec(`UPDATE referral_chain_members SET max_depth = (
+      // Eager opens finish the backfill before serving. A deferred wake
+      // leaves NULL caps for the integrity cron, 500 rows at a time. The
+      // mint path refuses a NULL cap, so a partial backfill fails closed.
+      if (!deferIntegrity) this.db.exec(`UPDATE referral_chain_members SET max_depth = (
         SELECT ri.max_depth FROM referral_invites ri
         WHERE ri.room_id = referral_chain_members.room_id
           AND ri.redeemed_member_id = referral_chain_members.member_id
@@ -1390,6 +1458,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // IF NOT EXISTS is idempotent, no schema version bump, intentionally
       // outside the writer fence (see unfencedAdditiveTables).
       this.db.exec(agentPluginSchema);
+      phase("plugin");
       this.agentPlugin.load();
       // Lane C inbox collaboration tables (task RC-2026-09-18-011) follow the
       // same additive pattern: IF NOT EXISTS is idempotent, no schema version
@@ -1473,11 +1542,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       ensureAttachmentSchema(this.db); // Converge the deployed v28-v33 attachment lineage before installing v34 fences.
       // Idempotent: recreates fences for tables the additive schemas just
       // (re)created, and refuses a file whose existing triggers drifted.
+      phase("fence");
       this.storagePlatform.installWriterFence(this.db);
       this.storagePlatform.verifyWriterFence(this.db);
       this.db.exec(INTEGRITY_SNAPSHOT_SCHEMA);
+      this.db.exec(INTEGRITY_JOB_CURSOR_SCHEMA);
       if (!deferIntegrity) this.verifyInvitationAudit();
-      this.shareLinks.verify();
       this.reminders.verifySchema();
       this.wakeQueue.verifySchema();
       this.wakeQueue.verifyPauseSchema();
@@ -1487,29 +1557,106 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // A lease whose holder died with the process is expired back to pending
       // here, so a restart preserves the intent exactly once (W4-45 done-when).
       if (!this.readOnly) this.wakeQueue.recover(this.now());
-      this.agentConnections.verify();
       if (!deferIntegrity) this.verifyHelpHistory();
-      this.inbox.verify();
-      this.email.verify();
       verifyAttachmentSchema(this.db);
       this.channelUpdates.verifySchema();
-      this.channelUpdates.verify();
       this.quarantineSplits.verifySchema();
-      this.quarantineSplits.verify();
-      verifyRoomLifecycle(this);
-      if (!this.readOnly) this.identities.expireInactive();
-    }); } catch (error) { this.coldStart = logColdStart(coldStart, this.db, error, { integrity: this.integrityMode }); this.db.close(); throw error; }
+      phase("verifies");
+      // Deferred opens (the Durable Object) replay these on the integrity
+      // cron, in batches. An eager open still checks them before serving.
+      if (!deferIntegrity) {
+        this.shareLinks.verify();
+        this.agentConnections.verify();
+        this.inbox.verify();
+        this.email.verify();
+        this.channelUpdates.verify();
+        this.quarantineSplits.verify();
+        verifyRoomLifecycle(this);
+        if (!this.readOnly) this.identities.expireInactive();
+      }
+      this.rememberSchemaStamp();
+      phase("checksum");
+      phases.checksum = { ms: 0, rowsRead: 0 };
+    }); } catch (error) { this.coldStart = logColdStart(coldStart, this.db, error, { integrity: this.integrityMode, phases: this.coldStartPhases }); this.db.close(); throw error; }
     this.coldStart = logColdStart(coldStart, this.db, false, this.coldStartExtra(deferIntegrity));
   }
 
   coldStartExtra(deferIntegrity) {
-    const extra = { integrity: this.integrityMode };
+    const extra = { integrity: this.integrityMode, phases: this.coldStartPhases };
     if (!deferIntegrity) return extra;
     extra.skipEventCount = true;
-    try {
-      extra.integrityMatch = this.readIntegritySnapshot() === this.integrityChecksum().text ? 1 : 0;
-    } catch { extra.integrityMatch = 0; }
+    // The checksum runs in verifyRoomIntegrity, not on this wake.
     return extra;
+  }
+
+  schemaStampMatches() {
+    const exists = this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='room_schema_stamp'").get();
+    if (!exists) return false;
+    const row = this.db.prepare("SELECT version, stamp FROM room_schema_stamp WHERE singleton=1").get();
+    return row?.version === STORE_SCHEMA_VERSION && row.stamp === roomSchemaStamp();
+  }
+
+  rememberSchemaStamp() {
+    this.db.exec(ROOM_SCHEMA_STAMP_SCHEMA);
+    this.db.prepare(`INSERT INTO room_schema_stamp (singleton, version, stamp) VALUES (1, ?, ?)
+      ON CONFLICT(singleton) DO UPDATE SET version=excluded.version, stamp=excluded.stamp`)
+      .run(STORE_SCHEMA_VERSION, roomSchemaStamp());
+  }
+
+  // At most `limit` chain members whose cap was never copied off the invite.
+  // The mint path refuses a NULL cap, so a tick that stops early fails closed.
+  backfillReferralDepth(limit = 500) {
+    return this.transaction(() => {
+      const exists = this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='referral_chain_members'").get();
+      if (!exists) return 0;
+      const rows = this.db.prepare("SELECT rowid FROM referral_chain_members WHERE max_depth IS NULL LIMIT ?").all(limit);
+      const update = this.db.prepare(`UPDATE referral_chain_members SET max_depth = (
+        SELECT ri.max_depth FROM referral_invites ri
+        WHERE ri.room_id = referral_chain_members.room_id
+          AND ri.redeemed_member_id = referral_chain_members.member_id
+          AND ri.status = 'redeemed' LIMIT 1
+      ) WHERE rowid = ? AND max_depth IS NULL`);
+      let updated = 0;
+      for (const row of rows) updated += update.run(row.rowid).changes;
+      return updated;
+    });
+  }
+
+  // Two replay steps per cron tick, continuing from the stored cursor so a
+  // hibernated wake does not start at share links forever. Each step is the
+  // same check the constructor used to run.
+  async runDeferredIntegrityBatch({ deadline = Infinity, yieldBetween = async () => {} } = {}) {
+    const steps = [
+      () => this.shareLinks.verify(),
+      () => this.agentConnections.verify(),
+      () => this.inbox.verify(),
+      () => this.email.verify(),
+      () => this.channelUpdates.verify(),
+      () => this.quarantineSplits.verify(),
+      () => verifyRoomLifecycle(this),
+      () => { if (!this.readOnly) this.identities.expireInactive(); },
+      () => this.backfillReferralDepth(500)
+    ];
+    let step = this.transaction(() => this.db.prepare("SELECT step FROM integrity_job_cursor WHERE singleton=1").get()?.step ?? 0);
+    if (!Number.isInteger(step) || step < 0 || step >= steps.length) step = 0;
+    const remember = next => this.transaction(() => {
+      this.db.prepare(`INSERT INTO integrity_job_cursor (singleton, step) VALUES (1, ?)
+        ON CONFLICT(singleton) DO UPDATE SET step=excluded.step`).run(next);
+    });
+    let ran = 0;
+    while (ran < 2) {
+      if (Date.now() > deadline) {
+        // A step that finished is not run again on the next tick.
+        if (ran > 0) remember(step);
+        return { ran, next: step, budgetExceeded: 1 };
+      }
+      steps[step]();
+      step = (step + 1) % steps.length;
+      ran += 1;
+      await yieldBetween();
+    }
+    remember(step);
+    return { ran, next: step };
   }
 
   // Rooms, projection bytes, and invitation rows. Not the event log.
@@ -1555,7 +1702,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     const before = this.integrityChecksum();
     if (this.readIntegritySnapshot() === before.text) {
       await yieldBetween();
-      return { matched: 1, skipped: 1, verified: 0, invitations: before.invitations };
+      if (Date.now() > deadline) return { matched: 1, skipped: 1, verified: 0, invitations: before.invitations, budgetExceeded: 1 };
+      const deferred = await this.runDeferredIntegrityBatch({ deadline, yieldBetween });
+      return { matched: 1, skipped: 1, verified: 0, invitations: before.invitations, deferred };
     }
     await yieldBetween();
     if (Date.now() > deadline) return { matched: 0, skipped: 0, verified: 0, budgetExceeded: 1 };
@@ -1577,7 +1726,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     await yieldBetween();
     const after = this.integrityChecksum();
     this.writeIntegritySnapshot(after.text);
-    return { matched: 0, skipped: 0, verified: 1, invitations: after.invitations };
+    if (Date.now() > deadline) return { matched: 0, skipped: 0, verified: 1, invitations: after.invitations, budgetExceeded: 1 };
+    const deferred = await this.runDeferredIntegrityBatch({ deadline, yieldBetween });
+    return { matched: 0, skipped: 0, verified: 1, invitations: after.invitations, deferred };
   }
 
   verifyHelpHistory() {

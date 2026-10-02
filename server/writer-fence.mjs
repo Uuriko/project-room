@@ -356,7 +356,12 @@ export const unfencedAdditiveTables = Object.freeze([
   // fenced — older writers have no code path to it, and a missing or stale
   // row only means the next cron rechecks. The constructor never uses it to
   // decide to replay the event log.
-  "integrity_snapshot"
+  "integrity_snapshot",
+  // room_schema_stamp: one hash of the DDL this process applies. A match
+  // skips schema setup on the next wake. integrity_job_cursor: which
+  // deferred integrity step the cron runs next. Neither is room content.
+  "room_schema_stamp",
+  "integrity_job_cursor"
 ]);
 // Created on first use, not in the constructor. A database that has never
 // issued an OAuth grant does not have these tables; a database that has

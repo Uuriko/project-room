@@ -23,8 +23,12 @@ test('a slow Durable Object probe answers liveness from one shared fetch', async
   assert.ok(keptAlive >= 1);
   const firstBody = await first.json();
   const secondBody = await second.json();
+  assert.equal(first.status, 503);
+  assert.equal(second.status, 503);
   assert.deepEqual(firstBody, secondBody);
+  assert.equal(secondBody.status, 'degraded');
   assert.deepEqual(secondBody.durableObject, { ready: false, status: 'timeout' });
+  assert.deepEqual(secondBody.do, { status: 'timeout', timeoutMs: 1000 });
 });
 
 test('a ready probe reports durable-object readiness and passes a denial through', async () => {
@@ -35,20 +39,23 @@ test('a ready probe reports durable-object readiness and passes a denial through
       status: 200,
       headers: { 'Content-Type': 'application/json; charset=utf-8', 'Server-Timing': 'app;dur=3', 'Content-Length': '40' }
     }),
-    onSnapshot: snapshot => healthProbeResponse(snapshot, healthRequest()),
+    onSnapshot: (snapshot, timing) => healthProbeResponse(snapshot, healthRequest(), timing),
     onUnready: () => { throw new Error('a fast probe must not time out'); }
   });
   const body = await ready.json();
   assert.equal(body.status, 'ok');
   assert.equal(body.mode, 'cloudflare-staging');
   assert.deepEqual(body.durableObject, { ready: true, status: 200 });
+  assert.equal(body.do.status, 'ok');
+  assert.equal(body.do.statusCode, 200);
+  assert.equal(typeof body.do.ms, 'number');
   assert.match(ready.headers.get('server-timing'), /app;dur=3/);
   assert.equal(ready.headers.get('content-length'), null);
 
   const denied = await probe({
     timeoutMs: 200,
     start: async () => new Response('no', { status: 403, headers: { 'Content-Type': 'text/plain' } }),
-    onSnapshot: snapshot => healthProbeResponse(snapshot, healthRequest()),
+    onSnapshot: (snapshot, timing) => healthProbeResponse(snapshot, healthRequest(), timing),
     onUnready: () => { throw new Error('a denial is a finished probe'); }
   });
   assert.equal(denied.status, 403);
@@ -61,14 +68,18 @@ test('a probe that throws reports error readiness', async () => {
     timeoutMs: 200,
     start: async () => { throw new Error('constructor failed'); },
     onSnapshot: () => { throw new Error('no snapshot'); },
-    onUnready: readiness => healthLivenessResponse(healthRequest(), { mode: 'cloudflare-staging', readiness })
+    onUnready: (readiness, timing) => healthLivenessResponse(healthRequest(), { mode: 'cloudflare-staging', readiness, ...timing })
   });
-  assert.equal(response.status, 200);
-  assert.deepEqual((await response.json()).durableObject, { ready: false, status: 'error' });
+  assert.equal(response.status, 503);
+  const body = await response.json();
+  assert.equal(body.status, 'degraded');
+  assert.deepEqual(body.durableObject, { ready: false, status: 'error' });
+  assert.equal(body.do.status, 'error');
+  assert.equal(typeof body.do.ms, 'number');
 });
 
 test('HEAD liveness has an empty body', async () => {
   const response = healthLivenessResponse(healthRequest('HEAD'), { mode: 'cloudflare-staging', readiness: 'timeout' });
-  assert.equal(response.status, 200);
+  assert.equal(response.status, 503);
   assert.equal(await response.text(), '');
 });
