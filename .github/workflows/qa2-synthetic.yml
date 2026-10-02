@@ -6,6 +6,8 @@ name: qa2-synthetic
 #  - public pages: axe WCAG 2.2 AA, canonical/robots/OG, broken links, 390 px overflow.
 #  - one synthetic agent journey (12 tasks), which creates one qa2-journey-* room and
 #    two identities, then archives the room and revokes the identities.
+# This 6-hour schedule stays the deep check. The 5-minute outage probe is the
+# separate Worker in cloudflare/external-probe.wrangler.jsonc.
 on:
   schedule:
     - cron: "47 */6 * * *"

@@ -2,7 +2,7 @@
 // Pins the unauthenticated HTTP surface. The inventory is derived, not
 // hand-kept (security review 2026-09-14, L3 / B48): docs/openapi.yaml marks
 // every open operation `security: []`; this test probes every /api route
-// server/http.mjs can match without a credential and fails when the served
+// the server can match without a credential and fails when the served
 // set differs from the declared set. Every declared route also needs a
 // shape-valid probe below stating what an anonymous caller gets, and
 // scripts/open-routes.mjs --check requires both docs tables to name it.
@@ -18,6 +18,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { openRoutes, openapiOperations, routeCandidates, routeKey } from "../scripts/open-routes.mjs";
 import { pluginRouteTemplates, nextActionsRouteTemplates } from "../scripts/route-docs-check.mjs";
+import { ROUTES } from "../server/routes/table.mjs";
 
 const read = path => readFileSync(new URL(path, import.meta.url), "utf8");
 const openapi = read("../docs/openapi.yaml");
@@ -27,6 +28,9 @@ const WORKER_OPEN = openapiOperations(openapi).filter(route => route.workerOnly
 const workerKeys = new Set(WORKER_OPEN.map(route => routeKey(route.method, route.path)));
 const SERVED_CANDIDATES = [
   ...routeCandidates(read("../server/http.mjs")),
+  // Paths that left http.mjs for the route table (batch RT). The inbox
+  // webhook is open; the other inbox rows stay account-guarded.
+  ...ROUTES.map(row => row.path),
   // The agent plug-in surface is mounted through a single delegation in
   // server/http.mjs; its templates are extracted from
   // server/agent-plugin-routes.mjs (same extraction as route-docs-check.mjs).

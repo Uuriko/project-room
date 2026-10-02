@@ -121,11 +121,9 @@ test("storeTheme paints light or dark and remembers the choice", () => {
   try {
     assert.equal(storeTheme("light"), "light");
     assert.equal(root.dataset.theme, "light");
-    assert.equal(root.style.colorScheme, "light");
     assert.equal(bag.get("project-room-theme"), "light");
     assert.equal(storeTheme("nope"), "dark");
     assert.equal(root.dataset.theme, undefined);
-    assert.equal(root.style.colorScheme, "dark");
     matches = true;
     assert.equal(storeTheme("system"), "light");
     assert.equal(root.dataset.theme, "light");

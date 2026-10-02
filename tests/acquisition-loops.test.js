@@ -14,6 +14,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { listRoomTemplates } from "../server/templates.mjs";
 import { publicRef } from "../server/public-rooms.mjs";
 import { generateKeyPair, signCard } from "../server/agent-card-signing.mjs";
+import { projectPublicWorkReceipt } from "../server/public-read-model.mjs";
 
 const SECRET_MESSAGE = "secret-message-body";
 const SECRET_NAME = "secret-member-name";
@@ -184,10 +185,11 @@ test("the agent directory lists only opted-in cards and counts public rooms", as
   publish(hidden.identityId, "hidden-agent", "Hidden Agent Card", "private");
   store.identities.link(ownerKey, "alpha", { identityId: visible.identityId, displayName: "hidden-link-name", permissions: ["accept_work"] });
   const receiptId = `pwr_${"ab".repeat(16)}`;
+  const counted = { schema: "public-work-receipt/1", receiptId, namespaceId: "alpha", identityId: visible.identityId, title: "Counted receipt", createdAt: "2026-10-01T00:00:00.000Z" };
   store.db.prepare("INSERT INTO public_work_receipts VALUES (?,?,?,?,?,?,?,?,?,?)").run(
     receiptId, "offer-1", "alpha", 1, visible.identityId, "note", "ab".repeat(32), 4,
-    JSON.stringify({ schema: "public-work-receipt/1", receiptId, namespaceId: "alpha", identityId: visible.identityId, title: "Counted receipt", createdAt: "2026-10-01T00:00:00.000Z" }),
-    Date.now());
+    JSON.stringify(counted), Date.now());
+  projectPublicWorkReceipt(store, counted, "ab".repeat(32));
   const page = await raw(origin, "/agents?ref=Ada");
   assert.equal(page.status, 200);
   assert.equal(page.headers.get("x-robots-tag"), "noindex, nofollow");
