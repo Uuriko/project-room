@@ -1,0 +1,18 @@
+{
+  "name": "project-room-relay",
+  "main": "src/index.mjs",
+  "compatibility_date": "2026-07-30",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "preview_urls": false,
+  "durable_objects": {
+    "bindings": [{ "name": "MACHINE", "class_name": "MachineLink" }]
+  },
+  "migrations": [{ "tag": "relay-v1", "new_sqlite_classes": ["MachineLink"] }],
+  "vars": {
+    "ROOM_ORIGIN": "https://room.trydemigod.com",
+    "RELAY_PHASE0_PASSTHROUGH": "0",
+    "RELAY_LOCK_CACHE_MS": "30000"
+  },
+  "observability": { "enabled": true }
+}

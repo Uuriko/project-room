@@ -9,7 +9,7 @@ Recorded 2026-10-01 ~17:45 PT. Source `60df170cb58b79fd1714ca5dfe3ef51da939b29d`
 | Worker | Role | Version | Rollback |
 | --- | --- | --- | --- |
 | `project-room` | Canonical namespace (`wrangler deploy --env production --keep-vars`). Production CPU budget `env.production.limits.cpu_ms` = 30000. | `86fc2647-4f88-482d-af43-3e8a3172828e` | `5a1ea853-afad-43ed-a613-39d1cf239a9e` |
-| `project-room-staging` | Public entry. Forwards through `ROOM.script_name=project-room` (`wrangler deploy --keep-vars`). One-second forwarding budget. | `4ad2f09f-35ba-4906-856c-fced4dbbcafc` | `2ebb4ed9-05e3-4f47-bfd1-c9db8fd5b4b0` |
+| `project-room-staging` | Public entry. The script name is historical; do not rename it, because getdasha.com/room and email routing are bound to it. Forwards through `ROOM.script_name=project-room` (`wrangler deploy --keep-vars`). One-second forwarding budget. | `4ad2f09f-35ba-4906-856c-fced4dbbcafc` | `2ebb4ed9-05e3-4f47-bfd1-c9db8fd5b4b0` |
 
 # Cloudflare staging candidate
 
@@ -75,8 +75,8 @@ and visitor-address adapters, not a second product.
 `scripts/runtime-package.mjs` and `tests/asset-packaging.test.js` read it with `JSON.parse`.
 The rationale for its `limits` and `observability` values lives here instead.
 
-- Top-level `limits.cpu_ms` is 1000. Production (`env.production.limits.cpu_ms`)
-  is 30000. A cold `invite-only-pilot` used to spend seconds of CPU in the
+- Top-level `limits.cpu_ms` is 1000. That script is the public entry. Its deployed name `project-room-staging` is historical and stays, because routes are bound to it. Production (`env.production.limits.cpu_ms`)
+  is 30000. Isolated staging (`env.staging`, script `project-room-stage`) uses 30000 as well, because it owns its own Durable Object. A cold `invite-only-pilot` used to spend seconds of CPU in the
   constructor (full event replay) and that CPU was charged to whichever RPC
   woke the object — in production, `drainChannelBacklog`, about 14 seconds.
   Hibernation after ~10 seconds idle, and a tail attach or detach, are what

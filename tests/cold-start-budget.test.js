@@ -10,17 +10,15 @@ import { createRecoveryFixture } from "../scripts/recovery-fixture.mjs";
 import { seedRecoveryCoverage } from "../scripts/recovery-coverage.mjs";
 import { applicationTables } from "../server/writer-fence.mjs";
 
-// Same empty tables as tests/recovery.test.js. Cron-written rows stay empty
-// on open. public_rooms stays empty until an owner opts in.
-// public_read_model_backfill stays empty until the cron writes the cursor.
-const EMPTY_UNTIL_CRON = new Map([
-  ["membership_delegation_pending", "stays empty until the cron"],
-  ["room_access_auto_approve", "stays empty until the cron"],
-  ["integrity_snapshot", "stays empty until the cron"],
-  ["integrity_job_cursor", "stays empty until the cron"],
-  ["integrity_room_state", "stays empty until the cron"],
-  ["public_rooms", "stays empty until an owner opts in"],
-  ["public_read_model_backfill", "stays empty until the cron writes the backfill cursor"],
+// Written by the cron, not by opening a store. Same exceptions as the recovery audit.
+const EMPTY_UNTIL_CRON = new Set([
+  "membership_delegation_pending",
+  "room_access_auto_approve",
+  "integrity_snapshot",
+  "integrity_job_cursor",
+  "integrity_room_state",
+  "public_rooms",
+  "public_read_model_backfill"
 ]);
 
 const EVENTS = 200_000;
@@ -90,7 +88,7 @@ test("deferred cold start on a production-shaped store stays within the budget",
       for (const table of applicationTables) {
         if (!/^[a-z0-9_]+$/.test(table)) throw new Error(`unexpected table name ${table}`);
         const rows = fixture.store.db.prepare(`SELECT COUNT(*) AS n FROM "${table}"`).get().n;
-        if (EMPTY_UNTIL_CRON.has(table)) assert.equal(rows, 0, `${table} ${EMPTY_UNTIL_CRON.get(table)}`);
+        if (EMPTY_UNTIL_CRON.has(table)) assert.equal(rows, 0, `${table} stays empty until the cron`);
         else assert.ok(rows > 0, `${table} has production-shaped rows`);
         counted.push(table);
       }
