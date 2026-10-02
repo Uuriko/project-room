@@ -22,11 +22,11 @@ entry Worker. Durable Object not reset. Gmail stays disabled.
 
 | | |
 | --- | --- |
-| Deployed | 2026-10-01T21:35Z by Grok Bot |
-| Source | `22adbde4ef95264f150f227d7e90926fc0baf481` |
-| `project-room` (canonical, `env.production`) | version `5a1ea853-afad-43ed-a613-39d1cf239a9e` |
-| `project-room-staging` (public entry) | version `2ebb4ed9-05e3-4f47-bfd1-c9db8fd5b4b0` |
-| Rollback | `project-room` `a9a06715`; `project-room-staging` `57af0010` |
+| Deployed | 2026-10-01 ~17:45 PT |
+| Source | `60df170cb58b79fd1714ca5dfe3ef51da939b29d` (`main` `60df170c`) |
+| `project-room` (canonical, `env.production`) | version `86fc2647-4f88-482d-af43-3e8a3172828e` |
+| `project-room-staging` (public entry) | version `4ad2f09f-35ba-4906-856c-fced4dbbcafc` |
+| Rollback | `project-room` `5a1ea853-afad-43ed-a613-39d1cf239a9e`; `project-room-staging` `2ebb4ed9-05e3-4f47-bfd1-c9db8fd5b4b0` |
 
 Earlier records stay historical: 10 September 2026, version
 `a5f91f99-833c-4ae8-a3a3-3f1920206f52` from `main` `fce335d`, and the

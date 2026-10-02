@@ -105,7 +105,7 @@ import { evaluateReceipt } from "./jev-receipts.mjs"; // Jev-harness receipt gat
 import { charterContext, charterFromEvent } from "../src/room-charter.js";
 import { REPLY_FIELDS, REPLY_POLICY_VERSION, replyPostMode } from "../src/reply-requests.js";
 import { ReplyRequests } from "./reply-requests.mjs";
-import { validateHelpData } from "../src/work-help.js";
+import { validateHelpData, WORK_HELP_UPDATED } from "../src/work-help.js";
 import { auditWorkHelp } from "./work-help.mjs";
 import { HELP_OFFER_OPENED, HELP_OFFER_UPDATED, validateHelpOfferData } from "../src/help-offers.js";
 import { classifyCommand } from "./action-classes.mjs";
@@ -165,6 +165,180 @@ function ensureDefaultChannelState(state) {
     archivedAt: null
   };
   return true;
+}
+
+// Provenance repair reads only these envelopes. Chat messages are the bulk of
+// the log and are not an input to proposer, receipt, verification, decision,
+// or supersession repair.
+const PROVENANCE_EVENT_TYPES = Object.freeze([
+  T.WORK_PROPOSED, T.WORK_COMPLETED, T.VERIFICATION_RECORDED, T.OWNER_DECISION_RECORDED, T.WORK_SUPERSEDED
+]);
+const HELP_EVENT_TYPES = Object.freeze([WORK_HELP_UPDATED, HELP_OFFER_OPENED, HELP_OFFER_UPDATED]);
+
+function parseStoredJson(value, fallback) {
+  if (value == null) return fallback;
+  return typeof value === "string" ? JSON.parse(value) : value;
+}
+
+function startColdStart() {
+  const started = { wall: performance.now(), cpu: null };
+  try {
+    if (typeof process !== "undefined" && typeof process.cpuUsage === "function") started.cpu = process.cpuUsage();
+  } catch { started.cpu = null; }
+  return started;
+}
+
+// One structured line per open, including a failed open, so the next isolate
+// restart can be read from Workers Logs without a tail attached. No event
+// bodies, projections, or secrets.
+function logColdStart(started, db, failed) {
+  const record = { event: "room.cold_start", durationMs: Math.round(performance.now() - started.wall) };
+  if (failed) {
+    record.failed = true;
+    if (failed instanceof Error && failed.message) record.error = failed.message.slice(0, 180);
+  }
+  try {
+    if (started.cpu && typeof process.cpuUsage === "function") {
+      const cpu = process.cpuUsage(started.cpu);
+      record.cpuMs = Math.round((cpu.user + cpu.system) / 1000);
+    }
+  } catch { /* workerd may omit cpuUsage */ }
+  try {
+    if (typeof process.memoryUsage === "function") {
+      const heap = process.memoryUsage().heapUsed;
+      if (Number.isFinite(heap) && heap > 0) record.heapBytes = heap;
+    }
+  } catch { /* workerd may omit memoryUsage */ }
+  try {
+    if (db && db.isOpen !== false) {
+      const counts = db.prepare("SELECT COUNT(*) AS rooms, COALESCE(SUM(LENGTH(projection)), 0) AS projectionBytes FROM rooms").get();
+      const events = db.prepare("SELECT COUNT(*) AS events FROM events").get();
+      if (counts) {
+        record.rooms = counts.rooms;
+        record.projectionBytes = counts.projectionBytes;
+      }
+      if (events) record.events = events.events;
+    }
+  } catch { /* schema not installed, or the handle is already closing */ }
+  console.info(JSON.stringify(record));
+}
+
+function repairInvalidSupersessions(state) {
+  const workItems = Object.values(state.workItems ?? {}).filter(item => item && typeof item === "object");
+  const hasInvalidSupersession = item => {
+    if (item.state !== "superseded" || !item.supersededBy) return false;
+    const visited = new Set([item.id]);
+    let nextId = item.supersededBy;
+    while (nextId) {
+      if (visited.has(nextId)) return true;
+      visited.add(nextId);
+      const next = state.workItems[nextId];
+      if (!next) return true;
+      nextId = next.supersededBy;
+    }
+    return false;
+  };
+  let changed = false;
+  for (const item of workItems.filter(hasInvalidSupersession)) {
+    item.supersessionRepair = { previousTargetId: item.supersededBy, reason: "invalid_legacy_link" };
+    item.supersededBy = null;
+    changed = true;
+  }
+  return changed;
+}
+
+// Mutates `state`. `events` are parsed provenance envelopes in sequence order.
+function applyProvenanceRepair(state, events) {
+  const missing = Object.values(state.workItems ?? {}).filter(item => item && !Object.hasOwn(item, "proposedById"));
+  const workItems = Object.values(state.workItems ?? {}).filter(item => item && typeof item === "object");
+  const legacyReceipts = workItems.flatMap(item => [...(item.receiptHistory ?? []), item.receipt].filter(Boolean))
+    .filter(receipt => !Object.hasOwn(receipt, "reportedById") || !Object.hasOwn(receipt, "producerId") || !Object.hasOwn(receipt, "producerAttribution"));
+  const legacyVerifications = workItems.flatMap(item => [...(item.verificationHistory ?? []), item.verification].filter(Boolean)
+    .map(verification => ({ item, verification })))
+    .filter(({ verification }) => !Object.hasOwn(verification, "independenceConfirmed"));
+  const approvalsToCheck = workItems.filter(item => item.decision?.decision === "approved");
+  const legacySupersededClaims = workItems.filter(item => item.state === "superseded" && item.claim?.status === "active");
+  const proposers = new Map();
+  const completions = new Map();
+  const verifications = new Map();
+  const decisions = new Map();
+  const supersessions = new Map();
+  for (const parsed of events) {
+    if (parsed.type === T.WORK_PROPOSED && parsed.data?.workItemId && !proposers.has(parsed.data.workItemId)) proposers.set(parsed.data.workItemId, parsed.actorId ?? null);
+    if (parsed.type === T.WORK_COMPLETED && parsed.id) completions.set(parsed.id, parsed);
+    if (parsed.type === T.VERIFICATION_RECORDED && parsed.id) verifications.set(parsed.id, parsed);
+    if (parsed.type === T.OWNER_DECISION_RECORDED && parsed.id) decisions.set(parsed.id, parsed);
+    if (parsed.type === T.WORK_SUPERSEDED && parsed.data?.workItemId) supersessions.set(parsed.data.workItemId, parsed);
+  }
+  let changed = false;
+  if (ensureDefaultChannelState(state)) changed = true;
+  for (const item of missing) {
+    const proposer = proposers.get(item.id);
+    if (proposer) { item.proposedById = proposer; changed = true; }
+  }
+  for (const receipt of legacyReceipts) {
+    const completion = completions.get(receipt.eventId);
+    const producerId = completion?.data && Object.hasOwn(completion.data, "producerId") ? completion.data.producerId : null;
+    receipt.reportedById = completion?.actorId ?? null;
+    receipt.producerId = producerId ?? null;
+    receipt.producerAttribution = producerId == null ? "unknown" : "reported";
+    changed = true;
+  }
+  for (const { item, verification } of legacyVerifications) {
+    const receipt = [...(item.receiptHistory ?? []), item.receipt].filter(Boolean)
+      .find(candidate => candidate.eventId === verification.completionEventId && candidate.evidenceVersion === verification.evidenceVersion);
+    const verificationEvent = verifications.get(verification.eventId);
+    const producerKnown = receipt?.producerAttribution === "reported" && receipt.producerId != null;
+    const verifierAuthenticated = verificationEvent?.actorId === verification.verifierId && verificationEvent.actorId === item.verifierMemberId;
+    const exactReceipt = verificationEvent?.data?.completionEventId === receipt?.eventId && verificationEvent?.data?.evidenceVersion === receipt?.evidenceVersion;
+    verification.independenceConfirmed = producerKnown && verifierAuthenticated && exactReceipt && receipt.producerId !== verificationEvent.actorId;
+    changed = true;
+  }
+  for (const item of approvalsToCheck) {
+    const receipt = item.receipt, verification = item.verification, decision = item.decision;
+    const decisionEvent = decisions.get(decision.eventId);
+    const approvalStillCurrent = item.state === "completed";
+    const approvalProvenanceSatisfied = decision.actorId === item.humanDecisionMakerId
+      && decision.completionEventId === receipt?.eventId
+      && decision.evidenceVersion === receipt?.evidenceVersion
+      && decisionEvent?.actorId === decision.actorId
+      && decisionEvent?.data?.workItemId === item.id
+      && decisionEvent?.data?.decision === "approved"
+      && decisionEvent?.data?.completionEventId === receipt?.eventId
+      && decisionEvent?.data?.evidenceVersion === receipt?.evidenceVersion
+      && decisionEvent?.data?.reason === decision.reason;
+    const independentGateSatisfied = !item.independentVerificationRequired || (
+      verification?.result === "pass" && verification.independenceConfirmed === true
+      && verification.verifierId === item.verifierMemberId
+      && verification.completionEventId === receipt?.eventId
+      && verification.evidenceVersion === receipt?.evidenceVersion
+      && receipt?.producerAttribution === "reported" && receipt.producerId != null
+      && receipt.producerId !== verification.verifierId
+    );
+    const confirmed = approvalStillCurrent && approvalProvenanceSatisfied && independentGateSatisfied;
+    if (!confirmed) {
+      item.decisionHistory ||= [];
+      const invalidatedByRepair = !approvalStillCurrent ? "approval_not_current"
+        : !approvalProvenanceSatisfied ? "approval_provenance_unconfirmed"
+        : "producer_independence_unconfirmed";
+      item.decisionHistory.push({
+        ...decision,
+        historical: true,
+        invalidatedByRepair,
+        ...(!approvalStillCurrent ? { invalidatedState: item.state } : {})
+      });
+      item.decision = null;
+      changed = true;
+    }
+  }
+  for (const item of legacySupersededClaims) {
+    const supersession = supersessions.get(item.id);
+    item.claim.status = "superseded";
+    item.claim.supersededAt = supersession?.at ?? item.updatedAt;
+    changed = true;
+  }
+  if (repairInvalidSupersessions(state)) changed = true;
+  return changed;
 }
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
@@ -719,6 +893,7 @@ function agentWakeTargetIds(state, senderMemberId, data) {
 
 export class RoomStore {
   constructor(filename, { now = () => Date.now(), readOnly = false, database, storagePlatform = nodeStorage, storageFailureThreshold = STORAGE_FAILURE_THRESHOLD, stitch = null, identityHashKey = undefined } = {}) {
+    const coldStart = startColdStart();
     if (!Number.isInteger(storageFailureThreshold) || storageFailureThreshold < 1) throw new Error("Storage failure threshold must be a positive integer");
     // Cross-channel thread stitching (task #19): stitch is the frozen
     // { salt, epoch, enabled, bindings } triple from stitchConfigFromEnv, or
@@ -801,6 +976,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     const supported = new Set([...Array(STORE_SCHEMA_VERSION + 1).keys()]);
     const hasSchema = version === 0 && this.storagePlatform.hasSchema(this.db);
     if (!supported.has(version) || hasSchema) {
+      logColdStart(coldStart, this.db, true);
       this.db.close();
       throw new Error(version > STORE_SCHEMA_VERSION ? "Database schema is newer than this service" : "Database schema version is unsupported");
     }
@@ -853,8 +1029,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         verifyRoomLifecycle(this);
         this.moderation.verifySchema({ allowAbsent: true }); // E4 message reports: additive at v27 as well.
         this.bountyEscrow.verifySchema({ allowAbsent: true }); // Escrowed bounties: additive, read-only never migrates.
+        logColdStart(coldStart, this.db, false);
         return;
-      } catch (error) { this.db.close(); throw error; }
+      } catch (error) { logColdStart(coldStart, this.db, error); this.db.close(); throw error; }
     }
     this.storagePlatform.configure(this.db, false);
     this.storagePlatform.registerWriter(this.db);
@@ -1245,14 +1422,41 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.quarantineSplits.verify();
       verifyRoomLifecycle(this);
       if (!this.readOnly) this.identities.expireInactive();
-    }); } catch (error) { this.db.close(); throw error; }
+    }); } catch (error) { logColdStart(coldStart, this.db, error); this.db.close(); throw error; }
+    logColdStart(coldStart, this.db, false);
   }
 
   verifyHelpHistory() {
     return this.readTransaction(() => {
-      for (const row of this.db.prepare("SELECT id,projection FROM rooms ORDER BY id").all()) {
-        const history = this.db.prepare("SELECT sequence,body FROM events WHERE room_id=? ORDER BY sequence").all(row.id);
-        const checkpoint = this.db.prepare("SELECT sequence,projection FROM projection_checkpoints WHERE room_id=?").get(row.id);
+      const placeholders = HELP_EVENT_TYPES.map(() => "?").join(",");
+      const helpRooms = new Set(this.db.prepare(
+        `SELECT DISTINCT room_id AS roomId FROM events WHERE json_extract(body,'$.type') IN (${placeholders})`
+      ).all(...HELP_EVENT_TYPES).map(row => row.roomId));
+      const idsWithHelp = sql => new Set(this.db.prepare(sql).all().map(row => row.id));
+      // own() is true for a present key whose value is null. json_type is SQL
+      // NULL only when the key is absent, so this matches that check without
+      // parsing message bodies.
+      const roomHelp = idsWithHelp(`
+        SELECT id FROM rooms WHERE json_type(projection, '$.helpOffers') IS NOT NULL
+        UNION
+        SELECT rooms.id AS id FROM rooms, json_each(rooms.projection, '$.workItems') AS item
+        WHERE json_type(item.value, '$.helpWanted') IS NOT NULL
+      `);
+      const checkpointHelp = idsWithHelp(`
+        SELECT room_id AS id FROM projection_checkpoints WHERE json_type(projection, '$.helpOffers') IS NOT NULL
+        UNION
+        SELECT projection_checkpoints.room_id AS id
+        FROM projection_checkpoints, json_each(projection_checkpoints.projection, '$.workItems') AS item
+        WHERE json_type(item.value, '$.helpWanted') IS NOT NULL
+      `);
+      if (!helpRooms.size) {
+        if (roomHelp.size || checkpointHelp.size) throw new Error("Help invitation history requires operator reconciliation");
+        return;
+      }
+      for (const row of this.db.prepare("SELECT id, projection FROM rooms ORDER BY id").all()) {
+        if (!helpRooms.has(row.id) && !roomHelp.has(row.id) && !checkpointHelp.has(row.id)) continue;
+        const history = this.db.prepare("SELECT sequence, body FROM events WHERE room_id=? ORDER BY sequence").all(row.id);
+        const checkpoint = this.db.prepare("SELECT sequence, projection FROM projection_checkpoints WHERE room_id=?").get(row.id);
         auditWorkHelp(JSON.parse(row.projection), history, checkpoint);
       }
     });
@@ -1579,6 +1783,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // The legacy reducer guessed that every reporter was also the producer, so legacy receipts
   // deliberately migrate to explicit unknown producer attribution unless their event carried
   // the newer producerId field. Idempotent current projections are left untouched.
+  //
+  // Chat messages are not an input. A current projection is repaired from SQL extracts
+  // (default channel, invalid supersession links) and does not JSON.parse the log.
+  // Rooms that still carry a legacy marker load only the provenance event types.
   repairProjectionProvenance({ upgradeV1 = false } = {}) {
     this.transaction(() => {
       // A v1 projection was produced under v1 transition rules. Preserve its repaired,
@@ -1586,129 +1794,114 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // normally from there. This keeps legacy event bodies byte-for-byte append-only without
       // weakening the current reducer to accept rules that no longer apply.
       this.db.exec("CREATE TABLE IF NOT EXISTS projection_checkpoints (room_id TEXT PRIMARY KEY REFERENCES rooms(id), sequence INTEGER NOT NULL, projection TEXT NOT NULL)");
-      const findEvents = this.db.prepare("SELECT body FROM events WHERE room_id=? ORDER BY sequence");
-      const saveCheckpoint = this.db.prepare("INSERT INTO projection_checkpoints(room_id,sequence,projection) VALUES(?,?,?)");
-      for (const { id, sequence, projection } of this.db.prepare("SELECT id, sequence, projection FROM rooms ORDER BY id").all()) {
-        const state = JSON.parse(projection);
-        const missing = Object.values(state.workItems ?? {}).filter(item => item && !Object.hasOwn(item, "proposedById"));
-        const workItems = Object.values(state.workItems ?? {}).filter(item => item && typeof item === "object");
-        const legacyReceipts = workItems.flatMap(item => [...(item.receiptHistory ?? []), item.receipt].filter(Boolean))
-          .filter(receipt => !Object.hasOwn(receipt, "reportedById") || !Object.hasOwn(receipt, "producerId") || !Object.hasOwn(receipt, "producerAttribution"));
-        const legacyVerifications = workItems.flatMap(item => [...(item.verificationHistory ?? []), item.verification].filter(Boolean)
-          .map(verification => ({ item, verification })))
-          .filter(({ verification }) => !Object.hasOwn(verification, "independenceConfirmed"));
-        const approvalsToCheck = workItems.filter(item => item.decision?.decision === "approved");
-        const legacySupersededClaims = workItems.filter(item => item.state === "superseded" && item.claim?.status === "active");
-        const hasInvalidSupersession = item => {
-          if (item.state !== "superseded" || !item.supersededBy) return false;
-          const visited = new Set([item.id]);
-          let nextId = item.supersededBy;
-          while (nextId) {
-            if (visited.has(nextId)) return true;
-            visited.add(nextId);
-            const next = state.workItems[nextId];
-            if (!next) return true;
-            nextId = next.supersededBy;
-          }
-          return false;
-        };
-        const invalidSupersessions = workItems.filter(hasInvalidSupersession);
-        const proposers = new Map();
-        const completions = new Map();
-        const verifications = new Map();
-        const decisions = new Map();
-        const supersessions = new Map();
-        for (const row of findEvents.all(id)) {
-          const parsed = JSON.parse(row.body);
-          if (parsed.type === T.WORK_PROPOSED && parsed.data?.workItemId && !proposers.has(parsed.data.workItemId)) proposers.set(parsed.data.workItemId, parsed.actorId ?? null);
-          if (parsed.type === T.WORK_COMPLETED && parsed.id) completions.set(parsed.id, parsed);
-          if (parsed.type === T.VERIFICATION_RECORDED && parsed.id) verifications.set(parsed.id, parsed);
-          if (parsed.type === T.OWNER_DECISION_RECORDED && parsed.id) decisions.set(parsed.id, parsed);
-          if (parsed.type === T.WORK_SUPERSEDED && parsed.data?.workItemId) supersessions.set(parsed.data.workItemId, parsed);
-        }
-        let changed = false;
-        // Phase 2 channels: legacy projections (stored before channels existed)
-        // gain #general so the stored projection matches a replay. Mirrors
-        // ensureDefaultChannel in src/events.js.
-        if (ensureDefaultChannelState(state)) changed = true;
-        for (const item of missing) {
-          const proposer = proposers.get(item.id);
-          if (proposer) { item.proposedById = proposer; changed = true; }
-        }
-        for (const receipt of legacyReceipts) {
-          const completion = completions.get(receipt.eventId);
-          const producerId = completion?.data && Object.hasOwn(completion.data, "producerId") ? completion.data.producerId : null;
-          receipt.reportedById = completion?.actorId ?? null;
-          receipt.producerId = producerId ?? null;
-          receipt.producerAttribution = producerId == null ? "unknown" : "reported";
-          changed = true;
-        }
-        for (const { item, verification } of legacyVerifications) {
-          const receipt = [...(item.receiptHistory ?? []), item.receipt].filter(Boolean)
-            .find(candidate => candidate.eventId === verification.completionEventId && candidate.evidenceVersion === verification.evidenceVersion);
-          const verificationEvent = verifications.get(verification.eventId);
-          const producerKnown = receipt?.producerAttribution === "reported" && receipt.producerId != null;
-          const verifierAuthenticated = verificationEvent?.actorId === verification.verifierId && verificationEvent.actorId === item.verifierMemberId;
-          const exactReceipt = verificationEvent?.data?.completionEventId === receipt?.eventId && verificationEvent?.data?.evidenceVersion === receipt?.evidenceVersion;
-          verification.independenceConfirmed = producerKnown && verifierAuthenticated && exactReceipt && receipt.producerId !== verificationEvent.actorId;
-          changed = true;
-        }
-        for (const item of approvalsToCheck) {
-          const receipt = item.receipt, verification = item.verification, decision = item.decision;
-          const decisionEvent = decisions.get(decision.eventId);
-          const approvalStillCurrent = item.state === "completed";
-          const approvalProvenanceSatisfied = decision.actorId === item.humanDecisionMakerId
-            && decision.completionEventId === receipt?.eventId
-            && decision.evidenceVersion === receipt?.evidenceVersion
-            && decisionEvent?.actorId === decision.actorId
-            && decisionEvent?.data?.workItemId === item.id
-            && decisionEvent?.data?.decision === "approved"
-            && decisionEvent?.data?.completionEventId === receipt?.eventId
-            && decisionEvent?.data?.evidenceVersion === receipt?.evidenceVersion
-            && decisionEvent?.data?.reason === decision.reason;
-          const independentGateSatisfied = !item.independentVerificationRequired || (
-            verification?.result === "pass" && verification.independenceConfirmed === true
-            && verification.verifierId === item.verifierMemberId
-            && verification.completionEventId === receipt?.eventId
-            && verification.evidenceVersion === receipt?.evidenceVersion
-            && receipt?.producerAttribution === "reported" && receipt.producerId != null
-            && receipt.producerId !== verification.verifierId
-          );
-          const confirmed = approvalStillCurrent && approvalProvenanceSatisfied && independentGateSatisfied;
-          if (!confirmed) {
-            item.decisionHistory ||= [];
-            const invalidatedByRepair = !approvalStillCurrent ? "approval_not_current"
-              : !approvalProvenanceSatisfied ? "approval_provenance_unconfirmed"
-              : "producer_independence_unconfirmed";
-            item.decisionHistory.push({
-              ...decision,
-              historical: true,
-              invalidatedByRepair,
-              ...(!approvalStillCurrent ? { invalidatedState: item.state } : {})
-            });
-            item.decision = null;
-            changed = true;
-          }
-        }
-        for (const item of legacySupersededClaims) {
-          const supersession = supersessions.get(item.id);
-          item.claim.status = "superseded";
-          item.claim.supersededAt = supersession?.at ?? item.updatedAt;
-          changed = true;
-        }
-        for (const item of invalidSupersessions) {
-          item.supersessionRepair = { previousTargetId: item.supersededBy, reason: "invalid_legacy_link" };
-          item.supersededBy = null;
-          changed = true;
-        }
-        if (changed) this.db.prepare("UPDATE rooms SET projection=? WHERE id=?").run(JSON.stringify(state), id);
-        if (upgradeV1) saveCheckpoint.run(id, sequence, JSON.stringify(state));
+      this.ensureEventTypeIndex();
+      if (upgradeV1) {
+        const rooms = this.db.prepare("SELECT id, sequence, projection FROM rooms ORDER BY id").all();
+        this.replayProvenance(rooms, { upgradeV1: true });
+        // v2 marks the producer/reporter/verification-independence projection contract.
+        // Commit its marker atomically with every v1 projection repair so older binaries
+        // either see untouched v1 or reject the fully upgraded database.
+        this.storagePlatform.setVersion(this.db, 2);
+        return;
       }
-      // v2 marks the producer/reporter/verification-independence projection contract.
-      // Commit its marker atomically with every v1 projection repair so older binaries
-      // either see untouched v1 or reject the fully upgraded database.
-      if (upgradeV1) this.storagePlatform.setVersion(this.db, 2);
+      for (const row of this.db.prepare("SELECT projection FROM rooms WHERE json_valid(projection) = 0").all()) JSON.parse(row.projection);
+      const replayIds = this.roomsNeedingProvenanceReplay();
+      this.repairProjectionShape(replayIds);
+      if (!replayIds.size) return;
+      const rooms = this.db.prepare("SELECT id, sequence FROM rooms ORDER BY id").all().filter(row => replayIds.has(row.id));
+      this.replayProvenance(rooms, { upgradeV1: false });
     });
+  }
+  ensureEventTypeIndex() {
+    // Additive. Expression indexes do not fire writer triggers. Durable Object
+    // SQL rejects SAVEPOINT, so this runs inside the open transaction itself.
+    this.db.exec("CREATE INDEX IF NOT EXISTS events_room_type ON events(room_id, json_extract(body, '$.type'))");
+  }
+  roomsNeedingProvenanceReplay() {
+    const ids = this.db.prepare(`
+      SELECT DISTINCT rooms.id AS id
+      FROM rooms, json_each(rooms.projection, '$.workItems') AS item
+      WHERE json_type(item.value) = 'object' AND (
+        json_type(item.value, '$.proposedById') IS NULL
+        OR (json_type(item.value, '$.receipt') = 'object' AND (
+          json_type(item.value, '$.receipt.reportedById') IS NULL
+          OR json_type(item.value, '$.receipt.producerId') IS NULL
+          OR json_type(item.value, '$.receipt.producerAttribution') IS NULL))
+        OR (json_type(item.value, '$.verification') = 'object'
+          AND json_type(item.value, '$.verification.independenceConfirmed') IS NULL)
+        OR json_extract(item.value, '$.decision.decision') = 'approved'
+        OR (json_extract(item.value, '$.state') = 'superseded' AND json_extract(item.value, '$.claim.status') = 'active')
+      )
+      UNION
+      SELECT DISTINCT rooms.id AS id
+      FROM rooms, json_each(rooms.projection, '$.workItems') AS item, json_each(item.value, '$.receiptHistory') AS receipt
+      WHERE json_type(receipt.value) = 'object' AND (
+        json_type(receipt.value, '$.reportedById') IS NULL
+        OR json_type(receipt.value, '$.producerId') IS NULL
+        OR json_type(receipt.value, '$.producerAttribution') IS NULL)
+      UNION
+      SELECT DISTINCT rooms.id AS id
+      FROM rooms, json_each(rooms.projection, '$.workItems') AS item, json_each(item.value, '$.verificationHistory') AS verification
+      WHERE json_type(verification.value) = 'object'
+        AND json_type(verification.value, '$.independenceConfirmed') IS NULL
+    `).all().map(row => row.id);
+    return new Set(ids);
+  }
+  repairProjectionShape(skipIds) {
+    const update = this.db.prepare("UPDATE rooms SET projection=? WHERE id=?");
+    const missingChannel = this.db.prepare(`
+      SELECT id, projection FROM rooms
+      WHERE json_type(projection, '$.room') = 'object'
+        AND (json_type(projection, '$.channels.${DEFAULT_CHANNEL_ID}') IS NULL
+          OR json_type(projection, '$.channels.${DEFAULT_CHANNEL_ID}') = 'null')
+    `).all();
+    for (const row of missingChannel) {
+      if (skipIds.has(row.id)) continue;
+      const state = JSON.parse(row.projection);
+      if (!ensureDefaultChannelState(state)) continue;
+      update.run(JSON.stringify(state), row.id);
+    }
+    const linked = this.db.prepare(`
+      SELECT rooms.id AS id, json_extract(rooms.projection, '$.workItems') AS workItems
+      FROM rooms
+      WHERE EXISTS (
+        SELECT 1 FROM json_each(rooms.projection, '$.workItems') AS item
+        WHERE json_extract(item.value, '$.state') = 'superseded'
+          AND json_type(item.value, '$.supersededBy') = 'text'
+      )
+    `).all();
+    for (const row of linked) {
+      if (skipIds.has(row.id)) continue;
+      if (!repairInvalidSupersessions({ workItems: parseStoredJson(row.workItems, {}) })) continue;
+      const state = JSON.parse(this.db.prepare("SELECT projection FROM rooms WHERE id=?").get(row.id).projection);
+      if (repairInvalidSupersessions(state)) update.run(JSON.stringify(state), row.id);
+    }
+  }
+  replayProvenance(rooms, { upgradeV1 }) {
+    const placeholders = PROVENANCE_EVENT_TYPES.map(() => "?").join(",");
+    const findEvents = this.db.prepare(`SELECT body FROM events WHERE room_id=? AND json_extract(body,'$.type') IN (${placeholders}) ORDER BY sequence`);
+    const saveCheckpoint = this.db.prepare("INSERT INTO projection_checkpoints(room_id,sequence,projection) VALUES(?,?,?)");
+    const update = this.db.prepare("UPDATE rooms SET projection=? WHERE id=?");
+    const slicesOf = this.db.prepare(`SELECT json_extract(projection, '$.room') AS room, json_extract(projection, '$.channels') AS channels, json_extract(projection, '$.workItems') AS workItems FROM rooms WHERE id=?`);
+    for (const room of rooms) {
+      const events = findEvents.all(room.id, ...PROVENANCE_EVENT_TYPES).map(row => JSON.parse(row.body));
+      if (upgradeV1) {
+        const state = JSON.parse(room.projection);
+        const changed = applyProvenanceRepair(state, events);
+        if (changed) update.run(JSON.stringify(state), room.id);
+        saveCheckpoint.run(room.id, room.sequence, JSON.stringify(state));
+        continue;
+      }
+      const slices = slicesOf.get(room.id);
+      const partial = {
+        room: parseStoredJson(slices?.room, null),
+        channels: parseStoredJson(slices?.channels, undefined),
+        workItems: parseStoredJson(slices?.workItems, {})
+      };
+      if (!applyProvenanceRepair(partial, events)) continue;
+      const state = JSON.parse(this.db.prepare("SELECT projection FROM rooms WHERE id=?").get(room.id).projection);
+      if (applyProvenanceRepair(state, events)) update.run(JSON.stringify(state), room.id);
+    }
   }
   close() { this.db.close(); }
   transaction(fn) {

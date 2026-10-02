@@ -16,7 +16,7 @@ import { ChannelDrainer } from '../server/channel-drain.mjs';
 import { DurableDatabase, durableStorage } from './storage.mjs';
 import { bootstrapRoom } from './bootstrap.mjs';
 import { maintenanceEnabled, maintenanceResponse } from '../server/maintenance.mjs';
-import { isEdgeDoorUrl, EDGE_DOOR_HOSTS, rewriteRoomApiPrefix } from '../deploy/agent-discovery.mjs';
+import { isEdgeDoorUrl, EDGE_DOOR_HOSTS, rewriteRoomApiPrefix, isHealthAliasPath } from '../deploy/agent-discovery.mjs';
 // E1 — email inbound (Worker email() handler). These must come after the
 // imports above: server/channel-adapters/index.mjs has a module-init order
 // constraint and is only safely evaluated after store.mjs/http.mjs.
@@ -28,6 +28,11 @@ import { CRON_JOB_BUDGET_MS, HEARTBEAT_STORAGE_KEY, applyOutcomes, jobHealthResp
 import { SOURCE_REVISION, BUILD_ID } from '../server/version.mjs';
 import { edgePublicResponse } from './edge-public.mjs';
 import { appDurationMs, logRoomRequest, requestPath, withServerTiming } from './request-timing.mjs';
+import { HEALTH_PROBE_TIMEOUT_MS, createHealthProbe, healthLivenessResponse, healthProbeResponse } from './health-probe.mjs';
+
+// One probe per isolate. Concurrent health checks during a cold start share
+// it; a finished probe does not cache, so the next check sees a fresh answer.
+const durableObjectHealth = createHealthProbe();
 
 // Let a request that arrived while this cron RPC was queued run before the
 // job's synchronous work closes the input gate again.
@@ -242,7 +247,7 @@ export class ProjectRoom extends DurableObject {
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const started = Date.now();
     const finish = (response, servedBy) => {
       const totalMs = Date.now() - started;
@@ -305,6 +310,21 @@ export default {
     headers.set('X-Room-Visitor-IP', address);
     headers.delete('X-Real-IP');
     headers.delete('X-Forwarded-For');
+    const healthPath = url.pathname.length > 1 && url.pathname.endsWith('/') ? url.pathname.slice(0, -1) : url.pathname;
+    // Liveness is the Worker. Readiness is a short probe of invite-only-pilot.
+    // A cold constructor must not turn this check into room_unavailable.
+    if ((healthPath === '/api/health' || isHealthAliasPath(url.pathname)) && (request.method === 'GET' || request.method === 'HEAD')) {
+      const deployment = env.ROOM_DEPLOYMENT === 'production' || env.ROOM_DEPLOYMENT === 'staging' ? env.ROOM_DEPLOYMENT : undefined;
+      const mode = env.ROOM_SERVICE_MODE ?? 'cloudflare-staging';
+      const probed = await durableObjectHealth({
+        timeoutMs: HEALTH_PROBE_TIMEOUT_MS,
+        start: () => env.ROOM.getByName('invite-only-pilot').fetch(new Request(request, { headers })),
+        waitUntil: ctx?.waitUntil?.bind(ctx),
+        onSnapshot: snapshot => ({ response: healthProbeResponse(snapshot, request), servedBy: 'durable-object' }),
+        onUnready: readiness => ({ response: healthLivenessResponse(request, { mode, deployment, readiness }), servedBy: 'worker' })
+      });
+      return finish(probed.response, probed.servedBy);
+    }
     let response;
     try {
       response = await env.ROOM.getByName('invite-only-pilot').fetch(new Request(request, { headers }));

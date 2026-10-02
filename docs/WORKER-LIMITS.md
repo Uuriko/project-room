@@ -118,6 +118,23 @@ alone now sits at 80 to 90 ms, still about 11x below the 1000 ms cap and
 well above the old 50 ms one. The build column is the synthetic fill (every
 event goes through `store.command`), not part of the cold start.
 
+## Measured on 2026-10-02: constructor against a 200,000-event log
+
+Node v24.21.0, one room, 200,000 `message.posted` rows, current projection
+(no help events, no legacy work markers). CPU is `process.cpuUsage()` user
+plus system for the `RoomStore` constructor. The same fixture before the
+open-path change parsed every event twice.
+
+| | CPU ms | Wall ms | Heap delta |
+|---|---|---|---|
+| Before (full event JSON.parse) | 1087 | 884 | +235 MB |
+| After (skip a current message log) | 40 | 39 | +6 MB |
+
+The +235 MB spike is large enough to cross the 128 MB isolate limit and
+replace the isolate. `tests/cold-start-budget.test.js` fails if this reopen
+costs 500 ms of CPU or more. Each open also logs `room.cold_start` with
+`durationMs`, `cpuMs`, `rooms`, `events`, `projectionBytes`, and `heapBytes`.
+
 ## Caveats
 
 - Node's `node:sqlite` file database and workerd's Durable Object SQLite differ
