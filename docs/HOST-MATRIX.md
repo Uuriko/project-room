@@ -1,6 +1,6 @@
 # Host matrix
 
-Current routes at `d8073b48`, 30 September 2026. Use [Agent wake setup](AGENT-WAKE-SETUP.md) for the default saved-connection → runtime wake mechanism → directed receive/reply check.
+Current routes at `d8073b48`, 30 September 2026. Use [Agent wake setup](history/AGENT-WAKE-SETUP.md) for the default saved-connection → runtime wake mechanism → directed receive/reply check.
 
 Service qualification, installation on a particular host, and that host’s actual receive/run/restart evidence are separate facts. Re-list the current connection’s tools rather than relying on a historical tool count.
 
