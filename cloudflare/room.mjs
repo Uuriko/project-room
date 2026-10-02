@@ -25,7 +25,7 @@ import { emailConnection } from '../server/email-envelope.mjs';
 import { isEmailProfile } from '../server/channel-connection.mjs';
 import { runLiveStoreRetention } from '../server/retention-run.mjs';
 import { syncClaimPullRequests } from '../server/claim-pr-sync.mjs';
-import { CRON_JOB_BUDGET_MS, HEARTBEAT_STORAGE_KEY, applyOutcomes, jobHealthResponse, jobHealthUnavailable, jobHealthView, runCronJobs } from './job-heartbeat.mjs';
+import { CRON_JOB_BUDGET_MS, HEARTBEAT_STORAGE_KEY, applyOutcomes, cronIntegrationConfigured, jobHealthResponse, jobHealthUnavailable, jobHealthView, runCronJobs } from './job-heartbeat.mjs';
 import { SOURCE_REVISION, BUILD_ID } from '../server/version.mjs';
 import { edgePublicResponse } from './edge-public.mjs';
 import { appDurationMs, logRoomRequest, requestPath, withServerTiming } from './request-timing.mjs';
@@ -171,7 +171,8 @@ export class ProjectRoom extends DurableObject {
   async syncGmailMailboxes() {
     if (this.paused) return { completed: 0 };
     await yieldToQueuedRequests();
-    // Unconfigured Gmail is visible in /api/health/jobs instead of looking like a quiet success.
+    // The minute cron does not call this when Gmail is off. A direct call still
+    // says so, instead of looking like a mailbox that had nothing to sync.
     if (!this.gmailSync) return { completed: 0, configured: false };
     return this.gmailSync.tick({ deadline: cronDeadline() });
   }
@@ -185,7 +186,7 @@ export class ProjectRoom extends DurableObject {
     return { recorded: Array.isArray(outcomes) ? outcomes.length : 0 };
   }
   async readJobHealth() {
-    return jobHealthView(await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY), Date.now());
+    return jobHealthView(await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY), Date.now(), this.env);
   }
 
   // E1 — RPC: active email connections whose identity or alias lists this
@@ -439,14 +440,18 @@ export default {
   async scheduled(event, env, ctx) {
     if (maintenanceEnabled(env.ROOM_MAINTENANCE)) return;
     const room = env.ROOM.getByName('invite-only-pilot');
-    const outcomes = await runCronJobs({
+    const runners = {
       'gmail-sync': () => room.syncGmailMailboxes(),
       'channel-drain': () => room.drainChannelBacklog(),
       'webhook-dispatch': () => room.drainWebhookDeliveries(),
       'land-queue': () => room.refreshLandQueue(),
       'claim-prs': () => room.refreshClaimPullRequests(),
       'retention': () => room.planRetention()
-    });
+    };
+    for (const name of Object.keys(runners)) {
+      if (!cronIntegrationConfigured(name, env)) delete runners[name];
+    }
+    const outcomes = await runCronJobs(runners);
     try { await room.recordCronTick(outcomes); }
     catch (error) { console.error(`[job-heartbeat] record failed: ${error?.message ?? error}`); }
     try {
