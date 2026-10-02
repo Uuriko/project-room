@@ -20,9 +20,7 @@ import { isEdgeDoorUrl, EDGE_DOOR_HOSTS, rewriteRoomApiPrefix, isHealthAliasPath
 // E1 — email inbound (Worker email() handler). These must come after the
 // imports above: server/channel-adapters/index.mjs has a module-init order
 // constraint and is only safely evaluated after store.mjs/http.mjs.
-import { routeInboundEmail, emailRoutingLimits, emailRoutingRejections, connectionAddresses, routingKey } from '../server/email-routing-inbound.mjs';
-import { emailConnection } from '../server/email-envelope.mjs';
-import { isEmailProfile } from '../server/channel-connection.mjs';
+import { durableInboundEmailConsumer, emailRoutingLimits, emailRoutingRejections } from '../server/email-routing-inbound.mjs';
 import { RETENTION_TABLES, runLiveStoreRetention } from '../server/retention-run.mjs';
 import { pruneAbuseRateBuckets } from '../server/abuse-rate-buckets.mjs';
 import { syncClaimPullRequests } from '../server/claim-pr-sync.mjs';
@@ -198,22 +196,6 @@ export class ProjectRoom extends DurableObject {
     return jobHealthView(await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY), Date.now());
   }
 
-  // E1 — RPC: active email connections whose identity or alias lists this
-  // routing key. Runs in the DO so no connection data leaves it. Returns the
-  // profile or null.
-  lookupRoutedConnection(address) {
-    if (this.paused) return null;
-    const key = routingKey(address);
-    if (!key) return null;
-    return this.store.readTransaction(() => {
-      for (const row of this.store.db.prepare("SELECT data_json FROM private_email_connections WHERE provider='microsoft-graph'").all()) {
-        const connection = JSON.parse(row.data_json);
-        if (connection.state !== 'active' || !isEmailProfile(connection.profile)) continue;
-        if (connectionAddresses(emailConnection(connection.profile)).includes(key)) return connection.profile;
-      }
-      return null;
-    });
-  }
   // Task 9 — auto-drain RPC for the Worker's cron trigger. Scans the webhook
   // journal and poison-screens pending slices (both session-free, so they run
   // on schedule); the inbox import itself still needs an owner session (B20
@@ -321,19 +303,6 @@ export class ProjectRoom extends DurableObject {
       }));
     }
     return { ...receipt, webhookDeliveries, abuseRateBuckets };
-  }
-  // E1 — RPC: hand an accepted, already-routed message to the importer. Needs
-  // the system import authority from B20; until then it parks the request so
-  // the owner's next sync imports it. Returns { accepted, duplicate }.
-  importRoutedEmail(routed) {
-    if (this.paused) throw new Error('Room paused');
-    // B20: replace with the account-scoped import authority, e.g.
-    //   return this.store.email.applyRouted(routed)  (completeRoutedImport + apply under the import fence)
-    this.routedMail ??= new Map();
-    if (this.routedMail.has(routed.requestId)) return { accepted: true, duplicate: true };
-    if (this.routedMail.size >= 500) throw new Error('Routed mail backlog full');
-    this.routedMail.set(routed.requestId, routed);
-    return { accepted: true, duplicate: false };
   }
 }
 
@@ -459,19 +428,13 @@ export default {
     if (maintenanceEnabled(env.ROOM_MAINTENANCE)) { message.setReject(emailRoutingRejections.unavailable); return; }
     // Refuse before reading the stream: the size cap is the first defence.
     if (message.rawSize > emailRoutingLimits.rawBytes) { message.setReject(emailRoutingRejections.tooLarge); return; }
-    const room = env.ROOM.getByName('invite-only-pilot');
-    let routed;
-    try {
-      const raw = new Uint8Array(await new Response(message.raw).arrayBuffer());
-      routed = await routeInboundEmail(
-        { from: message.from, to: message.to, raw, rawSize: message.rawSize, receivedAt: new Date().toISOString() },
-        { lookup: address => room.lookupRoutedConnection(address) });
-    } catch {
-      // Storage or RPC failure: temporary reject so the sender retries; never a silent drop.
-      message.setReject(emailRoutingRejections.unavailable); return;
-    }
-    if (!routed.decision.accept) { message.setReject(routed.decision.reason); return; }
-    try { await room.importRoutedEmail(routed); }
+    // Inbox is shelved. Accepting here used to park the message in memory and
+    // drop it on eviction. Reject unless a consumer that persists the message
+    // is actually wired. A throw from that consumer is still a reject: SMTP
+    // must not accept mail we failed to store.
+    const consume = durableInboundEmailConsumer();
+    if (typeof consume !== "function") { message.setReject(emailRoutingRejections.notAccepted); return; }
+    try { await consume(message, env, ctx); }
     catch { message.setReject(emailRoutingRejections.unavailable); }
   },
 
