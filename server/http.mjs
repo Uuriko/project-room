@@ -126,15 +126,14 @@ const discoveryLinks = url => {
     `<${base}/room>; rel="alternate"; type="text/html"`
   ].join(", ");
 };
-// --- GR1 public pages: www.getdasha.com/room/<page> keeps the /room prefix.
-// Those paths serve the same document and name the canonical host in Link.
+// --- GR1 public pages: live receipts and the sitemap under the /room prefix.
+// Static marketing (/about, /offers, /compare, images) stays off this server.
+// The edge serves those, including www.getdasha.com/room/<page>.
 const gr1PublicPath = pathname => {
   if (!pathname.startsWith("/room/")) return null;
   const rest = pathname.slice("/room".length);
-  if (rest === "/receipts" || /^\/receipts\/(?:pwr_[a-f0-9]{16,128}|wcr_[a-f0-9]{32}|wir_[a-f0-9]{32})(?:\.json)?$/.test(rest)) return rest;
-  if (/^\/og\/[a-z0-9-]+\.png$/.test(rest)) return rest;
-  if (rest === "/sitemap.xml" || rest === "/" || rest === "/about" || rest === "/offers" || rest === "/index.html" || rest === "/about.html" || rest === "/offers.html") return rest;
-  if (rest.startsWith("/compare/")) return rest;
+  if (rest === "/receipts" || rest === "/sitemap.xml") return rest;
+  if (/^\/receipts\/(?:pwr_[a-f0-9]{16,128}|wcr_[a-f0-9]{32}|wir_[a-f0-9]{32})(?:\.json)?$/.test(rest)) return rest;
   return null;
 };
 const canonicalLink = pathname => {

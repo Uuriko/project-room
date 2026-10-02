@@ -52,10 +52,8 @@ test("public doors are indexable while credentials and unknown pages keep privat
     for (const block of html.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)) JSON.parse(block[1]);
     assert.match(html, /"@type":"FAQPage"/);
   }
-  const door = await fetch(origin + "/room/about");
-  assert.equal(door.status, 200);
-  assert.match(door.headers.get("link") ?? "", /<https:\/\/room\.trydemigod\.com\/about>; rel="canonical"/);
-  assert.equal(door.headers.get("x-robots-tag"), "all");
+  assert.equal((await fetch(origin + "/room/about")).status, 404);
+  assert.equal((await fetch(origin + "/room/offers")).status, 404);
   const map = await fetch(origin + "/sitemap.xml");
   assert.equal(map.status, 200); assert.equal(map.headers.get("x-robots-tag"), "all");
   const xml = await map.text();
