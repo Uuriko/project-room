@@ -47,6 +47,7 @@ import { WakeQueue, wakeQueueSchema, wakeQueuePauseSchema } from "./wake-queue.m
 import { Attention, attentionSchema } from "./attention.mjs";
 import { createDurableWorkClaimRegistry, workClaimSchema } from "./work-claim-sqlite.mjs";
 import { NextActions, nextActionsSchema } from "./next-actions.mjs"; // RC-2026-09-25-911: ranked per-agent next actions.
+import { updatesSchema } from "./updates.mjs"; // Updates marks: private read/done/clear, additive.
 import { ChannelUpdateJournal, channelJournalSchema } from "./channel-journal.mjs";
 import { DurableTelegramLiveStatus, telegramLiveStatusSchema } from "./channel-live-status.mjs";
 import { SpamQuarantineJournal, spamQuarantineSchema, migrateSpamQuarantineColumns } from "./spam-quarantine-journal.mjs";
@@ -1030,6 +1031,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // RC-2026-09-25-911: next-action dismissals/suppressions are purely
       // additive as well: IF NOT EXISTS is idempotent, no schema version bump.
       this.db.exec(nextActionsSchema);
+      // Updates marks are purely additive: IF NOT EXISTS, no schema version bump.
+      this.db.exec(updatesSchema);
       this.workClaims.verifySchema({ allowAbsent: true });
       this.db.exec(workClaimSchema);
       this.workClaims.verifySchema();
