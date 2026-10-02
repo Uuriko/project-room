@@ -48,6 +48,7 @@ import { RequestRuns, requestRunSchema } from "./request-runs.mjs";
 import { WakeQueue, wakeQueueSchema, wakeQueuePauseSchema } from "./wake-queue.mjs";
 import { Attention, attentionSchema } from "./attention.mjs";
 import { createDurableWorkClaimRegistry, workClaimSchema } from "./work-claim-sqlite.mjs";
+import { PUBLIC_READ_MODEL_SCHEMA, noteWorkClaimChange, syncRoomPublication } from "./public-read-model.mjs";
 import { NextActions, nextActionsSchema } from "./next-actions.mjs"; // RC-2026-09-25-911: ranked per-agent next actions.
 import { ChannelUpdateJournal, channelJournalSchema } from "./channel-journal.mjs";
 import { DurableTelegramLiveStatus, telegramLiveStatusSchema } from "./channel-live-status.mjs";
@@ -980,7 +981,8 @@ function roomSchemaStamp() {
     directSendSchema, inboxStitchSchema, RETIRED_BOARD_V2_SCHEMA, EMISSARY_LURE_SCHEMA,
     agentKeyRegistrySchema, INTEGRITY_SNAPSHOT_SCHEMA, OPERATOR_ACTIONS_SCHEMA,
     INTEGRITY_JOB_CURSOR_SCHEMA, INTEGRITY_ROOM_STATE_SCHEMA, INTEGRITY_SWEEP_COLUMN,
-    ROOM_SCHEMA_STAMP_SCHEMA, LOOKUP_INDEXES
+    ROOM_SCHEMA_STAMP_SCHEMA, LOOKUP_INDEXES,
+    PUBLIC_READ_MODEL_SCHEMA
   ];
   for (const part of parts) hash.update("\0").update(part ?? "");
   for (const def of fenceDefinitions(STORE_SCHEMA_VERSION)) hash.update("\0").update(def.name).update(def.sql);
@@ -1065,7 +1067,10 @@ export class RoomStore {
     this.moderation = new Moderation(this);
     this.wakeQueue = new WakeQueue(this);
     this.attention = new Attention(this);
-    this.workClaims = createDurableWorkClaimRegistry(this.db, { transaction: fn => this.transaction(fn) });
+    this.workClaims = createDurableWorkClaimRegistry(this.db, {
+      transaction: fn => this.transaction(fn),
+      onChange: roomId => noteWorkClaimChange(this, roomId),
+    });
     this.nextActions = new NextActions(this); // RC-2026-09-25-911: ranked next-actions (private dismissals/suppressions).
     this.readOnly = readOnly;
     this.agentConnections = new AgentConnections(this);
@@ -1424,6 +1429,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // #605: opt-in public room directory (owner toggles discoverability;
       // purely additive side table, no events, no projection impact).
       this.db.exec(roomDirectorySchema);
+      // Empty public read-model tables. Filling them is the public-read-model
+      // cron (or the opt-in write). The constructor does not scan rooms.
+      this.db.exec(PUBLIC_READ_MODEL_SCHEMA);
       // Existing directory rows predate the independent feed visibility bit.
       // Default them on so upgrading does not silently hide public work.
       const directoryColumns = new Set(this.db.prepare("PRAGMA table_info(room_directory_settings)").all().map(c => c.name));
@@ -2399,9 +2407,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   initialize(events) {
     return this.transaction(() => {
       const state = events.reduce(applyEvent, emptyRoomState());
-      this.db.prepare("INSERT INTO rooms(id,sequence,projection,archived_at) VALUES(?,?,?,?)").run(state.room.id, events.length, JSON.stringify(compact(state)), archivedAtOf(state));
+      const stored = compact(state);
+      this.db.prepare("INSERT INTO rooms(id,sequence,projection,archived_at) VALUES(?,?,?,?)").run(state.room.id, events.length, JSON.stringify(stored), archivedAtOf(stored));
       const insert = this.db.prepare("INSERT INTO events VALUES(?,?,?,?)");
       events.forEach((e, i) => insert.run(state.room.id, i + 1, e.id, JSON.stringify(e)));
+      syncRoomPublication(this, { roomId: state.room.id, state: stored, previous: null, auth: null });
       return state.room.id;
     });
   }
@@ -3696,7 +3706,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       const { ownerId } = this.roomAuthority(roomId);
       if (auth.member.id !== ownerId) fail(403, "owner_required", "Only the room owner can import history");
-      refuseArchivedWrite(this.room(roomId).state);
+      const previous = this.room(roomId).state;
+      refuseArchivedWrite(previous);
       if (!Array.isArray(lines) || !lines.length || lines.length > 10000) fail(422, "invalid_import", "Import is 1 to 10000 event lines");
       const events = lines.map((line, i) => {
         if (!line || typeof line !== "object" || line.sequence !== i + 1) fail(422, "invalid_import", `Line ${i + 1} breaks the event sequence`);
@@ -3724,6 +3735,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       events.forEach((e, i) => insert.run(roomId, i + 1, e.id, JSON.stringify(e)));
       this.db.prepare("UPDATE rooms SET sequence=?,projection=?,archived_at=? WHERE id=?").run(events.length, JSON.stringify(state), archivedAtOf(state), roomId);
       this.db.prepare("INSERT INTO projection_checkpoints(room_id,sequence,projection) VALUES(?,?,?)").run(roomId, events.length, JSON.stringify(state));
+      syncRoomPublication(this, { roomId, state, previous, auth: null });
       return { imported: events.length, sequence: events.length };
     });
   }
@@ -4452,6 +4464,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const note = skippedWakes.length
         ? `Posted. Wake skipped for ${skippedWakes.map(id => room.state.members?.[id]?.displayName || id).join(", ")}: Room Trust is off, so that agent was not woken.`
         : null;
+      syncRoomPublication(this, { roomId, state, previous: room.state, auth });
       return { sequence, event: incoming, duplicate: false, ...(note ? { note } : {}) };
     });
   }

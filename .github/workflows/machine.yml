@@ -1,0 +1,43 @@
+name: machine
+
+on:
+  pull_request:
+    paths:
+      - "machine/**"
+      - ".github/workflows/machine.yml"
+      - "package.json"
+  push:
+    branches: [main]
+    paths:
+      - "machine/**"
+      - ".github/workflows/machine.yml"
+      - "package.json"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-pr-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - run: npm ci
+      - run: npm run test:machine
+      - run: node machine/build.mjs --check
+  darwin-check:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - run: node machine/build.mjs --check

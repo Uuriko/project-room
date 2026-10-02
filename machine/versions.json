@@ -1,0 +1,15 @@
+{
+  "daemon": "0.1.0",
+  "diskNeedGb": 100,
+  "goldenDiskGb": 50,
+  "lume": {
+    "version": "0.6.0",
+    "url": "https://github.com/trycua/cua/releases/download/lume-v0.6.0/lume-0.6.0-darwin-arm64.tar.gz",
+    "sha256": "4d25c7c36ebd3fdf0e2f97f9e7a2c4ff2d0538ba9eb2d536f6dbb542d9d504a7"
+  },
+  "driver": {
+    "version": "0.32.0",
+    "url": "https://github.com/trycua/cua/releases/download/cua-driver-rs-v0.32.0/cua-driver-rs-0.32.0-darwin-arm64.tar.gz",
+    "sha256": "31f278f38015616a02142ccbb396721897cee4892927db103a31b297f60035a9"
+  }
+}

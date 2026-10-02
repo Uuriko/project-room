@@ -1145,6 +1145,37 @@ const ROWS = [
     }
   },
   {
+    "table": "public_directory_entries",
+    "key": "identity_id",
+    "action": "delete",
+    "match": {
+      "identity": [
+        "identity_id"
+      ]
+    }
+  },
+  {
+    "table": "public_receipts",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id",
+        "origin_room_id"
+      ]
+    }
+  },
+  {
+    "table": "public_rooms",
+    "key": "slug",
+    "action": "delete",
+    "match": {
+      "room": [
+        "slug"
+      ]
+    }
+  },
+  {
     "table": "public_work_receipts",
     "key": "identity_id",
     "action": "delete",

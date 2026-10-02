@@ -281,6 +281,7 @@ optional.push("server/membership-delegation.mjs"); // RC-2026-09-18-038: owner-g
 optional.push("server/usage-summary.mjs");
 optional.push("server/channel-adapters/telegram-config.mjs", "server/channel-adapters/telegram-transport.mjs", "scripts/telegram-set-webhook.mjs", "scripts/telegram-rotate-webhook.mjs");
 optional.push("server/receipts-page.mjs", "server/receipts-live.mjs"); // public receipts page + live room reader (imported by server/http.mjs)
+optional.push("server/public-read-model.mjs"); // public page tables (imported by server/store.mjs and the public routes)
 optional.push("server/templates.mjs", "server/public-rooms.mjs"); // GR2 template gallery, public room pages, agent directory (imported by server/http.mjs)
 optional.push("src/design-tokens.js"); // token declarations embedded in the public receipts page
 optional.push("server/boot-options.mjs"); // imported by server.mjs: default boot args incl. ChannelWebhookInbox
@@ -298,7 +299,7 @@ optional.push("server/capability-visibility.mjs"); // RC-2026-09-27-2731: withho
 optional.push("src/growth-emit.js", "src/growth-events.js", "src/growth-collector.js", "src/growth-mentions.js", "src/growth-fanout.js", "src/growth-persistence.js", "src/growth-summary.js", "src/growth-compare.js", "src/growth-alerts.js", "src/growth-watch.js", "src/growth-scheduler.js", "src/growth-http.js", "src/growth-digest.js");
 // Preserve redistribution terms; historical commits predate these documents.
 optional.push("LICENSE", "NOTICE", "THIRD_PARTY.md");
-optional.push("server/routes/dispatch.mjs", "server/routes/table.mjs"); // batch RT: declarative route table (imported by server/http.mjs)
+optional.push("server/routes/dispatch.mjs", "server/routes/table.mjs", "server/routes/inbox.mjs"); // batch RT: declarative route table (imported by server/http.mjs)
 export const allowed = new Set([...required, ...optional]);
 const sha256 = bytes => createHash("sha256").update(bytes).digest("hex");
 // The contract stays exact: any mismatch fails. Each failure now names the

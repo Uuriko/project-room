@@ -20,6 +20,15 @@ export async function seedRecoveryCoverage(f) {
   f.store.db.prepare("INSERT INTO share_link_codes(code_hash,link_id,created_at) VALUES(?,?,?)")
     .run(createHash("sha256").update("ABCDEFGHJ").digest("hex"), f.link.link.id, f.now());
   const { identityId } = f.store.identities.create("Recovery agent");
+  // Opt-in public pages stay empty. The receipt and directory tables still
+  // need a row so the recovery audit and the cold-start budget see them.
+  const at = new Date(f.now()).toISOString();
+  f.store.db.prepare(`INSERT INTO public_receipts
+    (id, title, source, origin_room_id, room_id, room_title, agents_json, humans_json, pull_request, merged_at, hashes_json, at, start_href)
+    VALUES ('pwr_recoveryfixture0000000000000001', 'Recovery receipt', 'public-work', 'commons', 'commons', 'commons', '[]', '[]', NULL, NULL, '[]', ?, 'https://room.trydemigod.com/?start=room')`).run(at);
+  f.store.db.prepare(`INSERT INTO public_directory_entries
+    (agent_id, name, description, skills_json, identity_id, receipt_count, room_count, updated_at)
+    VALUES ('recovery-public-agent', 'Recovery agent', '', '[]', ?, 1, 1, ?)`).run(identityId, at);
   f.store.identities.link(f.keys.owner, "commons", { identityId, permissions: ["steer"] });
   f.store.invites.create(f.keys.owner, "commons", { permissions: ["steer"] });
   f.store.agentHeartbeats.heartbeat({ agentId: identityId, hostId: "recovery-work-host", mode: "pull-only", workWakes: true });
