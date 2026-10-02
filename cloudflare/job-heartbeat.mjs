@@ -1,3 +1,5 @@
+import { telegramConfig } from "../server/channel-adapters/telegram-config.mjs";
+
 // Per-job cron heartbeat. Every scheduled job records lastRunAt, lastSuccessAt
 // and a redacted lastError in the Durable Object, and GET /api/health/jobs reads
 // it back without auth. A job whose lastSuccessAt is older than 3x its period is
@@ -10,7 +12,7 @@ export const STALE_PERIODS = 3;
 // then it stops at the next item so a slow tick cannot pin the input gate.
 export const CRON_JOB_BUDGET_MS = 5000;
 
-// The production trigger is "* * * * *" and each tick runs every job.
+// The production trigger is "* * * * *". A tick runs every job whose integration is configured.
 export const CRON_JOBS = Object.freeze([
   Object.freeze({ name: 'gmail-sync', periodSeconds: 60, redactErrors: true }),
   Object.freeze({ name: 'channel-drain', periodSeconds: 60 }),
@@ -20,6 +22,14 @@ export const CRON_JOBS = Object.freeze([
   Object.freeze({ name: 'retention', periodSeconds: 60 })
 ]);
 const JOBS = new Map(CRON_JOBS.map(job => [job.name, job]));
+
+// Env-only. A missing integration does not get a Durable Object call every minute.
+// Data-dependent work (a land-queue row, a pending webhook) still runs.
+export function cronIntegrationConfigured(name, env = {}) {
+  if (name === "gmail-sync") return env?.ROOM_GMAIL_ENABLED === "1";
+  if (name === "channel-drain") return telegramConfig(env ?? {}).configured === true;
+  return true;
+}
 const MAX_ERROR = 240;
 const MAX_SUMMARY_KEYS = 12;
 
@@ -119,29 +129,32 @@ export function applyOutcomes(previous, outcomes) {
 const iso = ms => (Number.isFinite(ms) ? new Date(ms).toISOString() : null);
 
 // Public read model. Stale = no success within STALE_PERIODS periods.
-export function jobHealthView(stored, now = Date.now()) {
+export function jobHealthView(stored, now = Date.now(), env = null) {
   const jobs = CRON_JOBS.map(job => {
     const record = stored?.[job.name] ?? {};
     const staleAfterSeconds = job.periodSeconds * STALE_PERIODS;
+    const configured = env == null || cronIntegrationConfigured(job.name, env);
     const ageSeconds = Number.isFinite(record.lastSuccessAt) ? Math.max(0, Math.round((now - record.lastSuccessAt) / 1000)) : null;
-    const stale = ageSeconds === null || ageSeconds > staleAfterSeconds;
-    const failing = (record.consecutiveFailures ?? 0) > 0;
+    const stale = configured && (ageSeconds === null || ageSeconds > staleAfterSeconds);
+    const failing = configured && (record.consecutiveFailures ?? 0) > 0;
     return {
       name: job.name,
       periodSeconds: job.periodSeconds,
       staleAfterSeconds,
+      configured,
       lastRunAt: iso(record.lastRunAt),
       lastSuccessAt: iso(record.lastSuccessAt),
-      secondsSinceSuccess: ageSeconds,
+      secondsSinceSuccess: configured ? ageSeconds : null,
       lastError: record.lastError ?? null,
       lastErrorAt: iso(record.lastErrorAt),
       consecutiveFailures: record.consecutiveFailures ?? 0,
       lastSummary: record.lastSummary ?? null,
       stale,
-      status: stale ? 'stale' : failing ? 'failing' : 'ok'
+      status: !configured ? 'unconfigured' : stale ? 'stale' : failing ? 'failing' : 'ok'
     };
   });
-  const status = jobs.some(job => job.stale) ? 'stale' : jobs.some(job => job.status === 'failing') ? 'failing' : 'ok';
+  const active = jobs.filter(job => job.status !== 'unconfigured');
+  const status = active.some(job => job.stale) ? 'stale' : active.some(job => job.status === 'failing') ? 'failing' : 'ok';
   return { schema: 'room.job-health/1', status, generatedAt: iso(now), staleAfterPeriods: STALE_PERIODS, jobs };
 }
 

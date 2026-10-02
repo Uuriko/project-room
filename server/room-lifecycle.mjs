@@ -18,6 +18,8 @@
 import { EVENT_TYPES as T, PERMISSIONS, event, validId, ROOM_KINDS, roomKind, isRoomArchived } from "../src/events.js";
 import { ServiceError, provisionalAccountPrefix } from "./store.mjs";
 import { accountRoomCredits, GROWTH_ROOM_ORIGIN } from "./growth-loop.mjs";
+import { getRoomTemplate } from "./templates.mjs";
+import { seedStarterForNewAccount, starterTitleForIntent } from "./starter-room.mjs";
 
 export const ROOM_LIFECYCLE_MIGRATION = 28; // informational: which chain step introduced rooms.archived_at
 // Bounded pilot: memberships per account, counted before a room is created.
@@ -74,9 +76,12 @@ const text = (value, max, multiline = false) => typeof value === "string" && val
 // bound to the account like any other human membership. The client-chosen
 // roomId is the idempotency key: the same request returns the same room with
 // duplicate: true; a different room under that id is 409 room_exists.
+const STARTER_FIELDS = Object.freeze(["intent", "start", "templateSlug"]);
+
 export function createAccountRoom(store, token, binding, request) {
   if (!request || typeof request !== "object" || Array.isArray(request)
-    || Object.keys(request).length !== CREATE_FIELDS.length || !CREATE_FIELDS.every(field => Object.hasOwn(request, field))) {
+    || !CREATE_FIELDS.every(field => Object.hasOwn(request, field))
+    || Object.keys(request).some(field => !CREATE_FIELDS.includes(field) && !STARTER_FIELDS.includes(field))) {
     fail(422, "invalid_room_request", "Supply roomId, title, purpose, kind and displayName");
   }
   const { roomId, kind } = request;
@@ -85,7 +90,29 @@ export function createAccountRoom(store, token, binding, request) {
   if (!text(request.purpose, 1000, true)) fail(422, "invalid_room_request", "Room purpose must be 1 to 1000 characters");
   if (!text(request.displayName, 80)) fail(422, "invalid_room_request", "Your name in the room must be 1 to 80 characters");
   if (!ROOM_KINDS.includes(kind)) fail(422, "invalid_room_request", "Room kind must be personal or organization");
-  const title = request.title.trim(), purpose = request.purpose.trim(), displayName = request.displayName.trim();
+  // ACT-1a: optional intent / start=1 seed Room Guide. Requests without them
+  // keep the existing two-step onboarding. ACT-1b is what sends these fields.
+  let intent = null;
+  if (Object.hasOwn(request, "intent")) {
+    if (!text(request.intent, 80)) fail(422, "invalid_room_request", "intent must be 1 to 80 characters");
+    intent = request.intent.trim();
+  }
+  let start = false;
+  if (Object.hasOwn(request, "start")) {
+    if (request.start !== 1 && request.start !== true) fail(422, "invalid_room_request", "start must be 1");
+    start = true;
+  }
+  let templateSlug = null;
+  if (Object.hasOwn(request, "templateSlug")) {
+    if (typeof request.templateSlug !== "string" || !getRoomTemplate(request.templateSlug)) {
+      fail(422, "invalid_room_request", "templateSlug must name a room template");
+    }
+    templateSlug = request.templateSlug;
+  }
+  const wantsStarter = Boolean(intent) || start;
+  let title = request.title.trim();
+  if (intent) title = starterTitleForIntent(intent);
+  const purpose = request.purpose.trim(), displayName = request.displayName.trim();
   return store.transaction(() => {
     const auth = store.authenticateAccountSession(token, null, binding);
     const accountId = auth.account.id;
@@ -97,6 +124,7 @@ export function createAccountRoom(store, token, binding, request) {
       const same = state && state.room.ownerId === bound.member_id && state.room.title === title && state.room.purpose === purpose
         && roomKind(state.room) === kind && state.members[bound.member_id]?.displayName === displayName;
       if (!same) fail(409, "room_exists", "That room id is already in use");
+      if (wantsStarter) seedStarterForNewAccount(store, accountId, { intent, templateSlug, roomId, ownerMemberId: bound.member_id, start });
       return view(bound.member_id, true);
     }
     // A provisional account exists for exactly one room key membership and can never bind elsewhere.
@@ -132,6 +160,7 @@ export function createAccountRoom(store, token, binding, request) {
       event({ type: T.MEMBER_ADDED, actorId: ownerId, roomId, at, data: { memberId: ownerId, displayName, kind: "human", permissions: [...PERMISSIONS] } })
     ]);
     store.ensureHumanAccountBinding(roomId, ownerId, accountId, foundedWithGrowth ? GROWTH_ROOM_ORIGIN : "account-room-create");
+    if (wantsStarter) seedStarterForNewAccount(store, accountId, { intent, templateSlug, roomId, ownerMemberId: ownerId, start });
     return view(ownerId, false);
   });
 }

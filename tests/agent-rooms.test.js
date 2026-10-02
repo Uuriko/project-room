@@ -56,12 +56,14 @@ test("an identity creates a room self-serve and becomes its owner", async t => {
   assert.equal(created.duplicate, false);
   // RC-2026-09-18-030: the create response names the first-owner moves.
   assert.deepEqual(created.next.map(n => n.action),
-    ["invite-members", "publish-card", "post-message", "read-quickstart"]);
+    ["start-work", "post-message", "finish-work", "create-task", "invite-members", "publish-card", "read-quickstart"]);
   assert.ok(created.next.every(n => typeof n.description === "string" && (n.path || n.doc)),
     "every next step names a path or doc plus what to do");
-  assert.equal(created.next[0].path, "/api/rooms/agent-den/agent-invites",
+  assert.equal(created.next[0].path, "/api/rooms/agent-den/work-claims/starter/update",
     "room-scoped next steps are templated with the new roomId");
-  assert.equal(created.nextActions[0].path, "/api/rooms/agent-den/agent-invites");
+  assert.equal(created.nextActions[0].path, "/api/rooms/agent-den/work-claims/starter/update");
+  assert.equal(created.starter.claimId, "starter");
+  assert.equal(created.starter.state, "claimed");
   // The projection names the agent member as owner with the full set...
   const authority = store.roomAuthority("agent-den");
   assert.equal(authority.ownerId, identity.identityId);
