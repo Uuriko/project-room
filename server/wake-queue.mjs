@@ -88,19 +88,21 @@ export class WakeQueue {
     const row = this.db.prepare("SELECT * FROM wake_queue_pause WHERE room_id=? AND member_id=?").get(roomId, memberId);
     return row ? { pausedAt: row.paused_at, reason: row.reason } : null;
   }
-  // C6: owner-facing pause. A member always acts on its own pause row; the
-  // signed-in room owner may also inspect, pause and resume another member's.
-  // A removed member's row stays inspectable but inert: changing it is
-  // refused, so a resume can never restart a removed member's queued wakes.
-  isOwner(auth, roomId, authority = this.store.roomAuthority(roomId)) {
-    return Boolean(auth.account) && auth.kind === "session" && auth.member.kind === "human"
-      && auth.member.id === authority.ownerId && auth.member.permissions.includes("manage_members");
+  // A member always acts on its own pause row. Pausing or resuming another
+  // member requires the room owner or manage_members, on a session or a
+  // bearer credential. A removed member's row stays inspectable but inert:
+  // changing it is refused, so a resume can never restart a removed member's
+  // queued wakes.
+  mayGovernWakes(auth, roomId, authority = this.store.roomAuthority(roomId)) {
+    if (!auth?.member) return false;
+    if (auth.member.id === authority.ownerId) return true;
+    return Boolean(auth.member.permissions?.includes("manage_members"));
   }
   subject(auth, roomId, memberId, { change = false } = {}) {
     if (memberId === null || memberId === undefined || memberId === auth.member.id) return auth.member.id;
     if (!validId(memberId)) fail(422, "invalid_member", "Choose one member");
     const authority = this.store.roomAuthority(roomId);
-    if (!this.isOwner(auth, roomId, authority)) fail(403, "owner_required", "Only the signed-in room owner can inspect, pause or resume another member");
+    if (!this.mayGovernWakes(auth, roomId, authority)) fail(403, "wake_pause_not_permitted", "You can pause your own wakes. Pausing another member requires the room owner or manage members.");
     if (!Object.hasOwn(authority.members, memberId)) fail(404, "member_not_found", "Unknown member");
     if (change && authority.members[memberId].active === false) fail(409, "member_inactive", "This member's access has ended; its pause row is inert");
     return memberId;
@@ -138,7 +140,7 @@ export class WakeQueue {
   }
   outcome(auth, roomId, subject, extra = {}) {
     const current = this.current(auth, roomId, subject);
-    return { ...(this.isOwner(auth, roomId) ? { ...current, paused: this.pausedMembers(roomId) } : current), ...extra };
+    return { ...(this.mayGovernWakes(auth, roomId) ? { ...current, paused: this.pausedMembers(roomId) } : current), ...extra };
   }
   receipt(requestId, fields, request) {
     return createHash("sha256").update(JSON.stringify(Object.fromEntries(fields.sort().map(field => [field, request[field]])))).digest("hex");
@@ -214,12 +216,6 @@ export class WakeQueue {
   pause(token, roomId, request, binding = null, { memberId = null } = {}) {
     return this.store.transaction(() => {
       const auth = this.store.authenticate(token, roomId, binding);
-      // Guests may read and chat but may not change wake-queue stop control.
-      // pause() authenticates directly and bypasses store.command, so the
-      // RoomStore guest scope gate never runs here — enforce the same denial
-      // explicitly. Mirrors RC-2026-09-27-2716 (PR #1156).
-      if (isGuestAgentMemberId(auth.member.id))
-        fail(403, "guest_scope_denied", "Guest members cannot pause wake intents");
       const subject = this.subject(auth, roomId, memberId, { change: true });
       const fields = ["requestId", "reason"];
       if (!request || Array.isArray(request) || Object.keys(request).length !== fields.length || !fields.every(field => Object.hasOwn(request, field))
@@ -243,12 +239,6 @@ export class WakeQueue {
   resume(token, roomId, request, binding = null, { memberId = null } = {}) {
     return this.store.transaction(() => {
       const auth = this.store.authenticate(token, roomId, binding);
-      // Guests may read and chat but may not change wake-queue stop control.
-      // resume() authenticates directly and bypasses store.command, so the
-      // RoomStore guest scope gate never runs here — enforce the same denial
-      // explicitly. Mirrors RC-2026-09-27-2716 (PR #1156).
-      if (isGuestAgentMemberId(auth.member.id))
-        fail(403, "guest_scope_denied", "Guest members cannot resume wake intents");
       const subject = this.subject(auth, roomId, memberId, { change: true });
       const keys = request && !Array.isArray(request) ? Object.keys(request) : null;
       const reasonOk = !keys?.includes("reason") || request.reason === null || typeof request.reason === "string" && request.reason.length <= 200;

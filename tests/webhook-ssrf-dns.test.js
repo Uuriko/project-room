@@ -168,27 +168,53 @@ test("QA2 P2-8: webhook DNS stays on public addresses", async (t) => {
   });
   try {
     let lookups = 0;
-    const allowed = await assertSubscriptionWebhookUrl("https://rebind.example/hook", {
-      lookup: async () => { lookups += 1; return [{ address: "127.0.0.1", family: 4 }]; },
-    });
-    assert.equal(allowed, "https://rebind.example/hook");
+    const doh = answers => async (url) => {
+      const type = new URL(url).searchParams.get("type");
+      const data = type === "A" ? answers : [];
+      return { ok: true, json: async () => ({ Status: 0, Answer: data.map(address => ({ type: 1, TTL: 30, data: address })) }) };
+    };
+    await assert.rejects(
+      () => assertSubscriptionWebhookUrl("https://rebind.example/hook", {
+        lookup: async () => { lookups += 1; return [{ address: "127.0.0.1", family: 4 }]; },
+        dohFetch: doh(["10.1.2.3"]),
+      }),
+      error => error instanceof WebhookSubscriptionError && error.code === "webhook_url_not_public" && error.status === 422,
+    );
     assert.equal(lookups, 0);
+    const allowed = await assertSubscriptionWebhookUrl("https://public-hook.example/hook", { dohFetch: doh(["93.184.216.34"]) });
+    assert.equal(allowed, "https://public-hook.example/hook");
     await assert.rejects(
       () => assertSubscriptionWebhookUrl("https://metadata.google.internal/computeMetadata/v1/"),
       error => error instanceof WebhookSubscriptionError && error.code === "webhook_url_not_public" && error.status === 422,
     );
     let fetches = 0;
-    const skipped = await postDelivery({
+    const refused = await postDelivery({
       url: "https://hooks.example.test/hook",
       envelope: {},
       headers: {},
+      dnsResolvers: { dohFetch: doh(["127.0.0.1"]) },
       fetchImpl: async () => {
         fetches += 1;
         return { status: 200, text: async () => "ok", headers: { get: () => null } };
       },
     });
-    assert.equal(skipped.ok, true);
-    assert.equal(fetches, 1);
+    assert.equal(refused.ok, false);
+    assert.equal(refused.classification, "dead");
+    assert.match(refused.error, /webhook_url_not_public/);
+    assert.equal(fetches, 0);
+    const unresolved = await postDelivery({
+      url: "https://missing.example.test/hook",
+      envelope: {},
+      headers: {},
+      dnsResolvers: { dohFetch: async () => { throw new Error("dns unavailable"); } },
+      fetchImpl: async () => {
+        fetches += 1;
+        return { status: 200, text: async () => "ok", headers: { get: () => null } };
+      },
+    });
+    assert.equal(unresolved.ok, false);
+    assert.equal(unresolved.classification, "retry");
+    assert.equal(fetches, 0);
     const blockedName = await postDelivery({
       url: "https://metadata.goog/computeMetadata/v1/",
       envelope: {},
@@ -201,7 +227,7 @@ test("QA2 P2-8: webhook DNS stays on public addresses", async (t) => {
     assert.equal(blockedName.ok, false);
     assert.equal(blockedName.classification, "dead");
     assert.match(blockedName.error, /webhook_url_not_public/);
-    assert.equal(fetches, 1);
+    assert.equal(fetches, 0);
   } finally {
     if (prior) Object.defineProperty(globalThis, "navigator", prior);
   }
