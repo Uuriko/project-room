@@ -116,6 +116,16 @@ const ROWS = [
     }
   },
   {
+    "table": "account_terms",
+    "key": "account_id",
+    "action": "delete",
+    "match": {
+      "account": [
+        "account_id"
+      ]
+    }
+  },
+  {
     "table": "activity_events",
     "key": "room_id",
     "action": "delete",
