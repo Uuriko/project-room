@@ -1,4 +1,4 @@
-import { publicSearchAssets, publicSearchCanonical, publicSearchMarketingPolicy, publicSearchSitemap, PUBLIC_SEARCH_CSP, PUBLIC_PAGE_LASTMOD, reviewedPublicSearchPaths } from "../deploy/public-search.mjs";
+import { acceptPrefersHtml, publicHtmlNotFoundPath, publicSearchAssets, publicSearchCanonical, publicSearchMarketingPolicy, publicSearchSitemap, PUBLIC_NOT_FOUND_HTML, PUBLIC_SEARCH_CSP, PUBLIC_PAGE_LASTMOD, reviewedPublicSearchPaths } from "../deploy/public-search.mjs";
 import { readConversation } from "./conversation-sync.mjs";
 import { OutsideAgents } from "./outside-agents.mjs";
 import { GmailSync } from './gmail-sync.mjs';
@@ -3041,6 +3041,16 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const page = (await loadAsset("join.html")).toString("utf8").replaceAll("{{ASSET_BASE}}", assetBase);
         res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": Buffer.byteLength(page), "Cache-Control": "no-store" });
         return res.end(page);
+      }
+      // Q3-E HTML 404. A browser Accept that prefers text/html gets 404.html
+      // (lang, title, h1, links home / about / receipts, X-Robots-Tag: noindex).
+      // /api/, /mcp and /.well-known/ keep the JSON body, as does any client
+      // whose Accept does not prefer text/html.
+      if (publicHtmlNotFoundPath(url.pathname) && acceptPrefersHtml(req.headers.accept)) {
+        const body = Buffer.from(PUBLIC_NOT_FOUND_HTML);
+        res.setHeader("X-Robots-Tag", "noindex");
+        res.writeHead(404, { "Content-Type": "text/html; charset=utf-8", "Content-Length": body.length });
+        return res.end(req.method === "HEAD" ? undefined : body);
       }
       if (!url.pathname.startsWith("/api/")) reject(404, "not_found", "Not found");
       if (url.pathname === "/api/session") {

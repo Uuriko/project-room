@@ -4,7 +4,7 @@
 // gate for every route that shares it. Asset bytes are cached for the life
 // of this isolate; a deploy starts a new one.
 import { publicAssetPaths } from '../deploy/public-assets.mjs';
-import { publicSearchAssets, publicSearchCanonical, publicSearchMarketingPolicy, PUBLIC_SEARCH_CSP, reviewedPublicSearchPaths } from '../deploy/public-search.mjs';
+import { acceptPrefersHtml, publicHtmlNotFoundPath, publicSearchAssets, publicSearchCanonical, publicSearchMarketingPolicy, PUBLIC_NOT_FOUND_HTML, PUBLIC_SEARCH_CSP, reviewedPublicSearchPaths } from '../deploy/public-search.mjs';
 import { discoveryDoc, EDGE_DOOR_HOSTS, ROOM_ORIGIN, SKILLS_CATALOG_PATH } from '../deploy/agent-discovery.mjs';
 import { buildOpenApiJson } from '../server/discoverability.mjs';
 import { MCP_SERVER_CARD_PATH, MCP_DISCOVERY_CACHE_CONTROL, MCP_SERVER_CARD_CORS } from '../src/mcp-server-card.mjs';
@@ -157,6 +157,16 @@ async function assetResponse(request, env, url) {
     // A reviewed page with no packaged bytes is an error, not a public
     // document. Do not leave the indexable robots tag that a present page
     // would have set above.
+    // Q3-E: browsers get the static HTML 404. Other clients keep the plain
+    // body. Unknown paths are answered by the Node server after routing, so
+    // live pages such as /receipts are not claimed here.
+    if (publicHtmlNotFoundPath(url.pathname) && acceptPrefersHtml(request.headers.get('accept'))) {
+      const page = new TextEncoder().encode(PUBLIC_NOT_FOUND_HTML);
+      headers.set('X-Robots-Tag', 'noindex');
+      headers.set('Content-Type', 'text/html; charset=utf-8');
+      headers.set('Content-Length', String(page.byteLength));
+      return new Response(request.method === 'HEAD' ? null : page, { status: 404, headers });
+    }
     headers.set('X-Robots-Tag', 'noindex, nofollow');
     headers.set('Content-Type', 'text/plain; charset=utf-8');
     return new Response(request.method === 'HEAD' ? null : 'Not found\n', { status: 404, headers });

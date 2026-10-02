@@ -79,6 +79,9 @@ test('static assets and discovery documents do not enter the Durable Object', as
     const about = await call('/about');
     assert.equal(about.headers.get('x-test-do-fetches'), '0');
     assert.equal(about.headers.get('x-robots-tag'), 'all');
+    assert.match(about.headers.get('content-security-policy'), /default-src 'none'/);
+    assert.match(about.headers.get('content-security-policy'), /script-src https:\/\/static\.cloudflareinsights\.com/);
+    assert.match(about.headers.get('content-security-policy'), /connect-src https:\/\/cloudflareinsights\.com/);
     assert.match(about.headers.get('content-security-policy'), /style-src 'unsafe-inline'/);
     assert.equal(await about.text(), 'about-page');
     const alias = await call('/about.html');
@@ -115,6 +118,23 @@ test('static assets and discovery documents do not enter the Durable Object', as
     const denied = await call('/llms.txt', { method: 'POST' });
     assert.equal(denied.status, 405);
     assert.equal(denied.headers.get('x-test-do-fetches'), '0');
+
+    const missing = await call('/compare/project-room-vs-slack', { headers: { Accept: 'text/html' } });
+    assert.equal(missing.status, 404);
+    assert.equal(missing.headers.get('x-test-do-fetches'), '0');
+    assert.equal(missing.headers.get('x-robots-tag'), 'noindex');
+    assert.match(missing.headers.get('content-type'), /text\/html/);
+    const missingHtml = await missing.text();
+    assert.match(missingHtml, /<html lang="en">/);
+    assert.match(missingHtml, /<title>Page not found<\/title>/);
+    assert.match(missingHtml, /<h1>Page not found<\/h1>/);
+    assert.match(missingHtml, /href="\/"/);
+    assert.match(missingHtml, /href="\/about"/);
+    assert.match(missingHtml, /href="\/receipts"/);
+    const missingClient = await call('/compare/project-room-vs-slack');
+    assert.equal(missingClient.status, 404);
+    assert.equal(missingClient.headers.get('x-test-do-fetches'), '0');
+    assert.equal(await missingClient.text(), 'Not found\n');
 
     const health = await call('/api/health', { ip: '192.0.2.9' });
     assert.equal(health.status, 200, await health.clone().text());
