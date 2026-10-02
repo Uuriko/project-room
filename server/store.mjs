@@ -190,7 +190,9 @@ function startColdStart() {
 
 // One structured line per open, including a failed open, so the next isolate
 // restart can be read from Workers Logs without a tail attached. No event
-// bodies, projections, or secrets.
+// bodies, projections, or secrets. stderr, not stdout: server.mjs treats the
+// first stdout write as "listening", and this line is emitted while the
+// store is still opening.
 function logColdStart(started, db, failed, extra = {}) {
   const record = { event: "room.cold_start", durationMs: Math.round(performance.now() - started.wall) };
   if (failed) {
@@ -227,7 +229,7 @@ function logColdStart(started, db, failed, extra = {}) {
       }
     }
   } catch { /* schema not installed, or the handle is already closing */ }
-  console.info(JSON.stringify(record));
+  console.error(JSON.stringify(record));
   return record;
 }
 

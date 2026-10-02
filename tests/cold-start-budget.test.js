@@ -12,10 +12,10 @@ const COLD_START_CPU_BUDGET_MS = 500;
 
 function captureInfo(fn) {
   const lines = [];
-  const original = console.info;
-  console.info = (...args) => { lines.push(args.map(String).join(" ")); };
+  const original = console.error;
+  console.error = (...args) => { lines.push(args.map(String).join(" ")); };
   try { return { lines, value: fn() }; }
-  finally { console.info = original; }
+  finally { console.error = original; }
 }
 
 test("cold start on a large message log stays within the CPU budget", () => {
