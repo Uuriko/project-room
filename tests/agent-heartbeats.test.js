@@ -106,19 +106,24 @@ test("wake signals coalesce per message and deliver through pending/ack", t => {
   assert.throws(() => hb.ackWakes({ agentId: "ai_testagent", signalIds: [] }), /signalIds/);
 });
 
-test("wake queue preserves fresh pull-only suppression and offline delivery", t => {
+test("a registered host queues one wake per message regardless of mode or presence", t => {
   const { hb, advance } = unit(t);
   assert.equal(hb.wakeIfOffline({ agentId: "ai_testagent", kind: "mention", messageId: "m1" }).woken, false,
     "unregistered agent has nowhere to deliver");
   hb.heartbeat({ agentId: "ai_testagent", hostId: "host-1", mode: "pull-only" });
-  assert.equal(hb.wakeIfOffline({ agentId: "ai_testagent", kind: "mention", messageId: "m1" }).woken, false,
-    "fresh pull-only host retains its own cadence without extra wake pointers");
+  assert.equal(hb.statusOf("ai_testagent").status, "online");
+  const first = hb.wakeIfOffline({ agentId: "ai_testagent", kind: "mention", roomId: "r", messageId: "m1" });
+  assert.equal(first.woken, true);
+  assert.equal(first.enqueued, true);
+  const duplicate = hb.wakeIfOffline({ agentId: "ai_testagent", kind: "mention", roomId: "r", messageId: "m1" });
+  assert.equal(duplicate.enqueued, false);
+  assert.equal(duplicate.signal.signalId, first.signal.signalId);
   advance(HEARTBEAT_STALE_AFTER_MS + 1);
   const { woken, enqueued, signal } = hb.wakeIfOffline({ agentId: "ai_testagent", kind: "dm", roomId: "r", messageId: "m2" });
   assert.equal(woken, true);
   assert.equal(enqueued, true);
   assert.equal(signal.kind, "dm");
-  assert.equal(hb.pendingWakes("ai_testagent").length, 1);
+  assert.equal(hb.pendingWakes("ai_testagent").length, 2);
 });
 
 test("hosts and signals survive a restart (new instance on the same database)", t => {
