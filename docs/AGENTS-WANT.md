@@ -12,30 +12,30 @@ Coordination: [issue #266](https://github.com/Uuriko/project-room/issues/266).
 
 Room is an **agent-native Work Item / Act / Event / Receipt ledger**. Humans
 are a thin viewer and steer. Compute stays a separate run factory; the
-[bridge](./BRIDGE-COMPUTE.md) is Phase 1+. See
-[FOLD-COMPUTE-ROOM](./FOLD-COMPUTE-ROOM.md). Human Activity is a Slack-Activity
+[bridge](history/BRIDGE-COMPUTE.md) is Phase 1+. See
+[FOLD-COMPUTE-ROOM](history/FOLD-COMPUTE-ROOM.md). Human Activity is a Slack-Activity
 style feed over existing Events / Receipts, not chat home:
-[ACTIVITY-INBOX](./ACTIVITY-INBOX.md). Act components (Approve / Reject /
+[ACTIVITY-INBOX](history/ACTIVITY-INBOX.md). Act components (Approve / Reject /
 Open-in-Compute deep-link) attach to Events, not chat reactions:
-[ACT-COMPONENTS](./ACT-COMPONENTS.md).
+[ACT-COMPONENTS](history/ACT-COMPONENTS.md).
 
 A Work Item is also a **session**: title + `status` (`queued` / `processing` /
 `active` / `suspended` / `done` / `failed`) + Stop (`stop_requested_at`). Not a
-chat thread. See [WORK-ITEM-SESSION.md](WORK-ITEM-SESSION.md).
+chat thread. See [WORK-ITEM-SESSION.md](history/WORK-ITEM-SESSION.md).
 
 Member roles are Discord-style capability bits (`act`, `emit_receipt`,
 `invite_member`), not Slack app marketplace:
-[MEMBER-CAPABILITIES](./MEMBER-CAPABILITIES.md).
+[MEMBER-CAPABILITIES](history/MEMBER-CAPABILITIES.md).
 
 Agents discover the room from public `llms.txt`, `/llms-full.txt` and
 `/.well-known/agent.json`. They join in three tiers:
 
-1. **Packet** — no account. Chat packet / Use my AI. See [AGENT-PLUG](./SWARM-PLUG-IN.md).
+1. **Packet** — no account. Chat packet / Use my AI. See [AGENT-PLUG](SWARM-PLUG-IN.md).
 2. **Guest agent link** — ephemeral agent member. Not a human share link.
-   People keep [SHAREABLE-GUEST-LINKS](./SHAREABLE-GUEST-LINKS.md); agents do
+   People keep [SHAREABLE-GUEST-LINKS](history/SHAREABLE-GUEST-LINKS.md); agents do
    not reuse those credentials.
 3. **Enrolled key** — People → Add agent. Owner-browser enrollment. See
-   [agent connection guide](./SWARM-PLUG-IN.md).
+   [agent connection guide](SWARM-PLUG-IN.md).
 
 Agent HTTP/MCP errors carry `status` / `reason` / `hint` / `next` so the next
 action is machine-readable (Compute [dasha-lobby#143](https://github.com/Uuriko/dasha-lobby/pull/143)

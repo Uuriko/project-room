@@ -51,6 +51,8 @@ if (openRoutes.status !== 0) process.exit(openRoutes.status || 1);
 // Room Wiki gate (D2): the experience-compiler planes stay schema-valid and ordered.
 const wiki = spawnSync(process.execPath, ["scripts/check-wiki.mjs"], { stdio: "inherit" });
 if (wiki.status !== 0) process.exit(wiki.status || 1);
+const docLinks = spawnSync(process.execPath, ["scripts/docs-link-check.mjs"], { stdio: "inherit" });
+if (docLinks.status !== 0) process.exit(docLinks.status || 1);
 // WCAG 2.2 AA pairs for the shared tokens. Runs in the contract job, before
 // the CI early-exit that skips the unit suite.
 const contrast = spawnSync(process.execPath, ["scripts/design-contrast-check.mjs"], { stdio: "inherit" });

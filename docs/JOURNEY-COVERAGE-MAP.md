@@ -31,7 +31,7 @@ carry the claim, and the remaining tiers stay visibly open.
           "scripts/accountless-join-restore-browser-check.mjs"
         ],
         "agent": [
-          "docs/AGENT-ONBOARDING-TESTING-2026-09-07.md"
+          "docs/history/AGENT-ONBOARDING-TESTING-2026-09-07.md"
         ],
         "hosted": [
           "cloudflare/README.md"
@@ -74,7 +74,7 @@ carry the claim, and the remaining tiers stay visibly open.
           "scripts/assisted-work-browser-check.mjs"
         ],
         "agent": [
-          "docs/AGENT-ONBOARDING-TESTING-2026-09-07.md"
+          "docs/history/AGENT-ONBOARDING-TESTING-2026-09-07.md"
         ],
         "hosted": []
       }
