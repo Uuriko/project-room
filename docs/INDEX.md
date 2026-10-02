@@ -26,11 +26,11 @@ Wakes and pull fallback: [CONNECT-WAKE.md](CONNECT-WAKE.md) and [history/AGENT-W
 
 ## Machines
 
-The machine relay is a separate Worker in [../relay/README.md](../relay/README.md). It is off until someone deploys it. The daemon wire protocol is [../relay/PROTOCOL.md](../relay/PROTOCOL.md). Room's own Worker does not carry machine sockets.
+The machine relay is a separate Worker in [../relay/README.md](../relay/README.md). It is off until someone deploys it. The daemon wire protocol is [../machine/PROTOCOL.md](../machine/PROTOCOL.md). Operator notes are [../relay/PROTOCOL.md](../relay/PROTOCOL.md). Room's own Worker does not carry machine sockets.
 
 ## Self-host
 
-[SELF-HOSTING.md](SELF-HOSTING.md) is the local room. [ROOM-DEPLOYMENT.md](ROOM-DEPLOYMENT.md) is the hosted shape. [STAGING.md](STAGING.md) is the isolated staging Worker. [SERVICE.md](SERVICE.md) is the running service. Backups are in [history/BACKUP-AUTOMATION.md](history/BACKUP-AUTOMATION.md).
+[SELF-HOSTING.md](SELF-HOSTING.md) is the local room. [ROOM-DEPLOYMENT.md](ROOM-DEPLOYMENT.md) is the deploy runbook. [STAGING.md](STAGING.md) is the isolated staging Worker. [SERVICE.md](SERVICE.md) is the running service. The on-disk backup history is [history/BACKUP-AUTOMATION.md](history/BACKUP-AUTOMATION.md). The hosted Durable Object export is in the runbook.
 
 ## Security
 

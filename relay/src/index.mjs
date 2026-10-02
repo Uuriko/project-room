@@ -9,12 +9,12 @@ import { errorResponse, json, readJson } from "./http.mjs";
 import { MachineLink } from "./machine-link.mjs";
 import { log, recentLogs } from "./redact.mjs";
 import {
-  ENROLL_TTL_MS, MAX_SMALL_BYTES, SERVER_NAME, challengeHeader, isLabel, isMachineId, isMemberId, isRoomId, missingSecrets, passthroughEnabled,
+  ENROLL_TTL_MS, MAX_SMALL_BYTES, SERVER_NAME, challengeHeader, isInviteCode, isLabel, isMachineId, isMemberId, isRoomId, missingSecrets, passthroughEnabled,
 } from "./protocol.mjs";
 
 export { MachineLink };
 
-const MACHINE_ROUTE = /^\/v0\/machines\/([^/]+)\/(link|mcp|call|halt|resume|status)$/;
+const MACHINE_ROUTE = /^\/v0\/machines\/([^/]+)\/(link|mcp|call|halt|pause|resume|bye|status)$/;
 
 export default {
   async fetch(request, env) {
@@ -47,7 +47,8 @@ async function route(request, env, url) {
   const expire = /^\/admin\/enroll-codes\/([^/]+)\/expire$/.exec(url.pathname);
   if (expire && request.method === "POST") return expireEnroll(request, env, expire[1]);
   if (url.pathname === "/admin/logs" && request.method === "GET") return adminLogs(request, env);
-  if (url.pathname === "/enroll" && request.method === "POST") return enroll(request, env);
+  if (url.pathname === "/v0/enroll" && request.method === "POST") return enroll(request, env);
+  if (url.pathname === "/v0/machines/link") return linkByToken(request, env, url);
   const match = MACHINE_ROUTE.exec(url.pathname);
   if (!match) throw relayError(404, "not_found", "Not found");
   if (!isMachineId(match[1])) throw relayError(404, "not_found", "Not found");
@@ -87,10 +88,15 @@ async function mintEnroll(request, env) {
   await requireAdmin(env, request);
   const { value } = await readJson(request, MAX_SMALL_BYTES, "Request body");
   if (!isLabel(value.label)) throw relayError(422, "invalid_enroll", "label must be 1..80 characters without control characters");
-  if (!Array.isArray(value.rooms) || value.rooms.length < 1 || value.rooms.length > 8 || value.rooms.some(room => !isRoomId(room))) {
-    throw relayError(422, "invalid_enroll", "rooms must list 1..8 room ids");
-  }
+  if (!isRoomId(value.roomId)) throw relayError(422, "invalid_enroll", "roomId must be a short id");
   if (!isMemberId(value.ownerMemberId)) throw relayError(422, "invalid_enroll", "ownerMemberId must be a short id");
+  if (!isInviteCode(value.inviteCode)) throw relayError(422, "invalid_enroll", "inviteCode must be an operator-minted Room code");
+  if (value.profile !== undefined && value.profile !== "contribute") {
+    throw relayError(422, "invalid_enroll", "The invite profile must be contribute");
+  }
+  if (value.displayName !== undefined && !isLabel(value.displayName)) {
+    throw relayError(422, "invalid_enroll", "displayName must be 1..80 characters without control characters");
+  }
   const machineId = `mch_${randomHex(8)}`;
   const verifier = randomB64url(32);
   const expiresAt = new Date(Date.now() + ENROLL_TTL_MS).toISOString();
@@ -100,8 +106,11 @@ async function mintEnroll(request, env) {
     body: JSON.stringify({
       machineId,
       label: value.label,
-      rooms: [...new Set(value.rooms)],
+      roomId: value.roomId,
+      rooms: [value.roomId],
       ownerMemberId: value.ownerMemberId,
+      inviteCode: value.inviteCode,
+      displayName: value.displayName ?? null,
       codeHash: await sha256Hex(verifier),
       expiresAt,
     }),
@@ -113,15 +122,25 @@ async function mintEnroll(request, env) {
     machineId,
     expiresAt,
     label: value.label,
-    rooms: [...new Set(value.rooms)],
+    roomId: value.roomId,
     ownerMemberId: value.ownerMemberId,
+    inviteCode: value.inviteCode,
+    ...(value.displayName ? { displayName: value.displayName } : {}),
   });
 }
 
 async function enroll(request, env) {
-  const { value } = await readJson(request, MAX_SMALL_BYTES, "Request body");
+  let value;
+  try {
+    ({ value } = await readJson(request, MAX_SMALL_BYTES, "Request body"));
+  } catch (error) {
+    if (error instanceof RelayError && (error.code === "invalid_json" || error.code === "json_required")) {
+      return json(401, { error: "code_invalid" });
+    }
+    throw error;
+  }
   const parsed = parseCode(value.code);
-  if (!parsed) throw relayError(401, "enroll_code_invalid", "The enroll code was refused");
+  if (!parsed) return json(401, { error: "code_invalid" });
   const response = await machine(env, parsed.machineId).fetch(new Request("https://machine.internal/enroll", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -129,11 +148,42 @@ async function enroll(request, env) {
   }));
   if (!response.ok) return response;
   const issued = await response.json();
+  return json(200, publicEnroll(issued, request, env));
+}
+
+function publicEnroll(issued, request, env) {
   const linkUrl = new URL(request.url);
   linkUrl.protocol = linkUrl.protocol === "https:" ? "wss:" : "ws:";
-  linkUrl.pathname = `/v0/machines/${issued.machineId}/link`;
+  linkUrl.pathname = "/v0/machines/link";
   linkUrl.search = "";
-  return json(200, { machineId: issued.machineId, machineToken: issued.machineToken, link: linkUrl.toString() });
+  linkUrl.hash = "";
+  const body = {
+    machineToken: issued.machineToken,
+    machineId: issued.machineId,
+    label: issued.label,
+    roomId: issued.roomId,
+    ownerMemberId: issued.ownerMemberId,
+    inviteCode: issued.inviteCode,
+    relayUrl: linkUrl.toString(),
+  };
+  if (typeof issued.displayName === "string" && issued.displayName) body.displayName = issued.displayName;
+  const origin = typeof env.ROOM_ORIGIN === "string" ? env.ROOM_ORIGIN.replace(/\/$/, "") : "";
+  if (origin) body.roomOrigin = origin;
+  return body;
+}
+
+async function linkByToken(request, env, url) {
+  if (url.searchParams.has("token") || url.searchParams.has("machineToken")) {
+    throw relayError(401, "unauthenticated", "The machine token was refused");
+  }
+  const token = /^Bearer\s+(\S+)$/.exec(request.headers.get("authorization") ?? "")?.[1] ?? "";
+  const machineId = token.split(".")[0];
+  if (!isMachineId(machineId)) throw relayError(401, "unauthenticated", "The machine token was refused");
+  const response = await machine(env, machineId).fetch(request);
+  if (response.status !== 401 || response.headers.get("www-authenticate")) return response;
+  const headers = new Headers(response.headers);
+  headers.set("www-authenticate", challengeHeader(request, machineId));
+  return new Response(response.body, { status: 401, headers });
 }
 
 async function expireEnroll(request, env, machineId) {
