@@ -160,6 +160,7 @@ test("claim lease expiring within 24h surfaces; distant leases stay quiet", t =>
 
 test("an action stays visible when informational claim leases fill the cap", t => {
   const f = setup(t);
+  f.store.workClaims.configure("commons", { maxMemberOpenClaims: 25 });
   const expires = new Date(f.clock.now + 2 * 3600000).toISOString();
   for (let n = 1; n <= 25; n++) {
     const wid = proposeWork(f, `lease-${String(n).padStart(2, "0")}`, { mode: "write" });

@@ -2611,6 +2611,18 @@
     },
     {
       "method": "GET",
+      "path": "/api/rooms/{id}/work-claims/config"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/work-claims/config"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/work-claims/config"
+    },
+    {
+      "method": "GET",
       "path": "/api/rooms/{id}/work-claims/duplicates"
     },
     {
@@ -5998,6 +6010,18 @@
     {
       "method": "POST",
       "path": "/api/rooms/{id}/work-claims/{id}/update"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/work-claims/config"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/work-claims/config"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/work-claims/config"
     },
     {
       "method": "GET",
