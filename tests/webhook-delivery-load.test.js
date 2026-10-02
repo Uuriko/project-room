@@ -68,6 +68,7 @@ test("startup hydration matches the newest 100 per subscription, oldest first", 
     store.close();
     const reopened = new RoomStore(filename, { now: () => NOW });
     try {
+      for (const id of reopened.agentPlugin.subs.keys()) reopened.agentPlugin.hydrateDeliveries(id);
       const ids = sub => reopened.agentPlugin.subs.get(sub).deliveries.map(delivery => delivery.deliveryId);
       assert.deepEqual(ids("busy"), oracle.get("busy"));
       assert.equal(ids("busy").length, WEBHOOK_DELIVERY_KEEP);
@@ -108,6 +109,7 @@ test("reopening creates the delivery index on a database that already has rows",
         "SELECT sql FROM sqlite_master WHERE type='index' AND name='agent_webhook_deliveries_sub_created'").get();
       assert.match(index.sql, /agent_webhook_deliveries\(subscription_id, created_at\)/);
       assert.equal(reopened.db.prepare("SELECT COUNT(*) AS n FROM agent_webhook_deliveries").get().n, before);
+      reopened.agentPlugin.hydrateDeliveries("sub");
       assert.equal(reopened.agentPlugin.subs.get("sub").deliveries.length, before);
     } finally { reopened.close(); }
   });

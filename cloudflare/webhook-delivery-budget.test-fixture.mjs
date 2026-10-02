@@ -17,7 +17,9 @@ class MeteredDatabase extends DurableDatabase {
     this.log = log;
   }
   #note(sql, cursor, returned) {
-    this.log.push({ sql, rowsRead: Number(cursor.rowsRead ?? 0), returned });
+    const rowsRead = Number(cursor.rowsRead ?? 0);
+    this.rowsRead = (this.rowsRead ?? 0) + rowsRead;
+    this.log.push({ sql, rowsRead, returned });
   }
   exec(sql) {
     return durableStorage.transaction(this, () => {
@@ -93,19 +95,27 @@ export class DeliveryBudgetRoom {
     seed(created.store, count, subscriptions);
     const measured = [];
     let last = null;
+    let lastLog = [];
     for (let pass = 0; pass < passes; pass++) {
       const log = [];
       const opened = openStore(this.ctx.storage, log);
       last = opened.store;
+      lastLog = log;
       const selects = log.filter(entry => entry.sql === RECENT_WEBHOOK_DELIVERIES_SQL);
       measured.push({
         deliveryRowsRead: deliveryReads(log),
         totalRowsRead: log.reduce((sum, entry) => sum + entry.rowsRead, 0),
         hydrationStatements: selects.length,
+        schemaLookups: log.filter(entry => /\bsqlite_master\b/i.test(entry.sql)).length,
         ms: opened.ms,
+        phases: opened.store.coldStart?.phases ?? null,
       });
     }
     const plans = last.db.prepare("EXPLAIN QUERY PLAN " + RECENT_WEBHOOK_DELIVERIES_SQL).all("sub").map(row => row.detail);
+    const mark = lastLog.length;
+    for (const id of last.agentPlugin.subs.keys()) last.agentPlugin.hydrateDeliveries(id);
+    const loaded = last.agentPlugin.subs.get("sub-0").deliveries.length;
+    const hydrateRowsRead = deliveryReads(lastLog.slice(mark));
     let legacyRowsRead = null;
     let legacyMs = null;
     if (oracle) {
@@ -119,8 +129,10 @@ export class DeliveryBudgetRoom {
       legacyRowsRead = deliveryReads(log);
       legacyMs = performance.now() - started;
     }
-    const loaded = last.agentPlugin.subs.get("sub-0").deliveries.length;
-    return Response.json({ measured, plans, legacyRowsRead, legacyMs, loaded, count, subscriptions });
+    return Response.json({
+      measured, plans, legacyRowsRead, legacyMs, loaded, count, subscriptions,
+      hydrateRowsRead,
+    });
   }
 }
 
