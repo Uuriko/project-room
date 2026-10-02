@@ -11,6 +11,8 @@
 //   - looks up at most one pull per tick without a token, four with one
 //   - waits out 403/429 until x-ratelimit-reset or retry-after
 //   - reads at most 32 candidate rows and refuses a body over 64 KiB
+//   - stops before the next lookup once `deadline` has passed, and aborts
+//     the in-flight request at the sooner of 5s and the time remaining
 // The token (GITHUB_TOKEN or GH_TOKEN) is never logged or stored. Public
 // repositories still answer when it is absent.
 import { emitWorkClaimEvent } from "./work-claim-events.mjs";
@@ -72,16 +74,19 @@ async function readJson(response) {
   return { error: true };
 }
 
-async function lookupPull(pullRequest, { fetchImpl, token, nowMs }) {
+async function lookupPull(pullRequest, { fetchImpl, token, nowMs, deadline = Infinity }) {
   const [owner, name] = pullRequest.repo.split("/");
   const endpoint = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/pulls/${pullRequest.number}`;
   const headers = githubHeaders(token);
   const cached = usableEtag(pullRequest.etag);
   if (cached) headers["If-None-Match"] = cached;
+  const budgetMs = deadline - Date.now();
+  if (budgetMs <= 0) return { kind: "budget" };
   let response;
   try {
-    response = await fetchImpl(endpoint, { headers, signal: AbortSignal.timeout(5000) });
+    response = await fetchImpl(endpoint, { headers, signal: AbortSignal.timeout(Math.min(5000, budgetMs)) });
   } catch {
+    if (Date.now() > deadline) return { kind: "budget" };
     return { kind: "error" };
   }
   const etag = usableEtag(responseHeader(response, "etag")) || cached;
@@ -120,13 +125,14 @@ function delayFor(item, kind, token) {
 
 // Look up due claims. One fetch per distinct pull URL. Stops on a rate limit
 // or a rejected token. Does not write.
-export async function collectPullRequestLookups(items, { fetchImpl = fetch, token = null, nowMs = Date.now(), limit = null } = {}) {
+export async function collectPullRequestLookups(items, { fetchImpl = fetch, token = null, nowMs = Date.now(), limit = null, deadline = Infinity, yieldBetween = null } = {}) {
   const cap = limit ?? (token ? LOOKUP_LIMIT : LOOKUP_LIMIT_NO_TOKEN);
   const due = (items ?? []).filter(item => pullRequestDue(item, nowMs));
   const results = [];
   const seen = new Map();
   let fetches = 0;
   let rateLimitedUntil = null;
+  let budgetExceeded = false;
   for (const item of due) {
     const url = item.pullRequest.url;
     const prior = seen.get(url);
@@ -135,8 +141,10 @@ export async function collectPullRequestLookups(items, { fetchImpl = fetch, toke
       continue;
     }
     if (fetches >= cap || rateLimitedUntil) break;
+    if (Date.now() > deadline) { budgetExceeded = true; break; }
     fetches += 1;
-    const looked = await lookupPull(item.pullRequest, { fetchImpl, token, nowMs });
+    const looked = await lookupPull(item.pullRequest, { fetchImpl, token, nowMs, deadline });
+    if (looked.kind === "budget") { budgetExceeded = true; break; }
     const result = {
       claimId: item.id,
       url,
@@ -145,13 +153,14 @@ export async function collectPullRequestLookups(items, { fetchImpl = fetch, toke
     };
     seen.set(url, result);
     results.push(result);
+    if (typeof yieldBetween === "function") await yieldBetween();
     if (looked.kind === "rateLimited") {
       rateLimitedUntil = looked.rateLimitedUntil;
       break;
     }
     if (looked.kind === "unconfigured") break;
   }
-  return { results, rateLimitedUntil };
+  return { results, rateLimitedUntil, budgetExceeded };
 }
 
 // Write one lookup onto the current claim row. Returns true when the claim
@@ -256,14 +265,15 @@ function loadDueClaims(store, nowMs) {
 
 // Poll every room that has an open pull link. A shared reset skips the tick
 // before any request. A missing token does not fail the tick.
-export async function syncClaimPullRequests(store, { env = null, fetchImpl = fetch, nowMs = Date.now(), token = undefined } = {}) {
+export async function syncClaimPullRequests(store, { env = null, fetchImpl = fetch, nowMs = Date.now(), token = undefined, deadline = Infinity, yieldBetween = null } = {}) {
   if (!store?.db || !store.workClaims) return { checked: 0, updated: 0 };
   const access = token === undefined ? githubToken(env ?? process.env) : token;
+  if (Date.now() > deadline) return { checked: 0, updated: 0, budgetExceeded: 1 };
   if (readClaimPullBudget(store) > nowMs) return { checked: 0, updated: 0, rateLimited: true };
   const due = loadDueClaims(store, nowMs);
   if (due.length === 0) return { checked: 0, updated: 0 };
   const batch = await collectPullRequestLookups(due.map(entry => entry.item), {
-    fetchImpl, token: access, nowMs
+    fetchImpl, token: access, nowMs, deadline, yieldBetween
   });
   const roomOf = new Map(due.map(entry => [entry.item.id, entry.roomId]));
   let checked = 0;
@@ -288,7 +298,7 @@ export async function syncClaimPullRequests(store, { env = null, fetchImpl = fet
       writeClaimPullBudget(store, batch.rateLimitedUntil, nowMs);
     }
   });
-  return { checked, updated, ...(rateLimited ? { rateLimited: true } : {}) };
+  return { checked, updated, ...(rateLimited ? { rateLimited: true } : {}), ...(batch.budgetExceeded ? { budgetExceeded: 1 } : {}) };
 }
 
 // Settle every live claim linked to a closing pull_request webhook payload.

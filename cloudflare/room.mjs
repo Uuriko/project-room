@@ -273,7 +273,14 @@ export class ProjectRoom extends DurableObject {
   async refreshClaimPullRequests() {
     if (this.paused) return { checked: 0, updated: 0 };
     await yieldToQueuedRequests();
-    return syncClaimPullRequests(this.store, { env: this.env });
+    // Same 5s budget as the other cron RPCs. The poll itself also stops
+    // before the next GitHub call and caps each request to the time left,
+    // so a slow pull cannot hold this tick open for the full fetch timeout.
+    return syncClaimPullRequests(this.store, {
+      env: this.env,
+      deadline: cronDeadline(),
+      yieldBetween: () => yieldToQueuedRequests()
+    });
   }
   // Scans only disposable web-fetch/research logs. The deletion flag is
   // explicit; authoritative room and security audit journals are excluded.

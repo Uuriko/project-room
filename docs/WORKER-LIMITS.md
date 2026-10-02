@@ -149,6 +149,14 @@ immediately; a configured drain continues in `waitUntil` slices that yield
 the input gate. `/api/health` returns 200 from the Worker within 1 second
 when the object is rebuilding, with `durableObject.ready: false`.
 
+The per-minute `claim-prs` job shares that cron. It is not part of the
+constructor. It reads at most 32 live claims whose pull has no outcome yet,
+calls GitHub at most four times (once with no token), sends `If-None-Match`,
+and on 403 or 429 waits until the reset before calling again. Each call aborts
+at the sooner of 5 seconds and the job's remaining `CRON_JOB_BUDGET_MS`, and
+the tick does not start another call after that budget. A response over 64 KiB
+is refused. `budgetExceeded` is progress, not a failed heartbeat.
+
 `tests/cold-start-budget.test.js` fails if a 200,000-event reopen, eager or
 deferred, costs 500 ms of CPU or more. Each open logs `room.cold_start`
 (`durationMs`, `cpuMs`, `rooms`, `sequences`, `projectionBytes`). The first
