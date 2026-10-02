@@ -98,6 +98,13 @@ export function ensureVerifiedEmailSchema(db) {
   const methodCols = new Set(db.prepare("PRAGMA table_info(account_login_methods)").all().map(column => column.name));
   if (methodCols.size > 0 && !methodCols.has("verified_at")) {
     db.exec("ALTER TABLE account_login_methods ADD COLUMN verified_at INTEGER");
+    // One-time backfill for databases created before verified_at. Fresh
+    // databases already have the column, and later opens must not rewrite it.
+    db.prepare(`UPDATE account_login_methods SET verified_at=created_at
+      WHERE verified_at IS NULL AND type='oauth' AND email IS NOT NULL`).run();
+    db.prepare(`UPDATE account_login_methods SET verified_at=created_at
+      WHERE verified_at IS NULL AND type='magic'
+      AND account_id NOT IN (SELECT id FROM accounts WHERE origin='password-signup')`).run();
   }
   const accountCols = new Set(db.prepare("PRAGMA table_info(accounts)").all().map(column => column.name));
   if (accountCols.size > 0 && !accountCols.has("password_reset_required")) {
@@ -112,11 +119,6 @@ export function ensureVerifiedEmailSchema(db) {
     );
     CREATE INDEX IF NOT EXISTS account_security_event_account ON account_security_events(account_id, at);
   `);
-  db.prepare(`UPDATE account_login_methods SET verified_at=created_at
-    WHERE verified_at IS NULL AND type='oauth' AND email IS NOT NULL`).run();
-  db.prepare(`UPDATE account_login_methods SET verified_at=created_at
-    WHERE verified_at IS NULL AND type='magic'
-    AND account_id NOT IN (SELECT id FROM accounts WHERE origin='password-signup')`).run();
 }
 
 const sha256hex = text => createHash("sha256").update(text, "utf8").digest("hex");

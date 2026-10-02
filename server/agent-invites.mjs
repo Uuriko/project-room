@@ -229,8 +229,11 @@ export class AgentInvites {
         const linked = this.db.prepare("SELECT member_id FROM identity_links WHERE room_id=? AND identity_id=?").get(row.room_id, existingIdentity.identityId);
         const member = linked && this.store.room(row.room_id).state.members[linked.member_id];
         if (!member?.active) fail(403, "access_ended", "Membership is no longer active");
+        const mcpToken = this.store.agentPlugin.issueOnboardingMcpToken({
+          identityId: existingIdentity.identityId, roomId: row.room_id, label: member.displayName
+        });
         return { identityId: existingIdentity.identityId, roomId: row.room_id, memberId: member.id,
-          displayName: member.displayName, permissions: member.permissions, duplicate: true,
+          displayName: member.displayName, permissions: member.permissions, duplicate: true, mcpToken,
           next: redeemNext(row.room_id, member.displayName), nextActions: nextActionsForInviteRedeem(row.room_id) };
       }
       if (row.revoked_at != null) fail(410, "invite_revoked", "Invite code was revoked");

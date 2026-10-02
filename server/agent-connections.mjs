@@ -270,17 +270,11 @@ export class AgentConnections {
         ...(unlinkedIdentityId ? { unlinkedIdentityId } : {}) };
       this.db.prepare("INSERT INTO agent_connection_operations VALUES(?,?,?,?,?,?,?,?,?)").run(roomId, memberId, row.generation, auth.account.id, requestId, requestJSON, fingerprint, JSON.stringify(receipt), JSON.stringify(row));
       let mcpToken = null;
-      if (action === "create") {
+      if (action === "create" && request.identityId) {
         this.store.accountLogins.assertEmailVerified(auth.account.id);
-        let mcpIdentityId = request.identityId ?? null;
-        if (!mcpIdentityId) {
-          const minted = this.store.identities.create(String(request.displayName || "Agent").trim().slice(0, 80));
-          mcpIdentityId = minted.identityId;
-          this.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)")
-            .run(roomId, mcpIdentityId, memberId, now);
-        }
         mcpToken = this.store.agentPlugin.issueOnboardingMcpToken({
-          identityId: mcpIdentityId, roomId, label: String(request.displayName || "Add agent").trim().slice(0, 80) || "Add agent"
+          identityId: request.identityId, roomId,
+          label: String(request.displayName || "Add agent").trim().slice(0, 80) || "Add agent"
         });
       }
       return { receipt, connection: this.view(row), duplicate: false, ...(mcpToken ? { mcpToken } : {}) };

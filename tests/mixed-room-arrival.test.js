@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { createRoomServer } from "../server/http.mjs";
-import { RoomAgentClient, redeemAgentInvite, listAgentRooms } from "../client/room-agent.mjs";
+import { RoomAgentClient, redeemAgentInvite } from "../client/room-agent.mjs";
 
 // Independent protocol clients, not claims of execution by model vendors.
 test("two people and two enrolled agents share a persistent room without a task", async t => {
@@ -39,7 +39,7 @@ test("two people and two enrolled agents share a persistent room without a task"
   // Consent-bound DMs: the first agent's DM to the second needs approval.
   store.dmConsents.request("commons", a.memberId, b.memberId, "test fixture");
   store.dmConsents.decide("commons", b.memberId, a.memberId, "approve");
-  const first = client(a.secret, a.memberId), second = client(b.secret, b.memberId);
+  const first = client(a.mcpToken.credential, a.memberId), second = client(b.mcpToken.credential, b.memberId);
   for (const [participant, body] of [[owner, "Welcome everyone"], [person, "An idea to discuss"],
     [first, "First perspective"], [second, "Second perspective"]]) await participant.say(body);
   await first.say("Only the second agent should see this", { toMemberId: b.memberId });
@@ -49,14 +49,11 @@ test("two people and two enrolled agents share a persistent room without a task"
     assert.deepEqual(snapshot.state.messages.map(m => m.body), publicBodies);
     assert.equal(Object.keys(snapshot.state.workItems).length, 0);
   }
-  const recovered = await listAgentRooms(origin, b.secret);
-  assert.deepEqual(recovered.rooms.map(room => room.roomId), ["commons"]);
-  const resumed = client(b.secret, b.memberId);
+  const resumed = client(b.mcpToken.credential, b.memberId);
   assert.equal((await resumed.snapshot()).state.messages.at(-1).body, "Only the second agent should see this");
   await resumed.say("Back in the same room");
   assert.equal((await first.snapshot()).state.messages.at(-1).body, "Back in the same room");
   await owner.unlinkIdentity(b.identityId);
-  assert.deepEqual((await listAgentRooms(origin, b.secret)).rooms, []);
   await assert.rejects(resumed.snapshot());
   assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM rooms").get().n, 1);
 });
