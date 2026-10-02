@@ -239,9 +239,10 @@ export class ProjectRoom extends DurableObject {
       this.channelDrainInflight = false;
     }
   }
-  // Snapshot plus checksum on the rooms and invitation tables. A match returns
-  // immediately. A mismatch replays invitations and legacy projections in
-  // slices that yield the input gate. Never called from the constructor.
+  // Changed rooms update the checksum. One room per tick is reread so a
+  // projection that changes without a new event is still caught. A mismatch
+  // replays invitations and legacy projections in slices that yield the
+  // input gate. Never called from the constructor.
   async verifyRoomIntegrity() {
     if (this.paused) return { skipped: 1, paused: 1 };
     await yieldToQueuedRequests();
@@ -452,7 +453,7 @@ export default {
     try {
       const integrity = await room.verifyRoomIntegrity();
       const line = { event: 'room.integrity' };
-      for (const key of ['matched', 'skipped', 'verified', 'budgetExceeded', 'invitations', 'paused']) {
+      for (const key of ['matched', 'skipped', 'verified', 'budgetExceeded', 'invitations', 'paused', 'checked', 'swept']) {
         if (typeof integrity?.[key] === 'number') line[key] = integrity[key];
       }
       console.info(JSON.stringify(line));

@@ -977,7 +977,8 @@ function roomSchemaStamp() {
     ownerDelegateSchema, agentRoomSchema, oauthPendingSchema, gmailSchema, requestRunSchema,
     directSendSchema, inboxStitchSchema, RETIRED_BOARD_V2_SCHEMA, EMISSARY_LURE_SCHEMA,
     agentKeyRegistrySchema, INTEGRITY_SNAPSHOT_SCHEMA,
-    INTEGRITY_JOB_CURSOR_SCHEMA, ROOM_SCHEMA_STAMP_SCHEMA
+    INTEGRITY_JOB_CURSOR_SCHEMA, INTEGRITY_ROOM_STATE_SCHEMA, INTEGRITY_SWEEP_COLUMN,
+    ROOM_SCHEMA_STAMP_SCHEMA
   ];
   for (const part of parts) hash.update("\0").update(part ?? "");
   for (const def of fenceDefinitions(STORE_SCHEMA_VERSION)) hash.update("\0").update(def.name).update(def.sql);
@@ -993,6 +994,12 @@ const INTEGRITY_JOB_CURSOR_SCHEMA = `CREATE TABLE IF NOT EXISTS integrity_job_cu
   singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
   step INTEGER NOT NULL
 )`;
+const INTEGRITY_ROOM_STATE_SCHEMA = `CREATE TABLE IF NOT EXISTS integrity_room_state (
+  room_id TEXT PRIMARY KEY,
+  sequence INTEGER NOT NULL,
+  projection_bytes INTEGER NOT NULL
+)`;
+const INTEGRITY_SWEEP_COLUMN = "ALTER TABLE integrity_job_cursor ADD COLUMN sweep_after TEXT NOT NULL DEFAULT ''";
 const ROOM_SCHEMA_STAMP_SCHEMA = `CREATE TABLE IF NOT EXISTS room_schema_stamp (
   singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
   version INTEGER NOT NULL,
@@ -1547,6 +1554,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.storagePlatform.verifyWriterFence(this.db);
       this.db.exec(INTEGRITY_SNAPSHOT_SCHEMA);
       this.db.exec(INTEGRITY_JOB_CURSOR_SCHEMA);
+      this.ensureIntegrityRoomState();
       if (!deferIntegrity) this.verifyInvitationAudit();
       this.reminders.verifySchema();
       this.wakeQueue.verifySchema();
@@ -1659,6 +1667,73 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     return { ran, next: step };
   }
 
+  ensureIntegrityRoomState() {
+    this.db.exec(INTEGRITY_ROOM_STATE_SCHEMA);
+    const columns = new Set(this.db.prepare("PRAGMA table_info(integrity_job_cursor)").all().map(column => column.name));
+    if (!columns.has("sweep_after")) this.db.exec(INTEGRITY_SWEEP_COLUMN);
+  }
+
+  // Remember each room's sequence and projection size after a full check so
+  // the next tick does not read every projection again.
+  rememberIntegrityRoomState() {
+    this.ensureIntegrityRoomState();
+    this.transaction(() => {
+      this.db.prepare(`INSERT INTO integrity_room_state(room_id, sequence, projection_bytes)
+        SELECT id, sequence, LENGTH(projection) FROM rooms WHERE 1
+        ON CONFLICT(room_id) DO UPDATE SET sequence=excluded.sequence, projection_bytes=excluded.projection_bytes`).run();
+      this.db.prepare("DELETE FROM integrity_room_state WHERE room_id NOT IN (SELECT id FROM rooms)").run();
+    });
+  }
+
+  // Changed rooms, plus one room of the rolling sweep. A sequence change
+  // updates the stored checksum. Projection bytes that move without a
+  // sequence change, or a state table that does not cover every room, fall
+  // through to the full repair.
+  incrementalIntegrityCheck() {
+    this.ensureIntegrityRoomState();
+    return this.transaction(() => {
+      const snapshot = this.readIntegritySnapshot();
+      const roomCount = this.db.prepare("SELECT COUNT(*) AS n FROM rooms").get().n;
+      const stateCount = this.db.prepare("SELECT COUNT(*) AS n FROM integrity_room_state").get().n;
+      if (!snapshot || stateCount !== roomCount) return { ok: false };
+      const parts = snapshot.split(":").map(Number);
+      if (parts.length !== 6 || parts.some(part => !Number.isSafeInteger(part))) return { ok: false };
+      const sweepAfter = this.db.prepare("SELECT sweep_after FROM integrity_job_cursor WHERE singleton=1").get()?.sweep_after ?? "";
+      const sweepSql = "SELECT id, sequence, LENGTH(projection) AS bytes FROM rooms";
+      const sweep = this.db.prepare(`${sweepSql} WHERE id>? ORDER BY id LIMIT 1`).get(sweepAfter)
+        ?? this.db.prepare(`${sweepSql} ORDER BY id LIMIT 1`).get();
+      const changed = this.db.prepare(`SELECT r.id, r.sequence, LENGTH(r.projection) AS bytes, s.sequence AS oldSequence, s.projection_bytes AS oldBytes
+        FROM rooms r JOIN integrity_room_state s ON s.room_id=r.id WHERE r.sequence!=s.sequence`).all();
+      const uncovered = this.db.prepare(`SELECT 1 FROM rooms r LEFT JOIN integrity_room_state s ON s.room_id=r.id WHERE s.room_id IS NULL
+        UNION SELECT 1 FROM integrity_room_state s LEFT JOIN rooms r ON r.id=s.room_id WHERE r.id IS NULL LIMIT 1`).get();
+      if (uncovered) return { ok: false };
+      if (sweep) {
+        const stored = this.db.prepare("SELECT sequence, projection_bytes AS bytes FROM integrity_room_state WHERE room_id=?").get(sweep.id);
+        if (!stored || (stored.sequence === sweep.sequence && stored.bytes !== sweep.bytes)) return { ok: false };
+      }
+      const invitations = this.db.prepare("SELECT COUNT(*) AS invitations FROM membership_invitations").get().invitations;
+      const journal = this.db.prepare("SELECT COUNT(*) AS entries, COALESCE(SUM(sequence), 0) AS sequences FROM membership_invitation_journal").get();
+      if (invitations !== parts[3] || journal.entries !== parts[4] || journal.sequences !== parts[5]) return { ok: false };
+      let sequences = parts[1];
+      let projectionBytes = parts[2];
+      const update = this.db.prepare("UPDATE integrity_room_state SET sequence=?, projection_bytes=? WHERE room_id=?");
+      for (const row of changed) {
+        sequences += row.sequence - row.oldSequence;
+        projectionBytes += row.bytes - row.oldBytes;
+        update.run(row.sequence, row.bytes, row.id);
+      }
+      const text = [parts[0], sequences, projectionBytes, invitations, journal.entries, journal.sequences].join(":");
+      if (text !== snapshot) {
+        this.db.prepare("UPDATE integrity_snapshot SET checksum=?, verified_at=? WHERE id=1").run(text, this.now());
+      }
+      if (sweep) {
+        this.db.prepare(`INSERT INTO integrity_job_cursor(singleton, step, sweep_after) VALUES(1, 0, ?)
+          ON CONFLICT(singleton) DO UPDATE SET sweep_after=excluded.sweep_after`).run(sweep.id);
+      }
+      return { ok: true, invitations, checked: changed.length, swept: sweep ? 1 : 0 };
+    });
+  }
+
   // Rooms, projection bytes, and invitation rows. Not the event log.
   integrityChecksum() {
     return this.readTransaction(() => {
@@ -1699,6 +1774,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   async verifyRoomIntegrity({ yieldBetween = async () => {}, deadline = Infinity } = {}) {
     if (this.readOnly) throw new Error("Read-only stores do not run the integrity job");
     if (typeof yieldBetween !== "function") throw new TypeError("yieldBetween must be a function");
+    if (Date.now() > deadline) return { matched: 0, skipped: 0, verified: 0, budgetExceeded: 1, checked: 0, swept: 0 };
+    const incremental = this.incrementalIntegrityCheck();
+    if (incremental.ok) {
+      await yieldBetween();
+      if (Date.now() > deadline) return { matched: 1, skipped: 1, verified: 0, invitations: incremental.invitations, checked: incremental.checked, swept: incremental.swept, budgetExceeded: 1 };
+      const deferred = await this.runDeferredIntegrityBatch({ deadline, yieldBetween });
+      return { matched: 1, skipped: 1, verified: 0, invitations: incremental.invitations, checked: incremental.checked, swept: incremental.swept, deferred };
+    }
     const before = this.integrityChecksum();
     if (this.readIntegritySnapshot() === before.text) {
       await yieldBetween();
@@ -1726,6 +1809,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     await yieldBetween();
     const after = this.integrityChecksum();
     this.writeIntegritySnapshot(after.text);
+    this.rememberIntegrityRoomState();
     if (Date.now() > deadline) return { matched: 0, skipped: 0, verified: 1, invitations: after.invitations, budgetExceeded: 1 };
     const deferred = await this.runDeferredIntegrityBatch({ deadline, yieldBetween });
     return { matched: 0, skipped: 0, verified: 1, invitations: after.invitations, deferred };
