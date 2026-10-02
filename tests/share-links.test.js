@@ -614,6 +614,45 @@ test("persisted links with inherited or missing issuers fail public preview with
   }
 });
 
+test("expired, cancelled, and full links do not consume the 200 live-link cap", t => {
+  const f = fixture(t);
+  const mint = (maxJoins = 1) => {
+    const linkToken = randomBytes(32).toString("base64url");
+    const created = f.store.shareLinks.create(f.ownerKey, "commons", {
+      requestId: randomUUID(), linkToken, expiresAt: f.store.now() + 3600000, maxJoins, expectedMemberRevision: 0,
+    }, null);
+    return { linkToken, created };
+  };
+  for (let i = 0; i < 199; i += 1) mint();
+  f.setNow(f.details.expiresAt);
+  const afterExpiry = mint();
+  assert.equal(afterExpiry.created.link.status, "active");
+  f.store.shareLinks.cancel(f.ownerKey, "commons", afterExpiry.created.link.id, null);
+  const afterCancel = mint();
+  assert.equal(afterCancel.created.link.status, "active");
+  const filled = mint(1);
+  const slot = f.store.createAccountSessionSlot();
+  const current = f.store.accountSessionSlot(slot.token);
+  f.store.shareLinks.join(slot.token, filled.linkToken, {
+    displayName: "Full guest", redemptionId: randomUUID(),
+    expectedSessionRevision: current.sessionRevision, expectedSessionBinding: current.sessionBinding,
+  });
+  assert.equal(f.store.shareLinks.list(f.ownerKey, "commons", null).links.find(link => link.id === filled.created.link.id).status, "full");
+  const afterFull = mint();
+  assert.equal(afterFull.created.link.status, "active");
+  for (let active = 2; active < 200; active += 1) mint();
+  assert.equal(f.store.shareLinks.list(f.ownerKey, "commons", null).links.filter(link => link.status === "active").length, 200);
+  assert.throws(() => mint(), { code: "pilot_limit" });
+  const beforeInvite = f.store.db.prepare("SELECT count(*) n FROM share_links").get().n;
+  const auth = f.store.authenticate(f.ownerKey, "commons");
+  assert.equal(f.store.shareLinks.personalInvite(auth, "commons", 25), null);
+  assert.equal(f.store.db.prepare("SELECT count(*) n FROM share_links").get().n, beforeInvite);
+  f.store.shareLinks.cancel(f.ownerKey, "commons", afterFull.created.link.id, null);
+  const invited = f.store.shareLinks.personalInvite(auth, "commons", 25);
+  assert.equal(typeof invited.token, "string");
+  assert.equal(f.store.db.prepare("SELECT count(*) n FROM share_links").get().n, beforeInvite + 1);
+});
+
 test("an actual enrolled toString issuer retains shared invitation authority", t => {
   const f = fixture(t, "toString");
   assert.equal(f.store.shareLinks.preview(f.linkToken).link.status, "active");

@@ -9,8 +9,10 @@ No login. The page is indexable when the URL has no query string.
 ## What is public
 
 - Public-work receipts are already public. They stay on this page.
-- A work claim appears only when it is done, its pull request outcome is
-  `merged`, and the room owner has turned on public receipts.
+- A work claim appears only when it is done, this server recorded the merge
+  (`pr_merged` on the claim history, with `syncedAt`), and the room owner
+  has turned on public receipts. A member-supplied `outcome: "merged"` does
+  not.
 - A completed work item appears only when it has a receipt and the same
   owner setting is on.
 - The setting is `room.public_receipts_set`. It is off until the owner

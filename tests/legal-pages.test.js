@@ -11,7 +11,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { TERMS_VERSION } from "../server/legal-store.mjs";
 import { EMBEDDED_LEGAL } from "../server/legal-documents.mjs";
-import { collectPublicReceipts } from "../server/receipts-live.mjs";
+import { collectPublicReceipts, projectPublicWorkReceipt } from "../server/receipts-live.mjs";
 
 const HASH = `sha256:${"ab".repeat(32)}`;
 const PWR = `pwr_${"cd".repeat(32)}`;
@@ -218,6 +218,10 @@ test("unpublish removes a room and a receipt from public reads and the sitemap",
   store.command(ownerKey, "commons", { id: "page-on", type: "room.public_page_set", data: { enabled: true } });
   store.command(ownerKey, "commons", { id: "receipts-on", type: "room.public_receipts_set", data: { enabled: true } });
   store.roomDirectory.set("commons", "owner", true);
+  projectPublicWorkReceipt(store, {
+    schema: "public-work-receipt/1", receiptId: PWR, namespaceId: "commons", identityId: "ai_public",
+    title: "Public task", createdAt: "2026-10-01T00:00:00.000Z", artifact: { sha256: "cd".repeat(32) },
+  }, "cd".repeat(32));
   const claimId = collectPublicReceipts(store).find(item => item.title === "Ship the door").id;
   assert.equal((await raw(origin, "/r/commons")).status, 200);
   assert.match((await raw(origin, "/r/commons")).text, /Report/);

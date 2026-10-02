@@ -62,7 +62,7 @@ function roomStub(overrides = {}) {
 }
 
 test("every cron job in scheduled() has a heartbeat entry", () => {
-  assert.deepEqual(CRON_JOBS.map(job => job.name).sort(), ["channel-drain", "claim-prs", "gmail-sync", "land-queue", "retention", "webhook-dispatch"]);
+  assert.deepEqual(CRON_JOBS.map(job => job.name).sort(), ["channel-drain", "claim-prs", "gmail-sync", "land-queue", "public-read-model", "retention", "webhook-dispatch"]);
   for (const job of CRON_JOBS) assert.equal(job.periodSeconds, 60);
 });
 

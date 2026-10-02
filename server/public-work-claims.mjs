@@ -4,6 +4,7 @@ import { canonicalJson } from '../src/audit-receipts.mjs';
 import { createWork, claimWork, renewWork, updateWork, releaseExpired } from './work-claims.mjs';
 import { withPublicWorkClaimWriter } from './public-work-claim-fence.mjs';
 import { ServiceError } from './service-error.mjs';
+import { projectPublicWorkReceipt } from './public-read-model.mjs';
 
 export const publicWorkClaimsSchema = `
 CREATE TABLE IF NOT EXISTS public_work_tasks (
@@ -195,6 +196,7 @@ export class PublicWorkClaims {
             namespaceId: row.namespace_key, generation: row.generation, identityId: identity.identityId, state: 'submitted',
             artifact: { sha256, bytes }, checksReported: input.checksReported, verification: 'hash_only', createdAt: new Date(this.store.now()).toISOString() };
           this.db.prepare('INSERT INTO public_work_receipts VALUES (?,?,?,?,?,?,?,?,?,?)').run(receiptId, offerId, row.namespace_key, row.generation, identity.identityId, input.artifactText, sha256, bytes, JSON.stringify(receipt), this.store.now());
+          projectPublicWorkReceipt(this.store, receipt, sha256);
           item = updateWork({ ...item, files: [] }, identity.identityId, { state: 'done', deliveryMode: 'result', blobs: ['sha256:' + sha256], now: this.store.now() });
           this.store.workClaims.set(row.namespace_key, item);
           outcome.receipt = receipt;
