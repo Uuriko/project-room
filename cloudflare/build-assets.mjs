@@ -12,11 +12,10 @@ async function checkOutput(directory, prefix = '') {
   if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('Asset output must be a real directory');
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     const path = prefix + entry.name;
-    if (entry.isDirectory() && path === 'src') await checkOutput(new URL('src/', directory), 'src/');
-    else if (entry.isDirectory() && path === 'connectors') await checkOutput(new URL('connectors/', directory), 'connectors/');
-    else if (entry.isDirectory() && path === 'compare') await checkOutput(new URL('compare/', directory), 'compare/');
-    else if (entry.isDirectory() && path === 'og') await checkOutput(new URL('og/', directory), 'og/');
-    else if (!entry.isFile() || !packagedPaths.includes(path)) throw new Error(`Unexpected asset output: ${path}`);
+    if (entry.isDirectory()) {
+      if (!packagedPaths.some(file => file.startsWith(path + '/'))) throw new Error(`Unexpected asset output: ${path}`);
+      await checkOutput(new URL(entry.name + '/', directory), path + '/');
+    } else if (!entry.isFile() || !packagedPaths.includes(path)) throw new Error(`Unexpected asset output: ${path}`);
   }
 }
 export async function buildAssets(output = new URL('./public/', import.meta.url)) {
@@ -26,10 +25,8 @@ export async function buildAssets(output = new URL('./public/', import.meta.url)
     return readFile(source);
   }));
   await checkOutput(output);
-  await mkdir(new URL('src/', output), { recursive: true });
-  await mkdir(new URL('connectors/', output), { recursive: true });
-  await mkdir(new URL('compare/', output), { recursive: true });
-  await mkdir(new URL('og/', output), { recursive: true });
+  const directories = new Set(packagedPaths.filter(file => file.includes('/')).map(file => file.slice(0, file.lastIndexOf('/') + 1)));
+  await Promise.all([...directories].map(dir => mkdir(new URL(dir, output), { recursive: true })));
   await Promise.all(packagedPaths.map((file, index) => writeFile(new URL(file, output), sources[index])));
   return packagedPaths.length;
 }

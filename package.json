@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "bin": {
+    "room": "bin/room.mjs"
+  },
   "description": "Executable v0 contract for a shared human and agent project room",
   "scripts": {
     "start": "node server.mjs",
@@ -15,6 +18,7 @@
     "provision": "node scripts/provision.mjs",
     "audit:invitations": "node scripts/audit-invitations.mjs",
     "test:handoff": "node --test tests/agent-handoff.test.js",
+    "build:agent-docs": "node scripts/build-agent-docs.mjs",
     "agent:inbox": "node scripts/agent-inbox.mjs",
     "agent:roster": "node scripts/room-roster.mjs"
   },

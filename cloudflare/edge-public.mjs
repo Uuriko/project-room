@@ -27,6 +27,9 @@ const assets = new Map([
   ...publicAssetPaths.map(path => [`/${path}`, [path, assetType(path)]])
 ]);
 for (const [url, file] of publicSearchAssets(publicAssetPaths)) assets.set(url, [file, 'text/html']);
+// DX-1a begin: scripts/install.sh is the installer. Its public URL is /install.sh.
+assets.set('/install.sh', ['scripts/install.sh', 'text/plain']);
+// DX-1a end
 
 const skillsDoc = discoveryDoc(SKILLS_CATALOG_PATH);
 
