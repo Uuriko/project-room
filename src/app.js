@@ -798,6 +798,9 @@ async function landAfterSignIn() {
   });
   if (!target.explicit) {
     if (target.roomId) await openRememberedRoomOrInbox();
+    // ?account=1 is the inbox. A sign-in with no room and no account home
+    // opens that account's room after the name step.
+    else if (accountHomeFromLocation()) showAccountWorkspace();
     else await openPersonalRoomAfterSignup();
     return;
   }
