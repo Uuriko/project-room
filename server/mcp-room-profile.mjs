@@ -38,6 +38,7 @@ import {
   hostedMcpToolDefs as HOSTED_TOOLS,
 } from "./mcp-hosted-tools.mjs";
 import { listedMcpTools, MCP_TOOL_FOCUSES } from "./mcp-discovery.mjs";
+import { stampEvents, stampWorkListing } from "./content-trust.mjs";
 import { resolveCatalogAgent, catalogCallDenial } from "./capability-visibility.mjs";
 
 const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -331,13 +332,13 @@ function listWork(store, secret, args) {
     id: request.id, requesterId: request.requesterId, workItemId: request.workItemId, revision: request.revision,
     nextRead: { tool: "room_read_request", arguments: { requestMessageId: request.id } }
   })) ?? null;
-  return {
+  return stampWorkListing({
     roomId: snapshot.roomId, evaluatedThrough: snapshot.sequence, focus,
     member: member ? { id: member.id, kind: member.kind, permissions: [...member.permissions] } : null,
     charter: snapshot.charter ?? null,
     ...(matches ? { selection: { query: args.query.trim(), matches: matches.total, shown: work.length } } : {}),
     work, ...(focus === "needs_me" ? { replyRequests, replyRequestsEvaluatedThrough: replyListing.evaluatedThrough } : {})
-  };
+  });
 }
 
 // UFO-steal track 2 (RC-2026-09-27-2743): call-time tier denial mirroring
@@ -426,7 +427,8 @@ function callRoomTool(store, secret, identity, name, args, agentRooms) {
     });
   }
   if (name === "room_list_events") {
-    return store.eventsAfter(secret, roomId, args.after ?? 0, args.limit ?? 50);
+    const auth = store.authenticate(secret, roomId);
+    return stampEvents(store.eventsAfter(secret, roomId, args.after ?? 0, args.limit ?? 50), auth.member.id);
   }
   if (name === "room_post_message") {
     const id = args.id ?? randomUUID();
