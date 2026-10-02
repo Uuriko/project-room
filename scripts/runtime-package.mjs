@@ -287,10 +287,7 @@ optional.push("server/spend-allowance.mjs");
 optional.push("server/autonomy-tiers.mjs"); // Graduated autonomy tiers (imported by server/store.mjs and server/http.mjs)
 optional.push("server/grants.mjs"); // UFO-steal slice 1 (RC-2026-09-27-2728): per-agent capability grant edges (imported by server/store.mjs and server/http.mjs)
 optional.push("server/next-actions.mjs", "server/next-actions-routes.mjs"); // RC-2026-09-25-911: ranked per-agent next actions (pure builder + HTTP routes; imported by server/store.mjs and server/http.mjs)
-optional.push("server/board-v2.mjs"); // RC-2026-09-26-1114: room-native claims board v2 prototype (route contract + handleBoardV2Request; wired into http.mjs by RC-2026-09-27-2720)
 optional.push("server/job-bot.mjs"); // RC-2026-09-27-1149: fixtures-only room job bot (not wired into http.mjs yet; standalone module + tests)
-optional.push("server/board-v2-sqlite.mjs"); // RC-2026-09-27: SQLite persistence for board-v2 (durable registry per design §3)
-optional.push("server/board-v2-durable.mjs"); // RC-2026-09-27-2720: durable BoardV2 state machine over board_vtwo_* (imported by server/http.mjs)
 optional.push("server/capability-visibility.mjs"); // RC-2026-09-27-2731: withhold-never-refused catalog predicate (imported by server/mcp-discovery.mjs and server/mcp-room-profile.mjs)
 optional.push("src/growth-emit.js", "src/growth-events.js", "src/growth-collector.js", "src/growth-mentions.js", "src/growth-fanout.js", "src/growth-persistence.js", "src/growth-summary.js", "src/growth-compare.js", "src/growth-alerts.js", "src/growth-watch.js", "src/growth-scheduler.js", "src/growth-http.js", "src/growth-digest.js");
 // Preserve redistribution terms; historical commits predate these documents.

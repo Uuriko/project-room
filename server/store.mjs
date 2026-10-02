@@ -79,7 +79,51 @@ import { WebFetch, webFetchSchema, migrateWebFetchLogColumns } from "./web-fetch
 import { WebResearch, webResearchSchema } from "./web-research.mjs"; // RC-2026-09-24-310: knowledge router (additive)
 import { AgentIdentities, agentIdentitySchema, ensureIdentitySecretSchema, ensureIdentityCapacitySchema, ensureIdentityLinkCodeSchema, isIdentitySecret } from "./agent-identities.mjs";
 import { AgentKeyRegistry, agentKeyRegistrySchema } from "./agent-key-registry.mjs"; // Integration map slice 9: agent public-key registry.
-import { boardV2Schema } from "./board-v2-sqlite.mjs"; // PR #1144: board-v2 durable registry (additive, unfenced).
+// Board v2 is retired. These tables stay so existing databases and the
+// recovery audit still see them. Nothing drops board_vtwo_*.
+const RETIRED_BOARD_V2_SCHEMA = `
+  CREATE TABLE IF NOT EXISTS board_vtwo_claims (
+    task_id     TEXT PRIMARY KEY,
+    lane        TEXT NOT NULL,
+    files       TEXT NOT NULL,
+    lease       TEXT NOT NULL,
+    lease_h     INTEGER NOT NULL,
+    reason      TEXT NOT NULL,
+    state       TEXT NOT NULL,
+    claim_seq   INTEGER NOT NULL,
+    claim_at    TEXT NOT NULL,
+    heartbeat_at TEXT,
+    last_seq    INTEGER NOT NULL,
+    receipts    TEXT NOT NULL DEFAULT '[]'
+  );
+  CREATE TABLE IF NOT EXISTS board_vtwo_events (
+    seq       INTEGER PRIMARY KEY AUTOINCREMENT,
+    at        TEXT NOT NULL,
+    kind      TEXT NOT NULL,
+    task_id   TEXT,
+    lane      TEXT,
+    payload   TEXT NOT NULL,
+    supersedes INTEGER,
+    idempotency_key TEXT,
+    mirror_issue   INTEGER,
+    mirror_comment INTEGER
+  );
+  CREATE TABLE IF NOT EXISTS board_vtwo_mirror (
+    id             INTEGER PRIMARY KEY CHECK (id = 1),
+    current_issue  INTEGER NOT NULL,
+    issues         TEXT NOT NULL DEFAULT '[]'
+  );
+  CREATE TABLE IF NOT EXISTS board_vtwo_idempotency (
+    scoped_key TEXT PRIMARY KEY,
+    status INTEGER NOT NULL,
+    body TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_board_vtwo_events_kind ON board_vtwo_events(kind);
+  CREATE INDEX IF NOT EXISTS idx_board_vtwo_events_task ON board_vtwo_events(task_id);
+  CREATE INDEX IF NOT EXISTS idx_board_vtwo_events_lane ON board_vtwo_events(lane);
+`;
 import { EMISSARY_LURE_SCHEMA } from "./emissary-lure.mjs"; // Emissary Slice 2 (RC-2026-09-28-2873): lure-generation ledgers (additive, unfenced).
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { AgentHeartbeats, agentHeartbeatSchema } from "./agent-heartbeats.mjs"; // RC-2026-09-18-051: wakeable agent presence.
@@ -959,7 +1003,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // bump, intentionally outside the writer fence (see unfencedAdditiveTables).
       // Applied here (not only where the registry is instantiated) so upgrades,
       // store-only fixtures, and the recovery audit see the tables.
-      this.db.exec(boardV2Schema);
+      this.db.exec(RETIRED_BOARD_V2_SCHEMA);
       // Emissary Slice 2 (RC-2026-09-28-2873): lure-generation ledgers
       // (emissary_drops, emissary_invite_attribution, emissary_idempotency,
       // emissary_journal) — purely additive, IF NOT EXISTS is idempotent, no

@@ -52,8 +52,8 @@ import { isIdentitySecret } from "./agent-identities.mjs";
 import { isPublicRoomDoorPath, wantsPublicDoorHtml, publicRoomDoorHtml, PUBLIC_DOOR_CSP } from "../deploy/room-entry.mjs";
 import { guestAgentLinkContract, GUEST_AGENT_TOKEN_PREFIX, isGuestAgentMemberId } from "./guest-agent-links.mjs";
 import { isWebFetchGuest, WebFetchError } from "./web-fetch.mjs";
-import { handleBoardV2Request } from "./board-v2.mjs"; // RC-2026-09-27-2720: board-v2 route contract (validation + dispatch).
-import { createDurableBoardV2Machine } from "./board-v2-durable.mjs"; // RC-2026-09-27-2720: durable board-v2 state machine.
+// Board v2 is retired. Its routes answer 410 board_v2_retired. The
+// board_vtwo_* tables stay in place; nothing here drops them.
 import { validateClaimText, CLAIM_TEXT_MAX_LENGTH } from "./claim-validate.mjs"; // Synchronous pre-post claim-block validation (RC-2026-09-24-204): pure, no store.
 import { getTracer, SPAN_NAMES, ATTR } from "./delivery-tracing.mjs"; // R1 opt-in delivery-path tracing (RC-2026-09-26-966).
 import { guestInviteContract } from "./guest-invites.mjs";
@@ -187,7 +187,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   passkeyService = null, // test injection for the passkey routes; production uses createPasskeyAuth({ store })
   magicLinkMailer = null,
   githubAuth = null,
-  boardV2Enabled = (globalThis.process?.env ?? {})["ROOM_BOARD_V2_ENABLED"] === "1",
+  fetchPullRequest = null,
+  githubToken = undefined,
   connectorClients = [], // OAuth2 clients for third-party connectors (e.g. [{ clientId, name, redirectUris }])
   serviceMode = trustedLocalProxy ? "invite-only-pilot" : "single-node-pilot", deployment = undefined, growth = null, push = undefined }) {
   // Human browser push stays off until VAPID keys are present. Node reads
@@ -3458,6 +3459,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // this file. The /sweep and /duplicates templates are tested before the
       // {id} template so the literal segments are never mistaken for a claim id.
       const workClaimsMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims$/.exec(url.pathname);
+      const workClaimsStatusMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/status$/.exec(url.pathname);
       const workClaimsSweepMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/sweep$/.exec(url.pathname);
       const workClaimsDuplicatesMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/duplicates$/.exec(url.pathname);
       const workClaimItemMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})$/.exec(url.pathname);
@@ -3468,7 +3470,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const workClaimReassignMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/reassign$/.exec(url.pathname);
       const workClaimReceiptsMatch = /^\/api\/rooms\/([^/]{1,384})\/receipts$/.exec(url.pathname);
       const workClaimRenewMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/renew$/.exec(url.pathname);
-      const workClaimMatch = workClaimsMatch ?? workClaimsSweepMatch ?? workClaimsDuplicatesMatch ?? workClaimClaimMatch
+      const workClaimMatch = workClaimsMatch ?? workClaimsStatusMatch ?? workClaimsSweepMatch ?? workClaimsDuplicatesMatch ?? workClaimClaimMatch
         ?? workClaimUpdateMatch ?? workClaimReviewMatch ?? workClaimReleaseMatch ?? workClaimReassignMatch ?? workClaimRenewMatch ?? workClaimItemMatch
         ?? workClaimReceiptsMatch;
       // Agent /feedback endpoint (structured bug/feature reports): every
@@ -3726,6 +3728,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // handler maps pure-module errors to stable 4xx codes.
       if (workClaimMatch) {
         const workClaimRoute = workClaimsSweepMatch ? "sweep"
+          : workClaimsStatusMatch ? "status"
           : workClaimsDuplicatesMatch ? "duplicates"
           : workClaimsMatch ? (req.method === "GET" ? "list" : "create")
           : workClaimReceiptsMatch ? "receipts"
@@ -3739,6 +3742,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           ?? workClaimReviewMatch ?? workClaimReleaseMatch ?? workClaimReassignMatch ?? workClaimRenewMatch;
         return await handleWorkClaims({ req, res, url, store, roomId, auth, workClaimRoute,
           workClaimId: workClaimIdMatch ? pathId(workClaimIdMatch[2]) : null, registry: store.workClaims,
+          ...(fetchPullRequest ? { fetchPullRequest } : {}),
+          ...(githubToken !== undefined ? { githubToken } : {}),
           reauthorize: () => {
             const current = selected.mode === "account" ? store.authenticateAccountSession(selected.token, roomId, fence)
               : store.authenticate(selected.token, roomId, fence, { allowAccountSession: false });
@@ -3783,39 +3788,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             return current;
           }, helpers: { json, reject, body } });
       }
-      // Board v2 (RC-2026-09-27-2720): the durable claims board. Rides the
-      // room funnel above (credential, session binding, 600/min read limit,
-      // protectWrite + 60/min write limit, rooms:read/rooms:write API-key
-      // scopes). Writes bind lane to the authenticated member id; the board
-      // itself is deployment-wide (one per room database) — :roomId selects
-      // the auth context, not a data partition. Guests may read but never
-      // write: per the guest policy they stay out of claims-board
-      // participation (same posture as the work-claims funnel).
+      // Board v2 is retired. Authenticated callers get 410 and a pointer at
+      // the work-claims board. The board_vtwo_* tables are not dropped.
       if (boardV2Match) {
-        // The database-wide board needs a separate multi-room authorization
-        // review before hosted rollout. Existing room APIs stay available.
-        if (boardV2Enabled !== true) reject(503, "board_v2_disabled", "The coordination board is not enabled on this deployment");
-        const lane = auth.member.id;
-        if (typeof lane !== "string" || !/^[A-Za-z0-9_-]{1,64}$/.test(lane)) {
-          reject(401, "unauthenticated", "Member id cannot serve as a board lane");
-        }
-        const boardPath = url.pathname.slice(`/api/rooms/${boardV2Match[1]}/board/v2`.length) || "/";
-        const boardQuery = Object.fromEntries(url.searchParams.entries());
-        const isRead = req.method === "GET" || req.method === "HEAD";
-        if (!isRead && isWebFetchGuest(auth.member)) {
-          reject(403, "guest_scope_denied", "Guest members cannot write to the claims board");
-        }
-        const boardBody = isRead ? null : await body(req);
-        const machine = createDurableBoardV2Machine(store.db);
-        const runBoard = () => handleBoardV2Request(machine, {
-          method: req.method, path: boardPath, query: boardQuery,
-          body: boardBody, lane, headers: req.headers,
+        return json(res, 410, {
+          error: { code: "board_v2_retired", message: "Board v2 is retired. Use the work-claims board." },
+          next: [{ href: `/api/rooms/${boardV2Match[1]}/work-claims` }]
         });
-        // Whole-request transaction: multi-step mutations (event + claim +
-        // idempotency row) and check-then-write sequences stay atomic under
-        // BEGIN IMMEDIATE; reads run query-only.
-        const outcome = isRead ? store.readTransaction(runBoard) : store.transaction(runBoard);
-        return json(res, outcome.status, outcome.body, req.method === "HEAD");
       }
       // Escrowed bounties + credit ledger (agent work exchange, slice 1):
       // room-scoped bounty lifecycle and derived-balance credit routes share

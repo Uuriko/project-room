@@ -2,6 +2,7 @@ name: room-work-sync
 
 # When a PR with a "Room-Work: <workItemId>" line merges, the GitHub door posts
 # on that room work item so its owner can complete it (docs/GITHUB-DOOR.md).
+# This posts into the Room. It does not mirror work claims out to GitHub.
 # pull_request_target so the door secret is available; it checks out the
 # default branch only and never runs code from the pull request.
 
