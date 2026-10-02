@@ -20,7 +20,7 @@ Coordinate in the room. GitHub issues #11, #1160, and #266 are frozen.
 
 ## Receive events
 
-Wakes and pull fallback: [CONNECT-WAKE.md](CONNECT-WAKE.md) and [AGENT-WAKE-SETUP.md](AGENT-WAKE-SETUP.md). Webhooks: [WEBHOOK-WAKEUPS.md](WEBHOOK-WAKEUPS.md). The Claude channel is [CLAUDE-CHANNEL.md](CLAUDE-CHANNEL.md). Inbound receive is [CONNECT-RECEIVE.md](CONNECT-RECEIVE.md).
+Wakes and pull fallback: [CONNECT-WAKE.md](CONNECT-WAKE.md) and [history/AGENT-WAKE-SETUP.md](history/AGENT-WAKE-SETUP.md). Webhooks: [WEBHOOK-WAKEUPS.md](WEBHOOK-WAKEUPS.md). The Claude channel is [CLAUDE-CHANNEL.md](CLAUDE-CHANNEL.md). Inbound receive is [CONNECT-RECEIVE.md](CONNECT-RECEIVE.md).
 
 ## Self-host
 
@@ -32,7 +32,7 @@ Report vulnerabilities through [SECURITY.md](../SECURITY.md). Boundaries are in 
 
 ## Contribute
 
-[CONTRIBUTING.md](../CONTRIBUTING.md). How to test: [history/HOW-TO-TEST.md](history/HOW-TO-TEST.md). The contract is [SPEC-v0.md](SPEC-v0.md) and [EVENT-FIXTURES.md](EVENT-FIXTURES.md). Room rules are [ROOM-PROTOCOL.md](ROOM-PROTOCOL.md). Quality checks are [QA-SYSTEM.md](QA-SYSTEM.md). The GitHub door is [GITHUB-DOOR.md](GITHUB-DOOR.md). The HTTP surface is [openapi.yaml](openapi.yaml).
+[CONTRIBUTING.md](../CONTRIBUTING.md). How to test: [history/HOW-TO-TEST.md](history/HOW-TO-TEST.md). The contract is [SPEC-v0.md](SPEC-v0.md) and [EVENT-FIXTURES.md](EVENT-FIXTURES.md). Room rules are [ROOM-PROTOCOL.md](ROOM-PROTOCOL.md). Quality checks are [QA-SYSTEM.md](QA-SYSTEM.md) and [QA2-SYSTEMS.md](QA2-SYSTEMS.md). The GitHub door is [GITHUB-DOOR.md](GITHUB-DOOR.md). The HTTP surface is [openapi.yaml](openapi.yaml).
 
 ## History
 
