@@ -48,10 +48,10 @@ async function authorizeLease(env, state, token, { needLease, slotHint, tool, no
   if ((state.revoked ?? []).some(item => item.jti === claims.jti)) {
     throw relayError(401, "lease_token_revoked", "The lease token was revoked");
   }
-  if (state.halted && needLease) throw relayError(409, "halted", "The machine is halted");
+  assertRunnable(state, now, needLease);
   if (needLease && slotHint && slotHint !== claims.slot) throw relayError(422, "slot_mismatch", "The requested slot does not match the lease token");
-  const active = liveLease(state, now);
-  if (active && (active.slot !== claims.slot || active.claimId !== claims.claim)) {
+  const active = liveLease(state, now, claims.slot);
+  if (active && active.claimId !== claims.claim) {
     throw relayError(409, "slot_held", slotHeldMessage(active), {
       holder: active.holderName, expiresAt: active.expiresAt, claimId: active.claimId, slot: active.slot,
     });
@@ -65,7 +65,7 @@ async function authorizeLease(env, state, token, { needLease, slotHint, tool, no
     expiresAt: new Date(claims.exp * 1000).toISOString(),
     caps: claims.caps,
   };
-  if (needLease) state.activeLease = lease;
+  if (needLease) rememberLease(state, lease);
   if (needLease && tool) {
     if (!toolAllowed(tool)) throw relayError(403, "tool_not_allowed", `${tool} is not an allowed machine tool`);
     if (!capsCover(claims.caps, tool)) throw relayError(403, "capability_denied", `The lease does not cover ${tool}`);
@@ -88,7 +88,7 @@ async function authorizePassthrough(env, state, request, bearer, { needLease, sl
     identity = { hash, roomId, memberId: fetched.memberId, identityId: fetched.identityId, at: now };
     state.identityCache = [identity, ...(state.identityCache ?? []).filter(item => !(item.hash === hash && item.roomId === roomId))].slice(0, 32);
   }
-  if (state.halted && needLease) throw relayError(409, "halted", "The machine is halted");
+  assertRunnable(state, now, needLease);
   if (!needLease) return { identity, lease: null };
   if (slotHint && !isSlot(slotHint)) throw relayError(422, "invalid_slot", "slot must be a short lowercase name");
   if (tool && !toolAllowed(tool)) throw relayError(403, "tool_not_allowed", `${tool} is not an allowed machine tool`);
@@ -132,12 +132,25 @@ async function authorizePassthrough(env, state, request, bearer, { needLease, sl
     expiresAt: winner.expiresAt,
     caps: null,
   };
-  state.activeLease = lease;
+  rememberLease(state, lease);
   return { identity, lease: publicLease(lease) };
 }
 
-function liveLease(state, now) {
-  const lease = state.activeLease;
+function assertRunnable(state, now, needLease) {
+  if (!needLease) return;
+  if (state.halted) throw relayError(409, "halted", "The machine is halted");
+  if (typeof state.pausedUntil === "number" && now < state.pausedUntil) {
+    throw relayError(409, "paused", "The machine is paused");
+  }
+}
+
+function rememberLease(state, lease) {
+  state.leases = { ...(state.leases ?? {}), [lease.slot]: lease };
+  state.activeLease = lease;
+}
+
+function liveLease(state, now, slot) {
+  const lease = state.leases?.[slot] ?? null;
   if (!lease?.expiresAt) return null;
   const exp = Date.parse(lease.expiresAt);
   if (!Number.isFinite(exp) || exp <= now) return null;
