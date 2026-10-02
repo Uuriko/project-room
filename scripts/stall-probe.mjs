@@ -5,7 +5,7 @@ import { resolve } from "node:path";
 // exceeds the budget. Requests stay in flight together, which is the shape
 // of a Durable Object input-gate stall (a sequential probe would hide it).
 //
-//   node scripts/stall-probe.mjs --url https://room.trydemigod.com --seconds 20 --path /api/health
+//   node scripts/stall-probe.mjs --url https://room.trydemigod.com --seconds 20 --path /api/ready
 //
 // CI: .github/workflows/stall-probe.yml (workflow_dispatch). The verdict
 // function is covered by tests/edge-stall.test.js without hitting a network.
@@ -25,7 +25,7 @@ export function probeVerdict(samples, { maxP99Ms = 3000 } = {}) {
 }
 
 export function parseProbeArgs(argv) {
-  const opts = { url: "", seconds: 20, path: "/api/health", maxP99Ms: 3000 };
+  const opts = { url: "", seconds: 20, path: "/api/ready", maxP99Ms: 3000 };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     const next = argv[i + 1];
@@ -70,7 +70,7 @@ export async function runStallProbe({ url, seconds, path, maxP99Ms, fetchImpl, s
 async function main() {
   const opts = parseProbeArgs(process.argv.slice(2));
   if (!opts.url) {
-    console.error("Usage: node scripts/stall-probe.mjs --url https://host [--seconds 20] [--path /api/health] [--max-ms 3000]");
+    console.error("Usage: node scripts/stall-probe.mjs --url https://host [--seconds 20] [--path /api/ready] [--max-ms 3000]");
     process.exit(2);
   }
   const { target, results, verdict } = await runStallProbe(opts);
