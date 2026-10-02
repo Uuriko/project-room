@@ -6,9 +6,10 @@ behaviors marked (pinned).
 
 ## What can leave a room
 
-- **Room export (any member).** `GET /api/rooms/<id>/export` returns the full
-  event log as JSONL, one `{sequence, event}` per line. It is the complete
-  history, not the current view. The body is assembled in full before the
+- **Room export (any member).** `GET /api/rooms/<id>/export` returns the
+  event log as JSONL, one `{sequence, event}` per line. A deleted message's
+  body is null, the same tombstone as the projection, and an edited message
+  carries only its current body. The file is assembled in full before the
   response starts and carries a `Content-Length`, so a failure while reading
   history is a JSON error response rather than a truncated file that looks
   like a shorter export, and a dropped connection shows up as an incomplete
@@ -24,9 +25,8 @@ behaviors marked (pinned).
   it) allows nothing but its own fixed style block. Evidence URLs become links
   only when they are credential-free `https:` URLs; anything else is shown as
   text. Deleted messages appear as "Message deleted" with no body and no edit
-  history, so this format shows the room as members saw it, while the JSONL
-  format above remains the complete history. It shares the JSONL route's
-  authentication, `Content-Length` framing, memory bound and closing
+  history. It shares the JSONL route's authentication, `Content-Length`
+  framing, memory bound and closing
   "End of export" marker (pinned). In the room UI, **Export as HTML** in the
   History panel downloads it for the signed-in member (`room-<id>-export.html`).
 - **Room import (owner only).** `POST /api/rooms/<id>/import` replaces the
@@ -40,15 +40,18 @@ behaviors marked (pinned).
 
 ## What deletion means
 
-- Deleting a message hides it from the room. The projection keeps only a
-  tombstone (who deleted it and when) and purges the message's edit history
-  from the projection (pinned).
-- Deletion is a visibility rule, not erasure. The event log keeps the original
-  message and every edit, so a room export — taken before or after deletion —
-  still contains the earlier content (pinned). An import replays exactly what
-  the file holds, including that history.
-- Editing keeps prior versions in the room's edit history until the message is
-  deleted.
+- Deleting a message hides its text. The projection keeps a tombstone (who
+  deleted it and when) and drops the message's edit history (pinned). Reads
+  of the event log, the room projection, and both export formats return that
+  same tombstone: the body is null, and earlier wording is not in the response
+  (pinned).
+- The stored log is not rewritten. An export taken after a delete does not
+  contain the deleted wording, so importing that file cannot bring the wording
+  back. A file already downloaded still holds whatever it held. Import replays
+  the file it is given; a deleted message in a new export has a null body,
+  and a new post requires text, so that file does not import.
+- Editing returns only the current body on those reads. Prior bodies, including
+  edit-history text, are omitted (pinned).
 - There is no self-serve room deletion. The owner can archive a room (below),
   which makes it read-only but removes nothing. Removing a room entirely is an
   operator action on the service database and its backups, and exports already
