@@ -6,6 +6,17 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { DEFAULT_CHANNEL_ID } from "../src/events.js";
+import { createRecoveryFixture } from "../scripts/recovery-fixture.mjs";
+import { seedRecoveryCoverage } from "../scripts/recovery-coverage.mjs";
+import { applicationTables } from "../server/writer-fence.mjs";
+
+// Written by the cron, not by opening a store. Same exceptions as the recovery audit.
+const EMPTY_UNTIL_CRON = new Set([
+  "membership_delegation_pending",
+  "room_access_auto_approve",
+  "integrity_snapshot",
+  "integrity_job_cursor"
+]);
 
 const EVENTS = 200_000;
 const COLD_START_CPU_BUDGET_MS = 500;
@@ -57,6 +68,47 @@ test("cold start on a large message log stays within the CPU budget", () => {
       assert.equal(record.events, undefined);
       assert.equal(record.sequences, EVENTS);
       assert.ok(record.projectionBytes > 0);
+      assert.ok(record.cpuMs < COLD_START_CPU_BUDGET_MS, `deferred cold start used ${record.cpuMs}ms CPU`);
+      assert.equal(deferred.room("commons").state.channels[DEFAULT_CHANNEL_ID].id, DEFAULT_CHANNEL_ID);
+    } finally { deferred.close(); }
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("deferred cold start on a production-shaped store stays within the budget", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "project-room-cold-shaped-"));
+  const filename = join(directory, "room.sqlite");
+  const fixture = createRecoveryFixture(filename);
+  try {
+    try {
+      await seedRecoveryCoverage(fixture);
+      const counted = [];
+      for (const table of applicationTables) {
+        if (!/^[a-z0-9_]+$/.test(table)) throw new Error(`unexpected table name ${table}`);
+        const rows = fixture.store.db.prepare(`SELECT COUNT(*) AS n FROM "${table}"`).get().n;
+        if (EMPTY_UNTIL_CRON.has(table)) assert.equal(rows, 0, `${table} stays empty until the cron`);
+        else assert.ok(rows > 0, `${table} has production-shaped rows`);
+        counted.push(table);
+      }
+      assert.equal(counted.length, applicationTables.length);
+      const start = fixture.store.db.prepare("SELECT sequence FROM rooms WHERE id='commons'").get().sequence;
+      const body = JSON.stringify({
+        type: "message.posted", roomId: "commons", actorId: "owner",
+        data: { messageId: "m", body: "Synthetic audit event for the cold-start measurement, long enough to resemble a real chat line." }
+      });
+      fixture.store.transaction(() => {
+        const insert = fixture.store.db.prepare("INSERT INTO events(room_id, sequence, id, body) VALUES(?,?,?,?)");
+        for (let offset = 1; offset <= EVENTS; offset += 1) insert.run("commons", start + offset, `shaped${offset}`, body);
+        fixture.store.db.prepare("UPDATE rooms SET sequence=? WHERE id='commons'").run(start + EVENTS);
+      });
+    } finally { fixture.store.close(); }
+    const { lines, value: deferred } = captureInfo(() => new RoomStore(filename, { integrity: "deferred" }));
+    try {
+      const record = JSON.parse(lines.find(line => line.includes('"event":"room.cold_start"')));
+      assert.equal(record.integrity, "deferred");
+      assert.equal(record.phases.checksum.rowsRead, 0);
+      assert.equal(record.events, undefined);
+      assert.ok(record.rooms >= 2);
+      assert.ok(record.sequences > EVENTS);
       assert.ok(record.cpuMs < COLD_START_CPU_BUDGET_MS, `deferred cold start used ${record.cpuMs}ms CPU`);
       assert.equal(deferred.room("commons").state.channels[DEFAULT_CHANNEL_ID].id, DEFAULT_CHANNEL_ID);
     } finally { deferred.close(); }
