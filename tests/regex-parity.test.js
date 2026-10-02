@@ -14,12 +14,6 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  TASK_ID_RE as boardTaskIdRe,
-  LEASE_RE as boardLeaseRe,
-  LANE_RE as boardLaneRe,
-  SHA_RE as boardShaRe,
-} from "../server/board-v2.mjs";
-import {
   TASK_ID_RE as validateTaskIdRe,
   LEASE_RE as validateLeaseRe,
   STATE_RE as validateStateRe,
@@ -29,8 +23,6 @@ import {
   LEASE_RE as indexLeaseRe,
   STATE_RE as indexStateRe,
 } from "../scripts/claims-index.mjs";
-import { LANE_RE as feedbackLaneRe } from "../server/feedback-routes.mjs";
-import { SHA_RE as durableShaRe } from "../server/board-v2-durable.mjs";
 import { EXTERNAL_ID_RE as graphExternalIdRe } from "../server/emissary-graph.mjs";
 import { EXTERNAL_ID_RE as receiptsExternalIdRe } from "../server/emissary-receipts.mjs";
 
@@ -53,21 +45,21 @@ function checkParity(name, copies, accepts, rejects) {
   }
 }
 
-test("TASK_ID_RE parity: board-v2, claim-validate, claims-index", () => {
+test("TASK_ID_RE parity: claim-validate, claims-index", () => {
   checkParity("TASK_ID_RE",
-    [boardTaskIdRe, validateTaskIdRe, indexTaskIdRe],
+    [validateTaskIdRe, indexTaskIdRe],
     ["RC-2026-09-29-1", "RC-2026-09-29-12345", "RC-2000-01-01-999"],
     ["RC-2026-9-29-1", "RC-2026-09-29-", "rc-2026-09-29-1", "RC-2026-09-29-1 ",
      "RC-2026-09-29", "RC-2026-13-99-1x", "", "RC-2026-09-29-１２３"]);
 });
 
-test("LEASE_RE parity: board-v2, claim-validate, claims-index", () => {
+test("LEASE_RE parity: claim-validate, claims-index", () => {
   checkParity("LEASE_RE",
-    [boardLeaseRe, validateLeaseRe, indexLeaseRe],
+    [validateLeaseRe, indexLeaseRe],
     ["lease=6h", "lease=0h", "lease=123h"],
     ["lease=6H", "lease=6", "6h", "lease= 6h", "lease=-1h", "lease=6hh", ""]);
   // The capture group is the contract: every copy must parse the same hours.
-  for (const re of [boardLeaseRe, validateLeaseRe, indexLeaseRe]) {
+  for (const re of [validateLeaseRe, indexLeaseRe]) {
     assert.equal(new RegExp(re.source, re.flags).exec("lease=42h")[1], "42");
   }
 });
@@ -77,20 +69,6 @@ test("STATE_RE parity: claim-validate, claims-index", () => {
     [validateStateRe, indexStateRe],
     ["submitted", "working", "cancelled", "suspended", "completed", "failed(abc_123)"],
     ["failed()", "failed(a-b)", "failed(a b)", "done", "WORKING", "", "failed"]);
-});
-
-test("LANE_RE parity: board-v2, feedback-routes", () => {
-  checkParity("LANE_RE",
-    [boardLaneRe, feedbackLaneRe],
-    ["jill", "a", "A-1_b", "x".repeat(64)],
-    ["", "x".repeat(65), "a b", "a.b", "lane!"]);
-});
-
-test("SHA_RE parity: board-v2, board-v2-durable", () => {
-  checkParity("SHA_RE",
-    [boardShaRe, durableShaRe],
-    ["abc1234", "ABC1234", "0".repeat(40), "9f8e7d6c5b"],
-    ["abc123", "0".repeat(41), "xyz", "abc 123", ""]);
 });
 
 test("EXTERNAL_ID_RE parity: emissary-graph, emissary-receipts", () => {

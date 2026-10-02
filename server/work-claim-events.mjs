@@ -22,7 +22,7 @@ const eventTitle = item => {
   return title.trim() ? title : item.id;
 };
 
-export function workClaimEventData(item, action, { previousOwnerId = null, paths = undefined, pullRequest = undefined } = {}) {
+export function workClaimEventData(item, action, { previousOwnerId = null, paths = undefined, pullRequest = undefined, reason = undefined, ciState = undefined, verdict = undefined } = {}) {
   if (!WORK_CLAIM_ACTIONS.includes(action)) throw new Error(`Unknown work claim action: ${action}`);
   // Release and lease expiry clear files on the item. Callers pass the paths
   // that were held so the receipt still says which lane opened up.
@@ -45,12 +45,29 @@ export function workClaimEventData(item, action, { previousOwnerId = null, paths
       outcome: action === "pr_merged" ? "merged" : "closed"
     };
   }
+  if (reason) data.reason = reason;
+  if (ciState) data.ciState = ciState;
+  if (verdict) data.verdict = verdict;
   return data;
+}
+
+// CI success/failure and a changes-requested review wake the claim owner
+// through the existing agent wake queue. The queue accepts mention and dm;
+// these signals use mention, and messageId starts with "work-claim:" so a
+// host can tell them from a chat mention. A bad id never rolls back the claim.
+export function enqueueClaimWake(store, roomId, agentId, messageId) {
+  if (!store?.agentHeartbeats || typeof agentId !== "string" || typeof messageId !== "string") return null;
+  try {
+    return store.agentHeartbeats.enqueueWake({ agentId, kind: "mention", roomId, messageId });
+  } catch (error) {
+    console.error("work claim wake failed:", error?.message ?? error);
+    return null;
+  }
 }
 
 // Handler unit tests drive the routes with a registry-only store; events need
 // the real event log, so a store without one records nothing here.
-export function emitWorkClaimEvent(store, roomId, { actorId, item, action, previousOwnerId = null, atMs = null, paths = undefined, pullRequest = undefined }) {
+export function emitWorkClaimEvent(store, roomId, { actorId, item, action, previousOwnerId = null, atMs = null, paths = undefined, pullRequest = undefined, reason = undefined, ciState = undefined, verdict = undefined }) {
   if (!store?.db || typeof store.room !== "function") return null;
   const room = store.room(roomId);
   // The event log refuses anything after archive (applyEvent throws). Skip
@@ -66,7 +83,7 @@ export function emitWorkClaimEvent(store, roomId, { actorId, item, action, previ
     actorId: actor && actor.active !== false ? actorId : room.state.room.ownerId,
     roomId,
     at: new Date(stamp).toISOString(),
-    data: workClaimEventData(item, action, { previousOwnerId, paths, pullRequest })
+    data: workClaimEventData(item, action, { previousOwnerId, paths, pullRequest, reason, ciState, verdict })
   });
   const state = applyEvent(room.state, incoming);
   const sequence = room.sequence + 1;

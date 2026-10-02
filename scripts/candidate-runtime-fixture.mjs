@@ -62,6 +62,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/guest-agent-links.mjs');
   paths.add('server/agent-invites.mjs');
   paths.add('server/referrals.mjs'); // Referral attribution (imported by server/store.mjs)
+  paths.add('server/growth-loop.mjs'); // Referral growth: activation and room credits (imported by server/http.mjs and server/referrals.mjs)
   paths.add('server/referral-invites.mjs'); // Signed agent-carried referral invites (imported by server/store.mjs)
   paths.add('server/thread-mutes.mjs'); // Per-thread mutes (imported by server/store.mjs)
   paths.add('server/human-push.mjs'); // Human browser push (imported by server/store.mjs)
@@ -145,7 +146,6 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/receipts-page.mjs'); // Public receipts page (imported by server/http.mjs)
   paths.add('server/receipts-live.mjs'); // Live public-receipt reader (imported by server/http.mjs)
   paths.add('server/capability-visibility.mjs'); // RC-2026-09-27-2731: withhold-never-refused catalog predicate (imported by server/mcp-discovery.mjs and server/mcp-room-profile.mjs)
-  for (const path of ['server/board-v2.mjs', 'server/board-v2-sqlite.mjs', 'server/board-v2-durable.mjs']) paths.add(path); // RC-2026-09-27-2720: board-v2 HTTP wiring (imported by server/http.mjs)
   paths.add('server/conversation-sync.mjs'); // bounded viewer-scoped conversation reads (imported by server/http.mjs)
   const candidate = join(directory, 'synthetic-source'); mkdirSync(candidate);
   // No private state, credentials, docs or real checkout Git metadata.
