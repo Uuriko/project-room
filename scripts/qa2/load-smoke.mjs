@@ -7,11 +7,13 @@
 import { argv, exit } from "node:process";
 import { randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
+import { createQaClient } from "./lib/client.mjs";
 const arg = (n, d) => { const i = argv.indexOf(`--${n}`); return i > 0 ? argv[i + 1] : d; };
 const origin = arg("origin", "http://127.0.0.1:4173"), vus = Number(arg("vus", "20")), seconds = Number(arg("seconds", "30"));
 if (!/127\.0\.0\.1|localhost/.test(origin) && vus > 3) { console.error("refusing >3 VUs against a non-local origin"); exit(2); }
 const H = { "content-type": "application/json", origin, "user-agent": "project-room-qa2-load/1" };
-const ident = await (await fetch(`${origin}/api/agent-identities`, { method: "POST", headers: H, body: JSON.stringify({ displayName: `qa2-load-${Date.now().toString(36)}` }) })).json();
+const client = createQaClient({ origin, userAgent: "project-room-qa2-load/1" });
+const ident = (await client.request("POST", "/api/agent-identities", { body: { displayName: `qa2-load-${Date.now().toString(36)}` } })).json;
 const auth = { ...H, authorization: `Bearer ${ident.secret}` };
 const room = await (await fetch(`${origin}/api/agent-rooms`, { method: "POST", headers: auth, body: JSON.stringify({ title: `qa2-load-${Date.now().toString(36)}`, purpose: "load smoke; archived after" }) })).json();
 const R = `${origin}/api/rooms/${room.roomId}`;

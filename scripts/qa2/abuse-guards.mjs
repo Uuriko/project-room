@@ -6,6 +6,7 @@
 import { argv, exit } from "node:process";
 import { randomUUID, randomBytes } from "node:crypto";
 import { writeFileSync } from "node:fs";
+import { createQaClient } from "./lib/client.mjs";
 
 const arg = (name, fallback) => {
   const index = argv.indexOf(`--${name}`);
@@ -18,6 +19,7 @@ if (!/^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(origin)) {
 }
 
 const UA = "project-room-qa2-guards/1";
+const client = createQaClient({ origin, userAgent: UA });
 const stamp = Date.now().toString(36);
 const OPEN_CAP = 200;
 const MEMBER_CAP = 20;
@@ -30,36 +32,7 @@ const codeOf = response => response.json?.error?.code ?? "";
 const sameList = (left, right) => JSON.stringify(left) === JSON.stringify(right);
 
 async function req(method, path, token, body) {
-  const headers = { "user-agent": UA, accept: "application/json, text/event-stream" };
-  if (body !== undefined) {
-    headers["content-type"] = "application/json";
-    headers.origin = origin;
-  }
-  if (token) headers.authorization = `Bearer ${token}`;
-  for (let attempt = 0; attempt < 4; attempt++) {
-    const response = await fetch(origin + path, {
-      method,
-      headers,
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
-    if (response.status === 429 && attempt < 3) {
-      const reset = Number(response.headers.get("x-ratelimit-reset"));
-      const waitMs = Number.isFinite(reset)
-        ? Math.min(65000, Math.max(250, reset * 1000 - Date.now() + 250))
-        : 61000;
-      await response.arrayBuffer();
-      await new Promise(resolve => setTimeout(resolve, waitMs));
-      continue;
-    }
-    let text = await response.text();
-    if (/^(event|data):/.test(text)) {
-      text = text.split("\n").filter(line => line.startsWith("data:")).map(line => line.slice(5)).join("\n");
-    }
-    let json = null;
-    try { json = JSON.parse(text); } catch { /* non-JSON error pages stay in text */ }
-    return { status: response.status, json, text };
-  }
-  return { status: 0, json: null, text: "no response" };
+  return client.request(method, path, { token, body, accept: "application/json, text/event-stream" });
 }
 
 const must = (response, what) => {

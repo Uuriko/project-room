@@ -163,6 +163,23 @@ export function workStatus(item, now = Date.now()) {
 
 export const activeClaim = (item, now = Date.now()) => item.claim?.status === "active" && Date.parse(item.claim.expiresAt) > now;
 
+// Same writer rule as the work-claim board: the room owner, a human with
+// accept_work or complete_work, or an agent on the contribute, review, or
+// collaborate profile. write_external is not a claim grant.
+const BOARD_CLAIM_PROFILES = Object.freeze([
+  ["accept_work", "complete_work"],
+  ["verify"],
+  ["steer", "accept_work", "complete_work", "verify"],
+]);
+
+export function mayWriteBoardClaims(member, ownerId = null) {
+  if (!member || member.active === false) return false;
+  if (typeof ownerId === "string" && ownerId.length > 0 && member.id === ownerId) return true;
+  const permissions = new Set(member.permissions ?? []);
+  if (member.kind === "human") return permissions.has("accept_work") || permissions.has("complete_work");
+  return BOARD_CLAIM_PROFILES.some(profile => profile.every(permission => permissions.has(permission)));
+}
+
 // Presentation choices only. Every submitted action is still validated by the service.
 export function workActions(item, member, now = Date.now()) {
   if (!member || member.active === false || item.state === S.SUPERSEDED || item.supersededBy) return [];
@@ -171,7 +188,7 @@ export function workActions(item, member, now = Date.now()) {
   const claim = activeClaim(item, now) && item.claim.holderId === member.id;
   const writable = item.mode === "read" || (claim && can("write_external"));
   if (own && item.state === S.PROPOSED && can("accept_work")) actions.push(["accept", "Accept"]);
-  if (own && [S.ACCEPTED, S.WORKING, S.BLOCKED].includes(item.state) && item.mode === "write" && !activeClaim(item, now) && can("write_external")) actions.push(["claim", "Record write scope"]);
+  if (own && [S.ACCEPTED, S.WORKING, S.BLOCKED].includes(item.state) && item.mode === "write" && !activeClaim(item, now) && mayWriteBoardClaims(member)) actions.push(["claim", "Record write scope"]);
   if (own && item.state === S.ACCEPTED && can("accept_work") && writable) actions.push(["start", "Start"]);
   if (own && item.state === S.BLOCKED && can("accept_work")) actions.push(["resolve", "Resolve blocker"]);
   if (own && [S.ACCEPTED, S.WORKING].includes(item.state)) {

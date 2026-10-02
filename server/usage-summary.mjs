@@ -79,7 +79,9 @@ export function roomUsageSummary(store, token, roomId, { days = USAGE_DEFAULT_DA
     const members = Object.values(room.state.members ?? {}).filter(Boolean);
     const active = members.filter(member => member.active !== false);
     const humans = active.filter(member => member.kind === "human").length;
-    const agents = active.filter(member => member.kind === "agent").length;
+    // Room Guide is kind agent and system:true. It teaches the first close and
+    // does not count as an agent member toward weekly productive rooms.
+    const agents = active.filter(member => member.kind === "agent" && member.system !== true).length;
     const agentIdentities = store.db.prepare("SELECT count(DISTINCT identity_id) AS n FROM identity_links WHERE room_id=?").get(roomId).n;
     const projectionBytes = store.db.prepare("SELECT length(CAST(projection AS BLOB)) AS bytes FROM rooms WHERE id=?").get(roomId)?.bytes ?? 0;
     const rows = store.db.prepare(

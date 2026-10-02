@@ -60,8 +60,16 @@ test("sitemap lists compare pages and those pages return 200", async t => {
   assert.match(xml, /<loc>https:\/\/room\.trydemigod\.com\/offers<\/loc>/);
   assert.match(xml, /<loc>https:\/\/room\.trydemigod\.com\/about<\/loc>/);
   assert.match(xml, /\/compare\/project-room-vs-slack/);
+  assert.equal(xml.includes("/compare</loc>"), false);
+  const missing = await fetch(`${origin}/compare`);
+  assert.equal(missing.status, 404);
   const page = await fetch(`${origin}/compare/project-room-vs-slack`);
   assert.equal(page.status, 200);
+  const html = await page.text();
+  const hrefs = html.match(/href="([^"]+)"/g) ?? [];
+  assert.equal(hrefs.some(href => /href="\/compare\/?"$/.test(href)), false);
+  assert.equal(html.includes("master comparison"), false);
+  assert.match(html, /href="\/compare\/project-room-vs-discord"/);
 });
 
 test("favicon, icon, and manifest routes serve the public marks", async t => {

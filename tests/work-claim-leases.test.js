@@ -227,7 +227,7 @@ const runRoute = async ({ route, id = null, body: reqBody = {}, memberId = "quil
   const store = {
     roomAuthority: roomId => ({ members: {
       quill: { id: "quill", kind: "agent", active: true, permissions: ["verify"] },
-      grok: { id: "grok", kind: "agent", active: true, permissions: [] },
+      grok: { id: "grok", kind: "agent", active: true, permissions: ["accept_work", "complete_work"] },
       ...storeMembers,
     } }),
   };

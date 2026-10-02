@@ -11,32 +11,19 @@ import { randomUUID } from "node:crypto";
 import { writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createQaClient } from "./lib/client.mjs";
 
 const arg = (n, d) => { const i = argv.indexOf(`--${n}`); return i > 0 ? argv[i + 1] : d; };
 const origin = arg("origin", "http://127.0.0.1:4173");
 const mcpUrl = arg("mcp", `${origin}/mcp`);
 const trials = Number(arg("trials", "1"));
 const UA = "project-room-qa2-journeys/1";
+const client = createQaClient({ origin, userAgent: UA });
 
-let calls = 0, rateLimited = 0;
+let calls = 0;
 async function http(method, path, { token, body, accept = "application/json" } = {}) {
   calls++;
-  const headers = { "user-agent": UA, accept };
-  if (body !== undefined) { headers["content-type"] = "application/json"; headers.origin = origin; }
-  if (token) headers.authorization = `Bearer ${token}`;
-  const started = performance.now();
-  let r;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    r = await fetch(path.startsWith("http") ? path : origin + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
-    if (r.status !== 429) break;
-    rateLimited++;
-    const wait = Math.min(Number(r.headers.get("retry-after") || 30), 65) * 1000; // a well-behaved agent honours Retry-After
-    await r.text(); await new Promise(res => setTimeout(res, wait));
-  }
-  let text = await r.text();
-  if (/^(event|data):/.test(text.slice(0, 10))) text = text.split("\n").filter(l => l.startsWith("data:")).map(l => l.slice(5)).join("\n");
-  let json = null; try { json = JSON.parse(text); } catch {}
-  return { status: r.status, json, text, headers: r.headers, ms: Math.round(performance.now() - started) };
+  return client.request(method, path, { token, body, accept });
 }
 const mcp = async (token, method, params) => http("POST", mcpUrl, { token, body: { jsonrpc: "2.0", id: randomUUID(), method, params }, accept: "application/json, text/event-stream" });
 const toolResult = r => r.json?.result?.structuredContent ?? (() => { try { return JSON.parse(r.json?.result?.content?.[0]?.text); } catch { return null; } })();
@@ -173,7 +160,7 @@ for (let t = 0; t < trials; t++) all.push(await runTrial(t));
 const ids = all[0].map(t => t.id);
 const summary = ids.map(id => { const runs = all.map(r => r.find(t => t.id === id)); return { id, title: runs[0].title, passAt1: runs[0].pass, passHatK: runs.every(r => r.pass), discoverable: runs[0].discoverable, calls: runs[0].calls, ms: runs[0].ms, notes: runs[0].notes }; });
 const passed = summary.filter(s => s.passAt1).length, coldOk = summary.filter(s => s.passAt1 && s.discoverable).length;
-const lines = [`# Agent journeys against ${origin} (${new Date().toISOString()})`, "", `pass@1 ${passed}/${summary.length}; pass^${trials} ${summary.filter(s => s.passHatK).length}/${summary.length}; cold-discoverable and passed ${coldOk}/${summary.length}; 429 retries ${rateLimited}`, "", "| task | pass | discoverable | calls | ms | notes |", "| --- | --- | --- | --- | --- | --- |", ...summary.map(s => `| ${s.id} ${s.title} | ${s.passAt1 ? "yes" : "NO"} | ${s.discoverable ? "yes" : "NO"} | ${s.calls} | ${s.ms} | ${s.notes.join("; ").replace(/\|/g, "/")} |`)];
+const lines = [`# Agent journeys against ${origin} (${new Date().toISOString()})`, "", `pass@1 ${passed}/${summary.length}; pass^${trials} ${summary.filter(s => s.passHatK).length}/${summary.length}; cold-discoverable and passed ${coldOk}/${summary.length}; 429 retries ${client.rateLimited}`, "", "| task | pass | discoverable | calls | ms | notes |", "| --- | --- | --- | --- | --- | --- |", ...summary.map(s => `| ${s.id} ${s.title} | ${s.passAt1 ? "yes" : "NO"} | ${s.discoverable ? "yes" : "NO"} | ${s.calls} | ${s.ms} | ${s.notes.join("; ").replace(/\|/g, "/")} |`)];
 console.log(lines.join("\n"));
 if (arg("json")) writeFileSync(arg("json"), JSON.stringify({ origin, trials, summary, runs: all }, null, 2));
 if (arg("md")) writeFileSync(arg("md"), lines.join("\n") + "\n");
