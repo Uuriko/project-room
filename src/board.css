@@ -1,0 +1,24 @@
+#board-dialog { width: min(72rem, calc(100vw - 1rem)); box-sizing: border-box; }
+#tasks-destination { margin: 0 0 var(--space-3); }
+#tasks-board-open { display: block; width: 100%; min-height: 44px; text-align: left; }
+.board-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); margin-bottom: var(--space-3); }
+.live-chip { margin: 0; padding: .2rem .55rem; border: 1px solid var(--line); border-radius: 99px; color: var(--text); font-size: var(--text-sm); }
+.board-empty { margin: 0; max-width: 36rem; }
+.board-columns { display: grid; grid-template-columns: 1fr; gap: var(--space-3); }
+.board-columns section { min-width: 0; padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--panel-raised); }
+.board-columns h3 { margin: 0 0 var(--space-2); font-size: var(--text-sm); }
+.claim-card { margin: 0 0 var(--space-3); padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--card); }
+.claim-card h4 { margin: 0 0 var(--space-2); font-size: var(--text-md); overflow-wrap: anywhere; }
+.claim-owner, .claim-lease, .claim-pr { margin: 0 0 var(--space-2); }
+.claim-owner { display: flex; align-items: center; gap: var(--space-2); }
+.claim-files, .claim-reviews, .claim-deps { margin: 0 0 var(--space-2); }
+.claim-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.claim-actions button, .claim-actions select { min-height: 44px; }
+.ci-badge { display: inline-block; padding: 0 .4rem; border: 1px solid var(--line); border-radius: 99px; font-size: var(--text-xs); text-transform: uppercase; }
+.ci-success { color: var(--green); }
+.ci-failure { color: var(--red); }
+.ci-pending, .ci-neutral { color: var(--muted); }
+.claim-update { margin: .35rem 0; padding: .35rem .6rem; border-left: 2px solid var(--violet); color: var(--muted); font-size: var(--text-sm); list-style: none; overflow-wrap: anywhere; }
+@media (min-width: 900px) {
+  .board-columns { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+}
