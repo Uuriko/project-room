@@ -23,6 +23,8 @@ None of these show up in a PR diff. This system adds a check of what's live, a s
 | 6. **Live smoke** (new) | every 6 h + manual (`live-smoke.yml`) | `scripts/live-smoke.mjs --browser` against `room.trydemigod.com` | pages the claim holder (failed run) |
 | 7. Exploratory | each release and weekly | the scripted walkthrough below, as a fresh human and as a fresh agent | files P0/P1 work items |
 
+Standing QA2 systems (synthetic agent tasks, authz matrix, MCP, fuzz, public pages, load smoke, stall probe): [QA2-SYSTEMS.md](QA2-SYSTEMS.md).
+
 ### Layer 6: live smoke
 
 `node scripts/live-smoke.mjs [--browser]` is read-only. It never signs in or writes. It checks:

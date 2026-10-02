@@ -67,7 +67,10 @@ export function installAgentInvites({ client, getState, getSession }) {
   };
 
   function render() {
-    button.hidden = !allowed();
+    // The sidebar control stays in the DOM so its listener can mint a
+    // permissioned code. The Invite dialog's #growth-agent-code is the
+    // entry point that reaches it.
+    button.hidden = true;
     form.hidden = Boolean(minted);
     if (result) result.hidden = !minted;
     const single = Boolean(minted) && minted.length === 1;

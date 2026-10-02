@@ -18,7 +18,9 @@
 // Ownership: API keys, directory cards and webhook subscriptions are scoped
 // to the publishing agent identity. Cross-identity access reads as 404
 // (never an oracle); a publish colliding with another identity's card is
-// 409. Nothing here touches the network.
+// 409. Webhook subscribe and delivery resolve the hostname before opening
+// a socket; that lookup is the SSRF gate and runs outside the write
+// transaction.
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createAgentApiKeys, ApiKeyError, API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { createAgentDirectory, DirectoryError } from "./agent-directory.mjs";
@@ -26,6 +28,7 @@ import { createIdentityVerification, VERIFIED, UNVERIFIED } from "./identity-ver
 import { buildPluginManifest, ManifestError } from "./agent-plugin-manifest.mjs";
 import {
   createAgentWebhookSubscriptions, WebhookSubscriptionError, signPayload, verifySignature,
+  assertSubscriptionWebhookUrl,
 } from "./agent-webhook-subscriptions.mjs";
 import { buildWakePing, WAKE_PING_EVENT, validateWebhookUrl } from "./outbound-webhooks.mjs"; // RC-2026-09-18-051: wake-ping payloads.
 import {
@@ -150,6 +153,11 @@ export class AgentPluginStore {
     // commit journals them. Null in tests and when unset — deliveries then
     // wait for the cron tick / manual drain.
     this.dispatchKick = null;
+    // Subscribe-time and delivery-time DNS. Null uses dns.lookup on Node
+    // (skipped on Workers). Tests inject a lookup so they never touch the
+    // network. The same function is used at delivery so a name that was
+    // public at subscribe can be shown private later.
+    this.webhookLookup = null;
     const clock = () => store.now();
     this.apiKeys = createAgentApiKeys({ store: this.keys, clock });
     // RC-2026-09-18-049: verification tiers ride on the trust evidence —
@@ -754,6 +762,20 @@ export class AgentPluginStore {
 
   // ---- Per-agent webhook subscriptions ----
 
+  setWebhookLookup(lookup) {
+    this.webhookLookup = typeof lookup === "function" ? lookup : null;
+    return this;
+  }
+
+  // Await this before subscribeWebhook. A private answer throws 422
+  // webhook_url_not_public and the caller must not store the URL.
+  assertWebhookUrl(url) {
+    return assertSubscriptionWebhookUrl(url, this.webhookLookup ? { lookup: this.webhookLookup } : {});
+  }
+
+  // HTTP and MCP await assertWebhookUrl before this write. The pure
+  // module still rejects IP literals and metadata names; the DNS lookup
+  // stays outside the transaction.
   subscribeWebhook({ identityId, url, events, secret = null }) {
     return this.mutate(() => {
       const signingSecret = secret ?? randomBytes(32).toString("base64url");
@@ -1003,7 +1025,11 @@ export class AgentPluginStore {
       eventType: row.event_type, issuedAt, signature });
     const result = await postDelivery({ fetchImpl, url: row.target_url ?? sub.url, envelope, headers, timeoutMs: DELIVERY_TIMEOUT_MS, dnsResolvers });
     return this.mutate(() => {
-      try { this.webhooks.recordAttempt(row.delivery_id, { ok: result.ok, error: result.error }); } catch { /* cache may lag; the table is authoritative */ }
+      try {
+        this.webhooks.recordAttempt(row.delivery_id, {
+          ok: result.ok, error: result.error, terminal: result.classification === "dead",
+        });
+      } catch { /* cache may lag; the table is authoritative */ }
       if (result.ok) {
         this.markDelivered(row.delivery_id, { signature, issuedAt, envelope, now });
         return "delivered";
@@ -1049,11 +1075,13 @@ export class AgentPluginStore {
   // delivery mutates in its own transaction so one poison row cannot roll
   // back the rest of the sweep. dnsResolvers ({ resolve4, resolve6 }) is
   // injectable so tests never touch the network; omitted it defaults to the
-  // real resolver and every target is re-validated before its POST
-  // (dispatch-time SSRF guard, QA-Sec 2026-09-19). fetchImpl is an optional
+  // real resolver (dns.lookup on Node; skipped on Workers) and every target
+  // is re-validated before its POST (dispatch-time SSRF guard). An injected
+  // webhook lookup, when set, is the resolver for this drain. fetchImpl is an optional
   // override (tests); omitted, postDelivery uses its DNS-pinned transport
   // on Node (plain fetch on Workers) — the M-1 rebinding fix.
   async drainWebhookDeliveries({ fetchImpl, now = this.store.now(), limit = 25, agentId = null, dnsResolvers } = {}) {
+    const resolvers = dnsResolvers ?? (this.webhookLookup ? { lookup: this.webhookLookup } : undefined);
     // Only rows that can actually be attempted fill the batch. Deliveries of a
     // disabled subscription or of an identity no longer linked to the event's
     // room stay pending but are left out here; otherwise a large skipped
@@ -1073,7 +1101,7 @@ export class AgentPluginStore {
     const summary = { processed: 0, delivered: 0, retried: 0, deadLettered: 0, skipped: 0 };
     for (const row of due) {
       summary.processed++;
-      summary[await this.attemptStoredDelivery(row, { fetchImpl, now, dnsResolvers })]++;
+      summary[await this.attemptStoredDelivery(row, { fetchImpl, now, dnsResolvers: resolvers })]++;
     }
     return Object.freeze(summary);
   }

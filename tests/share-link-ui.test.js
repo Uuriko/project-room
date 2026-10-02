@@ -613,3 +613,39 @@ test("reload recovers a pending join even when its success filled the invitation
     assert.equal(readUncertainJoin(), null);
   } finally { dom.uninstall(); }
 });
+
+test("an invite landing names who invited you", async () => {
+  const dom = guestJoinDom();
+  const accountClient = {
+    session: {},
+    async prepareShareLink() {
+      return { session: this.session, preview: { ...previewFor("Commons"), inviterDisplayName: "Ada" } };
+    },
+  };
+  dom.install();
+  try {
+    const ui = installShareLinks({ client: { generation: 0 }, accountClient, getState: () => null, getSession: () => null, openRoom() {} });
+    await ui.open({ token: "n".repeat(43) });
+    assert.equal(dom.node("#join-inviter-line").textContent, "Ada invited you.");
+    assert.match(dom.node("#join-link-title").textContent, /Commons/);
+  } finally { dom.uninstall(); }
+});
+
+test("a dead invite link asks for a fresh one and offers sign-in", async () => {
+  const dom = guestJoinDom();
+  const accountClient = {
+    session: null,
+    async prepareShareLink() { throw Object.assign(new Error("gone"), { code: "link_unavailable", status: 410 }); },
+  };
+  dom.install();
+  try {
+    const ui = installShareLinks({ client: { generation: 0 }, accountClient, getState: () => null, getSession: () => null, openRoom() {} });
+    await ui.open({ token: "b".repeat(43) });
+    assert.equal(dom.node("#join-link-title").textContent, "This invite has ended");
+    assert.match(dom.node("#join-link-scope").textContent, /fresh link/);
+    assert.match(dom.node("#join-link-status").textContent, /Sign in and request access/);
+    assert.equal(dom.node("#join-account-choices").hidden, false);
+    assert.equal(dom.node("#join-link-dialog").open, true);
+    assert.equal(dom.node("#join-link-scope").textContent.includes("incomplete"), false);
+  } finally { dom.uninstall(); }
+});
