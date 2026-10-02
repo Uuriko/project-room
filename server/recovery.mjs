@@ -2,7 +2,7 @@
 import { createHash } from "node:crypto";
 import { EVENT_TYPES, validId } from "../src/events.js";
 import { terminalWork } from "../src/workflow.js";
-import { applicationTables, STORE_SCHEMA_VERSION } from "./writer-fence.mjs";
+import { applicationTables, lazyAdditiveTables, STORE_SCHEMA_VERSION } from "./writer-fence.mjs";
 import { auditTextResults } from "./text-results.mjs";
 import { auditCharters } from "../src/room-charter.js";
 import { auditReplyRequests } from "./reply-requests.mjs";
@@ -24,7 +24,10 @@ export function auditRecovery(store) {
     const runtimeTables = platform === "durable-object" ? ["room_runtime_version", "room_writer_permit"] : [];
     const tables = store.db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all()
       .map(row => row.name).filter(name => !name.startsWith("sqlite_") && !(platform === "durable-object" && name.startsWith("_cf_")));
-    requireState(canonical(tables) === canonical([...applicationTables, ...runtimeTables].sort()));
+    const required = [...applicationTables, ...runtimeTables].sort();
+    const allowed = new Set([...required, ...lazyAdditiveTables]);
+    requireState(tables.every(name => allowed.has(name)));
+    requireState(required.every(name => tables.includes(name)));
     const rooms = new Map();
     let eventCount = 0, checkpointCount = 0, checkpointEvents = 0;
     for (const row of store.db.prepare("SELECT id,sequence FROM rooms ORDER BY id").all()) {

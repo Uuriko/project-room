@@ -10,6 +10,7 @@ import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { ServiceError } from "./store.mjs";
+import { ABUSE_RATE_FAMILIES, loadAbuseRateBucket, saveAbuseRateBucket } from "./abuse-rate-buckets.mjs";
 import { peerEventVisible, visibleBonds } from "./bonds.mjs";
 import { clientAddress, STREAM_INTERVAL_DEFAULT_MS } from "./deployment.mjs";
 import { validId, memberCan, MAX_MESSAGE_COMMAND_BYTES } from "../src/events.js";
@@ -553,6 +554,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   const rates = new Map(), rateFamilies = new Map();
   const rateFamily = id => id.slice(0, id.indexOf(":"));
   const dropRate = (id, family = rateFamily(id)) => {
+    const entry = rates.get(id);
+    // Keep a durable count that was already being written. A key that never
+    // reached a write stride leaves no row, so a flood of one-shot keys cannot
+    // fill the table.
+    if (entry && ABUSE_RATE_FAMILIES.has(family) && entry.persistedN !== undefined && entry.persistedN !== entry.n && entry.until > Date.now())
+      saveAbuseRateBucket(store.db, id, entry);
     rates.delete(id);
     const left = rateFamilies.get(family) - 1;
     if (left > 0) rateFamilies.set(family, left); else rateFamilies.delete(family);
@@ -561,16 +568,22 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     const now = Date.now();
     for (const [k, v] of rates) if (v.until <= now) dropRate(k);
     const family = rateFamily(id);
+    const durable = ABUSE_RATE_FAMILIES.has(family);
     let entry = rates.get(id);
     if (entry) rates.delete(id);
     else {
+      if (durable) entry = loadAbuseRateBucket(store.db, id, now);
       if ((rateFamilies.get(family) ?? 0) >= RATE_FAMILY_KEYS)
         for (const k of rates.keys()) if (rateFamily(k) === family) { dropRate(k, family); break; }
       rateFamilies.set(family, (rateFamilies.get(family) ?? 0) + 1);
-      entry = { n: 0, until: now + 60000 };
+      if (!entry) entry = { n: 0, until: now + 60000 };
     }
     entry.n++;
     rates.set(id, entry);
+    if (durable) {
+      const stride = Math.max(1, Math.floor(maximum / 4));
+      if (entry.n >= maximum || entry.n % stride === 0) saveAbuseRateBucket(store.db, id, entry);
+    }
     if (entry.n > maximum) throw new ServiceError(429, "rate_limited", "Too many requests; retry after a minute",
       { "X-RateLimit-Limit": maximum, "X-RateLimit-Remaining": 0, "X-RateLimit-Reset": Math.ceil(entry.until / 1000) });
   }
