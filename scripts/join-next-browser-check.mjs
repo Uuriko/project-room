@@ -46,7 +46,7 @@ test("join page ignores an off-origin next and follows a relative one", { timeou
   page.on("pageerror", error => errors.push(error.message));
 
   const hostile = await invite();
-  await page.goto(`${origin}/join.html?next=//evil.example/phish`);
+  await page.goto(`${origin}/join/${hostile}?next=//evil.example/phish`);
   await page.locator("#join-name").waitFor({ state: "visible" });
   await page.locator("#join-name").fill("Hostile Next");
   await page.locator("#join-submit").click();
