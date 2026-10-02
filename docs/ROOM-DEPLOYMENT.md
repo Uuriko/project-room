@@ -29,7 +29,7 @@ The first staging deploy creates the `room-sqlite-v1` class on `project-room-sta
 
 GitHub Actions deploys `main` to this Worker on every push, and from the Actions tab (`.github/workflows/staging.yml`). The workflow needs the Actions secret `CLOUDFLARE_API_TOKEN` (Workers script edit on this account). If that token can see more than one account, also set `CLOUDFLARE_ACCOUNT_ID`. When `CLOUDFLARE_API_TOKEN` is missing the workflow prints a notice and succeeds. It does not deploy production, and it does not fail `main`.
 
-Worker secrets on `project-room-stage` are optional for the public smoke. Set a name only when the rehearsal needs it, with `pnpm exec wrangler secret put NAME --env staging`. Names only, never values in git: `ROOM_IDENTITY_HASH_KEY`, `ROOM_MAINTENANCE`, `ROOM_BOOTSTRAP_OWNER_HASH`, `ROOM_BOOTSTRAP_EXPIRES_AT`, `ROOM_VAPID_PUBLIC_KEY`, `ROOM_VAPID_PRIVATE_KEY`, `ROOM_VAPID_SUBJECT`, `ROOM_GOOGLE_CLIENT_ID`, `ROOM_GOOGLE_CLIENT_SECRET`, `ROOM_GMAIL_TOKEN_KEY`, `ROOM_GMAIL_PILOT_ACCOUNT_ID`, `RESEND_API_KEY`, `ROOM_MAGIC_FROM`, `GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET`, `ROOM_BOARD_V2_ENABLED`, `ROOM_RETENTION_ALLOW_DELETION`, `STITCHING_ENABLED`, `ROOM_PASSKEY_RP_ID`, `ROOM_OPERATOR_ACCOUNT_ID`, `ROOM_AGENT_CARD_SIGNING_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, `ROOM_BACKUP_TOKEN`. `CHANNEL_SEND_BUDGET`, `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME`, and `TELEMETRY` are read when present.
+Worker secrets on `project-room-stage` are optional for the public smoke. Set a name only when the rehearsal needs it, with `pnpm exec wrangler secret put NAME --env staging`. Names only, never values in git: `ROOM_IDENTITY_HASH_KEY`, `ROOM_MAINTENANCE`, `ROOM_BOOTSTRAP_OWNER_HASH`, `ROOM_BOOTSTRAP_EXPIRES_AT`, `ROOM_VAPID_PUBLIC_KEY`, `ROOM_VAPID_PRIVATE_KEY`, `ROOM_VAPID_SUBJECT`, `ROOM_GOOGLE_CLIENT_ID`, `ROOM_GOOGLE_CLIENT_SECRET`, `ROOM_GMAIL_TOKEN_KEY`, `ROOM_GMAIL_PILOT_ACCOUNT_ID`, `RESEND_API_KEY`, `ROOM_MAGIC_FROM`, `GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET`, `ROOM_BOARD_V2_ENABLED`, `ROOM_RETENTION_ALLOW_DELETION`, `STITCHING_ENABLED`, `ROOM_PASSKEY_RP_ID`, `ROOM_OPERATOR_ACCOUNT_ID`, `ROOM_OPERATOR_TOKEN_SHA256`, `ROOM_OPERATOR_PROTECTED_ROOMS`, `ROOM_AGENT_CARD_SIGNING_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, `ROOM_BACKUP_TOKEN`. `CHANNEL_SEND_BUDGET`, `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME`, and `TELEMETRY` are read when present.
 
 ## 2. Verify staging
 
@@ -120,6 +120,10 @@ The production cron writes `room-backups/YYYY-MM-DD.ndjson` to R2 when the ownin
 Then deploy the canonical Worker with `--keep-vars`. A binding that exists only in the dashboard is dropped on the next deploy. Create the bucket `project-room-backups` first.
 
 The on-disk Node server still uses `scripts/backup-room.mjs`, which copies a sqlite file. That path is not the hosted Durable Object.
+
+## Operator
+
+Purge, status, and the operator audit answer 404 until `ROOM_OPERATOR_TOKEN_SHA256` is set on the script that owns the Durable Object. The value is the hex SHA-256 of the operator token, not the token. `ROOM_OPERATOR_PROTECTED_ROOMS` is an optional comma-separated list of room ids that purge refuses, in addition to `invite-only-pilot`. Set them with `pnpm exec wrangler secret put NAME --env production`. Add the same names on `--env staging` only when a rehearsal needs them. A secret on the entry Worker alone does not reach the object. `--keep-vars` and rollback leave both in place. Find, plan, and execute are in [OPERATOR.md](OPERATOR.md).
 
 ## Emergency API deploy
 
