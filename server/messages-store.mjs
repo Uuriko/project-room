@@ -104,6 +104,14 @@ function textOrNull(value) {
   return typeof value === "string" && value !== "" ? value : null;
 }
 
+// Same rule as currentBody in server/redact-read.mjs. A deleted message
+// stores no text. An edit stores only the current body. Prior wording stays
+// in the event log and is left out of this table.
+function storedBody(message) {
+  if (!message || message.deletedAt || message.body == null) return null;
+  return typeof message.body === "string" ? message.body : null;
+}
+
 // Upsert one row per message the event touched. seq stays at the earliest
 // event that wrote the row, so an edit does not reorder history. Calling
 // this twice for the same event leaves one row.
@@ -127,7 +135,7 @@ export function syncMessageRows(db, { roomId, sequence, event, state }) {
       textOrNull(message.toMemberId),
       textOrNull(message.workItemId),
       message.authorId,
-      typeof message.body === "string" ? message.body : null,
+      storedBody(message),
       message.createdAt,
       textOrNull(message.editedAt),
       textOrNull(message.deletedAt),

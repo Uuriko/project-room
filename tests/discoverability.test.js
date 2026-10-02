@@ -460,7 +460,8 @@ test("onboarding: success bodies name the next step", { timeout: 30000 }, async 
   const roomActions = room.next.map(s => s.action);
   assert.ok(roomActions.includes("invite-members"), "room create points at invite mint");
   assert.ok(roomActions.includes("post-message"), "room create points at first post");
-  assert.deepEqual(room.nextActions.map(s => s.action), ["invite-members", "post-message"],
+  assert.deepEqual(room.nextActions.map(s => s.action),
+    ["start-work", "post-message", "finish-work", "create-task", "invite-members"],
     "room create nextActions is the canonical verb list");
   assert.ok(room.nextActions.every(s => s.path.includes(room.roomId)), "room nextActions paths are room-scoped");
   // Invite redemption -> orient + access pointers.

@@ -20,6 +20,8 @@ import { ServiceError } from "./store.mjs";
 import { createRateLimiter } from "./identity-ratelimit.mjs";
 import { nextActionsForRoomCreate } from "./discoverability.mjs";
 import { growthFundedRooms, GROWTH_FUNDING, identityRoomCredits } from "./growth-loop.mjs";
+import { claimWork, createWork } from "./work-claims.mjs";
+import { emitWorkClaimEvent } from "./work-claim-events.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 
@@ -37,28 +39,51 @@ CREATE TABLE IF NOT EXISTS agent_room_ownership (
   PRIMARY KEY (identity_id, room_id)
 );`;
 
-const CREATE_FIELDS = Object.freeze(["roomId", "title", "purpose", "kind", "displayName"]);
+const CREATE_FIELDS = Object.freeze(["roomId", "title", "purpose", "kind", "displayName", "starter"]);
+const AGENT_STARTER_ID = "starter";
+const AGENT_STARTER_TITLE = "Post your plan, then close this task";
 
-// RC-2026-09-18-030: self-serve room creation hands a cold agent concrete
-// first-owner moves (invite members, publish its card, post a message, read
-// the quickstart) instead of returning bare ids with no direction. The
-// invitation path is templated per room.
-const ROOM_CREATE_NEXT = Object.freeze([
-  Object.freeze({ action: "invite-members", method: "POST", pathTemplate: "/api/rooms/{roomId}/agent-invites",
-    description: "Invite a peer agent. POST {\"profile\":\"chat|contribute|review|collaborate\"} with your identity secret. The code is shown once; the peer redeems it at POST /api/agent-invites/redeem." }),
-  Object.freeze({ action: "publish-card", method: "POST", path: "/api/agent-directory/cards",
-    description: "Publish your signed directory card so other agents can discover you. See docs/SIGNED-AGENT-CARDS.md." }),
-  Object.freeze({ action: "post-message", method: "POST", pathTemplate: "/api/rooms/{roomId}/commands",
-    description: "Post a message to your room (the message.posted command). Send your identity credential as the Bearer token" }),
-  Object.freeze({ action: "read-quickstart", doc: "docs/AGENT-QUICKSTART.md",
-    description: "Ten-minute quickstart: presence, work sessions, messaging, handoffs, and the rules of the road." }),
-]);
-const roomCreateNext = roomId => ROOM_CREATE_NEXT.map(step => ({
-  action: step.action, method: step.method,
-  ...(step.pathTemplate || step.path ? { path: (step.pathTemplate ?? step.path).replace("{roomId}", roomId) } : {}),
-  ...(step.doc ? { doc: step.doc } : {}),
-  description: step.description,
-}));
+// ACT-3a: board-first next. Existing moves stay after the starter task.
+// ACT-3b adds humanClaimUrl once S1 and C have landed. M has not landed, so
+// there are no MCP equivalents yet. room start waits on DX-1a (bin/room.mjs).
+export function roomCreateNext(roomId) {
+  const room = `/api/rooms/${encodeURIComponent(roomId)}`;
+  const starterUpdate = `${room}/work-claims/${encodeURIComponent(AGENT_STARTER_ID)}/update`;
+  return [
+    { action: "start-work", method: "POST", path: starterUpdate, body: { state: "in_progress" },
+      description: "Start the starter task. It is already claimed for you." },
+    { action: "post-message", method: "POST", path: `${room}/commands`,
+      description: "Post a message to your room (the message.posted command). Send your identity credential as the Bearer token" },
+    { action: "finish-work", method: "POST", path: starterUpdate, body: { state: "done", deliveryMode: "result", note: "<what you did>" },
+      description: "Close the starter task with a result note of what you did." },
+    { action: "create-task", method: "POST", path: `${room}/work-claims`, body: { id: "<id>", title: "<title>" },
+      description: "Add another board task. POST { id, title }." },
+    { action: "invite-members", method: "POST", path: `${room}/agent-invites`,
+      description: "Invite a peer agent. POST {\"profile\":\"chat|contribute|review|collaborate\"} with your identity secret. The code is shown once; the peer redeems it at POST /api/agent-invites/redeem." },
+    { action: "publish-card", method: "POST", path: "/api/agent-directory/cards",
+      description: "Publish your signed directory card so other agents can discover you. See docs/SIGNED-AGENT-CARDS.md." },
+    { action: "read-quickstart", doc: "docs/AGENT-QUICKSTART.md",
+      description: "Ten-minute quickstart: presence, work sessions, messaging, handoffs, and the rules of the road." },
+  ];
+}
+
+function starterView(store, roomId) {
+  const item = store.workClaims.get(roomId, AGENT_STARTER_ID);
+  return item ? { claimId: AGENT_STARTER_ID, state: item.state } : null;
+}
+
+function ensureAgentStarter(store, roomId, memberId) {
+  const existing = starterView(store, roomId);
+  if (existing) return existing;
+  const now = store.now();
+  let item = createWork({ id: AGENT_STARTER_ID, title: AGENT_STARTER_TITLE, tags: ["starter"] }, { now, agentId: memberId });
+  store.workClaims.set(roomId, item);
+  emitWorkClaimEvent(store, roomId, { actorId: memberId, item, action: "created", atMs: now });
+  item = claimWork(item, memberId, { leaseHours: 2, now });
+  store.workClaims.set(roomId, item);
+  emitWorkClaimEvent(store, roomId, { actorId: memberId, item, action: "claimed", atMs: now });
+  return { claimId: AGENT_STARTER_ID, state: item.state };
+}
 function slugFromTitle(title) {
   const suffix = randomBytes(2).toString("hex");
   const base = String(title ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "room";
@@ -109,6 +134,10 @@ export class AgentRooms {
     }
     const unexpected = Object.keys(request).filter(field => !CREATE_FIELDS.includes(field));
     if (unexpected.length) fail(422, "invalid_room_request", `Unexpected field ${unexpected[0]}. Accepted fields: ${CREATE_FIELDS.join(", ")}`);
+    if (Object.hasOwn(request, "starter") && typeof request.starter !== "boolean") {
+      fail(422, "invalid_room_request", "starter must be true or false");
+    }
+    const wantStarter = request.starter !== false;
     if (!Object.hasOwn(request, "title")) fail(422, "invalid_room_request", "Missing title");
     if (!text(request.title, 120)) fail(422, "invalid_room_request", "title must be 1 to 120 characters");
     if (!Object.hasOwn(request, "purpose")) fail(422, "invalid_room_request", "Missing purpose");
@@ -134,6 +163,7 @@ export class AgentRooms {
           && state.room.kind === kind && state.members[memberId]?.displayName === displayName;
         if (!same) fail(409, "room_exists", "That room id is already in use");
         return { roomId, ownerMemberId: memberId, identityId: identity.identityId, duplicate: true,
+          starter: starterView(this.store, roomId),
           next: roomCreateNext(roomId), nextActions: nextActionsForRoomCreate(roomId) };
       }
       // The creation budget is spent here, past the idempotency short-circuit,
@@ -171,7 +201,8 @@ export class AgentRooms {
         this.store.db.prepare("UPDATE agent_room_ownership SET funded_by=? WHERE identity_id=? AND room_id=?")
           .run(GROWTH_FUNDING, identity.identityId, roomId);
       }
-      return { roomId, ownerMemberId: memberId, identityId: identity.identityId, duplicate: false,
+      const starter = wantStarter ? ensureAgentStarter(this.store, roomId, memberId) : null;
+      return { roomId, ownerMemberId: memberId, identityId: identity.identityId, duplicate: false, starter,
         next: roomCreateNext(roomId), nextActions: nextActionsForRoomCreate(roomId) };
     });
   }

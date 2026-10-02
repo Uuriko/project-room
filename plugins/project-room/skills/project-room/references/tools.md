@@ -39,7 +39,7 @@ Writes go through `POST /api/rooms/:roomId/commands` with `{ "id", "type", "data
 | `room_submit_text_result` | `work.completed` | Native `room_text` receipt. |
 | `room_record_completion` | `work.completed` | External receipt. Requires `signedEvidence`. |
 | `room_record_verification` | `verification.recorded` | Review of one exact completion. |
-| `room_acquire_claim` / `room_release_claim` | claim events | Write-mode scope reservation. Needs `write_external`. |
+| `room_acquire_claim` / `room_release_claim` | claim events | Write-mode scope reservation. Needs a contribute, review, or collaborate profile. |
 | `room_record_handoff` | `work.handoff_recorded` | Stop short. Does not close the item. |
 | `room_supersede_work` | `work.superseded` | Replace with an existing item. Needs `steer`. |
 | `room_clear_halt` | `work.halt_cleared` | Clear one halt. Needs `steer` or `decide`. |

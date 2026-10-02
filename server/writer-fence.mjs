@@ -1,3 +1,4 @@
+import { ABUSE_RATE_TABLES } from "./abuse-rate-buckets.mjs";
 import { OAUTH_PROVIDER_TABLES } from "./oauth-provider-store.mjs";
 
 // Upgrade compatibility fence, not authentication against a database administrator.
@@ -361,12 +362,15 @@ export const unfencedAdditiveTables = Object.freeze([
   // skips schema setup on the next wake. integrity_job_cursor: which
   // deferred integrity step the cron runs next. Neither is room content.
   "room_schema_stamp",
-  "integrity_job_cursor"
+  "integrity_job_cursor",
+  // Per-room sequence and projection size for the incremental integrity
+  // check. The cron writes it; a missing row means that room is due.
+  "integrity_room_state"
 ]);
 // Created on first use, not in the constructor. A database that has never
-// issued an OAuth grant does not have these tables; a database that has
-// must still pass the recovery audit.
-export const lazyAdditiveTables = Object.freeze([...OAUTH_PROVIDER_TABLES]);
+// issued an OAuth grant or persisted an abuse rate bucket does not have
+// these tables; a database that has must still pass the recovery audit.
+export const lazyAdditiveTables = Object.freeze([...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES]);
 // messages (MSG-1) is fenced at v37 only. v34–v36 files do not have the
 // table or its triggers; verifyWriterFence(36) must not require them.
 const v34FencedTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables])]);
