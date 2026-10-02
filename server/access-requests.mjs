@@ -29,6 +29,7 @@
 // store.mjs to apply, following the agent-identities.mjs pattern.
 
 import { randomUUID, createHash } from "node:crypto";
+import { MemberPermissionRequests, permissionRequestContents } from "./member-permission-requests.mjs";
 import { createRateLimiter } from "./identity-ratelimit.mjs";
 // RC-2026-09-19-071 (QAJ-006): a new access request appends an
 // access.requested room event so the request is timeline-visible and drives
@@ -103,22 +104,14 @@ export const REQUEST_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 // Legacy admission rows contain a permission array. Upgrade intent lives in
 // the request row, not only in the replaceable event journal: restoring room
 // history must never reinterpret a stale upgrade as a fresh admission.
-const requestContents = row => {
-  const stored = JSON.parse(row.requested_permissions);
-  if (Array.isArray(stored) && row.status !== UPGRADE_PENDING_STATUS) return { permissions: stored, upgrade: null };
-  if (stored?.version !== 1 || stored.kind !== "permission-upgrade"
-      || !Array.isArray(stored.permissions) || !stored.permissions.every(p => ACCESS_REQUEST_PERMISSIONS.includes(p))
-      || typeof stored.memberId !== "string" || !REQUEST_ID_PATTERN.test(stored.memberId)
-      || !Number.isSafeInteger(stored.memberRevision) || stored.memberRevision < 0) {
-    fail(409, "invalid_request", "Unsupported stored access request; ask a room owner to review it");
-  }
-  return { permissions: stored.permissions, upgrade: { memberId: stored.memberId, revision: stored.memberRevision } };
-};
+const requestContents = permissionRequestContents;
 
 const rowToRequest = row => row ? Object.freeze({
   requestId: row.request_id,
   roomId: row.room_id,
-  identityId: row.identity_id,
+  identityId: requestContents(row).upgrade?.principalKind === "room-member" ? null : row.identity_id,
+  kind: requestContents(row).upgrade ? "permissions" : "join",
+  ...(requestContents(row).upgrade ? { memberId: requestContents(row).upgrade.memberId } : {}),
   displayName: row.display_name,
   requestedPermissions: requestContents(row).permissions,
   note: row.note,
@@ -158,10 +151,17 @@ export class AccessRequests {
   constructor(store, { rateLimiter } = {}) {
     this.store = store;
     this.db = store.db;
+    this.memberPermissions = new MemberPermissionRequests(this);
     // Separate bucket from general API use: requesting access is rare and
     // sensitive. 5 requests per hour per identity is generous for humans
     // and tight enough to blunt enumeration.
     this.rateLimiter = rateLimiter ?? createRateLimiter({ capacity: 5, refillPerSecond: 5 / 3600 });
+  }
+
+  toRequest(row) { return rowToRequest(row); }
+
+  requestForMember(token, roomId, input, binding = null) {
+    return this.memberPermissions.request(token, roomId, input, binding);
   }
 
   // Admission is public. Upgrades require the current identity secret as
@@ -306,7 +306,7 @@ export class AccessRequests {
   // so they are the actorId as their identity. Archived rooms keep the old
   // behavior (request recorded, no timeline event — there is no live
   // timeline audience to notify).
-  emitAccessRequested(roomId, { requestId, identityId, displayName, requestedPermissions, note, at, upgradeMember = null }) {
+  emitAccessRequested(roomId, { requestId, identityId, displayName, requestedPermissions, note, at, upgradeMember = null, identityScope = "global" }) {
     const room = this.store.room(roomId);
     if (isRoomArchived(room.state)) return;
     if (room.sequence >= MAX_ROOM_EVENTS) fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
@@ -326,6 +326,9 @@ export class AccessRequests {
       data: {
         requestId,
         identityId,
+        identityScope,
+        requestKind: upgradeMember ? "permissions" : "join",
+        ...(upgradeMember ? { requesterMemberId: upgradeMember.id } : {}),
         displayName,
         // The permissions the requester asked for (the owner chooses the
         // final grant at decision time). Keyed `permissions` — not
@@ -628,6 +631,9 @@ export class AccessRequests {
       const live = this.maybeExpire(row);
       if (!isPending(live.status)) fail(409, "already_decided", `Request is already ${live.status}`);
       const now = this.store.now();
+      if (this.upgradeBasis(row)) {
+        return this.memberPermissions.review(token, roomId, row, { decision, permissions, note }, auth, expectedSessionBinding);
+      }
       if (decision === "deny") {
         // RC-2026-09-18-025: explicit null treated as omitted, same as request().
         if (note !== undefined && note !== null && (typeof note !== "string" || note.length > 500)) {
@@ -655,46 +661,6 @@ export class AccessRequests {
       const existingLink = this.db.prepare(
         "SELECT member_id AS memberId FROM identity_links WHERE room_id=? AND identity_id=?"
       ).get(roomId, row.identity_id);
-      const upgrade = this.upgradeBasis(row);
-      if (upgrade) {
-        const currentAuthority = this.store.roomAuthority(roomId);
-        const member = Object.hasOwn(currentAuthority.members, upgrade.memberId) ? currentAuthority.members[upgrade.memberId] : null;
-        const recorded = this.db.prepare("SELECT body FROM events WHERE room_id=? AND id=?")
-          .get(roomId, createHash("sha256").update(`access-request:${requestId}`).digest("hex"));
-        const basisEvent = recorded ? JSON.parse(recorded.body) : null;
-        if (existingLink?.memberId !== upgrade.memberId || !member || member.active === false
-            || member.identityId !== row.identity_id || member.revision !== upgrade.revision
-            || this.store.identities.secretRevoked(row.identity_id)
-            || basisEvent?.type !== T.ACCESS_REQUESTED || basisEvent.data.requestId !== requestId
-            || basisEvent.data.identityId !== row.identity_id || basisEvent.actorId !== row.identity_id
-            || basisEvent.data.upgradeMemberId !== upgrade.memberId || basisEvent.data.expectedMemberRevision !== upgrade.revision) {
-          fail(409, "stale_membership", "Membership changed since this request; review current access and submit a new request");
-        }
-        // Admission delegation alone cannot mutate an existing membership.
-        // The ordinary command path additionally enforces scoped authority,
-        // autonomy, archival, revision and non-transitive admin boundaries.
-        if (!memberCan(currentAuthority, auth.member.id, "manage_members")) {
-          fail(403, "access_denied", "manage_members required to approve additional permissions for an existing member");
-        }
-        const effectivePermissions = [...new Set([...member.permissions, ...grants])];
-        if (effectivePermissions.length !== member.permissions.length) {
-          this.store.command(token, roomId, { id: randomUUID(), type: T.MEMBER_ACCESS_CHANGED,
-            data: { memberId: member.id, expectedMemberRevision: upgrade.revision,
-              permissions: effectivePermissions, active: true } }, expectedSessionBinding);
-        }
-        this.db.prepare("UPDATE access_requests SET status='approved', decided_at=?, decided_by=?, decision_note=? WHERE request_id=?")
-          .run(now, auth.member.id, "additional permissions reviewed; existing access preserved", requestId);
-        const updated = rowToRequest(this.db.prepare("SELECT * FROM access_requests WHERE request_id=?").get(requestId));
-        return Object.freeze({
-          ...updated,
-          memberId: member.id,
-          grantedPermissions: Object.freeze(effectivePermissions),
-          next: Object.freeze([
-            Object.freeze({ action: "see-membership", method: "GET", path: `/api/rooms/${encodeURIComponent(roomId)}/presence`,
-              description: "Confirm the reviewed permissions on the existing room member." }),
-          ]),
-        });
-      }
       if (existingLink) {
         // A direct grant already admitted this identity. Recording the
         // decision must not link them again or change the grant they hold.

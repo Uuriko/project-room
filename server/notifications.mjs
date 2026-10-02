@@ -7,10 +7,11 @@ import { EVENT_TYPES as T, defaultNotificationPreferences } from "../src/events.
 import { messageAddressesMember } from "../src/conversation.js";
 import { ServiceError } from "./store.mjs";
 import { mutedEvent } from "./moderation.mjs";
+import { permissionDecisionMessages } from "./member-permission-requests.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 
-export const NOTIFICATION_KINDS = Object.freeze(["mention", "reply", "assignment", "work_update", "access_request"]);
+export const NOTIFICATION_KINDS = Object.freeze(["mention", "reply", "assignment", "work_update", "access_request", "access_decision"]);
 // Bounded tail: the feed never scans unbounded history. Older unread events
 // stay reachable through the return brief; the response says where it started.
 export const NOTIFICATION_TAIL = 500;
@@ -40,7 +41,7 @@ const involvedIn = (item, memberId) => Boolean(item) && (ROLE_FIELDS.some(field 
 // and deletions are honoured without a second store. `mutedThreadIds` is the
 // member's muted thread-root ids (a Set); items from muted threads are
 // skipped at read time, so unmuting restores them on the next read.
-export function deriveNotifications({ events, state, member, mutedThreadIds = null }) {
+export function deriveNotifications({ events, state, member, mutedThreadIds = null, accessDecisions = new Map() }) {
   const preferences = { ...defaultNotificationPreferences(), ...(member.notificationPreferences ?? {}) };
   const messages = new Map((state.messages ?? []).map(message => [message.id, message]));
   const muted = mutedThreadIds instanceof Set ? mutedThreadIds : new Set();
@@ -70,6 +71,11 @@ export function deriveNotifications({ events, state, member, mutedThreadIds = nu
     // E4: an actor you muted never reaches your feed. Read per request, so
     // unmuting brings their items back on the next read (the owner cannot be muted).
     if (mutedEvent(state, member.id, event)) continue;
+    const decision = accessDecisions.get(event.data?.messageId);
+    if (decision && decision.memberId === member.id) {
+      put("access_decision", "requestId", decision.requestId, row, { eventId: event.id, outcome: decision.outcome, note: decision.note });
+      continue;
+    }
     if (event.type === T.MESSAGE_POSTED) {
       const messageId = event.data.messageId || event.id;
       const current = messages.get(messageId);
@@ -105,11 +111,15 @@ export function deriveNotifications({ events, state, member, mutedThreadIds = nu
     // surfaces the queue, so this is not gated on work_updates preferences —
     // like the session-enforcement carve-out below, it waits on the owner.
     if (event.type === T.ACCESS_REQUESTED) {
-      if (member.id === state.room?.ownerId) {
+      if (member.id === state.room?.ownerId || member.permissions?.includes("manage_members")) {
         put("access_request", "requestId", event.data.requestId, row, {
           eventId: event.id,
           displayName: event.data.displayName,
           note: event.data.note ?? null,
+          requestKind: event.data.requestKind ?? "join",
+          requestedPermissions: [...(event.data.permissions ?? [])],
+          label: event.data.requestKind === "permissions"
+            ? `wants: ${(event.data.permissions ?? []).join(", ")}` : "requests to join",
         });
       }
       continue;
@@ -192,7 +202,7 @@ export class Notifications {
       const rows = fetched.slice(0, tail).reverse().map(r => ({ sequence: r.sequence, event: JSON.parse(r.body) }));
       const member = room.state.members[auth.member.id] ?? auth.member;
       const mutedThreadIds = this.store.threadMutes.mutedThreadIds(roomId, auth.member.id);
-      const notifications = deriveNotifications({ events: rows, state: room.state, member, mutedThreadIds });
+      const notifications = deriveNotifications({ events: rows, state: room.state, member, mutedThreadIds, accessDecisions: permissionDecisionMessages(this.store, rows) });
       const nextBefore = notifications.length > limit ? notifications[limit - 1].sequence
         : truncated ? rows[0].sequence : null;
       // Tag acknowledgment (2026-09-23): per-member mention ack rate over the

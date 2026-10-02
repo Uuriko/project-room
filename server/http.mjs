@@ -3398,6 +3398,34 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           }),
         });
       }
+      // JDOT-MEMBER-PERMS begin: room-authenticated self-service aliases.
+      const memberAccessRequest = /^\/api\/rooms\/([^/]{1,384})\/access-requests$/.exec(url.pathname);
+      const ownPermissionRequest = /^\/api\/rooms\/([^/]{1,384})\/members\/me\/permission-requests$/.exec(url.pathname);
+      if ((memberAccessRequest || ownPermissionRequest) && req.method === "POST") {
+        const roomId = pathId((memberAccessRequest ?? ownPermissionRequest)[1]);
+        const selected = roomCredentials(req, url);
+        const fence = selected.mode === "account" ? accountBinding(req) : expectedBinding(req);
+        const auth = roomAuth(selected, roomId, fence);
+        if (selected.bearer && auth.credentialScope !== "room") reject(403, "access_denied", "Bearer account sessions are not accepted");
+        if (!selected.bearer && auth.kind !== "session") reject(401, "unauthenticated", "Browser session required");
+        protectWrite(req, auth, selected.bearer);
+        rate(`write:${auth.credentialHash}`, 60);
+        if (auth.kind === "api-key" && !(auth.apiKeyScopes ?? []).some(scope => scope === "rooms:write" || scope === "rooms:*")) {
+          reject(403, "insufficient_scope", "API key lacks rooms:write");
+        }
+        const data = await body(req);
+        const permissionField = ownPermissionRequest ? "permissions" : "requestedPermissions";
+        if (!data || typeof data !== "object" || !Object.hasOwn(data, permissionField)
+            || Object.keys(data).some(key => ![permissionField, "note", "requestId"].includes(key))) {
+          reject(422, "invalid_request", `${permissionField} is required; note and requestId are optional`);
+        }
+        const current = roomAuth(selected, roomId, fence);
+        if (current.member.id !== auth.member.id) reject(403, "access_denied", "The acting member changed");
+        const requested = accessRequests.requestForMember(selected.token, roomId,
+          { permissions: data[permissionField], note: data.note, requestId: data.requestId }, fence);
+        return json(res, 201, requested);
+      }
+      // JDOT-MEMBER-PERMS end
       // POST-only route: a wrong method is 405 (Allow: POST), not a 404
       // unknown-route, so a mistaken GET reads as a method error.
       if (url.pathname === "/api/access-requests" && req.method !== "POST") {
