@@ -116,8 +116,9 @@ const leaseHoursOfBody = data => ("leaseHours" in data ? data.leaseHours : undef
 
 // Writes (create, claim, renew, update) need a contribute, review, or
 // collaborate profile, the room owner, or a human who holds contribute
-// rights. Reading stays open to every member. Rooms whose authority does
-// not name an owner are fixture registries: they do not model profiles.
+// rights. Reading stays open to every member. A room that names no owner
+// does not open the board: only an explicit member with one of those
+// profiles can mutate.
 const WORK_CLAIM_PROFILES = Object.freeze({
   contribute: ["accept_work", "complete_work"],
   review: ["verify"],
@@ -132,17 +133,20 @@ function resolveWorkClaimAccess(store, roomId, auth) {
   if (typeof store?.roomAuthority === "function") {
     try { authority = store.roomAuthority(roomId); } catch { authority = null; }
   }
-  const enforced = typeof authority?.ownerId === "string" && authority.ownerId.length > 0;
-  const live = enforced ? authority.members?.[auth.member.id] : null;
-  const member = live && typeof live === "object"
+  const ownerId = typeof authority?.ownerId === "string" && authority.ownerId.length > 0 ? authority.ownerId : null;
+  const members = authority?.members;
+  const memberId = auth?.member?.id;
+  const listed = members && typeof members === "object" && typeof memberId === "string"
+    && Object.hasOwn(members, memberId) && members[memberId];
+  const member = listed && typeof listed === "object"
     ? {
       ...auth.member,
-      ...live,
-      id: auth.member.id,
-      permissions: Array.isArray(live.permissions) ? live.permissions : (auth.member.permissions ?? []),
+      ...listed,
+      id: memberId,
+      permissions: Array.isArray(listed.permissions) ? listed.permissions : (auth.member.permissions ?? []),
     }
-    : auth.member;
-  return { authority, enforced, member };
+    : null;
+  return { authority, ownerId, member };
 }
 
 function holdsProfile(permissions, profile) {
@@ -150,25 +154,22 @@ function holdsProfile(permissions, profile) {
 }
 
 function mayWriteWorkClaims(access) {
-  if (!access.enforced) return true;
   const member = access.member;
   if (!member || member.active === false) return false;
-  if (member.id === access.authority.ownerId) return true;
+  if (access.ownerId && member.id === access.ownerId) return true;
   const permissions = new Set(member.permissions ?? []);
   if (member.kind === "human") return permissions.has("accept_work") || permissions.has("complete_work");
   return holdsProfile(permissions, "contribute") || holdsProfile(permissions, "review") || holdsProfile(permissions, "collaborate");
 }
 
 function mayManageAnyClaim(access) {
-  if (!access.enforced) return false;
   const member = access.member;
   if (!member || member.active === false) return false;
-  if (member.id === access.authority.ownerId) return true;
+  if (access.ownerId && member.id === access.ownerId) return true;
   return (member.permissions ?? []).includes("manage_claims");
 }
 
 function mayOptOutOfLease(access) {
-  if (!access.enforced) return true;
   return mayManageAnyClaim(access);
 }
 

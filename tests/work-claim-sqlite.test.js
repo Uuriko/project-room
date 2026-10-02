@@ -20,7 +20,10 @@ const helpers = {
 const call = (registry, member, route, id, body) => handleWorkClaims({
   req: { method: route === "read" ? "GET" : "POST", body }, res: {},
   url: new URL(`https://room.example/api/rooms/room1/work-claims${id ? `/${id}/${route}` : ""}`),
-  store: {}, roomId: "room1", auth: { member: { id: member, kind: "agent", permissions: [] } },
+  store: { roomAuthority: () => ({ members: {
+    jill: { id: "jill", kind: "agent", active: true, permissions: ["accept_work", "complete_work"] },
+    grokbot: { id: "grokbot", kind: "agent", active: true, permissions: ["accept_work", "complete_work"] },
+  } }) }, roomId: "room1", auth: { member: { id: member, kind: "agent", permissions: [] } },
   workClaimRoute: route, workClaimId: id, helpers, registry,
 });
 
