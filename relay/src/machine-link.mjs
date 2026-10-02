@@ -12,7 +12,8 @@ import { errorResponse, json, readJson } from "./http.mjs";
 import { initializeResult, parseRpc, requireToolName, rpcError, rpcResult, toolEnvelope } from "./mcp.mjs";
 import { redact } from "./redact.mjs";
 import {
-  CALL_TIMEOUT_MS, MAX_CALL_BYTES, MAX_SMALL_BYTES, PROTOCOL, filterTools, isResourceId, toolAllowed,
+  CALL_TIMEOUT_MS, HEARTBEAT_MS, MAX_CALL_BYTES, MAX_RESULT_BYTES, MAX_SMALL_BYTES, PROTOCOL_VERSION,
+  isResourceId, isSlot, listedTools, toolAllowed,
 } from "./protocol.mjs";
 
 const MCP_HEADERS = Object.freeze({
@@ -24,16 +25,20 @@ function emptyState(machineId) {
   return {
     machineId,
     label: "",
+    roomId: "",
     rooms: [],
     ownerMemberId: "",
+    inviteCode: "",
+    displayName: null,
     resourceId: null,
     tokenHash: null,
     enroll: null,
     haltEpoch: 0,
     halted: false,
+    pausedUntil: null,
     lastHeartbeat: null,
-    tools: [],
     activeLease: null,
+    leases: {},
     revoked: [],
     identityCache: [],
     decisionCache: [],
@@ -57,7 +62,9 @@ export class MachineLink extends DurableObject {
     const url = new URL(request.url);
     const route = url.pathname === "/mint" || url.pathname === "/enroll" || url.pathname === "/expire-enroll"
       ? url.pathname.slice(1)
-      : /^\/v0\/machines\/[^/]+\/(link|mcp|call|halt|resume|status)$/.exec(url.pathname)?.[1];
+      : url.pathname === "/v0/machines/link"
+        ? "link"
+        : /^\/v0\/machines\/[^/]+\/(link|mcp|call|halt|pause|resume|bye|status)$/.exec(url.pathname)?.[1];
     try {
       if (route === "mint") return await this.mint(request);
       if (route === "enroll") return await this.enroll(request);
@@ -66,7 +73,9 @@ export class MachineLink extends DurableObject {
       if (route === "mcp") return await this.mcp(request);
       if (route === "call") return await this.call(request);
       if (route === "halt") return await this.halt(request);
+      if (route === "pause") return await this.pause(request);
       if (route === "resume") return await this.resume(request);
+      if (route === "bye") return await this.bye(request);
       if (route === "status") return await this.status(request);
       return json(404, { error: { code: "not_found", message: "Not found" } });
     } catch (error) {
@@ -105,9 +114,21 @@ export class MachineLink extends DurableObject {
     return sockets.length > 0 ? sockets[sockets.length - 1] : null;
   }
 
+  async alarm() {
+    const socket = this.daemon();
+    if (!socket) return;
+    this.send(socket, { type: "heartbeat" });
+    await this.exclusive(() => {
+      if (!this.state) return;
+      this.state.lastHeartbeat = new Date().toISOString();
+      this.dirty = true;
+    });
+    if (this.daemon()) await this.ctx.storage.setAlarm(Date.now() + HEARTBEAT_MS);
+  }
+
   async webSocketMessage(ws, message) {
     const text = typeof message === "string" ? message : new TextDecoder().decode(message);
-    if (new TextEncoder().encode(text).byteLength > MAX_CALL_BYTES) {
+    if (new TextEncoder().encode(text).byteLength > MAX_RESULT_BYTES) {
       try { ws.close(1009, "frame too large"); } catch { /* already closed */ }
       return;
     }
@@ -129,13 +150,20 @@ export class MachineLink extends DurableObject {
       return;
     }
     if (msg.type !== "hello" && msg.type !== "heartbeat") return;
+    let accepted = false;
     await this.exclusive(() => {
       if (!this.state) return;
-      if (msg.type === "hello") this.state.tools = filterTools(msg.tools);
+      if (msg.type === "hello") {
+        if (msg.protocol !== PROTOCOL_VERSION || msg.machineId !== this.state.machineId) return;
+        if (typeof msg.label !== "string" || typeof msg.version !== "string") return;
+      }
       this.state.lastHeartbeat = new Date().toISOString();
       this.dirty = true;
-      if (msg.type === "hello") this.send(ws, { type: "welcome", machineId: this.state.machineId, haltEpoch: this.state.haltEpoch, protocol: PROTOCOL, halted: this.state.halted });
+      accepted = true;
     });
+    if (msg.type === "hello" && !accepted) {
+      try { ws.close(1002, "protocol"); } catch { /* already closed */ }
+    }
   }
 
   async webSocketClose(ws) {
@@ -156,8 +184,11 @@ export class MachineLink extends DurableObject {
       if (this.state) throw relayError(409, "machine_exists", "That machine already exists");
       this.state = emptyState(value.machineId);
       this.state.label = value.label;
+      this.state.roomId = value.roomId;
       this.state.rooms = value.rooms;
       this.state.ownerMemberId = value.ownerMemberId;
+      this.state.inviteCode = value.inviteCode;
+      this.state.displayName = value.displayName ?? null;
       this.state.enroll = { codeHash: value.codeHash, expiresAt: value.expiresAt, used: false };
       this.dirty = true;
     });
@@ -167,19 +198,34 @@ export class MachineLink extends DurableObject {
   async enroll(request) {
     const { value } = await readJson(request, MAX_SMALL_BYTES, "Request body");
     let issued = null;
-    await this.exclusive(async () => {
-      if (!this.state?.enroll) throw relayError(401, "enroll_code_invalid", "The enroll code was refused");
-      const hash = await sha256Hex(value.verifier);
-      if (!timingEqual(hash, this.state.enroll.codeHash ?? "")) throw relayError(401, "enroll_code_invalid", "The enroll code was refused");
-      if (this.state.enroll.used) throw relayError(401, "enroll_code_used", "The enroll code was already used");
-      if (Date.parse(this.state.enroll.expiresAt) <= Date.now()) throw relayError(401, "enroll_code_expired", "The enroll code has expired");
-      const token = bytesToB64url(crypto.getRandomValues(new Uint8Array(32)));
-      this.state.tokenHash = await sha256Hex(token);
-      this.state.enroll = { codeHash: this.state.enroll.codeHash, expiresAt: this.state.enroll.expiresAt, used: true };
-      this.dirty = true;
-      issued = token;
-    });
-    return json(200, { machineId: this.state.machineId, machineToken: issued });
+    try {
+      await this.exclusive(async () => {
+        if (!this.state?.enroll) throw relayError(401, "code_invalid", "The enroll code was refused");
+        const hash = await sha256Hex(value.verifier);
+        if (!timingEqual(hash, this.state.enroll.codeHash ?? "")) throw relayError(401, "code_invalid", "The enroll code was refused");
+        if (this.state.enroll.used) throw relayError(410, "code_used", "The enroll code was already used");
+        if (Date.parse(this.state.enroll.expiresAt) <= Date.now()) throw relayError(410, "code_expired", "The enroll code has expired");
+        const token = `${this.state.machineId}.${bytesToB64url(crypto.getRandomValues(new Uint8Array(32)))}`;
+        this.state.tokenHash = await sha256Hex(token);
+        this.state.enroll = { codeHash: this.state.enroll.codeHash, expiresAt: this.state.enroll.expiresAt, used: true };
+        this.dirty = true;
+        issued = {
+          machineToken: token,
+          machineId: this.state.machineId,
+          label: this.state.label,
+          roomId: this.state.roomId,
+          ownerMemberId: this.state.ownerMemberId,
+          inviteCode: this.state.inviteCode,
+          displayName: this.state.displayName,
+        };
+      });
+    } catch (error) {
+      if (error instanceof RelayError && (error.code === "code_invalid" || error.code === "code_used" || error.code === "code_expired")) {
+        return json(error.status, { error: error.code });
+      }
+      throw error;
+    }
+    return json(200, issued);
   }
 
   async expireEnroll() {
@@ -195,16 +241,23 @@ export class MachineLink extends DurableObject {
     if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
       throw relayError(426, "upgrade_required", "The machine link is a WebSocket");
     }
-    const token = request.headers.get("x-machine-token") || (/^Bearer\s+(\S+)$/.exec(request.headers.get("authorization") ?? "")?.[1] ?? "");
+    const url = new URL(request.url);
+    if (url.searchParams.has("token") || url.searchParams.has("machineToken")) {
+      throw relayError(401, "unauthenticated", "The machine token was refused");
+    }
+    const token = /^Bearer\s+(\S+)$/.exec(request.headers.get("authorization") ?? "")?.[1]
+      || request.headers.get("x-machine-token")
+      || "";
     let replaced = [];
     let response = null;
+    let server = null;
     await this.exclusive(async () => {
       if (!this.state?.tokenHash) throw relayError(401, "unauthenticated", "The machine token was refused");
       const hash = await sha256Hex(token);
       if (!timingEqual(hash, this.state.tokenHash)) throw relayError(401, "unauthenticated", "The machine token was refused");
       const pair = new WebSocketPair();
       const client = pair[0];
-      const server = pair[1];
+      server = pair[1];
       this.ctx.acceptWebSocket(server);
       this.live = server;
       for (const socket of this.ctx.getWebSockets()) {
@@ -216,9 +269,10 @@ export class MachineLink extends DurableObject {
       this.pending.clear();
       this.state.lastHeartbeat = new Date().toISOString();
       this.dirty = true;
-      this.send(server, { type: "welcome", machineId: this.state.machineId, haltEpoch: this.state.haltEpoch, protocol: PROTOCOL, halted: this.state.halted });
       response = new Response(null, { status: 101, webSocket: client });
     });
+    this.send(server, { type: "heartbeat" });
+    await this.ctx.storage.setAlarm(Date.now() + HEARTBEAT_MS);
     for (const pending of replaced) {
       clearTimeout(pending.timer);
       pending.reject(relayError(409, "link_replaced", "The machine reconnected"));
@@ -250,8 +304,7 @@ export class MachineLink extends DurableObject {
     }
     if (parsed.method === "tools/list") {
       await this.requireCaller(request, { needLease: false });
-      const tools = await this.exclusive(() => this.state?.tools ?? []);
-      return json(200, rpcResult(parsed.id, { tools }).body, MCP_HEADERS);
+      return json(200, rpcResult(parsed.id, { tools: listedTools() }).body, MCP_HEADERS);
     }
     if (parsed.method === "tools/call") {
       const { name, args } = requireToolName(parsed.params);
@@ -291,8 +344,15 @@ export class MachineLink extends DurableObject {
         needLease: true, slotHint: slot || null, tool, now: Date.now(),
       });
       const lease = auth.lease;
-      if (!toolAllowed(tool) || !this.state.tools.some(item => item.name === tool)) {
-        throw relayError(404, "tool_unknown", `${tool} is not available on this machine`);
+      if (!toolAllowed(tool)) throw relayError(403, "tool_not_allowed", `${tool} is not an allowed machine tool`);
+      const caller = {
+        identityId: lease.holderIdentity,
+        claimId: lease.claimId,
+        slot: lease.slot,
+        verified: true,
+      };
+      if (caller.verified !== true || typeof caller.identityId !== "string" || typeof caller.claimId !== "string" || !isSlot(caller.slot)) {
+        throw relayError(403, "tool_not_allowed", "A verified lease is required");
       }
       socket = this.daemon();
       if (!socket) throw relayError(503, "machine_offline", "The machine is not linked");
@@ -301,15 +361,8 @@ export class MachineLink extends DurableObject {
         type: "call",
         id,
         tool,
-        arguments: args,
-        lease: {
-          claim: lease.claimId,
-          slot: lease.slot,
-          holder: lease.holderIdentity,
-          room: lease.roomId,
-          exp: lease.expiresAt ? Math.floor(Date.parse(lease.expiresAt) / 1000) : null,
-          caps: lease.caps ?? [],
-        },
+        args,
+        caller,
       });
       if (new TextEncoder().encode(frame).byteLength > MAX_CALL_BYTES) {
         throw relayError(413, "payload_too_large", `Tool call payload exceeds ${MAX_CALL_BYTES} bytes`);
@@ -350,12 +403,14 @@ export class MachineLink extends DurableObject {
       this.applyControl(value);
       this.state.haltEpoch = nextEpoch;
       this.state.halted = true;
+      this.state.pausedUntil = null;
       this.state.activeLease = null;
+      this.state.leases = {};
       this.dirty = true;
       cancels = [...this.pending.values()];
       this.pending.clear();
       socket = this.daemon();
-      if (socket) notice = { type: "halt", haltEpoch: this.state.haltEpoch, reason: reasonOf(value) };
+      if (socket) notice = { type: "halt", epoch: this.state.haltEpoch };
     });
     if (notice) this.send(socket, notice);
     for (const pending of cancels) {
@@ -374,12 +429,57 @@ export class MachineLink extends DurableObject {
       await verifyLinkSignature(this.env.RELAY_LINK_SECRET, request, raw, Math.floor(Date.now() / 1000));
       this.applyControl(value);
       this.state.halted = false;
+      this.state.pausedUntil = null;
       this.dirty = true;
       socket = this.daemon();
-      if (socket) notice = { type: "resume", haltEpoch: this.state.haltEpoch };
+      if (socket) notice = { type: "resume" };
     });
     if (notice) this.send(socket, notice);
     return json(200, { halted: false, haltEpoch: this.state.haltEpoch });
+  }
+
+  async pause(request) {
+    const { value, raw } = await readJson(request, MAX_SMALL_BYTES, "Request body");
+    let socket = null;
+    let notice = null;
+    await this.exclusive(async () => {
+      if (!this.state) throw relayError(404, "machine_unknown", "No such machine");
+      await verifyLinkSignature(this.env.RELAY_LINK_SECRET, request, raw, Math.floor(Date.now() / 1000));
+      if (!Number.isSafeInteger(value.minutes) || value.minutes < 0 || value.minutes > 10_080) {
+        throw relayError(422, "invalid_pause", "minutes must be an integer from 0 to 10080");
+      }
+      this.state.pausedUntil = Date.now() + value.minutes * 60 * 1000;
+      this.dirty = true;
+      socket = this.daemon();
+      if (socket) notice = { type: "pause", minutes: value.minutes };
+    });
+    if (notice) this.send(socket, notice);
+    return json(200, { paused: true, minutes: value.minutes });
+  }
+
+  async bye(request) {
+    const { raw } = await readJson(request, MAX_SMALL_BYTES, "Request body");
+    let socket = null;
+    let notice = null;
+    let cancels = [];
+    await this.exclusive(async () => {
+      if (!this.state) throw relayError(404, "machine_unknown", "No such machine");
+      await verifyLinkSignature(this.env.RELAY_LINK_SECRET, request, raw, Math.floor(Date.now() / 1000));
+      this.dirty = true;
+      cancels = [...this.pending.values()];
+      this.pending.clear();
+      socket = this.daemon();
+      if (socket) notice = { type: "bye" };
+    });
+    if (notice) this.send(socket, notice);
+    if (socket) {
+      try { socket.close(1000, "bye"); } catch { /* already closed */ }
+    }
+    for (const pending of cancels) {
+      clearTimeout(pending.timer);
+      pending.reject(relayError(503, "machine_offline", "The machine link closed"));
+    }
+    return json(200, { bye: true });
   }
 
   applyControl(value) {
@@ -414,7 +514,7 @@ export class MachineLink extends DurableObject {
         halted: this.state.halted,
         haltEpoch: this.state.haltEpoch,
         lastHeartbeat: this.state.lastHeartbeat,
-        toolCount: this.state.tools.length,
+        toolCount: listedTools().length,
         rooms: this.state.rooms,
         ownerMemberId: this.state.ownerMemberId,
         resourceId: this.state.resourceId,
@@ -431,10 +531,6 @@ export class MachineLink extends DurableObject {
 function usableSocket(socket) {
   if (!socket) return false;
   return socket.readyState !== WebSocket.CLOSING && socket.readyState !== WebSocket.CLOSED;
-}
-
-function reasonOf(value) {
-  return typeof value.reason === "string" && value.reason.length <= 80 ? value.reason : "halt";
 }
 
 function nextHaltEpoch(value, state) {
