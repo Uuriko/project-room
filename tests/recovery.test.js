@@ -57,10 +57,6 @@ test("online capture preserves all application tables, identity boundaries and e
       assert.equal(table.rows, 0, "per-room integrity state is written by the cron, not on open");
       continue;
     }
-    if (table.table === "account_terms" || table.table === "public_abuse_reports" || table.table === "public_unpublish") {
-      assert.equal(table.rows, 0, "the fixture does not sign up, file a public report, or unpublish");
-      continue;
-    }
     assert.ok(table.rows > 0, `${table.table} has substantive fixture data`);
   }
   assert.equal(before.legacyCheckpoints, 1); assert.equal(before.replay.checkpointEvents, 2);

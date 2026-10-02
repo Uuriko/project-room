@@ -444,6 +444,17 @@ export async function seedRecoveryCoverage(f) {
   const followInput = { requestId: "recovery-create-follow-up", expectedReviewRevision: followRevision.review.revision, taskId: "follow-parent", expectedTermsVersion: 1,
     generation: 1, artifactSha256: followReceipt.artifact.sha256, successorTaskId: "follow-child", terms: { ...followTerms, title: "Explicit new recovery task" }, repositoryRef: "main", files: ["synthetic/revised.txt"] };
   const followResult = f.store.publicWorkSuccessors.create("commons", "owner", followReceipt.receiptId, followInput);
+  // Seed terms acceptance, one public report, and one unpublish. The recovery
+  // audit and the cold-start budget require a row in every application table.
+  // The unpublish target is not a room in this fixture.
+  const termsAccount = f.store.db.prepare("SELECT id FROM accounts LIMIT 1").get();
+  f.store.db.prepare("INSERT INTO account_terms (account_id, terms_version, accepted_at) VALUES (?, ?, ?)")
+    .run(termsAccount.id, "2026-10-02", f.now());
+  f.store.db.prepare(`INSERT INTO public_abuse_reports (id, kind, target, body, email, ip_hash, created_at, status)
+    VALUES ('rpt_recovery', 'room', 'recovery-public-room', 'Seeded so the capture covers public abuse reports.', NULL, ?, ?, 'open')`)
+    .run(createHash("sha256").update("project-room-public-report:recovery").digest("hex"), f.now());
+  f.store.db.prepare("INSERT INTO public_unpublish (kind, target, at, by_account) VALUES ('room', 'recovery-public-room', ?, ?)")
+    .run(f.now(), termsAccount.id);
 
   return {
     runRequest, runInput, offerRecords: f.store.projectOffers.ownerList("commons", "owner"),
