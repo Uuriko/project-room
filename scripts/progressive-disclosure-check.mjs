@@ -100,13 +100,23 @@ test("keyboard toggling never moves focus off the summary", { timeout: 30000 }, 
   }
 });
 
+async function chipQuiet(locator) {
+  return locator.evaluate(node => {
+    const text = (node.textContent || "").trim();
+    const style = getComputedStyle(node);
+    const visible = style.display !== "none" && style.visibility !== "hidden" && node.getClientRects().length > 0;
+    return { text, visible };
+  });
+}
+
 test("trailing chips align to the summary's right edge", { timeout: 30000 }, async t => {
   const { page } = await setup(t);
   await openSettings(page, "record-panel");
   for (const [id, chip] of [["#record-panel", "#event-count"], ["#decision-section", "#decision-count"]]) {
     if (id === "#decision-section") await page.locator("#record-panel").evaluate(node => { node.open = true; });
-    if (!(await page.locator(chip).textContent()).trim()) {
-      assert.equal(await page.locator(chip).isVisible(), false, "empty count chips stay quiet");
+    const state = await chipQuiet(page.locator(chip));
+    if (!state.text) {
+      assert.equal(state.visible, false, "empty count chips stay quiet");
       continue;
     }
     const [sum, ch] = await Promise.all([
@@ -117,8 +127,9 @@ test("trailing chips align to the summary's right edge", { timeout: 30000 }, asy
   await page.locator("#settings-close").click();
   await openCatchUp(page);
   await page.locator("#return-brief-panel").evaluate(node => { node.open = true; });
-  if (!(await page.locator("#rb-history-count").textContent()).trim()) {
-    assert.equal(await page.locator("#rb-history-count").isVisible(), false, "empty history count stays quiet");
+  const history = await chipQuiet(page.locator("#rb-history-count"));
+  if (!history.text) {
+    assert.equal(history.visible, false, "empty history count stays quiet");
     return;
   }
   const [sum, ch] = await Promise.all([
