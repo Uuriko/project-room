@@ -6,6 +6,8 @@ import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
+const skillsCheck = spawnSync(process.execPath, [join(root, "scripts", "skills-sync-check.mjs")], { cwd: root, stdio: "inherit" });
+if ((skillsCheck.status ?? 1) !== 0) process.exit(skillsCheck.status ?? 1);
 const eslint = join(root, "node_modules", "eslint", "bin", "eslint.js");
 // `--skip-if-missing` (used by scripts/check.mjs) lets a checkout that never
 // ran `npm ci` finish the rest of `npm run check` with a visible notice instead
