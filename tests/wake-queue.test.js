@@ -125,7 +125,7 @@ test("receipt capacity bounds requeue as well as enqueue", t => {
   assert.equal(f.enqueue({ requestId: first.receipt.requestId, maxAttempts: 1 }).duplicate, true, "an exact retry at the cap still returns its historical receipt");
 });
 
-test("guest-agent members cannot enqueue, pause, resume or requeue wake intents; reads stay open", t => {
+test("guest-agent members cannot enqueue or requeue wakes, and can pause their own", t => {
   const f = fixture(t);
   // Production guest admission mints member ids carrying the guest-agent-
   // prefix exactly; the denial keys on that shape, so the fixture does too.
@@ -140,10 +140,10 @@ test("guest-agent members cannot enqueue, pause, resume or requeue wake intents;
   };
   denied(() => f.store.wakeQueue.enqueue(guestKey, "commons",
     { requestId: randomUUID(), queueKey: "recipe:guest-probe", intent: { recipe: "guest-probe" }, dueAt: f.at(), maxAttempts: 3 }));
-  denied(() => f.store.wakeQueue.pause(guestKey, "commons", { requestId: randomUUID(), reason: "stop" }));
-  denied(() => f.store.wakeQueue.resume(guestKey, "commons", { requestId: randomUUID() }));
   denied(() => f.store.wakeQueue.requeue(guestKey, "commons",
     { requestId: randomUUID(), queueKey: "recipe:guest-probe", dueAt: f.at() }));
+  assert.equal(f.store.wakeQueue.pause(guestKey, "commons", { requestId: randomUUID(), reason: "stop" }).receipt.state, "paused");
+  assert.equal(f.store.wakeQueue.resume(guestKey, "commons", { requestId: randomUUID() }).receipt.state, "active");
 
   // No wake row landed for the guest; the read surface still answers and a
   // non-guest member's enqueue is unchanged.

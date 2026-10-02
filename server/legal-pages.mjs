@@ -107,10 +107,6 @@ export function legalPageHtml(pathname) {
   return pageHtml({ title, main: renderMarkdown(markdown) });
 }
 
-export function securityTxt() {
-  return `Contact: mailto:${ABUSE_EMAIL}\nExpires: 2027-10-02T00:00:00.000Z\nPreferred-Languages: en\nCanonical: https://room.trydemigod.com/.well-known/security.txt\nPolicy: https://room.trydemigod.com/acceptable-use\n`;
-}
-
 export function reportPageHtml() {
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">

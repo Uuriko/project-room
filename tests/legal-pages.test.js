@@ -99,6 +99,12 @@ test("legal pages are cacheable, indexed, and listed in the sitemap", async t =>
   for (const name of ["Cloudflare, Inc.", "Resend, Inc.", "Google LLC", "GitHub, Inc.", "Microsoft Corporation", "Firecrawl", "Telegram FZ-LLC"]) {
     assert.match(subprocessors.text, new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   }
+  const previousContact = process.env.ROOM_SECURITY_CONTACT;
+  process.env.ROOM_SECURITY_CONTACT = "potter@trydemigod.com";
+  t.after(() => {
+    if (previousContact === undefined) delete process.env.ROOM_SECURITY_CONTACT;
+    else process.env.ROOM_SECURITY_CONTACT = previousContact;
+  });
   const security = await raw(origin, "/.well-known/security.txt");
   assert.equal(security.status, 200);
   assert.match(security.text, /Contact: mailto:potter@trydemigod\.com/);

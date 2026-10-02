@@ -4,10 +4,9 @@ import {
   submitPublicReport, unpublishPublic, verifyReportProof,
 } from "./legal-store.mjs";
 import {
-  LEGAL_CACHE_CONTROL, LEGAL_PAGE_CSP, LEGAL_SITEMAP_PATHS, REPORT_PAGE_CSP, legalPageHtml, reportPageHtml, securityTxt,
+  LEGAL_CACHE_CONTROL, LEGAL_PAGE_CSP, LEGAL_SITEMAP_PATHS, REPORT_PAGE_CSP, legalPageHtml, reportPageHtml,
 } from "./legal-pages.mjs";
 
-const SECURITY_PATHS = new Set(["/.well-known/security.txt", "/security.txt"]);
 const PAGE_PATHS = new Set(LEGAL_SITEMAP_PATHS);
 const REPORT_FIELDS = ["kind", "target", "body", "bucket", "nonce"];
 
@@ -18,7 +17,7 @@ function send(res, status, body, type, head) {
 }
 
 export function isLegalPath(pathname) {
-  return SECURITY_PATHS.has(pathname) || PAGE_PATHS.has(pathname) || pathname === "/report"
+  return PAGE_PATHS.has(pathname) || pathname === "/report"
     || pathname === "/api/reports/public/challenge" || pathname === "/api/reports/public"
     || pathname === "/api/account/terms" || pathname === "/api/operator/unpublish"
     || pathname === "/api/health/jobs";
@@ -30,12 +29,6 @@ export async function handleLegalRequest({ req, res, url, store, rate, remoteAdd
   const head = req.method === "HEAD";
   const read = req.method === "GET" || head;
 
-  if (SECURITY_PATHS.has(pathname)) {
-    if (!read) reject(405, "method_not_allowed", "Method not allowed");
-    res.setHeader("Cache-Control", LEGAL_CACHE_CONTROL);
-    send(res, 200, securityTxt(), "text/plain; charset=utf-8", head);
-    return true;
-  }
   if (PAGE_PATHS.has(pathname)) {
     if (!read) reject(405, "method_not_allowed", "Method not allowed");
     const html = legalPageHtml(pathname);
