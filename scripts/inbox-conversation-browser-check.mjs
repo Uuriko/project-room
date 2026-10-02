@@ -38,7 +38,7 @@ function seedThread(f) {
   const child = structuredClone(raw.message);
   child.id = "AQMkThreadChild="; child.changeKey = "CQAAthread-child=";
   child.internetMessageId = "<thread-child@example.test>"; child.conversationId = "AAQkThreadConv=";
-  child.subject = "Re: Launch plan"; child.body.content = "Agreed — let us do it.";
+  child.subject = "Re: Launch plan"; child.body.content = "Agreed \u2014 let us do it.";
   child.hasAttachments = false;
   child.internetMessageHeaders = [{ name: "In-Reply-To", value: "<thread-parent@example.test>" }];
   const childOptions = { idType: "immutable",
@@ -82,13 +82,13 @@ async function setup(t, mobile = false) {
 for (const mobile of [false, true]) test(`conversation and attachments ${mobile ? "mobile" : "desktop"}: two entries render, descriptors stay metadata-only`, { timeout: 45000 }, async t => {
   const f = await setup(t, mobile), p = f.page;
   await f.inbox(); await f.pick(f.ids.parentId);
-  // Attachment descriptors: name, type and size only — never bytes, never a download.
+  // Attachment descriptors: name, type and size only \u2014 never bytes, never a download.
   await p.locator("#inbox-attachments:not([hidden])").waitFor();
   assert.equal(await p.locator("#inbox-attachment-list li").count(), 1);
-  assert.equal(await p.locator("#inbox-attachment-list li").first().textContent(), "brief.txt · text/plain · 128 bytes");
+  assert.equal(await p.locator("#inbox-attachment-list li").first().textContent(), "brief.txt \u00b7 text/plain \u00b7 128 bytes");
   assert.equal(await p.locator("#inbox-attachments a[download], #inbox-attachments button").count(), 0);
   assert.match(await p.locator("#inbox-attachments").textContent(), /file downloads are unavailable/);
-  assert.match(await p.locator("#inbox-email-metadata").textContent(), /1 attachment · files unavailable/);
+  assert.match(await p.locator("#inbox-email-metadata").textContent(), /1 attachment \u00b7 files unavailable/);
   // The conversation: both entries, the reply indented, the open message marked.
   await p.locator("#inbox-thread-toggle").click();
   await p.locator("#inbox-thread:not([hidden])").waitFor();
@@ -100,7 +100,7 @@ for (const mobile of [false, true]) test(`conversation and attachments ${mobile 
   assert.ok(labels.some(l => l.includes("(this message)")), "the open message is marked");
   const marked = labels[0].includes("(this message)") ? 0 : 1;
   assert.equal(await buttons.nth(marked).isDisabled(), true);
-  const indents = [await buttons.nth(0).evaluate(el => el.style.marginLeft), await buttons.nth(1).evaluate(el => el.style.marginLeft)];
+  const indents = [await buttons.nth(0).evaluate(el => getComputedStyle(el).marginLeft), await buttons.nth(1).evaluate(el => getComputedStyle(el).marginLeft)];
   assert.ok(indents.some(m => m !== "0px" && m !== ""), "the reply entry is depth-indented");
   // An entry opens its source in the reader.
   const other = marked === 0 ? 1 : 0;
