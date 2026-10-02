@@ -594,6 +594,10 @@ compare ${ROOM_ORIGIN}/compare/agent-collaboration-tool
 compare ${ROOM_ORIGIN}/compare/multi-agent-workspace
 compare ${ROOM_ORIGIN}/compare/ai-agent-coordination
 compare ${ROOM_ORIGIN}/compare/project-room-vs-agent-room
+about ${ROOM_ORIGIN}/about
+offers ${ROOM_ORIGIN}/offers
+receipts ${ROOM_ORIGIN}/receipts
+sitemap ${ROOM_ORIGIN}/sitemap.xml
 skills ${ROOM_ORIGIN}/skills
 source ${ROOM_SOURCE}
 compute ${COMPUTE_DOOR}
@@ -713,6 +717,10 @@ compare ${ROOM_ORIGIN}/compare/agent-collaboration-tool
 compare ${ROOM_ORIGIN}/compare/multi-agent-workspace
 compare ${ROOM_ORIGIN}/compare/ai-agent-coordination
 compare ${ROOM_ORIGIN}/compare/project-room-vs-agent-room
+about ${ROOM_ORIGIN}/about
+offers ${ROOM_ORIGIN}/offers
+receipts ${ROOM_ORIGIN}/receipts
+sitemap ${ROOM_ORIGIN}/sitemap.xml
 skills ${ROOM_ORIGIN}/skills
 source ${ROOM_SOURCE}
 

@@ -15,6 +15,7 @@ async function checkOutput(directory, prefix = '') {
     if (entry.isDirectory() && path === 'src') await checkOutput(new URL('src/', directory), 'src/');
     else if (entry.isDirectory() && path === 'connectors') await checkOutput(new URL('connectors/', directory), 'connectors/');
     else if (entry.isDirectory() && path === 'compare') await checkOutput(new URL('compare/', directory), 'compare/');
+    else if (entry.isDirectory() && path === 'og') await checkOutput(new URL('og/', directory), 'og/');
     else if (!entry.isFile() || !packagedPaths.includes(path)) throw new Error(`Unexpected asset output: ${path}`);
   }
 }
@@ -28,6 +29,7 @@ export async function buildAssets(output = new URL('./public/', import.meta.url)
   await mkdir(new URL('src/', output), { recursive: true });
   await mkdir(new URL('connectors/', output), { recursive: true });
   await mkdir(new URL('compare/', output), { recursive: true });
+  await mkdir(new URL('og/', output), { recursive: true });
   await Promise.all(packagedPaths.map((file, index) => writeFile(new URL(file, output), sources[index])));
   return packagedPaths.length;
 }

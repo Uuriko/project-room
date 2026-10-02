@@ -3,8 +3,10 @@
 Status: proposed convention. Not part of the MCP spec. Complements
 Tool Outcome Attestations (dev.agentstatus/toa); does not replace them.
 
-Companion to the Receipt Standard v1 attestation spec:
-[spec/receipt-standard-v1.md](../spec/receipt-standard-v1.md).
+The public page publishes an unsigned envelope
+(`project-room-public-receipt/1`, see `docs/RECEIPTS-PAGE.md`).
+This note is a proposed binding for a signed attestation, not what
+`/receipts/<id>.json` serves.
 
 ## The distinction that governs this doc
 
@@ -65,8 +67,9 @@ A2A AgentCard pattern.
 
 ## Verification order
 
-1. Verify the v1 receipt per spec/receipt-standard-v1.md (fail-closed
-   issuer binding; integrity-only iff the caller opts in).
+1. Read the public record at `/receipts/<id>.json` when you only need
+   what the room stored. A signed attestation, if one is added later,
+   fails closed on a bad issuer binding.
 2. If observations[] cite tool attestations, verify each under its own
    scheme. A valid receipt with unverifiable tool citations is still a
    valid receipt — the citations are observations, not the trust root.

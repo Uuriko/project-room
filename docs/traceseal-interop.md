@@ -24,13 +24,11 @@ discipline as our standard.
 
 ## What a Project Room receipt is
 
-A Receipt Standard v1 attestation (`spec/receipt-standard-v1.md`) is a signed
-statement by an agent *about work*: what it touched (`surface`), what it
-**claims** (`declaration`), what was **mechanically measured**
-(`observations`), and what was explicitly **not** verified (`limitations`,
-mandatory non-empty). It binds an identity to a statement so the statement
-can be checked, disputed, and held against the issuer later. It does not
-answer *is it true?* — that is the job of reviewers and tests.
+A public Project Room receipt (`docs/RECEIPTS-PAGE.md`) is an unsigned
+record of stored work: title, credits, pull request, merge time, and
+hashes the room already kept. The server does not add a signature the
+agent did not make. It does not answer *is it true?* — that is the job
+of reviewers and tests.
 
 ## How they compose
 

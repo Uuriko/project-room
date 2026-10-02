@@ -20,6 +20,8 @@ export const EVENT_TYPES = Object.freeze({
   ROOM_SPEND_ALLOWANCE_SET: "room.spend_allowance_set",
   // One owner kill-switch for cross-owner assign and wake. Default open.
   ROOM_TRUST_SET: "room.trust_set",
+  // Owner opt-in for the public receipts page. Default off when absent.
+  ROOM_PUBLIC_RECEIPTS_SET: "room.public_receipts_set",
   ROOM_ARCHIVED: "room.archived",
   MEMBER_ADDED: "member.added",
   MEMBER_JOINED_VIA_INVITATION: "member.joined_via_invitation",
@@ -146,6 +148,19 @@ export function roomPolicy(state) {
 export const TRUST_OFF_CODE = "trust_off";
 export const trustOffMessage = targetId =>
   `Room Trust is off: cross-owner assign and wake are blocked${targetId ? ` (${targetId})` : ""}. Ask the room owner to turn Trust on.`;
+
+// Public receipts stay off until the owner records room.public_receipts_set.
+// Absent means off, so older logs replay without a publicReceipts field.
+export function publicReceipts(state) {
+  const stored = state?.room?.publicReceipts;
+  if (!stored || typeof stored.enabled !== "boolean") return { enabled: false };
+  return {
+    enabled: stored.enabled,
+    revision: Number.isSafeInteger(stored.revision) ? stored.revision : 0,
+    setById: typeof stored.setById === "string" ? stored.setById : null,
+    setAt: typeof stored.setAt === "string" ? stored.setAt : null
+  };
+}
 
 export function roomTrust(state) {
   const stored = state?.room?.trust;
@@ -381,6 +396,7 @@ export function applyEvent(current, incoming) {
     [EVENT_TYPES.ROOM_POLICY_SET]: setRoomPolicy,
     [EVENT_TYPES.ROOM_SPEND_ALLOWANCE_SET]: setSpendAllowance,
     [EVENT_TYPES.ROOM_TRUST_SET]: setRoomTrust,
+    [EVENT_TYPES.ROOM_PUBLIC_RECEIPTS_SET]: setPublicReceipts,
     [EVENT_TYPES.ROOM_ARCHIVED]: archiveRoom,
     [EVENT_TYPES.OWNERSHIP_TRANSFERRED]: transferOwnership,
     [EVENT_TYPES.MEMBER_ADDED]: addMember,
@@ -557,6 +573,19 @@ function setRoomTrust(state, incoming) {
   if (typeof incoming.data.enabled !== "boolean") throw new Error("Room Trust requires enabled as true or false");
   const previous = state.room.trust ?? null;
   state.room.trust = {
+    enabled: incoming.data.enabled,
+    revision: (previous?.revision ?? 0) + 1,
+    setById: incoming.actorId,
+    setAt: incoming.at
+  };
+}
+
+function setPublicReceipts(state, incoming) {
+  const actor = requireMember(state, incoming.actorId);
+  if (actor.id !== state.room.ownerId) throw new Error("Only the Room owner may publish receipts");
+  if (typeof incoming.data.enabled !== "boolean") throw new Error("Public receipts require enabled as true or false");
+  const previous = state.room.publicReceipts ?? null;
+  state.room.publicReceipts = {
     enabled: incoming.data.enabled,
     revision: (previous?.revision ?? 0) + 1,
     setById: incoming.actorId,
