@@ -88,6 +88,7 @@ import { createRateLimiter } from "./identity-ratelimit.mjs";
 import { normalizeEmail } from "./account-login-methods.mjs";
 import { createPasskeyAuth, resolvePasskeyParams } from "./account-passkeys.mjs";
 import { createDeletionSecret, executeAccountDeletion, issueDeletionToken, planAccountDeletion, verifyDeletionToken, RETENTION_POLICY } from "./account-deletion.mjs"; // RC-2026-09-19-078: account-management surface
+import { createOperatorRoutes } from "./operator-routes.mjs"; // CP-ADMIN-0: operator purge, status, and audit. Paths stay in that module.
 import { hashPassword, verifyPassword, checkPasswordPolicy, DUMMY_PASSWORD_VERIFIER } from "../src/password-auth.mjs";
 import { buildGitHubAuthUrl, codeChallengeFor, createPendingStore, exchangeCodeForToken, fetchGitHubUser,
   GitHubOAuthError, GITHUB_START_PATH, GITHUB_CALLBACK_PATH, githubPostLoginPage, githubUnavailablePage } from "./github-oauth.mjs";
@@ -529,6 +530,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // subscriptions. Schema is applied in the store open path (server/store.mjs),
   // so every RoomStore carries it; http.mjs only owns the service instance.
   const agentPlugin = createAgentPluginRoutes({ store, json, reject, body, rate, bearer, exact, pathId, origin });
+  // CP-ADMIN-0: operator routes. An unset secret makes the handler return false.
+  const operatorRoutes = createOperatorRoutes({ store, json, reject, body, rate });
   // RC-2026-09-25-911: ranked next-actions. Schema is applied in the store
   // open path (server/store.mjs), so every RoomStore carries it; http.mjs
   // only owns the service instance.
@@ -2842,6 +2845,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           ]
         });
       }
+      // CP-ADMIN-0: operator surface. Returns false when the secret is unset, so
+      // the request falls through to the same not_found as an unknown path.
+      if (await operatorRoutes(req, res, { url, remoteAddress, requestId: operationId })) return;
       if (await agentPlugin(req, res, { url, remoteAddress })) return;
       if (await nextActionsRoutes(req, res, { url, remoteAddress })) return;
       // Public agent-invite join page: GET /join and GET /join/:code

@@ -102,6 +102,10 @@ Paste this into the review and tick every box that applies:
 - [ ] **Deploy.** The change is live after merge (`/api/version` matches), or the PR names who deploys.
 - [ ] **KNOWN.** If this fixes an audit finding, the matching `KNOWN` entry in `scripts/live-smoke.mjs` is deleted.
 
+## Naming and recovery
+
+QA runs prefix room titles and identity names with `qa<round>-` (for example `qa2-`). They also write a recovery file of the ids they create. Operator find matches those prefixes, so a later cleanup does not depend on someone remembering an id.
+
 ## Coordination
 
 QA work is claimed and reported in the Room (`muse-room` work board), not on GitHub issues. A failed live-smoke run should become a Room work item with the step-summary table pasted in.
