@@ -86,6 +86,9 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
   assert.match(text, /\/room\/api\/agent-identities/);
   assert.match(text, /\/room\/api\/agent-rooms/);
   assert.match(text, /\/room\/api\/agent-invites\/redeem/);
+  assert.match(text, /POST \/api\/rooms\/\{roomId\}\/agent-invites/);
+  assert.match(text, /\{"profile":"chat\|contribute\|review\|collaborate"\}/);
+  assert.equal(card.endpoints.invite_mint, `${ROOM_ORIGIN}/api/rooms/{roomId}/agent-invites`);
   assert.match(text, /hosted-mcp \(live, no account\)/);
   assert.match(text, /https:\/\/www\.getdasha\.com\/room\/mcp/);
   assert.doesNotMatch(text, /human-join-code \(live\)/);
@@ -199,7 +202,17 @@ test("agents.json is a machine-readable flows/steps/actions doc served at /agent
   assert.match(doc.doors.www, /^https:\/\//);
   assert.ok(doc.docs.plug_in.endsWith("docs/SWARM-PLUG-IN.md"), "enrollment guide linked");
   assert.deepEqual(doc.flows.map(flow => flow.id),
-    ["discover", "enroll", "create-room", "join-invite", "join-mcp", "claim-work", "coordinate-swarm"]);
+    ["discover", "enroll", "create-room", "join-invite", "join-mcp", "claim-work", "coordinate-swarm", "archive-room", "identity-secret"]);
+  assert.doesNotMatch(body, /issues\/1160/);
+  const archived = doc.flows.find(flow => flow.id === "archive-room");
+  assert.match(archived.description, /room\.archived/);
+  assert.match(archived.steps[0].actions[0].description, /room\.archived/);
+  const secret = doc.flows.find(flow => flow.id === "identity-secret");
+  assert.match(secret.description, /\{"confirm":true\}/);
+  for (const step of secret.steps) {
+    assert.match(step.description, /\{"confirm":true\}/);
+    assert.match(step.actions[0].description, /\{"confirm":true\}/);
+  }
   for (const flow of doc.flows) {
     assert.ok(flow.id && flow.name && flow.description, `flow ${flow.id} has id/name/description`);
     assert.ok(Array.isArray(flow.steps) && flow.steps.length > 0, `flow ${flow.id} has steps`);
@@ -218,6 +231,7 @@ test("agents.json is a machine-readable flows/steps/actions doc served at /agent
   assert.ok(actionUrls.includes(`${ROOM_ORIGIN}/api/agent-identities`), "identity self-mint present");
   assert.ok(actionUrls.includes(`${ROOM_ORIGIN}/api/agent-rooms`), "agent room create present");
   assert.ok(actionUrls.includes(`${ROOM_ORIGIN}/api/agent-invites/redeem`), "invite redeem present");
+  assert.ok(actionUrls.includes(`${ROOM_ORIGIN}/api/rooms/{roomId}/agent-invites`), "agent invite mint present");
   assert.ok(actionUrls.some(url => url.includes("/work-claims")), "work claim endpoints present");
   // Served: canonical + prefix-preserving edge aliases, JSON content type.
   assert.equal(AGENTS_JSON_PATH, "/agents.json");

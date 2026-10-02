@@ -537,9 +537,10 @@ test("trigger: assignment to an offline agent without push config POSTs nothing"
   assert.equal(transport.calls.length, 0, "no push config, no doorbell");
 });
 
-test("agent card advertises pushNotifications capability", () => {
+test("agent card does not advertise A2A pushNotifications", () => {
   const card = agentCard();
-  assert.equal(card.capabilities.pushNotifications, true);
+  assert.equal(card.capabilities.pushNotifications, false);
+  assert.equal(card.capabilities.webhooks, true);
 });
 
 test("pushNotify on an unknown identity never throws", async t => {
