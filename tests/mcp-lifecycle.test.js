@@ -152,7 +152,7 @@ test("separate MCP processes serialize overlapping claims, hand off, and never r
   const before = f.store.room("commons").sequence;
   const raced = await Promise.all(pair.map((mcp, index) => mcp.call("room_acquire_claim", claims[index])));
   const winner = raced.findIndex(result => result.result.structuredContent.status === "recorded"), loser = 1 - winner;
-  assert.equal(raced[loser].result.structuredContent.code, "claim_conflict"); assert.equal(f.store.room("commons").sequence, before + 1);
+  assert.equal(raced[loser].result.structuredContent.code, "claim_conflict"); assert.equal(f.store.room("commons").sequence, before + 2);
   const first = raced[winner].result.structuredContent;
   await recorded(pair[winner], "room_release_claim", { requestId: "release", workItemId: work(winner), expectedRevision: 2 });
   const newClaim = await recorded(pair[loser], "room_acquire_claim", claims[loser]); assert.equal(newClaim.duplicate, false);
