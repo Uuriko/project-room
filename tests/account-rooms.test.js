@@ -59,7 +59,7 @@ test("an account creates a room over HTTP with CSRF, opens it through the same s
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
     f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
   f.store.command(f.keys.owner, "commons", { id: crypto.randomUUID(), type: "member.added",
-    data: { memberId: "admin", displayName: "Ada", kind: "human", permissions: ["manage_members"] } });
+    data: { memberId: "admin", displayName: "Avery", kind: "human", permissions: ["manage_members"] } });
   f.store.createAccount("admin-account"); f.store.bindHumanAccount("commons", "admin", "admin-account");
   const key = f.store.issueAccountAccessKey("admin-account"), slot = f.store.createAccountSessionSlot(), session = f.store.loginAccountSession(slot.token, key, 0);
   const origin = "http://127.0.0.1:" + server.address().port;

@@ -224,7 +224,7 @@ test("account rooms: discovery carries kind and archive state; creation is bound
     const session = f.store.loginAccountSession(slot.token, key, 0);
     return { token: slot.token, binding: session.sessionBinding };
   };
-  f.store.command(f.keys.owner, "commons", { id: randomUUID(), type: T.MEMBER_ADDED, data: { memberId: "admin", displayName: "Ada", kind: "human", permissions: ["manage_members"] } });
+  f.store.command(f.keys.owner, "commons", { id: randomUUID(), type: T.MEMBER_ADDED, data: { memberId: "admin", displayName: "Avery", kind: "human", permissions: ["manage_members"] } });
   f.store.createAccount("admin-account"); f.store.bindHumanAccount("commons", "admin", "admin-account");
   const admin = login("admin-account"), guest = login(f.store.accountForMember("commons", "guest").id), ownerKey = login(f.store.accountForMember("commons", "owner").id);
   const request = (overrides = {}) => ({ roomId: "room-a", title: "Alpha", purpose: "Plan the pilot", kind: "organization", displayName: "Admin", ...overrides });
@@ -265,7 +265,7 @@ test("account rooms: discovery carries kind and archive state; creation is bound
 test("account rooms: the membership cap bounds creation", t => {
   const f = createAcceptanceFixture();
   t.after(() => { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
-  f.store.command(f.keys.owner, "commons", { id: randomUUID(), type: T.MEMBER_ADDED, data: { memberId: "admin", displayName: "Ada", kind: "human", permissions: ["manage_members"] } });
+  f.store.command(f.keys.owner, "commons", { id: randomUUID(), type: T.MEMBER_ADDED, data: { memberId: "admin", displayName: "Avery", kind: "human", permissions: ["manage_members"] } });
   f.store.createAccount("busy-account"); f.store.bindHumanAccount("commons", "admin", "busy-account");
   for (let i = 1; i < 100; i++) { const id = "room-" + String(i).padStart(3, "0"); f.store.initialize(initialRoom(id)); f.store.bindHumanAccount(id, "owner", "busy-account"); }
   const key = f.store.issueAccountAccessKey("busy-account"), slot = f.store.createAccountSessionSlot(), session = f.store.loginAccountSession(slot.token, key, 0);

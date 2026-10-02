@@ -196,6 +196,39 @@ export function verifyIdentityMintProof(displayName, proof, now = Date.now(), bi
   return false;
 }
 
+// One limiter for anonymous identity mints. POST /api/agent-identities and
+// /api/identity-create keep code rate_limited. A referral redeem that mints
+// a new identity passes identity_mint_limited. Proof failures stay 428
+// proof_required on every caller.
+export function enforceAnonymousMintLimits(identities, { name, buckets, proof, requireProof, now, limitCode = "rate_limited" }) {
+  const db = identities.db;
+  const dayStart = now - IDENTITY_MINT_WINDOW_MS;
+  const addressDay = db.prepare(
+    "SELECT count(*) AS n FROM agent_identities WHERE mint_address=? AND created_at>=?"
+  ).get(buckets.address, dayStart).n;
+  const presented = typeof proof === "string" && proof.length > 0;
+  if (presented && !verifyIdentityMintProof(name, proof, now, identities.powBits)) {
+    fail(428, "proof_required", "Identity mint proof required", null, identities.proofDetail(name, now));
+  }
+  if (!presented && requireProof && addressDay >= identities.proofFreePerAddress) {
+    fail(428, "proof_required", "Identity mint proof required", null, identities.proofDetail(name, now));
+  }
+  const addressMinute = db.prepare(
+    "SELECT count(*) AS n FROM agent_identities WHERE mint_address=? AND created_at>=?"
+  ).get(buckets.address, now - MINT_MINUTE_MS).n;
+  const limited = (message, retryAfter) => fail(429, limitCode, message, { "Retry-After": String(retryAfter) });
+  if (addressMinute >= identities.addressMinuteLimit) limited("Too many identity mints from this address", 60);
+  if (addressDay >= identities.addressDailyLimit) limited("Identity mint address budget reached", 3600);
+  const networkDay = db.prepare(
+    "SELECT count(*) AS n FROM agent_identities WHERE mint_network=? AND created_at>=?"
+  ).get(buckets.network, dayStart).n;
+  if (networkDay >= identities.networkDailyLimit) limited("Identity mint network budget reached", 3600);
+  const globalDay = db.prepare(
+    "SELECT count(*) AS n FROM agent_identities WHERE mint_address IS NOT NULL AND created_at>=?"
+  ).get(dayStart).n;
+  if (globalDay >= identities.anonymousDailyLimit) limited("Identity mint daily budget reached", 3600);
+}
+
 export function solveIdentityMintProof(displayName, now = Date.now(), bits = IDENTITY_POW_BITS) {
   const name = typeof displayName === "string" ? displayName.trim() : "";
   const bucket = Math.floor(now / IDENTITY_POW_WINDOW_MS);
@@ -323,7 +356,7 @@ export class AgentIdentities {
       let mintNetwork = null;
       if (anonymous && typeof anonymous === "object") {
         const buckets = anonymousMintBuckets(anonymous.address);
-        this.admitAnonymous(name, buckets, anonymous.proof, anonymous.requireProof !== false, now);
+        this.admitAnonymous(name, buckets, anonymous.proof, anonymous.requireProof !== false, now, anonymous.limitCode);
         activatedAt = null;
         mintAddress = buckets.address;
         mintNetwork = buckets.network;
@@ -374,39 +407,8 @@ export class AgentIdentities {
     };
   }
 
-  admitAnonymous(name, buckets, proof, requireProof, now) {
-    const dayStart = now - IDENTITY_MINT_WINDOW_MS;
-    const addressDay = this.db.prepare(
-      "SELECT count(*) AS n FROM agent_identities WHERE mint_address=? AND created_at>=?"
-    ).get(buckets.address, dayStart).n;
-    const presented = typeof proof === "string" && proof.length > 0;
-    if (presented && !verifyIdentityMintProof(name, proof, now, this.powBits)) {
-      fail(428, "proof_required", "Identity mint proof required", null, this.proofDetail(name, now));
-    }
-    if (!presented && requireProof && addressDay >= this.proofFreePerAddress) {
-      fail(428, "proof_required", "Identity mint proof required", null, this.proofDetail(name, now));
-    }
-    const addressMinute = this.db.prepare(
-      "SELECT count(*) AS n FROM agent_identities WHERE mint_address=? AND created_at>=?"
-    ).get(buckets.address, now - MINT_MINUTE_MS).n;
-    if (addressMinute >= this.addressMinuteLimit) {
-      fail(429, "rate_limited", "Too many identity mints from this address", { "Retry-After": "60" });
-    }
-    if (addressDay >= this.addressDailyLimit) {
-      fail(429, "rate_limited", "Identity mint address budget reached", { "Retry-After": "3600" });
-    }
-    const networkDay = this.db.prepare(
-      "SELECT count(*) AS n FROM agent_identities WHERE mint_network=? AND created_at>=?"
-    ).get(buckets.network, dayStart).n;
-    if (networkDay >= this.networkDailyLimit) {
-      fail(429, "rate_limited", "Identity mint network budget reached", { "Retry-After": "3600" });
-    }
-    const globalDay = this.db.prepare(
-      "SELECT count(*) AS n FROM agent_identities WHERE mint_address IS NOT NULL AND created_at>=?"
-    ).get(dayStart).n;
-    if (globalDay >= this.anonymousDailyLimit) {
-      fail(429, "rate_limited", "Identity mint daily budget reached", { "Retry-After": "3600" });
-    }
+  admitAnonymous(name, buckets, proof, requireProof, now, limitCode = "rate_limited") {
+    enforceAnonymousMintLimits(this, { name, buckets, proof, requireProof, now, limitCode });
   }
 
   // Keep an anonymous row that still holds a room membership, an invite, or

@@ -4,6 +4,8 @@ import {
   parseJoinCode,
   serviceApiBase,
   roomEntryHref,
+  sameOriginRelativeNext,
+  joinNextHref,
   permissionLabel,
   formatInviteExpiry,
   joinErrorMessage,
@@ -38,6 +40,18 @@ test("room entry href preserves the www door", () => {
     roomEntryHref("room-1", { origin: "https://room.example", pathname: "/join/RM-X" }),
     "https://room.example/#room/room-1"
   );
+});
+
+test("join next follows one same-origin relative path", () => {
+  const here = { origin: "https://room.example", pathname: "/join/RM-X", search: "" };
+  assert.equal(sameOriginRelativeNext("/offers", here), "/offers");
+  assert.equal(sameOriginRelativeNext("/#room/commons?tab=1", here), "/#room/commons?tab=1");
+  assert.equal(sameOriginRelativeNext("//evil.example", here), null);
+  assert.equal(sameOriginRelativeNext("https://evil.example/phish", here), null);
+  assert.equal(sameOriginRelativeNext("/\\evil.example", here), null);
+  assert.equal(sameOriginRelativeNext("/ok\nSet-Cookie", here), null);
+  assert.equal(joinNextHref("commons", { ...here, search: "?next=https://evil.example" }), "https://room.example/#room/commons");
+  assert.equal(joinNextHref("commons", { ...here, search: "?next=/#room/commons" }), "/#room/commons");
 });
 
 test("permission labels are human-readable", () => {
