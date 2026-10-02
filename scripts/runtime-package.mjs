@@ -46,8 +46,6 @@ const required = [...v8Assets, "server.mjs", "package.json", "package-lock.json"
 const optional = ["server/diagnostics.mjs", "server/maintenance.mjs", "server/recovery.mjs", "client/agent-connection.mjs", "server/agent-connections.mjs", "src/agent-connections.js", "src/agent-error.mjs", "client/mcp-stdio.mjs", "client/work-preparation.mjs", "scripts/agent-mcp.mjs", "client/work-actions.mjs", "server/work-discussion.mjs", "server/text-results.mjs", "client/attention-inbox.mjs"];
 optional.push("server/public-work-claims.mjs", "server/public-work-claim-fence.mjs", "client/public-work-claims.mjs");
 optional.push("server/public-work-reviews.mjs", "server/mcp-public-work.mjs", "server/public-work-successors.mjs");
-optional.push("server/mcp-install-script.mjs", "server/usdc-x402.mjs", "server/x402.mjs", "server/usdc-payouts.mjs");
-optional.push("server/receipt-payout.mjs"); // Jill 2026-09-30: receipt → x402 instruction consumer + owner release queue (pure, imports usdc-x402.mjs)
 optional.push("src/audit-receipts.mjs", "src/outside-agents.mjs", "server/outside-agents.mjs", "scripts/outside-agents.mjs");
 optional.push("src/room-charter.js", "src/room-instructions.js");
 optional.push("src/reply-requests.js", "server/reply-requests.mjs");
@@ -96,7 +94,6 @@ optional.push("server/quarantine-review-coverage.mjs"); // per-signal review-cov
 // collapse/expand UI slice.
 optional.push("server/inbox-outbox.mjs", "server/inbox-transport.mjs", "server/version.mjs");
 optional.push("server/jev-admission.mjs"); // Jev-harness admission gate (imported by server/http.mjs; pure, no imports of its own)
-optional.push("server/capability-registry.mjs"); // Integration slice #11: typed capability registry (library module, not yet imported by a route; pure, no imports of its own)
 optional.push("server/jev-receipts.mjs"); // Jev-harness receipt gate (imported by server/work-claim-routes.mjs; pure, no imports of its own)
 optional.push("server/jev-shadow-journal.mjs"); // Jev shadow-decision journal (imported by server/store.mjs; imports ServiceError from server/service-error.mjs)
 optional.push("server/service-error.mjs"); // shared ServiceError (imported by server/store.mjs — re-exported — and server/jev-shadow-journal.mjs; pure, no imports of its own)
@@ -147,7 +144,6 @@ optional.push("src/work-recipes.js");
 optional.push("src/chat-suggestions.js"); // one-tap replies and task nudge above the composer (imported by src/app.js)
 optional.push("server/action-classes.mjs");
 optional.push("server/room-lifecycle.mjs");
-optional.push("server/room-norms.mjs"); // RC-2026-09-18-043: coordination norms defaults (pure; consumed by the activation-pack route)
 optional.push("server/attachment-schema.mjs");
 optional.push("server/room-attachment-bytes.mjs"); // room_attachments byte store (imported by server/store.mjs and server/http.mjs)
 optional.push("server/inbox-attachment-bytes.mjs"); // identity inbox attachment bytes (imported by server/store.mjs)
@@ -160,7 +156,7 @@ optional.push("server/attention.mjs");
 optional.push("server/owner-attention.mjs"); // #662: owner "needs your attention" rollup (imported by server/http.mjs)
 optional.push("server/mention-lifecycle.mjs"); // #658: mention lifecycle state machine + schema (imported by server/store.mjs)
 optional.push("server/moderation.mjs");
-optional.push("server/channel-connection.mjs", "server/channel-import.mjs", "server/channel-adapters/index.mjs", "server/channel-adapters/email.mjs", "server/channel-adapters/telegram.mjs", "server/channel-adapters/telegram-rotation.mjs", "server/channel-adapters/gmail.mjs", "server/channel-adapters/whatsapp.mjs", "server/channel-adapters/sms.mjs", "server/channel-adapters/messenger.mjs", "server/sms-ingest.mjs", "server/messenger-ingest.mjs", "server/sms-outbound.mjs", "server/messenger-outbound.mjs");
+optional.push("server/channel-connection.mjs", "server/channel-import.mjs", "server/channel-adapters/index.mjs", "server/channel-adapters/email.mjs", "server/channel-adapters/telegram.mjs", "server/channel-adapters/telegram-rotation.mjs", "server/channel-adapters/gmail.mjs", "server/channel-adapters/whatsapp.mjs", "server/channel-adapters/sms.mjs", "server/channel-adapters/messenger.mjs");
 optional.push("server/mime-message.mjs", "server/email-routing-inbound.mjs", "server/channel-journal.mjs");
 optional.push("server/channel-live-status.mjs"); // Task 10: durable Telegram live-delivery/send facts (imported by server/store.mjs)
 optional.push("server/delivery-tracing.mjs"); // R1: opt-in OTel delivery-path tracing (pure, no store.mjs imports)
@@ -169,13 +165,8 @@ optional.push("server/token-bucket.mjs"); // token-bucket limiter (imported by s
 optional.push("server/spam-quarantine-journal.mjs"); // Durable spam-guard quarantine journal (imported by server/store.mjs)
 optional.push("server/channel-drain.mjs"); // Task 9: scheduled drain of pending_channel_updates (imported by server.mjs)
 optional.push("server/sla-clocks.mjs"); // Task 24: per-channel SLA clocks (imported by server/inbox.mjs)
-optional.push("server/sla-urgent-notify.mjs"); // Tasks 24/34/35: SLA-breach urgent-notification producer (feed into decideNotification)
-optional.push("server/sla-sweep.mjs"); // Task 26: SLA sweep/scheduler feeding live threads into the breach producer
-optional.push("server/sla-sweep-hooks.mjs"); // Task 26: real readThreads/deliver hook wiring for the SLA sweep
 optional.push("server/sla-breach-journal.mjs"); // Task 26: durable in-app sink for SLA-breach deliver (imported by server/store.mjs)
 optional.push("server/sla-dashboard.mjs"); // Task 26: SLA dashboard aggregator (imported by server/inbox.mjs)
-optional.push("server/morning-digest.mjs"); // Task 21: morning digest builder (imported by server/inbox.mjs)
-optional.push("server/digest-mode.mjs"); // Task 21: sender grouping reused by server/morning-digest.mjs
 optional.push("server/inbox-triage.mjs"); // Task 21: triage decider reused by server/morning-digest.mjs
 optional.push("server/inbox-handoff.mjs"); // Task 23: agent handoff protocol (imported by server/inbox.mjs and server/store.mjs)
 optional.push("server/handoff-case.mjs"); // CASE handoff contract (imported by server/inbox-handoff.mjs; pure, imports ServiceError from store.mjs)
@@ -200,8 +191,6 @@ optional.push("server/work-claim-events.mjs"); // work_claim.updated receipts (i
 optional.push("server/claim-coordination.mjs"); // exclusive file leases, ready queue, pull-request outcomes (imported by server/work-claims.mjs and server/work-claim-routes.mjs)
 optional.push("server/claim-pr-sync.mjs"); // poll linked pull requests onto claims (imported by server/work-claim-routes.mjs and cloudflare/room.mjs)
 optional.push("server/mention-receipts.mjs"); // sender-facing mention delivery and read/ack receipts (imported by server/http.mjs)
-optional.push("server/public-claims.mjs"); // Jill 2026-09-30: public claim registry with Ed25519 receipts (imported by server/public-claim-routes.mjs; pure, node:crypto only)
-optional.push("server/public-claim-routes.mjs"); // Jill 2026-09-30: public claim HTTP routes — the ONE public verb (imported by server/http.mjs)
 optional.push("server/feedback-store.mjs"); // RC-2026-09-27-2745: pure /feedback state machine + Mark-staked triage economy (imported by server/feedback-routes.mjs; imports ./feedback-scrub.mjs)
 optional.push("server/feedback-scrub.mjs"); // RC-2026-09-27-2745: secret scrubbing at feedback intake (imported by server/feedback-store.mjs; pure, no imports)
 optional.push("server/feedback-routes.mjs"); // RC-2026-09-27-2745: /feedback HTTP routes (imported by server/http.mjs)
@@ -232,7 +221,6 @@ optional.push("server/room-key-presence.mjs"); // Scoped pull-only room credenti
 optional.push("server/agent-heartbeats.mjs"); // RC-2026-09-18-051: wakeable agent presence (imported by server/store.mjs; imports outbound-webhooks.mjs)
 optional.push("server/work-wakes.mjs"); // Opt-in pointer-only work delivery on heartbeat reads (imported by server/store.mjs; pure work-pointer journal)
 optional.push("server/members-directory.mjs"); // RC-2026-09-24-202: members directory + skill cards (imported by server/store.mjs)
-optional.push("server/mentions.mjs"); // RC-2026-09-18-051: mention parser (imported by server/store.mjs for wake-on-mention; pure, no imports)
 optional.push("server/gmail-content.mjs","server/gmail-import-authority.mjs","server/gmail-sync.mjs","server/vendor/gmail-html-sanitizer.mjs","server/vendor/gmail-html-LICENSES.txt", "server/gmail-mailbox.mjs", "server/gmail-actions.mjs", "src/account-setup-ui.js", "src/gmail-ui.js");
 optional.push("server/retention-run.mjs"); // dry-run retention caller (imported by cloudflare/room.mjs)
 optional.push("cloudflare/job-heartbeat.mjs"); // per-job cron heartbeat (imported by cloudflare/room.mjs)
@@ -288,7 +276,6 @@ optional.push("server/spend-allowance.mjs");
 optional.push("server/autonomy-tiers.mjs"); // Graduated autonomy tiers (imported by server/store.mjs and server/http.mjs)
 optional.push("server/grants.mjs"); // UFO-steal slice 1 (RC-2026-09-27-2728): per-agent capability grant edges (imported by server/store.mjs and server/http.mjs)
 optional.push("server/next-actions.mjs", "server/next-actions-routes.mjs"); // RC-2026-09-25-911: ranked per-agent next actions (pure builder + HTTP routes; imported by server/store.mjs and server/http.mjs)
-optional.push("server/job-bot.mjs"); // RC-2026-09-27-1149: fixtures-only room job bot (not wired into http.mjs yet; standalone module + tests)
 optional.push("server/capability-visibility.mjs"); // RC-2026-09-27-2731: withhold-never-refused catalog predicate (imported by server/mcp-discovery.mjs and server/mcp-room-profile.mjs)
 optional.push("src/growth-emit.js", "src/growth-events.js", "src/growth-collector.js", "src/growth-mentions.js", "src/growth-fanout.js", "src/growth-persistence.js", "src/growth-summary.js", "src/growth-compare.js", "src/growth-alerts.js", "src/growth-watch.js", "src/growth-scheduler.js", "src/growth-http.js", "src/growth-digest.js");
 // Preserve redistribution terms; historical commits predate these documents.

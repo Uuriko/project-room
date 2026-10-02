@@ -241,6 +241,10 @@ export function serveRoomMcp({ client, roomId, memberId, input, output, timeoutM
           value = await Promise.race([call,
             new Promise((_, reject) => controller.signal.addEventListener("abort", () => reject(controller.signal.reason), { once: true }))]);
           isError = value.status === "unconfirmed";
+          // A recorded reply is the only evidence the later wake ack can cite.
+          if (!isError && value?.status === "recorded" && (selected.name === "room_respond_to_request" || selected.name === "room_reply")) {
+            channel?.noteRecordedReply?.(args);
+          }
         }
         catch (cause) {
           value = connectionDiagnostic(cause); isError = true;

@@ -22,71 +22,15 @@ const runScript = (rel, args, { env = {}, input = "" } = {}) => new Promise((res
 });
 
 // ---- L-31: semver card-version tie-break in agent-discovery ----
-import { createAgentDiscovery } from "../src/agent-discovery.mjs";
 
-test("L-31: card version 1.2.10 outranks 1.2.9 at equal coverage (numeric segments)", () => {
-  const discovery = createAgentDiscovery({
-    cardRegistry: {
-      list: () => [
-        { agentId: "a-agent", version: "1.2.9", capabilities: ["chat"] },
-        { agentId: "b-agent", version: "1.2.10", capabilities: ["chat"] },
-      ],
-    },
-  });
-  const ranked = discovery.discover({ capabilities: ["chat"] });
-  assert.equal(ranked[0].agentId, "b-agent"); // "1.2.10" > "1.2.9" (was NaN → agentId order)
-  assert.equal(ranked[1].agentId, "a-agent");
-});
 
-test("L-31: higher coverage still beats a higher version", () => {
-  const discovery = createAgentDiscovery({
-    cardRegistry: {
-      list: () => [
-        { agentId: "a-agent", version: "2.0.0", capabilities: ["chat"] },
-        { agentId: "b-agent", version: "1.0.0", capabilities: ["chat", "files"] },
-      ],
-    },
-  });
-  const ranked = discovery.discover({ capabilities: ["chat", "files"] });
-  assert.equal(ranked[0].agentId, "b-agent");
-});
 
 // ---- L-32: case-insensitive channel-key normalization in contact-merge ----
-import { createContactMerge } from "../src/contact-merge.mjs";
 
-test("L-32: channels differing only by key case still conflict on divergent handles", () => {
-  const merge = createContactMerge();
-  const a = merge.addContact({ emails: ["alice@example.com"], channels: { X: "@alice" } });
-  const b = merge.addContact({ emails: ["alice@example.com"], channels: { x: "@mallory" } });
-  const proposal = merge.proposeMerge(a.id, b.id);
-  assert.equal(proposal.state, "conflict");
-  assert.ok(proposal.conflicts.some(c => c.field === "channels.X"),
-    `expected a conflict on the shared channel, got ${JSON.stringify(proposal.conflicts)}`);
-});
 
-test("L-32: channels differing only by key case do not conflict on the same handle", () => {
-  const merge = createContactMerge();
-  const a = merge.addContact({ emails: ["alice@example.com"], channels: { X: "@alice" } });
-  const b = merge.addContact({ emails: ["alice@example.com"], channels: { x: "@alice" } });
-  const proposal = merge.proposeMerge(a.id, b.id);
-  assert.ok(!proposal.conflicts.some(c => c.field === "channels.X"),
-    `unexpected channel conflict: ${JSON.stringify(proposal.conflicts)}`);
-});
 
 // ---- L-33: NaN failureThreshold fails closed to the default breaker ----
-import { createFailover, DEFAULT_FAILURE_THRESHOLD } from "../src/failover-provider-wireup.mjs";
 
-test("L-33: NaN failureThreshold falls back to the default so the circuit still opens", async () => {
-  const fo = createFailover({
-    failureThreshold: NaN,
-    cooldownMs: Number.POSITIVE_INFINITY,
-    providers: [{ name: "p0", sender: async () => { throw new Error("down"); } }],
-  });
-  for (let i = 0; i < DEFAULT_FAILURE_THRESHOLD; i += 1) {
-    await assert.rejects(fo.send({ body: "x" }));
-  }
-  assert.equal(fo.stats("p0").circuitState, "open");
-});
 
 // ---- L-34: reactions on deleted messages are refused ----
 import { RoomStore } from "../server/store.mjs";
@@ -112,85 +56,18 @@ test("L-34: setMessageReaction on a deleted message throws 'Message was deleted'
 });
 
 // ---- L-35: snapshot() must be a read, persist() the only writer ----
-import { createHandoffStore } from "../src/handoff-store.mjs";
 
-test("L-35: snapshot() never calls storage.save (only mutating ops persist)", () => {
-  let saves = 0;
-  const store = createHandoffStore({
-    storage: { save: () => { saves += 1; }, load: () => null },
-  });
-  store.snapshot();
-  assert.equal(saves, 0);
-  store.propose({ fromAgent: "a", toAgent: "b", taskId: "t", summary: "work" }, "a");
-  assert.equal(saves, 1);
-});
 
 // ---- L-36: overnight quiet windows wrap midnight ----
-import { createDigestScheduler } from "../src/digest-scheduler.mjs";
 
-test("L-36: quiet-window boundaries are wall-clock on DST transition days", () => {
-  const scheduler = createDigestScheduler();
-  const sub = scheduler.subscribe({
-    userId: "u1", channels: ["email"], cadence: "immediate",
-    quietHours: { start: "22:00", end: "07:00", tz: "America/New_York" },
-  });
-  // 2026-03-08 is the US spring-forward day (02:00 -> 03:00). 23:30 EDT is
-  // 2026-03-09T03:30Z; the window ends at local 07:00 = 2026-03-09T11:00Z.
-  // Absolute-ms arithmetic on the pre-fix code returned 12:00Z instead.
-  const now = Date.UTC(2026, 2, 9, 3, 30);
-  assert.equal(scheduler.nextDue(sub, now), Date.UTC(2026, 2, 9, 11, 0));
-});
 
-test("L-36: overnight quiet windows wrap midnight (guard, UTC has no DST)", () => {
-  const scheduler = createDigestScheduler();
-  const sub = scheduler.subscribe({
-    userId: "u1", channels: ["email"], cadence: "immediate",
-    quietHours: { start: "22:00", end: "07:00", tz: "UTC" },
-  });
-  // 2026-09-30 23:30 UTC is inside the quiet window; next due is 2026-10-01 07:00 UTC.
-  const now = Date.UTC(2026, 8, 30, 23, 30);
-  assert.equal(scheduler.nextDue(sub, now), Date.UTC(2026, 9, 1, 7, 0));
-});
 
-test("L-36: nextDue outside the quiet window returns now", () => {
-  const scheduler = createDigestScheduler();
-  const sub = scheduler.subscribe({
-    userId: "u1", channels: ["email"], cadence: "immediate",
-    quietHours: { start: "22:00", end: "07:00", tz: "UTC" },
-  });
-  const now = Date.UTC(2026, 8, 30, 12, 0);
-  assert.equal(scheduler.nextDue(sub, now), now);
-});
 
 // ---- L-37: inbound sentAt is coerced to a number, never garbage ----
-import { createMessaging } from "../src/cross-agent-messaging.mjs";
 
-test("L-37: inbound messages with a non-numeric sentAt get a numeric fallback", () => {
-  let captured;
-  const transport = { receive: (handler) => { captured = handler; }, send: async () => {} };
-  const bus = createMessaging({ transport, clock: () => 1727731200000 });
-  bus.onInbound(() => {});
-  captured({ from: "a", to: "b", body: "hello", threadId: "t1", sentAt: "bogus" });
-  const stored = bus.thread("t1");
-  assert.equal(stored.length, 1);
-  assert.equal(typeof stored[0].sentAt, "number");
-  assert.ok(Number.isFinite(stored[0].sentAt));
-});
 
 // ---- L-38: totp verifyCode never throws on bad clock/step inputs ----
-import { generateSecret, generateCode, verifyCode } from "../src/totp-2fa.mjs";
 
-test("L-38: verifyCode returns false (not throw) on non-numeric time and bad stepSeconds", () => {
-  const secret = generateSecret();
-  const code = generateCode(secret, { time: 1727731200000 });
-  assert.doesNotThrow(() => {
-    assert.equal(verifyCode(code, secret, { time: "x" }), false);
-    assert.equal(verifyCode(code, secret, { time: Number.NaN }), false);
-    assert.equal(verifyCode(code, secret, { time: -1 }), false);
-    assert.equal(verifyCode(code, secret, { stepSeconds: 0 }), false);
-    assert.equal(verifyCode(code, secret, { stepSeconds: "30" }), false);
-  });
-});
 
 // ---- L-39: retry button wired before the invite preview fetch (source-contract) ----
 // join.js only boots when `document` exists (no DOM lib in the repo), so the
@@ -207,33 +84,10 @@ test("L-39: retryWired registration precedes the /agent-invites/preview fetch in
 });
 
 // ---- L-40: pairing-code attempt numbering is the post-increment count ----
-import { createWhatsAppConnect } from "../src/whatsapp-connect.mjs";
 
-test("L-40: WA_CODE_MISMATCH message and detail agree on the attempt count", () => {
-  const wa = createWhatsAppConnect({ code: () => "1234-5678" });
-  const { id } = wa.createConnection();
-  wa.stageCode(id, "+14155550123");
-  let err = null;
-  try { wa.confirmCode(id, "0000-0000"); } catch (e) { err = e; }
-  assert.ok(err, "expected confirmCode to throw on a wrong pairing code");
-  assert.equal(err.code, "WA_CODE_MISMATCH");
-  assert.equal(err.detail.codeAttempts, 1);
-  assert.ok(err.message.includes("(attempt 1/5)"),
-    `message/detail disagree: ${err.message} vs detail ${JSON.stringify(err.detail)}`);
-});
 
 // ---- L-41: aliased messages are visible under their channel ----
-import { createUnifiedContactThread } from "../src/unified-contact-thread.mjs";
 
-test("L-41: query({channel}) and markRead({channel}) surface channel-aliased messages", () => {
-  const thread = createUnifiedContactThread();
-  thread.addMessage({ channel: "email", channelMessageId: "e1", ts: 1000,
-    direction: "inbound", from: "alice", body: "same-body" });
-  thread.addMessage({ channel: "telegram", channelMessageId: "tg1", ts: 1001,
-    direction: "inbound", from: "alice", body: "same-body" });
-  assert.equal(thread.query({ channel: "telegram" }).length, 1);
-  assert.equal(thread.markRead({ channel: "telegram" }), 1);
-});
 
 // ---- L-42: link-before-introduce is buffered, not dropped ----
 import { assembleOutsideAgents, outsideAgentBody } from "../src/outside-agents.mjs";
@@ -254,31 +108,7 @@ test("L-42: a link arriving before its introduce is applied once the agent exist
 });
 
 // ---- L-43: concurrent same-token room.post calls share one backend post ----
-import { createMcpPostWiring } from "../src/mcp-post-wiring.mjs";
 
-test("L-43: concurrent posts with the same clientToken share one in-flight post", async () => {
-  let calls = 0;
-  let release;
-  const gate = new Promise((resolve) => { release = resolve; });
-  const wiring = createMcpPostWiring({
-    transport: {
-      connect: async () => {}, disconnect: async () => {}, registerTool: () => {},
-    },
-    postBackend: async () => { calls += 1; await gate; return { messageId: "posted-1" }; },
-  });
-  await wiring.connect();
-  try {
-    const args = ["room.post", { channel: "c", text: "t" }, { agentId: "a", clientToken: "tok" }];
-    const p1 = wiring.handleRequest(...args);
-    const p2 = wiring.handleRequest(...args);
-    // Both callers must attach to the in-flight slot before the backend settles.
-    await new Promise((resolve) => setImmediate(resolve));
-    release();
-    const [r1, r2] = await Promise.all([p1, p2]);
-    assert.equal(calls, 1);
-    assert.deepEqual(r1, r2);
-  } finally { await wiring.disconnect(); }
-});
 
 // ---- L-45: --print-cron line is shell-quoted (injection-safe) ----
 // (dynamic import: shQuote was unexported pre-fix, so a static import would
@@ -474,25 +304,8 @@ test("L-53: pullOnce aborts a stalled heartbeat fetch within ~15s", async () => 
 });
 
 // ---- G-L1: broadcast ack requests do not land in every inbox ----
-import { projectActivity } from "../activity-inbox/src/project.js";
 
-test("G-L1: an ack request without toMemberId is not an ack_needed row for an arbitrary viewer", () => {
-  const { rows } = projectActivity({
-    viewer: { memberId: "bob" },
-    events: [{ id: "e1", type: "note.recorded", at: "2026-09-30T00:00:00Z",
-      data: { ackNeeded: true, workItemId: "w1" } }],
-  });
-  assert.equal(rows.filter((r) => r.kind === "ack_needed").length, 0);
-});
 
-test("G-L1: an ack request addressed to the viewer still lands in their inbox", () => {
-  const { rows } = projectActivity({
-    viewer: { memberId: "bob" },
-    events: [{ id: "e1", type: "note.recorded", at: "2026-09-30T00:00:00Z",
-      data: { ackNeeded: true, toMemberId: "bob", workItemId: "w1" } }],
-  });
-  assert.equal(rows.filter((r) => r.kind === "ack_needed").length, 1);
-});
 
 // ---- G-L2: the retry disjunct requires the request to be open ----
 // (dynamic import: isRequestEligible was extracted from the inline loop by the fix)

@@ -97,6 +97,9 @@ test('real channel starts after initialization, delivers once, and requires expl
   assert.equal(f.store.agentHeartbeats.pendingWakes(f.agent.identityId).length, 2);
   const ack = await p.rpc('tools/call', { name: 'room_acknowledge_wake', arguments: { signalIds: [signal.signalId] } });
   assert.deepEqual(ack.result.structuredContent.acknowledged, [signal.signalId]);
+  assert.equal(ack.result.structuredContent.reachability.observed, false);
+  assert.equal(ack.result.structuredContent.reachability.basis, 'ack_without_linked_reply');
+  assert.equal(ack.result.structuredContent.reachability.uiBadge, 'room_ui_v2');
   assert.deepEqual(f.store.agentHeartbeats.pendingWakes(f.agent.identityId).map(row => row.signalId), [foreign.signalId]);
   assert.equal((await p.stop())[0], 0, 'shutdown cancels held fetch');
   const ordinary = peer(t, f, true), result = await ordinary.initialize();

@@ -3,8 +3,7 @@
 // because symlinks break on Windows checkouts. Contract guarded: the copies
 // match skills/ exactly, the manifest names line up, and the plugin MCP points
 // at the hosted Room MCP with an optional bearer.
-// If this fails after a skill edit, run:
-//   rm -rf plugins/project-room/skills && mkdir plugins/project-room/skills && cp -R skills/project-room skills/project-room-onboarding plugins/project-room/skills/
+// If this fails after a skill edit, run: node scripts/skills-sync.mjs
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync, statSync } from "node:fs";
@@ -30,9 +29,16 @@ test("plugin skill copies match skills/", () => {
 test("marketplace, plugin and MCP manifests line up", () => {
   const market = JSON.parse(readFileSync(join(root, ".claude-plugin", "marketplace.json"), "utf8"));
   const manifest = JSON.parse(readFileSync(join(plugin, ".claude-plugin", "plugin.json"), "utf8"));
-  const mcp = JSON.parse(readFileSync(join(plugin, ".mcp.json"), "utf8")).mcpServers["project-room"];
+  const servers = JSON.parse(readFileSync(join(plugin, ".mcp.json"), "utf8")).mcpServers;
+  const mcp = servers["project-room"];
+  const channel = servers["project-room-channel"];
   const entry = market.plugins.find(p => p.source === "./plugins/project-room");
   assert.equal(entry.name, manifest.name);
   assert.equal(mcp.url, "https://www.getdasha.com/room/mcp");
   assert.equal(mcp.headers.Authorization, "Bearer ${PROJECT_ROOM_SECRET:-}");
+  assert.equal(manifest.channels[0].server, "project-room-channel");
+  assert.equal(channel.env.ROOM_AGENT_CONFIG, "${user_config.room_agent_config}");
+  assert.equal(JSON.stringify(channel).includes("pri_"), false);
+  assert.equal(manifest.userConfig.room_agent_config.type, "directory");
+  assert.equal(manifest.userConfig.room_agent_config.sensitive, undefined);
 });
