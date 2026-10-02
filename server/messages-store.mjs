@@ -1,7 +1,9 @@
 // MSG-1: the messages table, double-written with the room event log.
-// Read paths still use the projection. This module only writes rows, in the
-// same transaction as the event insert. MSG-2 backfills events that landed
-// before the table existed.
+// Read paths still use the projection. The command path writes rows in the
+// same transaction as the event insert. MSG-2 replays events that landed
+// before the table, and events from importEvents and initialize, which still
+// do not double-write. The integrity cron runs that replay.
+import { applyEvent, emptyRoomState } from "../src/events.js";
 
 export const MESSAGE_ROW_TYPES = Object.freeze([
   "message.posted",
@@ -38,6 +40,27 @@ CREATE INDEX IF NOT EXISTS messages_room_channel_seq ON messages(room_id, channe
 CREATE INDEX IF NOT EXISTS messages_room_thread_seq ON messages(room_id, thread_root_id, seq);
 CREATE INDEX IF NOT EXISTS messages_room_dm_seq ON messages(room_id, to_member_id, seq);
 `;
+
+// One row per room the replay has touched. applied_seq is the last event
+// whose message rows are committed. state_json is the room state after that
+// event, so the next batch does not replay the prefix. The empty room_id row
+// is the parity sweep cursor, not a room. Written by the cron, not on open.
+export const MESSAGES_BACKFILL_CURSOR_SCHEMA = `
+CREATE TABLE IF NOT EXISTS messages_backfill_cursor (
+  room_id TEXT PRIMARY KEY,
+  applied_seq INTEGER NOT NULL,
+  applied_event_id TEXT NOT NULL DEFAULT '',
+  state_seq INTEGER NOT NULL DEFAULT 0,
+  state_json TEXT,
+  parity_at_seq INTEGER,
+  sweep_after TEXT NOT NULL DEFAULT ''
+);
+`;
+
+export const MESSAGES_BACKFILL_BATCH = 200;
+const BACKFILL_COMMIT = 25;
+const SWEEP_ID = "";
+const POSTED = "message.posted";
 
 // Same party rule as eventsAfter for message.posted: a row with to_member_id
 // is visible to its author and the addressed member. Everyone else sees only
@@ -145,4 +168,221 @@ export function syncMessageRows(db, { roomId, sequence, event, state }) {
     written += 1;
   }
   return written;
+}
+
+function compactState(state) {
+  return { ...state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
+}
+
+function readCursor(db, roomId) {
+  return db.prepare(`SELECT applied_seq, applied_event_id, state_seq, state_json
+    FROM messages_backfill_cursor WHERE room_id=?`).get(roomId) ?? null;
+}
+
+function cursorMatches(db, roomId, cursor, sequence) {
+  if (!cursor) return true;
+  if (!Number.isInteger(cursor.applied_seq) || cursor.applied_seq < 0 || cursor.applied_seq > sequence) return false;
+  if (cursor.applied_seq === 0) return cursor.applied_event_id === "";
+  const row = db.prepare("SELECT id FROM events WHERE room_id=? AND sequence=?").get(roomId, cursor.applied_seq);
+  return row?.id === cursor.applied_event_id;
+}
+
+function saveCursor(db, roomId, appliedSeq, eventId, state) {
+  db.prepare(`INSERT INTO messages_backfill_cursor
+      (room_id, applied_seq, applied_event_id, state_seq, state_json, parity_at_seq)
+    VALUES (?, ?, ?, ?, ?, NULL)
+    ON CONFLICT(room_id) DO UPDATE SET
+      applied_seq=excluded.applied_seq,
+      applied_event_id=excluded.applied_event_id,
+      state_seq=excluded.state_seq,
+      state_json=excluded.state_json,
+      parity_at_seq=NULL`).run(roomId, appliedSeq, eventId, appliedSeq, JSON.stringify(state));
+}
+
+function pruneMessages(db, roomId) {
+  db.prepare(`DELETE FROM messages WHERE room_id=? AND message_id NOT IN (
+    SELECT json_extract(value, '$.id') FROM rooms, json_each(rooms.projection, '$.messages') WHERE rooms.id=?
+  )`).run(roomId, roomId);
+}
+
+function resetRoom(store, roomId) {
+  store.transaction(() => {
+    store.db.prepare("DELETE FROM messages WHERE room_id=?").run(roomId);
+    store.db.prepare("DELETE FROM messages_backfill_cursor WHERE room_id=?").run(roomId);
+  });
+}
+
+function loadState(db, roomId, cursor) {
+  if (!cursor || cursor.applied_seq === 0) return { state: emptyRoomState(), seq: 0 };
+  const replayFrom = (start, state) => {
+    const rows = db.prepare("SELECT body FROM events WHERE room_id=? AND sequence>? AND sequence<=? ORDER BY sequence")
+      .all(roomId, start, cursor.applied_seq);
+    let current = state;
+    for (const row of rows) current = compactState(applyEvent(current, JSON.parse(row.body)));
+    return current;
+  };
+  if (typeof cursor.state_json === "string" && cursor.state_seq === cursor.applied_seq) {
+    try { return { state: JSON.parse(cursor.state_json), seq: cursor.applied_seq }; }
+    catch { /* a torn snapshot replays from the log */ }
+  }
+  if (typeof cursor.state_json === "string" && Number.isInteger(cursor.state_seq) && cursor.state_seq >= 0 && cursor.state_seq < cursor.applied_seq) {
+    try { return { state: replayFrom(cursor.state_seq, JSON.parse(cursor.state_json)), seq: cursor.applied_seq }; }
+    catch { /* fall through to a full replay */ }
+  }
+  return { state: replayFrom(0, emptyRoomState()), seq: cursor.applied_seq };
+}
+
+function nextRoom(db) {
+  return db.prepare(`SELECT r.id AS id, r.sequence AS sequence
+    FROM rooms r
+    LEFT JOIN messages_backfill_cursor c ON c.room_id = r.id
+    WHERE c.room_id IS NULL
+      OR c.applied_seq != r.sequence
+      OR (c.applied_seq > 0 AND NOT EXISTS (
+        SELECT 1 FROM events e
+        WHERE e.room_id = r.id AND e.sequence = c.applied_seq AND e.id = c.applied_event_id
+      ))
+    ORDER BY r.id
+    LIMIT 1`).get() ?? null;
+}
+
+function fillRoom(store, room, budget, expired, yieldBetween) {
+  let cursor = readCursor(store.db, room.id);
+  if (cursor && !cursorMatches(store.db, room.id, cursor, room.sequence)) {
+    resetRoom(store, room.id);
+    cursor = null;
+  }
+  let { state, seq } = loadState(store.db, room.id, cursor);
+  let events = 0;
+  while (events < budget) {
+    if (expired()) return { events, stopped: true, budgetExceeded: true, appliedSeq: seq };
+    const rows = store.db.prepare(`SELECT sequence, id, body FROM events
+      WHERE room_id=? AND sequence>? ORDER BY sequence LIMIT ?`)
+      .all(room.id, seq, Math.min(BACKFILL_COMMIT, budget - events));
+    if (!rows.length) {
+      const sequence = store.db.prepare("SELECT sequence FROM rooms WHERE id=?").get(room.id).sequence;
+      if (seq !== sequence) throw new Error(`messages backfill stopped at ${seq} before room ${room.id} reached sequence ${sequence}`);
+      // The last chunk already stored its event id. Saving here would replace
+      // that id with a blank one and the next pass would replay the room.
+      store.transaction(() => {
+        if (seq > 0) pruneMessages(store.db, room.id);
+        else saveCursor(store.db, room.id, 0, "", state);
+      });
+      return { events, stopped: false, budgetExceeded: false, appliedSeq: seq };
+    }
+    const outcome = store.transaction(() => {
+      let next = state;
+      let last = null;
+      for (const row of rows) {
+        const incoming = JSON.parse(row.body);
+        next = compactState(applyEvent(next, incoming));
+        syncMessageRows(store.db, { roomId: room.id, sequence: row.sequence, event: incoming, state: next });
+        last = row;
+      }
+      const sequence = store.db.prepare("SELECT sequence FROM rooms WHERE id=?").get(room.id).sequence;
+      if (last.sequence === sequence) pruneMessages(store.db, room.id);
+      saveCursor(store.db, room.id, last.sequence, last.id, next);
+      return { state: next, seq: last.sequence };
+    });
+    state = outcome.state;
+    seq = outcome.seq;
+    events += rows.length;
+    yieldBetween();
+  }
+  return { events, stopped: false, budgetExceeded: false, appliedSeq: seq };
+}
+
+// Replay message events into the messages table, one budgeted batch. A
+// commit lands every few events with the cursor, so a throw or a deadline
+// keeps the prefix and the next call continues there. Running it again
+// after the log is caught up writes nothing. A replaced log (importEvents)
+// drops that room's rows and starts again.
+export function runMessagesBackfill(store, { limit = MESSAGES_BACKFILL_BATCH, deadline = Infinity, yieldBetween = () => {} } = {}) {
+  if (store?.readOnly) throw new Error("Read-only stores do not backfill messages");
+  if (typeof yieldBetween !== "function") throw new TypeError("yieldBetween must be a function");
+  const cap = Number.isInteger(limit) && limit > 0 ? Math.min(limit, 1000) : MESSAGES_BACKFILL_BATCH;
+  if (Date.now() > deadline) return { done: false, events: 0, rooms: 0, budgetExceeded: true };
+  let events = 0;
+  let rooms = 0;
+  let roomId = null;
+  let appliedSeq = null;
+  const seen = new Set();
+  while (events < cap) {
+    if (Date.now() > deadline) return { done: false, events, rooms, budgetExceeded: true, roomId, appliedSeq };
+    const room = nextRoom(store.db);
+    if (!room) return { done: true, events, rooms, budgetExceeded: false, roomId, appliedSeq };
+    if (seen.has(room.id)) return { done: false, events, rooms, budgetExceeded: false, roomId, appliedSeq };
+    seen.add(room.id);
+    const wrote = fillRoom(store, room, cap - events, () => Date.now() > deadline, yieldBetween);
+    events += wrote.events;
+    rooms += 1;
+    roomId = room.id;
+    appliedSeq = wrote.appliedSeq;
+    if (wrote.stopped) return { done: false, events, rooms, budgetExceeded: true, roomId, appliedSeq };
+  }
+  return { done: nextRoom(store.db) == null, events, rooms, budgetExceeded: false, roomId, appliedSeq };
+}
+
+function caughtUpSql(after) {
+  return {
+    sql: `SELECT r.id AS id
+      FROM rooms r
+      JOIN messages_backfill_cursor c ON c.room_id = r.id
+      WHERE c.applied_seq = r.sequence
+        AND (
+          (c.applied_seq = 0 AND r.sequence = 0)
+          OR c.applied_event_id = (
+            SELECT e.id FROM events e WHERE e.room_id = r.id AND e.sequence = c.applied_seq
+          )
+        )
+        AND r.id > ?
+      ORDER BY r.id
+      LIMIT 1`,
+    after
+  };
+}
+
+function nextParityRoom(db, after) {
+  const query = caughtUpSql(after);
+  return db.prepare(query.sql).get(query.after)?.id
+    ?? db.prepare(caughtUpSql("").sql).get("")?.id
+    ?? null;
+}
+
+function parityNumbers(db, roomId) {
+  const projectionCount = db.prepare("SELECT COALESCE(json_array_length(projection, '$.messages'), 0) AS n FROM rooms WHERE id=?").get(roomId).n;
+  const table = db.prepare("SELECT COUNT(*) AS n, COALESCE(MAX(seq), 0) AS lastSeq FROM messages WHERE room_id=?").get(roomId);
+  const posted = db.prepare(`SELECT COALESCE(MAX(sequence), 0) AS lastSeq FROM events
+    WHERE room_id=? AND json_extract(body, '$.type')=?`).get(roomId, POSTED);
+  return {
+    projectionCount,
+    tableCount: table.n,
+    projectionLastSeq: posted.lastSeq,
+    tableLastSeq: table.lastSeq
+  };
+}
+
+function rememberSweep(store, roomId) {
+  store.transaction(() => {
+    store.db.prepare(`INSERT INTO messages_backfill_cursor (room_id, applied_seq, applied_event_id, sweep_after)
+      VALUES (?, 0, '', ?)
+      ON CONFLICT(room_id) DO UPDATE SET sweep_after=excluded.sweep_after`).run(SWEEP_ID, roomId);
+  });
+}
+
+// One caught-up room per call. Count is the projection message array.
+// Last seq is the highest message.posted sequence, which is the seq stored
+// on the newest row (edits keep the earlier seq). A room still being
+// replayed is left for a later call. A mismatch throws.
+export function checkMessagesParity(store) {
+  if (store?.readOnly) throw new Error("Read-only stores do not check message parity");
+  const sweepAfter = store.db.prepare("SELECT sweep_after FROM messages_backfill_cursor WHERE room_id=?").get(SWEEP_ID)?.sweep_after ?? "";
+  const roomId = nextParityRoom(store.db, sweepAfter);
+  if (!roomId) return { ok: true, checked: 0 };
+  const numbers = parityNumbers(store.db, roomId);
+  if (numbers.projectionCount !== numbers.tableCount || numbers.projectionLastSeq !== numbers.tableLastSeq) {
+    throw new Error(`messages parity failed for ${roomId}: projection count ${numbers.projectionCount}, table count ${numbers.tableCount}, projection last seq ${numbers.projectionLastSeq}, table last seq ${numbers.tableLastSeq}`);
+  }
+  rememberSweep(store, roomId);
+  return { ok: true, checked: 1, roomId, ...numbers };
 }

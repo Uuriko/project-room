@@ -18,7 +18,8 @@ const EMPTY_UNTIL_CRON = new Set([
   "integrity_job_cursor",
   "integrity_room_state",
   "public_rooms",
-  "public_read_model_backfill"
+  "public_read_model_backfill",
+  "messages_backfill_cursor"
 ]);
 
 const EVENTS = 200_000;
