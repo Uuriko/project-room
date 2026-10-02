@@ -31,7 +31,7 @@ test("server-issued guest credential is random, hashed, usable and not recoverab
   assert.equal(replay.replayed, true);
   assert.equal(Object.hasOwn(replay, "token"), false);
   assert.equal(replay.member.id, first.member.id);
-  const second = store.guestAgentLinks.mint(owner, "commons", details(randomUUID()));
+  const second = store.guestAgentLinks.mint(owner, "commons", { ...details(randomUUID()), displayName: "Caller" });
   assert.notEqual(second.token, first.token);
   assert.throws(() => store.guestAgentLinks.mint(owner, "commons", { ...details(requestId), displayName: "Changed" }), { code: "idempotency_conflict" });
 });

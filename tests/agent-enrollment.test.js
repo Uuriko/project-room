@@ -161,7 +161,7 @@ test("owner browser authorization, digest-only input and expiry are required; la
   assert.throws(() => f.apply({ ...f.request, token: f.key.token }), { code: "invalid_connection" });
   assert.throws(() => f.apply({ ...f.request, expiresAt: Date.now() + 31 * 86400000 }), { code: "invalid_expiry" });
   const skewed = f.apply({ ...f.request, requestId: randomUUID(), memberId: `agent-${randomUUID()}`,
-    keyHash: f.secret().keyHash, expiresAt: f.store.now() + 30 * 86400000 + 30_000 });
+    displayName: "Skewed assistant", keyHash: f.secret().keyHash, expiresAt: f.store.now() + 30 * 86400000 + 30_000 });
   assert.equal(skewed.connection.status, "key_issued");
   const result = f.apply(f.request); f.setNow(f.request.expiresAt + 1);
   const retry = f.apply(f.request); assert.deepEqual(retry.receipt, result.receipt); assert.equal(retry.connection.status, "expired");

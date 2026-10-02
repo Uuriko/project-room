@@ -44,7 +44,7 @@ const definitions = [
   ["record_verification", "Record evidence review", T.VERIFICATION_RECORDED, "Record your own check of the exact completion event and evidence version inspected. Requires designated verify authority; independent review cannot be by its producer. Historical findings do not approve newer evidence. Never substitute the latest receipt automatically.", {
     result: { type: "string", enum: ["pass", "fail"] }, completionEventId: id, evidenceVersion: text, summary: text, nextAction: text
   }, ["result", "completionEventId", "evidenceVersion", "summary"]],
-  ["acquire_claim", "Reserve work scope", T.CLAIM_ACQUIRED, "Reserve a declared repository/ref/path scope for your assigned write-mode task. Requires existing write_external authority, not granted by enrollment presets. Coordinates this room only; does not authorize external writes, resolve repository aliases or stop other processes.", {
+  ["acquire_claim", "Reserve work scope", T.CLAIM_ACQUIRED, "Reserve a declared repository/ref/path scope for your assigned write-mode task. Requires a contribute, review, or collaborate profile (or the room owner). write_external is not granted by the claim and is still required to finish write-mode work. Coordinates this room only; does not authorize external writes, resolve repository aliases or stop other processes.", {
     repository: text, ref: text, paths: { type: "array", minItems: 1, maxItems: 64, items: { ...text, maxLength: 512 } },
     expiresAt: { ...text, description: "Explicit ISO timestamp. The service checks that it is in the future; no automatic renewal." }
   }],
