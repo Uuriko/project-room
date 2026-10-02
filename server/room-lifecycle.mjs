@@ -17,6 +17,7 @@
 // This module owns the column and its data only — never PRAGMA user_version.
 import { EVENT_TYPES as T, PERMISSIONS, event, validId, ROOM_KINDS, roomKind, isRoomArchived } from "../src/events.js";
 import { ServiceError, provisionalAccountPrefix } from "./store.mjs";
+import { accountRoomCredits, GROWTH_ROOM_ORIGIN } from "./growth-loop.mjs";
 
 export const ROOM_LIFECYCLE_MIGRATION = 28; // informational: which chain step introduced rooms.archived_at
 // Bounded pilot: memberships per account, counted before a room is created.
@@ -107,19 +108,29 @@ export function createAccountRoom(store, token, binding, request) {
     // Zero memberships means a stranger's first room: always allowed, they
     // become its owner. An account that already belongs to rooms keeps the
     // administration requirement for additional rooms.
-    const administers = memberships.length === 0 || memberships.some(({ room_id }) => {
+    // A growth-funded room does not count as administering one: owning it
+    // must not unlock the ordinary 100-room allowance.
+    let foundedWithGrowth = false;
+    const naturallyAdministers = memberships.length === 0 || memberships.some(({ room_id }) => {
+      const origin = store.db.prepare("SELECT origin FROM member_accounts WHERE room_id=? AND account_id=?").get(room_id, accountId)?.origin;
+      if (origin === GROWTH_ROOM_ORIGIN) return false;
       let member;
       try { member = store.authenticateAccountSession(token, room_id, binding).member; }
       catch (error) { if (error.status === 403) return false; throw error; }
       return member.id === store.roomAuthority(room_id).ownerId || member.permissions.includes("manage_members");
     });
-    if (!administers) fail(403, "room_creation_denied", "Creating a room requires membership administration in one of your rooms");
+    if (!naturallyAdministers) {
+      const credits = accountRoomCredits(store, accountId);
+      const growthRooms = store.db.prepare("SELECT count(*) AS n FROM member_accounts WHERE account_id=? AND origin=?").get(accountId, GROWTH_ROOM_ORIGIN).n;
+      if (growthRooms >= credits.total) fail(403, "room_creation_denied", "Creating a room requires membership administration in one of your rooms");
+      foundedWithGrowth = true;
+    }
     const ownerId = "owner", at = new Date(store.now()).toISOString();
     store.initialize([
       event({ type: T.ROOM_CREATED, actorId: ownerId, roomId, at, data: { roomId, ownerId, title, purpose, kind } }),
       event({ type: T.MEMBER_ADDED, actorId: ownerId, roomId, at, data: { memberId: ownerId, displayName, kind: "human", permissions: [...PERMISSIONS] } })
     ]);
-    store.ensureHumanAccountBinding(roomId, ownerId, accountId, "account-room-create");
+    store.ensureHumanAccountBinding(roomId, ownerId, accountId, foundedWithGrowth ? GROWTH_ROOM_ORIGIN : "account-room-create");
     return view(ownerId, false);
   });
 }

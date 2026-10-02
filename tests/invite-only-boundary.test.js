@@ -288,7 +288,7 @@ test("capability previews never leak room content", async t => {
   const serialized = JSON.stringify(preview.json);
   assert.ok(!serialized.includes(secretBody), "preview must not contain message bodies");
   assert.ok(!serialized.includes(ownerKey), "preview must not contain credentials");
-  assert.deepEqual(Object.keys(preview.json).sort(), ["access", "identity", "link", "room"]);
+  assert.deepEqual(Object.keys(preview.json).sort(), ["access", "identity", "inviterDisplayName", "link", "room"]);
   assert.deepEqual(Object.keys(preview.json.room).sort(), ["id", "title"]);
 });
 
