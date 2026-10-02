@@ -17,6 +17,8 @@
 // (db handle, transactions, room state) and exports its schema for
 // store.mjs to apply. Local ServiceError avoids the store.mjs import cycle.
 
+import { isUnpublished } from "./legal-store.mjs";
+
 class ServiceError extends Error {
   constructor(status, code, message, headers = null) { super(message); this.status = status; this.code = code; this.headers = headers; }
 }
@@ -151,6 +153,7 @@ export class RoomDirectory {
     } catch {
       return null;
     }
+    if (isUnpublished(this.db, "room", roomId)) return null;
     const title = cleanText(state?.room?.title, MAX_TITLE_CHARS);
     if (!title) return null;
     const members = state?.members && typeof state.members === "object" ? state.members : {};

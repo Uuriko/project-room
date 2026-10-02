@@ -1521,3 +1521,5 @@ summary { overflow-wrap: anywhere; }
 .settings-form { display: grid; gap: var(--space-3); }
 .settings-identity { margin: 0; padding-left: 1.1rem; }
 #settings-dialog details > summary { min-height: 44px; cursor: pointer; }
+.site-footer { margin: 2rem 1rem 1rem; color: var(--muted); font-size: var(--text-sm); }
+.site-footer a { color: inherit; }

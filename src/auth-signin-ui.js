@@ -19,7 +19,7 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
   let emailMethod = "password", passwordMode = "login", passwordEmail = "";
   let magicPhase = "request", magicEmail = "", busy = false;
   let resetPhase = "request", resetEmail = "", resetCode = "";
-  let magicManualCode = false, pendingLink = null, statusText = "", statusError = false;
+  let magicManualCode = false, pendingLink = null, pendingTerms = null, statusText = "", statusError = false;
   const surface = () => container;
   const statusNode = () => surface()?.querySelector("[data-signin-status]") ?? null;
   function setStatus(text, error = false) {
@@ -57,13 +57,14 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
     return signed?.authenticated === true && typeof signed.account?.id === "string" && Boolean(signed.account.id.trim());
   });
   function currentView() {
+    if (pendingTerms) return "terms";
     if (pendingLink) return "account-switch";
     if (emailMethod === "forgot") return "forgot";
     if (emailMethod === "reset") return `reset-${resetPhase}`;
     return emailMethod === "password" ? `password-${passwordMode}` : `magic-${magicPhase}`;
   }
   function showView(view) {
-    if (busy) return false;
+    if (busy || pendingTerms) return false;
     const valid = ["password-login", "password-signup", "forgot", "reset-request", "reset-sent", "reset-form", "magic-request", "magic-sent", "account-switch"];
     if (!valid.includes(view)) return false;
     if (view === "account-switch") { if (!pendingLink) return false; }
@@ -84,6 +85,7 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
   function back() { if (busy) return false; resetCode = ""; return showView("password-login"); }
   const failureText = error => error?.message || "Couldn’t sign in. Try again.";
   function panelHtml() {
+    if (pendingTerms) return `<form data-signin-form="terms"><p class="form-hint">The terms changed. Read the <a href="/terms">Terms</a> and <a href="/privacy">Privacy Policy</a>, then continue.</p><button class="button primary" type="submit" ${busy ? "disabled" : ""}>Agree and continue</button></form>`;
     if (pendingLink) return `<p class="form-hint">This link is for a different account.</p><button type="button" class="button primary" data-magic-switch ${busy ? "disabled" : ""}>Switch account</button>`;
     if (emailMethod === "forgot") return `<button type="button" class="button primary" data-recovery-option="reset" data-reset-password>Reset password</button><button type="button" class="text-button" data-recovery-option="magic" data-email-method="magic">Email me a sign-in link</button>`;
     if (emailMethod === "reset") {
@@ -115,7 +117,9 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
   }
   function render() {
     const node = surface();
-    if (node) node.innerHTML = `${currentView().startsWith("password-") ? "" : `<button type="button" class="text-button" data-signin-back ${busy ? "disabled" : ""}>Back</button>`}<div data-signin-panel>${panelHtml()}</div><p class="status form-status" role="alert" data-signin-status></p>`;
+    const view = currentView();
+    const hideBack = view.startsWith("password-") || view === "terms";
+    if (node) node.innerHTML = `${hideBack ? "" : `<button type="button" class="text-button" data-signin-back ${busy ? "disabled" : ""}>Back</button>`}<div data-signin-panel>${panelHtml()}</div><p class="status form-status" role="alert" data-signin-status></p>`;
     setStatus(statusText, statusError);
     onViewChange?.(currentView());
   }
@@ -123,6 +127,13 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
   async function finish(view) {
     const session = view?.session ?? view;
     if (!session?.authenticated || !session?.account) throw new Error("Sign-in didn\u2019t complete. Try again.");
+    if (session.terms?.required) {
+      pendingTerms = session;
+      setStatus("");
+      render();
+      return;
+    }
+    pendingTerms = null;
     setStatus("");
     await onSignedIn(session);
   }
@@ -197,6 +208,16 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
     if (!form || !container?.contains?.(form)) return;
     event.preventDefault();
     if (busy) return;
+    if (form.dataset.signinForm === "terms") {
+      const session = pendingTerms;
+      if (!session?.terms?.version) return;
+      await withBusy(async () => {
+        const accepted = await api(session, "/api/account/terms", { version: session.terms.version });
+        pendingTerms = null;
+        await finish(accepted);
+      });
+      return;
+    }
     if (form.dataset.signinForm === "reset-consume") {
       const fields = Object.fromEntries([...form.querySelectorAll('input[name]')].map(input => [input.name, input.value]));
       if (!resetCode) { setStatus("Request a new password reset link.", true); return; }
@@ -298,7 +319,14 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
     node.addEventListener("submit", onSubmit);
   }
   return {
-    canLeave() { return !busy; },
+    canLeave() { return !busy && !pendingTerms; },
+    requireTerms(session) {
+      if (!session?.terms?.required) return false;
+      pendingTerms = session;
+      setStatus("");
+      render();
+      return true;
+    },
     showView, back, focus: focusView,
     showPassword(mode = "login") { return showView(mode === "signup" ? "password-signup" : "password-login"); },
     showMagic() {
@@ -314,7 +342,7 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
     },
     closeEmail() { return back(); },
     clear() {
-      resetCode = ""; resetEmail = ""; resetPhase = "request"; magicPhase = "request"; magicEmail = ""; magicManualCode = false; pendingLink = null; statusText = ""; passwordEmail = ""; passwordMode = "login"; emailMethod = "password"; busy = false;
+      resetCode = ""; resetEmail = ""; resetPhase = "request"; magicPhase = "request"; magicEmail = ""; magicManualCode = false; pendingLink = null; pendingTerms = null; statusText = ""; passwordEmail = ""; passwordMode = "login"; emailMethod = "password"; busy = false;
       onBusyChange?.(false);
       render();
     },

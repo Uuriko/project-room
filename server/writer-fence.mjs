@@ -359,7 +359,12 @@ export const unfencedAdditiveTables = Object.freeze([
   // skips schema setup on the next wake. integrity_job_cursor: which
   // deferred integrity step the cron runs next. Neither is room content.
   "room_schema_stamp",
-  "integrity_job_cursor"
+  "integrity_job_cursor",
+  // LEGAL: terms acceptance, public abuse reports, and operator unpublish.
+  // Additive and unfenced. Older writers have no code path to them.
+  "account_terms",
+  "public_abuse_reports",
+  "public_unpublish"
 ]);
 export const applicationTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables, ...unfencedAdditiveTables])]);
 const v34FencedTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables])]);

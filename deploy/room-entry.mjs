@@ -278,7 +278,7 @@ a:focus-visible{outline:1px solid var(--clay);outline-offset:3px}
   </section>
   <p class="help">Source: <a href="https://github.com/Uuriko/project-room" rel="noopener noreferrer">github.com/Uuriko/project-room</a></p>
 </main>
-<footer>© 2026 Demigod · <a href="/">Home</a> · <a href="/contact">Contact</a> · <a href="/legal">Privacy</a></footer>
+<footer>© 2026 Demigod Labs, Inc. · <a href="/">Home</a> · <a href="/contact">Contact</a> · <a href="/terms">Terms</a> · <a href="/privacy">Privacy</a> · <a href="/subprocessors">Subprocessors</a> · <a href="/acceptable-use">Acceptable use</a> · <a href="/report">Report</a> · <a href="mailto:potter@trydemigod.com">Abuse</a></footer>
 </body></html>`;
 
 // getdasha Room door for the Worker at /room (www, lobby, apex, worker origin).

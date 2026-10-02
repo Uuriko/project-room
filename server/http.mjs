@@ -78,6 +78,11 @@ import { queryPublicReceipts, publicReceiptById, collectPublicReceipts, PUBLIC_R
 import { applyRoomTemplate } from "./templates.mjs";
 import { templatesIndex, templatePage, publicRoomView, agentDirectoryView, publicSitemapEntries, PUBLIC_PAGE_CSP } from "./public-rooms.mjs";
 // --- end GR2 ---
+// --- LEGAL public pages, terms acceptance, abuse reports, operator unpublish (G-SEC-11, G-SEC-14). ---
+import { termsStatus } from "./legal-store.mjs";
+import { LEGAL_SITEMAP_PATHS } from "./legal-pages.mjs";
+import { handleLegalRequest, isLegalPath } from "./legal-routes.mjs";
+// --- end LEGAL ---
 import {
   listActivity, activityUnreadCount, markActivityRead, markActivityReadAll,
   getReadHorizon, setReadHorizon, listSaved, setSaved
@@ -225,7 +230,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   fetchPullRequest = null,
   githubToken = undefined,
   connectorClients = [], // OAuth2 clients for third-party connectors (e.g. [{ clientId, name, redirectUris }])
-  serviceMode = trustedLocalProxy ? "invite-only-pilot" : "single-node-pilot", deployment = undefined, growth = null, push = undefined }) {
+  serviceMode = trustedLocalProxy ? "invite-only-pilot" : "single-node-pilot", deployment = undefined, growth = null, push = undefined,
+  operatorAccountId = (globalThis.process && globalThis.process.env.ROOM_OPERATOR_ACCOUNT_ID) || "" }) {
   // Human browser push stays off until VAPID keys are present. Node reads
   // process.env; the Worker passes its bindings as `push` so a secret never
   // has to live in the source tree.
@@ -236,6 +242,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // config never holds up startup and the card reports "not configured".
   if (typeof telegram?.configured !== "boolean" || !Array.isArray(telegram.bindings)) throw new Error("Telegram configuration must come from telegramConfig()");
   if (deployment !== undefined && deployment !== "production" && deployment !== "staging") throw new Error("deployment must be production or staging");
+  const sessionAccountView = auth => {
+    const view = accountView(auth);
+    if (!auth?.account) return view;
+    return { ...view, terms: termsStatus(store.db, auth.account.id) };
+  };
+  // Literals stay in this file so scripts/open-routes.mjs sees the legal API.
+  const legalApiPaths = new Set(["/api/reports/public/challenge", "/api/reports/public", "/api/account/terms", "/api/operator/unpublish", "/api/health/jobs"]);
   const deploymentField = deployment ? { deployment } : {};
   // Google sign-in is off unless the caller passes googleConfig(env, origin).
   // The sign-in helper is created lazily so its PKCE/state table lives as long
@@ -1078,7 +1091,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           rotateSlot: true
         });
         setCookie(res, accountCookieName, freshSlotToken, Math.max(0, Math.floor((loggedIn.expiresAt - store.now()) / 1000)));
-        return json(res, 201, accountView(loggedIn));
+        return json(res, 201, sessionAccountView(loggedIn));
       }
       if (url.pathname === "/api/auth/password/reset/request" || url.pathname === "/api/auth/password/reset/consume") {
         if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
@@ -1179,7 +1192,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         store.accountLogins.linkMagicMethod(accountId, { email: normalized });
         store.accountLogins.touchMethod(accountId, method.id);
         const loggedIn = finishPasswordSlot(signupToken, accountId, data.sessionRevision, method.id);
-        return json(res, 201, accountView(loggedIn));
+        return json(res, 201, sessionAccountView(loggedIn));
       }
       if (url.pathname === "/api/auth/password/login") {
         if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
@@ -1204,7 +1217,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const passwordMethod = store.accountLogins.listMethods(accountId).find(m => m.type === "password");
         store.accountLogins.touchMethod(accountId, passwordMethod.id);
         const loggedIn = finishPasswordSlot(loginToken, accountId, data.sessionRevision, passwordMethod.id);
-        return json(res, 200, accountView(loggedIn));
+        return json(res, 200, sessionAccountView(loggedIn));
       }
       if (url.pathname === "/api/auth/password/change") {
         if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
@@ -1681,7 +1694,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           rotateSlot: true
         });
         setCookie(res, accountCookieName, freshSlotToken, Math.max(0, Math.floor((loggedIn.expiresAt - store.now()) / 1000)));
-        return json(res, 200, accountView(loggedIn));
+        return json(res, 200, sessionAccountView(loggedIn));
       }
       // Track C C14 — read-only growth analytics surface. The handler is a
       // pure read over the collector/scheduler; unknown /growth subpaths 404
@@ -1945,6 +1958,15 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         res.writeHead(301, { Location: (url.pathname.startsWith("/room/") ? "/room" : "") + "/favicon.svg" });
         return res.end();
       }
+      // --- LEGAL public pages, terms acceptance, abuse reports, operator unpublish (G-SEC-11, G-SEC-14). ---
+      if (legalApiPaths.has(url.pathname) || isLegalPath(url.pathname)) {
+        const handled = await handleLegalRequest({
+          req, res, url, store, rate, remoteAddress, readBody: body, json, cookie, protectWrite, reject,
+          operatorAccountId, accountCookieName, accountView: sessionAccountView,
+        });
+        if (handled) return;
+      }
+      // --- end LEGAL ---
       if (url.pathname === "/sitemap.xml" && ["GET", "HEAD"].includes(req.method)) {
         // Confirm bytes exist before advertising an asset-backed canonical URL.
         const available = [];
@@ -1959,6 +1981,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const xml = publicSearchSitemap(ROOM_ORIGIN, [
           ...available.map(path => ({ path, lastmod: PUBLIC_PAGE_LASTMOD })),
           { path: "/receipts", lastmod: PUBLIC_PAGE_LASTMOD },
+          ...LEGAL_SITEMAP_PATHS.map(path => ({ path, lastmod: PUBLIC_PAGE_LASTMOD })),
           ...receiptEntries,
           ...publicSitemapEntries(store), // GR2 templates, agents, and opted-in room pages
         ]);
@@ -2413,7 +2436,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             rate(`account-slot:${remoteAddress}`, 20);
             const created = store.createAccountSessionSlot();
             setCookie(res, accountCookieName, created.token, Math.max(0, Math.floor((created.session.expiresAt - store.now()) / 1000)));
-            return json(res, 200, accountView(created.session));
+            return json(res, 200, sessionAccountView(created.session));
           }
           let slot;
           try { slot = store.authenticateAccountSession(slotToken); }
@@ -2428,7 +2451,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
               slot = created.session;
             }
           }
-          return json(res, 200, accountView(slot));
+          return json(res, 200, sessionAccountView(slot));
         }
         checkOrigin(req, true);
         if (!slotToken) reject(401, "account_session_required", "Start an account browser session before signing in");
@@ -2447,11 +2470,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             rotateSlot: true
           });
           setCookie(res, accountCookieName, freshSlotToken, Math.max(0, Math.floor((loggedIn.expiresAt - store.now()) / 1000)));
-          return json(res, 201, accountView(loggedIn));
+          return json(res, 201, sessionAccountView(loggedIn));
         }
         if (req.method === "DELETE") {
           if (!exact(data, ["expectedSessionRevision"])) reject(422, "invalid_logout", "Current session revision required");
-          return json(res, 200, accountView(store.logoutAccountSession(slotToken, data.expectedSessionRevision)));
+          return json(res, 200, sessionAccountView(store.logoutAccountSession(slotToken, data.expectedSessionRevision)));
         }
         reject(405, "method_not_allowed", "Method not allowed");
       }
@@ -2519,7 +2542,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           rotateSlot: true
         });
         setCookie(res, accountCookieName, freshSlotToken, Math.max(0, Math.floor((loggedIn.expiresAt - store.now()) / 1000)));
-        return json(res, 200, { remaining: redemption.remaining, session: accountView(loggedIn) });
+        return json(res, 200, { remaining: redemption.remaining, session: sessionAccountView(loggedIn) });
       }
       // ---- Login method settings (slice 7, RC-2026-09-17-016) ----
       // Authenticated management of an account's linked sign-in methods.

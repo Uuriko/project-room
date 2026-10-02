@@ -801,6 +801,15 @@ async function landAfterSignIn() {
 let startRoomFlight = null;
 function showAccountWorkspace() {
   if (!accountClient.session?.authenticated) return;
+  if (accountClient.session.terms?.required) {
+    $("#main").hidden = true;
+    $("#auth-panel").hidden = false;
+    $("#signin-methods").hidden = false;
+    $("#email-auth-step").hidden = true;
+    $("#signin-controller").prepend($("#auth-signin-ui"));
+    signinUI.requireTerms(accountClient.session);
+    return;
+  }
   rememberAccountHint();
   $("#auth-panel").hidden = true; $("#signout-button").hidden = false; $("#signout-button").disabled = signoutLoading;
   $("#account-settings-button").hidden = false;

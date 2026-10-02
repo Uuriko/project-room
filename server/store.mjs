@@ -42,6 +42,7 @@ import { conflictingClaim } from "./claim-scopes.mjs";
 import { Reminders, reminderSchema } from "./reminders.mjs";
 import { Notifications } from "./notifications.mjs";
 import { Moderation, moderationSchema, mutedEvent } from "./moderation.mjs";
+import { accountTermsSchema, publicAbuseSchema, publicUnpublishSchema, recordSignupTerms } from "./legal-store.mjs"; // terms, public reports, unpublish (G-SEC-11, G-SEC-14)
 import { RequestRuns, requestRunSchema } from "./request-runs.mjs";
 import { WakeQueue, wakeQueueSchema, wakeQueuePauseSchema } from "./wake-queue.mjs";
 import { Attention, attentionSchema } from "./attention.mjs";
@@ -971,7 +972,8 @@ function roomSchemaStamp() {
     webFetchSchema, webResearchSchema, mentionStateSchema, activitySchema, threadMutesSchema,
     humanPushSchema, quarantineThreadSplitSchema, slaBreachAlertSchema, inboxHandoffSchema,
     inboxHandoffRoomSchema, handoffEnvelopeSchema, agentPluginSchema, inboxCollabSchema,
-    moderationSchema, bountyEscrowSchema, projectOffersSchema, publicWorkClaimsSchema,
+    moderationSchema, accountTermsSchema, publicAbuseSchema, publicUnpublishSchema,
+    bountyEscrowSchema, projectOffersSchema, publicWorkClaimsSchema,
     publicWorkClaimFenceSchema, publicWorkReviewsSchema, publicWorkSuccessorsSchema,
     accessRequestSchema, membershipDelegationSchema, membershipDelegationJournalSchema,
     ownerDelegateSchema, agentRoomSchema, oauthPendingSchema, gmailSchema, requestRunSchema,
@@ -1487,6 +1489,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // same-schema packaged fallbacks that predate it still verify.
       this.db.exec(inboxReadSchema);
       this.db.exec(moderationSchema); // Message reports (issue #6 E4): purely additive, same pattern.
+      // LEGAL: terms acceptance, public abuse reports, operator unpublish. Additive, unfenced.
+      this.db.exec(accountTermsSchema);
+      this.db.exec(publicAbuseSchema);
+      this.db.exec(publicUnpublishSchema);
       // Escrowed bounties (agent work exchange, slice 1): purely additive,
       // intentionally outside the writer fence (see unfencedAdditiveTables in
       // server/writer-fence.mjs) so same-schema packaged fallbacks that
@@ -2333,6 +2339,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // New accounts start un-onboarded (onboarded=0) so they land on the
       // first-run onboarding step (RC-2026-09-19-078).
       this.db.prepare("INSERT INTO accounts(id,active,revision,auth_epoch,origin,created_at,onboarded) VALUES(?,1,0,0,?,?,0)").run(accountId, origin.trim(), this.now());
+      recordSignupTerms(this.db, accountId, origin.trim(), this.now());
       return this.account(accountId);
     });
   }

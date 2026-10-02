@@ -71,6 +71,10 @@ const PROBES = {
   "HEAD /api/project-offers/{}/brief.md": [undefined, 404],
   "GET /api/auth/gmail/callback": [undefined, 200],
   "GET /api/health": [undefined, 200],
+  "GET /api/health/jobs": [undefined, 200],
+  "HEAD /api/health/jobs": [undefined, 200],
+  "GET /api/reports/public/challenge": [undefined, 200],
+  "POST /api/reports/public": [{}, 428],
   // Hosted MCP is outside the /api template scan. Unauthenticated GET/POST
   // stay the public join surface (200). The bearer profile is covered by
   // tests/room-mcp-auth.test.js.
@@ -204,7 +208,7 @@ test("Worker-only anonymous routes have dedicated runtime boundary coverage", ()
   // These operations are exercised against Worker.fetch in job-heartbeat.test.js
   // and real workerd in cloudflare/version-signal.check.mjs. A newly marked
   // Worker operation must acquire runtime coverage before joining this partition.
-  assert.deepEqual([...workerKeys].sort(), ["GET /api/health/jobs", "GET /api/version/worker"]);
+  assert.deepEqual([...workerKeys].sort(), ["GET /api/version/worker"]);
 });
 
 test("Node unauthenticated endpoint inventory equals its openapi security: [] set", async t => {

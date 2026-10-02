@@ -5,6 +5,7 @@
 import { createHash } from "node:crypto";
 import { publicReceipts } from "../src/events.js";
 import { START_ROOM_URL } from "../deploy/room-entry.mjs";
+import { isUnpublished } from "./legal-store.mjs";
 
 const SHA256 = /^sha256:[a-f0-9]{64}$/;
 const HEX64 = /^[a-f0-9]{64}$/;
@@ -109,6 +110,7 @@ function publicWorkReceipts(store, rooms, listed) {
     try { body = JSON.parse(row.receipt_json); } catch { continue; }
     if (!body || typeof body.receiptId !== "string" || !body.receiptId.startsWith("pwr_")) continue;
     const roomId = typeof body.namespaceId === "string" ? body.namespaceId : null;
+    if ((roomId && isUnpublished(store.db, "room", roomId)) || isUnpublished(store.db, "receipt", body.receiptId)) continue;
     const state = roomId ? rooms.get(roomId) : null;
     const showRoom = roomId && listed.has(roomId);
     const owner = state ? credit(state, state.room?.ownerId) : null;
@@ -136,7 +138,7 @@ function publicWorkReceipts(store, rooms, listed) {
 function optedInReceipts(store, rooms, listed) {
   const out = [];
   for (const [roomId, state] of rooms) {
-    if (publicReceipts(state).enabled !== true) continue;
+    if (publicReceipts(state).enabled !== true || isUnpublished(store.db, "room", roomId)) continue;
     const room = roomField(state, listed.has(roomId));
     const owner = credit(state, state.room?.ownerId);
     const href = startHref(owner?.name);
@@ -197,10 +199,16 @@ function loadRooms(store) {
   return rooms;
 }
 
+function receiptVisible(store, item) {
+  if (isUnpublished(store.db, "receipt", item.id)) return false;
+  if (item.room?.id && isUnpublished(store.db, "room", item.room.id)) return false;
+  return true;
+}
+
 export function collectPublicReceipts(store) {
   const rooms = loadRooms(store);
   const listed = listedRoomIds(store);
-  const all = [...publicWorkReceipts(store, rooms, listed), ...optedInReceipts(store, rooms, listed)];
+  const all = [...publicWorkReceipts(store, rooms, listed), ...optedInReceipts(store, rooms, listed)].filter(item => receiptVisible(store, item));
   all.sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   return all;
 }
