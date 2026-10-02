@@ -33,9 +33,13 @@ test("production-sized webhook hydration stays under 20k rows and scales linearl
     const sized = await measure(mf, 3000, { passes: 2, oracle: true });
     assert.equal(sized.loaded, 100);
     assert.ok(sized.legacyRowsRead > 1_000_000, `legacy correlated read was ${sized.legacyRowsRead}`);
+    assert.ok(sized.hydrateRowsRead < BUDGET, `first-use delivery reads ${sized.hydrateRowsRead}`);
     for (const pass of sized.measured) {
-      assert.equal(pass.hydrationStatements, sized.subscriptions);
-      assert.ok(pass.deliveryRowsRead < BUDGET, `startup delivery reads ${pass.deliveryRowsRead}`);
+      assert.equal(pass.hydrationStatements, 0);
+      assert.ok(pass.totalRowsRead < BUDGET, `constructor reads ${pass.totalRowsRead}`);
+      assert.ok(pass.schemaLookups < 5, `schema lookups ${pass.schemaLookups}`);
+      assert.ok(pass.ms < 50, `constructor took ${pass.ms}ms`);
+      assert.equal(pass.phases.checksum.rowsRead, 0);
     }
     const plan = sized.plans.join("\n");
     assert.match(plan, /SEARCH agent_webhook_deliveries USING INDEX agent_webhook_deliveries_sub_created/);
@@ -44,8 +48,8 @@ test("production-sized webhook hydration stays under 20k rows and scales linearl
 
     const small = await measure(mf, 1000);
     const large = await measure(mf, 4000);
-    const smallReads = small.measured[0].deliveryRowsRead;
-    const largeReads = large.measured[0].deliveryRowsRead;
+    const smallReads = small.measured[0].totalRowsRead;
+    const largeReads = large.measured[0].totalRowsRead;
     assert.ok(smallReads > 0 && largeReads > 0);
     assert.ok(largeReads < smallReads * 4, `1k reads ${smallReads}, 4k reads ${largeReads}`);
   } finally { await mf.dispose(); }

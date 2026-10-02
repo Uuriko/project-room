@@ -287,23 +287,10 @@ export class AgentPluginStore {
         withdrawn: row.withdrawn === 1,
       });
     }
-    // RC-2026-09-19-064: the durable delivery journal now lives in
-    // agent_webhook_deliveries (restart-safe); the in-memory journal is a
-    // bounded cache hydrated from it so the pure module stays consistent.
-    // One indexed LIMIT per subscription. A correlated "newest 100" subquery
-    // scanned the whole table once per row and froze every cold start.
-    const hasDeliveriesTable = this.db.prepare(
-      "SELECT 1 FROM sqlite_master WHERE type='table' AND name='agent_webhook_deliveries'").get();
-    const recentDeliveries = hasDeliveriesTable ? this.db.prepare(RECENT_WEBHOOK_DELIVERIES_SQL) : null;
+    // Delivery rows stay on disk until something reads or writes that
+    // subscription's journal. Loading every subscription here scanned the
+    // table on every cold start.
     for (const row of this.db.prepare("SELECT * FROM agent_webhook_subs").all()) {
-      let deliveries;
-      if (recentDeliveries) {
-        const rows = recentDeliveries.all(row.subscription_id);
-        // Empty SQL falls through to journal_json, matching the previous
-        // "no grouped rows" path for a subscription that has never been
-        // written to the delivery table.
-        if (rows.length) deliveries = rows.reverse().map(cachedDelivery);
-      }
       this.subs.set(row.subscription_id, {
         subscriptionId: row.subscription_id,
         agentId: row.agent_id,
@@ -312,7 +299,9 @@ export class AgentPluginStore {
         secret: row.secret,
         enabled: row.enabled === 1,
         createdAt: row.created_at,
-        deliveries: deliveries ?? JSON.parse(row.journal_json ?? "[]"),
+        journalJson: row.journal_json ?? "[]",
+        deliveries: [],
+        deliveriesLoaded: false,
       });
     }
     // RC-2026-09-18-049: verification attestations and per-room gate policy.
@@ -818,7 +807,24 @@ export class AgentPluginStore {
   }
 
   listWebhooks(identityId) {
-    return this.store.readTransaction(() => this.webhooks.forAgent(identityId));
+    return this.store.readTransaction(() => {
+      for (const sub of this.subs.values()) {
+        if (sub.agentId === identityId) this.hydrateDeliveries(sub.subscriptionId);
+      }
+      return this.webhooks.forAgent(identityId);
+    });
+  }
+
+  // Newest 100 deliveries for one subscription, oldest-first in the cache.
+  // Empty SQL falls through to journal_json, matching a subscription that
+  // has never been written to the delivery table.
+  hydrateDeliveries(subscriptionId) {
+    const sub = this.subs.get(subscriptionId);
+    if (!sub || sub.deliveriesLoaded) return sub;
+    const rows = this.db.prepare(RECENT_WEBHOOK_DELIVERIES_SQL).all(subscriptionId);
+    sub.deliveries = rows.length ? rows.reverse().map(cachedDelivery) : JSON.parse(sub.journalJson ?? "[]");
+    sub.deliveriesLoaded = true;
+    return sub;
   }
 
   unsubscribeWebhook({ identityId, subscriptionId }) {
@@ -894,6 +900,8 @@ export class AgentPluginStore {
 
   recordWebhookAttempt(deliveryId, { ok, error = null }) {
     return this.mutate(() => {
+      const owner = this.db.prepare("SELECT subscription_id FROM agent_webhook_deliveries WHERE delivery_id=?").get(deliveryId);
+      if (owner) this.hydrateDeliveries(owner.subscription_id);
       const result = this.webhooks.recordAttempt(deliveryId, { ok, error });
       const now = this.store.now();
       this.db.prepare(`UPDATE agent_webhook_deliveries
@@ -944,6 +952,7 @@ export class AgentPluginStore {
   persistJournal(subscriptionId) {
     const sub = this.subs.get(subscriptionId);
     if (!sub) return;
+    if (!sub.deliveriesLoaded) this.hydrateDeliveries(subscriptionId);
     this.db.prepare("UPDATE agent_webhook_subs SET journal_json=? WHERE subscription_id=?")
       .run(JSON.stringify(sub.deliveries), subscriptionId);
   }
