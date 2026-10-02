@@ -187,9 +187,14 @@ async function checkDispatchTarget(target, dnsResolvers) {
   } catch (error) {
     const message = error?.message ?? "webhook target rejected";
     // A hostile or malformed target can never succeed: dead-letter it. A
-    // name that fails to resolve may be transient: retry it.
-    const hostile = /private or reserved|valid https/.test(message);
-    return { ok: false, result: { ok: false, status: 0, error: `webhook target rejected: ${message}`.slice(0, 500),
+    // name that fails to resolve may be transient: retry it. SSRF refusals
+    // carry webhook_url_not_public so the delivery journal can name the
+    // reason without a retry.
+    const ssrf = error?.code === "webhook_url_not_public" || /private or reserved|metadata hostname/.test(message);
+    const hostile = ssrf || /valid https/.test(message);
+    const prefix = ssrf ? "webhook_url_not_public: " : "";
+    return { ok: false, result: { ok: false, status: 0,
+      error: `${prefix}webhook target rejected: ${message}`.slice(0, 500),
       classification: hostile ? "dead" : "retry" } };
   }
 }
@@ -204,9 +209,10 @@ async function checkDispatchTarget(target, dnsResolvers) {
 // is re-validated: https only (no downgrade to http), public host only,
 // DNS re-resolved. A target that can never be valid (private/reserved IP,
 // non-https URL) is classified "dead"; a name that merely fails to resolve
-// right now is "retry". dnsResolvers ({ resolve4, resolve6 }) is injectable
-// so tests never touch the network; omitted it defaults to the real
-// resolver (fail closed in production).
+// right now is "retry". dnsResolvers ({ lookup } or { resolve4, resolve6 })
+// is injectable so tests never touch the network; omitted, Node uses
+// dns.lookup({ all: true }) and pins the socket to those addresses.
+// Workers skip DNS (hostname denylist only) and use fetch.
 //
 // M-1 fix (RC-2026-09-25): the connection is pinned to the addresses the
 // check vetted. On Node the default transport is pinnedDispatchPost (a
