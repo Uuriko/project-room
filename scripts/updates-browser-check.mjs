@@ -12,6 +12,7 @@ import { EVENT_TYPES as T } from "../src/events.js";
 import { signInFixture } from "./auth-signin.mjs";
 import { clickChrome, openSearch } from "./room-chrome.mjs";
 import { makeTestSigner } from "./helpers/signed-evidence.mjs";
+import { hashPassword } from "../src/password-auth.mjs";
 
 const command = (type, data, id = crypto.randomUUID()) => ({ id, type, data });
 
@@ -328,5 +329,96 @@ test("Updates navigation keeps review, draft and return context at 1280px and 39
     }
   }
   assert.equal(JSON.stringify(store.room("commons")), roomBefore, "all navigation and cancellation paths remain read-only for shared work");
+  // Real account-backed lifecycle boundaries keep the old document alive:
+  // a Rooms-picker switch and a distinct-account password sign-in must retire
+  // an old Update callback without touching the replacement private view.
+  const password = "synthetic-navigation-password";
+  for (const [id, memberId, displayName] of [["navigation-account-a", "reader-a", "Reader A"], ["navigation-account-b", "reader-b", "Reader B"]]) {
+    send(owner, T.MEMBER_ADDED, { memberId, displayName, kind: "human", permissions: [] });
+    store.createAccount(id); store.completeOnboarding(id);
+    store.bindHumanAccount("commons", memberId, id);
+    store.accountLogins.linkPasswordMethod(id, { email: `${id}@example.invalid`, verifier: hashPassword(password) });
+    send(agent, T.MESSAGE_POSTED, { messageId: `private-${memberId}`, body: `Private update for ${displayName}`, toMemberId: memberId });
+  }
+  store.initialize(initialRoom("updates-other", "other-owner"));
+  store.bindHumanAccount("updates-other", "other-owner", "navigation-account-a");
+  const otherOwner = store.issueAccessKey("updates-other", "other-owner");
+  store.command(otherOwner, "updates-other", command(T.MEMBER_ADDED, { memberId: "other-agent", displayName: "Other room agent", kind: "agent", permissions: [] }));
+  const otherAgent = store.issueAccessKey("updates-other", "other-agent");
+  store.command(otherAgent, "updates-other", command(T.MESSAGE_POSTED, { messageId: "other-room-update", body: "Private update in the other room", toMemberId: "other-owner" }));
+  const lifecycleBefore = JSON.stringify([store.room("commons"), store.room("updates-other")]);
+  const loginAccount = async (accountId, displayName) => {
+    await page.locator("#auth-panel").waitFor({ state: "visible" });
+    // Set the ordinary room URL without loading a new document or abandoning
+    // the pending response, as in the existing session-boundary journey.
+    await page.evaluate(() => history.replaceState(null, "", "?room=commons"));
+    const form = page.locator('#auth-signin-ui [data-signin-form="password"]');
+    await form.locator('[name="email"]').fill(`${accountId}@example.invalid`);
+    await form.locator('[name="password"]').fill(password);
+    const accepted = page.waitForResponse(response => new URL(response.url()).pathname === "/api/auth/password/login" && response.request().method() === "POST");
+    await form.locator('button[type="submit"]').click();
+    assert.equal((await accepted).status(), 200);
+    await page.locator("#main").waitFor({ state: "visible" });
+    await page.waitForFunction(name => document.querySelector("#identity-label")?.textContent.startsWith(name), displayName);
+    const sessionResponse = await page.request.get(`${origin}/api/account-session`);
+    assert.equal((await sessionResponse.json()).account.id, accountId, "this is a distinct account session, not a room-key principal swap");
+  };
+  const showOnlyUpdate = async title => {
+    await page.locator("#topbar-updates").click();
+    await selectUpdatesFilter("Needs me", "needs");
+    assert.equal(await page.locator(".updates-row").count(), 1);
+    assert.match(await page.locator(".updates-row").innerText(), new RegExp(title));
+    return page.locator('.updates-row [data-update-action="open"]');
+  };
+  const openAccountRoom = async roomId => {
+    await clickChrome(page, "#nav-rooms");
+    await page.locator(`[data-account-room="${roomId}"]`).click();
+    await page.locator("#main").waitFor({ state: "visible" });
+    await page.waitForFunction(id => new URL(location.href).searchParams.get("room") === id, roomId);
+  };
+  await loginAccount("navigation-account-a", "Reader A");
+  const oldOpen = await showOnlyUpdate("Private update for Reader A");
+  const oldUpdateId = await page.locator(".updates-row").getAttribute("data-update-id");
+  const oldDocument = await page.evaluate(() => performance.timeOrigin);
+  const roomDelay = await delayRead();
+  await oldOpen.click(); await roomDelay.entered;
+  await page.locator("#updates-close").click();
+  await openAccountRoom("updates-other");
+  await page.locator("#message-input").fill("Replacement room draft");
+  await showOnlyUpdate("Private update in the other room");
+  const roomDestination = page.url();
+  await roomDelay.finish();
+  assert.equal(await page.evaluate(() => performance.timeOrigin), oldDocument, "room switch preserves the pending old JavaScript callback");
+  assert.equal(page.url(), roomDestination);
+  const sameAccount = await page.request.get(`${origin}/api/account-session`);
+  assert.equal((await sameAccount.json()).account.id, "navigation-account-a", "Rooms navigation keeps the same account");
+  assert.equal(await page.locator("#updates-dialog").isVisible(), true);
+  assert.match(await page.locator(".updates-row").innerText(), /Private update in the other room/);
+  assert.equal(await page.locator("#message-input").inputValue(), "Replacement room draft");
+  assert.equal(store.db.prepare("SELECT COUNT(*) AS count FROM private_update_marks WHERE room_id=?").get("updates-other").count, 0);
+  await page.locator("#updates-close").click();
+  await page.locator("#message-input").fill("");
+  await openAccountRoom("commons");
+
+  const accountOpen = await showOnlyUpdate("Private update for Reader A");
+  const accountDelay = await delayRead();
+  await accountOpen.click(); await accountDelay.entered;
+  await page.locator("#updates-close").click();
+  await clickChrome(page, "#signout-button");
+  await loginAccount("navigation-account-b", "Reader B");
+  await page.locator("#message-input").fill("Replacement account draft");
+  await showOnlyUpdate("Private update for Reader B");
+  const accountDestination = page.url();
+  await accountDelay.finish();
+  assert.equal(await page.evaluate(() => performance.timeOrigin), oldDocument, "account switch preserves the pending old JavaScript callback");
+  assert.equal(page.url(), accountDestination);
+  assert.equal(await page.locator("#updates-dialog").isVisible(), true);
+  assert.match(await page.locator(".updates-row").innerText(), /Private update for Reader B/);
+  assert.equal(await page.locator(`.updates-row[data-update-id="${oldUpdateId}"]`).count(), 0);
+  assert.equal(await page.locator("#message-input").inputValue(), "Replacement account draft");
+  assert.equal(await page.locator("#work-navigation-return").isVisible(), false);
+  assert.equal(store.db.prepare("SELECT COUNT(*) AS count FROM private_update_marks WHERE member_id=?").get("reader-b").count, 0);
+  assert.equal(store.db.prepare("SELECT action FROM private_update_marks WHERE room_id=? AND member_id=? AND item_id=?").get("commons", "reader-a", oldUpdateId).action, "read");
+  assert.equal(JSON.stringify([store.room("commons"), store.room("updates-other")]), lifecycleBefore, "stale callbacks cannot mutate either room's shared state");
   assert.deepEqual(errors, []);
 });

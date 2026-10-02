@@ -229,7 +229,7 @@ let instructionsUI = null;
 let inboxUI = null;
 let state = null, session = null, pendingMessage = null, pendingWork = null, pendingAction = null;
 // JDOT-COH-NAV begin
-let updatesUi = null, resetNavigationBoard = null;
+let updatesUi = null, resetNavigationBoard = null, navigationBoardReady = null;
 const workNavigationOrigins = new Map();
 let activeWorkNavigation = null, activeWorkNavigationId = null, workNavigationEpoch = 0, workHistoryReplayKey = null;
 // JDOT-COH-NAV end
@@ -2781,7 +2781,8 @@ function captureWorkOrigin(extra = {}) {
     boardColumnsScroll: $("#work-board .board-columns")?.scrollLeft ?? 0 };
 }
 function sameWorkOrigin(a, b) {
-  if (a.type !== b.type) return false;
+  if (a.type !== b.type || a.channelId !== b.channelId || a.threadId !== b.threadId
+    || JSON.stringify(a.mode ?? null) !== JSON.stringify(b.mode ?? null)) return false;
   if (a.type === "updates") return a.updates?.itemId === b.updates?.itemId && a.updates?.filter === b.updates?.filter;
   if (a.type === "board") return a.claimId === b.claimId;
   const key = value => value.focusKey || value.searchWorkId || (value.messageId && `${value.messageId}|${value.messageWorkId}`);
@@ -2852,6 +2853,7 @@ async function restoreWorkOrigin(ticket) {
     if (!await updatesUi.restore(origin.updates)) return;
   } else if (origin.type === "board") {
     $("#tasks-board-open").click();
+    if (!await navigationBoardReady?.() || epoch !== workNavigationEpoch || !currentWorkOrigin(ticket) || !$("#board-dialog").open) return;
     $("#board-dialog").scrollTop = origin.boardScroll;
     $("#work-board").scrollTop = origin.boardBodyScroll;
     const columns = $("#work-board .board-columns"); if (columns) columns.scrollLeft = origin.boardColumnsScroll;
@@ -2866,7 +2868,9 @@ async function restoreWorkOrigin(ticket) {
     const messageWork = origin.messageId && origin.messageWorkId
       ? $(`#message-list [data-message-record-id="${CSS.escape(origin.messageId)}"] [data-open-work="${CSS.escape(origin.messageWorkId)}"]`) : null;
     const fallback = origin.type === "board" ? $("#board-close") : $("#conversation-title");
-    [origin.focus, keyed, search, messageWork, claim, fallback].find(usable)?.focus({ preventScroll: true });
+    const target = [origin.focus, keyed, search, messageWork, claim].find(usable) ?? fallback;
+    target?.focus({ preventScroll: true });
+    if (target === fallback) target?.scrollIntoView({ block: "nearest", behavior: "instant" });
   }
   syncWorkReturnControl();
 }
@@ -7135,7 +7139,13 @@ if (initialInvitationFragment && !initialPasswordReset) openInvitation(initialIn
 {
   const board = lazyDisclosure({ panel: $("#board-panel"),
     load: () => import("./board-ui.js"),
-    install: module => module.installWorkBoard({ client, getState: () => state, getSession: () => session }),
+    // JDOT-COH-NAV begin
+    install: module => {
+      const controller = module.installWorkBoard({ client, getState: () => state, getSession: () => session });
+      navigationBoardReady = () => controller.whenReady();
+      return controller;
+    },
+    // JDOT-COH-NAV end
     onError: () => notice("Could not load the board. Close and reopen to retry.", true) });
   // JDOT-COH-NAV begin
   resetNavigationBoard = () => { $("#board-dialog").close(); $("#board-panel").open = false; board.reset(); };

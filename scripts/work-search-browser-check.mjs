@@ -1,4 +1,4 @@
-import { clickChrome } from "./room-chrome.mjs";
+import { clickChrome, ensureSidebarOpen, ensureSidebarClosed, openComposerOptions } from "./room-chrome.mjs";
 // Simulated local people. Search must not submit, acknowledge or create work.
 import './discovery-contribution-browser-check.mjs';
 import test from 'node:test';
@@ -23,8 +23,11 @@ for (const touch of [false, true]) test(`work search ${touch ? 'touch' : 'deskto
     definitionOfDone: done, accountableMemberId: 'owner', independentVerificationRequired: false, ownerDecisionRequired: false,
     ...(sourceMessageId ? { sourceMessageId } : {}) });
   const pair = 'search:same-id';
-  send('message.posted', { messageId: pair, body: 'Orbit discussion from the same ID.' });
+  send('channel.created', { channelId: 'design', name: 'design' });
+  send('message.posted', { messageId: pair, channelId: 'design', body: 'Orbit discussion from the same ID.' });
   propose(pair, 'Orbit <b>agenda</b>', 'Gather the telescope notes.', pair);
+  send('message.posted', { messageId: 'canonical-task-proposal', channelId: 'general', workItemId: pair,
+    packetId: 'manual-packet', basisRevision: 0, body: 'Candidate agenda wording.' });
   propose('finished', 'Previous Orbit outcome');
   const mutate = (type, extra = {}) => send(type, { workItemId: 'finished', expectedRevision: f.store.room('commons').state.workItems.finished.revision, ...extra });
   mutate('work.accepted');
@@ -119,26 +122,87 @@ for (const touch of [false, true]) test(`work search ${touch ? 'touch' : 'deskto
   assert.equal(await search.inputValue(), 'handoff-only');
   assert.equal(await hits.locator('a').count(), 0, 'return falls back safely when the originating search result no longer exists');
 
-  // A chat-linked task leaves a thread and restores that thread's own composer.
+  // Cross-channel navigation restores the real source thread and its unsent request.
+  // The source discussion is in #design; its canonical proposal is in #general.
+  await ensureSidebarOpen(page);
+  await page.locator('#channel-list [data-channel="design"]').click();
+  await ensureSidebarClosed(page);
+  assert.equal(await page.locator('#conversation-title').textContent(), '# design');
   await page.locator('[data-message-id="search:same-id"][data-message-action="reply"]').click();
   await page.locator('#thread-bar').waitFor({ state: 'visible' });
-  await page.locator('#message-to-select').evaluate(node => { node.value = 'producer'; node.dispatchEvent(new Event('change', { bubbles: true })); });
-  const threadDraft = 'Keep this thread reply and its recipient.';
+  await openComposerOptions(page);
+  await page.locator('#request-reply').click();
+  await page.locator('#message-to-select').selectOption('producer');
+  const threadDraft = 'Keep this thread request and its recipient.';
   await page.locator('#message-input').fill(threadDraft);
-  await page.locator('#message-input').evaluate(node => node.setSelectionRange(5, 13, 'forward'));
+  await page.locator('#message-input').press('Home');
+  for (let index = 0; index < 8; index++) await page.locator('#message-input').press('Shift+ArrowRight');
   const chatLink = page.locator('#message-list [data-message-record-id="search:same-id"] [data-open-work="search:same-id"]');
+  const beforeChannelNavigation = auditRecovery(f.store).dataSha256;
   await chatLink.focus();
+  assert.equal(await chatLink.getAttribute('href'), canonicalHash);
   await chatLink.press('Enter');
   await page.locator('#thread-bar').waitFor({ state: 'hidden' });
+  assert.equal(await page.locator('#conversation-title').textContent(), '# general');
+  assert.equal(new URL(page.url()).hash, canonicalHash);
   assert.equal(await card.locator('.work-details').evaluate(node => node.open), true);
+  assert.equal(await card.evaluate(node => node === document.activeElement), true);
+  assert.equal(await page.locator('#request-mode-bar').isVisible(), false);
+  const assertThreadOrigin = async () => {
+    await page.locator('#thread-bar').waitFor({ state: 'visible' });
+    await page.waitForFunction(() => document.activeElement?.closest('[data-message-record-id="search:same-id"]')
+      && document.activeElement?.dataset.openWork === 'search:same-id');
+    assert.equal(await page.locator('#conversation-title').textContent(), '# design');
+    assert.equal(await page.locator('#channel-list [data-channel="design"]').getAttribute('aria-current'), 'page');
+    assert.equal(await page.locator('#message-input').inputValue(), threadDraft);
+    assert.equal(await page.locator('#message-to-select').inputValue(), 'producer');
+    assert.equal(await page.locator('#request-mode-label').textContent(), 'Request a reply');
+    assert.equal(await page.locator('#request-mode-bar').isVisible(), true);
+    assert.deepEqual(await page.locator('#message-input').evaluate(node => [node.selectionStart, node.selectionEnd, node.selectionDirection]), [0, 8, 'forward']);
+    assert.equal(await chatLink.evaluate(node => node === document.activeElement), true);
+  };
   await back.press('Enter');
-  await page.locator('#thread-bar').waitFor({ state: 'visible' });
-  assert.equal(await page.locator('#message-input').inputValue(), threadDraft);
-  assert.equal(await page.locator('#message-to-select').inputValue(), 'producer');
-  assert.deepEqual(await page.locator('#message-input').evaluate(node => [node.selectionStart, node.selectionEnd, node.selectionDirection]), [5, 13, 'forward']);
-  assert.equal(await chatLink.evaluate(node => node === document.activeElement), true);
+  await assertThreadOrigin();
+  await page.goForward();
+  await page.waitForFunction(id => document.activeElement?.dataset.workRecordId === id, pair);
+  assert.equal(await page.locator('#conversation-title').textContent(), '# general');
+  assert.equal(await page.locator('#thread-bar').isVisible(), false);
+  assert.equal(await card.locator('.work-details').evaluate(node => node.open), true);
+  await page.goBack();
+  await assertThreadOrigin();
+  assert.equal(auditRecovery(f.store).dataSha256, beforeChannelNavigation, 'channel/thread return and history neither submit the draft nor mutate Room data');
   await page.locator('#message-input').fill('');
   await page.locator('#thread-back').click();
+  await ensureSidebarOpen(page);
+  await page.locator('#channel-list [data-channel="general"]').click();
+  await ensureSidebarClosed(page);
+
+  // Reopening the same search hit after a channel change refreshes its return
+  // context without adding another copy of the canonical destination to history.
+  await search.fill('telescope');
+  await target.press('Enter');
+  await page.waitForFunction(id => document.activeElement?.dataset.workRecordId === id, pair);
+  const sameTargetHistoryLength = await page.evaluate(() => history.length);
+  await ensureSidebarOpen(page);
+  await page.locator('#channel-list [data-channel="design"]').click();
+  await ensureSidebarClosed(page);
+  assert.equal(await page.locator('#conversation-title').textContent(), '# design');
+  const channelDraft = 'Keep this design channel thought.';
+  await page.locator('#message-input').fill(channelDraft);
+  await target.press('Enter');
+  await page.waitForFunction(id => document.activeElement?.dataset.workRecordId === id, pair);
+  assert.equal(await page.locator('#conversation-title').textContent(), '# general');
+  assert.equal(await page.evaluate(() => history.length), sameTargetHistoryLength);
+  await back.press('Enter');
+  await page.waitForFunction(id => document.activeElement?.dataset.openWork === id, pair);
+  assert.equal(await page.locator('#conversation-title').textContent(), '# design', 'the same search hit returns to its latest originating channel');
+  assert.equal(await search.inputValue(), 'telescope');
+  assert.equal(await page.locator('#message-input').inputValue(), channelDraft);
+  assert.equal(await target.evaluate(node => node === document.activeElement), true);
+  assert.equal(auditRecovery(f.store).dataSha256, beforeChannelNavigation, 'refreshing a same-target origin is read-only');
+  await ensureSidebarOpen(page);
+  await page.locator('#channel-list [data-channel="general"]').click();
+  await ensureSidebarClosed(page);
 
   await search.fill('Bounds');
   assert.equal(await hits.locator('[data-open-work]').count(), 25);

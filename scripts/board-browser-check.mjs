@@ -277,6 +277,49 @@ test("board columns, keyboard claim, linked work returns, chat line, 390px, and 
   await page.waitForFunction(id => document.activeElement?.closest("article")?.dataset.claimId === id, claimId);
   assert.equal(await linked.evaluate(node => node === document.activeElement), true);
   assert.deepEqual(navigationState(), beforeNavigation);
+
+  // A persisted origin may disappear while its canonical work is open.
+  // The durable registry is also used by land-queue removal; there is no
+  // standalone claim DELETE route. A real HTTP claim event refreshes the UI.
+  const removedOriginUrl = page.url();
+  await linked.press("Enter");
+  await assertWork();
+  fixture.store.workClaims.delete("commons", claimId);
+  await post(page, origin, "/work-claims/board-refresh/claim", {});
+  await page.waitForFunction(sequence => document.querySelector("#event-count")?.textContent === String(sequence),
+    fixture.store.room("commons").sequence);
+  await assertWork();
+  const missingClaim = await page.request.get(`${origin}/api/rooms/commons/work-claims/${claimId}`);
+  assert.equal(missingClaim.status(), 404, "the origin is absent from the public claim API");
+  const afterOriginRemoval = navigationState();
+  assert.deepEqual(afterOriginRemoval.workItems, beforeNavigation.workItems, "removing the claim leaves canonical work intact");
+  const assertRemovedOriginReturn = async () => {
+    await dialog.waitFor({ state: "visible" });
+    // The lazy Board refreshes when reopened. Wait for actual detachment,
+    // not merely a hidden dialog, before checking the final fallback focus.
+    await page.locator(`article[data-claim-id='${claimId}']`).waitFor({ state: "detached" });
+    await page.waitForFunction(() => document.activeElement?.id === "board-close");
+    assert.equal(page.url(), removedOriginUrl);
+    assert.equal(await page.locator("#board-close").isVisible(), true, "the missing origin falls back to the Board close control");
+    assert.equal(await page.locator("#board-close").evaluate(node => {
+      const box = node.getBoundingClientRect(), board = node.closest("dialog");
+      const bounds = board.getBoundingClientRect();
+      const top = Math.max(0, bounds.top + board.clientTop);
+      const left = Math.max(0, bounds.left + board.clientLeft);
+      const bottom = Math.min(innerHeight, bounds.top + board.clientTop + board.clientHeight);
+      const right = Math.min(innerWidth, bounds.left + board.clientLeft + board.clientWidth);
+      return box.width > 0 && box.height > 0 && box.top >= top - 1 && box.left >= left - 1
+        && box.bottom <= bottom + 1 && box.right <= right + 1;
+    }), true, "fallback focus is fully visible inside the Board viewport");
+    assert.equal(await page.locator(`article[data-claim-id='${claimId}']`).count(), 0, "return does not recreate the removed card");
+    assert.deepEqual(navigationState(), afterOriginRemoval, "removed-origin return creates no work, events, or claim rows");
+  };
+  await page.locator("#work-navigation-return").press("Enter");
+  await assertRemovedOriginReturn();
+  await page.goForward();
+  await assertWork();
+  await page.goBack();
+  await assertRemovedOriginReturn();
 });
 
 function seedClaim(store, item) {

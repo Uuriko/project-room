@@ -321,14 +321,14 @@ function filesFromField(value) {
 
 export function installWorkBoard({ client, getState, getSession }) {
   const root = document.querySelector("#work-board");
-  if (!root) return { sync() {}, reset() {} };
+  if (!root) return { sync() {}, reset() {}, async whenReady() { return false; } };
   let items = [];
   let status = null;
   let cap = 20;
   let older = false;
   let seen = null;
   let loadedRoom = null;
-  let loadedContext = null, operation = 0;
+  let loadedContext = null, operation = 0, readFlight = null, actionFlight = null;
   const context = () => {
     const current = getSession(), member = current?.member?.id;
     return current?.roomId && member && getState()?.members?.[member]?.id === member && getState().members[member].active !== false
@@ -398,13 +398,16 @@ export function installWorkBoard({ client, getState, getSession }) {
     const mark = events.length ? events[events.length - 1].id : "";
     if (!force && loadedRoom === session.roomId && seen === mark) return;
     const mine = ++operation;
+    let pending = null;
     busy = true;
     try {
-      const [page, live, config] = await Promise.all([
+      pending = Promise.all([
         readClaims(client),
         client.request(client.path("/work-claims/status")),
         client.request(client.path("/work-claims/config"))
       ]);
+      readFlight = pending;
+      const [page, live, config] = await pending;
       if (mine !== operation || context() !== owned) return;
       items = page.claims;
       older = page.older;
@@ -416,6 +419,7 @@ export function installWorkBoard({ client, getState, getSession }) {
     } catch {
       if (mine === operation && context() === owned) note("Could not load the board.");
     } finally {
+      if (readFlight === pending) readFlight = null;
       if (mine === operation) busy = false;
     }
   }
@@ -426,8 +430,10 @@ export function installWorkBoard({ client, getState, getSession }) {
     const mine = ++operation;
     if (focus) { pendingFocus = { key: focus.key ?? null, id: focus.id ?? null }; pendingStatus = focus.status ?? ""; }
     busy = true;
+    let pending = null;
     try {
-      await run();
+      pending = run(); actionFlight = pending;
+      await pending;
       if (mine !== operation || context() !== owned) return;
       busy = false;
       await load({ force: true });
@@ -437,6 +443,8 @@ export function installWorkBoard({ client, getState, getSession }) {
       pendingStatus = "";
       busy = false;
       note(error?.message || "Could not update the claim.");
+    } finally {
+      if (actionFlight === pending) actionFlight = null;
     }
   }
 
@@ -494,6 +502,17 @@ export function installWorkBoard({ client, getState, getSession }) {
 
   return {
     sync() { void load(); },
-    reset() { operation++; busy = false; loadedContext = null; items = []; status = null; cap = 20; older = false; seen = null; loadedRoom = null; pendingFocus = null; pendingStatus = ""; stick = null; if (root.isConnected) root.replaceChildren(); }
+    async whenReady() {
+      const owned = context();
+      if (!owned) return false;
+      try {
+        if (actionFlight) await actionFlight;
+        if (context() !== owned) return false;
+        if (readFlight) await readFlight;
+        else await load();
+      } catch { return false; }
+      return context() === owned && loadedContext === owned && loadedRoom === getSession()?.roomId;
+    },
+    reset() { operation++; busy = false; readFlight = null; actionFlight = null; loadedContext = null; items = []; status = null; cap = 20; older = false; seen = null; loadedRoom = null; pendingFocus = null; pendingStatus = ""; stick = null; if (root.isConnected) root.replaceChildren(); }
   };
 }

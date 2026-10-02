@@ -87,6 +87,7 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
     const target = row?.querySelector(`[data-update-action="${saved.action}"]`)
       ?? tabs.querySelector(`[data-update-filter="${filter}"]`);
     target?.focus({ preventScroll: true });
+    if (!row) target?.scrollIntoView({ block: "nearest", behavior: "instant" });
     return true;
   }
 
