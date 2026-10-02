@@ -3,7 +3,7 @@
 // the earliest claimedAt holds the slot. A later claim, a done claim, an
 // expired lease, or a different slot does not take it.
 
-import { ACTIVE_STATES } from "./protocol.mjs";
+import { ACTIVE_STATES, isSlot } from "./protocol.mjs";
 
 function expiryMs(claim) {
   if (claim?.leaseExpiresAt == null) return null;
@@ -29,7 +29,7 @@ export function slotOf(claim, machineId) {
   const matches = claim.files.filter(file => typeof file === "string" && file.startsWith(prefix) && !file.slice(prefix.length).includes("/"));
   if (matches.length !== 1) return null;
   const slot = matches[0].slice(prefix.length);
-  return slot.length > 0 ? slot : null;
+  return isSlot(slot) ? slot : null;
 }
 
 export function holdersForMachine(claims, machineId, now) {
