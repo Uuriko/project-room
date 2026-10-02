@@ -1,4 +1,4 @@
-// Tasks › Board: columns, a keyboard claim, collapsed chat lines, 390px, and axe.
+// Tasks › Board: claim actions, linked work and return journeys, 390px, and axe.
 // The room page and the work-claim HTTP API are the boundary. No test doubles.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -42,7 +42,7 @@ async function axe(page) {
   assert.deepEqual(serious.map(item => `${item.impact} ${item.id}`), []);
 }
 
-test("board columns, keyboard claim, chat line, 390px, and axe", { timeout: 90000 }, async t => {
+test("board columns, keyboard claim, linked work returns, chat line, 390px, and axe", { timeout: 120000 }, async t => {
   mkdirSync(shots, { recursive: true });
   mkdirSync("test-results", { recursive: true });
   const fixture = createAcceptanceFixture();
@@ -154,6 +154,107 @@ test("board columns, keyboard claim, chat line, 390px, and axe", { timeout: 9000
   await page.screenshot({ path: `${shots}/board-after-390.png` });
   await page.screenshot({ path: "test-results/board-after-390.png" });
   await axe(page);
+
+  await page.locator("#board-close").click();
+  const workId = "board:canonical", claimId = "board-linked";
+  const propose = (id, title) => fixture.store.command(fixture.keys.owner, "commons", {
+    id: crypto.randomUUID(), type: "work.proposed",
+    data: { workItemId: id, title, definitionOfDone: "Open the existing work without changing it.",
+      accountableMemberId: "owner", independentVerificationRequired: false, ownerDecisionRequired: false }
+  });
+  propose(workId, "Canonical work behind the Board card");
+  propose(claimId, "Different work with the claim's ID");
+  propose("board-coincidence", "Unlinked work with a coincidentally equal ID");
+  const updatedAt = new Date().toISOString();
+  // REST creation does not accept workItemId. These persisted legacy rows
+  // exercise the real list response, including absent and unresolved links.
+  for (const item of [
+    { id: claimId, title: "Z linked Board card", workItemId: workId },
+    { id: "board-null", title: "Legacy card without a work link", workItemId: null },
+    { id: "board-dangling", title: "Legacy card with a missing target", workItemId: "board:missing" },
+    { id: "board-coincidence", title: "Legacy card whose ID matches work", workItemId: null },
+    ...Array.from({ length: 6 }, (_, index) => ({ id: `board-context-${index}`, title: `Navigation context ${index}` }))
+  ]) seedClaim(fixture.store, { state: "unclaimed", updatedAt, ...item });
+  // A normal claim event makes the already-open client refresh its Board list.
+  await post(page, origin, "/work-claims", { id: "board-refresh", title: "Navigation refresh" }, 201);
+  await page.waitForFunction(sequence => document.querySelector("#event-count")?.textContent === String(sequence),
+    fixture.store.room("commons").sequence);
+  const navigationState = () => {
+    const room = fixture.store.room("commons");
+    return {
+      sequence: room.sequence,
+      workItems: structuredClone(room.state.workItems),
+      events: fixture.store.db.prepare("SELECT sequence, id, body FROM events WHERE room_id=? ORDER BY sequence").all("commons"),
+      claims: fixture.store.db.prepare("SELECT claim_id, item_json, updated_at FROM work_claims WHERE room_id=? ORDER BY claim_id").all("commons")
+    };
+  };
+  const beforeNavigation = navigationState();
+  const dialog = page.locator("#board-dialog");
+  const linked = page.locator(`article[data-claim-id='${claimId}'] h4 a[data-open-work]`);
+  const record = page.locator(`[data-work-record-id='${workId}']`);
+  const canonicalHash = `#pr-record/work/${encodeURIComponent(workId)}`;
+  const assertWork = async () => {
+    await record.waitFor({ state: "visible" });
+    await page.waitForFunction(id => document.activeElement?.dataset.workRecordId === id, workId);
+    assert.equal(new URL(page.url()).hash, canonicalHash);
+    assert.equal(await dialog.evaluate(node => node.open), false, "the Board no longer traps focus over work");
+    assert.equal(await record.locator("h3").innerText(), "Canonical work behind the Board card");
+    assert.equal(await record.locator(".work-details").evaluate(node => node.open), true);
+    assert.equal(await page.locator("#work-navigation-return").innerText(), "Back to Board");
+  };
+  const assertBoardReturn = async (url, scrollTop) => {
+    await dialog.waitFor({ state: "visible" });
+    await page.waitForFunction(id => document.activeElement?.closest("article")?.dataset.claimId === id, claimId);
+    assert.equal(page.url(), url);
+    assert.equal(await linked.evaluate(node => node === document.activeElement), true, "return restores the exact title link");
+    assert.ok(Math.abs(await dialog.evaluate(node => node.scrollTop) - scrollTop) <= 1, "return preserves Board scroll");
+  };
+  for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {
+    await page.setViewportSize(viewport);
+    await page.keyboard.press("Control+k");
+    await page.locator("#room-actions-query").fill("board");
+    await page.keyboard.press("Enter");
+    await linked.waitFor({ state: "visible" });
+    assert.equal(await linked.getAttribute("href"), canonicalHash);
+    assert.equal(await linked.getAttribute("data-open-work"), workId);
+    const boardUrl = page.url();
+    for (const id of ["board-null", "board-dangling", "board-coincidence"]) {
+      const heading = page.locator(`article[data-claim-id='${id}'] h4`);
+      assert.equal(await heading.count(), 1);
+      assert.equal(await heading.locator("a, [data-open-work]").count(), 0, `${id} is not a fabricated work link`);
+      await heading.click();
+      assert.equal(page.url(), boardUrl);
+      assert.equal(await dialog.evaluate(node => node.open), true);
+    }
+    await page.locator("#board-close").focus();
+    for (let step = 0; step < 100; step += 1) {
+      if (await linked.evaluate(node => node === document.activeElement)) break;
+      await page.keyboard.press("Tab");
+    }
+    assert.equal(await linked.evaluate(node => node === document.activeElement), true, `${viewport.width}px title is keyboard reachable`);
+    const scrollTop = await dialog.evaluate(node => node.scrollTop);
+    assert.ok(scrollTop > 0, "the return journey starts from a scrolled Board");
+    await page.keyboard.press("Enter");
+    await assertWork();
+    await page.locator("#work-navigation-return").focus();
+    await page.keyboard.press("Enter");
+    await assertBoardReturn(boardUrl, scrollTop);
+
+    await page.keyboard.press("Enter");
+    await assertWork();
+    await page.goBack();
+    await assertBoardReturn(boardUrl, scrollTop);
+    await page.goForward();
+    await assertWork();
+    await page.locator("#work-navigation-return").focus();
+    await page.keyboard.press("Enter");
+    await assertBoardReturn(boardUrl, scrollTop);
+    assert.deepEqual(navigationState(), beforeNavigation, "Board/work navigation changes no Room events, work items, or claim rows");
+    assert.equal(await dialog.evaluate(node => node.scrollWidth <= node.clientWidth + 1), true);
+    await page.screenshot({ path: `test-results/board-work-return-${viewport.width}.png` });
+    await axe(page);
+    await page.locator("#board-close").click();
+  }
 });
 
 function seedClaim(store, item) {

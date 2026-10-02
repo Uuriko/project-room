@@ -22,7 +22,7 @@ function visible(items, filter) {
   return items;
 }
 
-export function mountUpdates({ client, host }) {
+export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessage }) {
   const topbar = host?.querySelector(".topbar-actions") ?? document.querySelector(".topbar-actions");
   const entry = document.createElement("button");
   entry.id = "topbar-updates";
@@ -58,6 +58,37 @@ export function mountUpdates({ client, host }) {
   let items = [];
   let actionable = 0;
   let ticket = 0;
+  let interaction = 0;
+  let owner = null;
+  const context = () => getContext ? getContext() : client.session ? `${client.generation}|${client.session.roomId}|${client.session.member?.id}` : null;
+  const owns = value => value !== null && value === context();
+  function reset() {
+    ticket++; interaction++; owner = null; items = []; actionable = 0; filter = "needs";
+    if (dialog.open) dialog.close();
+    list.replaceChildren(); status.textContent = ""; paintBadge();
+  }
+  function currentContext() {
+    const value = context();
+    if (owner !== value) { reset(); owner = value; }
+    return value;
+  }
+  function cancelPending() { interaction++; ticket++; }
+  function capture(itemId, action = "open") {
+    return { filter, itemId, action, scrollTop: dialog.scrollTop, listScrollTop: list.scrollTop };
+  }
+  async function restore(saved) {
+    if (!currentContext()) return false;
+    const mine = ++interaction, owned = owner;
+    if (!dialog.open) dialog.showModal();
+    await load(saved.filter);
+    if (mine !== interaction || !owns(owned) || !dialog.open) return false;
+    dialog.scrollTop = saved.scrollTop; list.scrollTop = saved.listScrollTop;
+    const row = [...list.children].find(node => node.dataset.updateId === saved.itemId);
+    const target = row?.querySelector(`[data-update-action="${saved.action}"]`)
+      ?? tabs.querySelector(`[data-update-filter="${filter}"]`);
+    target?.focus({ preventScroll: true });
+    return true;
+  }
 
   function paintBadge() {
     badge.textContent = actionable ? String(actionable) : "";
@@ -106,6 +137,8 @@ export function mountUpdates({ client, host }) {
     }
   }
   async function load(next = filter) {
+    const owned = currentContext();
+    if (!owned) return;
     filter = next;
     const mine = ++ticket;
     status.textContent = "Loading updates…";
@@ -114,7 +147,7 @@ export function mountUpdates({ client, host }) {
         client.roomRead(`/updates?${queryFor(filter)}&limit=50`),
         filter === "needs" ? null : client.roomRead("/updates?state=actionable&limit=100")
       ]);
-      if (mine !== ticket || !page) return;
+      if (mine !== ticket || !owns(owned) || !page) return;
       items = page.items ?? [];
       const counted = filter === "needs" ? page : needs;
       actionable = (counted?.items ?? []).filter(item => item.state === "unread" || item.state === "read").length;
@@ -122,36 +155,52 @@ export function mountUpdates({ client, host }) {
       paint();
       status.textContent = "";
     } catch (error) {
-      if (mine !== ticket) return;
+      if (mine !== ticket || !owns(owned)) return;
       status.textContent = error?.message || "Could not load updates.";
     }
   }
   async function mark(item, action) {
+    const owned = currentContext();
+    if (!owned) return;
+    const mine = ++interaction;
+    const origin = capture(item.id, action);
     const requestId = crypto.randomUUID();
     const path = action === "open" ? "read" : action === "done" ? "done" : "clear";
     status.textContent = "";
-    await client.roomWrite(`/updates/${encodeURIComponent(item.id)}/${path}`, { requestId });
+    let result;
+    try { result = await client.roomWrite(`/updates/${encodeURIComponent(item.id)}/${path}`, { requestId }); }
+    catch (error) { if (mine !== interaction || !owns(owned) || !dialog.open) return; throw error; }
+    if (!result || mine !== interaction || !owns(owned) || !dialog.open) return;
     if (action === "open") {
-      dialog.close();
+      const workItemId = item.sourceRef?.workItemId;
       const messageId = item.sourceRef?.messageId;
-      const row = messageId ? document.querySelector(`[data-message-record-id="${CSS.escape(messageId)}"]`) : null;
-      row?.scrollIntoView({ block: "nearest" });
-      if (row instanceof HTMLElement) row.focus({ preventScroll: true });
+      const opened = workItemId && onOpenWork ? onOpenWork(workItemId, origin)
+        : messageId && onOpenMessage ? onOpenMessage(messageId, origin) : null;
+      if (opened === false) { status.textContent = "That source is no longer available in this room."; return; }
+      dialog.close();
+      if (opened !== true && messageId) {
+        const row = document.querySelector(`[data-message-record-id="${CSS.escape(messageId)}"]`);
+        row?.scrollIntoView({ block: "nearest" });
+        if (row instanceof HTMLElement) row.focus({ preventScroll: true });
+      }
+      return;
     }
     await load();
-    if (action !== "open" && !dialog.open) dialog.showModal();
   }
   function open(next = "needs") {
+    if (!currentContext()) return;
+    cancelPending();
     if (!dialog.open) dialog.showModal();
     const tab = tabs.querySelector(`[data-update-filter="${next}"]`);
     tab?.focus();
     void load(next);
   }
   entry.addEventListener("click", () => open(filter));
-  dialog.querySelector("#updates-close").addEventListener("click", () => dialog.close());
+  dialog.querySelector("#updates-close").addEventListener("click", () => { cancelPending(); dialog.close(); });
+  dialog.addEventListener("cancel", cancelPending);
   tabs.addEventListener("click", event => {
     const button = event.target.closest("[data-update-filter]");
-    if (button) void load(button.dataset.updateFilter);
+    if (button) { cancelPending(); void load(button.dataset.updateFilter); }
   });
   tabs.addEventListener("keydown", event => {
     if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return;
@@ -161,7 +210,7 @@ export function mountUpdates({ client, host }) {
     event.preventDefault();
     const step = event.key === "ArrowRight" ? 1 : -1;
     const next = buttons[(index + step + buttons.length) % buttons.length];
-    next.focus();
+    cancelPending(); next.focus();
     void load(next.dataset.updateFilter);
   });
   list.addEventListener("click", event => {
@@ -170,13 +219,17 @@ export function mountUpdates({ client, host }) {
     if (!button || !row) return;
     const item = items.find(entry => entry.id === row.dataset.updateId);
     if (!item) return;
-    void mark(item, button.dataset.updateAction).catch(error => { status.textContent = error?.message || "Could not update that row."; });
+    const owned = context();
+    button.disabled = button.dataset.updateAction !== "open";
+    void mark(item, button.dataset.updateAction).catch(error => {
+      if (owns(owned) && dialog.open) status.textContent = error?.message || "Could not update that row.";
+    }).finally(() => { if (owns(owned) && button.isConnected) button.disabled = false; });
   });
   const main = document.querySelector("#main");
   if (main) {
-    new MutationObserver(() => { if (!main.hidden) void load(filter); })
+    new MutationObserver(() => { if (main.hidden) reset(); else void load(filter); })
       .observe(main, { attributes: true, attributeFilter: ["hidden"] });
   }
   paintBadge();
-  return { open, openAction(id) { const next = PALETTE[id]; if (!next) return false; open(next); return true; } };
+  return { open, restore, reset, cancelPending, openAction(id) { const next = PALETTE[id]; if (!next) return false; open(next); return true; } };
 }
