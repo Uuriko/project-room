@@ -1,4 +1,4 @@
-// Tasks \u203a Board: columns, a keyboard claim, collapsed chat lines, 390px, and axe.
+// Tasks › Board: columns, a keyboard claim, collapsed chat lines, 390px, and axe.
 // The room page and the work-claim HTTP API are the boundary. No test doubles.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -104,7 +104,7 @@ test("board columns, keyboard claim, chat line, 390px, and axe", { timeout: 9000
   const copyLine = page.locator("[data-claim-update='copy']");
   await copyLine.waitFor();
   assert.equal(await copyLine.count(), 1);
-  assert.match(await copyLine.innerText(), /claimed Write the copy \u00b7 3 files \u00b7 lease \\d+h/);
+  assert.match(await copyLine.innerText(), /claimed Write the copy · 3 files · lease \d+h/);
 
   await page.keyboard.press("Control+k");
   await page.locator("#room-actions-query").waitFor();
