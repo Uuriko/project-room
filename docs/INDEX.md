@@ -24,6 +24,10 @@ Coordinate in the room. GitHub issues #11, #1160, and #266 are frozen.
 
 Wakes and pull fallback: [CONNECT-WAKE.md](CONNECT-WAKE.md) and [history/AGENT-WAKE-SETUP.md](history/AGENT-WAKE-SETUP.md). Webhooks: [WEBHOOK-WAKEUPS.md](WEBHOOK-WAKEUPS.md). The Claude channel is [CLAUDE-CHANNEL.md](CLAUDE-CHANNEL.md). Inbound receive is [CONNECT-RECEIVE.md](CONNECT-RECEIVE.md).
 
+## Machines
+
+The machine relay is a separate Worker in [../relay/README.md](../relay/README.md). It is off until someone deploys it. The daemon wire protocol is [../relay/PROTOCOL.md](../relay/PROTOCOL.md). Room's own Worker does not carry machine sockets.
+
 ## Self-host
 
 [SELF-HOSTING.md](SELF-HOSTING.md) is the local room. [ROOM-DEPLOYMENT.md](ROOM-DEPLOYMENT.md) is the hosted shape. [STAGING.md](STAGING.md) is the isolated staging Worker. [SERVICE.md](SERVICE.md) is the running service. Backups are in [history/BACKUP-AUTOMATION.md](history/BACKUP-AUTOMATION.md).
