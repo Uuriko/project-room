@@ -544,6 +544,8 @@ function validateEnvelope(incoming) {
     if (["expectedRevision", "expectedMemberRevision"].includes(key) && (!Number.isSafeInteger(value) || value < 0)) throw new Error(`Invalid ${key}`);
     if (["independentVerificationRequired", "ownerDecisionRequired", "active", ...ROOM_POLICY_FIELDS].includes(key) && typeof value !== "boolean") throw new Error(`Invalid ${key}`);
     if (["permissions", "paths", "checksClaimed", "capabilities", "scopes", "acceptedScopes"].includes(key) && (!Array.isArray(value) || value.length > 64 || value.some(v => typeof v !== "string" || !v.trim() || v.length > 512))) throw new Error(`Invalid ${key}`);
+    if (key === "pullRequests" && (!Array.isArray(value) || value.length > 16 || value.some(v => typeof v !== "string" || !/^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/pull\/[1-9]\d{0,9}$/.test(v)))) throw new Error(`Invalid ${key}`);
+    if (key === "blocks" && (!Array.isArray(value) || value.length > 64 || value.some(entry => !entry || typeof entry !== "object" || Array.isArray(entry) || typeof entry.path !== "string" || !entry.path.trim() || entry.path.length > 512 || (entry.block != null && (typeof entry.block !== "string" || entry.block.length > 80)) || (entry.region != null && (typeof entry.region !== "string" || entry.region.length > 80))))) throw new Error(`Invalid ${key}`);
     // Legacy events (v11-v18) used data.outputs as a plain string; keep that shape valid for strict replay.
     if (key === "outputs" && typeof value !== "string" && (!Array.isArray(value) || value.length > 64 || value.some(v => typeof v !== "string" || !v.trim() || v.length > 512))) throw new Error(`Invalid ${key}`);
     if (key === "preferences" && (Array.isArray(value) || typeof value !== "object" || Object.entries(value).some(([k, v]) => typeof k !== "string" || typeof v !== "string" || k.length > 64 || v.length > 64))) throw new Error(`Invalid ${key}`);
@@ -573,7 +575,7 @@ function validateEnvelope(incoming) {
       || typeof action.claimId !== "string" || !validId(action.claimId)
       || typeof action.label !== "string" || !action.label.trim() || action.label.length > 512
       || Object.keys(action).some(field => field !== "claimId" && field !== "label")))) throw new Error(`Invalid ${key}`);
-    if (!["string", "boolean", "number"].includes(typeof value) && !["permissions", "paths", "checksClaimed", "capabilities", "preferences", "budget", "outputs", "segments", "signedEvidence", "labels", "scopes", "acceptedScopes", "changed", "state", "pullRequest", "actions"].includes(key)) throw new Error(`Invalid ${key}`);
+    if (!["string", "boolean", "number"].includes(typeof value) && !["permissions", "paths", "checksClaimed", "capabilities", "preferences", "budget", "outputs", "segments", "signedEvidence", "labels", "scopes", "acceptedScopes", "changed", "state", "pullRequest", "pullRequests", "blocks", "actions"].includes(key)) throw new Error(`Invalid ${key}`);
   }
 }
 
@@ -1707,13 +1709,15 @@ function renewClaim(state, incoming) {
   const item = mutableWorkItem(state, incoming, [WORK_STATES.ACCEPTED, WORK_STATES.WORKING, WORK_STATES.BLOCKED]);
   if (!item.claim || !claimIsActive(item.claim, incoming.at)) throw new Error("No active claim to renew — acquire a fresh claim instead");
   if (incoming.actorId !== item.claim.holderId) throw new Error("Only the claim holder may renew this claim");
-  requireFields(incoming.data, ["progressMessageId", "expiresAt"]);
+  requireFields(incoming.data, ["expiresAt"]);
   if (!Number.isFinite(Date.parse(incoming.data.expiresAt)) || Date.parse(incoming.data.expiresAt) <= Date.parse(incoming.at)) throw new Error("Claim expiry must be in the future");
-  requireProgressCheckin(state, item.claim, incoming.actorId, incoming.data.progressMessageId);
+  if (incoming.data.progressMessageId != null) {
+    requireProgressCheckin(state, item.claim, incoming.actorId, incoming.data.progressMessageId);
+    item.claim.progressMessageId = incoming.data.progressMessageId;
+  }
   item.claim.expiresAt = incoming.data.expiresAt;
   item.claim.renewedAt = incoming.at;
   item.claim.renewals = (item.claim.renewals ?? 0) + 1;
-  item.claim.progressMessageId = incoming.data.progressMessageId;
   commitMutation(item, incoming);
 }
 

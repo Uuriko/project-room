@@ -98,6 +98,38 @@ test("a closing webhook releases the claim, and a second delivery does not settl
   assert.deepEqual(applyPullRequestWebhook(store, payload).applied, []);
 });
 
+test("a batch stays claimed until every linked pull is merged or closed", async t => {
+  const { store, call } = await room(t);
+  const second = "https://github.com/Uuriko/project-room/pull/9";
+  await call("create", null, { id: "batch", pullRequests: [URL_A, second], repo: "Uuriko/project-room", branch: "coord" });
+  await call("claim", "batch", {});
+  const firstFetch = githubFetch({ merged: true, state: "closed" });
+  await call("sweep", null, {}, { fetchImpl: firstFetch.fetchImpl });
+  const midway = store.workClaims.get("commons", "batch");
+  assert.equal(midway.state, "claimed");
+  assert.equal(midway.repo, "Uuriko/project-room");
+  assert.equal(midway.branch, "coord");
+  assert.equal(midway.pullRequests.find(pull => pull.url === URL_A).outcome, "merged");
+  assert.equal(midway.pullRequests.find(pull => pull.url === second).outcome, null);
+  assert.equal(midway.pullRequest.url, second);
+  assert.equal(claimEvents(store).some(event => event.data.action === "pr_merged"), false);
+  const closedFetch = githubFetch({ merged: false, state: "closed" });
+  await call("sweep", null, {}, { fetchImpl: closedFetch.fetchImpl });
+  const settled = store.workClaims.get("commons", "batch");
+  assert.equal(settled.state, "unclaimed");
+  assert.equal(settled.pullRequests.every(pull => pull.outcome), true);
+  assert.equal(claimEvents(store).some(event => event.data.action === "pr_closed"), true);
+});
+
+test("an explicit release settles a batch while a linked pull is still open", async t => {
+  const { store, call } = await room(t);
+  await call("create", null, { id: "open-batch", pullRequests: [URL_A, "https://github.com/Uuriko/project-room/pull/11"] });
+  await call("claim", "open-batch", {});
+  const released = await call("release", "open-batch", { reason: "handed off" });
+  assert.equal(released.value.state, "unclaimed");
+  assert.equal(store.workClaims.get("commons", "open-batch").owner, null);
+});
+
 test("an open pull is not settled, and the next sweep waits instead of polling again", async t => {
   const { store, call } = await room(t);
   await call("create", null, { id: "lane", pullRequest: URL_A });
