@@ -977,7 +977,7 @@ function roomSchemaStamp() {
     ownerDelegateSchema, agentRoomSchema, oauthPendingSchema, gmailSchema, requestRunSchema,
     directSendSchema, inboxStitchSchema, RETIRED_BOARD_V2_SCHEMA, EMISSARY_LURE_SCHEMA,
     agentKeyRegistrySchema, INTEGRITY_SNAPSHOT_SCHEMA,
-    INTEGRITY_JOB_CURSOR_SCHEMA, ROOM_SCHEMA_STAMP_SCHEMA
+    INTEGRITY_JOB_CURSOR_SCHEMA, ROOM_SCHEMA_STAMP_SCHEMA, LOOKUP_INDEXES
   ];
   for (const part of parts) hash.update("\0").update(part ?? "");
   for (const def of fenceDefinitions(STORE_SCHEMA_VERSION)) hash.update("\0").update(def.name).update(def.sql);
@@ -998,6 +998,22 @@ const ROOM_SCHEMA_STAMP_SCHEMA = `CREATE TABLE IF NOT EXISTS room_schema_stamp (
   version INTEGER NOT NULL,
   stamp TEXT NOT NULL
 )`;
+
+// Lookups on growing tables whose primary key does not lead with the
+// filter column. Included in the schema stamp so a deploy runs this once
+// on the full path; a later wake does not rebuild it.
+const LOOKUP_INDEXES = `
+  CREATE INDEX IF NOT EXISTS identity_links_identity ON identity_links(identity_id);
+  CREATE INDEX IF NOT EXISTS member_accounts_account ON member_accounts(account_id, room_id);
+  CREATE INDEX IF NOT EXISTS share_link_joins_slot ON share_link_joins(slot_hash);
+  CREATE INDEX IF NOT EXISTS account_passkey_method ON account_passkey_credentials(method_id);
+  CREATE INDEX IF NOT EXISTS oauth_pending_slot ON oauth_pending_states(provider, slot_token);
+  CREATE INDEX IF NOT EXISTS agent_connections_sponsor ON agent_connections(sponsor_account_id);
+  CREATE INDEX IF NOT EXISTS private_email_connections_id ON private_email_connections(id);
+  CREATE INDEX IF NOT EXISTS public_work_receipts_offer ON public_work_receipts(offer_id, generation);
+  CREATE INDEX IF NOT EXISTS gmail_pending_account ON gmail_pending(account_id);
+  CREATE INDEX IF NOT EXISTS guest_selfserve_idem_member ON guest_selfserve_idem(member_id);
+`;
 
 export class RoomStore {
   constructor(filename, { now = () => Date.now(), readOnly = false, database, storagePlatform = nodeStorage, storageFailureThreshold = STORAGE_FAILURE_THRESHOLD, stitch = null, identityHashKey = undefined, integrity = "eager" } = {}) {
@@ -1574,6 +1590,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         verifyRoomLifecycle(this);
         if (!this.readOnly) this.identities.expireInactive();
       }
+      this.db.exec(LOOKUP_INDEXES);
       this.rememberSchemaStamp();
       phase("checksum");
       phases.checksum = { ms: 0, rowsRead: 0 };

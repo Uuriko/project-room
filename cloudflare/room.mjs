@@ -21,13 +21,13 @@ import { isEdgeDoorUrl, EDGE_DOOR_HOSTS, rewriteRoomApiPrefix, isHealthAliasPath
 // imports above: server/channel-adapters/index.mjs has a module-init order
 // constraint and is only safely evaluated after store.mjs/http.mjs.
 import { durableInboundEmailConsumer, emailRoutingLimits, emailRoutingRejections } from '../server/email-routing-inbound.mjs';
-import { runLiveStoreRetention } from '../server/retention-run.mjs';
+import { RETENTION_TABLES, runLiveStoreRetention } from '../server/retention-run.mjs';
 import { syncClaimPullRequests } from '../server/claim-pr-sync.mjs';
 import { CRON_JOB_BUDGET_MS, HEARTBEAT_STORAGE_KEY, applyOutcomes, jobHealthResponse, jobHealthUnavailable, jobHealthView, runCronJobs } from './job-heartbeat.mjs';
 import { SOURCE_REVISION, BUILD_ID } from '../server/version.mjs';
 import { edgePublicResponse } from './edge-public.mjs';
 import { appDurationMs, logRoomRequest, requestPath, withServerTiming } from './request-timing.mjs';
-import { HEALTH_PROBE_TIMEOUT_MS, createHealthProbe, healthLivenessResponse, healthProbeResponse } from './health-probe.mjs';
+import { HEALTH_PROBE_TIMEOUT_MS, createHealthProbe, healthLivenessResponse, readyProbeResponse, workerLivenessResponse } from './health-probe.mjs';
 
 // One probe per isolate. Concurrent health checks during a cold start share
 // it; a finished probe does not cache, so the next check sees a fresh answer.
@@ -41,6 +41,7 @@ function yieldToQueuedRequests() {
 function cronDeadline() {
   return Date.now() + CRON_JOB_BUDGET_MS;
 }
+const RETENTION_CURSOR_KEY = 'retention-table-index';
 
 // The DO transport may erase the original error type. Report availability,
 // without exposing backend details or claiming that a mutation rolled back.
@@ -166,6 +167,14 @@ export class ProjectRoom extends DurableObject {
     finally { this.ctx.waitUntil(this.store.humanPush.flush()); }
   }
 
+  // Readiness is one statement. It does not open the room, replay events, or
+  // scan a table. A paused object has no database, so it is not ready.
+  probeStorage() {
+    if (this.paused || !this.store) return { ok: false };
+    const row = this.store.db.prepare("SELECT 1 AS ok").get();
+    return { ok: row?.ok === 1 };
+  }
+
   async syncGmailMailboxes() {
     if (this.paused) return { completed: 0 };
     await yieldToQueuedRequests();
@@ -269,12 +278,25 @@ export class ProjectRoom extends DurableObject {
   async planRetention() {
     if (this.paused) return { dryRun: true, deleted: 0, skipped: "paused" };
     await yieldToQueuedRequests();
+    const stored = await this.ctx.storage.get(RETENTION_CURSOR_KEY);
+    const tableIndex = Number.isSafeInteger(stored) ? stored : 0;
     const receipt = runLiveStoreRetention({ store: this.store, env: this.env,
-      now: new Date().toISOString(), record: plan => { this.lastRetentionPlan = plan; } });
-    // Applied on every retention tick, not behind the disposable-log deletion
-    // flag. Delivered and dead-letter webhook rows are a cache; pending and
-    // failed rows stay until dispatch finishes them.
-    const webhookDeliveries = this.store.agentPlugin.pruneWebhookDeliveries();
+      now: new Date().toISOString(), tableIndex, deadline: cronDeadline(),
+      record: plan => { this.lastRetentionPlan = plan; } });
+    await this.ctx.storage.put(RETENTION_CURSOR_KEY, (tableIndex + 1) % RETENTION_TABLES.length);
+    // Delivered and dead-letter webhook rows are a cache. Pending and failed
+    // rows stay until dispatch finishes them.
+    let webhookDeliveries = { deleted: 0 };
+    try {
+      webhookDeliveries = this.store.agentPlugin.pruneWebhookDeliveries();
+    } finally {
+      console.info(JSON.stringify({
+        event: 'room.retention', table: receipt.table, deleted: receipt.deleted,
+        dryRun: receipt.dryRun ? 1 : 0, budgetExceeded: receipt.budgetExceeded ? 1 : 0,
+        eligible: receipt.categories?.[receipt.table]?.eligible ?? 0,
+        webhookDeleted: webhookDeliveries?.deleted ?? 0
+      }));
+    }
     return { ...receipt, webhookDeliveries };
   }
 }
@@ -344,16 +366,36 @@ export default {
     headers.delete('X-Real-IP');
     headers.delete('X-Forwarded-For');
     const healthPath = url.pathname.length > 1 && url.pathname.endsWith('/') ? url.pathname.slice(0, -1) : url.pathname;
-    // Liveness is the Worker. Readiness is a short probe of invite-only-pilot.
-    // A cold constructor must not turn this check into room_unavailable.
+    const deployment = env.ROOM_DEPLOYMENT === 'production' || env.ROOM_DEPLOYMENT === 'staging' ? env.ROOM_DEPLOYMENT : undefined;
+    const mode = env.ROOM_SERVICE_MODE ?? 'cloudflare-staging';
+    const operationalGet = (request.method === 'GET' || request.method === 'HEAD')
+      && (healthPath === '/api/health' || healthPath === '/api/ready' || isHealthAliasPath(url.pathname));
+    // These answers never enter the Node origin check. A browser Origin that
+    // is not this room is still refused, same as every other /api route.
+    if (operationalGet) {
+      const originHeader = request.headers.get('Origin');
+      if (originHeader && originHeader !== url.origin) {
+        return finish(new Response(JSON.stringify({ error: { code: 'origin_denied', message: 'Request origin is not allowed' } }), {
+          status: 403, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }
+        }), 'worker');
+      }
+    }
+    // Liveness is the Worker. It does not construct or query the Durable Object.
     if ((healthPath === '/api/health' || isHealthAliasPath(url.pathname)) && (request.method === 'GET' || request.method === 'HEAD')) {
-      const deployment = env.ROOM_DEPLOYMENT === 'production' || env.ROOM_DEPLOYMENT === 'staging' ? env.ROOM_DEPLOYMENT : undefined;
-      const mode = env.ROOM_SERVICE_MODE ?? 'cloudflare-staging';
+      return finish(workerLivenessResponse(request, { mode, deployment }), 'worker');
+    }
+    // Readiness is SELECT 1 on invite-only-pilot, bounded by the probe budget.
+    // A cold constructor must not turn this check into room_unavailable.
+    if (healthPath === '/api/ready' && (request.method === 'GET' || request.method === 'HEAD')) {
       const probed = await durableObjectHealth({
         timeoutMs: HEALTH_PROBE_TIMEOUT_MS,
-        start: () => env.ROOM.getByName('invite-only-pilot').fetch(new Request(request, { headers })),
+        start: async () => {
+          const result = await env.ROOM.getByName('invite-only-pilot').probeStorage();
+          if (!result?.ok) throw new Error('storage probe failed');
+          return new Response(JSON.stringify({ status: 'ok' }), { status: 200, headers: { 'Content-Type': 'application/json; charset=utf-8' } });
+        },
         waitUntil: ctx?.waitUntil?.bind(ctx),
-        onSnapshot: (snapshot, timing) => ({ response: healthProbeResponse(snapshot, request, timing), servedBy: 'durable-object' }),
+        onSnapshot: (snapshot, timing) => ({ response: readyProbeResponse(snapshot, request, { mode, deployment, elapsedMs: timing.elapsedMs }), servedBy: 'durable-object' }),
         onUnready: (readiness, timing) => ({ response: healthLivenessResponse(request, { mode, deployment, readiness, ...timing }), servedBy: 'worker' })
       });
       return finish(probed.response, probed.servedBy);

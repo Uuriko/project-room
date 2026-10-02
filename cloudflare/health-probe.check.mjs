@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createHealthProbe, healthLivenessResponse, healthProbeResponse } from './health-probe.mjs';
+import { createHealthProbe, healthLivenessResponse, readyProbeResponse } from './health-probe.mjs';
 
 const healthRequest = (method = 'GET') => new Request('https://room.example.test/api/health', { method });
 
@@ -13,7 +13,7 @@ test('a slow Durable Object probe answers liveness from one shared fetch', async
     setTimeout(() => resolve(Response.json({ status: 'ok', mode: 'cloudflare-staging' })), 1000);
   });
   const waitUntil = promise => { keptAlive += 1; promise.then(() => {}, () => {}); };
-  const onSnapshot = snapshot => healthProbeResponse(snapshot, healthRequest());
+  const onSnapshot = snapshot => readyProbeResponse(snapshot, healthRequest(), { mode: 'cloudflare-staging' });
   const onUnready = readiness => healthLivenessResponse(healthRequest(), { mode: 'cloudflare-staging', readiness });
   const [first, second] = await Promise.all([
     probe({ start, timeoutMs: 50, onSnapshot, onUnready, waitUntil }),
@@ -31,35 +31,27 @@ test('a slow Durable Object probe answers liveness from one shared fetch', async
   assert.deepEqual(secondBody.do, { status: 'timeout', timeoutMs: 1000 });
 });
 
-test('a ready probe reports durable-object readiness and passes a denial through', async () => {
+test('a ready probe reports storage readiness', async () => {
   const probe = createHealthProbe();
   const ready = await probe({
     timeoutMs: 200,
-    start: async () => new Response(JSON.stringify({ status: 'ok', mode: 'cloudflare-staging' }), {
+    start: async () => new Response(JSON.stringify({ status: 'ok' }), {
       status: 200,
-      headers: { 'Content-Type': 'application/json; charset=utf-8', 'Server-Timing': 'app;dur=3', 'Content-Length': '40' }
+      headers: { 'Content-Type': 'application/json; charset=utf-8' }
     }),
-    onSnapshot: (snapshot, timing) => healthProbeResponse(snapshot, healthRequest(), timing),
+    onSnapshot: (snapshot, timing) => readyProbeResponse(snapshot, healthRequest(), { mode: 'cloudflare-staging', elapsedMs: timing.elapsedMs }),
     onUnready: () => { throw new Error('a fast probe must not time out'); }
   });
   const body = await ready.json();
-  assert.equal(body.status, 'ok');
+  assert.equal(body.status, 'ready');
   assert.equal(body.mode, 'cloudflare-staging');
-  assert.deepEqual(body.durableObject, { ready: true, status: 200 });
   assert.equal(body.do.status, 'ok');
   assert.equal(body.do.statusCode, 200);
   assert.equal(typeof body.do.ms, 'number');
-  assert.match(ready.headers.get('server-timing'), /app;dur=3/);
-  assert.equal(ready.headers.get('content-length'), null);
 
-  const denied = await probe({
-    timeoutMs: 200,
-    start: async () => new Response('no', { status: 403, headers: { 'Content-Type': 'text/plain' } }),
-    onSnapshot: (snapshot, timing) => healthProbeResponse(snapshot, healthRequest(), timing),
-    onUnready: () => { throw new Error('a denial is a finished probe'); }
-  });
-  assert.equal(denied.status, 403);
-  assert.equal(await denied.text(), 'no');
+  const head = readyProbeResponse({ status: 200 }, healthRequest('HEAD'), { mode: 'cloudflare-staging', elapsedMs: 4 });
+  assert.equal(head.status, 200);
+  assert.equal(await head.text(), '');
 });
 
 test('a probe that throws reports error readiness', async () => {

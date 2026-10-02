@@ -164,6 +164,7 @@ test("RPC stub calls target a class that extends DurableObject", () => {
     "drainChannelBacklog",
     "drainWebhookDeliveries",
     "planRetention",
+    "probeStorage",
     "readJobHealth",
     "recordCronTick",
     "refreshClaimPullRequests",
