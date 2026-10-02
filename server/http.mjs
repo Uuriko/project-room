@@ -384,6 +384,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // scoped tokens for the Project Room API. One instance per server (one per
   // Durable Object in production); client registry comes from config.
   const oauthProvider = createOAuthProvider({
+    db: store.db,
     clock: () => store.now(),
     // F-01 reuse signal: refresh-token reuse (possible theft) revokes the
     // whole token family inside the provider; log it as a structured
