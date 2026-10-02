@@ -21,11 +21,12 @@ The probe's `do-rpc-fail` verdict is a failure-domain clue, not a root-cause pro
 
 ## Blast radius
 
-All five per-minute cron jobs RPC into the single `invite-only-pilot` DO
-(`cloudflare/room.mjs` comment, wrangler production cron `* * * * *`). While
-the DO is down: no serving, no cron writes, and - because cron heartbeats are
-emitted *through* the same DO they monitor (registry class 19) - no liveness
-signal either. Silence is not health.
+The production safety-net cron (`*/30 * * * *` in wrangler) makes one RPC,
+`ensureJobAlarm`, into the single `invite-only-pilot` Durable Object. Due
+webhook, land, and claim work runs from that object's alarm. While the DO is
+down: no serving, no alarm or cron writes, and — because job heartbeats are
+emitted through the same DO they monitor — no liveness signal either. Silence
+is not health.
 
 ## Diagnosis and mitigation
 
