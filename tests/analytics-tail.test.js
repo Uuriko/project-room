@@ -76,7 +76,7 @@ test("a SQL failure in the tail is counted and does not escape", async () => {
 
 test("a done merged claim is a receipt in both the live list and the growth predicate", t => {
   const { store } = openRoom(t);
-  const projection = store.room("alpha").state;
+  const projection = structuredClone(store.room("alpha").state);
   projection.room.publicReceipts = { enabled: true, revision: 1, setById: "owner", setAt: "2026-09-30T15:00:00.000Z" };
   projection.workItems = {
     done: { id: "done", state: "completed", title: "LeakTitleZZ", receipt: { eventId: "r1" }, updatedAt: "2026-09-30T15:00:00.000Z" },
