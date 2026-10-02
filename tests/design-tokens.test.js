@@ -10,7 +10,6 @@ import { DARK_DECLARATIONS, LIGHT_DECLARATIONS } from "../src/design-tokens.js";
 import { ROOM_ENTRY_HTML, publicRoomDoorHtml } from "../deploy/room-entry.mjs";
 import { renderReceiptsHtml } from "../server/receipts-page.mjs";
 import { renderRoomExportHtml } from "../server/room-export-html.mjs";
-import { renderStatusPage } from "../src/health-status.mjs";
 import { PublicFace, roomPublicFaceSchema } from "../server/public-face.mjs";
 import { HEALTH_PAGE_STYLE } from "../scripts/room-health.mjs";
 
@@ -54,7 +53,6 @@ const surfaces = {
   "public face": faceHtml(),
   receipts,
   "room export": renderRoomExportHtml([]),
-  "status page": renderStatusPage({}),
   "room health": readFileSync(new URL("../docs/room-health.html", import.meta.url), "utf8")
 };
 
