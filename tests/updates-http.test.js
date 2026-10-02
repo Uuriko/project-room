@@ -4,7 +4,7 @@
 // mention receipts, and cross-room reads keep the same state.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -49,6 +49,20 @@ function addAgent(store, roomId, ownerKey, memberId = "agent", displayName = "Re
     memberId, displayName, kind: "agent", permissions: ["accept_work", "complete_work"]
   } });
   return store.issueAccessKey(roomId, memberId);
+}
+
+function persistedUpdates(store) {
+  return {
+    marks: store.db.prepare("SELECT * FROM private_update_marks ORDER BY room_id, member_id, item_id").all(),
+    receipts: store.db.prepare("SELECT * FROM private_update_commands ORDER BY room_id, member_id, request_id").all(),
+    journal: store.db.prepare("SELECT COUNT(*) AS count, MAX(sequence) AS lastSequence FROM events").get()
+  };
+}
+
+function clarify(store, ownerKey, messageId, body = "one more detail on the plan") {
+  store.command(ownerKey, "commons", { id: randomUUID(), type: T.MESSAGE_POSTED, data: {
+    messageId: randomUUID(), body, replyToId: messageId
+  } });
 }
 
 function ask(store, roomId, ownerKey, toMemberId, body = "please confirm the plan") {
@@ -111,7 +125,7 @@ test("done retires the item from updates and needs-me, and a clarification bring
   const listed = await request("/api/rooms/commons/updates", { token: readerKey });
   const item = listed.body.items.find(entry => entry.sourceRef.requestId === messageId);
   const done = await request(`/api/rooms/commons/updates/${item.id}/done`, {
-    method: "POST", token: readerKey, data: { requestId: randomUUID() }
+    method: "POST", token: readerKey, data: { requestId: randomUUID(), expectedBasis: item.basisToken }
   });
   assert.equal(done.status, 200);
   assert.equal(done.body.item.state, "handled");
@@ -127,25 +141,112 @@ test("done retires the item from updates and needs-me, and a clarification bring
   assert.equal(revived.state, "unread");
 });
 
-test("read is idempotent on an exact retry and a reused request id conflicts", async t => {
+// These cases own the stale-click contract at HTTP + durable storage: a source
+// clarification between listing and clicking must not acknowledge unseen work.
+for (const [action, expectedState] of [["read", "read"], ["done", "handled"], ["clear", "cleared"]]) {
+  test(`${action} rejects an unseen clarification and replays only its committed basis`, async t => {
+    const { store, ownerKey, request } = serve(t);
+    const agentKey = addAgent(store, "commons", ownerKey);
+    const { messageId } = ask(store, "commons", ownerKey, "agent");
+    const listed = await request("/api/rooms/commons/updates", { token: agentKey });
+    assert.equal(listed.status, 200);
+    const item = listed.body.items[0];
+    assert.match(item.basisToken, /^ub1_[a-f0-9]{64}$/);
+    const repeated = await request("/api/rooms/commons/updates", { token: agentKey });
+    assert.equal(repeated.body.items[0].basisToken, item.basisToken);
+    clarify(store, ownerKey, messageId);
+    const beforeStale = persistedUpdates(store);
+    const requestId = randomUUID();
+    const path = `/api/rooms/commons/updates/${item.id}/${action}`;
+    const stale = await request(path, {
+      method: "POST", token: agentKey, data: { requestId, expectedBasis: item.basisToken }
+    });
+    assert.equal(stale.status, 409);
+    assert.equal(stale.body.error.code, "update_changed");
+    assert.deepEqual(persistedUpdates(store), beforeStale, "stale clicks write no mark, receipt, or source event");
+
+    const fresh = (await request("/api/rooms/commons/updates", { token: agentKey })).body.items[0];
+    assert.equal(fresh.id, item.id);
+    assert.equal(fresh.state, "unread");
+    assert.notEqual(fresh.basisToken, item.basisToken);
+    const data = { requestId, expectedBasis: fresh.basisToken };
+    const committed = await request(path, { method: "POST", token: agentKey, data });
+    assert.equal(committed.status, 200);
+    assert.equal(committed.body.duplicate, false);
+    assert.equal(committed.body.item.state, expectedState);
+    assert.equal(committed.body.item.basisToken, fresh.basisToken);
+    assert.equal(persistedUpdates(store).marks.length, beforeStale.marks.length + 1);
+    assert.equal(persistedUpdates(store).receipts.length, beforeStale.receipts.length + 1);
+    assert.deepEqual(persistedUpdates(store).journal, beforeStale.journal);
+
+    clarify(store, ownerKey, messageId, "a later clarification after the acknowledgement");
+    const beforeRetry = persistedUpdates(store);
+    const retry = await request(path, { method: "POST", token: agentKey, data });
+    assert.equal(retry.status, 200);
+    assert.deepEqual(retry.body, { ...committed.body, duplicate: true });
+    assert.deepEqual(persistedUpdates(store), beforeRetry, "an old exact retry cannot mark the newer source");
+    const current = (await request("/api/rooms/commons/updates", { token: agentKey })).body.items[0];
+    assert.equal(current.id, item.id);
+    assert.equal(current.state, "unread");
+    assert.notEqual(current.basisToken, fresh.basisToken);
+  });
+}
+
+test("request id reuse conflicts on a changed basis, action, or item", async t => {
+  const { store, ownerKey, request } = serve(t);
+  const agentKey = addAgent(store, "commons", ownerKey);
+  const { messageId } = ask(store, "commons", ownerKey, "agent");
+  const item = (await request("/api/rooms/commons/updates", { token: agentKey })).body.items[0];
+  const requestId = randomUUID();
+  const first = await request(`/api/rooms/commons/updates/${item.id}/read`, {
+    method: "POST", token: agentKey, data: { requestId, expectedBasis: item.basisToken }
+  });
+  assert.equal(first.status, 200);
+  clarify(store, ownerKey, messageId);
+  const newer = (await request("/api/rooms/commons/updates", { token: agentKey })).body.items[0];
+  const other = ask(store, "commons", ownerKey, "agent", "a separate request");
+  const otherItem = (await request("/api/rooms/commons/updates", { token: agentKey })).body.items
+    .find(entry => entry.sourceRef.requestId === other.messageId);
+  const before = persistedUpdates(store);
+  for (const [label, itemId, action, expectedBasis] of [
+    ["basis", item.id, "read", newer.basisToken],
+    ["action", item.id, "done", item.basisToken],
+    ["item", otherItem.id, "read", otherItem.basisToken]
+  ]) {
+    const conflict = await request(`/api/rooms/commons/updates/${itemId}/${action}`, {
+      method: "POST", token: agentKey, data: { requestId, expectedBasis }
+    });
+    assert.equal(conflict.status, 409, label);
+    assert.equal(conflict.body.error.code, "idempotency_conflict", label);
+    assert.deepEqual(persistedUpdates(store), before, label);
+  }
+});
+
+test("new marks distinguish missing basis from malformed basis without writing", async t => {
   const { store, ownerKey, request } = serve(t);
   const agentKey = addAgent(store, "commons", ownerKey);
   ask(store, "commons", ownerKey, "agent");
   const item = (await request("/api/rooms/commons/updates", { token: agentKey })).body.items[0];
-  const requestId = randomUUID();
-  const first = await request(`/api/rooms/commons/updates/${item.id}/read`, { method: "POST", token: agentKey, data: { requestId } });
-  assert.equal(first.status, 200);
-  assert.equal(first.body.duplicate, false);
-  assert.equal(first.body.item.state, "read");
-  const retry = await request(`/api/rooms/commons/updates/${item.id}/read`, { method: "POST", token: agentKey, data: { requestId } });
-  assert.equal(retry.status, 200);
-  assert.equal(retry.body.duplicate, true);
-  assert.equal(retry.body.item.state, "read");
-  const conflict = await request(`/api/rooms/commons/updates/${item.id}/done`, { method: "POST", token: agentKey, data: { requestId } });
-  assert.equal(conflict.status, 409);
-  assert.equal(conflict.body.error.code, "idempotency_conflict");
-  const saved = await request("/api/rooms/commons/updates?state=all", { token: agentKey });
-  assert.equal(saved.body.items[0].state, "read");
+  const before = persistedUpdates(store);
+  for (const [label, fields, code] of [
+    ["missing", {}, "update_basis_required"],
+    ["null", { expectedBasis: null }, "invalid_update"],
+    ["number", { expectedBasis: 7 }, "invalid_update"],
+    ["object", { expectedBasis: {} }, "invalid_update"],
+    ["empty", { expectedBasis: "" }, "invalid_update"],
+    ["short digest", { expectedBasis: "ub1_abc" }, "invalid_update"],
+    ["wrong version", { expectedBasis: `ub2_${"a".repeat(64)}` }, "invalid_update"],
+    ["extra field", { expectedBasis: item.basisToken, extra: true }, "invalid_update"]
+  ]) {
+    const rejected = await request(`/api/rooms/commons/updates/${item.id}/done`, {
+      method: "POST", token: agentKey, data: { requestId: randomUUID(), ...fields }
+    });
+    assert.equal(rejected.status, 422, label);
+    assert.equal(rejected.body.error.code, code, label);
+    assert.deepEqual(persistedUpdates(store), before, label);
+  }
+  const current = (await request("/api/rooms/commons/updates", { token: agentKey })).body.items[0];
+  assert.equal(current.state, "unread");
 });
 
 test("pages stay stable and a restarted store keeps the mark", async t => {
@@ -173,19 +274,20 @@ test("pages stay stable and a restarted store keeps the mark", async t => {
     const listed = await get(`/api/rooms/commons/updates?limit=1${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`);
     assert.equal(listed.status, 200);
     assert.equal(listed.body.items.length, 1);
-    seen.push(listed.body.items[0].id);
+    seen.push(listed.body.items[0]);
     if (!listed.body.hasMore) break;
     cursor = listed.body.cursor;
   }
   assert.equal(seen.length, 3);
-  assert.equal(new Set(seen).size, 3);
+  assert.equal(new Set(seen.map(item => item.id)).size, 3);
   const item = seen[0];
   const requestId = randomUUID();
-  const marked = await fetch(`${origin}/api/rooms/commons/updates/${item}/read`, {
+  const marked = await fetch(`${origin}/api/rooms/commons/updates/${item.id}/read`, {
     method: "POST", headers: { Authorization: `Bearer ${agentKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ requestId })
+    body: JSON.stringify({ requestId, expectedBasis: item.basisToken })
   });
   assert.equal(marked.status, 200);
+  const committed = await marked.json();
   server.closeStreams(); server.closeAllConnections();
   await new Promise(resolve => server.close(resolve));
   store.close();
@@ -200,15 +302,113 @@ test("pages stay stable and a restarted store keeps the mark", async t => {
   await new Promise(resolve => server2.listen(0, "127.0.0.1", resolve));
   const origin2 = `http://127.0.0.1:${server2.address().port}`;
   const after = await (await fetch(`${origin2}/api/rooms/commons/updates?state=all`, { headers: { Authorization: `Bearer ${agentKey}` } })).json();
-  assert.equal(after.items.find(entry => entry.id === item).state, "read");
-  const lost = await fetch(`${origin2}/api/rooms/commons/updates/${item}/read`, {
+  assert.equal(after.items.find(entry => entry.id === item.id).state, "read");
+  const beforeRetry = persistedUpdates(reopened);
+  const lost = await fetch(`${origin2}/api/rooms/commons/updates/${item.id}/read`, {
     method: "POST", headers: { Authorization: `Bearer ${agentKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ requestId })
+    body: JSON.stringify({ requestId, expectedBasis: item.basisToken })
   });
   const replay = await lost.json();
   assert.equal(lost.status, 200);
   assert.equal(replay.duplicate, true);
-  assert.equal(replay.item.state, "read");
+  assert.deepEqual(replay, { ...committed, duplicate: true });
+  assert.deepEqual(persistedUpdates(reopened), beforeRetry);
+});
+
+test("pre-upgrade committed receipts remain retryable under current authorization only", async t => {
+  const { store, ownerKey, request } = serve(t);
+  const oldKey = addAgent(store, "commons", ownerKey);
+  const { messageId } = ask(store, "commons", ownerKey, "agent");
+  const listed = await request("/api/rooms/commons/updates", { token: oldKey });
+  const item = listed.body.items[0];
+  const requestId = randomUUID();
+  const legacyItem = { ...item, state: "handled" };
+  delete legacyItem.basisToken;
+  // Explicit persisted pre-upgrade fixture, using the historical row format.
+  // New-policy receipt creation is exercised by the HTTP cases above.
+  const legacyReceipt = {
+    roomId: "commons", viewerId: "agent", viewerAccountId: listed.body.viewerAccountId,
+    viewerAuthEpoch: listed.body.viewerAuthEpoch, viewerSessionBinding: listed.body.viewerSessionBinding,
+    viewerSessionRevision: listed.body.viewerSessionRevision,
+    requestId, duplicate: false, item: legacyItem
+  };
+  const source = store.room("commons").state.replyRequests[messageId];
+  const legacyBasis = `${source.status}|${source.revision}|${source.contextEventId ?? ""}`;
+  const legacyFingerprint = createHash("sha256").update(`done|${item.id}|${requestId}`).digest("hex");
+  store.transaction(() => {
+    store.db.prepare("INSERT INTO private_update_marks (room_id,member_id,item_id,action,basis,updated_at) VALUES(?,?,?,?,?,?)")
+      .run("commons", "agent", item.id, "done", legacyBasis, store.now());
+    store.db.prepare("INSERT INTO private_update_commands (room_id,member_id,request_id,fingerprint,response) VALUES(?,?,?,?,?)")
+      .run("commons", "agent", requestId, legacyFingerprint, JSON.stringify(legacyReceipt));
+  });
+  clarify(store, ownerKey, messageId);
+  store.revoke(oldKey);
+  const currentKey = store.issueAccessKey("commons", "agent");
+  const before = persistedUpdates(store);
+  const path = `/api/rooms/commons/updates/${item.id}/done`;
+  const retry = await request(path, { method: "POST", token: currentKey, data: { requestId } });
+  assert.equal(retry.status, 200);
+  assert.deepEqual(retry.body.item, legacyItem);
+  assert.equal(retry.body.duplicate, true);
+  assert.equal(retry.body.viewerId, "agent");
+  assert.deepEqual(persistedUpdates(store), before);
+  const fresh = (await request("/api/rooms/commons/updates", { token: currentKey })).body.items[0];
+  assert.equal(fresh.id, item.id);
+  assert.equal(fresh.state, "unread");
+
+  const newUnbound = await request(path, {
+    method: "POST", token: currentKey, data: { requestId: randomUUID() }
+  });
+  assert.equal(newUnbound.status, 422);
+  assert.equal(newUnbound.body.error.code, "update_basis_required");
+  const alteredRetry = await request(path, {
+    method: "POST", token: currentKey, data: { requestId, expectedBasis: fresh.basisToken }
+  });
+  assert.equal(alteredRetry.status, 409);
+  assert.equal(alteredRetry.body.error.code, "idempotency_conflict");
+  assert.deepEqual(persistedUpdates(store), before);
+  store.revoke(currentKey);
+  const beforeDenied = persistedUpdates(store);
+  const denied = await request(path, { method: "POST", token: currentKey, data: { requestId } });
+  assert.equal(denied.status, 401);
+  assert.deepEqual(persistedUpdates(store), beforeDenied, "a durable receipt does not bypass revocation");
+});
+
+test("marks and request ids stay private to each member and a basis token grants no access", async t => {
+  const { store, ownerKey, request } = serve(t);
+  const firstKey = addAgent(store, "commons", ownerKey);
+  const secondKey = addAgent(store, "commons", ownerKey, "second", "Other Agent");
+  const outsiderKey = addAgent(store, "commons", ownerKey, "outsider", "Outside Agent");
+  store.command(ownerKey, "commons", { id: randomUUID(), type: T.MESSAGE_POSTED, data: {
+    messageId: randomUUID(), body: "@Reply Agent and @Other Agent please review this"
+  } });
+  const first = (await request("/api/rooms/commons/updates?kinds=mention", { token: firstKey })).body.items[0];
+  const second = (await request("/api/rooms/commons/updates?kinds=mention", { token: secondKey })).body.items[0];
+  assert.equal(first.id, second.id);
+  const requestId = randomUUID();
+  const path = `/api/rooms/commons/updates/${first.id}/done`;
+  const marked = await request(path, {
+    method: "POST", token: firstKey, data: { requestId, expectedBasis: first.basisToken }
+  });
+  assert.equal(marked.status, 200);
+  assert.equal(marked.body.duplicate, false);
+  const secondAfter = (await request("/api/rooms/commons/updates?kinds=mention", { token: secondKey })).body.items[0];
+  assert.equal(secondAfter.state, "unread");
+  const beforeDenied = persistedUpdates(store);
+  const forbidden = await request(path, {
+    method: "POST", token: outsiderKey, data: { requestId, expectedBasis: first.basisToken }
+  });
+  assert.equal(forbidden.status, 404);
+  assert.equal(forbidden.body.error.code, "update_not_found");
+  assert.deepEqual(persistedUpdates(store), beforeDenied);
+  const independentlyMarked = await request(path, {
+    method: "POST", token: secondKey, data: { requestId, expectedBasis: secondAfter.basisToken }
+  });
+  assert.equal(independentlyMarked.status, 200);
+  assert.equal(independentlyMarked.body.duplicate, false, "another member cannot retrieve the first member's receipt");
+  assert.equal(independentlyMarked.body.viewerId, "second");
+  assert.equal(persistedUpdates(store).marks.length, beforeDenied.marks.length + 1);
+  assert.equal(persistedUpdates(store).receipts.length, beforeDenied.receipts.length + 1);
 });
 
 test("a revoked key is refused and mentions arrive through mention receipts", async t => {

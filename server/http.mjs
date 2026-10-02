@@ -3303,9 +3303,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         protectWrite(req, auth, selected.bearer);
         rate(`write:${auth.credentialHash}`, 60);
         const data = await body(req);
-        if (!exact(data, ["requestId"]) || typeof data.requestId !== "string") reject(422, "invalid_update", "requestId is the only accepted field");
+        // JDOT-COH-UPDATES-BASIS begin
+        // Missing expectedBasis can reach only an authenticated legacy receipt;
+        // the service refuses every new unbound operation.
+        if ((!exact(data, ["requestId"]) && !exact(data, ["requestId", "expectedBasis"])) || typeof data.requestId !== "string") reject(422, "invalid_update", "Supply requestId and the observed expectedBasis");
         const action = updatesReadMatch ? "read" : updatesDoneMatch ? "done" : "clear";
-        return json(res, 200, markUpdate(store, selected.token, roomId, pathId(updatesMarkMatch[2]), action, data.requestId, fence));
+        return json(res, 200, markUpdate(store, selected.token, roomId, pathId(updatesMarkMatch[2]), action, data.requestId, fence, data.expectedBasis));
+        // JDOT-COH-UPDATES-BASIS end
       }
       const accessStatusMatch = /^\/api\/access-requests\/([^/]{1,64})$/.exec(url.pathname);
       if (accessStatusMatch && req.method === "GET") {

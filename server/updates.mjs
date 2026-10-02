@@ -50,7 +50,13 @@ const iso = value => {
 };
 const itemIdOf = (kind, key) => `upd_${createHash("sha256").update(`${kind}|${key}`).digest("hex").slice(0, 20)}`;
 const encode = value => Buffer.from(JSON.stringify(value), "utf8").toString("base64url");
-const fingerprintOf = (action, itemId, requestId) => createHash("sha256").update(`${action}|${itemId}|${requestId}`).digest("hex");
+// An observed source precondition, not a credential or an authorization grant.
+// Keep the old fingerprint only for exact pre-upgrade committed receipt retries.
+const basisTokenOf = item => `ub1_${createHash("sha256").update(JSON.stringify([1, item.roomId, item.id, item.basis])).digest("hex")}`;
+const validBasis = value => typeof value === "string" && /^ub1_[a-f0-9]{64}$/.test(value);
+const fingerprintOf = (action, itemId, requestId, expectedBasis) => createHash("sha256")
+  .update(expectedBasis === undefined ? `${action}|${itemId}|${requestId}`
+    : JSON.stringify([1, action, itemId, requestId, expectedBasis])).digest("hex");
 
 function ensureSchema(store) {
   if (store.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='private_update_marks'").get()) return true;
@@ -317,7 +323,7 @@ function projectRoom(store, roomId, memberId, identityId) {
 
 function publish(item) {
   const { basis, terminal, ...rest } = item;
-  return rest;
+  return { ...rest, basisToken: basisTokenOf(item) };
 }
 
 function parseListQuery({ state = "actionable", kinds = null, cursor = null, limit = DEFAULT_LIMIT } = {}) {
@@ -446,13 +452,14 @@ export function listAccountUpdates(store, token, binding, query = {}) {
   });
 }
 
-export function markUpdate(store, token, roomId, itemId, action, requestId, binding = null) {
+export function markUpdate(store, token, roomId, itemId, action, requestId, binding = null, expectedBasis = undefined) {
   if (!["read", "done", "clear"].includes(action)) fail(422, "invalid_update", "Choose read, done, or clear");
   if (!validId(requestId) || !validId(itemId)) fail(422, "invalid_update", "Supply the item id and a request id");
+  if (expectedBasis !== undefined && !validBasis(expectedBasis)) fail(422, "invalid_update", "expectedBasis must be an Updates basis token");
   ensureSchema(store);
   return store.transaction(() => {
     const auth = store.authenticate(token, roomId, binding);
-    const fingerprint = fingerprintOf(action, itemId, requestId);
+    const fingerprint = fingerprintOf(action, itemId, requestId, expectedBasis);
     const prior = store.db.prepare(
       "SELECT fingerprint, response FROM private_update_commands WHERE room_id=? AND member_id=? AND request_id=?"
     ).get(roomId, auth.member.id, requestId);
@@ -460,9 +467,13 @@ export function markUpdate(store, token, roomId, itemId, action, requestId, bind
       if (prior.fingerprint !== fingerprint) fail(409, "idempotency_conflict", "Request id already used for a different update");
       return { ...JSON.parse(prior.response), ...viewerEcho(auth, roomId), duplicate: true };
     }
+    // New unbound operations must never acknowledge a revision the caller did
+    // not see. Old committed receipts above remain retryable under current auth.
+    if (expectedBasis === undefined) fail(422, "update_basis_required", "Read the update and supply its basisToken as expectedBasis");
     const projected = projectRoom(store, roomId, auth.member.id, auth.identityId ?? null);
     const raw = projected.items.find(item => item.id === itemId);
     if (!raw) fail(404, "update_not_found", "That update is not in your list");
+    if (expectedBasis !== basisTokenOf(raw)) fail(409, "update_changed", "This update changed; read it again before acting");
     let next = raw.state;
     if (action === "read" && raw.state === "unread") next = "read";
     if (action === "done" && ACTIONABLE.has(raw.state)) next = "handled";

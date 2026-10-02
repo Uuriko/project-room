@@ -9,6 +9,8 @@ const FILTERS = [
   { id: "all", label: "All activity" },
   { id: "saved", label: "Saved" }
 ];
+const ACTION_LABELS = { open: "Open", done: "Handled for me", clear: "Clear" };
+const validBasis = value => typeof value === "string" && /^ub1_[a-f0-9]{64}$/.test(value);
 const PALETTE = { "catch-up": "needs", activity: "all", mentions: "mentions", later: "saved" };
 
 function queryFor(filter) {
@@ -60,10 +62,13 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
   let ticket = 0;
   let interaction = 0;
   let owner = null;
+  // Uncertain operations survive same-session Close/reopen. Their observed
+  // basis never advances just because a refresh brings a newer item into view.
+  const operations = new Map();
   const context = () => getContext ? getContext() : client.session ? `${client.generation}|${client.session.roomId}|${client.session.member?.id}` : null;
   const owns = value => value !== null && value === context();
   function reset() {
-    ticket++; interaction++; owner = null; items = []; actionable = 0; filter = "needs";
+    ticket++; interaction++; owner = null; items = []; actionable = 0; filter = "needs"; operations.clear();
     if (dialog.open) dialog.close();
     list.replaceChildren(); status.textContent = ""; paintBadge();
   }
@@ -96,6 +101,18 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
     badge.hidden = actionable === 0;
     entry.setAttribute("aria-label", actionable ? `Updates, ${actionable} need you` : "Updates");
   }
+  function paintOperations() {
+    for (const row of list.querySelectorAll("[data-update-id]")) {
+      const operation = operations.get(row.dataset.updateId);
+      for (const button of row.querySelectorAll("[data-update-action]")) {
+        const action = button.dataset.updateAction;
+        const label = `${operation?.action === action ? (operation.busy ? "Checking " : "Retry ") : ""}${ACTION_LABELS[action]}`;
+        button.textContent = label;
+        button.setAttribute("aria-label", `${label} ${items.find(item => item.id === row.dataset.updateId)?.title || "update"}`);
+        button.disabled = !!operation && (operation.action !== action || (operation.busy && action !== "open"));
+      }
+    }
+  }
   function paint() {
     for (const button of tabs.querySelectorAll("[role=tab]")) {
       const on = button.dataset.updateFilter === filter;
@@ -103,7 +120,12 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
       button.tabIndex = on ? 0 : -1;
     }
     list.replaceChildren();
-    const rows = visible(items, filter);
+    const rows = [...visible(items, filter)];
+    // A committed-but-lost Done may have left this filter. Keep only a neutral
+    // recovery control, not cached source text that a fresh read no longer lists.
+    for (const [id] of operations) {
+      if (!rows.some(item => item.id === id)) rows.push({ id, title: "Earlier update action", kind: "pending_action", state: "unconfirmed" });
+    }
     if (!rows.length) {
       const empty = document.createElement("li");
       empty.className = "empty-note";
@@ -124,7 +146,7 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
       copy.append(title, meta);
       const actions = document.createElement("div");
       actions.className = "updates-actions";
-      for (const [name, label] of [["open", "Open"], ["done", "Done"], ["clear", "Clear"]]) {
+      for (const [name, label] of Object.entries(ACTION_LABELS)) {
         const button = document.createElement("button");
         button.type = "button";
         button.className = name === "open" ? "button secondary" : "button ghost";
@@ -136,6 +158,7 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
       row.append(copy, actions);
       list.append(row);
     }
+    paintOperations();
   }
   async function load(next = filter) {
     const owned = currentContext();
@@ -163,21 +186,71 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
   async function mark(item, action) {
     const owned = currentContext();
     if (!owned) return;
-    const mine = ++interaction;
+    let operation = operations.get(item.id);
+    if (operation && operation.action !== action) {
+      status.textContent = "Confirm the earlier action before choosing another.";
+      return;
+    }
+    if (!operation) {
+      if (!validBasis(item.basisToken)) {
+        status.textContent = "Refresh Updates before marking this item.";
+        return;
+      }
+      operation = { requestId: crypto.randomUUID(), expectedBasis: item.basisToken, action,
+        item: { ...item, sourceRef: { ...item.sourceRef } }, busy: false, flight: 0 };
+      operations.set(item.id, operation);
+    }
+    const mine = ++interaction, flight = ++operation.flight;
     const origin = capture(item.id, action);
-    const requestId = crypto.randomUUID();
-    const path = action === "open" ? "read" : action === "done" ? "done" : "clear";
-    status.textContent = "";
+    const path = action === "open" ? "read" : action;
+    const current = () => mine === interaction && owns(owned) && dialog.open;
+    operation.busy = true; paintOperations(); status.textContent = "";
     let result;
-    try { result = await client.roomWrite(`/updates/${encodeURIComponent(item.id)}/${path}`, { requestId }); }
-    catch (error) { if (mine !== interaction || !owns(owned) || !dialog.open) return; throw error; }
-    if (!result || mine !== interaction || !owns(owned) || !dialog.open) return;
+    try {
+      result = await client.roomWrite(`/updates/${encodeURIComponent(operation.item.id)}/${path}`,
+        { requestId: operation.requestId, expectedBasis: operation.expectedBasis });
+    } catch (error) {
+      if (!current()) return;
+      if (["update_changed", "update_basis_required", "invalid_update", "update_not_found", "idempotency_conflict"].includes(error?.code)) {
+        operations.delete(item.id);
+        await load();
+        if (current()) status.textContent = error.code === "update_changed"
+          ? "This update changed. Review it before acting again."
+          : "That action could not be applied. Review the refreshed update before acting.";
+        return;
+      }
+      throw error;
+    } finally {
+      if (owns(owned) && operations.get(item.id) === operation && operation.flight === flight) {
+        operation.busy = false;
+        if (dialog.open) paintOperations();
+      }
+    }
+    if (!result || !current()) return;
+    // A valid session echo alone does not bind a response to this row or click.
+    if (result.requestId !== operation.requestId || result.item?.id !== operation.item.id
+        || result.item?.roomId !== operation.item.roomId || result.item?.basisToken !== operation.expectedBasis
+        || JSON.stringify(result.item?.sourceRef) !== JSON.stringify(operation.item.sourceRef)) {
+      status.textContent = "Could not confirm that action. Retry it to check the same update.";
+      return;
+    }
+    operations.delete(item.id);
+    const latest = items.find(entry => entry.id === item.id);
+    if (latest?.basisToken !== operation.expectedBasis) {
+      if (!latest) {
+        paint();
+        tabs.querySelector(`[data-update-filter="${filter}"]`)?.focus();
+      } else paintOperations();
+      status.textContent = latest ? "Earlier action confirmed. This update changed; review it before acting again."
+        : "Earlier action confirmed. That update is no longer in this list.";
+      return;
+    }
     if (action === "open") {
-      const workItemId = item.sourceRef?.workItemId;
-      const messageId = item.sourceRef?.messageId;
+      const workItemId = operation.item.sourceRef?.workItemId;
+      const messageId = operation.item.sourceRef?.messageId;
       const opened = workItemId && onOpenWork ? onOpenWork(workItemId, origin)
         : messageId && onOpenMessage ? onOpenMessage(messageId, origin) : null;
-      if (opened === false) { status.textContent = "That source is no longer available in this room."; return; }
+      if (opened === false) { paintOperations(); status.textContent = "That source is no longer available in this room."; return; }
       dialog.close();
       if (opened !== true && messageId) {
         const row = document.querySelector(`[data-message-record-id="${CSS.escape(messageId)}"]`);
@@ -218,13 +291,12 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
     const button = event.target.closest("[data-update-action]");
     const row = event.target.closest("[data-update-id]");
     if (!button || !row) return;
-    const item = items.find(entry => entry.id === row.dataset.updateId);
+    const item = items.find(entry => entry.id === row.dataset.updateId) ?? operations.get(row.dataset.updateId)?.item;
     if (!item) return;
     const owned = context();
-    button.disabled = button.dataset.updateAction !== "open";
     void mark(item, button.dataset.updateAction).catch(error => {
-      if (owns(owned) && dialog.open) status.textContent = error?.message || "Could not update that row.";
-    }).finally(() => { if (owns(owned) && button.isConnected) button.disabled = false; });
+      if (owns(owned) && dialog.open) status.textContent = error?.message || "Could not confirm that action. Retry it to check the same update.";
+    });
   });
   const main = document.querySelector("#main");
   if (main) {

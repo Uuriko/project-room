@@ -8363,7 +8363,15 @@ paths:
               schema:
                 type: object
                 properties:
-                  items: { type: array, items: { type: object } }
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        basisToken:
+                          type: string
+                          pattern: '^ub1_[a-f0-9]{64}$'
+                          description: Opaque observed source basis. Pass unchanged as expectedBasis for a new private mark; this is not an authority grant.
                   hasMore: { type: boolean }
                   cursor: { type: [string, "null"] }
                   incompleteSources: { type: object }
@@ -8401,7 +8409,15 @@ paths:
               schema:
                 type: object
                 properties:
-                  items: { type: array, items: { type: object } }
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        basisToken:
+                          type: string
+                          pattern: '^ub1_[a-f0-9]{64}$'
+                          description: Opaque observed source basis. Pass unchanged as expectedBasis for a new private mark; this is not an authority grant.
                   hasMore: { type: boolean }
                   cursor: { type: [string, "null"] }
                   incompleteSources: { type: object }
@@ -8413,7 +8429,16 @@ paths:
   /api/rooms/{roomId}/updates/{itemId}/read:
     post:
       summary: Mark an update read
-      description: Idempotent. Retry the same requestId to receive the same result. A later source revision becomes unread again.
+      description: >-
+        Private read mark, not shared completion. New operations require the listed
+        basisToken as expectedBasis. A changed source basis refuses the mark without
+        effects. Retry the same requestId and expectedBasis to receive the original
+        committed result, even after a later source change. Current authentication
+        is required for every retry. An omitted expectedBasis is accepted only for
+        an exact already-committed legacy receipt, never a new operation.
+        Tokens reflect the existing source basis, not every message edit; independent
+        wake/reply handling is unchanged. Older writers restore weaker behavior on
+        downgrade, so rollback does not preserve this precondition.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: itemId
@@ -8427,18 +8452,31 @@ paths:
             schema:
               type: object
               required: [requestId]
+              additionalProperties: false
               properties:
                 requestId: { type: string }
+                expectedBasis:
+                  type: string
+                  pattern: '^ub1_[a-f0-9]{64}$'
+                  description: Required for every new operation. Omission is reserved for exact already-committed legacy receipt retries; never refresh this token to retry an older action.
       responses:
         '200': { description: The update, with state read when it was unread. duplicate is true on an exact retry. }
         '401': { description: unauthenticated }
         '404': { description: update_not_found }
-        '409': { description: idempotency_conflict }
-        '422': { description: invalid_update }
+        '409': { description: 'update_changed (refresh and review before a new action) or idempotency_conflict (requestId reused with another action, item or basis)' }
+        '422': { description: 'update_basis_required for an unbound new operation; invalid_update for malformed fields or token' }
   /api/rooms/{roomId}/updates/{itemId}/done:
     post:
       summary: Mark an update handled
-      description: Human Done or the same acknowledgement an agent wake records. Idempotent exact retry. The item leaves actionable lists, including needs-me.
+      description: >-
+        Marks handled for the current member, not shared task completion. New
+        operations require the listed basisToken as expectedBasis; changed basis
+        refuses with no effect. Exact retries retain requestId and expectedBasis
+        and return the historical committed receipt under current authentication.
+        Omitted expectedBasis is allowed only for an exact committed legacy retry.
+        The item leaves this member's actionable lists, including needs-me.
+        Existing source-basis limitations and independent wake/reply-derived handling
+        remain; older writers do not retain this guard on downgrade.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: itemId
@@ -8452,18 +8490,31 @@ paths:
             schema:
               type: object
               required: [requestId]
+              additionalProperties: false
               properties:
                 requestId: { type: string }
+                expectedBasis:
+                  type: string
+                  pattern: '^ub1_[a-f0-9]{64}$'
+                  description: Required for every new operation. Omission is reserved for exact already-committed legacy receipt retries; never refresh this token to retry an older action.
       responses:
         '200': { description: The update, state handled when it was actionable. duplicate is true on an exact retry. }
         '401': { description: unauthenticated }
         '404': { description: update_not_found }
-        '409': { description: idempotency_conflict }
-        '422': { description: invalid_update }
+        '409': { description: 'update_changed (refresh and review before a new action) or idempotency_conflict (requestId reused with another action, item or basis)' }
+        '422': { description: 'update_basis_required for an unbound new operation; invalid_update for malformed fields or token' }
   /api/rooms/{roomId}/updates/{itemId}/clear:
     post:
       summary: Dismiss an update
-      description: Clears the item. Idempotent exact retry. A new request revision or clarification makes it actionable again.
+      description: >-
+        Dismisses the item for the current member without changing shared work.
+        New operations require the listed basisToken as expectedBasis. A different
+        current basis refuses without effects. Exact retries with the same requestId
+        and expectedBasis return the old committed receipt without dismissing a
+        newer basis. Missing expectedBasis is accepted only for an authenticated
+        exact committed legacy retry. A new request revision or clarification
+        resurfaces. This guards the existing source basis, not every content edit
+        or independent wake/reply handling; older writers weaken it on downgrade.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: itemId
@@ -8477,14 +8528,19 @@ paths:
             schema:
               type: object
               required: [requestId]
+              additionalProperties: false
               properties:
                 requestId: { type: string }
+                expectedBasis:
+                  type: string
+                  pattern: '^ub1_[a-f0-9]{64}$'
+                  description: Required for every new operation. Omission is reserved for exact already-committed legacy receipt retries; never refresh this token to retry an older action.
       responses:
         '200': { description: The update, state cleared. duplicate is true on an exact retry. }
         '401': { description: unauthenticated }
         '404': { description: update_not_found }
-        '409': { description: idempotency_conflict }
-        '422': { description: invalid_update }
+        '409': { description: 'update_changed (refresh and review before a new action) or idempotency_conflict (requestId reused with another action, item or basis)' }
+        '422': { description: 'update_basis_required for an unbound new operation; invalid_update for malformed fields or token' }
   /api/agent-keys:
     post:
       summary: Issue a scoped agent API key

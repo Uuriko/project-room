@@ -1,4 +1,4 @@
-// Updates HTTP/SQLite journey: message/work destinations, exact returns and retired reads.
+// Updates HTTP/SQLite journeys: revision-bound marks, exact retries and retired navigation.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -16,7 +16,7 @@ import { hashPassword } from "../src/password-auth.mjs";
 
 const command = (type, data, id = crypto.randomUUID()) => ({ id, type, data });
 
-test("Updates navigation keeps review, draft and return context at 1280px and 390px", { timeout: 120000 }, async t => {
+async function setup(t) {
   const directory = mkdtempSync(join(tmpdir(), "room-updates-browser-"));
   const store = new RoomStore(join(directory, "room.sqlite"));
   store.initialize(initialRoom());
@@ -58,6 +58,11 @@ test("Updates navigation keeps review, draft and return context at 1280px and 39
   assert.equal(await page.locator("#updates-count").textContent(), "");
 
   const agent = store.issueAccessKey("commons", "agent");
+  return { store, owner, agent, origin, page, errors, selectUpdatesFilter };
+}
+
+test("Updates navigation keeps review, draft and return context at 1280px and 390px", { timeout: 120000 }, async t => {
+  const { store, owner, agent, origin, page, errors, selectUpdatesFilter } = await setup(t);
   const messageId = "updates-message-only", threadId = "updates-thread-root";
   store.command(owner, "commons", command(T.MESSAGE_POSTED, { messageId: threadId, body: "Starting review discussion." }));
   store.command(agent, "commons", command(T.MESSAGE_POSTED, {
@@ -100,7 +105,7 @@ test("Updates navigation keeps review, draft and return context at 1280px and 39
   await selectUpdatesFilter("Saved", "saved");
   await page.locator(".updates-row").waitFor();
   assert.match(await page.locator(".updates-row").innerText(), /read/);
-  await page.getByRole("button", { name: /Done please confirm/ }).click();
+  await page.locator('.updates-row [data-update-action="done"]').click();
   await selectUpdatesFilter("Needs me", "needs");
   await page.getByText("Nothing needs you.").waitFor();
   assert.equal(await page.locator("#updates-count").textContent(), "");
@@ -267,7 +272,7 @@ test("Updates navigation keeps review, draft and return context at 1280px and 39
   assert.equal(sessionResponse.ok(), true);
   const { csrf } = await sessionResponse.json();
   const handled = await page.request.post(`${origin}/api/rooms/commons/updates/${encodeURIComponent(review.id)}/done`, {
-    headers: { Origin: origin, "X-CSRF-Token": csrf }, data: { requestId: crypto.randomUUID() }
+    headers: { Origin: origin, "X-CSRF-Token": csrf }, data: { requestId: crypto.randomUUID(), expectedBasis: review.basisToken }
   });
   assert.equal(handled.status(), 200, await handled.text());
   await page.locator("#work-navigation-return").press("Enter");
@@ -461,4 +466,317 @@ test("Updates navigation keeps review, draft and return context at 1280px and 39
   assert.equal(store.db.prepare("SELECT action FROM private_update_marks WHERE room_id=? AND member_id=? AND item_id=?").get("commons", "reader-a", oldUpdateId).action, "read");
   assert.equal(JSON.stringify([store.room("commons"), store.room("updates-other")]), lifecycleBefore, "stale callbacks cannot mutate either room's shared state");
   assert.deepEqual(errors, []);
+});
+
+// Authoring gate: HTTP tests own token admission and idempotency. These journeys
+// own the distinct browser risks: acting on an already-rendered revision,
+// retaining an ambiguous operation through dismissal, and accepting the wrong
+// receipt as success. Every projection and receipt comes from this real server;
+// routes only lose, delay, or corrupt delivery after a real commit. No UI seam.
+function revisionJourney(f) {
+  const { store, owner, agent, origin, page, selectUpdatesFilter } = f;
+  const signEvidence = makeTestSigner(store);
+  const send = (key, type, data) => store.command(key, "commons", command(type, data));
+  const work = id => store.room("commons").state.workItems[id];
+  const complete = (id, version) => send(agent, T.WORK_COMPLETED, {
+    workItemId: id, expectedRevision: work(id).revision, summary: `Evidence ${version} for ${id}`,
+    evidenceUrl: "https://example.invalid/not-fetched", signedEvidence: signEvidence(), evidenceVersion: version,
+    producerId: "agent", nextAction: "Review this exact evidence."
+  });
+  const listed = async id => {
+    const response = await page.request.get(`${origin}/api/rooms/commons/updates?state=all&limit=100`);
+    assert.equal(response.status(), 200, await response.text());
+    const item = (await response.json()).items.find(item => item.kind === "review_requested" && item.sourceRef.workItemId === id);
+    assert.ok(item, `real completed work ${id} projects a review update`);
+    return item;
+  };
+  const makeReview = async id => {
+    send(owner, T.WORK_PROPOSED, { workItemId: id, title: `Review ${id}`,
+      definitionOfDone: "Name the evidence and next action.", accountableMemberId: "agent", mode: "read",
+      independentVerificationRequired: false, ownerDecisionRequired: true, humanDecisionMakerId: "owner" });
+    send(agent, T.WORK_ACCEPTED, { workItemId: id, expectedRevision: 0 });
+    complete(id, "v1");
+    return listed(id);
+  };
+  const revise = async id => {
+    const before = work(id).revision;
+    send(agent, T.WORK_BLOCKED, { workItemId: id, expectedRevision: before,
+      reason: "The evidence needs another revision.", nextAction: "Prepare the next exact result." });
+    send(agent, T.WORK_BLOCKER_RESOLVED, { workItemId: id, expectedRevision: work(id).revision,
+      resolution: "A revised result is ready." });
+    complete(id, `v${before + 1}`);
+    assert.equal(work(id).revision, before + 3);
+    await page.waitForFunction(sequence => document.querySelector("#event-count")?.textContent === String(sequence), store.room("commons").sequence);
+    return listed(id);
+  };
+  const row = id => page.locator(`.updates-row[data-update-id="${id}"]`);
+  const action = (id, name) => row(id).locator(`[data-update-action="${name}"]`);
+  const path = (id, name) => `/api/rooms/commons/updates/${encodeURIComponent(id)}/${name === "open" ? "read" : name}`;
+  const attempts = [];
+  page.on("request", request => {
+    const pathname = new URL(request.url()).pathname;
+    if (request.method() === "POST" && /\/updates\/[^/]+\/(read|done|clear)$/.test(pathname)) {
+      attempts.push({ path: pathname, body: request.postDataJSON() });
+    }
+  });
+  const responseFor = (id, name) => page.waitForResponse(response => response.request().method() === "POST"
+    && new URL(response.url()).pathname === path(id, name));
+  const openUpdates = async (filter = "all") => {
+    await page.locator("#topbar-updates").click();
+    await page.locator("#updates-dialog").waitFor({ state: "visible" });
+    await selectUpdatesFilter(filter === "needs" ? "Needs me" : "All activity", filter);
+  };
+  const settled = () => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  const waitRetry = async (id, name) => {
+    await page.waitForFunction(({ id, name }) => {
+      const button = [...document.querySelectorAll(".updates-row")].find(row => row.dataset.updateId === id)
+        ?.querySelector(`[data-update-action="${name}"]`);
+      return button?.textContent.startsWith("Retry ") && !button.disabled;
+    }, { id, name });
+    for (const other of ["open", "done", "clear"].filter(value => value !== name)) {
+      assert.equal(await action(id, other).isDisabled(), true, "an unresolved operation cannot be replaced by another action on the row");
+    }
+  };
+  const waitChanged = async () => {
+    await page.waitForFunction(() => /changed/i.test(document.querySelector("#updates-status")?.textContent ?? ""));
+    await settled();
+  };
+  const countCommands = () => store.db.prepare("SELECT COUNT(*) AS count FROM private_update_commands WHERE room_id=? AND member_id=?")
+    .get("commons", "owner").count;
+  const mark = id => store.db.prepare("SELECT action,basis,updated_at FROM private_update_marks WHERE room_id=? AND member_id=? AND item_id=?")
+    .get("commons", "owner", id) ?? null;
+  const finishSuccess = async (item, name) => {
+    if (name === "open") {
+      await page.locator("#updates-dialog").waitFor({ state: "hidden" });
+      await page.waitForFunction(id => document.activeElement?.dataset.workRecordId === id, item.sourceRef.workItemId);
+      await page.locator("#work-navigation-return").click();
+      await page.locator("#updates-dialog").waitFor({ state: "visible" });
+    } else {
+      const state = name === "done" ? "handled" : "cleared";
+      await page.waitForFunction(({ id, state }) => [...document.querySelectorAll(".updates-row")]
+        .find(row => row.dataset.updateId === id)?.querySelector(".updates-copy p")?.textContent.endsWith(` · ${state}`), { id: item.id, state });
+    }
+    await page.locator("#updates-close").click();
+  };
+  return { ...f, makeReview, listed, revise, row, action, path, attempts, responseFor, openUpdates,
+    settled, waitRetry, waitChanged, countCommands, mark, finishSuccess };
+}
+
+test("Updates refuse a source revision changed after display without silently marking or navigating", { timeout: 120000 }, async t => {
+  const f = revisionJourney(await setup(t));
+  const { page, store } = f;
+  for (const name of ["open", "done", "clear"]) {
+    const shown = await f.makeReview(`stale-${name}`);
+    await f.openUpdates();
+    await f.action(shown.id, name).waitFor();
+    const destination = page.url();
+    const markBefore = f.mark(shown.id), commandsBefore = f.countCommands(), attemptsBefore = f.attempts.length;
+    const current = await f.revise(shown.sourceRef.workItemId);
+    const sharedBeforeClick = JSON.stringify(store.room("commons"));
+    const response = f.responseFor(shown.id, name);
+    await f.action(shown.id, name).click();
+    const rejected = await response;
+    assert.equal(rejected.status(), 409, "the server must reject the basis that was actually displayed, not mark the newer revision");
+    assert.equal((await rejected.json()).error.code, "update_changed");
+    await f.waitChanged();
+    assert.equal(f.attempts.length, attemptsBefore + 1, "a changed source never triggers an automatic second mark");
+    const original = f.attempts.at(-1);
+    assert.equal(original.body.expectedBasis, shown.basisToken);
+    assert.match(original.body.expectedBasis, /^ub1_[a-f0-9]{64}$/);
+    assert.notEqual(current.basisToken, shown.basisToken);
+    assert.equal(page.url(), destination, "stale Open must not navigate to a result the user did not review");
+    assert.equal(await page.locator("#updates-dialog").isVisible(), true);
+    assert.match(await f.row(shown.id).locator(".updates-copy p").textContent(), / · unread$/);
+    assert.equal(f.countCommands(), commandsBefore, "a rejected mark creates no private command receipt");
+    assert.deepEqual(f.mark(shown.id), markBefore, "a rejected mark does not alter the prior private mark");
+    assert.equal(JSON.stringify(store.room("commons")), sharedBeforeClick);
+
+    // A second, explicit click is a new decision against the refreshed revision.
+    const accepted = f.responseFor(current.id, name);
+    await f.action(current.id, name).click();
+    const confirmed = await accepted;
+    assert.equal(confirmed.status(), 200, await confirmed.text());
+    assert.equal(f.attempts.at(-1).body.expectedBasis, current.basisToken);
+    assert.notEqual(f.attempts.at(-1).body.requestId, original.body.requestId);
+    await f.finishSuccess(current, name);
+    assert.equal(f.countCommands(), commandsBefore + 1);
+    assert.equal(JSON.stringify(store.room("commons")), sharedBeforeClick, "only the private mark changes on the explicit fresh decision");
+  }
+  assert.deepEqual(f.errors, []);
+});
+
+test("Updates retry the original committed operation after held, lost, 503 and 429 responses across Close and Escape", { timeout: 120000 }, async t => {
+  const f = revisionJourney(await setup(t));
+  const { page, store, origin } = f;
+  for (const [name, transport, dismiss] of [["open", "held", "Close"], ["open", "lost", "Close"], ["done", 503, "Escape"], ["clear", 429, "Close"]]) {
+    const shown = await f.makeReview(`retry-${name}-${transport}`);
+    await f.openUpdates();
+    const delivered = [], commandsBefore = f.countCommands(), attemptsBefore = f.attempts.length;
+    let enterHeld, releaseHeld;
+    const heldEntered = new Promise(resolve => { enterHeld = resolve; });
+    const heldRelease = new Promise(resolve => { releaseHeld = resolve; });
+    const routeUrl = origin + f.path(shown.id, name);
+    const interceptor = async route => {
+      const response = await route.fetch();
+      assert.equal(response.status(), 200, await response.text());
+      delivered.push(await response.json());
+      if (delivered.length !== 1) return route.fulfill({ response });
+      // The real server has committed. Only the browser-facing delivery changes.
+      if (transport === "held") {
+        enterHeld();
+        await heldRelease;
+        return route.fulfill({ response });
+      }
+      if (transport === "lost") return route.abort("failed");
+      return route.fulfill({ response, status: transport });
+    };
+    await page.route(routeUrl, interceptor);
+    await f.action(shown.id, name).click();
+    if (transport === "held") await heldEntered;
+    else await f.waitRetry(shown.id, name);
+    const original = f.attempts.at(-1);
+    assert.equal(original.body.expectedBasis, shown.basisToken);
+    assert.equal(f.countCommands(), commandsBefore + 1);
+    const committedMark = f.mark(shown.id);
+    const current = await f.revise(shown.sourceRef.workItemId);
+    assert.notEqual(current.basisToken, shown.basisToken);
+    assert.equal(current.state, "unread", "the new source revision is not handled by the previous mark");
+    if (dismiss === "Escape") await page.keyboard.press("Escape");
+    else await page.locator("#updates-close").click();
+    await page.locator("#updates-dialog").waitFor({ state: "hidden" });
+    await f.openUpdates();
+    const destination = page.url();
+    if (transport === "held") {
+      const finished = page.waitForEvent("requestfinished", request => new URL(request.url()).pathname === f.path(shown.id, name));
+      releaseHeld();
+      await finished;
+      await f.settled();
+      assert.equal(page.url(), destination, "a held success released into a reopened newer list cannot navigate");
+    }
+    await f.waitRetry(shown.id, name);
+    assert.equal(f.attempts.length, attemptsBefore + 1, "Close/reopen neither retries automatically nor discards the unresolved operation");
+    const sharedBeforeRetry = JSON.stringify(store.room("commons"));
+    const response = f.responseFor(shown.id, name);
+    await f.action(shown.id, name).click();
+    assert.equal((await response).status(), 200);
+    await f.waitChanged();
+    assert.equal(f.attempts.length, attemptsBefore + 2);
+    assert.deepEqual(f.attempts.at(-1), original, "retry retains request id, endpoint, action and displayed basis despite the newer list");
+    assert.equal(delivered[1].duplicate, true);
+    assert.equal(delivered[1].requestId, original.body.requestId);
+    assert.equal(delivered[1].item.basisToken, shown.basisToken, "a committed exact retry returns its historical receipt");
+    assert.equal(f.countCommands(), commandsBefore + 1, "retry is the same private command, not a second revision's mark");
+    assert.deepEqual(f.mark(shown.id), committedMark);
+    assert.equal(page.url(), destination, "historical success must not navigate using a newer source revision");
+    assert.equal(await page.locator("#updates-dialog").isVisible(), true);
+    assert.match(await f.row(shown.id).locator(".updates-copy p").textContent(), / · unread$/);
+    assert.equal((await f.listed(shown.sourceRef.workItemId)).state, "unread");
+    assert.equal(JSON.stringify(store.room("commons")), sharedBeforeRetry);
+
+    const accepted = f.responseFor(current.id, name);
+    await f.action(current.id, name).click();
+    assert.equal((await accepted).status(), 200);
+    assert.equal(f.attempts.at(-1).body.expectedBasis, current.basisToken);
+    assert.notEqual(f.attempts.at(-1).body.requestId, original.body.requestId);
+    await f.finishSuccess(current, name);
+    assert.equal(f.countCommands(), commandsBefore + 2);
+    await page.unroute(routeUrl, interceptor);
+  }
+  assert.deepEqual(f.errors, []);
+});
+
+test("Updates do not navigate or repaint for a receipt from a different request, item or basis", { timeout: 120000 }, async t => {
+  const f = revisionJourney(await setup(t));
+  const { page, store, origin } = f;
+  const other = await f.makeReview("different-receipt-source");
+  for (const [name, field] of [["open", "request"], ["done", "item"], ["clear", "basis"]]) {
+    const shown = await f.makeReview(`receipt-${field}`);
+    await f.openUpdates();
+    const destination = page.url(), commandsBefore = f.countCommands(), attemptsBefore = f.attempts.length;
+    const sharedBefore = JSON.stringify(store.room("commons"));
+    const routeUrl = origin + f.path(shown.id, name);
+    let deliveries = 0;
+    const interceptor = async route => {
+      const response = await route.fetch();
+      assert.equal(response.status(), 200, await response.text());
+      const receipt = await response.json();
+      if (++deliveries !== 1) return route.fulfill({ response });
+      // Start from the server's own receipt, and corrupt just its operation
+      // correlation field in transit. Another valid item/token prevents a
+      // generic malformed-body guard from standing in for exact matching.
+      if (field === "request") receipt.requestId = crypto.randomUUID();
+      if (field === "item") receipt.item.id = other.id;
+      if (field === "basis") receipt.item.basisToken = other.basisToken;
+      return route.fulfill({ response, json: receipt });
+    };
+    await page.route(routeUrl, interceptor);
+    await f.action(shown.id, name).click();
+    await f.waitRetry(shown.id, name);
+    const original = f.attempts.at(-1);
+    assert.equal(page.url(), destination);
+    assert.equal(await page.locator("#updates-dialog").isVisible(), true);
+    assert.match(await f.row(shown.id).locator(".updates-copy p").textContent(), / · unread$/,
+      "an unmatched receipt cannot optimistically repaint the displayed row as handled");
+    assert.equal(f.attempts.length, attemptsBefore + 1);
+    assert.equal(f.countCommands(), commandsBefore + 1, "the real mark committed even though its response cannot confirm the UI operation");
+    const response = f.responseFor(shown.id, name);
+    await f.action(shown.id, name).click();
+    const retry = await response;
+    assert.equal(retry.status(), 200, await retry.text());
+    assert.equal((await retry.json()).duplicate, true);
+    assert.deepEqual(f.attempts.at(-1), original);
+    await f.finishSuccess(shown, name);
+    assert.equal(f.countCommands(), commandsBefore + 1);
+    assert.equal(JSON.stringify(store.room("commons")), sharedBefore);
+    await page.unroute(routeUrl, interceptor);
+  }
+  assert.deepEqual(f.errors, []);
+});
+
+test("Updates retain a neutral retry when a lost Done or Clear removes the source from Needs me", { timeout: 120000 }, async t => {
+  const f = revisionJourney(await setup(t));
+  const { page, store, origin } = f;
+  for (const name of ["done", "clear"]) {
+    const shown = await f.makeReview(`retry-missing-${name}`);
+    await f.openUpdates("needs");
+    const commandsBefore = f.countCommands(), attemptsBefore = f.attempts.length;
+    const sharedBefore = JSON.stringify(store.room("commons"));
+    const routeUrl = origin + f.path(shown.id, name);
+    let deliveries = 0;
+    const interceptor = async route => {
+      const response = await route.fetch();
+      assert.equal(response.status(), 200, await response.text());
+      return ++deliveries === 1 ? route.abort("failed") : route.fulfill({ response });
+    };
+    await page.route(routeUrl, interceptor);
+    await f.action(shown.id, name).click();
+    await f.waitRetry(shown.id, name);
+    const original = f.attempts.at(-1), committedMark = f.mark(shown.id);
+    assert.equal(f.countCommands(), commandsBefore + 1);
+    await page.locator("#updates-close").click();
+    await f.openUpdates("needs");
+    await f.waitRetry(shown.id, name);
+    const current = await f.listed(shown.sourceRef.workItemId);
+    assert.equal(current.basisToken, shown.basisToken, "this is a missing-filter recovery, not a newer revision");
+    assert.equal(current.state, name === "done" ? "handled" : "cleared");
+    assert.equal(await f.row(shown.id).locator(".updates-copy strong").textContent(), "Earlier update action");
+    assert.doesNotMatch(await f.row(shown.id).innerText(), new RegExp(shown.title), "a recovery-only row does not resurrect cached source text");
+    assert.equal(f.attempts.length, attemptsBefore + 1);
+    const destination = page.url(), response = f.responseFor(shown.id, name);
+    await f.action(shown.id, name).click();
+    const confirmed = await response;
+    assert.equal(confirmed.status(), 200, await confirmed.text());
+    assert.equal((await confirmed.json()).duplicate, true);
+    await f.row(shown.id).waitFor({ state: "detached" });
+    assert.equal(f.attempts.length, attemptsBefore + 2);
+    assert.deepEqual(f.attempts.at(-1), original, "the neutral control reconciles the exact earlier operation");
+    assert.equal(f.countCommands(), commandsBefore + 1);
+    assert.deepEqual(f.mark(shown.id), committedMark);
+    assert.equal(page.url(), destination);
+    assert.equal(await page.locator("#updates-dialog").isVisible(), true);
+    assert.equal(JSON.stringify(store.room("commons")), sharedBefore);
+    await page.locator("#updates-close").click();
+    await page.unroute(routeUrl, interceptor);
+  }
+  assert.deepEqual(f.errors, []);
 });
