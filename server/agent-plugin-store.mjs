@@ -256,6 +256,10 @@ export class AgentPluginStore {
     if (deliveryColumns.size > 0 && !deliveryColumns.has("target_url")) {
       this.db.exec("ALTER TABLE agent_webhook_deliveries ADD COLUMN target_url TEXT");
     }
+    const keyColumns = new Set(this.db.prepare("PRAGMA table_info(agent_api_keys)").all().map(c => c.name));
+    if (keyColumns.size > 0 && !keyColumns.has("last_used_ua")) {
+      this.db.exec("ALTER TABLE agent_api_keys ADD COLUMN last_used_ua TEXT");
+    }
     this.keys.clear();
     this.cards.clear();
     this.subs.clear();
@@ -272,6 +276,7 @@ export class AgentPluginStore {
         expiresAt: row.expires_at,
         revoked: row.revoked === 1,
         lastUsedAt: row.last_used_at,
+        lastUsedUa: row.last_used_ua ?? null,
       });
     }
     for (const row of this.db.prepare("SELECT * FROM agent_directory_cards").all()) {
@@ -356,6 +361,36 @@ export class AgentPluginStore {
         for (const [k, v] of saved) target.set(k, v);
       }
       throw err;
+    }
+  }
+
+  issueOnboardingMcpToken({ identityId, roomId, label }) {
+    const host = typeof label === "string" && label.trim() ? label.trim().slice(0, 80) : "MCP client";
+    const issued = this.issueApiKey({
+      identityId,
+      scopes: [`mcp:room:${roomId}`, "rooms:read", "rooms:write"],
+      expiresAt: this.store.now() + 30 * 86400000,
+      label: host
+    });
+    return {
+      credential: API_KEY_PREFIX + issued.secret,
+      scopes: [...issued.scopes],
+      expiresAt: issued.expiresAt,
+      label: issued.label,
+      keyId: issued.keyId
+    };
+  }
+
+  notePresentedKeyUse(keyId, { at = null, ua = null } = {}) {
+    const when = Number.isSafeInteger(at) ? at : this.store.now();
+    const agent = typeof ua === "string" && ua.trim() ? ua.trim().slice(0, 200) : null;
+    this.store.transaction(() => {
+      this.db.prepare("UPDATE agent_api_keys SET last_used_at=?, last_used_ua=? WHERE key_id=?").run(when, agent, keyId);
+    });
+    const record = this.keys.get(keyId);
+    if (record) {
+      record.lastUsedAt = when;
+      record.lastUsedUa = agent;
     }
   }
 

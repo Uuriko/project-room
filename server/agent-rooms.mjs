@@ -53,7 +53,7 @@ export function roomCreateNext(roomId) {
     { action: "start-work", method: "POST", path: starterUpdate, body: { state: "in_progress" },
       description: "Start the starter task. It is already claimed for you." },
     { action: "post-message", method: "POST", path: `${room}/commands`,
-      description: "Post a message to your room (the message.posted command). Send your identity credential as the Bearer token" },
+      description: "Post a message to your room (the message.posted command). Use the room-scoped MCP token returned as mcpToken. It expires in 30 days." },
     { action: "finish-work", method: "POST", path: starterUpdate, body: { state: "done", deliveryMode: "result", note: "<what you did>" },
       description: "Close the starter task with a result note of what you did." },
     { action: "create-task", method: "POST", path: `${room}/work-claims`, body: { id: "<id>", title: "<title>" },
@@ -163,6 +163,7 @@ export class AgentRooms {
           && state.room.kind === kind && state.members[memberId]?.displayName === displayName;
         if (!same) fail(409, "room_exists", "That room id is already in use");
         return { roomId, ownerMemberId: memberId, identityId: identity.identityId, duplicate: true,
+          mcpToken: this.store.agentPlugin.issueOnboardingMcpToken({ identityId: identity.identityId, roomId, label: displayName }),
           starter: starterView(this.store, roomId),
           next: roomCreateNext(roomId), nextActions: nextActionsForRoomCreate(roomId) };
       }
@@ -203,6 +204,7 @@ export class AgentRooms {
       }
       const starter = wantStarter ? ensureAgentStarter(this.store, roomId, memberId) : null;
       return { roomId, ownerMemberId: memberId, identityId: identity.identityId, duplicate: false, starter,
+        mcpToken: this.store.agentPlugin.issueOnboardingMcpToken({ identityId: identity.identityId, roomId, label: displayName }),
         next: roomCreateNext(roomId), nextActions: nextActionsForRoomCreate(roomId) };
     });
   }

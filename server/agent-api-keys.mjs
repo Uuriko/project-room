@@ -21,7 +21,7 @@ const check = (condition, message) => { if (!condition) fail("invalid_api_key", 
 
 export const API_KEY_PREFIX = "rak_";
 const IDENTITY_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
-const SCOPE_PATTERN = /^[a-z0-9:_*-]+$/;
+const SCOPE_PATTERN = /^[A-Za-z0-9_.:*-]+$/;
 const MIN_SECRET_ENTROPY_BYTES = 24;
 
 // The documented API-key scope vocabulary (RC-2026-09-18-019). These are
@@ -79,7 +79,7 @@ export function createAgentApiKeys({ store, clock, random } = {}) {
       "identityId must match [A-Za-z0-9_-]{1,64}");
     check(Array.isArray(scopes) && scopes.length > 0, "scopes must be a non-empty array");
     check(scopes.every(s => typeof s === "string" && s.length > 0 && SCOPE_PATTERN.test(s)),
-      "every scope must be a lowercase scope string ([a-z0-9:_*-]+)");
+      "every scope must be a scope string ([A-Za-z0-9_.:*-]+)");
     check(expiresAt === undefined || (Number.isInteger(expiresAt) && expiresAt > 0),
       "expiresAt must be a positive integer ms epoch if given");
     check(label === undefined || (typeof label === "string" && label.length <= 80),
@@ -95,6 +95,7 @@ export function createAgentApiKeys({ store, clock, random } = {}) {
     expiresAt: record.expiresAt,
     revoked: record.revoked,
     lastUsedAt: record.lastUsedAt,
+    lastUsedUa: record.lastUsedUa ?? null,
   });
 
   // Issue a key for an agent identity. Returns the secret ONCE — the
@@ -115,6 +116,7 @@ export function createAgentApiKeys({ store, clock, random } = {}) {
       expiresAt,
       revoked: false,
       lastUsedAt: null,
+      lastUsedUa: null,
     };
     keys.set(keyId, record);
     return Object.freeze({ ...publicRecord(record), secret });
