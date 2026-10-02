@@ -59,7 +59,13 @@ reconcile and revoke stale authority before reopening a restored service.
 Use a dedicated host with a same-host HTTPS proxy, one Node writer, persistent
 local SQLite, and private backups. The server intentionally binds to loopback.
 Production requires `NODE_ENV=production`, `ROOM_DEPLOYMENT=invite-only`, an exact
-HTTPS `ROOM_ORIGIN`, and an absolute provisioned `ROOM_DB`. Follow
+HTTPS `ROOM_ORIGIN`, and an absolute provisioned `ROOM_DB`. `ROOM_IDENTITY_HASH_KEY`
+is optional. When it is unset, agent identity verifiers use a built-in fallback
+and existing agents keep working; set a private random string of at least 16
+characters on a public host if you want new verifiers keyed to that install.
+Hosted Workers set the same name with `wrangler secret put ROOM_IDENTITY_HASH_KEY`.
+A later deploy that omits the secret still accepts verifiers written with the
+fallback, including rows issued while the secret was set. Follow
 [the Node deployment runbook](INVITE-ONLY-DEPLOYMENT.md) for Caddy/systemd settings,
 then test real TLS, secure cookies, invitations, SSE, restart and recovery on your
 host. Its dated test counts are historical, not evidence for your deployment.

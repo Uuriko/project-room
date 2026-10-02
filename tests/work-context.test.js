@@ -53,7 +53,7 @@ test("selected context is one authenticated read with current actor/gates and ex
   assert.match(context.scope.guidance, /not authority/);
   const selected = f.view("producer", { includeSource: true });
   assert.deepEqual(selected.context.source.message, { id: "test-request", authorId: "guest", body: snapshot.state.messages.find(message => message.id === "test-request").body,
-    createdAt: snapshot.state.messages.find(message => message.id === "test-request").createdAt });
+    createdAt: snapshot.state.messages.find(message => message.id === "test-request").createdAt, untrusted: true });
   assert.equal(selected.context.source.status, "included");
   assert.ok(selected.context.participants.some(member => member.id === "guest"));
   assert.equal(f.view("reviewer").next.addressedToViewer, false);

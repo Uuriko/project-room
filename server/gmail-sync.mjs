@@ -81,7 +81,7 @@ export class GmailSync {
       return { imported: observations.filter(o => o.kind === 'message').length };
     });
   }
-  async tick() {
+  async tick({ deadline = Infinity } = {}) {
     const accountIds = this.store.db.prepare('SELECT account_id FROM gmail_mailboxes UNION SELECT account_id FROM gmail_linked_mailboxes').all();
     const due = [];
     for (const row of accountIds) {
@@ -91,7 +91,9 @@ export class GmailSync {
     }
     due.sort((a, b) => (a.record.nextSyncAt ?? 0) - (b.record.nextSyncAt ?? 0));
     let completed = 0;
-    for (const { account, record } of due.slice(0, 10)) {
+    const batch = due.slice(0, 10);
+    for (const { account, record } of batch) {
+      if (Date.now() > deadline) return { completed, pending: due.length - completed, budgetExceeded: 1 };
       try { await this.mailboxTick(account.id, record.connectionId); completed++; }
       catch (error) {
         const latest = this.mailbox.record({ account: this.store.account(account.id) }, record.connectionId);
