@@ -1,4 +1,4 @@
-import { readdirSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 
@@ -18,7 +18,8 @@ const cloudflare = readdirSync("cloudflare", { withFileTypes: true })
   .filter(e => e.isFile() && e.name.endsWith(".mjs")).map(e => join("cloudflare", e.name));
 const deploy = readdirSync("deploy", { withFileTypes: true })
   .filter(e => e.isFile() && e.name.endsWith(".mjs")).map(e => join("deploy", e.name));
-for (const path of ["server.mjs", "push-sw.js", "bin/room.mjs", ...["src", "server", "client", "scripts", "tests", "cli"].flatMap(files), ...cloudflare, ...deploy]) {
+const relay = ["relay/src", "relay/checks"].filter(existsSync).flatMap(files);
+for (const path of ["server.mjs", "push-sw.js", "bin/room.mjs", ...["src", "server", "client", "scripts", "tests", "cli"].flatMap(files), ...cloudflare, ...deploy, ...relay]) {
   const result = spawnSync(process.execPath, ["--check", path], { stdio: "inherit" });
   if (result.status !== 0) process.exit(result.status || 1);
 }
@@ -55,6 +56,9 @@ const wiki = spawnSync(process.execPath, ["scripts/check-wiki.mjs"], { stdio: "i
 if (wiki.status !== 0) process.exit(wiki.status || 1);
 const docLinks = spawnSync(process.execPath, ["scripts/docs-link-check.mjs"], { stdio: "inherit" });
 if (docLinks.status !== 0) process.exit(docLinks.status || 1);
+// VL-2a: the GitHub App manifest stays aligned with the shared core.
+const githubApp = spawnSync(process.execPath, ["scripts/github-app-check.mjs"], { stdio: "inherit" });
+if (githubApp.status !== 0) process.exit(githubApp.status || 1);
 // WCAG 2.2 AA pairs for the shared tokens. Runs in the contract job, before
 // the CI early-exit that skips the unit suite.
 const contrast = spawnSync(process.execPath, ["scripts/design-contrast-check.mjs"], { stdio: "inherit" });

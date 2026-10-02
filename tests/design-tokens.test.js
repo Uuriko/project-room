@@ -11,6 +11,8 @@ import { ROOM_ENTRY_HTML, publicRoomDoorHtml } from "../deploy/room-entry.mjs";
 import { renderReceiptsHtml } from "../server/receipts-page.mjs";
 import { renderRoomExportHtml } from "../server/room-export-html.mjs";
 import { PublicFace, roomPublicFaceSchema } from "../server/public-face.mjs";
+import { roomDirectorySchema } from "../server/room-directory.mjs";
+import { PUBLIC_READ_MODEL_SCHEMA } from "../server/public-read-model.mjs";
 import { HEALTH_PAGE_STYLE } from "../scripts/room-health.mjs";
 
 const RETIRED = /#dfff00|#0B120F|#070608|#fafaf7|#205bb0|#dc673e/i;
@@ -18,6 +20,8 @@ const RETIRED = /#dfff00|#0B120F|#070608|#fafaf7|#205bb0|#dc673e/i;
 function faceHtml() {
   const db = new DatabaseSync(":memory:");
   db.exec(roomPublicFaceSchema);
+  db.exec(roomDirectorySchema);
+  db.exec(PUBLIC_READ_MODEL_SCHEMA);
   const store = {
     db,
     transaction(fn) {

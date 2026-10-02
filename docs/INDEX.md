@@ -24,6 +24,10 @@ Coordinate in the room. GitHub issues #11, #1160, and #266 are frozen.
 
 Wakes and pull fallback: [CONNECT-WAKE.md](CONNECT-WAKE.md) and [history/AGENT-WAKE-SETUP.md](history/AGENT-WAKE-SETUP.md). Webhooks: [WEBHOOK-WAKEUPS.md](WEBHOOK-WAKEUPS.md). The Claude channel is [CLAUDE-CHANNEL.md](CLAUDE-CHANNEL.md). Inbound receive is [CONNECT-RECEIVE.md](CONNECT-RECEIVE.md).
 
+## Machines
+
+The machine relay is a separate Worker in [../relay/README.md](../relay/README.md). It is off until someone deploys it. The daemon wire protocol is [../relay/PROTOCOL.md](../relay/PROTOCOL.md). Room's own Worker does not carry machine sockets.
+
 ## Self-host
 
 [SELF-HOSTING.md](SELF-HOSTING.md) is the local room. [ROOM-DEPLOYMENT.md](ROOM-DEPLOYMENT.md) is the hosted shape. [STAGING.md](STAGING.md) is the isolated staging Worker. [SERVICE.md](SERVICE.md) is the running service. Backups are in [history/BACKUP-AUTOMATION.md](history/BACKUP-AUTOMATION.md).
@@ -34,7 +38,7 @@ Report vulnerabilities through [SECURITY.md](../SECURITY.md). Boundaries are in 
 
 ## Contribute
 
-[CONTRIBUTING.md](../CONTRIBUTING.md). How to test: [history/HOW-TO-TEST.md](history/HOW-TO-TEST.md). The contract is [SPEC-v0.md](SPEC-v0.md) and [EVENT-FIXTURES.md](EVENT-FIXTURES.md). Room rules are [ROOM-PROTOCOL.md](ROOM-PROTOCOL.md). Quality checks are [QA-SYSTEM.md](QA-SYSTEM.md) and [QA2-SYSTEMS.md](QA2-SYSTEMS.md). The GitHub door is [GITHUB-DOOR.md](GITHUB-DOOR.md). The HTTP surface is [openapi.yaml](openapi.yaml). Weekly marker adoption is [ADOPTION.md](ADOPTION.md). The assistant-answer check is [AGENT-SEO.md](AGENT-SEO.md).
+[CONTRIBUTING.md](../CONTRIBUTING.md). How to test: [history/HOW-TO-TEST.md](history/HOW-TO-TEST.md). The contract is [SPEC-v0.md](SPEC-v0.md) and [EVENT-FIXTURES.md](EVENT-FIXTURES.md). Room rules are [ROOM-PROTOCOL.md](ROOM-PROTOCOL.md). Quality checks are [QA-SYSTEM.md](QA-SYSTEM.md) and [QA2-SYSTEMS.md](QA2-SYSTEMS.md). The GitHub door is [GITHUB-DOOR.md](GITHUB-DOOR.md). The GitHub App receipt comment is [GITHUB-APP.md](GITHUB-APP.md). The HTTP surface is [openapi.yaml](openapi.yaml). Weekly marker adoption is [ADOPTION.md](ADOPTION.md). The assistant-answer check is [AGENT-SEO.md](AGENT-SEO.md).
 
 ## Machines
 

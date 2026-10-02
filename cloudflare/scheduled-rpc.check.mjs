@@ -34,6 +34,7 @@ test('paused ProjectRoom cron methods run inside workerd, and an unknown method 
     assert.deepEqual(results.refreshLandQueue, { ok: true, value: { checked: 0, updated: 0, unconfigured: 0 } });
     assert.deepEqual(results.refreshClaimPullRequests, { ok: true, value: { checked: 0, updated: 0 } });
     assert.deepEqual(results.planRetention, { ok: true, value: { dryRun: true, deleted: 0, skipped: 'paused' } });
+    assert.deepEqual(results.backfillPublicReadModel, { ok: true, value: { done: false, skipped: 'paused', rooms: 0, receipts: 0, cards: 0 } });
     assert.equal(results.drainChannelBacklog.ok, false);
     assert.match(results.drainChannelBacklog.message, /Room paused/);
     assert.equal(results.drainWebhookDeliveries.ok, false);
