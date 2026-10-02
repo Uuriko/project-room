@@ -42,7 +42,7 @@ test("the room-machine daemon enrolls and says hello against the relay", async (
     assert.equal(enrolled.roomId, "room_alpha");
     assert.equal(enrolled.machineId, minted.body.machineId);
     const config = loadConfig(home);
-    assert.equal(config.relayUrl, `ws://127.0.0.1:${bridge.port}/v0/machines/${minted.body.machineId}/link`);
+    assert.equal(config.relayUrl, `ws://127.0.0.1:${bridge.port}/v0/machines/link`);
     assert.equal(config.roomOrigin, room.origin);
     assert.equal(config.displayName, "Mac bot (contract)");
     assert.equal(config.label, "Potter spare MacBook");

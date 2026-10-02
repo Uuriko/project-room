@@ -77,8 +77,15 @@ test("enroll and the machine socket match machine/PROTOCOL.md", async () => {
     assert.equal(late.body.error, contract.gone[1]);
     assert.notEqual(late.body.error, used.body.error);
 
-    const legacy = await readBody(await relayFetch(ctx, "/enroll", { method: "POST", json: { code: minted.body.code } }));
-    assert.equal(legacy.status, 404);
+    const aliasMint = await mint(ctx, {
+      label: "spare", roomId: "commons", ownerMemberId: "owner", inviteCode: "RM-23456789ABCDEFGH",
+    });
+    const legacy = await readBody(await relayFetch(ctx, "/enroll", { method: "POST", json: { code: aliasMint.body.code } }));
+    assert.equal(legacy.status, 200);
+    assert.equal(legacy.headers.get("deprecation"), "true");
+    assert.equal(legacy.body.machineId, aliasMint.body.machineId);
+    assert.equal(legacy.body.roomId, "commons");
+    assert.equal(new URL(legacy.body.relayUrl).pathname, "/v0/machines/link");
     const queried = await ctx.mf.dispatchFetch(`${ctx.origin}/v0/machines/link?token=1`, {
       headers: { upgrade: "websocket", authorization: `Bearer ${issued.body.machineToken}` },
     });

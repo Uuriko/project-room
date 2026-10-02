@@ -14,10 +14,3 @@ export class RelayError extends Error {
 export function relayError(status, code, message, extra) {
   return new RelayError(status, code, message, extra);
 }
-
-// Enroll failures use the daemon's flat body: { "error": "code_invalid" }.
-export function enrollFailure(status, code) {
-  const error = new RelayError(status, code, code);
-  error.flat = true;
-  return error;
-}

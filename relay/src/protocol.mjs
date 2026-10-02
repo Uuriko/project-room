@@ -14,7 +14,6 @@ export const LOCK_CACHE_MAX_MS = 30 * 1000;
 export const CALL_TIMEOUT_MS = 30_000;
 export const HEARTBEAT_MS = 30_000;
 export const HMAC_SKEW_SEC = 300;
-export const HEARTBEAT_INTERVAL_MS = 30_000;
 export const SERVER_NAME = "project-room-relay";
 export const SERVER_VERSION = "0.1.0";
 export const ACTIVE_STATES = new Set(["claimed", "in_progress", "blocked"]);
@@ -94,16 +93,6 @@ export function isLabel(value) {
   return typeof value === "string" && value.length >= 1 && value.length <= 80 && !/[\u0000-\u001f\u007f]/.test(value);
 }
 
-export function isDisplayName(value) {
-  return isLabel(value);
-}
-
-const INVITE_CODE = /^RM-[A-Za-z0-9]{8,64}$/;
-
-export function isInviteCode(value) {
-  return typeof value === "string" && INVITE_CODE.test(value);
-}
-
 // An origin the daemon can join with `new URL(path, origin)`. No userinfo, path, query, or hash.
 export function roomOriginOf(value) {
   if (typeof value !== "string" || value.length > 300) return null;
@@ -113,30 +102,6 @@ export function roomOriginOf(value) {
   if (url.username || url.password || url.search || url.hash) return null;
   if (url.pathname !== "/" && url.pathname !== "") return null;
   return url.origin;
-}
-
-// machine/PROTOCOL.md default allowlist. Used when hello does not advertise tools.
-export const DEFAULT_DAEMON_TOOL_NAMES = Object.freeze([
-  "machine.status",
-  "machine.release",
-  "desktop.screenshot",
-  "desktop.click",
-  "desktop.type",
-  "desktop.key",
-  "desktop.scroll",
-  "desktop.list_apps",
-  "shell.vm",
-  "files.put",
-  "files.get",
-  "inference.chat",
-]);
-
-export function defaultDaemonTools() {
-  return DEFAULT_DAEMON_TOOL_NAMES.map(name => ({
-    name,
-    description: "",
-    inputSchema: { type: "object", properties: {} },
-  }));
 }
 
 export function toolAllowed(name) {

@@ -2,7 +2,7 @@
 
 A separate Cloudflare Worker that carries machine tool calls. Room stays the control plane. The relay refuses a call that a live lease does not back.
 
-The Worker name is `project-room-relay`. It is off until someone deploys it. `RELAY_PHASE0_PASSTHROUGH` defaults to `0`. Nothing in this directory attaches a public hostname. The parent attaches a route or a custom domain after deploy.
+The Worker name is `project-room-relay`. It is off until someone deploys it. `RELAY_PHASE0_PASSTHROUGH` defaults to `0`. `wrangler.jsonc` enables `workers_dev` and attaches `relay.trydemigod.com` as a custom domain.
 
 Room's own Worker does not accept machine sockets. The daemon dials out. The wire contract is [machine/PROTOCOL.md](../machine/PROTOCOL.md). Operator notes for enroll, halt, and lease tokens are [PROTOCOL.md](PROTOCOL.md).
 
@@ -22,10 +22,19 @@ This Worker does not issue OAuth tokens. `GET /.well-known/oauth-protected-resou
 `POST /admin/enroll-codes` with `Authorization: Bearer <RELAY_ADMIN_TOKEN>` mints a one-time code. The operator has already minted the Room agent invite (`profile: "contribute"`). The relay stores that code and does not create the Room identity:
 
 ```json
-{ "label": "spare", "roomId": "commons", "ownerMemberId": "owner", "inviteCode": "RM-...", "displayName": "Room machine" }
+{
+  "label": "spare",
+  "rooms": ["commons"],
+  "ownerMemberId": "owner",
+  "inviteCode": "RM-...",
+  "roomOrigin": "https://room.trydemigod.com",
+  "displayName": "Room machine"
+}
 ```
 
-The code is `<machineId>.<verifier>`. It is single use and expires 15 minutes after minting. `POST /v0/enroll` with `{ "code" }` returns `machineToken`, `machineId`, `label`, `roomId`, `ownerMemberId`, `inviteCode`, optional `displayName`, `relayUrl` (`wss://<relay>/v0/machines/link`), and optional `roomOrigin`. An unknown code is `401` with `{ "error": "code_invalid" }`. A used or expired code is `410` with `{ "error": "code_used" }` or `{ "error": "code_expired" }`.
+`roomId` is accepted in place of `rooms`. When both are present, `roomId` must be `rooms[0]`. `roomOrigin` and `displayName` are optional. A stored `roomOrigin` is returned on enroll; otherwise the reply uses `ROOM_ORIGIN`.
+
+The code is `<machineId>.<verifier>`. It is single use and expires 15 minutes after minting. `POST /v0/enroll` with `{ "code" }` returns `machineToken`, `machineId`, `label`, `roomId`, `ownerMemberId`, `inviteCode`, optional `displayName`, `relayUrl` (`wss://<request-host>/v0/machines/link`), and optional `roomOrigin`. `POST /enroll` is the same handler with a `Deprecation: true` header, kept for one release. An unknown code is `401` with `{ "error": "code_invalid" }`. A used or expired code is `410` with `{ "error": "code_used" }` or `{ "error": "code_expired" }`.
 
 `POST /admin/enroll-codes/<machineId>/expire` revokes an unused code immediately.
 

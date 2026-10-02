@@ -52,9 +52,9 @@ test("an enroll code works once, expires, and stays bound to its room", async ()
     label: "Ada's desk", roomId: "room_alpha", ownerMemberId: "mem_ada", inviteCode: "RM-0123456789ABCDEF", displayName: "Ada desk",
   });
   assert.equal(minted.status, 201);
-  assert.equal(minted.body.inviteCode, invite);
-  assert.equal(minted.body.roomOrigin, "https://room.trydemigod.com");
-  assert.equal(minted.body.displayName, "Mac bot (Ada)");
+  assert.equal(minted.body.inviteCode, "RM-0123456789ABCDEF");
+  assert.equal(minted.body.roomId, "room_alpha");
+  assert.equal(minted.body.displayName, "Ada desk");
   const delta = Date.parse(minted.body.expiresAt) - Date.now();
   assert.ok(delta > 14 * 60 * 1000 && delta < 16 * 60 * 1000, `expiresAt was ${delta} ms out`);
   const tampered = `${minted.body.code.slice(0, -1)}${minted.body.code.endsWith("a") ? "b" : "a"}`;

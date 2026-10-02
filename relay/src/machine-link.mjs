@@ -6,7 +6,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { authorize } from "./auth.mjs";
 import { bytesToB64url, sha256Hex, timingEqual } from "./bytes.mjs";
-import { RelayError, enrollFailure, relayError } from "./errors.mjs";
+import { RelayError, relayError } from "./errors.mjs";
 import { verifyLinkSignature } from "./hmac.mjs";
 import { errorResponse, json, readJson } from "./http.mjs";
 import { initializeResult, parseRpc, requireToolName, rpcError, rpcResult, toolEnvelope } from "./mcp.mjs";
@@ -30,6 +30,7 @@ function emptyState(machineId) {
     ownerMemberId: "",
     inviteCode: "",
     displayName: null,
+    roomOrigin: "",
     resourceId: null,
     tokenHash: null,
     enroll: null,
@@ -191,6 +192,7 @@ export class MachineLink extends DurableObject {
       this.state.ownerMemberId = value.ownerMemberId;
       this.state.inviteCode = value.inviteCode;
       this.state.displayName = value.displayName ?? null;
+      this.state.roomOrigin = value.roomOrigin || "";
       this.state.enroll = { codeHash: value.codeHash, expiresAt: value.expiresAt, used: false };
       this.dirty = true;
     });
@@ -219,6 +221,7 @@ export class MachineLink extends DurableObject {
           ownerMemberId: this.state.ownerMemberId,
           inviteCode: this.state.inviteCode,
           displayName: this.state.displayName,
+          roomOrigin: this.state.roomOrigin,
         };
       });
     } catch (error) {
@@ -530,25 +533,8 @@ export class MachineLink extends DurableObject {
     return json(200, body);
   }
 
-  async armHeartbeat() {
-    await this.ctx.storage.setAlarm(Date.now() + HEARTBEAT_INTERVAL_MS);
-  }
-
   async disarmHeartbeat() {
     try { await this.ctx.storage.deleteAlarm(); } catch { /* no alarm was set */ }
-  }
-
-  async alarm() {
-    let live = false;
-    await this.exclusive(() => {
-      const socket = this.daemon();
-      if (!socket || !this.state) return;
-      this.send(socket, { type: "heartbeat" });
-      this.state.lastHeartbeat = new Date().toISOString();
-      this.dirty = true;
-      live = true;
-    });
-    if (live) await this.armHeartbeat();
   }
 }
 
