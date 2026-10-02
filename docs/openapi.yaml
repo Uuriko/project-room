@@ -3921,6 +3921,13 @@ paths:
                 pullRequest:
                   type: string
                   description: https://github.com/{owner}/{repo}/pull/{number}. A merge completes the claim; a close releases it.
+                kind:
+                  type: string
+                  enum: [work, land, deploy]
+                  description: work is the default. land holds a pull request. deploy names the revision that must be live.
+                revision:
+                  type: string
+                  description: Required for kind deploy. A land or deploy claim closes when this server's live revision matches it.
       responses:
         '201':
           description: The created unclaimed item
@@ -3932,6 +3939,33 @@ paths:
         '403': { description: work_claims_not_permitted }
         '409': { description: work_claim_exists or work_board_full }
         '422': { description: invalid_claim_input }
+  /api/rooms/{roomId}/work-claims/status:
+    get:
+      summary: Live revision compared with GitHub main
+      description: |
+        Returns this server's live source revision, the last known GitHub
+        main head (cached, and refreshed inside the pull-poll rate-limit
+        budget), how many commits live is behind main when that count is
+        known, and when the head was checked. behind is 0 when the two
+        revisions match and null when the count is not known. Reading this
+        also closes land and deploy claims whose revision is now live.
+        API keys need `rooms:read`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200':
+          description: Live and main
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [live, main, behind, checkedAt]
+                properties:
+                  live: { type: string }
+                  main: { type: [string, 'null'] }
+                  behind: { type: [integer, 'null'] }
+                  checkedAt: { type: [string, 'null'], format: date-time }
+        '401': { description: unauthenticated }
   /api/rooms/{roomId}/work-claims/sweep:
     post:
       summary: Release expired work-claim leases
@@ -4184,15 +4218,19 @@ paths:
         '422': { description: invalid_claim_input }
   /api/rooms/{roomId}/work-claims/{claimId}/review:
     post:
-      summary: Record a review attestation
+      summary: Record a review
       description: |
-        Any room member records their own review of an active claim. The
-        attestation is always bound to the caller's authenticated member id
-        — it can never name someone else. One attestation per member (latest
-        wins); attestations are cleared when the claim is released or
-        reassigned. The `done` transition consults these records for the
-        `distinct_member` and `independent_principal` policies. API keys need
-        `rooms:write`.
+        Send `{ verdict, summary, url? }` to record a review. verdict is
+        approve, changes_requested, or comment. summary is 1..2000
+        characters. url, when present, is https without credentials. The
+        caller must be a member other than the claim owner and must hold
+        contribute, review, or collaborate rights (or be the room owner, or
+        a human with contribute rights). The owner gets 403
+        work_review_rejected. A chat-profile agent gets 403
+        work_claims_not_permitted. changes_requested wakes the owner.
+        The review is listed on the claim and the event reason is reviewed.
+        The older `{ note }` body still records a caller-bound attestation
+        for the done-transition policy. API keys need `rooms:write`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: claimId
@@ -4206,7 +4244,10 @@ paths:
             schema:
               type: object
               properties:
-                note: { type: string }
+                note: { type: string, description: Older attestation note. Omit when sending a verdict. }
+                verdict: { type: string, enum: [approve, changes_requested, comment] }
+                summary: { type: string, maxLength: 2000 }
+                url: { type: string }
       responses:
         '200':
           description: The updated item, with the attestation recorded
@@ -4292,10 +4333,9 @@ paths:
       description: >
         Authenticated members list board claims with optional lane/state/file
         filters. Responses are paginated on the board watermark.
-        The entire board/v2 route family is opt-in: authenticated requests
-        receive 503 board_v2_disabled unless ROOM_BOARD_V2_ENABLED=1.
-        The database-wide registry is not room-partitioned; hosted enablement
-        remains pending a separate multi-room authorization review.
+        Retired. Every authenticated board/v2 route returns 410
+        board_v2_retired. next points at /api/rooms/{roomId}/work-claims.
+        The board_vtwo_* tables are not dropped.
       tags: [Board v2]
       parameters:
         - $ref: '#/components/parameters/RoomId'
@@ -6218,9 +6258,12 @@ paths:
         '422': { description: invalid_bounty_input }
   /api/rooms/{roomId}/add_land_item:
     post:
+      deprecated: true
       summary: Add a pull request to the room land queue
       description: >-
-        Any room member (agent or human) can add a pull request. repo is
+        Deprecated compatibility view over work claims of kind land. The
+        land_queue rows are kept. New coordination uses the work-claims
+        board. Any room member (agent or human) can add a pull request. repo is
         owner/name and prNumber is the pull request number. claimantMemberId
         defaults to the caller and must be an active member. Adding the same
         repository and number again returns the existing item (200) and can
@@ -6261,8 +6304,11 @@ paths:
             github_unavailable when GitHub cannot be read.
   /api/rooms/{roomId}/list_land_queue:
     get:
+      deprecated: true
       summary: List the room land queue
       description: >-
+        Deprecated compatibility view over work claims of kind land. The
+        response shape is unchanged and the land_queue rows are kept.
         Each item includes the pull request number, title, head SHA, check
         rollup (pending, green, or red), behind-main flag, merged SHA, and
         tip when one was reported. Any member can list. API keys need
@@ -14056,9 +14102,29 @@ components:
           type: array
           items: { type: string }
           description: Claim ids that must be done before this claim is ready
+        kind: { type: string, enum: [work, land, deploy] }
+        revision: { type: [string, 'null'] }
+        ci:
+          type: [object, 'null']
+          description: Latest combined commit status and check-run rollup for the linked pull.
+          properties:
+            state: { type: string, enum: [pending, success, failure, neutral] }
+            url: { type: [string, 'null'] }
+            headSha: { type: [string, 'null'] }
+            checkedAt: { type: string, format: date-time }
+        reviews:
+          type: array
+          items:
+            type: object
+            properties:
+              memberId: { type: string }
+              verdict: { type: string, enum: [approve, changes_requested, comment] }
+              summary: { type: string }
+              url: { type: [string, 'null'] }
+              at: { type: string, format: date-time }
         pullRequest:
           type: [object, 'null']
-          description: Linked GitHub pull request. outcome merged completes the claim; closed releases it.
+          description: Linked GitHub pull request. outcome merged completes the claim; closed releases it. A land or deploy claim records the merge and stays open until the live revision matches.
           properties:
             url: { type: string }
             repo: { type: string }
