@@ -30,7 +30,9 @@ export function permissionRequestContents(row) {
 }
 
 export class MemberPermissionRequests {
-  constructor(accessRequests) { this.access = accessRequests; this.store = accessRequests.store; this.db = accessRequests.db; }
+  constructor(accessRequests, maxPending = 5) {
+    this.access = accessRequests; this.store = accessRequests.store; this.db = accessRequests.db; this.maxPending = maxPending;
+  }
 
   request(token, roomId, { permissions, note, requestId } = {}, binding = null) {
     if (!Array.isArray(permissions) || !permissions.every(p => PERMISSIONS.includes(p)) || new Set(permissions).size !== permissions.length) {
@@ -58,7 +60,7 @@ export class MemberPermissionRequests {
         }
         return this.access.toRequest(existing);
       }
-      const limit = this.access.rateLimiter.check(`access-request:${principalId}`);
+      const limit = this.access.rateLimiter.check(`access-request:${identityId ?? `${roomId}:${principalId}`}`);
       if (!limit.allowed) fail(429, "rate_limited", limit.message);
       if (permissions.every(p => member.permissions.includes(p))) {
         fail(409, "nothing_to_request", `Already held: ${member.permissions.join(", ") || "read/chat access"}`);
@@ -67,7 +69,7 @@ export class MemberPermissionRequests {
       if (isRoomArchived(room.state)) fail(409, "room_archived", "This room is archived; access cannot be upgraded");
       const pending = this.db.prepare("SELECT count(*) AS n FROM access_requests WHERE room_id=? AND identity_id=? AND status IN ('pending','pending_upgrade')")
         .get(roomId, principalId).n;
-      if (pending >= 5) fail(409, "too_many_requests", "At most 5 pending requests per room");
+      if (pending >= this.maxPending) fail(409, "too_many_requests", `At most ${this.maxPending} pending requests per room`);
       const stored = { version: identityId ? 1 : 2, kind: "permission-upgrade", permissions,
         memberId: member.id, memberRevision: member.revision,
         ...(!identityId ? { principal: { kind: "room-member", memberId: member.id } } : {}) };
@@ -102,7 +104,7 @@ export class MemberPermissionRequests {
         fail(409, "stale_membership", "Membership changed since this request; review current access and submit a new request");
       }
       if (!memberCan(authority, auth.member.id, "manage_members")) fail(403, "access_denied", "manage_members required to approve additional permissions");
-      const grants = permissions ?? contents.permissions;
+      const grants = permissions === undefined ? contents.permissions : permissions;
       if (!Array.isArray(grants) || !grants.every(p => PERMISSIONS.includes(p))) fail(422, "invalid_request", "permissions must be room permissions");
       const missing = auth.member.id === authority.ownerId ? [] : grants.filter(p => !auth.member.permissions.includes(p));
       if (missing.length) fail(403, "access_denied", `Cannot grant permissions not held: ${missing.join(", ")}`);
@@ -113,11 +115,11 @@ export class MemberPermissionRequests {
       }
     }
     if (note != null && (typeof note !== "string" || note.length > 500)) fail(422, "invalid_request", "note must be text of at most 500 characters");
-    const granted = decision === "approve" ? permissions ?? contents.permissions : [];
+    const granted = decision === "approve" ? (permissions === undefined ? contents.permissions : permissions) : [];
     const messageId = randomUUID();
     const body = decision === "approve"
-      ? `${row.display_name}'s permission request ${row.request_id} is approved. Approved permissions: ${granted.join(", ") || "none added"}. Existing access is preserved.`
-      : `${row.display_name}'s permission request ${row.request_id} is declined. Existing access is unchanged.${note?.trim() ? ` ${note.trim()}` : ""}`;
+      ? `Approved permission request ${row.request_id} for ${row.display_name}. Approved permissions: ${granted.join(", ") || "none added"}. Existing access is preserved.`
+      : `Declined permission request ${row.request_id} for ${row.display_name}. Existing access is unchanged.${note?.trim() ? ` ${note.trim()}` : ""}`;
     // Existing message commands retain ordinary actor authority, archival and
     // capacity checks. The surrounding decision transaction makes this atomic.
     this.store.command(token, roomId, { id: randomUUID(), type: T.MESSAGE_POSTED,
@@ -146,7 +148,7 @@ export function permissionDecisionMessages(store, rows) {
     const upgrade = permissionRequestContents(row).upgrade;
     if (upgrade?.decisionMessageId !== event.data.messageId) continue;
     decisions.set(event.data.messageId, { requestId: row.request_id, memberId: upgrade.memberId,
-      outcome: row.status, note: event.data.body, eventId: event.id });
+      outcome: row.status, eventId: event.id });
   }
   return decisions;
 }

@@ -151,7 +151,7 @@ export class AccessRequests {
   constructor(store, { rateLimiter } = {}) {
     this.store = store;
     this.db = store.db;
-    this.memberPermissions = new MemberPermissionRequests(this);
+    this.memberPermissions = new MemberPermissionRequests(this, MAX_PENDING_PER_IDENTITY_ROOM);
     // Separate bucket from general API use: requesting access is rare and
     // sensitive. 5 requests per hour per identity is generous for humans
     // and tight enough to blunt enumeration.

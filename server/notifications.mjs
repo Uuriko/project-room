@@ -73,7 +73,10 @@ export function deriveNotifications({ events, state, member, mutedThreadIds = nu
     if (mutedEvent(state, member.id, event)) continue;
     const decision = accessDecisions.get(event.data?.messageId);
     if (decision && decision.memberId === member.id) {
-      put("access_decision", "requestId", decision.requestId, row, { eventId: event.id, outcome: decision.outcome, note: decision.note });
+      const current = messages.get(event.data.messageId);
+      if (current?.deletedAt) continue;
+      put("access_decision", "requestId", decision.requestId, row, { eventId: event.id, outcome: decision.outcome,
+        note: current?.body ?? `Permission request ${decision.outcome}` });
       continue;
     }
     if (event.type === T.MESSAGE_POSTED) {
@@ -115,7 +118,8 @@ export function deriveNotifications({ events, state, member, mutedThreadIds = nu
         put("access_request", "requestId", event.data.requestId, row, {
           eventId: event.id,
           displayName: event.data.displayName,
-          note: event.data.note ?? null,
+          note: event.data.requestKind === "permissions"
+            ? `Wants: ${(event.data.permissions ?? []).join(", ")}${event.data.note ? `. ${event.data.note}` : ""}` : event.data.note ?? null,
           requestKind: event.data.requestKind ?? "join",
           requestedPermissions: [...(event.data.permissions ?? [])],
           label: event.data.requestKind === "permissions"
