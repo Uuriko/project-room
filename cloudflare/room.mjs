@@ -29,6 +29,7 @@ import { SOURCE_REVISION, BUILD_ID } from '../server/version.mjs';
 import { edgePublicResponse } from './edge-public.mjs';
 import { appDurationMs, logRoomRequest, requestPath, withServerTiming } from './request-timing.mjs';
 import { HEALTH_PROBE_TIMEOUT_MS, createHealthProbe, healthLivenessResponse, readyProbeResponse, workerLivenessResponse } from './health-probe.mjs';
+import { flushRoomGuide, installGuideCommandHook } from '../server/room-guide.mjs';
 
 // One probe per isolate. Concurrent health checks during a cold start share
 // it; a finished probe does not cache, so the next check sees a fresh answer.
@@ -85,6 +86,8 @@ export class ProjectRoom extends DurableObject {
     if (this.paused) return;
     this.store = new RoomStore(null, { database: new DurableDatabase(ctx.storage), storagePlatform: durableStorage,
       stitch: stitchConfigFromEnv(env), identityHashKey: env.ROOM_IDENTITY_HASH_KEY ?? null, integrity: "deferred" });
+    // ACT-1a: one delimited call. Room Guide advances after commands. ACT-4 owns nudges.
+    installGuideCommandHook(this.store);
     // Event-push dispatch: same fire-and-forget flush as the node entry
     // point. The Durable Object may suspend before the microtask drains;
     // the cron tick remains the restart-safe backstop.
@@ -165,7 +168,11 @@ export class ProjectRoom extends DurableObject {
     };
     if (this.paused) return respond(maintenanceResponse(request));
     try { return respond(await this.requestSignals.run(request.signal, () => this.handler.fetch(request))); }
-    finally { this.ctx.waitUntil(this.store.humanPush.flush()); }
+    finally {
+      this.ctx.waitUntil(this.store.humanPush.flush());
+      // ACT-1a: post-request flush for a Room Guide step the command hook left queued.
+      this.ctx.waitUntil(Promise.resolve(flushRoomGuide(this.store)));
+    }
   }
 
   // Readiness is one statement. It does not open the room, replay events, or

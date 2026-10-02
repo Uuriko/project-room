@@ -42,6 +42,7 @@ import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { evaluateReceipt } from "./jev-receipts.mjs";
 import { findClaimCollisions } from "./claim-collisions.mjs";
 import { emitWorkClaimEvent } from "./work-claim-events.mjs";
+import { ROOM_GUIDE_ID } from "./room-guide.mjs";
 import { fileLeaseConflictBody, fileLeaseConflicts, holdForRateLimit, readyClaims } from "./claim-coordination.mjs";
 import { collectPullRequestLookups, commitPullRequestLookup, readClaimPullBudget, readRoomDeployStatus, writeClaimPullBudget } from "./claim-pr-sync.mjs";
 import { enqueueClaimWake } from "./work-claim-events.mjs";
@@ -408,11 +409,26 @@ export async function handleWorkClaims(options) {
   }
 }
 
+// ACT-1a: Room Guide may claim and close only claims tagged starter. This is
+// the HTTP choke point (the handler cannot be wrapped, and server/http.mjs is
+// out of scope). It runs before the owner check so a non-starter claim is
+// guide_starter_only, not work_not_owner. C's capability check, when it lands,
+// should keep this refusal.
+function refuseRoomGuideOffStarter(registry, roomId, auth, workClaimId, method, reject) {
+  if (method === "GET" || method === "HEAD") return;
+  if (auth?.member?.id !== ROOM_GUIDE_ID) return;
+  const item = typeof workClaimId === "string" ? registry.get(roomId, workClaimId) : null;
+  if (!item?.tags?.includes("starter")) {
+    reject(403, "guide_starter_only", "Room Guide can only claim and close starter tasks.");
+  }
+}
+
 function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRoute, workClaimId, helpers, registry, pullBatch = { results: [], rateLimitedUntil: null, skipped: false }, deployStatus = null }) {
   const { json, reject, body } = helpers;
   if (req.method !== "GET" && req.method !== "HEAD") enforceAutonomyTierForAction({
     db: store.db, roomId, state: { room: { ownerId: store.roomAuthority?.(roomId)?.ownerId } },
     actor: auth.member, action: `${req.method} work-claim ${workClaimRoute}`, fail: reject });
+  refuseRoomGuideOffStarter(registry, roomId, auth, workClaimId, req.method, reject);
   const nowMs = Date.now();
   const caller = auth.member.id;
   // Every committed claim change appends one work_claim.updated room event
