@@ -235,6 +235,7 @@ optional.push("server/oauth-provider.mjs"); // OAuth2 authorization server for c
 optional.push("connectors/muse.md"); // Muse custom-connector brief (served at /connectors/muse.md)
 optional.push("server/account-login-methods.mjs"); // Multi-method login model (imported by server/store.mjs)
 optional.push("server/account-deletion.mjs"); // RC-2026-09-19-078: deletion executor (imported by server/http.mjs; imports the src planner below)
+optional.push("server/operator-auth.mjs", "server/operator-actions.mjs", "server/purge-registry.mjs", "server/operator-purge.mjs", "server/operator-status.mjs", "server/operator-routes.mjs"); // CP-ADMIN-0: operator auth, purge, and status (imported by server/http.mjs and server/store.mjs)
 optional.push("src/account-deletion.mjs"); // RC-2026-09-19-078: pure purge planner (imported by server/account-deletion.mjs)
 optional.push("server/account-passkeys.mjs"); // Passkey auth wiring (slice 5; imported by server/http.mjs)
 optional.push("src/passkey-login.mjs"); // WebAuthn logic (imported by server/account-passkeys.mjs)
