@@ -19,6 +19,7 @@
 // store.mjs to apply. Local ServiceError avoids the store.mjs import cycle.
 
 import { randomBytes } from "node:crypto";
+import { refreshListedRoom } from "./public-read-model.mjs";
 
 class ServiceError extends Error {
   constructor(status, code, message, headers = null) { super(message); this.status = status; this.code = code; this.headers = headers; }
@@ -83,6 +84,7 @@ export class PublicFace {
          ON CONFLICT(room_id) DO UPDATE SET enabled=1, public_code=excluded.public_code,
            created_at=CASE WHEN room_public_settings.public_code IS NULL THEN excluded.created_at ELSE room_public_settings.created_at END`
       ).run(roomId, 1, code, at);
+      refreshListedRoom(this.store, roomId);
       return Object.freeze({ roomId, enabled: true, publicCode: code });
     });
   }
@@ -96,6 +98,7 @@ export class PublicFace {
          VALUES (?,0,NULL,?,NULL)
          ON CONFLICT(room_id) DO UPDATE SET enabled=0, public_code=NULL`
       ).run(roomId, nowMs());
+      refreshListedRoom(this.store, roomId);
       return Object.freeze({ roomId, enabled: false, publicCode: null });
     });
   }
