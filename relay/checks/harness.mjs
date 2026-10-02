@@ -191,7 +191,7 @@ export async function mint(ctx, fields) {
 }
 
 export async function enroll(ctx, code) {
-  const response = await relayFetch(ctx, "/enroll", { method: "POST", json: { code } });
+  const response = await relayFetch(ctx, "/v0/enroll", { method: "POST", json: { code } });
   return readBody(response);
 }
 
@@ -310,9 +310,11 @@ export async function linkDaemon(ctx, machineId, token, { tools = DAEMON_TOOLS, 
       await new Promise(resolve => setTimeout(resolve, 10));
     }
   }
-  await expectFrame("welcome");
-  ws.send(JSON.stringify({ type: "hello", version: "room-machine/0.1", tools }));
-  await expectFrame("welcome");
+  await expectFrame("heartbeat");
+  ws.send(JSON.stringify({
+    type: "hello", protocol: 1, machineId, label: "Desk", version: "0.1.0", tools,
+  }));
+  await expectFrame("heartbeat");
   return {
     ws,
     seen,

@@ -14,6 +14,7 @@ export function errorResponse(error, headers = {}) {
   const known = error instanceof RelayError;
   const status = known ? error.status : 500;
   const code = known ? error.code : "internal";
+  if (known && error.flat) return json(status, { error: code }, headers);
   const message = known ? error.message : "The relay could not complete that request";
   const extra = known ? error.extra : {};
   return json(status, { error: { code, message, ...extra } }, headers);

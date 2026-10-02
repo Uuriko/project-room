@@ -4,17 +4,17 @@
 // RELAY_PHASE0_PASSTHROUGH is exactly "1".
 
 import { randomB64url, randomHex, sha256Hex, timingEqual } from "./bytes.mjs";
-import { RelayError, relayError } from "./errors.mjs";
+import { RelayError, enrollFailure, relayError } from "./errors.mjs";
 import { errorResponse, json, readJson } from "./http.mjs";
 import { MachineLink } from "./machine-link.mjs";
 import { log, recentLogs } from "./redact.mjs";
 import {
-  ENROLL_TTL_MS, MAX_SMALL_BYTES, SERVER_NAME, challengeHeader, isLabel, isMachineId, isMemberId, isRoomId, missingSecrets, passthroughEnabled,
+  ENROLL_TTL_MS, MAX_SMALL_BYTES, SERVER_NAME, challengeHeader, isDisplayName, isInviteCode, isLabel, isMachineId, isMemberId, isRoomId, missingSecrets, passthroughEnabled, roomOriginOf,
 } from "./protocol.mjs";
 
 export { MachineLink };
 
-const MACHINE_ROUTE = /^\/v0\/machines\/([^/]+)\/(link|mcp|call|halt|resume|status)$/;
+const MACHINE_ROUTE = /^\/v0\/machines\/([^/]+)\/(link|mcp|call|halt|pause|resume|status)$/;
 
 export default {
   async fetch(request, env) {
@@ -25,6 +25,7 @@ export default {
       return response;
     } catch (error) {
       const response = errorResponse(error, authenticateHeader(error, request));
+      const aliased = url.pathname === "/enroll" ? deprecatedResponse(response, { deprecation: "true" }) : response;
       log({
         method: request.method,
         path: url.pathname,
@@ -33,7 +34,7 @@ export default {
         error: error instanceof RelayError ? error.code : "internal",
       });
       if (!(error instanceof RelayError)) console.error(JSON.stringify({ message: "relay request failed" }));
-      return response;
+      return aliased;
     }
   },
 };
@@ -47,7 +48,9 @@ async function route(request, env, url) {
   const expire = /^\/admin\/enroll-codes\/([^/]+)\/expire$/.exec(url.pathname);
   if (expire && request.method === "POST") return expireEnroll(request, env, expire[1]);
   if (url.pathname === "/admin/logs" && request.method === "GET") return adminLogs(request, env);
-  if (url.pathname === "/enroll" && request.method === "POST") return enroll(request, env);
+  if ((url.pathname === "/v0/enroll" || url.pathname === "/enroll") && request.method === "POST") {
+    return enroll(request, env, { deprecated: url.pathname === "/enroll" });
+  }
   const match = MACHINE_ROUTE.exec(url.pathname);
   if (!match) throw relayError(404, "not_found", "Not found");
   if (!isMachineId(match[1])) throw relayError(404, "not_found", "Not found");
@@ -91,6 +94,20 @@ async function mintEnroll(request, env) {
     throw relayError(422, "invalid_enroll", "rooms must list 1..8 room ids");
   }
   if (!isMemberId(value.ownerMemberId)) throw relayError(422, "invalid_enroll", "ownerMemberId must be a short id");
+  if (!isInviteCode(value.inviteCode)) throw relayError(422, "invalid_enroll", "inviteCode must be a Room agent invite code");
+  const roomOrigin = value.roomOrigin === undefined || value.roomOrigin === null || value.roomOrigin === ""
+    ? ""
+    : roomOriginOf(value.roomOrigin);
+  if (value.roomOrigin !== undefined && value.roomOrigin !== null && value.roomOrigin !== "" && !roomOrigin) {
+    throw relayError(422, "invalid_enroll", "roomOrigin must be an http(s) origin");
+  }
+  const displayName = value.displayName === undefined || value.displayName === null || value.displayName === ""
+    ? ""
+    : value.displayName;
+  if (displayName && !isDisplayName(displayName)) {
+    throw relayError(422, "invalid_enroll", "displayName must be 1..80 characters without control characters");
+  }
+  const rooms = [...new Set(value.rooms)];
   const machineId = `mch_${randomHex(8)}`;
   const verifier = randomB64url(32);
   const expiresAt = new Date(Date.now() + ENROLL_TTL_MS).toISOString();
@@ -100,8 +117,11 @@ async function mintEnroll(request, env) {
     body: JSON.stringify({
       machineId,
       label: value.label,
-      rooms: [...new Set(value.rooms)],
+      rooms,
       ownerMemberId: value.ownerMemberId,
+      inviteCode: value.inviteCode,
+      roomOrigin,
+      displayName,
       codeHash: await sha256Hex(verifier),
       expiresAt,
     }),
@@ -113,27 +133,54 @@ async function mintEnroll(request, env) {
     machineId,
     expiresAt,
     label: value.label,
-    rooms: [...new Set(value.rooms)],
+    rooms,
     ownerMemberId: value.ownerMemberId,
+    inviteCode: value.inviteCode,
+    ...(displayName ? { displayName } : {}),
+    ...(roomOrigin ? { roomOrigin } : {}),
   });
 }
 
-async function enroll(request, env) {
+async function enroll(request, env, { deprecated = false } = {}) {
+  const headers = deprecated ? { deprecation: "true" } : {};
   const { value } = await readJson(request, MAX_SMALL_BYTES, "Request body");
   const parsed = parseCode(value.code);
-  if (!parsed) throw relayError(401, "enroll_code_invalid", "The enroll code was refused");
+  if (!parsed) throw enrollFailure(401, "code_invalid");
   const response = await machine(env, parsed.machineId).fetch(new Request("https://machine.internal/enroll", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ verifier: parsed.verifier }),
   }));
-  if (!response.ok) return response;
+  if (!response.ok) return deprecatedResponse(response, headers);
   const issued = await response.json();
+  const body = {
+    machineToken: issued.machineToken,
+    machineId: issued.machineId,
+    label: issued.label,
+    roomId: issued.roomId,
+    ownerMemberId: issued.ownerMemberId,
+    inviteCode: issued.inviteCode,
+    relayUrl: machineRelayUrl(request, issued.machineId),
+  };
+  if (issued.displayName) body.displayName = issued.displayName;
+  if (issued.roomOrigin) body.roomOrigin = issued.roomOrigin;
+  return json(200, body, headers);
+}
+
+function machineRelayUrl(request, machineId) {
   const linkUrl = new URL(request.url);
   linkUrl.protocol = linkUrl.protocol === "https:" ? "wss:" : "ws:";
-  linkUrl.pathname = `/v0/machines/${issued.machineId}/link`;
+  linkUrl.pathname = `/v0/machines/${machineId}/link`;
   linkUrl.search = "";
-  return json(200, { machineId: issued.machineId, machineToken: issued.machineToken, link: linkUrl.toString() });
+  linkUrl.hash = "";
+  return linkUrl.toString();
+}
+
+function deprecatedResponse(response, headers) {
+  if (!headers.deprecation) return response;
+  const next = new Headers(response.headers);
+  next.set("deprecation", "true");
+  return new Response(response.body, { status: response.status, headers: next });
 }
 
 async function expireEnroll(request, env, machineId) {

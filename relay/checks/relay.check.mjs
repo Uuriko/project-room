@@ -48,34 +48,67 @@ test("healthz stays off until passthrough is set and names missing secrets", asy
 });
 
 test("an enroll code works once, expires, and stays bound to its room", async () => {
-  const minted = await mint(on, { label: "Ada's desk", rooms: ["room_alpha", "room_alpha"], ownerMemberId: "mem_ada" });
+  const invite = "RM-0123456789ABCDEF";
+  const missingInvite = await mint(on, { label: "Ada's desk", rooms: ["room_alpha"], ownerMemberId: "mem_ada" });
+  assert.equal(missingInvite.status, 422);
+  assert.equal(missingInvite.body.error.code, "invalid_enroll");
+  const minted = await mint(on, {
+    label: "Ada's desk",
+    rooms: ["room_alpha", "room_alpha"],
+    ownerMemberId: "mem_ada",
+    inviteCode: invite,
+    roomOrigin: "https://room.trydemigod.com/",
+    displayName: "Mac bot (Ada)",
+  });
   assert.equal(minted.status, 201);
+  assert.equal(minted.body.inviteCode, invite);
+  assert.equal(minted.body.roomOrigin, "https://room.trydemigod.com");
+  assert.equal(minted.body.displayName, "Mac bot (Ada)");
   const delta = Date.parse(minted.body.expiresAt) - Date.now();
   assert.ok(delta > 14 * 60 * 1000 && delta < 16 * 60 * 1000, `expiresAt was ${delta} ms out`);
   const tampered = `${minted.body.code.slice(0, -1)}${minted.body.code.endsWith("a") ? "b" : "a"}`;
   const refused = await enroll(on, tampered);
   assert.equal(refused.status, 401);
-  assert.equal(refused.body.error.code, "enroll_code_invalid");
+  assert.deepEqual(refused.body, { error: "code_invalid" });
   const issued = await enroll(on, minted.body.code);
   assert.equal(issued.status, 200);
+  assert.equal(issued.headers.get("deprecation"), null);
   assert.equal(issued.body.machineId, minted.body.machineId);
   assert.equal(typeof issued.body.machineToken, "string");
-  assert.match(issued.body.link, new RegExp(`/v0/machines/${issued.body.machineId}/link$`));
+  assert.equal(issued.body.label, "Ada's desk");
+  assert.equal(issued.body.roomId, "room_alpha");
+  assert.equal(issued.body.ownerMemberId, "mem_ada");
+  assert.equal(issued.body.inviteCode, invite);
+  assert.equal(issued.body.displayName, "Mac bot (Ada)");
+  assert.equal(issued.body.roomOrigin, "https://room.trydemigod.com");
+  assert.equal(issued.body.relayUrl, `wss://relay.test/v0/machines/${issued.body.machineId}/link`);
   const again = await enroll(on, minted.body.code);
-  assert.equal(again.status, 401);
-  assert.equal(again.body.error.code, "enroll_code_used");
+  assert.equal(again.status, 410);
+  assert.deepEqual(again.body, { error: "code_used" });
   const status = await machineStatus(on, issued.body.machineId);
   assert.deepEqual(status.body.rooms, ["room_alpha"]);
   assert.equal(status.body.label, "Ada's desk");
   assert.equal(status.body.ownerMemberId, "mem_ada");
   assert.equal(status.body.online, false);
 
-  const expiring = await mint(on, { label: "Spare", rooms: ["room_alpha"], ownerMemberId: "mem_ada" });
+  const aliasMint = await mint(on, {
+    label: "Alias", rooms: ["room_alpha"], ownerMemberId: "mem_ada", inviteCode: invite,
+  });
+  const alias = await readBody(await relayFetch(on, "/enroll", { method: "POST", json: { code: aliasMint.body.code } }));
+  assert.equal(alias.status, 200);
+  assert.equal(alias.headers.get("deprecation"), "true");
+  assert.equal(alias.body.relayUrl, `wss://relay.test/v0/machines/${alias.body.machineId}/link`);
+  assert.equal(alias.body.roomId, "room_alpha");
+  assert.equal(alias.body.inviteCode, invite);
+  assert.equal(alias.body.displayName, undefined);
+  assert.equal(alias.body.roomOrigin, undefined);
+
+  const expiring = await mint(on, { label: "Spare", rooms: ["room_alpha"], ownerMemberId: "mem_ada", inviteCode: invite });
   const expired = await expireCode(on, expiring.body.machineId);
   assert.equal(expired.status, 200);
   const late = await enroll(on, expiring.body.code);
-  assert.equal(late.status, 401);
-  assert.equal(late.body.error.code, "enroll_code_expired");
+  assert.equal(late.status, 410);
+  assert.deepEqual(late.body, { error: "code_expired" });
 
   const before = on.room.fetches.length;
   const otherRoom = await postCall(on, issued.body.machineId, { tool: "desktop.screenshot", arguments: {} }, {
@@ -104,7 +137,9 @@ test("a wrong link token is refused and a reconnect replaces the socket", async 
   });
   const call = await first.expectFrame("call");
   assert.equal(call.tool, "desktop.screenshot");
-  assert.equal(call.lease.slot, "desk");
+  assert.deepEqual(call.caller, { identityId: "mem_ada", claimId: "claim_ada", slot: "desk", verified: true });
+  assert.deepEqual(call.args, {});
+  assert.equal(call.lease, undefined);
   const second = await linkDaemon(off, machine.machineId, machine.machineToken, {
     answer: () => ({ ok: true, result: { shot: true } }),
   });
@@ -114,6 +149,8 @@ test("a wrong link token is refused and a reconnect replaces the socket", async 
   const closed = await until(() => first.closeInfo(), 2000);
   assert.equal(closed.code, 4001);
   assert.match(closed.reason, /replaced/);
+  const bye = await until(() => first.seen.find(msg => msg.type === "bye") ?? null, 2000);
+  assert.deepEqual(bye, { type: "bye" });
   const again = await postCall(off, machine.machineId, { tool: "desktop.screenshot", arguments: {} }, {
     authorization: `Bearer ${tokenFor(off, machine.machineId)}`,
   });
@@ -143,22 +180,25 @@ test("halt reaches the daemon within 2 seconds and cancels the in-flight call", 
   assert.ok(Date.now() - started < 2000, `halt took ${Date.now() - started} ms`);
   assert.equal(halted.status, 200);
   assert.equal(halted.body.halted, true);
-  assert.equal(frame.haltEpoch, halted.body.haltEpoch);
-  assert.equal(frame.reason, "operator");
+  assert.deepEqual(frame, { type: "halt", epoch: halted.body.haltEpoch });
   const cancelled = await pending;
   assert.equal(cancelled.status, 409);
   assert.equal(cancelled.body.error.code, "halted");
   const mid = await machineStatus(off, machine.machineId);
   assert.equal(mid.body.halted, true);
-  assert.equal(mid.body.haltEpoch, frame.haltEpoch);
+  assert.equal(mid.body.haltEpoch, frame.epoch);
 
   const resumed = await control(off, machine.machineId, "resume", {});
   const resumeFrame = await daemon.expectFrame("resume");
   assert.equal(resumed.body.halted, false);
-  assert.equal(resumeFrame.haltEpoch, frame.haltEpoch);
+  assert.deepEqual(resumeFrame, { type: "resume" });
+  const paused = await control(off, machine.machineId, "pause", { minutes: 30 });
+  const pauseFrame = await daemon.expectFrame("pause");
+  assert.equal(paused.status, 200);
+  assert.deepEqual(pauseFrame, { type: "pause", minutes: 30 });
   const after = await machineStatus(off, machine.machineId);
   assert.equal(after.body.halted, false);
-  assert.equal(after.body.haltEpoch, frame.haltEpoch);
+  assert.equal(after.body.haltEpoch, frame.epoch);
 });
 
 test("phase 0 passthrough gives the earliest live work claim the slot", async () => {
@@ -208,10 +248,11 @@ test("phase 0 passthrough gives the earliest live work claim the slot", async ()
     const shot = await client.callTool({ name: "desktop.screenshot", arguments: {} });
     assert.equal(shot.isError, false);
     assert.equal(shot.structuredContent.shot, true);
-    assert.equal(seen.at(-1).lease.claim, "claim_ada");
-    assert.equal(seen.at(-1).lease.slot, "desk");
-    assert.equal(seen.at(-1).lease.holder, "idn_ada");
-    assert.equal(seen.at(-1).lease.room, "room_alpha");
+    assert.equal(seen.at(-1).caller.claimId, "claim_ada");
+    assert.equal(seen.at(-1).caller.slot, "desk");
+    assert.equal(seen.at(-1).caller.identityId, "idn_ada");
+    assert.equal(seen.at(-1).caller.verified, true);
+    assert.deepEqual(seen.at(-1).args, {});
 
     const held = await postRpc(on, machine.machineId, {
       method: "tools/call",
@@ -227,8 +268,9 @@ test("phase 0 passthrough gives the earliest live work claim the slot", async ()
     });
     assert.equal(side.status, 200);
     assert.equal(side.body.isError, false);
-    assert.equal(seen.at(-1).lease.slot, "side");
-    assert.equal(seen.at(-1).lease.claim, "claim_side");
+    assert.equal(seen.at(-1).caller.slot, "side");
+    assert.equal(seen.at(-1).caller.claimId, "claim_side");
+    assert.equal(seen.at(-1).caller.verified, true);
 
     const missing = await postCall(on, machine.machineId, { tool: "files.read", arguments: { path: "notes.txt" } }, {
       authorization: `Bearer ${ada}`,
@@ -266,8 +308,9 @@ test("phase 0 passthrough gives the earliest live work claim the slot", async ()
     });
     assert.equal(freed.status, 200);
     assert.equal(freed.body.isError, false);
-    assert.equal(seen.at(-1).lease.claim, "claim_bea");
-    assert.equal(seen.at(-1).lease.slot, "desk");
+    assert.equal(seen.at(-1).caller.claimId, "claim_bea");
+    assert.equal(seen.at(-1).caller.slot, "desk");
+    assert.equal(seen.at(-1).caller.verified, true);
 
     const logs = await readBody(await relayFetch(on, "/admin/logs", {
       headers: { authorization: `Bearer ${on.adminToken}` },
@@ -309,7 +352,9 @@ test("lease tokens are checked and a room bearer is not one", async () => {
   });
   assert.equal(first.status, 200);
   assert.equal(first.body.structuredContent.shot, true);
-  assert.deepEqual(seen.at(-1).lease.caps, ["desktop.gui"]);
+  assert.deepEqual(seen.at(-1).caller, {
+    identityId: "mem_ada", claimId: "claim_ada", slot: "desk", verified: true,
+  });
   const replay = await postCall(off, machine.machineId, { tool: "desktop.screenshot", arguments: {} }, {
     authorization: `Bearer ${good}`,
   });
@@ -386,6 +431,9 @@ async function enrolledMachine(ctx, fields = {}) {
     label: "Desk",
     rooms: fields.rooms ?? ["room_alpha"],
     ownerMemberId: fields.ownerMemberId ?? "mem_ada",
+    inviteCode: fields.inviteCode ?? "RM-0123456789ABCDEF",
+    ...(fields.displayName ? { displayName: fields.displayName } : {}),
+    ...(fields.roomOrigin ? { roomOrigin: fields.roomOrigin } : {}),
   });
   assert.equal(minted.status, 201, JSON.stringify(minted.body));
   const issued = await enroll(ctx, minted.body.code);

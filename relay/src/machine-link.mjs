@@ -6,13 +6,13 @@
 import { DurableObject } from "cloudflare:workers";
 import { authorize } from "./auth.mjs";
 import { bytesToB64url, sha256Hex, timingEqual } from "./bytes.mjs";
-import { RelayError, relayError } from "./errors.mjs";
+import { RelayError, enrollFailure, relayError } from "./errors.mjs";
 import { verifyLinkSignature } from "./hmac.mjs";
 import { errorResponse, json, readJson } from "./http.mjs";
 import { initializeResult, parseRpc, requireToolName, rpcError, rpcResult, toolEnvelope } from "./mcp.mjs";
 import { redact } from "./redact.mjs";
 import {
-  CALL_TIMEOUT_MS, MAX_CALL_BYTES, MAX_SMALL_BYTES, PROTOCOL, filterTools, isResourceId, toolAllowed,
+  CALL_TIMEOUT_MS, HEARTBEAT_INTERVAL_MS, MAX_CALL_BYTES, MAX_SMALL_BYTES, defaultDaemonTools, filterTools, isResourceId, toolAllowed,
 } from "./protocol.mjs";
 
 const MCP_HEADERS = Object.freeze({
@@ -26,6 +26,9 @@ function emptyState(machineId) {
     label: "",
     rooms: [],
     ownerMemberId: "",
+    inviteCode: "",
+    displayName: "",
+    roomOrigin: "",
     resourceId: null,
     tokenHash: null,
     enroll: null,
@@ -57,7 +60,7 @@ export class MachineLink extends DurableObject {
     const url = new URL(request.url);
     const route = url.pathname === "/mint" || url.pathname === "/enroll" || url.pathname === "/expire-enroll"
       ? url.pathname.slice(1)
-      : /^\/v0\/machines\/[^/]+\/(link|mcp|call|halt|resume|status)$/.exec(url.pathname)?.[1];
+      : /^\/v0\/machines\/[^/]+\/(link|mcp|call|halt|pause|resume|status)$/.exec(url.pathname)?.[1];
     try {
       if (route === "mint") return await this.mint(request);
       if (route === "enroll") return await this.enroll(request);
@@ -66,6 +69,7 @@ export class MachineLink extends DurableObject {
       if (route === "mcp") return await this.mcp(request);
       if (route === "call") return await this.call(request);
       if (route === "halt") return await this.halt(request);
+      if (route === "pause") return await this.pause(request);
       if (route === "resume") return await this.resume(request);
       if (route === "status") return await this.status(request);
       return json(404, { error: { code: "not_found", message: "Not found" } });
@@ -131,19 +135,25 @@ export class MachineLink extends DurableObject {
     if (msg.type !== "hello" && msg.type !== "heartbeat") return;
     await this.exclusive(() => {
       if (!this.state) return;
-      if (msg.type === "hello") this.state.tools = filterTools(msg.tools);
+      if (msg.type === "hello") {
+        if (msg.protocol !== undefined && msg.protocol !== 1) return;
+        this.state.tools = Array.isArray(msg.tools) ? filterTools(msg.tools) : filterTools(defaultDaemonTools());
+      }
       this.state.lastHeartbeat = new Date().toISOString();
       this.dirty = true;
-      if (msg.type === "hello") this.send(ws, { type: "welcome", machineId: this.state.machineId, haltEpoch: this.state.haltEpoch, protocol: PROTOCOL, halted: this.state.halted });
+      if (msg.type === "hello") this.send(ws, { type: "heartbeat" });
     });
+    if (msg.type === "hello") await this.armHeartbeat();
   }
 
   async webSocketClose(ws) {
     if (this.live === ws) this.live = null;
+    if (!this.daemon()) await this.disarmHeartbeat();
   }
 
   async webSocketError(ws) {
     if (this.live === ws) this.live = null;
+    if (!this.daemon()) await this.disarmHeartbeat();
   }
 
   send(ws, payload) {
@@ -158,6 +168,9 @@ export class MachineLink extends DurableObject {
       this.state.label = value.label;
       this.state.rooms = value.rooms;
       this.state.ownerMemberId = value.ownerMemberId;
+      this.state.inviteCode = value.inviteCode;
+      this.state.displayName = value.displayName || "";
+      this.state.roomOrigin = value.roomOrigin || "";
       this.state.enroll = { codeHash: value.codeHash, expiresAt: value.expiresAt, used: false };
       this.dirty = true;
     });
@@ -168,18 +181,27 @@ export class MachineLink extends DurableObject {
     const { value } = await readJson(request, MAX_SMALL_BYTES, "Request body");
     let issued = null;
     await this.exclusive(async () => {
-      if (!this.state?.enroll) throw relayError(401, "enroll_code_invalid", "The enroll code was refused");
+      if (!this.state?.enroll) throw enrollFailure(401, "code_invalid");
       const hash = await sha256Hex(value.verifier);
-      if (!timingEqual(hash, this.state.enroll.codeHash ?? "")) throw relayError(401, "enroll_code_invalid", "The enroll code was refused");
-      if (this.state.enroll.used) throw relayError(401, "enroll_code_used", "The enroll code was already used");
-      if (Date.parse(this.state.enroll.expiresAt) <= Date.now()) throw relayError(401, "enroll_code_expired", "The enroll code has expired");
+      if (!timingEqual(hash, this.state.enroll.codeHash ?? "")) throw enrollFailure(401, "code_invalid");
+      if (this.state.enroll.used) throw enrollFailure(410, "code_used");
+      if (Date.parse(this.state.enroll.expiresAt) <= Date.now()) throw enrollFailure(410, "code_expired");
       const token = bytesToB64url(crypto.getRandomValues(new Uint8Array(32)));
       this.state.tokenHash = await sha256Hex(token);
       this.state.enroll = { codeHash: this.state.enroll.codeHash, expiresAt: this.state.enroll.expiresAt, used: true };
       this.dirty = true;
       issued = token;
     });
-    return json(200, { machineId: this.state.machineId, machineToken: issued });
+    return json(200, {
+      machineId: this.state.machineId,
+      machineToken: issued,
+      label: this.state.label,
+      roomId: this.state.rooms[0],
+      ownerMemberId: this.state.ownerMemberId,
+      inviteCode: this.state.inviteCode,
+      ...(this.state.displayName ? { displayName: this.state.displayName } : {}),
+      ...(this.state.roomOrigin ? { roomOrigin: this.state.roomOrigin } : {}),
+    });
   }
 
   async expireEnroll() {
@@ -209,6 +231,7 @@ export class MachineLink extends DurableObject {
       this.live = server;
       for (const socket of this.ctx.getWebSockets()) {
         if (socket !== server) {
+          this.send(socket, { type: "bye" });
           try { socket.close(4001, "replaced"); } catch { /* already closed */ }
         }
       }
@@ -216,7 +239,8 @@ export class MachineLink extends DurableObject {
       this.pending.clear();
       this.state.lastHeartbeat = new Date().toISOString();
       this.dirty = true;
-      this.send(server, { type: "welcome", machineId: this.state.machineId, haltEpoch: this.state.haltEpoch, protocol: PROTOCOL, halted: this.state.halted });
+      this.send(server, { type: "heartbeat" });
+      await this.armHeartbeat();
       response = new Response(null, { status: 101, webSocket: client });
     });
     for (const pending of replaced) {
@@ -301,14 +325,12 @@ export class MachineLink extends DurableObject {
         type: "call",
         id,
         tool,
-        arguments: args,
-        lease: {
-          claim: lease.claimId,
+        args,
+        caller: {
+          identityId: lease.holderIdentity,
+          claimId: lease.claimId,
           slot: lease.slot,
-          holder: lease.holderIdentity,
-          room: lease.roomId,
-          exp: lease.expiresAt ? Math.floor(Date.parse(lease.expiresAt) / 1000) : null,
-          caps: lease.caps ?? [],
+          verified: true,
         },
       });
       if (new TextEncoder().encode(frame).byteLength > MAX_CALL_BYTES) {
@@ -355,7 +377,7 @@ export class MachineLink extends DurableObject {
       cancels = [...this.pending.values()];
       this.pending.clear();
       socket = this.daemon();
-      if (socket) notice = { type: "halt", haltEpoch: this.state.haltEpoch, reason: reasonOf(value) };
+      if (socket) notice = { type: "halt", epoch: this.state.haltEpoch };
     });
     if (notice) this.send(socket, notice);
     for (const pending of cancels) {
@@ -376,10 +398,27 @@ export class MachineLink extends DurableObject {
       this.state.halted = false;
       this.dirty = true;
       socket = this.daemon();
-      if (socket) notice = { type: "resume", haltEpoch: this.state.haltEpoch };
+      if (socket) notice = { type: "resume" };
     });
     if (notice) this.send(socket, notice);
     return json(200, { halted: false, haltEpoch: this.state.haltEpoch });
+  }
+
+  async pause(request) {
+    const { value, raw } = await readJson(request, MAX_SMALL_BYTES, "Request body");
+    let socket = null;
+    let notice = null;
+    await this.exclusive(async () => {
+      if (!this.state) throw relayError(404, "machine_unknown", "No such machine");
+      await verifyLinkSignature(this.env.RELAY_LINK_SECRET, request, raw, Math.floor(Date.now() / 1000));
+      if (!Number.isSafeInteger(value.minutes) || value.minutes < 1 || value.minutes > 24 * 60) {
+        throw relayError(422, "invalid_pause", "minutes must be an integer from 1 to 1440");
+      }
+      socket = this.daemon();
+      if (socket) notice = { type: "pause", minutes: value.minutes };
+    });
+    if (notice) this.send(socket, notice);
+    return json(200, { paused: true, minutes: value.minutes });
   }
 
   applyControl(value) {
@@ -426,15 +465,32 @@ export class MachineLink extends DurableObject {
     if (request.method === "HEAD") return new Response(null, { status: 200, headers: { "cache-control": "no-store" } });
     return json(200, body);
   }
+
+  async armHeartbeat() {
+    await this.ctx.storage.setAlarm(Date.now() + HEARTBEAT_INTERVAL_MS);
+  }
+
+  async disarmHeartbeat() {
+    try { await this.ctx.storage.deleteAlarm(); } catch { /* no alarm was set */ }
+  }
+
+  async alarm() {
+    let live = false;
+    await this.exclusive(() => {
+      const socket = this.daemon();
+      if (!socket || !this.state) return;
+      this.send(socket, { type: "heartbeat" });
+      this.state.lastHeartbeat = new Date().toISOString();
+      this.dirty = true;
+      live = true;
+    });
+    if (live) await this.armHeartbeat();
+  }
 }
 
 function usableSocket(socket) {
   if (!socket) return false;
   return socket.readyState !== WebSocket.CLOSING && socket.readyState !== WebSocket.CLOSED;
-}
-
-function reasonOf(value) {
-  return typeof value.reason === "string" && value.reason.length <= 80 ? value.reason : "halt";
 }
 
 function nextHaltEpoch(value, state) {
