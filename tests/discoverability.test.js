@@ -237,6 +237,11 @@ test("GET /openapi.json validates as OpenAPI 3.1 and matches the route table", {
   assert.equal(typeof doc.info?.title, "string");
   assert.ok(Array.isArray(doc.servers) && doc.servers.length > 0, "servers[] present");
   assert.equal(typeof doc.paths, "object");
+  const rpcError = doc.components?.schemas?.JsonRpcError;
+  assert.deepEqual(rpcError?.required, ["jsonrpc", "id", "error"]);
+  assert.equal(rpcError?.properties?.error?.properties?.code?.type, "integer");
+  assert.equal(rpcError?.properties?.error?.required?.includes("data"), false);
+  assert.equal(typeof rpcError?.properties?.error?.properties?.data?.properties?.status, "object");
   const envelope = doc.components?.schemas?.ErrorEnvelope;
   assert.ok(envelope, "ErrorEnvelope schema present");
   for (const field of ["error", "status", "reason", "hint", "next", "operationId", "category"]) {
@@ -254,9 +259,17 @@ test("GET /openapi.json validates as OpenAPI 3.1 and matches the route table", {
       assert.equal(typeof op.operationId, "string");
       assert.equal(typeof op.summary, "string");
       assert.ok(op.responses["200"] || op.responses["201"], "success response documented");
+      const jsonRpcStatuses = method === "POST"
+        ? { "/a2a": ["400"], "/mcp": ["400", "401"], "/room/mcp": ["400", "401"] }[entry.path] ?? []
+        : [];
       for (const status of ["400", "401", "403", "404", "409", "429"]) {
-        assert.ok(op.responses[status]?.$ref?.startsWith("#/components/responses/"),
-          `${entry.path} documents ${status} via the canonical error components`);
+        if (jsonRpcStatuses.includes(status)) {
+          assert.equal(op.responses[status]?.content?.["application/json"]?.schema?.$ref,
+            "#/components/schemas/JsonRpcError", `${method} ${entry.path} ${status}`);
+        } else {
+          assert.ok(op.responses[status]?.$ref?.startsWith("#/components/responses/"),
+            `${entry.path} documents ${status} via the canonical error components`);
+        }
       }
     }
   }
@@ -265,6 +278,26 @@ test("GET /openapi.json validates as OpenAPI 3.1 and matches the route table", {
   // The /room alias serves the same bytes.
   const aliased = await (await get(origin, "/room/openapi.json")).json();
   assert.deepEqual(aliased.paths, doc.paths);
+});
+
+test("invalid JSON on MCP and A2A matches JsonRpcError, not ErrorEnvelope", async t => {
+  const { origin } = await serve(t);
+  for (const path of ["/mcp", "/room/mcp", "/a2a"]) {
+    const live = await fetch(`${origin}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: origin },
+      body: "not-json",
+    });
+    assert.equal(live.status, 400, path);
+    const body = await live.json();
+    assert.equal(body.jsonrpc, "2.0", path);
+    assert.equal(body.id, null, path);
+    assert.equal(body.error.code, -32700, path);
+    assert.equal(typeof body.error.message, "string", path);
+    assert.equal(body.status, undefined, path);
+    if (path === "/a2a") assert.equal(body.error.data, undefined, path);
+    else assert.equal(typeof body.error.data.status, "string", path);
+  }
 });
 
 test("openapi: operationIds are unique across every documented operation", { timeout: 30000 }, async t => {
