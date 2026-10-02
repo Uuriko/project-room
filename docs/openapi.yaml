@@ -6908,7 +6908,13 @@ paths:
   /api/ready:
     get:
       summary: Readiness
-      description: "Open (also HEAD). 200 `{ status: ready }` once the store answers; 503 `{ status: unavailable }` otherwise."
+      description: >-
+        Open (also HEAD). On the Worker, 200 `{ status: ready, mode, do }`
+        only when invite-only-pilot answers `SELECT 1` within one second;
+        otherwise 503 `{ status: degraded, do }` (`do.status` is `timeout` or
+        `error`). The Node process answers 200 `{ status: ready }` when its
+        store answers and 503 `{ status: unavailable }` when storage is down.
+        `/api/health` stays Worker and Node liveness and does not run this probe.
       security: []
       responses:
         '200': { description: "{ status: ready }" }
