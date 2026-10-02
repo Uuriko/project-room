@@ -1,9 +1,10 @@
 // Outbound webhooks (B020). A webhook manager: register webhooks
 // (URL + event filter), match room events against filters, build delivery
-// payloads, and track delivery state (pending → delivered/failed). Actual
-// HTTP delivery is a later slice. All state is caller-owned (a Map); the
-// module is pure except for node:dns, which only the opt-in async DNS
-// check (assertWebhookHostDnsPublic) touches. Malformed inputs throw
+// payloads, and track delivery state (pending → delivered/failed).
+// HTTP delivery is implemented in server/webhook-dispatch.mjs. This module
+// does not POST. All state is caller-owned (a Map); the module is pure
+// except for node:dns, which only the opt-in async DNS check
+// (assertWebhookHostDnsPublic) touches. Malformed inputs throw
 // WebhookError.
 import { promises as dns } from "node:dns";
 import { parseIpv4, parseIpv6, isBlockedIp, isBlockedIpv6Value, isWorkersRuntime } from "./ip-blocklist.mjs";
