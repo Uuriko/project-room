@@ -1,0 +1,63 @@
+name: qa3-gates
+
+# Durable QA3 gates against a throwaway local server. Pull requests that touch
+# the server, the client, or this harness run the authz, content-trust, SSE,
+# and public-scan checks. Board growth is nightly. expectedFail cells are
+# listed in the job summary and stay green until their fix lands.
+on:
+  pull_request:
+    paths:
+      - "server/**"
+      - "src/**"
+      - "cloudflare/**"
+      - "scripts/qa2/**"
+      - "scripts/qa3/**"
+      - "package.json"
+      - ".github/workflows/qa3-gates.yml"
+  schedule:
+    - cron: "17 8 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qa3-gates-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gates:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - run: npm ci
+      - name: Authz, content trust, SSE, and public scan
+        run: |
+          PORT=4317
+          export ROOM_DB="$RUNNER_TEMP/qa3.sqlite"
+          export ROOM_INSTANCE_LOCK_PATH="$RUNNER_TEMP/qa3.lock"
+          PORT=$PORT ROOM_DB=$ROOM_DB ROOM_INSTANCE_LOCK_PATH=$ROOM_INSTANCE_LOCK_PATH node server.mjs > "$RUNNER_TEMP/qa3-server.log" 2>&1 &
+          for i in $(seq 1 50); do curl -fsS "http://127.0.0.1:$PORT/api/health" >/dev/null 2>&1 && break; sleep 0.2; done
+          curl -fsS "http://127.0.0.1:$PORT/api/health"
+          node scripts/qa3/authz-board.mjs --origin "http://127.0.0.1:$PORT"
+          node scripts/qa3/content-trust.mjs --origin "http://127.0.0.1:$PORT" --db "$ROOM_DB"
+          node scripts/qa3/sse-contract.mjs --origin "http://127.0.0.1:$PORT"
+          node scripts/qa3/public-scan-budget.mjs
+
+  board-growth:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - run: npm ci
+      - name: Board growth budget
+        run: node scripts/qa3/board-growth.mjs

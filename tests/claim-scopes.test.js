@@ -38,6 +38,51 @@ function fixture(t) {
   return { store, filename, keys, item, mutate, propose, scope, signEvidence, advance: ms => { now += ms; } };
 }
 
+test('projection claims follow the board writer profile and do not grant write_external', t => {
+  const f = fixture(t);
+  const add = (id, permissions) => {
+    f.store.command(f.keys.owner, 'commons', command(T.MEMBER_ADDED, {
+      memberId: id, displayName: id, kind: 'agent', accountableHumanId: 'owner', permissions,
+    }));
+    setTier(f.store.db, 'commons', id, 't2_standard', { updatedBy: 'owner', nowMs: Date.now() });
+    return f.store.issueAccessKey('commons', id);
+  };
+  const externalKey = add('external-only', ['accept_work', 'write_external']);
+  const contributeKey = add('contributor', ['accept_work', 'complete_work']);
+  const send = (key, type, data) => f.store.command(key, 'commons', command(type, data));
+  const propose = (id, actor, key) => {
+    send(f.keys.owner, T.WORK_PROPOSED, {
+      workItemId: id, title: id, definitionOfDone: 'Versioned result', accountableMemberId: actor, mode: 'write',
+      independentVerificationRequired: false, ownerDecisionRequired: false,
+    });
+    send(key, T.WORK_ACCEPTED, { workItemId: id, expectedRevision: 0 });
+  };
+  propose('ext', 'external-only', externalKey);
+  assert.throws(
+    () => send(externalKey, T.CLAIM_ACQUIRED, { workItemId: 'ext', expectedRevision: 1, ...f.scope(['docs/ext.md']) }),
+    { status: 403, code: 'work_claims_not_permitted' });
+  assert.equal(f.item('ext').claim ?? null, null);
+  propose('board', 'contributor', contributeKey);
+  send(contributeKey, T.CLAIM_ACQUIRED, { workItemId: 'board', expectedRevision: 1, ...f.scope(['docs/board.md']) });
+  assert.equal(f.item('board').claim.status, 'active');
+  assert.equal(f.item('board').claim.holderId, 'contributor');
+  assert.equal(f.store.room('commons').state.members.contributor.permissions.includes('write_external'), false);
+  assert.throws(
+    () => send(externalKey, T.CLAIM_RELEASED, { workItemId: 'board', expectedRevision: f.item('board').revision }),
+    { status: 403, code: 'work_claims_not_permitted' });
+  assert.equal(f.item('board').claim.status, 'active');
+  f.advance(1000);
+  const posted = send(contributeKey, T.MESSAGE_POSTED, { messageId: 'board-progress', body: 'Still on docs/board.md' });
+  send(contributeKey, T.CLAIM_RENEWED, {
+    workItemId: 'board', expectedRevision: f.item('board').revision, progressMessageId: 'board-progress',
+    expiresAt: new Date(Date.now() + 120000).toISOString(),
+  });
+  assert.equal(f.item('board').claim.renewals, 1);
+  assert.equal(posted.event.type, T.MESSAGE_POSTED);
+  send(contributeKey, T.CLAIM_RELEASED, { workItemId: 'board', expectedRevision: f.item('board').revision });
+  assert.equal(f.item('board').claim.status, 'released');
+});
+
 test('separate work claims serialize across database connections with no rejected event or receipt', t => {
   const f = fixture(t);
   f.propose('first'); f.propose('second', 'b');

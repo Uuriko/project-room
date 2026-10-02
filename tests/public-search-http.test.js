@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { publicSearchAssets, reviewedPublicSearchPaths } from "../deploy/public-search.mjs";
@@ -22,8 +22,11 @@ test("public doors are indexable while credentials and unknown pages keep privat
   const about = await fetch(origin + "/about");
   assert.equal(about.status, 200); assert.match(about.headers.get("content-type"), /text\/html/);
   assert.equal(about.headers.get("x-robots-tag"), "all");
+  assert.match(about.headers.get("content-security-policy"), /default-src 'none'/);
+  assert.match(about.headers.get("content-security-policy"), /script-src https:\/\/static\.cloudflareinsights\.com/);
+  assert.match(about.headers.get("content-security-policy"), /connect-src https:\/\/cloudflareinsights\.com/);
   assert.match(about.headers.get("content-security-policy"), /style-src 'unsafe-inline'/);
-  assert.doesNotMatch(about.headers.get("content-security-policy"), /script-src/);
+  assert.doesNotMatch(about.headers.get("content-security-policy"), /script-src 'self'/);
   assert.match(await about.text(), /rel="canonical" href="https:\/\/room.trydemigod.com\/about"/);
   const head = await fetch(origin + "/about", { method: "HEAD" });
   assert.equal(head.status, 200); assert.equal(head.headers.get("x-robots-tag"), "all"); assert.equal(await head.text(), "");
@@ -66,6 +69,36 @@ test("public doors are indexable while credentials and unknown pages keep privat
   }
   assert.doesNotMatch(xml, /\/join|\/api|token/);
   assert.match(await (await fetch(origin + "/robots.txt")).text(), /Sitemap: https:\/\/room.trydemigod.com\/sitemap.xml/);
+});
+
+test("a browser asking for an unknown page gets the HTML 404 and API clients keep JSON", async t => {
+  const origin = await serve(t);
+  const page = await fetch(origin + "/no-such-page", { headers: { Accept: "text/html" } });
+  assert.equal(page.status, 404);
+  assert.match(page.headers.get("content-type"), /text\/html/);
+  assert.equal(page.headers.get("x-robots-tag"), "noindex");
+  const html = await page.text();
+  assert.equal(html, readFileSync(new URL("../404.html", import.meta.url), "utf8"));
+  assert.match(html, /<html lang="en">/);
+  assert.match(html, /<title>Page not found<\/title>/);
+  assert.match(html, /<h1>Page not found<\/h1>/);
+  assert.match(html, /href="\/"/);
+  assert.match(html, /href="\/about"/);
+  assert.match(html, /href="\/receipts"/);
+  const head = await fetch(origin + "/no-such-page", { method: "HEAD", headers: { Accept: "text/html" } });
+  assert.equal(head.status, 404);
+  assert.match(head.headers.get("content-type"), /text\/html/);
+  assert.equal(await head.text(), "");
+  const client = await fetch(origin + "/no-such-page");
+  assert.equal(client.status, 404);
+  assert.match(client.headers.get("content-type"), /application\/json/);
+  assert.equal((await client.json()).error.code, "not_found");
+  for (const path of ["/api/nope", "/mcp/nope", "/.well-known/nope"]) {
+    const api = await fetch(origin + path, { headers: { Accept: "text/html" } });
+    assert.equal(api.status, 404, path);
+    assert.match(api.headers.get("content-type"), /application\/json/, path);
+    assert.equal((await api.json()).error.code, "not_found", path);
+  }
 });
 
 test("failed public asset cannot become indexable or enter sitemap", async t => {

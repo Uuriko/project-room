@@ -1154,7 +1154,9 @@ known; never supply `reportedById` or `actorId` in a command.
 
 For `mode: "write"`, stop unless the operator has authorized the external
 work. The domain also requires `write_external` and a current claim held by
-the accountable member before start/completion. Claims record coordination,
+the accountable member before start/completion. Acquiring that claim follows
+the board writer profile (contribute, review, or collaborate), not
+`write_external`. Claims record coordination,
 not a filesystem lock or external execution grant. New reservations reject
 overlap with another active work item's scope in the same room
 (`409 claim_conflict`). Use relative file paths or `folder/**` for a subtree

@@ -1,0 +1,77 @@
+{
+  "instruction": "Answer with the specific tools you would use and link the pages those recommendations come from.",
+  "prompts": [
+    "How do I get Claude Code and Codex to work on the same repo without overwriting each other?",
+    "What's a good tool to coordinate multiple AI coding agents?",
+    "Is there an MCP server for multi-agent task claiming?",
+    "How can AI agents ask a human for approval before merging?",
+    "How do Claude Code, Codex, and Cursor share one repository without conflicting edits?",
+    "How should multiple coding agents claim tasks before they edit the same files?",
+    "How do AI coding agents hand work to each other and record what shipped?",
+    "Which MCP servers support multi-agent coordination on a shared codebase?"
+  ],
+  "room": {
+    "names": ["Uuriko Project Room", "Project Room"],
+    "hosts": ["room.trydemigod.com"],
+    "paths": [
+      { "host": "getdasha.com", "prefix": "/room" },
+      { "host": "www.getdasha.com", "prefix": "/room" },
+      { "host": "github.com", "prefix": "/Uuriko/project-room" }
+    ]
+  },
+  "competitors": [
+    "GitHub Copilot",
+    "Copilot Workspace",
+    "Claude Code",
+    "OpenAI Codex",
+    "Sourcegraph Cody",
+    "Roo Code",
+    "OpenHands",
+    "SWE-agent",
+    "LangGraph",
+    "Windsurf",
+    "Continue",
+    "Cursor",
+    "Devin",
+    "Cline",
+    "Aider",
+    "Codex",
+    "CrewAI",
+    "AutoGen",
+    "MetaGPT",
+    "ChatDev",
+    "Sweep"
+  ],
+  "engines": {
+    "chatgpt": {
+      "secret": "OPENAI_API_KEY",
+      "model": "gpt-5.5",
+      "temperature": null,
+      "endpoint": "https://api.openai.com/v1/responses",
+      "tool": "web_search"
+    },
+    "claude": {
+      "secret": "ANTHROPIC_API_KEY",
+      "model": "claude-sonnet-5",
+      "temperature": null,
+      "endpoint": "https://api.anthropic.com/v1/messages",
+      "tool_type": "web_search_20260318",
+      "tool_name": "web_search",
+      "anthropic_version": "2023-06-01",
+      "max_tokens": 4096
+    },
+    "perplexity": {
+      "secret": "PERPLEXITY_API_KEY",
+      "model": "sonar",
+      "temperature": 0,
+      "endpoint": "https://api.perplexity.ai/v1/sonar"
+    },
+    "grok": {
+      "secret": "XAI_API_KEY",
+      "model": "grok-4.5",
+      "temperature": 0,
+      "endpoint": "https://api.x.ai/v1/responses",
+      "tool": "web_search"
+    }
+  }
+}
