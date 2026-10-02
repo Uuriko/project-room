@@ -412,6 +412,12 @@ const shapes = {
   [T.ROOM_SPEND_ALLOWANCE_SET]: "allowanceCents periodDays",
   [T.ROOM_TRUST_SET]: "enabled",
   [T.ROOM_PUBLIC_RECEIPTS_SET]: "enabled",
+  // --- GR2 public acquisition opt-ins. Command field allowlist only. ---
+  [T.ROOM_PUBLIC_PAGE_SET]: "enabled",
+  [T.ROOM_JOIN_LINK_SET]: "enabled",
+  [T.MEMBER_PUBLIC_NAME_SET]: "enabled",
+  [T.WORK_PUBLIC_SET]: "workItemId enabled",
+  // --- end GR2 ---
   [T.ROOM_ARCHIVED]: "reason",
   [T.OWNERSHIP_TRANSFERRED]: "toMemberId reason",
   [T.MEMBER_ADDED]: "memberId displayName kind permissions accountableHumanId identityId agentType referredBy",

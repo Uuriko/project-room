@@ -9020,6 +9020,41 @@ paths:
         '409': { description: room_exists or pilot_limit }
         '422': { description: invalid_room_request }
         '429': { description: rate_limited }
+  /api/account-rooms/from-template:
+    post:
+      summary: Create a room from a public template
+      description: |
+        Account-session write (X-CSRF-Token, Origin, X-Session-Binding),
+        10 per minute per account. Same room-creation rules as
+        POST /api/account-rooms. The template adds channels, starter tasks,
+        and empty-file board claims. The client-chosen roomId is the
+        idempotency key: the same request returns duplicate true and does
+        not add a second copy of the starter tasks. ref is echoed and is
+        not stored on the room.
+      security:
+        - accountSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [roomId, template, title, purpose, kind, displayName]
+              properties:
+                roomId: { type: string, maxLength: 64 }
+                template: { type: string }
+                title: { type: string, maxLength: 120 }
+                purpose: { type: string, maxLength: 1000 }
+                kind: { type: string, enum: [personal, organization] }
+                displayName: { type: string, maxLength: 80 }
+                ref: { type: string, maxLength: 80 }
+      responses:
+        '201': { description: "{ contractVersion, viewer, room, duplicate: false, template, ref }" }
+        '200': { description: Idempotent replay of the same request (duplicate true) }
+        '403': { description: "csrf_denied, origin_denied or room_creation_denied" }
+        '409': { description: room_exists, pilot_limit, or idempotency_conflict }
+        '422': { description: invalid_template or session_binding_required }
+        '429': { description: rate_limited }
   /api/account/profile:
     get:
       summary: Read the account's profile

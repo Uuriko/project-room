@@ -22,6 +22,12 @@ export const EVENT_TYPES = Object.freeze({
   ROOM_TRUST_SET: "room.trust_set",
   // Owner opt-in for the public receipts page. Default off when absent.
   ROOM_PUBLIC_RECEIPTS_SET: "room.public_receipts_set",
+  // --- GR2 public acquisition opt-ins. Absent means off. ---
+  ROOM_PUBLIC_PAGE_SET: "room.public_page_set",
+  ROOM_JOIN_LINK_SET: "room.join_link_set",
+  MEMBER_PUBLIC_NAME_SET: "member.public_name_set",
+  WORK_PUBLIC_SET: "work.public_set",
+  // --- end GR2 ---
   ROOM_ARCHIVED: "room.archived",
   MEMBER_ADDED: "member.added",
   MEMBER_JOINED_VIA_INVITATION: "member.joined_via_invitation",
@@ -161,6 +167,34 @@ export function publicReceipts(state) {
     setAt: typeof stored.setAt === "string" ? stored.setAt : null
   };
 }
+
+// --- GR2: public room page, join link, public name, public task. Absent means off. ---
+function optIn(stored) {
+  if (!stored || typeof stored.enabled !== "boolean") return { enabled: false };
+  return {
+    enabled: stored.enabled,
+    revision: Number.isSafeInteger(stored.revision) ? stored.revision : 0,
+    setById: typeof stored.setById === "string" ? stored.setById : null,
+    setAt: typeof stored.setAt === "string" ? stored.setAt : null
+  };
+}
+
+export function publicPage(state) {
+  return optIn(state?.room?.publicPage);
+}
+
+export function joinLink(state) {
+  return optIn(state?.room?.joinLink);
+}
+
+export function publicName(member) {
+  return optIn(member?.publicName);
+}
+
+export function publicTask(item) {
+  return optIn(item?.publicTask);
+}
+// --- end GR2 ---
 
 export function roomTrust(state) {
   const stored = state?.room?.trust;
@@ -397,6 +431,12 @@ export function applyEvent(current, incoming) {
     [EVENT_TYPES.ROOM_SPEND_ALLOWANCE_SET]: setSpendAllowance,
     [EVENT_TYPES.ROOM_TRUST_SET]: setRoomTrust,
     [EVENT_TYPES.ROOM_PUBLIC_RECEIPTS_SET]: setPublicReceipts,
+    // --- GR2 ---
+    [EVENT_TYPES.ROOM_PUBLIC_PAGE_SET]: setPublicPage,
+    [EVENT_TYPES.ROOM_JOIN_LINK_SET]: setJoinLink,
+    [EVENT_TYPES.MEMBER_PUBLIC_NAME_SET]: setPublicName,
+    [EVENT_TYPES.WORK_PUBLIC_SET]: setPublicTask,
+    // --- end GR2 ---
     [EVENT_TYPES.ROOM_ARCHIVED]: archiveRoom,
     [EVENT_TYPES.OWNERSHIP_TRANSFERRED]: transferOwnership,
     [EVENT_TYPES.MEMBER_ADDED]: addMember,
@@ -592,6 +632,51 @@ function setPublicReceipts(state, incoming) {
     setAt: incoming.at
   };
 }
+
+// --- GR2 opt-in writers. Same shape as public receipts: owner or the member who owns the text. ---
+function writeOptIn(previous, incoming) {
+  return {
+    enabled: incoming.data.enabled,
+    revision: (previous?.revision ?? 0) + 1,
+    setById: incoming.actorId,
+    setAt: incoming.at
+  };
+}
+
+function requireEnabled(incoming, label) {
+  if (typeof incoming.data.enabled !== "boolean") throw new Error(`${label} requires enabled as true or false`);
+}
+
+function setPublicPage(state, incoming) {
+  const actor = requireMember(state, incoming.actorId);
+  if (actor.id !== state.room.ownerId) throw new Error("Only the Room owner may publish the room page");
+  requireEnabled(incoming, "Public room page");
+  state.room.publicPage = writeOptIn(state.room.publicPage ?? null, incoming);
+}
+
+function setJoinLink(state, incoming) {
+  const actor = requireMember(state, incoming.actorId);
+  if (actor.id !== state.room.ownerId) throw new Error("Only the Room owner may share a join link");
+  requireEnabled(incoming, "Join link");
+  state.room.joinLink = writeOptIn(state.room.joinLink ?? null, incoming);
+}
+
+function setPublicName(state, incoming) {
+  const actor = requireMember(state, incoming.actorId);
+  requireEnabled(incoming, "Public name");
+  actor.publicName = writeOptIn(actor.publicName ?? null, incoming);
+}
+
+function setPublicTask(state, incoming) {
+  requireFields(incoming.data, ["workItemId"]);
+  const actor = requireMember(state, incoming.actorId);
+  const item = state.workItems[incoming.data.workItemId];
+  if (!item) throw new Error("Unknown work item");
+  if (actor.id !== state.room.ownerId && actor.id !== item.proposedById) throw new Error("Only the Room owner or the proposer may publish this task");
+  requireEnabled(incoming, "Public task");
+  item.publicTask = writeOptIn(item.publicTask ?? null, incoming);
+}
+// --- end GR2 ---
 
 function archiveRoom(state, incoming) {
   const actor = requireMember(state, incoming.actorId);
