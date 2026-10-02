@@ -8,14 +8,36 @@ on:
 permissions:
   contents: read
 
-# Cancel superseded PR checks; preserve every main/manual run independently.
+# One in-flight run per pull request. Pushes to main share `test-main` with
+# cancel-in-progress, so a newer tip cancels superseded queued and in-progress
+# main runs and the newest tip is the one that stays. workflow_dispatch is
+# keyed by run id: a manual run neither cancels the tip nor is cancelled by it.
 concurrency:
-  group: ${{ github.workflow }}-pr-${{ github.event.pull_request.number || github.run_id }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ${{ github.event_name == 'workflow_dispatch' && format('{0}-dispatch-{1}', github.workflow, github.run_id) || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'test-main') || format('{0}-{1}', github.workflow, github.ref) }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 jobs:
+  # Pull requests only. Push to main skips this job so the full matrix starts
+  # immediately. Shards run unless this job explicitly sets browser=false.
+  changes:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      browser: ${{ steps.plan.outputs.browser }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0 # Three-dot diff against the PR base needs history on both sides.
+      - id: plan
+        env:
+          EVENT_NAME: pull_request
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node scripts/ci-changes.mjs
   contract:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -23,15 +45,18 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
+          cache: npm
       - run: npm ci # `npm run check` now includes the lint gate, which needs the eslint devDependency.
       - run: npm run check
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
+          cache: npm
       - run: npm ci
       - run: npm run lint
       # No-new-untested-server-module gate (RC-2026-09-25-302): zero-dep, no
@@ -53,6 +78,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
+          cache: npm
       - run: npm ci
       - name: Install Linux host isolation for automatic-run unit tests
         run: sudo apt-get update -qq && sudo apt-get install -y bubblewrap
@@ -107,6 +133,10 @@ jobs:
           path: /tmp/test-output.log
   browser-shards:
     name: browser shard ${{ matrix.shard }}/4
+    needs: changes
+    # Skip only when the merge-base diff explicitly does not touch browser
+    # paths. A skipped or failed filter, and every main push, still runs shards.
+    if: always() && !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.browser != 'false')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
@@ -120,6 +150,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
+          cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - name: Run conversation, composer recovery, Quiet Focus, accessibility, and session browser gates
@@ -138,16 +169,27 @@ jobs:
   # Keep the required check name stable. Dependency success alone cannot prove
   # the intended matrix was complete: require each exact-run completion receipt.
   browser:
-    needs: browser-shards
-    if: always()
+    needs: [changes, browser-shards]
+    if: always() && !cancelled()
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      # Required check name stays `browser`. An intentional shard skip must
+      # report success; a skip for any other reason fails closed.
+      - name: Browser paths unchanged versus the merge base
+        if: needs.changes.result == 'success' && needs.changes.outputs.browser == 'false' && needs.browser-shards.result == 'skipped'
+        run: echo "browser shards skipped; pull request diff does not touch browser paths" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Fail closed when shards were skipped unexpectedly
+        if: needs.browser-shards.result == 'skipped' && (needs.changes.result != 'success' || needs.changes.outputs.browser != 'false')
+        run: echo "browser shards skipped unexpectedly (changes=${{ needs.changes.result }}, browser=${{ needs.changes.outputs.browser }})" && exit 1
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        if: needs.browser-shards.result != 'skipped'
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        if: needs.browser-shards.result != 'skipped'
         with:
           node-version: 24
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: needs.browser-shards.result != 'skipped'
         with:
           # All attempts in this run: a re-run shard uploads under a new attempt
           # number, and browser-shards-check.mjs keeps the latest attempt per
@@ -158,12 +200,13 @@ jobs:
           path: browser-evidence
           merge-multiple: true
       - name: Require all four successful browser shards from this run
-        if: always()
+        if: needs.browser-shards.result != 'skipped'
         env:
           BROWSER_MATRIX_RESULT: ${{ needs.browser-shards.result }}
         run: node scripts/browser-shards-check.mjs browser-evidence
   cloudflare:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -171,6 +214,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
+          cache: npm
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
           version: 10
@@ -195,10 +239,28 @@ jobs:
           if-no-files-found: ignore
   # Branch protection requires a check named "test". The package workflows that
   # used that job id are gone. This job keeps the name and passes only when
-  # the suite jobs above have succeeded.
+  # the suite jobs above have succeeded. Default success() also fails when any
+  # job in the graph was skipped, so an intentional browser-shard skip would
+  # skip this required check. Evaluate the direct results instead.
   test:
     needs: [contract, lint, unit, browser, cloudflare]
+    if: always() && !cancelled()
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - run: echo "contract, lint, unit, browser, and cloudflare succeeded"
+      - name: Require contract, lint, unit, browser, and cloudflare
+        env:
+          CONTRACT: ${{ needs.contract.result }}
+          LINT: ${{ needs.lint.result }}
+          UNIT: ${{ needs.unit.result }}
+          BROWSER: ${{ needs.browser.result }}
+          CLOUDFLARE: ${{ needs.cloudflare.result }}
+        run: |
+          failed=0
+          for pair in "contract:$CONTRACT" "lint:$LINT" "unit:$UNIT" "browser:$BROWSER" "cloudflare:$CLOUDFLARE"; do
+            name=${pair%%:*}
+            result=${pair#*:}
+            echo "$name=$result"
+            if [ "$result" != "success" ]; then failed=1; fi
+          done
+          exit "$failed"

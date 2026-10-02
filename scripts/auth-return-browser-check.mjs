@@ -13,11 +13,15 @@ import { createMagicLinkMailer } from "../server/magic-links.mjs";
 import { ROOM_ACCESS_NOTICE } from "../src/room-deep-link.js";
 
 async function dismissSetup(page) {
-  const later = page.locator("#account-setup-dialog").getByRole("button", { name: "Set up later" });
+  const dialog = page.locator("#account-setup-dialog");
+  const later = dialog.getByRole("button", { name: "Set up later" });
+  const done = dialog.getByRole("button", { name: "Done", exact: true });
   try {
-    await later.waitFor({ state: "visible", timeout: 4000 });
-    await later.click();
-  } catch { /* The setup dialog is not on this screen. */ }
+    await later.or(done).waitFor({ state: "visible", timeout: 4000 });
+  } catch { return; }
+  if (await later.isVisible()) await later.click();
+  else await done.click();
+  await dialog.waitFor({ state: "hidden" });
 }
 
 test("email link sign-in returns to the last room, pending entry is guarded, and the composer uploads a file", { timeout: 90000 }, async t => {
@@ -99,10 +103,14 @@ test("email link sign-in returns to the last room, pending entry is guarded, and
   await form().locator('button[type=submit]').click();
   await redeemDeliveredLink();
   await dismissSetup(page);
-  await page.locator("#nav-rooms").click();
-  const room = page.locator("#account-rooms-list button").first();
-  await room.waitFor();
-  await room.click();
+  // No chosen room lands in the account's room. The room list is the path
+  // when that room is not already open.
+  if (!(await page.locator("#main").isVisible())) {
+    await page.locator("#nav-rooms").click();
+    const room = page.locator("#account-rooms-list button").first();
+    await room.waitFor();
+    await room.click();
+  }
   await page.locator("#main").waitFor({ state: "visible" });
 
   const upload = page.waitForResponse(response => response.request().method() === "POST" && /\/api\/rooms\/[^/]+\/files$/.test(new URL(response.url()).pathname) && response.ok());

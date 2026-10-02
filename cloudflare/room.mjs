@@ -25,11 +25,13 @@ import { RETENTION_TABLES, runLiveStoreRetention } from '../server/retention-run
 import { pruneAbuseRateBuckets } from '../server/abuse-rate-buckets.mjs';
 import { pruneOAuthProvider } from '../server/oauth-provider-store.mjs';
 import { syncClaimPullRequests } from '../server/claim-pr-sync.mjs';
-import { CRON_JOB_BUDGET_MS, HEARTBEAT_STORAGE_KEY, applyOutcomes, jobHealthResponse, jobHealthUnavailable, jobHealthView, runCronJobs } from './job-heartbeat.mjs';
+import { CRON_JOB_BUDGET_MS, HEARTBEAT_STORAGE_KEY, applyOutcomes, cronIntegrationConfigured, jobHealthResponse, jobHealthUnavailable, jobHealthView, runCronJobs } from './job-heartbeat.mjs';
 import { SOURCE_REVISION, BUILD_ID } from '../server/version.mjs';
 import { edgePublicResponse } from './edge-public.mjs';
 import { appDurationMs, logRoomRequest, requestPath, withServerTiming } from './request-timing.mjs';
 import { HEALTH_PROBE_TIMEOUT_MS, createHealthProbe, healthLivenessResponse, readyProbeResponse, workerLivenessResponse } from './health-probe.mjs';
+import { exportNdjsonStream, operatorExportResponse } from '../server/room-export.mjs';
+import { writeDailyBackup } from './room-backup.mjs';
 import { flushRoomGuide, installGuideCommandHook } from '../server/room-guide.mjs';
 
 // One probe per isolate. Concurrent health checks during a cold start share
@@ -168,6 +170,10 @@ export class ProjectRoom extends DurableObject {
       return withServerTiming(response, 'app', appMs);
     };
     if (this.paused) return respond(maintenanceResponse(request));
+    const url = new URL(request.url);
+    if (url.pathname === '/api/operator/export') {
+      return respond(operatorExportResponse(request, this.env.ROOM_BACKUP_TOKEN, this.store.db));
+    }
     try { return respond(await this.requestSignals.run(request.signal, () => this.handler.fetch(request))); }
     finally {
       this.ctx.waitUntil(this.store.humanPush.flush());
@@ -187,7 +193,8 @@ export class ProjectRoom extends DurableObject {
   async syncGmailMailboxes() {
     if (this.paused) return { completed: 0 };
     await yieldToQueuedRequests();
-    // Unconfigured Gmail is visible in /api/health/jobs instead of looking like a quiet success.
+    // The minute cron does not call this when Gmail is off. A direct call still
+    // says so, instead of looking like a mailbox that had nothing to sync.
     if (!this.gmailSync) return { completed: 0, configured: false };
     return this.gmailSync.tick({ deadline: cronDeadline() });
   }
@@ -201,7 +208,7 @@ export class ProjectRoom extends DurableObject {
     return { recorded: Array.isArray(outcomes) ? outcomes.length : 0 };
   }
   async readJobHealth() {
-    return jobHealthView(await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY), Date.now());
+    return jobHealthView(await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY), Date.now(), this.env);
   }
 
   // Task 9 — auto-drain RPC for the Worker's cron trigger. Scans the webhook
@@ -316,6 +323,11 @@ export class ProjectRoom extends DurableObject {
       }));
     }
     return { ...receipt, webhookDeliveries, oauthProvider, abuseRateBuckets };
+  }
+  // Operator and cron export. Returns a stream of NDJSON; callers must not log it.
+  exportRoomNdjson() {
+    if (this.paused || !this.store) throw new Error('Room paused');
+    return exportNdjsonStream(this.store.db);
   }
 }
 
@@ -462,14 +474,18 @@ export default {
   async scheduled(event, env, ctx) {
     if (maintenanceEnabled(env.ROOM_MAINTENANCE)) return;
     const room = env.ROOM.getByName('invite-only-pilot');
-    const outcomes = await runCronJobs({
+    const runners = {
       'gmail-sync': () => room.syncGmailMailboxes(),
       'channel-drain': () => room.drainChannelBacklog(),
       'webhook-dispatch': () => room.drainWebhookDeliveries(),
       'land-queue': () => room.refreshLandQueue(),
       'claim-prs': () => room.refreshClaimPullRequests(),
       'retention': () => room.planRetention()
-    });
+    };
+    for (const name of Object.keys(runners)) {
+      if (!cronIntegrationConfigured(name, env)) delete runners[name];
+    }
+    const outcomes = await runCronJobs(runners);
     try { await room.recordCronTick(outcomes); }
     catch (error) { console.error(`[job-heartbeat] record failed: ${error?.message ?? error}`); }
     try {
@@ -480,6 +496,8 @@ export default {
       }
       console.info(JSON.stringify(line));
     } catch (error) { console.error(`[integrity] ${error?.message ?? error}`); }
+    try { await writeDailyBackup(env, room); }
+    catch (error) { console.error(`[room-backup] ${error?.message ?? error}`); }
     const failed = outcomes.filter(outcome => !outcome.ok).map(outcome => outcome.job);
     if (failed.length) throw new Error(`cron jobs failed: ${failed.join(', ')}`);
   }

@@ -60,8 +60,16 @@ test("sitemap lists compare pages and those pages return 200", async t => {
   assert.match(xml, /<loc>https:\/\/room\.trydemigod\.com\/offers<\/loc>/);
   assert.match(xml, /<loc>https:\/\/room\.trydemigod\.com\/about<\/loc>/);
   assert.match(xml, /\/compare\/project-room-vs-slack/);
+  assert.equal(xml.includes("/compare</loc>"), false);
+  const missing = await fetch(`${origin}/compare`);
+  assert.equal(missing.status, 404);
   const page = await fetch(`${origin}/compare/project-room-vs-slack`);
   assert.equal(page.status, 200);
+  const html = await page.text();
+  const hrefs = html.match(/href="([^"]+)"/g) ?? [];
+  assert.equal(hrefs.some(href => /href="\/compare\/?"$/.test(href)), false);
+  assert.equal(html.includes("master comparison"), false);
+  assert.match(html, /href="\/compare\/project-room-vs-discord"/);
 });
 
 test("favicon, icon, and manifest routes serve the public marks", async t => {
@@ -78,6 +86,13 @@ test("favicon, icon, and manifest routes serve the public marks", async t => {
   const home = await (await fetch(`${origin}/`)).text();
   assert.match(home, /rel="icon" href="\/favicon\.svg"/);
   assert.match(home, /rel="manifest" href="\/manifest\.webmanifest"/);
+  assert.match(home, /rel="apple-touch-icon" href="\/icons\/apple-touch-icon-180\.png"/);
+  const touch = await fetch(`${origin}/icons/apple-touch-icon-180.png`);
+  assert.equal(touch.status, 200);
+  assert.match(touch.headers.get("content-type") ?? "", /image\/png/);
+  const offline = await fetch(`${origin}/offline.html`);
+  assert.equal(offline.status, 200);
+  assert.match(await offline.text(), /Room is offline/);
   assert.equal((home.match(/<h1[\s>]/g) ?? []).length, 1);
   assert.doesNotMatch(home, /id="message-input"[^>]*aria-expanded/);
   assert.doesNotMatch(home, /id="room-overview-open"[^>]*aria-label="Room overview"/);
