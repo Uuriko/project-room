@@ -739,6 +739,36 @@ test.describe("room-machine bot", { concurrency: false }, () => {
     assert.equal(readFileSync(join(room.home, "config.json"), "utf8").includes(key), false);
   });
 
+  test("a handled update is acked without a plan, and a long mention is planned from the full message", async (t) => {
+    const room = await enrolled(t);
+    saveBot(room.home, { tier: "t1" });
+    const secret = await secretOf(room);
+    const bot = new MachineBot({ home: room.home, env: room.env, waitMs: 0, provider: scripted([]) });
+    const posted = await mention(room, "@Room machine short task");
+    const messageId = posted.event?.data?.messageId;
+    assert.equal(typeof messageId, "string");
+    const listed = await get(room.origin, "/api/rooms/commons/updates?state=actionable", secret);
+    assert.equal(listed.status, 200, JSON.stringify(listed.json));
+    const item = (listed.json.items ?? []).find(entry => entry.sourceRef?.messageId === messageId);
+    assert.ok(item, JSON.stringify(listed.json.items));
+    const done = await post(room.origin, `/api/rooms/commons/updates/${item.id}/done`, { requestId: randomUUID() }, secret);
+    assert.equal(done.status, 200, JSON.stringify(done.json));
+    const skipped = await step(room, bot);
+    assert.equal(skipped.results?.[0]?.ignored, "handled", JSON.stringify(skipped));
+    assert.equal((await bodies(room.origin, "commons", secret)).some(body => body.startsWith("Plan:")), false);
+    const polled = await get(room.origin, "/api/agent-wakes/poll?hostId=room-machine&waitMs=0", secret);
+    assert.equal(polled.json.pendingWakes.length, 0);
+
+    const tail = "TAIL-TOKEN-beyond-the-clip";
+    await mention(room, `@Room machine ${"x".repeat(130)} ${tail}`);
+    const planned = await step(room, bot);
+    assert.equal(planned.results?.[0]?.planned, true, JSON.stringify(planned));
+    const plan = (await bodies(room.origin, "commons", secret)).find(body => body.startsWith("Plan:"));
+    assert.match(plan, new RegExp(tail));
+    const open = await get(room.origin, "/api/rooms/commons/updates?state=actionable", secret);
+    assert.equal((open.json.items ?? []).some(entry => String(entry.title).includes(tail)), false);
+  });
+
   test("room-machine run starts the bot loop when bot.enabled is on", async (t) => {
     const room = await enrolled(t);
     saveBot(room.home, { tier: "t3" });

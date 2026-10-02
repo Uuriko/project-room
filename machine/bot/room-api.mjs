@@ -29,6 +29,9 @@ export function createRoomApi({ origin, secret, signal }) {
   const auth = { token: secret, signal };
   return {
     async heartbeat() {
+      // The heartbeat body is hostId, mode, wakeUrl, cadenceSeconds,
+      // pushNotification, and workWakes. U does not accept host metadata, so
+      // hosted_by is not sent.
       return call(origin, "/api/agent-heartbeats", {
         ...auth,
         method: "POST",
@@ -42,6 +45,36 @@ export function createRoomApi({ origin, secret, signal }) {
     async ack(signalIds) {
       if (!Array.isArray(signalIds) || signalIds.length === 0) return { ok: true, value: { acknowledged: [] } };
       return call(origin, "/api/agent-heartbeats/ack", { ...auth, method: "POST", body: { signalIds } });
+    },
+    async orient(roomId) {
+      return call(origin, `/api/rooms/${encodeURIComponent(roomId)}/orient`, auth);
+    },
+    async updates(roomId) {
+      const items = [];
+      let cursor = "";
+      let incomplete = null;
+      for (let page = 0; page < 5; page += 1) {
+        const params = new URLSearchParams({ state: "actionable", limit: "100" });
+        if (cursor) params.set("cursor", cursor);
+        const listed = await call(origin, `/api/rooms/${encodeURIComponent(roomId)}/updates?${params}`, auth);
+        if (!listed.ok) {
+          if (items.length === 0) return listed;
+          return { ok: true, status: 200, value: { items, incompleteSources: { ...(incomplete ?? {}), mentions: true } } };
+        }
+        incomplete = listed.value?.incompleteSources ?? incomplete;
+        items.push(...(listed.value?.items ?? []));
+        if (!listed.value?.hasMore || typeof listed.value.cursor !== "string" || !listed.value.cursor) break;
+        cursor = listed.value.cursor;
+      }
+      return { ok: true, status: 200, value: { items, incompleteSources: incomplete } };
+    },
+    async markUpdate(roomId, itemId, action) {
+      if (typeof itemId !== "string" || !itemId) return { ok: true, value: null };
+      return call(origin, `/api/rooms/${encodeURIComponent(roomId)}/updates/${encodeURIComponent(itemId)}/${action}`, {
+        ...auth,
+        method: "POST",
+        body: { requestId: randomUUID() },
+      });
     },
     async conversation(roomId, { messageId, limit } = {}) {
       const query = messageId

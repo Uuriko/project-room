@@ -11,6 +11,7 @@ import { dispatchTool } from "../lib/tools.mjs";
 import { deleteGuest, guestName } from "../lib/vms.mjs";
 import { normalizeBot, botTierFromRoom, isDesktopTask } from "./config.mjs";
 import { createRoomApi } from "./room-api.mjs";
+import { queueMatch, sourcesIncomplete, wakePointers } from "./queue.mjs";
 import { pickSlot, slotLabel } from "./lease.mjs";
 import { stageReceipt, closeClaim } from "./receipts.mjs";
 import { createProvider } from "./providers/index.mjs";
@@ -120,12 +121,17 @@ export class MachineBot {
     this.api = createRoomApi({ origin: config.roomOrigin, secret, signal: this.abort.signal });
     if (this.pending) await this.tryGo();
     if (this.active) return { enabled: true, ...(await this.continueActive()) };
-    await this.api.heartbeat();
-    const page = await this.api.poll(this.pending ? 0 : this.waitMs);
+    const beat = await this.api.heartbeat();
+    let signals = beat.ok ? wakePointers(beat.value) : [];
+    if (signals.length === 0) {
+      const page = await this.api.poll(this.pending ? 0 : this.waitMs);
+      if (this.stopped) return { enabled: true, stopped: true };
+      if (!page.ok) return { enabled: true, polled: false, status: page.status };
+      signals = wakePointers(page.value);
+    }
     if (this.stopped) return { enabled: true, stopped: true };
-    if (!page.ok) return { enabled: true, polled: false, status: page.status };
     const results = [];
-    for (const signal of page.value?.pendingWakes ?? []) {
+    for (const signal of signals) {
       if (this.stopped) break;
       results.push(await this.handleSignal(signal));
       if (this.active) {
@@ -170,6 +176,12 @@ export class MachineBot {
     return this.api.post(roomId, body, { replyToId, secrets });
   }
 
+  async reply(roomId, body, replyToId, updateId) {
+    const posted = await this.post(roomId, body, replyToId);
+    if (posted.ok && updateId) await this.api.markUpdate(roomId, updateId, "done");
+    return posted;
+  }
+
   async handleSignal(signal) {
     const roomId = signal?.roomId;
     const signalId = signal?.signalId;
@@ -177,32 +189,37 @@ export class MachineBot {
       await this.api.ack([signalId].filter(Boolean));
       return { signalId, ignored: "allowlist" };
     }
-    const source = await this.readSource(roomId, signal);
+    const queued = await this.readQueue(roomId, signal);
+    if (!queued.ok) {
+      if (queued.reason === "membership" || queued.reason === "handled") await this.api.ack([signalId].filter(Boolean));
+      return { signalId, ignored: queued.reason };
+    }
+    const source = await this.readSource(roomId, signal, queued);
     if (!source.ok) {
-      if (source.reason === "membership") await this.api.ack([signalId].filter(Boolean));
+      if (source.reason === "membership" || source.reason === "handled") await this.api.ack([signalId].filter(Boolean));
       return { signalId, ignored: source.reason };
     }
     if (await this.isPaused(roomId)) return { signalId, paused: true };
     const provider = await this.resolveProvider();
     if (provider.name === "none" || provider.missingKey === true) {
-      await this.post(roomId, provider.message, source.messageId);
+      await this.reply(roomId, provider.message, source.messageId, source.updateId);
       await this.api.ack([signalId]);
       return { signalId, refused: provider.name };
     }
     if (isDesktopTask(source.text) && provider.computerUse !== true) {
-      await this.post(roomId, GUI_MESSAGE, source.messageId);
+      await this.reply(roomId, GUI_MESSAGE, source.messageId, source.updateId);
       await this.api.ack([signalId]);
       return { signalId, refused: "desktop" };
     }
     const tier = await this.tierFor(roomId);
     const actNow = tier === "t3" || (tier === "t2" && source.kind === "work");
     if (!actNow && source.kind !== "work" && tier === "t2") {
-      await this.post(roomId, "I take board items assigned to me. I did not start from this mention.", source.messageId);
+      await this.reply(roomId, "I take board items assigned to me. I did not start from this mention.", source.messageId, source.updateId);
       await this.api.ack([signalId]);
       return { signalId, ignored: "tier" };
     }
     if (!actNow) {
-      const plan = await this.post(roomId, `Plan: ${source.text.trim().slice(0, 400)} Reply go and I will start.`, source.messageId);
+      const plan = await this.reply(roomId, `Plan: ${source.text.trim().slice(0, 400)} Reply go and I will start.`, source.messageId, source.updateId);
       if (!plan.ok) return { signalId, ignored: "unread" };
       this.pending = { ...source, planMessageId: plan.messageId, tier };
       await this.saveState();
@@ -214,33 +231,69 @@ export class MachineBot {
     return { signalId, started: Boolean(this.active) };
   }
 
-  async readSource(roomId, signal) {
-    if (signal.kind === "work" && typeof signal.workItemId === "string") {
-      const item = await this.api.claim(roomId, signal.workItemId);
-      if (item.status === 403 || item.status === 404) return { ok: false, reason: "membership" };
-      if (!item.ok || !item.value) return { ok: false, reason: "unread" };
-      return {
-        ok: true,
-        kind: "work",
-        roomId,
-        messageId: null,
-        workItemId: signal.workItemId,
-        text: String(item.value.title ?? signal.workItemId),
-      };
+  async readQueue(roomId, signal) {
+    const orient = await this.api.orient(roomId);
+    if (orient.status === 403 || orient.status === 404) return { ok: false, reason: "membership" };
+    if (!orient.ok) return { ok: false, reason: "unread" };
+    const memberId = orient.value?.you?.member?.id ?? orient.value?.member?.id;
+    if (typeof memberId === "string" && memberId) this.memberIds.set(roomId, memberId);
+    const updates = await this.api.updates(roomId);
+    if (updates.status === 403 || updates.status === 404) return { ok: false, reason: "membership" };
+    if (!updates.ok) return { ok: false, reason: "unread" };
+    const match = queueMatch(signal, { updates: updates.value?.items ?? [], orient: orient.value });
+    if (match) return { ok: true, ...match };
+    if (sourcesIncomplete(updates.value?.incompleteSources)) return { ok: true, fallback: true };
+    return { ok: false, reason: "handled" };
+  }
+
+  async readSource(roomId, signal, queued = {}) {
+    const pointedMessage = typeof queued.messageId === "string" ? queued.messageId : null;
+    const pointedWork = typeof queued.workItemId === "string" ? queued.workItemId : null;
+    const workItemId = pointedMessage ? null : (pointedWork ?? (signal.kind === "work" ? signal.workItemId : null));
+    if (typeof workItemId === "string") {
+      const item = await this.api.claim(roomId, workItemId);
+      if (item.status === 403) return { ok: false, reason: "membership" };
+      if (item.ok && item.value) {
+        return {
+          ok: true,
+          kind: "work",
+          roomId,
+          messageId: null,
+          workItemId,
+          updateId: queued.updateId ?? null,
+          text: String(item.value.title ?? queued.title ?? workItemId),
+        };
+      }
+      if (typeof queued.title === "string" && queued.title && item.status === 404) {
+        return {
+          ok: true,
+          kind: "work",
+          roomId,
+          messageId: null,
+          workItemId,
+          updateId: queued.updateId ?? null,
+          text: queued.title,
+        };
+      }
+      return { ok: false, reason: item.status === 404 ? "handled" : "unread" };
     }
-    const messageId = signal.messageId;
-    if (typeof messageId !== "string" || messageId.startsWith("work-claim:")) return { ok: false, reason: "unread" };
+    const messageId = pointedMessage ?? signal.messageId;
+    if (typeof messageId !== "string" || messageId.startsWith("work-claim:")) {
+      return { ok: false, reason: queued.fallback ? "unread" : "handled" };
+    }
     const page = await this.api.conversation(roomId, { messageId });
     if (page.status === 403 || page.status === 404) return { ok: false, reason: "membership" };
     if (!page.ok) return { ok: false, reason: "unread" };
     const message = page.value?.messages?.[0];
     if (!message || typeof message.body !== "string") return { ok: false, reason: "unread" };
     if (typeof page.value?.viewerId === "string") this.memberIds.set(roomId, page.value.viewerId);
+    const kind = queued.kind === "dm" || signal.kind === "dm" ? "dm" : "mention";
     return {
       ok: true,
-      kind: signal.kind === "dm" ? "dm" : "mention",
+      kind,
       roomId,
       messageId: message.id ?? messageId,
+      updateId: queued.updateId ?? null,
       text: message.body,
     };
   }
@@ -269,17 +322,17 @@ export class MachineBot {
     const machineId = this.config.machineId || "machine";
     const picked = pickSlot(claims, machineId, memberId, this.clock());
     if (!picked.slot) {
-      await this.post(source.roomId, "Desk and scratch are both leased. I did not start.", source.messageId);
+      await this.reply(source.roomId, "Desk and scratch are both leased. I did not start.", source.messageId, source.updateId);
       return;
     }
     const work = await this.ensureWork(source, memberId);
     if (!work) {
-      await this.post(source.roomId, "I could not claim this on the board.", source.messageId);
+      await this.reply(source.roomId, "I could not claim this on the board.", source.messageId, source.updateId);
       return;
     }
     const lease = picked.existing ?? await this.ensureLease(source, work.id, picked.slot, machineId);
     if (!lease) {
-      await this.post(source.roomId, "I could not lease a desktop slot.", source.messageId);
+      await this.reply(source.roomId, "I could not lease a desktop slot.", source.messageId, source.updateId);
       await this.api.updateClaim(source.roomId, work.id, { state: "blocked", note: "no slot" });
       return;
     }
@@ -288,6 +341,7 @@ export class MachineBot {
       roomId: source.roomId,
       messageId: source.messageId,
       text: source.text,
+      updateId: source.updateId ?? null,
       workId: work.id,
       leaseId: lease.id,
       slot: picked.slot,
@@ -475,7 +529,7 @@ export class MachineBot {
   async stopEarly(message) {
     const active = this.active;
     if (!active) return { stopped: true };
-    await this.post(active.roomId, message, active.messageId);
+    await this.reply(active.roomId, message, active.messageId, active.updateId);
     await this.api.updateClaim(active.roomId, active.leaseId, { state: "unclaimed", note: message.slice(0, 200) });
     await this.api.updateClaim(active.roomId, active.workId, { state: "blocked", note: message.slice(0, 200) });
     this.clearSlot(active);
@@ -512,7 +566,7 @@ export class MachineBot {
     });
     const lines = [text];
     if (receipt.blobs.length) lines.push(`Receipt ${receipt.blobs.join(" ")}`);
-    await this.post(active.roomId, lines.join("\n"), active.messageId);
+    await this.reply(active.roomId, lines.join("\n"), active.messageId, active.updateId);
     this.clearSlot(active);
     this.active = null;
     await this.saveState();
