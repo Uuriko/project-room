@@ -83,6 +83,8 @@ const ownerMsg = randomUUID();
 must(await req("POST", `${R}/commands`, { token: T.owner, body: cmd("message.posted", { messageId: ownerMsg, body: "qa2 owner message" }) }), "owner msg");
 must(await req("POST", `${R}/work-claims`, { token: T.owner, body: { id: "qa2-held", title: "held by collaborator" } }), "claim create");
 must(await req("POST", `${R}/work-claims/qa2-held/claim`, { token: T.collaborator, body: { note: "mine", leaseHours: 1 } }), "collab claims");
+must(await req("POST", `${R}/work-claims`, { token: T.owner, body: { id: "qa2-release", title: "owner may release" } }), "release fixture");
+must(await req("POST", `${R}/work-claims/qa2-release/claim`, { token: T.collaborator, body: { note: "mine", leaseHours: 1 } }), "release fixture claim");
 // a bonded DM between owner and collaborator, which nobody else may read
 const bond = must(await req("POST", `${R}/commands`, { token: T.owner, body: cmd("bond.propose", { to: ids.collaborator }) }), "bond");
 must(await req("POST", `${R}/commands`, { token: T.collaborator, body: cmd("bond.accept", { bondId: bond.event.data.bondId }) }), "bond accept");
@@ -99,11 +101,11 @@ const A = [
   ["post message", MEMBERS, t => req("POST", `${R}/commands`, { token: t, body: cmd("message.posted", { messageId: randomUUID(), body: "qa2 authz post" }) })],
   ["export room log", MEMBERS, t => req("GET", `${R}/export`, { token: t })],
   ["list work claims", MEMBERS, t => req("GET", `${R}/work-claims`, { token: t })],
-  ["create work claim", MEMBERS, t => req("POST", `${R}/work-claims`, { token: t, body: { id: `qa2-c-${randomUUID().slice(0, 8)}`, title: "x" } })],
+  ["create work claim", ["owner", "collaborator"], t => req("POST", `${R}/work-claims`, { token: t, body: { id: `qa2-c-${randomUUID().slice(0, 8)}`, title: "x" } })],
   ["steal claim held by collaborator", [], t => req("POST", `${R}/work-claims/qa2-held/claim`, { token: t, body: { note: "steal" } }), { okStatuses: [409] }],
   ["update claim held by collaborator", ["collaborator"], t => req("POST", `${R}/work-claims/qa2-held/update`, { token: t, body: { note: "touch" } })],
-  ["reassign claim held by collaborator", ["owner", "collaborator"], t => req("POST", `${R}/work-claims/qa2-held/reassign`, { token: t, body: { newOwner: ids.collaborator, note: "keep" } }), { known: ["owner"], knownWhy: "QA2-F: manage_claims does not let the room owner reassign a member's claim (work_not_owner)" }],
-  ["release claim held by collaborator", ["collaborator"], t => req("POST", `${R}/work-claims/qa2-held/release`, { token: t, body: { note: "drop" } }), { once: true }],
+  ["reassign claim held by collaborator", ["owner", "collaborator"], t => req("POST", `${R}/work-claims/qa2-held/reassign`, { token: t, body: { newOwner: ids.collaborator, note: "keep" } })],
+  ["release claim held by collaborator", ["owner", "collaborator"], t => req("POST", `${R}/work-claims/${t === T.owner ? "qa2-release" : "qa2-held"}/release`, { token: t, body: { note: "drop" } })],
   ["mint agent invite", ["owner"], t => req("POST", `${R}/agent-invites`, { token: t, body: { profile: "chat" } })],
   ["list agent invites", ["owner"], t => req("GET", `${R}/agent-invites`, { token: t })],
   ["edit owner's message", ["owner"], t => req("POST", `${R}/commands`, { token: t, body: cmd("message.edited", { messageId: ownerMsg, body: "qa2 edited", expectedMessageRevision: 0 }) }), { denyAs422: "command_rejected", once: true }],
