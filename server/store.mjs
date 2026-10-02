@@ -411,6 +411,7 @@ const shapes = {
   [T.ROOM_POLICY_SET]: ROOM_POLICY_FIELDS.join(" "),
   [T.ROOM_SPEND_ALLOWANCE_SET]: "allowanceCents periodDays",
   [T.ROOM_TRUST_SET]: "enabled",
+  [T.ROOM_PUBLIC_RECEIPTS_SET]: "enabled",
   [T.ROOM_ARCHIVED]: "reason",
   [T.OWNERSHIP_TRANSFERRED]: "toMemberId reason",
   [T.MEMBER_ADDED]: "memberId displayName kind permissions accountableHumanId identityId agentType referredBy",

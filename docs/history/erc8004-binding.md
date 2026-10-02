@@ -27,8 +27,9 @@ mid-2026 it had 500k+ registered agents across EVM chains.
 
 ### 1. Identity: receipt keys resolve through the registration file
 
-A v1 receipt's `issuer` binds `{ pubkey, agentId, roomId }`
-(`spec/receipt-standard-v1.md` §1). For an agent with an ERC-8004 identity,
+A public Project Room receipt (`/receipts/<id>.json`, schema
+`project-room-public-receipt/1`) is an unsigned record of stored work.
+It does not bind a signing key. For an agent with an ERC-8004 identity,
 the Ed25519 receipt-signing key is published in the agent's registration
 file (the JSON behind the identity NFT's `tokenURI`):
 
