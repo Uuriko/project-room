@@ -1,5 +1,5 @@
 // Signed agent-carried referral invites — the Burs-IA steal-list item.
-// Any active room member can mint a signed bring-a-friend token and carry it
+// The owner, or a member who can invite, can mint a signed bring-a-friend token and carry it
 // out-of-band (a DM, a post, a chat with another agent). The server never
 // sends or dispatches the token: the inviter is the transport. Redemption is
 // unauthenticated, binds the stranger to the room, the chain, and a depth,
@@ -40,9 +40,8 @@ import { assertMemberDisplayNameAvailable } from "./display-name-guard.mjs";
 import { generateKeyPair } from "./agent-card-signing.mjs";
 import { refuseArchivedWrite } from "./room-lifecycle.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
-import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
-import { event as makeEvent, EVENT_TYPES as T, MEMBERSHIP_AUTHORITY_POLICY_VERSION } from "../src/events.js";
+import { canInviteMembers, event as makeEvent, EVENT_TYPES as T, MEMBERSHIP_AUTHORITY_POLICY_VERSION } from "../src/events.js";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 const hash = text => createHash("sha256").update(text).digest("hex");
@@ -242,12 +241,12 @@ export class ReferralInvites {
     // Minting referral invites is a membership write: the read-only
     // autonomy tier applies even for active agent members (issue #996).
     enforceAutonomyTierForAction({ db: this.store.db, roomId, state: room.state, actor: auth.member, action: "referral_invite_mint", fail });
-    // Guests may read and chat but may not admit new members. Referral mint
-    // bypasses store.command (it authenticates directly), so the RoomStore
-    // guest scope gate never runs here — enforce the same denial explicitly.
-    // Mirrors RC-2026-09-23-100.
-    if (isGuestAgentMemberId(auth.member.id))
-      fail(403, "guest_scope_denied", "Guest members cannot mint referral invites");
+    // Minting admits a new member. This path authenticates directly and
+    // skips store.command, so the invite check lives here: the owner, or a
+    // member with invite_member or manage_members. Everyone else is refused.
+    if (!canInviteMembers(room.state, auth.member.id)) {
+      fail(403, "invite_not_permitted", "Only the room owner, or a member who can invite, can mint a referral invite.");
+    }
     refuseArchivedWrite(room.state);
     if (room.state.members[auth.member.id]?.active === false) fail(403, "access_denied", "Join the room before sending referral invites");
 
@@ -354,7 +353,7 @@ export class ReferralInvites {
   }
 
   // --- redeem ------------------------------------------------------------
-  redeem({ token, displayName = "Referred agent" }) {
+  redeem({ token, displayName = "Referred agent", identitySecret = null, address = "", proof = undefined } = {}) {
     const payload = this.verifyToken(token);
     if (!payload) fail(404, "invite_unavailable", "That invite is not available");
     const { jti, chainId, roomId, depth, maxDepth, expiresAt } = payload;
@@ -389,6 +388,16 @@ export class ReferralInvites {
     if (!inviter || inviter.active === false) {
       rejectAndFail(410, "invite_expired", "That invite is no longer valid", "inviter_inactive");
     }
+    // A caller who already has an identity attaches it. A new identity
+    // spends the same anonymous mint limiter as identity-create.
+    let attached = null;
+    if (identitySecret) {
+      attached = this.store.identities.resolveGlobalIdentitySecret(identitySecret);
+      if (!attached?.identityId) fail(401, "auth_required", "That identity secret does not match an identity.");
+    }
+    const name = attached
+      ? String(attached.displayName ?? "").trim()
+      : String(displayName ?? "Referred agent").trim();
 
     return this.store.transaction(() => {
       const room = this.store.room(roomId);
@@ -397,11 +406,19 @@ export class ReferralInvites {
       if (room.sequence + 1 > 2000000) fail(409, "pilot_limit", "Room event limit reached; no data was changed");
       if (Object.keys(room.state.members).length > 5000) fail(409, "pilot_limit", "Room member limit reached; no data was changed");
 
-      const name = String(displayName ?? "Referred agent").trim();
+      if (attached) {
+        const linked = this.store.db.prepare("SELECT 1 FROM identity_links WHERE room_id=? AND identity_id=?").get(roomId, attached.identityId);
+        if (linked) fail(409, "identity_already_linked", "This identity is already linked to this room");
+      }
       // Mint copies this string onto the new member. Refuse it before the
       // identity row exists.
       assertMemberDisplayNameAvailable(name, room.state.members);
-      const identity = this.store.identities.create(name);
+      const identity = attached
+        ? { identityId: attached.identityId, secret: null }
+        : this.store.identities.create(name, {
+          anonymous: { address, proof, limitCode: "identity_mint_limited" },
+        });
+      if (!attached) this.store.identities.noteActivated(identity.identityId);
       const identityId = identity.identityId;
       if (!MEMBER_ID_PATTERN.test(identityId)) fail(500, "invite_failed", "Generated member id is invalid");
       const memberId = identityId;
@@ -454,7 +471,7 @@ export class ReferralInvites {
 
       return {
         identityId,
-        secret: identity.secret,
+        ...(attached ? { attached: true } : { secret: identity.secret, attached: false }),
         roomId,
         memberId,
         displayName: name,
