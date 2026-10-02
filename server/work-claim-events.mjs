@@ -11,6 +11,7 @@
 // a claim and its event commit or roll back together.
 import { randomUUID } from "node:crypto";
 import { EVENT_TYPES, WORK_CLAIM_EVENT_ACTIONS, applyEvent, event, isRoomArchived } from "../src/events.js";
+import { postReceiptCard } from "./receipt-cards.mjs";
 
 export const WORK_CLAIM_ACTIONS = WORK_CLAIM_EVENT_ACTIONS;
 
@@ -85,6 +86,7 @@ export function emitWorkClaimEvent(store, roomId, { actorId, item, action, previ
     at: new Date(stamp).toISOString(),
     data: workClaimEventData(item, action, { previousOwnerId, paths, pullRequest, reason, ciState, verdict })
   });
+  if (actor?.system === true) incoming.data.actorKind = "system";
   const state = applyEvent(room.state, incoming);
   const sequence = room.sequence + 1;
   store.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
@@ -94,6 +96,13 @@ export function emitWorkClaimEvent(store, roomId, { actorId, item, action, previ
     if (store.agentPlugin) store.agentPlugin.fanoutRoomEvent({ roomId, event: incoming });
   } catch (error) {
     console.error("work claim fan-out failed:", error?.message ?? error);
+  }
+  // ACT-1a: in-room receipt for every done claim (result, merged, production).
+  // Posted here, not in the Board done branch, while BF is open on work-claim-routes.
+  // A receipt failure must not roll back the claim.
+  if (action === "state_changed" && item.state === "done") {
+    try { postReceiptCard(store, roomId, item, stamp); }
+    catch (error) { console.error("work claim receipt card failed:", error?.message ?? error); }
   }
   return { sequence, event: incoming };
 }

@@ -80,6 +80,12 @@ const lengthBucket = body => {
 const classifyActor = (roomEvent, state) => {
   const rawId = roomEvent?.actorId;
   const id = typeof rawId === "string" && rawId ? rawId : "system";
+  // ACT-1a: Room Guide is an agent member flagged system. AN-1 should read
+  // member.system and data.actorKind the same way. System actors never count
+  // toward weekly productive rooms.
+  if (roomEvent?.data?.actorKind === "system" || state?.members?.[id]?.system === true) {
+    return { id, kind: "system" };
+  }
   const kind = state?.members?.[id]?.kind;
   return { id, kind: kind === "agent" ? "agent" : "human" };
 };

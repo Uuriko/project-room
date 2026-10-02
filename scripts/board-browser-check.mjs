@@ -42,7 +42,7 @@ async function axe(page) {
   assert.deepEqual(serious.map(item => `${item.impact} ${item.id}`), []);
 }
 
-test("board columns, keyboard claim, chat line, 390px, and axe", { timeout: 60000 }, async t => {
+test("board columns, keyboard claim, chat line, 390px, and axe", { timeout: 90000 }, async t => {
   mkdirSync(shots, { recursive: true });
   mkdirSync("test-results", { recursive: true });
   const fixture = createAcceptanceFixture();
@@ -70,8 +70,15 @@ test("board columns, keyboard claim, chat line, 390px, and axe", { timeout: 6000
   await page.locator("#tasks-board-open").click();
   await page.locator("#board-dialog").waitFor({ state: "visible" });
   await page.locator(".board-empty").waitFor();
-  assert.equal(await page.locator(".board-empty").innerText(), "Claim work so others don't collide. Agents can do this over MCP.");
-  assert.match(await page.locator(".live-chip").innerText(), /Live vs main/);
+  assert.equal(await page.locator(".board-empty").innerText(), "Claim work here so people and agents don't collide.");
+  assert.equal(await page.locator("#board-new-item").count(), 1);
+  assert.match(await page.locator(".live-chip").innerText(), /Deploy status unknown|Live matches main|Live is behind main/);
+  await page.locator("#board-new-item [name=title]").fill("Fix login copy");
+  await page.locator("#board-new-item [name=files]").fill("src/board-ui.js");
+  await page.locator("#board-new-item button[type=submit]").click();
+  await page.locator("article h4", { hasText: "Fix login copy" }).waitFor();
+  assert.equal(await page.locator("#board-status").innerText(), "Opened 'Fix login copy'");
+  assert.equal(await page.evaluate(() => document.activeElement?.closest("article")?.querySelector("h4")?.textContent), "Fix login copy");
   await page.screenshot({ path: `${shots}/board-before.png` });
   await page.screenshot({ path: "test-results/board-before.png" });
   await page.locator("#board-close").click();
@@ -123,7 +130,20 @@ test("board columns, keyboard claim, chat line, 390px, and axe", { timeout: 6000
   await page.keyboard.press("Enter");
   await page.locator("[aria-labelledby='board-col-claimed'] article[data-claim-id='notes']").waitFor();
   assert.equal(await page.locator("[aria-labelledby='board-col-ready'] article[data-claim-id='notes']").count(), 0);
+  assert.equal(await page.locator("#board-status").innerText(), "Claimed 'Write the notes'");
+  assert.equal(await page.evaluate(() => document.activeElement?.closest("article")?.dataset.claimId), "notes");
+  const follow = async (id, action, status) => {
+    await page.locator(`article[data-claim-id='${id}'] [data-claim-action='${action}']`).click();
+    await page.waitForFunction(expected => document.querySelector("#board-status")?.textContent === expected, status);
+    assert.equal(await page.evaluate(claimId => document.activeElement?.closest("article")?.dataset.claimId, id), id);
+  };
+  await follow("notes", "renew", "Renewed 'Write the notes'");
+  await follow("notes", "progress", "Marked 'Write the notes' in progress");
+  await follow("notes", "done", "Done 'Write the notes'");
+  assert.equal(await page.locator("article[data-claim-id='notes'] .claim-lease").count(), 0);
+  await follow("copy", "release", "Released 'Write the copy'");
   await page.screenshot({ path: `${shots}/board-after.png` });
+  await page.screenshot({ path: `${shots}/board-1280.png` });
   await page.screenshot({ path: "test-results/board-after.png" });
   await axe(page);
 
@@ -134,4 +154,75 @@ test("board columns, keyboard claim, chat line, 390px, and axe", { timeout: 6000
   await page.screenshot({ path: `${shots}/board-after-390.png` });
   await page.screenshot({ path: "test-results/board-after-390.png" });
   await axe(page);
+});
+
+function seedClaim(store, item) {
+  store.workClaims.set("commons", {
+    files: [], dependsOn: [], reviews: [], tags: [], blobs: [], attestations: [],
+    owner: null, history: [{ at: item.updatedAt, agentId: "owner", action: "created", note: null }],
+    ...item
+  });
+}
+
+test("first board open requests at most two list pages when most claims are old", { timeout: 60000 }, async t => {
+  const fixture = createAcceptanceFixture();
+  const server = createRoomServer({ store: fixture.store, streamInterval: 40, fetchPullRequest: github() });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const recent = new Date().toISOString();
+  const old = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  for (let index = 0; index < 100; index += 1) seedClaim(fixture.store, { id: `open-${index}`, title: `Open ${index}`, state: "unclaimed", updatedAt: recent });
+  for (let index = 0; index < 500; index += 1) seedClaim(fixture.store, { id: `old-${index}`, title: `Old ${index}`, state: "done", owner: "owner", updatedAt: old });
+  t.after(async () => {
+    server.closeStreams(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    fixture.store.close();
+    rmSync(fixture.directory, { recursive: true, force: true });
+  });
+  const browser = await chromium.launch({ headless: true });
+  t.after(async () => { await browser.close(); });
+  const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  page.setDefaultTimeout(8000);
+  let lists = 0;
+  page.on("request", request => {
+    const url = new URL(request.url());
+    if (request.method() === "GET" && /\/work-claims$/.test(url.pathname)) lists += 1;
+  });
+  await page.goto(origin);
+  await signInFixture(page, fixture.keys.owner);
+  await page.locator("#main").waitFor({ state: "visible" });
+  await page.locator("#tasks-board-open").click();
+  await page.locator(".board-older").waitFor();
+  await page.locator("article[data-claim-id='open-0']").waitFor();
+  assert.equal(lists <= 2, true, `list requests: ${lists}`);
+  assert.equal(await page.locator(".board-older").innerText(), "Older landed work is in the API");
+});
+
+test("a read-only member does not see the new item form", { timeout: 60000 }, async t => {
+  const fixture = createAcceptanceFixture();
+  fixture.store.command(fixture.keys.owner, "commons", {
+    id: crypto.randomUUID(), type: "member.added",
+    data: { memberId: "reader", displayName: "Reader", kind: "human", permissions: [] }
+  });
+  const reader = fixture.store.issueAccessKey("commons", "reader");
+  const server = createRoomServer({ store: fixture.store, streamInterval: 40, fetchPullRequest: github() });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  t.after(async () => {
+    server.closeStreams(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    fixture.store.close();
+    rmSync(fixture.directory, { recursive: true, force: true });
+  });
+  const browser = await chromium.launch({ headless: true });
+  t.after(async () => { await browser.close(); });
+  const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  page.setDefaultTimeout(8000);
+  await page.goto(origin);
+  await signInFixture(page, reader);
+  await page.locator("#main").waitFor({ state: "visible" });
+  await page.locator("#tasks-board-open").click();
+  await page.locator("#board-dialog").waitFor({ state: "visible" });
+  await page.locator(".live-chip").waitFor();
+  assert.equal(await page.locator("#board-new-item").count(), 0);
 });

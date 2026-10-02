@@ -62,8 +62,6 @@ export function installRoomLayout() {
     get('#skip-link').setAttribute('href', room ? '#conversation-title' : '#connection-status');
   };
   new MutationObserver(sync).observe(main, { attributes: true, attributeFilter: ['hidden'] });
-  const workspace = get("#workspace-nav");
-  new ResizeObserver(() => document.documentElement.style.setProperty("--workspace-nav-height", `${workspace.getBoundingClientRect().height}px`)).observe(workspace);
   compact.addEventListener("change", sync);
   sync();
 }
