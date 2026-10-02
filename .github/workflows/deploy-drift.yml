@@ -1,0 +1,56 @@
+name: deploy-drift
+
+# Reports when production's public /api/version lags main. Public endpoints
+# only: no tokens, no deploy. A red run is the report. This is not a pull
+# request check and does not block main.
+on:
+  schedule:
+    - cron: "23 * * * *"
+  workflow_dispatch:
+    inputs:
+      max_prs:
+        description: Fail when production is behind main by more than this many commits
+        default: "5"
+        required: false
+      max_hours:
+        description: Fail when the first of those commits is older than this many hours
+        default: "24"
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-drift
+  cancel-in-progress: false
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - name: Fetch main
+        run: git fetch origin main
+      - name: Compare production to main
+        env:
+          MAX_PRS: ${{ github.event_name == 'workflow_dispatch' && inputs.max_prs || '5' }}
+          MAX_HOURS: ${{ github.event_name == 'workflow_dispatch' && inputs.max_hours || '24' }}
+        run: |
+          set +e
+          set -o pipefail
+          node scripts/watch-deploy-drift.mjs --ref origin/main --max-prs "$MAX_PRS" --max-hours "$MAX_HOURS" | tee "$RUNNER_TEMP/drift.json"
+          code=$?
+          {
+            echo "## Deploy drift"
+            echo
+            echo '```json'
+            cat "$RUNNER_TEMP/drift.json"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$code"
