@@ -8,6 +8,7 @@ import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { migrateLandQueueClaims } from "../server/land-queue.mjs";
+import { handleWorkClaims } from "../server/work-claim-routes.mjs";
 import { SOURCE_REVISION } from "../server/version.mjs";
 
 const SHA = "a".repeat(40);
@@ -108,6 +109,37 @@ test("a contribute-profile agent creates, renews, and releases a claim without w
   const denied = await chat.call(chat.chatKey, "/work-claims", { id: "nope" });
   assert.equal(denied.status, 403);
   assert.equal(denied.value.error.code, "work_claims_not_permitted");
+});
+
+test("an ownerless room refuses a non-member and a member without a claim profile", async t => {
+  const { store, call, coordKey, chatKey } = await fixture(t);
+  const row = store.db.prepare("SELECT projection FROM rooms WHERE id=?").get("commons");
+  const projection = JSON.parse(row.projection);
+  projection.room.ownerId = "";
+  store.db.prepare("UPDATE rooms SET projection=? WHERE id=?").run(JSON.stringify(projection), "commons");
+  const chat = await call(chatKey, "/work-claims", { id: "chat-no" });
+  assert.equal(chat.status, 403);
+  assert.equal(chat.value.error.code, "work_claims_not_permitted");
+  const stranger = await handleWorkClaims({
+    req: { method: "POST", body: { id: "stranger-no" } },
+    res: {},
+    url: new URL("https://room.example/api/rooms/commons/work-claims"),
+    store, roomId: "commons",
+    auth: { member: { id: "stranger", kind: "agent", permissions: ["accept_work", "complete_work"] } },
+    workClaimRoute: "create",
+    helpers: {
+      json: (_res, status, value) => ({ status, value }),
+      reject: (status, code, message) => { const error = new Error(message); error.status = status; error.code = code; throw error; },
+      body: async req => req.body,
+    },
+    registry: store.workClaims,
+  });
+  assert.equal(stranger.status, 403);
+  assert.equal(stranger.value.error.code, "work_claims_not_permitted");
+  assert.equal(store.workClaims.get("commons", "stranger-no"), null);
+  const allowed = await call(coordKey, "/work-claims", { id: "coord-yes" });
+  assert.equal(allowed.status, 201);
+  assert.equal(allowed.value.owner, null);
 });
 
 test("CI state changes are stored, receipted, and wake the owner on failure", async t => {

@@ -773,6 +773,16 @@ const ROWS = [
     }
   },
   {
+    "table": "integrity_room_state",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
     "table": "jev_shadow_decisions",
     "key": "room_id",
     "action": "delete",

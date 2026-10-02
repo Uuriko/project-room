@@ -188,6 +188,9 @@ optional.push("server/persisted-row.mjs"); // RC-2026-09-27-2730: replay-safe pe
 optional.push("server/claim-collisions.mjs");
 optional.push("server/work-claim-routes.mjs"); // RC-2026-09-18-041: work-claim HTTP routes (imported by server/http.mjs)
 optional.push("server/work-claim-events.mjs"); // work_claim.updated receipts (imported by server/work-claim-routes.mjs; imports src/events.js)
+optional.push("server/receipt-cards.mjs"); // ACT-1a: in-room receipt cards (imported by server/work-claim-events.mjs and server/room-guide.mjs)
+optional.push("server/room-guide.mjs"); // ACT-1a: Room Guide demo agent (imported by cloudflare/room.mjs and server/starter-room.mjs)
+optional.push("server/starter-room.mjs"); // ACT-1a: starter seed (imported by server/room-lifecycle.mjs)
 optional.push("server/claim-coordination.mjs"); // exclusive file leases, ready queue, pull-request outcomes (imported by server/work-claims.mjs and server/work-claim-routes.mjs)
 optional.push("server/claim-pr-sync.mjs"); // poll linked pull requests onto claims (imported by server/work-claim-routes.mjs and cloudflare/room.mjs)
 optional.push("server/mention-receipts.mjs"); // sender-facing mention delivery and read/ack receipts (imported by server/http.mjs)
@@ -233,6 +236,7 @@ optional.push("server/google-oauth.mjs"); // Google sign-in (imported by server/
 optional.push("server/github-oauth.mjs"); // GitHub sign-in (imported by server/http.mjs)
 optional.push("server/oauth-provider.mjs"); // OAuth2 authorization server for connectors (imported by server/http.mjs)
 optional.push("server/oauth-provider-store.mjs"); // Durable hashed OAuth grants (imported by server/oauth-provider.mjs, server/writer-fence.mjs, and cloudflare/room.mjs)
+optional.push("server/abuse-rate-buckets.mjs"); // Durable abuse rate buckets (imported by server/http.mjs, server/writer-fence.mjs, and cloudflare/room.mjs)
 optional.push("connectors/muse.md"); // Muse custom-connector brief (served at /connectors/muse.md)
 optional.push("server/account-login-methods.mjs"); // Multi-method login model (imported by server/store.mjs)
 optional.push("server/account-deletion.mjs"); // RC-2026-09-19-078: deletion executor (imported by server/http.mjs; imports the src planner below)
@@ -289,6 +293,7 @@ optional.push("server/capability-visibility.mjs"); // RC-2026-09-27-2731: withho
 optional.push("src/growth-emit.js", "src/growth-events.js", "src/growth-collector.js", "src/growth-mentions.js", "src/growth-fanout.js", "src/growth-persistence.js", "src/growth-summary.js", "src/growth-compare.js", "src/growth-alerts.js", "src/growth-watch.js", "src/growth-scheduler.js", "src/growth-http.js", "src/growth-digest.js");
 // Preserve redistribution terms; historical commits predate these documents.
 optional.push("LICENSE", "NOTICE", "THIRD_PARTY.md");
+optional.push("server/routes/dispatch.mjs", "server/routes/table.mjs"); // batch RT: declarative route table (imported by server/http.mjs)
 export const allowed = new Set([...required, ...optional]);
 const sha256 = bytes => createHash("sha256").update(bytes).digest("hex");
 // The contract stays exact: any mismatch fails. Each failure now names the

@@ -1,4 +1,4 @@
-import { publicSearchAssets, publicSearchCanonical, publicSearchMarketingPolicy, publicSearchSitemap, PUBLIC_SEARCH_CSP, PUBLIC_PAGE_LASTMOD, reviewedPublicSearchPaths } from "../deploy/public-search.mjs";
+import { acceptPrefersHtml, publicHtmlNotFoundPath, publicSearchAssets, publicSearchCanonical, publicSearchMarketingPolicy, publicSearchSitemap, PUBLIC_NOT_FOUND_HTML, PUBLIC_SEARCH_CSP, PUBLIC_PAGE_LASTMOD, reviewedPublicSearchPaths } from "../deploy/public-search.mjs";
 import { readConversation } from "./conversation-sync.mjs";
 import { OutsideAgents } from "./outside-agents.mjs";
 import { GmailSync } from './gmail-sync.mjs';
@@ -10,6 +10,7 @@ import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { ServiceError } from "./store.mjs";
+import { ABUSE_RATE_FAMILIES, loadAbuseRateBucket, saveAbuseRateBucket } from "./abuse-rate-buckets.mjs";
 import { peerEventVisible, visibleBonds } from "./bonds.mjs";
 import { clientAddress, STREAM_INTERVAL_DEFAULT_MS } from "./deployment.mjs";
 import { isWorkersRuntime } from "./ip-blocklist.mjs";
@@ -96,6 +97,7 @@ import { hashPassword, verifyPassword, checkPasswordPolicy, DUMMY_PASSWORD_VERIF
 import { buildGitHubAuthUrl, codeChallengeFor, createPendingStore, exchangeCodeForToken, fetchGitHubUser,
   GitHubOAuthError, GITHUB_START_PATH, GITHUB_CALLBACK_PATH, githubPostLoginPage, githubUnavailablePage } from "./github-oauth.mjs";
 import { createOAuthProvider, OAUTH_SCOPES } from "./oauth-provider.mjs";
+import { dispatchRoute } from "./routes/dispatch.mjs";
 
 const roomCookieName = "room_session";
 const accountCookieName = "account_session";
@@ -603,6 +605,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   const rates = new Map(), rateFamilies = new Map();
   const rateFamily = id => id.slice(0, id.indexOf(":"));
   const dropRate = (id, family = rateFamily(id)) => {
+    const entry = rates.get(id);
+    // Keep a durable count that was already being written. A key that never
+    // reached a write stride leaves no row, so a flood of one-shot keys cannot
+    // fill the table.
+    if (entry && ABUSE_RATE_FAMILIES.has(family) && entry.persistedN !== undefined && entry.persistedN !== entry.n && entry.until > Date.now())
+      saveAbuseRateBucket(store.db, id, entry);
     rates.delete(id);
     const left = rateFamilies.get(family) - 1;
     if (left > 0) rateFamilies.set(family, left); else rateFamilies.delete(family);
@@ -611,16 +619,22 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     const now = Date.now();
     for (const [k, v] of rates) if (v.until <= now) dropRate(k);
     const family = rateFamily(id);
+    const durable = ABUSE_RATE_FAMILIES.has(family);
     let entry = rates.get(id);
     if (entry) rates.delete(id);
     else {
+      if (durable) entry = loadAbuseRateBucket(store.db, id, now);
       if ((rateFamilies.get(family) ?? 0) >= RATE_FAMILY_KEYS)
         for (const k of rates.keys()) if (rateFamily(k) === family) { dropRate(k, family); break; }
       rateFamilies.set(family, (rateFamilies.get(family) ?? 0) + 1);
-      entry = { n: 0, until: now + 60000 };
+      if (!entry) entry = { n: 0, until: now + 60000 };
     }
     entry.n++;
     rates.set(id, entry);
+    if (durable) {
+      const stride = Math.max(1, Math.floor(maximum / 4));
+      if (entry.n >= maximum || entry.n % stride === 0) saveAbuseRateBucket(store.db, id, entry);
+    }
     if (entry.n > maximum) throw new ServiceError(429, "rate_limited", "Too many requests; retry after a minute",
       { "X-RateLimit-Limit": maximum, "X-RateLimit-Remaining": 0, "X-RateLimit-Reset": Math.ceil(entry.until / 1000) });
   }
@@ -902,6 +916,15 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (!previewDoorRequest) checkOrigin(req);
       url.pathname = rewriteRoomApiPrefix(inboundPath);
       if (url.pathname.startsWith("/api/")) res.setHeader("X-Operation-Id", operationId);
+      // Route table (batch RT). A matched row is finished here, including
+      // 405 Allow on a known path. Anything else falls through to the
+      // legacy chain below until that chain is empty.
+      if (await dispatchRoute({
+        req, res, url, store, remoteAddress, loopback, operationId,
+        json, reject, rate, cookie, setCookie, bearer, body, readText,
+        roomAuth, roomCredentials, expectedBinding, accountBinding,
+        checkOrigin, protectWrite, exact, pathId, expectedOrigin,
+      })) return;
       if ((url.pathname === "/api/health" || url.pathname === "/api/health/" || isHealthAliasPath(inboundPath) || isHealthAliasPath(url.pathname)) && ["GET", "HEAD"].includes(req.method)) {
         return json(res, 200, { status: "ok", mode: serviceMode, ...deploymentField }, req.method === "HEAD");
       }
@@ -3107,6 +3130,16 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const page = (await loadAsset("join.html")).toString("utf8").replaceAll("{{ASSET_BASE}}", assetBase);
         res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": Buffer.byteLength(page), "Cache-Control": "no-store" });
         return res.end(page);
+      }
+      // Q3-E HTML 404. A browser Accept that prefers text/html gets 404.html
+      // (lang, title, h1, links home / about / receipts, X-Robots-Tag: noindex).
+      // /api/, /mcp and /.well-known/ keep the JSON body, as does any client
+      // whose Accept does not prefer text/html.
+      if (publicHtmlNotFoundPath(url.pathname) && acceptPrefersHtml(req.headers.accept)) {
+        const body = Buffer.from(PUBLIC_NOT_FOUND_HTML);
+        res.setHeader("X-Robots-Tag", "noindex");
+        res.writeHead(404, { "Content-Type": "text/html; charset=utf-8", "Content-Length": body.length });
+        return res.end(req.method === "HEAD" ? undefined : body);
       }
       if (!url.pathname.startsWith("/api/")) reject(404, "not_found", "Not found");
       if (url.pathname === "/api/session") {
