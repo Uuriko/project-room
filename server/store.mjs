@@ -4155,17 +4155,20 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           : memberAuthorityEvent ? { ...command.data, authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION }
           : requestMode ? { ...command.data, requestPolicyVersion: REPLY_POLICY_VERSION } : command.data
       });
-      // SEC-1: a member display name is refused before the reducer stores it.
+      // A display name is checked before the reducer stores it. Exact
+      // duplicates stay allowed: identity link already accepts two members
+      // with the same spelling. Reserved labels, confusable spellings, and
+      // control characters are refused.
       if (command.type === T.MEMBER_ADDED || command.type === T.MEMBER_JOINED_VIA_INVITATION) {
         try {
           assertMemberDisplayNameAvailable(command.data?.displayName, room.state.members);
         } catch (error) {
-          if (error?.code === "display_name_unavailable") {
+          if (error?.code === "display_name_unavailable" && error.reason !== "duplicate") {
             const refused = new ServiceError(422, "display_name_unavailable", error.message);
             if (error.detail) refused.detail = error.detail;
             throw refused;
           }
-          throw error;
+          if (error?.code !== "display_name_unavailable") throw error;
         }
       }
       let state;

@@ -65,21 +65,22 @@ test("workerd refuses a private webhook answer and retries a resolution failure"
     compatibilityFlags: ["nodejs_compat"],
   });
   try {
-    const privateAnswer = await (await mf.dispatchFetch("http://localhost/subscribe?host=hook-private.example&answer=10.1.2.3")).json();
+    const origin = "http://localhost";
+    const privateAnswer = await (await mf.dispatchFetch(origin + "/subscribe?host=" + "hook-private.example" + "&answer=10.1.2.3")).json();
     assert.equal(privateAnswer.ok, false);
     assert.equal(privateAnswer.code, "webhook_url_not_public");
     assert.equal(privateAnswer.status, 422);
     assert.equal(privateAnswer.stored, 0);
-    const loopback = await (await mf.dispatchFetch("http://localhost/subscribe?host=hook-loop.example&answer=127.0.0.1")).json();
+    const loopback = await (await mf.dispatchFetch(origin + "/subscribe?host=" + "hook-loop.example" + "&answer=127.0.0.1")).json();
     assert.equal(loopback.code, "webhook_url_not_public");
     assert.equal(loopback.stored, 0);
-    const unresolved = await (await mf.dispatchFetch("http://localhost/subscribe?host=hook-missing.example&fail=1")).json();
+    const unresolved = await (await mf.dispatchFetch(origin + "/subscribe?host=" + "hook-missing.example" + "&fail=1")).json();
     assert.equal(unresolved.code, "webhook_url_not_public");
     assert.equal(unresolved.stored, 0);
-    const dead = await (await mf.dispatchFetch("http://localhost/deliver?host=deliver-private.example")).json();
+    const dead = await (await mf.dispatchFetch(origin + "/deliver?host=" + "deliver-private.example")).json();
     assert.equal(dead.ok, false);
     assert.equal(dead.classification, "dead");
-    const retry = await (await mf.dispatchFetch("http://localhost/deliver?host=deliver-missing.example&fail=1")).json();
+    const retry = await (await mf.dispatchFetch(origin + "/deliver?host=" + "deliver-missing.example" + "&fail=1")).json();
     assert.equal(retry.ok, false);
     assert.equal(retry.classification, "retry");
   } finally {
