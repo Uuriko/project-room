@@ -4,12 +4,12 @@
 // gate for every route that shares it. Asset bytes are cached for the life
 // of this isolate; a deploy starts a new one.
 import { publicAssetPaths } from '../deploy/public-assets.mjs';
-import { publicSearchAssets, publicSearchCanonical, PUBLIC_SEARCH_CSP, reviewedPublicSearchPaths } from '../deploy/public-search.mjs';
+import { publicSearchAssets, publicSearchCanonical, publicSearchMarketingPolicy, PUBLIC_SEARCH_CSP, reviewedPublicSearchPaths } from '../deploy/public-search.mjs';
 import { discoveryDoc, EDGE_DOOR_HOSTS, ROOM_ORIGIN, SKILLS_CATALOG_PATH } from '../deploy/agent-discovery.mjs';
 import { buildOpenApiJson } from '../server/discoverability.mjs';
 import { MCP_SERVER_CARD_PATH, MCP_DISCOVERY_CACHE_CONTROL, MCP_SERVER_CARD_CORS } from '../src/mcp-server-card.mjs';
 
-const APP_CSP = "default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'";
+const APP_CSP = "default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'";
 const ASSET_CACHE_MAX = 96;
 const assetCache = new Map();
 let openApiCache = null;
@@ -129,12 +129,14 @@ async function assetResponse(request, env, url) {
   const headers = baseHeaders(url);
   headers.set('Link', discoveryLinks(url));
   const canonical = publicSearchCanonical(url.pathname, publicAssetPaths);
-  if (canonical) headers.set('Content-Security-Policy', PUBLIC_SEARCH_CSP);
-  if (canonical && !url.search && reviewedPublicSearchPaths.includes(canonical)) headers.set('X-Robots-Tag', 'all');
+  // About and compare pages have no scripts. The app shell and offers page keep
+  // the room policy from baseHeaders so their modules load.
+  if (canonical && publicSearchMarketingPolicy(canonical)) headers.set('Content-Security-Policy', PUBLIC_SEARCH_CSP);
   if (canonical && !url.search && canonical !== url.pathname) {
     headers.set('Location', canonical);
     return new Response(null, { status: 301, headers });
   }
+  if (canonical && !url.search && reviewedPublicSearchPaths.includes(canonical)) headers.set('X-Robots-Tag', 'all');
   const [file, type] = assets.get(url.pathname);
   const bytes = await loadCachedAsset(env, file);
   if (!bytes) {

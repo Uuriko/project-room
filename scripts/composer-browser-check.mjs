@@ -149,8 +149,9 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     await recipient.selectOption("", { force: true });
 
     // @-mention autocomplete is a real listbox: rows are options, the textarea points at the active one.
+    // aria-expanded is not allowed on a textbox, so the open state is the list plus aria-activedescendant.
     const mentionList = page.locator("#mention-list");
-    assert.equal(await input.getAttribute("aria-expanded"), "false");
+    assert.equal(await input.getAttribute("aria-expanded"), null);
     assert.equal(await input.getAttribute("aria-autocomplete"), "list");
     await input.click();
     await page.keyboard.type("Hi @");
@@ -161,7 +162,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     assert.equal(await mentionList.locator("button, [aria-selected]:not([role='option'])").count(), 0, "aria-selected only on options, no nested buttons");
     assert.equal(await options.first().getAttribute("aria-selected"), "true");
     assert.equal(await options.first().getAttribute("id"), "mention-option-0");
-    assert.equal(await input.getAttribute("aria-expanded"), "true");
+    assert.equal(await input.getAttribute("aria-expanded"), null);
     assert.equal(await input.getAttribute("aria-activedescendant"), "mention-option-0");
     await page.keyboard.press("ArrowDown");
     assert.equal(await input.getAttribute("aria-activedescendant"), "mention-option-1");
@@ -169,7 +170,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     assert.equal(await options.first().getAttribute("aria-selected"), "false");
     await page.keyboard.press("Escape");
     await mentionList.waitFor({ state: "hidden" });
-    assert.equal(await input.getAttribute("aria-expanded"), "false");
+    assert.equal(await input.getAttribute("aria-expanded"), null);
     assert.equal(await input.getAttribute("aria-activedescendant"), null);
     assert.equal(await input.inputValue(), "Hi @");
     await page.keyboard.type("may");

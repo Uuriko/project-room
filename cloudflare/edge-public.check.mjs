@@ -65,7 +65,8 @@ test('static assets and discovery documents do not enter the Durable Object', as
     assert.match(await page.text(), /message-input/);
     assert.match(page.headers.get('server-timing'), /total;dur=/);
     assert.match(page.headers.get('link'), /llms\.txt/);
-    assert.match(page.headers.get('x-robots-tag'), /noindex/);
+    assert.equal(page.headers.get('x-robots-tag'), 'all');
+    assert.match(page.headers.get('content-security-policy'), /script-src 'self'/);
 
     const about = await call('/about');
     assert.equal(about.headers.get('x-test-do-fetches'), '0');

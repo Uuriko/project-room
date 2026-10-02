@@ -44,14 +44,11 @@ export const DISCOVERY = [
 // code, optionally "code:detail-prefix". Delete an entry when it is fixed.
 export const KNOWN = new Map([
   ["html_404", "AUDIT P2-5: unknown paths return agent JSON to browsers"],
-  ["advertised_url:https://room.trydemigod.com/icon.svg", "AUDIT P2-6: ai-catalog logoUrl 404"],
   ["advertised_url:https://room.trydemigod.com/extensions/", "AUDIT P3: A2A extension URIs do not resolve to a spec page"],
-  ["favicon", "AUDIT P2-6: /favicon.ico 404"],
   ["noindex_public", "AUDIT P1-9: public pages send noindex while robots.txt allows crawling"],
   ["csp_console:/about", "AUDIT P2-4: CSP blocks the injected analytics beacon"],
   ["csp_console:/receipts", "AUDIT P2-4: CSP blocks the injected analytics beacon"],
   ["csp_console:/join", "AUDIT P2-4: /join inline style blocked by its CSP"],
-  ["overflow:/receipts", "AUDIT P2-7: /receipts overflows at 390 px"],
 ]);
 
 const knownReason = (code, detail = "") => {

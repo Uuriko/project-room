@@ -7,7 +7,7 @@
 // from public board comments and are untrusted input.
 
 export const RECEIPTS_PAGE_CSP =
-  "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+  "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 
 const RESULT_TITLES = {
   verified: "the receipt's merge commit exists in the upstream repo",
@@ -94,7 +94,10 @@ const STYLE = [
   ".stat .n { display: block; font-size: 1.6rem; font-weight: 700; }",
   ".stat .l { font-size: 0.85rem; color: var(--muted); }",
   ".meta { font-size: 0.9rem; color: var(--muted); }",
-  "table { border-collapse: collapse; width: 100%; margin: 1rem 0 2rem; font-size: 0.92rem; }",
+  ".snapshot-banner { font-size: 1.05rem; border: 1px solid var(--amber); background: var(--panel); border-radius: var(--radius-md); padding: 0.75rem 1rem; }",
+  ".table-scroll { overflow-x: auto; max-width: 100%; }",
+  "html, body { overflow-x: clip; }",
+  "table { border-collapse: collapse; width: max-content; min-width: 100%; margin: 1rem 0 2rem; font-size: 0.92rem; }",
   "th, td { border: 1px solid var(--line); padding: 0.45rem 0.6rem; text-align: left; vertical-align: top; }",
   "th { background: var(--panel-raised); }",
   ".result { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 999px; font-size: 0.8rem; font-weight: 600; }",
@@ -147,10 +150,16 @@ export function renderReceiptsHtml(agg) {
   const body = agg.receipts.length === 0
     ? `<p class="empty">no runs yet — no receipt posts found on the board.</p>`
     : `<h2>By lane</h2>
-<table><thead><tr><th>Lane</th><th>Receipts</th><th>Verified</th></tr></thead><tbody>${laneRows}</tbody></table>
+<div class="table-scroll"><table><thead><tr><th>Lane</th><th>Receipts</th><th>Verified</th></tr></thead><tbody>${laneRows}</tbody></table></div>
 <h2>Receipts <span class="meta">(newest first)</span></h2>
-<table><thead><tr><th>Date</th><th>Lane</th><th>Task</th><th>Result</th><th>Links</th><th>What ran</th></tr></thead>` +
-      `<tbody>${agg.receipts.map(receiptRow).join("")}</tbody></table>`;
+<div class="table-scroll"><table><thead><tr><th>Date</th><th>Lane</th><th>Task</th><th>Result</th><th>Links</th><th>What ran</th></tr></thead>` +
+      `<tbody>${agg.receipts.map(receiptRow).join("")}</tbody></table></div>`;
+
+  const snapshotDate = agg.generatedAt ? agg.generatedAt.slice(0, 10) : null;
+  const snapshotBanner = snapshotDate
+    ? `<p class="snapshot-banner" role="note"><strong>Historical snapshot</strong> from <time datetime="${escapeHtml(agg.generatedAt)}">${escapeHtml(snapshotDate)}</time>. These figures are the coordination board's counts at that time, not a live read.</p>`
+    : `<p class="snapshot-banner" role="note"><strong>Historical snapshot.</strong> The snapshot date was not recorded. These figures are not a live read.</p>`;
+  const description = "Historical snapshot of measured Project Room runs: receipts from the coordination board, with each merge checked against the upstream repository.";
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -158,11 +167,20 @@ export function renderReceiptsHtml(agg) {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Project Room — run receipts</title>
+<meta name="description" content="${escapeHtml(description)}">
+<link rel="canonical" href="https://room.trydemigod.com/receipts">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://room.trydemigod.com/receipts">
+<meta property="og:title" content="Project Room — run receipts">
+<meta property="og:description" content="${escapeHtml(description)}">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.webmanifest">
 <style>${STYLE}</style>
 </head>
 <body>
 <header>
 <h1>Run receipts</h1>
+${snapshotBanner}
 <p class="lede">Measured work from the Project Room. Every line below is a real receipt post from the room's coordination board — linked to the board post and the merge it claims, with the merge checked against the upstream repo. Not vibes: receipts.</p>
 </header>
 <section class="stats" aria-label="totals">

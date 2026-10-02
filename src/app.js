@@ -238,8 +238,10 @@ const client = new RoomClient({
     roomGeneration = client.generation;
     const roomId = state.room?.id ?? identity.roomId;
     if (roomId !== activeChannelRoomId) { activeChannelRoomId = roomId; restoreActiveChannel(); }
-    $("#room-title").textContent = state.room?.title ?? roomId;
-    $("#mobile-room-name").textContent = state.room?.title ?? roomId;
+    const roomTitle = state.room?.title ?? roomId;
+    $("#room-title").textContent = roomTitle;
+    $("#mobile-room-name").textContent = roomTitle;
+    $("#room-overview-open").setAttribute("aria-label", `${roomTitle}, Room overview`);
     $(".room-purpose").textContent = state.room?.purpose ?? "";
     $("#main").hidden = false; $("#auth-panel").hidden = true; $("#auth-panel").setAttribute("aria-busy", "false");
     $("#account-rooms-panel").hidden = true;
@@ -3668,7 +3670,7 @@ function hideMentions() {
   list.hidden = true; list.replaceChildren(); mentionIndex = 0;
   if ($("#emoji-list")?.hidden !== false) {
     // Closed listbox: the textarea stops pointing at an option that no longer exists.
-    input?.setAttribute("aria-expanded", "false"); input?.removeAttribute("aria-activedescendant");
+    input?.removeAttribute("aria-expanded"); input?.removeAttribute("aria-activedescendant");
     input?.setAttribute("aria-controls", "mention-list");
   }
 }
@@ -3677,7 +3679,7 @@ function hideEmoji() {
   if (!list || list.hidden) return;
   list.hidden = true; list.replaceChildren(); emojiIndex = 0;
   if ($("#mention-list")?.hidden !== false) {
-    input?.setAttribute("aria-expanded", "false"); input?.removeAttribute("aria-activedescendant");
+    input?.removeAttribute("aria-expanded"); input?.removeAttribute("aria-activedescendant");
     input?.setAttribute("aria-controls", "mention-list");
   }
 }
@@ -3698,7 +3700,7 @@ function renderEmoji() {
   list.hidden = false;
   list.innerHTML = choice.matches.map((item, i) => `<li role="option" id="emoji-option-${i}" class="mention-option${i === emojiIndex ? " active" : ""}" data-emoji="${esc(item.emoji)}" aria-selected="${i === emojiIndex}"><span class="emoji-glyph" aria-hidden="true">${item.emoji}</span> ${esc(item.name)}</li>`).join("");
   const input = $("#message-input");
-  input.setAttribute("aria-expanded", "true");
+  input.removeAttribute("aria-expanded");
   input.setAttribute("aria-controls", "emoji-list");
   input.setAttribute("aria-activedescendant", `emoji-option-${emojiIndex}`);
 }
@@ -3727,7 +3729,7 @@ function renderMentions() {
   // nested button). Focus stays in the textarea; aria-activedescendant names the row.
   list.innerHTML = matches.map((m, i) => `<li role="option" id="mention-option-${i}" class="mention-option${i === mentionIndex ? " active" : ""}" data-mention-id="${esc(m.id)}" aria-selected="${i === mentionIndex}">${esc(m.displayName)} <span>${esc(kindLabel(m.kind))}</span></li>`).join("");
   const input = $("#message-input");
-  input.setAttribute("aria-expanded", "true");
+  input.removeAttribute("aria-expanded");
   input.setAttribute("aria-activedescendant", `mention-option-${mentionIndex}`);
 }
 function applyMentionMember(member) {

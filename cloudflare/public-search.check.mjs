@@ -30,7 +30,10 @@ test('actual Worker public search routes load packaged HTML and preserve private
     assert.match(page.headers.get('content-type'), /text\/html/); assert.match(await page.text(), /Work with your agents in one room/);
     const head = await call(present, '/about', 'HEAD'); assert.equal(head.status, 200); assert.equal(await head.text(), '');
     const alias = await call(present, '/about.html'); assert.equal(alias.status, 301); assert.equal(alias.headers.get('location'), '/about');
-    for (const path of ['/', '/index.html', '/join.html', '/api/version', '/about?secret=synthetic', '/compare/not-reviewed']) {
+    const home = await call(present, '/'); assert.equal(home.status, 200); assert.equal(home.headers.get('x-robots-tag'), 'all');
+    assert.match(home.headers.get('content-security-policy'), /script-src 'self'/);
+    const offers = await call(present, '/offers'); assert.equal(offers.status, 200); assert.equal(offers.headers.get('x-robots-tag'), 'all');
+    for (const path of ['/index.html', '/join.html', '/api/version', '/about?secret=synthetic', '/compare/not-reviewed']) {
       const response = await call(present, path); assert.match(response.headers.get('x-robots-tag'), /noindex/, path);
     }
     for (const file of publicAssetPaths.filter(path => path.startsWith('compare/') && path.endsWith('.html'))) {
@@ -39,7 +42,8 @@ test('actual Worker public search routes load packaged HTML and preserve private
       assert.match(await page.text(), new RegExp('rel="canonical" href="https://room.trydemigod.com' + canonical + '"'));
     }
     const map = await call(present, '/sitemap.xml'); assert.equal(map.status, 200); assert.equal(map.headers.get('x-robots-tag'), 'all');
-    const sitemap = await map.text(); assert.match(sitemap, /\/about/); assert.doesNotMatch(sitemap, /compare/);
+    const sitemap = await map.text(); assert.match(sitemap, /\/about/); assert.match(sitemap, /<loc>https:\/\/room\.trydemigod\.com\/<\/loc>/);
+    assert.match(sitemap, /<loc>https:\/\/room\.trydemigod\.com\/offers<\/loc>/); assert.doesNotMatch(sitemap, /compare/);
   } finally { await present.dispose(); }
   const absent = start(true);
   try {
