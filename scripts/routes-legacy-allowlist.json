@@ -374,6 +374,10 @@
       "path": "/api/auth/agent/session"
     },
     {
+      "method": "POST",
+      "path": "/api/auth/email/verify"
+    },
+    {
       "method": "GET",
       "path": "/api/auth/github/callback"
     },
@@ -3878,6 +3882,10 @@
     {
       "method": "POST",
       "path": "/api/auth/agent/session"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/email/verify"
     },
     {
       "method": "GET",
