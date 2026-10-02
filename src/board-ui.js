@@ -164,10 +164,54 @@ export function paintClaimChat(state, list) {
 }
 
 function liveLabel(status) {
-  if (!status) return "Live vs main";
-  if (status.behind === 0) return "Live vs main · matches";
-  if (typeof status.behind === "number") return `Live vs main · ${status.behind} behind`;
-  return "Live vs main · not compared";
+  if (!status || typeof status.behind !== "number") return "Deploy status unknown";
+  if (status.behind === 0) return "Live matches main";
+  if (status.behind > 0) return "Live is behind main";
+  return "Deploy status unknown";
+}
+
+// room_read_board / room_acquire_claim / room_renew_claim / room_release_claim
+// read the older work-item model. They are not tools for this Board.
+const NOT_BOARD_TOOLS = new Set(["room_read_board", "room_acquire_claim", "room_renew_claim", "room_release_claim"]);
+
+export function boardToolNames(capabilities) {
+  const list = Array.isArray(capabilities) ? capabilities : [];
+  const names = [];
+  for (const name of list) {
+    if (typeof name !== "string" || NOT_BOARD_TOOLS.has(name)) continue;
+    if (!/work[_-]claim/.test(name) || names.includes(name)) continue;
+    names.push(name);
+  }
+  return names;
+}
+
+export function emptyBoardCopy(capabilities) {
+  const tools = boardToolNames(capabilities);
+  const line = "Claim work here so people and agents don't collide.";
+  return tools.length ? `${line} Agents can use ${tools.join(", ")}.` : line;
+}
+
+function advertisedCapabilities(state) {
+  const names = [];
+  for (const member of Object.values(state?.members ?? {})) {
+    if (Array.isArray(member?.capabilities)) names.push(...member.capabilities);
+  }
+  return names;
+}
+
+export function canWriteClaims(state, session) {
+  const id = session?.member?.id;
+  if (!id || !state?.members) return false;
+  const ownerId = state.room?.ownerId;
+  const enforced = typeof ownerId === "string" && ownerId.length > 0;
+  if (!enforced) return true;
+  if (id === ownerId) return true;
+  const member = state.members[id];
+  if (!member || member.active === false) return false;
+  const permissions = new Set(member.permissions ?? []);
+  if (member.kind === "human") return permissions.has("accept_work") || permissions.has("complete_work");
+  const holds = (...needed) => needed.every(name => permissions.has(name));
+  return holds("accept_work", "complete_work") || permissions.has("verify") || holds("steer", "accept_work", "complete_work", "verify");
 }
 
 function viewerOf(state, session) {
@@ -185,7 +229,7 @@ function cardHtml(item, viewer, members, now) {
   const fileBlock = files.length
     ? `<details class="claim-files"><summary>${files.length} file${files.length === 1 ? "" : "s"}</summary><ul>${files.map(file => `<li>${escapeHtml(file)}</li>`).join("")}</ul></details>`
     : "";
-  const lease = countdown(item.leaseExpiresAt, now);
+  const lease = item.state === "done" ? "" : countdown(item.leaseExpiresAt, now);
   const number = pullNumber(item.pullRequest?.url);
   const pr = item.pullRequest?.url
     ? `<p class="claim-pr"><a href="${escapeHtml(item.pullRequest.url)}">PR ${number ? `#${escapeHtml(number)}` : "link"}</a>${item.ci?.state ? ` <span class="ci-badge ci-${escapeHtml(item.ci.state)}">${escapeHtml(item.ci.state)}</span>` : ""}</p>`
@@ -194,41 +238,72 @@ function cardHtml(item, viewer, members, now) {
     ? `<ul class="claim-reviews">${item.reviews.map(review => `<li>${escapeHtml(memberName(members, review.memberId) || review.memberId)} ${escapeHtml(String(review.verdict ?? "").replaceAll("_", " "))}</li>`).join("")}</ul>`
     : "";
   const deps = (item.dependsOn ?? []).map(id => `<li>lands after #${escapeHtml(id)}</li>`).join("");
+  const button = (action, label, tone) => `<button type="button" class="button ${tone}" data-claim-action="${action}" data-claim-id="${escapeHtml(item.id)}" data-focus-key="${action}:${escapeHtml(item.id)}">${label}</button>`;
   const actions = [];
-  if (item.state === "unclaimed") actions.push(`<button type="button" data-claim-action="claim" data-claim-id="${escapeHtml(item.id)}" data-focus-key="claim:${escapeHtml(item.id)}">Claim</button>`);
-  if (mine && ["claimed", "in_progress", "blocked"].includes(item.state)) actions.push(`<button type="button" data-claim-action="renew" data-claim-id="${escapeHtml(item.id)}" data-focus-key="renew:${escapeHtml(item.id)}">Renew</button>`);
-  if (mine && (item.state === "claimed" || item.state === "blocked")) actions.push(`<button type="button" data-claim-action="progress" data-claim-id="${escapeHtml(item.id)}" data-focus-key="progress:${escapeHtml(item.id)}">Mark in progress</button>`);
-  if (mine && item.state === "in_progress") actions.push(`<button type="button" data-claim-action="done" data-claim-id="${escapeHtml(item.id)}" data-focus-key="done:${escapeHtml(item.id)}">Done</button>`);
+  if (item.state === "unclaimed") actions.push(button("claim", "Claim", "primary"));
+  if (mine && ["claimed", "in_progress", "blocked"].includes(item.state)) actions.push(button("renew", "Renew", "secondary"));
+  if (mine && (item.state === "claimed" || item.state === "blocked")) actions.push(button("progress", "Mark in progress", "secondary"));
+  if (mine && item.state === "in_progress") actions.push(button("done", "Done", "primary"));
   if (viewer.manage && ownerId && item.state !== "done" && item.state !== "unclaimed") {
-    actions.push(`<button type="button" data-claim-action="release" data-claim-id="${escapeHtml(item.id)}" data-focus-key="release:${escapeHtml(item.id)}">Release</button>`);
+    actions.push(button("release", "Release", "secondary"));
     const options = Object.values(members ?? {}).filter(member => member && member.active !== false && member.id !== ownerId)
       .map(member => `<option value="${escapeHtml(member.id)}">${escapeHtml(memberName(members, member.id))}</option>`).join("");
-    if (options) actions.push(`<form data-claim-reassign="${escapeHtml(item.id)}"><label>Reassign <select name="newOwner" aria-label="Reassign ${escapeHtml(item.title)}">${options}</select></label><button type="submit">Move</button></form>`);
+    if (options) actions.push(`<form data-claim-reassign="${escapeHtml(item.id)}"><label>Reassign <select name="newOwner" aria-label="Reassign ${escapeHtml(item.title)}">${options}</select></label><button type="submit" class="button secondary">Move</button></form>`);
   }
-  return `<article class="claim-card" data-claim-id="${escapeHtml(item.id)}"><h4>${escapeHtml(item.title || item.id)}</h4><p class="claim-owner">${ownerId ? `<span class="member-avatar" aria-hidden="true">${escapeHtml(initials(owner))}</span> ` : ""}<span>${escapeHtml(owner)}</span></p>${fileBlock}${lease ? `<p class="claim-lease">${escapeHtml(lease)}</p>` : ""}${pr}${reviews}${deps ? `<ul class="claim-deps">${deps}</ul>` : ""}<div class="claim-actions">${actions.join("")}</div></article>`;
+  return `<article class="claim-card" data-claim-id="${escapeHtml(item.id)}"><h4 tabindex="-1">${escapeHtml(item.title || item.id)}</h4><p class="claim-owner">${ownerId ? `<span class="member-avatar" aria-hidden="true">${escapeHtml(initials(owner))}</span> ` : ""}<span>${escapeHtml(owner)}</span></p>${fileBlock}${lease ? `<p class="claim-lease">${escapeHtml(lease)}</p>` : ""}${pr}${reviews}${deps ? `<ul class="claim-deps">${deps}</ul>` : ""}<div class="claim-actions">${actions.join("")}</div></article>`;
 }
 
-function boardHtml(items, status, viewer, members, now) {
+function newItemForm() {
+  return `<form id="board-new-item" class="board-new"><h3>New item</h3><label>Title <input name="title" maxlength="200" required autocomplete="off"></label><label>Files <input name="files" maxlength="4000" autocomplete="off" placeholder="Optional, comma-separated"></label><button type="submit" class="button primary">Add item</button></form>`;
+}
+
+function boardHtml(items, status, viewer, members, now, { older = false, canWrite = false, capabilities = [] } = {}) {
   const columns = placeClaims(items, now);
-  const sweep = viewer.manage ? `<button type="button" id="board-close-stale" data-claim-action="sweep">Close stale</button>` : "";
+  const sweep = viewer.manage ? `<button type="button" class="button secondary" id="board-close-stale" data-claim-action="sweep">Close stale</button>` : "";
+  const form = canWrite ? newItemForm() : "";
+  const hint = older ? `<p class="form-hint board-older">Older landed work is in the API</p>` : "";
   const body = items.length
-    ? `<div class="board-columns">${COLUMNS.map(([id, label]) => `<section aria-labelledby="board-col-${id}"><h3 id="board-col-${id}">${label}</h3>${columns[id].map(item => cardHtml(item, viewer, members, now)).join("") || `<p class="form-hint">Nothing here.</p>`}</section>`).join("")}</div>`
-    : `<p class="board-empty">Claim work so others don't collide. Agents can do this over MCP.</p>`;
-  return `<div class="board-head"><p class="live-chip">${escapeHtml(liveLabel(status))}</p>${sweep}</div><p id="board-status" class="form-hint" role="status"></p>${body}`;
+    ? `${hint}<div class="board-columns">${COLUMNS.map(([id, label]) => `<section aria-labelledby="board-col-${id}"><h3 id="board-col-${id}">${label}</h3>${columns[id].map(item => cardHtml(item, viewer, members, now)).join("") || `<p class="form-hint">Nothing here.</p>`}</section>`).join("")}</div>`
+    : `<p class="board-empty">${escapeHtml(emptyBoardCopy(capabilities))}</p>${hint}`;
+  return `${form}<div class="board-head"><p class="live-chip">${escapeHtml(liveLabel(status))}</p>${sweep}</div><p id="board-status" class="form-hint" role="status"></p>${body}`;
 }
 
-async function readClaims(client) {
+function staleDonePage(claims, now) {
+  return claims.length > 0 && claims.every(item => {
+    if (item?.state !== "done") return false;
+    const at = Date.parse(updatedAt(item));
+    return Number.isFinite(at) && now - at > WEEK;
+  });
+}
+
+async function readClaims(client, now = Date.now()) {
   const claims = [];
   let cursor = null;
+  let older = false;
   for (let page = 0; page < 20; page += 1) {
     const query = new URLSearchParams({ limit: "200" });
+    // SEC-2 adds updatedSince=now-7d once the list route accepts it. Until
+    // then an unknown parameter is a 422, so the query stays limit and cursor
+    // and a page of only old done items ends the walk.
     if (cursor) query.set("cursor", cursor);
     const body = await client.request(client.path(`/work-claims?${query}`));
-    claims.push(...(body.claims ?? []));
-    if (!body.nextCursor) return claims;
+    const pageClaims = body.claims ?? [];
+    claims.push(...pageClaims);
+    if (staleDonePage(pageClaims, now)) { older = true; break; }
+    if (!body.nextCursor) return { claims, older };
     cursor = body.nextCursor;
   }
-  return claims;
+  return { claims, older };
+}
+
+function claimIdFromTitle(title) {
+  const slug = title.toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80);
+  const suffix = crypto.randomUUID().replace(/-/g, "").slice(0, 8);
+  return `${slug || "item"}-${suffix}`.slice(0, 128);
+}
+
+function filesFromField(value) {
+  return String(value ?? "").split(/[\n,]/).map(part => part.trim()).filter(Boolean).slice(0, 64);
 }
 
 export function installWorkBoard({ client, getState, getSession }) {
@@ -236,20 +311,59 @@ export function installWorkBoard({ client, getState, getSession }) {
   if (!root) return { sync() {}, reset() {} };
   let items = [];
   let status = null;
+  let older = false;
   let seen = null;
   let loadedRoom = null;
   let busy = false;
+  let pendingFocus = null;
+  let pendingStatus = "";
+  let stick = null;
 
   function paint() {
     const state = getState();
-    const focus = document.activeElement?.closest?.("[data-focus-key]")?.dataset.focusKey ?? null;
-    root.innerHTML = boardHtml(items, status, viewerOf(state, getSession()), state?.members ?? {}, Date.now());
-    if (focus) root.querySelector(`[data-focus-key="${CSS.escape(focus)}"]`)?.focus();
+    const session = getSession();
+    const active = document.activeElement;
+    const restoreFocus = !active || active === document.body || root.contains(active);
+    if (pendingFocus) stick = { key: pendingFocus.key ?? null, id: pendingFocus.id ?? null, status: pendingStatus };
+    else if (!stick && restoreFocus) {
+      const key = active?.closest?.("[data-focus-key]")?.dataset.focusKey ?? null;
+      if (key) stick = { key, id: active.closest("article")?.dataset.claimId ?? null, status: "" };
+    }
+    pendingFocus = null;
+    pendingStatus = "";
+    root.innerHTML = boardHtml(items, status, viewerOf(state, session), state?.members ?? {}, Date.now(), {
+      older, canWrite: canWriteClaims(state, session), capabilities: advertisedCapabilities(state)
+    });
+    if (stick?.status) {
+      const line = root.querySelector("#board-status");
+      if (line) line.textContent = stick.status;
+    }
+    if (!restoreFocus || !stick) return;
+    const same = stick.key ? root.querySelector(`[data-focus-key="${CSS.escape(stick.key)}"]`) : null;
+    const heading = !same && stick.id ? root.querySelector(`article[data-claim-id="${CSS.escape(stick.id)}"] h4`) : null;
+    (same || heading)?.focus();
   }
 
   function note(text) {
+    stick = { ...(stick ?? {}), status: text };
     const line = root.querySelector("#board-status");
     if (line) line.textContent = text;
+  }
+
+  function titleOf(id) {
+    return items.find(item => item.id === id)?.title || id;
+  }
+
+  function outcome(action, id) {
+    const title = titleOf(id);
+    if (action === "claim") return `Claimed '${title}'`;
+    if (action === "renew") return `Renewed '${title}'`;
+    if (action === "progress") return `Marked '${title}' in progress`;
+    if (action === "done") return `Done '${title}'`;
+    if (action === "release") return `Released '${title}'`;
+    if (action === "reassign") return `Reassigned '${title}'`;
+    if (action === "create") return `Opened '${title}'`;
+    return "Closed stale claims";
   }
 
   async function load({ force = false } = {}) {
@@ -260,12 +374,13 @@ export function installWorkBoard({ client, getState, getSession }) {
     if (!force && loadedRoom === session.roomId && seen === mark) return;
     busy = true;
     try {
-      const [claims, live] = await Promise.all([
+      const [page, live] = await Promise.all([
         readClaims(client),
         client.request(client.path("/work-claims/status"))
       ]);
       if (getSession()?.roomId !== session.roomId) return;
-      items = claims;
+      items = page.claims;
+      older = page.older;
       status = live;
       loadedRoom = session.roomId;
       seen = mark;
@@ -277,14 +392,17 @@ export function installWorkBoard({ client, getState, getSession }) {
     }
   }
 
-  async function act(run) {
+  async function act(run, focus) {
     if (busy) return;
+    if (focus) { pendingFocus = { key: focus.key ?? null, id: focus.id ?? null }; pendingStatus = focus.status ?? ""; }
     busy = true;
     try {
       await run();
       busy = false;
       await load({ force: true });
     } catch (error) {
+      pendingFocus = null;
+      pendingStatus = "";
       busy = false;
       note(error?.message || "Could not update the claim.");
     }
@@ -295,36 +413,49 @@ export function installWorkBoard({ client, getState, getSession }) {
     if (!button || !root.contains(button)) return;
     const id = button.dataset.claimId;
     const action = button.dataset.claimAction;
+    const focus = { key: button.dataset.focusKey ?? null, id: id ?? null, status: outcome(action, id) };
     if (action === "sweep") {
-      void act(() => client.request(client.path("/work-claims/sweep"), { method: "POST", data: {} }));
+      void act(() => client.request(client.path("/work-claims/sweep"), { method: "POST", data: {} }), focus);
       return;
     }
     const path = client.path(`/work-claims/${encodeURIComponent(id)}`);
-    if (action === "claim") void act(() => client.request(`${path}/claim`, { method: "POST", data: {} }));
-    else if (action === "release") void act(() => client.request(`${path}/release`, { method: "POST", data: {} }));
-    else if (action === "progress") void act(() => client.request(`${path}/update`, { method: "POST", data: { state: "in_progress" } }));
-    else if (action === "done") void act(() => client.request(`${path}/update`, { method: "POST", data: { state: "done" } }));
+    if (action === "claim") void act(() => client.request(`${path}/claim`, { method: "POST", data: {} }), focus);
+    else if (action === "release") void act(() => client.request(`${path}/release`, { method: "POST", data: {} }), focus);
+    else if (action === "progress") void act(() => client.request(`${path}/update`, { method: "POST", data: { state: "in_progress" } }), focus);
+    else if (action === "done") void act(() => client.request(`${path}/update`, { method: "POST", data: { state: "done" } }), focus);
     else if (action === "renew") {
-      const title = items.find(item => item.id === id)?.title || id;
+      const title = titleOf(id);
       const messageId = crypto.randomUUID();
       void act(async () => {
         await client.send({ id: crypto.randomUUID(), type: "message.posted", data: { messageId, body: `Checking in on ${title}.` } });
         await client.request(`${path}/renew`, { method: "POST", data: { progressMessageId: messageId } });
-      });
+      }, focus);
     }
   });
   root.addEventListener("submit", event => {
+    const created = event.target.closest("#board-new-item");
+    if (created && root.contains(created)) {
+      event.preventDefault();
+      const data = new FormData(created);
+      const title = String(data.get("title") ?? "").trim();
+      if (!title) return;
+      const id = claimIdFromTitle(title);
+      const files = filesFromField(data.get("files"));
+      const body = files.length ? { id, title, files } : { id, title };
+      void act(() => client.request(client.path("/work-claims"), { method: "POST", data: body }), { id, status: `Opened '${title}'` });
+      return;
+    }
     const form = event.target.closest("[data-claim-reassign]");
     if (!form || !root.contains(form)) return;
     event.preventDefault();
     const id = form.dataset.claimReassign;
     const newOwner = new FormData(form).get("newOwner");
     if (typeof newOwner !== "string" || !newOwner) return;
-    void act(() => client.request(client.path(`/work-claims/${encodeURIComponent(id)}/reassign`), { method: "POST", data: { newOwner } }));
+    void act(() => client.request(client.path(`/work-claims/${encodeURIComponent(id)}/reassign`), { method: "POST", data: { newOwner } }), { id, status: outcome("reassign", id) });
   });
 
   return {
     sync() { void load(); },
-    reset() { items = []; status = null; seen = null; loadedRoom = null; if (root.isConnected) root.replaceChildren(); }
+    reset() { items = []; status = null; older = false; seen = null; loadedRoom = null; pendingFocus = null; pendingStatus = ""; stick = null; if (root.isConnected) root.replaceChildren(); }
   };
 }
