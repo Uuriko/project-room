@@ -35,7 +35,8 @@ const CRON_METHODS = [
   'drainWebhookDeliveries',
   'refreshLandQueue',
   'refreshClaimPullRequests',
-  'planRetention'
+  'planRetention',
+  'backfillPublicReadModel'
 ];
 
 export default {

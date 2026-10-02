@@ -17,6 +17,43 @@ const RESEND_API_URL = "https://api.resend.com/emails";
 
 const isNonEmptyString = value => typeof value === "string" && value.length > 0;
 
+// Shared Resend POST. Magic-link mail and notification mail both use it.
+// `label` is a fixed phrase ("magic link email", "notification email"), never
+// a recipient, a URL, or a message body.
+async function postResendEmail({ apiKey, from, fetchFn, to, subject, text, html, headers, label }) {
+  let response;
+  try {
+    response = await fetchFn(RESEND_API_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ from, to, subject, text, html, ...(headers ? { headers } : {}) })
+    });
+  } catch (error) {
+    throw new Error(`${label} failed to send: ${error?.message ?? error}`);
+  }
+  if (!response.ok) {
+    let detail = "";
+    try { detail = (await response.text()).slice(0, 200); } catch { /* ignore */ }
+    throw new Error(`${label} failed to send (HTTP ${response.status})${detail ? `: ${detail}` : ""}`);
+  }
+}
+
+// Transport for notification mail (HB-1a / NOTIFY). Null when unconfigured,
+// which is the Room default. The magic-link helpers below keep their own
+// return shape.
+export function resendTransport({ apiKey, from, fetchFn = fetch } = {}) {
+  if (!isNonEmptyString(apiKey) || !isNonEmptyString(from)) return null;
+  return ({ to, subject, text, html, headers } = {}) => {
+    if (!isNonEmptyString(to) || !isNonEmptyString(subject) || !isNonEmptyString(text)) {
+      throw new Error("notification email failed to send: recipient, subject, and text are required");
+    }
+    return postResendEmail({ apiKey, from, fetchFn, to, subject, text, html, headers, label: "notification email" });
+  };
+}
+
 // Build the magic-link send function for createMagicLinkMailer.
 // Returns null when no API key is configured (mailer stays unconfigured).
 export function resendMagicLinkSend({ apiKey, from, fetchFn = fetch } = {}) {
@@ -54,24 +91,7 @@ export function resendMagicLinkSend({ apiKey, from, fetchFn = fetch } = {}) {
       : `<p>Your Project Room sign-in code is:</p>` +
         `<p style="font-size: 24px; font-weight: bold; letter-spacing: 4px;">${escapeHtml(code)}</p>` +
         `<p>It expires in ${minutes} minutes. If you didn't request this, you can ignore this email.</p>`;
-    let response;
-    try {
-      response = await fetchFn(RESEND_API_URL, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ from, to, subject, text, html })
-      });
-    } catch (error) {
-      throw new Error(`magic link email failed to send: ${error?.message ?? error}`);
-    }
-    if (!response.ok) {
-      let detail = "";
-      try { detail = (await response.text()).slice(0, 200); } catch { /* ignore */ }
-      throw new Error(`magic link email failed to send (HTTP ${response.status})${detail ? `: ${detail}` : ""}`);
-    }
+    await postResendEmail({ apiKey, from, fetchFn, to, subject, text, html, label: "magic link email" });
   };
 }
 

@@ -161,6 +161,7 @@ test("RPC stub calls target a class that extends DurableObject", () => {
   }
   const methods = [...new Set(calls.map(call => call.method))].sort();
   assert.deepEqual(methods, [
+    "backfillPublicReadModel",
     "drainChannelBacklog",
     "drainWebhookDeliveries",
     "planRetention",
@@ -207,6 +208,7 @@ test("scheduled handler invokes cron RPC on the real ProjectRoom shape", async (
   const scheduledBody = sliceBalanced(workerSource, workerSource.indexOf("{", scheduledAt));
   const expected = rpcStubCalls(scheduledBody).map(call => call.method).sort();
   assert.deepEqual(expected, [
+    "backfillPublicReadModel",
     "drainChannelBacklog",
     "drainWebhookDeliveries",
     "planRetention",

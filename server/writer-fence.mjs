@@ -366,6 +366,14 @@ export const unfencedAdditiveTables = Object.freeze([
   // deferred integrity step the cron runs next. Neither is room content.
   "room_schema_stamp",
   "integrity_job_cursor",
+  // Public page read model. Written when an owner opts in, and removed when
+  // they opt out. Older writers have no path to these tables. Public pages
+  // read only these rows. The constructor creates the empty tables; the
+  // cron backfill copies rooms that opted in before the tables existed.
+  "public_receipts",
+  "public_rooms",
+  "public_directory_entries",
+  "public_read_model_backfill",
   // Per-room sequence and projection size for the incremental integrity
   // check. The cron writes it; a missing row means that room is due.
   "integrity_room_state"

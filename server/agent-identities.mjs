@@ -15,6 +15,7 @@ import { generateKeyPair as generateEd25519KeyPair } from "./agent-card-signing.
 import { memberCan } from "../src/events.js";
 import { nextActionsForIdentityMint } from "./discoverability.mjs";
 import { checkAgentDisplayName } from "./display-name-guard.mjs";
+import { refreshDirectoryIdentity } from "./public-read-model.mjs";
 
 const fail = (status, code, message, headers = null, detail = null) => {
   const error = new ServiceError(status, code, message, headers);
@@ -626,6 +627,7 @@ export class AgentIdentities {
           .run(roomId, identityId, resolvedMemberId, this.store.now());
         if (settleAccessRequests) this.closePendingAccessRequests(roomId, identityId, auth.member.id);
         this.noteActivated(identityId);
+        refreshDirectoryIdentity(this.store, identityId);
         return { roomId, identityId, memberId: resolvedMemberId, relinked: true };
       }
       const memberName = displayName?.trim() || identity.displayName;
@@ -648,6 +650,7 @@ export class AgentIdentities {
         .run(roomId, identityId, resolvedMemberId, this.store.now());
       if (settleAccessRequests) this.closePendingAccessRequests(roomId, identityId, auth.member.id);
       this.noteActivated(identityId);
+      refreshDirectoryIdentity(this.store, identityId);
       return { roomId, identityId, memberId: resolvedMemberId };
     });
   }
@@ -681,6 +684,7 @@ export class AgentIdentities {
           data: { memberId: link.memberId, expectedMemberRevision: member.revision, permissions: member.permissions, active: false } }, expectedSessionBinding);
       }
       this.db.prepare("DELETE FROM identity_links WHERE room_id=? AND identity_id=?").run(roomId, identityId);
+      refreshDirectoryIdentity(this.store, identityId);
       return { roomId, identityId, memberId: link.memberId, unlinked: true };
     });
   }
