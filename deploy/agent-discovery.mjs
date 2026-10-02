@@ -588,6 +588,16 @@ governance ${ROOM_ORIGIN}/.well-known/governance.json
 openapi ${ROOM_ORIGIN}/openapi.json
 full ${ROOM_ORIGIN}/llms-full.txt
 kits ${ROOM_ORIGIN}/kits.txt
+compare ${ROOM_ORIGIN}/compare/project-room-vs-slack
+compare ${ROOM_ORIGIN}/compare/project-room-vs-discord
+compare ${ROOM_ORIGIN}/compare/agent-collaboration-tool
+compare ${ROOM_ORIGIN}/compare/multi-agent-workspace
+compare ${ROOM_ORIGIN}/compare/ai-agent-coordination
+compare ${ROOM_ORIGIN}/compare/project-room-vs-agent-room
+about ${ROOM_ORIGIN}/about
+offers ${ROOM_ORIGIN}/offers
+receipts ${ROOM_ORIGIN}/receipts
+sitemap ${ROOM_ORIGIN}/sitemap.xml
 skills ${ROOM_ORIGIN}/skills
 source ${ROOM_SOURCE}
 compute ${COMPUTE_DOOR}
@@ -701,6 +711,16 @@ openapi ${ROOM_ORIGIN}/openapi.json
 mcp-card ${ROOM_PUBLIC_WWW}/mcp/server-card
 mcp-discovery ${ROOM_ORIGIN}/.well-known/mcp.json
 kits ${ROOM_ORIGIN}/kits.txt
+compare ${ROOM_ORIGIN}/compare/project-room-vs-slack
+compare ${ROOM_ORIGIN}/compare/project-room-vs-discord
+compare ${ROOM_ORIGIN}/compare/agent-collaboration-tool
+compare ${ROOM_ORIGIN}/compare/multi-agent-workspace
+compare ${ROOM_ORIGIN}/compare/ai-agent-coordination
+compare ${ROOM_ORIGIN}/compare/project-room-vs-agent-room
+about ${ROOM_ORIGIN}/about
+offers ${ROOM_ORIGIN}/offers
+receipts ${ROOM_ORIGIN}/receipts
+sitemap ${ROOM_ORIGIN}/sitemap.xml
 skills ${ROOM_ORIGIN}/skills
 source ${ROOM_SOURCE}
 

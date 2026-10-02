@@ -30,8 +30,10 @@ test('bundled public door executes under CSP and preserves invitation and room l
     'https://room.trydemigod.com/.well-known/agent-card.json',
     'https://room.trydemigod.com/llms.txt',
     'https://room.trydemigod.com/skills',
+    'https://room.trydemigod.com/room',
     'https://room.trydemigod.com/room'
   ], 'alternate entry discovery leads to Project Room, not the shared host apex');
+  assert.match(response.headers.get('link') ?? '', /<https:\/\/room\.trydemigod\.com\/room>; rel="canonical"/);
   const headers = Object.fromEntries(response.headers);
   const browser = await chromium.launch({ headless: true });
   t.after(() => browser.close());

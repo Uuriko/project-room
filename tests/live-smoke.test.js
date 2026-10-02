@@ -9,6 +9,7 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { PUBLIC_PAGES } from "../scripts/live-smoke.mjs";
 
 const run = promisify(execFile);
 const LIVE = "a".repeat(40);
@@ -28,14 +29,14 @@ function stand(overrides = {}) {
     "/agents.json": [200, "application/json", "{}"],
     "/openapi.json": [200, "application/json", "{}"],
     "/robots.txt": [200, "text/plain", "User-agent: *\nAllow: /\n"],
-    "/sitemap.xml": [200, "application/xml", "<urlset/>"],
+    "/sitemap.xml": [200, "application/xml", "<urlset><url><loc>https://room.trydemigod.com/receipts/pwr_abcdabcdabcdabcd</loc></url></urlset>"],
     "/favicon.ico": [200, "image/x-icon", "x"],
     "/a2a": [405, "application/json", "{}"],
     "/api/needs-me": [401, "application/json", "{}"],
     "/repos/Uuriko/project-room/commits/main": [200, "application/json", JSON.stringify({ sha: LIVE })],
     ...overrides,
   };
-  for (const page of ["/", "/about", "/offers", "/receipts", "/join"]) routes[page] ??= [200, "text/html", "<!doctype html><title>Room</title>"];
+  for (const page of [...PUBLIC_PAGES, "/receipts/pwr_abcdabcdabcdabcd"]) routes[page] ??= [200, "text/html", "<!doctype html><title>Room</title>"];
   const server = createServer((req, res) => {
     const path = new URL(req.url, "http://x").pathname;
     const origin = `http://127.0.0.1:${server.address().port}`;
