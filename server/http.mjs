@@ -12,6 +12,7 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypt
 import { ServiceError } from "./store.mjs";
 import { peerEventVisible, visibleBonds } from "./bonds.mjs";
 import { clientAddress, STREAM_INTERVAL_DEFAULT_MS } from "./deployment.mjs";
+import { isWorkersRuntime } from "./ip-blocklist.mjs";
 import { validId, memberCan, MAX_MESSAGE_COMMAND_BYTES } from "../src/events.js";
 import { SyntheticInboxTransport, FixtureChannelSender, GmailSender, gmailCredentialsFor, sendTelegramDirect } from "./inbox-transport.mjs";
 import { createSendBudgetRegistry } from "./channel-send-budgets.mjs";
@@ -117,6 +118,47 @@ for (const name of ["favicon.svg", "icon.svg", "manifest.webmanifest"]) {
   if (asset) assets.set(`/room/${name}`, asset);
 }
 const reject = (status, code, message, headers) => { throw new ServiceError(status, code, message, headers ?? null); };
+
+// RFC 9116. Contact comes from ROOM_SECURITY_CONTACT. A bare address becomes
+// a mailto URI. Anything else must already be mailto: or https:, with no
+// line breaks. Unset or unusable values serve 404.
+let securityContactWarned = false;
+function securityContactFrom(raw) {
+  if (typeof raw !== "string") return null;
+  const trimmed = raw.trim();
+  if (!trimmed || /[\r\n]/.test(trimmed)) return null;
+  const contact = trimmed.includes(":") ? trimmed : `mailto:${trimmed}`;
+  if (!/^mailto:/i.test(contact) && !/^https:\/\//i.test(contact)) return null;
+  return contact;
+}
+function securityTxtDocument(contact, now = Date.now()) {
+  const expires = new Date(now + 365 * 24 * 60 * 60 * 1000).toISOString().replace(/\.\d{3}Z$/, "Z");
+  return `Contact: ${contact}\nExpires: ${expires}\n`;
+}
+function warnMissingSecurityContact() {
+  if (securityContactWarned) return;
+  securityContactWarned = true;
+  console.warn("ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404");
+}
+function warnMissingSecurityContactCheck() {
+  if (!securityContactFrom(process.env.ROOM_SECURITY_CONTACT)) warnMissingSecurityContact();
+}
+function writeSecurityTxt(req, res) {
+  if (req.method !== "GET" && req.method !== "HEAD") reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET, HEAD" });
+  const contact = securityContactFrom(process.env.ROOM_SECURITY_CONTACT);
+  if (!contact) {
+    warnMissingSecurityContact();
+    res.statusCode = 404;
+    res.setHeader("Content-Type", "text/plain; charset=utf-8");
+    res.end(req.method === "HEAD" ? undefined : "Not found\n");
+    return;
+  }
+  const body = securityTxtDocument(contact);
+  res.statusCode = 200;
+  res.setHeader("Content-Type", "text/plain; charset=utf-8");
+  res.setHeader("Content-Length", String(Buffer.byteLength(body)));
+  res.end(req.method === "HEAD" ? undefined : body);
+}
 // RFC 8288 discovery hints on machine-readable surfaces: the A2A agent card,
 // the llms packet, the skills catalog, and the public HTML door.
 const discoveryLinks = url => {
@@ -236,6 +278,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // config never holds up startup and the card reports "not configured".
   if (typeof telegram?.configured !== "boolean" || !Array.isArray(telegram.bindings)) throw new Error("Telegram configuration must come from telegramConfig()");
   if (deployment !== undefined && deployment !== "production" && deployment !== "staging") throw new Error("deployment must be production or staging");
+  // The Worker reads ROOM_SECURITY_CONTACT from its binding in edge-public.
+  // Logging process.env here would warn on every isolate that has no env var.
+  if (!isWorkersRuntime()) warnMissingSecurityContactCheck();
   const deploymentField = deployment ? { deployment } : {};
   // Google sign-in is off unless the caller passes googleConfig(env, origin).
   // The sign-in helper is created lazily so its PKCE/state table lives as long
@@ -780,12 +825,18 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     // Cloudflare Web Analytics injects its beacon at the edge. The app does not
     // add that script; this document policy is what lets the beacon run.
     res.setHeader("Content-Security-Policy", "default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'");
+    // SEC-1: lock unused powerful features and cross-origin window access.
+    res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()");
+    res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
     try {
       if (req.headers.host !== new URL(expectedOrigin()).host) reject(403, "host_denied", "Unexpected host");
       let remoteAddress;
       try { remoteAddress = resolveClientAddress(req); }
       catch { reject(403, "proxy_denied", "Invalid proxy configuration"); }
       const url = new URL(req.url, expectedOrigin()), loopback = ["127.0.0.1", "::1"].includes(remoteAddress);
+      if (url.pathname === "/.well-known/security.txt" || url.pathname === "/room/.well-known/security.txt") {
+        return writeSecurityTxt(req, res);
+      }
       // Jev-harness admission gate, shadow mode (docs/JEV-GATES.md): score
       // the join with the cheap classifier, journal the would-be decision,
       // then proceed unchanged. Shadow mode never enforces — this helper
@@ -3263,8 +3314,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (url.pathname === "/api/agent-invites/redeem" && req.method !== "POST") {
         reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
       }
-      // Signed referral invites: any active member mints a bearer token and
-      // carries it out-of-band — the server never sends or dispatches it.
+      // Signed referral invites: the owner, or a member who can invite, mints
+      // a bearer token and carries it out-of-band — the server never sends it.
       // Redemption is unauthenticated (the token is the credential) and
       // lands the stranger at the fixed read+chat tier.
       if (url.pathname === "/api/referral-invites/mint" && req.method === "POST") {
@@ -3287,13 +3338,25 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (url.pathname === "/api/referral-invites/redeem" && req.method === "POST") {
         rate(`referral-invite-redeem:${remoteAddress}`, 20);
         const data = await body(req);
-        const withName = Object.hasOwn(data, "displayName");
-        if (!(exact(data, withName ? ["token", "displayName"] : ["token"]))
+        // SEC-1: a bearer attaches an existing identity. A new join shares
+        // the anonymous mint limiter, so proof is accepted on this body.
+        const fields = ["token"];
+        if (Object.hasOwn(data, "displayName")) fields.push("displayName");
+        if (Object.hasOwn(data, "proof")) fields.push("proof");
+        const proofOk = !Object.hasOwn(data, "proof") || (typeof data.proof === "string" && /^[A-Za-z0-9_-]{1,43}$/.test(data.proof));
+        if (!exact(data, fields)
             || typeof data.token !== "string"
-            || (withName && typeof data.displayName !== "string")) {
-          reject(422, "invalid_invite", "token and optional displayName are the accepted fields");
+            || (Object.hasOwn(data, "displayName") && typeof data.displayName !== "string")
+            || !proofOk) {
+          reject(422, "invalid_invite", "token, optional displayName, and optional proof are the accepted fields");
         }
-        const redeemedReferral = store.referralInvites.redeem({ token: data.token, displayName: data.displayName });
+        const redeemedReferral = store.referralInvites.redeem({
+          token: data.token,
+          displayName: data.displayName,
+          identitySecret: bearer(req) || null,
+          address: String(remoteAddress ?? ""),
+          proof: data.proof,
+        });
         // Jev-harness admission gate, shadow mode (docs/JEV-GATES.md):
         // score the join, journal the would-be decision, admit anyway.
         jevShadowAdmission("referral-invite:redeem", { roomId: redeemedReferral.roomId, identityId: redeemedReferral.identityId,
