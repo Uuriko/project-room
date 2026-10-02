@@ -6,6 +6,8 @@
 // not mount the UI; these use no production test seams or fabricated API replies.
 // The two happy-path viewports additionally guard mobile reachability and native
 // keyboard activation; Escape review dismissal must restore the initiating focus.
+// Additional regressions own prelookup-throttle retry continuity, live ownership
+// loss with an open review, and keyboard focus across real stream-driven refreshes.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
@@ -210,37 +212,55 @@ test("an admin can cancel partial review, approve only selected permissions, and
   assert.equal(f.pending().length, 0);
 });
 
-test("a lost committed response retries the same permission request without a duplicate", { timeout: 60000 }, async t => {
+for (const scenario of ["lost response", "lost response then 429", "confirmed pending then 429"]) test(`permission request recovery: ${scenario} retains one request and its grants`, { timeout: 60000 }, async t => {
   const f = await setup(t), page = await f.login("requester");
+  const confirmed = scenario.startsWith("confirmed"), throttle = scenario.endsWith("429");
   const held = f.hold(), committed = deferred(), sent = [];
   await page.route(`**${requestPath}`, async route => {
     sent.push(route.request().postDataJSON());
+    // Simulate only the prelookup limiter's error. Original and recovery writes
+    // still reach the real HTTP handler, authentication, database and event log.
+    if (throttle && sent.length === 2) return route.fulfill({ status: 429,
+      json: { error: { code: "rate_limited", message: "Synthetic prelookup rate limit" } } });
     if (sent.length !== 1) return route.continue();
     const response = await route.fetch();
     assert.equal(response.status(), 201);
     committed.resolve();
     await held.promise;
-    await route.abort("failed");
+    if (confirmed) await route.fulfill({ response });
+    else await route.abort("failed");
   });
   await openMemberProfile(page, "requester");
   await ownRow(page).getByRole("button", { name: "Ask to take work", exact: true }).dblclick();
   await committed.promise;
   assert.equal(sent.length, 1, "an impatient double click submits once");
-  assert.equal(f.pending().length, 1, "the server committed before the response was lost");
+  assert.equal(f.pending().length, 1, "the original request was committed");
   const sequence = f.store.room("commons").sequence;
   held.resolve();
-  const retry = ownRow(page).getByRole("button", { name: "Retry request", exact: true });
-  await retry.waitFor();
-  const reply = page.waitForResponse(response => isPermissionRequest(response.request()));
-  await retry.click();
-  const response = await reply;
+  const firstRecovery = ownRow(page).getByRole("button", { name: confirmed ? "Check request" : "Retry request", exact: true });
+  await firstRecovery.waitFor();
+  let reply = page.waitForResponse(response => isPermissionRequest(response.request()));
+  await firstRecovery.click();
+  let response = await reply;
+  if (throttle) {
+    assert.equal(response.status(), 429);
+    const retry = ownRow(page).getByRole("button", { name: "Retry request", exact: true });
+    await retry.waitFor();
+    assert.equal(f.pending().length, 1);
+    assert.equal(f.store.room("commons").sequence, sequence, "the prelookup throttle did not write");
+    reply = page.waitForResponse(response => isPermissionRequest(response.request()));
+    await retry.click();
+    response = await reply;
+  }
   assert.equal(response.status(), 201);
   const recovered = await response.json();
-  await retry.waitFor({ state: "detached" });
-  assert.equal(sent.length, 2);
-  assert.equal(sent[1].requestId, sent[0].requestId);
+  await ownRow(page).locator("[data-permission-request-status]").filter({ hasText: "Waiting for review." }).waitFor();
+  assert.equal(sent.length, throttle ? 3 : 2);
   assert.ok(sent[0].requestId);
-  assert.deepEqual(sent[1].permissions, sent[0].permissions);
+  for (const retry of sent.slice(1)) {
+    assert.equal(retry.requestId, sent[0].requestId, "every retry retains the original idempotency key");
+    assert.deepEqual(retry.permissions, sent[0].permissions, "every retry retains the exact requested grants");
+  }
   assert.equal(recovered.requestId, sent[0].requestId);
   assert.equal(f.pending().length, 1);
   assert.equal(f.store.room("commons").sequence, sequence, "recovering a committed request appends no duplicate event");
@@ -278,4 +298,98 @@ test("a late permission-request response cannot move request state into a differ
   assert.notEqual(otherRequest.requestId, firstRequest.requestId);
   assert.deepEqual(f.pending().map(request => request.memberId).sort(), ["other", "requester"]);
   assert.deepEqual(f.permissions("other"), []);
+});
+
+
+test("ownership transfer closes a partial review and clears the owner-only rollup before the admin queue returns", { timeout: 60000 }, async t => {
+  const f = await setup(t);
+  const send = (type, data) => f.store.command(f.keys.owner, "commons", { id: crypto.randomUUID(), type, data });
+  const workId = "owner-lease-reminder", title = "Owner-only lease reminder";
+  send(T.WORK_PROPOSED, { workItemId: workId, title, definitionOfDone: "Return evidence",
+    accountableMemberId: "owner", mode: "write", independentVerificationRequired: false, ownerDecisionRequired: false });
+  const revision = () => f.store.room("commons").state.workItems[workId].revision;
+  send(T.WORK_ACCEPTED, { workItemId: workId, expectedRevision: revision() });
+  send(T.CLAIM_ACQUIRED, { workItemId: workId, expectedRevision: revision(), repository: "fixture/repository",
+    ref: "local-fixture", paths: ["fixture.txt"], expiresAt: new Date(Date.now() + 3600000).toISOString() });
+  const request = f.access.requestForMember(f.keys.requester, "commons", {
+    permissions: ["accept_work", "complete_work"], requestId: "ownership-browser-request" });
+  const page = await f.login("owner"), row = attentionRow(page);
+  await row.waitFor();
+  const ownerDetail = page.locator("#attention-list > li").filter({ hasText: title });
+  await ownerDetail.waitFor();
+  await row.getByRole("button", { name: "Approve partial", exact: true }).click();
+  await row.locator("fieldset").waitFor();
+  const held = f.hold(), captured = deferred();
+  await page.route("**/api/rooms/commons/access-requests?status=pending", async route => {
+    const response = await route.fetch();
+    assert.equal(response.status(), 200);
+    captured.resolve();
+    await held.promise;
+    await route.fulfill({ response });
+  });
+  send(T.OWNERSHIP_TRANSFERRED, { toMemberId: "other", reason: "Disposable browser ownership handoff" });
+  const authority = f.store.roomAuthority("commons");
+  assert.equal(authority.ownerId, "other");
+  assert.equal(authority.members.owner.active, true);
+  assert.ok(authority.members.owner.permissions.includes("manage_members"));
+  await ownerDetail.waitFor({ state: "detached" });
+  await page.locator("#attention-list fieldset").waitFor({ state: "detached" });
+  await captured.promise;
+  assert.equal(await page.locator("#attention-list > li").count(), 0, "old owner details clear while the authorized replacement queue is loading");
+  const delivered = page.waitForResponse(response => new URL(response.url()).pathname.endsWith("/access-requests"));
+  held.resolve(); await delivered;
+  await row.waitFor();
+  assert.equal(await page.locator("#attention-list > li").count(), 1);
+  assert.equal(await row.getAttribute("data-access-request-id"), request.requestId);
+  assert.equal(await row.locator(".attention-kind").textContent(), "Permission request");
+  assert.equal(await ownerDetail.count(), 0, "an active ex-owner admin receives no owner-only work reminder");
+  assert.equal(await page.locator("#attention-list fieldset").count(), 0, "the previous owner's unsent partial editor does not survive");
+  assert.equal(f.pending().length, 1, "ownership transition never submits the partial approval");
+  assert.deepEqual(f.permissions("requester"), []);
+});
+
+test("stream-driven request refresh preserves action focus but never takes it back from the composer", { timeout: 60000 }, async t => {
+  const f = await setup(t);
+  f.access.requestForMember(f.keys.requester, "commons", {
+    permissions: ["accept_work", "complete_work"], requestId: "focus-browser-request" });
+  const page = await f.login("owner"), row = attentionRow(page);
+  await row.waitFor();
+  const isQueue = response => response.request().method() === "GET"
+    && new URL(response.url()).pathname === "/api/rooms/commons/access-requests";
+  const refreshDone = () => page.waitForFunction(() => !document.querySelector("#attention-refresh").disabled);
+  const unrelatedMessage = body => f.store.command(f.keys.owner, "commons", { id: crypto.randomUUID(),
+    type: T.MESSAGE_POSTED, data: { body } });
+  let decisions = 0;
+  page.on("request", request => {
+    if (request.method() === "POST" && /\/access-requests\/[^/]+\/decide$/.test(new URL(request.url()).pathname)) decisions++;
+  });
+  for (const label of ["Approve", "Decline", "Approve partial"]) {
+    const action = row.getByRole("button", { name: label, exact: true });
+    await action.focus();
+    const refreshed = page.waitForResponse(isQueue);
+    unrelatedMessage(`Unrelated activity while focused on ${label}`);
+    await (await refreshed).finished();
+    await refreshDone();
+    assert.equal(await action.evaluate(node => node === document.activeElement), true,
+      `${label} keeps keyboard focus on the same request after refresh`);
+  }
+  const held = f.hold(), captured = deferred();
+  await page.route("**/api/rooms/commons/access-requests?status=pending", async route => {
+    const response = await route.fetch();
+    captured.resolve();
+    await held.promise;
+    await route.fulfill({ response });
+  });
+  await row.getByRole("button", { name: "Approve", exact: true }).focus();
+  unrelatedMessage("The reader moves away during a pending refresh");
+  await captured.promise;
+  const composer = page.locator("#message-input");
+  await composer.focus();
+  const delivered = page.waitForResponse(isQueue);
+  held.resolve(); await (await delivered).finished();
+  await refreshDone();
+  assert.equal(await composer.evaluate(node => node === document.activeElement), true,
+    "a completed refresh does not steal focus after the reader moves elsewhere");
+  assert.equal(decisions, 0, "focusing and refreshing never submits a decision");
+  assert.equal(f.pending().length, 1);
 });

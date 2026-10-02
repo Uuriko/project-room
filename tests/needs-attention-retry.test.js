@@ -379,3 +379,97 @@ test("room sync preserves a manually selected page until the reader follows its 
   assert.equal(section._elements["#attention-range"].textContent, "Showing 1–1 of 3");
   assert.equal(section._elements["#attention-status"].textContent, "The list changed. Showing the first page.");
 });
+
+// Ownership-transfer audit: manage_members survives the transfer, so the
+// existing revoked/inactive cases cannot catch a retained owner-only report.
+// These exercise the real sync/read-completion boundaries with distinct private
+// owner data and public-to-admin queue data. The credible regressions are keeping
+// a selected owner page, or joining a late response to that old owner's report.
+// No new production dependency or test seam is needed.
+function ownerTransferReport() {
+  return {
+    items: [
+      { kind: "decision", id: "private-owner-decision", severity: "action", title: "Private owner decision",
+        detail: "Owner-only review detail", actions: [{ action: "review", method: "GET" }] },
+      { kind: "access_request", id: "request-1", severity: "action", title: "Pending member",
+        detail: "Pending permission review", actions: [] },
+    ],
+    itemCount: 91,
+    pageOffset: 20,
+    previousCursor: "owner-page-1",
+    nextCursor: "owner-page-3",
+  };
+}
+
+function assertOwnerRollupRemoved(section) {
+  const elements = section._elements;
+  assert.doesNotMatch(elements["#attention-list"].innerHTML, /Private owner decision|Owner-only review detail|private-owner-decision/,
+    "neither private owner content nor its review link survives ownership loss");
+  assert.notEqual(elements["#attention-count"].textContent, "91", "owner-only totals are removed");
+  assert.doesNotMatch(elements["#attention-range"].textContent, /of 91/, "owner-only page metadata is removed");
+  assert.equal(elements["#attention-pages"].hidden, true, "owner continuations are removed");
+  assert.equal(elements["#attention-previous"].disabled, true);
+  assert.equal(elements["#attention-next"].disabled, true);
+}
+
+function assertAdminQueueRendered(section) {
+  assertOwnerRollupRemoved(section);
+  assert.equal(section.hidden, false, "the remaining admin can still review pending requests");
+  assert.match(section._elements["#attention-list"].innerHTML, /Pending member wants more permissions/);
+  assert.equal(section._elements["#attention-count"].textContent, "1");
+  assert.equal(section._elements["#attention-range"].textContent, "Showing 1–1 of 1");
+}
+
+test("ownership transfer clears a selected owner page while preserving the active admin queue", async t => {
+  const { section, timers } = attentionEnvironment(t);
+  const state = attentionState({ owner: true });
+  const { client } = attentionClient({ read: async () => state.room.ownerId === "admin-1" ? ownerTransferReport() : null });
+  const card = createNeedsAttentionCard({ client, section, getState: () => state });
+  card.sync(); // Establish the current room so the later sync is an authority change, not initial setup.
+  await card.refresh("owner-page-2");
+  assert.match(section._elements["#attention-list"].innerHTML, /Private owner decision/);
+  assert.equal(section._elements["#attention-range"].textContent, "Showing 21–22 of 91");
+  assert.equal(section._elements["#attention-next"].disabled, false);
+  state.room.ownerId = "new-owner";
+  client.sequence++;
+  card.sync();
+  assertOwnerRollupRemoved(section); // Must happen synchronously, before the next network response.
+  assert.equal(state.members["admin-1"].active, true);
+  assert.ok(state.members["admin-1"].permissions.includes("manage_members"));
+  await card.refresh();
+  assertAdminQueueRendered(section);
+  assert.equal(timers.size, 0);
+});
+
+for (const stage of ["rollup", "queue"]) {
+  test(`ownership transfer suppresses an in-flight owner ${stage} response even while admin authority remains`, async t => {
+    const { section, timers } = attentionEnvironment(t);
+    const state = attentionState({ owner: true });
+    const pending = deferredAttentionRead(), entered = deferredAttentionRead();
+    let holdRead = false;
+    const hold = () => { entered.resolve(); return pending.promise; };
+    const { client } = attentionClient({
+      read: async () => holdRead && stage === "rollup" ? hold()
+        : state.room.ownerId === "admin-1" ? ownerTransferReport() : null,
+      queue: async () => holdRead && stage === "queue" ? hold() : accessQueue(),
+    });
+    const card = createNeedsAttentionCard({ client, section, getState: () => state });
+    card.sync();
+    await card.refresh("owner-page-2");
+    assert.match(section._elements["#attention-list"].innerHTML, /Private owner decision/);
+    holdRead = true;
+    const refresh = card.refresh("owner-page-3");
+    await entered.promise;
+    state.room.ownerId = "new-owner";
+    // No sync: an outstanding read may settle before the next UI update.
+    pending.resolve(stage === "rollup" ? ownerTransferReport() : accessQueue());
+    await refresh;
+    assertOwnerRollupRemoved(section);
+    assert.equal(state.members["admin-1"].active, true);
+    assert.ok(state.members["admin-1"].permissions.includes("manage_members"));
+    holdRead = false;
+    await card.refresh();
+    assertAdminQueueRendered(section);
+    assert.equal(timers.size, 0);
+  });
+}

@@ -60,7 +60,7 @@ export function createNeedsAttentionCard(options) {
 
   function owns(ticket, session, generation) {
     if (ticket !== epoch || session !== client.session || generation !== client.generation) return false;
-    if (!canReview()) { hide(); return false; }
+    if (!canReview() || hasRoomState && currentReport?.ownerOnly && !viewer().owner) { hide(); return false; }
     return true;
   }
   function clearRetry() {
@@ -206,6 +206,10 @@ export function createNeedsAttentionCard(options) {
     clearRetry();
     const ticket = ++epoch, session = client.session, generation = client.generation;
     const focused = document.activeElement;
+    const focusedRow = focused?.closest?.("[data-access-request-id]");
+    const focusedRequest = focusedRow?.dataset.accessRequestId;
+    const focusedSelector = focused?.matches?.(".attention-decide") ? `[data-action-index="${CSS.escape(focused.dataset.actionIndex)}"]`
+      : ["attention-partial", "attention-selected", "attention-cancel"].find(name => focused?.classList?.contains?.(name));
     setBusy(true);
     setStatus("Checking…");
     try {
@@ -218,12 +222,19 @@ export function createNeedsAttentionCard(options) {
         const requests = queue.requests.map(requestItem), byId = new Map(requests.map(item => [item.id, item]));
         // Owners retain their paged rollup; admins receive only the request queue
         // their existing manage_members authority permits, never the owner rollup.
-        report = report ? { ...report, items: report.items.map(item => item.kind === "access_request" ? byId.get(item.id) : item).filter(Boolean) }
-          : { items: requests, itemCount: requests.length, pageOffset: 0 };
+        if (!viewer().owner) report = null;
+        report = report ? { ...report, ownerOnly: true, items: report.items.map(item => item.kind === "access_request" ? byId.get(item.id) : item).filter(Boolean) }
+          : { items: requests, itemCount: requests.length, pageOffset: 0, ownerOnly: false };
       }
       if (partial && !report?.items.some(item => item.id === partial.id)) partial = null;
+      const keepsFocus = focused && (document.activeElement === focused
+        || focused.disabled && document.activeElement === document.body);
       render(report);
-      if (focused === previous || focused === next) {
+      if (keepsFocus && focusedRequest && focusedSelector) {
+        const selector = focusedSelector.startsWith("[") ? focusedSelector : `.${focusedSelector}`;
+        const replacement = list.querySelector(`[data-access-request-id="${CSS.escape(focusedRequest)}"] ${selector}`);
+        if (replacement && !replacement.disabled) replacement.focus();
+      } else if (keepsFocus && (focused === previous || focused === next)) {
         // Avoid leaving keyboard focus on a now-disabled paging control.
         (pages.hidden ? refreshButton : focused.disabled ? (focused === next ? previous : next) : focused).focus();
       }
@@ -252,6 +263,9 @@ export function createNeedsAttentionCard(options) {
     const identity = `${client.generation}:${client.session.roomId}:${client.session.member.id}`;
     if (identity !== activeScope) { hide(); activeScope = identity; }
     const { member, owner } = viewer(), grants = `${owner}:${member.permissions.join(",")}`;
+    // An ex-owner may remain an admin. The owner rollup contains more than
+    // requests, so invalidate its page/editor and outstanding reads first.
+    if (currentReport?.ownerOnly && !owner) { hide(); activeScope = identity; }
     if (authority !== grants && currentReport) {
       if (partial) partial.selected = new Set([...partial.selected].filter(canGrant));
       const wasBusy = busy;
@@ -336,9 +350,10 @@ export function installMemberPermissions({ client, getState, getSession }) {
     } catch (error) {
       if (!owns(value) || sent !== operation) return;
       if ([401, 403].includes(error.status) || error.code === "session_binding_changed") { reset(); client.handleFailure(error); return; }
-      // Unknown transport outcomes retain the exact id and grant list. Retrying
-      // checks the committed request instead of creating a second one.
-      retry = !Number.isSafeInteger(error.status) || error.status >= 500;
+      // Unknown outcomes and transient pre-lookup refusals retain the exact
+      // id and grant list, including an already-confirmed pending request.
+      // Retrying checks that request instead of creating a second one.
+      retry = !Number.isSafeInteger(error.status) || error.status >= 500 || [408, 425, 429].includes(error.status);
       if (!retry) operation = null;
       message = error.code === "nothing_to_request" ? "You already have these permissions. Refreshing…" : `Could not request: ${error.message}`;
       if (error.code === "nothing_to_request") await client.refresh();
