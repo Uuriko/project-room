@@ -492,8 +492,8 @@ test("online capture preserves all application tables, identity boundaries and e
       assert.equal(table.rows, 0, "the deferred integrity cursor is written by the cron, not on open");
       continue;
     }
-    if (table.table === "public_rooms" || table.table === "public_directory_entries" || table.table === "public_read_model_backfill") {
-      assert.equal(table.rows, 0, "public pages stay empty until an owner opts in, and the backfill cursor is written by cron");
+    if (table.table === "public_rooms" || table.table === "public_read_model_backfill") {
+      assert.equal(table.rows, 0, "a public room page stays empty until an owner opts in, and the backfill cursor is written by cron");
       continue;
     }
     assert.ok(table.rows > 0, `${table.table} has substantive fixture data`);

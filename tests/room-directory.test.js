@@ -2,12 +2,16 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { RoomDirectory, roomDirectorySchema, DIRECTORY_PAGE_LIMIT } from "../server/room-directory.mjs";
+import { roomPublicFaceSchema } from "../server/public-face.mjs";
+import { PUBLIC_READ_MODEL_SCHEMA } from "../server/public-read-model.mjs";
 
 const member = (id, displayName, active = true) => ({ id, displayName, active, kind: "agent", permissions: [] });
 
 function makeStore(states) {
   const db = new DatabaseSync(":memory:");
   db.exec(roomDirectorySchema);
+  db.exec(roomPublicFaceSchema);
+  db.exec(PUBLIC_READ_MODEL_SCHEMA);
   db.exec("CREATE TABLE rooms (id TEXT PRIMARY KEY, archived_at TEXT)");
   const insertRoom = db.prepare("INSERT INTO rooms (id, archived_at) VALUES (?, ?)");
   for (const [id, { archived = false }] of Object.entries(states)) insertRoom.run(id, archived ? "2026-09-20" : null);

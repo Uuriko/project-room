@@ -38,8 +38,14 @@ async function serve(t) {
   });
   store.workClaims.set("public-room", {
     id: "visible-claim", title: "Visible claim", state: "done", owner: "owner",
-    history: [{ action: "pr_merged", actor: "owner", at: "2026-10-01T00:00:00.000Z" }],
+    history: [{ action: "pr_merged", agentId: "owner", actor: "not-a-member", at: "2026-10-01T00:00:00.000Z" }],
     pullRequest: { url: "https://github.com/Uuriko/project-room/pull/4", outcome: "merged", syncedAt: "2026-10-01T00:00:00.000Z" },
+    blobs: [], updatedAt: "2026-10-01T00:00:00.000Z",
+  });
+  store.workClaims.set("public-room", {
+    id: "unverified-claim", title: "UNVERIFIED-merge-claim", state: "done", owner: "owner",
+    history: [{ action: "state:done", agentId: "owner", at: "2026-10-01T00:00:00.000Z" }],
+    pullRequest: { url: "https://github.com/Uuriko/project-room/pull/8", outcome: "merged", syncedAt: "2026-10-01T00:00:00.000Z" },
     blobs: [], updatedAt: "2026-10-01T00:00:00.000Z",
   });
   command(store, publicKey, "public-room", "publish-page", "room.public_page_set", { enabled: true });
@@ -105,6 +111,8 @@ test("a private room with receipts never appears on a public route", async t => 
   const listed = await raw(origin, "/receipts");
   assert.equal(listed.status, 200);
   assert.match(listed.text, /Visible claim/);
+  assert.equal(listed.text.includes("UNVERIFIED-merge-claim"), false);
+  assert.equal(listed.text.includes("not-a-member"), false);
   const room = await raw(origin, "/r/public-room");
   assert.equal(room.status, 200);
   assert.match(room.text, /Join/);
@@ -264,4 +272,64 @@ test("opening the store does not backfill, and one batch publishes a bounded set
   const published = JSON.stringify(store.db.prepare("SELECT slug, title, purpose, names_json, tasks_json FROM public_rooms").all());
   assert.equal(published.includes(SENTINEL), false);
   assert.equal(published.includes("room-private"), false);
+});
+
+const percentile = (samples, p) => {
+  const sorted = [...samples].sort((a, b) => a - b);
+  return sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil(sorted.length * p) - 1))];
+};
+
+test("receipts, room pages, the directory, and the sitemap stay within 20 ms p95 with 2000 private rooms", async t => {
+  const { origin, store } = await serve(t);
+  store.transaction(() => {
+    const insert = store.db.prepare("INSERT INTO rooms (id, sequence, projection, archived_at) VALUES (?, 0, ?, NULL)");
+    for (let i = 0; i < 2000; i += 1) {
+      const id = `priv-${String(i).padStart(4, "0")}`;
+      insert.run(id, JSON.stringify({ room: { id, title: SENTINEL }, messages: [{ body: SENTINEL }] }));
+    }
+  });
+  const paths = ["/receipts", "/api/public/receipts", "/sitemap.xml", "/agents", "/r/public-room"];
+  for (const path of paths) await raw(origin, path);
+  const samples = new Map(paths.map(path => [path, []]));
+  for (let i = 0; i < 20; i += 1) {
+    for (const path of paths) {
+      const started = performance.now();
+      const page = await raw(origin, path);
+      samples.get(path).push(performance.now() - started);
+      assert.equal(page.status, 200, path);
+      assert.equal(page.text.includes(SENTINEL), false, path);
+    }
+  }
+  for (const path of paths) {
+    const p95 = percentile(samples.get(path), 0.95);
+    t.diagnostic(`${path} p95 ${p95.toFixed(2)} ms`);
+    assert.ok(p95 <= 20, `${path} p95 ${p95.toFixed(2)} ms`);
+  }
+});
+
+test("public receipts JSON allows any origin and the public pages allow the analytics beacon", async t => {
+  const { origin } = await serve(t);
+  const json = await fetch(`${origin}/api/public/receipts`, { headers: { Origin: "https://example.test" } });
+  assert.equal(json.status, 200);
+  assert.equal(json.headers.get("access-control-allow-origin"), "*");
+  assert.equal(json.headers.get("access-control-allow-credentials"), null);
+  const list = await json.json();
+  const id = list.receipts.find(item => item.title === "Visible claim")?.id;
+  assert.match(id, /^wcr_/);
+  const detail = await fetch(`${origin}/receipts/${id}.json`, { headers: { Origin: "https://example.test" } });
+  assert.equal(detail.status, 200);
+  assert.equal(detail.headers.get("access-control-allow-origin"), "*");
+  assert.equal(detail.headers.get("access-control-allow-credentials"), null);
+  const preflight = await fetch(`${origin}/api/public/receipts`, { method: "OPTIONS", headers: { Origin: "https://example.test" } });
+  assert.equal(preflight.status, 204);
+  assert.equal(preflight.headers.get("access-control-allow-origin"), "*");
+  assert.equal(preflight.headers.get("access-control-allow-credentials"), null);
+  const html = await fetch(`${origin}/receipts`, { headers: { Origin: "https://example.test" } });
+  assert.equal(html.status, 403);
+  for (const path of ["/receipts", "/agents", "/r/public-room"]) {
+    const page = await fetch(`${origin}${path}`);
+    const csp = page.headers.get("content-security-policy");
+    assert.match(csp, /https:\/\/static\.cloudflareinsights\.com/);
+    assert.match(csp, /https:\/\/cloudflareinsights\.com/);
+  }
 });

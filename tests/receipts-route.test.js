@@ -23,7 +23,7 @@ async function serve(t) {
   const adaKey = store.issueAccessKey("commons", "ada");
   store.workClaims.set("commons", {
     id: "claim-1", title: "Ship the door", state: "done", owner: "ada",
-    history: [{ action: "pr_merged", actor: "owner", at: "2026-10-01T00:00:00.000Z" }],
+    history: [{ action: "pr_merged", agentId: "owner", actor: "ada", at: "2026-10-01T00:00:00.000Z" }],
     pullRequest: { url: "https://github.com/Uuriko/project-room/pull/9", outcome: "merged", syncedAt: "2026-10-01T12:00:00.000Z" },
     blobs: [HASH], updatedAt: "2026-10-01T12:00:00.000Z",
   });
@@ -87,6 +87,7 @@ test("a private room's claim stays hidden until the owner publishes, and a non-o
   assert.equal(body.room, null);
   assert.deepEqual(body.agents, ["Ada"]);
   assert.deepEqual(body.humans, ["Room owner"]);
+  assert.equal(page.text.includes("ada"), false);
   store.roomDirectory.set("commons", "owner", true);
   const named = await raw(origin, `/receipts/${id}`);
   assert.match(named.text, /Project Room Commons/);

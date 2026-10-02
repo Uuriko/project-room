@@ -116,6 +116,17 @@ function credit(state, memberId) {
   return { name, kind: member.kind === "human" ? "human" : "agent" };
 }
 
+// A member can store outcome "merged" on a claim. The public page repeats a
+// merge only after this server settled it: the poll writes pr_merged, done,
+// and syncedAt together. The write path that stops members setting outcome
+// is separate.
+function serverVerifiedMerge(item) {
+  const pull = item?.pullRequest;
+  if (!item || item.state !== "done" || pull?.outcome !== "merged" || !iso(pull.syncedAt)) return false;
+  const history = Array.isArray(item.history) ? item.history : [];
+  return history.some(step => step?.action === "pr_merged");
+}
+
 function creditsFrom(people) {
   const agents = [], humans = [];
   for (const person of people) {
@@ -185,9 +196,9 @@ function optedInRows(store, state) {
   let claims = [];
   try { claims = store.workClaims?.list?.(roomId) ?? []; } catch { claims = []; }
   for (const item of claims) {
-    if (!item || item.state !== "done" || item.pullRequest?.outcome !== "merged") continue;
+    if (!serverVerifiedMerge(item)) continue;
     const people = [credit(state, item.owner)];
-    for (const step of Array.isArray(item.history) ? item.history : []) people.push(credit(state, step?.actor));
+    for (const step of Array.isArray(item.history) ? item.history : []) people.push(credit(state, step?.agentId));
     const { agents, humans } = creditsFrom(people);
     rows.push({
       id: hashId("wcr", roomId, item.id),

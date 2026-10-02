@@ -140,6 +140,15 @@ const gr1PublicPath = pathname => {
   if (/^\/receipts\/(?:pwr_[a-f0-9]{16,128}|wcr_[a-f0-9]{32}|wir_[a-f0-9]{32})(?:\.json)?$/.test(rest)) return rest;
   return null;
 };
+const PUBLIC_RECEIPT_JSON = /^\/receipts\/(?:pwr_[a-f0-9]{16,128}|wcr_[a-f0-9]{32}|wir_[a-f0-9]{32})\.json$/;
+const isPublicReceiptsJson = pathname => pathname === "/api/public/receipts"
+  || pathname === "/room/api/public/receipts"
+  || PUBLIC_RECEIPT_JSON.test(pathname)
+  || (pathname.startsWith("/room") && PUBLIC_RECEIPT_JSON.test(pathname.slice("/room".length)));
+const allowPublicReceiptsCors = res => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
+};
 // --- GR2: /room aliases for the acquisition pages. /room/agents.json stays the discovery packet. ---
 const gr2PublicPath = pathname => {
   if (!pathname.startsWith("/room/")) return null;
@@ -836,7 +845,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const previewDoorRequest = req.method === "POST"
         && (inboundPath === "/api/share-links/preview" || inboundPath === "/room/api/share-links/preview")
         && isEdgeDoorOrigin(req.headers.origin);
-      if (!previewDoorRequest) checkOrigin(req);
+      const publicReceiptsRead = ["GET", "HEAD", "OPTIONS"].includes(req.method) && isPublicReceiptsJson(inboundPath);
+      if (publicReceiptsRead) allowPublicReceiptsCors(res);
+      if (publicReceiptsRead && req.method === "OPTIONS") {
+        res.writeHead(204);
+        return res.end();
+      }
+      if (!previewDoorRequest && !publicReceiptsRead) checkOrigin(req);
       url.pathname = rewriteRoomApiPrefix(inboundPath);
       if (url.pathname.startsWith("/api/")) res.setHeader("X-Operation-Id", operationId);
       if ((url.pathname === "/api/health" || url.pathname === "/api/health/" || isHealthAliasPath(inboundPath) || isHealthAliasPath(url.pathname)) && ["GET", "HEAD"].includes(req.method)) {
