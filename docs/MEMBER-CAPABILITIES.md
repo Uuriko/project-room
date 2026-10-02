@@ -132,14 +132,7 @@ no bits.
 
 ## Isolated stub
 
-`member-capabilities/` is a pure helper, same isolation as `activity-inbox/`
-([#75](https://github.com/Uuriko/project-room/pull/75)) and `act-components/`
-([#77](https://github.com/Uuriko/project-room/pull/77)). It does not import
-or rewrite those packages. No `server/` or `src/` imports.
-
-```sh
-cd member-capabilities && npm test
-```
+The member-capabilities package was removed from this repository. The notes below are historical.
 
 `memberCapabilities(member, { ownerId })` returns `{ bits, owner }`.
 `canAct` / `canEmitReceipt` / `canInviteMember` are the gates. Fixture

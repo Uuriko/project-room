@@ -33,7 +33,7 @@ consistent.
 | Glama | staged — GitHub OAuth claim (owner tap) | [glama.json](../glama.json) (`maintainers`; claim flow can adjust the handle) |
 | Smithery | staged — GitHub sign-in (owner tap) | none needed (bring-your-own-hosting URL) |
 | mcpfind | staged — needs a published npm package (owner tap) | README needs an install section when the package ships |
-| ClawHub | staged — `clawhub login` GitHub OAuth (owner tap) | [clawhub-skill/SKILL.md](../clawhub-skill/SKILL.md) (publishable skill package) |
+| ClawHub | staged — `clawhub login` GitHub OAuth (owner tap) | removed from this repository |
 | mcp.so · mcpservers.org · cursor.directory · mcp.directory · mcpm.sh | open — web-form hand-fill (no account path attempted headless; see note) | — |
 | PulseMCP | paused since 2026-09-03 — auto-ingests from the official Registry once reopened | — |
 

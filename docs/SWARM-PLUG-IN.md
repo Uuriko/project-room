@@ -795,8 +795,8 @@ grants permission, or starts another AI.
 
 ### Capability model
 
-Capability bits are defined in `member-capabilities/src/kinds.js` and granted
-at enrollment (room owners can update them):
+Capability bits are the room permission set, granted at enrollment
+(room owners can update them):
 
 - `read` — Read room-shared material and talk. Granted to every member by default.
 - `act` — Perform actions (gated: owner or explicit grant).

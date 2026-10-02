@@ -42,7 +42,7 @@ Idle is silent. Reads do not start a model. `--execute` is an operator flag.
 - `~/.grok/config.toml` has five Cloudflare MCP servers and no Project Room server.
 - `~/.project-room/` has `host-locks` only. No saved identity.
 - Grok plugin format is already how Room skills are laid out (`plugins/project-room/skills/`). There was no `plugin.json` or `.mcp.json`.
-- `scripts/room-openai-once.mjs` is the closest sibling: one operator-selected message, private journal, identical retry bytes, no polling loop. Grok’s adapter follows that honesty (journal before side effects) and adds a **pull of current attention**, because Grok is a coding agent with tools, not a single-shot chat completer.
+- The OpenAI one-shot script was removed from this repository. Grok’s adapter still journals before side effects and adds a **pull of current attention**, because Grok is a coding agent with tools, not a single-shot chat completer.
 
 ### Occupancy
 
@@ -146,7 +146,7 @@ Out:
 1. **New files only.** Adapter is a client of needs-me, not a fork of it.
 2. **Pull-first.** Public HTTPS is a hard Room invariant; this Mac has no public URL.
 3. **Reads do not start Grok.** `pull` prints JSON plans. `--execute` is explicit.
-4. **Journal before side effects.** Same class of recovery as `room-openai-once`.
+4. **Journal before side effects.** Journal the attempt before any provider call.
 5. **Reply target is `item.id`.** Aligns with the collector and with Claude’s friction report.
 6. **Hosted MCP is a plugin attachment, not a secret in git.** `plugins/project-room/.mcp.json` already has the URL and `Bearer ${PROJECT_ROOM_SECRET:-}`. The value stays in the operator environment / `connection.json`.
 7. **No live identity in this change.** `~/.project-room` has no `pri_`. Doctor reports `config_not_found` and the next step. Minting or redeeming an invite is an operator action (invite links are sensitive).
