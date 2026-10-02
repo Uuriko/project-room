@@ -129,8 +129,9 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     navigationEpoch++;
     if (!preservePending) { try { storage?.removeItem(positionKey); } catch {} }
     setupUI.reset(); gmailUI.reset(); $('#inbox-gmail-open').hidden = true; gmailGeneration++; $('#inbox-gmail-notice').textContent = '';
-    $('#inbox-gmail-status').textContent = 'Bring your email into your private inbox.';
-    $('#inbox-gmail-connect').disabled = true; $('#inbox-gmail-connect').textContent = 'Connect Gmail';
+    const gmailSection = document.querySelector('.inbox-gmail'); if (gmailSection) gmailSection.hidden = false;
+    $('#inbox-gmail-status').hidden = false; $('#inbox-gmail-status').textContent = 'Bring your email into your private inbox.';
+    $('#inbox-gmail-connect').hidden = false; $('#inbox-gmail-connect').disabled = true; $('#inbox-gmail-connect').textContent = 'Connect Gmail';
     $('#inbox-gmail-disconnect').hidden = true; $('#inbox-gmail-disconnect').textContent = 'Disconnect';
     sendUI.reset({ preservePending });
     replyUI.reset({ preservePending });
@@ -206,7 +207,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     meta.append(badge, sender);
     if (source.needsYou) { const mark = document.createElement("span"); mark.className = "inbox-needs-you"; mark.textContent = "Needs you"; meta.append(mark); }
     subject.textContent = source.subject || "(No subject)";
-    if (!source.readAt) subject.style.fontWeight = "700";
+    if (!source.readAt) subject.classList.add("inbox-unread");
     button.append(meta, subject); button.addEventListener("click", () => open(source.id)); return button;
   }
   function renderList() {
@@ -389,13 +390,20 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     try {
       const value = await api.request('/gmail'); if (!owns() || turn !== gmailGeneration) return;
       gmailUI.setStatus(value); $('#inbox-gmail-open').hidden = !(value.mailboxes ?? [value]).some(m => m.state === 'connected');
+      const gmailSection = document.querySelector('.inbox-gmail');
+      if (gmailSection) gmailSection.hidden = false;
       const connected = value.state === 'connected';
-      $('#inbox-gmail-status').textContent = connected ? value.address : value.state === 'unavailable' ? 'Gmail connection is not enabled here yet.' : value.state === 'reconnect_required' ? 'Reconnect Gmail to receive email again.' : 'Bring your email into your private inbox.';
-      $('#inbox-gmail-connect').textContent = connected && value.canWrite ? 'Sync Gmail' : value.state === 'reconnect_required' || connected && !value.canWrite ? 'Reconnect Gmail' : 'Connect Gmail';
-      $('#inbox-gmail-connect').disabled = value.state === 'unavailable';
-      $('#inbox-gmail-connect').dataset.state = connected && !value.canWrite ? 'reconnect_required' : value.state;
+      const unavailable = value.state === 'unavailable';
+      const status = $('#inbox-gmail-status');
+      status.hidden = unavailable;
+      status.textContent = connected ? value.address : unavailable ? '' : value.state === 'reconnect_required' ? 'Reconnect Gmail to receive email again.' : 'Bring your email into your private inbox.';
+      const connect = $('#inbox-gmail-connect');
+      connect.hidden = unavailable;
+      connect.textContent = connected && value.canWrite ? 'Sync Gmail' : value.state === 'reconnect_required' || connected && !value.canWrite ? 'Reconnect Gmail' : 'Connect Gmail';
+      connect.disabled = false;
+      connect.dataset.state = connected && !value.canWrite ? 'reconnect_required' : value.state;
       $('#inbox-gmail-disconnect').hidden = !['connected', 'reconnect_required'].includes(value.state);
-    } catch { if (owns() && turn === gmailGeneration) $('#inbox-gmail-status').textContent = 'Couldn’t check Gmail. Refresh to try again.'; }
+    } catch { if (owns() && turn === gmailGeneration) { const gmailSection = document.querySelector('.inbox-gmail'); if (gmailSection) gmailSection.hidden = false; const status = $('#inbox-gmail-status'); status.hidden = false; status.textContent = 'Couldn’t check Gmail. Refresh to try again.'; } }
   }
   $('#inbox-setup').addEventListener('click', () => setupUI.check(true));
   $('#inbox-gmail-connect').addEventListener('click', async event => {
@@ -726,8 +734,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
       $("#inbox-thread").hidden = false;
       $("#inbox-thread-list").replaceChildren(...thread.entries.map(({ depth, source }) => {
         const row = document.createElement("div"), entry = document.createElement("button");
-        entry.type = "button"; entry.className = "text-button";
-        entry.style.marginLeft = `${Math.min(depth, 6) * 16}px`;
+        entry.type = "button"; entry.className = `text-button inbox-thread-depth-${Math.min(depth, 6)}`;
         entry.textContent = `${source.subject || "(No subject)"} · ${source.sender}`;
         if (source.id === sourceId) { entry.disabled = true; entry.textContent += " (this message)"; }
         else entry.addEventListener("click", () => open(source.id));

@@ -1,5 +1,7 @@
 # Growth event contract
 
+> This page is archived. The growth event catalog that replaced it is [docs/analytics/EVENTS.md](../analytics/EVENTS.md).
+
 Track C (agent-managed Growth Engine), slice C1. Growth events are the analytics
 vocabulary for the room: a small, curated set of workspace/product events derived
 from room activity. They are **not** the room event stream (`src/events.js`); they
