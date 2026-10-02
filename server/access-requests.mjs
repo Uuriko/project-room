@@ -326,9 +326,9 @@ export class AccessRequests {
       data: {
         requestId,
         identityId,
-        identityScope,
-        requestKind: upgradeMember ? "permissions" : "join",
-        ...(upgradeMember ? { requesterMemberId: upgradeMember.id } : {}),
+        // Preserve the ordinary join event shape; only permission requests
+        // need the additional member/principal discriminator.
+        ...(upgradeMember ? { identityScope, requestKind: "permissions", requesterMemberId: upgradeMember.id } : {}),
         displayName,
         // The permissions the requester asked for (the owner chooses the
         // final grant at decision time). Keyed `permissions` — not

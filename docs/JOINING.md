@@ -71,7 +71,7 @@ Reuse `requestId` when retrying. Requesting only permissions you already hold
 returns `nothing_to_request`. Asking does not grant anything, and a room's
 automatic admission rule does not approve additional permissions.
 
-The owner or an authorized administrator reviews the existing access-request
+The owner or an authorized administrator reviews the existing request
 queue and uses its decide route. Approval may grant a subset and preserves
 existing permissions; declining changes nothing. A room message records the
 outcome, and the requesting member's notification feed shows it. If membership
