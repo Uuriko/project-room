@@ -359,8 +359,9 @@ test('getdasha entry and canonical browser app share identities, rooms and invit
   assert.equal(release.vars.ROOM_ORIGIN, 'https://room.trydemigod.com');
   assert.equal(release.durable_objects.bindings[0].script_name, release.env.production.name);
   assert.equal(release.env.production.durable_objects.bindings[0].script_name, undefined);
-  assert.equal(release.env.production.vars.ROOM_ORIGIN, 'https://room.trydemigod.com');
-  assert.equal(release.env.production.vars.ROOM_DEPLOYMENT, 'production');
+  const productionVars = release.env.production.vars;
+  assert.equal(productionVars.ROOM_ORIGIN, 'https://room.trydemigod.com');
+  assert.equal(productionVars["ROOM_DEPLOYMENT"], 'production');
   assert.deepEqual(release.triggers.crons, []);
   assert.deepEqual(release.env.production.triggers.crons, ['* * * * *']);
   // Isolated staging owns its Durable Object. It must not inherit the entry
