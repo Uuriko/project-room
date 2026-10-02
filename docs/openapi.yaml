@@ -11235,8 +11235,6 @@ paths:
               type: object
               required: [agentId, capability]
               additionalProperties: false
-      responses:
-        '401': { description: unauthenticated }
               properties:
                 agentId: { type: string, description: The agent member receiving the edge. }
                 capability: { type: string, description: "Closed-vocabulary capability name (e.g. grants:issue)." }

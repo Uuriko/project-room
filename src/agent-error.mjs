@@ -173,6 +173,20 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
       next: [path(claimRoute), command("Claim the work item again (POST …/work-claims/{id}/claim).")]
     };
   }
+  if (reasonCode === "invite_not_permitted") {
+    return {
+      status: "action_required", reason: "invite_not_permitted",
+      hint: "Only the room owner, or a member who can invite, can mint a referral invite.",
+      next: [tool("room_check_access"), command("Ask the owner to grant invite access.")]
+    };
+  }
+  if (reasonCode === "wake_pause_not_permitted") {
+    return {
+      status: "action_required", reason: "wake_pause_not_permitted",
+      hint: "You can pause your own wakes. Pausing another member needs the owner or manage members.",
+      next: [tool("room_check_access"), command("Pause your own wakes, or ask the owner.")]
+    };
+  }
   if (httpStatus === 403 || ["access_denied", "owner_required", "host_denied", "proxy_denied", "csrf_denied"].includes(reasonCode)) {
     return {
       status: "action_required",

@@ -18,7 +18,9 @@ const call = (registry, route, id, body, queue = null) => handleWorkClaims({
   req: { method: route === "list" || route === "read" ? "GET" : "POST", body },
   res: {},
   url: new URL(`https://room.example/api/rooms/room1/work-claims${queue ? `?queue=${queue}` : ""}`),
-  store: {}, roomId: "room1",
+  store: { roomAuthority: () => ({ members: {
+    ada: { id: "ada", kind: "agent", active: true, permissions: ["accept_work", "complete_work"] },
+  } }) }, roomId: "room1",
   auth: { member: { id: "ada", kind: "agent", permissions: [] } },
   workClaimRoute: route, workClaimId: id, helpers, registry,
 });

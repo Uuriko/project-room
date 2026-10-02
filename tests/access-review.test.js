@@ -44,7 +44,7 @@ async function fixture(t) {
   const command = (type, data) => store.command(ownerKey, "commons", { id: randomUUID(), type, data });
   command(T.MESSAGE_POSTED, { messageId: randomUUID(), body: "Owner speaks" });
   // A human moderator with manage_members but who is not the owner.
-  command(T.MEMBER_ADDED, { memberId: "moderator", displayName: "Moderator", kind: "human", permissions: ["manage_members", "steer"] });
+  command(T.MEMBER_ADDED, { memberId: "moderator", displayName: "Morgan", kind: "human", permissions: ["manage_members", "steer"] });
   store.bindHumanAccount("commons", "moderator", "account-moderator");
   const moderatorKey = store.issueAccessKey("commons", "moderator");
   // A member that is added, then removed: it must not appear.

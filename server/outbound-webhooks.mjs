@@ -1,9 +1,9 @@
 // Outbound webhooks (B020). A webhook manager: register webhooks
 // (URL + event filter), match room events against filters, build delivery
-// payloads, and track delivery state (pending → delivered/failed). Actual
-// HTTP delivery is a later slice. All state is caller-owned (a Map); the
-// module is pure except for node:dns, which only the opt-in async DNS
-// check (assertWebhookHostDnsPublic) touches. Malformed inputs throw
+// payloads, and track delivery state (pending → delivered/failed).
+// HTTP delivery is implemented in server/webhook-dispatch.mjs. This module
+// does not POST. Registration state is caller-owned. Hostname checks use
+// node:dns on Node and DNS-over-HTTPS on Workers. Malformed inputs throw
 // WebhookError.
 import { promises as dns } from "node:dns";
 import { parseIpv4, parseIpv6, isBlockedIp, isBlockedIpv6Value, isWorkersRuntime } from "./ip-blocklist.mjs";
@@ -84,6 +84,13 @@ function assertPublicHost(hostname) {
   if (isMetadataHostname(name)) {
     fail("invalid_webhook", "webhook url must not target a private or reserved metadata hostname");
   }
+  // Link-local and cluster names are not public hosts. .localhost is already
+  // refused above. A trailing dot was stripped, so "db.internal." cannot dodge.
+  const internalNames = new Set(["internal", "local", "svc", "cluster.local"]);
+  const internalSuffixes = [".internal", ".local", ".svc", ".cluster.local"];
+  if (internalNames.has(name) || internalSuffixes.some(suffix => name.endsWith(suffix))) {
+    fail("invalid_webhook", "webhook url must not target a private or reserved hostname");
+  }
   if (isBlockedIp(name)) {
     fail("invalid_webhook", "webhook url must not target a private or reserved IP address");
   }
@@ -109,6 +116,10 @@ export function validateWebhookUrl(url) {
   try { parsed = new URL(url); } catch { fail("invalid_webhook", "url must be a valid https URL"); }
   check(parsed.protocol === "https:", "url must be a valid https URL");
   assertPublicHost(parsed.hostname);
+  // Default https is 443. An explicit port is only 443 or 8443.
+  if (parsed.port !== "" && parsed.port !== "443" && parsed.port !== "8443") {
+    fail("invalid_webhook", "webhook url must not target a private or reserved port");
+  }
   return url;
 }
 
@@ -122,10 +133,45 @@ export function validateWebhookUrl(url) {
 // On Node the default resolver is dns.lookup({ all: true }), the same
 // getaddrinfo path the socket would use (it honours hosts-file entries
 // that resolve4/resolve6 never see). Callers that pass resolve4/resolve6
-// keep that older injection. On Workers, DNS is skipped: the hostname
-// denylist above still runs, and the platform egress sandbox is the
-// backstop. An explicit resolver is still honoured so a test can pin
-// answers without pretending to be Workers.
+// keep that older injection. On Workers there is no pin API, so the name
+// is resolved through DNS-over-HTTPS and every A/AAAA answer is classified
+// with the same private-range checks. A Node lookup passed in from a test
+// is ignored on Workers. A resolution failure is not treated as public.
+const DOH_CACHE_CAP_MS = 5 * 60 * 1000;
+const dohCache = new Map();
+
+async function resolveWebhookAddressesViaDoh(hostname, { dohFetch = globalThis.fetch, now = Date.now() } = {}) {
+  const key = hostname.toLowerCase();
+  const hit = dohCache.get(key);
+  if (hit && hit.expiresAt > now) return hit.addresses;
+  if (hit) dohCache.delete(key);
+  if (typeof dohFetch !== "function") throw new Error("webhook hostname does not resolve");
+  const addresses = [];
+  let minTtlSec = null;
+  for (const type of ["A", "AAAA"]) {
+    const response = await dohFetch(`https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(key)}&type=${type}`, {
+      headers: { accept: "application/dns-json" },
+    });
+    if (!response?.ok) throw new Error("webhook hostname does not resolve");
+    const body = typeof response.json === "function" ? await response.json() : null;
+    const answers = Array.isArray(body?.Answer) ? body.Answer : [];
+    for (const answer of answers) {
+      const kind = Number(answer?.type);
+      if (kind !== 1 && kind !== 28) continue;
+      const data = String(answer?.data ?? "").trim();
+      if (!data) continue;
+      addresses.push(data);
+      const ttl = Number(answer?.TTL);
+      if (Number.isFinite(ttl) && ttl >= 0) minTtlSec = minTtlSec === null ? ttl : Math.min(minTtlSec, ttl);
+    }
+  }
+  if (addresses.length === 0) throw new Error("webhook hostname does not resolve");
+  if (minTtlSec !== null && minTtlSec > 0) {
+    dohCache.set(key, { addresses, expiresAt: now + Math.min(minTtlSec * 1000, DOH_CACHE_CAP_MS) });
+  }
+  return addresses;
+}
+
 export async function resolveWebhookTarget(url, options = {}) {
   let host;
   try { host = new URL(validateWebhookUrl(url)).hostname.toLowerCase().replace(/\.$/, ""); }
@@ -136,8 +182,20 @@ export async function resolveWebhookTarget(url, options = {}) {
   const explicit4 = typeof options.resolve4 === "function";
   const explicit6 = typeof options.resolve6 === "function";
   const explicitLookup = typeof options.lookup === "function";
-  if (!explicit4 && !explicit6 && !explicitLookup && isWorkersRuntime()) {
-    return { url, addresses: [] };
+  if (isWorkersRuntime()) {
+    let addresses;
+    try {
+      addresses = await resolveWebhookAddressesViaDoh(host, options);
+    } catch (error) {
+      if (error?.name === "WebhookError") throw error;
+      fail("invalid_webhook", "webhook hostname does not resolve to a public address");
+    }
+    for (const answer of addresses) {
+      if (answerIsBlocked(answer)) {
+        fail("invalid_webhook", "webhook hostname resolves to a private or reserved IP address");
+      }
+    }
+    return { url, addresses };
   }
   let answers;
   if (explicitLookup || (!explicit4 && !explicit6)) {
@@ -166,11 +224,12 @@ export async function resolveWebhookTarget(url, options = {}) {
 // refuses IP literals, localhost, and metadata names. On Node, also
 // dns.lookup({ all: true }) and refuse when any address is loopback,
 // RFC1918, CGNAT, link-local, unique-local, or an IPv4-mapped form of
-// those. Callers await this before opening the write transaction. A name
-// that does not resolve is not treated as public; delivery resolves again
-// and will not dial it. On Workers, skip the lookup — the hostname
-// denylist still applies.
-export async function assertAgentWebhookUrlPublic(url, { lookup = dns.lookup } = {}) {
+// those. Callers await this before opening the write transaction. On Node
+// a lookup failure still returns the URL. On Workers a resolution failure
+// refuses the subscription; delivery retries that failure instead of
+// treating it as allowed.
+export async function assertAgentWebhookUrlPublic(url, options = {}) {
+  const lookup = typeof options.lookup === "function" ? options.lookup : dns.lookup;
   let host;
   try {
     validateWebhookUrl(url);
@@ -181,7 +240,17 @@ export async function assertAgentWebhookUrlPublic(url, { lookup = dns.lookup } =
     }
     throw error;
   }
-  if (isWorkersRuntime()) return url;
+  if (isWorkersRuntime()) {
+    try {
+      await resolveWebhookTarget(url, { dohFetch: options.dohFetch, now: options.now });
+    } catch (error) {
+      if (error?.name === "WebhookError" && /private or reserved|does not resolve|metadata hostname/.test(error.message ?? "")) {
+        fail("webhook_url_not_public", "That webhook URL is not on the public internet.");
+      }
+      throw error;
+    }
+    return url;
+  }
   const bare = stripBrackets(host);
   if (parseIpv4(bare) !== null || parseIpv6(bare) !== null) return url;
   let records;
