@@ -8,7 +8,12 @@ import { createHash } from "node:crypto";
 
 const POW_BITS = 12;
 const POW_WINDOW_MS = 10 * 60 * 1000;
-const MINT_PATHS = new Set(["/api/agent-identities", "/api/identity-create"]);
+const MINT_PATHS = new Set([
+  "/api/agent-identities",
+  "/api/identity-create",
+  // Redeeming a referral invite mints an identity under the same proof.
+  "/api/referral-invites/redeem",
+]);
 
 export function solveIdentityMintProof(displayName, now = Date.now(), bits = POW_BITS) {
   const name = typeof displayName === "string" ? displayName.trim() : "";

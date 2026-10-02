@@ -41,17 +41,11 @@ const POLICY = {
     expectedFail: { chat: "F6 SEC-2", write_external: "F6 SEC-2", linkguest: "F6 SEC-2" },
   },
   "board status": { allow: MEMBERS },
-  "referral mint": {
-    allow: ["owner", "contribute", "review", "manage_claims"],
-    expectedFail: { chat: "F2 SEC-1", write_external: "F2 SEC-1", linkguest: "F2 SEC-1" },
-  },
+  "referral mint": { allow: ["owner"] },
   "referral redeem": { allow: ROLES },
   "receipts opt-in": { allow: ["owner"], denyAs422: true },
   "pause own wakes": { allow: MEMBERS },
-  "pause another member": {
-    allow: ["owner"],
-    expectedFail: { owner: "F27 SEC-1" },
-  },
+  "pause another member": { allow: ["owner"] },
   "forged merged pull request": {
     allow: [],
     refused: WRITERS,
