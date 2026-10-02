@@ -1,5 +1,5 @@
 {
-  "note": "Legacy routes still served outside server/routes/table.mjs. baseline is the RT-0 set and only shrinks. routes is the set still in the legacy chain.",
+  "note": "Legacy routes still served outside server/routes/table.mjs. baseline is the RT-0 set plus routes main added after that cut. This batch does not add legacy routes. routes is the set still in the legacy chain and only shrinks as groups move into the table.",
   "baseline": [
     {
       "method": "GET",
@@ -80,6 +80,14 @@
     {
       "method": "GET",
       "path": "/.well-known/oauth-authorization-server"
+    },
+    {
+      "method": "GET",
+      "path": "/.well-known/security.txt"
+    },
+    {
+      "method": "HEAD",
+      "path": "/.well-known/security.txt"
     },
     {
       "method": "OPTIONS",
@@ -3036,6 +3044,14 @@
     {
       "method": "HEAD",
       "path": "/room/.well-known/mcp.json"
+    },
+    {
+      "method": "GET",
+      "path": "/room/.well-known/security.txt"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/.well-known/security.txt"
     },
     {
       "method": "OPTIONS",
@@ -3572,6 +3588,14 @@
       "path": "/.well-known/oauth-authorization-server"
     },
     {
+      "method": "GET",
+      "path": "/.well-known/security.txt"
+    },
+    {
+      "method": "HEAD",
+      "path": "/.well-known/security.txt"
+    },
+    {
       "method": "OPTIONS",
       "path": "/a2a"
     },
@@ -6526,6 +6550,14 @@
     {
       "method": "HEAD",
       "path": "/room/.well-known/mcp.json"
+    },
+    {
+      "method": "GET",
+      "path": "/room/.well-known/security.txt"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/.well-known/security.txt"
     },
     {
       "method": "OPTIONS",

@@ -144,6 +144,20 @@ function topLevelMethods(body) {
   return found;
 }
 
+// A route if sometimes only calls a helper that owns the method check
+// (/.well-known/security.txt). Methods come from that helper's body.
+function withCalledHelpers(source, body) {
+  let extra = body;
+  for (const match of body.matchAll(/\b([A-Za-z_][A-Za-z0-9_]*)\s*\(/g)) {
+    const decl = new RegExp(`function ${match[1]}\\s*\\([^)]*\\)\\s*\\{`).exec(source);
+    if (!decl) continue;
+    const open = source.indexOf("{", decl.index);
+    const close = matchCloser(source, open, "{", "}");
+    if (close > open) extra += "\n" + source.slice(open + 1, close);
+  }
+  return extra;
+}
+
 function literalPaths(condition) {
   return [...condition.matchAll(/(?:url\.)?pathname\s*===\s*["']([^"']+)["']/g)].map(match => match[1]);
 }
@@ -297,9 +311,10 @@ function scanSource(source, bag, { names, matchers, bindings }) {
   eachIf(source, (condition, body) => {
     const direct = literalPaths(condition);
     const bound = boundPaths(condition, bindings);
-    let methods = methodsFrom(condition, body);
+    const visible = withCalledHelpers(source, body);
+    let methods = methodsFrom(condition, visible);
     const targets = [...direct, ...bound];
-    if (methods.size === 0 && targets.length) methods = topLevelMethods(body);
+    if (methods.size === 0 && targets.length) methods = topLevelMethods(visible);
     apply(methods, targets);
     // A pathname check nested under a method gate (Gmail's POST guard, for
     // example) does not repeat the method. It serves the enclosing methods.
@@ -419,7 +434,7 @@ export function servedPathKeys(sources) {
 
 export function allowlistDocument(routes, baseline = routes) {
   return {
-    note: "Legacy routes still served outside server/routes/table.mjs. baseline is the RT-0 set and only shrinks. routes is the set still in the legacy chain.",
+    note: "Legacy routes still served outside server/routes/table.mjs. baseline is the RT-0 set plus routes main added after that cut. This batch does not add legacy routes. routes is the set still in the legacy chain and only shrinks as groups move into the table.",
     baseline,
     routes,
   };
