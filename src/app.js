@@ -6641,3 +6641,34 @@ if (initialInvitationFragment && !initialPasswordReset) openInvitation(initialIn
   $("#auth-panel").hidden = false;
   if (!$("#invitation-dialog").open) queueMicrotask(() => focusSignin());
 });
+// --- W board: Tasks › Board. The command palette opens Board. ---
+{
+  const board = lazyDisclosure({ panel: $("#board-panel"),
+    load: () => import("./board-ui.js"),
+    install: module => module.installWorkBoard({ client, getState: () => state, getSession: () => session }),
+    onError: () => notice("Could not load the board. Close and reopen to retry.", true) });
+  const openBoard = () => {
+    const dialog = $("#board-dialog");
+    if (!dialog.open) dialog.showModal();
+    $("#board-panel").open = true;
+    board.sync();
+  };
+  $("#tasks-board-open").addEventListener("click", openBoard);
+  $("#board-close").addEventListener("click", () => { $("#board-dialog").close(); $("#board-panel").open = false; });
+  $("#signout-button").addEventListener("click", () => { $("#board-dialog").close(); board.reset(); }, true);
+  const priorEntries = roomActionEntries;
+  roomActionEntries = () => priorEntries().map(entry => entry.id === "landing"
+    ? { id: "board", label: "Board", words: "tasks board claims ci review lease land", always: true } : entry);
+  const priorChoose = chooseRoomAction;
+  chooseRoomAction = id => { if (id === "board") { openBoard(); return; } priorChoose(id); };
+  let chatPaint = null;
+  const paintChat = () => {
+    chatPaint ??= import("./board-ui.js");
+    void chatPaint.then(module => { if (state) module.paintClaimChat(state, $("#message-list")); });
+  };
+  const priorRender = render;
+  render = () => { if (!state) { board.reset(); return; } priorRender(); board.sync(); };
+  const priorMessages = renderMessages;
+  renderMessages = () => { priorMessages(); paintChat(); };
+}
+// --- end W board ---
