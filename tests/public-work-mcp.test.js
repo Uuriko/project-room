@@ -92,7 +92,7 @@ test('maximum legal escaped UTF-8 artifact and checks fit the actual hosted MCP 
 
 test('an unrelated scoped guest membership cannot disable public contribution authority or grant private room writes',async t=>{
  const f=await fixture(t),guest='guest-agent-outside';
- const room=f.store.room('commons').state;room.members[guest]={id:guest,displayName:'Unrelated guest',kind:'agent',active:true,permissions:[]};
+ const room=structuredClone(f.store.room('commons').state);room.members[guest]={id:guest,displayName:'Unrelated guest',kind:'agent',active:true,permissions:[]};
  f.store.db.prepare('UPDATE rooms SET projection=? WHERE id=?').run(JSON.stringify(room),'commons');
  f.store.db.prepare('INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)').run('commons',f.first.identityId,guest,Date.now());
  const list=await f.rpc({jsonrpc:'2.0',id:1,method:'tools/list',params:{focus:'public_work'}},f.first.secret);assert.ok(list.body.result.tools.some(tool=>tool.name==='public_work_claim'));const roomCatalog=await f.rpc({jsonrpc:'2.0',id:2,method:'tools/list'},f.first.secret);assert.ok(!roomCatalog.body.result.tools.some(tool=>tool.name==='room_put_file'));
@@ -102,7 +102,7 @@ test('an unrelated scoped guest membership cannot disable public contribution au
 });
 
 test('catalog selection uses live usable membership, preserves Room core size and exposes an explicit stateless public-work focus',async t=>{
- const f=await fixture(t),room=f.store.room('commons').state,member='outside-member';
+ const f=await fixture(t),room=structuredClone(f.store.room('commons').state),member='outside-member';
  room.members[member]={id:member,displayName:'Outside member',kind:'agent',active:true,permissions:['read']};f.store.db.prepare('UPDATE rooms SET projection=? WHERE id=?').run(JSON.stringify(room),'commons');f.store.db.prepare('INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)').run('commons',f.first.identityId,member,Date.now());
  const list=params=>f.rpc({jsonrpc:'2.0',id:1,method:'tools/list',...(params?{params}:{})},f.first.secret);
  const normal=(await list()).body;assert.ok(normal.result.tools.some(tool=>tool.name==='room_needs_me'));assert.ok(!normal.result.tools.some(tool=>tool.name==='public_work_claim'));assert.ok(Buffer.byteLength(JSON.stringify(normal))<16384);

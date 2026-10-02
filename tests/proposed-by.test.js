@@ -70,7 +70,7 @@ test("reopening a pre-upgrade database repairs provenance from each item's own p
   store.command(owner, "commons", { id: crypto.randomUUID(), type: T.MEMBER_ADDED, data: { memberId: "human", displayName: "human", kind: "human", permissions: ["accept_work"] } });
   store.command(owner, "commons", { id: crypto.randomUUID(), type: T.WORK_PROPOSED, data: { workItemId: "w-legacy", title: "Legacy item", definitionOfDone: "done", accountableMemberId: "human" } });
   // Simulate the pre-upgrade persisted shape: projection row without the field, envelope intact.
-  store.db.prepare("UPDATE rooms SET projection=? WHERE id=?").run(JSON.stringify((() => { const s = store.room("commons").state; delete s.workItems["w-legacy"].proposedById; return s; })()), "commons");
+  store.db.prepare("UPDATE rooms SET projection=? WHERE id=?").run(JSON.stringify((() => { const s = structuredClone(store.room("commons").state); delete s.workItems["w-legacy"].proposedById; return s; })()), "commons");
   store.close();
   store = new RoomStore(filename); // reopen: repair must run deterministically, without replaying the log
   try {
@@ -96,7 +96,7 @@ test("reopening a pre-upgrade database separates legacy reporters from unknown p
   store.command(human, "commons", { id: crypto.randomUUID(), type: T.WORK_BLOCKER_RESOLVED, data: { workItemId: "w-legacy-receipt", expectedRevision: 3, resolution: "v2 accepted" } });
   store.command(human, "commons", { id: crypto.randomUUID(), type: T.WORK_COMPLETED, data: { workItemId: "w-legacy-receipt", expectedRevision: 4, summary: "v2", evidenceUrl: "https://example.com/v2", evidenceVersion: "v2", nextAction: "done", signedEvidence: signEvidence() } });
 
-  const state = store.room("commons").state;
+  const state = structuredClone(store.room("commons").state);
   const item = state.workItems["w-legacy-receipt"];
   for (const receipt of [...item.receiptHistory, item.receipt]) {
     delete receipt.reportedById;
@@ -139,7 +139,7 @@ test("reopening backfills verification independence only from explicit producer 
     store.command(agent, "commons", { id: crypto.randomUUID(), type: T.VERIFICATION_RECORDED, data: { workItemId, expectedRevision: 2, result: "pass", completionEventId: completion.event.id, evidenceVersion: "v1", summary: "checked" } });
   }
 
-  const state = store.room("commons").state;
+  const state = structuredClone(store.room("commons").state);
   delete state.workItems["w-known-producer"].verification.independenceConfirmed;
   delete state.workItems["w-unknown-producer"].verification.independenceConfirmed;
   store.db.prepare("UPDATE rooms SET projection=? WHERE id=?").run(JSON.stringify(state), "commons");
@@ -269,7 +269,7 @@ test("v1 upgrades checkpoint a conservative projection and strictly replay the v
   // Recreate the exact v1 persistence semantics while leaving the authoritative event
   // envelopes in place: reporters were guessed as producers, independence was implicit,
   // approvals were not retired on rework, and supersession did not retire a write claim.
-  const legacy = store.room("commons").state;
+  const legacy = structuredClone(store.room("commons").state);
   for (const workItemId of ["legacy-approved", "legacy-blocked", "legacy-valid", "legacy-forged-approval"]) {
     const receipt = legacy.workItems[workItemId].receipt;
     delete receipt.reportedById;
@@ -306,7 +306,7 @@ test("v1 upgrades checkpoint a conservative projection and strictly replay the v
     "strict v2 replay must never silently accept a v1-only approval");
   store = new RoomStore(filename);
   try {
-    assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, 36);
+    assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, 37);
     assert.deepEqual(store.db.prepare("SELECT body FROM events WHERE room_id='commons' ORDER BY sequence").all().map(row => row.body), eventBodies,
       "migration leaves the append-only event bodies byte-identical");
     const repaired = store.room("commons");
@@ -407,7 +407,7 @@ test("an item with no authoritative proposal envelope stays honestly unknown aft
   store.initialize(initialRoom());
   const owner = store.issueAccessKey("commons", "owner");
   // Inject an imported legacy item with NO proposal envelope anywhere in the log.
-  const state = store.room("commons").state;
+  const state = structuredClone(store.room("commons").state);
   state.workItems["w-imported"] = { id: "w-imported", title: "Imported", state: "proposed", accountableMemberId: "owner" };
   store.db.prepare("UPDATE rooms SET projection=? WHERE id=?").run(JSON.stringify(state), "commons");
   store.close();

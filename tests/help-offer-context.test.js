@@ -198,7 +198,7 @@ test("HTTP negotiation preserves session fences, authentication and unchanged de
 });
 
 test("bulk projection validates malformed histories before presenting an empty or available queue", t => {
-  const f = setup(t), state = f.store.room("commons").state;
+  const f = setup(t), state = structuredClone(f.store.room("commons").state);
   state.helpOffers = [];
   assert.throws(() => workOffersContext(state, task, "guest", new Date().toISOString()));
 });

@@ -80,7 +80,7 @@ test('logout clears private result notes and a held results response cannot rest
 });
 test('fresh reviewer denial removes stale choices and preserves contributor feedback', { timeout: 45000 }, async t => {
   const f = await setup(t); await open(f); await row(f).locator('[data-review-feedback]').fill('Review note survives a permission change.');
-  const { state } = f.store.room('commons'); state.members.owner.permissions = state.members.owner.permissions.filter(permission => permission !== 'decide'); f.store.db.prepare('UPDATE rooms SET projection=? WHERE id=?').run(JSON.stringify(state), 'commons');
+  const state = structuredClone(f.store.room('commons').state); state.members.owner.permissions = state.members.owner.permissions.filter(permission => permission !== 'decide'); f.store.db.prepare('UPDATE rooms SET projection=? WHERE id=?').run(JSON.stringify(state), 'commons');
   await row(f).locator('[data-review-decision="accepted"]').click(); await f.page.locator('#owner-offer-status').filter({ hasText: 'Couldn’t record' }).waitFor();
   assert.equal(await row(f).locator('[data-review-decision="accepted"]').isVisible(), false); assert.equal(await row(f).locator('[data-review-feedback]').inputValue(), 'Review note survives a permission change.');
   assert.equal(f.store.publicWorkReviews.results('commons', 'owner').results[0].review.state, 'pending');
