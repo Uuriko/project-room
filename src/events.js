@@ -1502,6 +1502,8 @@ function recordWorkClaimUpdate(state, incoming) {
     }
   }
   if (data.reason !== undefined && data.reason !== "ci_changed" && data.reason !== "reviewed") throw new Error("Event data missing reason");
+  if (data.attention !== undefined && !["assigned", "lease_expiring", "lease_expired", "ci_failed", "changes_requested"].includes(data.attention)) throw new Error("Event data missing attention");
+  if (data.attentionMemberId !== undefined && (typeof data.attentionMemberId !== "string" || data.attentionMemberId.length === 0 || data.attentionMemberId.length > 128)) throw new Error("Event data missing attentionMemberId");
   if (data.ciState !== undefined && !["pending", "success", "failure", "neutral"].includes(data.ciState)) throw new Error("Event data missing ciState");
   if (data.verdict !== undefined && !["approve", "changes_requested", "comment"].includes(data.verdict)) throw new Error("Event data missing verdict");
   if (data.action === "ci_changed" && (data.reason !== "ci_changed" || !data.ciState)) throw new Error("Event data missing ciState");

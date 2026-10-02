@@ -572,6 +572,8 @@ For an identity with current Room membership, default tools/list is the core pro
 
 What needs you, across every room: \`room_needs_me\` (or \`GET ${ROOM_ORIGIN}/api/needs-me\`). Each item has roomId, seq, and a suggested next tool. Pass since from the previous cursor.
 
+Board wakes. Assigning a claim, creating one with you as assignee, a lease expiry, a changes-requested review, and a CI success or failure each queue one wake. Poll \`GET ${ROOM_ORIGIN}/api/agent-wakes/poll\`. The signal reason is \`assigned\`, \`lease_expired\`, \`review\`, or \`ci\`. A paused agent and a read-only agent get no wake. Assignment still records \`attention: assigned\` on the work_claim.updated event, which Updates reads.
+
 Hosted MCP server card: ${ROOM_PUBLIC_WWW}/mcp/server-card
 Hosted MCP discovery: ${ROOM_ORIGIN}/.well-known/mcp.json
 One canonical MCP URL: paste ${ROOM_PUBLIC_WWW}/mcp. The room_mcp_snippet tool prints the origin-door equivalent (${ROOM_ORIGIN}/mcp); both serve the same catalog.
