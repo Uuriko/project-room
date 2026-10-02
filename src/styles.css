@@ -663,6 +663,9 @@ button:disabled { cursor: wait; opacity: .6; }
 .share-link-list li { padding-block: .5rem; }
 .share-dialog details { margin-block: .75rem; }
 .share-dialog summary { cursor: pointer; min-height: 44px; padding-block: .65rem; font-size: .875rem; color: var(--muted); }
+.growth-kit { margin-block: .25rem 1rem; }
+.growth-reward, .growth-inviter { margin: 0 0 .75rem; font-weight: 650; }
+.growth-kit textarea, .growth-kit input { width: 100%; }
 #share-settings-summary { display: block; padding-left: 1rem; font-size: .8rem; margin-top: .2rem; }
 #share-link-form > .button { width: 100%; }
 #share-management { border-top: 1px solid var(--line-soft); padding-top: .35rem; }

@@ -3,8 +3,7 @@
 // mint-and-copy action. Member-visible; the API carries ids and display
 // names only, no credential data.
 
-import { mintInviteLink, inviteMintBody } from "./agent-invite-ui.js";
-import { canInviteMembers } from "./events.js";
+import { humanJoinShareUrl, rewardLine } from "./share-links.js";
 
 const $ = selector => document.querySelector(selector);
 
@@ -42,19 +41,32 @@ export function installReferralBoard({ client, getState, getSession }) {
   const countChip = $("#referral-count");
   if (!panel || !board || !button) return { sync() {}, reset() {} };
 
-  let loaded = false, busy = false, generation = 0;
+  let loaded = false, busy = false, generation = 0, lastInvite = null;
 
-  // "My referral link" mints through the protected agent-invite route: only
-  // members with invite authority see the button. Everyone else still gets
-  // the board, the leaderboard, and their own referrals.
-  const canMintLink = () => Boolean(getSession() && getState()?.room?.id === getSession().roomId
-    && canInviteMembers(getState(), getSession().member.id));
-  function syncLinkButton() { if (button) button.hidden = !canMintLink(); }
+  // The same personal invite the Invite dialog copies. Every member in the
+  // room has one; this button does not mint a second link.
+  const canCopy = () => Boolean(getSession() && getState()?.room?.id === getSession().roomId);
+  function syncLinkButton() {
+    if (!button) return;
+    button.hidden = !canCopy();
+    button.textContent = "Copy invite link";
+  }
+  function ensureProgress() {
+    if ($("#referral-progress") || typeof document.createElement !== "function" || !board) return;
+    const line = document.createElement("p");
+    line.id = "referral-progress";
+    line.className = "form-hint";
+    board.prepend(line);
+  }
 
   function status(text) { if (result) { result.hidden = !text; result.textContent = text ?? ""; } }
 
   function render(data) {
     const model = referralBoardModel(data);
+    lastInvite = data?.invite ?? null;
+    ensureProgress();
+    const progress = $("#referral-progress");
+    if (progress) progress.textContent = rewardLine(data?.reward);
     if (countChip) countChip.textContent = String(model.count);
     // My referrals.
     if (myList) myList.hidden = model.myItems.length === 0;
@@ -84,46 +96,24 @@ export function installReferralBoard({ client, getState, getSession }) {
     } finally { if (current()) busy = false; }
   }
 
-  async function mintMyLink() {
+  async function copyMyLink() {
     const session = getSession(), epoch = generation;
-    if (busy || !canMintLink()) return;
+    if (busy || !canCopy()) return;
     const current = () => epoch === generation && getSession() === session;
-    busy = true;
-    status("Minting your referral link…");
+    if (!loaded) await load();
+    if (!current()) return;
+    const invite = lastInvite?.token;
+    if (!invite) { status("Your invite link is not ready yet."); return; }
+    const url = humanJoinShareUrl(invite);
     try {
-      const roomId = session.roomId;
-      const link = await mintInviteLink({
-        requestBody: () => inviteMintBody("contribute", ""),
-        mintOne: async body => {
-          const created = await client.request(client.path("/agent-invites"), { method: "POST", data: body });
-          if (created?.roomId !== roomId) throw new Error("Invite could not be confirmed.");
-          return created;
-        },
-        locationLike: globalThis.location,
-      });
-      if (!current()) return;
-      status("");
-      const input = document.createElement("input");
-      input.value = link.link;
-      input.readOnly = true;
-      input.setAttribute("aria-label", "Your referral link");
-      const copy = document.createElement("button");
-      copy.type = "button";
-      copy.className = "button secondary";
-      copy.textContent = "Copy";
-      copy.addEventListener("click", async () => {
-        try { await navigator.clipboard.writeText(link.link); copy.textContent = "Copied"; }
-        catch { input.select(); copy.textContent = "Select and copy"; }
-      });
-      result.hidden = false;
-      result.textContent = "";
-      result.append(input, copy);
-    } catch (error) {
-      if (current()) status(error?.message ?? "Could not mint a referral link.");
-    } finally { if (current()) busy = false; }
+      await navigator.clipboard.writeText(url);
+      if (current()) status("Link copied.");
+    } catch {
+      if (current()) status(url);
+    }
   }
 
-  button.addEventListener("click", mintMyLink);
+  button.addEventListener("click", copyMyLink);
   panel.addEventListener("toggle", () => { if (panel.open) load(); });
 
   return {

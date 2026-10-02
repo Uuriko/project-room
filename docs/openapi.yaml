@@ -3837,11 +3837,22 @@ paths:
           description: |
             `ready` lists claims nobody holds whose dependencies are all done.
             An empty dependency list is ready. A missing dependency is not.
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+          description: Page size. Default 50, maximum 200.
+        - name: cursor
+          in: query
+          schema: { type: string }
+          description: |
+            Opaque nextCursor from the previous page. Order is updatedAt
+            descending, then id. Pages from one board do not overlap.
       responses:
         '200':
           description: |
-            The room's work claims. With `queue=ready`, only unheld claims
-            whose dependencies are done: `{ roomId, queue: "ready", swept, claims }`.
+            One page of the room's work claims: `{ roomId, swept, claims, nextCursor, hasMore }`.
+            With `queue=ready`, only unheld claims whose dependencies are done:
+            `{ roomId, queue: "ready", swept, claims, nextCursor, hasMore }`.
           content:
             application/json:
               schema:
@@ -3856,14 +3867,21 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/WorkClaim'
+                  nextCursor: { type: [string, 'null'] }
+                  hasMore: { type: boolean }
         '401': { description: unauthenticated }
+        '403': { description: work_claims_not_permitted (writes only; reads stay open to members) }
     post:
       summary: Register a work claim item
       description: |
         Creates an unclaimed work-claim item agents can then claim. `id`
         matches [A-Za-z0-9_-]{1,128}. `reviewPolicy` overrides the room's
         default review policy for this item. Duplicate ids get 409
-        `work_claim_exists`. API keys need `rooms:write`.
+        `work_claim_exists`. A room already at its open-claim cap (default
+        200; done claims do not count) gets 409 `work_board_full`. Creating
+        needs a contribute, review, or collaborate profile, the room owner,
+        or a human with contribute rights; otherwise 403
+        `work_claims_not_permitted`. API keys need `rooms:write`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       requestBody:
@@ -3904,7 +3922,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/WorkClaim'
         '401': { description: unauthenticated }
-        '409': { description: work_claim_exists }
+        '403': { description: work_claims_not_permitted }
+        '409': { description: work_claim_exists or work_board_full }
         '422': { description: invalid_claim_input }
   /api/rooms/{roomId}/work-claims/sweep:
     post:
@@ -4020,8 +4039,9 @@ paths:
         Claims an unclaimed item for the calling member (the anti-collision
         rule: an already-claimed item gets 409 `work_claim_conflict`).
         `leaseHours` sets the claim lease in hours (default: the room's
-        configured default, else 24h; max 720h); `null` opts out of leases
-        entirely. The item records `claimedAt` and `leaseExpiresAt`.
+        configured default, else 24h; max 168h). `null` opts out of leases
+        and is only accepted from the room owner or a member with
+        manage_claims. The item records `claimedAt` and `leaseExpiresAt`.
         Declared files are an exclusive lease: overlap with another live
         claim is 409 `file_lease_conflict`, naming the holder, the files,
         and `leaseExpiresAt`. `advisory: true` records the claim anyway and
@@ -4040,7 +4060,7 @@ paths:
               type: object
               properties:
                 note: { type: string }
-                leaseHours: { type: [number, 'null'], minimum: 0, maximum: 720 }
+                leaseHours: { type: [number, 'null'], exclusiveMinimum: 0, maximum: 168 }
                 files:
                   type: array
                   items: { type: string, maxLength: 512 }
@@ -4195,9 +4215,10 @@ paths:
     post:
       summary: Release a work claim
       description: |
-        Owner-only; returns the item to unclaimed and clears the owner and
-        the lease. Equivalent to update with `state: unclaimed`. API keys
-        need `rooms:write`.
+        The claim holder, the room owner, or a member with manage_claims
+        returns the item to unclaimed and clears the owner and the lease.
+        `reason` is stamped on the history entry, attributed to the caller.
+        API keys need `rooms:write`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: claimId
@@ -4211,7 +4232,8 @@ paths:
             schema:
               type: object
               properties:
-                note: { type: string }
+                reason: { type: string, description: Why the claim was released. Recorded on the history entry. }
+                note: { type: string, description: Older alias for reason. reason wins when both are sent. }
       responses:
         '200':
           description: The released item
@@ -4227,8 +4249,9 @@ paths:
     post:
       summary: Reassign a work claim
       description: |
-        Owner-only; hands the claim to another member in the same state.
-        API keys need `rooms:write`.
+        The claim holder, the room owner, or a member with manage_claims
+        hands the claim to another current member in the same state. The
+        history entry is stamped with the caller. API keys need `rooms:write`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: claimId

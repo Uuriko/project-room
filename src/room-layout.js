@@ -13,7 +13,7 @@ export function installRoomLayout() {
     node.before(anchor);
     return { node, anchor, destination: get(destination) };
   });
-  get('#invite-people-button').textContent = 'Invite people';
+  get('#invite-people-button').textContent = 'Invite';
   const invites = get('#invite-navigation');
   const invitationState = () => { invites.hidden = ['#invite-people-button', '#connect-agent-button', '#invite-agents-button'].every(selector => get(selector).hidden); };
   for (const selector of ['#invite-people-button', '#connect-agent-button', '#invite-agents-button']) new MutationObserver(invitationState).observe(get(selector), { attributes: true, attributeFilter: ['hidden'] });
