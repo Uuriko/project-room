@@ -161,6 +161,18 @@ function mayWriteWorkClaims(access) {
   return holdsProfile(permissions, "contribute") || holdsProfile(permissions, "review") || holdsProfile(permissions, "collaborate");
 }
 
+// Reviewing does not grant Board write access. A human with the existing
+// verify right can record a verdict just like an agent review profile.
+function mayReviewWorkClaims(access) {
+  return Boolean(access.member && access.member.active !== false
+    && (mayWriteWorkClaims(access) || (access.member.permissions ?? []).includes("verify")));
+}
+
+const reviewersOf = (store, roomId) => {
+  const authority = store.roomAuthority(roomId);
+  return Object.values(authority.members).filter(member => mayReviewWorkClaims({ ownerId: authority.ownerId, member })).map(member => member.id);
+};
+
 function mayManageAnyClaim(access) {
   const member = access.member;
   if (!member || member.active === false) return false;
@@ -735,9 +747,9 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
             `Review policy "${policy}" not satisfied for "${item.id}": no review attestation recorded by ${reviewer}`);
         }
         const verifiers = verifiersOf(store, roomId);
-        if (!canCloseWork(item, reviewer, { policy, verifyMembers: verifiers })) {
+        if (!canCloseWork(item, reviewer, { policy, verifyMembers: verifiers, reviewMembers: reviewersOf(store, roomId) })) {
           reject(403, "work_review_rejected",
-            `Review policy "${policy}" not satisfied for "${item.id}": attestation by ${reviewer} does not close this work`);
+            `Review policy "${policy}" not satisfied for "${item.id}": a current affirmative review by an authorized reviewer is required`);
         }
       }
     }
@@ -780,12 +792,13 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     const verdictReview = data && typeof data === "object" && !Array.isArray(data) && ("verdict" in data || "summary" in data || "url" in data);
     if (verdictReview) {
       if (!shape(data, { required: ["verdict", "summary"], optional: ["url"] })) invalidInput(reject, "{verdict, summary, url?}");
-      requireWriter();
+      if (!mayReviewWorkClaims(access)) refuseWorkClaims();
       const item = load(claimIdOf(reject, workClaimId));
       if (item.owner === caller) reject(403, "work_review_rejected", "The owner cannot review their own claim");
       const reviewed = runPure(reject, () => recordReview(item, caller, { verdict: data.verdict, summary: data.summary, url: data.url, now: nowMs }));
-      commit(reviewed, "reviewed", { reason: "reviewed", verdict: data.verdict });
-      if (data.verdict === "changes_requested") {
+      const duplicate = reviewed.history === item.history;
+      if (!duplicate) commit(reviewed, "reviewed", { reason: "reviewed", verdict: data.verdict });
+      if (!duplicate && data.verdict === "changes_requested") {
         enqueueClaimWake(store, roomId, item.owner, `work-claim:${item.id}:review:${caller}:${nowMs}`, { reason: "review", actorId: caller });
       }
       return json(res, 200, reviewed);
@@ -793,7 +806,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     if (!shape(data, { optional: ["note"] })) invalidInput(reject, "{note?} or {verdict, summary, url?}");
     const item = load(claimIdOf(reject, workClaimId));
     const attested = runPure(reject, () => attestWork(item, caller, { note: data.note, now: nowMs }));
-    commit(attested, "reviewed");
+    if (attested.history !== item.history) commit(attested, "reviewed");
     return json(res, 200, attested);
   }
   if (workClaimRoute === "release" && req.method === "POST") {

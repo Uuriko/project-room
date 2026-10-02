@@ -3,6 +3,9 @@
 // agent that can claim without write_external.
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { RoomAgentClient } from "../client/room-agent.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
@@ -28,7 +31,7 @@ function fakeGitHub(phase) {
   return async url => {
     const target = String(url);
     if (target.includes("/pulls/")) {
-      return githubResponse({ state: "open", merged: false, head: { sha: SHA } }, { etag: "\"pull\"" });
+      return githubResponse({ state: "open", merged: false, head: { sha: phase.headSha ?? SHA } }, { etag: "\"pull\"" });
     }
     if (target.endsWith("/status")) {
       const failure = phase.failure === true;
@@ -50,8 +53,8 @@ function fakeGitHub(phase) {
   };
 }
 
-async function fixture(t, { phase = { failure: false } } = {}) {
-  const store = new RoomStore(":memory:");
+async function fixture(t, { phase = { failure: false }, databasePath = ":memory:" } = {}) {
+  const store = new RoomStore(databasePath);
   store.initialize(initialRoom("commons"));
   const ownerKey = store.issueAccessKey("commons", "owner");
   const add = (id, displayName, kind, permissions) => store.command(ownerKey, "commons", {
@@ -60,8 +63,10 @@ async function fixture(t, { phase = { failure: false } } = {}) {
   });
   add("coord", "Coord", "agent", ["accept_work", "complete_work"]);
   add("chat", "Chat", "agent", []);
+  add("verifier", "Verifier", "human", ["verify"]);
   const coordKey = store.issueAccessKey("commons", "coord");
   const chatKey = store.issueAccessKey("commons", "chat");
+  const verifierKey = store.issueAccessKey("commons", "verifier");
   const server = createRoomServer({
     store,
     fetchPullRequest: fakeGitHub(phase),
@@ -84,7 +89,25 @@ async function fixture(t, { phase = { failure: false } } = {}) {
     });
     return { status: response.status, value: await response.json() };
   };
-  return { store, origin, ownerKey, coordKey, chatKey, owner: client(ownerKey), coord: client(coordKey), chat: client(chatKey), call };
+  return { store, origin, ownerKey, coordKey, chatKey, verifierKey, owner: client(ownerKey), coord: client(coordKey), chat: client(chatKey), call };
+}
+
+async function startReviewedClaim(f, id, reviewPolicy, extra = {}) {
+  assert.equal((await f.call(f.ownerKey, "/work-claims", { id, reviewPolicy, ...extra })).status, 201);
+  assert.equal((await f.call(f.ownerKey, `/work-claims/${id}/claim`, {})).status, 200);
+  const started = await f.call(f.ownerKey, `/work-claims/${id}/update`, { state: "in_progress" });
+  assert.equal(started.status, 200);
+  return started.value;
+}
+
+async function refusedCompletion(f, id, reviewedBy) {
+  const before = f.store.workClaims.get("commons", id);
+  const sequence = f.store.room("commons").sequence;
+  const response = await f.call(f.ownerKey, `/work-claims/${id}/update`, { state: "done", reviewedBy });
+  assert.equal(response.status, 403);
+  assert.equal(response.value.error.code, "work_review_rejected");
+  assert.deepEqual(f.store.workClaims.get("commons", id), before, "a rejected completion preserves the claim");
+  assert.equal(f.store.room("commons").sequence, sequence, "a rejected completion adds no event");
 }
 
 test("a contribute-profile agent creates, renews, and releases a claim without write_external", async t => {
@@ -220,6 +243,182 @@ test("review records refuse the owner and a chat agent, and a changes request wa
   const wake = store.db.prepare("SELECT kind FROM agent_wake_signals WHERE agent_id=?").get("owner");
   assert.equal(wake.kind, "mention");
   assert.match(store.db.prepare("SELECT message_id FROM agent_wake_signals WHERE agent_id=?").get("owner").message_id, /^work-claim:rev-1:review:/);
+});
+
+test("reviewed completion requires the named reviewer's latest explicit approval", async t => {
+  for (const policy of ["distinct_member", "independent_principal"]) {
+    await t.test(policy, async t => {
+      const f = await fixture(t);
+      const reviewer = policy === "distinct_member" ? "coord" : "verifier";
+      const key = reviewer === "coord" ? f.coordKey : f.verifierKey;
+      for (const [index, negative] of [
+        { verdict: "comment", summary: "Still reading" },
+        { verdict: "changes_requested", summary: "Fix the edge case" },
+        { note: "Legacy review note" },
+      ].entries()) {
+        const id = `latest-${index}`;
+        await startReviewedClaim(f, id, policy);
+        const review = body => f.call(key, `/work-claims/${id}/review`, body);
+        await refusedCompletion(f, id, reviewer);
+        assert.equal((await review(negative)).status, 200);
+        await refusedCompletion(f, id, reviewer);
+        const approved = await review({ verdict: "approve", summary: "Checked the current work" });
+        assert.equal(approved.status, 200);
+        assert.equal(approved.value.reviews.find(entry => entry.memberId === reviewer).verdict, "approve");
+        assert.equal((await review(negative)).status, 200);
+        await refusedCompletion(f, id, reviewer);
+        const after = (await f.call(f.ownerKey, `/work-claims/${id}`)).value;
+        assert.ok(after.history.length > approved.value.history.length, "supersession retains the review history");
+        if (negative.note) {
+          assert.equal(after.reviews.some(entry => entry.memberId === reviewer && entry.verdict === "approve"), false);
+          assert.equal(after.attestations.find(entry => entry.memberId === reviewer).note, negative.note);
+        }
+        assert.equal((await review({ verdict: "approve", summary: "Rechecked after the latest feedback" })).status, 200);
+        const done = await f.call(f.ownerKey, `/work-claims/${id}/update`, { state: "done", reviewedBy: reviewer });
+        assert.equal(done.status, 200);
+        assert.equal(done.value.state, "done");
+        assert.equal(done.value.reviewedBy, reviewer);
+      }
+    });
+  }
+});
+
+test("human verify permits review without granting Board writes, and self-attested closure is unchanged", async t => {
+  const f = await fixture(t);
+  await startReviewedClaim(f, "human-review", "independent_principal");
+  assert.equal((await f.call(f.ownerKey, "/work-claims", { id: "open-for-claim" })).status, 201);
+  for (const [path, body] of [
+    ["/work-claims", { id: "verifier-cannot-create" }],
+    ["/work-claims/open-for-claim/claim", {}],
+  ]) {
+    const denied = await f.call(f.verifierKey, path, body);
+    assert.equal(denied.status, 403);
+    assert.equal(denied.value.error.code, "work_claims_not_permitted");
+  }
+  const approved = await f.call(f.verifierKey, "/work-claims/human-review/review", { verdict: "approve", summary: "Verified" });
+  assert.equal(approved.status, 200);
+  assert.deepEqual(f.store.roomAuthority("commons").members.verifier.permissions, ["verify"]);
+  const done = await f.call(f.ownerKey, "/work-claims/human-review/update", { state: "done", reviewedBy: "verifier" });
+  assert.equal(done.status, 200);
+  await startReviewedClaim(f, "self-review", "self_attested");
+  await refusedCompletion(f, "self-review", "verifier");
+  const self = await f.call(f.ownerKey, "/work-claims/self-review/update", { state: "done" });
+  assert.equal(self.status, 200);
+  assert.equal(self.value.state, "done");
+});
+
+test("completion rechecks a reviewer's active membership and current review authority", async t => {
+  for (const scenario of [
+    { policy: "distinct_member", reviewer: "coord", permissions: [], active: true },
+    { policy: "distinct_member", reviewer: "coord", permissions: ["accept_work", "complete_work"], active: false },
+    { policy: "independent_principal", reviewer: "verifier", permissions: ["accept_work", "complete_work"], active: true },
+    { policy: "independent_principal", reviewer: "verifier", permissions: ["verify"], active: false },
+  ]) {
+    await t.test(`${scenario.policy}: ${scenario.active ? "permission revoked" : "inactive"}`, async t => {
+      const f = await fixture(t);
+      await startReviewedClaim(f, "authority", scenario.policy);
+      const key = scenario.reviewer === "coord" ? f.coordKey : f.verifierKey;
+      assert.equal((await f.call(key, "/work-claims/authority/review", { verdict: "approve", summary: "Approved while authorized" })).status, 200);
+      f.store.command(f.ownerKey, "commons", { id: "change-reviewer-access", type: "member.access_changed", data: {
+        memberId: scenario.reviewer,
+        expectedMemberRevision: f.store.roomAuthority("commons").members[scenario.reviewer].revision,
+        permissions: scenario.permissions, active: scenario.active,
+      } });
+      await refusedCompletion(f, "authority", scenario.reviewer);
+    });
+  }
+});
+
+test("an unchanged latest review retry preserves its timestamp, basis, events, and wakes", async t => {
+  const f = await fixture(t);
+  await startReviewedClaim(f, "retry-review", "distinct_member", { revision: "reviewed-revision" });
+  const body = { verdict: "changes_requested", summary: "Add the missing validation", url: "https://example.com/review" };
+  const first = await f.call(f.coordKey, "/work-claims/retry-review/review", body);
+  assert.equal(first.status, 200);
+  const sequence = f.store.room("commons").sequence;
+  const wakes = f.store.db.prepare("SELECT COUNT(*) AS n FROM agent_wake_signals WHERE agent_id=?").get("owner").n;
+  assert.equal(wakes, 1);
+  await new Promise(resolve => setTimeout(resolve, 5));
+  const retry = await f.call(f.coordKey, "/work-claims/retry-review/review", body);
+  assert.equal(retry.status, 200);
+  assert.deepEqual(retry.value, first.value);
+  assert.equal(f.store.room("commons").sequence, sequence);
+  assert.equal(f.store.db.prepare("SELECT COUNT(*) AS n FROM agent_wake_signals WHERE agent_id=?").get("owner").n, wakes);
+  assert.deepEqual((await f.call(f.ownerKey, "/work-claims/retry-review")).value.reviews, first.value.reviews);
+});
+
+test("approval remains bound to the reviewed revision and observed pull-request head", async t => {
+  for (const changed of ["revision", "headSha"]) {
+    await t.test(changed, async t => {
+      const phase = { headSha: SHA };
+      const f = await fixture(t, { phase });
+      const id = `basis-${changed}`;
+      const claim = await startReviewedClaim(f, id, "distinct_member", { revision: "revision-one", pullRequest: "https://github.com/acme/demo/pull/7" });
+      assert.equal((await f.call(f.ownerKey, "/work-claims/sweep", {})).status, 200);
+      const body = { verdict: "approve", summary: "Reviewed revision one" };
+      const review = await f.call(f.coordKey, `/work-claims/${id}/review`, body);
+      assert.equal(review.status, 200);
+      const basis = review.value.reviews[0].basis;
+      assert.ok(basis, "explicit review records the current claim basis");
+      assert.equal(basis.version, 1);
+      assert.equal(basis.owner, "owner");
+      assert.equal(basis.claimedAt, claim.claimedAt);
+      assert.equal(basis.revision, "revision-one");
+      assert.equal(basis.headSha, SHA);
+      const current = f.store.workClaims.get("commons", id);
+      if (changed === "revision") {
+        f.store.workClaims.set("commons", { ...current, revision: "revision-two" });
+      } else {
+        phase.headSha = MAIN;
+        f.store.workClaims.set("commons", { ...current, pullRequest: { ...current.pullRequest, nextPollAt: null, ciCursor: "done" } });
+        assert.equal((await f.call(f.ownerKey, "/work-claims/sweep", {})).status, 200);
+        assert.equal(f.store.workClaims.get("commons", id).ci.headSha, MAIN);
+      }
+      await refusedCompletion(f, id, "coord");
+      const sequence = f.store.room("commons").sequence;
+      const retry = await f.call(f.coordKey, `/work-claims/${id}/review`, body);
+      assert.equal(retry.status, 200);
+      assert.deepEqual(retry.value.reviews[0], review.value.reviews[0], "a retry cannot silently approve changed work");
+      assert.equal(f.store.room("commons").sequence, sequence);
+      await refusedCompletion(f, id, "coord");
+      const fresh = await f.call(f.coordKey, `/work-claims/${id}/review`, { verdict: "approve", summary: "Reviewed the updated work" });
+      assert.equal(fresh.status, 200);
+      assert.notDeepEqual(fresh.value.reviews[0].basis, basis);
+      assert.equal((await f.call(f.ownerKey, `/work-claims/${id}/update`, { state: "done", reviewedBy: "coord" })).status, 200);
+    });
+  }
+});
+
+test("persisted approvals retain their basis while older unbound records need a fresh review", async t => {
+  const directory = await mkdtemp(join(tmpdir(), "board-review-"));
+  const databasePath = join(directory, "room.sqlite");
+  const f = await fixture(t, { databasePath });
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  await startReviewedClaim(f, "persisted-review", "distinct_member", { revision: "persisted-revision" });
+  const approved = await f.call(f.coordKey, "/work-claims/persisted-review/review", { verdict: "approve", summary: "Reviewed persisted work" });
+  assert.equal(approved.status, 200);
+  const reopened = new RoomStore(databasePath);
+  try {
+    assert.deepEqual(reopened.workClaims.get("commons", "persisted-review").reviews, approved.value.reviews);
+    assert.ok(reopened.workClaims.get("commons", "persisted-review").reviews[0].basis);
+  } finally { reopened.close(); }
+  const current = f.store.workClaims.get("commons", "persisted-review");
+  // Older stored rows predate the versioned review context.
+  f.store.workClaims.set("commons", { ...current, reviews: current.reviews.map(({ basis: _basis, ...review }) => review) });
+  assert.equal((await f.call(f.ownerKey, "/work-claims/persisted-review")).status, 200);
+  await refusedCompletion(f, "persisted-review", "coord");
+  assert.equal((await f.call(f.coordKey, "/work-claims/persisted-review/review", { verdict: "approve", summary: "Fresh review with the current context" })).status, 200);
+  assert.equal((await f.call(f.ownerKey, "/work-claims/persisted-review/update", { state: "done", reviewedBy: "coord" })).status, 200);
+});
+
+test("a superseded claim cannot be manually completed with an otherwise valid approval", async t => {
+  const f = await fixture(t);
+  await startReviewedClaim(f, "superseded-review", "distinct_member");
+  assert.equal((await f.call(f.coordKey, "/work-claims/superseded-review/review", { verdict: "approve", summary: "Approved before replacement" })).status, 200);
+  assert.equal((await f.call(f.ownerKey, "/work-claims", { id: "replacement" })).status, 201);
+  const current = f.store.workClaims.get("commons", "superseded-review");
+  f.store.workClaims.set("commons", { ...current, supersededBy: "replacement" });
+  await refusedCompletion(f, "superseded-review", "coord");
 });
 
 test("a deploy claim closes when the live revision matches, and status reports main", async t => {
