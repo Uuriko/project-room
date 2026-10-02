@@ -92,7 +92,7 @@ test("two independent database writers race update against withdrawal without lo
 
 for (const corruption of ["help", "basis", "definition", "access", "event-author", "event-revision", "missing-history"]) test(`help audit rejects ${corruption} hidden behind a checkpoint`, t => {
   const f = setup(t); f.send();
-  const room = f.store.room("commons"), state = room.state;
+  const room = f.store.room("commons"), state = structuredClone(room.state);
   f.store.db.prepare("INSERT INTO projection_checkpoints VALUES(?,?,?)").run("commons", room.sequence, JSON.stringify(state));
   auditRecovery(f.store);
   if (["help", "basis", "definition", "access"].includes(corruption)) {
@@ -116,7 +116,7 @@ for (const corruption of ["help", "basis", "definition", "access", "event-author
 
 test("withdrawal remains possible at event and projection capacity; reopening does not", t => {
   const f = setup(t); f.send();
-  const state = f.store.room("commons").state; state.messages.push({ body: "x".repeat(4 * 1024 * 1024) });
+  const state = structuredClone(f.store.room("commons").state); state.messages.push({ body: "x".repeat(4 * 1024 * 1024) });
   f.store.db.prepare("UPDATE rooms SET sequence=10000,projection=? WHERE id='commons'").run(JSON.stringify(state));
   assert.throws(() => f.send(f.command({ scope: "Updated" })), { code: "pilot_limit" });
   const withdrawal = f.withdraw(); assert.equal(f.send(withdrawal, "owner").sequence, 10001);
@@ -178,7 +178,7 @@ test("genuine schema12 upgrade preserves old help-like message text and refuses 
       }
       const current = new RoomStore(f.filename, { now: f.now });
       try {
-        assert.equal(auditRecovery(current).schemaVersion, 36);
+        assert.equal(auditRecovery(current).schemaVersion, 37);
         assert.equal(current.room("old-text").state.messages[0].body, "Help wanted, just ordinary text");
         assert.equal(Object.hasOwn(current.room("old-text").state.messages[0], "helpWanted"), false);
         assert.equal(Object.hasOwn(current.room("commons").state.workItems[Object.keys(row.state.workItems)[0]], "helpWanted"), false);

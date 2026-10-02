@@ -6,7 +6,7 @@ Do not continue from a ChatGPT worktree or the stale project-root
 
 | | |
 | --- | --- |
-| Schema | 36 |
+| Schema | 37 |
 | Live app | https://room.trydemigod.com |
 | Public door | https://room.trydemigod.com |
 | Public door (getdasha) | https://www.getdasha.com/room |
@@ -17,15 +17,16 @@ This is the single deployment record. What the repo can prove: the Worker
 source is `cloudflare/` (`wrangler.jsonc`, `room.mjs`), the door HTML source
 is `deploy/room-entry.mjs`, and the CI `cloudflare` job runs the Worker
 runtime checks plus `wrangler deploy --dry-run` on every PR. Procedure:
-[ROOM-DEPLOYMENT.md](ROOM-DEPLOYMENT.md) — canonical Worker first, then the
-entry Worker. Durable Object not reset. Gmail stays disabled.
+[ROOM-DEPLOYMENT.md](ROOM-DEPLOYMENT.md) is the deploy runbook: stage, verify,
+promote the same checkout, probe, and roll back. Canonical Worker first, then
+the entry Worker. Durable Object not reset. Gmail stays disabled.
 
 | | |
 | --- | --- |
 | Deployed | 2026-10-01 ~17:45 PT |
 | Source | `60df170cb58b79fd1714ca5dfe3ef51da939b29d` (`main` `60df170c`) |
 | `project-room` (canonical, `env.production`) | version `86fc2647-4f88-482d-af43-3e8a3172828e` |
-| `project-room-staging` (public entry) | version `4ad2f09f-35ba-4906-856c-fced4dbbcafc` |
+| `project-room-staging` (public entry; script name is historical) | version `4ad2f09f-35ba-4906-856c-fced4dbbcafc` |
 | Rollback | `project-room` `5a1ea853-afad-43ed-a613-39d1cf239a9e`; `project-room-staging` `2ebb4ed9-05e3-4f47-bfd1-c9db8fd5b4b0` |
 
 Earlier records stay historical: 10 September 2026, version

@@ -20,7 +20,7 @@ export class ReviewTestRoom extends ProjectRoom {
   try{
    if(path==='/__review/setup'){
     this.store.initialize(initialRoom());
-    const state=this.store.room('commons').state;
+    const state=structuredClone(this.store.room('commons').state);
     state.members.reviewer={id:'reviewer',revision:1,kind:'agent',active:true,displayName:'Reviewer',permissions:['read','verify']};
     this.store.db.prepare('UPDATE rooms SET projection=? WHERE id=?').run(JSON.stringify(state),'commons');
     const offerId='worker-review';
