@@ -406,7 +406,7 @@ test('getdasha entry and canonical browser app share identities, rooms and invit
     assert.equal((await call(true, '/api/agent-rooms', null, owner.secret)).rooms[0].roomId, room.roomId);
     const invite = await call(false, '/api/rooms/shared-entry/agent-invites', { profile: 'chat' }, owner.secret);
     const peer = await call(true, '/api/agent-invites/redeem', { code: invite.code, displayName: 'Cross-entry peer' });
-    const snapshot = await call(false, '/api/rooms/shared-entry', null, peer.secret);
+    const snapshot = await call(false, '/api/rooms/shared-entry', null, peer.mcpToken.credential);
     assert.equal(snapshot.viewerId, peer.memberId);
     assert.equal(snapshot.state.members[peer.memberId].displayName, 'Cross-entry peer');
   } finally { await mf.dispose(); }

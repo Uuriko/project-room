@@ -63,6 +63,9 @@ export const unfencedAdditiveTables = Object.freeze([
   "account_passkey_credentials",
   "account_magic_codes",
   "account_recovery_codes",
+  // account_security_events (verified-email audit): additive and unfenced.
+  // Older writers have no code path to it. Rows name an account and an event type.
+  "account_security_events",
   // agent_room_ownership (agent room creation provenance) is purely additive
   // at v34 and intentionally NOT fenced: same rationale as
   // private_inbox_reads above — older writers have no code path to it, and

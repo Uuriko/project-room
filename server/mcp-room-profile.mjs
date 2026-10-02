@@ -10,6 +10,7 @@ import { handlePublicWorkMcp, isPublicWorkMcpTool } from './mcp-public-work.mjs'
 import { MCP_DISCOVERY_BLOCK } from "./discoverability.mjs";
 import { ServiceError } from "./store.mjs";
 import { isIdentitySecret } from "./agent-identities.mjs";
+import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { handleEmissaryTool } from "./emissary-lure.mjs";
 import { HeartbeatError } from "./agent-heartbeats.mjs";
@@ -75,11 +76,11 @@ function failureValue(error) {
 
 export function identityBearer(authorization) {
   if (typeof authorization !== "string" || !authorization.startsWith("Bearer ")) {
-    return { error: "Hosted room tools require Authorization: Bearer and a live identity secret" };
+    return { error: "Hosted room tools require Authorization: Bearer and a live identity or room token" };
   }
   const token = authorization.slice("Bearer ".length);
-  if (!token || /\s/.test(token) || !isIdentitySecret(token)) {
-    return { error: "Hosted room tools require a live identity secret" };
+  if (!token || /\s/.test(token) || !(isIdentitySecret(token) || token.startsWith(API_KEY_PREFIX))) {
+    return { error: "Hosted room tools require a live identity or room token" };
   }
   return { secret: token };
 }
@@ -400,9 +401,10 @@ function callRoomTool(store, secret, identity, name, args, agentRooms) {
     return store.invites.redeem(args.inviteCode, { displayName, identitySecret: secret });
   }
   if (name === "room_check_access" && args.roomId === undefined) {
+    const allowed = mcpRoomAllowlist(store, secret);
     const rooms = store.identities.roomsForIdentity(identity.identityId).map(row => ({
       roomId: row.roomId, title: row.title ?? row.roomId, memberId: row.memberId
-    }));
+    })).filter(row => !allowed || allowed.includes(row.roomId));
     return {
       contractVersion: 1, type: "agent_connection_check", status: "credential_accepted",
       identityId: identity.identityId, displayName: identity.displayName, rooms,
@@ -756,9 +758,33 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
   return { jsonrpc: "2.0", id: requestId, error: { code: -32601, message: "Method not found" } };
 }
 
+function mcpRoomAllowlist(store, secret) {
+  if (typeof secret !== "string" || !secret.startsWith(API_KEY_PREFIX)) return null;
+  const record = store.agentPlugin.verifyPresentedApiKey(secret);
+  if (!record) return [];
+  const rooms = record.scopes.filter(scope => scope.startsWith("mcp:room:")).map(scope => scope.slice("mcp:room:".length));
+  return rooms.length > 0 ? rooms : null;
+}
+
+function resolveMcpIdentity(store, secret, userAgent) {
+  if (secret.startsWith(API_KEY_PREFIX)) {
+    const record = store.agentPlugin.verifyPresentedApiKey(secret);
+    if (!record) return null;
+    const row = store.identities.get(record.identityId);
+    if (!row) return null;
+    store.agentPlugin.notePresentedKeyUse(record.keyId, { ua: userAgent });
+    store.identities.noteMcpUse(row.identityId, { legacy: false, ua: userAgent });
+    return { identityId: row.identityId, displayName: row.displayName };
+  }
+  const identity = store.identities.resolveGlobalIdentitySecret(secret);
+  if (!identity) return null;
+  store.identities.noteMcpUse(identity.identityId, { legacy: true, ua: userAgent });
+  return identity;
+}
+
 export function createHostedRoomMcp(store, { agentRooms } = {}) {
   const rooms = agentRooms ?? new AgentRooms(store);
-  return async function hostedRoomMcp(message, { authorization, mcpUrl, searchParams } = {}) {
+  return async function hostedRoomMcp(message, { authorization, mcpUrl, searchParams, userAgent } = {}) {
     if (message?.method === "tools/call" && isPublicWorkMcpTool(message.params?.name)) {
       const absent = authorization === undefined;
       const parsed = absent ? { secret: null } : identityBearer(authorization);
@@ -767,8 +793,8 @@ export function createHostedRoomMcp(store, { agentRooms } = {}) {
     }
     const parsed = identityBearer(authorization);
     if (parsed.error) return rpcError(message, MCP_AUTH_REQUIRED, parsed.error);
-    const identity = store.identities.resolveGlobalIdentitySecret(parsed.secret);
-    if (!identity) return rpcError(message, MCP_AUTH_REQUIRED, "Unknown or revoked identity secret");
+    const identity = resolveMcpIdentity(store, parsed.secret, userAgent);
+    if (!identity) return rpcError(message, MCP_AUTH_REQUIRED, "Unknown or revoked identity credential");
     return handleAuthed(message, { store, secret: parsed.secret, identity, mcpUrl, searchParams, agentRooms: rooms });
   };
 }

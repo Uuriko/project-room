@@ -270,7 +270,19 @@ function mentionHorizon(store, roomId, memberId, after, through) {
 // The cursor acknowledges discovery, not completion. Only advance through
 // sequence groups returned in full; multiple attention kinds may share an event.
 export function collectNeedsMe(store, secret, { since } = {}) {
-  const identity = store.identities.resolveGlobalIdentitySecret(secret);
+  let identity = null;
+  let allowedRooms = null;
+  if (typeof secret === "string" && secret.startsWith("rak_")) {
+    const record = store.agentPlugin.verifyPresentedApiKey(secret);
+    if (!record) fail(401, "unauthenticated", "Unknown, revoked, or expired API key");
+    allowedRooms = record.scopes.filter(scope => scope.startsWith("mcp:room:")).map(scope => scope.slice("mcp:room:".length));
+    if (allowedRooms.length === 0) fail(403, "insufficient_scope", "This key is limited to its room");
+    const row = store.identities.get(record.identityId);
+    if (!row) fail(401, "unauthenticated", "Unknown or revoked identity credential");
+    identity = { identityId: row.identityId, displayName: row.displayName };
+  } else {
+    identity = store.identities.resolveGlobalIdentitySecret(secret);
+  }
   if (!identity) fail(401, "unauthenticated", "Unknown or revoked identity secret");
   const parsed = parseNeedsMeSince(since);
   const links = store.db.prepare(
@@ -287,6 +299,7 @@ export function collectNeedsMe(store, secret, { since } = {}) {
   let roomAfter = parsed.roomAfter ?? "";
   let hasMore = links.length > MAX_ROOMS;
   for (const link of links.slice(0, MAX_ROOMS)) {
+    if (allowedRooms && !allowedRooms.includes(link.roomId)) { roomAfter = link.roomId; continue; }
     if (link.archivedAt) { roomAfter = link.roomId; continue; }
     // Do not silently acknowledge a room whose authority/projection failed.
     const authority = store.roomAuthority(link.roomId);

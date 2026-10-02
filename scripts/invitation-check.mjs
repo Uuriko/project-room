@@ -496,7 +496,7 @@ test("a shared invitation retains its pending account signup across Escape and n
   await form.locator('[name="password"]').fill("synthetic-shared-signup-password");
   const committed = deferred(), release = deferred(); t.after(() => release.resolve());
   await page.route("**/api/auth/password/signup", async route => {
-    const response = await route.fetch(); assert.equal(response.status(), 201);
+    const response = await route.fetch(); assert.equal(response.status(), 202);
     committed.resolve(); await release.promise; await route.fulfill({ response });
   });
   await form.locator('button[type="submit"]').click(); await committed.promise;

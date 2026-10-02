@@ -244,7 +244,7 @@ test("join paths: invite redeem, share link, and access-request approve can post
   const minted = f.store.invites.create(f.keys.owner, "commons", { permissions: ["accept_work"], displayName: "Invited" });
   const redeemed = f.store.invites.redeem(minted.code, { displayName: "Invited Bot" });
   assert.equal(getTier(f.db(), "commons", redeemed.memberId), null, "invite redeem leaves no tier row");
-  post(redeemed.secret, "redeemed agent posts");
+  post(redeemed.mcpToken.credential, "redeemed agent posts");
 
   const linkToken = randomBytes(32).toString("base64url");
   f.store.shareLinks.create(f.keys.owner, "commons", {
