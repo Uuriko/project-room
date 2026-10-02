@@ -34,10 +34,12 @@ The machine token and the Room identity secret are written to a `0600` file and 
 
 Pinned guest binaries are in `versions.json` (Lume 0.6.0 and Cua Driver 0.32.0, darwin-arm64 tarballs with sha256). An empty pin refuses the download. The installer does not pipe a moving upstream install script. There is no room-machine GitHub release binary yet. The installer runs the Node entry that ships inside the script (`machine/bin/room-machine.mjs`, Node ≥ 24.19).
 
-`room-machine provider set local|anthropic|openai|dasha|none` stores a name for a later batch. It does not accept an API key.
+`room-machine provider set local|anthropic|openai|dasha|none` stores the provider name in `config.json`. For anthropic, openai, and dasha, the key is read from stdin and stored in the keychain and a mode `0600` file. The key is not an argument, it is not written to `config.json`, and it is not placed in a child environment.
+
+The bot loop stays off until `room-machine bot enable --room <roomId>`. `room-machine bot disable` turns it off. While it is on, `room-machine run` polls that room. The local tier defaults to t1: the bot posts a plan and waits until the owner, or a member named with `--go`, replies `go`.
 
 ## Commands
 
-`status`, `doctor`, `stop`, `pause --minutes N`, `resume`, `uninstall`, `preflight`, `enroll --enroll CODE`, `run`.
+`status`, `doctor`, `stop`, `pause --minutes N`, `resume`, `uninstall`, `preflight`, `enroll --enroll CODE`, `provider set NAME`, `bot enable --room ROOM`, `bot disable`, `run`.
 
 `doctor` posts measured facts only: architecture, chip, RAM, free disk, macOS version, Lume version, driver version, guest grants, and whether Ollama and Xcode answered. A probe that fails is `not measured` or `absent`.

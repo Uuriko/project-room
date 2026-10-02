@@ -7,10 +7,39 @@ import { enroll } from "../lib/enroll.mjs";
 import { preflight } from "../lib/preflight.mjs";
 import { applySystemChanges, revertSystemChanges } from "../lib/system.mjs";
 import { prepareGolden } from "../lib/vms.mjs";
+import { disableBot, enableBot, normalizeBot } from "../bot/config.mjs";
+import { providerNeedsKey, saveProviderKey } from "../bot/keys.mjs";
 
 const argv = process.argv.slice(2);
 const command = argv[0] ?? "status";
 const home = configHome();
+
+function readStdin() {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    process.stdin.on("data", chunk => chunks.push(chunk));
+    process.stdin.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    process.stdin.on("error", reject);
+  });
+}
+
+function flagValue(name) {
+  const index = argv.indexOf(name);
+  if (index === -1) return null;
+  const value = argv[index + 1];
+  if (!value || value.startsWith("--")) return null;
+  return value;
+}
+
+function flagValues(name) {
+  const values = [];
+  for (let index = 0; index < argv.length; index += 1) {
+    if (argv[index] !== name) continue;
+    const value = argv[index + 1];
+    if (value && !value.startsWith("--")) values.push(value);
+  }
+  return values;
+}
 
 function off() {
   console.log("room-machine is off. Set ROOM_MACHINE_ENABLED=1 to turn it on.");
@@ -23,7 +52,13 @@ async function main() {
     const config = loadConfig(home);
     const daemon = new MachineDaemon({ home });
     const status = daemon.status();
-    console.log(JSON.stringify({ ...status, enabled: machineEnabled() && config.enabled === true, label: config.label || null }));
+    const bot = normalizeBot(config.bot);
+    console.log(JSON.stringify({
+      ...status,
+      enabled: machineEnabled() && config.enabled === true,
+      label: config.label || null,
+      bot: { enabled: bot.enabled, rooms: bot.rooms, tier: bot.tier },
+    }));
     return;
   }
   if (command === "stop") {
@@ -88,11 +123,43 @@ async function main() {
       process.exitCode = 2;
       return;
     }
+    if (argv.length > 3) {
+      console.log("The key is read from stdin. Do not pass it as an argument.");
+      process.exitCode = 2;
+      return;
+    }
+    if (providerNeedsKey(name)) {
+      const saved = await saveProviderKey(name, await readStdin(), home);
+      if (!saved.ok) {
+        console.log("A key is required on stdin.");
+        process.exitCode = 2;
+        return;
+      }
+    }
     const config = loadConfig(home);
     config.provider = name;
     config.enabled = true;
     saveConfig(config, home);
     console.log(JSON.stringify({ provider: name }));
+    return;
+  }
+  if (command === "bot" && argv[1] === "enable") {
+    const config = loadConfig(home);
+    const enabled = enableBot(config.bot, { roomId: flagValue("--room"), goMembers: flagValues("--go") });
+    if (!enabled.ok) {
+      console.log("bot enable needs --room <roomId>");
+      process.exitCode = 2;
+      return;
+    }
+    saveConfig({ ...config, bot: enabled.bot }, home);
+    console.log(JSON.stringify({ bot: { enabled: true, rooms: enabled.bot.rooms, tier: enabled.bot.tier } }));
+    return;
+  }
+  if (command === "bot" && argv[1] === "disable") {
+    const config = loadConfig(home);
+    const bot = disableBot(config.bot);
+    saveConfig({ ...config, bot }, home);
+    console.log(JSON.stringify({ bot: { enabled: false, rooms: bot.rooms } }));
     return;
   }
   if (command === "enroll") {
@@ -126,7 +193,7 @@ async function main() {
     });
     return;
   }
-  console.log("Commands: status, doctor, stop, pause --minutes N, resume, uninstall, provider set, run");
+  console.log("Commands: status, doctor, stop, pause --minutes N, resume, uninstall, provider set NAME, bot enable --room ROOM, bot disable, run");
   process.exitCode = 2;
 }
 

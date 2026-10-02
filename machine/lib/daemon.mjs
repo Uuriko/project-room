@@ -14,6 +14,7 @@ import {
 } from "./recording.mjs";
 import { identitySecret, stageFile, updateClaim } from "./room.mjs";
 import { deleteGuest, guestName, stopAllGuests, suspendGuests } from "./vms.mjs";
+import { attachBot } from "../bot/loop.mjs";
 
 function machineTag(label) {
   const body = String(label || "host").toLowerCase().replace(/[^a-z0-9_-]/g, "").slice(0, 24) || "host";
@@ -68,6 +69,7 @@ export class MachineDaemon {
     }, 200);
     this.timer.unref?.();
     this.connectLoop();
+    this.botStop = attachBot(this);
     return { enabled: true, enrolled: true };
   }
 
@@ -276,6 +278,7 @@ export class MachineDaemon {
   async stop() {
     this.stopped = true;
     clearInterval(this.timer);
+    if (this.botStop) await this.botStop();
     for (const stop of this.frameStops.values()) stop();
     this.frameStops.clear();
     await stopAllGuests(this.state);
