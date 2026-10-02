@@ -70,9 +70,12 @@ test("exact-commit runtime package verifies cold, excludes private state and pre
   }
   assert.throws(() => verifyRuntimePackage(destination, { expectedCommit: "0".repeat(40) }));
   const { buildAssets, assetPaths: committedAssets } = await import(pathToFileURL(join(destination, "cloudflare/build-assets.mjs")));
+  const { templateAssetPaths: committedTemplates } = await import(pathToFileURL(join(destination, "deploy/public-assets.mjs")));
+  // Templates such as join.html are copied for the worker loader and are not raw URLs.
+  const packagedAssets = [...committedAssets, ...committedTemplates];
   const assets = join(directory, "assets");
-  assert.equal(await buildAssets(pathToFileURL(assets + "/")), committedAssets.length);
-  for (const path of committedAssets) assert.deepEqual(readFileSync(join(assets, path)), readFileSync(join(destination, path)));
+  assert.equal(await buildAssets(pathToFileURL(assets + "/")), packagedAssets.length);
+  for (const path of packagedAssets) assert.deepEqual(readFileSync(join(assets, path)), readFileSync(join(destination, path)));
   const committedFixture = await frozenRecoveryFixture(repository, destination, commit);
   // The fail-loud boot gate (server/boot-config.mjs) refuses a production boot
   // with an unsigned card. This synthetic package is built from an unsigned dev
