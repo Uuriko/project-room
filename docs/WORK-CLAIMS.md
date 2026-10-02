@@ -50,14 +50,18 @@ review attestation from the named member (`POST .../review`).
 
 ## Claim, release, reassign
 
-`POST .../claim` with `{ "note"?, "leaseHours"?, "files"?, "advisory"?, "dependsOn"?, "pullRequest"? }`.
+`POST .../claim` with `{ "note"?, "leaseHours"?, "files"?, "advisory"?, "dependsOn"?, "pullRequest"?, "pullRequests"?, "repo"?, "branch"? }`.
 Only an `unclaimed` item can be claimed. A second holder is **409**
-`work_claim_conflict`.
+`work_claim_conflict`. `repo` and `branch` are optional labels (1..200
+characters of letters, numbers, or `.` `_` `/` `-`).
 
-Files are an exclusive lease. Overlap with another live claim (`claimed`,
-`in_progress`, `blocked`) is **409** `file_lease_conflict`. The body names
-`holder` (`claimId`, `owner`), `files`, and `leaseExpiresAt`. `advisory: true`
-still claims and returns `fileWarnings`.
+Files are an exclusive lease. A path string, or `{ "path", "block"? }` /
+`{ "path", "region"? }`, names what the claim holds. No label means the whole
+file and conflicts with every other live claim on that path. Two different
+labels on the same path do not conflict. The same label does. Overlap is
+**409** `file_lease_conflict`. The body names `holder` (`claimId`, `owner`),
+`files`, and `leaseExpiresAt`. `advisory: true` still claims and returns
+`fileWarnings`.
 
 `POST .../release` with `{ "reason"? }` (or the older `note`) returns the item
 to `unclaimed` and clears owner, lease, files, and attestations. The holder
@@ -71,10 +75,11 @@ current active member.
 
 ## Renew
 
-`POST .../renew` with `{ "progressMessageId", "note"?, "leaseHours"? }`.
+`POST .../renew` with `{ "progressMessageId"?, "note"?, "leaseHours"? }`.
 
 Only the holder can renew, and only while the claim is active and the lease
-has not lapsed. `progressMessageId` must be that holder's public room message
+has not lapsed. A heartbeat with no message extends the lease. When
+`progressMessageId` is present it must be that holder's public room message
 posted after `leaseStartAt` (or `claimedAt` when there is no lease start).
 A DM, someone else's message, or an older message is refused. A lapsed lease
 is **409** `claim_lease_lapsed`: claim the item again.
@@ -90,9 +95,11 @@ Open claims are everything that is not `done`.
   `in_progress`, or `blocked`. The next claim is **409**
   `too_many_open_claims`.
 
-These are not `file_lease_conflict`. A room may set `maxOpenClaims` and
-`maxMemberOpenClaims` through the work-claim config (integers 1..10000).
-Missing or invalid values use the defaults.
+These are not `file_lease_conflict`. The room owner sets the per-member cap
+with `POST /api/rooms/{roomId}/work-claims/config` and
+`{ "maxMemberOpenClaims": 20 }` (integer 1..10000). `GET` on that path reads
+the caps. Anyone else who posts is **403** `work_claims_not_permitted`.
+Missing or invalid stored values use the defaults.
 
 ## Leases
 
@@ -124,11 +131,14 @@ argument gets one page.
 
 ## Pull requests and the ready queue
 
-A claim may carry `pullRequest` as
+A claim may carry `pullRequest` or `pullRequests` (up to 16) as
 `https://github.com/{owner}/{repo}/pull/{number}`. There is no inbound GitHub
-webhook. `POST .../sweep` and the per-minute `claim-prs` cron poll the pull.
-A merge completes the claim (`pr_merged`). A close without a merge releases it
-(`pr_closed`). Either path appends one `work_claim.updated` event.
+webhook. `POST .../sweep` and the per-minute `claim-prs` cron poll the next
+open link. One merge does not settle a claim that still has another open
+link. The claim settles only when every linked pull is merged or closed:
+all merged completes it (`pr_merged`); any close without a merge releases it
+(`pr_closed`). An explicit release still releases it while links are open.
+Either settlement appends one `work_claim.updated` event.
 `dependsOn` is the list of claim ids that must be `done` before this claim
 appears on `queue=ready`. A claim cannot depend on itself.
 

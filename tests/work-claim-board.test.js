@@ -111,6 +111,25 @@ test("a contribute-profile agent creates, renews, and releases a claim without w
   assert.equal(denied.value.error.code, "work_claims_not_permitted");
 });
 
+test("the room owner sets the per-member claim cap and a second claim is refused", async t => {
+  const { call, ownerKey, coordKey, coord } = await fixture(t);
+  const saved = await call(ownerKey, "/work-claims/config", { maxMemberOpenClaims: 1 });
+  assert.equal(saved.status, 200);
+  assert.equal(saved.value.maxMemberOpenClaims, 1);
+  const denied = await call(coordKey, "/work-claims/config", { maxMemberOpenClaims: 4 });
+  assert.equal(denied.status, 403);
+  assert.equal(denied.value.error.code, "work_claims_not_permitted");
+  await coord.workClaimCreate({ id: "cap-1", title: "First" });
+  await coord.claimWorkItem("cap-1", {});
+  await coord.workClaimCreate({ id: "cap-2", title: "Second" });
+  const second = await call(coordKey, "/work-claims/cap-2/claim", {});
+  assert.equal(second.status, 409);
+  assert.equal(second.value.error.code, "too_many_open_claims");
+  const read = await call(ownerKey, "/work-claims/config");
+  assert.equal(read.status, 200);
+  assert.equal(read.value.maxMemberOpenClaims, 1);
+});
+
 test("an ownerless room refuses a non-member and a member without a claim profile", async t => {
   const { store, call, coordKey, chatKey } = await fixture(t);
   const row = store.db.prepare("SELECT projection FROM rooms WHERE id=?").get("commons");

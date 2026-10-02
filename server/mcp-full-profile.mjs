@@ -185,6 +185,18 @@ export async function callHostedStdioTool(store, secret, name, args) {
     });
     return { value, isError: value.stopped === "unknown" || value.stopped === "disconnected" };
   }
+  if (name === "room_set_member_claim_cap") {
+    const authority = store.roomAuthority(roomId);
+    const ownerId = typeof authority?.ownerId === "string" ? authority.ownerId : "";
+    if (!ownerId || ownerId !== auth.member.id) {
+      throw new ServiceError(403, "work_claims_not_permitted", "Only the room owner can set the per-member claim cap.");
+    }
+    const cap = rest.maxMemberOpenClaims;
+    if (!Number.isSafeInteger(cap) || cap < 1 || cap > 10000) {
+      throw new ServiceError(422, "invalid_claim_input", "maxMemberOpenClaims must be an integer 1..10000.");
+    }
+    return { value: { roomId, ...store.workClaims.configure(roomId, { maxMemberOpenClaims: cap }) }, isError: false };
+  }
   if (isWorkTool(name)) {
     const command = buildWorkCommand(name, rest);
     return recorded(store, secret, roomId, identity, command, receipt => recordedWorkAction(name, command, receipt));
