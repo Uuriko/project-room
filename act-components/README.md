@@ -2,7 +2,7 @@
 
 Pure helper. Does not import `server/` or `src/`. Schema stays v26.
 
-Contract: [docs/ACT-COMPONENTS.md](../docs/ACT-COMPONENTS.md).
+Contract: [docs/ACT-COMPONENTS.md](../docs/history/ACT-COMPONENTS.md).
 
 ```sh
 npm test

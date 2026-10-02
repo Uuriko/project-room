@@ -45,7 +45,7 @@ Leave the repo public. Do not add tokens, keys, or DIE copy.
 
 ## How to test
 
-Follow [HOW-TO-TEST.md](HOW-TO-TEST.md): open https://room.trydemigod.com,
+Follow [HOW-TO-TEST.md](history/HOW-TO-TEST.md): open https://room.trydemigod.com,
 then **Open Project Room**, then paste a room key (or choose Account key, or an
 invitation). Footer **Project Room** on the Demigod home page is the same door.
 
@@ -55,40 +55,39 @@ invitation). Footer **Project Room** on the Demigod home page is the same door.
 | --- | --- | --- |
 | Room chat, work, catch-up | `src/`, `server/` | Live on the isolated Worker |
 | Private Inbox / account home | `src/inbox-*.js`, `server/inbox*.mjs` | In source and on the Worker; open `/?account=1` |
-| Fixture email (Graph-shaped) | `server/email-*.mjs`, `server/graph-*.mjs`, `server/email-routing-inbound.mjs` | Local/fixture only. No live mailbox or send; the Email Routing inbound parser (#144) is in source but the Worker `email()` handler is not mounted ([EMAIL-ROUTING.md](EMAIL-ROUTING.md)) |
-| Unified inbox / fixture Telegram (Bot API-shaped) | `server/channel-*.mjs`, `server/channel-adapters/`, [UNIFIED-INBOX.md](UNIFIED-INBOX.md) | Fixture by default: recorded updates; webhook updates journal durably in `pending_channel_updates` (additive at schema 27). Telegram inbound (webhook route, `scripts/telegram-set-webhook.mjs`) and outbound (`sendMessage` via `/api/inbox/channel-sends`) go live once the operator sets `TELEGRAM_BOT_TOKEN` / `TELEGRAM_WEBHOOK_SECRET` ([UNIFIED-INBOX.md §Live Telegram](UNIFIED-INBOX.md#live-telegram-zero-spend)). Email stays fixture-only |
+| Fixture email (Graph-shaped) | `server/email-*.mjs`, `server/graph-*.mjs`, `server/email-routing-inbound.mjs` | Local/fixture only. No live mailbox or send; the Email Routing inbound parser (#144) is in source but the Worker `email()` handler is not mounted ([EMAIL-ROUTING.md](history/EMAIL-ROUTING.md)) |
+| Unified inbox / fixture Telegram (Bot API-shaped) | `server/channel-*.mjs`, `server/channel-adapters/`, [UNIFIED-INBOX.md](history/UNIFIED-INBOX.md) | Fixture by default: recorded updates; webhook updates journal durably in `pending_channel_updates` (additive at schema 27). Telegram inbound (webhook route, `scripts/telegram-set-webhook.mjs`) and outbound (`sendMessage` via `/api/inbox/channel-sends`) go live once the operator sets `TELEGRAM_BOT_TOKEN` / `TELEGRAM_WEBHOOK_SECRET` ([UNIFIED-INBOX.md §Live Telegram](history/UNIFIED-INBOX.md#live-telegram-zero-spend)). Email stays fixture-only |
 | Agent connect + MCP | `docs/SWARM-PLUG-IN.md`, `scripts/agent-inbox.mjs` | Owner-browser enrollment; not auto-enrolled |
 | Instinct / Muse / Grok Build / Grok Bot | `docs/ROOM-ROSTER.md` | Roster + Add-agent presets in this source |
 | Usability plan | `docs/USABILITY-PLAN.md` | Chat-first + growth slice; mailbox/auto-enroll gated |
-| Chat-first core | [CHAT-FIRST.md](CHAT-FIRST.md) | Humans talk; agents plug into the same room |
-| Growth / retention | [GROWTH-PLAN.md](GROWTH-PLAN.md) | Invite-only: talk, @ agents, invite, return |
-| Thread composer | [THREAD-COMPOSER.md](THREAD-COMPOSER.md) | In-thread placeholder; Also-@ on Reply |
-| Mentions search | [MENTIONS-SEARCH.md](MENTIONS-SEARCH.md) | Mentioned-you filter on existing search |
-| Reaction pills | [REACTIONS-VISIBLE.md](REACTIONS-VISIBLE.md) | 👍 ❤️ 🎉 🤔 under every message |
+| Chat-first core | [CHAT-FIRST.md](history/CHAT-FIRST.md) | Humans talk; agents plug into the same room |
+| Growth / retention | [GROWTH-PLAN.md](history/GROWTH-PLAN.md) | Invite-only: talk, @ agents, invite, return |
+| Thread composer | [THREAD-COMPOSER.md](history/THREAD-COMPOSER.md) | In-thread placeholder; Also-@ on Reply |
+| Mentions search | [MENTIONS-SEARCH.md](history/MENTIONS-SEARCH.md) | Mentioned-you filter on existing search |
+| Reaction pills | [REACTIONS-VISIBLE.md](history/REACTIONS-VISIBLE.md) | 👍 ❤️ 🎉 🤔 under every message |
 | Agent plug-in | [SWARM-PLUG-IN.md](SWARM-PLUG-IN.md) | Packet / MCP / Node routes in Add agent |
 | Agent discovery | [SWARM-PLUG-IN.md](SWARM-PLUG-IN.md) | `/llms.txt`, `/llms-full.txt`, `/.well-known/agent.json`, kits catalog `/kits.txt` (plus `/room/*` aliases) |
 | Kits catalog | [ROOM-KITS-CATALOG.md](ROOM-KITS-CATALOG.md) | `/room/kits` — catalog + install stub; not an App Store |
-| Quiet / fast | [QUIET-FAST.md](QUIET-FAST.md) | Infer route, hide chrome, no success toasts |
-| Work Item Session | [WORK-ITEM-SESSION.md](WORK-ITEM-SESSION.md) | Title + status + Stop ledger; schema 26 additive; no Slack-with-bots UI |
+| Quiet / fast | [QUIET-FAST.md](history/QUIET-FAST.md) | Infer route, hide chrome, no success toasts |
+| Work Item Session | [WORK-ITEM-SESSION.md](history/WORK-ITEM-SESSION.md) | Title + status + Stop ledger; schema 26 additive; no Slack-with-bots UI |
 | Room lifecycle (issue #6 A2) | `server/room-lifecycle.mjs`, `src/events.js`, Rooms panel in `src/app.js` | Schema 34 adds `rooms.archived_at`. `POST /api/account-rooms` creates a room for an account that administers membership somewhere; owner-only `room.archived` makes a room read-only (reads, streams and export continue, every write is 409 `room_archived`); a member leaves with `member.access_changed` on themself; the switcher lists archived rooms as read-only entries. Personal/organization is a `room.kind` badge until D1 |
 | Demigod `/room` landing | `deploy/room-entry.mjs` | Live on trydemigod.com; Connect P1 + private invite (no lobby publish) after next door publish |
 | getdasha `/room` door | `deploy/room-entry.mjs` `PUBLIC_ROOM_DOOR_HTML` | Worker serves HTML at `/room`; packets stay at `/room/llms.txt`; Connect invite stays private by default |
-| Research / messaging plans | [`research/`](../research/README.md) | Copied from the Codex ChatGPT project mirror |
+| Research / messaging plans | not in this tree | The research notes were removed from the tree |
 
 ## Inbox and email (yesterday’s Codex work)
 
 Account-owned Inbox, selected sharing, excerpt → room work → reviewed private
 draft, and fixture Graph reply journals are **in this tree**. Checkpoints:
 
-- [Account-first Inbox](ACCOUNT-FIRST-INBOX-2026-09-08.md)
-- [Email import](EMAIL-IMPORT-CHECKPOINT-2026-09-08.md)
-- [Email reader](EMAIL-READER-CHECKPOINT-2026-09-08.md)
-- [Email excerpts](EMAIL-EXCERPT-CHECKPOINT-2026-09-08.md)
-- [Composer review](COMPOSER-REVIEW-2026-09-08.md)
-- [Unified inbox](UNIFIED-INBOX.md): one connection record and adapter interface; Telegram joins email as a fixture channel
+- [Account-first Inbox](history/ACCOUNT-FIRST-INBOX-2026-09-08.md)
+- [Email import](history/EMAIL-IMPORT-CHECKPOINT-2026-09-08.md)
+- [Email reader](history/EMAIL-READER-CHECKPOINT-2026-09-08.md)
+- [Email excerpts](history/EMAIL-EXCERPT-CHECKPOINT-2026-09-08.md)
+- [Composer review](history/COMPOSER-REVIEW-2026-09-08.md)
+- [Unified inbox](history/UNIFIED-INBOX.md): one connection record and adapter interface; Telegram joins email as a fixture channel
 
-Next gated slice (not done): a real mailbox. See
-[research/EMAIL-QUALIFICATION-NEXT.md](../research/EMAIL-QUALIFICATION-NEXT.md).
+A real mailbox is not part of the current docs.
 
 ## Agents
 
@@ -99,7 +98,7 @@ credentials. Guest-agent mint is owner-issued (`ga1.` token, 2h)
 `/llms.txt`, `/llms-full.txt` and `/.well-known/agent.json`. `?account=1` is Inbox without joining a room.
 [ROOM-ROSTER.md](ROOM-ROSTER.md) is the Instinct / Muse / Grok Build / Grok
 Bot map. Product lock: [AGENTS-WANT.md](AGENTS-WANT.md). Work Items carry an
-additive [session](WORK-ITEM-SESSION.md) (`queued`…`failed`, Stop) so agents
+additive [session](history/WORK-ITEM-SESSION.md) (`queued`…`failed`, Stop) so agents
 see a ledger, not a chat thread. Writer stays 26.
 
 Room Trust is one owner header toggle (`room.trust_set`, field `enabled`). It defaults **on**: members may assign Work Items and wake agents across owners. Turning it **off** is the kill-switch for that cross-owner assign and wake only. Same-owner work stays open. It is not Bond, not a scopes picker, and not a per-task confirm. The header control appears for the owner when the room has more than one member-owner.
@@ -107,7 +106,7 @@ Room Trust is one owner header toggle (`room.trust_set`, field `enabled`). It de
 ## Historical merge notes
 
 PR #23 is in history at `63c3b712`. #8, #12, #13, #14 and #20 are included by
-ancestry. #3–#5 were reconciled; see [UNIFICATION-2026-09-07.md](UNIFICATION-2026-09-07.md).
+ancestry. #3–#5 were reconciled; see [UNIFICATION-2026-09-07.md](history/UNIFICATION-2026-09-07.md).
 #9’s harness and #16–#18 still need deliberate adaptation. #24 is independent
 conformance. #25/#26 operator API-key work is deferred.
 

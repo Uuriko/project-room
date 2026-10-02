@@ -15,9 +15,9 @@ Recorded 2026-10-01 ~17:45 PT. Source `60df170cb58b79fd1714ca5dfe3ef51da939b29d`
 
 **Local candidate update:** private reminders now require schema v8. They and the
 portable-work checkpoint are not published or deployed. See the
-[reminder plan](../docs/PRIVATE-REMINDERS-PLAN-2026-09-07.md). A migrated v8 database
+[reminder plan](../docs/history/PRIVATE-REMINDERS-PLAN-2026-09-07.md). A migrated v8 database
 cannot run the older v7 application. A compatible v8 package and disposable local
-switch/recovery drill are now implemented; see the [recovery runbook](../docs/V8-RECOVERY-RUNBOOK.md).
+switch/recovery drill are now implemented; see the [recovery runbook](../docs/history/V8-RECOVERY-RUNBOOK.md).
 Provider PITR, current authority reconciliation and hosted approval remain gates.
 Frozen 7075 does not support the new pause flag. All historical Worker rollback
 versions below refer to the still-live **pre-v8** release.
@@ -28,7 +28,7 @@ not reverified in the local v8 recovery checkpoint.
 Recorded status: **deployed to isolated staging on September 7, 2026** at
 [Project Room](https://project-room-staging.getdasha.workers.dev).
 Current accepted app `fb90a70`, Worker `901be347-7a39-4b56-8777-f4052bf81b38`;
-[latest checkpoint evidence](../docs/ASSISTED-WORK-CHECKPOINT-2026-09-07.md).
+[latest checkpoint evidence](../docs/history/ASSISTED-WORK-CHECKPOINT-2026-09-07.md).
 Assisted-work release passed exact-source CI and hosted acceptance. The older
 full-journey results below remain historical evidence. Code rollback baseline is
 `c9ad5cfa-8a3b-4d54-876d-9a7a052cf222`; rollback removes overlap enforcement.
@@ -176,13 +176,13 @@ persistence evidence, not a provider restore or disaster-recovery test.
 Historical deployed version after the first-use interface update:
 `5b052420-ec55-4fe3-8a35-7f0ac1347bcb` (source `0e20615`).
 Existing guest-session return and the new hosted suggestion-to-work flow passed;
-see [first-use testing](../docs/FIRST-USE-TESTING-2026-09-07.md). The earlier
+see [first-use testing](../docs/history/FIRST-USE-TESTING-2026-09-07.md). The earlier
 bootstrap-removal version was `6575030d-d72f-4e8e-b256-fc18ecc6719b`.
 The runtime source at `7c9292a` passed the existing remote CI workflow; the
 Cloudflare and hosted operator suites were run separately as described above.
 
 For the latest candidate and published version, use
-[release review and polish](../docs/RELEASE-POLISH-2026-09-07.md).
+[release review and polish](../docs/history/RELEASE-POLISH-2026-09-07.md).
 The explicit hosted acceptance script offers `--help`; unknown or conflicting
 modes stop before credentials/browser access. Synthetic guest checks now create
 a one-hour, one-join invitation. The separate `--invite-user` mode retains its

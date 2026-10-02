@@ -2,7 +2,7 @@
 
 Pure read-model. Does not import `server/` or `src/`. Schema stays v26.
 
-Contract: [docs/ACTIVITY-INBOX.md](../docs/ACTIVITY-INBOX.md).
+Contract: [docs/ACTIVITY-INBOX.md](../docs/history/ACTIVITY-INBOX.md).
 
 ```sh
 npm test

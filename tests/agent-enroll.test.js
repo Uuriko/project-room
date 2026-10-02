@@ -314,9 +314,9 @@ test("reserved lane names are rejected with 409 and an alternative (case-insensi
   assert.equal(ok.res.statusCode, 201);
 });
 
-test("RESERVED_LANE_NAMES stays in sync with lanes/REGISTRY.md", async () => {
+test("RESERVED_LANE_NAMES stays in sync with docs/history/lanes/REGISTRY.md", async () => {
   const { readFileSync } = await import("node:fs");
-  const registry = readFileSync(new URL("../lanes/REGISTRY.md", import.meta.url), "utf8");
+  const registry = readFileSync(new URL("../docs/history/lanes/REGISTRY.md", import.meta.url), "utf8");
   const lanes = [...registry.matchAll(/^\| ([A-Za-z0-9_-]+) \|/gm)]
     .map(m => m[1]).filter(name => name !== "Lane");
   assert.ok(lanes.length > 0, "expected lane rows in the registry table");

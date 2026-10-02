@@ -17,12 +17,12 @@ selfImprovement: false
 
 Judge only the receipt + trace for this Work Item. Return exactly one label.
 
-Contract: [ROOM-SCORER.md](../../../ROOM-SCORER.md). Receipt:
-[ROOM-RECEIPT-V1.md](../../../ROOM-RECEIPT-V1.md). Kits / harness:
-[ROOM-KITS-HARNESS-JEV-ROY.md](../../../ROOM-KITS-HARNESS-JEV-ROY.md).
+Contract: [ROOM-SCORER.md](../../../history/ROOM-SCORER.md). Receipt:
+[ROOM-RECEIPT-V1.md](../../../history/ROOM-RECEIPT-V1.md). Kits / harness:
+[ROOM-KITS-HARNESS-JEV-ROY.md](../../../history/ROOM-KITS-HARNESS-JEV-ROY.md).
 
 Cua desktop + Fleet claim / release live on
-[ROOM-CUA-DESKTOP.md](../../../ROOM-CUA-DESKTOP.md)
+[ROOM-CUA-DESKTOP.md](../../../history/ROOM-CUA-DESKTOP.md)
 ([#454](https://github.com/Uuriko/project-room/pull/454)).
 Grade the loop those docs name; do not invent a Fleet button.
 
