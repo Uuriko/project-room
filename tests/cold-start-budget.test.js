@@ -16,7 +16,11 @@ const EMPTY_UNTIL_CRON = new Set([
   "room_access_auto_approve",
   "integrity_snapshot",
   "integrity_job_cursor",
-  "integrity_room_state"
+  "integrity_room_state",
+  // A public room page stays empty until an owner opts in. The backfill
+  // cursor is written by cron. Same exceptions as the recovery audit.
+  "public_rooms",
+  "public_read_model_backfill"
 ]);
 
 const EVENTS = 200_000;
