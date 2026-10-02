@@ -9,7 +9,12 @@ info:
     query parameter (or `X-Project-Room-Auth` header) never carries a key:
     it only selects which browser cookie a room route reads — `room`
     (default) or `account` — and any other value is 422 `invalid_auth_mode`.
-    Every error uses the shape documented in docs/ERROR-TAXONOMY.md.
+    Every error uses the shape documented in docs/ERROR-TAXONOMY.md,
+    except JSON-RPC parse and auth failures on `POST /mcp`, `POST /room/mcp`,
+    and `POST /a2a`. Those return `JsonRpcError`
+    (`jsonrpc`, `id`, `error.code` as an integer, optional `error.data.status`),
+    not the canonical error envelope. Rate limits on those paths still use
+    the envelope.
     Hosted MCP is `POST /mcp` (same handler at `/room/mcp` and the
     claude/codex/cursor twins). With no Authorization header, tools/list is
     the four public join tools. With `Authorization: Bearer` and a live
@@ -12255,6 +12260,50 @@ paths:
         '403': { description: "access_denied (manage_members required)" }
         '404': { description: room_not_found }
         '422': { description: invalid_policy }
+  /a2a:
+    post:
+      operationId: a2aSendMessage
+      summary: A2A JSON-RPC
+      description: |
+        message/send and SendMessage answer with how to join. No credentials
+        and no room data. Invalid JSON is 400 JsonRpcError (error.code -32700)
+        with no error.data. Same handler at /room/a2a.
+      security: []
+      responses:
+        '200': { description: JSON-RPC result, or a JSON-RPC error object for a well-formed request the method cannot complete. }
+        '400':
+          description: Invalid JSON. Body is JsonRpcError (error.code -32700). Not the canonical error envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JsonRpcError"
+  /room/mcp:
+    get:
+      operationId: getRoomMcpJoinDoc
+      summary: Hosted MCP join document on the www door
+      description: Same handler as GET /mcp.
+      security: []
+      responses:
+        '200': { description: "text/plain snippets, or JSON when Accept is application/json" }
+    post:
+      operationId: postRoomMcp
+      summary: Hosted MCP JSON-RPC on the www door
+      description: Same handler as POST /mcp. Invalid JSON is 400 JsonRpcError.
+      security: []
+      responses:
+        '200': { description: JSON-RPC result. Same body as POST /mcp. }
+        '400':
+          description: Invalid JSON. Body is JsonRpcError (error.code -32700), including error.data.status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JsonRpcError"
+        '401':
+          description: Authorization was present but was not a live identity secret. Body is JsonRpcError.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JsonRpcError"
   /mcp:
     get:
       summary: Hosted MCP join document
@@ -12343,7 +12392,18 @@ paths:
       security: []
       responses:
         '200': { description: JSON-RPC result. Unauthenticated tools/list is the four join tools. Tool refusals use result.isError and still use the command receipt path for writes. }
-        '401': { description: Authorization was present but was not a live identity secret. The join tool list is not returned. }
+        '400':
+          description: Invalid JSON. Body is JsonRpcError (error.code -32700), not the canonical error envelope. MCP includes error.data.status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JsonRpcError"
+        '401':
+          description: Authorization was present but was not a live identity secret. Body is JsonRpcError (error.code integer). The join tool list is not returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JsonRpcError"
   /api/public-work/receipts/{receiptId}/review:
     get:
       operationId: "getContributorReview"
@@ -13050,6 +13110,43 @@ components:
       required: true
       schema: { type: string }
   schemas:
+    JsonRpcError:
+      type: object
+      description: |
+        JSON-RPC 2.0 error body for POST /mcp, POST /room/mcp, and POST /a2a.
+        error.code is an integer (-32700 for invalid JSON). MCP transport
+        errors include error.data.status; A2A parse errors omit error.data.
+      required: [jsonrpc, id, error]
+      properties:
+        jsonrpc:
+          const: "2.0"
+        id:
+          type: [string, number, "null"]
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: integer
+            message:
+              type: string
+            data:
+              type: object
+              properties:
+                status:
+                  type: string
+                reason:
+                  type: string
+                hint:
+                  type: string
+                next:
+                  type: array
+                  items:
+                    type: object
+                operationId:
+                  type: string
+                category:
+                  type: string
     PublicWorkFollowUp:
       type: object
       additionalProperties: false
