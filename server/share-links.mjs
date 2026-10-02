@@ -79,6 +79,19 @@ export class ShareLinks {
     }
     return auth;
   }
+  // Cancelled, expired, and full rows stay (link history is retained) and do
+  // not consume the 200 live links a room may hold.
+  roomLinkCount(roomId) {
+    const now = this.store.now();
+    const rows = this.db.prepare("SELECT id, max_joins FROM share_links WHERE room_id=? AND revoked_at IS NULL AND expires_at > ?").all(roomId, now);
+    let live = 0;
+    for (const row of rows) {
+      if (this.count(row) >= row.max_joins) continue;
+      live += 1;
+      if (live >= 200) return live;
+    }
+    return live;
+  }
   count(row) {
     const humans = this.db.prepare("SELECT count(*) n FROM share_link_joins WHERE link_id=?").get(row.id).n;
     // Use the event-ID index for this link's receipts, not the whole room history.
@@ -227,7 +240,7 @@ export class ShareLinks {
       const now = this.store.now();
       if (expiresAt <= now || expiresAt > now + 7 * 86400000) fail(422, "invalid_expiry", "Choose an expiry within seven days");
       if (expectedMemberRevision !== auth.member.revision) fail(409, "stale_member_revision", "Your room permissions changed; refresh before creating a link");
-      if (this.db.prepare("SELECT count(*) n FROM share_links WHERE room_id=?").get(roomId).n >= 200) fail(409, "pilot_limit", "Room link retention limit reached");
+      if (this.roomLinkCount(roomId) >= 200) fail(409, "pilot_limit", "Room link retention limit reached");
       for (const table of ["credentials", "account_credentials", "account_session_slots"]) {
         if (this.db.prepare(`SELECT 1 FROM ${table} WHERE hash=?`).get(tokenHash)) fail(409, "token_conflict", "Generate a new link");
       }
@@ -278,7 +291,7 @@ export class ShareLinks {
       const current = present(latest);
       if (current) return current;
     }
-    if (this.db.prepare("SELECT count(*) n FROM share_links WHERE room_id=?").get(roomId).n >= 200) {
+    if (this.roomLinkCount(roomId) >= 200) {
       return latest ? present(latest) : null;
     }
     const generation = latest ? (generationOf(latest) ?? 0) + 1 : 0;

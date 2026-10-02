@@ -22,6 +22,7 @@ import { isEdgeDoorUrl, EDGE_DOOR_HOSTS, rewriteRoomApiPrefix, isHealthAliasPath
 // constraint and is only safely evaluated after store.mjs/http.mjs.
 import { durableInboundEmailConsumer, emailRoutingLimits, emailRoutingRejections } from '../server/email-routing-inbound.mjs';
 import { RETENTION_TABLES, runLiveStoreRetention } from '../server/retention-run.mjs';
+import { backfillPublicReadModel as fillPublicReadModel } from '../server/public-read-model.mjs';
 import { pruneAbuseRateBuckets } from '../server/abuse-rate-buckets.mjs';
 import { pruneOAuthProvider } from '../server/oauth-provider-store.mjs';
 import { syncClaimPullRequests } from '../server/claim-pr-sync.mjs';
@@ -290,6 +291,13 @@ export class ProjectRoom extends DurableObject {
       yieldBetween: () => yieldToQueuedRequests()
     });
   }
+  // Copies opted-in rooms into the public read model, a bounded batch per tick.
+  // Paused rooms return before the store exists. The constructor does not do this.
+  async backfillPublicReadModel() {
+    if (this.paused) return { done: false, skipped: "paused", rooms: 0, receipts: 0, cards: 0 };
+    await yieldToQueuedRequests();
+    return fillPublicReadModel(this.store, { limit: 20, deadline: cronDeadline() });
+  }
   // Scans only disposable web-fetch/research logs. The deletion flag is
   // explicit; authoritative room and security audit journals are excluded.
   async planRetention() {
@@ -480,7 +488,8 @@ export default {
       'webhook-dispatch': () => room.drainWebhookDeliveries(),
       'land-queue': () => room.refreshLandQueue(),
       'claim-prs': () => room.refreshClaimPullRequests(),
-      'retention': () => room.planRetention()
+      'retention': () => room.planRetention(),
+      'public-read-model': () => room.backfillPublicReadModel()
     };
     for (const name of Object.keys(runners)) {
       if (!cronIntegrationConfigured(name, env)) delete runners[name];
