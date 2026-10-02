@@ -18,17 +18,32 @@ const room = arg("room", env.ROOM_QA_ROOM || "");
 const foreignRoom = arg("foreign-room", "muse-room");
 const writes = has("writes");
 const UA = "project-room-qa2-mcp-robustness/1";
+const localTarget = /^https?:\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?(?:\/|$)/i.test(url);
+// A keep-alive socket to the local QA server can reset between cases. One
+// retry covers that drop. A second drop, or any other error, still fails the case.
+const droppedLocalFetch = error => {
+  if (!localTarget || !(error instanceof TypeError)) return false;
+  const code = error.cause?.code || error.code;
+  return error.message === "fetch failed" || code === "ECONNRESET" || code === "ECONNREFUSED" || code === "EPIPE" || code === "UND_ERR_SOCKET" || code === "ETIMEDOUT";
+};
 
 async function rpc(payload, { auth = true, contentType = "application/json", raw = false, accept = "application/json, text/event-stream", method = "POST" } = {}) {
-  const headers = { "content-type": contentType, accept, "user-agent": UA };
-  if (auth && token) headers.authorization = `Bearer ${token}`;
-  const started = performance.now();
-  const res = await fetch(url, { method, headers, body: method === "GET" ? undefined : (raw ? payload : JSON.stringify(payload)) });
-  const ms = Math.round(performance.now() - started);
-  let text = await res.text();
-  if (/^(event|data):/m.test(text.slice(0, 40))) text = text.split("\n").filter(l => l.startsWith("data:")).map(l => l.slice(5)).join("\n");
-  let body = null; try { body = JSON.parse(text); } catch {}
-  return { status: res.status, ms, text, body };
+  const once = async () => {
+    const headers = { "content-type": contentType, accept, "user-agent": UA };
+    if (auth && token) headers.authorization = `Bearer ${token}`;
+    const started = performance.now();
+    const res = await fetch(url, { method, headers, body: method === "GET" ? undefined : (raw ? payload : JSON.stringify(payload)) });
+    const ms = Math.round(performance.now() - started);
+    let text = await res.text();
+    if (/^(event|data):/m.test(text.slice(0, 40))) text = text.split("\n").filter(l => l.startsWith("data:")).map(l => l.slice(5)).join("\n");
+    let body = null; try { body = JSON.parse(text); } catch {}
+    return { status: res.status, ms, text, body };
+  };
+  try { return await once(); }
+  catch (error) {
+    if (!droppedLocalFetch(error)) throw error;
+    return await once();
+  }
 }
 
 const call = (name, args, id) => ({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } });

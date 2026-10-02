@@ -172,3 +172,23 @@ test("the scheduler follows the repo pattern: unref'd interval, start/stop, neve
   assert.equal(channelDrainLimits.intervalMs, 60000, "default cadence lands verified updates within about a minute");
   assert.ok(channelDrainLimits.sliceLimit <= channelSyncLimits.webhookUpdates, "the drain slice respects the webhook page cap");
 });
+
+test("a tick with no channel connection skips the backlog", async t => {
+  const f = createAcceptanceFixture();
+  t.after(() => { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
+  const summary = await new ChannelDrainer({ store: f.store, webhooks: new ChannelWebhookInbox(f.store) }).tick();
+  assert.equal(summary.configured, false);
+  assert.equal(summary.skipped, 1);
+  assert.equal(summary.connections, 0);
+  assert.equal(summary.drained, 0);
+});
+
+test("a tick yields after each configured connection", async t => {
+  const f = fixture(t);
+  f.receive([f.message(2900)]);
+  let yields = 0;
+  const summary = await f.drainer().tick({ yieldBetween: async () => { yields += 1; } });
+  assert.equal(summary.connections, 1);
+  assert.equal(summary.drained, 1);
+  assert.equal(yields, 1);
+});

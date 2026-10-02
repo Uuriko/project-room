@@ -169,7 +169,8 @@ test("RPC stub calls target a class that extends DurableObject", () => {
     "recordCronTick",
     "refreshClaimPullRequests",
     "refreshLandQueue",
-    "syncGmailMailboxes"
+    "syncGmailMailboxes",
+    "verifyRoomIntegrity"
   ]);
   assert.match(workerSource, /env\.ROOM\.getByName\('invite-only-pilot'\)\.fetch\(/);
   assert.match(workerSource, /import\s*\{[^}]*\bDurableObject\b[^}]*\}\s*from\s*['"]cloudflare:workers['"]/);
@@ -212,7 +213,8 @@ test("scheduled handler invokes cron RPC on the real ProjectRoom shape", async (
     "recordCronTick",
     "refreshClaimPullRequests",
     "refreshLandQueue",
-    "syncGmailMailboxes"
+    "syncGmailMailboxes",
+    "verifyRoomIntegrity"
   ]);
 
   await worker.scheduled({ cron: "* * * * *" }, {
