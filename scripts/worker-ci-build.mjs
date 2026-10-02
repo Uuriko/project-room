@@ -20,7 +20,7 @@ try {
   if ((result.status ?? 1) !== 0) process.exitCode = result.status ?? 1;
   else {
     const probe = spawnSync(process.execPath, [join(directory, 'node_modules/wrangler/bin/wrangler.js'),
-      'deploy', '--config', 'external-probe.wrangler.jsonc', '--dry-run', '--outdir', 'dist-external-probe'],
+      'deploy', '--config', 'external-probe.wrangler.jsonc', '--dry-run', '--outdir', 'dist/external-probe'],
       { cwd: directory, stdio: 'inherit' });
     if (probe.error) throw probe.error;
     process.exitCode = probe.status ?? 1;

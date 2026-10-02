@@ -85,12 +85,12 @@ function webhookDestination(env) {
 function roomDestination(env) {
   const origin = text(env.PROBE_ROOM_ORIGIN) || text(env.ROOM_AGENT_ORIGIN);
   const roomId = text(env.PROBE_ROOM_ID) || text(env.ROOM_AGENT_ROOM);
-  const token = text(env.PROBE_ROOM_TOKEN) || text(env.ROOM_AGENT_TOKEN);
-  if (!origin && !roomId && !token) return { room: null, inert: "unset" };
-  if (!validProbeOrigin(origin) || !validRoomId(roomId) || token.length < 8 || token.length > 512) {
+  const credential = text(env.PROBE_ROOM_TOKEN) || text(env.ROOM_AGENT_TOKEN);
+  if (!origin && !roomId && !credential) return { room: null, inert: "unset" };
+  if (!validProbeOrigin(origin) || !validRoomId(roomId) || credential.length < 8 || credential.length > 512) {
     return { room: null, inert: "invalid" };
   }
-  return { room: { origin: new URL(origin).origin, roomId, token }, inert: null };
+  return { room: { origin: new URL(origin).origin, roomId, credential }, inert: null };
 }
 
 function normalize(raw) {
@@ -319,7 +319,7 @@ export async function runExternalProbe(env = {}, fetchImpl = globalThis.fetch) {
       const commandId = `probe-${state.incidentId}-${kind}`;
       const command = { id: commandId, type: "message.posted", data: { messageId: commandId, body: notice } };
       jobs.push(postJson(fetchImpl, new URL(`/api/rooms/${encodeURIComponent(room.room.roomId)}/commands`, room.room.origin), command, {
-        authorization: `Bearer ${room.room.token}`
+        authorization: `Bearer ${room.room.credential}`
       }, limitMs).then(ok => {
         if (ok) state = { ...state, alertedRoom: page };
         alerts.push({ destination: "room", kind, ok, inert: null });
