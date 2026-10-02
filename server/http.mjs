@@ -74,6 +74,10 @@ import { listAgentGrants, getAgentCapabilities, issueAgentGrant, revokeAgentGran
 import { listPins, setPin } from "./pins.mjs";
 import { renderReceiptsHtml, renderReceiptDetailHtml, receiptsListJson, receiptJson, RECEIPTS_PAGE_CSP } from "./receipts-page.mjs";
 import { queryPublicReceipts, publicReceiptById, collectPublicReceipts, PUBLIC_RECEIPT_ID } from "./receipts-live.mjs";
+// --- GR2 public acquisition pages (templates, opt-in room pages, agent directory). ---
+import { applyRoomTemplate } from "./templates.mjs";
+import { templatesIndex, templatePage, publicRoomView, agentDirectoryView, publicSitemapEntries, PUBLIC_PAGE_CSP } from "./public-rooms.mjs";
+// --- end GR2 ---
 import {
   listActivity, activityUnreadCount, markActivityRead, markActivityReadAll,
   getReadHorizon, setReadHorizon, listSaved, setSaved
@@ -136,6 +140,16 @@ const gr1PublicPath = pathname => {
   if (/^\/receipts\/(?:pwr_[a-f0-9]{16,128}|wcr_[a-f0-9]{32}|wir_[a-f0-9]{32})(?:\.json)?$/.test(rest)) return rest;
   return null;
 };
+// --- GR2: /room aliases for the acquisition pages. /room/agents.json stays the discovery packet. ---
+const gr2PublicPath = pathname => {
+  if (!pathname.startsWith("/room/")) return null;
+  const rest = pathname.slice("/room".length);
+  if (rest === "/templates" || rest === "/agents" || rest === "/templates.json") return rest;
+  if (/^\/templates\/[a-z0-9][a-z0-9-]{0,63}(?:\.json)?$/.test(rest)) return rest;
+  if (/^\/r\/[a-z0-9][a-z0-9-]{0,63}(?:\.json)?$/.test(rest)) return rest;
+  return null;
+};
+// --- end GR2 ---
 const canonicalLink = pathname => {
   const path = pathname === "/index.html" ? "/" : pathname === "/about.html" ? "/about" : pathname === "/offers.html" ? "/offers" : pathname;
   return `<${ROOM_ORIGIN}${path}>; rel="canonical"`;
@@ -1876,6 +1890,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // --- GR1 public pages: live receipts and /room/<marketing> aliases ---
       const gr1Alias = gr1PublicPath(url.pathname);
       if (gr1Alias) url.pathname = gr1Alias;
+      // --- GR2 ---
+      const gr2Alias = gr2PublicPath(url.pathname);
+      if (gr2Alias) url.pathname = gr2Alias;
+      // --- end GR2 ---
       const receiptDetail = /^\/receipts\/((?:pwr_[a-f0-9]{16,128}|wcr_[a-f0-9]{32}|wir_[a-f0-9]{32}))(\.json)?$/.exec(url.pathname);
       if ((url.pathname === "/receipts" || url.pathname === "/api/public/receipts" || receiptDetail) && ["GET", "HEAD"].includes(req.method)) {
         rate(`receipts:${remoteAddress}`, 120);
@@ -1942,12 +1960,54 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           ...available.map(path => ({ path, lastmod: PUBLIC_PAGE_LASTMOD })),
           { path: "/receipts", lastmod: PUBLIC_PAGE_LASTMOD },
           ...receiptEntries,
+          ...publicSitemapEntries(store), // GR2 templates, agents, and opted-in room pages
         ]);
         if (!url.search) res.setHeader("X-Robots-Tag", "all");
         res.setHeader("Link", publicPageLinks(url, "/sitemap.xml"));
         res.writeHead(200, { "Content-Type": "application/xml; charset=utf-8" });
         return res.end(req.method === "HEAD" ? undefined : xml);
       }
+      // --- GR2 public acquisition pages. Script-free. Indexable when the URL has no query. ---
+      const templateDetail = /^\/templates\/([a-z0-9][a-z0-9-]{0,63})(\.json)?$/.exec(url.pathname);
+      const roomPage = /^\/r\/([a-z0-9][a-z0-9-]{0,63})(\.json)?$/.exec(url.pathname);
+      const acquisition = url.pathname === "/templates" || url.pathname === "/templates.json"
+        || url.pathname === "/agents" || templateDetail || roomPage;
+      if (acquisition && ["GET", "HEAD"].includes(req.method)) {
+        rate(`acquisition:${remoteAddress}`, 120);
+        const ref = url.searchParams.get("ref") ?? "";
+        const sendPage = (status, html, jsonBody, canonical) => {
+          if (!url.search) res.setHeader("X-Robots-Tag", "all");
+          res.setHeader("Cache-Control", "public, max-age=60");
+          res.setHeader("Link", publicPageLinks(url, canonical));
+          if (jsonBody) {
+            const body = Buffer.from(JSON.stringify(jsonBody));
+            res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Content-Length": body.length });
+            return res.end(req.method === "HEAD" ? undefined : body);
+          }
+          res.setHeader("Content-Security-Policy", PUBLIC_PAGE_CSP);
+          const body = Buffer.from(html);
+          res.writeHead(status, { "Content-Type": "text/html; charset=utf-8", "Content-Length": body.length });
+          return res.end(req.method === "HEAD" ? undefined : body);
+        };
+        if (url.pathname === "/templates" || url.pathname === "/templates.json") {
+          const page = templatesIndex();
+          return sendPage(200, page.html, url.pathname.endsWith(".json") ? page.document : null, "/templates");
+        }
+        if (templateDetail) {
+          const page = templatePage(templateDetail[1], { ref });
+          if (!page) reject(404, "not_found", "Not found");
+          return sendPage(200, page.html, templateDetail[2] ? page.document : null, `/templates/${templateDetail[1]}`);
+        }
+        if (url.pathname === "/agents") {
+          const page = agentDirectoryView(store, { ref });
+          return sendPage(200, page.html, null, "/agents");
+        }
+        const page = publicRoomView(store, roomPage[1], { ref });
+        if (!page) reject(404, "not_found", "Not found");
+        return sendPage(200, page.html, roomPage[2] ? page.document : null, `/r/${roomPage[1]}`);
+      }
+      if (acquisition) reject(405, "method_not_allowed", "Method not allowed");
+      // --- end GR2 ---
       if (assets.has(url.pathname) && ["GET", "HEAD"].includes(req.method)) {
         const [path, type] = assets.get(url.pathname);
         const data = await loadAsset(path);
@@ -2316,6 +2376,16 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const result = store.createAccountRoom(token, binding, await body(req));
         return json(res, result.duplicate ? 200 : 201, result);
       }
+      // --- GR2: create a room from a public template. Auth and CSRF run before the body is trusted. ---
+      if (url.pathname === "/api/account-rooms/from-template" && req.method === "POST") {
+        const token = cookie(req, accountCookieName), binding = accountBinding(req);
+        const auth = store.authenticateAccountSession(token, null, binding);
+        protectWrite(req, auth, false);
+        rate(`account-template:${auth.account.id}`, 10);
+        const result = applyRoomTemplate(store, token, binding, await body(req));
+        return json(res, result.duplicate ? 200 : 201, result);
+      }
+      // --- end GR2 ---
       if (url.pathname === "/api/account/ensure-default-room" && req.method === "POST") {
         // RC-2026-09-19-088: first sign-in must never land in an empty void.
         // Idempotent: an account that already has rooms gets its first room

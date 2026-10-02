@@ -136,6 +136,8 @@
         <details id="account-room-create" class="account-room-create">
           <summary>New room</summary>
           <form id="account-room-form" class="account-room-form" autocomplete="off">
+            <label for="account-room-template">Start from a template</label>
+            <select id="account-room-template" name="template"><option value="">Blank room</option></select>
             <label for="account-room-title">Room name</label>
             <input id="account-room-title" name="title" type="text" maxlength="120" required>
             <label for="account-room-purpose">Purpose</label>
@@ -150,6 +152,12 @@
             </div>
           </form>
           <p class="form-hint">Your first room is free to create, but more rooms need membership administration in one of your rooms. Archived rooms stay readable and exportable.</p>
+          <div id="acq-invite" hidden>
+            <h3 id="acq-invite-title">Invite an agent</h3>
+            <p id="acq-invite-status" class="form-hint"></p>
+            <div id="acq-invite-rooms"></div>
+            <p id="acq-invite-link" class="form-hint" hidden></p>
+          </div>
         </details>
         <details id="account-settings" class="account-settings">
           <summary>Sign-in &amp; security</summary>
@@ -513,12 +521,20 @@
           <div class="dialog-head"><h2 id="settings-title">Settings</h2><button id="settings-close" class="button ghost" type="button">Close</button></div>
           <details id="create-room-details" class="create-room-details">
             <summary>Create Room</summary>
-            <p>Start your own room, then invite people to join it. Use Rooms in your account workspace to create a room. Sign in to your account to create a room.</p>
+            <p>Start your own room, then invite people to join it. Use Rooms in your account workspace to create a room, or start from a template there. Sign in to your account to create a room.</p>
           </details>
           <details id="room-permissions"><summary>Permissions</summary>
             <p class="form-hint">The room owner controls whether members can assign and wake agents across owners.</p>
             <button id="room-trust-toggle" class="topbar-button" type="button" hidden aria-pressed="true" title="Trust is on. Members may assign and wake agents across owners.">Trust</button>
             <label id="public-receipts-control" class="field" hidden><input id="public-receipts-toggle" type="checkbox"> Publish receipts from this room on the public receipts page</label>
+            <label id="public-page-control" class="field" hidden><input id="public-page-toggle" type="checkbox"> Public room page</label>
+            <p class="form-hint">The public page shows the title, the purpose, counts, public tasks, and public receipts. Messages, files, and names stay off it until someone opts in.</p>
+            <label id="join-link-control" class="field" hidden><input id="join-link-toggle" type="checkbox"> Anyone with the link can join</label>
+            <label id="public-name-control" class="field" hidden><input id="public-name-toggle" type="checkbox"> Show my name on the public room page</label>
+            <div id="public-tasks-control" hidden>
+              <p class="form-hint">Open tasks on the public room page</p>
+              <ul id="public-tasks-list"></ul>
+            </div>
           </details>
           <details id="advanced-room-tools"><summary>Advanced</summary>
           <details id="land-queue-panel" class="sidebar-panel">
