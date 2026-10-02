@@ -92,7 +92,15 @@ test('a lag inside both budgets is healthy, and crossing either budget is drift'
 
 test('a commit that is not an ancestor of main is drift', async t => {
   const tree = (await run('git', ['rev-parse', 'HEAD^{tree}'])).stdout.trim();
-  const side = (await run('git', ['commit-tree', tree, '-m', 'drift side'])).stdout.trim();
+  const side = (await run('git', ['commit-tree', tree, '-m', 'drift side'], {
+    env: {
+      ...process.env,
+      GIT_AUTHOR_NAME: 'drift-test',
+      GIT_AUTHOR_EMAIL: 'drift-test@example.com',
+      GIT_COMMITTER_NAME: 'drift-test',
+      GIT_COMMITTER_EMAIL: 'drift-test@example.com',
+    },
+  })).stdout.trim();
   const base = await withServer(t, path => path === '/api/version'
     ? { status: 200, body: { status: 'ok', sourceRevision: side } } : healthy(path));
   await assert.rejects(run(process.execPath, ['scripts/watch-deploy-drift.mjs', '--base', base, '--ref', 'HEAD']), error => {
