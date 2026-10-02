@@ -3928,17 +3928,24 @@ paths:
                 revision:
                   type: string
                   description: Required for kind deploy. A land or deploy claim closes when this server's live revision matches it.
+                assignee:
+                  type: string
+                  description: |
+                    Active member id. The item is claimed for them and they
+                    are woken with reason assigned. Omit it to leave the item
+                    unclaimed. An unknown or inactive member is 422
+                    work_assignee_unknown_member.
       responses:
         '201':
-          description: The created unclaimed item
+          description: The created item. Unclaimed unless assignee is set, in which case that member owns it.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/WorkClaim'
         '401': { description: unauthenticated }
         '403': { description: work_claims_not_permitted }
-        '409': { description: work_claim_exists or work_board_full }
-        '422': { description: invalid_claim_input }
+        '409': { description: work_claim_exists, work_board_full, or too_many_open_claims }
+        '422': { description: invalid_claim_input or work_assignee_unknown_member }
   /api/rooms/{roomId}/work-claims/config:
     get:
       summary: Read the room's work-claim caps
@@ -4331,7 +4338,9 @@ paths:
       description: |
         The claim holder, the room owner, or a member with manage_claims
         hands the claim to another current member in the same state. The
-        history entry is stamped with the caller. API keys need `rooms:write`.
+        history entry is stamped with the caller. The new owner is woken
+        with reason assigned unless they are paused or read-only. API keys
+        need `rooms:write`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: claimId

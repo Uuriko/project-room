@@ -10,7 +10,8 @@
 // row and the projection update run inside the caller's claim transaction, so
 // a claim and its event commit or roll back together.
 import { randomUUID } from "node:crypto";
-import { EVENT_TYPES, WORK_CLAIM_EVENT_ACTIONS, applyEvent, event, isRoomArchived } from "../src/events.js";
+import { EVENT_TYPES, WORK_CLAIM_EVENT_ACTIONS, applyEvent, event, firstBlockedWakeTarget, isRoomArchived } from "../src/events.js";
+import { getTier } from "./autonomy-tiers.mjs";
 import { postReceiptCard } from "./receipt-cards.mjs";
 
 export const WORK_CLAIM_ACTIONS = WORK_CLAIM_EVENT_ACTIONS;
@@ -23,7 +24,7 @@ const eventTitle = item => {
   return title.trim() ? title : item.id;
 };
 
-export function workClaimEventData(item, action, { previousOwnerId = null, paths = undefined, pullRequest = undefined, reason = undefined, ciState = undefined, verdict = undefined } = {}) {
+export function workClaimEventData(item, action, { previousOwnerId = null, paths = undefined, pullRequest = undefined, reason = undefined, ciState = undefined, verdict = undefined, attention = undefined, attentionMemberId = undefined } = {}) {
   if (!WORK_CLAIM_ACTIONS.includes(action)) throw new Error(`Unknown work claim action: ${action}`);
   // Release and lease expiry clear files on the item. Callers pass the paths
   // that were held so the receipt still says which lane opened up.
@@ -49,17 +50,70 @@ export function workClaimEventData(item, action, { previousOwnerId = null, paths
   if (reason) data.reason = reason;
   if (ciState) data.ciState = ciState;
   if (verdict) data.verdict = verdict;
+  // Updates reads attention on this event. A paused or read-only assignee
+  // still gets the item; the wake below is what pause and autonomy skip.
+  if (attention) data.attention = attention;
+  if (attentionMemberId) data.attentionMemberId = attentionMemberId;
   return data;
 }
 
-// CI success/failure and a changes-requested review wake the claim owner
-// through the existing agent wake queue. The queue accepts mention and dm;
-// these signals use mention, and messageId starts with "work-claim:" so a
-// host can tell them from a chat mention. A bad id never rolls back the claim.
-export function enqueueClaimWake(store, roomId, agentId, messageId) {
-  if (!store?.agentHeartbeats || typeof agentId !== "string" || typeof messageId !== "string") return null;
+// CI success/failure, a changes-requested review, an assignment, and a lease
+// expiry wake the member through the existing agent wake queue. The queue
+// accepts mention and dm; these signals use mention, and messageId starts
+// with "work-claim:{id}:{reason}:" so a host can tell them from a chat
+// mention and triage on reason. A bad id never rolls back the claim.
+//
+// Pause (wake_queue_pause) and a t1_readonly tier skip the wake. The room
+// event still carries attention, so Updates still lists the assignment.
+// Room trust off skips a cross-owner agent wake the same way a mention does.
+// The queue coalesces on message id, which is the per-signal rate limit
+// this path already has.
+function linkedIdentityId(store, roomId, memberId) {
   try {
-    return store.agentHeartbeats.enqueueWake({ agentId, kind: "mention", roomId, messageId });
+    return store.db.prepare(
+      "SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?"
+    ).get(roomId, memberId)?.identityId ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function claimWakeSkip(store, roomId, memberId, actorId) {
+  try {
+    if (store.wakeQueue?.pauseStatus?.(roomId, memberId)) return "paused";
+  } catch { /* pause table absent on a partial store */ }
+  try {
+    if (getTier(store.db, roomId, memberId)?.autonomyTier === "t1_readonly") return "readonly";
+  } catch { /* tier table absent */ }
+  try {
+    if (actorId && typeof store.room === "function") {
+      const state = store.room(roomId)?.state;
+      if (state && firstBlockedWakeTarget(state, actorId, [memberId])) return "trust";
+    }
+  } catch { /* room unread */ }
+  return null;
+}
+
+export function enqueueClaimWake(store, roomId, memberId, messageId, { reason, actorId } = {}) {
+  if (!store?.agentHeartbeats || typeof memberId !== "string" || typeof messageId !== "string") return null;
+  const skipped = claimWakeSkip(store, roomId, memberId, actorId);
+  if (skipped) return { enqueued: false, skipped };
+  const parts = messageId.startsWith("work-claim:") ? messageId.split(":") : [];
+  const derivedReason = reason ?? (parts.length >= 3 ? parts[2] : undefined);
+  const workClaim = parts.length >= 2 ? parts[1] : undefined;
+  const identityId = linkedIdentityId(store, roomId, memberId);
+  const agentId = identityId ?? memberId;
+  try {
+    const result = store.agentHeartbeats.enqueueWake({ agentId, kind: "mention", roomId, messageId });
+    if (result?.enqueued && identityId && store.agentPlugin?.deliverWakePing) {
+      const signal = {
+        ...result.signal,
+        ...(derivedReason ? { reason: derivedReason } : {}),
+        ...(workClaim ? { workClaim } : {})
+      };
+      store.agentPlugin.deliverWakePing({ identityId, signal });
+    }
+    return result;
   } catch (error) {
     console.error("work claim wake failed:", error?.message ?? error);
     return null;
@@ -68,7 +122,7 @@ export function enqueueClaimWake(store, roomId, agentId, messageId) {
 
 // Handler unit tests drive the routes with a registry-only store; events need
 // the real event log, so a store without one records nothing here.
-export function emitWorkClaimEvent(store, roomId, { actorId, item, action, previousOwnerId = null, atMs = null, paths = undefined, pullRequest = undefined, reason = undefined, ciState = undefined, verdict = undefined }) {
+export function emitWorkClaimEvent(store, roomId, { actorId, item, action, previousOwnerId = null, atMs = null, paths = undefined, pullRequest = undefined, reason = undefined, ciState = undefined, verdict = undefined, attention = undefined, attentionMemberId = undefined }) {
   if (!store?.db || typeof store.room !== "function") return null;
   const room = store.room(roomId);
   // The event log refuses anything after archive (applyEvent throws). Skip
@@ -84,7 +138,7 @@ export function emitWorkClaimEvent(store, roomId, { actorId, item, action, previ
     actorId: actor && actor.active !== false ? actorId : room.state.room.ownerId,
     roomId,
     at: new Date(stamp).toISOString(),
-    data: workClaimEventData(item, action, { previousOwnerId, paths, pullRequest, reason, ciState, verdict })
+    data: workClaimEventData(item, action, { previousOwnerId, paths, pullRequest, reason, ciState, verdict, attention, attentionMemberId })
   });
   if (actor?.system === true) incoming.data.actorKind = "system";
   const state = applyEvent(room.state, incoming);

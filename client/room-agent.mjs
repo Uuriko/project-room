@@ -674,7 +674,7 @@ export class RoomAgentClient {
     }
     return { ...page, claims, hasMore: false, nextCursor: null };
   }
-  workClaimCreate({ id, title, reviewPolicy, note, tags, files, dependsOn, pullRequest } = {}, { signal } = {}) {
+  workClaimCreate({ id, title, reviewPolicy, note, tags, files, dependsOn, pullRequest, assignee } = {}, { signal } = {}) {
     if (typeof id !== "string" || !id) throw new Error("Choose a work claim id");
     return this.#request("/work-claims", { id,
       ...(title === undefined ? {} : { title }),
@@ -683,6 +683,7 @@ export class RoomAgentClient {
       ...(files === undefined ? {} : { files }),
       ...(dependsOn === undefined ? {} : { dependsOn }),
       ...(pullRequest === undefined ? {} : { pullRequest }),
+      ...(assignee === undefined ? {} : { assignee }),
       ...(note === undefined ? {} : { note }) }, signal);
   }
   workClaimGet(id, { signal } = {}) { return this.#request(`/work-claims/${encodeURIComponent(id)}`, undefined, signal); }
