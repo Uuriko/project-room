@@ -14,6 +14,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { openapiOperations, routeCandidates } from "./open-routes.mjs";
+import { ROUTES } from "../server/routes/table.mjs";
 
 export const templateKey = path => path.replace(/\{[^}]+\}|:[A-Za-z]+/g, "{}");
 
@@ -116,6 +117,11 @@ export function routeDocsDrift({ http, pluginRoutes, nextActionsRoutes, worker, 
       const key = templateKey(template);
       if (!served.has(key)) served.set(key, template);
     }
+  }
+  // Batch RT: a group that left http.mjs is served from the route table.
+  for (const row of ROUTES) {
+    const key = templateKey(row.path);
+    if (!served.has(key)) served.set(key, row.path);
   }
   const operations = openapiOperations(openapi);
   const documented = new Map();

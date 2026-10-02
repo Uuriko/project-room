@@ -17,6 +17,8 @@
 // (db handle, transactions, room state) and exports its schema for
 // store.mjs to apply. Local ServiceError avoids the store.mjs import cycle.
 
+import { refreshListedRoom } from "./public-read-model.mjs";
+
 class ServiceError extends Error {
   constructor(status, code, message, headers = null) { super(message); this.status = status; this.code = code; this.headers = headers; }
 }
@@ -85,6 +87,7 @@ export class RoomDirectory {
           ON CONFLICT(room_id) DO UPDATE SET discoverable=excluded.discoverable,
             listed_at=excluded.listed_at, updated_at=excluded.updated_at`)
         .run(roomId, discoverable ? 1 : 0, listedAt, at);
+      refreshListedRoom(this.store, roomId);
       return { roomId, discoverable, listedAt };
     });
   }

@@ -20,6 +20,7 @@ test("a public receipt fits a 390px viewport", { timeout: 60000 }, async t => {
   store.workClaims.set("commons", {
     id: "claim-1", title: "A very long receipt title that should wrap inside a narrow phone viewport without stretching the page",
     state: "done", owner: "owner",
+    history: [{ action: "pr_merged", agentId: "owner", at: "2026-10-01T12:00:00.000Z" }],
     pullRequest: { url: "https://github.com/Uuriko/project-room/pull/9", outcome: "merged", syncedAt: "2026-10-01T12:00:00.000Z" },
     blobs: [`sha256:${"ab".repeat(32)}`], updatedAt: "2026-10-01T12:00:00.000Z",
   });

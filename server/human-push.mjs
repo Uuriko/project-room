@@ -4,11 +4,39 @@
 // are the undo. Agents keep their heartbeat push doorbell. A push names the
 // room and a count, never the message.
 import { isMutedBy } from "../src/events.js";
+import { notificationFromPush } from "../src/human-push-display.js";
 import { resolveMentionTargetsInText } from "./mention-lifecycle.mjs";
 import { deliverToSubscriptions, normaliseSubscription, pushPayloadFor } from "./push-subscriptions.mjs";
 
 export const HUMAN_PUSH_DEFAULT = "mentions_and_dms";
 const MAX_DEVICES = 8;
+const DECLARATIVE_LIMIT = 4096;
+
+// HB-3a. iOS 18.4+ can show this without waking the service worker. The
+// count fields stay so every other platform still uses the worker. Off
+// unless PUSH_DECLARATIVE=on. A payload that would reach 4KB is left as the
+// count payload.
+export function declarativePushPayload(payload, { enabled = false } = {}) {
+  if (enabled !== true || !payload || typeof payload !== "object") return payload;
+  const note = notificationFromPush(payload);
+  const navigate = typeof payload.navigateUrl === "string" && payload.navigateUrl.startsWith("/") && !payload.navigateUrl.startsWith("//")
+    ? payload.navigateUrl
+    : note.data.url;
+  const notification = {
+    title: note.title,
+    body: note.body,
+    navigate_url: navigate,
+    tag: note.tag
+  };
+  if (Number.isInteger(payload.needsMeCount) && payload.needsMeCount >= 0) notification.app_badge = payload.needsMeCount;
+  const next = { ...payload, web_push: 8030, notification };
+  if (new TextEncoder().encode(JSON.stringify(next)).length >= DECLARATIVE_LIMIT) return payload;
+  return next;
+}
+
+export function declarativePushEnabled(env = process.env) {
+  return env?.PUSH_DECLARATIVE === "on";
+}
 
 class ServiceError extends Error {
   constructor(status, code, message) { super(message); this.name = "ServiceError"; this.status = status; this.code = code; }
@@ -211,12 +239,12 @@ export class HumanPush {
         if (this._suppressed(roomId, state, recipient.memberId, senderMemberId, messageId)) continue;
         const subscriptions = this._rows(roomId, recipient.memberId);
         if (subscriptions.length === 0) continue;
-        const payload = pushPayloadFor({
+        const payload = declarativePushPayload(pushPayloadFor({
           roomId,
           unread: 1,
           sequence,
           notifications: [{ kind: recipient.kind }]
-        });
+        }), { enabled: declarativePushEnabled() });
         // Start only after synchronous transaction completion. A failed outer
         // transaction may remove this event even after command() returned.
         const stillVisible = endpoint => {
