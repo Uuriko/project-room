@@ -2455,6 +2455,54 @@
     },
     {
       "method": "GET",
+      "path": "/api/rooms/{id}/updates"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/updates"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/updates"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/updates/{id}/clear"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/updates/{id}/clear"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/updates/{id}/clear"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/updates/{id}/done"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/updates/{id}/done"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/updates/{id}/done"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/updates/{id}/read"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/updates/{id}/read"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/updates/{id}/read"
+    },
+    {
+      "method": "GET",
       "path": "/api/rooms/{id}/usage"
     },
     {
@@ -2644,6 +2692,14 @@
     {
       "method": "POST",
       "path": "/api/share-links/preview"
+    },
+    {
+      "method": "GET",
+      "path": "/api/updates"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/updates"
     },
     {
       "method": "GET",
@@ -5801,6 +5857,54 @@
     },
     {
       "method": "GET",
+      "path": "/api/rooms/{id}/updates"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/updates"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/updates"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/updates/{id}/clear"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/updates/{id}/clear"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/updates/{id}/clear"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/updates/{id}/done"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/updates/{id}/done"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/updates/{id}/done"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/updates/{id}/read"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/updates/{id}/read"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/updates/{id}/read"
+    },
+    {
+      "method": "GET",
       "path": "/api/rooms/{id}/usage"
     },
     {
@@ -5990,6 +6094,14 @@
     {
       "method": "POST",
       "path": "/api/share-links/preview"
+    },
+    {
+      "method": "GET",
+      "path": "/api/updates"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/updates"
     },
     {
       "method": "GET",

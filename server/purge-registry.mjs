@@ -1135,6 +1135,26 @@ const ROWS = [
     }
   },
   {
+    "table": "private_update_commands",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
+    "table": "private_update_marks",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
     "table": "project_offer_requests",
     "key": "room_id",
     "action": "delete",

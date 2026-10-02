@@ -10,7 +10,8 @@ import { createRecoveryFixture } from "../scripts/recovery-fixture.mjs";
 import { seedRecoveryCoverage } from "../scripts/recovery-coverage.mjs";
 import { applicationTables } from "../server/writer-fence.mjs";
 
-// Written by the cron, not by opening a store. Same exceptions as the recovery audit.
+// Empty in the recovery fixture: cron tables, and update marks that exist only
+// after a member reads, finishes, or clears an item. Same exceptions as the recovery audit.
 const EMPTY_UNTIL_CRON = new Set([
   "membership_delegation_pending",
   "room_access_auto_approve",
@@ -20,7 +21,9 @@ const EMPTY_UNTIL_CRON = new Set([
   // A public room page stays empty until an owner opts in. The backfill
   // cursor is written by cron. Same exceptions as the recovery audit.
   "public_rooms",
-  "public_read_model_backfill"
+  "public_read_model_backfill",
+  "private_update_marks",
+  "private_update_commands"
 ]);
 
 const EVENTS = 200_000;
