@@ -24,6 +24,7 @@ import { routeInboundEmail, emailRoutingLimits, emailRoutingRejections, connecti
 import { emailConnection } from '../server/email-envelope.mjs';
 import { isEmailProfile } from '../server/channel-connection.mjs';
 import { runLiveStoreRetention } from '../server/retention-run.mjs';
+import { backfillPublicReadModel as fillPublicReadModel } from '../server/public-read-model.mjs';
 import { syncClaimPullRequests } from '../server/claim-pr-sync.mjs';
 import { CRON_JOB_BUDGET_MS, HEARTBEAT_STORAGE_KEY, applyOutcomes, jobHealthResponse, jobHealthUnavailable, jobHealthView, runCronJobs } from './job-heartbeat.mjs';
 import { SOURCE_REVISION, BUILD_ID } from '../server/version.mjs';
@@ -282,6 +283,13 @@ export class ProjectRoom extends DurableObject {
       yieldBetween: () => yieldToQueuedRequests()
     });
   }
+  // Copies opted-in rooms into the public read model, a bounded batch per tick.
+  // Paused rooms return before the store exists. The constructor does not do this.
+  async backfillPublicReadModel() {
+    if (this.paused) return { done: false, skipped: "paused", rooms: 0, receipts: 0, cards: 0 };
+    await yieldToQueuedRequests();
+    return fillPublicReadModel(this.store, { limit: 20, deadline: cronDeadline() });
+  }
   // Scans only disposable web-fetch/research logs. The deletion flag is
   // explicit; authoritative room and security audit journals are excluded.
   async planRetention() {
@@ -445,7 +453,8 @@ export default {
       'webhook-dispatch': () => room.drainWebhookDeliveries(),
       'land-queue': () => room.refreshLandQueue(),
       'claim-prs': () => room.refreshClaimPullRequests(),
-      'retention': () => room.planRetention()
+      'retention': () => room.planRetention(),
+      'public-read-model': () => room.backfillPublicReadModel()
     });
     try { await room.recordCronTick(outcomes); }
     catch (error) { console.error(`[job-heartbeat] record failed: ${error?.message ?? error}`); }

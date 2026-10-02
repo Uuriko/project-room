@@ -354,7 +354,15 @@ export const unfencedAdditiveTables = Object.freeze([
   // fenced — older writers have no code path to it, and a missing or stale
   // row only means the next cron rechecks. The constructor never uses it to
   // decide to replay the event log.
-  "integrity_snapshot"
+  "integrity_snapshot",
+  // Public page read model. Written when an owner opts in, and removed when
+  // they opt out. Older writers have no path to these tables. Public pages
+  // read only these rows. The constructor creates the empty tables; the
+  // cron backfill copies rooms that opted in before the tables existed.
+  "public_receipts",
+  "public_rooms",
+  "public_directory_entries",
+  "public_read_model_backfill"
 ]);
 export const applicationTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables, ...unfencedAdditiveTables])]);
 const v34FencedTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables])]);

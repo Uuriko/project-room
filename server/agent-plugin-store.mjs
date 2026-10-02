@@ -31,6 +31,7 @@ import {
   assertSubscriptionWebhookUrl,
 } from "./agent-webhook-subscriptions.mjs";
 import { buildWakePing, WAKE_PING_EVENT, validateWebhookUrl } from "./outbound-webhooks.mjs"; // RC-2026-09-18-051: wake-ping payloads.
+import { syncDirectoryCard } from "./public-read-model.mjs";
 import {
   signDelivery, deliveryEnvelope, deliveryHeaders, postDelivery,
   backoffDelayMs, MAX_DELIVERY_ATTEMPTS, DELIVERY_TIMEOUT_MS,
@@ -547,6 +548,7 @@ export class AgentPluginStore {
           public_key=excluded.public_key, signature=excluded.signature`)
         .run(agentId, JSON.stringify(entry.card), entry.visibility, identityId,
           entry.publishedAt, entry.updatedAt, entry.publicKey, entry.signature);
+      syncDirectoryCard(this.store, agentId);
       // Rebuild the doc after the owner row exists so the trust source sees
       // the card's owner identity (RC-2026-09-18-049 verification tiers).
       return this.directory.get(agentId);
@@ -569,6 +571,7 @@ export class AgentPluginStore {
       const entry = this.cards.get(agentId);
       this.db.prepare("UPDATE agent_directory_cards SET withdrawn=1, updated_at=? WHERE agent_id=?")
         .run(entry.updatedAt, agentId);
+      syncDirectoryCard(this.store, agentId);
       return result;
     });
   }

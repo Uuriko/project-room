@@ -17,7 +17,8 @@ export const CRON_JOBS = Object.freeze([
   Object.freeze({ name: 'webhook-dispatch', periodSeconds: 60 }),
   Object.freeze({ name: 'land-queue', periodSeconds: 60 }),
   Object.freeze({ name: 'claim-prs', periodSeconds: 60 }),
-  Object.freeze({ name: 'retention', periodSeconds: 60 })
+  Object.freeze({ name: 'retention', periodSeconds: 60 }),
+  Object.freeze({ name: 'public-read-model', periodSeconds: 60 })
 ]);
 const JOBS = new Map(CRON_JOBS.map(job => [job.name, job]));
 const MAX_ERROR = 240;

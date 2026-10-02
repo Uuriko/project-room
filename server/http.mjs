@@ -73,7 +73,7 @@ import { getAgentAutonomyTier, setAgentAutonomyTier } from "./autonomy-tiers.mjs
 import { listAgentGrants, getAgentCapabilities, issueAgentGrant, revokeAgentGrant } from "./grants.mjs";
 import { listPins, setPin } from "./pins.mjs";
 import { renderReceiptsHtml, renderReceiptDetailHtml, receiptsListJson, receiptJson, RECEIPTS_PAGE_CSP } from "./receipts-page.mjs";
-import { queryPublicReceipts, publicReceiptById, collectPublicReceipts, PUBLIC_RECEIPT_ID } from "./receipts-live.mjs";
+import { queryPublicReceipts, publicReceiptById, listPublicReceiptSitemap, PUBLIC_RECEIPT_ID } from "./receipts-live.mjs";
 // --- GR2 public acquisition pages (templates, opt-in room pages, agent directory). ---
 import { applyRoomTemplate } from "./templates.mjs";
 import { templatesIndex, templatePage, publicRoomView, agentDirectoryView, publicSitemapEntries, PUBLIC_PAGE_CSP } from "./public-rooms.mjs";
@@ -1897,16 +1897,6 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const receiptDetail = /^\/receipts\/((?:pwr_[a-f0-9]{16,128}|wcr_[a-f0-9]{32}|wir_[a-f0-9]{32}))(\.json)?$/.exec(url.pathname);
       if ((url.pathname === "/receipts" || url.pathname === "/api/public/receipts" || receiptDetail) && ["GET", "HEAD"].includes(req.method)) {
         rate(`receipts:${remoteAddress}`, 120);
-        const limitRaw = url.searchParams.get("limit");
-        const queried = queryPublicReceipts(store, {
-          room: url.searchParams.get("room"),
-          agent: url.searchParams.get("agent"),
-          cursor: url.searchParams.get("cursor"),
-          limit: limitRaw == null ? 20 : Number(limitRaw),
-        });
-        if (queried.error && (url.pathname === "/receipts" || url.pathname === "/api/public/receipts")) {
-          reject(queried.error.status, queried.error.code, queried.error.message);
-        }
         const indexable = !url.search;
         if (indexable) res.setHeader("X-Robots-Tag", "all");
         res.setHeader("Cache-Control", "public, max-age=60");
@@ -1925,6 +1915,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": html.length });
           return res.end(req.method === "HEAD" ? undefined : html);
         }
+        const limitRaw = url.searchParams.get("limit");
+        const queried = queryPublicReceipts(store, {
+          room: url.searchParams.get("room"),
+          agent: url.searchParams.get("agent"),
+          cursor: url.searchParams.get("cursor"),
+          limit: limitRaw == null ? 20 : Number(limitRaw),
+        });
+        if (queried.error) reject(queried.error.status, queried.error.code, queried.error.message);
         res.setHeader("Link", publicPageLinks(url, "/receipts"));
         if (url.pathname === "/api/public/receipts") {
           const body = Buffer.from(JSON.stringify(receiptsListJson(queried)));
@@ -1952,9 +1950,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           if (!reviewedPublicSearchPaths.includes(path)) continue;
           try { await loadAsset(file); available.push(path); } catch { /* Unavailable pages are not advertised. */ }
         }
-        const receiptEntries = collectPublicReceipts(store).slice(0, 1000).map(item => ({
-          path: `/receipts/${item.id}`,
-          lastmod: typeof item.at === "string" ? item.at.slice(0, 10) : PUBLIC_PAGE_LASTMOD,
+        const receiptEntries = listPublicReceiptSitemap(store).map(item => ({
+          path: item.path,
+          lastmod: item.lastmod || PUBLIC_PAGE_LASTMOD,
         }));
         const xml = publicSearchSitemap(ROOM_ORIGIN, [
           ...available.map(path => ({ path, lastmod: PUBLIC_PAGE_LASTMOD })),
@@ -1999,7 +1997,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           return sendPage(200, page.html, templateDetail[2] ? page.document : null, `/templates/${templateDetail[1]}`);
         }
         if (url.pathname === "/agents") {
-          const page = agentDirectoryView(store, { ref });
+          const page = agentDirectoryView(store, { ref, cursor: url.searchParams.get("cursor") });
+          if (page.error) reject(page.error.status, page.error.code, page.error.message);
           return sendPage(200, page.html, null, "/agents");
         }
         const page = publicRoomView(store, roomPage[1], { ref });
