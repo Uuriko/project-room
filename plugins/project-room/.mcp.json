@@ -4,6 +4,16 @@
       "type": "http",
       "url": "https://www.getdasha.com/room/mcp",
       "headers": { "Authorization": "Bearer ${PROJECT_ROOM_SECRET:-}" }
+    },
+    "project-room-channel": {
+      "command": "node",
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/channel/serve.mjs",
+        "--mode", "channel",
+        "--host", "claude-room",
+        "--cadence-seconds", "60"
+      ],
+      "env": { "ROOM_AGENT_CONFIG": "${user_config.room_agent_config}" }
     }
   }
 }
