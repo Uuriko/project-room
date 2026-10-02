@@ -36,6 +36,7 @@ import { formatSessionExpiry } from "./session-expiry.js";
 import { handoffEnvelopeListHtml, envelopesForWork } from "./handoff-envelope-ui.js";
 import { installHumanPush } from "./human-push.js";
 import { chatSuggestions, ASK_AGENT_AFTER_MS } from "./chat-suggestions.js";
+import { paintClaimChat } from "./board-ui.js";
 
 const $ = selector => document.querySelector(selector);
 applyStoredTheme();
@@ -6661,11 +6662,7 @@ if (initialInvitationFragment && !initialPasswordReset) openInvitation(initialIn
     ? { id: "board", label: "Board", words: "tasks board claims ci review lease land", always: true } : entry);
   const priorChoose = chooseRoomAction;
   chooseRoomAction = id => { if (id === "board") { openBoard(); return; } priorChoose(id); };
-  let chatPaint = null;
-  const paintChat = () => {
-    chatPaint ??= import("./board-ui.js");
-    void chatPaint.then(module => { if (state) module.paintClaimChat(state, $("#message-list")); });
-  };
+  const paintChat = () => { if (state) paintClaimChat(state, $("#message-list")); };
   const priorRender = render;
   render = () => { if (!state) { board.reset(); return; } priorRender(); board.sync(); };
   const priorMessages = renderMessages;
