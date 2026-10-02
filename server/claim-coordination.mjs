@@ -99,12 +99,13 @@ const stamp = (atMs, agentId, action, note) => Object.freeze({
 // owner, lease, files, and attestations clear so the files can be claimed again.
 // Returns null when the claim is not live or already settled.
 export function settlePullRequest(item, outcome, nowMs) {
-  if (!item?.pullRequest || item.pullRequest.outcome) return null;
   if (!LIVE_CLAIM_STATES.has(item.state)) return null;
+  if (!pullsReadyToSettle(item)) return null;
   if (outcome !== "merged" && outcome !== "closed") return null;
   const at = new Date(nowMs).toISOString();
+  const current = item.pullRequest ?? pullLinks(item).at(-1);
   const pullRequest = Object.freeze({
-    ...item.pullRequest, outcome, syncedAt: at, nextPollAt: null, rateLimitedUntil: null
+    ...current, outcome: current.outcome ?? outcome, syncedAt: current.syncedAt ?? at, nextPollAt: null, rateLimitedUntil: null
   });
   const agentId = item.owner ?? "system";
   if (outcome === "merged") {
@@ -134,6 +135,7 @@ export function settlePullRequest(item, outcome, nowMs) {
       leaseStartAt: null,
       leaseExpiresAt: null,
       files: Object.freeze([]),
+      fileBlocks: Object.freeze({}),
       attestations: Object.freeze([]),
       reviews: Object.freeze([]),
       pullRequest,
@@ -143,20 +145,23 @@ export function settlePullRequest(item, outcome, nowMs) {
 }
 
 // Remember a poll that did not settle the claim, so the next tick waits.
+function withCurrentPull(item, pullRequest) {
+  const pullRequests = Array.isArray(item.pullRequests) && item.pullRequests.length
+    ? Object.freeze(item.pullRequests.map(entry => entry.url === pullRequest.url ? pullRequest : entry))
+    : item.pullRequests;
+  return { ...item, pullRequest, pullRequests };
+}
 export function rememberPoll(item, nowMs, delayMs, { etag, rateLimitedUntil = null } = {}) {
   if (!item?.pullRequest) return item;
   const previous = usableEtag(item.pullRequest.etag);
-  return {
-    ...item,
-    pullRequest: Object.freeze({
-      ...item.pullRequest,
-      syncedAt: new Date(nowMs).toISOString(),
-      nextPollAt: nowMs + delayMs,
-      pollBackoffMs: delayMs,
-      etag: etag === undefined ? previous : usableEtag(etag),
-      rateLimitedUntil
-    })
-  };
+  return withCurrentPull(item, Object.freeze({
+    ...item.pullRequest,
+    syncedAt: new Date(nowMs).toISOString(),
+    nextPollAt: nowMs + delayMs,
+    pollBackoffMs: delayMs,
+    etag: etag === undefined ? previous : usableEtag(etag),
+    rateLimitedUntil
+  }));
 }
 
 // Hold every still-open link until GitHub's reset. The stored ETag stays so
@@ -165,15 +170,12 @@ export function holdForRateLimit(item, nowMs, until) {
   if (!item?.pullRequest || item.pullRequest.outcome) return item;
   const scheduled = Number(item.pullRequest.nextPollAt);
   const nextPollAt = Number.isFinite(scheduled) ? Math.max(scheduled, until) : until;
-  return {
-    ...item,
-    pullRequest: Object.freeze({
-      ...item.pullRequest,
-      syncedAt: new Date(nowMs).toISOString(),
-      nextPollAt,
-      rateLimitedUntil: until
-    })
-  };
+  return withCurrentPull(item, Object.freeze({
+    ...item.pullRequest,
+    syncedAt: new Date(nowMs).toISOString(),
+    nextPollAt,
+    rateLimitedUntil: until
+  }));
 }
 
 const RED_CONCLUSIONS = new Set(["failure", "cancelled", "timed_out", "action_required"]);
@@ -219,17 +221,56 @@ export function pullRequestDue(item, nowMs) {
 
 // Live claims whose declared files intersect. One entry per holding claim.
 // Paths are compared as already stored (the claim machine normalizes them).
+function fileSlots(item) {
+  const blocks = item?.fileBlocks && typeof item.fileBlocks === "object" ? item.fileBlocks : {};
+  return (item?.files ?? []).filter(file => typeof file === "string").map(path => ({
+    path,
+    block: typeof blocks[path] === "string" && blocks[path].length > 0 ? blocks[path] : null
+  }));
+}
+function slotsConflict(left, right) {
+  if (left.path !== right.path) return false;
+  if (!left.block || !right.block) return true;
+  return left.block === right.block;
+}
+function slotLabel(slot) {
+  return slot.block ? `${slot.path} (${slot.block})` : slot.path;
+}
+export function pullLinks(item) {
+  if (Array.isArray(item?.pullRequests) && item.pullRequests.length) return item.pullRequests;
+  return item?.pullRequest?.url ? [item.pullRequest] : [];
+}
+export function recordPullOutcome(item, url, outcome, nowMs) {
+  const at = new Date(nowMs).toISOString();
+  const links = pullLinks(item).map(pull => pull.url === url
+    ? Object.freeze({ ...pull, outcome, syncedAt: at, nextPollAt: null, rateLimitedUntil: null })
+    : pull);
+  const open = links.find(pull => !pull.outcome) ?? null;
+  return {
+    ...item,
+    pullRequests: Object.freeze(links),
+    pullRequest: Object.freeze({ ...(open ?? links[links.length - 1]) })
+  };
+}
+export function pullsReadyToSettle(item) {
+  const links = pullLinks(item);
+  return links.length > 0 && links.every(pull => pull.outcome === "merged" || pull.outcome === "closed");
+}
+export function batchPullOutcome(item) {
+  return pullLinks(item).every(pull => pull.outcome === "merged") ? "merged" : "closed";
+}
 export function fileLeaseConflicts(items, claimed) {
-  const wanted = new Set(claimed?.files ?? []);
-  if (wanted.size === 0) return [];
+  const wanted = fileSlots(claimed);
+  if (wanted.length === 0) return [];
   const conflicts = [];
   for (const item of items ?? []) {
     if (!item || item.id === claimed.id || !LIVE_CLAIM_STATES.has(item.state)) continue;
-    const files = [...new Set((item.files ?? []).filter(file => wanted.has(file)))].sort();
-    if (files.length === 0) continue;
+    const files = fileSlots(item).filter(held => wanted.some(slot => slotsConflict(slot, held))).map(slotLabel);
+    const unique = [...new Set(files)].sort();
+    if (unique.length === 0) continue;
     conflicts.push(Object.freeze({
       holder: Object.freeze({ claimId: item.id, owner: item.owner ?? null }),
-      files: Object.freeze(files),
+      files: Object.freeze(unique),
       leaseExpiresAt: item.leaseExpiresAt ?? null
     }));
   }

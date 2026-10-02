@@ -75,6 +75,7 @@ import { InboxAttachmentBytes, inboxAttachmentBytesSchema } from "./inbox-attach
 import { BountyEscrow, bountyEscrowSchema, convergeBountyDeployedSchema } from "./bounty-escrow.mjs"; // Escrowed bounties, agent work exchange slice 1.
 import { selectedWorkContext, currentWorkRecord } from "./work-context.mjs";
 import { workItemChanges, mayWriteBoardClaims } from "../src/workflow.js";
+import { mirrorProjectionClaim } from "./work-claim-mirror.mjs";
 import { discussionWindow, selectedWorkDiscussion } from "./work-discussion.mjs";
 import { AgentConnections, agentConnectionSchema } from "./agent-connections.mjs";
 import { GuestAgentLinks, isRoomAccessToken, isGuestAgentMemberId } from "./guest-agent-links.mjs";
@@ -679,7 +680,7 @@ const shapes = {
   [T.WORK_SUPERSEDED]: `${work} supersededByWorkItemId reason`,
   [T.WORK_HANDOFF_RECORDED]: `${work} doneSummary evidenceUrl evidenceVersion nextAction limitReason haltAll`,
   [T.WORK_HALT_CLEARED]: "memberId haltEventId note",
-  [T.CLAIM_ACQUIRED]: `${work} repository ref paths expiresAt`,
+  [T.CLAIM_ACQUIRED]: `${work} repository ref paths expiresAt pullRequests blocks`,
   [T.CLAIM_RELEASED]: work,
   [T.CLAIM_RENEWED]: `${work} progressMessageId expiresAt`,
   [T.VERIFICATION_RECORDED]: `${work} result completionEventId evidenceVersion summary nextAction`,
@@ -744,7 +745,7 @@ export function validateCommand(command) {
   for (const [name, value] of Object.entries(command.data)) {
     if (!allowed.includes(name)) fail(422, "invalid_command", `Unexpected field: ${name}`);
     if (value === null) continue;
-    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents", "allowanceCents", "periodDays", "rounds", "toolCalls"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced", "muted", "resumeApproved", "alsoSendToChannel", "enabled", ...ROOM_POLICY_FIELDS].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities", "segments", "labels", "scopes"].includes(name) ? "array" : name === "outputs" ? "outputs" : ["preferences", "budget", "signedEvidence"].includes(name) ? "object" : "string";
+    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents", "allowanceCents", "periodDays", "rounds", "toolCalls"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced", "muted", "resumeApproved", "alsoSendToChannel", "enabled", ...ROOM_POLICY_FIELDS].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities", "segments", "labels", "scopes", "pullRequests", "blocks"].includes(name) ? "array" : name === "outputs" ? "outputs" : ["preferences", "budget", "signedEvidence"].includes(name) ? "object" : "string";
     if (type === "array" ? !Array.isArray(value) : type === "object" ? !(value && typeof value === "object" && !Array.isArray(value)) : type === "outputs" ? !(typeof value === "string" || (Array.isArray(value) && value.every(v => typeof v === "string"))) : typeof value !== type) fail(422, "invalid_command", `Invalid field: ${name}`);
   }
   if (command.type === T.MESSAGE_POSTED && (typeof command.data.body !== "string" || !command.data.body.trim())) fail(422, "invalid_command", messageBody);
@@ -764,13 +765,10 @@ export function validateCommand(command) {
     && (typeof command.data.sourceMessageId !== "string" || !command.data.sourceMessageId.trim())) {
     fail(422, "decision_source_required", "Post the rationale in the room first, then record the decision with its message id");
   }
-  // Lease-renewal check-ins: every renewal must cite the holder's public
-  // progress message. The reducer validates the cited message when present;
-  // the command gate below is what makes the citation mandatory going forward.
-  if (command.type === T.CLAIM_RENEWED
-    && (typeof command.data.progressMessageId !== "string" || !command.data.progressMessageId.trim())) {
-    fail(422, "claim_renewal_source_required", "Post a progress update in the room first, then renew the claim with its message id");
-  }
+  // A renewal may cite a public progress message. The citation is evidence,
+  // not a requirement: a heartbeat extends the lease with no new chat post.
+  // When the id is present, the reducer still checks that it is the holder's
+  // own public message newer than the current lease start.
   if (command.type === T.WORK_HELP_UPDATED) {
     try { validateHelpData(command.data); } catch (error) { fail(422, "invalid_command", error.message); }
   }
@@ -4479,6 +4477,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         if (bondEffect?.dm) this.bonds.sealDm(bondEffect.dm, incoming.id);
         this.db.prepare("INSERT INTO commands VALUES(?,?,?,?,?)").run(roomId, auth.member.id, command.id, fingerprint, sequence);
         this.db.prepare("UPDATE rooms SET sequence=?,projection=?,archived_at=? WHERE id=?").run(sequence, projection, archivedAtOf(state), roomId);
+        // Board is the claim authority the MCP tools share with /work-claims.
+        // Same transaction as the projection event: a handoff or supersede
+        // leaves a successor card, and a failed board write rolls the command back.
+        if (["claim.acquired", "claim.released", "claim.renewed", "work.handoff_recorded", "work.superseded"].includes(incoming.type)) {
+          mirrorProjectionClaim(this, roomId, auth.member.id, incoming);
+        }
         // MSG-1: double-write the messages table in this same transaction.
         // A throw here rolls the event back with the row. No read path uses
         // the table yet. Older events wait for the MSG-2 backfill.
