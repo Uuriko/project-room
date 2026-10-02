@@ -32,6 +32,24 @@ export function roomEntryHref(roomId, locationLike = globalThis.location) {
   return `${origin}${door}/#room/${encodeURIComponent(roomId)}`;
 }
 
+// A next value is followed only when it is one relative path on this origin.
+export function sameOriginRelativeNext(next, locationLike = globalThis.location) {
+  if (typeof next !== "string" || next.length === 0 || next.length > 2048) return null;
+  if (!next.startsWith("/") || next.startsWith("//") || next.includes("\\") || /[\u0000-\u001f\u007f]/.test(next)) return null;
+  const origin = String(locationLike?.origin ?? "");
+  let resolved;
+  try { resolved = new URL(next, origin || "http://localhost"); }
+  catch { return null; }
+  if (origin && resolved.origin !== origin) return null;
+  if (resolved.username || resolved.password) return null;
+  return `${resolved.pathname}${resolved.search}${resolved.hash}`;
+}
+
+export function joinNextHref(roomId, locationLike = globalThis.location) {
+  const params = new URLSearchParams(String(locationLike?.search ?? "").replace(/^\?/, ""));
+  return sameOriginRelativeNext(params.get("next"), locationLike) ?? roomEntryHref(roomId, locationLike);
+}
+
 export const PERMISSION_LABELS = Object.freeze({
   steer: "Steer work (claim and direct tasks)",
   accept_work: "Accept work",
@@ -229,7 +247,7 @@ async function boot() {
     const secretEl = $("join-secret");
     if (secretEl) secretEl.value = identitySecret;
     const openEl = $("join-open-room");
-    if (openEl) openEl.href = roomEntryHref(roomId);
+    if (openEl) openEl.href = joinNextHref(roomId);
   });
 
   $("join-copy-secret")?.addEventListener("click", async () => {
