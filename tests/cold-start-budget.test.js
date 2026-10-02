@@ -18,6 +18,8 @@ const EMPTY_UNTIL_CRON = new Set([
   "integrity_snapshot",
   "integrity_job_cursor",
   "integrity_room_state",
+  "public_rooms",
+  "public_read_model_backfill",
   "private_update_marks",
   "private_update_commands"
 ]);
