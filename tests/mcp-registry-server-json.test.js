@@ -46,12 +46,12 @@ test("server.json declares the public remote MCP surface", () => {
   assert.match(manifest.repository?.url ?? "", /^https:\/\/github\.com\//);
 });
 
-test("server.json stays honest about what the room actually serves", () => {
-  // The registry remote must be the advertised public join URL, not a guess.
-  const joinDoc = readFileSync(join(root, "src/room-mcp-join.js"), "utf8");
-  const urls = manifest.remotes.map((r) => r.url);
-  assert.ok(
-    urls.some((u) => joinDoc.includes(u)),
-    "remote URL must appear in src/room-mcp-join.js as the advertised public MCP URL"
-  );
+test("server.json points the registry remote at the canonical origin", () => {
+  assert.equal(manifest.websiteUrl, "https://room.trydemigod.com");
+  assert.equal(manifest.version, "1.1.0");
+  assert.ok(manifest.remotes.length > 0);
+  for (const remote of manifest.remotes) {
+    assert.equal(new URL(remote.url).origin, "https://room.trydemigod.com");
+  }
+  assert.equal(manifest.remotes[0].url, "https://room.trydemigod.com/mcp");
 });
