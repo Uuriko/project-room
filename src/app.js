@@ -17,7 +17,9 @@ import { identityIdOf, mergeFriendBonds, bondWithPeer, friendChrome, friendBondC
 import { installAgentConnections } from "./agent-connections.js";
 import { catalogById } from "./room-roster.js";
 import { installRoomInstructions } from "./room-instructions.js";
-import { createNeedsAttentionCard } from "./needs-attention.js";
+// JDOT-MEMBER-PERMS-UI begin
+import { createNeedsAttentionCard, installMemberPermissions } from "./needs-attention.js";
+// JDOT-MEMBER-PERMS-UI end
 import { mountUpdates } from "./updates-ui.js";
 import { installReminders } from "./reminders.js";
 import { installPortableWork, installResultCopy } from "./portable-work.js";
@@ -330,12 +332,9 @@ const client = new RoomClient({
     portableWorkUI?.sync();
     inboxUI?.sync();
     if (firstSnapshot) {
-      // #662: the owner card loads once per room session; everyone else never sees it.
-      if (session?.member?.kind === "human" && state.room?.ownerId === session.member.id && can("manage_members")) {
-        void ownerAttentionCard.refresh();
-      } else {
-        ownerAttentionCard.hide();
-      }
+      // JDOT-MEMBER-PERMS-UI begin
+      // render() synchronizes the existing attention card for owners/admins.
+      // JDOT-MEMBER-PERMS-UI end
       const saved = recovery.read(draftScope(identity), state);
       if (saved) {
         drafts = saved.drafts; currentThreadId = saved.threadId;
@@ -388,6 +387,10 @@ const client = new RoomClient({
     remindersUI?.reset();
     resetNotifications();
     resetAttention();
+    // JDOT-MEMBER-PERMS-UI begin
+    memberPermissionsUI?.reset();
+    ownerAttentionCard.hide();
+    // JDOT-MEMBER-PERMS-UI end
     agentConnectionsUI?.reset();
     agentInvitesUI?.reset();
     referralBoardUI?.reset();
@@ -557,7 +560,10 @@ landQueueUI = lazyDisclosure({ panel: $("#land-queue-panel"),
   onError: () => notice("Could not load the land queue. Close and reopen to retry.", true) });
 instructionsUI = installRoomInstructions({ client, getState: () => state, onSaved: text => notice(text) });
 // #662: owner "needs your attention" card (owner-gated; hidden for everyone else).
-const ownerAttentionCard = createNeedsAttentionCard({ client, section: $("#needs-attention") });
+// JDOT-MEMBER-PERMS-UI begin
+const ownerAttentionCard = createNeedsAttentionCard({ client, section: $("#needs-attention"), getState: () => state });
+const memberPermissionsUI = installMemberPermissions({ client, getState: () => state, getSession: () => session });
+// JDOT-MEMBER-PERMS-UI end
 // UPDATES HOOK (U batch). Palette Catch up, Activity, Mentions, and Saved for
 // later open this destination with the matching filter. Room UI v2 removes
 // the old entries later. The badge counts actionable updates only.
@@ -1925,6 +1931,10 @@ function render() {
   const people = members.filter(m => m.kind !== "agent").sort(byPresence);
   const agents = members.filter(m => m.kind === "agent").sort(byPresence);
   renderContent("#presence-list", `${dmRequestInbox()}${people.length ? `<p class="presence-heading">People</p>${people.map(presenceRow).join("")}` : ""}${agents.length ? `<p class="presence-heading">Agents</p>${agents.map(presenceRow).join("")}` : ""}`);
+  // JDOT-MEMBER-PERMS-UI begin
+  memberPermissionsUI.sync();
+  ownerAttentionCard.sync();
+  // JDOT-MEMBER-PERMS-UI end
   const proposing = can("steer") && !isRoomArchived(state); // Issue #6 A2: no new work in an archived room.
   for (const id of ["new-work-button"]) {
     $("#" + id).hidden = !proposing; $("#" + id).disabled = !proposing;
