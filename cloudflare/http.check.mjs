@@ -350,6 +350,7 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     assert.equal(denied.status, 403);
     assert.equal((await call('/api/rooms/commons')).status, 401);
     assert.equal((await call('/api/health', { headers: { Origin: 'https://other.example.test' } })).status, 403);
+    assert.equal((await call('/api/ready', { headers: { Origin: 'https://other.example.test' } })).status, 403);
     // Untrusted forwarding headers must not select a rate-limit identity.
     for (let n = 0; n < 20; n++) await json(await call('/api/account-session', { ip: '192.0.2.9', headers: { 'X-Room-Visitor-IP': `198.51.100.${n + 1}` } }));
     assert.equal((await call('/api/account-session', { ip: '192.0.2.9', headers: { 'X-Room-Visitor-IP': '198.51.100.99' } })).status, 429);

@@ -385,6 +385,18 @@ export default {
     const healthPath = url.pathname.length > 1 && url.pathname.endsWith('/') ? url.pathname.slice(0, -1) : url.pathname;
     const deployment = env.ROOM_DEPLOYMENT === 'production' || env.ROOM_DEPLOYMENT === 'staging' ? env.ROOM_DEPLOYMENT : undefined;
     const mode = env.ROOM_SERVICE_MODE ?? 'cloudflare-staging';
+    const operationalGet = (request.method === 'GET' || request.method === 'HEAD')
+      && (healthPath === '/api/health' || healthPath === '/api/ready' || isHealthAliasPath(url.pathname));
+    // These answers never enter the Node origin check. A browser Origin that
+    // is not this room is still refused, same as every other /api route.
+    if (operationalGet) {
+      const originHeader = request.headers.get('Origin');
+      if (originHeader && originHeader !== url.origin) {
+        return finish(new Response(JSON.stringify({ error: { code: 'origin_denied', message: 'Request origin is not allowed' } }), {
+          status: 403, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }
+        }), 'worker');
+      }
+    }
     // Liveness is the Worker. It does not construct or query the Durable Object.
     if ((healthPath === '/api/health' || isHealthAliasPath(url.pathname)) && (request.method === 'GET' || request.method === 'HEAD')) {
       return finish(workerLivenessResponse(request, { mode, deployment }), 'worker');
