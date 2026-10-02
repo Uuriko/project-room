@@ -5,6 +5,8 @@ name: live-smoke
 # overflow, axe WCAG 2.2 AA). Read-only: it never signs in or writes.
 # Triaged open findings are warnings (KNOWN in scripts/live-smoke.mjs);
 # anything new fails the run. See docs/QA-SYSTEM.md.
+# This 6-hour schedule stays the deep check. The 5-minute outage probe is the
+# separate Worker in cloudflare/external-probe.wrangler.jsonc.
 on:
   schedule:
     - cron: "17 */6 * * *"
