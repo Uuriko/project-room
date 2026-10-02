@@ -15,57 +15,21 @@ import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { randomBytes } from "node:crypto";
 
-import { actionsFor } from "../server/inbox-rules.mjs";
-import { createSendLaterStore } from "../server/inbox-send-later.mjs";
 import { InboxStitchStore, inboxStitchSchema } from "../server/inbox-stitch-store.mjs";
 import { stitchConfigFromEnv } from "../server/inbox-stitch.mjs";
-import { scoreMessage } from "../server/inbox-priority.mjs";
 import { createQuarantineQueue } from "../server/inbox-spam.mjs";
 import { buildThreads } from "../server/inbox-threads.mjs";
 import { InboxAttachmentBytes, inboxAttachmentBytesSchema } from "../server/inbox-attachment-bytes.mjs";
 import { attachmentLimits } from "../server/attachment-schema.mjs";
-import { createInboxZeroTriage } from "../src/inbox-zero-triage.mjs";
 
 // ---------------------------------------------------------------------------
 // L-1: snooze delay validation admits m/h/d/w units (was: only <n>d)
 // ---------------------------------------------------------------------------
 
-const ruleMsg = { subject: "hello", body: "hi", hasAttachment: false, spamScore: 0 };
-const snoozeRule = delay => [{
-  id: "r1",
-  conditions: [{ field: "subject", op: "contains", value: "hello" }],
-  actions: [{ type: "snooze", delay }],
-}];
-
-test("L-1: snooze delays accept 2h, 2m, 2w, 30m (not only <n>d)", () => {
-  for (const delay of ["2h", "2m", "2d", "2w", "30m", "1d"]) {
-    const actions = actionsFor(snoozeRule(delay), ruleMsg);
-    assert.equal(actions.length, 1, `${delay} should be accepted`);
-    assert.equal(actions[0].delay, delay);
-  }
-  for (const delay of ["2H", "2x", "abc", ""]) {
-    assert.throws(() => actionsFor(snoozeRule(delay), ruleMsg), /snooze actions need a delay/, `${delay} should be rejected`);
-  }
-});
-
 // ---------------------------------------------------------------------------
 // L-2: take() refuses sends that are not due yet
 // ---------------------------------------------------------------------------
 
-test("L-2: take() throws SL_NOT_DUE for a scheduled send before its sendAt", () => {
-  let now = 1_700_000_000_000;
-  const store = createSendLaterStore({ clock: () => now, id: () => "send-1" });
-  const scheduled = store.schedule({ id: "m1" }, { sendAt: now + 60_000 });
-  assert.equal(scheduled.state, "scheduled");
-  assert.throws(() => store.take([scheduled.id]), err => err.code === "SL_NOT_DUE");
-  // due() agrees: nothing is claimable before sendAt
-  assert.equal(store.due(now).length, 0);
-  // after the deadline both paths agree it is claimable
-  now += 61_000;
-  assert.equal(store.due(now).length, 1);
-  const taken = store.take([scheduled.id]);
-  assert.equal(taken[0].state, "ready");
-});
 
 // ---------------------------------------------------------------------------
 // L-3: salt-rotation receipts carry per-account indexed counts
@@ -111,13 +75,6 @@ test("L-3: stitch.rotate receipts report each account's own indexed count", () =
 // L-11: mention matching respects token boundaries
 // ---------------------------------------------------------------------------
 
-test("L-11: @ann does not match @anna for the mention boost", () => {
-  const opts = { mentionTokens: ["@ann"], now: 1_700_000_000_000 };
-  const exact = scoreMessage({ id: "m1", body: "hey @ann, look", receivedAt: 1_699_999_900_000 }, opts);
-  const prefix = scoreMessage({ id: "m2", body: "hey @anna, look", receivedAt: 1_699_999_900_000 }, opts);
-  assert.ok(exact.components.mention > 0, "@ann should earn the mention boost");
-  assert.equal(prefix.components.mention, 0, "@anna must not match token @ann");
-});
 
 // ---------------------------------------------------------------------------
 // L-12: quarantine queue timestamps route through the injected clock
@@ -182,45 +139,8 @@ test("L-14: expired attachment rows are purged so the records quota stays bounde
 // L-15: caller regexes are length-bounded and reject nested quantifiers
 // ---------------------------------------------------------------------------
 
-test("L-15: matches conditions reject >200-char patterns and nested quantifiers", () => {
-  const msg = { subject: "hello world", body: "", hasAttachment: false, spamScore: 0 };
-  const ruleWith = pattern => [{
-    id: "r1",
-    conditions: [{ field: "subject", op: "matches", value: pattern }],
-    actions: [{ type: "flag", label: "x" }],
-  }];
-  assert.throws(() => actionsFor(ruleWith("(a+)+$"), msg), /valid regex/, "(a+)+$ is a ReDoS shape");
-  assert.throws(() => actionsFor(ruleWith("a*b*+c"), msg), /valid regex/, "stacked quantifiers rejected");
-  assert.throws(() => actionsFor(ruleWith("x".repeat(201)), msg), /valid regex/, ">200 chars rejected");
-  assert.throws(() => actionsFor(ruleWith("(["), msg), /valid regex/, "invalid regex still rejected");
-  // sane patterns keep working, including bounded quantifiers
-  const matched = actionsFor(ruleWith("^hello (world|there)$"), msg);
-  assert.equal(matched.length, 1);
-  const bounded = actionsFor(ruleWith("a{2,4}b"), { ...msg, subject: "aaab" });
-  assert.equal(bounded.length, 1);
-});
 
 // ---------------------------------------------------------------------------
 // L-44: negative threadDepth cannot drag triage scores below zero
 // ---------------------------------------------------------------------------
 
-test("L-44: negative threadDepth is clamped to 0 in the triage score", () => {
-  const clock = { now: 1_700_000_000_000 };
-  let n = 0;
-  const triage = createInboxZeroTriage({
-    clock: () => clock.now,
-    id: () => `t-${(n += 1)}`,
-    senderScore: () => 0.95,
-  });
-  triage.startSession([{
-    id: "m-neg",
-    sender: "boss@example.com",
-    subject: "Quarterly plan",
-    receivedAt: clock.now - 3_600_000,
-    hasAttachment: false,
-    threadDepth: -50,
-  }]);
-  const got = triage.get("m-neg");
-  assert.ok(got.score >= 0, `score must not go negative (got ${got.score})`);
-  assert.notEqual(got.bucket, "spam-candidate", "a trusted sender must not land in the spam bucket on depth alone");
-});

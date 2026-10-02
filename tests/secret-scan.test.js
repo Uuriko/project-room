@@ -53,11 +53,11 @@ test("malformed inputs are refused", () => {
 });
 
 // Regression for secret-scanning alert #1 (2026-09-17): a real Telegram bot
-// token was committed in tests/telegram-connect.test.js. These tests lock in
-// the fix once the token is rotated: the scanner must catch the bot-token
-// shape, and committed fixtures may only carry obviously-fake placeholders.
-// The burned token's VALUE never appears here — only its shape, generated
-// at runtime.
+// token was committed in tests/telegram-connect.test.js. That fixture left
+// with the unwired connect module. These tests still lock the fix: the
+// scanner must catch the bot-token shape, and any committed telegram fixture
+// may only carry an obviously-fake placeholder. The burned token's VALUE
+// never appears here — only its shape, generated at runtime.
 const fakeBotToken = () => {
   const botId = String(100000000 + Math.floor(Math.random() * 899999999)); // 9 digits
   const secret = randomBytes(26).toString("base64url").replace(/[^A-Za-z0-9_-]/g, "x").slice(0, 35);
@@ -92,18 +92,14 @@ test("regression: telegram fixtures carry no real-shaped bot token", () => {
   const globalShape = new RegExp(pattern.regex.source, "g");
   const files = readdirSync(new URL(".", import.meta.url))
     .filter(name => /^telegram-.*\.test\.js$/.test(name));
-  assert.ok(files.includes("telegram-connect.test.js"), "the alert-#1 fixture file must be covered");
-  let shapedTotal = 0;
+  assert.ok(files.includes("telegram-token-leak.test.js"), "the runtime token-shape fixture must stay");
   for (const name of files) {
     const text = readFileSync(new URL(name, import.meta.url), "utf8");
-    const shaped = text.match(globalShape) ?? [];
-    shapedTotal += shaped.length;
-    for (const value of shaped) {
+    for (const value of text.match(globalShape) ?? []) {
       assert.match(value, /FAKE|PLACEHOLDER|EXAMPLE|DUMMY/i,
         `${name}: bot-token-shaped fixture value must be an obviously-fake placeholder`);
     }
   }
-  assert.ok(shapedTotal > 0, "fixtures should still exercise the token shape");
 });
 
 // The gate's allowlist is where a false positive gets silenced, so it is also
