@@ -359,8 +359,22 @@ test('getdasha entry and canonical browser app share identities, rooms and invit
   assert.equal(release.vars.ROOM_ORIGIN, 'https://room.trydemigod.com');
   assert.equal(release.durable_objects.bindings[0].script_name, release.env.production.name);
   assert.equal(release.env.production.durable_objects.bindings[0].script_name, undefined);
+  assert.equal(release.env.production.vars.ROOM_ORIGIN, 'https://room.trydemigod.com');
+  assert.equal(release.env.production.vars.ROOM_DEPLOYMENT, 'production');
   assert.deepEqual(release.triggers.crons, []);
   assert.deepEqual(release.env.production.triggers.crons, ['* * * * *']);
+  // Isolated staging owns its Durable Object. It must not inherit the entry
+  // binding that points at production, and it must not take the public routes.
+  assert.equal(release.name, 'project-room-staging');
+  assert.equal(release.env.staging.name, 'project-room-stage');
+  assert.equal(release.env.staging.workers_dev, true);
+  assert.deepEqual(release.env.staging.routes, []);
+  assert.equal(release.env.staging.limits.cpu_ms, 30000);
+  assert.deepEqual(release.env.staging.triggers.crons, []);
+  assert.equal(release.env.staging.durable_objects.bindings[0].class_name, 'ProjectRoom');
+  assert.equal(release.env.staging.durable_objects.bindings[0].script_name, undefined);
+  assert.equal(release.env.staging.vars.ROOM_DEPLOYMENT, 'staging');
+  assert.equal(release.env.staging.vars.ROOM_ORIGIN, 'https://project-room-stage.getdasha.workers.dev');
   const bundled = await build({ entryPoints: [fileURLToPath(new URL('./room.mjs', import.meta.url))], bundle: true,
     write: false, format: 'esm', platform: 'neutral', external: ['node:*', 'cloudflare:*'] });
   const common = { modules: true, script: bundled.outputFiles[0].text, compatibilityDate: release.compatibility_date,
