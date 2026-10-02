@@ -4,7 +4,7 @@ A separate Cloudflare Worker that carries machine tool calls. Room stays the con
 
 The Worker name is `project-room-relay`. It is off until someone deploys it. `RELAY_PHASE0_PASSTHROUGH` defaults to `0`. Nothing in this directory attaches a public hostname. The parent attaches a route or a custom domain after deploy.
 
-Room's own Worker does not accept machine sockets. The daemon dials out. The wire protocol is [PROTOCOL.md](PROTOCOL.md). MAC-AGENT-0 implements that document under `machine/`.
+Room's own Worker does not accept machine sockets. The daemon dials out. The wire contract is [machine/PROTOCOL.md](../machine/PROTOCOL.md). Operator notes for enroll, halt, and lease tokens are [PROTOCOL.md](PROTOCOL.md).
 
 ## What callers use
 
@@ -19,17 +19,17 @@ This Worker does not issue OAuth tokens. `GET /.well-known/oauth-protected-resou
 
 ## Operator routes
 
-`POST /admin/enroll-codes` with `Authorization: Bearer <RELAY_ADMIN_TOKEN>` mints a one-time code:
+`POST /admin/enroll-codes` with `Authorization: Bearer <RELAY_ADMIN_TOKEN>` mints a one-time code. The operator has already minted the Room agent invite (`profile: "contribute"`). The relay stores that code and does not create the Room identity:
 
 ```json
-{ "label": "Ada's desk", "rooms": ["room_alpha"], "ownerMemberId": "mem_ada" }
+{ "label": "spare", "roomId": "commons", "ownerMemberId": "owner", "inviteCode": "RM-...", "displayName": "Room machine" }
 ```
 
-The code is `<machineId>.<verifier>`. It expires in 15 minutes, and it is bound to that label, those rooms, and that owner. `POST /enroll` with `{ "code" }` returns the machine token and the WebSocket link once.
+The code is `<machineId>.<verifier>`. It is single use and expires 15 minutes after minting. `POST /v0/enroll` with `{ "code" }` returns `machineToken`, `machineId`, `label`, `roomId`, `ownerMemberId`, `inviteCode`, optional `displayName`, `relayUrl` (`wss://<relay>/v0/machines/link`), and optional `roomOrigin`. An unknown code is `401` with `{ "error": "code_invalid" }`. A used or expired code is `410` with `{ "error": "code_used" }` or `{ "error": "code_expired" }`.
 
 `POST /admin/enroll-codes/<machineId>/expire` revokes an unused code immediately.
 
-`POST /v0/machines/<machineId>/halt` and `/resume` use the link HMAC described in [PROTOCOL.md](PROTOCOL.md).
+`POST /v0/machines/<machineId>/halt`, `/pause`, `/resume`, and `/bye` use the link HMAC described in [PROTOCOL.md](PROTOCOL.md). The relay sets `caller.verified` to `true` only after its own Phase 0 check.
 
 ## Deploy
 
