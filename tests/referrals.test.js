@@ -4,6 +4,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -116,8 +117,12 @@ test("unmatched 'who referred you?' still joins with no referrer", t => {
 
 test("ambiguous display names do not falsely attribute", t => {
   const { store, accessRequests, ownerKey, roomId } = fixture(t);
-  mintRedeem(store, ownerKey, roomId, "Sam Duplicate");
-  mintRedeem(store, ownerKey, roomId, "sam duplicate"); // second member, same folded name
+  // New admissions refuse a second member with the same folded name. Rows
+  // already stored can still fold together, so this fixture writes them
+  // through the owner membership command. A matching answer then attributes nothing.
+  for (const [memberId, displayName] of [["sam-a", "Sam Duplicate"], ["sam-b", "sam duplicate"]]) {
+    store.command(ownerKey, roomId, { id: randomUUID(), type: "member.added", data: { memberId, displayName, kind: "human", permissions: [] } });
+  }
   const identity = store.identities.create("Confused Agent");
   accessRequests.request(roomId, {
     identityId: identity.identityId, displayName: "Confused Agent",
@@ -128,8 +133,7 @@ test("ambiguous display names do not falsely attribute", t => {
   assert.equal(decided.status, "approved");
   const member = store.room(roomId).state.members[decided.memberId];
   assert.ok(!("referredBy" in member), "ambiguous match attributes nothing");
-  // Only the two invite joins journaled.
-  assert.equal(referralEvents(store, roomId).length, 2);
+  assert.equal(referralEvents(store, roomId).length, 0);
 });
 
 test("a member cannot refer themselves", t => {
