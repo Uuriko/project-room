@@ -5,6 +5,7 @@ import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { AccessRequests } from "../server/access-requests.mjs";
+import { MemberPermissionRequests } from "../server/member-permission-requests.mjs";
 import { MEMBER_PERMISSION_ROUTES } from "../server/routes/member-permissions.mjs";
 
 // These real HTTP/store cases own the room-authenticated member contract.
@@ -139,7 +140,8 @@ test("decision notifications use current message text and respect deletion", asy
 test("private decision notes stay in the request record, not public outcome receipts", async t => {
   const f = await setup(t);
   const requests = new AccessRequests(f.store);
-  requests.requestForMember(f.token, "commons", { permissions: ["accept_work"], requestId: "private_note" });
+  const memberRequests = new MemberPermissionRequests(requests);
+  memberRequests.request(f.token, "commons", { permissions: ["accept_work"], requestId: "private_note" });
   const note = "Private review detail";
   const declined = requests.decide(f.owner, "commons", "private_note", { decision: "deny", note });
   assert.equal(declined.decisionNote, note);
