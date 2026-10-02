@@ -10,8 +10,6 @@
 import { createHash } from "node:crypto";
 import { ServiceError } from "./store.mjs";
 import { nextWorkStep } from "../src/workflow.js";
-import { charterContext } from "../src/room-charter.js";
-import { pinnedMessages } from "../src/events.js";
 import { validId } from "../src/events.js";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
