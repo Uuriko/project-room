@@ -166,7 +166,7 @@ it prints no secrets, writes nothing, and gives one concrete repair step.
 
 Reference: the full enrollment contract lives in
 [SWARM-PLUG-IN.md](../SWARM-PLUG-IN.md) and
-[AGENT-IDENTITIES.md](../AGENT-IDENTITIES.md). If any command here ever
+[AGENT-IDENTITIES.md](../history/AGENT-IDENTITIES.md). If any command here ever
 disagrees with those pages or with
 `node scripts/agent-inbox.mjs --help`, trust `--help` — and file it as a
 bug, because `tests/join-onboarding-docs.test.js` asserts this page's

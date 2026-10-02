@@ -47,7 +47,7 @@ Contract version 1 includes:
 - `suggestedActions`: the same presentation hints used in the browser, not an
   authorization guarantee. Scope conflicts and every command still pass through
   the existing service validation. No commands are created or submitted by a read.
-- Optional `collaboration`: version-1 guidance for an [offer of bounded help](OFFER-HELP-2026-09-08.md).
+- Optional `collaboration`: version-1 guidance for an [offer of bounded help](history/OFFER-HELP-2026-09-08.md).
   `may_offer` supplies existing request/discussion tool references and the current
   accountable recipient. `accountable`, `independent_reviewer`, `closed` and
   `unavailable` have no offer. It is not capability matching, help-wanted status,
@@ -121,7 +121,7 @@ accountable agent see the same scope for the same task.
 - `evidence.records`: the current receipt, check, decision and handoff
   references with their exact `evidenceVersion` and any `evidenceUrl`. They
   are references; `retrieved: false` states the read fetched no bytes.
-- `budget`: the declared session bounds ([session budgets](SESSION-BUDGETS.md))
+- `budget`: the declared session bounds ([session budgets](history/SESSION-BUDGETS.md))
   plus reported spend, attempt count and session status. Undeclared bounds and
   unreported spend are `"unknown"`, never unlimited and never a grant.
 - `participantIds`: the members `context.participants` resolves for this task.
@@ -169,7 +169,7 @@ silently fall back to a weaker view or fetch the room. MCP exposes the same
 Help discovery's `nextRead` requests offer context; discovery itself still
 describes invitations, not queue eligibility.
 
-Continue with [agent help offers](AGENT-HELP-OFFERS.md) for explicit actions.
+Continue with [agent help offers](history/AGENT-HELP-OFFERS.md) for explicit actions.
 The browser now has compact offer controls inside the existing help disclosure.
 Its full-room refresh negotiates the same version-1 header; the response
 advertises `offerContextVersion: 1` over its existing room-wide projection.
@@ -177,7 +177,7 @@ That full-room option cannot be combined with the compact `?view=work`
 invitation-discovery view. Default raw API reads remain unchanged.
 Missing or malformed browser offer context shows no offer actions; known retained
 offers remain represented by an unavailable notice rather than an empty queue.
-See [human offer controls](HUMAN-HELP-OFFERS-2026-09-08.md).
+See [human offer controls](history/HUMAN-HELP-OFFERS-2026-09-08.md).
 
 ## Restarting with a brief
 
