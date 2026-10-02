@@ -68,12 +68,16 @@ export function createRoomApi({ origin, secret, signal }) {
       }
       return { ok: true, status: 200, value: { items, incompleteSources: incomplete } };
     },
-    async markUpdate(roomId, itemId, action) {
-      if (typeof itemId !== "string" || !itemId) return { ok: true, value: null };
+    async markUpdate(roomId, itemId, action, expectedBasis) {
+      if (typeof itemId !== "string" || !itemId) return { ok: false, skipped: true, reason: "update_id_required", value: null };
+      // Old saved tasks cannot safely mark a revision they never observed.
+      if (typeof expectedBasis !== "string" || !expectedBasis) {
+        return { ok: false, skipped: true, reason: "update_basis_required", value: null };
+      }
       return call(origin, `/api/rooms/${encodeURIComponent(roomId)}/updates/${encodeURIComponent(itemId)}/${action}`, {
         ...auth,
         method: "POST",
-        body: { requestId: randomUUID() },
+        body: { requestId: randomUUID(), expectedBasis },
       });
     },
     async conversation(roomId, { messageId, limit } = {}) {

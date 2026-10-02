@@ -34,6 +34,7 @@ export function queueMatch(signal, { updates = [], orient = null } = {}) {
     const ref = update.sourceRef ?? {};
     return {
       updateId: typeof update.id === "string" ? update.id : null,
+      basisToken: typeof update.basisToken === "string" ? update.basisToken : null,
       kind: typeof update.kind === "string" ? update.kind : "mention",
       messageId: typeof ref.messageId === "string" ? ref.messageId : (typeof ref.requestId === "string" ? ref.requestId : messageId),
       workItemId: typeof ref.workItemId === "string" ? ref.workItemId : (typeof ref.claimId === "string" ? ref.claimId : workItemId),

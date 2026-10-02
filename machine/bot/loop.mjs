@@ -176,9 +176,9 @@ export class MachineBot {
     return this.api.post(roomId, body, { replyToId, secrets });
   }
 
-  async reply(roomId, body, replyToId, updateId) {
+  async reply(roomId, body, replyToId, updateId, basisToken) {
     const posted = await this.post(roomId, body, replyToId);
-    if (posted.ok && updateId) await this.api.markUpdate(roomId, updateId, "done");
+    if (posted.ok && updateId) await this.api.markUpdate(roomId, updateId, "done", basisToken);
     return posted;
   }
 
@@ -202,24 +202,24 @@ export class MachineBot {
     if (await this.isPaused(roomId)) return { signalId, paused: true };
     const provider = await this.resolveProvider();
     if (provider.name === "none" || provider.missingKey === true) {
-      await this.reply(roomId, provider.message, source.messageId, source.updateId);
+      await this.reply(roomId, provider.message, source.messageId, source.updateId, source.basisToken);
       await this.api.ack([signalId]);
       return { signalId, refused: provider.name };
     }
     if (isDesktopTask(source.text) && provider.computerUse !== true) {
-      await this.reply(roomId, GUI_MESSAGE, source.messageId, source.updateId);
+      await this.reply(roomId, GUI_MESSAGE, source.messageId, source.updateId, source.basisToken);
       await this.api.ack([signalId]);
       return { signalId, refused: "desktop" };
     }
     const tier = await this.tierFor(roomId);
     const actNow = tier === "t3" || (tier === "t2" && source.kind === "work");
     if (!actNow && source.kind !== "work" && tier === "t2") {
-      await this.reply(roomId, "I take board items assigned to me. I did not start from this mention.", source.messageId, source.updateId);
+      await this.reply(roomId, "I take board items assigned to me. I did not start from this mention.", source.messageId, source.updateId, source.basisToken);
       await this.api.ack([signalId]);
       return { signalId, ignored: "tier" };
     }
     if (!actNow) {
-      const plan = await this.reply(roomId, `Plan: ${source.text.trim().slice(0, 400)} Reply go and I will start.`, source.messageId, source.updateId);
+      const plan = await this.reply(roomId, `Plan: ${source.text.trim().slice(0, 400)} Reply go and I will start.`, source.messageId, source.updateId, source.basisToken);
       if (!plan.ok) return { signalId, ignored: "unread" };
       this.pending = { ...source, planMessageId: plan.messageId, tier };
       await this.saveState();
@@ -261,6 +261,7 @@ export class MachineBot {
           messageId: null,
           workItemId,
           updateId: queued.updateId ?? null,
+          basisToken: queued.basisToken ?? null,
           text: String(item.value.title ?? queued.title ?? workItemId),
         };
       }
@@ -272,6 +273,7 @@ export class MachineBot {
           messageId: null,
           workItemId,
           updateId: queued.updateId ?? null,
+          basisToken: queued.basisToken ?? null,
           text: queued.title,
         };
       }
@@ -294,6 +296,7 @@ export class MachineBot {
       roomId,
       messageId: message.id ?? messageId,
       updateId: queued.updateId ?? null,
+      basisToken: queued.basisToken ?? null,
       text: message.body,
     };
   }
@@ -322,17 +325,17 @@ export class MachineBot {
     const machineId = this.config.machineId || "machine";
     const picked = pickSlot(claims, machineId, memberId, this.clock());
     if (!picked.slot) {
-      await this.reply(source.roomId, "Desk and scratch are both leased. I did not start.", source.messageId, source.updateId);
+      await this.reply(source.roomId, "Desk and scratch are both leased. I did not start.", source.messageId, source.updateId, source.basisToken);
       return;
     }
     const work = await this.ensureWork(source, memberId);
     if (!work) {
-      await this.reply(source.roomId, "I could not claim this on the board.", source.messageId, source.updateId);
+      await this.reply(source.roomId, "I could not claim this on the board.", source.messageId, source.updateId, source.basisToken);
       return;
     }
     const lease = picked.existing ?? await this.ensureLease(source, work.id, picked.slot, machineId);
     if (!lease) {
-      await this.reply(source.roomId, "I could not lease a desktop slot.", source.messageId, source.updateId);
+      await this.reply(source.roomId, "I could not lease a desktop slot.", source.messageId, source.updateId, source.basisToken);
       await this.api.updateClaim(source.roomId, work.id, { state: "blocked", note: "no slot" });
       return;
     }
@@ -342,6 +345,7 @@ export class MachineBot {
       messageId: source.messageId,
       text: source.text,
       updateId: source.updateId ?? null,
+      basisToken: source.basisToken ?? null,
       workId: work.id,
       leaseId: lease.id,
       slot: picked.slot,
@@ -529,7 +533,7 @@ export class MachineBot {
   async stopEarly(message) {
     const active = this.active;
     if (!active) return { stopped: true };
-    await this.reply(active.roomId, message, active.messageId, active.updateId);
+    await this.reply(active.roomId, message, active.messageId, active.updateId, active.basisToken);
     await this.api.updateClaim(active.roomId, active.leaseId, { state: "unclaimed", note: message.slice(0, 200) });
     await this.api.updateClaim(active.roomId, active.workId, { state: "blocked", note: message.slice(0, 200) });
     this.clearSlot(active);
@@ -566,7 +570,7 @@ export class MachineBot {
     });
     const lines = [text];
     if (receipt.blobs.length) lines.push(`Receipt ${receipt.blobs.join(" ")}`);
-    await this.reply(active.roomId, lines.join("\n"), active.messageId, active.updateId);
+    await this.reply(active.roomId, lines.join("\n"), active.messageId, active.updateId, active.basisToken);
     this.clearSlot(active);
     this.active = null;
     await this.saveState();
