@@ -1,0 +1,54 @@
+name: qa2-synthetic
+
+# Production synthetic monitoring for room.trydemigod.com, offset from live-smoke:
+#  - stall probe: scripts/stall-probe.mjs (#1306), one request per second for 2
+#    minutes; fails when p99 latency exceeds 3 s.
+#  - public pages: axe WCAG 2.2 AA, canonical/robots/OG, broken links, 390 px overflow.
+#  - one synthetic agent journey (12 tasks), which creates one qa2-journey-* room and
+#    two identities, then archives the room and revokes the identities.
+on:
+  schedule:
+    - cron: "47 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qa2-synthetic
+  cancel-in-progress: false
+
+jobs:
+  synthetic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm i --no-save @axe-core/playwright@4
+      - name: Stall probe
+        run: node scripts/stall-probe.mjs --url https://room.trydemigod.com --path /api/health --seconds 120 --max-ms 3000 > stall.json
+      - name: Public pages gate
+        if: always()
+        # Waivers are tracked QA2 findings; delete each one when its fix deploys.
+        run: node scripts/qa2/public-pages.mjs --origin https://room.trydemigod.com --known "/:color-contrast,/join.html:broken link,/receipts:canonical,/receipts:overflow" --json pages.json --shots shots
+      - name: Synthetic agent journey
+        if: always()
+        # J5 passes on main (#1304). Production had not deployed that commit yet
+        # (sourceRevision 22adbde4). Drop the J5 exemption once the live journey passes it.
+        run: node scripts/qa2/agent-journeys.mjs --origin https://room.trydemigod.com --json journeys.json --md journeys.md || (cat journeys.md >> "$GITHUB_STEP_SUMMARY"; node -e 'const r=require("./journeys.json");const bad=r.summary.filter(s=>!s.passAt1&&s.id!=="J5");process.exit(bad.length?1:0)')
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: qa2-synthetic-${{ github.run_id }}
+          path: |
+            stall.json
+            pages.json
+            journeys.json
+            journeys.md
+            shots
+          retention-days: 14

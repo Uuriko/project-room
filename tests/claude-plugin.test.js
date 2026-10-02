@@ -3,8 +3,7 @@
 // because symlinks break on Windows checkouts. Contract guarded: the copies
 // match skills/ exactly, the manifest names line up, and the plugin MCP points
 // at the hosted Room MCP with an optional bearer.
-// If this fails after a skill edit, run:
-//   rm -rf plugins/project-room/skills && mkdir plugins/project-room/skills && cp -R skills/project-room skills/project-room-onboarding plugins/project-room/skills/
+// If this fails after a skill edit, run: node scripts/skills-sync.mjs
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync, statSync } from "node:fs";

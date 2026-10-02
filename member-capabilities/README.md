@@ -2,7 +2,7 @@
 
 Pure helper. Does not import `server/` or `src/`. Schema stays v26.
 
-Contract: [docs/MEMBER-CAPABILITIES.md](../docs/MEMBER-CAPABILITIES.md).
+Contract: [docs/MEMBER-CAPABILITIES.md](../docs/history/MEMBER-CAPABILITIES.md).
 
 ```sh
 npm test

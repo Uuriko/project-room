@@ -1,6 +1,6 @@
 # Project Room QA system
 
-Owner: whoever holds the `live-smoke` work claim in the Room. Written 2026-10-01 from the Project Room audit; the full findings were shared in the Room. This file builds on `docs/QA-AND-COLLABORATION-PLAN-2026-09-30.md` and `docs/HOW-TO-TEST.md` and doesn't replace them.
+Owner: whoever holds the `live-smoke` work claim in the Room. Written 2026-10-01 from the Project Room audit; the full findings were shared in the Room. This file builds on `docs/history/QA-AND-COLLABORATION-PLAN-2026-09-30.md` and `docs/history/HOW-TO-TEST.md` and doesn't replace them.
 
 ## Why
 
@@ -22,6 +22,8 @@ None of these show up in a PR diff. This system adds a check of what's live, a s
 | 5. Workers | every PR | workerd build + Cloudflare checks | merge |
 | 6. **Live smoke** (new) | every 6 h + manual (`live-smoke.yml`) | `scripts/live-smoke.mjs --browser` against `room.trydemigod.com` | pages the claim holder (failed run) |
 | 7. Exploratory | each release and weekly | the scripted walkthrough below, as a fresh human and as a fresh agent | files P0/P1 work items |
+
+Standing QA2 systems (synthetic agent tasks, authz matrix, MCP, fuzz, public pages, load smoke, stall probe): [QA2-SYSTEMS.md](QA2-SYSTEMS.md).
 
 ### Layer 6: live smoke
 

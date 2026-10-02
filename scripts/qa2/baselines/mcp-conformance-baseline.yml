@@ -1,0 +1,36 @@
+# MCP conformance baseline for Project Room (QA2, 2026-10-01).
+# The server declares only the `tools` capability, and its tools are Room tools, not the
+# reference "everything server" fixtures these scenarios call. Each entry below is
+# not-applicable rather than a defect. Any NEW failure fails CI; any entry that starts
+# passing fails CI until it is removed (stale baseline).
+server:
+  # no logging / completions / resources / prompts capability declared
+  - logging-set-level
+  - completion-complete
+  - resources-list
+  - resources-read-text
+  - resources-read-binary
+  - resources-templates-read
+  - resources-subscribe
+  - resources-unsubscribe
+  - prompts-list
+  - prompts-get-simple
+  - prompts-get-with-args
+  - prompts-get-embedded-resource
+  - prompts-get-with-image
+  # call reference fixture tools (test_simple_text, test_image_content, ...) that Room does not ship
+  - tools-call-simple-text
+  - tools-call-image
+  - tools-call-audio
+  - tools-call-embedded-resource
+  - tools-call-mixed-content
+  - tools-call-with-logging
+  - tools-call-error
+  - tools-call-with-progress
+  - tools-call-sampling
+  - tools-call-elicitation
+  - elicitation-sep1034-defaults
+  - elicitation-sep1330-enums
+  # Room pins the exact configured origin (127.0.0.1:<port> in CI), so a `localhost` Host is
+  # refused too. The hostile-host check (localhost-host-rebinding-rejected) must keep passing.
+  - dns-rebinding-protection  # scripts/qa2/mcp-conformance.mjs re-asserts its hostile-host check separately
