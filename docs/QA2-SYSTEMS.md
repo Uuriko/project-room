@@ -95,10 +95,10 @@ node scripts/qa2/load-smoke.mjs --origin http://127.0.0.1:4173 --vus 20 --second
 
 ### Stall probe — `scripts/stall-probe.mjs`
 
-The synthetic workflow calls the probe from #1306. It fires one request per second and fails when p99 latency exceeds `--max-ms` (default 3000). `--url` is the origin and `--path` defaults to `/api/health`. `--seconds` is an integer from 1 to 120. The verdict function is covered by `tests/edge-stall.test.js`.
+The synthetic workflow calls the probe from #1306. It fires one request per second and fails when p99 latency exceeds `--max-ms` (default 3000). `--url` is the origin and `--path` defaults to `/api/ready`, the Durable Object `SELECT 1` check. `/api/health` stays Worker liveness and does not enter the object. `--seconds` is an integer from 1 to 120. The verdict function is covered by `tests/edge-stall.test.js`.
 
 ```bash
-node scripts/stall-probe.mjs --url http://127.0.0.1:4173 --seconds 30 --path /api/health
+node scripts/stall-probe.mjs --url http://127.0.0.1:4173 --seconds 30 --path /api/ready
 ```
 
 ## Local suite
