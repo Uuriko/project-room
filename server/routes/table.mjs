@@ -31,6 +31,29 @@ export function assertRouteRow(row) {
   return problems;
 }
 
+// PRIV-1: reads that can carry a message body. The redaction test walks this
+// list. A new row here is a surface that must show no deleted text.
+export const MESSAGE_BODY_READS = Object.freeze([
+  Object.freeze({ id: "snapshot", group: "room", method: "GET", path: "/api/rooms/{roomId}" }),
+  Object.freeze({ id: "events", group: "room", method: "GET", path: "/api/rooms/{roomId}/events?after=0&limit=100" }),
+  Object.freeze({ id: "thread", group: "room", method: "GET", path: "/api/rooms/{roomId}/messages/{messageId}/thread" }),
+  Object.freeze({ id: "search", group: "room", method: "GET", path: "/api/rooms/{roomId}/search?q={needle}" }),
+  Object.freeze({ id: "export-jsonl", group: "room", method: "GET", path: "/api/rooms/{roomId}/export" }),
+  Object.freeze({ id: "export-html", group: "room", method: "GET", path: "/api/rooms/{roomId}/export?format=html" }),
+  Object.freeze({ id: "conversation", group: "room", method: "GET", path: "/api/rooms/{roomId}/conversation" }),
+  Object.freeze({ id: "return-brief", group: "room", method: "GET", path: "/api/rooms/{roomId}/return-brief" }),
+  Object.freeze({ id: "context", group: "room", method: "GET", path: "/api/rooms/{roomId}/context" }),
+  Object.freeze({ id: "open-questions", group: "room", method: "GET", path: "/api/rooms/{roomId}/open-questions" }),
+  Object.freeze({ id: "activity", group: "room", method: "GET", path: "/api/rooms/{roomId}/activity" }),
+  Object.freeze({ id: "mentions", group: "room", method: "GET", path: "/api/rooms/{roomId}/mentions" }),
+  Object.freeze({ id: "pins", group: "room", method: "GET", path: "/api/rooms/{roomId}/pins" }),
+  Object.freeze({ id: "stream", group: "room", method: "GET", path: "/api/rooms/{roomId}/stream?after=0", stream: true }),
+  Object.freeze({ id: "agent-inbox", group: "room", method: "GET", path: "/api/rooms/{roomId}/agent-inbox", auth: "agent" }),
+  Object.freeze({ id: "work-result", group: "receipt", method: "GET", path: "/api/rooms/{roomId}/work-result?workItemId={workItemId}" }),
+  Object.freeze({ id: "mcp-list-events", group: "mcp", tool: "room_list_events" }),
+  Object.freeze({ id: "mcp-read-messages", group: "mcp", tool: "room_read_messages" })
+]);
+
 export function assertRouteTable(routes = ROUTES) {
   const seen = new Set();
   const failures = [];

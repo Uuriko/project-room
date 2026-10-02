@@ -285,7 +285,9 @@ export function auditReplyRequests(state, history, checkpoint = null) {
     if (e.type === "message.posted") {
       const mode = prepareReplyPost(projected, e), messageId = data.messageId || e.id;
       check(validId(messageId) && !ids.has(messageId)); ids.add(messageId);
-      check(validId(e.actorId) && typeof data.body === "string" && data.body.length <= MAX_MESSAGE_BODY_CHARS && data.body.trim().length > 0);
+      // PRIV-1: a redacted post replays with a null body. The projection body is null too.
+      const redactedPost = data.redacted === true && data.body == null;
+      check(validId(e.actorId) && (redactedPost || (typeof data.body === "string" && data.body.length <= MAX_MESSAGE_BODY_CHARS && data.body.trim().length > 0)));
       for (const key of ["messageId", "workItemId", "replyToId", "toMemberId"]) check(data[key] == null || validId(data[key]));
       check(!data.replyToId || projected.messages.some(message => message.id === data.replyToId));
       if (mode || projected.replyRequests) {
@@ -297,7 +299,7 @@ export function auditReplyRequests(state, history, checkpoint = null) {
         }
       }
       if (mode === "respond") check(posts.get(data.contextSequence) === data.contextEventId);
-      projected.messages.push({ id: messageId, authorId: e.actorId, body: data.body,
+      projected.messages.push({ id: messageId, authorId: e.actorId, body: redactedPost ? null : data.body,
         workItemId: data.workItemId || null, replyToId: data.replyToId || null, toMemberId: data.toMemberId || null, createdAt: e.at });
       recordReplyPost(projected, e, mode); posts.set(row.sequence, e.id);
     }
@@ -314,8 +316,9 @@ export function auditReplyRequests(state, history, checkpoint = null) {
       const message = projected.messages.find(entry => entry.id === data.messageId);
       // The live engine refuses an edit to a message it cannot find, so a log
       // containing one is a real inconsistency and still fails here.
-      check(Boolean(message) && typeof data.body === "string");
-      message.body = data.body;
+      const redactedEdit = data.redacted === true && data.body == null;
+      check(Boolean(message) && (redactedEdit || typeof data.body === "string"));
+      message.body = redactedEdit ? null : data.body;
     }
     if (e.type === "message.deleted") {
       const message = projected.messages.find(entry => entry.id === data.messageId);

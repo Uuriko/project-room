@@ -136,6 +136,13 @@ export function walkExport(rows) {
         if (message) { message.body = null; message.deleted = true; message.deletedAt = event.at; message.edited = false; }
         break;
       }
+      case T.MESSAGE_REDACTED: {
+        const message = messages.get(data.messageId);
+        if (message) { message.body = null; message.deleted = true; message.deletedAt = message.deletedAt ?? event.at; message.edited = false; }
+        const copy = messages.get(`${data.messageId}:channel`);
+        if (copy) { copy.body = null; copy.deleted = true; copy.deletedAt = copy.deletedAt ?? event.at; }
+        break;
+      }
       case T.WORK_PROPOSED: {
         const item = workItem(data.workItemId);
         Object.assign(item, { title: data.title, definitionOfDone: data.definitionOfDone, accountableMemberId: data.accountableMemberId, state: "proposed", proposedById: event.actorId, createdAt: event.at });

@@ -17,6 +17,7 @@
 
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { EVENT_TYPES, applyEvent, event, isRoomArchived, roomKind } from "../src/events.js";
+import { commitMessageRedaction, redactRemainingMessageBodies } from "./message-redaction.mjs";
 import { ServiceError } from "./store.mjs";
 import {
   ACTIONS,
@@ -60,8 +61,6 @@ export const RETENTION_POLICY = Object.freeze({
 const countWhere = (store, table, accountId) =>
   store.db.prepare(`SELECT count(*) AS n FROM ${table} WHERE account_id=?`).get(accountId)?.n ?? 0;
 
-const PURGED_BODY = "[purged]";
-const REDACTED_TYPES = new Set([EVENT_TYPES.MESSAGE_POSTED, EVENT_TYPES.MESSAGE_EDITED, EVENT_TYPES.DM_POSTED]);
 
 const byId = (a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 const freezeList = list => Object.freeze(list.map(entry => Object.freeze({ ...entry })));
@@ -176,26 +175,34 @@ function applyEventOnRoom(state, incoming) {
   return applyEvent(base, incoming);
 }
 
-function redactRoomMessages(store, roomId) {
-  const rows = store.db.prepare("SELECT sequence, body FROM events WHERE room_id=?").all(roomId);
-  const update = store.db.prepare("UPDATE events SET body=? WHERE room_id=? AND sequence=?");
-  let messages = 0;
-  for (const row of rows) {
-    let parsed;
-    try { parsed = JSON.parse(row.body); }
-    catch { continue; }
-    if (!REDACTED_TYPES.has(parsed?.type) || typeof parsed.data?.body !== "string" || parsed.data.body === PURGED_BODY) continue;
-    parsed.data.body = PURGED_BODY;
-    update.run(JSON.stringify(parsed), roomId, row.sequence);
-    messages += 1;
+function redactRoomMessages(store, roomId, actorId) {
+  const room = store.room(roomId);
+  const messages = room.state.messages ?? [];
+  const ids = [];
+  for (const message of messages) {
+    if (typeof message.id !== "string") continue;
+    if (message.id.endsWith(":channel")) {
+      const source = message.id.slice(0, -":channel".length);
+      if (messages.some(entry => entry.id === source)) continue;
+    }
+    ids.push(message.id);
   }
+  let state = room.state;
+  let removed = 0;
+  const at = new Date(store.now()).toISOString();
+  for (const messageId of ids) {
+    const result = commitMessageRedaction(store.db, { roomId, state, actorId, at, messageId });
+    state = result.state;
+    removed += result.rewritten;
+  }
+  removed += redactRemainingMessageBodies(store.db, roomId);
   let files = 0;
   try {
     files = store.db.prepare(
       "UPDATE room_attachments SET state='deleted', bytes=NULL, filename='purged' WHERE room_id=? AND state IN ('staged','committed')"
     ).run(roomId).changes;
   } catch { files = 0; }
-  return messages + files;
+  return removed + files;
 }
 
 function rebuildRoom(store, roomId) {
@@ -207,7 +214,7 @@ function rebuildRoom(store, roomId) {
 // Archive a solely owned personal room and strip message and file bytes.
 // Events are redacted, then the projection is rebuilt so recovery matches.
 function archivePersonalRoom(store, room) {
-  const removed = redactRoomMessages(store, room.id);
+  const removed = redactRoomMessages(store, room.id, room.memberId);
   const state = store.room(room.id).state;
   if (!isRoomArchived(state)) {
     const current = store.room(room.id);

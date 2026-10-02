@@ -35,6 +35,7 @@ import { canonicalInvitationData, invitationJournalEntry, invitationJournalSchem
 import { invitationJoinedEvent, assertInvitationMembershipEvidence } from "./invitation-evidence.mjs";
 import { STORE_SCHEMA_VERSION, fenceDefinitions, registerWriter, installWriterFence, verifyWriterFence } from "./writer-fence.mjs";
 import { MESSAGES_SCHEMA, syncMessageRows } from "./messages-store.mjs";
+import { commitMessageRedaction } from "./message-redaction.mjs";
 import { migrateRoomLifecycleV28, verifyRoomLifecycle, refuseArchivedWrite, createAccountRoom, accountRoomEntry, ACCOUNT_ROOM_SELECT, archivedAtOf } from "./room-lifecycle.mjs";
 import { ShareLinks, shareLinkSchema, shareLinkCodeSchema } from "./share-links.mjs";
 import { DmConsents, dmConsentSchema } from "./dm-consents.mjs";
@@ -4497,6 +4498,16 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         // A throw here rolls the event back with the row. No read path uses
         // the table yet. Older events wait for the MSG-2 backfill.
         syncMessageRows(this.db, { roomId, sequence, event: incoming, state });
+        // --- PRIV-1 message redaction ---
+        // The returned sequence stays this delete. Later events in the same
+        // transaction rewrite the log and advance the room sequence.
+        if (command.type === T.MESSAGE_DELETED && typeof command.data?.messageId === "string") {
+          const redacted = commitMessageRedaction(this.db, {
+            roomId, state, actorId: incoming.actorId, at: incoming.at, messageId: command.data.messageId
+          });
+          state = redacted.state;
+        }
+        // --- end PRIV-1 message redaction ---
         logSpan.setAttribute(ATTR.OUTCOME, "ok");
         logSpan.setStatusOk();
       } catch (error) {
