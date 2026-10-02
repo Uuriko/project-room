@@ -78,6 +78,13 @@ test("favicon, icon, and manifest routes serve the public marks", async t => {
   const home = await (await fetch(`${origin}/`)).text();
   assert.match(home, /rel="icon" href="\/favicon\.svg"/);
   assert.match(home, /rel="manifest" href="\/manifest\.webmanifest"/);
+  assert.match(home, /rel="apple-touch-icon" href="\/icons\/apple-touch-icon-180\.png"/);
+  const touch = await fetch(`${origin}/icons/apple-touch-icon-180.png`);
+  assert.equal(touch.status, 200);
+  assert.match(touch.headers.get("content-type") ?? "", /image\/png/);
+  const offline = await fetch(`${origin}/offline.html`);
+  assert.equal(offline.status, 200);
+  assert.match(await offline.text(), /Room is offline/);
   assert.equal((home.match(/<h1[\s>]/g) ?? []).length, 1);
   assert.doesNotMatch(home, /id="message-input"[^>]*aria-expanded/);
   assert.doesNotMatch(home, /id="room-overview-open"[^>]*aria-label="Room overview"/);

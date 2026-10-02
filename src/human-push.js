@@ -14,7 +14,8 @@ function urlBase64ToUint8Array(value) {
 
 async function subscribe(client, publicKey, current) {
   const worker = new URL("../push-sw.js", import.meta.url);
-  const registration = await navigator.serviceWorker.register(worker.href, { type: "module", scope: new URL("./", worker).pathname });
+  // Classic script. iOS 16.4–18.3 home-screen workers reject { type: "module" }.
+  const registration = await navigator.serviceWorker.register(worker.href, { scope: new URL("./", worker).pathname });
   const existing = await registration.pushManager.getSubscription();
   const subscription = existing ?? await registration.pushManager.subscribe({
     userVisibleOnly: true,
