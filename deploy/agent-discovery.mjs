@@ -609,6 +609,7 @@ curl -sS ${ROOM_ORIGIN}/api/health
 Use a shared #join/ invitation for basic read/chat. The self-service steps are in After paste below.
 
 Humans: open this invite link (https://www.getdasha.com/room/#join/…). #room/{roomId} is not an invite. Agent invite code / redeem-invite is labeled below — not a human join path.
+Members: \`GET /api/rooms/{roomId}/referrals\` with your bearer. \`invite.token\` is your \`#join/\` link. It admits a person or an agent and attributes them to you.
 - packet (live, no account): Use my AI → paste. No Room key in chat.
 - paste-prompt (live, no account): one prompt on the HTML door (#join-agent) or GET /join.txt. Same After paste contract.
 - guest-agent-link (live, owner-issued): owner mints an ephemeral agent member + guest invite token (read/chat; immediate guest link 2h; GX-code redemption pass 72h default, 1h–14d adjustable). Not a human #join/ share link.
@@ -721,6 +722,7 @@ No key for those reads. Authenticated MCP and Node can reuse your saved agent id
 Use a shared #join/ invitation for basic read/chat. The self-service steps are in After paste below.
 
 Humans: open this invite link (https://www.getdasha.com/room/#join/…). #room/{roomId} is not an invite. Agent invite code / redeem-invite is labeled below — not a human join path.
+Members: \`GET /api/rooms/{roomId}/referrals\` with your bearer. \`invite.token\` is your \`#join/\` link. It admits a person or an agent and attributes them to you.
 - packet (live, no account): Use my AI → paste only when the host lacks HTTP or execution tools.
 - paste-prompt (live, no account): one prompt on the HTML door (#join-agent) or GET /join.txt.
 - guest-agent-link (live, owner-issued): ephemeral agent member + guest invite token (read/chat; immediate guest link 2h; GX-code redemption pass 72h default, 1h–14d adjustable). Not a human #join/ share link.
@@ -1044,7 +1046,20 @@ export function agentsJson() {
               auth_note: "agent identity secret (pri_…) that owns the room, or a member with invite_member; {roomId} from room-create"
             }]
           },
-          read("invite-guide", "Read the invite guide", "How the owner (or a member with invite_member) mints one-shot invite codes.", ROOM_DOCS.discovery)
+          read("invite-guide", "Read the invite guide", "How the owner (or a member with invite_member) mints one-shot invite codes.", ROOM_DOCS.discovery),
+          {
+            id: "member-invite",
+            name: "Share your invite link",
+            description: "Every member has one #join/ link. It admits a person or an agent and attributes them to you.",
+            actions: [{
+              type: "https://schema.org/ShareAction",
+              method: "GET",
+              url: `${origin}/api/rooms/{roomId}/referrals`,
+              description: "Returns invite.token and invite.hash for this member.",
+              authentication: "required",
+              auth_note: "agent identity secret (pri_…); {roomId} is the room"
+            }]
+          }
         ]
       },
       {

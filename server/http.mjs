@@ -33,6 +33,7 @@ import { agentErrorBody, errorCategory } from "../src/agent-error.mjs";
 import { DiagnosticsLog, supportExportBundle } from "./diagnostics.mjs";
 import { renderRoomExportHtml, EXPORT_HTML_CSP } from "./room-export-html.mjs";
 import { discoveryDoc, isHealthAliasPath, rewriteRoomApiPrefix, EDGE_DOOR_HOSTS, ROOM_ORIGIN } from "../deploy/agent-discovery.mjs";
+import { noteIdentityMint } from "./growth-loop.mjs";
 import { buildOpenApiJson, discoverabilityErrorOverride, nextActionsForAccessRequest, nextActionsForAccessRequestStatus, nextActionsForInviteRedeem } from "./discoverability.mjs";
 import { MCP_SERVER_CARD_PATH, MCP_DISCOVERY_CACHE_CONTROL, MCP_SERVER_CARD_CORS } from "../src/mcp-server-card.mjs";
 import { SKILLS_CATALOG_PATH } from "../deploy/agent-discovery.mjs";
@@ -2705,7 +2706,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!store.identities.resolveGlobalIdentitySecret(identitySecret)) reject(401, "unauthenticated", "Active agent identity required");
         const data = await body(req);
         if (!exact(data, ["linkToken", "displayName"])) reject(422, "invalid_join", "Invitation link and agent name required");
-        const result = store.shareLinks.joinAgent(identitySecret, data.linkToken, data.displayName);
+        const result = store.shareLinks.joinAgent(identitySecret, data.linkToken, data.displayName, { address: String(remoteAddress ?? "") });
         // Jev-harness admission gate, shadow mode (docs/JEV-GATES.md):
         // score the join, journal the would-be decision, admit anyway.
         jevShadowAdmission("share-link:join-agent", { roomId: result.roomId, identityId: result.identityId,
@@ -2740,7 +2741,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         rate(`link-join:${remoteAddress}`, 20);
         const oldRoomToken = cookie(req, roomCookieName);
         const result = store.shareLinks.join(token, data.linkToken, { ...data, expectedSessionBinding: binding,
-          revokeRoomToken: oldRoomToken && tokenPattern.test(oldRoomToken) ? oldRoomToken : null });
+          revokeRoomToken: oldRoomToken && tokenPattern.test(oldRoomToken) ? oldRoomToken : null,
+          clientAddress: String(remoteAddress ?? ""), clientSession: token });
         return json(res, result.duplicate ? 200 : 201, result);
       }
       if (url.pathname === "/api/invitations/preview" && req.method === "POST") {
@@ -3044,10 +3046,18 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }
         const registrationCredential = data.recoverable ? bearer(req) : undefined;
         if (data.recoverable && !registrationCredential) reject(401, "unauthenticated", "Saved registration credential required");
-        return json(res, 201, store.identities.create(data.displayName, {
+        const created = store.identities.create(data.displayName, {
           secret: registrationCredential,
           anonymous: { address: String(remoteAddress ?? ""), proof: data.proof },
-        }));
+        });
+        const slotToken = cookie(req, accountCookieName);
+        let mintAccountId = null;
+        if (slotToken) {
+          try { mintAccountId = store.authenticateAccountSession(slotToken).account?.id ?? null; }
+          catch { /* an anonymous mint still records the address and browser session */ }
+        }
+        noteIdentityMint(store, created.identityId, { address: String(remoteAddress ?? ""), session: slotToken || null, accountId: mintAccountId });
+        return json(res, 201, created);
       }
       // POST-only mint. GET must not look like a missing route (404) or an
       // auth challenge (401): there is nothing to authenticate.
@@ -4462,7 +4472,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // leaderboard by successful referrals, and the caller's own rows.
         // Authorization is store-level (Referrals.board); ids and display
         // names only, no credential data.
-        return json(res, 200, store.referrals.board(selected.token, roomId, fence));
+        return json(res, 200, store.referrals.board(selected.token, roomId, fence, {
+          address: String(remoteAddress ?? ""),
+          session: cookie(req, accountCookieName) || null,
+        }));
       }
       if (route === "referral-invites" && req.method === "GET") {
         // Owner-only referral invite journal: every mint, redemption, and
