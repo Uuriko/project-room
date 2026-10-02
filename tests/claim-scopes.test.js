@@ -7,6 +7,7 @@ import { RoomStore } from '../server/store.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { EVENT_TYPES as T, event } from '../src/events.js';
 import { claimScope, conflictingClaim } from '../server/claim-scopes.mjs';
+import { boardClaimId } from '../server/work-claim-mirror.mjs';
 import { makeTestSigner } from '../scripts/helpers/signed-evidence.mjs';
 import { setTier } from '../server/autonomy-tiers.mjs';
 
@@ -186,7 +187,7 @@ test('projection acquire, heartbeat, handoff, and supersede show up on the work-
   });
   const handed = f.store.workClaims.get('commons', 'lane');
   assert.equal(handed.chain.at(-1).kind, 'handoff');
-  assert.equal(handed.chain.at(-1).targetId, 'lane-next');
+  assert.equal(handed.chain.at(-1).targetId, boardClaimId('lane-next'));
   const successor = f.store.workClaims.get('commons', 'lane-next');
   assert.deepEqual(successor.dependsOn, ['lane']);
   assert.equal(successor.title, 'Review the header');
