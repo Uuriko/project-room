@@ -75,19 +75,59 @@ const tagsOf = value => {
 // the same way server/claim-collisions.mjs normalizes them so overlap checks
 // compare like with like. Optional; an empty list means "not declared".
 const MAX_CLAIM_FILES = 64;
-const filesOf = value => {
+const BLOCK_PATTERN = /^[A-Za-z0-9][A-Za-z0-9 _.:/-]{0,79}$/;
+const normalizeClaimPath = path => {
+  check(typeof path === "string" && path.trim().length > 0 && path.length <= 512, "each file must be a 1..512 character path");
+  let p = path.trim().replace(/\/+/g, "/");
+  while (p.startsWith("./")) p = p.slice(2);
+  while (p.length > 1 && p.endsWith("/")) p = p.slice(0, -1);
+  check(p.length > 0 && p !== "." && !p.startsWith("/") && !p.split("/").includes(".."), "each file must be a repo-relative path");
+  return p;
+};
+// A file is a path, or { path, block? } / { path, region? }. A missing label
+// is the whole file. Two labels on one path do not stack: a whole-file entry
+// wins and the path stays exclusive.
+const claimedFilesOf = value => {
   check(Array.isArray(value), "files must be an array");
   check(value.length <= MAX_CLAIM_FILES, `files must list at most ${MAX_CLAIM_FILES} paths`);
-  const normalized = value.map(path => {
-    check(typeof path === "string" && path.trim().length > 0 && path.length <= 512, "each file must be a 1..512 character path");
-    let p = path.trim().replace(/\/+/g, "/");
-    while (p.startsWith("./")) p = p.slice(2);
-    while (p.length > 1 && p.endsWith("/")) p = p.slice(0, -1);
-    check(p.length > 0 && p !== "." && !p.startsWith("/") && !p.split("/").includes(".."), "each file must be a repo-relative path");
-    return p;
+  const entries = value.map(entry => {
+    if (typeof entry === "string") return { path: normalizeClaimPath(entry), block: null };
+    check(entry !== null && typeof entry === "object" && !Array.isArray(entry), "each file must be a path or {path, block?}");
+    const label = entry.block ?? entry.region ?? null;
+    if (label !== null && label !== undefined) {
+      check(typeof label === "string" && BLOCK_PATTERN.test(label), "file block must be 1..80 letters, numbers, spaces, or . _ : / -");
+    }
+    return { path: normalizeClaimPath(entry.path), block: label || null };
   });
-  return Object.freeze([...new Set(normalized)].sort());
+  const whole = new Set(entries.filter(entry => !entry.block).map(entry => entry.path));
+  const fileBlocks = {};
+  for (const entry of entries) {
+    if (entry.block && !whole.has(entry.path)) fileBlocks[entry.path] = entry.block;
+  }
+  return {
+    files: Object.freeze([...new Set(entries.map(entry => entry.path))].sort()),
+    fileBlocks: Object.freeze(fileBlocks)
+  };
 };
+const fileBlocksOf = value => {
+  if (value === undefined || value === null) return Object.freeze({});
+  check(value !== null && typeof value === "object" && !Array.isArray(value), "fileBlocks must be an object");
+  const entries = Object.entries(value).map(([path, block]) => ({ path, block }));
+  return claimedFilesOf(entries).fileBlocks;
+};
+const NAME_PATTERN = /^[A-Za-z0-9._/-]{1,200}$/;
+const repoOf = value => {
+  if (value === undefined || value === null || value === "") return null;
+  check(typeof value === "string" && NAME_PATTERN.test(value), "repo must be 1..200 characters of letters, numbers, or . _ / -");
+  return value;
+};
+const branchOf = value => {
+  if (value === undefined || value === null || value === "") return null;
+  check(typeof value === "string" && NAME_PATTERN.test(value), "branch must be 1..200 characters of letters, numbers, or . _ / -");
+  return value;
+};
+const MAX_PULLS = 16;
+const MAX_CHAIN = 20;
 const DEPENDS_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 const MAX_DEPENDS = 16;
 const dependsOnOf = (value, selfId) => {
@@ -146,6 +186,38 @@ const pullRequestOf = value => {
     url: parsed.url, repo: parsed.repo, number: parsed.number, outcome, syncedAt, nextPollAt,
     etag, rateLimitedUntil, pollBackoffMs, ciCursor
   });
+};
+const pullRequestsOf = value => {
+  if (value === undefined || value === null) return Object.freeze([]);
+  check(Array.isArray(value), "pullRequests must be an array");
+  check(value.length <= MAX_PULLS, `pullRequests must list at most ${MAX_PULLS} pull requests`);
+  const links = [];
+  const seen = new Set();
+  for (const entry of value) {
+    const pull = pullRequestOf(entry);
+    if (!pull || seen.has(pull.url)) continue;
+    seen.add(pull.url);
+    links.push(pull);
+  }
+  return Object.freeze(links);
+};
+const chainOf = value => {
+  if (value === undefined || value === null) return Object.freeze([]);
+  check(Array.isArray(value) && value.length <= MAX_CHAIN, `chain must hold at most ${MAX_CHAIN} links`);
+  return Object.freeze(value.map(entry => {
+    check(entry !== null && typeof entry === "object" && !Array.isArray(entry), "each chain link must be an object");
+    check(entry.kind === "handoff" || entry.kind === "supersede", "chain kind must be handoff or supersede");
+    check(typeof entry.targetId === "string" && entry.targetId.length > 0 && entry.targetId.length <= 128, "chain targetId must be 1..128 characters");
+    check(typeof entry.at === "string" && Number.isFinite(Date.parse(entry.at)), "chain at must be an ISO timestamp");
+    check(typeof entry.actorId === "string" && entry.actorId.length > 0 && entry.actorId.length <= 128, "chain actorId must be 1..128 characters");
+    const note = entry.note ?? null;
+    if (note !== null) check(typeof note === "string" && note.length <= 2000, "chain note must be at most 2000 characters");
+    return Object.freeze({ kind: entry.kind, targetId: entry.targetId, at: entry.at, actorId: entry.actorId, note });
+  }));
+};
+const optionalId = (value, what) => {
+  if (value === undefined || value === null || value === "") return null;
+  return idOf(value, what, 256);
 };
 const blobsOf = value => {
   check(Array.isArray(value), "blobs must be an array");
@@ -240,9 +312,17 @@ const workOf = value => {
   const attestations = Array.isArray(value.attestations) ? value.attestations.map(attestationOf) : [];
   const tags = value.tags === undefined || value.tags === null ? Object.freeze([]) : tagsOf(value.tags);
   const blobs = value.blobs === undefined || value.blobs === null ? Object.freeze([]) : blobsOf(value.blobs);
-  const files = value.files === undefined || value.files === null ? Object.freeze([]) : filesOf(value.files);
+  const declared = value.files === undefined || value.files === null
+    ? { files: Object.freeze([]), fileBlocks: Object.freeze({}) }
+    : claimedFilesOf(value.files);
+  const storedBlocks = fileBlocksOf(value.fileBlocks);
+  const fileBlocks = Object.freeze({ ...storedBlocks, ...declared.fileBlocks });
+  const files = declared.files;
   const dependsOn = value.dependsOn === undefined || value.dependsOn === null ? Object.freeze([]) : dependsOnOf(value.dependsOn, value.id);
-  const pullRequest = pullRequestOf(value.pullRequest);
+  const listedPulls = Array.isArray(value.pullRequests) && value.pullRequests.length
+    ? pullRequestsOf(value.pullRequests)
+    : (value.pullRequest ? Object.freeze([pullRequestOf(value.pullRequest)]) : Object.freeze([]));
+  const pullRequest = listedPulls.find(pull => !pull.outcome) ?? listedPulls[listedPulls.length - 1] ?? null;
   const kind = kindOf(value.kind);
   const revision = revisionOf(value.revision);
   if (kind === "deploy") check(revision, "a deploy claim needs a revision");
@@ -251,7 +331,10 @@ const workOf = value => {
     claimedAt: value.claimedAt ?? null, leaseStartAt: value.leaseStartAt ?? null, leaseExpiresAt: value.leaseExpiresAt ?? null,
     deliveryMode: value.deliveryMode ?? null, reviewPolicy: value.reviewPolicy ?? null,
     reviewedBy: value.reviewedBy ?? null, attestations: Object.freeze(attestations),
-    tags, files, blobs, dependsOn, pullRequest,
+    tags, files, fileBlocks, blobs, dependsOn, pullRequest, pullRequests: listedPulls,
+    repo: repoOf(value.repo), branch: branchOf(value.branch),
+    chain: chainOf(value.chain), supersededBy: optionalId(value.supersededBy, "supersededBy"),
+    workItemId: optionalId(value.workItemId, "workItemId"),
     kind, revision, ci: ciOf(value.ci), reviews: reviewsOf(value.reviews) };
 };
 const agentOf = value => idOf(value, "agent id", 128);
@@ -291,11 +374,19 @@ const leaseHoursOf = value => {
     `leaseHours must be > 0 and <= ${MAX_LEASE_HOURS}, or null for no lease`);
   return value;
 };
+const pullList = (pullRequest, pullRequests) => {
+  const links = pullRequestsOf(pullRequests);
+  const single = pullRequestOf(pullRequest);
+  if (!single) return links;
+  if (links.some(pull => pull.url === single.url)) return links;
+  check(links.length < MAX_PULLS, `pullRequests must list at most ${MAX_PULLS} pull requests`);
+  return Object.freeze([...links, single]);
+};
 // Create a work item (unclaimed). Items usually enter the registry here;
 // claiming an unknown id is refused so claims always reference real work.
 // `tags` may be supplied up front (free-form, recorded on the item); blobs
 // are evidence pointers and are only recorded on the done transition.
-export function createWork({ id, title, reviewPolicy, note, tags, files, dependsOn, pullRequest, kind, revision } = {}, { now, agentId } = {}) {
+export function createWork({ id, title, reviewPolicy, note, tags, files, dependsOn, pullRequest, pullRequests, repo, branch, fileBlocks, workItemId, kind, revision } = {}, { now, agentId } = {}) {
   const atMs = nowMsOf(now);
   idOf(id, "work id", 256);
   if (title !== undefined) check(typeof title === "string" && title.length > 0 && title.length <= 512, "title must be 1..512 characters");
@@ -303,14 +394,20 @@ export function createWork({ id, title, reviewPolicy, note, tags, files, depends
   const claimKind = kindOf(kind);
   const claimRevision = revisionOf(revision);
   if (claimKind === "deploy") check(claimRevision, "a deploy claim needs a revision");
+  const declared = files === undefined || files === null ? { files: Object.freeze([]), fileBlocks: Object.freeze({}) } : claimedFilesOf(files);
+  const links = pullList(pullRequest, pullRequests);
   const item = { id, title: title ?? id, state: "unclaimed", owner: null, history: [],
     claimedAt: null, leaseStartAt: null, leaseExpiresAt: null, deliveryMode: null,
     reviewPolicy: reviewPolicy ?? null, reviewedBy: null, attestations: Object.freeze([]),
     tags: tags === undefined || tags === null ? Object.freeze([]) : tagsOf(tags),
-    files: files === undefined || files === null ? Object.freeze([]) : filesOf(files),
+    files: declared.files,
+    fileBlocks: Object.freeze({ ...fileBlocksOf(fileBlocks), ...declared.fileBlocks }),
     blobs: Object.freeze([]),
     dependsOn: dependsOn === undefined || dependsOn === null ? Object.freeze([]) : dependsOnOf(dependsOn, id),
-    pullRequest: pullRequestOf(pullRequest),
+    pullRequest: links.find(pull => !pull.outcome) ?? links[links.length - 1] ?? null,
+    pullRequests: links,
+    repo: repoOf(repo), branch: branchOf(branch),
+    chain: Object.freeze([]), supersededBy: null, workItemId: optionalId(workItemId, "workItemId"),
     kind: claimKind, revision: claimRevision, ci: null, reviews: Object.freeze([]) };
   // The creating member when the route knows it; "system" for internal creates.
   return withHistory(item, atMs, agentId === undefined ? "system" : agentOf(agentId), "created", note);
@@ -318,15 +415,23 @@ export function createWork({ id, title, reviewPolicy, note, tags, files, depends
 // Claim unclaimed work. Refuses already-claimed work (the anti-collision rule).
 // leaseHours: hours until the claim lapses (default: the room's
 // defaultLeaseHours, else 24h); null opts out — the claim never expires.
-export function claimWork(work, agentId, { note, leaseHours, files, dependsOn, pullRequest, room, now } = {}) {
+export function claimWork(work, agentId, { note, leaseHours, files, dependsOn, pullRequest, pullRequests, repo, branch, fileBlocks, room, now } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
   check(item.state === "unclaimed", `work "${item.id}" is already ${item.state} — release it first`);
   const wanted = leaseHoursOf(leaseHours);
   const effective = wanted === null ? null : wanted ?? roomWorkClaimConfig(room).defaultLeaseHours;
+  const declared = files === undefined || files === null ? null : claimedFilesOf(files);
+  const links = pullRequest === undefined && pullRequests === undefined ? null : pullList(pullRequest, pullRequests);
   const claimed = { ...item, state: "claimed", owner: agent, claimedAt: isoOf(atMs),
-    files: files === undefined || files === null ? item.files : filesOf(files),
+    files: declared ? declared.files : item.files,
+    fileBlocks: declared
+      ? Object.freeze({ ...fileBlocksOf(fileBlocks), ...declared.fileBlocks })
+      : (fileBlocks === undefined ? item.fileBlocks : fileBlocksOf(fileBlocks)),
     dependsOn: dependsOn === undefined ? item.dependsOn : dependsOnOf(dependsOn ?? [], item.id),
-    pullRequest: pullRequest === undefined ? item.pullRequest : pullRequestOf(pullRequest),
+    pullRequests: links ?? item.pullRequests,
+    pullRequest: links ? (links.find(pull => !pull.outcome) ?? links[links.length - 1] ?? null) : item.pullRequest,
+    repo: repo === undefined ? item.repo : repoOf(repo),
+    branch: branch === undefined ? item.branch : branchOf(branch),
     leaseStartAt: effective === null ? null : isoOf(atMs),
     leaseExpiresAt: effective === null ? null : isoOf(atMs + effective * 3600 * 1000) };
   return withHistory(claimed, atMs, agent, "claimed",
@@ -403,6 +508,7 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
     // declared files belong to the owner's round too — a re-claim must not
     // inherit the previous owner's file declarations
     files: released ? Object.freeze([]) : item.files,
+    fileBlocks: released ? Object.freeze({}) : item.fileBlocks,
     deliveryMode: state === "done" && deliveryMode != null ? deliveryMode : item.deliveryMode,
     reviewedBy: state === "done" && reviewedBy != null ? reviewedBy : item.reviewedBy,
     tags: state === "done" && tags != null ? tagsOf(tags) : item.tags,
@@ -514,7 +620,7 @@ export function releaseExpired(items, now) {
     // released claim drops its reviews too (attestations belong to the
     // lapsed owner's round of work, never to whoever claims next).
     const released = { ...item, state: "unclaimed", owner: null, leaseExpiresAt: null,
-      files: Object.freeze([]), attestations: Object.freeze([]), reviews: Object.freeze([]) };
+      files: Object.freeze([]), fileBlocks: Object.freeze({}), attestations: Object.freeze([]), reviews: Object.freeze([]) };
     return withHistory(released, atMs, item.owner ?? "system", "lease_expired",
       `claim by ${item.owner ?? "nobody"} lapsed at ${item.leaseExpiresAt} — auto-released`);
   });

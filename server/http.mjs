@@ -3470,6 +3470,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const workClaimsStatusMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/status$/.exec(url.pathname);
       const workClaimsSweepMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/sweep$/.exec(url.pathname);
       const workClaimsDuplicatesMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/duplicates$/.exec(url.pathname);
+      // Owner cap for open claims per member. Literal segment before {id}.
+      const workClaimsConfigMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/config$/.exec(url.pathname);
       const workClaimItemMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})$/.exec(url.pathname);
       const workClaimClaimMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/claim$/.exec(url.pathname);
       const workClaimUpdateMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/update$/.exec(url.pathname);
@@ -3478,7 +3480,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const workClaimReassignMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/reassign$/.exec(url.pathname);
       const workClaimReceiptsMatch = /^\/api\/rooms\/([^/]{1,384})\/receipts$/.exec(url.pathname);
       const workClaimRenewMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/renew$/.exec(url.pathname);
-      const workClaimMatch = workClaimsMatch ?? workClaimsStatusMatch ?? workClaimsSweepMatch ?? workClaimsDuplicatesMatch ?? workClaimClaimMatch
+      const workClaimMatch = workClaimsMatch ?? workClaimsStatusMatch ?? workClaimsSweepMatch ?? workClaimsDuplicatesMatch ?? workClaimsConfigMatch ?? workClaimClaimMatch
         ?? workClaimUpdateMatch ?? workClaimReviewMatch ?? workClaimReleaseMatch ?? workClaimReassignMatch ?? workClaimRenewMatch ?? workClaimItemMatch
         ?? workClaimReceiptsMatch;
       // Agent /feedback endpoint (structured bug/feature reports): every
@@ -3738,6 +3740,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const workClaimRoute = workClaimsSweepMatch ? "sweep"
           : workClaimsStatusMatch ? "status"
           : workClaimsDuplicatesMatch ? "duplicates"
+          : workClaimsConfigMatch ? "config"
           : workClaimsMatch ? (req.method === "GET" ? "list" : "create")
           : workClaimReceiptsMatch ? "receipts"
           : workClaimItemMatch ? "read"

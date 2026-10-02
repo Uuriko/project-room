@@ -202,7 +202,10 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
       assert.ok((await page.locator(`${selector} > summary`).boundingBox()).height >= 44, "disclosure has a usable touch target");
     }
     const recorded = fixture.store.eventsAfter(fixture.keys.owner, "commons", baseline.sequence, 100).events;
-    assert.deepEqual(recorded.map(({ event }) => event.type), [T.WORK_PROPOSED, T.WORK_ACCEPTED, T.WORK_PROPOSED, T.WORK_ACCEPTED, T.CLAIM_ACQUIRED, T.CLAIM_RELEASED, T.CLAIM_ACQUIRED]);
+    assert.deepEqual(recorded.map(({ event }) => event.type), [
+      T.WORK_PROPOSED, T.WORK_ACCEPTED, T.WORK_PROPOSED, T.WORK_ACCEPTED,
+      T.CLAIM_ACQUIRED, T.WORK_CLAIM_UPDATED, T.CLAIM_RELEASED, T.WORK_CLAIM_UPDATED, T.CLAIM_ACQUIRED, T.WORK_CLAIM_UPDATED
+    ]);
     assert.equal(recorded.some(({ event }) => [T.WORK_STARTED, T.WORK_COMPLETED].includes(event.type)), false, "coordination never claims automatic execution or completion");
     assert.equal(snapshot().cursor, baseline.cursor, "reading and disclosing a catch-up never acknowledges it");
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);

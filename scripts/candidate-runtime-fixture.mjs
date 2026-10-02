@@ -170,6 +170,8 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/receipt-cards.mjs'); // in-room receipt cards (imported by server/work-claim-events.mjs and server/room-guide.mjs)
   paths.add('server/room-guide.mjs'); // Room Guide demo agent (imported by cloudflare/room.mjs)
   paths.add('server/starter-room.mjs'); // starter seed (imported by server/room-lifecycle.mjs)
+  paths.add('deploy/public-search.mjs'); // public search assets (imported by server/http.mjs)
+  paths.add('cloudflare/job-heartbeat.mjs'); // per-job cron heartbeat (imported by cloudflare/room.mjs)
   paths.add('server/routes/agent-connect.mjs'); // GET /a/<code> (imported by server/http.mjs)
   paths.add('server/connect-snippets.mjs'); // DX-1a connect table (imported by deploy/public-search.mjs)
   for (const path of publicAssetPaths) paths.add(path);
