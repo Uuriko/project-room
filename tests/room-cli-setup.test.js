@@ -66,7 +66,7 @@ test("Node 24.19 is the minimum the doctor accepts", () => {
 });
 
 test("setup writes each tool config once, dry-run writes nothing, and no config contains the secret", async t => {
-  const { root, home, project, cleanup } = layout();
+  const { home, project, cleanup } = layout();
   t.after(cleanup);
   const env = envFor(home);
   const cases = [
