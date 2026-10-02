@@ -332,12 +332,13 @@ test("Updates navigation keeps review, draft and return context at 1280px and 39
   // Real account-backed lifecycle boundaries keep the old document alive:
   // a Rooms-picker switch and a distinct-account password sign-in must retire
   // an old Update callback without touching the replacement private view.
-  const password = "synthetic-navigation-password";
+  // This disposable local login uses a newly generated credential on every run.
+  const fixturePassword = crypto.randomUUID().concat("9A!");
   for (const [id, memberId, displayName] of [["navigation-account-a", "reader-a", "Reader A"], ["navigation-account-b", "reader-b", "Reader B"]]) {
     send(owner, T.MEMBER_ADDED, { memberId, displayName, kind: "human", permissions: [] });
     store.createAccount(id); store.completeOnboarding(id);
     store.bindHumanAccount("commons", memberId, id);
-    store.accountLogins.linkPasswordMethod(id, { email: `${id}@example.invalid`, verifier: hashPassword(password) });
+    store.accountLogins.linkPasswordMethod(id, { email: `${id}@example.invalid`, verifier: hashPassword(fixturePassword) });
     send(agent, T.MESSAGE_POSTED, { messageId: `private-${memberId}`, body: `Private update for ${displayName}`, toMemberId: memberId });
   }
   store.initialize(initialRoom("updates-other", "other-owner"));
@@ -346,6 +347,13 @@ test("Updates navigation keeps review, draft and return context at 1280px and 39
   store.command(otherOwner, "updates-other", command(T.MEMBER_ADDED, { memberId: "other-agent", displayName: "Other room agent", kind: "agent", permissions: [] }));
   const otherAgent = store.issueAccessKey("updates-other", "other-agent");
   store.command(otherAgent, "updates-other", command(T.MESSAGE_POSTED, { messageId: "other-room-update", body: "Private update in the other room", toMemberId: "other-owner" }));
+  const sharedHistoryId = "history:shared";
+  send(owner, T.WORK_PROPOSED, { workItemId: sharedHistoryId, title: "History destination in Commons",
+    definitionOfDone: "Commons-only task details.", accountableMemberId: "reader-a", mode: "read",
+    independentVerificationRequired: false, ownerDecisionRequired: false });
+  store.command(otherOwner, "updates-other", command(T.WORK_PROPOSED, { workItemId: sharedHistoryId,
+    title: "History destination in Other", definitionOfDone: "Other-room task details.", accountableMemberId: "other-owner", mode: "read",
+    independentVerificationRequired: false, ownerDecisionRequired: false }));
   const lifecycleBefore = JSON.stringify([store.room("commons"), store.room("updates-other")]);
   const loginAccount = async (accountId, displayName) => {
     await page.locator("#auth-panel").waitFor({ state: "visible" });
@@ -354,7 +362,7 @@ test("Updates navigation keeps review, draft and return context at 1280px and 39
     await page.evaluate(() => history.replaceState(null, "", "?room=commons"));
     const form = page.locator('#auth-signin-ui [data-signin-form="password"]');
     await form.locator('[name="email"]').fill(`${accountId}@example.invalid`);
-    await form.locator('[name="password"]').fill(password);
+    await form.locator('[name="password"]').fill(fixturePassword);
     const accepted = page.waitForResponse(response => new URL(response.url()).pathname === "/api/auth/password/login" && response.request().method() === "POST");
     await form.locator('button[type="submit"]').click();
     assert.equal((await accepted).status(), 200);
@@ -371,7 +379,7 @@ test("Updates navigation keeps review, draft and return context at 1280px and 39
     return page.locator('.updates-row [data-update-action="open"]');
   };
   const openAccountRoom = async roomId => {
-    await clickChrome(page, "#nav-rooms");
+    await clickChrome(page, "#choose-room");
     await page.locator(`[data-account-room="${roomId}"]`).click();
     await page.locator("#main").waitFor({ state: "visible" });
     await page.waitForFunction(id => new URL(location.href).searchParams.get("room") === id, roomId);
@@ -397,6 +405,38 @@ test("Updates navigation keeps review, draft and return context at 1280px and 39
   assert.equal(await page.locator("#message-input").inputValue(), "Replacement room draft");
   assert.equal(store.db.prepare("SELECT COUNT(*) AS count FROM private_update_marks WHERE room_id=?").get("updates-other").count, 0);
   await page.locator("#updates-close").click();
+  await page.locator("#message-input").fill("");
+  await openAccountRoom("commons");
+
+  // A real work-history entry survives Switch room, but its private ticket
+  // does not. The same work ID in the new room must never satisfy the old URL.
+  await openSearch(page);
+  await page.locator("#message-search").fill("History destination in Commons");
+  await page.locator(`#search-list [data-open-work="${sharedHistoryId}"]`).press("Enter");
+  await page.waitForFunction(id => document.activeElement?.dataset.workRecordId === id, sharedHistoryId);
+  const oldRoomWorkUrl = new URL(page.url());
+  assert.equal(oldRoomWorkUrl.searchParams.get("room"), "commons");
+  assert.equal(oldRoomWorkUrl.hash, `#pr-record/work/${encodeURIComponent(sharedHistoryId)}`);
+  assert.equal(await card(sharedHistoryId).locator("h3").textContent(), "History destination in Commons");
+  await openAccountRoom("updates-other");
+  const otherHistoryCard = card(sharedHistoryId);
+  assert.equal(await otherHistoryCard.locator("h3").textContent(), "History destination in Other");
+  assert.equal(await otherHistoryCard.locator(".work-details").evaluate(node => node.open), false);
+  await page.locator("#message-input").fill("Keep the current room history draft");
+  await page.goBack();
+  await page.waitForFunction(() => new URL(location.href).searchParams.get("room") === "updates-other" && location.hash === "#pr-view/rooms");
+  assert.equal(await page.locator("#main").isVisible(), true);
+  assert.match(await page.locator("#identity-label").textContent(), /^Room owner/);
+  assert.equal(await otherHistoryCard.locator("h3").textContent(), "History destination in Other");
+  assert.equal(await otherHistoryCard.locator(".work-details").evaluate(node => node.open), false,
+    "lost old-room ticket does not open the colliding task in the current room");
+  assert.equal(await page.locator("#work-navigation-return").isVisible(), false);
+  assert.equal(await page.locator("#message-input").inputValue(), "Keep the current room history draft");
+  assert.doesNotMatch(await page.locator("#message-list").innerText(), /Commons-only task details|History destination in Commons/);
+  await page.goForward();
+  await page.waitForFunction(() => new URL(location.href).searchParams.get("room") === "updates-other" && location.hash === "#pr-view/rooms");
+  assert.equal(await otherHistoryCard.locator(".work-details").evaluate(node => node.open), false);
+  assert.equal(JSON.stringify([store.room("commons"), store.room("updates-other")]), lifecycleBefore);
   await page.locator("#message-input").fill("");
   await openAccountRoom("commons");
 

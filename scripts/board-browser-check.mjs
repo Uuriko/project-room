@@ -278,6 +278,66 @@ test("board columns, keyboard claim, linked work returns, chat line, 390px, and 
   assert.equal(await linked.evaluate(node => node === document.activeElement), true);
   assert.deepEqual(navigationState(), beforeNavigation);
 
+  // A delayed Back return belongs to one opening of the dialog. Closing or
+  // cancelling it must not let that return steal focus from a later opening.
+  for (const dismiss of ["Close", "Escape"]) {
+    await linked.focus();
+    const abandonedScroll = await dialog.evaluate(node => node.scrollTop);
+    assert.ok(abandonedScroll > 0, `${dismiss}: the abandoned origin is scrolled`);
+    await linked.press("Enter");
+    await assertWork();
+    const refreshId = `board-delayed-${dismiss.toLowerCase()}`;
+    await post(page, origin, "/work-claims", { id: refreshId, title: `A delayed Board refresh after ${dismiss}` }, 201);
+    await page.waitForFunction(sequence => document.querySelector("#event-count")?.textContent === String(sequence),
+      fixture.store.room("commons").sequence);
+    const beforeDelayedReturn = navigationState();
+    const arrived = Promise.withResolvers(), release = Promise.withResolvers();
+    t.after(() => release.resolve());
+    const listPattern = "**/api/rooms/commons/work-claims?*";
+    let captured = false;
+    const holdList = async route => {
+      if (captured || route.request().method() !== "GET") return route.continue();
+      captured = true;
+      const response = await route.fetch();
+      assert.equal(response.status(), 200);
+      arrived.resolve();
+      await release.promise;
+      await route.fulfill({ response });
+    };
+    await page.route(listPattern, holdList);
+    try {
+      await page.goBack();
+      await arrived.promise;
+      await dialog.waitFor({ state: "visible" });
+      assert.equal(await page.locator(`article[data-claim-id='${refreshId}']`).count(), 0, "the actual list response is still held");
+      if (dismiss === "Close") await page.locator("#board-close").click();
+      else await page.keyboard.press("Escape");
+      await dialog.waitFor({ state: "hidden" });
+      await page.locator("#tasks-board-open").click();
+      await dialog.waitFor({ state: "visible" });
+      await page.locator("#board-close").focus();
+      const reopenedUrl = page.url();
+      const reopenedScroll = await dialog.evaluate(node => node.scrollTop);
+      assert.ok(Math.abs(reopenedScroll - abandonedScroll) > 1, `${dismiss}: the new opening has its own scroll position`);
+      const delivered = page.waitForResponse(response => response.request().method() === "GET"
+        && new URL(response.url()).pathname === "/api/rooms/commons/work-claims");
+      release.resolve();
+      await (await delivered).finished();
+      // This new, persisted claim proves the unmodified held response painted.
+      // Give its promise continuations a rendered frame before checking focus.
+      await page.locator(`article[data-claim-id='${refreshId}']`).waitFor({ state: "attached" });
+      await page.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)));
+      assert.equal(await dialog.evaluate(node => node.open), true);
+      assert.equal(page.url(), reopenedUrl);
+      assert.equal(await page.evaluate(() => document.activeElement?.id), "board-close", `${dismiss}: an abandoned return cannot steal the new opening's focus`);
+      assert.ok(Math.abs(await dialog.evaluate(node => node.scrollTop) - reopenedScroll) <= 1, `${dismiss}: an abandoned return cannot restore its old scroll`);
+      assert.deepEqual(navigationState(), beforeDelayedReturn, `${dismiss}: returning and reopening change no Room state`);
+    } finally {
+      release.resolve();
+      await page.unroute(listPattern, holdList);
+    }
+  }
+
   // A persisted origin may disappear while its canonical work is open.
   // The durable registry is also used by land-queue removal; there is no
   // standalone claim DELETE route. A real HTTP claim event refreshes the UI.

@@ -232,6 +232,7 @@ let state = null, session = null, pendingMessage = null, pendingWork = null, pen
 let updatesUi = null, resetNavigationBoard = null, navigationBoardReady = null;
 const workNavigationOrigins = new Map();
 let activeWorkNavigation = null, activeWorkNavigationId = null, workNavigationEpoch = 0, workHistoryReplayKey = null;
+let navigationBoardEpoch = 0;
 // JDOT-COH-NAV end
 // Phase 2 channels: the visible channel; persisted per room, defaults to the main channel.
 let activeChannelId = DEFAULT_CHANNEL_ID, activeChannelRoomId = null;
@@ -2757,7 +2758,7 @@ function syncWorkReturnControl() {
   button.textContent = origin ? `Back to ${origin.type === "updates" ? "Updates" : origin.type === "board" ? "Board" : "conversation"}` : "Back to room";
 }
 function clearWorkNavigation() {
-  resetNavigationBoard?.();
+  navigationBoardEpoch++; resetNavigationBoard?.();
   workNavigationEpoch++; workNavigationOrigins.clear(); activeWorkNavigation = null; activeWorkNavigationId = null; workHistoryReplayKey = null;
   const button = $("#work-navigation-return");
   if (button) { button.hidden = true; button.disabled = false; }
@@ -2853,7 +2854,9 @@ async function restoreWorkOrigin(ticket) {
     if (!await updatesUi.restore(origin.updates)) return;
   } else if (origin.type === "board") {
     $("#tasks-board-open").click();
-    if (!await navigationBoardReady?.() || epoch !== workNavigationEpoch || !currentWorkOrigin(ticket) || !$("#board-dialog").open) return;
+    const opening = navigationBoardEpoch;
+    if (!await navigationBoardReady?.() || opening !== navigationBoardEpoch || epoch !== workNavigationEpoch
+      || !currentWorkOrigin(ticket) || !$("#board-dialog").open) return;
     $("#board-dialog").scrollTop = origin.boardScroll;
     $("#work-board").scrollTop = origin.boardBodyScroll;
     const columns = $("#work-board .board-columns"); if (columns) columns.scrollLeft = origin.boardColumnsScroll;
@@ -2879,7 +2882,10 @@ function returnToCurrentRoom() {
   const detail = activeWorkNavigationId && workRecord(activeWorkNavigationId)?.querySelector(".work-details");
   if (detail) detail.open = false;
   activeWorkNavigationId = null;
-  history.replaceState(workHistoryState(), "", "#pr-view/rooms");
+  const destination = new URL(location.href);
+  if (session?.roomId) { destination.searchParams.set("room", session.roomId); destination.searchParams.delete("account"); }
+  destination.hash = "#pr-view/rooms";
+  history.replaceState(workHistoryState(), "", destination.pathname + destination.search + destination.hash);
   updatesUi?.close();
   if ($("#board-dialog").open) $("#board-dialog").close();
   if (workNavigationContext()) { inboxUI?.showRooms(); switchThread(null); focusRecord($("#conversation-title")); }
@@ -2971,6 +2977,14 @@ function revealLocationHash() {
     }
   }
   if (!state) return;
+  // JDOT-COH-NAV begin
+  const linkedRoom = selectedRoomFromLocation();
+  if (linkedRoom && linkedRoom !== session?.roomId) {
+    returnToCurrentRoom();
+    notice("That link belongs to another room. Open that room first.", true);
+    return;
+  }
+  // JDOT-COH-NAV end
   const deepRoom = roomIdFromHash(hash);
   if (deepRoom) {
     if (state.room?.id === deepRoom) {
@@ -7151,13 +7165,20 @@ if (initialInvitationFragment && !initialPasswordReset) openInvitation(initialIn
   resetNavigationBoard = () => { $("#board-dialog").close(); $("#board-panel").open = false; board.reset(); };
   // JDOT-COH-NAV end
   const openBoard = () => {
+    // JDOT-COH-NAV begin
+    navigationBoardEpoch++;
+    // JDOT-COH-NAV end
     const dialog = $("#board-dialog");
     if (!dialog.open) dialog.showModal();
     $("#board-panel").open = true;
     board.sync();
   };
   $("#tasks-board-open").addEventListener("click", openBoard);
-  $("#board-close").addEventListener("click", () => { $("#board-dialog").close(); $("#board-panel").open = false; });
+  // JDOT-COH-NAV begin
+  $("#board-close").addEventListener("click", () => { navigationBoardEpoch++; $("#board-dialog").close(); $("#board-panel").open = false; });
+  $("#board-dialog").addEventListener("cancel", () => { navigationBoardEpoch++; });
+  $("#board-panel").addEventListener("toggle", () => { if (!$("#board-panel").open) navigationBoardEpoch++; });
+  // JDOT-COH-NAV end
   $("#signout-button").addEventListener("click", () => { $("#board-dialog").close(); board.reset(); }, true);
   const priorEntries = roomActionEntries;
   roomActionEntries = () => priorEntries().map(entry => entry.id === "landing"
