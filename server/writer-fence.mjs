@@ -362,7 +362,10 @@ export const unfencedAdditiveTables = Object.freeze([
   // skips schema setup on the next wake. integrity_job_cursor: which
   // deferred integrity step the cron runs next. Neither is room content.
   "room_schema_stamp",
-  "integrity_job_cursor"
+  "integrity_job_cursor",
+  // Per-room sequence and projection size for the incremental integrity
+  // check. The cron writes it; a missing row means that room is due.
+  "integrity_room_state"
 ]);
 // Created on first use, not in the constructor. A database that has never
 // issued an OAuth grant or persisted an abuse rate bucket does not have
