@@ -4,7 +4,6 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,6 +11,7 @@ import { RoomStore } from "../server/store.mjs";
 import { AccessRequests } from "../server/access-requests.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
+import { applyEvent, event } from "../src/events.js";
 
 function fixture(t) {
   const directory = mkdtempSync(join(tmpdir(), "project-room-referrals-"));
@@ -117,12 +117,22 @@ test("unmatched 'who referred you?' still joins with no referrer", t => {
 
 test("ambiguous display names do not falsely attribute", t => {
   const { store, accessRequests, ownerKey, roomId } = fixture(t);
-  // New admissions refuse a second member with the same folded name. Rows
-  // already stored can still fold together, so this fixture writes them
-  // through the owner membership command. A matching answer then attributes nothing.
-  for (const [memberId, displayName] of [["sam-a", "Sam Duplicate"], ["sam-b", "sam duplicate"]]) {
-    store.command(ownerKey, roomId, { id: randomUUID(), type: "member.added", data: { memberId, displayName, kind: "human", permissions: [] } });
-  }
+  // Live member.added refuses a second folded name. Rows already stored can
+  // still fold together, so this fixture replays unstamped historical events.
+  // A matching answer then attributes nothing.
+  const room = store.room(roomId);
+  let state = room.state;
+  let sequence = room.sequence;
+  store.transaction(() => {
+    for (const [memberId, displayName] of [["sam-a", "Sam Duplicate"], ["sam-b", "sam duplicate"]]) {
+      const incoming = event({ type: "member.added", actorId: "owner", roomId, data: { memberId, displayName, kind: "human", permissions: [] } });
+      state = applyEvent(state, incoming);
+      sequence += 1;
+      store.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
+    }
+    const stored = { ...state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
+    store.db.prepare("UPDATE rooms SET sequence=?, projection=? WHERE id=?").run(sequence, JSON.stringify(stored), roomId);
+  });
   const identity = store.identities.create("Confused Agent");
   accessRequests.request(roomId, {
     identityId: identity.identityId, displayName: "Confused Agent",

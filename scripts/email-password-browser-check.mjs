@@ -1,7 +1,7 @@
 // Real local email/password journeys through the contextual email step.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { rmSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
 import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
@@ -36,6 +36,29 @@ test("contextual email creation signs in using the actual password signup API", 
   assert.equal(store.accountLogins.findPasswordAccount(email), actual.account.id);
   assert.equal(store.accountLogins.findAccountByVerifiedEmail(email), null);
   assert.doesNotMatch(page.url(), /password=|new-email-password/);
+});
+
+test("password signup lands in the personal room", { timeout: 40000 }, async t => {
+  const { page } = await setup(t);
+  const shots = "/opt/cursor/artifacts/screenshots";
+  mkdirSync(shots, { recursive: true });
+  const email = "room-landing@example.invalid";
+  const form = page.locator('#auth-signin-ui [data-signin-form="password"]');
+  await form.locator('[data-password-mode="signup"]').click();
+  await form.locator('[name="email"]').fill(email);
+  await form.locator('[name="password"]').fill(password);
+  await form.locator('button[type="submit"]').click();
+  const setupName = page.locator("#setup-name");
+  await setupName.waitFor({ state: "visible" });
+  await setupName.fill("Ada");
+  await page.getByRole("button", { name: "Done", exact: true }).click();
+  await page.waitForURL(/[?&]room=personal-/);
+  await page.locator("#main").waitFor({ state: "visible" });
+  assert.equal(await page.locator("#inbox-panel").isVisible(), false);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.screenshot({ path: `${shots}/first-run-1280.png` });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({ path: `${shots}/first-run-390.png` });
 });
 
 test("contextual email login reports a rejected password then signs into the existing account", { timeout: 25000 }, async t => {

@@ -1,5 +1,5 @@
 import { validId } from "./events.js";
-import { rosterSelection, rosterNameTaken, suggestedConfigDir, capabilitySummary, connectionSeat, connectionStanding, setupChecklist, routeHint, placeholderSnippetPaths, grokBuildToml, mcpJson, claudeMcpAddCommand, reconnectCopy, routeFromDisplayName, catalogSelection } from "./room-roster.js";
+import { rosterSelection, rosterNameTaken, suggestedConfigDir, capabilitySummary, connectionSeat, connectionStanding, setupChecklist, localClientSteps, routeHint, placeholderSnippetPaths, grokBuildToml, mcpJson, claudeMcpAddCommand, reconnectCopy, routeFromDisplayName, catalogSelection } from "./room-roster.js";
 
 const $ = selector => document.querySelector(selector);
 const newToken = () => btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
@@ -65,7 +65,7 @@ export function installAgentConnections({ client, getState }) {
       ? "Use my AI. Import this key only if the host can keep a secret outside chat."
       : route === "direct"
         ? "Import on that computer, then check. No key in a prompt."
-        : "Import, merge MCP from Copy plug-in steps, then room_check_access.";
+        : "Merge the MCP snippet, then call room_check_access.";
   }
   function describeRoute() {
     const route = currentRoute();
@@ -80,6 +80,7 @@ export function installAgentConnections({ client, getState }) {
     if ($("#agent-key-later")) $("#agent-key-later").hidden = !packet;
     if ($("#agent-host-snippets")) $("#agent-host-snippets").hidden = route !== "mcp";
     fillList($("#agent-import-checklist"), setupChecklist({ route, configDir: currentConfigDir() }));
+    if ($("#agent-local-command")) $("#agent-local-command").textContent = localClientSteps({ route, configDir: currentConfigDir() }).join("\n");
     try {
       const paths = placeholderSnippetPaths(currentConfigDir());
       if ($("#agent-mcp-toml")) $("#agent-mcp-toml").textContent = grokBuildToml(paths);

@@ -59,6 +59,7 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
   assert.match(card.description, /receipts/i);
   assert.match(card.description, /Members/);
   assert.match(card.description, /Not a run factory/);
+  assert.match(card.description, /A2A discovery: returns the join guide; use MCP for room actions/);
   assert.match(text, /Agent-native ledger/);
   assert.match(text, /Work Items \+ next actions \+ receipts/);
   assert.match(text, /Not a run factory/);

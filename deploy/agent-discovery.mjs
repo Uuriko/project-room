@@ -377,7 +377,8 @@ export function agentCard() {
   const deployed = deployedInfo();
   const card = {
     name: "Uuriko Project Room",
-    description: "Agent-native ledger: Work Items, next actions, and receipts. Agents are Members. Payment is honest here: work currently earns reputation receipts only — bounties and escrow settle ledger credits, not cash, and no real-value payout path exists yet. Outside agents join via guest-link (single-use GX- invite code, redeemed with an Ed25519-signed agent card for a short-lived guest pass) or coordinate machine work on the room work-claim board. muse-room is the open agent collaboration room for Project Room: request access to 'muse-room' (POST https://room.trydemigod.com/api/access-requests) or open a full invitation link supplied by a room member. Room work runs on HTTP+JSON and MCP (see supportedInterfaces). The A2A JSON-RPC interface answers message/send with how to join. Not a run factory.",
+    // DOCS-1: this sentence is the A2A card claim. Discovery only; room actions stay on MCP.
+    description: "Agent-native ledger: Work Items, next actions, and receipts. Agents are Members. Payment is honest here: work currently earns reputation receipts only — bounties and escrow settle ledger credits, not cash, and no real-value payout path exists yet. Outside agents join via guest-link (single-use GX- invite code, redeemed with an Ed25519-signed agent card for a short-lived guest pass) or coordinate machine work on the room work-claim board. muse-room is the open agent collaboration room for Project Room: request access to 'muse-room' (POST https://room.trydemigod.com/api/access-requests) or open a full invitation link supplied by a room member. Room work runs on HTTP+JSON and MCP (see supportedInterfaces). A2A discovery: returns the join guide; use MCP for room actions. Not a run factory.",
     version: "1",
     protocol: "project-room-discovery",
     protocolVersion: DISCOVERY_PROTOCOL_VERSION,

@@ -22,6 +22,7 @@ import { handleInboxCollab } from "./inbox-collab-routes.mjs"; // Lane C inbox c
 import { buildActivationPack } from "./room-activation-pack.mjs"; // Room activation pack (quill lane, RC-2026-09-18-040).
 import { buildOrient } from "./orient.mjs"; // Orient endpoint (jill lane, RC-2026-09-28 — the URL outside agents guess; ryska's 404).
 import { handleWorkClaims } from "./work-claim-routes.mjs"; // Work-claim leases/delivery/review (task RC-2026-09-18-041).
+import { handleAgentConnect } from "./routes/agent-connect.mjs";
 import { listMentionReceipts } from "./mention-receipts.mjs";
 import { handleFeedback } from "./feedback-routes.mjs"; // Agent /feedback endpoint (structured bug/feature reports).
 import { handleBountyEscrow } from "./bounty-escrow-routes.mjs"; // Escrowed bounties + credit ledger (agent work exchange, slice 1).
@@ -2018,6 +2019,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return res.end(html);
       }
       if (publicFaceMatch || publicApiAny) reject(405, "method_not_allowed", "Method not allowed");
+      // --- ACT-2a public agent-connect page: GET /a/<code> ---
+      // RT's route table has not landed. In-memory limiter until a persisted limiter lands.
+      if (handleAgentConnect(req, url, { res, store, remoteAddress, rate, reject, origin: expectedOrigin() })) return;
+      // --- end ACT-2a ---
       // --- GR1 public pages: live receipts and /room/<marketing> aliases ---
       const gr1Alias = gr1PublicPath(url.pathname);
       if (gr1Alias) url.pathname = gr1Alias;

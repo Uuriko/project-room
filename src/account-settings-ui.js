@@ -122,7 +122,6 @@ export function applyTheme(preference) {
   if (!root) return mode;
   if (mode === "light") root.dataset.theme = "light";
   else delete root.dataset.theme;
-  if (root.style) root.style.colorScheme = mode;
   return mode;
 }
 
@@ -244,10 +243,6 @@ function recoverySectionHtml(methods) {
     + `<div data-recovery-codes hidden></div>`;
 }
 
-// QA2 finding P2-11. Colors are the design tokens in src/design-tokens.js
-// (--red, --panel), already applied as CSS variables. No new stylesheet.
-const DESTRUCTIVE_BUTTON = "color:var(--red);background:var(--panel);border:1px solid var(--red)";
-
 export const ACCOUNT_DELETED_MESSAGE = "Your account was deleted.";
 
 export function accountDeletedLandingMessage(search = "") {
@@ -258,14 +253,14 @@ export function accountDeletedLandingMessage(search = "") {
 function deletionSectionHtml() {
   return `<h3>Delete account</h3>`
     + `<p class="form-hint">Permanently delete this account. Personal rooms you solely own are archived and their messages and files are purged. A shared room needs another owner first.</p>`
-    + `<button type="button" class="button" data-action="delete-account" style="${DESTRUCTIVE_BUTTON}">Delete account</button>`
+    + `<button type="button" class="button destructive" data-action="delete-account">Delete account</button>`
     + `<dialog data-deletion-dialog aria-labelledby="delete-account-title" aria-describedby="delete-account-summary">`
     + `<h3 id="delete-account-title">Delete account</h3>`
-    + `<div id="delete-account-summary" class="form-hint" data-deletion-summary style="white-space:pre-wrap">Loading what deletion will remove…</div>`
+    + `<div id="delete-account-summary" class="form-hint deletion-summary" data-deletion-summary>Loading what deletion will remove…</div>`
     + `<div data-deletion-blocked hidden></div>`
     + `<form data-form="delete-account" class="settings-form" hidden>`
     + `<label>Type your account email to confirm <input type="email" name="confirmEmail" autocomplete="off" spellcheck="false" required></label>`
-    + `<button type="submit" class="button" disabled style="${DESTRUCTIVE_BUTTON}">Delete account</button>`
+    + `<button type="submit" class="button destructive" disabled>Delete account</button>`
     + `</form>`
     + `<button type="button" class="button" data-action="delete-account-cancel">Cancel</button>`
     + `</dialog>`;

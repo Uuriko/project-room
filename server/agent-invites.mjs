@@ -24,6 +24,7 @@ import { nextActionsForInviteRedeem } from "./discoverability.mjs";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 import { agentAccessProfiles } from "./agent-connections.mjs";
 import { assertMemberDisplayNameAvailable } from "./display-name-guard.mjs";
+import { connectFields, starterFor } from "./routes/agent-connect.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 const hash = text => createHash("sha256").update(text).digest("hex");
@@ -232,9 +233,9 @@ export class AgentInvites {
         const mcpToken = this.store.agentPlugin.issueOnboardingMcpToken({
           identityId: existingIdentity.identityId, roomId: row.room_id, label: member.displayName
         });
-        return { identityId: existingIdentity.identityId, roomId: row.room_id, memberId: member.id,
+        return withConnect(this.store, row.room_id, member.id, { identityId: existingIdentity.identityId, roomId: row.room_id, memberId: member.id,
           displayName: member.displayName, permissions: member.permissions, duplicate: true, mcpToken,
-          next: redeemNext(row.room_id, member.displayName), nextActions: nextActionsForInviteRedeem(row.room_id) };
+          next: redeemNext(row.room_id, member.displayName), nextActions: nextActionsForInviteRedeem(row.room_id) });
       }
       if (row.revoked_at != null) fail(410, "invite_revoked", "Invite code was revoked");
       const now = this.store.now();
@@ -259,7 +260,18 @@ export class AgentInvites {
       // The name becomes this room's member name. Refuse reserved labels,
       // hidden characters, and skeletons that match someone already here
       // before an identity or membership row is written.
-      assertMemberDisplayNameAvailable(name, room.state.members);
+      try {
+        assertMemberDisplayNameAvailable(name, room.state.members);
+      } catch (error) {
+        if (error?.code === "display_name_unavailable") {
+          error.detail = {
+            ...(error.detail && typeof error.detail === "object" ? error.detail : {}),
+            displayName: error.suggestion,
+            displayNameReason: error.reason,
+          };
+        }
+        throw error;
+      }
       const identity = existingIdentity ?? this.store.identities.create(name);
       if (this.db.prepare("SELECT 1 FROM identity_links WHERE room_id=? AND identity_id=?").get(row.room_id, identity.identityId))
         fail(409, "identity_already_linked", "Identity already joined; reuse its saved connection");
@@ -309,13 +321,14 @@ export class AgentInvites {
         this.store.referrals.record({ roomId: row.room_id, referrerMemberId: row.created_by, refereeMemberId: memberId, via: "invite", at: now });
       }
       // Onboarding returns a room-scoped MCP token. The identity credential
-      // stays in the store and is not included in this response.
+      // stays in the store and is not included in this response. Connect
+      // steps name the MCP URL; they do not carry the token.
       const mcpToken = this.store.agentPlugin.issueOnboardingMcpToken({
         identityId: identity.identityId, roomId: row.room_id, label: name
       });
-      return { identityId: identity.identityId, ...(existingIdentity ? { duplicate: false } : {}), mcpToken,
+      return withConnect(this.store, row.room_id, memberId, { identityId: identity.identityId, ...(existingIdentity ? { duplicate: false } : {}), mcpToken,
         roomId: row.room_id, memberId, displayName: name, permissions,
-        next: redeemNext(row.room_id, name), nextActions: nextActionsForInviteRedeem(row.room_id) };
+        next: redeemNext(row.room_id, name), nextActions: nextActionsForInviteRedeem(row.room_id) });
     });
   }
 
@@ -400,6 +413,11 @@ export class AgentInvites {
 // actionable — no room lookup first. A redeem cannot rename a member, so
 // when the name fell back to the default the first step explains how to
 // redo the redeem with the wanted displayName.
+const withConnect = (store, roomId, memberId, body) => {
+  const starter = starterFor(store, roomId, memberId);
+  return { ...body, connect: connectFields(), ...(starter ? { starter } : {}) };
+};
+
 const DEFAULT_INVITE_NAME = "Invited agent";
 const redeemNext = (roomId, displayName) => {
   const room = `/api/rooms/${encodeURIComponent(roomId)}`;

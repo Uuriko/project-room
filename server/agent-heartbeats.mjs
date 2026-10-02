@@ -1,37 +1,24 @@
-// Wakeable agent presence (RC-2026-09-18-051) + push wake path
-// (RC-2026-09-24-203) + wakeable-by-default (RC-2026-09-28-3602).
+// Agent host heartbeats and the durable mention/DM wake queue.
 //
-// A durable registry of agent host heartbeats. Each agent identity runs zero
-// or more hosts; every host reports a mode:
+// Each agent identity has zero or more hosts. A host is wakeable (the
+// default) or pull-only. Wakeable hosts wait on GET /api/agent-wakes/poll
+// and may also register an HTTPS wake URL. Pull-only hosts register no
+// wake URL. Presence is online when any host was seen inside its
+// reachability window (max(180s, cadenceSeconds * 1.5)), offline when
+// every host is stale, and unregistered when no host has reported.
 //
-//   wakeable  - the default (RC-2026-09-28-3602). The host needs no public
-//               endpoint: it waits on the room-hosted wake poll
-//               (GET /api/agent-wakes/poll), which releases as soon as a
-//               queued mention/DM signal lands. A host may additionally
-//               register an https wake URL for true-push pings;
-//   pull-only - the host polls on its own cadence; queued wake signals are
-//               delivered on its next heartbeat instead of a ping.
+// Any agent with at least one registered host gets one wake signal per
+// mention or DM, whatever the host's mode or presence. The same message
+// coalesces to one signal (agent plus message). POST /api/agent-heartbeats
+// returns that host's unacknowledged signals in pendingWakes, oldest
+// first, at most 50, with more:true when the page is truncated. The poll
+// does not acknowledge. The host acknowledges with ackWakes.
 //
-// The registry tracks last-seen per host and derives the agent's effective
-// status: online when any host was seen inside its reachability window,
-// offline when every host is stale, unregistered when no host ever
-// reported. Wake signals are a durable queue: mentioning or DM'ing an
-// registered wakeable agent, or an offline pull-only agent, enqueues one signal per message (coalesced on
-// agent+message), and the host collects pending signals on its next
-// heartbeat — or immediately through the wake poll — and acknowledges them
-// once handled. Waiting on the poll consumes nothing: signals are
-// acknowledged explicitly via acknowledgeWake().
+// Push is a separate doorbell. An offline wakeable host with a usable
+// push subscription receives a pointer-only POST. Push does not decide
+// who gets a queued signal.
 //
-// RC-2026-09-24-203 adds the push wake path: a host may declare its poll
-// cadence and register a pushNotification subscription (url + opaque token
-// + optional bearer auth). Room events relevant to an offline agent
-// (message mentions, DMs, bond proposals, work assignments) then POST a
-// pointer-only doorbell to the push url — push is the doorbell, the
-// agent-inbox pull is the mail. The reachability window per host is
-// max(180s, cadenceSeconds * 1.5); undeclared hosts read stale after 180s.
-//
-// SQLite persistence survives restarts; the schema is purely additive
-// (no migration, no schema-version bump), matching the wake-queue pattern.
+// SQLite persistence survives restarts. The schema is additive.
 import { randomBytes } from "node:crypto";
 import { validateWebhookUrl, assertWebhookHostDnsPublic, WAKE_ACK_HINT } from "./outbound-webhooks.mjs";
 import { postDelivery } from "./webhook-dispatch.mjs";
@@ -284,8 +271,10 @@ export class AgentHeartbeats {
         : (effectiveMode === "wakeable" && pushConfigured && !pushSuspended ? "push" : "poller"),
       reachableUntil,
     });
+    const page = this.pendingWakePage(agentId, { hostId, roomId: workScopeRoomId });
     return Object.freeze({
-      host: { ...host, workWakes: this.store.workWakes?.hostEnabled(agentId, hostId) ?? false }, pendingWakes: this.pendingWakes(agentId, { hostId, roomId: workScopeRoomId }),
+      host: { ...host, workWakes: this.store.workWakes?.hostEnabled(agentId, hostId) ?? false },
+      pendingWakes: page.signals, more: page.more,
       pushConfigured, pushSuspended, reachability,
     });
   }
@@ -463,16 +452,29 @@ export class AgentHeartbeats {
     return Object.freeze({ enqueued: applied.changes > 0, signal: signalView(row) });
   }
 
-  // Undelivered wake signals, oldest first.
-  pendingWakes(agentId, { limit = MAX_PENDING_WAKES, roomId = null, hostId = null } = {}) {
+  // Undelivered wake signals, oldest first, capped at the caller's limit.
+  pendingWakes(agentId, options = {}) {
+    return this.pendingWakePage(agentId, options).signals;
+  }
+
+  // One page of unacknowledged signals for the host's rooms, oldest first.
+  // `more` is true when a signal remains past the cap. Fetching one extra
+  // row from each source is enough: the oldest page takes at most `limit`
+  // rows from either source.
+  pendingWakePage(agentId, { limit = MAX_PENDING_WAKES, roomId = null, hostId = null } = {}) {
     checkAgentId(agentId);
     check(Number.isInteger(limit) && limit > 0 && limit <= MAX_PENDING_WAKES,
       422, "invalid_heartbeat", `limit must be 1..${MAX_PENDING_WAKES}`);
+    const probe = limit + 1;
     const messages = this.db.prepare(`SELECT * FROM agent_wake_signals
       WHERE agent_id=? AND delivered_at IS NULL AND (? IS NULL OR room_id=?) ORDER BY created_at ASC LIMIT ?`)
-      .all(agentId, roomId, roomId, limit).map(signalView);
-    const work = this.store.workWakes?.pending(agentId, { roomId, hostId, limit }) ?? [];
-    return Object.freeze([...messages, ...work].sort((a, b) => a.createdAt - b.createdAt).slice(0, limit));
+      .all(agentId, roomId, roomId, probe).map(signalView);
+    const work = this.store.workWakes?.pending(agentId, { roomId, hostId, limit: probe }) ?? [];
+    const combined = [...messages, ...work].sort((a, b) => a.createdAt - b.createdAt);
+    return Object.freeze({
+      signals: Object.freeze(combined.slice(0, limit)),
+      more: combined.length > limit,
+    });
   }
 
   // RC-2026-09-28-3602: room-hosted wake poll — a synchronous, durable,
@@ -574,18 +576,12 @@ export class AgentHeartbeats {
     });
   }
 
-  // Offline registered hosts receive durable wakes. A fresh host actively
-  // waiting for this room also needs a signal. Registered wakeable hosts need
-  // durable signals between polls too: heartbeat presence is not message
-  // delivery. Fresh pull-only hosts without a waiter keep their own cadence.
+  // Queue a wake for every agent that has registered at least one host.
+  // Mode and presence do not matter. An agent with no host has nowhere to
+  // deliver the signal. Coalescing stays on agent plus message.
   wakeIfOffline({ agentId, kind, roomId = null, messageId }) {
     checkAgentId(agentId);
-    const status = this.statusOf(agentId);
-    const prefix = `${agentId}\0`;
-    const waiting = [...this._wakeWaiters].some(([key, waiter]) =>
-      key.startsWith(prefix) && (waiter.roomId === null || waiter.roomId === roomId));
-    const wakeable = status.hosts.some(host => host.mode === "wakeable");
-    if (status.status !== "offline" && !(status.status === "online" && (wakeable || waiting)))
+    if (this.statusOf(agentId).hosts.length === 0)
       return Object.freeze({ woken: false, signal: null });
     const { enqueued, signal } = this.enqueueWake({ agentId, kind, roomId, messageId });
     return Object.freeze({ woken: true, enqueued, signal });
