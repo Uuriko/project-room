@@ -33,6 +33,7 @@ import { SOURCE_REVISION, BUILD_ID } from "./version.mjs";
 import { agentErrorBody, errorCategory } from "../src/agent-error.mjs";
 import { DiagnosticsLog, supportExportBundle } from "./diagnostics.mjs";
 import { renderRoomExportHtml, EXPORT_HTML_CSP } from "./room-export-html.mjs";
+import { redactEventPage, redactEventRows, redactMessageTree, redactSnapshotState } from "./redact-read.mjs";
 import { discoveryDoc, isHealthAliasPath, rewriteRoomApiPrefix, EDGE_DOOR_HOSTS, ROOM_ORIGIN } from "../deploy/agent-discovery.mjs";
 import { noteIdentityMint } from "./growth-loop.mjs";
 import { buildOpenApiJson, discoverabilityErrorOverride, nextActionsForAccessRequest, nextActionsForAccessRequestStatus, nextActionsForInviteRedeem } from "./discoverability.mjs";
@@ -384,6 +385,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // scoped tokens for the Project Room API. One instance per server (one per
   // Durable Object in production); client registry comes from config.
   const oauthProvider = createOAuthProvider({
+    db: store.db,
     clock: () => store.now(),
     // F-01 reuse signal: refresh-token reuse (possible theft) revokes the
     // whole token family inside the provider; log it as a structured
@@ -720,6 +722,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Content-Length": Buffer.byteLength(body) });
     res.end(head ? undefined : body);
   }
+  // Read-time message redaction (server/redact-read.mjs). Responses that
+  // return events, the room projection, or an export show the tombstone for
+  // a deleted message and only the current body after an edit. The log
+  // itself is not rewritten.
+  function projectionMessages(id) {
+    return store.room(id).state.messages;
+  }
   // Bounded request reader shared by JSON and NDJSON routes. A declared
   // oversize is refused immediately while draining in the background: a stalled
   // sender must not hold a connection open until its request timeout. For
@@ -782,7 +791,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     const pump = () => {
       if (res.destroyed || res.writableEnded) { cleanup(); return; }
       try {
-        const batch = store.eventsAfter(token, roomId, cursor, 100, binding);
+        const batch = redactEventPage(store.eventsAfter(token, roomId, cursor, 100, binding), projectionMessages(roomId));
         if (!batch.events.length) res.write(": connected transport only\n\n");
         for (const item of batch.events) {
           res.write(`id: ${item.sequence}\nevent: room-event\ndata: ${JSON.stringify(item)}\n\n`);
@@ -4055,7 +4064,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!dmMessageVisible(thread.thread)) reject(404, "message_not_found", "Message not found");
         const stripDmReplies = message => ({ ...message,
           replies: (message.replies ?? []).filter(dmMessageVisible).map(stripDmReplies) });
-        return json(res, 200, { ...thread, thread: stripDmReplies(thread.thread) });
+        return json(res, 200, { ...thread, thread: redactMessageTree(stripDmReplies(thread.thread)) });
       }
       if (!route && req.method === "GET") {
         const params = url.searchParams;
@@ -4083,7 +4092,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             eventLog: (snapshot.state.eventLog ?? []).filter(roomEventVisible),
             pins: (snapshot.state.pins ?? []).filter(pin => visibleIds.has(pin.messageId)) };
           if (snapshot.state.bonds) nextState.bonds = visibleBonds(snapshot.state.bonds, peerContext);
-          snapshot.state = nextState;
+          snapshot.state = redactSnapshotState(nextState);
         }
         return json(res, 200, snapshot);
       }
@@ -4300,7 +4309,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const format = url.searchParams.get("format") ?? "jsonl";
         if (!["jsonl", "html"].includes(format) || url.searchParams.getAll("format").length > 1) reject(422, "invalid_format", "format is jsonl (default) or html");
         if (format === "html") {
-          const rows = [...store.exportEvents(selected.token, roomId, fence)].filter(({ event }) => roomEventVisible(event));
+          const rows = redactEventRows([...store.exportEvents(selected.token, roomId, fence)].filter(({ event }) => roomEventVisible(event)), projectionMessages(roomId));
           const bytes = Buffer.from(renderRoomExportHtml(rows, { roomId }), "utf8");
           res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": bytes.length,
             "Content-Security-Policy": EXPORT_HTML_CSP,
@@ -4315,9 +4324,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // sequence (order + event ids are the stable references; import
         // rewrites dense row keys anyway), so renumbering is replay-safe
         // and keeps the export self-consistent for reimport.
-        let exportSequence = 0;
+        const visible = [];
         for (const line of store.exportEvents(selected.token, roomId, fence)) {
           if (!roomEventVisible(line.event)) continue;
+          visible.push(line);
+        }
+        let exportSequence = 0;
+        for (const line of redactEventRows(visible, projectionMessages(roomId))) {
           exportSequence += 1;
           lines.push(JSON.stringify({ sequence: exportSequence, event: line.event }) + "\n");
         }
@@ -4907,9 +4920,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           reject(422, "invalid_event_cursor",
             "events uses the query parameter after (a sequence number), not afterSequence. Retry with after set to the last sequence you handled. A refused afterSequence is not a filter and does not mean you are caught up.");
         }
-        return json(res, 200, store.eventsAfter(selected.token, roomId,
+        return json(res, 200, redactEventPage(store.eventsAfter(selected.token, roomId,
           Number(params.get("after") || 0), Number(params.get("limit") || 100),
-          { actor: params.get("actor"), since: params.get("since"), until: params.get("until"), expectedSessionBinding: fence }));
+          { actor: params.get("actor"), since: params.get("since"), until: params.get("until"), expectedSessionBinding: fence }), projectionMessages(roomId)));
       }
       if (route === "agent-inbox" && req.method === "GET") {
         // RC-2026-09-18-012: agent-scoped unified inbox. Agent members only
@@ -4961,7 +4974,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (route === "return-brief" && req.method === "GET") {
         const horizon = url.searchParams.get("horizon"), after = url.searchParams.get("after"), cursor = url.searchParams.get("cursor"), limit = url.searchParams.get("limit");
-        return json(res, 200, store.returnBrief(selected.token, roomId, { horizon: horizon === null ? null : Number(horizon), after: after === null ? null : Number(after), cursor: cursor === null ? null : Number(cursor), limit: limit === null ? undefined : Number(limit), expectedSessionBinding: fence }));
+        const brief = store.returnBrief(selected.token, roomId, { horizon: horizon === null ? null : Number(horizon), after: after === null ? null : Number(after), cursor: cursor === null ? null : Number(cursor), limit: limit === null ? undefined : Number(limit), expectedSessionBinding: fence });
+        if (brief?.history) brief.history.items = redactEventRows(brief.history.items, projectionMessages(roomId));
+        return json(res, 200, brief);
       }
       if (route === "cursor" && req.method === "POST") {
         const data = await body(req);

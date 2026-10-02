@@ -17,6 +17,7 @@ import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
 import { prepareWork } from "../client/work-preparation.mjs";
 import { beginSelectedWork, findBeginReceipt } from "../client/begin-work.mjs";
 import { validId } from "../src/events.js";
+import { redactEventPage } from "./redact-read.mjs";
 import { projectBoard } from "../src/board.js";
 import { confirmsWorkReturn } from "../src/workflow.js";
 import { workContextMarkdown } from "../client/room-agent.mjs";
@@ -81,7 +82,7 @@ function stampRoom(value, roomId) {
 function roomMessages(store, secret, roomId, args, memberId) {
   const after = args.after ?? 0;
   const limit = args.limit ?? 50;
-  const page = store.eventsAfter(secret, roomId, after, limit);
+  const page = redactEventPage(store.eventsAfter(secret, roomId, after, limit), store.room(roomId).state.messages);
   const messages = (page?.events ?? []).filter(({ event }) => event?.type === "message.posted").map(({ sequence, event }) => ({
     sequence, eventId: event.id, messageId: event.data?.messageId ?? event.id, from: event.actorId, at: event.at,
     body: event.data?.body ?? "", replyToId: event.data?.replyToId ?? null, workItemId: event.data?.workItemId ?? null, private: Boolean(event.data?.toMemberId),
