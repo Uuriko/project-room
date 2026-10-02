@@ -17,5 +17,5 @@ rewriting Git history alone does not revoke a credential. Never include the
 credential itself in a report or verification receipt.
 
 For architecture and isolation boundaries, see [SECURITY-MODEL.md](docs/SECURITY-MODEL.md)
-and [DATA-BOUNDARIES.md](docs/DATA-BOUNDARIES.md). The [self-host guide](docs/SELF-HOSTING.md)
+and [DATA-BOUNDARIES.md](docs/history/DATA-BOUNDARIES.md). The [self-host guide](docs/SELF-HOSTING.md)
 explains the supported single-node shape and recovery limitations.
