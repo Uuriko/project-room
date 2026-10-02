@@ -48,7 +48,7 @@ test('static assets and discovery documents do not enter the Durable Object', as
       ASSETS: async request => {
         assetFetches += 1;
         const path = new URL(request.url).pathname;
-        const bodies = { '/index.html': '<div id="message-input">', '/about.html': 'about-page', '/src/app.js': 'app-js' };
+        const bodies = { '/index.html': '<div id="message-input">', '/about.html': 'about-page', '/src/app.js': 'app-js', '/manifest.webmanifest': '{"name":"Room"}' };
         if (!bodies[path]) return new Response(null, { status: 404 });
         return new Response(bodies[path]);
       }
@@ -67,6 +67,17 @@ test('static assets and discovery documents do not enter the Durable Object', as
     assert.match(page.headers.get('link'), /llms\.txt/);
     assert.equal(page.headers.get('x-robots-tag'), 'all');
     assert.match(page.headers.get('content-security-policy'), /script-src 'self'/);
+    assert.equal(page.headers.get('permissions-policy'), 'camera=(), microphone=(), geolocation=(), payment=(), usb=()');
+    assert.equal(page.headers.get('cross-origin-opener-policy'), 'same-origin');
+
+    const manifest = await call('/manifest.webmanifest');
+    assert.equal(manifest.status, 200);
+    assert.equal(manifest.headers.get('x-test-do-fetches'), '0');
+    assert.match(manifest.headers.get('content-type'), /application\/manifest\+json/);
+    const security = await call('/.well-known/security.txt');
+    assert.equal(security.status, 404);
+    assert.equal(security.headers.get('x-test-do-fetches'), '0');
+    assert.match(await security.text(), /Not found/);
 
     const about = await call('/about');
     assert.equal(about.headers.get('x-test-do-fetches'), '0');
@@ -118,6 +129,45 @@ test('static assets and discovery documents do not enter the Durable Object', as
     assert.deepEqual(healthBody.durableObject, { ready: true, status: 200 });
     assert.equal(healthBody.do.status, 'ok');
     assert.equal(typeof healthBody.do.ms, 'number');
+  } finally {
+    await mf.dispose();
+  }
+});
+
+test('security.txt is served from the edge when a contact is configured', async () => {
+  const cloudflareDir = fileURLToPath(new URL('.', import.meta.url));
+  const bundled = await build({
+    stdin: {
+      contents: `
+        import { edgePublicResponse } from './edge-public.mjs';
+        export default {
+          async fetch(request, env) {
+            const url = new URL(request.url);
+            const response = await edgePublicResponse(request, env, url);
+            return response ?? new Response('fallthrough', { status: 599 });
+          }
+        };
+      `,
+      resolveDir: cloudflareDir,
+      loader: 'js'
+    },
+    bundle: true, write: false, format: 'esm', platform: 'neutral', external: ['node:*', 'cloudflare:*']
+  });
+  const mf = new Miniflare({
+    modules: true, script: bundled.outputFiles[0].text,
+    compatibilityDate: '2026-07-30', compatibilityFlags: ['nodejs_compat'],
+    bindings: { ROOM_SECURITY_CONTACT: 'security@example.com', ROOM_ORIGIN: 'https://room.example.test' }
+  });
+  try {
+    const response = await mf.dispatchFetch('https://room.example.test/.well-known/security.txt');
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get('content-type'), /text\/plain/);
+    const body = await response.text();
+    assert.match(body, /Contact: mailto:security@example.com/);
+    assert.ok(Date.parse(/^Expires: (.+)$/m.exec(body)[1]) > Date.now());
+    const door = await mf.dispatchFetch('https://room.example.test/room/.well-known/security.txt');
+    assert.equal(door.status, 200);
+    assert.match(await door.text(), /Contact: mailto:security@example.com/);
   } finally {
     await mf.dispose();
   }

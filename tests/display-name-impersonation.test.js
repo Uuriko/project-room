@@ -191,3 +191,17 @@ test("redeem, share-link join, access requests, and referral redeem refuse a tak
   assert.equal(store.room("commons").state.members.owner.displayName, "Room owner");
   assert.equal(store.room("commons").state.members.potter.displayName, "Potter");
 });
+
+test("member.added through the command route refuses a confusable or duplicate display name", async t => {
+  const { store, ownerKey, origin } = await serve(t);
+  const before = memberNames(store);
+  for (const [displayName, memberId] of [["Potter", "candidate-dup"], ["\u0420otter", "candidate-look"]]) {
+    const added = await post(origin, "/api/rooms/commons/commands", {
+      id: randomUUID(), type: T.MEMBER_ADDED,
+      data: { memberId, displayName, kind: "human", permissions: [] },
+    }, ownerKey);
+    assert.equal(added.status, 422, displayName);
+    assert.equal(added.json.error.code, "display_name_unavailable");
+  }
+  assert.deepEqual(memberNames(store), before);
+});
