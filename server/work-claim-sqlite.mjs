@@ -18,10 +18,11 @@ import { encodeRow, decodeRow } from "./persisted-row.mjs";
 export const WORK_CLAIM_ROW_KIND = "work-claim";
 const WORK_CLAIM_FIELDS = ["id", "title", "state", "owner", "history", "claimedAt",
   "leaseStartAt", "leaseExpiresAt", "deliveryMode", "reviewPolicy", "reviewedBy",
-  "attestations", "tags", "files", "blobs"];
+  "attestations", "tags", "files", "blobs", "dependsOn", "pullRequest", "updatedAt"];
 const WORK_CLAIM_DEFAULTS = { title: null, state: "unclaimed", owner: null, history: [],
   claimedAt: null, leaseStartAt: null, leaseExpiresAt: null, deliveryMode: null,
-  reviewPolicy: null, reviewedBy: null, attestations: [], tags: [], files: [], blobs: [] };
+  reviewPolicy: null, reviewedBy: null, attestations: [], tags: [], files: [], blobs: [],
+  dependsOn: [], pullRequest: null, updatedAt: null };
 const decodeItem = text => {
   const item = decodeRow(text, { kind: WORK_CLAIM_ROW_KIND, fields: WORK_CLAIM_FIELDS, defaults: WORK_CLAIM_DEFAULTS });
   if (item.title == null) item.title = item.id; // workOf: title ?? id

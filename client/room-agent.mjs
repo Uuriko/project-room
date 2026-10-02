@@ -282,9 +282,16 @@ export class RoomAgentClient {
   #requestError(response, value, fallback = "Room request failed") {
     const retry = response.headers?.get("retry-after");
     const parsed = retry == null ? NaN : /^\d+$/.test(retry) ? Number(retry) * 1000 : Date.parse(retry) - Date.now();
-    return new RoomClientError(response.status, value?.error?.code ?? "request_failed", value?.error?.message ?? fallback, Number.isFinite(parsed) ? Math.max(0, parsed) : null, {
+    const error = new RoomClientError(response.status, value?.error?.code ?? "request_failed", value?.error?.message ?? fallback, Number.isFinite(parsed) ? Math.max(0, parsed) : null, {
       status: value?.status, reason: value?.reason, hint: value?.hint, next: value?.next
     });
+    if (value?.error?.code === "file_lease_conflict") {
+      error.holder = value.holder ?? null;
+      error.files = value.files ?? [];
+      error.leaseExpiresAt = value.leaseExpiresAt ?? null;
+      error.conflicts = value.conflicts ?? [];
+    }
+    return error;
   }
   async #fetchPath(path, body, signal, helpContext = false, offerContext = false) {
     const response = await this.#fetchRaw(path, {
@@ -639,23 +646,50 @@ export class RoomAgentClient {
   // Personal to this credential's member, never included in shared orientation.
   reminders(request) { return this.#request("/reminders", request); }
   // Work claims (RC-2026-09-18-041): the room's claim registry with leases,
-  // delivery modes and review policies. Claim/update/release/reassign are
-  // owner-gated server-side; reads need room membership only.
-  workClaims({ signal } = {}) { return this.#request("/work-claims", undefined, signal); }
-  workClaimCreate({ id, title, reviewPolicy, note, tags, files } = {}, { signal } = {}) {
+  // delivery modes and review policies. Creating, claiming, renewing, and
+  // updating need a contribute, review, or collaborate profile (or the room
+  // owner, or a human with contribute rights). Reads need room membership.
+  // A call without limit or cursor follows nextCursor so coordination sees
+  // the whole board; pass either to take a single page.
+  async workClaims({ queue, limit, cursor, signal } = {}) {
+    const params = new URLSearchParams();
+    if (queue) params.set("queue", queue);
+    if (limit !== undefined) params.set("limit", String(limit));
+    if (cursor) params.set("cursor", cursor);
+    const path = params.size ? `/work-claims?${params}` : "/work-claims";
+    const page = await this.#request(path, undefined, signal);
+    if (cursor || limit !== undefined || !page?.hasMore || typeof page.nextCursor !== "string") return page;
+    const claims = [...(page.claims ?? [])];
+    let next = page.nextCursor;
+    const seen = new Set();
+    for (let hop = 0; hop < 20 && next && !seen.has(next); hop += 1) {
+      seen.add(next);
+      const moreParams = new URLSearchParams(params);
+      moreParams.set("cursor", next);
+      const more = await this.#request(`/work-claims?${moreParams}`, undefined, signal);
+      claims.push(...(more?.claims ?? []));
+      next = more?.hasMore && typeof more.nextCursor === "string" ? more.nextCursor : null;
+    }
+    return { ...page, claims, hasMore: false, nextCursor: null };
+  }
+  workClaimCreate({ id, title, reviewPolicy, note, tags, files, dependsOn, pullRequest } = {}, { signal } = {}) {
     if (typeof id !== "string" || !id) throw new Error("Choose a work claim id");
     return this.#request("/work-claims", { id,
       ...(title === undefined ? {} : { title }),
       ...(reviewPolicy === undefined ? {} : { reviewPolicy }),
       ...(tags === undefined ? {} : { tags }),
       ...(files === undefined ? {} : { files }),
+      ...(dependsOn === undefined ? {} : { dependsOn }),
+      ...(pullRequest === undefined ? {} : { pullRequest }),
       ...(note === undefined ? {} : { note }) }, signal);
   }
   workClaimGet(id, { signal } = {}) { return this.#request(`/work-claims/${encodeURIComponent(id)}`, undefined, signal); }
-  claimWorkItem(id, { note, leaseHours, files, signal } = {}) {
+  claimWorkItem(id, { note, leaseHours, files, advisory, dependsOn, pullRequest, signal } = {}) {
     return this.#request(`/work-claims/${encodeURIComponent(id)}/claim`,
       { ...(note === undefined ? {} : { note }), ...(leaseHours === undefined ? {} : { leaseHours }),
-        ...(files === undefined ? {} : { files }) }, signal);
+        ...(files === undefined ? {} : { files }), ...(advisory === undefined ? {} : { advisory }),
+        ...(dependsOn === undefined ? {} : { dependsOn }),
+        ...(pullRequest === undefined ? {} : { pullRequest }) }, signal);
   }
   updateWorkItem(id, { state, note, deliveryMode, reviewedBy, tags, blobs, signal } = {}) {
     return this.#request(`/work-claims/${encodeURIComponent(id)}/update`,
@@ -673,9 +707,9 @@ export class RoomAgentClient {
       { progressMessageId, ...(note === undefined ? {} : { note }),
         ...(leaseHours === undefined ? {} : { leaseHours }) }, signal);
   }
-  releaseWorkItem(id, { note, signal } = {}) {
+  releaseWorkItem(id, { note, reason, signal } = {}) {
     return this.#request(`/work-claims/${encodeURIComponent(id)}/release`,
-      { ...(note === undefined ? {} : { note }) }, signal);
+      { ...(note === undefined ? {} : { note }), ...(reason === undefined ? {} : { reason }) }, signal);
   }
   reassignWorkItem(id, { newOwner, note, signal } = {}) {
     if (typeof newOwner !== "string" || !newOwner) throw new Error("Choose the new owner");
@@ -686,18 +720,18 @@ export class RoomAgentClient {
   // Convenience: claim, creating the item first when it does not exist yet.
   // title, reviewPolicy and tags apply only to creation; files apply to every
   // claim. Omitted files retain the declaration, while [] explicitly clears it.
-  async workClaim(id, { title, reviewPolicy, note, tags, files, leaseHours, signal } = {}) {
-    try { return await this.claimWorkItem(id, { note, leaseHours, files, signal }); }
+  async workClaim(id, { title, reviewPolicy, note, tags, files, leaseHours, advisory, dependsOn, pullRequest, signal } = {}) {
+    try { return await this.claimWorkItem(id, { note, leaseHours, files, advisory, dependsOn, pullRequest, signal }); }
     catch (error) {
       if (!(error instanceof RoomClientError) || error.status !== 404) throw error;
-      await this.workClaimCreate({ id, title, reviewPolicy, note, tags, files }, { signal });
-      return this.claimWorkItem(id, { note, leaseHours, files, signal });
+      await this.workClaimCreate({ id, title, reviewPolicy, note, tags, files, dependsOn, pullRequest }, { signal });
+      return this.claimWorkItem(id, { note, leaseHours, files, advisory, pullRequest, signal });
     }
   }
   async workComplete(id, { deliveryMode, note, reviewedBy, tags, blobs, signal } = {}) {
     return this.updateWorkItem(id, { state: "done", note, deliveryMode, reviewedBy, tags, blobs, signal });
   }
-  async workRelease(id, { note, signal } = {}) { return this.releaseWorkItem(id, { note, signal }); }
+  async workRelease(id, { note, reason, signal } = {}) { return this.releaseWorkItem(id, { note, reason, signal }); }
   // Selected task only; the normal authenticated snapshot never leaves this client.
   async workPacket(workItemId, options = {}) {
     return workPacket((await this.snapshot()).state, workItemId, options);

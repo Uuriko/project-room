@@ -20,6 +20,7 @@ import { handleInboxCollab } from "./inbox-collab-routes.mjs"; // Lane C inbox c
 import { buildActivationPack } from "./room-activation-pack.mjs"; // Room activation pack (quill lane, RC-2026-09-18-040).
 import { buildOrient } from "./orient.mjs"; // Orient endpoint (jill lane, RC-2026-09-28 — the URL outside agents guess; ryska's 404).
 import { handleWorkClaims } from "./work-claim-routes.mjs"; // Work-claim leases/delivery/review (task RC-2026-09-18-041).
+import { listMentionReceipts } from "./mention-receipts.mjs";
 import { handleFeedback } from "./feedback-routes.mjs"; // Agent /feedback endpoint (structured bug/feature reports).
 import { handleBountyEscrow } from "./bounty-escrow-routes.mjs"; // Escrowed bounties + credit ledger (agent work exchange, slice 1).
 import { buildOpportunitiesFeed } from "./opportunities.mjs"; // Public opportunity feed v2: read-only open-work discovery, decoupled from admission.
@@ -32,6 +33,7 @@ import { agentErrorBody, errorCategory } from "../src/agent-error.mjs";
 import { DiagnosticsLog, supportExportBundle } from "./diagnostics.mjs";
 import { renderRoomExportHtml, EXPORT_HTML_CSP } from "./room-export-html.mjs";
 import { discoveryDoc, isHealthAliasPath, rewriteRoomApiPrefix, EDGE_DOOR_HOSTS, ROOM_ORIGIN } from "../deploy/agent-discovery.mjs";
+import { noteIdentityMint } from "./growth-loop.mjs";
 import { buildOpenApiJson, discoverabilityErrorOverride, nextActionsForAccessRequest, nextActionsForAccessRequestStatus, nextActionsForInviteRedeem } from "./discoverability.mjs";
 import { MCP_SERVER_CARD_PATH, MCP_DISCOVERY_CACHE_CONTROL, MCP_SERVER_CARD_CORS } from "../src/mcp-server-card.mjs";
 import { SKILLS_CATALOG_PATH } from "../deploy/agent-discovery.mjs";
@@ -2704,7 +2706,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!store.identities.resolveGlobalIdentitySecret(identitySecret)) reject(401, "unauthenticated", "Active agent identity required");
         const data = await body(req);
         if (!exact(data, ["linkToken", "displayName"])) reject(422, "invalid_join", "Invitation link and agent name required");
-        const result = store.shareLinks.joinAgent(identitySecret, data.linkToken, data.displayName);
+        const result = store.shareLinks.joinAgent(identitySecret, data.linkToken, data.displayName, { address: String(remoteAddress ?? "") });
         // Jev-harness admission gate, shadow mode (docs/JEV-GATES.md):
         // score the join, journal the would-be decision, admit anyway.
         jevShadowAdmission("share-link:join-agent", { roomId: result.roomId, identityId: result.identityId,
@@ -2739,7 +2741,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         rate(`link-join:${remoteAddress}`, 20);
         const oldRoomToken = cookie(req, roomCookieName);
         const result = store.shareLinks.join(token, data.linkToken, { ...data, expectedSessionBinding: binding,
-          revokeRoomToken: oldRoomToken && tokenPattern.test(oldRoomToken) ? oldRoomToken : null });
+          revokeRoomToken: oldRoomToken && tokenPattern.test(oldRoomToken) ? oldRoomToken : null,
+          clientAddress: String(remoteAddress ?? ""), clientSession: token });
         return json(res, result.duplicate ? 200 : 201, result);
       }
       if (url.pathname === "/api/invitations/preview" && req.method === "POST") {
@@ -3043,10 +3046,18 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }
         const registrationCredential = data.recoverable ? bearer(req) : undefined;
         if (data.recoverable && !registrationCredential) reject(401, "unauthenticated", "Saved registration credential required");
-        return json(res, 201, store.identities.create(data.displayName, {
+        const created = store.identities.create(data.displayName, {
           secret: registrationCredential,
           anonymous: { address: String(remoteAddress ?? ""), proof: data.proof },
-        }));
+        });
+        const slotToken = cookie(req, accountCookieName);
+        let mintAccountId = null;
+        if (slotToken) {
+          try { mintAccountId = store.authenticateAccountSession(slotToken).account?.id ?? null; }
+          catch { /* an anonymous mint still records the address and browser session */ }
+        }
+        noteIdentityMint(store, created.identityId, { address: String(remoteAddress ?? ""), session: slotToken || null, accountId: mintAccountId });
+        return json(res, 201, created);
       }
       // POST-only mint. GET must not look like a missing route (404) or an
       // auth challenge (401): there is nothing to authenticate.
@@ -4332,10 +4343,18 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (route === "mentions" && req.method === "GET") {
         // #658: member-readable mention list. memberId defaults to the
         // caller; an owner may query another member (feeds #662's card).
+        // view=receipts is the sender's copy: delivered, then read/acked.
         const params = url.searchParams;
-        if ([...params.keys()].some(key => !["state", "after", "memberId", "auth"].includes(key) || params.getAll(key).length !== 1)) {
-          reject(422, "invalid_mention_query", "state, after and memberId are the accepted query parameters");
+        if ([...params.keys()].some(key => !["state", "after", "memberId", "auth", "view"].includes(key) || params.getAll(key).length !== 1)) {
+          reject(422, "invalid_mention_query", "state, after, memberId and view are the accepted query parameters");
         }
+        if (params.get("view") === "receipts") {
+          if (params.has("state") || params.has("after") || params.has("memberId")) {
+            reject(422, "invalid_mention_query", "view=receipts does not take state, after, or memberId");
+          }
+          return json(res, 200, listMentionReceipts(store, selected.token, roomId, fence));
+        }
+        if (params.has("view")) reject(422, "invalid_mention_query", "view must be receipts");
         return json(res, 200, store.listMentions(selected.token, roomId, {
           state: params.get("state"), after: params.get("after"), memberId: params.get("memberId"),
         }, fence));
@@ -4453,7 +4472,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // leaderboard by successful referrals, and the caller's own rows.
         // Authorization is store-level (Referrals.board); ids and display
         // names only, no credential data.
-        return json(res, 200, store.referrals.board(selected.token, roomId, fence));
+        return json(res, 200, store.referrals.board(selected.token, roomId, fence, {
+          address: String(remoteAddress ?? ""),
+          session: cookie(req, accountCookieName) || null,
+        }));
       }
       if (route === "referral-invites" && req.method === "GET") {
         // Owner-only referral invite journal: every mint, redemption, and

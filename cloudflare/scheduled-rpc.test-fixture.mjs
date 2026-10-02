@@ -34,6 +34,7 @@ const CRON_METHODS = [
   'drainChannelBacklog',
   'drainWebhookDeliveries',
   'refreshLandQueue',
+  'refreshClaimPullRequests',
   'planRetention'
 ];
 

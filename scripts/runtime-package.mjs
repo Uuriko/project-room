@@ -135,6 +135,7 @@ optional.push("server/owner-delegates.mjs"); // Owner-delegate authority (import
 optional.push("server/display-name-guard.mjs"); // Identity mint/link guard is part of the runtime import closure.
 optional.push("server/agent-invites.mjs");
 optional.push("server/referrals.mjs"); // Referral attribution: joins via invite/access-request (imported by server/store.mjs)
+optional.push("server/growth-loop.mjs"); // Referral growth: activation, room credits, payout guard (imported by server/referrals.mjs and server/agent-rooms.mjs)
 optional.push("server/referral-invites.mjs"); // Signed agent-carried referral invites (imported by server/store.mjs and server/http.mjs)
 optional.push("src/work-item-session.js");
 optional.push("src/board.js");
@@ -196,6 +197,9 @@ optional.push("server/persisted-row.mjs"); // RC-2026-09-27-2730: replay-safe pe
 optional.push("server/claim-collisions.mjs");
 optional.push("server/work-claim-routes.mjs"); // RC-2026-09-18-041: work-claim HTTP routes (imported by server/http.mjs)
 optional.push("server/work-claim-events.mjs"); // work_claim.updated receipts (imported by server/work-claim-routes.mjs; imports src/events.js)
+optional.push("server/claim-coordination.mjs"); // exclusive file leases, ready queue, pull-request outcomes (imported by server/work-claims.mjs and server/work-claim-routes.mjs)
+optional.push("server/claim-pr-sync.mjs"); // poll linked pull requests onto claims (imported by server/work-claim-routes.mjs and cloudflare/room.mjs)
+optional.push("server/mention-receipts.mjs"); // sender-facing mention delivery and read/ack receipts (imported by server/http.mjs)
 optional.push("server/public-claims.mjs"); // Jill 2026-09-30: public claim registry with Ed25519 receipts (imported by server/public-claim-routes.mjs; pure, node:crypto only)
 optional.push("server/public-claim-routes.mjs"); // Jill 2026-09-30: public claim HTTP routes — the ONE public verb (imported by server/http.mjs)
 optional.push("server/feedback-store.mjs"); // RC-2026-09-27-2745: pure /feedback state machine + Mark-staked triage economy (imported by server/feedback-routes.mjs; imports ./feedback-scrub.mjs)
