@@ -1,124 +1,42 @@
-# room-machine/0.1
+# Relay operator notes
 
-Wire protocol between a machine daemon and the relay Worker. The source of truth is [machine/PROTOCOL.md](../machine/PROTOCOL.md). This file is the relay side of that contract: enroll, the socket, and the caller-facing MCP and REST surface.
-
-Frames are JSON text. One JSON object per WebSocket message. A frame larger than 1048576 bytes is refused. A result the daemon sends is at most 4 MiB.
+The daemon wire contract is [machine/PROTOCOL.md](../machine/PROTOCOL.md). The relay speaks that document: `POST /v0/enroll`, protocol `1` hello, and the frames `heartbeat`, `halt`, `pause`, `resume`, `bye`, and `call`. This file is the operator surface around that contract. The relay does not create a Room identity and does not redeem the invite.
 
 ## Enroll
 
-`POST /v0/enroll` with `{ "code": "<one-time code>" }`.
+An operator mints a Room agent invite with `profile: "contribute"`, then stores that code on the enroll record.
 
-`POST /enroll` is the same handler with a `Deprecation: true` response header. It is a one-release alias.
-
-`200`:
+`POST /admin/enroll-codes` with `Authorization: Bearer <RELAY_ADMIN_TOKEN>`:
 
 ```json
 {
-  "machineToken": "secret",
-  "machineId": "mch_0123456789abcdef",
   "label": "spare",
   "roomId": "commons",
-  "ownerMemberId": "mem_owner",
+  "ownerMemberId": "owner",
   "inviteCode": "RM-...",
-  "displayName": "Room machine",
-  "relayUrl": "wss://relay.example/v0/machines/mch_0123456789abcdef/link",
-  "roomOrigin": "https://room.trydemigod.com"
+  "displayName": "Room machine"
 }
 ```
 
-`displayName` and `roomOrigin` are omitted when the enroll record has none. `roomId` is the first room on the allowlist. `relayUrl` uses the request host: `wss://` when the enroll request was `https`, otherwise `ws://`, then `/v0/machines/<machineId>/link`.
+`displayName` is optional. `profile`, when present, must be `contribute`. The returned code is `<machineId>.<verifier>`. It is single use and expires 15 minutes after minting. `POST /admin/enroll-codes/<machineId>/expire` revokes an unused code immediately.
 
-`401` `{ "error": "code_invalid" }`
+`POST /v0/enroll` with `{ "code" }` returns the body in machine/PROTOCOL.md. `relayUrl` is `wss://<relay>/v0/machines/link`. The machine token is returned once. The relay stores only its SHA-256. A wrong token is HTTP 401. The token is not accepted as a query parameter.
 
-`410` `{ "error": "code_used" }` or `{ "error": "code_expired" }`
+A second connection for the same machine closes the previous socket with code `4001` and reason `replaced`. Calls still in flight on the old socket fail with `409 link_replaced`.
 
-The code is single use and expires 15 minutes after it is minted. The parent stores the Room agent invite on the enroll record. The relay does not create the Room identity.
+## Socket
 
-The machine token is returned once. The relay stores only its SHA-256.
+The daemon connects to `relayUrl` and sends `Authorization: Bearer <machineToken>`. Hello is `{ "type": "hello", "protocol": 1, "machineId", "label", "version" }`. The relay sends `heartbeat` on connect and about every 30 seconds while the socket is open, so a quiet link stays inside the daemon's dead-man window.
 
-## Link
+`call` is sent only after the relay's own Phase 0 check succeeds. `caller.verified` is `true` on that frame and is not set when the check fails. Slots on that frame are `desk` and `scratch`. `args` is the tool argument object.
 
-The daemon dials `relayUrl`. It does not listen.
+`halt` is `{ "type": "halt", "epoch": <number> }`. `pause` is `{ "type": "pause", "minutes": <number> }`. `resume` is `{ "type": "resume" }`. `bye` is `{ "type": "bye" }`.
 
-Authenticate with either header:
+The daemon answers `{ "type": "result", "id", "ok", "result" | "error" }`. A result may be up to 4 MiB. The relay returns that outcome on both MCP and `POST /call`. A tool failure is a normal result with `isError: true`, not an HTTP error.
 
-- `Authorization: Bearer <machineToken>`
-- `X-Machine-Token: <machineToken>`
+## Tools
 
-The token is not a query parameter. A wrong token is HTTP 401 and no socket is kept. A second connection for the same machine sends `{ "type": "bye" }` and then closes the previous socket with code `4001` and reason `replaced`. Calls still in flight on the old socket fail with `409 link_replaced`.
-
-## Daemon to relay
-
-`hello` is the first frame the daemon sends.
-
-```json
-{ "type": "hello", "protocol": 1, "machineId": "mch_0123456789abcdef", "label": "spare", "version": "0.1.0" }
-```
-
-`protocol` must be `1` when it is present. A `tools` array is optional. When it is present, the relay stores the names that pass its allowlist. When it is absent, the relay serves the daemon's default allowlist. Host shell is never stored.
-
-`result` answers one `call`. `id` is the id from that call. `ok: true` carries `result`. `ok: false` carries `error` with `code` and `message`. The relay returns that outcome on both MCP and `POST /call`. A tool failure is a normal result with `isError: true`, not an HTTP error.
-
-```json
-{ "type": "result", "id": "call-id", "ok": true, "result": { "shot": true } }
-```
-
-```json
-{ "type": "result", "id": "call-id", "ok": false, "error": { "code": "missing", "message": "no such file" } }
-```
-
-An inbound `heartbeat` refreshes the link. The daemon does not have to send one.
-
-## Relay to daemon
-
-The relay sends `{ "type": "heartbeat" }` when the socket is accepted, again after `hello`, and about every 30 seconds while the socket stays up. That marks the link healthy for the daemon.
-
-`call` asks the daemon to run one tool. `verified` is `true` only after the relay's own check (Phase 0 passthrough or a lease token) has succeeded. `args` is the tool argument object.
-
-```json
-{ "type": "call", "id": "c1", "tool": "machine.status", "args": {}, "caller": { "identityId": "ai_...", "claimId": "lease1", "slot": "desk", "verified": true } }
-```
-
-`halt` means stop. `epoch` only increases.
-
-```json
-{ "type": "halt", "epoch": 1 }
-```
-
-`pause` suspends guests for `minutes`.
-
-```json
-{ "type": "pause", "minutes": 30 }
-```
-
-`resume` clears halt and pause.
-
-```json
-{ "type": "resume" }
-```
-
-`bye` tells the daemon the relay is closing this socket. The daemon keeps the process up and reconnects if the socket drops.
-
-```json
-{ "type": "bye" }
-```
-
-The relay sends `halt`, `pause`, and `resume` within the matching request, and the daemon sees them on a live socket.
-
-## Tools the relay will forward
-
-The daemon may report other names. The relay drops them and never calls them. Host shell is not in this list.
-
-- `desktop.*`
-- `shell.vm` and `shell.vm.*`
-- `files` and `files.*`
-- `browser.*`
-- `xcode.*`
-- `inference.*`
-- `machine.*`
-- `credential.use` and `credential.use.*`
-
-At most 64 tools are kept. Names are at most 128 characters. Descriptions are cut at 512 characters.
+`tools/list` returns the default allowlist in machine/PROTOCOL.md. A name outside that list is refused with `403 tool_not_allowed` and is not forwarded. There is no host shell.
 
 When `hello` does not include `tools`, the relay serves the default allowlist from machine/PROTOCOL.md: `machine.status`, `machine.release`, `desktop.screenshot`, `desktop.click`, `desktop.type`, `desktop.key`, `desktop.scroll`, `desktop.list_apps`, `shell.vm`, `files.put`, `files.get`, `inference.chat`.
 
@@ -133,7 +51,7 @@ Room mints Ed25519 compact JWS lease tokens. The relay verifies them with `ROOM_
 | `sub` | Holder identity |
 | `room` | Room id |
 | `claim` | Work-claim id |
-| `slot` | Slot name |
+| `slot` | `desk` or `scratch` |
 | `caps` | Capability strings |
 | `epoch` | Integer. Tokens older than `haltEpoch` are refused |
 | `exp` | Unix seconds, no further than 15 minutes out |
@@ -143,10 +61,10 @@ Phase 0 passthrough does not use these tokens. The caller sends a Room identity 
 
 ## Slots
 
-A board file `resource/<machineId>/<slot>` is one slot. Of the active, unexpired claims of `kind: "work"` on that path, the earliest `claimedAt` holds it. `done`, `unclaimed`, a lapsed `leaseExpiresAt`, another kind, and a different slot do not.
+A board file `resource/<machineId>/<slot>` is one slot. `slot` is `desk` or `scratch`. Of the active, unexpired claims of `kind: "work"` on that path, the earliest `claimedAt` holds it. `done`, `unclaimed`, a lapsed `leaseExpiresAt`, another kind, and the other slot do not.
 
 The daemon itself accepts only `desk` and `scratch`. The relay still forwards the slot the board claim names.
 
 ## Control plane
 
-Room pushes halt, pause, and resume to `POST /v0/machines/<machineId>/halt`, `/pause`, and `/resume`. Those requests carry `X-Relay-Timestamp` (unix seconds) and `X-Relay-Signature` (hex HMAC-SHA256 of `<timestamp>.<raw body>` under `RELAY_LINK_SECRET`). Skew over 300 seconds is refused. The halt body may include `epoch`, `reason`, `resourceId`, and `revoke: [{ "jti", "exp" }]`. The socket frame is `{ "type": "halt", "epoch" }`. The pause body is `{ "minutes": 30 }` and the socket frame is `{ "type": "pause", "minutes": 30 }`. Resume uses `{}` and the socket frame is `{ "type": "resume" }`.
+Room pushes control to `POST /v0/machines/<machineId>/halt`, `/pause`, `/resume`, and `/bye`. Those requests carry `X-Relay-Timestamp` (unix seconds) and `X-Relay-Signature` (hex HMAC-SHA256 of `<timestamp>.<raw body>` under `RELAY_LINK_SECRET`). Skew over 300 seconds is refused. Halt may include `epoch`, `resourceId`, and `revoke: [{ "jti", "exp" }]`. Pause requires `minutes`, an integer from 0 through 10080.

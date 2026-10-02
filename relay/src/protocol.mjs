@@ -1,39 +1,45 @@
-// Shared limits and the tool allowlist. The daemon may report extra tools;
-// the relay only stores and serves names on this list. Host shell is absent
-// on purpose: a contributed machine does not expose the owner's account.
+// Shared limits and the tool allowlist from machine/PROTOCOL.md.
+// Names outside that list are not forwarded. There is no host shell.
 
-export const PROTOCOL = "room-machine/0.1";
+export const PROTOCOL_VERSION = 1;
 export const MCP_PROTOCOL = "2025-11-25";
 export const MCP_PROTOCOLS = Object.freeze(["2025-11-25", "2025-06-18", "2025-03-26"]);
 export const MAX_CALL_BYTES = 1_048_576;
+export const MAX_RESULT_BYTES = 4_194_304;
 export const MAX_SMALL_BYTES = 65_536;
 export const ENROLL_TTL_MS = 15 * 60 * 1000;
 export const LEASE_TOKEN_TTL_MS = 15 * 60 * 1000;
 export const IDENTITY_CACHE_MS = 5 * 60 * 1000;
 export const LOCK_CACHE_MAX_MS = 30 * 1000;
 export const CALL_TIMEOUT_MS = 30_000;
+export const HEARTBEAT_MS = 30_000;
 export const HMAC_SKEW_SEC = 300;
 export const HEARTBEAT_INTERVAL_MS = 30_000;
 export const SERVER_NAME = "project-room-relay";
 export const SERVER_VERSION = "0.1.0";
 export const ACTIVE_STATES = new Set(["claimed", "in_progress", "blocked"]);
+export const DAEMON_SLOTS = Object.freeze(["desk", "scratch"]);
+
+export const DEFAULT_ALLOW = Object.freeze([
+  "machine.status",
+  "machine.release",
+  "desktop.screenshot",
+  "desktop.click",
+  "desktop.type",
+  "desktop.key",
+  "desktop.scroll",
+  "desktop.list_apps",
+  "shell.vm",
+  "files.put",
+  "files.get",
+  "inference.chat",
+]);
 
 const MACHINE_ID = /^mch_[0-9a-f]{16}$/;
-const SLOT = /^[a-z][a-z0-9_-]{0,63}$/;
 const ROOM_ID = /^[A-Za-z0-9_-]{1,128}$/;
 const MEMBER_ID = /^[A-Za-z0-9_-]{1,128}$/;
 const RESOURCE_ID = /^[A-Za-z0-9_-]{1,128}$/;
-
-const ALLOWED_TOOLS = [
-  /^desktop\.[a-z][a-z0-9_]*$/,
-  /^shell\.vm(?:\.[a-z][a-z0-9_]*)?$/,
-  /^files(?:\.[a-z][a-z0-9_]*)?$/,
-  /^browser\.[a-z][a-z0-9_]*$/,
-  /^xcode\.[a-z][a-z0-9_]*$/,
-  /^inference\.[a-z][a-z0-9_]*$/,
-  /^machine\.[a-z][a-z0-9_]*$/,
-  /^credential\.use(?:\.[a-z][a-z0-9_]*)?$/,
-];
+const INVITE_CODE = /^RM-(?:[0-9A-HJKMNP-TV-Z]{16}|[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{8})$/;
 
 const CAP_PATTERNS = new Map([
   ["desktop.gui", /^desktop\.[a-z][a-z0-9_]*$/],
@@ -65,7 +71,11 @@ export function isMachineId(value) {
 }
 
 export function isSlot(value) {
-  return typeof value === "string" && SLOT.test(value);
+  return typeof value === "string" && DAEMON_SLOTS.includes(value);
+}
+
+export function isInviteCode(value) {
+  return typeof value === "string" && INVITE_CODE.test(value);
 }
 
 export function isRoomId(value) {
@@ -130,7 +140,15 @@ export function defaultDaemonTools() {
 }
 
 export function toolAllowed(name) {
-  return typeof name === "string" && name.length <= 128 && ALLOWED_TOOLS.some(pattern => pattern.test(name));
+  return typeof name === "string" && DEFAULT_ALLOW.includes(name);
+}
+
+export function listedTools() {
+  return DEFAULT_ALLOW.map(name => ({
+    name,
+    description: "",
+    inputSchema: { type: "object", properties: {} },
+  }));
 }
 
 export function capCovers(cap, tool) {
@@ -142,23 +160,6 @@ export function capCovers(cap, tool) {
 
 export function capsCover(caps, tool) {
   return Array.isArray(caps) && caps.some(cap => capCovers(cap, tool));
-}
-
-export function filterTools(tools) {
-  if (!Array.isArray(tools)) return [];
-  const kept = [];
-  for (const tool of tools) {
-    if (!tool || typeof tool !== "object" || Array.isArray(tool)) continue;
-    if (!toolAllowed(tool.name)) continue;
-    if (kept.some(item => item.name === tool.name)) continue;
-    const description = typeof tool.description === "string" ? tool.description.slice(0, 512) : "";
-    const inputSchema = tool.inputSchema && typeof tool.inputSchema === "object" && !Array.isArray(tool.inputSchema)
-      ? tool.inputSchema
-      : { type: "object", properties: {} };
-    kept.push({ name: tool.name, description, inputSchema });
-    if (kept.length === 64) break;
-  }
-  return kept;
 }
 
 export function resourceLabel(machineId, slot) {

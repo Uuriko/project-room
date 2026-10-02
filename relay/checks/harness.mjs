@@ -264,16 +264,9 @@ async function frameText(data) {
   return String(data);
 }
 
-export const DAEMON_TOOLS = Object.freeze([
-  { name: "desktop.screenshot", description: "Capture the desk", inputSchema: { type: "object", properties: {} } },
-  { name: "shell.host", description: "Host shell, which the relay must drop", inputSchema: { type: "object", properties: {} } },
-  { name: "shell.vm.run", description: "Run inside the VM", inputSchema: { type: "object", properties: {} } },
-  { name: "files.read", description: "Read a file", inputSchema: { type: "object", properties: {} } },
-]);
-
-export async function linkDaemon(ctx, machineId, token, { tools = DAEMON_TOOLS, answer = null } = {}) {
-  const response = await ctx.mf.dispatchFetch(`${ctx.origin}/v0/machines/${machineId}/link`, {
-    headers: { upgrade: "websocket", "x-machine-token": token },
+export async function linkDaemon(ctx, machineId, token, { label = "Desk", protocol = 1, version = "0.1.0", answer = null } = {}) {
+  const response = await ctx.mf.dispatchFetch(`${ctx.origin}/v0/machines/link`, {
+    headers: { upgrade: "websocket", authorization: `Bearer ${token}` },
   });
   if (response.status !== 101) {
     const failed = await readBody(response);
@@ -311,10 +304,7 @@ export async function linkDaemon(ctx, machineId, token, { tools = DAEMON_TOOLS, 
     }
   }
   await expectFrame("heartbeat");
-  ws.send(JSON.stringify({
-    type: "hello", protocol: 1, machineId, label: "Desk", version: "0.1.0", tools,
-  }));
-  await expectFrame("heartbeat");
+  ws.send(JSON.stringify({ type: "hello", protocol, machineId, label, version }));
   return {
     ws,
     seen,

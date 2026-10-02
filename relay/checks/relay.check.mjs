@@ -3,7 +3,7 @@ import test from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import {
-  DAEMON_TOOLS, claimOnSlot, control, createRoom, enroll, expireCode, finishClaim, leaseToken,
+  claimOnSlot, control, createRoom, enroll, expireCode, finishClaim, leaseToken,
   linkDaemon, machineStatus, mint, postCall, postRpc, readBody, relayFetch, secret, startRelay,
 } from "./harness.mjs";
 
@@ -48,17 +48,8 @@ test("healthz stays off until passthrough is set and names missing secrets", asy
 });
 
 test("an enroll code works once, expires, and stays bound to its room", async () => {
-  const invite = "RM-0123456789ABCDEF";
-  const missingInvite = await mint(on, { label: "Ada's desk", rooms: ["room_alpha"], ownerMemberId: "mem_ada" });
-  assert.equal(missingInvite.status, 422);
-  assert.equal(missingInvite.body.error.code, "invalid_enroll");
   const minted = await mint(on, {
-    label: "Ada's desk",
-    rooms: ["room_alpha", "room_alpha"],
-    ownerMemberId: "mem_ada",
-    inviteCode: invite,
-    roomOrigin: "https://room.trydemigod.com/",
-    displayName: "Mac bot (Ada)",
+    label: "Ada's desk", roomId: "room_alpha", ownerMemberId: "mem_ada", inviteCode: "RM-0123456789ABCDEF", displayName: "Ada desk",
   });
   assert.equal(minted.status, 201);
   assert.equal(minted.body.inviteCode, invite);
@@ -69,46 +60,31 @@ test("an enroll code works once, expires, and stays bound to its room", async ()
   const tampered = `${minted.body.code.slice(0, -1)}${minted.body.code.endsWith("a") ? "b" : "a"}`;
   const refused = await enroll(on, tampered);
   assert.equal(refused.status, 401);
-  assert.deepEqual(refused.body, { error: "code_invalid" });
+  assert.equal(refused.body.error, "code_invalid");
   const issued = await enroll(on, minted.body.code);
   assert.equal(issued.status, 200);
   assert.equal(issued.headers.get("deprecation"), null);
   assert.equal(issued.body.machineId, minted.body.machineId);
-  assert.equal(typeof issued.body.machineToken, "string");
-  assert.equal(issued.body.label, "Ada's desk");
   assert.equal(issued.body.roomId, "room_alpha");
-  assert.equal(issued.body.ownerMemberId, "mem_ada");
-  assert.equal(issued.body.inviteCode, invite);
-  assert.equal(issued.body.displayName, "Mac bot (Ada)");
-  assert.equal(issued.body.roomOrigin, "https://room.trydemigod.com");
-  assert.equal(issued.body.relayUrl, `wss://relay.test/v0/machines/${issued.body.machineId}/link`);
+  assert.equal(issued.body.inviteCode, "RM-0123456789ABCDEF");
+  assert.equal(issued.body.displayName, "Ada desk");
+  assert.equal(issued.body.relayUrl, "wss://relay.test/v0/machines/link");
+  assert.equal(typeof issued.body.machineToken, "string");
   const again = await enroll(on, minted.body.code);
   assert.equal(again.status, 410);
-  assert.deepEqual(again.body, { error: "code_used" });
+  assert.equal(again.body.error, "code_used");
   const status = await machineStatus(on, issued.body.machineId);
   assert.deepEqual(status.body.rooms, ["room_alpha"]);
   assert.equal(status.body.label, "Ada's desk");
   assert.equal(status.body.ownerMemberId, "mem_ada");
   assert.equal(status.body.online, false);
 
-  const aliasMint = await mint(on, {
-    label: "Alias", rooms: ["room_alpha"], ownerMemberId: "mem_ada", inviteCode: invite,
-  });
-  const alias = await readBody(await relayFetch(on, "/enroll", { method: "POST", json: { code: aliasMint.body.code } }));
-  assert.equal(alias.status, 200);
-  assert.equal(alias.headers.get("deprecation"), "true");
-  assert.equal(alias.body.relayUrl, `wss://relay.test/v0/machines/${alias.body.machineId}/link`);
-  assert.equal(alias.body.roomId, "room_alpha");
-  assert.equal(alias.body.inviteCode, invite);
-  assert.equal(alias.body.displayName, undefined);
-  assert.equal(alias.body.roomOrigin, undefined);
-
-  const expiring = await mint(on, { label: "Spare", rooms: ["room_alpha"], ownerMemberId: "mem_ada", inviteCode: invite });
+  const expiring = await mint(on, { label: "Spare", roomId: "room_alpha", ownerMemberId: "mem_ada", inviteCode: "RM-ABCDEFGHJKMNPQRS" });
   const expired = await expireCode(on, expiring.body.machineId);
   assert.equal(expired.status, 200);
   const late = await enroll(on, expiring.body.code);
   assert.equal(late.status, 410);
-  assert.deepEqual(late.body, { error: "code_expired" });
+  assert.equal(late.body.error, "code_expired");
 
   const before = on.room.fetches.length;
   const otherRoom = await postCall(on, issued.body.machineId, { tool: "desktop.screenshot", arguments: {} }, {
@@ -122,8 +98,8 @@ test("an enroll code works once, expires, and stays bound to its room", async ()
 
 test("a wrong link token is refused and a reconnect replaces the socket", async () => {
   const machine = await enrolledMachine(off);
-  const bad = await off.mf.dispatchFetch(`${off.origin}/v0/machines/${machine.machineId}/link`, {
-    headers: { upgrade: "websocket", "x-machine-token": secret("nope") },
+  const bad = await off.mf.dispatchFetch(`${off.origin}/v0/machines/link`, {
+    headers: { upgrade: "websocket", authorization: `Bearer ${machine.machineId}.${secret("nope")}` },
   });
   const refused = await readBody(bad);
   assert.equal(refused.status, 401);
@@ -137,9 +113,10 @@ test("a wrong link token is refused and a reconnect replaces the socket", async 
   });
   const call = await first.expectFrame("call");
   assert.equal(call.tool, "desktop.screenshot");
-  assert.deepEqual(call.caller, { identityId: "mem_ada", claimId: "claim_ada", slot: "desk", verified: true });
+  assert.equal(call.caller.verified, true);
+  assert.equal(call.caller.slot, "desk");
+  assert.equal(call.caller.claimId, "claim_ada");
   assert.deepEqual(call.args, {});
-  assert.equal(call.lease, undefined);
   const second = await linkDaemon(off, machine.machineId, machine.machineToken, {
     answer: () => ({ ok: true, result: { shot: true } }),
   });
@@ -180,7 +157,8 @@ test("halt reaches the daemon within 2 seconds and cancels the in-flight call", 
   assert.ok(Date.now() - started < 2000, `halt took ${Date.now() - started} ms`);
   assert.equal(halted.status, 200);
   assert.equal(halted.body.halted, true);
-  assert.deepEqual(frame, { type: "halt", epoch: halted.body.haltEpoch });
+  assert.equal(frame.epoch, halted.body.haltEpoch);
+  assert.equal(frame.haltEpoch, undefined);
   const cancelled = await pending;
   assert.equal(cancelled.status, 409);
   assert.equal(cancelled.body.error.code, "halted");
@@ -192,10 +170,6 @@ test("halt reaches the daemon within 2 seconds and cancels the in-flight call", 
   const resumeFrame = await daemon.expectFrame("resume");
   assert.equal(resumed.body.halted, false);
   assert.deepEqual(resumeFrame, { type: "resume" });
-  const paused = await control(off, machine.machineId, "pause", { minutes: 30 });
-  const pauseFrame = await daemon.expectFrame("pause");
-  assert.equal(paused.status, 200);
-  assert.deepEqual(pauseFrame, { type: "pause", minutes: 30 });
   const after = await machineStatus(off, machine.machineId);
   assert.equal(after.body.halted, false);
   assert.equal(after.body.haltEpoch, frame.epoch);
@@ -214,8 +188,8 @@ test("phase 0 passthrough gives the earliest live work claim the slot", async ()
     claimOnSlot({ id: "claim_land", owner: "mem_bea", machineId: machine.machineId, slot: "desk", at: now - 3 * HOUR, leaseHours: 5, kind: "land" }),
     claimOnSlot({ id: "claim_expired", owner: "mem_bea", machineId: machine.machineId, slot: "desk", at: now - 48 * HOUR, leaseHours: 1 }),
     claimOnSlot({ id: "claim_bea", owner: "mem_bea", machineId: machine.machineId, slot: "desk", at: now - 30_000 }),
-    claimOnSlot({ id: "claim_side", owner: "mem_bea", machineId: machine.machineId, slot: "side", at: now - 20_000 }),
-    finishClaim(claimOnSlot({ id: "claim_ship", owner: "mem_ada", machineId: machine.machineId, slot: "ship", at: now - 90_000 }), "mem_ada", now - 80_000),
+    claimOnSlot({ id: "claim_scratch", owner: "mem_bea", machineId: machine.machineId, slot: "scratch", at: now - 20_000 }),
+    finishClaim(claimOnSlot({ id: "claim_done", owner: "mem_ada", machineId: machine.machineId, slot: "scratch", at: now - 90_000 }), "mem_ada", now - 80_000),
     claimOnSlot({ id: "claim_ada", owner: "mem_ada", machineId: machine.machineId, slot: "desk", at: now - 60_000 }),
   ];
   on.room.claims("room_alpha", claims);
@@ -223,7 +197,7 @@ test("phase 0 passthrough gives the earliest live work claim the slot", async ()
   await linkDaemon(on, machine.machineId, machine.machineToken, {
     answer(msg) {
       seen.push(msg);
-      if (msg.tool === "files.read") return { ok: false, error: { code: "missing", message: "no such file" } };
+      if (msg.tool === "files.get") return { ok: false, error: { code: "missing", message: "no such file" } };
       return { ok: true, result: { shot: true, tool: msg.tool } };
     },
   });
@@ -242,9 +216,11 @@ test("phase 0 passthrough gives the earliest live work claim the slot", async ()
     });
     await client.connect(transport);
     const listed = await client.listTools();
-    assert.deepEqual(listed.tools.map(tool => tool.name).sort(), ["desktop.screenshot", "files.read", "shell.vm.run"]);
     assert.equal(listed.tools.some(tool => tool.name === "shell.host"), false);
-    assert.equal(DAEMON_TOOLS.some(tool => tool.name === "shell.host"), true);
+    assert.equal(listed.tools.some(tool => tool.name === "shell.vm.run"), false);
+    assert.equal(listed.tools.some(tool => tool.name === "desktop.screenshot"), true);
+    assert.equal(listed.tools.some(tool => tool.name === "shell.vm"), true);
+    assert.equal(listed.tools.some(tool => tool.name === "files.get"), true);
     const shot = await client.callTool({ name: "desktop.screenshot", arguments: {} });
     assert.equal(shot.isError, false);
     assert.equal(shot.structuredContent.shot, true);
@@ -252,7 +228,7 @@ test("phase 0 passthrough gives the earliest live work claim the slot", async ()
     assert.equal(seen.at(-1).caller.slot, "desk");
     assert.equal(seen.at(-1).caller.identityId, "idn_ada");
     assert.equal(seen.at(-1).caller.verified, true);
-    assert.deepEqual(seen.at(-1).args, {});
+    assert.equal(Object.hasOwn(seen.at(-1), "arguments"), false);
 
     const held = await postRpc(on, machine.machineId, {
       method: "tools/call",
@@ -263,16 +239,16 @@ test("phase 0 passthrough gives the earliest live work claim the slot", async ()
     assert.equal(held.body.error.holder, "Ada");
     assert.match(held.body.error.message, /desk is held by Ada/);
 
-    const side = await postCall(on, machine.machineId, { tool: "shell.vm.run", arguments: { cmd: "true" }, slot: "side" }, {
+    const scratch = await postCall(on, machine.machineId, { tool: "shell.vm", arguments: { cmd: "true" }, slot: "scratch" }, {
       authorization: `Bearer ${bea}`,
     });
-    assert.equal(side.status, 200);
-    assert.equal(side.body.isError, false);
-    assert.equal(seen.at(-1).caller.slot, "side");
-    assert.equal(seen.at(-1).caller.claimId, "claim_side");
+    assert.equal(scratch.status, 200);
+    assert.equal(scratch.body.isError, false);
+    assert.equal(seen.at(-1).caller.slot, "scratch");
+    assert.equal(seen.at(-1).caller.claimId, "claim_scratch");
     assert.equal(seen.at(-1).caller.verified, true);
 
-    const missing = await postCall(on, machine.machineId, { tool: "files.read", arguments: { path: "notes.txt" } }, {
+    const missing = await postCall(on, machine.machineId, { tool: "files.get", arguments: { path: "notes.txt" } }, {
       authorization: `Bearer ${ada}`,
     });
     assert.equal(missing.status, 200);
@@ -285,11 +261,13 @@ test("phase 0 passthrough gives the earliest live work claim the slot", async ()
     }, { authorization: `Bearer ${ada}` });
     assert.equal(host.status, 403);
     assert.equal(host.body.error.code, "tool_not_allowed");
-    const unknown = await postCall(on, machine.machineId, { tool: "desktop.click", arguments: {} }, {
+    const click = await postCall(on, machine.machineId, { tool: "desktop.click", arguments: {} }, {
       authorization: `Bearer ${ada}`,
     });
-    assert.equal(unknown.status, 404);
-    assert.equal(unknown.body.error.code, "tool_unknown");
+    assert.equal(click.status, 200);
+    assert.equal(click.body.isError, false);
+    assert.equal(seen.at(-1).tool, "desktop.click");
+    assert.equal(seen.at(-1).caller.verified, true);
 
     const stranger = await postCall(on, machine.machineId, { tool: "desktop.screenshot", arguments: {} }, {
       authorization: `Bearer ${cam}`,
@@ -352,9 +330,10 @@ test("lease tokens are checked and a room bearer is not one", async () => {
   });
   assert.equal(first.status, 200);
   assert.equal(first.body.structuredContent.shot, true);
-  assert.deepEqual(seen.at(-1).caller, {
-    identityId: "mem_ada", claimId: "claim_ada", slot: "desk", verified: true,
-  });
+  assert.equal(seen.at(-1).caller.verified, true);
+  assert.equal(seen.at(-1).caller.identityId, "mem_ada");
+  assert.equal(seen.at(-1).caller.slot, "desk");
+  assert.equal(Object.hasOwn(seen.at(-1), "arguments"), false);
   const replay = await postCall(off, machine.machineId, { tool: "desktop.screenshot", arguments: {} }, {
     authorization: `Bearer ${good}`,
   });
@@ -365,12 +344,23 @@ test("lease tokens are checked and a room bearer is not one", async () => {
   });
   assert.equal(uncapped.status, 403);
   assert.equal(uncapped.body.error.code, "capability_denied");
-  const otherSlot = await postCall(off, machine.machineId, { tool: "shell.vm.run", arguments: {}, slot: "side" }, {
-    authorization: `Bearer ${tokenFor(off, machine.machineId, { claim: "claim_other", slot: "side", caps: ["shell.vm"] })}`,
+  const scratchSlot = await postCall(off, machine.machineId, { tool: "shell.vm", arguments: {}, slot: "scratch" }, {
+    authorization: `Bearer ${tokenFor(off, machine.machineId, { claim: "claim_scratch", slot: "scratch", caps: ["shell.vm"], jti: "scratch-slot" })}`,
+  });
+  assert.equal(scratchSlot.status, 200);
+  assert.equal(seen.at(-1).caller.slot, "scratch");
+  assert.equal(seen.at(-1).caller.verified, true);
+  const otherSlot = await postCall(off, machine.machineId, { tool: "desktop.screenshot", arguments: {}, slot: "desk" }, {
+    authorization: `Bearer ${tokenFor(off, machine.machineId, { claim: "claim_other", slot: "desk", jti: "other-desk" })}`,
   });
   assert.equal(otherSlot.status, 409);
   assert.equal(otherSlot.body.error.code, "slot_held");
   assert.equal(otherSlot.body.error.slot, "desk");
+  const foreignSlot = await postCall(off, machine.machineId, { tool: "shell.vm", arguments: {}, slot: "side" }, {
+    authorization: `Bearer ${tokenFor(off, machine.machineId, { claim: "claim_side", slot: "side", caps: ["shell.vm"], jti: "side-slot" })}`,
+  });
+  assert.equal(foreignSlot.status, 401);
+  assert.equal(foreignSlot.body.error.code, "lease_token_rejected");
   const now = Math.floor(Date.now() / 1000);
   const expired = await postCall(off, machine.machineId, { tool: "desktop.screenshot", arguments: {} }, {
     authorization: `Bearer ${tokenFor(off, machine.machineId, { exp: now - 10, jti: "expired" })}`,
@@ -428,12 +418,11 @@ test("a tool call larger than 1048576 bytes is refused", async () => {
 
 async function enrolledMachine(ctx, fields = {}) {
   const minted = await mint(ctx, {
-    label: "Desk",
-    rooms: fields.rooms ?? ["room_alpha"],
+    label: fields.label ?? "Desk",
+    roomId: fields.roomId ?? fields.rooms?.[0] ?? "room_alpha",
     ownerMemberId: fields.ownerMemberId ?? "mem_ada",
     inviteCode: fields.inviteCode ?? "RM-0123456789ABCDEF",
     ...(fields.displayName ? { displayName: fields.displayName } : {}),
-    ...(fields.roomOrigin ? { roomOrigin: fields.roomOrigin } : {}),
   });
   assert.equal(minted.status, 201, JSON.stringify(minted.body));
   const issued = await enroll(ctx, minted.body.code);

@@ -6,12 +6,29 @@ import { generateKeyPair, signCard } from "../server/agent-card-signing.mjs";
 import { flagMessage } from "../server/inbox-spam.mjs";
 import { createNotifyPrefs } from "../server/notify-prefs.mjs";
 import { issueGrant } from "../server/grants.mjs";
+import { appendOperatorAction } from "../server/operator-actions.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 
 export async function seedRecoveryCoverage(f) {
+  // One append-only operator audit row. The cold-start budget and the
+  // recovery audit both require every application table to hold a row,
+  // except the cron tables.
+  appendOperatorAction(f.store, {
+    action: "purge.find", targetKind: "room", targetId: "commons",
+    reason: "recovery fixture", planHash: null, counts: { rooms: 0 }, result: "found", requestId: "recovery-operator"
+  });
   f.store.db.prepare("INSERT INTO share_link_codes(code_hash,link_id,created_at) VALUES(?,?,?)")
     .run(createHash("sha256").update("ABCDEFGHJ").digest("hex"), f.link.link.id, f.now());
   const { identityId } = f.store.identities.create("Recovery agent");
+  // Opt-in public pages stay empty. The receipt and directory tables still
+  // need a row so the recovery audit and the cold-start budget see them.
+  const at = new Date(f.now()).toISOString();
+  f.store.db.prepare(`INSERT INTO public_receipts
+    (id, title, source, origin_room_id, room_id, room_title, agents_json, humans_json, pull_request, merged_at, hashes_json, at, start_href)
+    VALUES ('pwr_recoveryfixture0000000000000001', 'Recovery receipt', 'public-work', 'commons', 'commons', 'commons', '[]', '[]', NULL, NULL, '[]', ?, 'https://room.trydemigod.com/?start=room')`).run(at);
+  f.store.db.prepare(`INSERT INTO public_directory_entries
+    (agent_id, name, description, skills_json, identity_id, receipt_count, room_count, updated_at)
+    VALUES ('recovery-public-agent', 'Recovery agent', '', '[]', ?, 1, 1, ?)`).run(identityId, at);
   f.store.identities.link(f.keys.owner, "commons", { identityId, permissions: ["steer"] });
   f.store.invites.create(f.keys.owner, "commons", { permissions: ["steer"] });
   f.store.agentHeartbeats.heartbeat({ agentId: identityId, hostId: "recovery-work-host", mode: "pull-only", workWakes: true });
