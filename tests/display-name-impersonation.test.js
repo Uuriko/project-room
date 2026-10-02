@@ -11,7 +11,7 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { AccessRequests } from "../server/access-requests.mjs";
-import { EVENT_TYPES as T } from "../src/events.js";
+import { EVENT_TYPES as T, applyEvent, event, DISPLAY_NAME_POLICY_VERSION } from "../src/events.js";
 import { assessMemberDisplayName } from "../server/display-name-guard.mjs";
 
 const reserved = ["system", "project room", "room owner", "owner", "admin", "moderator", "everyone", "here", "channel", "all"];
@@ -89,6 +89,36 @@ const post = async (origin, path, body, token) => {
 };
 
 const memberNames = store => Object.values(store.room("commons").state.members).map(member => member.displayName).sort();
+
+test("a live member.added refuses a reserved or duplicate name, and an older unstamped event still replays", async t => {
+  const directory = mkdtempSync(join(tmpdir(), "room-display-name-command-"));
+  const store = new RoomStore(join(directory, "room.sqlite"));
+  store.initialize(initialRoom("commons"));
+  const ownerKey = store.issueAccessKey("commons", "owner");
+  t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
+  assert.equal(store.room("commons").state.members.owner.displayName, "Room owner");
+  const sequence = store.room("commons").sequence;
+  assert.throws(
+    () => store.command(ownerKey, "commons", { id: randomUUID(), type: T.MEMBER_ADDED, data: { memberId: "ada", displayName: "admin", kind: "human", permissions: ["steer"] } }),
+    error => error.status === 422 && error.code === "display_name_unavailable" && /reserved/i.test(error.message));
+  assert.equal(store.room("commons").sequence, sequence);
+  assert.equal(store.room("commons").state.members.ada, undefined);
+  store.command(ownerKey, "commons", { id: randomUUID(), type: T.MEMBER_ADDED, data: { memberId: "ada", displayName: "Ada", kind: "human", permissions: ["steer"] } });
+  assert.equal(store.room("commons").state.members.ada.displayName, "Ada");
+  assert.throws(
+    () => store.command(ownerKey, "commons", { id: randomUUID(), type: T.MEMBER_ADDED, data: { memberId: "ada-2", displayName: "Ada", kind: "human", permissions: ["steer"] } }),
+    error => error.status === 422 && error.code === "display_name_unavailable" && /already used/i.test(error.message));
+  assert.equal(store.room("commons").state.members["ada-2"], undefined);
+  const historical = applyEvent(store.room("commons").state, event({
+    type: T.MEMBER_ADDED, actorId: "owner", roomId: "commons",
+    data: { memberId: "legacy", displayName: "admin", kind: "human", permissions: ["steer"] },
+  }));
+  assert.equal(historical.members.legacy.displayName, "admin");
+  assert.throws(() => applyEvent(store.room("commons").state, event({
+    type: T.MEMBER_ADDED, actorId: "owner", roomId: "commons",
+    data: { memberId: "stamped", displayName: "admin", kind: "human", permissions: ["steer"], displayNamePolicyVersion: DISPLAY_NAME_POLICY_VERSION },
+  })), error => error.code === "display_name_unavailable");
+});
 
 test("redeem, share-link join, access requests, and referral redeem refuse a taken display name and keep the existing roster", async t => {
   const { store, ownerKey, origin } = await serve(t);
@@ -198,8 +228,9 @@ test("member.added through the command route refuses a confusable or reserved di
     id: randomUUID(), type: T.MEMBER_ADDED,
     data: { memberId: "candidate-dup", displayName: "Potter", kind: "human", permissions: [] },
   }, ownerKey);
-  assert.equal(duplicate.status, 201);
-  assert.equal(store.room("commons").state.members["candidate-dup"].displayName, "Potter");
+  assert.equal(duplicate.status, 422);
+  assert.equal(duplicate.json.error.code, "display_name_unavailable");
+  assert.equal(store.room("commons").state.members["candidate-dup"], undefined);
   for (const [displayName, memberId] of [["\u0420otter", "candidate-look"], ["Admin", "candidate-admin"]]) {
     const added = await post(origin, "/api/rooms/commons/commands", {
       id: randomUUID(), type: T.MEMBER_ADDED,

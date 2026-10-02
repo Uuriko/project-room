@@ -1,0 +1,72 @@
+name: onboarding-probe
+
+on:
+  schedule:
+    - cron: "0 15 * * 1"
+  workflow_dispatch:
+    inputs:
+      target:
+        description: production or staging
+        required: true
+        default: production
+        type: choice
+        options:
+          - production
+          - staging
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Resolve target
+        id: target
+        env:
+          ROOM_STAGING_ORIGIN: ${{ vars.ROOM_STAGING_ORIGIN }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ inputs.target }}" = "production" ] || [ -z "${{ inputs.target }}" ]; then
+            echo "origin=https://room.trydemigod.com" >> "$GITHUB_OUTPUT"
+            echo "mode=production" >> "$GITHUB_OUTPUT"
+          elif [ -z "$ROOM_STAGING_ORIGIN" ]; then
+            echo "staging target is not configured"
+            echo "mode=unconfigured" >> "$GITHUB_OUTPUT"
+            echo "origin=" >> "$GITHUB_OUTPUT"
+          else
+            echo "origin=$ROOM_STAGING_ORIGIN" >> "$GITHUB_OUTPUT"
+            echo "mode=staging" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Run probe
+        if: steps.target.outputs.mode != 'unconfigured'
+        env:
+          ROOM_OPS_POST_TOKEN: ${{ secrets.ROOM_OPS_POST_TOKEN }}
+          ROOM_OPS_ROOM_ID: ${{ secrets.ROOM_OPS_ROOM_ID }}
+          PROBE_ROUND: ${{ github.run_id }}
+        run: node scripts/onboarding-probe/run.mjs --target "${{ steps.target.outputs.origin }}" --runs 5 --out probe-out
+      - name: Gate
+        if: steps.target.outputs.mode != 'unconfigured'
+        continue-on-error: true
+        run: node scripts/onboarding-probe/gate.mjs --result probe-out/probe-result.json --baseline docs/onboarding-probe/baseline.json
+      - name: Publish summary
+        if: always()
+        run: |
+          if [ "${{ steps.target.outputs.mode }}" = "unconfigured" ]; then
+            echo "staging target is not configured" >> "$GITHUB_STEP_SUMMARY"
+          elif [ -f probe-out/table.md ]; then
+            cat probe-out/table.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always() && steps.target.outputs.mode != 'unconfigured'
+        with:
+          name: onboarding-probe
+          path: probe-out
+          if-no-files-found: warn

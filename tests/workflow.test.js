@@ -86,7 +86,9 @@ test("visible actions respect roles, producer independence, claims and retired w
   const f = room(true, true), member = f.member("producer");
   const actions = (item, actor = member) => workActions(item, actor, 1000).map(([action]) => action);
   const item = { ...f.item(), state: "accepted", mode: "write" };
-  assert.deepEqual(actions(item), ["block"]);
+  assert.deepEqual(actions(item), ["claim", "block"]);
+  const externalOnly = { ...member, permissions: ["write_external"] };
+  assert.deepEqual(actions(item, externalOnly), []);
   const writer = { ...member, permissions: [...member.permissions, "write_external"] };
   assert.deepEqual(actions(item, writer), ["claim", "block"]);
   item.claim = { status: "active", holderId: "producer", expiresAt: new Date(2000).toISOString() };

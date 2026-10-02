@@ -144,15 +144,23 @@ test("a contested write cannot start without a current exact-scope claim", () =>
   assert.throws(() => applyEvent(state, workEvent("write-started", EVENT_TYPES.WORK_STARTED, "codex", "work-write", 1)), /current exact-scope claim/);
 });
 
-test("a claim cannot create write permission", () => {
+test("a claim records scope without granting write permission", () => {
   let state = baseState();
   state = applyEvent(state, proposal("noauth-proposed", "work-noauth", "instinct", "codex", "write"));
   state = applyEvent(state, workEvent("noauth-accepted", EVENT_TYPES.WORK_ACCEPTED, "instinct", "work-noauth", 0));
-  assert.throws(() => applyEvent(state, workEvent("noauth-claim", EVENT_TYPES.CLAIM_ACQUIRED, "instinct", "work-noauth", 1, {
+  state = applyEvent(state, workEvent("noauth-claim", EVENT_TYPES.CLAIM_ACQUIRED, "instinct", "work-noauth", 1, {
     repository: "Uuriko/project-room",
     ref: "instinct/test",
     paths: ["src/**"],
     expiresAt: "2026-09-06T10:00:00.000Z"
+  }));
+  assert.equal(state.workItems["work-noauth"].claim.status, "active");
+  assert.equal(state.members.instinct.permissions.includes("write_external"), false);
+  assert.throws(() => applyEvent(state, workEvent("noauth-complete", EVENT_TYPES.WORK_COMPLETED, "instinct", "work-noauth", state.workItems["work-noauth"].revision, {
+    summary: "Done",
+    evidenceUrl: "https://github.com/Uuriko/project-room",
+    evidenceVersion: "abc",
+    nextAction: "Review"
   })), /lacks write_external/);
 });
 

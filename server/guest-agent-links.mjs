@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { EVENT_TYPES as T, event, validId } from "../src/events.js";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
+import { assessMemberDisplayName } from "./display-name-guard.mjs";
 
 class GuestAgentLinkError extends Error {
   constructor(status, code, message) { super(message); this.status = status; this.code = code; }
@@ -74,6 +75,20 @@ function displayNameOf(value) {
     fail(422, "invalid_link", "Choose a short guest name");
   }
   return name.trim();
+}
+
+// A mint that omits the name gets "Guest agent", then "Guest agent 2", and so
+// on. The caller did not choose those words, so a retry of the same request
+// still matches. An explicit name must match the stored one exactly.
+function omittedGuestName(stored) {
+  return stored === GUEST_AGENT_DEFAULT_NAME || stored.startsWith(`${GUEST_AGENT_DEFAULT_NAME} `);
+}
+
+function assignGuestName(requested, members, callerSuppliedName) {
+  if (callerSuppliedName) return requested;
+  const verdict = assessMemberDisplayName(requested, members);
+  if (verdict.reason === "duplicate" && verdict.suggestion) return verdict.suggestion;
+  return requested;
 }
 
 // Owner-issued vertical: no new table / writer bump. The link token is the
@@ -227,6 +242,7 @@ export class GuestAgentLinks {
       fail(422, "invalid_link", "Supply a requestId and current owner revision; a guest token is optional");
     }
     if (details.roomId !== undefined && details.roomId !== roomId) fail(422, "invalid_link", "Room does not match this mint");
+    const callerSuppliedName = details.displayName !== undefined;
     const displayName = displayNameOf(details.displayName);
     return this.store.transaction(() => {
       const auth = this.owner(token, roomId, binding);
@@ -249,15 +265,17 @@ export class GuestAgentLinks {
           if (existing.kind !== GUEST_AGENT_KIND || existing.active === false)
             fail(409, "membership_ended", "This guest membership ended; use a new requestId");
           const priorCredential = this.db.prepare("SELECT * FROM credentials WHERE room_id=? AND member_id=? AND kind='access'").get(roomId, memberId);
-          if (!this.liveCredential(priorCredential, existing) || existing.displayName !== displayName)
+          const nameOk = callerSuppliedName ? existing.displayName === displayName : omittedGuestName(existing.displayName);
+          if (!this.liveCredential(priorCredential, existing) || !nameOk)
             fail(409, "idempotency_conflict", "This requestId was already used for a different guest-agent mint");
           return { ...this.issued(null, priorCredential, existing, roomId), duplicate: true, replayed: true };
         }
         if (existing.kind !== GUEST_AGENT_KIND || existing.active === false) {
           fail(409, "membership_ended", "This guest membership ended; use a new requestId");
         }
+        const nameOk = callerSuppliedName ? existing.displayName === displayName : omittedGuestName(existing.displayName);
         if (!prior || prior.room_id !== roomId || prior.member_id !== memberId || !this.liveCredential(prior, existing)
-          || existing.displayName !== displayName) {
+          || !nameOk) {
           fail(409, "idempotency_conflict", "This requestId was already used for a different guest-agent mint");
         }
         return { ...this.issued(issuedToken, prior, existing, roomId), duplicate: true };
@@ -265,10 +283,11 @@ export class GuestAgentLinks {
       if (this.liveCount(roomId) >= GUEST_AGENT_MAX_JOINS) fail(429, "rate_limited", "Guest-agent mint limit reached for this room; wait for expiry or disconnect one");
       if (this.db.prepare("SELECT count(*) n FROM credentials WHERE room_id=?").get(roomId).n >= 5000) fail(409, "pilot_limit", "Credential retention limit reached");
       this.conflict(hash(issuedToken));
+      const assignedName = assignGuestName(displayName, this.store.room(roomId).state.members, callerSuppliedName);
       const membership = this.store.command(token, roomId, {
         id: `guest-agent-${hash(`${auth.account.id}:${requestId}`).slice(0, 40)}`,
         type: T.MEMBER_ADDED,
-        data: { memberId, displayName, kind: GUEST_AGENT_KIND, permissions: [...GUEST_AGENT_PERMISSIONS], accountableHumanId: auth.member.id }
+        data: { memberId, displayName: assignedName, kind: GUEST_AGENT_KIND, permissions: [...GUEST_AGENT_PERMISSIONS], accountableHumanId: auth.member.id }
       }, binding);
       const expiresAt = this.store.now() + GUEST_AGENT_TTL_MS;
       this.db.prepare("INSERT INTO credentials(hash,room_id,member_id,kind,parent_hash,expires_at,account_id,account_auth_epoch) VALUES(?,?,?,'access',NULL,?,NULL,NULL)")
