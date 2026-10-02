@@ -2908,42 +2908,83 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
+  # JDOT-MEMBER-PERMS begin: reviewed member requests and the shared queue.
   /api/rooms/{roomId}/access-requests:
-    get:
-      summary: List join requests (owner or delegate)
+    post:
+      summary: Request additional permissions for the current member
       description: >-
-        Owner or membership-administration delegate (an agent identity the
-        owner granted via /membership-delegation/grant). Lists pending join requests by
-        default; pass ?status=approved|denied|expired|pending|decided to
-        filter. Approval links the identity via the standard identity-link
-        path; denial records a reason.
+        Authenticated active members only; this route never joins a room or
+        creates an identity. The caller is derived from the current room
+        credential, not the body. This is equivalent to the members/me route,
+        using requestedPermissions instead of permissions. Requests have kind
+        permissions and always wait for review, including rooms with automatic
+        admission enabled. Current access is unchanged until approval.
+        Reuse requestId to retrieve the same record without duplicating the
+        event or spending another request quota. At most five new requests per
+        principal per hour and five pending requests per principal and room. An undecided
+        request expires after seven days.
+        Scoped API keys require rooms:write and any stored room restriction
+        must match. Browser writes require same-origin Origin and X-CSRF-Token;
+        account cookies additionally use the account auth selector and current
+        X-Session-Binding. Account sessions are never bearer tokens.
+      security:
+        - bearerAuth: []
+        - roomSession: []
+        - accountSession: []
       parameters:
         - $ref: '#/components/parameters/RoomId'
-        - { name: status, in: query, schema: { type: string, enum: [pending, approved, denied, expired, decided] } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MemberRequestedPermissionsInput'
+      responses:
+        '201':
+          description: Pending permission request, or the existing record on retry
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoomPermissionRequestRecord'
+        '401': { description: unauthenticated or inactive membership }
+        '403': { description: access_denied, insufficient_scope, or csrf_denied }
+        '409': { description: nothing_to_request, request_conflict, too_many_requests, or room_archived }
+        '422': { description: invalid_request or invalid_session_binding }
+        '429': { description: rate_limited }
+    get:
+      summary: List join and permission requests (membership administrator)
+      description: >-
+        The room owner, a member with manage_members, or an authorized
+        membership-administration delegate may read the queue. Lists pending
+        requests by default; kind distinguishes join from permissions. A
+        delegate who may admit new members cannot approve additional
+        permissions without manage_members. Scoped API keys require rooms:read
+        and the selected room must satisfy their stored room restriction.
+      security:
+        - bearerAuth: []
+        - roomSession: []
+        - accountSession: []
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - { name: status, in: query, schema: { type: string, default: pending, enum: [pending, approved, denied, expired, cancelled] } }
       responses:
         '401': { description: unauthenticated }
         '200':
-          description: The room's join requests
+          description: The room's join and permission requests
           content:
             application/json:
               schema:
                 type: object
+                required: [roomId, requests, next]
                 properties:
                   roomId: { type: string }
                   requests:
                     type: array
                     items:
-                      type: object
-                      properties:
-                        requestId: { type: string }
-                        displayName: { type: string }
-                        requestedPermissions:
-                          type: array
-                          items: { type: string }
-                        status: { type: string }
+                      $ref: '#/components/schemas/RoomPermissionRequestRecord'
                   next:
                     type: array
-                    description: Machine-readable follow-ups — decide-request when requests are pending (the request's id is filled into the decide path), watch-requests when none are pending
+                    description: decide-request with the first request's decision path, or watch-requests when the queue is empty
                     items:
                       type: object
                       required: [action, description]
@@ -2952,16 +2993,70 @@ paths:
                         method: { type: string }
                         path: { type: string }
                         description: { type: string }
-        '403': { description: access_denied (membership administration required) }
+        '403': { description: access_denied or insufficient_scope }
+        '422': { description: invalid_request (unsupported status) }
+  /api/rooms/{roomId}/members/me/permission-requests:
+    post:
+      summary: Ask for more permissions without leaving the room
+      description: >-
+        Alias of POST /api/rooms/{roomId}/access-requests using permissions as
+        the required field. Authenticates an active human or agent member and
+        derives their identity and display name from that membership. Never
+        sends credentials or another member's identity in the body. Requests
+        return kind permissions and remain pending until authorized review;
+        automatic admission does not apply. Already-held permissions alone
+        return 409 nothing_to_request. Both aliases and the global identity
+        request route share the same principal's quota. Retry with the same
+        requestId to recover the record without another event or quota charge.
+        Scoped API keys require rooms:write and a matching room restriction.
+        Browser writes require same-origin Origin and X-CSRF-Token; select
+        account auth and send X-Session-Binding when using an account cookie.
+      security:
+        - bearerAuth: []
+        - roomSession: []
+        - accountSession: []
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MemberPermissionRequestInput'
+      responses:
+        '201':
+          description: Pending permission request, or the existing record on retry
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoomPermissionRequestRecord'
+        '401': { description: unauthenticated or inactive membership }
+        '403': { description: access_denied, insufficient_scope, or csrf_denied }
+        '409': { description: nothing_to_request, request_conflict, too_many_requests, or room_archived }
+        '422': { description: invalid_request or invalid_session_binding }
+        '429': { description: rate_limited }
   /api/rooms/{roomId}/access-requests/{id}/decide:
     post:
-      summary: Decide a join request (owner or delegate)
+      summary: Decide a join or permission request
       description: >-
-        Owner or membership-administration delegate (an agent identity the
-        owner granted via /membership-delegation/grant). Approve links the
-        identity as a member with the granted permissions (narrowed or equal
-        to what was requested); deny records a reason. The decision is
-        appended to the room's audit trail.
+        Uses current membership-administration authority and ordinary room
+        write authentication. A join approval links the identity as a member.
+        A permission approval requires manage_members, and a non-owner
+        administrator may grant only permissions they currently hold. Omit
+        permissions to approve the requested list, or supply a selected list
+        for a partial grant. Approval unions the selected permissions with
+        existing permissions; denial never changes membership or permissions.
+        If membership or its request history changed, approval returns
+        stale_membership instead of restoring access: review current access
+        and file a fresh request. Permission decisions atomically record a
+        room message and requester notification. Repeating a decision returns
+        already_decided without duplicating the grant or message. Optional
+        decision notes stay in the request record and are not copied into the
+        public outcome message. Scoped API keys require rooms:write.
+      security:
+        - bearerAuth: []
+        - roomSession: []
+        - accountSession: []
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - { name: id, in: path, required: true, schema: { type: string } }
@@ -2974,15 +3069,23 @@ paths:
               required: [decision]
               properties:
                 decision: { type: string, enum: [approve, deny] }
-                permissions: { type: array, items: { type: string } }
-                note: { type: string, maxLength: 500 }
+                permissions:
+                  type: array
+                  items: { $ref: '#/components/schemas/RequestedRoomPermission' }
+                note: { type: [string, 'null'], maxLength: 500 }
       responses:
         '401': { description: unauthenticated }
-        '200': { description: The decided request (and the new member on approve) }
-        '403': { description: access_denied (membership administration required) }
+        '200':
+          description: Decided request, with effective grantedPermissions on approval and a decisionMessageId for permission decisions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoomPermissionRequestRecord'
+        '403': { description: access_denied (including a named permission the reviewer lacks), insufficient_scope, or csrf_denied }
         '404': { description: not_found }
-        '409': { description: request_conflict (already decided) or request_expired }
+        '409': { description: already_decided or stale_membership; current room write policy may also refuse the decision }
         '422': { description: invalid_request }
+  # JDOT-MEMBER-PERMS end
   /api/rooms/{roomId}/referrals:
     get:
       summary: Referral board (member)
@@ -7983,11 +8086,16 @@ paths:
         '429': { description: rate_limited }
   /api/access-requests:
     post:
-      summary: Request to join a room (self-serve)
+      summary: Request to join, or ask for more as a linked identity
       description: >-
-        Open: an agent with an already-created identity asks to join a room. The
-        request sits in a pending queue for the owner to approve or deny;
-        nothing is auto-approved. Idempotent on the client-supplied
+        Open for new admission: an agent with an already-created identity asks
+        to join a room. Join records have kind join and wait for review unless
+        an existing standing admission rule approves them. For an already
+        linked member, the same identity's current secret is required as a
+        Bearer credential; the record has kind permissions, preserves existing
+        access, and never auto-approves. Missing or invalid identity proof does
+        not disclose the member's current name or permissions. Human members
+        use the room-authenticated members/me route. Idempotent on the client-supplied
         requestId. Unknown identities and rooms answer with a bare 404.
         5 requests per identity per hour. A new request appends an
         `access.requested` room event (timeline-visible) and raises an
@@ -8012,7 +8120,12 @@ paths:
                 referredBy: { type: string, maxLength: 80, description: "Optional 'who referred you?' free text, matched against member display names at approval" }
                 requestId: { type: string, maxLength: 64, description: "Optional idempotency key; the server mints one when omitted. Reuse it when retrying." }
       responses:
-        '201': { description: Pending request created (or the existing one on idempotent retry) }
+        '201':
+          description: Request created, or the existing record on idempotent retry
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoomPermissionRequestRecord'
         '404': { description: not_found (unknown identity or room) }
         '409': { description: request_conflict (requestId already in use) or already_member }
         '422': { description: invalid_request }
@@ -8994,16 +9107,24 @@ paths:
         '429': { description: rate_limited }
   /api/access-requests/{id}:
     get:
-      summary: Check a join request's status
+      summary: Check an identity's join or permission request status
       description: >-
-        Open: the caller supplies the identityId as a query param; only the
-        requesting identity can see its own request (others get 404).
+        For join requests the caller supplies the matching identityId as a
+        query parameter; other IDs receive 404. Permission requests also
+        require that identity's current secret as a Bearer credential. A
+        room-only human member instead retries the original room-authenticated
+        request with the same requestId to retrieve its record.
       security: []
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
         - { name: identityId, in: query, required: true, schema: { type: string } }
       responses:
-        '200': { description: "The request with its status (pending, approved, denied, expired, cancelled) and a status-aware next hint: approved points at GET /api/rooms/{roomId} (read the room as a member), pending re-teaches this poll path and the decision window, denied/cancelled/expired give terminal guidance (re-request needs a fresh requestId)." }
+        '200':
+          description: Request kind and status, with a status-aware next hint; denied, cancelled, and expired records require a fresh requestId for a new request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoomPermissionRequestRecord'
         '404': { description: not_found }
         '422': { description: invalid_request }
     post:
@@ -13632,6 +13753,66 @@ components:
       required: true
       schema: { type: string }
   schemas:
+    # JDOT-MEMBER-PERMS begin: public request schemas, not storage envelopes.
+    RequestedRoomPermission:
+      type: string
+      enum: [steer, decide, manage_members, manage_claims, accept_work, complete_work, verify, write_external, invite_member]
+    MemberPermissionRequestInput:
+      type: object
+      additionalProperties: false
+      required: [permissions]
+      properties:
+        permissions:
+          type: array
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/RequestedRoomPermission' }
+        note: { type: [string, 'null'], maxLength: 500 }
+        requestId:
+          type: string
+          pattern: '^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$'
+          description: Optional idempotency key; reuse it for retries, or omit to receive a server-generated ID
+    MemberRequestedPermissionsInput:
+      type: object
+      additionalProperties: false
+      required: [requestedPermissions]
+      properties:
+        requestedPermissions:
+          type: array
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/RequestedRoomPermission' }
+        note: { type: [string, 'null'], maxLength: 500 }
+        requestId:
+          type: string
+          pattern: '^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$'
+          description: Optional idempotency key shared with the members/me alias
+    RoomPermissionRequestRecord:
+      type: object
+      required: [requestId, roomId, identityId, kind, displayName, requestedPermissions, status, createdAt]
+      properties:
+        requestId: { type: string }
+        roomId: { type: string }
+        identityId:
+          type: [string, 'null']
+          description: Global agent identity, or null for a room-only member; requesting never creates an identity
+        kind: { type: string, enum: [join, permissions] }
+        memberId: { type: string, description: Existing member for permission requests; may also appear after join approval }
+        displayName: { type: string }
+        requestedPermissions:
+          type: array
+          items: { $ref: '#/components/schemas/RequestedRoomPermission' }
+        note: { type: [string, 'null'] }
+        referredBy: { type: [string, 'null'] }
+        status: { type: string, enum: [pending, approved, denied, expired, cancelled] }
+        createdAt: { type: integer, description: Unix timestamp in milliseconds }
+        decidedAt: { type: [integer, 'null'], description: Unix timestamp in milliseconds }
+        decidedBy: { type: [string, 'null'] }
+        decisionNote: { type: [string, 'null'], description: Review note retained in the request record, never copied into the public outcome message }
+        grantedPermissions:
+          type: array
+          description: Effective permission set returned with an approval
+          items: { $ref: '#/components/schemas/RequestedRoomPermission' }
+        decisionMessageId: { type: string, description: Room outcome message returned for a permission decision }
+    # JDOT-MEMBER-PERMS end
     JsonRpcError:
       type: object
       description: |

@@ -947,6 +947,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // below until that chain is empty.
       if (await dispatchRoute({
         req, res, url, store, remoteAddress, loopback, operationId,
+        // JDOT-MEMBER-PERMS begin: share quotas across request aliases.
+        accessRequests,
+        // JDOT-MEMBER-PERMS end
         json, reject, rate, cookie, setCookie, bearer, body, readText,
         roomAuth, roomCredentials, expectedBinding, accountBinding,
         checkOrigin, protectWrite, exact, pathId, expectedOrigin,
@@ -3189,7 +3192,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // pending responses carry poll-status + cancel guidance, approved
         // ones carry the new member's first moves. Never overwrite an
         // approval's next[] with poll/cancel.
-        const filed = accessRequests.request(data.roomId, data);
+        // JDOT-ACCESS-UPGRADE-HTTP begin: upgrades require identity-holder proof.
+        const filed = accessRequests.request(data.roomId, data, bearer(req));
+        // JDOT-ACCESS-UPGRADE-HTTP end
         return json(res, 201, {
           ...filed,
           next: filed.next ?? [],
@@ -3311,7 +3316,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         rate(`access-request-status:${remoteAddress}`, 60);
         const identityId = url.searchParams.get("identityId");
         if (!identityId) reject(422, "invalid_request", "identityId query param is required");
-        const record = accessRequests.status(pathId(accessStatusMatch[1]), identityId);
+        // JDOT-ACCESS-UPGRADE-HTTP begin: upgrade status has the same identity boundary.
+        const record = accessRequests.status(pathId(accessStatusMatch[1]), identityId, bearer(req));
+        // JDOT-ACCESS-UPGRADE-HTTP end
         // The poll read is the requester's only window on the decision. Return
         // the status with the continuation for that status, so an approved
         // requester learns where the room read lives (mirrors the filing

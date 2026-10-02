@@ -5,13 +5,14 @@
 // `scope`. Both columns are required now.
 
 import { INBOX_ROUTES } from "./inbox.mjs";
+import { MEMBER_PERMISSION_ROUTES } from "./member-permissions.mjs";
 
 export const AUTH_CLASSES = Object.freeze(["none", "room", "account", "bearer", "roomToken", "door", "mcp"]);
 export const ROUTE_SCOPES = Object.freeze(["worker", "public", "directory", "room"]);
 export const ROUTE_METHODS = Object.freeze(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]);
 
 // Rows land here as groups leave the legacy chain. Do not push; replace the array.
-export const ROUTES = Object.freeze([...INBOX_ROUTES]);
+export const ROUTES = Object.freeze([...INBOX_ROUTES, ...MEMBER_PERMISSION_ROUTES]);
 
 export function assertRouteRow(row) {
   const problems = [];

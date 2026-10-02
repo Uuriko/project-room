@@ -1,7 +1,9 @@
 // Self-serve agent access requests.
 //
 // An agent that minted an identity (server/agent-identities.mjs) but has no
-// room membership can request access to a room. The request sits in a
+// room membership can request access to a room. Existing members may also
+// request additional permissions, which always require a reviewed decision.
+// The request sits in a
 // pending queue; the room owner — or an agent identity the owner has
 // explicitly granted membership administration
 // (server/membership-delegation.mjs) — approves or denies it. Approval links the
@@ -27,6 +29,7 @@
 // store.mjs to apply, following the agent-identities.mjs pattern.
 
 import { randomUUID, createHash } from "node:crypto";
+import { MemberPermissionRequests, permissionRequestContents } from "./member-permission-requests.mjs";
 import { createRateLimiter } from "./identity-ratelimit.mjs";
 // RC-2026-09-19-071 (QAJ-006): a new access request appends an
 // access.requested room event so the request is timeline-visible and drives
@@ -85,6 +88,12 @@ export const accessRequestSchema = `
 `;
 
 const STATUSES = ["pending", "approved", "denied", "expired", "cancelled"];
+// Older writers only decide raw 'pending' rows. This distinct stored status
+// fences upgrades on rollback, including approvals with explicit permissions.
+// Public callers still see 'pending'; direct identity grants intentionally do
+// not settle these rows, because changed membership requires a fresh review.
+const UPGRADE_PENDING_STATUS = "pending_upgrade";
+const isPending = status => status === "pending" || status === UPGRADE_PENDING_STATUS;
 const DECISIONS = ["approve", "deny"];
 const REQUEST_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 // An identity may hold at most this many pending requests per room.
@@ -92,17 +101,24 @@ export const MAX_PENDING_PER_IDENTITY_ROOM = 5;
 // Requests expire after this long without a decision.
 export const REQUEST_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
+// Legacy admission rows contain a permission array. Upgrade intent lives in
+// the request row, not only in the replaceable event journal: restoring room
+// history must never reinterpret a stale upgrade as a fresh admission.
+const requestContents = permissionRequestContents;
+
 const rowToRequest = row => row ? Object.freeze({
   requestId: row.request_id,
   roomId: row.room_id,
-  identityId: row.identity_id,
+  identityId: requestContents(row).upgrade?.principalKind === "room-member" ? null : row.identity_id,
+  kind: requestContents(row).upgrade ? "permissions" : "join",
+  ...(requestContents(row).upgrade ? { memberId: requestContents(row).upgrade.memberId } : {}),
   displayName: row.display_name,
-  requestedPermissions: JSON.parse(row.requested_permissions),
+  requestedPermissions: requestContents(row).permissions,
   note: row.note,
   // "Who referred you?" free text, answered at request time; resolved to a
   // member id only at approval, so the stored text is never an attribution.
   referredBy: row.referred_by ?? null,
-  status: row.status,
+  status: row.status === UPGRADE_PENDING_STATUS ? "pending" : row.status,
   createdAt: row.created_at,
   decidedAt: row.decided_at,
   decidedBy: row.decided_by,
@@ -135,16 +151,24 @@ export class AccessRequests {
   constructor(store, { rateLimiter } = {}) {
     this.store = store;
     this.db = store.db;
+    this.memberPermissions = new MemberPermissionRequests(this, MAX_PENDING_PER_IDENTITY_ROOM);
     // Separate bucket from general API use: requesting access is rare and
     // sensitive. 5 requests per hour per identity is generous for humans
     // and tight enough to blunt enumeration.
     this.rateLimiter = rateLimiter ?? createRateLimiter({ capacity: 5, refillPerSecond: 5 / 3600 });
   }
 
-  // Unauthenticated: an identity (not yet a member) asks to join a room.
+  toRequest(row) { return rowToRequest(row); }
+
+  requestForMember(token, roomId, input, binding = null) {
+    return this.memberPermissions.request(token, roomId, input, binding);
+  }
+
+  // Admission is public. Upgrades require the current identity secret as
+  // proof of the requester's identity, then an authorized reviewed decision.
   // requestId is the caller's idempotency key: retries with the same id
   // return the original request instead of creating a duplicate.
-  request(roomId, { identityId, displayName, requestedPermissions, note, referredBy, requestId }) {
+  request(roomId, { identityId, displayName, requestedPermissions, note, referredBy, requestId }, secret = null) {
     if (typeof roomId !== "string" || !roomId) fail(422, "invalid_request", "roomId is required");
     if (typeof identityId !== "string" || !identityId) fail(422, "invalid_request", "identityId is required");
     const name = typeof displayName === "string" ? displayName.trim() : "";
@@ -179,6 +203,7 @@ export class AccessRequests {
       if (existing) {
         // Idempotent retry: only the original identity may observe it.
         if (existing.identity_id !== identityId) fail(409, "request_conflict", "requestId is already in use");
+        if (this.upgradeBasis(existing)) this.store.identities.authenticateIdentitySecret(identityId, secret);
         // A retried auto-approval returns the approval record (member id +
         // grant), not just the row — so a lost response can recover the
         // membership the call created.
@@ -186,7 +211,7 @@ export class AccessRequests {
           const link = this.db.prepare(
             "SELECT member_id AS memberId FROM identity_links WHERE room_id=? AND identity_id=?"
           ).get(existing.room_id, existing.identity_id);
-          if (link) return this.autoApproveResponse(rowToRequest(existing), link.memberId, JSON.parse(existing.requested_permissions));
+          if (link) return this.autoApproveResponse(rowToRequest(existing), link.memberId, requestContents(existing).permissions);
         }
         const retryLive = rowToRequest(existing);
         if (retryLive.status === "pending") {
@@ -206,35 +231,58 @@ export class AccessRequests {
       // and allocated a bucket per made-up value that was never released.
       // Keyed here, the space is bounded by the identities table. A retry that
       // returns the original request creates nothing, so it costs nothing.
+      const linked = this.db.prepare("SELECT member_id AS memberId FROM identity_links WHERE room_id=? AND identity_id=?").get(roomId, identityId);
+      if (linked) {
+        // Preserve the public already-member response without exposing the
+        // member name or which permissions it holds to an anonymous probe.
+        if (!secret) fail(409, "already_member", "This identity is already linked to this room; present its current identity secret as Bearer to request additional permissions");
+        this.store.identities.authenticateIdentitySecret(identityId, secret);
+      }
+      // Invalid upgrade proofs must not spend the real holder's request quota.
       const limit = this.rateLimiter.check(`access-request:${identityId}`);
       if (!limit.allowed) fail(429, "rate_limited", limit.message);
       const roomExists = this.db.prepare("SELECT 1 FROM rooms WHERE id=?").get(roomId);
       if (!roomExists) fail(404, "not_found", "No such room or identity");
-      // Already a member? Then there is nothing to request.
-      const linked = this.db.prepare("SELECT 1 FROM identity_links WHERE room_id=? AND identity_id=?").get(roomId, identityId);
-      if (linked) fail(409, "already_member", "This identity is already linked to this room");
+      const room = this.store.room(roomId);
+      const member = linked && Object.hasOwn(room.state.members, linked.memberId) ? room.state.members[linked.memberId] : null;
+      if (linked) {
+        if (!member || member.active === false || member.identityId !== identityId || this.store.identities.secretRevoked(identityId)) {
+          fail(409, "stale_membership", "Current active membership required; ask a room owner to review access");
+        }
+        if (requestedPermissions.every(permission => member.permissions.includes(permission))) {
+          fail(409, "already_member", "This identity is already linked to this room with the requested permissions");
+        }
+        if (isRoomArchived(room.state)) fail(409, "room_archived", "This room is archived; access cannot be upgraded");
+      }
       const pending = this.db.prepare(
-        "SELECT count(*) AS n FROM access_requests WHERE room_id=? AND identity_id=? AND status='pending'").get(roomId, identityId).n;
+        "SELECT count(*) AS n FROM access_requests WHERE room_id=? AND identity_id=? AND status IN ('pending', 'pending_upgrade')").get(roomId, identityId).n;
       if (pending >= MAX_PENDING_PER_IDENTITY_ROOM) {
         fail(409, "too_many_requests", `At most ${MAX_PENDING_PER_IDENTITY_ROOM} pending requests per room`);
       }
       // The requested name is the member name an approval will store. Refuse
       // it before the request or its timeline event is written.
-      assertMemberDisplayNameAvailable(name, this.store.room(roomId).state.members);
+      // An upgrade cannot rename or impersonate another member. Use the
+      // linked member's current name, rather than checking it against itself.
+      const requestName = member ? member.displayName : name;
+      if (!member) assertMemberDisplayNameAvailable(requestName, room.state.members);
       const now = this.store.now();
+      const storedPermissions = member ? { version: 1, kind: "permission-upgrade",
+        permissions: requestedPermissions, memberId: member.id, memberRevision: member.revision } : requestedPermissions;
       this.db.prepare(`INSERT INTO access_requests(
           request_id, room_id, identity_id, display_name, requested_permissions,
-          note, referred_by, status, created_at) VALUES(?,?,?,?,?,?,?, 'pending', ?)`)
-        .run(rid, roomId, identityId, name, JSON.stringify(requestedPermissions),
-          note?.trim() || null, typeof referredBy === "string" && referredBy.trim() ? referredBy.trim() : null, now);
+          note, referred_by, status, created_at) VALUES(?,?,?,?,?,?,?,?,?)`)
+        .run(rid, roomId, identityId, requestName, JSON.stringify(storedPermissions),
+          note?.trim() || null, typeof referredBy === "string" && referredBy.trim() ? referredBy.trim() : null,
+          member ? UPGRADE_PENDING_STATUS : "pending", now);
       // RC-2026-09-19-071 (QAJ-006): the arrival is timeline-visible and
       // drives the owner's notification feed. Same transaction as the
       // insert, so a request is never recorded without its event. The
       // idempotent-retry branch above returns before this point, so a
       // retry never emits a duplicate.
       this.emitAccessRequested(roomId, {
-        requestId: rid, identityId, displayName: name,
+        requestId: rid, identityId, displayName: requestName,
         requestedPermissions, note: note?.trim() || null, at: now,
+        upgradeMember: member,
       });
       // Self-serve admission (RC-2026-09-29-3603): rooms with an auto-approve
       // rule admit matching requests inline, in the same transaction.
@@ -258,13 +306,19 @@ export class AccessRequests {
   // so they are the actorId as their identity. Archived rooms keep the old
   // behavior (request recorded, no timeline event — there is no live
   // timeline audience to notify).
-  emitAccessRequested(roomId, { requestId, identityId, displayName, requestedPermissions, note, at }) {
+  emitAccessRequested(roomId, { requestId, identityId, displayName, requestedPermissions, note, at, upgradeMember = null, identityScope = "global" }) {
     const room = this.store.room(roomId);
     if (isRoomArchived(room.state)) return;
     if (room.sequence >= MAX_ROOM_EVENTS) fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
+    const requestKey = createHash("sha256").update(`access-request:${requestId}`).digest("hex");
+    if (upgradeMember && this.db.prepare("SELECT 1 FROM events WHERE id=?").get(requestKey)) {
+      fail(409, "request_conflict", "requestId conflicts with an existing room event; use a new requestId");
+    }
     const incoming = event({
-      id: randomUUID(),
-      idempotencyKey: createHash("sha256").update(`access-request:${requestId}`).digest("hex"),
+      // Only upgrade events use a deterministic ID, so their review basis
+      // can be read through the existing UNIQUE events.id index.
+      id: upgradeMember ? requestKey : randomUUID(),
+      idempotencyKey: requestKey,
       type: T.ACCESS_REQUESTED,
       roomId,
       actorId: identityId,
@@ -272,6 +326,9 @@ export class AccessRequests {
       data: {
         requestId,
         identityId,
+        // Preserve the ordinary join event shape; only permission requests
+        // need the additional member/principal discriminator.
+        ...(upgradeMember ? { identityScope, requestKind: "permissions", requesterMemberId: upgradeMember.id } : {}),
         displayName,
         // The permissions the requester asked for (the owner chooses the
         // final grant at decision time). Keyed `permissions` — not
@@ -279,6 +336,9 @@ export class AccessRequests {
         // array values for a fixed set of data keys.
         permissions: [...requestedPermissions],
         note,
+        // Audit the exact membership revision. The request row separately
+        // persists this intent so replacing history cannot erase the binding.
+        ...(upgradeMember ? { upgradeMemberId: upgradeMember.id, expectedMemberRevision: upgradeMember.revision } : {}),
       },
     });
     let state;
@@ -289,6 +349,12 @@ export class AccessRequests {
     const sequence = room.sequence + 1;
     this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
     this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
+  }
+
+  // The durable row distinguishes upgrades from legacy admission requests,
+  // including when an import has replaced their original request event.
+  upgradeBasis(row) {
+    return requestContents(row).upgrade;
   }
 
   // RC-2026-09-29-3603: setting a standing admission rule requires actual
@@ -383,10 +449,12 @@ export class AccessRequests {
   // the room has no rule, preserving the existing silent-pending behavior.
   tryAutoApprove(roomId, requestId) {
     const row = this.db.prepare("SELECT * FROM access_requests WHERE request_id=?").get(requestId);
-    if (!row || row.status !== "pending" || row.room_id !== roomId) return { approved: false, pendingNote: null };
+    if (!row || !isPending(row.status) || row.room_id !== roomId) return { approved: false, pendingNote: null };
+    if (this.upgradeBasis(row)) return { approved: false, pendingNote:
+      "Additional permissions for an existing member require an authorized review; this request waits for a decision." };
     const config = this.getAutoApproveConfig(row.room_id);
     if (!config) return { approved: false, pendingNote: null };
-    const requested = JSON.parse(row.requested_permissions);
+    const requested = requestContents(row).permissions;
     if (!requested.length || !requested.every(p => config.permissions.includes(p))) {
       return { approved: false, pendingNote:
         `This room auto-approves ${config.permissions.join(", ")}; the requested ${requested.join(", ") || "read/chat access"} is outside the rule, so it waits for an owner decision.` };
@@ -508,7 +576,7 @@ export class AccessRequests {
     return Object.freeze([
       Object.freeze({ action: "poll-status", method: "GET",
         path: `/api/access-requests/${encodeURIComponent(requestId)}?identityId=${encodeURIComponent(identityId)}`,
-        description: `Poll this path with your identityId to learn the owner's decision. Requests expire undecided after ${REQUEST_TTL_MS / 86400000} days.` }),
+        description: `Poll this path with your identityId to learn the owner's decision. Existing-member upgrades also require your current identity secret as Bearer. Requests expire undecided after ${REQUEST_TTL_MS / 86400000} days.` }),
       Object.freeze({ action: "cancel-request", method: "POST",
         path: `/api/access-requests/${encodeURIComponent(requestId)}`,
         description: "Withdraw this pending request. Send { identityId } with your identity's current secret as the Bearer token." }),
@@ -517,9 +585,10 @@ export class AccessRequests {
 
   // Identity-scoped read: the requesting identity checks its own request.
   // Anyone else gets 404, so pending requests are not enumerable.
-  status(requestId, identityId) {
+  status(requestId, identityId, secret = null) {
     const row = this.db.prepare("SELECT * FROM access_requests WHERE request_id=?").get(requestId);
     if (!row || row.identity_id !== identityId) fail(404, "not_found", "No such join request");
+    if (this.upgradeBasis(row)) this.store.identities.authenticateIdentitySecret(identityId, secret);
     return rowToRequest(this.maybeExpire(row));
   }
 
@@ -542,7 +611,8 @@ export class AccessRequests {
     if (!STATUSES.includes(status)) fail(422, "invalid_request", `status must be one of ${STATUSES.join(", ")}`);
     this.expireOld(roomId);
     const rows = this.db.prepare(
-      "SELECT * FROM access_requests WHERE room_id=? AND status=? ORDER BY created_at ASC").all(roomId, status);
+      "SELECT * FROM access_requests WHERE room_id=? AND status IN (?,?) ORDER BY created_at ASC")
+      .all(roomId, status, status === "pending" ? UPGRADE_PENDING_STATUS : status);
     return Object.freeze(rows.map(rowToRequest));
   }
 
@@ -559,8 +629,11 @@ export class AccessRequests {
       const row = this.db.prepare("SELECT * FROM access_requests WHERE request_id=? AND room_id=?").get(requestId, roomId);
       if (!row) fail(404, "not_found", "No such join request");
       const live = this.maybeExpire(row);
-      if (live.status !== "pending") fail(409, "already_decided", `Request is already ${live.status}`);
+      if (!isPending(live.status)) fail(409, "already_decided", `Request is already ${live.status}`);
       const now = this.store.now();
+      if (this.upgradeBasis(row)) {
+        return this.memberPermissions.review(token, roomId, row, { decision, permissions, note }, auth, expectedSessionBinding);
+      }
       if (decision === "deny") {
         // RC-2026-09-18-025: explicit null treated as omitted, same as request().
         if (note !== undefined && note !== null && (typeof note !== "string" || note.length > 500)) {
@@ -573,7 +646,7 @@ export class AccessRequests {
       // Approve: the owner chooses the final permissions (never more than
       // the agent asked for is not enforced — the owner is sovereign — but
       // the request records what was asked).
-      const grants = permissions === undefined ? JSON.parse(row.requested_permissions) : permissions;
+      const grants = permissions === undefined ? requestContents(row).permissions : permissions;
       // RC-2026-09-18-022: the approval grant is validated too, so a
       // hand-written approval can never mint a member with nonsense
       // permissions. (Requests validated at request() time already pass.)
@@ -660,7 +733,7 @@ export class AccessRequests {
       if (!row || row.identity_id !== identityId) fail(404, "not_found", "No such join request");
       const live = this.maybeExpire(row);
       if (live.status === "cancelled") return rowToRequest(this.db.prepare("SELECT * FROM access_requests WHERE request_id=?").get(requestId));
-      if (live.status !== "pending") fail(409, "already_decided", `Request is already ${live.status}`);
+      if (!isPending(live.status)) fail(409, "already_decided", `Request is already ${live.status}`);
       const now = this.store.now();
       this.db.prepare("UPDATE access_requests SET status='cancelled', decided_at=?, decision_note=? WHERE request_id=?")
         .run(now, "withdrawn by requester", requestId);
@@ -670,7 +743,7 @@ export class AccessRequests {
 
   // Mark a single row expired if past TTL; returns the (possibly updated) row.
   maybeExpire(row) {
-    if (row.status === "pending" && this.store.now() - row.created_at > REQUEST_TTL_MS) {
+    if (isPending(row.status) && this.store.now() - row.created_at > REQUEST_TTL_MS) {
       this.db.prepare("UPDATE access_requests SET status='expired' WHERE request_id=?").run(row.request_id);
       return { ...row, status: "expired" };
     }
@@ -679,7 +752,7 @@ export class AccessRequests {
 
   expireOld(roomId) {
     const cutoff = this.store.now() - REQUEST_TTL_MS;
-    this.db.prepare("UPDATE access_requests SET status='expired' WHERE room_id=? AND status='pending' AND created_at<?")
+    this.db.prepare("UPDATE access_requests SET status='expired' WHERE room_id=? AND status IN ('pending', 'pending_upgrade') AND created_at<?")
       .run(roomId, cutoff);
   }
 }
