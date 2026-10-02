@@ -1,15 +1,17 @@
 // Declarative HTTP route table (batch RT).
 //
 // Every route that has left the legacy chain in server/http.mjs is one frozen
-// row. The table starts empty: dispatch falls through and behaviour is unchanged.
-// Batch C fills `capability`. SPLIT reads `scope`. Both columns are required now.
+// row. Unmatched paths fall through. Batch C fills `capability`. SPLIT reads
+// `scope`. Both columns are required now.
+
+import { INBOX_ROUTES } from "./inbox.mjs";
 
 export const AUTH_CLASSES = Object.freeze(["none", "room", "account", "bearer", "roomToken", "door", "mcp"]);
 export const ROUTE_SCOPES = Object.freeze(["worker", "public", "directory", "room"]);
 export const ROUTE_METHODS = Object.freeze(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]);
 
-// Frozen and empty until an extraction PR adds rows. Do not push; replace the array.
-export const ROUTES = Object.freeze([]);
+// Rows land here as groups leave the legacy chain. Do not push; replace the array.
+export const ROUTES = Object.freeze([...INBOX_ROUTES]);
 
 export function assertRouteRow(row) {
   const problems = [];

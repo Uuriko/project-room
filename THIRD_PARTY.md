@@ -15,6 +15,7 @@ relicense dependencies, quoted source material or third-party artwork.
 - **Quotations, product names and logos:** third-party rights remain with their
   owners. Source links in research documents are attribution, not a license grant.
 - **Test-audit skill:** `.agents/skills/test-audit/` is copied from [OpenClaw](https://github.com/openclaw/openclaw/blob/main/.agents/skills/test-audit/SKILL.md) (`SKILL.md` and `CAMPAIGN.md`). Copyright (c) 2026 OpenClaw Foundation, MIT. The MIT text is in `.agents/skills/test-audit/LICENSE`. The "Project Room" section at the end of `SKILL.md` is a local adaptation. This does not relicense the rest of the repository.
+- **Inter:** `og/fonts/Inter-Regular.ttf` is Inter 4.1 Regular by The Inter Project Authors, used only to rasterize the runtime Open Graph glyph atlas. SIL Open Font License 1.1. The license text is `og/fonts/OFL.txt`. Upstream: https://github.com/rsms/inter
 - **Emoji shortcodes:** `src/emoji-catalog.js` vendors names, descriptions, and tags from [github/gemoji](https://github.com/github/gemoji) `db/emoji.json` (MIT). Modifier-base code points are from Unicode Emoji 16.0 `emoji-data.txt` (© 2024 Unicode®, Inc., [Unicode terms of use](https://www.unicode.org/terms_of_use.html)). The glyphs themselves are Unicode characters, not copied artwork.
 - **Dependencies:** Node.js and npm/pnpm dependencies retain their own licenses.
   Root and nested manifests/lockfiles identify exact packages. The Node service
