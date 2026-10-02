@@ -462,9 +462,9 @@ test("identity secret is shown once: no read path returns it afterwards (RC-2026
   })).json();
   assert.ok(!JSON.stringify(list).includes(secret), "secret must not appear in the owner link audit");
   assert.ok(!/"secret"/.test(JSON.stringify(list)), "no secret field anywhere in the audit list");
-  // The database holds only the v2 scrypt hash: the plaintext secret is unrecoverable server-side.
+  // The database holds only the v3 keyed hash: the plaintext secret is unrecoverable server-side.
   const row = store.db.prepare("SELECT secret_hash FROM agent_identities WHERE identity_id=?").get(identityId);
-  assert.ok(row && /^v2:[a-f0-9]{64}$/.test(row.secret_hash), "only the v2 hash is stored");
+  assert.ok(row && /^v3:[a-f0-9]{64}$/.test(row.secret_hash), "only the fast keyed hash is stored");
   assert.ok(!row.secret_hash.includes(secret.slice(4, 12)), "no plaintext fragment in the stored hash");
 });
 
@@ -619,7 +619,7 @@ test("owner agent passes the identity-connection ladder with owner-class permiss
   }
 });
 
-test("legacy sha256 identity hashes upgrade to v2 scrypt on successful verification (RC-2026-09-23)", async t => {
+test("legacy sha256 identity hashes upgrade to the fast keyed verifier on successful verification (RC-2026-09-23)", async t => {
   const { store, origin } = await serve(t);
   const { createHash } = await import("node:crypto");
   const { identityId, secret } = await createAgentIdentity(origin, "Legacy Bot");
@@ -633,9 +633,9 @@ test("legacy sha256 identity hashes upgrade to v2 scrypt on successful verificat
   const resolved = store.identities.resolveGlobalIdentitySecret(secret);
   assert.equal(resolved?.identityId, identityId);
 
-  // ...and the row is now v2.
+  // ...and the row is now the fast keyed verifier.
   const after = store.db.prepare("SELECT secret_hash FROM agent_identities WHERE identity_id=?").get(identityId);
-  assert.match(after.secret_hash, /^v2:[a-f0-9]{64}$/);
+  assert.match(after.secret_hash, /^v3:[a-f0-9]{64}$/);
   assert.notEqual(after.secret_hash, legacy);
 
   // The secret keeps working after the upgrade (authenticate + resolve paths).
@@ -670,7 +670,76 @@ test("legacy identity first reads authenticate without writing or degrading stor
   assert.throws(() => store.readTransaction(() => { throw new Error("read failed"); }), /read failed/);
   assert.equal(store.readTransactionDepth, 0);
   store.identities.authenticateIdentitySecret(identity.identityId, identity.secret);
-  assert.match(storedHash(), /^v2:[a-f0-9]{64}$/);
+  assert.match(storedHash(), /^v3:[a-f0-9]{64}$/);
   store.identities.revoke(identity.identityId, identity.secret);
   assert.throws(() => store.snapshot(identity.secret, "commons"), error => error.status === 401);
+});
+
+test("a current identity secret verifies without scrypt, and a stored scrypt row pays it once", async t => {
+  const { store } = await serve(t);
+  const { randomBytes, scryptSync } = await import("node:crypto");
+  const { IDENTITY_HASH_PARAMS, IDENTITY_HASH_SALT, IDENTITY_V2_PREFIX, identityScryptComputations } = await import("../server/identity-secret-hash.mjs");
+  const stranger = "pri_" + Buffer.from(randomBytes(32)).toString("base64url");
+  const current = store.identities.create("Fast Path");
+  const legacy = store.identities.create("Scrypt Path");
+  const digest = `${IDENTITY_V2_PREFIX}${scryptSync(legacy.secret, IDENTITY_HASH_SALT, 32, IDENTITY_HASH_PARAMS).toString("hex")}`;
+  store.db.prepare("UPDATE agent_identities SET secret_hash=? WHERE identity_id=?").run(digest, legacy.identityId);
+  const before = identityScryptComputations();
+  for (let i = 0; i < 12; i++) assert.equal(store.identities.resolveGlobalIdentitySecret(current.secret).identityId, current.identityId);
+  assert.equal(identityScryptComputations(), before, "v3 lookup must not run scrypt");
+  // A well-formed secret for an identity whose verifier is already HMAC
+  // must not run scrypt, even while another row is still v2.
+  assert.throws(() => store.identities.authenticateIdentitySecret(current.identityId, stranger), /Unknown or revoked/);
+  assert.equal(identityScryptComputations(), before, "unknown secret looked up by identity id must not run scrypt");
+  const stored = store.db.prepare("SELECT secret_hash AS secretHash FROM agent_identities WHERE identity_id=?").get(current.identityId);
+  assert.match(stored.secretHash, /^v3:[a-f0-9]{64}$/);
+  assert.equal(stored.secretHash.includes(current.secret.slice(4, 16)), false);
+
+  const cold = identityScryptComputations();
+  assert.throws(() => store.identities.authenticateIdentitySecret(legacy.identityId, stranger), /Unknown or revoked/);
+  assert.equal(identityScryptComputations(), cold + 1, "a v2 row pays one scrypt to reject a wrong secret");
+  assert.throws(() => store.identities.authenticateIdentitySecret(legacy.identityId, stranger), /Unknown or revoked/);
+  assert.equal(identityScryptComputations(), cold + 1, "the same wrong secret does not run scrypt again and still fails");
+  assert.equal(store.identities.resolveGlobalIdentitySecret(legacy.secret).identityId, legacy.identityId);
+  assert.equal(identityScryptComputations(), cold + 2, "the real v2 secret pays one scrypt and upgrades");
+  for (let i = 0; i < 12; i++) assert.equal(store.identities.resolveGlobalIdentitySecret(legacy.secret).identityId, legacy.identityId);
+  assert.equal(identityScryptComputations(), cold + 2, "later verifies use the stored fast hash");
+  const upgraded = store.db.prepare("SELECT secret_hash AS secretHash FROM agent_identities WHERE identity_id=?").get(legacy.identityId);
+  assert.match(upgraded.secretHash, /^v3:[a-f0-9]{64}$/);
+  assert.notEqual(upgraded.secretHash, digest);
+  assert.equal(store.identities.resolveGlobalIdentitySecret(stranger), null);
+  assert.equal(identityScryptComputations(), cold + 2, "an unknown secret does not run scrypt once no v2 row remains");
+  const rotated = store.identities.rotate(legacy.identityId, legacy.secret);
+  assert.equal(store.identities.resolveGlobalIdentitySecret(legacy.secret), null);
+  assert.equal(store.identities.resolveGlobalIdentitySecret(rotated.secret).identityId, legacy.identityId);
+  store.identities.revoke(legacy.identityId, rotated.secret);
+  assert.equal(store.identities.resolveGlobalIdentitySecret(rotated.secret), null);
+  assert.equal(identityScryptComputations(), cold + 2, "rotate and revoke do not re-run scrypt or accept a cached verifier");
+});
+
+test("omitting ROOM_IDENTITY_HASH_KEY does not lock out fallback or previously keyed verifiers", async t => {
+  const { fastIdentityHash } = await import("../server/identity-secret-hash.mjs");
+  const directory = mkdtempSync(join(tmpdir(), "project-room-identity-key-"));
+  const path = join(directory, "room.sqlite");
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const plain = new RoomStore(path, { identityHashKey: null });
+  plain.initialize(initialRoom("commons"));
+  const agent = plain.identities.create("Local agent");
+  const stored = plain.db.prepare("SELECT secret_hash AS secretHash, fallback_secret_hash AS fallbackHash FROM agent_identities WHERE identity_id=?").get(agent.identityId);
+  assert.equal(stored.secretHash, fastIdentityHash(agent.secret, null));
+  assert.equal(stored.fallbackHash, null);
+  plain.close();
+  const key = "worker-identity-hash-key";
+  const keyed = new RoomStore(path, { identityHashKey: key });
+  assert.equal(keyed.identities.resolveGlobalIdentitySecret(agent.secret).identityId, agent.identityId);
+  const second = keyed.identities.create("Keyed agent");
+  const secondRow = keyed.db.prepare("SELECT secret_hash AS secretHash, fallback_secret_hash AS fallbackHash FROM agent_identities WHERE identity_id=?").get(second.identityId);
+  assert.equal(secondRow.secretHash, fastIdentityHash(second.secret, key));
+  assert.equal(secondRow.fallbackHash, fastIdentityHash(second.secret, null));
+  assert.notEqual(secondRow.secretHash, secondRow.fallbackHash);
+  keyed.close();
+  const omitted = new RoomStore(path, { identityHashKey: null });
+  assert.equal(omitted.identities.resolveGlobalIdentitySecret(agent.secret).identityId, agent.identityId);
+  assert.equal(omitted.identities.resolveGlobalIdentitySecret(second.secret).identityId, second.identityId);
+  omitted.close();
 });

@@ -1,21 +1,26 @@
-export const reviewedPublicSearchPaths = Object.freeze(["/about"]);
-export const PUBLIC_SEARCH_CSP = "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
-// Only explicitly reviewed static marketing pages may override private defaults.
-export const comparisonSlugs = Object.freeze([
-  "project-room-vs-slack", "project-room-vs-discord", "agent-collaboration-tool",
-  "multi-agent-workspace", "ai-agent-coordination", "project-room-vs-agent-room"
-]);
+export const reviewedPublicSearchPaths = Object.freeze(["/", "/offers", "/about"]);
+export const PUBLIC_SEARCH_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+// A compare URL is advertised only when its HTML file is listed here and registered
+// as a public asset. Slugs whose files were never added 404'd on the origin.
+export const comparisonSlugs = Object.freeze([]);
+const staticPages = Object.freeze([["/", "index.html"], ["/offers", "offers.html"], ["/about", "about.html"]]);
 export function publicSearchAssets(registered) {
   const paths = new Set(registered);
-  return new Map([['/about', 'about.html'], ...comparisonSlugs.map(slug => [`/compare/${slug}`, `compare/${slug}.html`])]
+  return new Map([...staticPages, ...comparisonSlugs.map(slug => [`/compare/${slug}`, `compare/${slug}.html`])]
     .filter(([, file]) => paths.has(file)));
 }
 export function publicSearchCanonical(pathname, registered) {
   const routes = publicSearchAssets(registered);
   if (routes.has(pathname)) return pathname;
-  if (pathname === '/about.html') return routes.has('/about') ? '/about' : null;
-  const candidate = pathname.endsWith('.html') ? pathname.slice(0, -5) : null;
+  if (pathname === "/index.html") return routes.has("/") ? "/" : null;
+  if (pathname === "/about.html") return routes.has("/about") ? "/about" : null;
+  const candidate = pathname.endsWith(".html") ? pathname.slice(0, -5) : null;
   return candidate && routes.has(candidate) ? candidate : null;
+}
+// Locked marketing CSP is for documents with no scripts. The app shell and
+// offers page keep the room policy so their stylesheets and modules load.
+export function publicSearchMarketingPolicy(pathname) {
+  return pathname === "/about" || (typeof pathname === "string" && pathname.startsWith("/compare/"));
 }
 export function publicSearchSitemap(origin, paths) {
   const escape = text => text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('"', '&quot;');

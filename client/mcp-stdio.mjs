@@ -10,6 +10,7 @@ import { currentAttention } from "./attention-inbox.mjs";
 import { WatchError } from "./watch-journal.mjs";
 import { replyTools, isReplyTool, replyRoute, validReplyArguments, submitReplyAction, replyRefusal } from "./reply-actions.mjs";
 import { helpTools, isHelpTool, validHelpArguments, submitHelpAction, helpActionRefusal } from "./help-actions.mjs";
+import { withOpenWorldHint } from "../server/content-trust.mjs";
 
 export const MCP_VERSION = "2025-11-25";
 export const MCP_PREVIOUS_VERSION = "2025-06-18";
@@ -218,7 +219,7 @@ export function serveRoomMcp({ client, roomId, memberId, input, output, timeoutM
       } else if (phase !== "ready") { await error(requestId, -32000, "Initialize first"); return; }
       else if (message.method === "tools/list") {
         if (message.params?.cursor !== undefined) { await error(requestId, -32602, "No pagination cursor is supported"); return; }
-        result = { tools };
+        result = { tools: tools.map(withOpenWorldHint) };
       } else if (message.method === "tools/call") {
         const selected = tools.find(tool => tool.name === message.params?.name), args = message.params?.arguments ?? {};
         if (!selected || !validArguments(selected, args)) {

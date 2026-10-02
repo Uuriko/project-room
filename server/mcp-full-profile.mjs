@@ -26,6 +26,7 @@ import { trustTools, isTrustTool, validTrustToolArguments } from "../client/trus
 import { isWorkTool, buildWorkCommand, confirmsAgentCommand, recordedWorkAction } from "../client/work-actions.mjs";
 import { isHelpTool, buildHelpCommand, recordedHelpAction } from "../client/help-actions.mjs";
 import { isReplyTool, replyRoute, buildReplyCommand, recordedReplyAction } from "../client/reply-actions.mjs";
+import { markIfOther, stampBoard, withContentTrust } from "./content-trust.mjs";
 
 const ALREADY_HOSTED = new Set(["room_check_access", "get_room_context", "room_list_work"]);
 const roomIdField = { type: "string", minLength: 1, maxLength: 128, description: "Room id this identity is linked to." };
@@ -89,7 +90,10 @@ function roomMessages(store, secret, roomId, args, memberId) {
       && [event.actorId, event.data.toMemberId].includes(memberId) ? { requestKind: "reply", nextRead: { tool: "room_read_request", arguments: { roomId, requestMessageId: event.data.messageId ?? event.id } } } : {}),
     ...(Array.isArray(event.mentions) && event.mentions.length ? { mentions: event.mentions.map(mention => ({ memberId: mention.memberId, displayName: mention.displayName })) } : {})
   }));
-  return { roomId, messages, next: page?.next ?? after, hasMore: Boolean(page?.hasMore) };
+  return withContentTrust({
+    roomId, messages: messages.map(message => markIfOther(message, memberId, message.from)),
+    next: page?.next ?? after, hasMore: Boolean(page?.hasMore)
+  });
 }
 
 function replyRead(store, secret, roomId, name, args) {
@@ -191,8 +195,8 @@ export async function callHostedStdioTool(store, secret, name, args) {
   }
   if (name === "room_read_board") {
     const snapshot = store.snapshot(secret, roomId);
-    return { value: { ...projectBoard(snapshot.state, Date.now()), roomId: snapshot.roomId,
-      evaluatedThrough: snapshot.sequence, evaluatedAt: new Date().toISOString() }, isError: false };
+    return { value: stampBoard({ ...projectBoard(snapshot.state, Date.now()), roomId: snapshot.roomId,
+      evaluatedThrough: snapshot.sequence, evaluatedAt: new Date().toISOString() }), isError: false };
   }
   if (name === "room_read_work") {
     const options = { includeSource: rest.includeSource ?? false, includeOffers: rest.includeOffers ?? false };

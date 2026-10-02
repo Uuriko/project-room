@@ -1,6 +1,7 @@
 import { createHash, createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { ServiceError } from "./store.mjs";
 import { validId } from "../src/events.js";
+import { markIfOther, withContentTrust } from "./content-trust.mjs";
 
 const keys = new WeakMap();
 const MAX_BYTES = 512 * 1024;
@@ -80,6 +81,10 @@ export function readConversation(store, token, roomId, { limit = 50, cursor = nu
     const version = digest([head.sequence, anchor, messages]);
     const checkpoint = messageId === null && cursor === null ? signed.encode({ kind: "checkpoint", scope, version }) : null;
     if (since !== null && saved.version === version) return { ...base, mode: "not_modified", nextCursor, checkpoint };
-    return { ...base, mode: "replace", messages, nextCursor, checkpoint, messageBytes: bytes };
+    return withContentTrust({
+      ...base, mode: "replace",
+      messages: messages.map(message => markIfOther(message, auth.member.id, message.authorId)),
+      nextCursor, checkpoint, messageBytes: bytes
+    });
   });
 }

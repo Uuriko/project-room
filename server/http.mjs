@@ -1,4 +1,4 @@
-import { publicSearchAssets, publicSearchCanonical, publicSearchSitemap, PUBLIC_SEARCH_CSP, reviewedPublicSearchPaths } from "../deploy/public-search.mjs";
+import { publicSearchAssets, publicSearchCanonical, publicSearchMarketingPolicy, publicSearchSitemap, PUBLIC_SEARCH_CSP, reviewedPublicSearchPaths } from "../deploy/public-search.mjs";
 import { readConversation } from "./conversation-sync.mjs";
 import { OutsideAgents } from "./outside-agents.mjs";
 import { GmailSync } from './gmail-sync.mjs';
@@ -94,13 +94,18 @@ const accountCookieName = "account_session";
 const tokenPattern = /^[A-Za-z0-9_-]{43}$/;
 const bindingPattern = /^[a-f0-9]{64}$/;
 const assetType = path => path.endsWith(".js") ? "text/javascript" : path.endsWith(".css") ? "text/css"
-  : path.endsWith(".html") ? "text/html" : "text/markdown; charset=utf-8";
+  : path.endsWith(".html") ? "text/html" : path.endsWith(".svg") ? "image/svg+xml"
+  : path.endsWith(".webmanifest") ? "application/manifest+json" : "text/markdown; charset=utf-8";
 const assets = new Map([
   ["/", ["index.html", "text/html"]],
   ["/offers", ["offers.html", "text/html"]],
   ...publicAssetPaths.map(path => [`/${path}`, [path, assetType(path)]]),
 ]);
 for (const [url, file] of publicSearchAssets(publicAssetPaths)) assets.set(url, [file, "text/html"]);
+for (const name of ["favicon.svg", "icon.svg", "manifest.webmanifest"]) {
+  const asset = assets.get(`/${name}`);
+  if (asset) assets.set(`/room/${name}`, asset);
+}
 const reject = (status, code, message, headers) => { throw new ServiceError(status, code, message, headers ?? null); };
 // RFC 8288 discovery hints on machine-readable surfaces: the A2A agent card,
 // the llms packet, the skills catalog, and the public HTML door.
@@ -733,7 +738,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     res.setHeader("Strict-Transport-Security", "max-age=31536000");
     // Cloudflare Web Analytics injects its beacon at the edge. The app does not
     // add that script; this document policy is what lets the beacon run.
-    res.setHeader("Content-Security-Policy", "default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'");
+    res.setHeader("Content-Security-Policy", "default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'");
     try {
       if (req.headers.host !== new URL(expectedOrigin()).host) reject(403, "host_denied", "Unexpected host");
       let remoteAddress;
@@ -1871,6 +1876,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return res.end(req.method === "HEAD" ? undefined : html);
       }
       if (url.pathname === "/receipts" || url.pathname === "/api/public/receipts") reject(405, "method_not_allowed", "Method not allowed");
+      if ((url.pathname === "/join.html" || url.pathname === "/room/join.html") && ["GET", "HEAD"].includes(req.method)) {
+        res.writeHead(301, { Location: url.pathname.replace(/\.html$/, "") + url.search });
+        return res.end();
+      }
+      if ((url.pathname === "/favicon.ico" || url.pathname === "/room/favicon.ico") && ["GET", "HEAD"].includes(req.method)) {
+        res.writeHead(301, { Location: (url.pathname.startsWith("/room/") ? "/room" : "") + "/favicon.svg" });
+        return res.end();
+      }
       if (url.pathname === "/sitemap.xml" && ["GET", "HEAD"].includes(req.method)) {
         // Confirm bytes exist before advertising an asset-backed canonical URL.
         const available = [];
@@ -1887,13 +1900,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const [path, type] = assets.get(url.pathname);
         const data = await loadAsset(path);
         const canonical = publicSearchCanonical(url.pathname, publicAssetPaths);
-        if (canonical) res.setHeader("Content-Security-Policy", PUBLIC_SEARCH_CSP);
+        if (canonical && publicSearchMarketingPolicy(canonical)) res.setHeader("Content-Security-Policy", PUBLIC_SEARCH_CSP);
         if (canonical && !url.search) {
-          if (reviewedPublicSearchPaths.includes(canonical)) res.setHeader("X-Robots-Tag", "all");
           if (canonical !== url.pathname) {
             res.writeHead(301, { Location: canonical });
             return res.end();
           }
+          if (reviewedPublicSearchPaths.includes(canonical)) res.setHeader("X-Robots-Tag", "all");
         }
         // RFC 8288 discovery hints on the public HTML door too: a cold agent
         // starting at GET / alone can find the agent card from Link headers.

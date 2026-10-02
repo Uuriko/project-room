@@ -93,6 +93,9 @@ test("settingsHtml shows linked methods with actions and honest provider states"
   assert.ok(html.includes("Nothing to configure here yet. Room notifications stay in Catch up."));
   assert.ok(html.includes("No plan is billed from account settings."));
   assert.ok(html.includes("a@b.c"), "profile lists the account email");
+  const advanced = html.slice(html.indexOf('id="settings-advanced-title"'));
+  assert.ok(advanced.includes("Delete account"), "Advanced offers Delete account");
+  assert.ok(advanced.includes('data-action="delete-account"'));
 });
 
 test("settingsHtml offers password set when none exists and recovery generation", () => {

@@ -6,6 +6,9 @@
 
 export const HEARTBEAT_STORAGE_KEY = 'cron:job-heartbeats:v1';
 export const STALE_PERIODS = 3;
+// A cron RPC shares the request Durable Object. Each job gets this long,
+// then it stops at the next item so a slow tick cannot pin the input gate.
+export const CRON_JOB_BUDGET_MS = 5000;
 
 // The production trigger is "* * * * *" and each tick runs every job.
 export const CRON_JOBS = Object.freeze([
@@ -45,6 +48,8 @@ function errorText(job, error) {
 // drainer never throws; it returns scanError / errors instead).
 export function summaryFailure(result) {
   if (!result || typeof result !== 'object') return null;
+  // budgetExceeded is cooperative progress, recorded in the summary. It is
+  // not a failed tick: the next minute continues the remainder.
   if (result.scanError) return `scanError: ${redactError(result.scanError)}`;
   if (Number(result.errors) > 0) return `${Number(result.errors)} error(s) in tick`;
   return null;
@@ -62,22 +67,38 @@ export function compactSummary(result) {
   return Object.keys(out).length ? out : null;
 }
 
-// Runs every job concurrently; never rejects. One outcome per job.
-export async function runCronJobs(runners, { now = () => Date.now(), log = (...args) => console.warn(...args) } = {}) {
-  return Promise.all(Object.entries(runners).map(async ([name, run]) => {
+// One job at a time. Promise.all queued every RPC onto the Durable Object
+// before any of them yielded, so a request that arrived mid-tick waited for
+// the whole set. A turn yield between jobs lets the Worker deliver HTTP
+// before the next RPC. Never rejects. One outcome per job.
+export async function runCronJobs(runners, {
+  now = () => Date.now(),
+  log = (...args) => console.warn(...args),
+  yieldTurn = () => new Promise(resolve => setTimeout(resolve, 0))
+} = {}) {
+  const entries = Object.entries(runners);
+  const outcomes = [];
+  for (let index = 0; index < entries.length; index++) {
+    if (index > 0) await yieldTurn();
+    const [name, run] = entries[index];
     const job = JOBS.get(name) ?? { name, periodSeconds: 60 };
     const startedAt = now();
     try {
       const result = await run();
       const failure = summaryFailure(result);
+      const durationMs = now() - startedAt;
+      console.info(JSON.stringify({ event: 'room.cron_job', job: name, ok: !failure, durationMs }));
       if (failure) log(`[${name}] cron tick reported failure: ${failure}`);
-      return { job: name, ok: !failure, at: startedAt, durationMs: now() - startedAt, error: failure, summary: compactSummary(result) };
+      outcomes.push({ job: name, ok: !failure, at: startedAt, durationMs, error: failure, summary: compactSummary(result) });
     } catch (error) {
       const message = errorText(job, error);
+      const durationMs = now() - startedAt;
+      console.info(JSON.stringify({ event: 'room.cron_job', job: name, ok: false, durationMs }));
       log(`[${name}] cron tick failed: ${message}`);
-      return { job: name, ok: false, at: startedAt, durationMs: now() - startedAt, error: message, summary: null };
+      outcomes.push({ job: name, ok: false, at: startedAt, durationMs, error: message, summary: null });
     }
-  }));
+  }
+  return outcomes;
 }
 
 // Folds one tick's outcomes into the stored per-job record.

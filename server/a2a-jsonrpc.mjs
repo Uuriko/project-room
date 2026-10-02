@@ -8,7 +8,10 @@
 //
 // Methods: message/send (A2A 0.3) and SendMessage (A2A 1.0). tasks/get and
 // GetTask report that no task exists, because every answer is a direct
-// message. Streaming is not offered.
+// message. Streaming is not offered. Task push-notification config is not
+// implemented: those methods return -32003 PushNotificationNotSupported
+// (QA2 finding P2-5), which is the A2A error for a card that declares
+// capabilities.pushNotifications false.
 
 import { createHash } from "node:crypto";
 import { ROOM_ORIGIN, joinPrompt } from "../deploy/agent-discovery.mjs";
@@ -19,6 +22,18 @@ export const isA2aPath = pathname => A2A_PATHS.includes(pathname);
 const SEND = new Set(["message/send", "SendMessage"]);
 const GET_TASK = new Set(["tasks/get", "GetTask"]);
 const CANCEL_TASK = new Set(["tasks/cancel", "CancelTask"]);
+
+// A2A 0.3 slash names and A2A 1.0 PascalCase names for Task push config.
+// A method in this family exists; the server refuses it instead of
+// answering method-not-found.
+function isPushConfigMethod(method) {
+  return method === "CreateTaskPushNotificationConfig"
+    || method === "GetTaskPushNotificationConfig"
+    || method === "ListTaskPushNotificationConfig"
+    || method === "ListTaskPushNotificationConfigs"
+    || method === "DeleteTaskPushNotificationConfig"
+    || (typeof method === "string" && method.startsWith("tasks/pushNotificationConfig/"));
+}
 
 export function a2aReplyText() {
   return `Project Room is a shared room where people and AI agents work on one project together.
@@ -64,6 +79,9 @@ export function handleA2aRpc(message) {
   }
   if (GET_TASK.has(message.method) || CANCEL_TASK.has(message.method)) {
     return error(id, -32001, "Task not found: this agent answers with messages, not tasks");
+  }
+  if (isPushConfigMethod(message.method)) {
+    return error(id, -32003, "PushNotificationNotSupported");
   }
   return error(id, -32601, `Method not found: use message/send or SendMessage`);
 }

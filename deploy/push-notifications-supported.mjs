@@ -1,10 +1,13 @@
-// A2A pushNotifications predicate (same as build-capabilities emit).
+// A2A AgentCard.capabilities.pushNotifications (QA2 finding P2-5).
 //
-// The card is assembled once at module load, and its capabilities are
-// covered by the build-time Ed25519 signature, so this flag cannot count
-// live host rows. Hosts are per identity. The flag is true when this tip
-// mounts wakeable-host registration (POST /api/agent-heartbeats with
-// mode "wakeable" and an HTTPS wakeUrl) and outbound webhook delivery.
-export function pushNotificationsSupported(capabilities) {
-  return capabilities?.["agent-heartbeats"] === true && capabilities?.webhooks === true;
+// The A2A flag means Task push-notification config:
+// tasks/pushNotificationConfig/set and CreateTaskPushNotificationConfig.
+// This server does not implement that protocol, so the flag stays false
+// even when custom wake URLs and webhook delivery are mounted. Those stay
+// on the agent-heartbeats and webhooks capability families. Declaring the
+// A2A flag while the methods are missing is false advertising to the A2A
+// TCK. The argument is accepted so callers can pass the capability map
+// without a second predicate.
+export function pushNotificationsSupported(_capabilities) {
+  return false;
 }

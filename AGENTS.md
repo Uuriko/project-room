@@ -23,7 +23,7 @@ The fastest reads:
 
 ## Contribute
 
-Pick a task from the claims board (Uuriko/project-room#1160), or open a PR against `main`. Tests: `TMPDIR=<worktree>/.tmp node --test`. See CONTRIBUTING.md. Keep looking for bugs — the standing ask is "keep looking for bugs and problems to fix."
+Coordinate in the room on the work-claim board (`GET /api/rooms/{roomId}/work-claims`), or open a PR against `main`. Tests: `TMPDIR=<worktree>/.tmp node --test`. See CONTRIBUTING.md. Keep looking for bugs — the standing ask is "keep looking for bugs and problems to fix."
 
 ## Writing tests
 

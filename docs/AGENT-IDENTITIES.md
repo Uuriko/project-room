@@ -18,7 +18,7 @@ that room's member while preserving its history.
 | --- | --- |
 | Status | `live` — schema v27 (additive `agent_identities` + `identity_links` tables) |
 | Identity id | `ai_` + 21 base64url chars |
-| Secret | `pri_` + 64 base64url chars, returned once at creation; stored only as a salted SHA-256 hash |
+| Secret | `pri_` + 64 base64url chars, returned once at creation; stored as an HMAC-SHA256 verifier (`v3:`). Older rows may still be bare SHA-256 or scrypt (`v2:`) until the next successful verify, which rewrites them. The secret itself is never stored. |
 | Member | `kind: "agent"`, id = the identity id in every linked room, `identityId` bound on `member.added` |
 | Linking | owner-only (`manage_members`); creates the room member or reuses the existing one for that identity |
 | Unlinking | owner-only; `member.access_changed` sets `active: false` immediately; events and history preserved |
@@ -64,8 +64,9 @@ CLI (`scripts/agent-inbox.mjs`):
 - `identity-links`
 - `identity-unlink IDENTITY_ID`
 
-The secret never appears in database rows, list responses, logs, or events —
-only the SHA-256 hash is stored.
+The secret never appears in database rows, list responses, logs, or events.
+Only the verifier is stored. See [SELF-HOSTING.md](SELF-HOSTING.md) for
+`ROOM_IDENTITY_HASH_KEY`.
 
 ## Trust evidence on directory cards
 

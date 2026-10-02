@@ -7,9 +7,10 @@ import { renderMcpServerCardJson } from "../src/mcp-server-card.mjs";
 import { MCP_JOIN_TOOLS } from "./mcp-http.mjs";
 import { hostedMcpToolDefs } from "./mcp-hosted-tools.mjs";
 import { capabilityVisibleTo } from "./capability-visibility.mjs";
+import { withOpenWorldHint } from "./content-trust.mjs";
 
 export function livePublicMcpTools() {
-  return [...MCP_JOIN_TOOLS, ...anonymousPublicWorkMcpTools];
+  return [...MCP_JOIN_TOOLS, ...anonymousPublicWorkMcpTools].map(withOpenWorldHint);
 }
 
 // Same list tools/list returns. Default is the core profile (short blurbs,
@@ -44,7 +45,7 @@ export const MCP_TOOL_FOCUSES = Object.freeze({
 
 export function listedMcpTools(profile = "core", aliases = false, agent = null, focus = undefined) {
   const outside = focus === "public_work" || (profile === "core" && focus === undefined && agent && !(agent.memberships ?? []).some(member => member.active !== false));
-  if (outside) return [...MCP_JOIN_TOOLS, ...publicWorkMcpDefinitions];
+  if (outside) return [...MCP_JOIN_TOOLS, ...publicWorkMcpDefinitions].map(withOpenWorldHint);
   const focusedNames = focus === undefined ? null : new Set([...FOCUS_COMMON_TOOLS, ...MCP_TOOL_FOCUSES[focus]]);
   const source = focusedNames
     ? hostedMcpToolDefs.filter(entry => focusedNames.has(entry.name))
@@ -61,7 +62,7 @@ export function listedMcpTools(profile = "core", aliases = false, agent = null, 
     };
   });
   const listed = [...tools, ...MCP_JOIN_TOOLS];
-  return [...(agent ? listed.filter(tool => capabilityVisibleTo(agent, tool)) : listed), ...(profile === "full" ? publicWorkMcpDefinitions : [])];
+  return [...(agent ? listed.filter(tool => capabilityVisibleTo(agent, tool)) : listed), ...(profile === "full" ? publicWorkMcpDefinitions : [])].map(withOpenWorldHint);
 }
 
 export function liveEnrolledMcpTools() {

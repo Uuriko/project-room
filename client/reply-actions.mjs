@@ -4,6 +4,7 @@ import { validId } from "../src/events.js";
 import { replyPostMode } from "../src/reply-requests.js";
 import { conforms, confirmsAgentCommand } from "./work-actions.mjs";
 import { agentErrorAx } from "../src/agent-error.mjs";
+import { CONTENT_TRUST } from "../server/content-trust.mjs";
 
 const id = { type: "string", minLength: 1, maxLength: 128, pattern: "^(?!(?:constructor|prototype|__proto__)$)[A-Za-z0-9][A-Za-z0-9_.:-]*$" };
 const text = { type: "string", minLength: 1, maxLength: 4096, pattern: "\\S" };
@@ -115,6 +116,12 @@ const body = value => typeof value === "string" && value.trim().length > 0 && va
 const keys = (value, fields) => value && typeof value === "object" && !Array.isArray(value)
   && Object.keys(value).length === fields.length && fields.every(key => Object.hasOwn(value, key));
 const invalid = () => { throw Object.assign(new Error("Request response does not match the selected room, identity or window"), { status: 200, code: "invalid_response" }); };
+function withoutUntrusted(value) {
+  if (!value || typeof value !== "object" || !Object.hasOwn(value, "untrusted")) return value;
+  if (value.untrusted !== true) invalid();
+  const { untrusted, ...rest } = value;
+  return rest;
+}
 const assert = value => { if (!value) invalid(); };
 const requestFields = "id openingEventId requesterId recipientId workItemId status revision contextEventId terminalEventId createdAt closedAt".split(" ");
 function validRequest(request) {
@@ -161,7 +168,8 @@ export function validateReplyRead(result, { name, args, roomId }) {
     && validId(result.roomCreatedEventId) && page && page.cursor === (args.cursor ?? null) && page.checkpoint === (args.checkpoint ?? null)
     && integer(page.afterSequence) && integer(page.horizonSequence) && page.afterSequence <= page.horizonSequence
     && page.horizonSequence <= result.evaluatedThrough && validId(page.horizonEventId)
-    && page.limit === (args.limit ?? 20) && Array.isArray(page.items) && page.items.length <= page.limit && typeof page.hasMore === "boolean");
+    && page.limit === (args.limit ?? 20) && Array.isArray(page.items) && page.items.length <= page.limit && typeof page.hasMore === "boolean"
+    && result.contentTrust === CONTENT_TRUST);
   const binding = { version: 1, roomId, roomCreatedEventId: result.roomCreatedEventId, viewerId: result.viewerId,
     viewerAccountId: result.viewerAccountId, viewerAuthEpoch: result.viewerAuthEpoch, direction, requestMessageId };
   const decode = (token, kind) => {
@@ -196,9 +204,19 @@ export function validateReplyRead(result, { name, args, roomId }) {
       && (selected ? row.requestMessageId === requestMessageId && row.requesterId === request?.requesterId && row.recipientId === request?.recipientId && row.workItemId === request?.workItemId
         : direction === "incoming" ? row.recipientId === result.viewerId : direction === "outgoing" ? row.requesterId === result.viewerId
           : [row.requesterId, row.recipientId].includes(result.viewerId)));
-    if (row.kind === "cancelled") assert(keys(row, [...rowKeys, "reason"]) && body(row.reason));
+    if (row.kind === "cancelled") {
+      const canonical = withoutUntrusted(row);
+      assert(keys(canonical, [...rowKeys, "reason"]) && body(row.reason));
+      if (row.actorId !== result.viewerId) assert(row.untrusted === true);
+      else assert(!Object.hasOwn(row, "untrusted"));
+      bytes += Buffer.byteLength(JSON.stringify(canonical));
+    }
     else {
-      const message = row.message;
+      const raw = row.message;
+      if (raw?.authorId !== result.viewerId) assert(raw?.untrusted === true);
+      else assert(raw && !Object.hasOwn(raw, "untrusted"));
+      const message = withoutUntrusted(raw);
+      const canonical = message === raw ? row : { ...row, message };
       assert(keys(row, [...rowKeys, "message"])
         && message && keys(message, ["id", "authorId", "body", "workItemId", "replyToId", "toMemberId", "createdAt", ...(message.proposal ? ["proposal"] : [])])
         && validId(message.id) && !messages.has(message.id) && message.authorId === row.actorId && body(message.body) && message.createdAt === row.at
@@ -213,8 +231,9 @@ export function validateReplyRead(result, { name, args, roomId }) {
           && integer(p.basisRevision) && integer(p.submittedAtRevision) && p.basisRevision <= p.submittedAtRevision && p.attribution === "manual-unverified");
       }
       messages.add(message.id);
+      bytes += Buffer.byteLength(JSON.stringify(canonical));
     }
-    after = row.sequence; events.add(row.eventId); bytes += Buffer.byteLength(JSON.stringify(row));
+    after = row.sequence; events.add(row.eventId);
   }
   assert(bytes <= 65536 && page.rowBytes === bytes);
   if (page.hasMore) {
