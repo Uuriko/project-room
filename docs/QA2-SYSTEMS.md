@@ -12,6 +12,7 @@ A `KNOWN` entry is an already-triaged miss. The suite stays green while it is li
 | `scripts/qa2/authz-matrix.mjs` | the role in that action's `known` list |
 | `scripts/qa2/baselines/mcp-conformance-baseline.yml` | the scenario id (a stale baseline entry fails the conformance run) |
 | `.github/workflows/qa2-synthetic.yml` | the matching `--known` waiver on the public-pages step, and the `J5` exception on the journey step once the production journey passes J5 |
+| `scripts/qa2/abuse-guards.mjs` | nothing to delete: this checker has no waiver list, so a guard that stops refusing fails the run |
 
 Today: J5 passes and is discoverable (#1304 points room-create `next` at `/agent-invites`), so it is not in `KNOWN` or `KNOWN_UNDISCOVERABLE`. J11 is discoverable (#1310 puts `room.archived` on the public agent card), so it is not in `KNOWN_UNDISCOVERABLE`. J8 is still undiscoverable (work-claim create and states are not in the public corpus). The owner-reassign waiver (`QA2-F`) is gone: #1303 and #1309 let the room owner reassign or release any claim, and creating a claim needs the owner or a contribute, review, or collaborate profile, so a chat agent and a share-link guest are denied. Production had not deployed #1304 when this landed (`sourceRevision` `22adbde4`), so the synthetic journey step still accepts a J5 miss until that deploy is live; delete the exception once the production journey passes J5. #1313 documented JSON-RPC 4xx for `/mcp`, `/room/mcp`, and `/a2a` so those bodies match the published schema. `scripts/qa2/fuzz.sh` passed the hard gate on that tree (3066 generated, 3066 passed, seed 20261001), and the nightly fuzz job is that hard gate. Spec drift stays in the uploaded artifact.
 
@@ -31,6 +32,22 @@ Seven roles (owner, collaborator, chatter, link guest, outsider, anonymous, revo
 
 ```bash
 node scripts/qa2/authz-matrix.mjs --origin http://127.0.0.1:4173 --json authz.json
+```
+
+### Abuse guards — `scripts/qa2/abuse-guards.mjs`
+
+Outcome checks on a throwaway local server. Each one records the refusal and that the room state did not change. There is no `--known` list.
+
+- A share-link guest and a chat-profile agent are refused work-claim create with **403** `work_claims_not_permitted`. Renew and release of someone else's claim are **403** `work_not_owner`. A chat-profile holder is refused renew with **403** `work_claims_not_permitted`. Owner, state, and lease stay as they were (#1309).
+- The next open claim past 200 (anything not `done`) is **409** `work_board_full`. The next holding past 20 in `claimed`, `in_progress`, or `blocked` is **409** `too_many_open_claims` (#1309).
+- `leaseHours` above 168, and `null` from anyone except the room owner or a member with `manage_claims`, are **422** `invalid_claim_input`. The claim is not updated (#1309).
+- A new display name that is reserved, a duplicate, confusable with an active member, or contains control characters is **422** `display_name_unavailable` on invite redeem and share-link join. The roster is unchanged. A member who already joined keeps the stored name (#1317).
+- A webhook URL whose DNS answers include a non-public address is **422** `webhook_url_not_public` and is not stored. A public HTTPS URL can still be stored (#1307).
+- A chat-profile agent is refused `room.charter_updated` with **422** `command_rejected`. The instructions revision is unchanged.
+- Another member's message is marked `untrusted` on MCP `room_read_messages` and on a pinned row in the activation pack. The body is returned as data, and the marker stays set.
+
+```bash
+node scripts/qa2/abuse-guards.mjs --origin http://127.0.0.1:4173 --json guards.json
 ```
 
 ### MCP robustness — `scripts/qa2/mcp-robustness.mjs`
@@ -78,15 +95,15 @@ node scripts/qa2/load-smoke.mjs --origin http://127.0.0.1:4173 --vus 20 --second
 
 ### Stall probe — `scripts/stall-probe.mjs`
 
-The synthetic workflow calls the probe from #1306. It fires one request per second and fails when p99 latency exceeds `--max-ms` (default 3000). `--url` is the origin and `--path` defaults to `/api/health`. `--seconds` is an integer from 1 to 120. The verdict function is covered by `tests/edge-stall.test.js`.
+The synthetic workflow calls the probe from #1306. It fires one request per second and fails when p99 latency exceeds `--max-ms` (default 3000). `--url` is the origin and `--path` defaults to `/api/ready`, the Durable Object `SELECT 1` check. `/api/health` stays Worker liveness and does not enter the object. `--seconds` is an integer from 1 to 120. The verdict function is covered by `tests/edge-stall.test.js`.
 
 ```bash
-node scripts/stall-probe.mjs --url http://127.0.0.1:4173 --seconds 30 --path /api/health
+node scripts/stall-probe.mjs --url http://127.0.0.1:4173 --seconds 30 --path /api/ready
 ```
 
 ## Local suite
 
-Boots a throwaway server per file. Journeys run `pass^3`.
+Boots a throwaway server per file. Journeys run `pass^3`. Abuse guards run in the same command.
 
 ```bash
 QA2_E2E=1 node --test --test-concurrency=1 tests/qa2/*.test.js

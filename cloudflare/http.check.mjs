@@ -122,12 +122,23 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     for (const bot of ['GPTBot', 'OAI-SearchBot', 'ChatGPT-User', 'ClaudeBot', 'Claude-SearchBot', 'PerplexityBot', 'Meta-ExternalAgent']) {
       assert.match(robotsBody, new RegExp(`User-agent: ${bot}`), bot);
     }
-    const leftoverHealth = await json(await call('/room/health'));
-    assert.deepEqual(leftoverHealth, await json(await call('/api/health')));
-    assert.deepEqual(await json(await call('/api/healthz')), leftoverHealth);
-    assert.deepEqual(await json(await call('/healthz')), leftoverHealth);
-    assert.deepEqual(await json(await call('/room/healthz')), leftoverHealth);
-    assert.deepEqual(await json(await call('/room/api/healthz')), leftoverHealth);
+    const healthShape = async path => json(await call(path));
+    const leftoverHealth = await healthShape('/room/health');
+    assert.deepEqual(leftoverHealth, { status: 'ok', mode: 'cloudflare-staging' });
+    assert.deepEqual(leftoverHealth, await healthShape('/api/health'));
+    assert.deepEqual(await healthShape('/api/healthz'), leftoverHealth);
+    assert.deepEqual(await healthShape('/healthz'), leftoverHealth);
+    assert.deepEqual(await healthShape('/room/healthz'), leftoverHealth);
+    assert.deepEqual(await healthShape('/room/api/healthz'), leftoverHealth);
+    const ready = await json(await call('/api/ready'));
+    assert.equal(ready.status, 'ready');
+    assert.equal(ready.mode, 'cloudflare-staging');
+    assert.equal(ready.do.status, 'ok');
+    assert.equal(ready.do.statusCode, 200);
+    assert.equal(typeof ready.do.ms, 'number');
+    const readyHead = await call('/api/ready', { method: 'HEAD' });
+    assert.equal(readyHead.status, 200);
+    assert.equal(await readyHead.text(), '');
     const kits = await call('/room/kits');
     assert.equal(kits.status, 200);
     assert.match(kits.headers.get('content-type'), /text\/plain/);
@@ -339,6 +350,7 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     assert.equal(denied.status, 403);
     assert.equal((await call('/api/rooms/commons')).status, 401);
     assert.equal((await call('/api/health', { headers: { Origin: 'https://other.example.test' } })).status, 403);
+    assert.equal((await call('/api/ready', { headers: { Origin: 'https://other.example.test' } })).status, 403);
     // Untrusted forwarding headers must not select a rate-limit identity.
     for (let n = 0; n < 20; n++) await json(await call('/api/account-session', { ip: '192.0.2.9', headers: { 'X-Room-Visitor-IP': `198.51.100.${n + 1}` } }));
     assert.equal((await call('/api/account-session', { ip: '192.0.2.9', headers: { 'X-Room-Visitor-IP': '198.51.100.99' } })).status, 429);
@@ -464,7 +476,7 @@ test('Worker bounty HTTP receipts create distinct durable webhook deliveries wit
 });
 
 
-test('Worker board claims and receipts retain real event sequences across restart', async () => {
+test('Worker board v2 routes stay retired across restart, including when the old flag is set', async () => {
   const bundled = await build({ entryPoints: [fileURLToPath(new URL('./http-worker.test-fixture.mjs', import.meta.url))],
     bundle: true, write: false, format: 'esm', platform: 'neutral', external: ['node:*', 'cloudflare:*'] });
   const origin = 'https://room.example.test', directory = await mkdtemp(join(tmpdir(), 'project-room-cf-board-'));
@@ -473,43 +485,29 @@ test('Worker board claims and receipts retain real event sequences across restar
     durableObjects: { ROOM: { className: 'HttpTestRoom', useSQLite: true } },
     durableObjectsPersist: directory, bindings: { ROOM_ORIGIN: origin } };
   let mf = new Miniflare(config);
-  const call = async (path, key, data, status = data ? 201 : 200, idem = null) => {
+  const call = async (path, key, data, status = 410) => {
     const response = await mf.dispatchFetch(origin + path, { method: data ? 'POST' : 'GET',
       headers: { Host: new URL(origin).host, 'CF-Connecting-IP': '192.0.2.1',
-        ...(key ? { Authorization: `Bearer ${key}` } : {}), ...(idem ? { 'Idempotency-Key': idem } : {}),
+        ...(key ? { Authorization: `Bearer ${key}` } : {}),
         ...(data ? { Origin: origin, 'Content-Type': 'application/json' } : {}) },
       ...(data ? { body: JSON.stringify(data) } : {}) });
     assert.equal(response.status, status, await response.clone().text());
     return response.json();
   };
   try {
-    const { ownerKey } = await call('/__test-provision');
-    const base = '/api/rooms/commons/board/v2', task = 'RC-2026-09-27-9001';
-    const payload = { task_id: task, files: ['synthetic/board-fixture.txt'], lease: 'lease=8h', reason: 'Isolated Worker persistence check' };
-    const disabled = await call(base + '/board', ownerKey, undefined, 503);
-    assert.equal(disabled.error.code, 'board_v2_disabled');
-    assert.equal((await call(base + '/claims', ownerKey, payload, 503)).error.code, 'board_v2_disabled');
+    const { ownerKey } = await call('/__test-provision', undefined, undefined, 200);
+    const base = '/api/rooms/commons/board/v2';
+    const payload = { task_id: 'RC-2026-09-27-9001', files: ['synthetic/board-fixture.txt'], lease: 'lease=8h', reason: 'Isolated Worker persistence check' };
+    const retired = await call(base + '/board', ownerKey);
+    assert.equal(retired.error.code, 'board_v2_retired');
+    assert.equal(retired.next[0].href, '/api/rooms/commons/work-claims');
+    assert.equal((await call(base + '/claims', ownerKey, payload)).error.code, 'board_v2_retired');
     await mf.dispose();
     config.bindings.ROOM_BOARD_V2_ENABLED = '1';
     mf = new Miniflare(config);
-    const claim = await call(base + '/claims', ownerKey, payload, 201, 'board-fixture-claim');
-    assert.ok(Number.isSafeInteger(claim.seq) && claim.seq > 0, 'claim returns its persisted sequence');
-    assert.equal(claim.claim.last_seq, claim.seq);
-    assert.equal(claim.seq, 1, 'disabled read and write created no board events');
-    const receipt = await call(`${base}/claims/${task}/receipts`, ownerKey, { sha: 'abc1234', pr: 1 });
-    assert.ok(Number.isSafeInteger(receipt.seq) && receipt.seq > claim.seq);
-    assert.equal(receipt.receipt.seq, receipt.seq);
-    const events = await call(base + '/events', ownerKey);
-    assert.deepEqual(events.events.map(event => event.seq), [claim.seq, receipt.seq]);
-    const board = await call(base + '/board', ownerKey);
-    assert.equal(board.claims[0].receipts[0].seq, receipt.seq);
-    await mf.dispose(); mf = new Miniflare(config);
-    assert.deepEqual(await call(base + '/events', ownerKey), events);
-    assert.deepEqual(await call(base + '/board', ownerKey), board);
-    assert.deepEqual(await call(base + '/claims', ownerKey, payload, 201, 'board-fixture-claim'), claim);
-    const beat = await call(`${base}/claims/${task}/heartbeat`, ownerKey, { note: 'After isolated restart' }, 200);
-    assert.ok(Number.isSafeInteger(beat.seq) && beat.seq > receipt.seq);
-    assert.deepEqual((await call(base + '/events', ownerKey)).events.map(event => event.seq), [claim.seq, receipt.seq, beat.seq]);
+    const again = await call(base + '/claims', ownerKey, payload);
+    assert.equal(again.error.code, 'board_v2_retired');
+    assert.equal(again.next[0].href, '/api/rooms/commons/work-claims');
   } finally { await mf.dispose(); await rm(directory, { recursive: true, force: true }); }
 });
 

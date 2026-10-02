@@ -40,6 +40,7 @@ import {
 } from "./mcp-hosted-tools.mjs";
 import { listedMcpTools, MCP_TOOL_FOCUSES } from "./mcp-discovery.mjs";
 import { stampEvents, stampWorkListing } from "./content-trust.mjs";
+import { redactEventPage } from "./redact-read.mjs";
 import { resolveCatalogAgent, catalogCallDenial } from "./capability-visibility.mjs";
 
 const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -432,7 +433,7 @@ function callRoomTool(store, secret, identity, name, args, agentRooms) {
   }
   if (name === "room_list_events") {
     const auth = store.authenticate(secret, roomId);
-    return stampEvents(store.eventsAfter(secret, roomId, args.after ?? 0, args.limit ?? 50), auth.member.id);
+    return stampEvents(redactEventPage(store.eventsAfter(secret, roomId, args.after ?? 0, args.limit ?? 50), store.room(roomId).state.messages), auth.member.id);
   }
   if (name === "room_post_message") {
     const id = args.id ?? randomUUID();

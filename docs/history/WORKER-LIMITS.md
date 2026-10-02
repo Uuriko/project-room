@@ -118,6 +118,50 @@ alone now sits at 80 to 90 ms, still about 11x below the 1000 ms cap and
 well above the old 50 ms one. The build column is the synthetic fill (every
 event goes through `store.command`), not part of the cold start.
 
+## Measured on 2026-10-02: constructor against a 200,000-event log
+
+Node v24.21.0, one room, 200,000 `message.posted` rows, current projection
+(no help events, no legacy work markers). CPU is `process.cpuUsage()` user
+plus system for the `RoomStore` constructor. The same fixture before the
+open-path change parsed every event twice.
+
+| | CPU ms | Wall ms | Heap delta |
+|---|---|---|---|
+| Before (full event JSON.parse) | 1087 | 884 | +235 MB |
+| After (skip a current message log) | 40 | 39 | +6 MB |
+
+Production freezes on 2026-10-01 were not a memory eviction and not a
+five-minute timer. Cloudflare hibernates this Durable Object after about 10
+seconds with no requests, and attaching or detaching `wrangler tail` resets
+it ("Durable Object reset because its code was updated") with no deploy.
+The waking RPC was `drainChannelBacklog`: 14400 ms CPU and 16871 ms wall,
+then canceled. A warm event is about 1 ms of CPU. Requests queue at the
+input gate (`app;dur=0`) until that rebuild finishes.
+
+The constructor still must stay cheap, because its CPU is charged to the
+waking RPC. The Durable Object opens with `integrity: "deferred"`: a current
+schema skips event replay, invitation replay, help replay, and the event-type
+index. A rooms-and-invitations checksum is logged and compared with
+`integrity_snapshot`. The full check runs from cron (`verifyRoomIntegrity`),
+yields between invitations, and skips the event log unless a projection still
+carries a legacy marker. With zero channel connections the drain RPC returns
+immediately; a configured drain continues in `waitUntil` slices that yield
+the input gate. `/api/health` returns 200 from the Worker within 1 second
+when the object is rebuilding, with `durableObject.ready: false`.
+
+The per-minute `claim-prs` job shares that cron. It is not part of the
+constructor. It reads at most 32 live claims whose pull has no outcome yet,
+calls GitHub at most four times (once with no token), sends `If-None-Match`,
+and on 403 or 429 waits until the reset before calling again. Each call aborts
+at the sooner of 5 seconds and the job's remaining `CRON_JOB_BUDGET_MS`, and
+the tick does not start another call after that budget. A response over 64 KiB
+is refused. `budgetExceeded` is progress, not a failed heartbeat.
+
+`tests/cold-start-budget.test.js` fails if a 200,000-event reopen, eager or
+deferred, costs 500 ms of CPU or more. Each open logs `room.cold_start`
+(`durationMs`, `cpuMs`, `rooms`, `sequences`, `projectionBytes`). The first
+request logs `phase: "first_request"` with `constructMs` and `firstRequestMs`.
+
 ## Caveats
 
 - Node's `node:sqlite` file database and workerd's Durable Object SQLite differ

@@ -447,12 +447,12 @@ test("auto-approve: deceptive display names never auto-admit", async t => {
   // point: the room-level skeleton check must catch what global identity
   // creation (NFKC-normalized, single-script) legitimately allows.
   const impostor = store.identities.create("Ａlice");
-  const pending = requests.request("commons", {
+  assert.throws(() => requests.request("commons", {
     identityId: impostor.identityId, displayName: "Ａlice",
     requestedPermissions: ["accept_work"], requestId: "ar_auto_deceptive"
-  });
-  assert.equal(pending.status, "pending");
-  assert.match(pending.pendingNote, /display name/i);
+  }), error => error.status === 422 && error.code === "display_name_unavailable" && error.reason === "duplicate");
+  assert.equal(store.db.prepare("SELECT count(*) AS n FROM access_requests WHERE request_id=?").get("ar_auto_deceptive").n, 0);
+  assert.equal(store.room("commons").state.members[impostor.identityId], undefined);
 });
 
 test("pending responses carry service-level poll-status guidance", async t => {

@@ -16,19 +16,25 @@ import { ChannelDrainer } from '../server/channel-drain.mjs';
 import { DurableDatabase, durableStorage } from './storage.mjs';
 import { bootstrapRoom } from './bootstrap.mjs';
 import { maintenanceEnabled, maintenanceResponse } from '../server/maintenance.mjs';
-import { isEdgeDoorUrl, EDGE_DOOR_HOSTS, rewriteRoomApiPrefix } from '../deploy/agent-discovery.mjs';
+import { isEdgeDoorUrl, EDGE_DOOR_HOSTS, rewriteRoomApiPrefix, isHealthAliasPath } from '../deploy/agent-discovery.mjs';
 // E1 — email inbound (Worker email() handler). These must come after the
 // imports above: server/channel-adapters/index.mjs has a module-init order
 // constraint and is only safely evaluated after store.mjs/http.mjs.
-import { routeInboundEmail, emailRoutingLimits, emailRoutingRejections, connectionAddresses, routingKey } from '../server/email-routing-inbound.mjs';
-import { emailConnection } from '../server/email-envelope.mjs';
-import { isEmailProfile } from '../server/channel-connection.mjs';
-import { runLiveStoreRetention } from '../server/retention-run.mjs';
+import { durableInboundEmailConsumer, emailRoutingLimits, emailRoutingRejections } from '../server/email-routing-inbound.mjs';
+import { RETENTION_TABLES, runLiveStoreRetention } from '../server/retention-run.mjs';
+import { pruneAbuseRateBuckets } from '../server/abuse-rate-buckets.mjs';
+import { pruneOAuthProvider } from '../server/oauth-provider-store.mjs';
 import { syncClaimPullRequests } from '../server/claim-pr-sync.mjs';
-import { CRON_JOB_BUDGET_MS, HEARTBEAT_STORAGE_KEY, applyOutcomes, jobHealthResponse, jobHealthUnavailable, jobHealthView, runCronJobs } from './job-heartbeat.mjs';
+import { CRON_JOB_BUDGET_MS, HEARTBEAT_STORAGE_KEY, applyOutcomes, cronIntegrationConfigured, jobHealthResponse, jobHealthUnavailable, jobHealthView, runCronJobs } from './job-heartbeat.mjs';
 import { SOURCE_REVISION, BUILD_ID } from '../server/version.mjs';
 import { edgePublicResponse } from './edge-public.mjs';
 import { appDurationMs, logRoomRequest, requestPath, withServerTiming } from './request-timing.mjs';
+import { HEALTH_PROBE_TIMEOUT_MS, createHealthProbe, healthLivenessResponse, readyProbeResponse, workerLivenessResponse } from './health-probe.mjs';
+import { flushRoomGuide, installGuideCommandHook } from '../server/room-guide.mjs';
+
+// One probe per isolate. Concurrent health checks during a cold start share
+// it; a finished probe does not cache, so the next check sees a fresh answer.
+const durableObjectHealth = createHealthProbe();
 
 // Let a request that arrived while this cron RPC was queued run before the
 // job's synchronous work closes the input gate again.
@@ -38,6 +44,7 @@ function yieldToQueuedRequests() {
 function cronDeadline() {
   return Date.now() + CRON_JOB_BUDGET_MS;
 }
+const RETENTION_CURSOR_KEY = 'retention-table-index';
 
 // The DO transport may erase the original error type. Report availability,
 // without exposing backend details or claiming that a mutation rolled back.
@@ -79,7 +86,9 @@ export class ProjectRoom extends DurableObject {
     this.paused = maintenanceEnabled(env.ROOM_MAINTENANCE);
     if (this.paused) return;
     this.store = new RoomStore(null, { database: new DurableDatabase(ctx.storage), storagePlatform: durableStorage,
-      stitch: stitchConfigFromEnv(env), identityHashKey: env.ROOM_IDENTITY_HASH_KEY ?? null });
+      stitch: stitchConfigFromEnv(env), identityHashKey: env.ROOM_IDENTITY_HASH_KEY ?? null, integrity: "deferred" });
+    // ACT-1a: one delimited call. Room Guide advances after commands. ACT-4 owns nudges.
+    installGuideCommandHook(this.store);
     // Event-push dispatch: same fire-and-forget flush as the node entry
     // point. The Durable Object may suspend before the microtask drains;
     // the cron tick remains the restart-safe backstop.
@@ -140,8 +149,19 @@ export class ProjectRoom extends DurableObject {
   }
   async fetch(request) {
     const started = Date.now();
+    const cold = this.store?.coldStart;
     const respond = response => {
       const appMs = Date.now() - started;
+      if (cold && !this.coldStartRequestLogged) {
+        this.coldStartRequestLogged = true;
+        const line = {
+          event: 'room.cold_start', phase: 'first_request',
+          constructMs: cold.durationMs, firstRequestMs: appMs,
+          rooms: cold.rooms ?? 0, sequences: cold.sequences ?? 0, projectionBytes: cold.projectionBytes ?? 0
+        };
+        if (cold.phases) line.phases = cold.phases;
+        console.info(JSON.stringify(line));
+      }
       console.info(JSON.stringify({
         event: 'room.do_request', method: request.method, path: requestPath(request.url), status: response.status, appMs
       }));
@@ -149,13 +169,26 @@ export class ProjectRoom extends DurableObject {
     };
     if (this.paused) return respond(maintenanceResponse(request));
     try { return respond(await this.requestSignals.run(request.signal, () => this.handler.fetch(request))); }
-    finally { this.ctx.waitUntil(this.store.humanPush.flush()); }
+    finally {
+      this.ctx.waitUntil(this.store.humanPush.flush());
+      // ACT-1a: post-request flush for a Room Guide step the command hook left queued.
+      this.ctx.waitUntil(Promise.resolve(flushRoomGuide(this.store)));
+    }
+  }
+
+  // Readiness is one statement. It does not open the room, replay events, or
+  // scan a table. A paused object has no database, so it is not ready.
+  probeStorage() {
+    if (this.paused || !this.store) return { ok: false };
+    const row = this.store.db.prepare("SELECT 1 AS ok").get();
+    return { ok: row?.ok === 1 };
   }
 
   async syncGmailMailboxes() {
     if (this.paused) return { completed: 0 };
     await yieldToQueuedRequests();
-    // Unconfigured Gmail is visible in /api/health/jobs instead of looking like a quiet success.
+    // The minute cron does not call this when Gmail is off. A direct call still
+    // says so, instead of looking like a mailbox that had nothing to sync.
     if (!this.gmailSync) return { completed: 0, configured: false };
     return this.gmailSync.tick({ deadline: cronDeadline() });
   }
@@ -169,25 +202,9 @@ export class ProjectRoom extends DurableObject {
     return { recorded: Array.isArray(outcomes) ? outcomes.length : 0 };
   }
   async readJobHealth() {
-    return jobHealthView(await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY), Date.now());
+    return jobHealthView(await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY), Date.now(), this.env);
   }
 
-  // E1 — RPC: active email connections whose identity or alias lists this
-  // routing key. Runs in the DO so no connection data leaves it. Returns the
-  // profile or null.
-  lookupRoutedConnection(address) {
-    if (this.paused) return null;
-    const key = routingKey(address);
-    if (!key) return null;
-    return this.store.readTransaction(() => {
-      for (const row of this.store.db.prepare("SELECT data_json FROM private_email_connections WHERE provider='microsoft-graph'").all()) {
-        const connection = JSON.parse(row.data_json);
-        if (connection.state !== 'active' || !isEmailProfile(connection.profile)) continue;
-        if (connectionAddresses(emailConnection(connection.profile)).includes(key)) return connection.profile;
-      }
-      return null;
-    });
-  }
   // Task 9 — auto-drain RPC for the Worker's cron trigger. Scans the webhook
   // journal and poison-screens pending slices (both session-free, so they run
   // on schedule); the inbox import itself still needs an owner session (B20
@@ -196,8 +213,41 @@ export class ProjectRoom extends DurableObject {
   async drainChannelBacklog() {
     if (this.paused) throw new Error('Room paused');
     await yieldToQueuedRequests();
-    const drainer = new ChannelDrainer({ store: this.store, webhooks: this.channelWebhooks });
-    return drainer.tick({ deadline: cronDeadline() });
+    const drainer = this.channelDrainer ??= new ChannelDrainer({ store: this.store, webhooks: this.channelWebhooks });
+    const gate = drainer.configured();
+    if (!gate.configured) return { skipped: 1, configured: false, connections: 0 };
+    if (this.channelDrainInflight) return { started: 0, background: 1, inflight: 1, connections: gate.connections };
+    const work = this.#drainChannelsInBackground(drainer);
+    this.ctx.waitUntil(work);
+    return { started: 1, background: 1, connections: gate.connections };
+  }
+  // Runs after the RPC returns. The first await opens the input gate before
+  // any journal scan, and tick yields again between connections. Not an RPC.
+  async #drainChannelsInBackground(drainer) {
+    this.channelDrainInflight = true;
+    try {
+      await yieldToQueuedRequests();
+      const summary = await drainer.tick({ deadline: cronDeadline(), yieldBetween: () => yieldToQueuedRequests() });
+      console.info(JSON.stringify({
+        event: 'room.channel_drain', connections: summary.connections ?? 0, deferred: summary.deferred ?? 0,
+        errors: summary.errors ?? 0, budgetExceeded: summary.budgetExceeded ? 1 : 0
+      }));
+      return summary;
+    } catch (error) {
+      console.error(`[channel-drain] background tick failed: ${error?.message ?? error}`);
+      return { errors: 1 };
+    } finally {
+      this.channelDrainInflight = false;
+    }
+  }
+  // Changed rooms update the checksum. One room per tick is reread so a
+  // projection that changes without a new event is still caught. A mismatch
+  // replays invitations and legacy projections in slices that yield the
+  // input gate. Never called from the constructor.
+  async verifyRoomIntegrity() {
+    if (this.paused) return { skipped: 1, paused: 1 };
+    await yieldToQueuedRequests();
+    return this.store.verifyRoomIntegrity({ yieldBetween: () => yieldToQueuedRequests(), deadline: cronDeadline() });
   }
   // RC-2026-09-19-064 — signed webhook dispatch RPC for the Worker's cron
   // trigger. Sweeps due deliveries (pending/failed with next_attempt_at <=
@@ -225,33 +275,53 @@ export class ProjectRoom extends DurableObject {
   async refreshClaimPullRequests() {
     if (this.paused) return { checked: 0, updated: 0 };
     await yieldToQueuedRequests();
-    return syncClaimPullRequests(this.store, { env: this.env });
+    // Same 5s budget as the other cron RPCs. The poll itself also stops
+    // before the next GitHub call and caps each request to the time left,
+    // so a slow pull cannot hold this tick open for the full fetch timeout.
+    return syncClaimPullRequests(this.store, {
+      env: this.env,
+      deadline: cronDeadline(),
+      yieldBetween: () => yieldToQueuedRequests()
+    });
   }
   // Scans only disposable web-fetch/research logs. The deletion flag is
   // explicit; authoritative room and security audit journals are excluded.
   async planRetention() {
     if (this.paused) return { dryRun: true, deleted: 0, skipped: "paused" };
     await yieldToQueuedRequests();
-    return runLiveStoreRetention({ store: this.store, env: this.env,
-      now: new Date().toISOString(), record: plan => { this.lastRetentionPlan = plan; } });
-  }
-  // E1 — RPC: hand an accepted, already-routed message to the importer. Needs
-  // the system import authority from B20; until then it parks the request so
-  // the owner's next sync imports it. Returns { accepted, duplicate }.
-  importRoutedEmail(routed) {
-    if (this.paused) throw new Error('Room paused');
-    // B20: replace with the account-scoped import authority, e.g.
-    //   return this.store.email.applyRouted(routed)  (completeRoutedImport + apply under the import fence)
-    this.routedMail ??= new Map();
-    if (this.routedMail.has(routed.requestId)) return { accepted: true, duplicate: true };
-    if (this.routedMail.size >= 500) throw new Error('Routed mail backlog full');
-    this.routedMail.set(routed.requestId, routed);
-    return { accepted: true, duplicate: false };
+    const stored = await this.ctx.storage.get(RETENTION_CURSOR_KEY);
+    const tableIndex = Number.isSafeInteger(stored) ? stored : 0;
+    const receipt = runLiveStoreRetention({ store: this.store, env: this.env,
+      now: new Date().toISOString(), tableIndex, deadline: cronDeadline(),
+      record: plan => { this.lastRetentionPlan = plan; } });
+    await this.ctx.storage.put(RETENTION_CURSOR_KEY, (tableIndex + 1) % RETENTION_TABLES.length);
+    // Delivered and dead-letter webhook rows are a cache. Pending and failed
+    // rows stay until dispatch finishes them. Expired OAuth grants and abuse
+    // buckets are the same kind of cache: a room that has never saved one
+    // has no table.
+    let webhookDeliveries = { deleted: 0 };
+    let oauthProvider = { pruned: 0 };
+    let abuseRateBuckets = { pruned: 0 };
+    try {
+      webhookDeliveries = this.store.agentPlugin.pruneWebhookDeliveries();
+      oauthProvider = pruneOAuthProvider(this.store.db, { now: Date.now(), limit: 100 });
+      abuseRateBuckets = pruneAbuseRateBuckets(this.store.db, { now: Date.now(), limit: 100 });
+    } finally {
+      console.info(JSON.stringify({
+        event: 'room.retention', table: receipt.table, deleted: receipt.deleted,
+        dryRun: receipt.dryRun ? 1 : 0, budgetExceeded: receipt.budgetExceeded ? 1 : 0,
+        eligible: receipt.categories?.[receipt.table]?.eligible ?? 0,
+        webhookDeleted: webhookDeliveries?.deleted ?? 0,
+        oauthPruned: oauthProvider?.pruned ?? 0,
+        abuseRatePruned: abuseRateBuckets?.pruned ?? 0
+      }));
+    }
+    return { ...receipt, webhookDeliveries, oauthProvider, abuseRateBuckets };
   }
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const started = Date.now();
     const finish = (response, servedBy) => {
       const totalMs = Date.now() - started;
@@ -314,6 +384,41 @@ export default {
     headers.set('X-Room-Visitor-IP', address);
     headers.delete('X-Real-IP');
     headers.delete('X-Forwarded-For');
+    const healthPath = url.pathname.length > 1 && url.pathname.endsWith('/') ? url.pathname.slice(0, -1) : url.pathname;
+    const deployment = env.ROOM_DEPLOYMENT === 'production' || env.ROOM_DEPLOYMENT === 'staging' ? env.ROOM_DEPLOYMENT : undefined;
+    const mode = env.ROOM_SERVICE_MODE ?? 'cloudflare-staging';
+    const operationalGet = (request.method === 'GET' || request.method === 'HEAD')
+      && (healthPath === '/api/health' || healthPath === '/api/ready' || isHealthAliasPath(url.pathname));
+    // These answers never enter the Node origin check. A browser Origin that
+    // is not this room is still refused, same as every other /api route.
+    if (operationalGet) {
+      const originHeader = request.headers.get('Origin');
+      if (originHeader && originHeader !== url.origin) {
+        return finish(new Response(JSON.stringify({ error: { code: 'origin_denied', message: 'Request origin is not allowed' } }), {
+          status: 403, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }
+        }), 'worker');
+      }
+    }
+    // Liveness is the Worker. It does not construct or query the Durable Object.
+    if ((healthPath === '/api/health' || isHealthAliasPath(url.pathname)) && (request.method === 'GET' || request.method === 'HEAD')) {
+      return finish(workerLivenessResponse(request, { mode, deployment }), 'worker');
+    }
+    // Readiness is SELECT 1 on invite-only-pilot, bounded by the probe budget.
+    // A cold constructor must not turn this check into room_unavailable.
+    if (healthPath === '/api/ready' && (request.method === 'GET' || request.method === 'HEAD')) {
+      const probed = await durableObjectHealth({
+        timeoutMs: HEALTH_PROBE_TIMEOUT_MS,
+        start: async () => {
+          const result = await env.ROOM.getByName('invite-only-pilot').probeStorage();
+          if (!result?.ok) throw new Error('storage probe failed');
+          return new Response(JSON.stringify({ status: 'ok' }), { status: 200, headers: { 'Content-Type': 'application/json; charset=utf-8' } });
+        },
+        waitUntil: ctx?.waitUntil?.bind(ctx),
+        onSnapshot: (snapshot, timing) => ({ response: readyProbeResponse(snapshot, request, { mode, deployment, elapsedMs: timing.elapsedMs }), servedBy: 'durable-object' }),
+        onUnready: (readiness, timing) => ({ response: healthLivenessResponse(request, { mode, deployment, readiness, ...timing }), servedBy: 'worker' })
+      });
+      return finish(probed.response, probed.servedBy);
+    }
     let response;
     try {
       response = await env.ROOM.getByName('invite-only-pilot').fetch(new Request(request, { headers }));
@@ -337,19 +442,13 @@ export default {
     if (maintenanceEnabled(env.ROOM_MAINTENANCE)) { message.setReject(emailRoutingRejections.unavailable); return; }
     // Refuse before reading the stream: the size cap is the first defence.
     if (message.rawSize > emailRoutingLimits.rawBytes) { message.setReject(emailRoutingRejections.tooLarge); return; }
-    const room = env.ROOM.getByName('invite-only-pilot');
-    let routed;
-    try {
-      const raw = new Uint8Array(await new Response(message.raw).arrayBuffer());
-      routed = await routeInboundEmail(
-        { from: message.from, to: message.to, raw, rawSize: message.rawSize, receivedAt: new Date().toISOString() },
-        { lookup: address => room.lookupRoutedConnection(address) });
-    } catch {
-      // Storage or RPC failure: temporary reject so the sender retries; never a silent drop.
-      message.setReject(emailRoutingRejections.unavailable); return;
-    }
-    if (!routed.decision.accept) { message.setReject(routed.decision.reason); return; }
-    try { await room.importRoutedEmail(routed); }
+    // Inbox is shelved. Accepting here used to park the message in memory and
+    // drop it on eviction. Reject unless a consumer that persists the message
+    // is actually wired. A throw from that consumer is still a reject: SMTP
+    // must not accept mail we failed to store.
+    const consume = durableInboundEmailConsumer();
+    if (typeof consume !== "function") { message.setReject(emailRoutingRejections.notAccepted); return; }
+    try { await consume(message, env, ctx); }
     catch { message.setReject(emailRoutingRejections.unavailable); }
   },
 
@@ -364,16 +463,28 @@ export default {
   async scheduled(event, env, ctx) {
     if (maintenanceEnabled(env.ROOM_MAINTENANCE)) return;
     const room = env.ROOM.getByName('invite-only-pilot');
-    const outcomes = await runCronJobs({
+    const runners = {
       'gmail-sync': () => room.syncGmailMailboxes(),
       'channel-drain': () => room.drainChannelBacklog(),
       'webhook-dispatch': () => room.drainWebhookDeliveries(),
       'land-queue': () => room.refreshLandQueue(),
       'claim-prs': () => room.refreshClaimPullRequests(),
       'retention': () => room.planRetention()
-    });
+    };
+    for (const name of Object.keys(runners)) {
+      if (!cronIntegrationConfigured(name, env)) delete runners[name];
+    }
+    const outcomes = await runCronJobs(runners);
     try { await room.recordCronTick(outcomes); }
     catch (error) { console.error(`[job-heartbeat] record failed: ${error?.message ?? error}`); }
+    try {
+      const integrity = await room.verifyRoomIntegrity();
+      const line = { event: 'room.integrity' };
+      for (const key of ['matched', 'skipped', 'verified', 'budgetExceeded', 'invitations', 'paused', 'checked', 'swept']) {
+        if (typeof integrity?.[key] === 'number') line[key] = integrity[key];
+      }
+      console.info(JSON.stringify(line));
+    } catch (error) { console.error(`[integrity] ${error?.message ?? error}`); }
     const failed = outcomes.filter(outcome => !outcome.ok).map(outcome => outcome.job);
     if (failed.length) throw new Error(`cron jobs failed: ${failed.join(', ')}`);
   }

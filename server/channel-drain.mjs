@@ -15,8 +15,7 @@
 //
 // The inbox import itself (`syncTelegramConnection` → `store.email.apply` →
 // `store.inbox.importSource`) is owner-session bound: there is no system
-// import authority yet (B20 — see the `importRoutedEmail` note in
-// cloudflare/room.mjs). Until that authority exists the drainer is wired with
+// import authority yet (B20). Until that authority exists the drainer is wired with
 // no `importSlice`, and per-connection drains report an honest
 // `channel_drain_unavailable` deferral instead of importing. The scan and the
 // poison-screen are session-free and run on schedule regardless, so poison
@@ -49,6 +48,25 @@ export class ChannelDrainer {
     this.#store = store; this.#webhooks = webhooks; this.#importSlice = importSlice; this.#now = now;
   }
   get lastTick() { return this.#lastTick; }
+  // Cheap gate: any stored connection, or one pending journal row. Missing
+  // tables mean the channel inbox was never installed. This does not scan
+  // event bodies or import a slice.
+  configured() {
+    try {
+      return this.#store.readTransaction(() => {
+        let connections = 0;
+        try { connections = Number(this.#store.db.prepare("SELECT COUNT(*) AS n FROM private_email_connections").get()?.n) || 0; }
+        catch { connections = 0; }
+        if (connections > 0) return { configured: true, connections };
+        let pending = false;
+        try { pending = Boolean(this.#store.db.prepare("SELECT 1 AS hit FROM pending_channel_updates LIMIT 1").get()); }
+        catch { pending = false; }
+        return { configured: pending, connections: 0 };
+      });
+    } catch {
+      return { configured: false, connections: 0 };
+    }
+  }
   // Session-free scan: telegram connections in active state that hold pending
   // journal rows, oldest-backlog first. Read-only; safe to run every tick.
   scan() {
@@ -124,8 +142,15 @@ export class ChannelDrainer {
   }
   // One scheduled cycle: scan, poison-screen each connection, then drain.
   // Never throws: a failing connection is one entry in the summary.
-  async tick({ deadline = Infinity } = {}) {
+  async tick({ deadline = Infinity, yieldBetween = null } = {}) {
     const at = this.#now(), summary = { at, connections: 0, screened: 0, parked: 0, drained: 0, deferred: 0, errors: 0, results: [] };
+    const gate = this.configured();
+    if (!gate.configured) {
+      summary.configured = false;
+      summary.skipped = 1;
+      this.#lastTick = summary;
+      return summary;
+    }
     let targets = [];
     try { targets = this.scan(); }
     catch (error) { summary.scanError = oneLine(error?.code ?? error?.message ?? error); this.#lastTick = summary; return summary; }
@@ -134,13 +159,19 @@ export class ChannelDrainer {
       if (Date.now() > deadline) { summary.budgetExceeded = 1; break; }
       let screened = { screened: 0, parked: [] };
       try { screened = this.poisonScreen({ accountId, connectionId }); }
-      catch (error) { summary.errors++; summary.results.push({ accountId, connectionId, status: "error", code: oneLine(error?.code ?? "poison_screen_failed") }); continue; }
+      catch (error) {
+        summary.errors++;
+        summary.results.push({ accountId, connectionId, status: "error", code: oneLine(error?.code ?? "poison_screen_failed") });
+        if (typeof yieldBetween === "function") await yieldBetween();
+        continue;
+      }
       summary.screened += screened.screened; summary.parked += screened.parked.length;
       const drained = await this.drainConnection({ accountId, connectionId });
       if (drained.status === "drained") summary.drained++;
       else if (drained.status === "deferred") summary.deferred++;
       else if (drained.status === "error") summary.errors++;
       summary.results.push({ ...drained, screened: screened.screened, parked: screened.parked });
+      if (typeof yieldBetween === "function") await yieldBetween();
     }
     this.#lastTick = summary;
     return summary;

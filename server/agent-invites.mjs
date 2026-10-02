@@ -23,6 +23,7 @@ import { event, EVENT_TYPES as T, memberCan, canInviteMembers, MEMBERSHIP_AUTHOR
 import { nextActionsForInviteRedeem } from "./discoverability.mjs";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 import { agentAccessProfiles } from "./agent-connections.mjs";
+import { assertMemberDisplayNameAvailable } from "./display-name-guard.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 const hash = text => createHash("sha256").update(text).digest("hex");
@@ -251,6 +252,10 @@ export class AgentInvites {
       const name = typeof displayName === "string" && displayName.trim() ? displayName.trim()
         : row.display_name || DEFAULT_INVITE_NAME;
       if (name.length > 80) fail(422, "invalid_invite_name", "displayName must be 1-80 characters");
+      // The name becomes this room's member name. Refuse reserved labels,
+      // hidden characters, and skeletons that match someone already here
+      // before an identity or membership row is written.
+      assertMemberDisplayNameAvailable(name, room.state.members);
       const identity = existingIdentity ?? this.store.identities.create(name);
       if (this.db.prepare("SELECT 1 FROM identity_links WHERE room_id=? AND identity_id=?").get(row.room_id, identity.identityId))
         fail(409, "identity_already_linked", "Identity already joined; reuse its saved connection");

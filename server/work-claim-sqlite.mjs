@@ -18,11 +18,13 @@ import { encodeRow, decodeRow } from "./persisted-row.mjs";
 export const WORK_CLAIM_ROW_KIND = "work-claim";
 const WORK_CLAIM_FIELDS = ["id", "title", "state", "owner", "history", "claimedAt",
   "leaseStartAt", "leaseExpiresAt", "deliveryMode", "reviewPolicy", "reviewedBy",
-  "attestations", "tags", "files", "blobs", "dependsOn", "pullRequest", "updatedAt"];
+  "attestations", "tags", "files", "blobs", "dependsOn", "pullRequest", "updatedAt",
+  "kind", "revision", "ci", "reviews"];
 const WORK_CLAIM_DEFAULTS = { title: null, state: "unclaimed", owner: null, history: [],
   claimedAt: null, leaseStartAt: null, leaseExpiresAt: null, deliveryMode: null,
   reviewPolicy: null, reviewedBy: null, attestations: [], tags: [], files: [], blobs: [],
-  dependsOn: [], pullRequest: null, updatedAt: null };
+  dependsOn: [], pullRequest: null, updatedAt: null,
+  kind: "work", revision: null, ci: null, reviews: [] };
 const decodeItem = text => {
   const item = decodeRow(text, { kind: WORK_CLAIM_ROW_KIND, fields: WORK_CLAIM_FIELDS, defaults: WORK_CLAIM_DEFAULTS });
   if (item.title == null) item.title = item.id; // workOf: title ?? id
@@ -92,6 +94,9 @@ export function createDurableWorkClaimRegistry(db, { now = () => Date.now(), tra
     },
     list(roomId) { return selectRoom.all(roomId).map(row => decodeItem(row.item_json)); },
     has(roomId, id) { return selectOne.get(roomId, id) != null; },
+    delete(roomId, id) {
+      db.prepare("DELETE FROM work_claims WHERE room_id=? AND claim_id=?").run(roomId, id);
+    },
     configure(roomId, config) {
       if (config !== undefined && config !== null) {
         if (typeof config !== "object" || Array.isArray(config)) throw new Error("room work-claim config must be an object");

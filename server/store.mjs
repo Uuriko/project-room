@@ -13,13 +13,14 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 // class object and all `instanceof` checks behave identically.
 import { ServiceError } from "./service-error.mjs";
 import { stampInbox, stampSearch, stampThread, stampWorkResult, withContentTrust } from "./content-trust.mjs";
+import { assertMemberDisplayNameAvailable } from "./display-name-guard.mjs";
 import { createRoomFloodGuard } from "./room-flood-guard.mjs";
 import { getTracer, SPAN_NAMES, ATTR } from "./delivery-tracing.mjs"; // R1 opt-in delivery-path tracing (RC-2026-09-26-966).
 export { ServiceError };
 import {
   applyEvent, emptyRoomState, event, EVENT_TYPES as T, WORK_STATES, INVITATION_ROLE_POLICIES,
   INVITATION_ROLE_POLICY_VERSION, INVITATION_ROLES,
-  MEMBERSHIP_AUTHORITY_POLICY_VERSION, validId, memberCan, ROOM_POLICY_FIELDS, DEFAULT_CHANNEL_ID,
+  MEMBERSHIP_AUTHORITY_POLICY_VERSION, DISPLAY_NAME_POLICY_VERSION, validId, memberCan, ROOM_POLICY_FIELDS, DEFAULT_CHANNEL_ID,
   TRUST_OFF_CODE, trustOffMessage, firstBlockedWakeTarget,
   MAX_MESSAGE_BODY_CHARS, MAX_MESSAGE_COMMAND_BYTES
 } from "../src/events.js";
@@ -31,7 +32,7 @@ import { ensureAutonomyTiersSchema, enforceAutonomyTiers } from "./autonomy-tier
 import { ensureGrantsSchema } from "./grants.mjs";
 import { canonicalInvitationData, invitationJournalEntry, invitationJournalSchema, replayInvitationJournal } from "./invitation-journal.mjs";
 import { invitationJoinedEvent, assertInvitationMembershipEvidence } from "./invitation-evidence.mjs";
-import { STORE_SCHEMA_VERSION, registerWriter, installWriterFence, verifyWriterFence } from "./writer-fence.mjs";
+import { STORE_SCHEMA_VERSION, fenceDefinitions, registerWriter, installWriterFence, verifyWriterFence } from "./writer-fence.mjs";
 import { migrateRoomLifecycleV28, verifyRoomLifecycle, refuseArchivedWrite, createAccountRoom, accountRoomEntry, ACCOUNT_ROOM_SELECT, archivedAtOf } from "./room-lifecycle.mjs";
 import { ShareLinks, shareLinkSchema, shareLinkCodeSchema } from "./share-links.mjs";
 import { DmConsents, dmConsentSchema } from "./dm-consents.mjs";
@@ -71,7 +72,7 @@ import { RoomAttachmentBytes } from "./room-attachment-bytes.mjs";
 import { InboxAttachmentBytes, inboxAttachmentBytesSchema } from "./inbox-attachment-bytes.mjs";
 import { BountyEscrow, bountyEscrowSchema, convergeBountyDeployedSchema } from "./bounty-escrow.mjs"; // Escrowed bounties, agent work exchange slice 1.
 import { selectedWorkContext, currentWorkRecord } from "./work-context.mjs";
-import { workItemChanges } from "../src/workflow.js";
+import { workItemChanges, mayWriteBoardClaims } from "../src/workflow.js";
 import { discussionWindow, selectedWorkDiscussion } from "./work-discussion.mjs";
 import { AgentConnections, agentConnectionSchema } from "./agent-connections.mjs";
 import { GuestAgentLinks, isRoomAccessToken, isGuestAgentMemberId } from "./guest-agent-links.mjs";
@@ -80,7 +81,51 @@ import { WebFetch, webFetchSchema, migrateWebFetchLogColumns } from "./web-fetch
 import { WebResearch, webResearchSchema } from "./web-research.mjs"; // RC-2026-09-24-310: knowledge router (additive)
 import { AgentIdentities, agentIdentitySchema, ensureIdentitySecretSchema, ensureIdentityCapacitySchema, ensureIdentityLinkCodeSchema, isIdentitySecret } from "./agent-identities.mjs";
 import { AgentKeyRegistry, agentKeyRegistrySchema } from "./agent-key-registry.mjs"; // Integration map slice 9: agent public-key registry.
-import { boardV2Schema } from "./board-v2-sqlite.mjs"; // PR #1144: board-v2 durable registry (additive, unfenced).
+// Board v2 is retired. These tables stay so existing databases and the
+// recovery audit still see them. Nothing drops board_vtwo_*.
+const RETIRED_BOARD_V2_SCHEMA = `
+  CREATE TABLE IF NOT EXISTS board_vtwo_claims (
+    task_id     TEXT PRIMARY KEY,
+    lane        TEXT NOT NULL,
+    files       TEXT NOT NULL,
+    lease       TEXT NOT NULL,
+    lease_h     INTEGER NOT NULL,
+    reason      TEXT NOT NULL,
+    state       TEXT NOT NULL,
+    claim_seq   INTEGER NOT NULL,
+    claim_at    TEXT NOT NULL,
+    heartbeat_at TEXT,
+    last_seq    INTEGER NOT NULL,
+    receipts    TEXT NOT NULL DEFAULT '[]'
+  );
+  CREATE TABLE IF NOT EXISTS board_vtwo_events (
+    seq       INTEGER PRIMARY KEY AUTOINCREMENT,
+    at        TEXT NOT NULL,
+    kind      TEXT NOT NULL,
+    task_id   TEXT,
+    lane      TEXT,
+    payload   TEXT NOT NULL,
+    supersedes INTEGER,
+    idempotency_key TEXT,
+    mirror_issue   INTEGER,
+    mirror_comment INTEGER
+  );
+  CREATE TABLE IF NOT EXISTS board_vtwo_mirror (
+    id             INTEGER PRIMARY KEY CHECK (id = 1),
+    current_issue  INTEGER NOT NULL,
+    issues         TEXT NOT NULL DEFAULT '[]'
+  );
+  CREATE TABLE IF NOT EXISTS board_vtwo_idempotency (
+    scoped_key TEXT PRIMARY KEY,
+    status INTEGER NOT NULL,
+    body TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_board_vtwo_events_kind ON board_vtwo_events(kind);
+  CREATE INDEX IF NOT EXISTS idx_board_vtwo_events_task ON board_vtwo_events(task_id);
+  CREATE INDEX IF NOT EXISTS idx_board_vtwo_events_lane ON board_vtwo_events(lane);
+`;
 import { EMISSARY_LURE_SCHEMA } from "./emissary-lure.mjs"; // Emissary Slice 2 (RC-2026-09-28-2873): lure-generation ledgers (additive, unfenced).
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { AgentHeartbeats, agentHeartbeatSchema } from "./agent-heartbeats.mjs"; // RC-2026-09-18-051: wakeable agent presence.
@@ -106,7 +151,7 @@ import { evaluateReceipt } from "./jev-receipts.mjs"; // Jev-harness receipt gat
 import { charterContext, charterFromEvent } from "../src/room-charter.js";
 import { REPLY_FIELDS, REPLY_POLICY_VERSION, replyPostMode } from "../src/reply-requests.js";
 import { ReplyRequests } from "./reply-requests.mjs";
-import { validateHelpData } from "../src/work-help.js";
+import { validateHelpData, WORK_HELP_UPDATED } from "../src/work-help.js";
 import { auditWorkHelp } from "./work-help.mjs";
 import { HELP_OFFER_OPENED, HELP_OFFER_UPDATED, validateHelpOfferData } from "../src/help-offers.js";
 import { classifyCommand } from "./action-classes.mjs";
@@ -166,6 +211,191 @@ function ensureDefaultChannelState(state) {
     archivedAt: null
   };
   return true;
+}
+
+// Provenance repair reads only these envelopes. Chat messages are the bulk of
+// the log and are not an input to proposer, receipt, verification, decision,
+// or supersession repair.
+const PROVENANCE_EVENT_TYPES = Object.freeze([
+  T.WORK_PROPOSED, T.WORK_COMPLETED, T.VERIFICATION_RECORDED, T.OWNER_DECISION_RECORDED, T.WORK_SUPERSEDED
+]);
+const HELP_EVENT_TYPES = Object.freeze([WORK_HELP_UPDATED, HELP_OFFER_OPENED, HELP_OFFER_UPDATED]);
+
+function parseStoredJson(value, fallback) {
+  if (value == null) return fallback;
+  return typeof value === "string" ? JSON.parse(value) : value;
+}
+
+function startColdStart() {
+  const started = { wall: performance.now(), cpu: null };
+  try {
+    if (typeof process !== "undefined" && typeof process.cpuUsage === "function") started.cpu = process.cpuUsage();
+  } catch { started.cpu = null; }
+  return started;
+}
+
+// One structured line per open, including a failed open, so the next isolate
+// restart can be read from Workers Logs without a tail attached. No event
+// bodies, projections, or secrets. stderr, not stdout: server.mjs treats the
+// first stdout write as "listening", and this line is emitted while the
+// store is still opening.
+function logColdStart(started, db, failed, extra = {}) {
+  const record = { event: "room.cold_start", durationMs: Math.round(performance.now() - started.wall) };
+  if (failed) {
+    record.failed = true;
+    if (failed instanceof Error && failed.message) record.error = failed.message.slice(0, 180);
+  }
+  if (extra.integrity) record.integrity = extra.integrity;
+  if (extra.integrityMatch != null) record.integrityMatch = extra.integrityMatch;
+  if (extra.phases) record.phases = extra.phases;
+  try {
+    if (started.cpu && typeof process.cpuUsage === "function") {
+      const cpu = process.cpuUsage(started.cpu);
+      record.cpuMs = Math.round((cpu.user + cpu.system) / 1000);
+    }
+  } catch { /* workerd may omit cpuUsage */ }
+  try {
+    if (typeof process.memoryUsage === "function") {
+      const heap = process.memoryUsage().heapUsed;
+      if (Number.isFinite(heap) && heap > 0) record.heapBytes = heap;
+    }
+  } catch { /* workerd may omit memoryUsage */ }
+  try {
+    if (db && db.isOpen !== false) {
+      const counts = db.prepare("SELECT COUNT(*) AS rooms, COALESCE(SUM(sequence), 0) AS sequences, COALESCE(SUM(LENGTH(projection)), 0) AS projectionBytes FROM rooms").get();
+      if (counts) {
+        record.rooms = counts.rooms;
+        record.sequences = counts.sequences;
+        record.projectionBytes = counts.projectionBytes;
+      }
+      // Deferred opens must not walk the event log. Sequence sum and
+      // projection bytes are the state size; COUNT(*) on events is not.
+      if (!extra.skipEventCount) {
+        const events = db.prepare("SELECT COUNT(*) AS events FROM events").get();
+        if (events) record.events = events.events;
+      }
+    }
+  } catch { /* schema not installed, or the handle is already closing */ }
+  console.error(JSON.stringify(record));
+  return record;
+}
+
+function repairInvalidSupersessions(state) {
+  const workItems = Object.values(state.workItems ?? {}).filter(item => item && typeof item === "object");
+  const hasInvalidSupersession = item => {
+    if (item.state !== "superseded" || !item.supersededBy) return false;
+    const visited = new Set([item.id]);
+    let nextId = item.supersededBy;
+    while (nextId) {
+      if (visited.has(nextId)) return true;
+      visited.add(nextId);
+      const next = state.workItems[nextId];
+      if (!next) return true;
+      nextId = next.supersededBy;
+    }
+    return false;
+  };
+  let changed = false;
+  for (const item of workItems.filter(hasInvalidSupersession)) {
+    item.supersessionRepair = { previousTargetId: item.supersededBy, reason: "invalid_legacy_link" };
+    item.supersededBy = null;
+    changed = true;
+  }
+  return changed;
+}
+
+// Mutates `state`. `events` are parsed provenance envelopes in sequence order.
+function applyProvenanceRepair(state, events) {
+  const missing = Object.values(state.workItems ?? {}).filter(item => item && !Object.hasOwn(item, "proposedById"));
+  const workItems = Object.values(state.workItems ?? {}).filter(item => item && typeof item === "object");
+  const legacyReceipts = workItems.flatMap(item => [...(item.receiptHistory ?? []), item.receipt].filter(Boolean))
+    .filter(receipt => !Object.hasOwn(receipt, "reportedById") || !Object.hasOwn(receipt, "producerId") || !Object.hasOwn(receipt, "producerAttribution"));
+  const legacyVerifications = workItems.flatMap(item => [...(item.verificationHistory ?? []), item.verification].filter(Boolean)
+    .map(verification => ({ item, verification })))
+    .filter(({ verification }) => !Object.hasOwn(verification, "independenceConfirmed"));
+  const approvalsToCheck = workItems.filter(item => item.decision?.decision === "approved");
+  const legacySupersededClaims = workItems.filter(item => item.state === "superseded" && item.claim?.status === "active");
+  const proposers = new Map();
+  const completions = new Map();
+  const verifications = new Map();
+  const decisions = new Map();
+  const supersessions = new Map();
+  for (const parsed of events) {
+    if (parsed.type === T.WORK_PROPOSED && parsed.data?.workItemId && !proposers.has(parsed.data.workItemId)) proposers.set(parsed.data.workItemId, parsed.actorId ?? null);
+    if (parsed.type === T.WORK_COMPLETED && parsed.id) completions.set(parsed.id, parsed);
+    if (parsed.type === T.VERIFICATION_RECORDED && parsed.id) verifications.set(parsed.id, parsed);
+    if (parsed.type === T.OWNER_DECISION_RECORDED && parsed.id) decisions.set(parsed.id, parsed);
+    if (parsed.type === T.WORK_SUPERSEDED && parsed.data?.workItemId) supersessions.set(parsed.data.workItemId, parsed);
+  }
+  let changed = false;
+  if (ensureDefaultChannelState(state)) changed = true;
+  for (const item of missing) {
+    const proposer = proposers.get(item.id);
+    if (proposer) { item.proposedById = proposer; changed = true; }
+  }
+  for (const receipt of legacyReceipts) {
+    const completion = completions.get(receipt.eventId);
+    const producerId = completion?.data && Object.hasOwn(completion.data, "producerId") ? completion.data.producerId : null;
+    receipt.reportedById = completion?.actorId ?? null;
+    receipt.producerId = producerId ?? null;
+    receipt.producerAttribution = producerId == null ? "unknown" : "reported";
+    changed = true;
+  }
+  for (const { item, verification } of legacyVerifications) {
+    const receipt = [...(item.receiptHistory ?? []), item.receipt].filter(Boolean)
+      .find(candidate => candidate.eventId === verification.completionEventId && candidate.evidenceVersion === verification.evidenceVersion);
+    const verificationEvent = verifications.get(verification.eventId);
+    const producerKnown = receipt?.producerAttribution === "reported" && receipt.producerId != null;
+    const verifierAuthenticated = verificationEvent?.actorId === verification.verifierId && verificationEvent.actorId === item.verifierMemberId;
+    const exactReceipt = verificationEvent?.data?.completionEventId === receipt?.eventId && verificationEvent?.data?.evidenceVersion === receipt?.evidenceVersion;
+    verification.independenceConfirmed = producerKnown && verifierAuthenticated && exactReceipt && receipt.producerId !== verificationEvent.actorId;
+    changed = true;
+  }
+  for (const item of approvalsToCheck) {
+    const receipt = item.receipt, verification = item.verification, decision = item.decision;
+    const decisionEvent = decisions.get(decision.eventId);
+    const approvalStillCurrent = item.state === "completed";
+    const approvalProvenanceSatisfied = decision.actorId === item.humanDecisionMakerId
+      && decision.completionEventId === receipt?.eventId
+      && decision.evidenceVersion === receipt?.evidenceVersion
+      && decisionEvent?.actorId === decision.actorId
+      && decisionEvent?.data?.workItemId === item.id
+      && decisionEvent?.data?.decision === "approved"
+      && decisionEvent?.data?.completionEventId === receipt?.eventId
+      && decisionEvent?.data?.evidenceVersion === receipt?.evidenceVersion
+      && decisionEvent?.data?.reason === decision.reason;
+    const independentGateSatisfied = !item.independentVerificationRequired || (
+      verification?.result === "pass" && verification.independenceConfirmed === true
+      && verification.verifierId === item.verifierMemberId
+      && verification.completionEventId === receipt?.eventId
+      && verification.evidenceVersion === receipt?.evidenceVersion
+      && receipt?.producerAttribution === "reported" && receipt.producerId != null
+      && receipt.producerId !== verification.verifierId
+    );
+    const confirmed = approvalStillCurrent && approvalProvenanceSatisfied && independentGateSatisfied;
+    if (!confirmed) {
+      item.decisionHistory ||= [];
+      const invalidatedByRepair = !approvalStillCurrent ? "approval_not_current"
+        : !approvalProvenanceSatisfied ? "approval_provenance_unconfirmed"
+        : "producer_independence_unconfirmed";
+      item.decisionHistory.push({
+        ...decision,
+        historical: true,
+        invalidatedByRepair,
+        ...(!approvalStillCurrent ? { invalidatedState: item.state } : {})
+      });
+      item.decision = null;
+      changed = true;
+    }
+  }
+  for (const item of legacySupersededClaims) {
+    const supersession = supersessions.get(item.id);
+    item.claim.status = "superseded";
+    item.claim.supersededAt = supersession?.at ?? item.updatedAt;
+    changed = true;
+  }
+  if (repairInvalidSupersessions(state)) changed = true;
+  return changed;
 }
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
@@ -413,6 +643,12 @@ const shapes = {
   [T.ROOM_SPEND_ALLOWANCE_SET]: "allowanceCents periodDays",
   [T.ROOM_TRUST_SET]: "enabled",
   [T.ROOM_PUBLIC_RECEIPTS_SET]: "enabled",
+  // --- GR2 public acquisition opt-ins. Command field allowlist only. ---
+  [T.ROOM_PUBLIC_PAGE_SET]: "enabled",
+  [T.ROOM_JOIN_LINK_SET]: "enabled",
+  [T.MEMBER_PUBLIC_NAME_SET]: "enabled",
+  [T.WORK_PUBLIC_SET]: "workItemId enabled",
+  // --- end GR2 ---
   [T.ROOM_ARCHIVED]: "reason",
   [T.OWNERSHIP_TRANSFERRED]: "toMemberId reason",
   [T.MEMBER_ADDED]: "memberId displayName kind permissions accountableHumanId identityId agentType referredBy",
@@ -719,8 +955,81 @@ function agentWakeTargetIds(state, senderMemberId, data) {
   return [...agentWakeTargets(state, senderMemberId, data).keys()];
 }
 
+// Hash of the DDL this process knows how to apply. A stored match means
+// schema setup and the writer fence already ran for this code, so a wake
+// can skip both. Fence SQL is included: a trigger change must reinstall.
+function roomSchemaStamp() {
+  const hash = createHash("sha256");
+  hash.update(String(STORE_SCHEMA_VERSION));
+  const parts = [
+    invitationSchema, agentIdentitySchema, accountLoginMethodsSchema, agentInviteSchema,
+    referralInviteSchema, referralSchema, emissaryGraphSchema, emissaryReceiptSchema,
+    shareLinkSchema, shareLinkCodeSchema, reminderSchema, agentConnectionSchema,
+    inboxSchema, inboxReadSchema, emailImportSchema, wakeQueueSchema, wakeQueuePauseSchema,
+    attentionSchema, workClaimSchema, nextActionsSchema, agentHeartbeatSchema, workWakeSchema,
+    landQueueSchema, inboxAttachmentBytesSchema, membersDirectorySchema, channelJournalSchema,
+    telegramLiveStatusSchema, spamQuarantineSchema, jevShadowSchema, dmConsentSchema, bondSchema,
+    roomPublicFaceSchema, roomDirectorySchema, guestInviteSchema, guestSelfServeSchema,
+    webFetchSchema, webResearchSchema, mentionStateSchema, activitySchema, threadMutesSchema,
+    humanPushSchema, quarantineThreadSplitSchema, slaBreachAlertSchema, inboxHandoffSchema,
+    inboxHandoffRoomSchema, handoffEnvelopeSchema, agentPluginSchema, inboxCollabSchema,
+    moderationSchema, bountyEscrowSchema, projectOffersSchema, publicWorkClaimsSchema,
+    publicWorkClaimFenceSchema, publicWorkReviewsSchema, publicWorkSuccessorsSchema,
+    accessRequestSchema, membershipDelegationSchema, membershipDelegationJournalSchema,
+    ownerDelegateSchema, agentRoomSchema, oauthPendingSchema, gmailSchema, requestRunSchema,
+    directSendSchema, inboxStitchSchema, RETIRED_BOARD_V2_SCHEMA, EMISSARY_LURE_SCHEMA,
+    agentKeyRegistrySchema, INTEGRITY_SNAPSHOT_SCHEMA,
+    INTEGRITY_JOB_CURSOR_SCHEMA, INTEGRITY_ROOM_STATE_SCHEMA, INTEGRITY_SWEEP_COLUMN,
+    ROOM_SCHEMA_STAMP_SCHEMA, LOOKUP_INDEXES
+  ];
+  for (const part of parts) hash.update("\0").update(part ?? "");
+  for (const def of fenceDefinitions(STORE_SCHEMA_VERSION)) hash.update("\0").update(def.name).update(def.sql);
+  return hash.digest("hex");
+}
+
+const INTEGRITY_SNAPSHOT_SCHEMA = `CREATE TABLE IF NOT EXISTS integrity_snapshot (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  checksum TEXT NOT NULL,
+  verified_at INTEGER NOT NULL
+)`;
+const INTEGRITY_JOB_CURSOR_SCHEMA = `CREATE TABLE IF NOT EXISTS integrity_job_cursor (
+  singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+  step INTEGER NOT NULL
+)`;
+const INTEGRITY_ROOM_STATE_SCHEMA = `CREATE TABLE IF NOT EXISTS integrity_room_state (
+  room_id TEXT PRIMARY KEY,
+  sequence INTEGER NOT NULL,
+  projection_bytes INTEGER NOT NULL
+)`;
+const INTEGRITY_SWEEP_COLUMN = "ALTER TABLE integrity_job_cursor ADD COLUMN sweep_after TEXT NOT NULL DEFAULT ''";
+const ROOM_SCHEMA_STAMP_SCHEMA = `CREATE TABLE IF NOT EXISTS room_schema_stamp (
+  singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+  version INTEGER NOT NULL,
+  stamp TEXT NOT NULL
+)`;
+
+// Lookups on growing tables whose primary key does not lead with the
+// filter column. Included in the schema stamp so a deploy runs this once
+// on the full path; a later wake does not rebuild it.
+const LOOKUP_INDEXES = `
+  CREATE INDEX IF NOT EXISTS identity_links_identity ON identity_links(identity_id);
+  CREATE INDEX IF NOT EXISTS member_accounts_account ON member_accounts(account_id, room_id);
+  CREATE INDEX IF NOT EXISTS share_link_joins_slot ON share_link_joins(slot_hash);
+  CREATE INDEX IF NOT EXISTS account_passkey_method ON account_passkey_credentials(method_id);
+  CREATE INDEX IF NOT EXISTS oauth_pending_slot ON oauth_pending_states(provider, slot_token);
+  CREATE INDEX IF NOT EXISTS agent_connections_sponsor ON agent_connections(sponsor_account_id);
+  CREATE INDEX IF NOT EXISTS private_email_connections_id ON private_email_connections(id);
+  CREATE INDEX IF NOT EXISTS public_work_receipts_offer ON public_work_receipts(offer_id, generation);
+  CREATE INDEX IF NOT EXISTS gmail_pending_account ON gmail_pending(account_id);
+  CREATE INDEX IF NOT EXISTS guest_selfserve_idem_member ON guest_selfserve_idem(member_id);
+`;
+
 export class RoomStore {
-  constructor(filename, { now = () => Date.now(), readOnly = false, database, storagePlatform = nodeStorage, storageFailureThreshold = STORAGE_FAILURE_THRESHOLD, stitch = null, identityHashKey = undefined } = {}) {
+  constructor(filename, { now = () => Date.now(), readOnly = false, database, storagePlatform = nodeStorage, storageFailureThreshold = STORAGE_FAILURE_THRESHOLD, stitch = null, identityHashKey = undefined, integrity = "eager" } = {}) {
+    const coldStart = startColdStart();
+    if (integrity !== "eager" && integrity !== "deferred") throw new Error("integrity must be eager or deferred");
+    if (readOnly && integrity === "deferred") throw new Error("Read-only integrity checks stay eager");
+    this.integrityMode = integrity;
     if (!Number.isInteger(storageFailureThreshold) || storageFailureThreshold < 1) throw new Error("Storage failure threshold must be a positive integer");
     // Cross-channel thread stitching (task #19): stitch is the frozen
     // { salt, epoch, enabled, bindings } triple from stitchConfigFromEnv, or
@@ -803,6 +1112,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     const supported = new Set([...Array(STORE_SCHEMA_VERSION + 1).keys()]);
     const hasSchema = version === 0 && this.storagePlatform.hasSchema(this.db);
     if (!supported.has(version) || hasSchema) {
+      logColdStart(coldStart, this.db, true);
       this.db.close();
       throw new Error(version > STORE_SCHEMA_VERSION ? "Database schema is newer than this service" : "Database schema version is unsupported");
     }
@@ -855,15 +1165,45 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         verifyRoomLifecycle(this);
         this.moderation.verifySchema({ allowAbsent: true }); // E4 message reports: additive at v27 as well.
         this.bountyEscrow.verifySchema({ allowAbsent: true }); // Escrowed bounties: additive, read-only never migrates.
+        logColdStart(coldStart, this.db, false);
         return;
-      } catch (error) { this.db.close(); throw error; }
+      } catch (error) { logColdStart(coldStart, this.db, error); this.db.close(); throw error; }
     }
     this.storagePlatform.configure(this.db, false);
     this.storagePlatform.registerWriter(this.db);
+    // A current deferred open (the Durable Object) must not replay events,
+    // invitations, or help history, and must not build the event-type index.
+    // Those scans are the integrity job's work. An older schema still migrates
+    // and repairs here; that path runs once per upgrade, not on every wake.
+    const deferIntegrity = this.integrityMode === "deferred" && version === STORE_SCHEMA_VERSION;
     try { this.transaction(() => {
     // Reread under the write lock: another startup may have upgraded while we waited.
     if (this.storagePlatform.version(this.db) !== version) throw new Error("Database changed during startup; retry with the current service");
-    if (version >= 6) this.storagePlatform.verifyWriterFence(this.db, version);
+    const phases = {};
+    const phaseAt = { name: "schema", t: performance.now(), rows: Number(this.db.rowsRead ?? 0) };
+    const phase = name => {
+      const now = performance.now();
+      const rows = Number(this.db.rowsRead ?? 0);
+      phases[phaseAt.name] = { ms: Math.round(now - phaseAt.t), rowsRead: rows - phaseAt.rows };
+      phaseAt.name = name;
+      phaseAt.t = now;
+      phaseAt.rows = rows;
+    };
+    this.coldStartPhases = phases;
+    // A wake of an already-current database skips schema setup, fence
+    // install, and the delivery hydration. Integrity replays run on the cron.
+    const stampMatches = deferIntegrity && version === STORE_SCHEMA_VERSION && this.schemaStampMatches();
+    if (version >= 6 && !stampMatches) this.storagePlatform.verifyWriterFence(this.db, version);
+    if (stampMatches) {
+      phase("fence");
+      phase("plugin");
+      this.agentPlugin.load();
+      phase("verifies");
+      if (!this.readOnly) this.wakeQueue.recover(this.now());
+      phase("checksum");
+      phases.checksum = { ms: 0, rowsRead: 0 };
+      return;
+    }
     if (version > 0 && version < 12) {
       // Legacy fixture import allowed ignored scalar fields. Never reinterpret a
       // previously stored policy marker, even when it is null or behind a checkpoint.
@@ -909,7 +1249,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       || this.db.prepare("SELECT 1 FROM rooms,json_tree(rooms.projection) WHERE json_tree.key='externalProducer' LIMIT 1").get()
       || version >= 2 && this.db.prepare("SELECT 1 FROM projection_checkpoints,json_tree(projection_checkpoints.projection) WHERE json_tree.key='externalProducer' LIMIT 1").get()))
       throw new Error("Pre-v26 outside credit history requires operator reconciliation");
-    this.repairProjectionProvenance({ upgradeV1: version === 1 });
+    if (!deferIntegrity) this.repairProjectionProvenance({ upgradeV1: version === 1 });
     if (version === 1 || version === 2) this.migrateIdentityV3(version);
     if (version === 1 || version === 2 || version === 3) this.migrateInvitationsV4();
       if (version < 5) this.migrateInvitationJournalV5();
@@ -961,7 +1301,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // bump, intentionally outside the writer fence (see unfencedAdditiveTables).
       // Applied here (not only where the registry is instantiated) so upgrades,
       // store-only fixtures, and the recovery audit see the tables.
-      this.db.exec(boardV2Schema);
+      this.db.exec(RETIRED_BOARD_V2_SCHEMA);
       // Emissary Slice 2 (RC-2026-09-28-2873): lure-generation ledgers
       // (emissary_drops, emissary_invite_attribution, emissary_idempotency,
       // emissary_journal) — purely additive, IF NOT EXISTS is idempotent, no
@@ -1007,7 +1347,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // unmatched row stays NULL and the mint path refuses it fail-closed.
       const chainColumns = new Set(this.db.prepare("PRAGMA table_info(referral_chain_members)").all().map(c => c.name));
       if (!chainColumns.has("max_depth")) this.db.exec("ALTER TABLE referral_chain_members ADD COLUMN max_depth INTEGER");
-      this.db.exec(`UPDATE referral_chain_members SET max_depth = (
+      // Eager opens finish the backfill before serving. A deferred wake
+      // leaves NULL caps for the integrity cron, 500 rows at a time. The
+      // mint path refuses a NULL cap, so a partial backfill fails closed.
+      if (!deferIntegrity) this.db.exec(`UPDATE referral_chain_members SET max_depth = (
         SELECT ri.max_depth FROM referral_invites ri
         WHERE ri.room_id = referral_chain_members.room_id
           AND ri.redeemed_member_id = referral_chain_members.member_id
@@ -1142,6 +1485,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // IF NOT EXISTS is idempotent, no schema version bump, intentionally
       // outside the writer fence (see unfencedAdditiveTables).
       this.db.exec(agentPluginSchema);
+      phase("plugin");
       this.agentPlugin.load();
       // Lane C inbox collaboration tables (task RC-2026-09-18-011) follow the
       // same additive pattern: IF NOT EXISTS is idempotent, no schema version
@@ -1225,10 +1569,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       ensureAttachmentSchema(this.db); // Converge the deployed v28-v33 attachment lineage before installing v34 fences.
       // Idempotent: recreates fences for tables the additive schemas just
       // (re)created, and refuses a file whose existing triggers drifted.
+      phase("fence");
       this.storagePlatform.installWriterFence(this.db);
       this.storagePlatform.verifyWriterFence(this.db);
-      this.verifyInvitationAudit();
-      this.shareLinks.verify();
+      this.db.exec(INTEGRITY_SNAPSHOT_SCHEMA);
+      this.db.exec(INTEGRITY_JOB_CURSOR_SCHEMA);
+      this.ensureIntegrityRoomState();
+      if (!deferIntegrity) this.verifyInvitationAudit();
       this.reminders.verifySchema();
       this.wakeQueue.verifySchema();
       this.wakeQueue.verifyPauseSchema();
@@ -1238,25 +1585,288 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // A lease whose holder died with the process is expired back to pending
       // here, so a restart preserves the intent exactly once (W4-45 done-when).
       if (!this.readOnly) this.wakeQueue.recover(this.now());
-      this.agentConnections.verify();
-      this.verifyHelpHistory();
-      this.inbox.verify();
-      this.email.verify();
+      if (!deferIntegrity) this.verifyHelpHistory();
       verifyAttachmentSchema(this.db);
       this.channelUpdates.verifySchema();
-      this.channelUpdates.verify();
       this.quarantineSplits.verifySchema();
-      this.quarantineSplits.verify();
-      verifyRoomLifecycle(this);
-      if (!this.readOnly) this.identities.expireInactive();
-    }); } catch (error) { this.db.close(); throw error; }
+      phase("verifies");
+      // Deferred opens (the Durable Object) replay these on the integrity
+      // cron, in batches. An eager open still checks them before serving.
+      if (!deferIntegrity) {
+        this.shareLinks.verify();
+        this.agentConnections.verify();
+        this.inbox.verify();
+        this.email.verify();
+        this.channelUpdates.verify();
+        this.quarantineSplits.verify();
+        verifyRoomLifecycle(this);
+        if (!this.readOnly) this.identities.expireInactive();
+      }
+      this.db.exec(LOOKUP_INDEXES);
+      this.rememberSchemaStamp();
+      phase("checksum");
+      phases.checksum = { ms: 0, rowsRead: 0 };
+    }); } catch (error) { this.coldStart = logColdStart(coldStart, this.db, error, { integrity: this.integrityMode, phases: this.coldStartPhases }); this.db.close(); throw error; }
+    this.coldStart = logColdStart(coldStart, this.db, false, this.coldStartExtra(deferIntegrity));
+  }
+
+  coldStartExtra(deferIntegrity) {
+    const extra = { integrity: this.integrityMode, phases: this.coldStartPhases };
+    if (!deferIntegrity) return extra;
+    extra.skipEventCount = true;
+    // The checksum runs in verifyRoomIntegrity, not on this wake.
+    return extra;
+  }
+
+  schemaStampMatches() {
+    const exists = this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='room_schema_stamp'").get();
+    if (!exists) return false;
+    const row = this.db.prepare("SELECT version, stamp FROM room_schema_stamp WHERE singleton=1").get();
+    return row?.version === STORE_SCHEMA_VERSION && row.stamp === roomSchemaStamp();
+  }
+
+  rememberSchemaStamp() {
+    this.db.exec(ROOM_SCHEMA_STAMP_SCHEMA);
+    this.db.prepare(`INSERT INTO room_schema_stamp (singleton, version, stamp) VALUES (1, ?, ?)
+      ON CONFLICT(singleton) DO UPDATE SET version=excluded.version, stamp=excluded.stamp`)
+      .run(STORE_SCHEMA_VERSION, roomSchemaStamp());
+  }
+
+  // At most `limit` chain members whose cap was never copied off the invite.
+  // The mint path refuses a NULL cap, so a tick that stops early fails closed.
+  backfillReferralDepth(limit = 500) {
+    return this.transaction(() => {
+      const exists = this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='referral_chain_members'").get();
+      if (!exists) return 0;
+      const rows = this.db.prepare("SELECT rowid FROM referral_chain_members WHERE max_depth IS NULL LIMIT ?").all(limit);
+      const update = this.db.prepare(`UPDATE referral_chain_members SET max_depth = (
+        SELECT ri.max_depth FROM referral_invites ri
+        WHERE ri.room_id = referral_chain_members.room_id
+          AND ri.redeemed_member_id = referral_chain_members.member_id
+          AND ri.status = 'redeemed' LIMIT 1
+      ) WHERE rowid = ? AND max_depth IS NULL`);
+      let updated = 0;
+      for (const row of rows) updated += update.run(row.rowid).changes;
+      return updated;
+    });
+  }
+
+  // Two replay steps per cron tick, continuing from the stored cursor so a
+  // hibernated wake does not start at share links forever. Each step is the
+  // same check the constructor used to run.
+  async runDeferredIntegrityBatch({ deadline = Infinity, yieldBetween = async () => {} } = {}) {
+    const steps = [
+      () => this.shareLinks.verify(),
+      () => this.agentConnections.verify(),
+      () => this.inbox.verify(),
+      () => this.email.verify(),
+      () => this.channelUpdates.verify(),
+      () => this.quarantineSplits.verify(),
+      () => verifyRoomLifecycle(this),
+      () => { if (!this.readOnly) this.identities.expireInactive(); },
+      () => this.backfillReferralDepth(500)
+    ];
+    let step = this.transaction(() => this.db.prepare("SELECT step FROM integrity_job_cursor WHERE singleton=1").get()?.step ?? 0);
+    if (!Number.isInteger(step) || step < 0 || step >= steps.length) step = 0;
+    const remember = next => this.transaction(() => {
+      this.db.prepare(`INSERT INTO integrity_job_cursor (singleton, step) VALUES (1, ?)
+        ON CONFLICT(singleton) DO UPDATE SET step=excluded.step`).run(next);
+    });
+    let ran = 0;
+    while (ran < 2) {
+      if (Date.now() > deadline) {
+        // A step that finished is not run again on the next tick.
+        if (ran > 0) remember(step);
+        return { ran, next: step, budgetExceeded: 1 };
+      }
+      steps[step]();
+      step = (step + 1) % steps.length;
+      ran += 1;
+      await yieldBetween();
+    }
+    remember(step);
+    return { ran, next: step };
+  }
+
+  ensureIntegrityRoomState() {
+    this.db.exec(INTEGRITY_ROOM_STATE_SCHEMA);
+    const columns = new Set(this.db.prepare("PRAGMA table_info(integrity_job_cursor)").all().map(column => column.name));
+    if (!columns.has("sweep_after")) this.db.exec(INTEGRITY_SWEEP_COLUMN);
+  }
+
+  // Remember each room's sequence and projection size after a full check so
+  // the next tick does not read every projection again.
+  rememberIntegrityRoomState() {
+    this.ensureIntegrityRoomState();
+    this.transaction(() => {
+      this.db.prepare(`INSERT INTO integrity_room_state(room_id, sequence, projection_bytes)
+        SELECT id, sequence, LENGTH(projection) FROM rooms WHERE 1
+        ON CONFLICT(room_id) DO UPDATE SET sequence=excluded.sequence, projection_bytes=excluded.projection_bytes`).run();
+      this.db.prepare("DELETE FROM integrity_room_state WHERE room_id NOT IN (SELECT id FROM rooms)").run();
+    });
+  }
+
+  // Changed rooms, plus one room of the rolling sweep. A sequence change
+  // updates the stored checksum. Projection bytes that move without a
+  // sequence change, or a state table that does not cover every room, fall
+  // through to the full repair.
+  incrementalIntegrityCheck() {
+    this.ensureIntegrityRoomState();
+    return this.transaction(() => {
+      const snapshot = this.readIntegritySnapshot();
+      const roomCount = this.db.prepare("SELECT COUNT(*) AS n FROM rooms").get().n;
+      const stateCount = this.db.prepare("SELECT COUNT(*) AS n FROM integrity_room_state").get().n;
+      if (!snapshot || stateCount !== roomCount) return { ok: false };
+      const parts = snapshot.split(":").map(Number);
+      if (parts.length !== 6 || parts.some(part => !Number.isSafeInteger(part))) return { ok: false };
+      const sweepAfter = this.db.prepare("SELECT sweep_after FROM integrity_job_cursor WHERE singleton=1").get()?.sweep_after ?? "";
+      const sweepSql = "SELECT id, sequence, LENGTH(projection) AS bytes FROM rooms";
+      const sweep = this.db.prepare(`${sweepSql} WHERE id>? ORDER BY id LIMIT 1`).get(sweepAfter)
+        ?? this.db.prepare(`${sweepSql} ORDER BY id LIMIT 1`).get();
+      const changed = this.db.prepare(`SELECT r.id, r.sequence, LENGTH(r.projection) AS bytes, s.sequence AS oldSequence, s.projection_bytes AS oldBytes
+        FROM rooms r JOIN integrity_room_state s ON s.room_id=r.id WHERE r.sequence!=s.sequence`).all();
+      const uncovered = this.db.prepare(`SELECT 1 FROM rooms r LEFT JOIN integrity_room_state s ON s.room_id=r.id WHERE s.room_id IS NULL
+        UNION SELECT 1 FROM integrity_room_state s LEFT JOIN rooms r ON r.id=s.room_id WHERE r.id IS NULL LIMIT 1`).get();
+      if (uncovered) return { ok: false };
+      if (sweep) {
+        const stored = this.db.prepare("SELECT sequence, projection_bytes AS bytes FROM integrity_room_state WHERE room_id=?").get(sweep.id);
+        if (!stored || (stored.sequence === sweep.sequence && stored.bytes !== sweep.bytes)) return { ok: false };
+      }
+      const invitations = this.db.prepare("SELECT COUNT(*) AS invitations FROM membership_invitations").get().invitations;
+      const journal = this.db.prepare("SELECT COUNT(*) AS entries, COALESCE(SUM(sequence), 0) AS sequences FROM membership_invitation_journal").get();
+      if (invitations !== parts[3] || journal.entries !== parts[4] || journal.sequences !== parts[5]) return { ok: false };
+      let sequences = parts[1];
+      let projectionBytes = parts[2];
+      const update = this.db.prepare("UPDATE integrity_room_state SET sequence=?, projection_bytes=? WHERE room_id=?");
+      for (const row of changed) {
+        sequences += row.sequence - row.oldSequence;
+        projectionBytes += row.bytes - row.oldBytes;
+        update.run(row.sequence, row.bytes, row.id);
+      }
+      const text = [parts[0], sequences, projectionBytes, invitations, journal.entries, journal.sequences].join(":");
+      if (text !== snapshot) {
+        this.db.prepare("UPDATE integrity_snapshot SET checksum=?, verified_at=? WHERE id=1").run(text, this.now());
+      }
+      if (sweep) {
+        this.db.prepare(`INSERT INTO integrity_job_cursor(singleton, step, sweep_after) VALUES(1, 0, ?)
+          ON CONFLICT(singleton) DO UPDATE SET sweep_after=excluded.sweep_after`).run(sweep.id);
+      }
+      return { ok: true, invitations, checked: changed.length, swept: sweep ? 1 : 0 };
+    });
+  }
+
+  // Rooms, projection bytes, and invitation rows. Not the event log.
+  integrityChecksum() {
+    return this.readTransaction(() => {
+      const rooms = this.db.prepare("SELECT COUNT(*) AS rooms, COALESCE(SUM(sequence), 0) AS sequences, COALESCE(SUM(LENGTH(projection)), 0) AS projectionBytes FROM rooms").get();
+      const invitations = this.db.prepare("SELECT COUNT(*) AS invitations FROM membership_invitations").get();
+      const journal = this.db.prepare("SELECT COUNT(*) AS entries, COALESCE(SUM(sequence), 0) AS sequences FROM membership_invitation_journal").get();
+      const text = [rooms.rooms, rooms.sequences, rooms.projectionBytes, invitations.invitations, journal.entries, journal.sequences].join(":");
+      return { text, rooms: rooms.rooms, sequences: rooms.sequences, projectionBytes: rooms.projectionBytes, invitations: invitations.invitations };
+    });
+  }
+  readIntegritySnapshot() {
+    try { return this.db.prepare("SELECT checksum FROM integrity_snapshot WHERE id=1").get()?.checksum ?? null; }
+    catch { return null; }
+  }
+  writeIntegritySnapshot(text) {
+    this.transaction(() => {
+      this.db.prepare("INSERT INTO integrity_snapshot(id, checksum, verified_at) VALUES(1, ?, ?) ON CONFLICT(id) DO UPDATE SET checksum=excluded.checksum, verified_at=excluded.verified_at")
+        .run(text, this.now());
+    });
+  }
+  helpProjectionPresent() {
+    return this.readTransaction(() => Boolean(this.db.prepare(`
+      SELECT 1 AS present FROM rooms WHERE json_type(projection, '$.helpOffers') IS NOT NULL
+      UNION
+      SELECT 1 FROM rooms, json_each(rooms.projection, '$.workItems') AS item
+      WHERE json_type(item.value, '$.helpWanted') IS NOT NULL
+      UNION
+      SELECT 1 FROM projection_checkpoints WHERE json_type(projection, '$.helpOffers') IS NOT NULL
+      UNION
+      SELECT 1 FROM projection_checkpoints, json_each(projection_checkpoints.projection, '$.workItems') AS item
+      WHERE json_type(item.value, '$.helpWanted') IS NOT NULL
+      LIMIT 1
+    `).get()));
+  }
+  // Full invitation, help, and provenance check. Yields between invitations so
+  // a cron tick can open the input gate. A matching snapshot returns without
+  // reading event bodies. The constructor does not call this.
+  async verifyRoomIntegrity({ yieldBetween = async () => {}, deadline = Infinity } = {}) {
+    if (this.readOnly) throw new Error("Read-only stores do not run the integrity job");
+    if (typeof yieldBetween !== "function") throw new TypeError("yieldBetween must be a function");
+    if (Date.now() > deadline) return { matched: 0, skipped: 0, verified: 0, budgetExceeded: 1, checked: 0, swept: 0 };
+    const incremental = this.incrementalIntegrityCheck();
+    if (incremental.ok) {
+      await yieldBetween();
+      if (Date.now() > deadline) return { matched: 1, skipped: 1, verified: 0, invitations: incremental.invitations, checked: incremental.checked, swept: incremental.swept, budgetExceeded: 1 };
+      const deferred = await this.runDeferredIntegrityBatch({ deadline, yieldBetween });
+      return { matched: 1, skipped: 1, verified: 0, invitations: incremental.invitations, checked: incremental.checked, swept: incremental.swept, deferred };
+    }
+    const before = this.integrityChecksum();
+    if (this.readIntegritySnapshot() === before.text) {
+      await yieldBetween();
+      if (Date.now() > deadline) return { matched: 1, skipped: 1, verified: 0, invitations: before.invitations, budgetExceeded: 1 };
+      const deferred = await this.runDeferredIntegrityBatch({ deadline, yieldBetween });
+      return { matched: 1, skipped: 1, verified: 0, invitations: before.invitations, deferred };
+    }
+    await yieldBetween();
+    if (Date.now() > deadline) return { matched: 0, skipped: 0, verified: 0, budgetExceeded: 1 };
+    const orphan = this.readTransaction(() => this.db.prepare("SELECT 1 FROM membership_invitation_journal j LEFT JOIN membership_invitations i ON i.id=j.invitation_id WHERE i.id IS NULL LIMIT 1").get());
+    if (orphan) fail(503, "invitation_integrity_error", "Invitation record requires operator reconciliation");
+    const ids = this.readTransaction(() => this.db.prepare("SELECT id FROM membership_invitations ORDER BY id").all().map(row => row.id));
+    for (const id of ids) {
+      if (Date.now() > deadline) return { matched: 0, skipped: 0, verified: 0, budgetExceeded: 1 };
+      this.verifyInvitationRecord(id);
+      await yieldBetween();
+    }
+    if (this.helpProjectionPresent()) {
+      if (Date.now() > deadline) return { matched: 0, skipped: 0, verified: 0, budgetExceeded: 1 };
+      this.verifyHelpHistory();
+      await yieldBetween();
+    }
+    if (Date.now() > deadline) return { matched: 0, skipped: 0, verified: 0, budgetExceeded: 1 };
+    this.repairProjectionProvenance({ upgradeV1: false, ensureIndex: false });
+    await yieldBetween();
+    const after = this.integrityChecksum();
+    this.writeIntegritySnapshot(after.text);
+    this.rememberIntegrityRoomState();
+    if (Date.now() > deadline) return { matched: 0, skipped: 0, verified: 1, invitations: after.invitations, budgetExceeded: 1 };
+    const deferred = await this.runDeferredIntegrityBatch({ deadline, yieldBetween });
+    return { matched: 0, skipped: 0, verified: 1, invitations: after.invitations, deferred };
   }
 
   verifyHelpHistory() {
     return this.readTransaction(() => {
-      for (const row of this.db.prepare("SELECT id,projection FROM rooms ORDER BY id").all()) {
-        const history = this.db.prepare("SELECT sequence,body FROM events WHERE room_id=? ORDER BY sequence").all(row.id);
-        const checkpoint = this.db.prepare("SELECT sequence,projection FROM projection_checkpoints WHERE room_id=?").get(row.id);
+      const placeholders = HELP_EVENT_TYPES.map(() => "?").join(",");
+      const helpRooms = new Set(this.db.prepare(
+        `SELECT DISTINCT room_id AS roomId FROM events WHERE json_extract(body,'$.type') IN (${placeholders})`
+      ).all(...HELP_EVENT_TYPES).map(row => row.roomId));
+      const idsWithHelp = sql => new Set(this.db.prepare(sql).all().map(row => row.id));
+      // own() is true for a present key whose value is null. json_type is SQL
+      // NULL only when the key is absent, so this matches that check without
+      // parsing message bodies.
+      const roomHelp = idsWithHelp(`
+        SELECT id FROM rooms WHERE json_type(projection, '$.helpOffers') IS NOT NULL
+        UNION
+        SELECT rooms.id AS id FROM rooms, json_each(rooms.projection, '$.workItems') AS item
+        WHERE json_type(item.value, '$.helpWanted') IS NOT NULL
+      `);
+      const checkpointHelp = idsWithHelp(`
+        SELECT room_id AS id FROM projection_checkpoints WHERE json_type(projection, '$.helpOffers') IS NOT NULL
+        UNION
+        SELECT projection_checkpoints.room_id AS id
+        FROM projection_checkpoints, json_each(projection_checkpoints.projection, '$.workItems') AS item
+        WHERE json_type(item.value, '$.helpWanted') IS NOT NULL
+      `);
+      if (!helpRooms.size) {
+        if (roomHelp.size || checkpointHelp.size) throw new Error("Help invitation history requires operator reconciliation");
+        return;
+      }
+      for (const row of this.db.prepare("SELECT id, projection FROM rooms ORDER BY id").all()) {
+        if (!helpRooms.has(row.id) && !roomHelp.has(row.id) && !checkpointHelp.has(row.id)) continue;
+        const history = this.db.prepare("SELECT sequence, body FROM events WHERE room_id=? ORDER BY sequence").all(row.id);
+        const checkpoint = this.db.prepare("SELECT sequence, projection FROM projection_checkpoints WHERE room_id=?").get(row.id);
         auditWorkHelp(JSON.parse(row.projection), history, checkpoint);
       }
     });
@@ -1583,136 +2193,127 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // The legacy reducer guessed that every reporter was also the producer, so legacy receipts
   // deliberately migrate to explicit unknown producer attribution unless their event carried
   // the newer producerId field. Idempotent current projections are left untouched.
-  repairProjectionProvenance({ upgradeV1 = false } = {}) {
+  //
+  // Chat messages are not an input. A current projection is repaired from SQL extracts
+  // (default channel, invalid supersession links) and does not JSON.parse the log.
+  // Rooms that still carry a legacy marker load only the provenance event types.
+  repairProjectionProvenance({ upgradeV1 = false, ensureIndex = true } = {}) {
     this.transaction(() => {
       // A v1 projection was produced under v1 transition rules. Preserve its repaired,
       // conservative form as an immutable recovery checkpoint; all later v2 events replay
       // normally from there. This keeps legacy event bodies byte-for-byte append-only without
       // weakening the current reducer to accept rules that no longer apply.
       this.db.exec("CREATE TABLE IF NOT EXISTS projection_checkpoints (room_id TEXT PRIMARY KEY REFERENCES rooms(id), sequence INTEGER NOT NULL, projection TEXT NOT NULL)");
-      const findEvents = this.db.prepare("SELECT body FROM events WHERE room_id=? ORDER BY sequence");
-      const saveCheckpoint = this.db.prepare("INSERT INTO projection_checkpoints(room_id,sequence,projection) VALUES(?,?,?)");
-      for (const { id, sequence, projection } of this.db.prepare("SELECT id, sequence, projection FROM rooms ORDER BY id").all()) {
-        const state = JSON.parse(projection);
-        const missing = Object.values(state.workItems ?? {}).filter(item => item && !Object.hasOwn(item, "proposedById"));
-        const workItems = Object.values(state.workItems ?? {}).filter(item => item && typeof item === "object");
-        const legacyReceipts = workItems.flatMap(item => [...(item.receiptHistory ?? []), item.receipt].filter(Boolean))
-          .filter(receipt => !Object.hasOwn(receipt, "reportedById") || !Object.hasOwn(receipt, "producerId") || !Object.hasOwn(receipt, "producerAttribution"));
-        const legacyVerifications = workItems.flatMap(item => [...(item.verificationHistory ?? []), item.verification].filter(Boolean)
-          .map(verification => ({ item, verification })))
-          .filter(({ verification }) => !Object.hasOwn(verification, "independenceConfirmed"));
-        const approvalsToCheck = workItems.filter(item => item.decision?.decision === "approved");
-        const legacySupersededClaims = workItems.filter(item => item.state === "superseded" && item.claim?.status === "active");
-        const hasInvalidSupersession = item => {
-          if (item.state !== "superseded" || !item.supersededBy) return false;
-          const visited = new Set([item.id]);
-          let nextId = item.supersededBy;
-          while (nextId) {
-            if (visited.has(nextId)) return true;
-            visited.add(nextId);
-            const next = state.workItems[nextId];
-            if (!next) return true;
-            nextId = next.supersededBy;
-          }
-          return false;
-        };
-        const invalidSupersessions = workItems.filter(hasInvalidSupersession);
-        const proposers = new Map();
-        const completions = new Map();
-        const verifications = new Map();
-        const decisions = new Map();
-        const supersessions = new Map();
-        for (const row of findEvents.all(id)) {
-          const parsed = JSON.parse(row.body);
-          if (parsed.type === T.WORK_PROPOSED && parsed.data?.workItemId && !proposers.has(parsed.data.workItemId)) proposers.set(parsed.data.workItemId, parsed.actorId ?? null);
-          if (parsed.type === T.WORK_COMPLETED && parsed.id) completions.set(parsed.id, parsed);
-          if (parsed.type === T.VERIFICATION_RECORDED && parsed.id) verifications.set(parsed.id, parsed);
-          if (parsed.type === T.OWNER_DECISION_RECORDED && parsed.id) decisions.set(parsed.id, parsed);
-          if (parsed.type === T.WORK_SUPERSEDED && parsed.data?.workItemId) supersessions.set(parsed.data.workItemId, parsed);
-        }
-        let changed = false;
-        // Phase 2 channels: legacy projections (stored before channels existed)
-        // gain #general so the stored projection matches a replay. Mirrors
-        // ensureDefaultChannel in src/events.js.
-        if (ensureDefaultChannelState(state)) changed = true;
-        for (const item of missing) {
-          const proposer = proposers.get(item.id);
-          if (proposer) { item.proposedById = proposer; changed = true; }
-        }
-        for (const receipt of legacyReceipts) {
-          const completion = completions.get(receipt.eventId);
-          const producerId = completion?.data && Object.hasOwn(completion.data, "producerId") ? completion.data.producerId : null;
-          receipt.reportedById = completion?.actorId ?? null;
-          receipt.producerId = producerId ?? null;
-          receipt.producerAttribution = producerId == null ? "unknown" : "reported";
-          changed = true;
-        }
-        for (const { item, verification } of legacyVerifications) {
-          const receipt = [...(item.receiptHistory ?? []), item.receipt].filter(Boolean)
-            .find(candidate => candidate.eventId === verification.completionEventId && candidate.evidenceVersion === verification.evidenceVersion);
-          const verificationEvent = verifications.get(verification.eventId);
-          const producerKnown = receipt?.producerAttribution === "reported" && receipt.producerId != null;
-          const verifierAuthenticated = verificationEvent?.actorId === verification.verifierId && verificationEvent.actorId === item.verifierMemberId;
-          const exactReceipt = verificationEvent?.data?.completionEventId === receipt?.eventId && verificationEvent?.data?.evidenceVersion === receipt?.evidenceVersion;
-          verification.independenceConfirmed = producerKnown && verifierAuthenticated && exactReceipt && receipt.producerId !== verificationEvent.actorId;
-          changed = true;
-        }
-        for (const item of approvalsToCheck) {
-          const receipt = item.receipt, verification = item.verification, decision = item.decision;
-          const decisionEvent = decisions.get(decision.eventId);
-          const approvalStillCurrent = item.state === "completed";
-          const approvalProvenanceSatisfied = decision.actorId === item.humanDecisionMakerId
-            && decision.completionEventId === receipt?.eventId
-            && decision.evidenceVersion === receipt?.evidenceVersion
-            && decisionEvent?.actorId === decision.actorId
-            && decisionEvent?.data?.workItemId === item.id
-            && decisionEvent?.data?.decision === "approved"
-            && decisionEvent?.data?.completionEventId === receipt?.eventId
-            && decisionEvent?.data?.evidenceVersion === receipt?.evidenceVersion
-            && decisionEvent?.data?.reason === decision.reason;
-          const independentGateSatisfied = !item.independentVerificationRequired || (
-            verification?.result === "pass" && verification.independenceConfirmed === true
-            && verification.verifierId === item.verifierMemberId
-            && verification.completionEventId === receipt?.eventId
-            && verification.evidenceVersion === receipt?.evidenceVersion
-            && receipt?.producerAttribution === "reported" && receipt.producerId != null
-            && receipt.producerId !== verification.verifierId
-          );
-          const confirmed = approvalStillCurrent && approvalProvenanceSatisfied && independentGateSatisfied;
-          if (!confirmed) {
-            item.decisionHistory ||= [];
-            const invalidatedByRepair = !approvalStillCurrent ? "approval_not_current"
-              : !approvalProvenanceSatisfied ? "approval_provenance_unconfirmed"
-              : "producer_independence_unconfirmed";
-            item.decisionHistory.push({
-              ...decision,
-              historical: true,
-              invalidatedByRepair,
-              ...(!approvalStillCurrent ? { invalidatedState: item.state } : {})
-            });
-            item.decision = null;
-            changed = true;
-          }
-        }
-        for (const item of legacySupersededClaims) {
-          const supersession = supersessions.get(item.id);
-          item.claim.status = "superseded";
-          item.claim.supersededAt = supersession?.at ?? item.updatedAt;
-          changed = true;
-        }
-        for (const item of invalidSupersessions) {
-          item.supersessionRepair = { previousTargetId: item.supersededBy, reason: "invalid_legacy_link" };
-          item.supersededBy = null;
-          changed = true;
-        }
-        if (changed) this.db.prepare("UPDATE rooms SET projection=? WHERE id=?").run(JSON.stringify(state), id);
-        if (upgradeV1) saveCheckpoint.run(id, sequence, JSON.stringify(state));
+      // The expression index cannot yield mid-build. Deferred wakes and the
+      // integrity cron skip it; eager opens still create it inside this transaction.
+      if (ensureIndex) this.ensureEventTypeIndex();
+      if (upgradeV1) {
+        const rooms = this.db.prepare("SELECT id, sequence, projection FROM rooms ORDER BY id").all();
+        this.replayProvenance(rooms, { upgradeV1: true });
+        // v2 marks the producer/reporter/verification-independence projection contract.
+        // Commit its marker atomically with every v1 projection repair so older binaries
+        // either see untouched v1 or reject the fully upgraded database.
+        this.storagePlatform.setVersion(this.db, 2);
+        return;
       }
-      // v2 marks the producer/reporter/verification-independence projection contract.
-      // Commit its marker atomically with every v1 projection repair so older binaries
-      // either see untouched v1 or reject the fully upgraded database.
-      if (upgradeV1) this.storagePlatform.setVersion(this.db, 2);
+      for (const row of this.db.prepare("SELECT projection FROM rooms WHERE json_valid(projection) = 0").all()) JSON.parse(row.projection);
+      const replayIds = this.roomsNeedingProvenanceReplay();
+      this.repairProjectionShape(replayIds);
+      if (!replayIds.size) return;
+      const rooms = this.db.prepare("SELECT id, sequence FROM rooms ORDER BY id").all().filter(row => replayIds.has(row.id));
+      this.replayProvenance(rooms, { upgradeV1: false });
     });
+  }
+  ensureEventTypeIndex() {
+    // Additive. Expression indexes do not fire writer triggers. Durable Object
+    // SQL rejects SAVEPOINT, so this runs inside the open transaction itself.
+    this.db.exec("CREATE INDEX IF NOT EXISTS events_room_type ON events(room_id, json_extract(body, '$.type'))");
+  }
+  roomsNeedingProvenanceReplay() {
+    const ids = this.db.prepare(`
+      SELECT DISTINCT rooms.id AS id
+      FROM rooms, json_each(rooms.projection, '$.workItems') AS item
+      WHERE json_type(item.value) = 'object' AND (
+        json_type(item.value, '$.proposedById') IS NULL
+        OR (json_type(item.value, '$.receipt') = 'object' AND (
+          json_type(item.value, '$.receipt.reportedById') IS NULL
+          OR json_type(item.value, '$.receipt.producerId') IS NULL
+          OR json_type(item.value, '$.receipt.producerAttribution') IS NULL))
+        OR (json_type(item.value, '$.verification') = 'object'
+          AND json_type(item.value, '$.verification.independenceConfirmed') IS NULL)
+        OR json_extract(item.value, '$.decision.decision') = 'approved'
+        OR (json_extract(item.value, '$.state') = 'superseded' AND json_extract(item.value, '$.claim.status') = 'active')
+      )
+      UNION
+      SELECT DISTINCT rooms.id AS id
+      FROM rooms, json_each(rooms.projection, '$.workItems') AS item, json_each(item.value, '$.receiptHistory') AS receipt
+      WHERE json_type(receipt.value) = 'object' AND (
+        json_type(receipt.value, '$.reportedById') IS NULL
+        OR json_type(receipt.value, '$.producerId') IS NULL
+        OR json_type(receipt.value, '$.producerAttribution') IS NULL)
+      UNION
+      SELECT DISTINCT rooms.id AS id
+      FROM rooms, json_each(rooms.projection, '$.workItems') AS item, json_each(item.value, '$.verificationHistory') AS verification
+      WHERE json_type(verification.value) = 'object'
+        AND json_type(verification.value, '$.independenceConfirmed') IS NULL
+    `).all().map(row => row.id);
+    return new Set(ids);
+  }
+  repairProjectionShape(skipIds) {
+    const update = this.db.prepare("UPDATE rooms SET projection=? WHERE id=?");
+    const missingChannel = this.db.prepare(`
+      SELECT id, projection FROM rooms
+      WHERE json_type(projection, '$.room') = 'object'
+        AND (json_type(projection, '$.channels.${DEFAULT_CHANNEL_ID}') IS NULL
+          OR json_type(projection, '$.channels.${DEFAULT_CHANNEL_ID}') = 'null')
+    `).all();
+    for (const row of missingChannel) {
+      if (skipIds.has(row.id)) continue;
+      const state = JSON.parse(row.projection);
+      if (!ensureDefaultChannelState(state)) continue;
+      update.run(JSON.stringify(state), row.id);
+    }
+    const linked = this.db.prepare(`
+      SELECT rooms.id AS id, json_extract(rooms.projection, '$.workItems') AS workItems
+      FROM rooms
+      WHERE EXISTS (
+        SELECT 1 FROM json_each(rooms.projection, '$.workItems') AS item
+        WHERE json_extract(item.value, '$.state') = 'superseded'
+          AND json_type(item.value, '$.supersededBy') = 'text'
+      )
+    `).all();
+    for (const row of linked) {
+      if (skipIds.has(row.id)) continue;
+      if (!repairInvalidSupersessions({ workItems: parseStoredJson(row.workItems, {}) })) continue;
+      const state = JSON.parse(this.db.prepare("SELECT projection FROM rooms WHERE id=?").get(row.id).projection);
+      if (repairInvalidSupersessions(state)) update.run(JSON.stringify(state), row.id);
+    }
+  }
+  replayProvenance(rooms, { upgradeV1 }) {
+    const placeholders = PROVENANCE_EVENT_TYPES.map(() => "?").join(",");
+    const findEvents = this.db.prepare(`SELECT body FROM events WHERE room_id=? AND json_extract(body,'$.type') IN (${placeholders}) ORDER BY sequence`);
+    const saveCheckpoint = this.db.prepare("INSERT INTO projection_checkpoints(room_id,sequence,projection) VALUES(?,?,?)");
+    const update = this.db.prepare("UPDATE rooms SET projection=? WHERE id=?");
+    const slicesOf = this.db.prepare(`SELECT json_extract(projection, '$.room') AS room, json_extract(projection, '$.channels') AS channels, json_extract(projection, '$.workItems') AS workItems FROM rooms WHERE id=?`);
+    for (const room of rooms) {
+      const events = findEvents.all(room.id, ...PROVENANCE_EVENT_TYPES).map(row => JSON.parse(row.body));
+      if (upgradeV1) {
+        const state = JSON.parse(room.projection);
+        const changed = applyProvenanceRepair(state, events);
+        if (changed) update.run(JSON.stringify(state), room.id);
+        saveCheckpoint.run(room.id, room.sequence, JSON.stringify(state));
+        continue;
+      }
+      const slices = slicesOf.get(room.id);
+      const partial = {
+        room: parseStoredJson(slices?.room, null),
+        channels: parseStoredJson(slices?.channels, undefined),
+        workItems: parseStoredJson(slices?.workItems, {})
+      };
+      if (!applyProvenanceRepair(partial, events)) continue;
+      const state = JSON.parse(this.db.prepare("SELECT projection FROM rooms WHERE id=?").get(room.id).projection);
+      if (applyProvenanceRepair(state, events)) update.run(JSON.stringify(state), room.id);
+    }
   }
   close() { this.db.close(); }
   transaction(fn) {
@@ -3623,6 +4224,15 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // so a demotion to t1_readonly wins on the agent's next write. New
       // agent members enroll at t2_standard (see autonomy-tiers.mjs).
       enforceAutonomyTiers({ db: this.db, roomId, state: room.state, command, actor: auth.member, nowMs: this.now(), fail });
+      // Projection claims follow the board writer rule. Live only: an exact
+      // command retry returned above, and replay of an older event never
+      // reaches this line. write_external does not admit a claim.
+      if ([T.CLAIM_ACQUIRED, T.CLAIM_RELEASED, T.CLAIM_RENEWED].includes(command.type)) {
+        const actor = room.state.members?.[auth.member.id];
+        if (!mayWriteBoardClaims(actor, room.state.room?.ownerId)) {
+          fail(403, "work_claims_not_permitted", "Creating, claiming, renewing, or updating work claims needs a contribute, review, or collaborate profile.");
+        }
+      }
       // Bond / peer DM. Room chat (message.posted) is unchanged and still
       // requires room membership plus DM consent when toMemberId is set.
       // Peer DMs are a separate command, gated by an active bond with peer.dm.
@@ -3638,9 +4248,29 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         type: bondEffect?.eventType ?? command.type, roomId, actorId: auth.member.id, at: new Date(this.now()).toISOString(),
         idempotencyKey: hash(`${auth.member.id}:${command.id}`), causationId: command.causationId,
         data: bondEffect ? bondEffect.data
-          : memberAuthorityEvent ? { ...command.data, authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION }
+          : memberAuthorityEvent ? {
+            ...command.data,
+            authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION,
+            ...(command.type === T.MEMBER_ADDED ? { displayNamePolicyVersion: DISPLAY_NAME_POLICY_VERSION } : {}),
+          }
           : requestMode ? { ...command.data, requestPolicyVersion: REPLY_POLICY_VERSION } : command.data
       });
+      // A display name is checked before the reducer stores it. Exact
+      // duplicates stay allowed: identity link already accepts two members
+      // with the same spelling. Reserved labels, confusable spellings, and
+      // control characters are refused.
+      if (command.type === T.MEMBER_ADDED || command.type === T.MEMBER_JOINED_VIA_INVITATION) {
+        try {
+          assertMemberDisplayNameAvailable(command.data?.displayName, room.state.members);
+        } catch (error) {
+          if (error?.code === "display_name_unavailable" && error.reason !== "duplicate") {
+            const refused = new ServiceError(422, "display_name_unavailable", error.message);
+            if (error.detail) refused.detail = error.detail;
+            throw refused;
+          }
+          if (error?.code !== "display_name_unavailable") throw error;
+        }
+      }
       let state;
       try {
         // New referral attribution requires a real member. Keep this at live
@@ -3660,6 +4290,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       }
       catch (error) {
         if (error?.code === TRUST_OFF_CODE) fail(403, TRUST_OFF_CODE, error.message);
+        if (error?.code === "display_name_unavailable") fail(422, "display_name_unavailable", error.message);
         if (/^Claim held by [A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(error.message)) fail(409, "session_claimed", error.message);
         if (command.type === T.MESSAGE_REACTION_SET && (/^Event data missing /.test(error.message) || error.message === "Invalid reaction choice")) {
           fail(422, "invalid_arguments", error.message);

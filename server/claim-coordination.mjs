@@ -135,6 +135,7 @@ export function settlePullRequest(item, outcome, nowMs) {
       leaseExpiresAt: null,
       files: Object.freeze([]),
       attestations: Object.freeze([]),
+      reviews: Object.freeze([]),
       pullRequest,
       history: Object.freeze([...(item.history ?? []), stamp(nowMs, agentId, "pr_closed", note)])
     }
@@ -173,6 +174,39 @@ export function holdForRateLimit(item, nowMs, until) {
       rateLimitedUntil: until
     })
   };
+}
+
+const RED_CONCLUSIONS = new Set(["failure", "cancelled", "timed_out", "action_required"]);
+const NEUTRAL_CONCLUSIONS = new Set(["neutral", "skipped"]);
+
+// Combined commit status plus check runs, reduced to the claim's ci.state.
+// A failure wins. Anything still running stays pending. All-success is
+// success. Only neutral or skipped signals, or no signal at all, is neutral.
+export function rollupClaimCi({ status = null, checkRuns = [], pullUrl = null } = {}) {
+  let failure = false;
+  let pending = false;
+  let success = 0;
+  for (const run of Array.isArray(checkRuns) ? checkRuns : []) {
+    const conclusion = run?.conclusion ?? null;
+    if (RED_CONCLUSIONS.has(conclusion)) failure = true;
+    else if (conclusion === "success") success += 1;
+    else if (NEUTRAL_CONCLUSIONS.has(conclusion)) continue;
+    else pending = true;
+  }
+  const total = status && typeof status === "object" ? Number(status.total_count) : 0;
+  if (Number.isFinite(total) && total > 0) {
+    if (status.state === "failure" || status.state === "error") failure = true;
+    else if (status.state === "success") success += 1;
+    else pending = true;
+  }
+  let state = "neutral";
+  if (failure) state = "failure";
+  else if (pending) state = "pending";
+  else if (success > 0) state = "success";
+  const statuses = Array.isArray(status?.statuses) ? status.statuses : [];
+  const target = statuses.find(entry => typeof entry?.target_url === "string" && entry.target_url.startsWith("https://"));
+  const url = target?.target_url || (typeof pullUrl === "string" ? pullUrl : null);
+  return { state, url };
 }
 
 export function pullRequestDue(item, nowMs) {

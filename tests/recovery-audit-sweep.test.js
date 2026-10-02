@@ -9,6 +9,7 @@ import { auditRecovery } from "../server/recovery.mjs";
 import { AccessRequests } from "../server/access-requests.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
 import { emitWorkClaimEvent } from "../server/work-claim-events.mjs";
+import { seedStarter } from "../server/starter-room.mjs";
 
 // A gate for one bug class, found three times in one day.
 //
@@ -74,6 +75,12 @@ function sweep() {
   step(T.ROOM_SPEND_ALLOWANCE_SET, "owner", { allowanceCents: 10000, periodDays: 30 });
   step(T.ROOM_TRUST_SET, "owner", { enabled: false });
   step(T.ROOM_PUBLIC_RECEIPTS_SET, "owner", { enabled: true });
+  // --- GR2 opt-ins. Each one has to replay through auditRecovery. ---
+  step(T.ROOM_PUBLIC_PAGE_SET, "owner", { enabled: true });
+  step(T.ROOM_JOIN_LINK_SET, "owner", { enabled: true });
+  step(T.MEMBER_PUBLIC_NAME_SET, "owner", { enabled: true });
+  step(T.WORK_PUBLIC_SET, "owner", { workItemId: W, enabled: true });
+  // --- end GR2 ---
   step(T.NOTIFICATION_PREFERENCES_SET, "producer", { preferences: { mentions: "all" } });
   step(T.MEMBER_STATUS_UPDATED, "producer", { memberId: "producer", message: "Working on the agenda" });
   step(T.CAPABILITIES_ADVERTISED, "producer", { capabilities: ["text"] });
@@ -269,6 +276,16 @@ function sweep() {
   if (!fixture.store.db.prepare("SELECT 1 FROM events WHERE room_id='commons' AND json_extract(body,'$.type')=? LIMIT 1").get(T.WORK_CLAIM_UPDATED))
     broke.push(`${T.WORK_CLAIM_UPDATED}: the sweep never got this event into the log, so nothing was audited`);
 
+  // room.starter_seeded is not a command. Seeding the fixture room records it
+  // before the room is archived.
+  try {
+    seedStarter(fixture.store, "commons", { intent: "bug", ownerMemberId: "owner" });
+    exercised.add(T.ROOM_STARTER_SEEDED);
+    auditRecovery(fixture.store);
+  } catch (error) { broke.push(`${T.ROOM_STARTER_SEEDED}: ${error.message}`); }
+  if (!fixture.store.db.prepare("SELECT 1 FROM events WHERE room_id='commons' AND json_extract(body,'$.type')=? LIMIT 1").get(T.ROOM_STARTER_SEEDED))
+    broke.push(`${T.ROOM_STARTER_SEEDED}: the sweep never got this event into the log, so nothing was audited`);
+
   // Last, because both end the room's normal life.
   step(T.OWNERSHIP_TRANSFERRED, "owner", { toMemberId: "producer", reason: "handing the room over" });
   step(T.ROOM_ARCHIVED, "producer", { reason: "pilot over" });
@@ -301,13 +318,13 @@ test("the event surface has not grown without this sweep noticing", () => {
   // decide: teach the sweep to exercise it, or record that it cannot be. Either
   // is fine. Silently adding an event no auditor models is what is not.
   //
-  // claim.renewed is not exercised here: it needs a leased write-claim
-  // plus the holder's public progress message, and the sweep fixture's
-  // producer holds no write_external grant, so claim.acquired is refused
-  // before a renewal is even reachable. The reducer's validation is covered
-  // by tests/lease-renewal.test.js instead.
+  // claim.renewed is not exercised here: it needs an active claim plus the
+  // holder's public progress message posted after that claim. The sweep does
+  // not acquire one. The reducer's validation is covered by
+  // tests/lease-renewal.test.js instead.
   // land.updated is exercised above via report_tip (it is not a command).
   // work_claim.updated is exercised above via emitWorkClaimEvent (it is not a command).
-  assert.equal(Object.values(T).length, 55,
+  // room.starter_seeded is exercised above via seedStarter (it is not a command).
+  assert.equal(Object.values(T).length, 60,
     "EVENT_TYPES changed: add the new type to this sweep, then update this count");
 });

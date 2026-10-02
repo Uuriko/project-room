@@ -196,6 +196,39 @@ export function verifyIdentityMintProof(displayName, proof, now = Date.now(), bi
   return false;
 }
 
+// One limiter for anonymous identity mints. POST /api/agent-identities and
+// /api/identity-create keep code rate_limited. A referral redeem that mints
+// a new identity passes identity_mint_limited. Proof failures stay 428
+// proof_required on every caller.
+export function enforceAnonymousMintLimits(identities, { name, buckets, proof, requireProof, now, limitCode = "rate_limited" }) {
+  const db = identities.db;
+  const dayStart = now - IDENTITY_MINT_WINDOW_MS;
+  const addressDay = db.prepare(
+    "SELECT count(*) AS n FROM agent_identities WHERE mint_address=? AND created_at>=?"
+  ).get(buckets.address, dayStart).n;
+  const presented = typeof proof === "string" && proof.length > 0;
+  if (presented && !verifyIdentityMintProof(name, proof, now, identities.powBits)) {
+    fail(428, "proof_required", "Identity mint proof required", null, identities.proofDetail(name, now));
+  }
+  if (!presented && requireProof && addressDay >= identities.proofFreePerAddress) {
+    fail(428, "proof_required", "Identity mint proof required", null, identities.proofDetail(name, now));
+  }
+  const addressMinute = db.prepare(
+    "SELECT count(*) AS n FROM agent_identities WHERE mint_address=? AND created_at>=?"
+  ).get(buckets.address, now - MINT_MINUTE_MS).n;
+  const limited = (message, retryAfter) => fail(429, limitCode, message, { "Retry-After": String(retryAfter) });
+  if (addressMinute >= identities.addressMinuteLimit) limited("Too many identity mints from this address", 60);
+  if (addressDay >= identities.addressDailyLimit) limited("Identity mint address budget reached", 3600);
+  const networkDay = db.prepare(
+    "SELECT count(*) AS n FROM agent_identities WHERE mint_network=? AND created_at>=?"
+  ).get(buckets.network, dayStart).n;
+  if (networkDay >= identities.networkDailyLimit) limited("Identity mint network budget reached", 3600);
+  const globalDay = db.prepare(
+    "SELECT count(*) AS n FROM agent_identities WHERE mint_address IS NOT NULL AND created_at>=?"
+  ).get(dayStart).n;
+  if (globalDay >= identities.anonymousDailyLimit) limited("Identity mint daily budget reached", 3600);
+}
+
 export function solveIdentityMintProof(displayName, now = Date.now(), bits = IDENTITY_POW_BITS) {
   const name = typeof displayName === "string" ? displayName.trim() : "";
   const bucket = Math.floor(now / IDENTITY_POW_WINDOW_MS);
@@ -323,7 +356,7 @@ export class AgentIdentities {
       let mintNetwork = null;
       if (anonymous && typeof anonymous === "object") {
         const buckets = anonymousMintBuckets(anonymous.address);
-        this.admitAnonymous(name, buckets, anonymous.proof, anonymous.requireProof !== false, now);
+        this.admitAnonymous(name, buckets, anonymous.proof, anonymous.requireProof !== false, now, anonymous.limitCode);
         activatedAt = null;
         mintAddress = buckets.address;
         mintNetwork = buckets.network;
@@ -374,39 +407,8 @@ export class AgentIdentities {
     };
   }
 
-  admitAnonymous(name, buckets, proof, requireProof, now) {
-    const dayStart = now - IDENTITY_MINT_WINDOW_MS;
-    const addressDay = this.db.prepare(
-      "SELECT count(*) AS n FROM agent_identities WHERE mint_address=? AND created_at>=?"
-    ).get(buckets.address, dayStart).n;
-    const presented = typeof proof === "string" && proof.length > 0;
-    if (presented && !verifyIdentityMintProof(name, proof, now, this.powBits)) {
-      fail(428, "proof_required", "Identity mint proof required", null, this.proofDetail(name, now));
-    }
-    if (!presented && requireProof && addressDay >= this.proofFreePerAddress) {
-      fail(428, "proof_required", "Identity mint proof required", null, this.proofDetail(name, now));
-    }
-    const addressMinute = this.db.prepare(
-      "SELECT count(*) AS n FROM agent_identities WHERE mint_address=? AND created_at>=?"
-    ).get(buckets.address, now - MINT_MINUTE_MS).n;
-    if (addressMinute >= this.addressMinuteLimit) {
-      fail(429, "rate_limited", "Too many identity mints from this address", { "Retry-After": "60" });
-    }
-    if (addressDay >= this.addressDailyLimit) {
-      fail(429, "rate_limited", "Identity mint address budget reached", { "Retry-After": "3600" });
-    }
-    const networkDay = this.db.prepare(
-      "SELECT count(*) AS n FROM agent_identities WHERE mint_network=? AND created_at>=?"
-    ).get(buckets.network, dayStart).n;
-    if (networkDay >= this.networkDailyLimit) {
-      fail(429, "rate_limited", "Identity mint network budget reached", { "Retry-After": "3600" });
-    }
-    const globalDay = this.db.prepare(
-      "SELECT count(*) AS n FROM agent_identities WHERE mint_address IS NOT NULL AND created_at>=?"
-    ).get(dayStart).n;
-    if (globalDay >= this.anonymousDailyLimit) {
-      fail(429, "rate_limited", "Identity mint daily budget reached", { "Retry-After": "3600" });
-    }
+  admitAnonymous(name, buckets, proof, requireProof, now, limitCode = "rate_limited") {
+    enforceAnonymousMintLimits(this, { name, buckets, proof, requireProof, now, limitCode });
   }
 
   // Keep an anonymous row that still holds a room membership, an invite, or
@@ -445,10 +447,13 @@ export class AgentIdentities {
       )`);
     }
     if (table("rooms")) {
-      clauses.push(`AND NOT EXISTS (
-        SELECT 1 FROM rooms, json_each(rooms.projection, '$.workItems') AS item
-        WHERE json_extract(item.value, '$.claim.holderId') = agent_identities.identity_id
-          AND json_extract(item.value, '$.claim.status') = 'active'
+      // Uncorrelated: one work-item scan for the whole sweep. The previous
+      // NOT EXISTS re-parsed every projection once per identity candidate.
+      clauses.push(`AND identity_id NOT IN (
+        SELECT json_extract(item.value, '$.claim.holderId')
+        FROM rooms, json_each(rooms.projection, '$.workItems') AS item
+        WHERE json_extract(item.value, '$.claim.status') = 'active'
+          AND json_extract(item.value, '$.claim.holderId') IS NOT NULL
       )`);
     }
     return clauses.join("\n");
@@ -466,6 +471,11 @@ export class AgentIdentities {
     const table = name => this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name);
     if (!table("agent_identities") || !table("identity_links")) return 0;
     const cutoff = this.store.now() - this.activationWindowMs;
+    const stale = this.db.prepare(`
+      SELECT COUNT(*) AS n FROM agent_identities
+      WHERE mint_address IS NOT NULL AND activated_at IS NULL AND revoked_at IS NULL AND created_at < ?
+    `).get(cutoff).n;
+    if (!stale) return 0;
     const keep = this.retentionClauses();
     const rows = this.db.prepare(`
       SELECT identity_id AS identityId FROM agent_identities
@@ -608,12 +618,10 @@ export class AgentIdentities {
       }
       const memberName = displayName?.trim() || identity.displayName;
       // Compare against active room members inside the writer transaction,
-      // not an earlier snapshot. Exact-name duplicates already exist in the
-      // room protocol, so preserve them; block deceptive alternate spellings
-      // of an active name, and reject mixed-script/invisible names outright.
-      // Same-identity relinks preserve their existing path above.
-      // Preserve ordinary case/space variants already supported by the
-      // protocol; NFKC width/style lookalikes remain distinct and are blocked.
+      // not an earlier snapshot. Exact duplicates and reserved labels are
+      // refused by the live member.added guard. This check still blocks
+      // deceptive alternate spellings, mixed scripts, and invisible characters
+      // before that command. Same-identity relinks keep the path above.
       const canonical = value => value.trim().replace(/\p{White_Space}+/gu, " ").toLowerCase();
       const activeNames = Object.values(this.store.room(roomId).state.members)
         .filter(member => member.active !== false && member.id !== resolvedMemberId

@@ -6,7 +6,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { applicationTables, unfencedAdditiveTables } from "../server/writer-fence.mjs";
+import { applicationTables, lazyAdditiveTables, unfencedAdditiveTables } from "../server/writer-fence.mjs";
 
 const SERVER_DIR = new URL("../server/", import.meta.url).pathname;
 
@@ -20,7 +20,8 @@ test("all CREATE TABLE tables in server modules are registered application table
     }
   }
   // writer-fence owns the canonical DDL; only additive module tables are in scope here.
-  const unregistered = [...created].filter(t => !applicationTables.includes(t));
+  const registered = new Set([...applicationTables, ...lazyAdditiveTables]);
+  const unregistered = [...created].filter(t => !registered.has(t));
   assert.deepEqual(unregistered, [],
     `unregistered tables would fail the recovery audit: ${unregistered.join(", ")}`);
 });

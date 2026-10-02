@@ -84,8 +84,8 @@ test("retries keep the same guest, do not consume another use, and require uncha
 });
 
 test("join limits, expiry, cancellation and current inviter authority bound future joins", t => {
-  const f = fixture(t); f.guest().accept(); f.guest().accept();
-  assert.throws(() => f.guest().accept(), { code: "link_unavailable" });
+  const f = fixture(t); f.guest("Ada").accept(); f.guest("Nia").accept();
+  assert.throws(() => f.guest("Bea").accept(), { code: "link_unavailable" });
   assert.throws(() => f.store.shareLinks.preview(f.linkToken), { code: "link_unavailable" });
   const newToken = randomBytes(32).toString("base64url");
   const created = f.store.shareLinks.create(f.ownerKey, "commons", { ...f.details, requestId: randomUUID(), linkToken: newToken }, null);
@@ -543,8 +543,9 @@ test("same join retried with a lost cookie cannot mint a second guest or use the
   assert.equal(f.store.shareLinks.list(f.ownerKey, "commons").links[0].joins, 1);
   assert.throws(() => f.store.authenticateAccountSession(retry.slot.token), { code: "unauthenticated" });
   assert.equal(original.accept().session.member.id, joined.session.member.id);
-  // Names are not identity: a different person choosing the same name may join.
-  const different = retry.accept();
+  // A different browser choosing the same display name does not join.
+  assert.throws(() => retry.accept(), error => error.code === "display_name_unavailable" && error.reason === "duplicate");
+  const different = retry.accept("Mina");
   assert.notEqual(different.session.member.id, joined.session.member.id);
 });
 

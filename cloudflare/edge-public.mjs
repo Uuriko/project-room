@@ -4,7 +4,7 @@
 // gate for every route that shares it. Asset bytes are cached for the life
 // of this isolate; a deploy starts a new one.
 import { publicAssetPaths } from '../deploy/public-assets.mjs';
-import { publicSearchAssets, publicSearchCanonical, publicSearchMarketingPolicy, PUBLIC_SEARCH_CSP, reviewedPublicSearchPaths } from '../deploy/public-search.mjs';
+import { acceptPrefersHtml, publicHtmlNotFoundPath, publicSearchAssets, publicSearchCanonical, publicSearchMarketingPolicy, PUBLIC_NOT_FOUND_HTML, PUBLIC_SEARCH_CSP, reviewedPublicSearchPaths } from '../deploy/public-search.mjs';
 import { discoveryDoc, EDGE_DOOR_HOSTS, ROOM_ORIGIN, SKILLS_CATALOG_PATH } from '../deploy/agent-discovery.mjs';
 import { buildOpenApiJson } from '../server/discoverability.mjs';
 import { MCP_SERVER_CARD_PATH, MCP_DISCOVERY_CACHE_CONTROL, MCP_SERVER_CARD_CORS } from '../src/mcp-server-card.mjs';
@@ -19,6 +19,7 @@ const assetType = path => path.endsWith('.js') ? 'text/javascript'
   : path.endsWith('.html') ? 'text/html'
   : path.endsWith('.png') ? 'image/png'
   : path.endsWith('.svg') ? 'image/svg+xml'
+  : path.endsWith('.webmanifest') ? 'application/manifest+json'
   : 'text/markdown; charset=utf-8';
 
 const assets = new Map([
@@ -48,6 +49,8 @@ function baseHeaders(url) {
   headers.set('X-Robots-Tag', 'noindex, nofollow');
   if (url.protocol === 'https:') headers.set('Strict-Transport-Security', 'max-age=31536000');
   headers.set('Content-Security-Policy', APP_CSP);
+  headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=()');
+  headers.set('Cross-Origin-Opener-Policy', 'same-origin');
   return headers;
 }
 
@@ -72,7 +75,40 @@ function roomMarketingPath(pathname) {
   return assets.has(rest) ? rest : null;
 }
 
+let securityContactWarned = false;
+
+function securityContactFrom(raw) {
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  if (!trimmed || /[\r\n]/.test(trimmed)) return null;
+  const contact = trimmed.includes(':') ? trimmed : `mailto:${trimmed}`;
+  if (!/^mailto:/i.test(contact) && !/^https:\/\//i.test(contact)) return null;
+  return contact;
+}
+
+function securityTxtResponse(request, url, contact) {
+  const headers = baseHeaders(url);
+  if (request.method !== 'GET' && request.method !== 'HEAD') return methodNotAllowed(headers, 'GET, HEAD');
+  if (!contact) {
+    if (!securityContactWarned) {
+      securityContactWarned = true;
+      console.warn('ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404');
+    }
+    headers.set('Content-Type', 'text/plain; charset=utf-8');
+    const body = 'Not found\n';
+    headers.set('Content-Length', String(body.length));
+    return new Response(request.method === 'HEAD' ? null : body, { status: 404, headers });
+  }
+  const expires = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+  const body = `Contact: ${contact}\nExpires: ${expires}\n`;
+  const bytes = new TextEncoder().encode(body);
+  headers.set('Content-Type', 'text/plain; charset=utf-8');
+  headers.set('Content-Length', String(bytes.byteLength));
+  return new Response(request.method === 'HEAD' ? null : bytes, { status: 200, headers });
+}
+
 export function classifyEdgePath(pathname) {
+  if (pathname === '/.well-known/security.txt' || pathname === '/room/.well-known/security.txt') return 'security-txt';
   if (pathname === '/openapi.json' || pathname === '/room/openapi.json') return 'openapi';
   const doc = discoveryDoc(pathname);
   if (doc && doc !== skillsDoc) return 'discovery';
@@ -157,6 +193,16 @@ async function assetResponse(request, env, url) {
     // A reviewed page with no packaged bytes is an error, not a public
     // document. Do not leave the indexable robots tag that a present page
     // would have set above.
+    // Q3-E: browsers get the static HTML 404. Other clients keep the plain
+    // body. Unknown paths are answered by the Node server after routing, so
+    // live pages such as /receipts are not claimed here.
+    if (publicHtmlNotFoundPath(url.pathname) && acceptPrefersHtml(request.headers.get('accept'))) {
+      const page = new TextEncoder().encode(PUBLIC_NOT_FOUND_HTML);
+      headers.set('X-Robots-Tag', 'noindex');
+      headers.set('Content-Type', 'text/html; charset=utf-8');
+      headers.set('Content-Length', String(page.byteLength));
+      return new Response(request.method === 'HEAD' ? null : page, { status: 404, headers });
+    }
     headers.set('X-Robots-Tag', 'noindex, nofollow');
     headers.set('Content-Type', 'text/plain; charset=utf-8');
     return new Response(request.method === 'HEAD' ? null : 'Not found\n', { status: 404, headers });
@@ -172,6 +218,7 @@ async function assetResponse(request, env, url) {
 export async function edgePublicResponse(request, env, url) {
   const kind = classifyEdgePath(url.pathname);
   if (!kind) return null;
+  if (kind === 'security-txt') return securityTxtResponse(request, url, securityContactFrom(env?.ROOM_SECURITY_CONTACT));
   if (kind === 'openapi') return openApiResponse(request, url);
   if (kind === 'discovery') return discoveryResponse(request, url);
   if (request.method !== 'GET' && request.method !== 'HEAD') return methodNotAllowed(baseHeaders(url), 'GET, HEAD');

@@ -53,6 +53,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/land-queue.mjs'); // per-room pull-request land queue (imported by server/store.mjs)
   paths.add('server/work-wakes.mjs'); // Opt-in pointer-only work delivery on heartbeat reads (imported by server/store.mjs)
   paths.add('src/land-queue-board.js'); // Land-queue board card (imported by src/app.js)
+  paths.add('src/board-ui.js'); paths.add('src/board.css'); // Tasks › Board (imported by src/app.js)
   paths.add('server/mcp-full-profile.mjs'); // stdio-equivalent hosted MCP tools (imported by server/mcp-room-profile.mjs)
   paths.add('deploy/agent-discovery.mjs');
   paths.add('deploy/capabilities.mjs'); // #601: build-time route-family inventory (imported by deploy/agent-discovery.mjs)
@@ -62,6 +63,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/guest-agent-links.mjs');
   paths.add('server/agent-invites.mjs');
   paths.add('server/referrals.mjs'); // Referral attribution (imported by server/store.mjs)
+  paths.add('server/growth-loop.mjs'); // Referral growth: activation and room credits (imported by server/http.mjs and server/referrals.mjs)
   paths.add('server/referral-invites.mjs'); // Signed agent-carried referral invites (imported by server/store.mjs)
   paths.add('server/thread-mutes.mjs'); // Per-thread mutes (imported by server/store.mjs)
   paths.add('server/human-push.mjs'); // Human browser push (imported by server/store.mjs)
@@ -138,15 +140,18 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('src/room-layout.js');
   paths.add('src/needs-attention.js'); // #662: owner attention card (imported by src/app.js)
   paths.add('src/emoji.js'); paths.add('src/emoji-catalog.js'); // Unicode emoji + reaction identity (imported by src/app.js, src/conversation.js, src/events.js)
+  paths.add('src/display-name-guard.js'); // Member display-name admission (imported by src/events.js)
   paths.add('server/mention-lifecycle.mjs'); // #658: mention lifecycle state machine + schema (imported by server/store.mjs)
   paths.add('server/room-flood-guard.mjs'); // per (room, member) chat post budget (imported by server/store.mjs)
   paths.add('server/members-directory.mjs'); // RC-2026-09-24-202: members directory + skill cards (imported by server/store.mjs)
   paths.add('server/public-face.mjs'); // Opt-in public read-only face (imported by server/store.mjs)
   paths.add('server/receipts-page.mjs'); // Public receipts page (imported by server/http.mjs)
   paths.add('server/receipts-live.mjs'); // Live public-receipt reader (imported by server/http.mjs)
+  paths.add('server/templates.mjs'); // GR2 room templates (imported by server/http.mjs)
+  paths.add('server/public-rooms.mjs'); // GR2 public room, template, and agent pages (imported by server/http.mjs)
   paths.add('server/capability-visibility.mjs'); // RC-2026-09-27-2731: withhold-never-refused catalog predicate (imported by server/mcp-discovery.mjs and server/mcp-room-profile.mjs)
-  for (const path of ['server/board-v2.mjs', 'server/board-v2-sqlite.mjs', 'server/board-v2-durable.mjs']) paths.add(path); // RC-2026-09-27-2720: board-v2 HTTP wiring (imported by server/http.mjs)
   paths.add('server/conversation-sync.mjs'); // bounded viewer-scoped conversation reads (imported by server/http.mjs)
+  paths.add('server/routes/dispatch.mjs'); paths.add('server/routes/table.mjs'); // batch RT: route table (imported by server/http.mjs)
   const candidate = join(directory, 'synthetic-source'); mkdirSync(candidate);
   // No private state, credentials, docs or real checkout Git metadata.
   for (const path of paths) {

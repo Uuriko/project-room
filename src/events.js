@@ -1,4 +1,5 @@
 import { canonicalReaction, foldedReactionMap, MAX_REACTIONS_PER_MESSAGE } from "./emoji.js";
+import { assertMemberDisplayNameAvailable } from "./display-name-guard.js";
 import { proposalContext, nativeTextEvidence, reportedProducer, validateResultSegments } from "./work-packet.js";
 import { CHARTER_TYPE, charterFromEvent } from "./room-charter.js";
 import { REPLY_CANCELLED, prepareReplyPost, recordReplyPost, cancelReplyRequest } from "./reply-requests.js";
@@ -22,6 +23,12 @@ export const EVENT_TYPES = Object.freeze({
   ROOM_TRUST_SET: "room.trust_set",
   // Owner opt-in for the public receipts page. Default off when absent.
   ROOM_PUBLIC_RECEIPTS_SET: "room.public_receipts_set",
+  // --- GR2 public acquisition opt-ins. Absent means off. ---
+  ROOM_PUBLIC_PAGE_SET: "room.public_page_set",
+  ROOM_JOIN_LINK_SET: "room.join_link_set",
+  MEMBER_PUBLIC_NAME_SET: "member.public_name_set",
+  WORK_PUBLIC_SET: "work.public_set",
+  // --- end GR2 ---
   ROOM_ARCHIVED: "room.archived",
   MEMBER_ADDED: "member.added",
   MEMBER_JOINED_VIA_INVITATION: "member.joined_via_invitation",
@@ -87,7 +94,10 @@ export const EVENT_TYPES = Object.freeze({
   // Work-claim receipt. The work_claims table is the source of truth; this
   // event is the thin room record of who claimed, renewed, handed off or
   // released which claim (server/work-claim-events.mjs).
-  WORK_CLAIM_UPDATED: "work_claim.updated"
+  WORK_CLAIM_UPDATED: "work_claim.updated",
+  // ACT-1a: a room's starter task and Room Guide were seeded once.
+  // ACT-1b (/start, landing, receipt UI) waits on S1, RT, and GR2 deployed.
+  ROOM_STARTER_SEEDED: "room.starter_seeded"
 });
 
 // Room channels (Phase 2 of the Discord/Slack-like redesign): every room has
@@ -161,6 +171,34 @@ export function publicReceipts(state) {
     setAt: typeof stored.setAt === "string" ? stored.setAt : null
   };
 }
+
+// --- GR2: public room page, join link, public name, public task. Absent means off. ---
+function optIn(stored) {
+  if (!stored || typeof stored.enabled !== "boolean") return { enabled: false };
+  return {
+    enabled: stored.enabled,
+    revision: Number.isSafeInteger(stored.revision) ? stored.revision : 0,
+    setById: typeof stored.setById === "string" ? stored.setById : null,
+    setAt: typeof stored.setAt === "string" ? stored.setAt : null
+  };
+}
+
+export function publicPage(state) {
+  return optIn(state?.room?.publicPage);
+}
+
+export function joinLink(state) {
+  return optIn(state?.room?.joinLink);
+}
+
+export function publicName(member) {
+  return optIn(member?.publicName);
+}
+
+export function publicTask(item) {
+  return optIn(item?.publicTask);
+}
+// --- end GR2 ---
 
 export function roomTrust(state) {
   const stored = state?.room?.trust;
@@ -320,6 +358,9 @@ export const INVITATION_ROLE_POLICIES = Object.freeze({
 export const INVITATION_ROLE_POLICY_VERSION = 1;
 export const INVITATION_ROLES = INVITATION_ROLE_POLICIES[INVITATION_ROLE_POLICY_VERSION];
 export const MEMBERSHIP_AUTHORITY_POLICY_VERSION = 2;
+// Live member.added commands stamp this. Events written before it omit the
+// field and keep replaying, including a bootstrap owner named "Room owner".
+export const DISPLAY_NAME_POLICY_VERSION = 1;
 
 export function validId(value) {
   return typeof value === "string" && /^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127}$/.test(value) && !["constructor", "prototype", "__proto__"].includes(value);
@@ -397,6 +438,12 @@ export function applyEvent(current, incoming) {
     [EVENT_TYPES.ROOM_SPEND_ALLOWANCE_SET]: setSpendAllowance,
     [EVENT_TYPES.ROOM_TRUST_SET]: setRoomTrust,
     [EVENT_TYPES.ROOM_PUBLIC_RECEIPTS_SET]: setPublicReceipts,
+    // --- GR2 ---
+    [EVENT_TYPES.ROOM_PUBLIC_PAGE_SET]: setPublicPage,
+    [EVENT_TYPES.ROOM_JOIN_LINK_SET]: setJoinLink,
+    [EVENT_TYPES.MEMBER_PUBLIC_NAME_SET]: setPublicName,
+    [EVENT_TYPES.WORK_PUBLIC_SET]: setPublicTask,
+    // --- end GR2 ---
     [EVENT_TYPES.ROOM_ARCHIVED]: archiveRoom,
     [EVENT_TYPES.OWNERSHIP_TRANSFERRED]: transferOwnership,
     [EVENT_TYPES.MEMBER_ADDED]: addMember,
@@ -448,7 +495,8 @@ export function applyEvent(current, incoming) {
     [EVENT_TYPES.BOND_REVOKED]: recordBond,
     [EVENT_TYPES.DM_POSTED]: recordPeerDm,
     [EVENT_TYPES.LAND_UPDATED]: recordLandUpdate,
-    [EVENT_TYPES.WORK_CLAIM_UPDATED]: recordWorkClaimUpdate
+    [EVENT_TYPES.WORK_CLAIM_UPDATED]: recordWorkClaimUpdate,
+    [EVENT_TYPES.ROOM_STARTER_SEEDED]: recordStarterSeeded
   };
   const handler = handlers[incoming.type];
   if (!Object.hasOwn(handlers, incoming.type)) throw new Error(`Unsupported event type: ${incoming.type}`);
@@ -520,7 +568,12 @@ function validateEnvelope(incoming) {
       || !/^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/pull\/[1-9]\d{0,9}$/.test(value.url)
       || (value.outcome !== "merged" && value.outcome !== "closed")
       || Object.keys(value).length !== 2)) throw new Error(`Invalid ${key}`);
-    if (!["string", "boolean", "number"].includes(typeof value) && !["permissions", "paths", "checksClaimed", "capabilities", "preferences", "budget", "outputs", "segments", "signedEvidence", "labels", "scopes", "acceptedScopes", "changed", "state", "pullRequest"].includes(key)) throw new Error(`Invalid ${key}`);
+    // ACT-1a: starter welcome buttons. Each entry is a claim id plus a label.
+    if (key === "actions" && (!Array.isArray(value) || value.length > 16 || value.some(action => !action || typeof action !== "object" || Array.isArray(action)
+      || typeof action.claimId !== "string" || !validId(action.claimId)
+      || typeof action.label !== "string" || !action.label.trim() || action.label.length > 512
+      || Object.keys(action).some(field => field !== "claimId" && field !== "label")))) throw new Error(`Invalid ${key}`);
+    if (!["string", "boolean", "number"].includes(typeof value) && !["permissions", "paths", "checksClaimed", "capabilities", "preferences", "budget", "outputs", "segments", "signedEvidence", "labels", "scopes", "acceptedScopes", "changed", "state", "pullRequest", "actions"].includes(key)) throw new Error(`Invalid ${key}`);
   }
 }
 
@@ -592,6 +645,51 @@ function setPublicReceipts(state, incoming) {
     setAt: incoming.at
   };
 }
+
+// --- GR2 opt-in writers. Same shape as public receipts: owner or the member who owns the text. ---
+function writeOptIn(previous, incoming) {
+  return {
+    enabled: incoming.data.enabled,
+    revision: (previous?.revision ?? 0) + 1,
+    setById: incoming.actorId,
+    setAt: incoming.at
+  };
+}
+
+function requireEnabled(incoming, label) {
+  if (typeof incoming.data.enabled !== "boolean") throw new Error(`${label} requires enabled as true or false`);
+}
+
+function setPublicPage(state, incoming) {
+  const actor = requireMember(state, incoming.actorId);
+  if (actor.id !== state.room.ownerId) throw new Error("Only the Room owner may publish the room page");
+  requireEnabled(incoming, "Public room page");
+  state.room.publicPage = writeOptIn(state.room.publicPage ?? null, incoming);
+}
+
+function setJoinLink(state, incoming) {
+  const actor = requireMember(state, incoming.actorId);
+  if (actor.id !== state.room.ownerId) throw new Error("Only the Room owner may share a join link");
+  requireEnabled(incoming, "Join link");
+  state.room.joinLink = writeOptIn(state.room.joinLink ?? null, incoming);
+}
+
+function setPublicName(state, incoming) {
+  const actor = requireMember(state, incoming.actorId);
+  requireEnabled(incoming, "Public name");
+  actor.publicName = writeOptIn(actor.publicName ?? null, incoming);
+}
+
+function setPublicTask(state, incoming) {
+  requireFields(incoming.data, ["workItemId"]);
+  const actor = requireMember(state, incoming.actorId);
+  const item = state.workItems[incoming.data.workItemId];
+  if (!item) throw new Error("Unknown work item");
+  if (actor.id !== state.room.ownerId && actor.id !== item.proposedById) throw new Error("Only the Room owner or the proposer may publish this task");
+  requireEnabled(incoming, "Public task");
+  item.publicTask = writeOptIn(item.publicTask ?? null, incoming);
+}
+// --- end GR2 ---
 
 function archiveRoom(state, incoming) {
   const actor = requireMember(state, incoming.actorId);
@@ -677,6 +775,12 @@ function addMember(state, incoming) {
     if (requireMember(state, incoming.data.accountableHumanId).kind !== "human") throw new Error("Accountable sponsor must be a human member");
   }
   if (isBootstrapOwner && !incoming.data.permissions.includes("manage_members")) throw new Error("Owner must retain membership administration");
+  // Reserved, duplicate, confusable, and control-character names are refused
+  // on the live command path. The bootstrap owner is exempt so a room can
+  // still be created under "Room owner". Older events omit the policy stamp.
+  if (!isBootstrapOwner && incoming.data.displayNamePolicyVersion === DISPLAY_NAME_POLICY_VERSION) {
+    assertMemberDisplayNameAvailable(incoming.data.displayName, state.members);
+  }
   // Round-2 #101: a member record may be bound to a global agent identity.
   if (incoming.data.identityId != null
     && (typeof incoming.data.identityId !== "string" || incoming.data.identityId.length > 64)) throw new Error("identityId must be a short string");
@@ -712,6 +816,9 @@ function addMember(state, incoming) {
     // First-party Connect catalog type. Omitted on older members so replay stays
     // byte-identical. Not a marketplace listing.
     ...(incoming.data.agentType ? { agentType: incoming.data.agentType } : {}),
+    // ACT-1a: Room Guide is an agent member the analytics path treats as system.
+    // Omitted unless set, so older projections replay byte-identically.
+    ...(incoming.data.system === true ? { system: true } : {}),
     accountableHumanId: incoming.data.accountableHumanId || (incoming.data.kind === "human" ? memberId : state.room.ownerId),
     permissions: [...incoming.data.permissions],
     // #643: explicit delegation marker. Set only when the owner granted
@@ -903,6 +1010,12 @@ function postMessage(state, incoming) {
   const requestMode = prepareReplyPost(state, incoming);
   if (incoming.data.toMemberId) (requestMode === "respond" ? knownMember : requireMember)(state, incoming.data.toMemberId);
   if (typeof incoming.data.body !== "string") throw new Error("Message body must be text");
+  // ACT-1a: receipt cards and starter choice buttons. Absent on ordinary posts.
+  if (incoming.data.kind != null && incoming.data.kind !== "receipt_card") throw new Error("Message kind must be receipt_card");
+  if (incoming.data.kind === "receipt_card") {
+    requireFields(incoming.data, ["claimId", "title", "closedBy", "deliveryMode", "evidence"]);
+    if (!["result", "merged", "production"].includes(incoming.data.deliveryMode)) throw new Error("Invalid deliveryMode");
+  }
   if (incoming.data.workItemId) requireWorkItem(state, incoming.data.workItemId);
   // Replies pin to their thread root's channel so a thread can't drift across
   // channels, no matter what channelId the command carries.
@@ -931,7 +1044,17 @@ function postMessage(state, incoming) {
     replyToId: incoming.data.replyToId || null,
     toMemberId: incoming.data.toMemberId || null,
     createdAt: incoming.at,
-    ...(proposal ? { proposal } : {})
+    ...(proposal ? { proposal } : {}),
+    ...(Array.isArray(incoming.data.actions) ? { actions: incoming.data.actions.map(action => ({ claimId: action.claimId, label: action.label })) } : {}),
+    ...(incoming.data.kind === "receipt_card" ? {
+      kind: "receipt_card",
+      claimId: incoming.data.claimId,
+      title: incoming.data.title,
+      closedBy: incoming.data.closedBy,
+      deliveryMode: incoming.data.deliveryMode,
+      evidence: incoming.data.evidence,
+      ...(incoming.data.pullRequestUrl ? { pullRequestUrl: incoming.data.pullRequestUrl } : {})
+    } : {})
   });
   // "Also send to channel": a public thread reply also lands as a top-level
   // message in the thread's channel, in the same event. The derived id is
@@ -1340,10 +1463,24 @@ function recordLandUpdate(state, incoming) {
   }
 }
 
-export const WORK_CLAIM_EVENT_ACTIONS = Object.freeze(["created", "claimed", "state_changed", "reviewed", "released", "reassigned", "renewed", "lease_expired", "pr_merged", "pr_closed"]);
+export const WORK_CLAIM_EVENT_ACTIONS = Object.freeze(["created", "claimed", "state_changed", "reviewed", "released", "reassigned", "renewed", "lease_expired", "pr_merged", "pr_closed", "ci_changed"]);
 const WORK_CLAIM_EVENT_STATES = ["unclaimed", "claimed", "in_progress", "blocked", "done"];
 
 // Thin receipt: validated, never copied into the projection.
+function recordStarterSeeded(state, incoming) {
+  requireFields(incoming.data, ["templateSlug", "intentKind"]);
+  const actor = requireMember(state, incoming.actorId);
+  if (actor.id !== state.room.ownerId && actor.system !== true) throw new Error("Only the Room owner may seed a starter");
+  if (state.room.starterSeeded) throw new Error("Starter already seeded");
+  if (!/^[a-z0-9-]{1,64}$/.test(incoming.data.templateSlug)) throw new Error("Invalid templateSlug");
+  if (!/^[a-z0-9-]{1,32}$/.test(incoming.data.intentKind)) throw new Error("Invalid intentKind");
+  state.room.starterSeeded = {
+    templateSlug: incoming.data.templateSlug,
+    intentKind: incoming.data.intentKind,
+    at: incoming.at
+  };
+}
+
 function recordWorkClaimUpdate(state, incoming) {
   requireMember(state, incoming.actorId);
   const data = incoming.data ?? {};
@@ -1362,6 +1499,10 @@ function recordWorkClaimUpdate(state, incoming) {
       throw new Error("Event data missing pullRequest");
     }
   }
+  if (data.reason !== undefined && data.reason !== "ci_changed" && data.reason !== "reviewed") throw new Error("Event data missing reason");
+  if (data.ciState !== undefined && !["pending", "success", "failure", "neutral"].includes(data.ciState)) throw new Error("Event data missing ciState");
+  if (data.verdict !== undefined && !["approve", "changes_requested", "comment"].includes(data.verdict)) throw new Error("Event data missing verdict");
+  if (data.action === "ci_changed" && (data.reason !== "ci_changed" || !data.ciState)) throw new Error("Event data missing ciState");
 }
 
 function recordReferral(state, incoming) {
@@ -1521,7 +1662,9 @@ function acquireClaim(state, incoming) {
   const item = mutableWorkItem(state, incoming, [WORK_STATES.ACCEPTED, WORK_STATES.WORKING, WORK_STATES.BLOCKED]);
   if (item.mode !== "write") throw new Error("Read-only work does not use a write claim");
   if (incoming.actorId !== item.accountableMemberId) throw new Error("Only the accountable member may acquire this claim");
-  requirePermission(state, incoming.actorId, "write_external");
+  // A claim records scope. It does not grant write_external; write-mode
+  // completion still requires that permission. Live commands admit only a
+  // board writer (mayWriteBoardClaims). Replaying an older claim is unchanged.
   requireFields(incoming.data, ["repository", "ref", "paths", "expiresAt"]);
   if (!Array.isArray(incoming.data.paths) || incoming.data.paths.length === 0) throw new Error("Claim paths must be explicit");
   if (!Number.isFinite(Date.parse(incoming.data.expiresAt)) || Date.parse(incoming.data.expiresAt) <= Date.parse(incoming.at)) throw new Error("Claim expiry must be in the future");

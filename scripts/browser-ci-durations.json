@@ -62,6 +62,7 @@
     "scripts/pinned-messages-browser-check.mjs": 3500,
     "scripts/portable-work-browser-check.mjs": 7400,
     "scripts/progressive-disclosure-check.mjs": 4400,
+    "scripts/public-pages-polish-browser-check.mjs": 4000,
     "scripts/purpose-invite-check.mjs": 2300,
     "scripts/quiet-attribution-browser-check.mjs": 2300,
     "scripts/quiet-copy-browser-check.mjs": 4300,
@@ -96,6 +97,7 @@
     "scripts/work-resume-browser-check.mjs": 2600,
     "scripts/work-reuse-browser-check.mjs": 14800,
     "scripts/work-search-browser-check.mjs": 3300,
-    "scripts/workflow-browser-check.mjs": 14100
+    "scripts/workflow-browser-check.mjs": 14100,
+    "scripts/join-next-browser-check.mjs": 12000
   }
 }

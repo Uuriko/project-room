@@ -22,6 +22,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { ServiceError } from "./service-error.mjs";
 import { event, EVENT_TYPES, applyEvent, validId } from "../src/events.js";
+import { claimWork, createWork } from "./work-claims.mjs";
 
 export const LAND_CHECKS = Object.freeze(["pending", "green", "red"]);
 export const LAND_MERGEABLE = Object.freeze(["mergeable", "behind", "conflict", "unknown", "merged"]);
@@ -432,6 +433,67 @@ export async function fetchPullSnapshot({ repo, prNumber, token = null, fetchImp
   };
 }
 
+const viewFromClaim = (item, roomId) => {
+  const pull = item.pullRequest;
+  const created = Date.parse(item.history?.[0]?.at ?? item.updatedAt ?? "") || 0;
+  return {
+    itemId: item.id,
+    roomId,
+    repo: pull?.repo ?? null,
+    prNumber: pull?.number ?? null,
+    url: pull?.url ?? null,
+    title: item.title ?? null,
+    claimantMemberId: item.owner,
+    addedByMemberId: item.history?.[0]?.agentId ?? item.owner,
+    headSha: item.ci?.headSha ?? null,
+    mergeable: "unknown",
+    behind: false,
+    checks: item.ci?.state === "success" ? "green" : item.ci?.state === "failure" ? "red" : "pending",
+    mergedSha: item.revision && /^[0-9a-f]{40}$/.test(item.revision) ? item.revision : null,
+    tip: null,
+    lastError: null,
+    createdAt: created,
+    updatedAt: Date.parse(item.updatedAt ?? "") || created
+  };
+};
+
+function mirrorLandClaim(store, row) {
+  if (!row || !store?.workClaims || store.workClaims.has(row.room_id, row.item_id)) return false;
+  const url = `https://github.com/${row.repo}/pull/${row.pr_number}`;
+  const revision = row.merged_sha || row.tip_source_revision || row.head_sha || null;
+  const now = row.created_at;
+  let item = createWork({
+    id: row.item_id,
+    title: row.title || `${row.repo}#${row.pr_number}`,
+    pullRequest: url,
+    kind: "land",
+    revision
+  }, { now, agentId: row.added_by_member_id });
+  if (row.claimant_member_id) {
+    item = claimWork(item, row.claimant_member_id, { leaseHours: null, pullRequest: url, now });
+  }
+  store.workClaims.set(row.room_id, item);
+  return true;
+}
+
+// One-time, idempotent copy of land_queue rows into kind:"land" claims.
+// The land_queue rows stay. A second call copies nothing new.
+export function migrateLandQueueClaims(store) {
+  if (!store?.db || !store.workClaims) return { copied: 0 };
+  let rows = [];
+  try {
+    rows = store.db.prepare("SELECT * FROM land_queue").all();
+  } catch (error) {
+    if (/no such table/i.test(error?.message ?? "")) return { copied: 0 };
+    throw error;
+  }
+  let copied = 0;
+  for (const row of rows) {
+    if (mirrorLandClaim(store, row)) copied += 1;
+  }
+  return { copied };
+}
+
 const viewFromRow = row => ({
   itemId: row.item_id,
   roomId: row.room_id,
@@ -494,8 +556,12 @@ export class LandQueue {
 
   list(roomId, memberId) {
     this.#member(roomId, memberId);
-    const items = this.store.readTransaction(() => this.db.prepare(
-      "SELECT * FROM land_queue WHERE room_id=? ORDER BY created_at ASC").all(roomId).map(viewFromRow));
+    migrateLandQueueClaims(this.store);
+    const claims = this.store.workClaims.list(roomId).filter(item => item.kind === "land");
+    const items = claims.map(item => {
+      const row = this.#row(roomId, item.id);
+      return row ? viewFromRow(row) : viewFromClaim(item, roomId);
+    }).sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
     return { roomId, items };
   }
 
@@ -514,6 +580,7 @@ export class LandQueue {
             .run(claimant, this.store.now(), roomId, existing.item_id);
         });
       }
+      mirrorLandClaim(this.store, this.#row(roomId, existing.item_id));
       const item = viewFromRow(this.#row(roomId, existing.item_id));
       return this.#refreshRow(item, { duplicate: true });
     }
@@ -528,6 +595,7 @@ export class LandQueue {
          created_at, updated_at)
         VALUES (?,?,?,?,?,?,NULL,NULL,'unknown',0,'pending',NULL,NULL,NULL,NULL,0,?,?)`)
         .run(roomId, itemId, parsedRepo, parsedPr, claimant, memberId, now, now);
+      mirrorLandClaim(this.store, this.#row(roomId, itemId));
     });
     const item = viewFromRow(this.#row(roomId, itemId));
     return this.#refreshRow(item, { duplicate: false });
@@ -540,6 +608,7 @@ export class LandQueue {
     if (!row) fail(404, "land_item_not_found", "Land queue item was not found");
     this.store.transaction(() => {
       this.db.prepare("DELETE FROM land_queue WHERE room_id=? AND item_id=?").run(roomId, itemId);
+      if (typeof this.store.workClaims.delete === "function") this.store.workClaims.delete(roomId, itemId);
     });
     return { roomId, itemId, removed: true };
   }
@@ -570,6 +639,10 @@ export class LandQueue {
         WHERE room_id=? AND item_id=?`)
         .run(nextTip.sourceRevision, nextTip.buildId, now, roomId, itemId);
       item = viewFromRow(this.#row(roomId, itemId));
+      const claim = this.store.workClaims.get(roomId, itemId);
+      if (claim && nextTip.sourceRevision && claim.revision !== nextTip.sourceRevision) {
+        this.store.workClaims.set(roomId, { ...claim, revision: nextTip.sourceRevision });
+      }
       if (changed.length > 0) this.#emit(roomId, item, changed);
     });
     return { item, changed };
@@ -660,6 +733,7 @@ export class LandQueue {
       if (error?.code === "pr_not_found" && !duplicate) {
         this.store.transaction(() => {
           this.db.prepare("DELETE FROM land_queue WHERE room_id=? AND item_id=?").run(item.roomId, item.itemId);
+          if (typeof this.store.workClaims?.delete === "function") this.store.workClaims.delete(item.roomId, item.itemId);
         });
       } else if (error?.code === "github_unconfigured" || error?.code === "github_unavailable") {
         const backoff = nextPollBackoff(row?.backoff_ms);

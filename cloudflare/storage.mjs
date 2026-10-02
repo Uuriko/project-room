@@ -2,26 +2,69 @@ import { STORE_SCHEMA_VERSION, fenceDefinitions, writerVersions } from '../serve
 
 const marker = 'room_runtime_version';
 const permit = 'room_writer_permit';
+// Version and permit checks read sqlite_master. Cache them once per
+// isolate on the underlying storage, so every wrapper sees a write made
+// by another. A version write drops the cache. A transaction that throws
+// drops it too: transactionSync rolls the SQL back, and a cached version
+// or permit check would still describe the uncommitted write. The permit
+// flip inside a committed transaction ends at 0, so a passed check for
+// that value stays valid until the schema version changes.
+const runtimeCache = new WeakMap();
+const cacheKey = db => db.storage ?? db;
+const cacheOf = db => {
+  const key = cacheKey(db);
+  let hit = runtimeCache.get(key);
+  if (!hit) { hit = {}; runtimeCache.set(key, hit); }
+  return hit;
+};
+const forgetRuntime = db => { runtimeCache.delete(cacheKey(db)); };
 export const durableFenceDefinitions = version => fenceDefinitions(version).map(({ name, sql }) => ({ name,
   sql: sql.replace(`project_room_writer_v${version}()`, version < 8 ? `(SELECT version FROM ${marker} WHERE singleton=1)`
     : `(CASE WHEN (SELECT version FROM ${marker} WHERE singleton=1) IS ${version} AND (SELECT version FROM ${permit} WHERE singleton=1) IS ${version} THEN ${version} ELSE NULL END)`) }));
 const fences = durableFenceDefinitions(STORE_SCHEMA_VERSION);
 const reconciliation = () => { throw new Error('Database writer fence requires operator reconciliation'); };
-const hasPermit = db => Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(permit));
+const hasPermit = db => {
+  const hit = cacheOf(db);
+  if (hit.permitExists === true) return true;
+  const exists = Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(permit));
+  if (exists) hit.permitExists = true;
+  return exists;
+};
 const permitValue = db => hasPermit(db) ? db.prepare(`SELECT version FROM ${permit} WHERE singleton=1`).get()?.version : null;
 const permitSchema = version => `CREATE TABLE ${permit} (singleton INTEGER PRIMARY KEY CHECK(singleton=1), version INTEGER NOT NULL CHECK(version IN (0,${version})))`;
 const verifyPermit = (db, version, value) => {
+  const hit = cacheOf(db);
+  if (hit.permitOk && hit.permitVersion === version && hit.permitValue === value) return;
   if (db.prepare("SELECT sql FROM sqlite_master WHERE name=? AND type='table'").get(permit)?.sql !== permitSchema(version)
     || db.prepare(`SELECT count(*) n FROM ${permit}`).get().n !== 1 || permitValue(db) !== value) reconciliation();
+  hit.permitOk = true;
+  hit.permitVersion = version;
+  hit.permitValue = value;
 };
 
 // A narrow adapter for the methods RoomStore actually uses. No SQL parsing,
 // arbitrary rewrites, filesystem emulation, or pretend user-defined functions.
 export class DurableDatabase {
-  constructor(storage) { this.storage = storage; this.isTransaction = false; }
-  exec(sql) { return durableStorage.transaction(this, () => this.storage.sql.exec(sql).toArray()); }
+  constructor(storage) { this.storage = storage; this.isTransaction = false; this.rowsRead = 0; }
+  #count(cursor) {
+    const n = Number(cursor?.rowsRead ?? 0);
+    if (n) this.rowsRead += n;
+  }
+  exec(sql) {
+    return durableStorage.transaction(this, () => {
+      const cursor = this.storage.sql.exec(sql);
+      const rows = cursor.toArray();
+      this.#count(cursor);
+      return rows;
+    });
+  }
   prepare(sql) {
-    const all = (...args) => this.storage.sql.exec(sql, ...args).toArray();
+    const all = (...args) => {
+      const cursor = this.storage.sql.exec(sql, ...args);
+      const rows = cursor.toArray();
+      this.#count(cursor);
+      return rows;
+    };
     return {
       all,
       get: (...args) => all(...args)[0],
@@ -38,13 +81,18 @@ export class DurableDatabase {
 
 export const durableStorage = {
   version(db) {
+    const hit = cacheOf(db);
+    if (hit.versionKnown) return hit.version;
     const exists = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(marker);
-    if (!exists) return 0;
+    if (!exists) { hit.versionKnown = true; hit.version = 0; return 0; }
     const row = db.prepare(`SELECT version FROM ${marker} WHERE singleton=1`).get();
     if (!row || !Number.isSafeInteger(row.version)) throw new Error('Missing database version marker');
+    hit.versionKnown = true;
+    hit.version = row.version;
     return row.version;
   },
   setVersion(db, version) {
+    forgetRuntime(db);
     if (!db.isTransaction || !Number.isSafeInteger(version) || version < 1) throw new Error('Version changes require a migration transaction');
     db.exec(`CREATE TABLE IF NOT EXISTS ${marker} (singleton INTEGER PRIMARY KEY CHECK(singleton=1), version INTEGER NOT NULL)`);
     db.prepare(`INSERT INTO ${marker} VALUES(1,?) ON CONFLICT(singleton) DO UPDATE SET version=excluded.version`).run(version);
@@ -77,6 +125,7 @@ export const durableStorage = {
       if (!writerVersions.includes(db.migrationSource) || db.migrationSource < 8) reconciliation();
       verifyPermit(db, db.migrationSource, db.migrationSource);
       db.exec(`DROP TABLE ${permit}`);
+      forgetRuntime(db);
     }
     if (!hasPermit(db)) {
       db.exec(permitSchema(STORE_SCHEMA_VERSION));
@@ -123,6 +172,9 @@ export const durableStorage = {
         if (!readOnly && hasPermit(db)) db.storage.sql.exec(`UPDATE ${permit} SET version=0 WHERE singleton=1`);
         if (this.version(db) === STORE_SCHEMA_VERSION) db.migrationSource = null;
         return result;
+      } catch (error) {
+        forgetRuntime(db);
+        throw error;
       } finally { db.isTransaction = false; db.readOnlyTransaction = false; }
     });
   }

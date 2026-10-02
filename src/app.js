@@ -37,6 +37,7 @@ import { formatSessionExpiry } from "./session-expiry.js";
 import { handoffEnvelopeListHtml, envelopesForWork } from "./handoff-envelope-ui.js";
 import { installHumanPush } from "./human-push.js";
 import { chatSuggestions, ASK_AGENT_AFTER_MS } from "./chat-suggestions.js";
+import { paintClaimChat } from "./board-ui.js";
 
 const $ = selector => document.querySelector(selector);
 applyStoredTheme();
@@ -152,6 +153,36 @@ function receiptReferrer() {
   try { return window.sessionStorage.getItem(RECEIPT_REF_KEY) || ""; } catch { return ""; }
 }
 // --- end GR1 ---
+// --- GR2: template start, public-room join, and directory invite survive sign-in. ---
+const ACQUISITION_KEY = "pr-acquisition";
+const TEMPLATE_ROOM_KEY = "pr-template-room";
+try {
+  const acqUrl = new URL(location.href);
+  const start = acqUrl.searchParams.get("start");
+  const intent = start === "template"
+    ? { kind: "template", template: acqUrl.searchParams.get("template") || "" }
+    : start === "invite-agent"
+      ? { kind: "invite-agent", agent: acqUrl.searchParams.get("agent") || "" }
+      : acqUrl.searchParams.has("request")
+        ? { kind: "request", roomId: acqUrl.searchParams.get("request") || "" }
+        : null;
+  if (intent) {
+    window.sessionStorage.setItem(ACQUISITION_KEY, JSON.stringify(intent));
+    acqUrl.searchParams.delete("start");
+    acqUrl.searchParams.delete("template");
+    acqUrl.searchParams.delete("agent");
+    acqUrl.searchParams.delete("request");
+    history.replaceState(history.state, "", acqUrl.pathname + acqUrl.search + acqUrl.hash);
+  }
+} catch { /* storage or the URL may be blocked */ }
+function readAcquisition() {
+  try { return JSON.parse(window.sessionStorage.getItem(ACQUISITION_KEY) || "null"); }
+  catch { return null; }
+}
+function clearAcquisition() {
+  try { window.sessionStorage.removeItem(ACQUISITION_KEY); } catch { /* storage may be blocked */ }
+}
+// --- end GR2 ---
 function consumeStartRoomIntent() {
   const wanted = startRoomIntent;
   startRoomIntent = false;
@@ -790,6 +821,12 @@ function showAccountWorkspace() {
     startRoomFlight = openStartedRoom().finally(() => { startRoomFlight = null; });
     return;
   }
+  // --- GR2 ---
+  if (!state && !startRoomFlight && readAcquisition() && !initialInvitationFragment && !initialJoinFragment) {
+    startRoomFlight = runAcquisitionIntent().finally(() => { startRoomFlight = null; });
+    return;
+  }
+  // --- end GR2 ---
   if (!state) {
     if (["#pr-view/rooms", "#pr-view/room-list"].includes(location.hash)) inboxUI.showRoomList();
     else inboxUI.open();
@@ -970,10 +1007,16 @@ $("#account-room-form").addEventListener("submit", async event => {
   if (!title || !purpose || !displayName) { setFormStatus(status, "Room name, purpose and your name are required.", true); return; }
   // One id per attempt: a retry after a lost response finds the same room instead of creating a twin.
   const roomId = form.dataset.roomId || (form.dataset.roomId = "room-" + crypto.randomUUID().replaceAll("-", "").slice(0, 12));
+  // --- GR2: a chosen template uses the same room id and the same retry. ---
+  const template = $("#account-room-template")?.value || "";
+  const ref = receiptReferrer();
+  // --- end GR2 ---
   form.dataset.busy = "true"; $("#account-room-submit").disabled = true; setFormStatus(status, "Creating…");
   try {
     const session = accountClient.currentSession("creating a room", { authenticated: true });
-    const result = await accountClient.request("/api/account-rooms", { method: "POST", data: { roomId, title, purpose, kind, displayName }, session });
+    const result = template
+      ? await accountClient.request("/api/account-rooms/from-template", { method: "POST", data: { roomId, template, title, purpose, kind, displayName, ...(ref ? { ref } : {}) }, session })
+      : await accountClient.request("/api/account-rooms", { method: "POST", data: { roomId, title, purpose, kind, displayName }, session });
     if (accountClient.session !== owned) return;
     delete form.dataset.roomId; form.reset(); setFormStatus(status, ""); $("#account-room-create").open = false;
     await openAccountRoom(result.room.id);
@@ -1863,6 +1906,7 @@ function render() {
   syncRoomHealth();
   syncRoomTrust();
   syncPublicReceipts(); // GR1 owner control for the public receipts page
+  syncAcquisitionControls(); // GR2 public room page, join link, name, and tasks
   $("#event-count").textContent = `${client.sequence}`;
   renderReturnBrief({ timelineRendered: true });
   setText("#decision-count", state.eventLog.filter(e => e.type === T.DECISION_RECORDED).length || "");
@@ -4686,6 +4730,187 @@ $("#public-receipts-toggle")?.addEventListener("change", async () => {
   }
 });
 // --- end GR1 ---
+// --- GR2 public room page, join link, name, and starter-template controls. ---
+let acquisitionBusy = false;
+function syncAcquisitionControls() {
+  const viewerId = session?.member?.id;
+  const isOwner = Boolean(state && viewerId && viewerId === state.room.ownerId);
+  const pageControl = $("#public-page-control");
+  const pageBox = $("#public-page-toggle");
+  const joinControl = $("#join-link-control");
+  const joinBox = $("#join-link-toggle");
+  const nameControl = $("#public-name-control");
+  const nameBox = $("#public-name-toggle");
+  const tasksControl = $("#public-tasks-control");
+  if (pageControl && pageBox) {
+    pageControl.hidden = !isOwner;
+    if (isOwner) { pageBox.checked = state.room.publicPage?.enabled === true; pageBox.disabled = acquisitionBusy; }
+  }
+  if (joinControl && joinBox) {
+    joinControl.hidden = !isOwner;
+    if (isOwner) { joinBox.checked = state.room.joinLink?.enabled === true; joinBox.disabled = acquisitionBusy; }
+  }
+  const member = state && viewerId ? state.members[viewerId] : null;
+  if (nameControl && nameBox) {
+    nameControl.hidden = !member;
+    if (member) { nameBox.checked = member.publicName?.enabled === true; nameBox.disabled = acquisitionBusy; }
+  }
+  if (tasksControl) {
+    tasksControl.hidden = !isOwner;
+    const list = $("#public-tasks-list");
+    if (isOwner && list) {
+      const open = Object.values(state.workItems ?? {}).filter(item => ["proposed", "accepted", "working", "blocked"].includes(item.state));
+      list.replaceChildren(...open.map(item => {
+        const li = document.createElement("li");
+        const label = document.createElement("label");
+        const box = document.createElement("input");
+        box.type = "checkbox";
+        box.checked = item.publicTask?.enabled === true;
+        box.disabled = acquisitionBusy;
+        box.addEventListener("change", () => sendAcquisition(T.WORK_PUBLIC_SET, { workItemId: item.id, enabled: box.checked }));
+        label.append(box, document.createTextNode(" " + item.title));
+        li.append(label);
+        return li;
+      }));
+    }
+  }
+}
+async function sendAcquisition(type, data) {
+  if (!state || acquisitionBusy) return;
+  acquisitionBusy = true;
+  syncAcquisitionControls();
+  try { await client.send({ id: crypto.randomUUID(), type, data }); }
+  catch (error) { notice(error.message || "That setting was not changed.", true); }
+  finally { acquisitionBusy = false; if (state) syncAcquisitionControls(); }
+}
+$("#public-page-toggle")?.addEventListener("change", () => {
+  if (session?.member?.id !== state?.room?.ownerId) return;
+  sendAcquisition(T.ROOM_PUBLIC_PAGE_SET, { enabled: $("#public-page-toggle").checked });
+});
+$("#join-link-toggle")?.addEventListener("change", () => {
+  if (session?.member?.id !== state?.room?.ownerId) return;
+  sendAcquisition(T.ROOM_JOIN_LINK_SET, { enabled: $("#join-link-toggle").checked });
+});
+$("#public-name-toggle")?.addEventListener("change", () => {
+  if (!session?.member?.id) return;
+  sendAcquisition(T.MEMBER_PUBLIC_NAME_SET, { enabled: $("#public-name-toggle").checked });
+});
+async function loadTemplateChoices() {
+  const select = $("#account-room-template");
+  if (!select || select.dataset.loaded === "true") return;
+  select.dataset.loaded = "true";
+  try {
+    const body = await (await fetch("/templates.json")).json();
+    for (const template of body.templates ?? []) {
+      const option = document.createElement("option");
+      option.value = template.slug;
+      option.textContent = template.title;
+      option.dataset.purpose = template.purpose;
+      select.append(option);
+    }
+  } catch { select.dataset.loaded = ""; }
+}
+$("#account-room-template")?.addEventListener("change", () => {
+  const option = $("#account-room-template").selectedOptions[0];
+  if (!option?.value) return;
+  const title = $("#account-room-title");
+  const purpose = $("#account-room-purpose");
+  if (title && !title.value) title.value = option.textContent;
+  if (purpose && !purpose.value && option.dataset.purpose) purpose.value = option.dataset.purpose;
+});
+$("#account-room-create")?.addEventListener("toggle", () => { if ($("#account-room-create").open) loadTemplateChoices(); });
+async function startRoomFromTemplate(slug) {
+  const owned = accountClient.session;
+  $("#account-rooms-status").textContent = "Creating your room…";
+  const listed = await (await fetch("/templates.json")).json();
+  const template = (listed.templates ?? []).find(item => item.slug === slug);
+  if (!template) { $("#account-rooms-status").textContent = "That template is not available."; return; }
+  let roomId = window.sessionStorage.getItem(TEMPLATE_ROOM_KEY);
+  if (!roomId) {
+    roomId = "room-" + crypto.randomUUID().replaceAll("-", "").slice(0, 12);
+    window.sessionStorage.setItem(TEMPLATE_ROOM_KEY, roomId);
+  }
+  const ref = receiptReferrer();
+  const session = accountClient.currentSession("creating a room", { authenticated: true });
+  const result = await accountClient.request("/api/account-rooms/from-template", {
+    method: "POST",
+    data: { roomId, template: slug, title: template.title, purpose: template.purpose, kind: "personal", displayName: "Owner", ...(ref ? { ref } : {}) },
+    session,
+  });
+  if (accountClient.session !== owned) return;
+  await openAccountRoom(result.room.id);
+  window.sessionStorage.removeItem(TEMPLATE_ROOM_KEY);
+}
+async function showAgentInvitePicker(agentId) {
+  inboxUI.showRoomList();
+  const box = $("#acq-invite");
+  const status = $("#acq-invite-status");
+  const rooms = $("#acq-invite-rooms");
+  const link = $("#acq-invite-link");
+  if (!box || !rooms) return;
+  box.hidden = false;
+  if (link) link.hidden = true;
+  if (status) status.textContent = "Loading rooms…";
+  const directory = await (await fetch("/api/agent-directory")).json();
+  const agent = (directory.agents ?? []).find(item => item.agentId === agentId);
+  if ($("#acq-invite-title")) $("#acq-invite-title").textContent = agent ? `Invite ${agent.name}` : "Invite an agent";
+  if (!agent) { if (status) status.textContent = "That agent does not have a public card."; return; }
+  const session = accountClient.currentSession("loading rooms", { authenticated: true });
+  const listed = await accountClient.request("/api/account-rooms", { session });
+  rooms.replaceChildren();
+  if (!listed.rooms?.length) { if (status) status.textContent = "Create a room first, then invite this agent."; return; }
+  if (status) status.textContent = `Pick a room. The join link is yours to send to the operator of ${agent.name}.`;
+  for (const room of listed.rooms) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "button secondary";
+    button.textContent = room.title || room.id;
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      try {
+        const response = await fetch(`/api/rooms/${encodeURIComponent(room.id)}/referrals`, {
+          credentials: "same-origin",
+          headers: { "X-Project-Room-Auth": "account", "X-Session-Binding": accountClient.session.sessionBinding },
+        });
+        const body = await response.json();
+        if (!response.ok || !body.invite?.hash) { if (status) status.textContent = "Couldn’t mint a join link for that room."; return; }
+        if (link) {
+          link.hidden = false;
+          link.textContent = `Send ${body.invite.hash} to the operator of ${agent.name}. A join through it is credited to you.`;
+        }
+        clearAcquisition();
+      } finally { button.disabled = false; }
+    });
+    rooms.append(button);
+  }
+}
+async function runAcquisitionIntent() {
+  const intent = readAcquisition();
+  if (!intent || state || !accountClient.session?.authenticated) return;
+  try {
+    if (intent.kind === "request") {
+      clearAcquisition();
+      inboxUI.showRoomList();
+      const input = $("#account-request-room");
+      if (input && intent.roomId) input.value = intent.roomId;
+      const details = $("#account-request-access");
+      if (details) details.open = true;
+      const referred = $("#account-request-referred");
+      const ref = receiptReferrer();
+      if (referred && !referred.value && ref) referred.value = ref;
+      return;
+    }
+    if (intent.kind === "template") {
+      await startRoomFromTemplate(intent.template);
+      clearAcquisition();
+      return;
+    }
+    if (intent.kind === "invite-agent") await showAgentInvitePicker(intent.agent);
+  } catch {
+    $("#account-rooms-status").textContent = "Couldn’t finish that. Refresh and try again.";
+  }
+}
+// --- end GR2 ---
 // Room policy (issue #6 A4): when the owner made review or approval mandatory,
 // the proposer sees the requirement locked on with the reason. The server
 // enforces it regardless of what a client sends; this is only the honest view.
@@ -6647,3 +6872,30 @@ if (initialInvitationFragment && !initialPasswordReset) openInvitation(initialIn
   $("#auth-panel").hidden = false;
   if (!$("#invitation-dialog").open) queueMicrotask(() => focusSignin());
 });
+// --- W board: Tasks › Board. The command palette opens Board. ---
+{
+  const board = lazyDisclosure({ panel: $("#board-panel"),
+    load: () => import("./board-ui.js"),
+    install: module => module.installWorkBoard({ client, getState: () => state, getSession: () => session }),
+    onError: () => notice("Could not load the board. Close and reopen to retry.", true) });
+  const openBoard = () => {
+    const dialog = $("#board-dialog");
+    if (!dialog.open) dialog.showModal();
+    $("#board-panel").open = true;
+    board.sync();
+  };
+  $("#tasks-board-open").addEventListener("click", openBoard);
+  $("#board-close").addEventListener("click", () => { $("#board-dialog").close(); $("#board-panel").open = false; });
+  $("#signout-button").addEventListener("click", () => { $("#board-dialog").close(); board.reset(); }, true);
+  const priorEntries = roomActionEntries;
+  roomActionEntries = () => priorEntries().map(entry => entry.id === "landing"
+    ? { id: "board", label: "Board", words: "tasks board claims ci review lease land", always: true } : entry);
+  const priorChoose = chooseRoomAction;
+  chooseRoomAction = id => { if (id === "board") { openBoard(); return; } priorChoose(id); };
+  const paintChat = () => { if (state) paintClaimChat(state, $("#message-list")); };
+  const priorRender = render;
+  render = () => { if (!state) { board.reset(); return; } priorRender(); board.sync(); };
+  const priorMessages = renderMessages;
+  renderMessages = () => { priorMessages(); paintChat(); };
+}
+// --- end W board ---

@@ -11,6 +11,7 @@ import { RoomStore } from "../server/store.mjs";
 import { AccessRequests } from "../server/access-requests.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
+import { applyEvent, event } from "../src/events.js";
 
 function fixture(t) {
   const directory = mkdtempSync(join(tmpdir(), "project-room-referrals-"));
@@ -116,8 +117,22 @@ test("unmatched 'who referred you?' still joins with no referrer", t => {
 
 test("ambiguous display names do not falsely attribute", t => {
   const { store, accessRequests, ownerKey, roomId } = fixture(t);
-  mintRedeem(store, ownerKey, roomId, "Sam Duplicate");
-  mintRedeem(store, ownerKey, roomId, "sam duplicate"); // second member, same folded name
+  // Live member.added refuses a second folded name. Rows already stored can
+  // still fold together, so this fixture replays unstamped historical events.
+  // A matching answer then attributes nothing.
+  const room = store.room(roomId);
+  let state = room.state;
+  let sequence = room.sequence;
+  store.transaction(() => {
+    for (const [memberId, displayName] of [["sam-a", "Sam Duplicate"], ["sam-b", "sam duplicate"]]) {
+      const incoming = event({ type: "member.added", actorId: "owner", roomId, data: { memberId, displayName, kind: "human", permissions: [] } });
+      state = applyEvent(state, incoming);
+      sequence += 1;
+      store.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
+    }
+    const stored = { ...state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
+    store.db.prepare("UPDATE rooms SET sequence=?, projection=? WHERE id=?").run(sequence, JSON.stringify(stored), roomId);
+  });
   const identity = store.identities.create("Confused Agent");
   accessRequests.request(roomId, {
     identityId: identity.identityId, displayName: "Confused Agent",
@@ -128,8 +143,7 @@ test("ambiguous display names do not falsely attribute", t => {
   assert.equal(decided.status, "approved");
   const member = store.room(roomId).state.members[decided.memberId];
   assert.ok(!("referredBy" in member), "ambiguous match attributes nothing");
-  // Only the two invite joins journaled.
-  assert.equal(referralEvents(store, roomId).length, 2);
+  assert.equal(referralEvents(store, roomId).length, 0);
 });
 
 test("a member cannot refer themselves", t => {

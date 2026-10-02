@@ -80,9 +80,11 @@ test('integration: identity mint and room link enforce names at the write bounda
   }
   assert.equal(count(), linkedBefore, 'failed links do not leave a membership');
   const duplicate = store.identities.create('Another');
-  assert.equal(store.identities.link(ownerKey, 'commons', {
+  assert.throws(() => store.identities.link(ownerKey, 'commons', {
     identityId: duplicate.identityId, displayName: 'Relay', permissions: []
-  }).identityId, duplicate.identityId, 'existing exact-name duplicates remain allowed');
+  }), error => error.status === 422 && error.code === 'display_name_unavailable',
+  'a live room link refuses an exact display-name duplicate');
+  assert.equal(count(), linkedBefore, 'a refused duplicate link writes no membership');
   const linked = store.identities.link(ownerKey, 'commons', {
     identityId: second.identityId, displayName: 'Helpful Agent', permissions: []
   });

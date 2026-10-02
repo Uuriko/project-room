@@ -25,8 +25,6 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 // set loads that this walk would otherwise call unreachable.
 export const KEEP = [
   // Other batches will wire these.
-  "server/room-templates.mjs",
-  "server/work-templates.mjs",
   "server/receipt-standard.mjs",
   "src/design-tokens.js",
   // Scripts and workflows load these directly.
