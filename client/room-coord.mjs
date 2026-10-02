@@ -166,7 +166,9 @@ export async function coordStatus(client, { lander, memberId, now, expiringWithi
   if (lander !== undefined) assertClient(lander, ["landQueue"]);
   const at = nowFrom({ now });
   const [claimsResponse, land] = await Promise.all([client.workClaims({ signal }), lander ? lander.landQueue({ signal }) : null]);
-  const claims = claimsOf(claimsResponse);
+  // Kind "land" is the land queue, already reported as landQueue. Leaving
+  // those claims in live/mine would list the same pull twice.
+  const claims = claimsOf(claimsResponse).filter(claim => claim.kind !== "land");
   const live = claims.filter(claim => isLiveClaim(claim, at));
   const brief = claim => ({ id: claim.id, title: claim.title ?? null, state: claim.state, owner: claim.owner,
     leaseExpiresAt: claim.leaseExpiresAt ?? null, files: [...(claim.files ?? [])] });
