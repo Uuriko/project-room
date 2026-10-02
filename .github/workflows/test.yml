@@ -239,10 +239,28 @@ jobs:
           if-no-files-found: ignore
   # Branch protection requires a check named "test". The package workflows that
   # used that job id are gone. This job keeps the name and passes only when
-  # the suite jobs above have succeeded.
+  # the suite jobs above have succeeded. Default success() also fails when any
+  # job in the graph was skipped, so an intentional browser-shard skip would
+  # skip this required check. Evaluate the direct results instead.
   test:
     needs: [contract, lint, unit, browser, cloudflare]
+    if: always() && !cancelled()
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - run: echo "contract, lint, unit, browser, and cloudflare succeeded"
+      - name: Require contract, lint, unit, browser, and cloudflare
+        env:
+          CONTRACT: ${{ needs.contract.result }}
+          LINT: ${{ needs.lint.result }}
+          UNIT: ${{ needs.unit.result }}
+          BROWSER: ${{ needs.browser.result }}
+          CLOUDFLARE: ${{ needs.cloudflare.result }}
+        run: |
+          failed=0
+          for pair in "contract:$CONTRACT" "lint:$LINT" "unit:$UNIT" "browser:$BROWSER" "cloudflare:$CLOUDFLARE"; do
+            name=${pair%%:*}
+            result=${pair#*:}
+            echo "$name=$result"
+            if [ "$result" != "success" ]; then failed=1; fi
+          done
+          exit "$failed"
