@@ -7,12 +7,12 @@ import { RoomStore } from '../server/store.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { createRoomServer } from '../server/http.mjs';
 
-async function fixture(t) {
+async function fixture(t, { reviewerPermissions = [] } = {}) {
   const store = new RoomStore(':memory:');
   store.initialize(initialRoom('commons'));
   const token = store.issueAccessKey('commons', 'owner');
   store.command(token, 'commons', { id: 'add-reviewer', type: 'member.added',
-    data: { memberId: 'reviewer', displayName: 'Reviewer', kind: 'human', permissions: [] } });
+    data: { memberId: 'reviewer', displayName: 'Reviewer', kind: 'human', permissions: reviewerPermissions } });
   const peerToken = store.issueAccessKey('commons', 'reviewer');
   const server = createRoomServer({ store });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -77,7 +77,7 @@ test('SDK convenience claim and completion preserve creation metadata and explic
 });
 
 test('SDK sends invalid declarations for server rejection instead of silently dropping them', async t => {
-  const { owner: client } = await fixture(t);
+  const { owner: client, peer } = await fixture(t, { reviewerPermissions: ['verify'] });
   for (const [id, fields] of [['invalid-path', { files: ['../outside'] }], ['invalid-tag', { tags: ['not a tag'] }]]) {
     await assert.rejects(client.workClaimCreate({ id, ...fields }), invalid);
     await assert.rejects(client.workClaimGet(id), error => error.status === 404);
@@ -91,11 +91,22 @@ test('SDK sends invalid declarations for server rejection instead of silently dr
     await assert.rejects(client.workComplete('pending', fields), invalid);
     assert.equal((await client.workClaimGet('pending')).state, 'in_progress');
   }
+  const beforeReview = await client.workClaimGet('pending');
+  for (const fields of [
+    { verdict: 'approved', summary: 'Invalid verdict' },
+    { verdict: 'approve' },
+    { verdict: 'approve', summary: '' },
+    { verdict: 'approve', summary: 'Invalid URL', url: 'http://example.com/review' },
+    { verdict: 'approve', summary: 'Mixed review forms', note: 'Legacy note' },
+  ]) {
+    await assert.rejects(peer.reviewWorkItem('pending', fields), invalid);
+    assert.deepEqual(await client.workClaimGet('pending'), beforeReview);
+  }
 });
 
 
-test('SDK review records the authenticated reviewer and satisfies distinct-member completion', async t => {
-  const { owner, peer } = await fixture(t);
+test('SDK preserves legacy notes and requires an explicit approval for reviewed completion', async t => {
+  const { owner, peer } = await fixture(t, { reviewerPermissions: ['verify'] });
   await owner.workClaim('reviewed', { reviewPolicy: 'distinct_member' });
   await owner.updateWorkItem('reviewed', { state: 'in_progress' });
   const before = await owner.workClaimGet('reviewed');
@@ -106,11 +117,28 @@ test('SDK review records the authenticated reviewer and satisfies distinct-membe
   assert.equal(reviewed.attestations.length, 1);
   assert.equal(reviewed.attestations[0].memberId, 'reviewer');
   assert.equal(reviewed.attestations[0].note, 'Checked the result');
+  assert.deepEqual(reviewed.reviews, []);
+  await assert.rejects(owner.workComplete('reviewed', { reviewedBy: 'reviewer' }),
+    error => error.status === 403 && error.code === 'work_review_rejected');
   await assert.rejects(peer.workComplete('reviewed', { reviewedBy: 'reviewer' }),
     error => error.status === 403 && error.code === 'work_not_owner');
   assert.deepEqual(await owner.workClaimGet('reviewed'), reviewed);
+  for (const verdict of ['comment', 'changes_requested']) {
+    const negative = await peer.reviewWorkItem('reviewed', { verdict, summary: `Feedback: ${verdict}` });
+    assert.equal(negative.reviews[0].verdict, verdict);
+    assert.equal(negative.reviews[0].memberId, 'reviewer');
+    await assert.rejects(owner.workComplete('reviewed', { reviewedBy: 'reviewer' }),
+      error => error.status === 403 && error.code === 'work_review_rejected');
+    assert.deepEqual(await owner.workClaimGet('reviewed'), negative);
+  }
+  const approval = { verdict: 'approve', summary: 'Explicitly approved the current result', url: 'https://example.com/review/result' };
+  const approved = await peer.reviewWorkItem('reviewed', approval);
+  assert.equal(approved.reviews[0].memberId, 'reviewer');
+  for (const [field, value] of Object.entries(approval)) assert.equal(approved.reviews[0][field], value);
+  assert.deepEqual((await owner.workClaimGet('reviewed')).reviews, approved.reviews);
   const done = await owner.workComplete('reviewed', { reviewedBy: 'reviewer' });
   assert.equal(done.state, 'done');
+  assert.equal(done.reviewedBy, 'reviewer');
   await assert.rejects(peer.reviewWorkItem('reviewed', { note: 'Too late' }), invalid);
   assert.deepEqual(await owner.workClaimGet('reviewed'), done);
 });

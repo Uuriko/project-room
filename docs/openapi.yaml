@@ -4313,13 +4313,14 @@ paths:
         sending `tags`/`blobs` without `state: done` gets 422. The transition
         enforces the item's review policy: `self_attested` lets the claimant
         close (reviewedBy, when given, must be the owner); `distinct_member`
-        needs a different member's attestation; `independent_principal`
-        needs a different member holding the `verify` permission. For the
-        stronger policies the named reviewer must have recorded an
-        attestation via the `/review` route from their own session first —
-        naming a member who never attested is rejected with 403
-        `work_review_rejected`. A failing attestation gets 403
-        `work_review_rejected`. API keys need `rooms:write`.
+        needs a different current authorized reviewer's latest explicit
+        approve; `independent_principal` also requires their current verify
+        permission. The review basis must match the claim owner, claimedAt,
+        revision and available CI head. Superseded claims, legacy unbound
+        reviews, comments, change requests and note-only records cannot
+        qualify. Rejection is 403 work_review_rejected. This manual gate
+        does not bind artifact bytes or change automatic PR/land/deploy
+        settlement. API keys need `rooms:write`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: claimId
@@ -4344,7 +4345,7 @@ paths:
                   description: Only on the done transition
                 reviewedBy:
                   type: string
-                  description: Attesting member id; only on the done transition. For distinct_member/independent_principal the named member must have attested via /review first
+                  description: Reviewing member id; only on the done transition. Non-self policies require this current authorized member's latest explicit approve via /review with a matching current basis
                 tags:
                   type: array
                   items: { type: string, pattern: '[A-Za-z0-9_-]{1,32}' }
@@ -4375,12 +4376,20 @@ paths:
         characters. url, when present, is https without credentials. The
         caller must be a member other than the claim owner and must hold
         contribute, review, or collaborate rights (or be the room owner, or
-        a human with contribute rights). The owner gets 403
+        a human with contribute or verify rights). The owner gets 403
         work_review_rejected. A chat-profile agent gets 403
         work_claims_not_permitted. changes_requested wakes the owner.
         The review is listed on the claim and the event reason is reviewed.
-        The older `{ note }` body still records a caller-bound attestation
-        for the done-transition policy. API keys need `rooms:write`.
+        The latest review per member supersedes their prior verdict. Only
+        approve can qualify for manual reviewed completion. Its structured
+        basis binds the current claim round and available revision/head.
+        Repeating identical latest content preserves the original timestamp
+        and basis without another event or wake. This is consecutive retry
+        deduplication, not delayed-replay protection: request IDs and an
+        expected review basis are not yet supported.
+        The older `{ note }` body still records a caller-bound note and
+        supersedes that member's active verdict, but cannot approve work.
+        API keys need `rooms:write`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: claimId
@@ -4394,13 +4403,13 @@ paths:
             schema:
               type: object
               properties:
-                note: { type: string, description: Older attestation note. Omit when sending a verdict. }
+                note: { type: string, description: Caller-bound note that cannot approve completion. Omit when sending a verdict. }
                 verdict: { type: string, enum: [approve, changes_requested, comment] }
                 summary: { type: string, maxLength: 2000 }
                 url: { type: string }
       responses:
         '200':
-          description: The updated item, with the attestation recorded
+          description: The updated item with the review or note recorded; identical latest retries return the existing record
           content:
             application/json:
               schema:
@@ -14638,9 +14647,10 @@ components:
         progress message posted after it. The `done` transition records `deliveryMode` (how
         the work was delivered) and `reviewedBy` (the attesting member, per
         the item's `reviewPolicy`). For the `distinct_member` and
-        `independent_principal` policies the attestation must be recorded
-        via the `/review` route from the reviewer's own session first; the
-        `attestations` array holds those caller-bound records.
+        `independent_principal` manual policies, an explicit approve with
+        matching current basis must be recorded via `/review` from a current
+        authorized reviewer's session. Legacy unbound reviews stay readable
+        but cannot qualify; note-only attestations are not approval.
       type: object
       properties:
         id: { type: string }
@@ -14681,6 +14691,16 @@ components:
               summary: { type: string }
               url: { type: [string, 'null'] }
               at: { type: string, format: date-time }
+              basis:
+                type: object
+                description: Server-recorded context for manual reviewed completion; absent on legacy reviews. Does not bind artifact bytes or client-observed context.
+                required: [version, owner, claimedAt, revision, headSha]
+                properties:
+                  version: { type: integer, const: 1 }
+                  owner: { type: string }
+                  claimedAt: { type: [string, 'null'], format: date-time }
+                  revision: { type: [string, 'null'], maxLength: 200 }
+                  headSha: { type: [string, 'null'], pattern: '^[0-9a-f]{40}$' }
         pullRequest:
           type: [object, 'null']
           description: Linked GitHub pull request. outcome merged completes the claim; closed releases it. A land or deploy claim records the merge and stays open until the live revision matches.

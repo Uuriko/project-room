@@ -28,21 +28,11 @@
 // Both are recorded on the item and frozen with the done state; the
 // GET /api/rooms/{roomId}/receipts route searches them.
 //
-// Review policies: work items (or the room config) carry reviewPolicy in
-// { self_attested, distinct_member, independent_principal }. canCloseWork
-// enforces the policy for the done transition: self_attested lets the
-// claimant close; distinct_member requires a different member to attest;
-// independent_principal requires a different member holding the verify
-// permission (supplied as verifyMembers) to attest. Enforcement lives with
-// the caller (the HTTP layer applies it); the state machine itself only
-// records the attestation (reviewedBy) on the done transition.
-//
-// SECURITY (QA-Sec 2026-09-19): attestations are first-class records, not
-// caller-supplied names. attestWork records a review attestation from the
-// authenticated caller's own session; the done transition only accepts a
-// reviewedBy that has such a recorded attestation (for non-self policies).
-// Naming another member without their attestation is rejected — the
-// previous "name anyone" behavior was a confused-deputy flaw.
+// Manual reviewed completion requires a latest explicit approve bound to the
+// current claim round and available revision/head metadata, plus current
+// reviewer authority supplied by the HTTP layer. self_attested is unchanged.
+// Note-only attestations remain caller-bound records but cannot approve work.
+// This does not gate automatic PR/land/deploy settlement or bind artifact bytes.
 import { parsePullRequestUrl } from "./claim-coordination.mjs";
 const STATES = ["unclaimed", "claimed", "in_progress", "blocked", "done"];
 const CLAIM_KINDS = ["work", "land", "deploy"];
@@ -277,6 +267,24 @@ const ciOf = value => {
     checkedAt: value.checkedAt
   });
 };
+// Structured context for manual reviewed completion. This binds recorded
+// claim metadata, not artifact bytes or a version the client proves it saw.
+const reviewBasisOf = value => {
+  if (value === undefined || value === null) return null;
+  check(value && typeof value === "object" && !Array.isArray(value) && value.version === 1, "review basis must use version 1");
+  check(typeof value.owner === "string" && value.owner.length > 0 && value.owner.length <= 128, "review basis owner is required");
+  check(value.claimedAt === null || typeof value.claimedAt === "string" && Number.isFinite(Date.parse(value.claimedAt)), "review basis claimedAt must be an ISO timestamp or null");
+  check(value.revision === null || typeof value.revision === "string" && value.revision.length > 0 && value.revision.length <= 200, "review basis revision must be a short string or null");
+  check(value.headSha === null || typeof value.headSha === "string" && /^[0-9a-f]{40}$/.test(value.headSha), "review basis headSha must be a commit SHA or null");
+  return Object.freeze({ version: 1, owner: value.owner, claimedAt: value.claimedAt, revision: value.revision, headSha: value.headSha });
+};
+const reviewBasisFor = item => Object.freeze({ version: 1, owner: item.owner, claimedAt: item.claimedAt,
+  revision: item.revision ?? null, headSha: item.ci?.headSha ?? null });
+const currentReviewBasis = (review, item) => {
+  const basis = review?.basis, current = reviewBasisFor(item);
+  return basis && Object.keys(current).every(key => basis[key] === current[key]);
+};
+
 const reviewRecordOf = value => {
   check(value !== null && typeof value === "object" && !Array.isArray(value), "review must be an object");
   check(typeof value.memberId === "string" && value.memberId.length > 0 && value.memberId.length <= 128, "review memberId must be 1..128 characters");
@@ -284,7 +292,9 @@ const reviewRecordOf = value => {
   check(typeof value.summary === "string" && value.summary.length > 0 && value.summary.length <= 2000, "summary must be 1..2000 characters");
   check(value.url == null || (typeof value.url === "string" && value.url.length <= 300), "review url must be at most 300 characters");
   check(typeof value.at === "string" && Number.isFinite(Date.parse(value.at)), "review at must be an ISO timestamp");
-  return Object.freeze({ memberId: value.memberId, verdict: value.verdict, summary: value.summary, url: value.url ?? null, at: value.at });
+  const basis = reviewBasisOf(value.basis);
+  return Object.freeze({ memberId: value.memberId, verdict: value.verdict, summary: value.summary, url: value.url ?? null, at: value.at,
+    ...(basis ? { basis } : {}) });
 };
 const reviewsOf = value => {
   if (value === undefined || value === null) return Object.freeze([]);
@@ -515,24 +525,29 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
     blobs: state === "done" && blobs != null ? blobsOf(blobs) : item.blobs };
   return withHistory(next, atMs, agent, state === undefined ? "noted" : `state:${state}`, note);
 }
-// Record a review attestation from the caller's own authenticated session.
-// One attestation per member (latest wins); the done transition consults
-// these records rather than trusting a caller-supplied reviewedBy name.
+// Record a note from the caller's own authenticated session. A new note
+// supersedes that member's active verdict but cannot approve reviewed completion.
 // Refused on unclaimed work (nothing to review) and on done work (immutable).
 export function attestWork(work, agentId, { note, now } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
   check(ACTIVE_CLAIM_STATES.includes(item.state), `work "${item.id}" is ${item.state} — only active claims can be reviewed`);
   if (note !== undefined && note !== null) check(typeof note === "string" && note.length <= 512, "note must be at most 512 characters");
+  const prior = item.attestations.find(entry => entry.memberId === agent);
+  const explicit = item.reviews.some(entry => entry.memberId === agent);
+  if (!explicit && prior && prior.note === (note ?? null)) return Object.freeze(item);
   const attestation = Object.freeze({ memberId: agent, at: isoOf(atMs), note: note ?? null });
   const attestations = Object.freeze([
     ...item.attestations.filter(entry => entry.memberId !== agent),
     attestation,
   ]);
-  return withHistory({ ...item, attestations }, atMs, agent, "reviewed", note);
+  // A new note supersedes this member's active verdict; it is not an approve.
+  // Immutable event/history records remain available for the prior review.
+  const reviews = Object.freeze(item.reviews.filter(entry => entry.memberId !== agent));
+  return withHistory({ ...item, attestations, reviews }, atMs, agent, "reviewed", note);
 }
 // A review record from someone other than the owner. Latest record per member
-// wins. The same member is also attested so the done-transition policy still
-// sees a caller-bound review. The owner cannot review their own claim.
+// wins. Only approve also records the caller-bound attestation used by the
+// manual done policy. The owner cannot review their own claim.
 export function recordReview(work, agentId, { verdict, summary, url, now } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
   check(item.owner !== agent, `work "${item.id}" is owned by ${item.owner ?? "nobody"} — the owner cannot review it`);
@@ -547,11 +562,17 @@ export function recordReview(work, agentId, { verdict, summary, url, now } = {})
     check(parsed && parsed.protocol === "https:" && !parsed.username && !parsed.password, "url must be an https URL without credentials");
     reviewUrl = url;
   }
+  const prior = item.reviews.find(entry => entry.memberId === agent);
+  // Replaying the latest identical content never refreshes its old binding.
+  // A request ID is still needed to distinguish delayed retries after a newer verdict.
+  if (prior && prior.verdict === verdict && prior.summary === summary && prior.url === reviewUrl) return Object.freeze(item);
   const at = isoOf(atMs);
-  const review = Object.freeze({ memberId: agent, verdict, summary, url: reviewUrl, at });
+  const review = Object.freeze({ memberId: agent, verdict, summary, url: reviewUrl, at, basis: reviewBasisFor(item) });
   const reviews = Object.freeze([...item.reviews.filter(entry => entry.memberId !== agent), review]);
-  const attestation = Object.freeze({ memberId: agent, at, note: summary.slice(0, 512) });
-  const attestations = Object.freeze([...item.attestations.filter(entry => entry.memberId !== agent), attestation]);
+  const attestations = Object.freeze([
+    ...item.attestations.filter(entry => entry.memberId !== agent),
+    ...(verdict === "approve" ? [Object.freeze({ memberId: agent, at, note: summary.slice(0, 512) })] : []),
+  ]);
   return withHistory({ ...item, reviews, attestations }, atMs, agent, "reviewed", summary.slice(0, 512));
 }
 // Land and deploy claims close when this server's live revision matches the
@@ -627,18 +648,25 @@ export function releaseExpired(items, now) {
 }
 // Review-policy gate for the done transition. policy resolves from the
 // explicit option, then the work item, then self_attested. verifyMembers is
-// the set/list of member ids holding the verify permission (only consulted
-// for independent_principal). Returns true when reviewerId may close the
+// the current set/list holding verify; reviewMembers is the current set/list
+// allowed to record explicit reviews. verifyMembers is only consulted
+// for independent_principal. Returns true when reviewerId may close the
 // work; unknown policies throw (programmer error), identity mismatches
 // simply return false.
-export function canCloseWork(work, reviewerId, { policy, verifyMembers } = {}) {
+export function canCloseWork(work, reviewerId, { policy, verifyMembers, reviewMembers } = {}) {
   const item = workOf(work);
   const effective = policy ?? item.reviewPolicy ?? DEFAULT_REVIEW_POLICY;
   check(REVIEW_POLICIES.includes(effective), `policy must be one of ${REVIEW_POLICIES.join(", ")}`);
   if (item.state === "done" || item.state === "unclaimed" || item.owner === null) return false;
   if (typeof reviewerId !== "string" || reviewerId.length === 0) return false;
   if (effective === "self_attested") return reviewerId === item.owner;
-  if (reviewerId === item.owner) return false;
+  if (reviewerId === item.owner || item.supersededBy) return false;
+  const review = item.reviews.find(entry => entry.memberId === reviewerId);
+  if (review?.verdict !== "approve" || !currentReviewBasis(review, item)) return false;
+  const attestation = item.attestations.find(entry => entry.memberId === reviewerId);
+  if (!attestation || attestation.at !== review.at) return false;
+  const reviewers = reviewMembers instanceof Set ? reviewMembers : new Set(reviewMembers ?? []);
+  if (!reviewers.has(reviewerId)) return false;
   if (effective === "distinct_member") return true;
   const verifiers = verifyMembers instanceof Set ? verifyMembers : new Set(verifyMembers ?? []);
   return verifiers.has(reviewerId);
