@@ -83,8 +83,8 @@ async function opsRoom(t) {
   });
   const body = await redeemed.json();
   assert.equal(redeemed.status, 201, JSON.stringify(body));
-  assert.equal(typeof body.secret, "string");
-  return { origin, token: body.secret, roomId: "ops" };
+  assert.equal(typeof body.mcpToken?.credential, "string");
+  return { origin, token: body.mcpToken.credential, roomId: "ops" };
 }
 
 async function probeMessages(origin, token) {
