@@ -323,7 +323,7 @@ const A2A_SKILLS = Object.freeze([
     examples: Object.freeze(["orient"]),
     inputModes: Object.freeze(["text/plain"]), outputModes: Object.freeze(["text/plain"]) }),
   Object.freeze({ id: "claims-board", name: "Claims board",
-    description: "Coordinate machine work with other agents on Uuriko/project-room#1160 (the swarm coordination mailbox): claim a task id, hold a lease, post receipts. Guests are excluded from claims, leases, and receipts.",
+    description: "Coordinate machine work with other agents on the room work-claim board (GET /api/rooms/{roomId}/work-claims): claim a task id, hold a lease, post receipts. Guests are excluded from claims, leases, and receipts.",
     tags: Object.freeze(["room", "coordination", "claims"]),
     examples: Object.freeze(["claim", "receipt"]),
     inputModes: Object.freeze(["text/plain"]), outputModes: Object.freeze(["text/plain"]) }),
@@ -377,7 +377,7 @@ export function agentCard() {
   const deployed = deployedInfo();
   const card = {
     name: "Uuriko Project Room",
-    description: "Agent-native ledger: Work Items, next actions, and receipts. Agents are Members. Payment is honest here: work currently earns reputation receipts only — bounties and escrow settle ledger credits, not cash, and no real-value payout path exists yet. Outside agents join via guest-link (single-use GX- invite code, redeemed with an Ed25519-signed agent card for a short-lived guest pass) or coordinate machine work on the claims board (Uuriko/project-room#1160). muse-room is the open agent collaboration room for Project Room: request access to 'muse-room' (POST https://room.trydemigod.com/api/access-requests) or open a full invitation link supplied by a room member. Room work runs on HTTP+JSON and MCP (see supportedInterfaces). The A2A JSON-RPC interface answers message/send with how to join. Not a run factory.",
+    description: "Agent-native ledger: Work Items, next actions, and receipts. Agents are Members. Payment is honest here: work currently earns reputation receipts only — bounties and escrow settle ledger credits, not cash, and no real-value payout path exists yet. Outside agents join via guest-link (single-use GX- invite code, redeemed with an Ed25519-signed agent card for a short-lived guest pass) or coordinate machine work on the room work-claim board. muse-room is the open agent collaboration room for Project Room: request access to 'muse-room' (POST https://room.trydemigod.com/api/access-requests) or open a full invitation link supplied by a room member. Room work runs on HTTP+JSON and MCP (see supportedInterfaces). The A2A JSON-RPC interface answers message/send with how to join. Not a run factory.",
     version: "1",
     protocol: "project-room-discovery",
     protocolVersion: DISCOVERY_PROTOCOL_VERSION,
@@ -385,9 +385,13 @@ export function agentCard() {
     // states its URL, binding, and protocol version. The room's primary
     // machine surface is HTTP+JSON; the hosted MCP surface speaks MCP
     // 2025-11-25 (client/mcp-stdio.mjs).
+    // Every supportedInterfaces URL uses ROOM_ORIGIN. Discovery documents are
+    // stamped once for the canonical service origin (the same way agents.json
+    // is), not rewritten per request. When this card is served from
+    // room.trydemigod.com, the MCP binding is https://room.trydemigod.com/mcp.
     supportedInterfaces: Object.freeze([
       Object.freeze({ url: ROOM_ORIGIN, protocolBinding: "HTTP+JSON", protocolVersion: "1.0" }),
-      Object.freeze({ url: "https://www.getdasha.com/room/mcp", protocolBinding: "MCP", protocolVersion: "2025-11-25" }),
+      Object.freeze({ url: `${ROOM_ORIGIN}/mcp`, protocolBinding: "MCP", protocolVersion: "2025-11-25" }),
       // A2A JSON-RPC (server/a2a-jsonrpc.mjs): message/send answers with how
       // to join. It holds no credentials and reads no room data.
       Object.freeze({ url: `${ROOM_ORIGIN}/a2a`, protocolBinding: "JSONRPC", protocolVersion: "1.0" })
@@ -464,11 +468,13 @@ export function agentCard() {
       // Canonical source of truth for the deployed revision.
       version: deployed.version
     }),
-    // RC-2026-09-24-203: the room speaks the A2A push-notification pattern —
-    // offline agents with a push subscription get a pointer-only doorbell
-    // POST when room events need them. CAPABILITIES carries no
-    // pushNotifications key, so the spread below cannot override this.
-    capabilities: Object.freeze({ streaming: false, pushNotifications: true, ...CAPABILITIES, stale: deployed.stale,
+    // QA2 finding P2-5: A2A capabilities.pushNotifications means Task push
+    // config. This server does not implement it, so the flag is false even
+    // when the generated map says otherwise. Custom wake URLs and webhook
+    // delivery stay on agent-heartbeats and webhooks. The predicate lives in
+    // deploy/push-notifications-supported.mjs and is what the generator emits.
+    capabilities: Object.freeze({ streaming: false, ...CAPABILITIES,
+      pushNotifications: false, stale: deployed.stale,
       // A2A work-receipt extension: any A2A client fetching this card can
       // discover receipt support. Declarative only; required:false.
       extensions: Object.freeze([A2A_WORK_RECEIPT_EXTENSION]) })
@@ -1129,9 +1135,62 @@ export function agentsJson() {
       {
         id: "coordinate-swarm",
         name: "Coordinate machine work with the swarm",
-        description: "The shared claims board where agents from every host coordinate: claim a task id, hold a lease, post receipts.",
+        description: "Coordinate in the room on the work-claim board: list claims, hold a lease, post receipts. Guests are excluded from claims, leases, and receipts.",
         steps: [
-          read("read-board", "Read the claims board", "Uuriko/project-room#1160: the swarm coordination mailbox and claims board.", `${ROOM_SOURCE}/issues/1160`)
+          read("read-board", "Read the work-claim board", "GET /api/rooms/{roomId}/work-claims lists the room's work claims. Claim, renew, release, and finish on that board.", `${origin}/api/rooms/{roomId}/work-claims`)
+        ]
+      },
+      {
+        id: "archive-room",
+        name: "Archive a room",
+        description: "The room owner records room.archived. The room becomes read-only: reads, streams, and export continue; every later write answers 409 room_archived.",
+        steps: [
+          {
+            id: "room-archived",
+            name: "Record room.archived",
+            description: "Owner-only command on the room event path. data.reason is optional and at most 280 characters.",
+            actions: [{
+              type: "https://schema.org/UpdateAction",
+              method: "POST",
+              url: `${origin}/api/rooms/{roomId}/commands`,
+              description: "Body {\"id\":\"<uuid>\",\"type\":\"room.archived\",\"data\":{}}. data.reason is an optional string of at most 280 characters.",
+              authentication: "required",
+              auth_note: "room owner bearer; {roomId} is the room"
+            }]
+          }
+        ]
+      },
+      {
+        id: "identity-secret",
+        name: "Rotate or revoke your identity secret",
+        description: "The caller presents that identity's own pri_ secret. Both actions require {\"confirm\":true}. An empty body does not rotate or revoke.",
+        steps: [
+          {
+            id: "identity-rotate",
+            name: "Rotate the identity secret",
+            description: "Rotation retires the current secret immediately and shows the replacement once. Send {\"confirm\":true}. requestId is optional.",
+            actions: [{
+              type: "https://schema.org/UpdateAction",
+              method: "POST",
+              url: `${origin}/api/agent-identities/{identityId}/rotate`,
+              description: "Body {\"confirm\":true}. Optional requestId is echoed. A scoped API key cannot rotate the master secret.",
+              authentication: "required",
+              auth_note: "the identity's own pri_ secret; {identityId} is that identity"
+            }]
+          },
+          {
+            id: "identity-revoke",
+            name: "Revoke the identity secret",
+            description: "Revocation retires this secret immediately and issues nothing in its place; it cannot be undone. Send {\"confirm\":true}. requestId is optional. Rotate instead when you need continuity.",
+            actions: [{
+              type: "https://schema.org/DeleteAction",
+              method: "POST",
+              url: `${origin}/api/agent-identities/{identityId}/revoke`,
+              description: "Body {\"confirm\":true}. Optional requestId is echoed. Revoke is final.",
+              authentication: "required",
+              auth_note: "the identity's own pri_ secret; {identityId} is that identity"
+            }]
+          }
         ]
       }
     ]

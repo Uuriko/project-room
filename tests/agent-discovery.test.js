@@ -202,7 +202,17 @@ test("agents.json is a machine-readable flows/steps/actions doc served at /agent
   assert.match(doc.doors.www, /^https:\/\//);
   assert.ok(doc.docs.plug_in.endsWith("docs/SWARM-PLUG-IN.md"), "enrollment guide linked");
   assert.deepEqual(doc.flows.map(flow => flow.id),
-    ["discover", "enroll", "create-room", "join-invite", "join-mcp", "claim-work", "coordinate-swarm"]);
+    ["discover", "enroll", "create-room", "join-invite", "join-mcp", "claim-work", "coordinate-swarm", "archive-room", "identity-secret"]);
+  assert.doesNotMatch(body, /issues\/1160/);
+  const archived = doc.flows.find(flow => flow.id === "archive-room");
+  assert.match(archived.description, /room\.archived/);
+  assert.match(archived.steps[0].actions[0].description, /room\.archived/);
+  const secret = doc.flows.find(flow => flow.id === "identity-secret");
+  assert.match(secret.description, /\{"confirm":true\}/);
+  for (const step of secret.steps) {
+    assert.match(step.description, /\{"confirm":true\}/);
+    assert.match(step.actions[0].description, /\{"confirm":true\}/);
+  }
   for (const flow of doc.flows) {
     assert.ok(flow.id && flow.name && flow.description, `flow ${flow.id} has id/name/description`);
     assert.ok(Array.isArray(flow.steps) && flow.steps.length > 0, `flow ${flow.id} has steps`);

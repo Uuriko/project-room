@@ -5,8 +5,10 @@
 // server/mcp-http.mjs. tests/discoverability.test.js pins the served methods
 // for the inventoried routes, so method drift fails loudly instead of
 // silently omitting operations from the generated spec. The same table drives
-// the HTTP error-guidance overrides (discoverabilityErrorOverride) so every
-// 4xx/429 on a listed route carries the canonical envelope with a non-empty next[].
+// the HTTP error-guidance overrides (discoverabilityErrorOverride) so a
+// ServiceError on a listed route carries the canonical envelope with a
+// non-empty next[]. JSON-RPC POST /mcp, POST /room/mcp, and POST /a2a parse
+// failures are not that envelope: the handler returns JsonRpcError.
 //
 // Route entries: { path, methods, auth, summary, operationId }.
 // Multi-method routes MUST use the optional `operationIds` extra to give each
@@ -115,6 +117,14 @@ export const MCP_DISCOVERY_BLOCK = Object.freeze({
 
 const ERROR_RESPONSES = ["BadRequest", "Unauthorized", "Forbidden", "NotFound", "Conflict", "TooManyRequests"];
 
+// Protocol 4xx from the JSON-RPC handlers. Rate limits, body caps, and host
+// checks throw ServiceError before those handlers and stay ErrorEnvelope.
+const JSON_RPC_STATUSES = Object.freeze({
+  "/a2a": new Set(["400"]),
+  "/mcp": new Set(["400", "401"]),
+  "/room/mcp": new Set(["400", "401"]),
+});
+
 function errorComponents() {
   const responses = {};
   for (const name of ERROR_RESPONSES) {
@@ -126,14 +136,27 @@ function errorComponents() {
   return responses;
 }
 
+function jsonRpcErrorResponse(status) {
+  const description = status === "401"
+    ? "JSON-RPC authorization error (jsonrpc, id, error.code integer). Not ErrorEnvelope."
+    : "JSON-RPC parse error (jsonrpc, id, error.code integer, optional error.data.status). Not ErrorEnvelope.";
+  return {
+    description,
+    content: { "application/json": { schema: { $ref: "#/components/schemas/JsonRpcError" } } },
+  };
+}
+
 function operationResponses(entry, method) {
   const success = method === "POST" && entry.path !== "/api/needs-me"
     ? { "201": { description: "Created. Success bodies carry next[] guidance toward the next step." } }
     : { "200": { description: "OK. Success bodies carry next[] guidance toward the next step." } };
   const errors = {};
+  const jsonRpc = method === "POST" ? JSON_RPC_STATUSES[entry.path] : null;
   for (const name of ERROR_RESPONSES) {
     const status = { BadRequest: "400", Unauthorized: "401", Forbidden: "403", NotFound: "404", Conflict: "409", TooManyRequests: "429" }[name];
-    errors[status] = { $ref: `#/components/responses/${name}` };
+    errors[status] = jsonRpc?.has(status)
+      ? jsonRpcErrorResponse(status)
+      : { $ref: `#/components/responses/${name}` };
   }
   return { ...success, ...errors };
 }
@@ -329,7 +352,10 @@ export function buildOpenApiJson({ origin }) {
         "This document is generated from a hand-maintained route inventory (server/discoverability.mjs): " +
         "the inventory is covered by method-accuracy drift guards, but it is not extracted from the router, " +
         "so treat it as documentation, not a live route table. " +
-        "Every 4xx/429 on a listed route returns the canonical error envelope (see components.schemas.ErrorEnvelope).",
+        "Service errors on a listed route return the canonical error envelope (see components.schemas.ErrorEnvelope). " +
+        "POST /mcp, POST /room/mcp, and POST /a2a parse failures return JsonRpcError instead: " +
+        "{ jsonrpc, id, error: { code, message, data?: { status } } }. " +
+        "Rate limits and other ServiceErrors on those paths stay ErrorEnvelope.",
     },
     servers: [{ url: origin }],
     paths,
@@ -365,6 +391,34 @@ export function buildOpenApiJson({ origin }) {
             next: { type: "array", minItems: 1, items: { $ref: "#/components/schemas/NextStep" } },
             operationId: { type: "string" },
             category: { type: "string" },
+          },
+        },
+        // A2A parse errors omit error.data. MCP transport errors include it.
+        JsonRpcError: {
+          type: "object",
+          required: ["jsonrpc", "id", "error"],
+          properties: {
+            jsonrpc: { const: "2.0" },
+            id: { type: ["string", "number", "null"] },
+            error: {
+              type: "object",
+              required: ["code", "message"],
+              properties: {
+                code: { type: "integer" },
+                message: { type: "string" },
+                data: {
+                  type: "object",
+                  properties: {
+                    status: { type: "string" },
+                    reason: { type: "string" },
+                    hint: { type: "string" },
+                    next: { type: "array", items: { $ref: "#/components/schemas/NextStep" } },
+                    operationId: { type: "string" },
+                    category: { type: "string" },
+                  },
+                },
+              },
+            },
           },
         },
       },

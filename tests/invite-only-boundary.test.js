@@ -76,6 +76,9 @@ const PROBES = {
   // tests/room-mcp-auth.test.js.
   "GET /mcp": [undefined, 200],
   "POST /mcp": [{}, 200],
+  "GET /room/mcp": [undefined, 200],
+  "POST /room/mcp": [{}, 200],
+  "POST /a2a": [{}, 200],
   "GET /api/version": [undefined, 200],
   "GET /api/ready": [undefined, 200],
   // Agent directory reads: public documents without a credential; an

@@ -413,8 +413,12 @@ test("follow-up preparation carries bounded completed exchanges for the same pai
   const follow = f.open("guest", { replyToId: "answer", body: "Add a keyboard shortcut" });
   const read = (who, request = follow) => f.store.replyRequests.selected(f.keys[who], "commons", request.command.data.messageId);
   const earlier = read("agent").preparation.previousExchanges;
+  const stripTrust = exchanges => exchanges.map(exchange => ({
+    ...exchange,
+    messages: exchange.messages.map(({ untrusted, ...message }) => message)
+  }));
   assert.deepEqual(earlier[0].messages.map(message => message.id), [id, "clarification", "answer"]);
-  assert.deepEqual(read("guest").preparation.previousExchanges, earlier);
+  assert.deepEqual(stripTrust(read("guest").preparation.previousExchanges), stripTrust(earlier));
   assert.throws(() => read("reviewer"), { code: "reply_request_not_found" });
   const changedPair = f.open("guest", { replyToId: "answer", toMemberId: "reviewer" });
   assert.deepEqual(read("reviewer", changedPair).preparation.previousExchanges, []);

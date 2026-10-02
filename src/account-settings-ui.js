@@ -244,6 +244,33 @@ function recoverySectionHtml(methods) {
     + `<div data-recovery-codes hidden></div>`;
 }
 
+// QA2 finding P2-11. Colors are the design tokens in src/design-tokens.js
+// (--red, --panel), already applied as CSS variables. No new stylesheet.
+const DESTRUCTIVE_BUTTON = "color:var(--red);background:var(--panel);border:1px solid var(--red)";
+
+export const ACCOUNT_DELETED_MESSAGE = "Your account was deleted.";
+
+export function accountDeletedLandingMessage(search = "") {
+  const params = new URLSearchParams(String(search).replace(/^\?/, ""));
+  return params.get("account-deleted") === "1" ? ACCOUNT_DELETED_MESSAGE : "";
+}
+
+function deletionSectionHtml() {
+  return `<h3>Delete account</h3>`
+    + `<p class="form-hint">Permanently delete this account. Personal rooms you solely own are archived and their messages and files are purged. A shared room needs another owner first.</p>`
+    + `<button type="button" class="button" data-action="delete-account" style="${DESTRUCTIVE_BUTTON}">Delete account</button>`
+    + `<dialog data-deletion-dialog aria-labelledby="delete-account-title" aria-describedby="delete-account-summary">`
+    + `<h3 id="delete-account-title">Delete account</h3>`
+    + `<div id="delete-account-summary" class="form-hint" data-deletion-summary style="white-space:pre-wrap">Loading what deletion will remove…</div>`
+    + `<div data-deletion-blocked hidden></div>`
+    + `<form data-form="delete-account" class="settings-form" hidden>`
+    + `<label>Type your account email to confirm <input type="email" name="confirmEmail" autocomplete="off" spellcheck="false" required></label>`
+    + `<button type="submit" class="button" disabled style="${DESTRUCTIVE_BUTTON}">Delete account</button>`
+    + `</form>`
+    + `<button type="button" class="button" data-action="delete-account-cancel">Cancel</button>`
+    + `</dialog>`;
+}
+
 function mailSectionHtml(providers) {
   return `<h3>Email sign-in</h3>`
     + (providers?.mail?.configured
@@ -286,15 +313,34 @@ export function settingsHtml({ methods = [], providers = null } = {}) {
       `<h3>Linked sign-in methods</h3>${methodsBody}`
       + passwordSectionHtml(methods)
       + passkeySectionHtml()
-      + recoverySectionHtml(methods))
+      + recoverySectionHtml(methods)
+      + deletionSectionHtml())
     + `</div>`;
 }
 
 // --- Wired behavior ---
-export function createAccountSettingsUI({ accountClient, credentials = null } = {}) {
+export function createAccountSettingsUI({ accountClient, credentials = null, onAccountDeleted = null } = {}) {
   if (!accountClient) throw new Error("accountClient is required");
   const webauthn = () => credentials ?? globalThis.navigator?.credentials ?? null;
-  let container = null, state = { methods: [], providers: null };
+  let container = null, state = { methods: [], providers: null }, deletionToken = null;
+
+  const accountEmails = () => [...new Set(state.methods
+    .map(method => typeof method.email === "string" ? method.email.trim().toLowerCase() : "")
+    .filter(Boolean))];
+
+  const deletionDialog = () => container?.querySelector("[data-deletion-dialog]") ?? null;
+
+  const syncDeleteConfirm = () => {
+    const form = container?.querySelector('form[data-form="delete-account"]');
+    const input = form?.elements?.confirmEmail;
+    const submit = form?.querySelector('button[type="submit"]');
+    if (!input || !submit) return;
+    const typed = input.value.trim().toLowerCase();
+    submit.disabled = !deletionToken || !accountEmails().includes(typed);
+  };
+
+  const focusables = dialog => [...dialog.querySelectorAll("button, input, a[href], select, textarea")]
+    .filter(element => !element.disabled && !element.closest("[hidden]") && element.getClientRects().length);
 
   const status = message => {
     const node = container?.querySelector("[data-settings-status]");
@@ -391,10 +437,76 @@ export function createAccountSettingsUI({ accountClient, credentials = null } = 
     } catch (error) { status(error?.message || "Could not change the password."); }
   };
 
+  const openDeletion = async () => {
+    const dialog = deletionDialog();
+    if (!dialog) return;
+    deletionToken = null;
+    const summary = dialog.querySelector("[data-deletion-summary]");
+    const blocked = dialog.querySelector("[data-deletion-blocked]");
+    const form = dialog.querySelector('form[data-form="delete-account"]');
+    summary.textContent = "Loading what deletion will remove…";
+    blocked.hidden = true;
+    blocked.replaceChildren();
+    form.hidden = true;
+    syncDeleteConfirm();
+    if (!dialog.open) dialog.showModal();
+    dialog.querySelector("[data-action='delete-account-cancel']")?.focus();
+    try {
+      const session = accountClient.currentSession("planning account deletion", { authenticated: true });
+      const planned = await accountClient.request("/api/account/deletion/plan", { session });
+      deletionToken = typeof planned.confirmationToken === "string" ? planned.confirmationToken : null;
+      summary.textContent = planned.summary?.text || "Review the deletion plan before continuing.";
+      const rooms = planned.plan?.rooms?.blocked ?? [];
+      const emails = accountEmails();
+      if (rooms.length) {
+        blocked.hidden = false;
+        const doc = globalThis.document;
+        blocked.replaceChildren(...rooms.map(room => {
+          const item = doc.createElement("p");
+          item.textContent = `Transfer ownership before deleting: ${room.title || room.id} (${room.id}).`;
+          return item;
+        }));
+        form.hidden = true;
+      } else if (!emails.length) {
+        blocked.hidden = false;
+        const item = globalThis.document.createElement("p");
+        item.textContent = "Add an email sign-in method before deleting this account. Deletion asks you to type that email.";
+        blocked.append(item);
+        form.hidden = true;
+      } else {
+        form.hidden = false;
+        form.reset();
+        syncDeleteConfirm();
+        form.elements.confirmEmail?.focus();
+      }
+    } catch (error) {
+      summary.textContent = error?.message || "Could not load the deletion plan.";
+    }
+  };
+
+  const submitDeletion = async form => {
+    const typed = String(new FormData(form).get("confirmEmail") ?? "").trim().toLowerCase();
+    if (!deletionToken || !accountEmails().includes(typed)) { syncDeleteConfirm(); return; }
+    const session = accountClient.currentSession("deleting this account", { authenticated: true });
+    status("Deleting account…");
+    try {
+      await accountClient.request("/api/account/delete", { method: "POST", session, data: { confirmationToken: deletionToken } });
+      deletionToken = null;
+      if (onAccountDeleted) await onAccountDeleted();
+      else globalThis.location?.assign("/?account-deleted=1");
+    } catch (error) {
+      const summary = deletionDialog()?.querySelector("[data-deletion-summary]");
+      if (summary) summary.textContent = error?.message || "Could not delete the account.";
+      status(error?.message || "Could not delete the account.");
+    }
+  };
+
   const onClick = event => {
     const button = event.target?.closest?.("[data-action]");
     if (!button || !container?.contains(button)) return;
     const { action, id } = button.dataset;
+    if (action === "delete-account") return openDeletion();
+    if (action === "delete-account-cancel") { deletionDialog()?.close(); return; }
     if (action === "disable") return mutate("/api/auth/methods/disable", id);
     if (action === "enable") return mutate("/api/auth/methods/enable", id);
     if (action === "remove") return mutate("/api/auth/methods/remove", id, "Remove this sign-in method? You\u2019ll sign in with your remaining methods.");
@@ -408,7 +520,24 @@ export function createAccountSettingsUI({ accountClient, credentials = null } = 
     const form = event.target?.closest?.("form[data-form]");
     if (!form || !container?.contains(form)) return;
     event.preventDefault();
+    if (form.dataset.form === "delete-account") return submitDeletion(form);
     submitPasswordForm(form);
+  };
+
+  const onInput = event => {
+    if (event.target?.name === "confirmEmail" && container?.contains(event.target)) syncDeleteConfirm();
+  };
+
+  const onKeyDown = event => {
+    const dialog = deletionDialog();
+    if (!dialog?.open || event.key !== "Tab") return;
+    const controls = focusables(dialog);
+    const first = controls[0], last = controls.at(-1);
+    if (!first) return;
+    if (event.shiftKey && document.activeElement === first || !event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      (event.shiftKey ? last : first).focus();
+    }
   };
 
   const onChange = event => {
@@ -422,11 +551,15 @@ export function createAccountSettingsUI({ accountClient, credentials = null } = 
       container.removeEventListener("click", onClick);
       container.removeEventListener("submit", onSubmit);
       container.removeEventListener("change", onChange);
+      container.removeEventListener("input", onInput);
+      container.removeEventListener("keydown", onKeyDown);
     }
     container = next;
     container.addEventListener("click", onClick);
     container.addEventListener("submit", onSubmit);
     container.addEventListener("change", onChange);
+    container.addEventListener("input", onInput);
+    container.addEventListener("keydown", onKeyDown);
     return refresh();
   };
 

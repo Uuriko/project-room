@@ -69,6 +69,8 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('src/human-push.js'); paths.add('src/human-push-display.js'); paths.add('push-sw.js'); // Human push button, lock-screen text, service worker
   paths.add('join.html'); // Self-serve join page
   paths.add('src/join.js'); // Join page logic
+  paths.add('favicon.svg'); paths.add('icon.svg'); paths.add('manifest.webmanifest');
+  paths.add('src/public-a11y.css');
   paths.add('src/referral-board.js'); // Referral board (imported by src/app.js)
   paths.add('src/work-item-session.js');
   paths.add('src/work-recipes.js');
@@ -118,6 +120,7 @@ export function candidateRuntimeFixture(repository, directory) {
   for (const path of ['server/sla-clocks.mjs', 'server/sla-urgent-notify.mjs', 'server/sla-sweep.mjs', 'server/sla-sweep-hooks.mjs', 'server/sla-breach-journal.mjs', 'server/morning-digest.mjs', 'server/digest-mode.mjs', 'server/inbox-triage.mjs']) paths.add(path); // Tasks 21/24/26 (imported by server/inbox.mjs)
   paths.add('server/inbox-handoff.mjs'); // Task 23 (imported by server/inbox.mjs and server/store.mjs)
   for (const path of ['server/inbox-assign.mjs', 'server/inbox-internal-notes.mjs', 'server/inbox-collision.mjs', 'server/inbox-approval.mjs', 'server/inbox-agent-routing.mjs', 'server/inbox-collab-store.mjs', 'server/inbox-collab-routes.mjs']) paths.add(path); // Lane C inbox collaboration (task RC-2026-09-18-011)
+  paths.add('server/content-trust.mjs'); // structured untrusted markers (imported by server/http.mjs surfaces and MCP)
   paths.add('server/room-activation-pack.mjs'); // Room activation pack (quill lane, RC-2026-09-18-040; imported by server/http.mjs)
   paths.add('server/room-context.mjs'); // Compact agent room context (imported by server/store.mjs)
   for (const path of ['server/work-claims.mjs', 'server/work-claim-routes.mjs', 'server/work-duplicates.mjs']) paths.add(path); // RC-2026-09-18-041: work-claim state machine + HTTP routes (imported by server/http.mjs); work-duplicates: pure duplicate detection (imported by server/work-claim-routes.mjs)

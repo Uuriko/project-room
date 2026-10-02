@@ -24,7 +24,7 @@ import { replyDraftKey, replyDraftData, validReplyDraft, replyFollowUp, creditQu
 import { workHelpContext, validateHelpData } from "./work-help.js";
 import { workOffersContext, validateHelpOfferData } from "./help-offers.js";
 import { installInbox } from "./inbox-ui.js";
-import { createAccountSettingsUI, applyStoredTheme, organizeRoomSettings } from "./account-settings-ui.js";
+import { createAccountSettingsUI, applyStoredTheme, organizeRoomSettings, ACCOUNT_DELETED_MESSAGE } from "./account-settings-ui.js";
 import { createAuthSigninUI, classifyAuthLink } from "./auth-signin-ui.js";
 import { createAgentSigninUI } from "./agent-signin-ui.js";
 import { stashPendingInvite, clearPendingInvite, takeRestoredInvite, stashPendingJoin, clearPendingJoin, takeRestoredJoin, inviteRequestDoor, defaultRequestPermissions, validateAccessRequestForm, newAccessRequestId, stashAccessRequest, readAccessRequest } from "./invite-context.js";
@@ -78,6 +78,16 @@ function accountHomeFromLocation() {
 function googleErrorFromLocation() {
   const values = new URLSearchParams(location.search).getAll("google");
   return values.length === 1 && ["error", "unavailable"].includes(values[0]) ? values[0] : null;
+}
+function accountDeletedFromLocation() {
+  const values = new URLSearchParams(location.search).getAll("account-deleted");
+  return values.length === 1 && values[0] === "1";
+}
+const initialAccountDeleted = accountDeletedFromLocation();
+if (initialAccountDeleted) {
+  const url = new URL(location.href);
+  url.searchParams.delete("account-deleted");
+  history.replaceState(history.state, "", `${url.pathname}${url.search}${url.hash}`);
 }
 const initialGoogleFailed = googleErrorFromLocation();
 const googleSigninFailureMessage = initialGoogleFailed === "unavailable"
@@ -228,8 +238,10 @@ const client = new RoomClient({
     roomGeneration = client.generation;
     const roomId = state.room?.id ?? identity.roomId;
     if (roomId !== activeChannelRoomId) { activeChannelRoomId = roomId; restoreActiveChannel(); }
-    $("#room-title").textContent = state.room?.title ?? roomId;
-    $("#mobile-room-name").textContent = state.room?.title ?? roomId;
+    const roomTitle = state.room?.title ?? roomId;
+    $("#room-title").textContent = roomTitle;
+    $("#mobile-room-name").textContent = roomTitle;
+    $("#room-overview-open").setAttribute("aria-label", `${roomTitle}, Room overview`);
     $(".room-purpose").textContent = state.room?.purpose ?? "";
     $("#main").hidden = false; $("#auth-panel").hidden = true; $("#auth-panel").setAttribute("aria-busy", "false");
     $("#account-rooms-panel").hidden = true;
@@ -530,7 +542,13 @@ function ensureAccountSession() {
 }
 // Sign-in & security settings (slice 7): mounted inside the account rooms
 // panel's <details>, opened from the session menu.
-const accountSettingsUI = createAccountSettingsUI({ accountClient });
+const accountSettingsUI = createAccountSettingsUI({
+  accountClient,
+  onAccountDeleted: async () => {
+    try { await client.logout(); } catch { /* deletion already ended the account session */ }
+    location.assign("/?account-deleted=1");
+  }
+});
 // Multi-method sign-in / create-account (slice 7): mounts into the auth
 // panel next to the Google button. After a
 // browser sign-in the cookie changed, so restore the in-memory session and
@@ -3652,7 +3670,7 @@ function hideMentions() {
   list.hidden = true; list.replaceChildren(); mentionIndex = 0;
   if ($("#emoji-list")?.hidden !== false) {
     // Closed listbox: the textarea stops pointing at an option that no longer exists.
-    input?.setAttribute("aria-expanded", "false"); input?.removeAttribute("aria-activedescendant");
+    input?.removeAttribute("aria-expanded"); input?.removeAttribute("aria-activedescendant");
     input?.setAttribute("aria-controls", "mention-list");
   }
 }
@@ -3661,7 +3679,7 @@ function hideEmoji() {
   if (!list || list.hidden) return;
   list.hidden = true; list.replaceChildren(); emojiIndex = 0;
   if ($("#mention-list")?.hidden !== false) {
-    input?.setAttribute("aria-expanded", "false"); input?.removeAttribute("aria-activedescendant");
+    input?.removeAttribute("aria-expanded"); input?.removeAttribute("aria-activedescendant");
     input?.setAttribute("aria-controls", "mention-list");
   }
 }
@@ -3682,7 +3700,7 @@ function renderEmoji() {
   list.hidden = false;
   list.innerHTML = choice.matches.map((item, i) => `<li role="option" id="emoji-option-${i}" class="mention-option${i === emojiIndex ? " active" : ""}" data-emoji="${esc(item.emoji)}" aria-selected="${i === emojiIndex}"><span class="emoji-glyph" aria-hidden="true">${item.emoji}</span> ${esc(item.name)}</li>`).join("");
   const input = $("#message-input");
-  input.setAttribute("aria-expanded", "true");
+  input.removeAttribute("aria-expanded");
   input.setAttribute("aria-controls", "emoji-list");
   input.setAttribute("aria-activedescendant", `emoji-option-${emojiIndex}`);
 }
@@ -3711,7 +3729,7 @@ function renderMentions() {
   // nested button). Focus stays in the textarea; aria-activedescendant names the row.
   list.innerHTML = matches.map((m, i) => `<li role="option" id="mention-option-${i}" class="mention-option${i === mentionIndex ? " active" : ""}" data-mention-id="${esc(m.id)}" aria-selected="${i === mentionIndex}">${esc(m.displayName)} <span>${esc(kindLabel(m.kind))}</span></li>`).join("");
   const input = $("#message-input");
-  input.setAttribute("aria-expanded", "true");
+  input.removeAttribute("aria-expanded");
   input.setAttribute("aria-activedescendant", `mention-option-${mentionIndex}`);
 }
 function applyMentionMember(member) {
@@ -6557,13 +6575,16 @@ if (initialInvitationFragment && !initialPasswordReset) openInvitation(initialIn
   const signedOut = [401, 403].includes(error.status);
   if (signedOut) recovery.clear();
   const requestedRoom = selectedRoomFromLocation();
-  setFormStatus($("#auth-error"), initialGoogleFailed
+  const deletedNotice = initialAccountDeleted && signedOut && !requestedRoom ? ACCOUNT_DELETED_MESSAGE : "";
+  setFormStatus($("#auth-error"), deletedNotice
+    ? deletedNotice
+    : initialGoogleFailed
     ? googleSigninFailureMessage
     : initialGitHubFailed
     ? "GitHub sign-in didn't finish — it may have been cancelled, or GitHub declined the request. Try again, or sign in another way."
     : signedOut
     ? requestedRoom ? `This account cannot open #${requestedRoom}. Use an account with active membership there.` : ""
-    : unreachableRoomMessage(error), true);
+    : unreachableRoomMessage(error), !deletedNotice);
   setConnectionStatus(signedOut ? "Not connected · sign in required" : "Room service unavailable · not connected");
   $("#identity-label").textContent = signedOut ? "Not signed in" : "Session unavailable";
   $("#auth-panel").hidden = false;

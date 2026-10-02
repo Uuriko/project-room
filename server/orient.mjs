@@ -15,6 +15,7 @@
 import { roomOrientation } from "../src/work-selectors.js";
 import { nextWorkStep } from "../src/workflow.js";
 import { roomKind, WORK_STATES } from "../src/events.js";
+import { annotateOrientation, claimNote, withContentTrust } from "./content-trust.mjs";
 
 // Work states that count as open; completed and superseded work is history,
 // not something an arriving agent should pick up.
@@ -45,7 +46,9 @@ const workOf = (item, now) => {
       label: next.label,
       memberId: next.memberId ?? null,
       needsAttention: next.needsAttention
-    }
+    },
+    untrusted: true,
+    ...claimNote(item)
   };
 };
 
@@ -65,7 +68,7 @@ export function buildOrient(store, roomSlug, viewerId) {
   const openWork = Object.values(state.workItems ?? {})
     .filter(item => item && OPEN_WORK_STATES.has(item.state))
     .sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0));
-  return {
+  return withContentTrust({
     contract: { name: "project-room/orient", version: 1 },
     room: {
       slug: state.room.id,
@@ -76,10 +79,10 @@ export function buildOrient(store, roomSlug, viewerId) {
     member: memberOf(member),
     evaluatedThrough: sequence,
     eventCursor: cursorOf(sequence),
-    orientation: roomOrientation(state),
+    orientation: annotateOrientation(roomOrientation(state)),
     work: openWork.slice(0, MAX_WORK).map(item => workOf(item, now)),
     workTotal: openWork.length,
     links: { activationPack: `/api/rooms/${state.room.id}/activation-pack` },
     generatedAt: new Date(now).toISOString()
-  };
+  });
 }

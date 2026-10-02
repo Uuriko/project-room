@@ -1,0 +1,11 @@
+{
+  "name": "Project Room",
+  "short_name": "Room",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#202127",
+  "theme_color": "#5555bd",
+  "icons": [
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

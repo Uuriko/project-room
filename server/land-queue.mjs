@@ -575,7 +575,7 @@ export class LandQueue {
     return { item, changed };
   }
 
-  async refreshDue({ now = this.store.now() } = {}) {
+  async refreshDue({ now = this.store.now(), deadline = Infinity } = {}) {
     const limited = this.db.prepare("SELECT MAX(rate_limited_until) AS until FROM land_queue").get();
     if (limited?.until != null && limited.until > now) {
       return { checked: 0, updated: 0, unconfigured: 0, rateLimited: 1 };
@@ -588,6 +588,10 @@ export class LandQueue {
       LIMIT ?`).all(now, limit);
     const summary = { checked: 0, updated: 0, unconfigured: 0, rateLimited: 0 };
     for (const row of due) {
+      if (Number.isFinite(deadline) && Date.now() > deadline) {
+        summary.budgetExceeded = 1;
+        break;
+      }
       summary.checked += 1;
       try {
         const result = await this.#refreshRow(viewFromRow(row), { duplicate: false, cron: true });

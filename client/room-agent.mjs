@@ -16,6 +16,7 @@ import { workOffersContext, MAX_HELP_OFFERS, MAX_PENDING_HELP_OFFERS } from "../
 import { AGENT_ERRORS, resolveAgentErrorAx } from "../src/agent-error.mjs";
 import { edgeDoorApiPath } from "../deploy/agent-discovery.mjs";
 import { assembleOutsideAgents, planOutsideAgentRecord } from "../src/outside-agents.mjs";
+import { CONTENT_TRUST, markIfOther, stampBoard, stampWorkListing, withContentTrust } from "../server/content-trust.mjs";
 
 export { AGENT_ERRORS };
 export class RoomClientError extends Error {
@@ -461,7 +462,11 @@ export class RoomAgentClient {
         && [event.actorId, event.data.toMemberId].includes(this.#memberId) ? { requestKind: "reply", nextRead: { tool: "room_read_request", arguments: { requestMessageId: event.data.messageId ?? event.id } } } : {}),
       ...(Array.isArray(event.mentions) && event.mentions.length ? { mentions: event.mentions.map(m => ({ memberId: m.memberId, displayName: m.displayName })) } : {})
     }));
-    return { roomId: this.#roomId, messages, next: page?.next ?? after, hasMore: Boolean(page?.hasMore) };
+    return withContentTrust({
+      roomId: this.#roomId,
+      messages: messages.map(message => markIfOther(message, this.#memberId, message.from)),
+      next: page?.next ?? after, hasMore: Boolean(page?.hasMore)
+    });
   }
   async replyRead(name, args = {}, { signal } = {}) {
     const route = replyRoute(name);
@@ -593,7 +598,7 @@ export class RoomAgentClient {
         || !integer(value.horizon) || !integer(value.since) || !integer(value.after) || value.since > value.after || value.after >= value.horizon) invalid();
       return value;
     };
-    if (result?.contractVersion !== 1 || result.roomId !== this.#roomId || result.workItemId !== workItemId || !validId(result.viewerId)
+    if (result?.contentTrust !== CONTENT_TRUST || result?.contractVersion !== 1 || result.roomId !== this.#roomId || result.workItemId !== workItemId || !validId(result.viewerId)
       || result.selection?.rule !== "source-linked-descendants-v1" || result.scope?.membership !== "room" || result.scope.targetedMessages !== "room-visible" || result.scope.externalExecution !== false
       || !page || !integer(page.horizon) || !integer(page.since) || !integer(page.after) || page.since > page.after || page.after > page.horizon
       || page.cursor !== cursor || (cursor === null && (page.since !== (since ?? 0) || page.after !== (since ?? 0)))
@@ -617,7 +622,12 @@ export class RoomAgentClient {
         || (row.relation === "reply" && (!message.replyToId || message.workItemId !== null))
         || (proposal && (!validId(proposal.packetId) || !integer(proposal.basisRevision) || !integer(proposal.submittedAtRevision)
           || proposal.basisRevision > proposal.submittedAtRevision || proposal.attribution !== "manual-unverified"))) invalid();
-      after = row.sequence; ids.add(message.id); events.add(row.eventId); bytes += Buffer.byteLength(JSON.stringify(row));
+      if (message.authorId !== result.viewerId) {
+        if (message.untrusted !== true) invalid();
+      } else if (Object.hasOwn(message, "untrusted")) invalid();
+      const { untrusted, ...bare } = message;
+      const canonical = Object.hasOwn(message, "untrusted") ? { ...row, message: bare } : row;
+      after = row.sequence; ids.add(message.id); events.add(row.eventId); bytes += Buffer.byteLength(JSON.stringify(canonical));
     }
     if (bytes > 65536 || page.rowBytes !== bytes || (page.hasMore && after >= page.horizon)) invalid();
     if (page.hasMore) {
@@ -1029,8 +1039,8 @@ export class RoomAgentClient {
   }
   async board({ signal } = {}) {
     const snapshot = await this.snapshot({ signal });
-    return { ...projectBoard(snapshot.state, Date.now()), roomId: snapshot.roomId,
-      evaluatedThrough: snapshot.sequence, evaluatedAt: new Date().toISOString() };
+    return stampBoard({ ...projectBoard(snapshot.state, Date.now()), roomId: snapshot.roomId,
+      evaluatedThrough: snapshot.sequence, evaluatedAt: new Date().toISOString() });
   }
   async orient({ signal, focus = "all", query } = {}) {
     if (!["all", "needs_me", "help_wanted", "results"].includes(focus)) throw new RoomClientError(0, "invalid_focus", "Choose all work, work needing you, help invitations, or results");
@@ -1068,7 +1078,7 @@ export class RoomAgentClient {
           availableRoomActions: workActions(item, member, now).map(([action, label]) => ({ action, label })),
           nextRead: { tool: "room_read_work", arguments: { workItemId: item.id, ...(focus === "help_wanted" ? { includeOffers: true } : {}) } } };
       });
-      return { contractVersion: 1, roomId: snapshot.roomId, evaluatedThrough: snapshot.sequence,
+      return stampWorkListing({ contractVersion: 1, roomId: snapshot.roomId, evaluatedThrough: snapshot.sequence,
         evaluatedAt: new Date(now).toISOString(), clockSource: focus === "help_wanted" ? "service" : "client", focus, charter, member,
         errors: AGENT_ERRORS,
         scope: { kind: "room", permissions: member.permissions, externalExecution: false },
@@ -1083,9 +1093,9 @@ export class RoomAgentClient {
           guidance: "Explicit current invitations, not assignments, queue eligibility or permission to execute. All matching invitations in this bounded Room are included. Follow nextRead to inspect current offer capacity and selection; review scope and discussion before contributing. Unsupported offer reads fail explicitly. No automatic offer or dispatch." }
           : { totalWork: items.length, needsMe: work.length, openReplyRequests: openReplies.length,
           guidance: "Current next steps addressed to you, including those missing a Room permission, plus open reply requests addressed to you in replyRequests. Not all your ongoing work. Follow nextRead and finish every conversation page before answering with current.answerBasis. room_request_reply opens a new question, not an answer. Reply requests are a separate read at replyRequestsEvaluatedThrough. Empty work and empty reply requests do not mean the room is done." },
-        work, ...(focus === "needs_me" ? { replyRequests: openReplies, replyRequestsEvaluatedThrough: replyListing.evaluatedThrough } : {}) };
+        work, ...(focus === "needs_me" ? { replyRequests: openReplies, replyRequestsEvaluatedThrough: replyListing.evaluatedThrough } : {}) });
     }
-    return {
+    return stampWorkListing({
       contractVersion: 1, roomId: snapshot.roomId, evaluatedThrough: snapshot.sequence,
       charter,
       errors: AGENT_ERRORS,
@@ -1096,7 +1106,7 @@ export class RoomAgentClient {
         receipt: item.receipt, verification: item.verification, decision: item.decision, blocker: item.blocker,
         ...(item.handoff ? { handoff: item.handoff, handoffHistory: item.handoffHistory ?? [] } : {})
       }))
-    };
+    });
   }
 }
 

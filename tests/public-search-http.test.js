@@ -17,7 +17,7 @@ async function serve(t, options = {}) {
   return `http://127.0.0.1:${server.address().port}`;
 }
 
-test("public landing is indexable while app, credentials and unknown pages keep private defaults", async t => {
+test("public doors are indexable while credentials and unknown pages keep private defaults", async t => {
   const origin = await serve(t);
   const about = await fetch(origin + "/about");
   assert.equal(about.status, 200); assert.match(about.headers.get("content-type"), /text\/html/);
@@ -29,8 +29,16 @@ test("public landing is indexable while app, credentials and unknown pages keep 
   assert.equal(head.status, 200); assert.equal(head.headers.get("x-robots-tag"), "all"); assert.equal(await head.text(), "");
   const alias = await fetch(origin + "/about.html", { redirect: "manual" });
   assert.equal(alias.status, 301); assert.equal(alias.headers.get("location"), "/about");
-  for (const path of ["/", "/index.html", "/join.html", "/api/version", "/api/account-session", "/about?token=synthetic", "/compare/not-reviewed"]) {
-    const response = await fetch(origin + path);
+  const home = await fetch(origin + "/");
+  assert.equal(home.status, 200); assert.equal(home.headers.get("x-robots-tag"), "all");
+  assert.match(home.headers.get("content-security-policy"), /script-src 'self'/);
+  const offers = await fetch(origin + "/offers");
+  assert.equal(offers.status, 200); assert.equal(offers.headers.get("x-robots-tag"), "all");
+  assert.match(offers.headers.get("content-security-policy"), /script-src 'self'/);
+  const indexAlias = await fetch(origin + "/index.html", { redirect: "manual" });
+  assert.equal(indexAlias.status, 301); assert.equal(indexAlias.headers.get("location"), "/");
+  for (const path of ["/join.html", "/api/version", "/api/account-session", "/about?token=synthetic", "/compare/not-reviewed"]) {
+    const response = await fetch(origin + path, { redirect: "manual" });
     assert.match(response.headers.get("x-robots-tag"), /noindex/, path);
   }
   for (const file of publicAssetPaths.filter(path => path.startsWith("compare/") && path.endsWith(".html"))) {
@@ -41,7 +49,10 @@ test("public landing is indexable while app, credentials and unknown pages keep 
   }
   const map = await fetch(origin + "/sitemap.xml");
   assert.equal(map.status, 200); assert.equal(map.headers.get("x-robots-tag"), "all");
-  const xml = await map.text(); assert.match(xml, /https:\/\/room.trydemigod.com\/about/); assert.match(xml, /\/receipts/);
+  const xml = await map.text();
+  assert.match(xml, /<loc>https:\/\/room\.trydemigod\.com\/<\/loc>/);
+  assert.match(xml, /<loc>https:\/\/room\.trydemigod\.com\/offers<\/loc>/);
+  assert.match(xml, /https:\/\/room.trydemigod.com\/about/); assert.match(xml, /\/receipts/);
   assert.doesNotMatch(xml, /compare|join|api|token/);
   assert.match(await (await fetch(origin + "/robots.txt")).text(), /Sitemap: https:\/\/room.trydemigod.com\/sitemap.xml/);
 });
@@ -53,9 +64,11 @@ test("failed public asset cannot become indexable or enter sitemap", async t => 
   assert.doesNotMatch(await (await fetch(origin + "/sitemap.xml")).text(), /\/about/);
 });
 
-test("registering comparison assets does not implicitly approve their claims for indexing", () => {
-  const routes = publicSearchAssets(["about.html", "compare/project-room-vs-slack.html"]);
-  assert.equal(routes.get("/compare/project-room-vs-slack"), "compare/project-room-vs-slack.html");
-  assert.deepEqual(reviewedPublicSearchPaths, ["/about"]);
+test("missing compare files are not routes and are not approved for indexing", () => {
+  const routes = publicSearchAssets(["about.html", "index.html", "offers.html", "compare/project-room-vs-slack.html"]);
+  assert.equal(routes.has("/compare/project-room-vs-slack"), false);
+  assert.equal(routes.get("/"), "index.html");
+  assert.equal(routes.get("/offers"), "offers.html");
+  assert.deepEqual(reviewedPublicSearchPaths, ["/", "/offers", "/about"]);
   assert.equal(reviewedPublicSearchPaths.includes("/compare/project-room-vs-slack"), false);
 });

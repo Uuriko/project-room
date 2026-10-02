@@ -7,6 +7,9 @@
     <title>Project Room</title>
     <link rel="help" type="text/plain" href="/llms.txt" title="Agent joining instructions">
     <link rel="stylesheet" href="./src/styles.css">
+    <link rel="stylesheet" href="./src/public-a11y.css">
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <link rel="manifest" href="/manifest.webmanifest">
   </head>
   <body>
     <a id="skip-link" class="skip-link" href="#connection-status">Skip to content</a>
@@ -90,7 +93,7 @@
       </nav>
       <p id="account-status" class="form-hint" role="status" hidden></p>
       <section id="account-rooms-panel" class="auth-panel panel" aria-labelledby="account-rooms-title" hidden>
-        <h1 id="account-rooms-title">Rooms</h1>
+        <h2 id="account-rooms-title" class="view-title" role="heading" aria-level="1">Rooms</h2>
         <p id="account-rooms-status" role="status"></p>
         <div id="account-rooms-list"></div>
         <button id="account-rooms-more" class="text-button" type="button" hidden>More</button>
@@ -144,7 +147,7 @@
       </section>
       <section id="inbox-panel" class="inbox-panel" aria-label="Your inbox" hidden>
         <aside class="inbox-sidebar">
-          <header><h1 id="inbox-heading" tabindex="-1">Inbox</h1><button id="inbox-refresh" class="button ghost icon-button" type="button" aria-label="Refresh inbox">↻</button></header>
+          <header><h2 id="inbox-heading" class="view-title" role="heading" aria-level="1" tabindex="-1">Inbox</h2><button id="inbox-refresh" class="button ghost icon-button" type="button" aria-label="Refresh inbox">↻</button></header>
           <section class="inbox-gmail" aria-label="Gmail">
             <p id="inbox-gmail-notice" class="form-hint" role="status"></p>
             <p id="inbox-gmail-status" class="form-hint" role="status">Bring your email into your private inbox.</p>
@@ -267,9 +270,9 @@
       <main id="main" class="community-shell" hidden>
         <aside id="room-sidebar" aria-label="Channels and people">
           <div id="sidebar-workspace"></div>
-          <h1 class="sidebar-head">
-            <button id="room-overview-open" class="room-overview-open" type="button" aria-label="Room overview" aria-haspopup="dialog" aria-controls="room-overview-dialog"><span id="room-title" tabindex="-1">Project Room</span><span aria-hidden="true">⌄</span></button>
-          </h1>
+          <div class="sidebar-head" role="heading" aria-level="1">
+            <button id="room-overview-open" class="room-overview-open" type="button" aria-haspopup="dialog" aria-controls="room-overview-dialog"><span id="room-title" tabindex="-1">Project Room</span><span class="sr-only">, Room overview</span><span aria-hidden="true">⌄</span></button>
+          </div>
           <p id="room-archived-note" class="room-archived-note" role="status" hidden></p>
           <nav aria-label="Channels">
             <p class="sidebar-label channels-label"><span>Channels</span><button id="create-channel-button" class="icon-button channel-add" type="button" aria-label="New channel" title="New channel">+</button></p>
@@ -376,7 +379,7 @@
                   <button id="composer-attach" class="icon-button composer-attach" type="button" aria-label="Attach a file" title="Attach a file"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg><span>Attach a file</span></button>
                 </div>
               </details>
-              <textarea id="message-input" rows="2" aria-describedby="message-length-status" placeholder="Message #general" title="Enter to send · Shift + Enter for a new line" aria-description="Enter to send · Shift + Enter for a new line" aria-controls="mention-list" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false" required></textarea>
+              <textarea id="message-input" rows="2" aria-describedby="message-length-status" placeholder="Message #general" title="Enter to send · Shift + Enter for a new line" aria-description="Enter to send · Shift + Enter for a new line" aria-controls="mention-list" aria-autocomplete="list" aria-haspopup="listbox" required></textarea>
               <input id="composer-file" type="file" hidden multiple tabindex="-1">
               <button class="button primary icon-button" type="submit" aria-label="Send" title="Send"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></button>
             </div>
