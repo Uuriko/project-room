@@ -15,7 +15,8 @@ const EMPTY_UNTIL_CRON = new Set([
   "membership_delegation_pending",
   "room_access_auto_approve",
   "integrity_snapshot",
-  "integrity_job_cursor"
+  "integrity_job_cursor",
+  "integrity_room_state"
 ]);
 
 const EVENTS = 200_000;
