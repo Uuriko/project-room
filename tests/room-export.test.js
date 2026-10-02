@@ -278,7 +278,7 @@ test("client exportRoom/importRoom use the hardened fetch posture and keep the s
   await assert.rejects(redirected.importRoom("{}\n"));
 });
 
-test("F8 semantics: export retains deleted-message history; projection and search hide it", async t => {
+test("F8 semantics: export returns the deletion tombstone; projection and search hide the text", async t => {
   const { request, ownerKey, store } = await serve(t);
   const cmd = (type, data) => store.command(ownerKey, "commons", { id: randomUUID(), type, data });
   cmd(T.MESSAGE_POSTED, { messageId: "m1", body: "original secret wording" });
@@ -292,12 +292,14 @@ test("F8 semantics: export retains deleted-message history; projection and searc
   // Search never returns tombstoned messages, on either the old or new wording.
   assert.equal(store.search(ownerKey, "commons", "secret", "messages").messages.length, 0);
   assert.equal(store.search(ownerKey, "commons", "revised", "messages").messages.length, 0);
-  // Export is the complete history: original post, edit and tombstone event are all present.
+  // Export keeps the events and replaces both bodies with the tombstone.
   const ndjson = await (await request("/api/rooms/commons/export", { token: ownerKey })).text();
   const events = ndjson.trim().split("\n").map(l => JSON.parse(l).event);
-  assert.equal(events.find(e => e.type === T.MESSAGE_POSTED && e.data.messageId === "m1").data.body, "original secret wording");
-  assert.equal(events.find(e => e.type === T.MESSAGE_EDITED && e.data.messageId === "m1").data.body, "revised wording");
+  assert.equal(events.find(e => e.type === T.MESSAGE_POSTED && e.data.messageId === "m1").data.body, null);
+  assert.equal(events.find(e => e.type === T.MESSAGE_EDITED && e.data.messageId === "m1").data.body, null);
   assert.equal(events.find(e => e.type === T.MESSAGE_DELETED && e.data.messageId === "m1").data.reason, "Posted in error");
+  assert.equal(ndjson.includes("original secret wording"), false);
+  assert.equal(ndjson.includes("revised wording"), false);
 });
 
 // BUILD-01 F2: the human-readable export.
@@ -388,14 +390,14 @@ test("HTML export respects current membership: a removed member gets nothing, th
   assert.match(html, /Test agent <span class="flag">agent<\/span> <span class="flag">access ended<\/span>/);
 });
 
-test("HTML export keeps the JSONL export byte-for-byte and shares its integrity rule", async t => {
+test("JSONL format variants match and omit deleted message text", async t => {
   const { request, ownerKey, store } = await serve(t);
   await seedReadableRoom(store, ownerKey);
-  const expected = [...store.exportEvents(ownerKey, "commons")].map(line => JSON.stringify(line) + "\n").join("");
   const plain = await (await request("/api/rooms/commons/export", { token: ownerKey })).text();
   const explicit = await (await request("/api/rooms/commons/export?format=jsonl", { token: ownerKey })).text();
-  assert.equal(plain, expected);
-  assert.equal(explicit, expected);
+  assert.equal(plain, explicit);
+  assert.equal(plain.includes("original secret wording"), false);
+  assert.equal(plain.includes("revised secret wording"), false);
   // A failure part-way through the walk is a JSON error, never a clean-looking partial page.
   const real = store.exportEvents.bind(store);
   store.exportEvents = function* (...args) {
