@@ -859,6 +859,10 @@ test("Updates retain a neutral retry when a lost Done or Clear removes the sourc
 // Fixture items, cursors, source revisions and marks all come from real HTTP
 // and SQLite. Delivery routes below only hold, lose, or corrupt a real reply;
 // they never implement paging, authorization, source projection or receipts.
+// Keyboard append owns focus recovery after disabling its control, including
+// a lost transport reply, but must yield to later focus/filter/navigation.
+// Existing HTTP coverage cannot exercise native focus and disabled controls;
+// these cases extend the real browser journey without a production test seam.
 async function pagingJourney(t) {
   let time = Date.now();
   const f = revisionJourney(await setup(t, { now: () => ++time }));
@@ -1202,8 +1206,10 @@ test("Updates restart a real stale cursor once, retain the window on transport r
     await f.more.click();
     await page.waitForFunction(() => {
       const button = document.querySelector("#updates-load-more");
-      return button && (button.hidden || button.disabled || /Refresh/i.test(button.textContent))
-        && !/Loading/i.test(document.querySelector("#updates-status")?.textContent ?? "");
+      // The terminal notice starts with "Loading stopped". It must not be
+      // mistaken for the pending "Loading updates…" state.
+      return button && !button.hidden && !button.disabled && /Refresh/i.test(button.textContent)
+        && /page did not advance/i.test(document.querySelector("#updates-status")?.textContent ?? "");
     });
     await f.settled();
     const ids = await f.ids();
@@ -1213,6 +1219,13 @@ test("Updates restart a real stale cursor once, retain the window on transport r
     assert.match(await page.locator("#updates-dialog").innerText(), /refresh|changed|could not|couldn.t|stopped/i,
       "a broken continuation has an explicit recovery cue");
     await page.unroute(routePattern, broken);
+    const beforeRestart = requests.length;
+    await f.more.click();
+    await f.waitRows(pages[0].items);
+    assert.deepEqual(requests.slice(beforeRestart), [{ state: "all", cursor: null }],
+      `${fault} recovery explicitly restarts one first page instead of retrying the broken continuation`);
+    assert.equal(await f.more.textContent(), "Load more");
+    assert.equal(await f.more.isDisabled(), false);
     await page.locator("#updates-close").click();
   }
   assert.deepEqual(f.errors, []);
@@ -1282,6 +1295,36 @@ test("Updates fence repeated Load more and held real pages across filter, Close,
   const sharedBefore = JSON.stringify(store.room("commons"));
   const commandsBefore = f.countCommands();
   await f.openUpdates();
+  const pagePattern = /\/api\/rooms\/commons\/updates\?/;
+  const losePage = async route => {
+    const url = new URL(route.request().url());
+    if (!url.searchParams.has("cursor") || url.searchParams.get("state") !== "all") return route.continue();
+    const response = await route.fetch();
+    assert.equal(response.status(), 200);
+    await route.abort("failed");
+  };
+  await page.route(pagePattern, losePage);
+  const summaryChanges = await page.locator("#updates-summary-status").evaluateHandle(node => {
+    const observed = { count: 0 };
+    const observer = new MutationObserver(changes => { observed.count += changes.length; });
+    observer.observe(node, { childList: true, subtree: true, characterData: true });
+    return { observed, disconnect: () => observer.disconnect() };
+  });
+  await f.more.focus();
+  await page.keyboard.press("Enter");
+  await page.waitForFunction(() => {
+    const message = document.querySelector("#updates-status")?.textContent;
+    return message && message !== "Loading updates…" && document.querySelector("#updates-load-more")?.disabled === false;
+  });
+  await f.waitRows(pages[0].items, { status: null });
+  await page.waitForFunction(() => document.activeElement?.id === "updates-load-more");
+  assert.equal(await summaryChanges.evaluate(({ observed, disconnect }) => { disconnect(); return observed.count; }), 0,
+    "a failed page does not reinsert unchanged summary text into its live region");
+  await summaryChanges.dispose();
+  await page.unroute(pagePattern, losePage);
+  await f.loadMore(pages.slice(0, 2).flatMap(value => value.items), { keyboard: true });
+  await page.locator("#updates-close").click();
+  await f.openUpdates();
   const focusMoved = await holdUpdatesPage(page);
   await f.more.focus();
   await page.keyboard.press("Enter");
@@ -1298,7 +1341,8 @@ test("Updates fence repeated Load more and held real pages across filter, Close,
     await f.waitRows(pages[0].items);
     const before = requests.length;
     const delayed = await holdUpdatesPage(page);
-    await f.more.click();
+    await f.more.focus();
+    await page.keyboard.press("Enter");
     const held = await delayed.entered;
     assert.equal(held.items.length, 50);
     assert.equal(await f.more.isDisabled(), true);
@@ -1324,8 +1368,13 @@ test("Updates fence repeated Load more and held real pages across filter, Close,
       }
     }
     const destination = page.url();
+    const focusDestination = await page.evaluate(() => ({ id: document.activeElement?.id,
+      filter: document.activeElement?.dataset.updateFilter, work: document.activeElement?.dataset.workRecordId }));
     await delayed.finish();
     assert.equal(page.url(), destination, `${transition} retires the old continuation's navigation ownership`);
+    assert.deepEqual(await page.evaluate(() => ({ id: document.activeElement?.id,
+      filter: document.activeElement?.dataset.updateFilter, work: document.activeElement?.dataset.workRecordId })), focusDestination,
+    `${transition} retires keyboard focus ownership of the pending page`);
     if (transition === "newer navigation") {
       assert.equal(await page.locator("#updates-dialog").isVisible(), false);
       assert.equal(await page.evaluate(() => document.activeElement?.dataset.workRecordId), review.sourceRef.workItemId);

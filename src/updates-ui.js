@@ -121,8 +121,10 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
   function paintPaging() {
     const pageCopy = loadedPages ? `Page ${loadedPages} loaded. ` : "";
     if (pageAnnouncement.textContent !== pageCopy) pageAnnouncement.textContent = pageCopy;
-    summary.textContent = `${visible(items, filter).length} loaded${hasMore ? " · More available" : ""}${filter === "saved" ? ` · ${items.length} checked` : ""}`;
-    partial.textContent = incomplete ? "Some update sources are unavailable. This list may be incomplete." : "";
+    const summaryCopy = `${visible(items, filter).length} loaded${hasMore ? " · More available" : ""}${filter === "saved" ? ` · ${items.length} checked` : ""}`;
+    const partialCopy = incomplete ? "Some update sources are unavailable. This list may be incomplete." : "";
+    if (summary.textContent !== summaryCopy) summary.textContent = summaryCopy;
+    if (partial.textContent !== partialCopy) partial.textContent = partialCopy;
     loadMore.hidden = !hasMore && !incomplete;
     loadMore.disabled = loading;
     loadMore.textContent = hasMore && cursor ? "Load more" : "Refresh updates";
@@ -351,8 +353,10 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
     document.addEventListener("pointerdown", movedPointer);
     try {
       const loaded = await load(filter, hasMore && cursor ? { append: true } : { budget: 1 });
-      if (!loaded || !retainFocus || mine !== interaction || !owns(owned) || !dialog.open) return;
-      const added = new Set(visible(items, filter).filter(item => !previous.has(item.id)).map(item => item.id));
+      if (!retainFocus || mine !== interaction || !owns(owned) || !dialog.open) return;
+      // Disabling the pending control can drop keyboard focus. On failure,
+      // return to the same enabled retry control without moving into old rows.
+      const added = new Set(loaded ? visible(items, filter).filter(item => !previous.has(item.id)).map(item => item.id) : []);
       const firstNewAction = [...list.children].filter(row => added.has(row.dataset.updateId))
         .map(row => row.querySelector("[data-update-action]:enabled")).find(Boolean);
       const continuation = !loadMore.hidden && !loadMore.disabled ? loadMore : null;
