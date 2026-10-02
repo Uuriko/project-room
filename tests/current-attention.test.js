@@ -113,7 +113,7 @@ test("malformed or unavailable charter context refuses without advancing retaine
   const f = fixture(t); f.work(); f.charter(); await f.pull(); const before = rows(f.state);
   for (const damage of [s => delete s.charter, s => s.charter.revision++, s => delete s.state.room.charter,
     s => s.charter.authority = "permission", s => s.sequence = 1]) {
-    const snapshot = await f.client.snapshot(); damage(snapshot);
+    const snapshot = structuredClone(await f.client.snapshot()); damage(snapshot);
     await assert.rejects(f.pull({ client: { ...f.client, snapshot: async () => snapshot } }));
     assert.deepEqual(rows(f.state), before);
   }

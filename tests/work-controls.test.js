@@ -265,9 +265,10 @@ test("legacy projections backfill work-control defaults on replay (no migration)
   // Simulate a pre-controls stored projection: strip the new fields as the
   // old code would have written them, then rebuild from the event log.
   const room = store.room("commons");
-  const item = room.state.workItems[workItemId];
+  const state = structuredClone(room.state);
+  const item = state.workItems[workItemId];
   delete item.round_count; delete item.tool_calls; delete item.suspended_by;
-  store.db.prepare("UPDATE rooms SET projection=? WHERE id='commons'").run(JSON.stringify(room.state));
+  store.db.prepare("UPDATE rooms SET projection=? WHERE id='commons'").run(JSON.stringify(state));
   const rebuilt = store.rebuildProjection("commons");
   const backfilled = rebuilt.state.workItems[workItemId];
   assert.equal(backfilled.round_count, 0);

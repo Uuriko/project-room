@@ -49,7 +49,7 @@ test('mobile owner cash draft remains truthful and nonowner has no posting actio
 });
 test('fresh server reviewer denial preserves unsaved form without publishing', { timeout: 45000 }, async t => {
   const f = await setup(t); await open(f.page); await fill(f.page, { reward: 'unpaid' });
-  const { state } = f.store.room('commons'); state.members.owner.permissions = state.members.owner.permissions.filter(permission => permission !== 'decide'); f.store.db.prepare('UPDATE rooms SET projection=? WHERE id=?').run(JSON.stringify(state), 'commons');
+  const state = structuredClone(f.store.room('commons').state); state.members.owner.permissions = state.members.owner.permissions.filter(permission => permission !== 'decide'); f.store.db.prepare('UPDATE rooms SET projection=? WHERE id=?').run(JSON.stringify(state), 'commons');
   await f.page.locator('#owner-offer-save').click(); await f.page.locator('#owner-offer-status').filter({ hasText: 'Couldn’t save' }).waitFor(); assert.equal(await f.page.locator('#owner-offer-form [name=title]').inputValue(), 'Improve the welcome flow'); assert.equal(f.store.projectOffers.ownerList('commons', 'owner').offers.length, 0);
 });
 test('amount conversion is exact and rejects ambiguous numeric input', () => { assert.equal(offerMinorUnits('999999999999.999999', 6), '999999999999999999'); for (const raw of ['1e3', '-1', '01', '1.0001', '0', 'NaN']) assert.throws(() => offerMinorUnits(raw, 3)); });

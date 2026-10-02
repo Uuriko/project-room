@@ -51,7 +51,7 @@ test("native text preserves exact stored UTF-8 and old post/proposal provenance 
   const reopened = new RoomStore(join(f.directory, "room.sqlite"));
   try {
     assert.equal(reopened.workResult(f.keys.producer, "commons", f.workItemId).result.text.body, body);
-    assert.equal(reopened.command(f.keys.producer, "commons", command).duplicate, true); assert.equal(auditRecovery(reopened).schemaVersion, 36);
+    assert.equal(reopened.command(f.keys.producer, "commons", command).duplicate, true); assert.equal(auditRecovery(reopened).schemaVersion, 37);
   } finally { reopened.close(); }
   assert.equal((await f.client.snapshot()).cursor, 0);
 });
@@ -134,9 +134,10 @@ test("recovery audits native completion hidden before a projection checkpoint", 
 test("recovery rejects orphan native receipts hidden in a checkpoint", async t => {
   const f = await setup(t), posted = f.post("Recovery artifact"); f.send(T.WORK_COMPLETED, f.input(posted));
   const room = f.store.room("commons");
-  room.state.workItems[f.workItemId].receiptHistory.push({ ...structuredClone(room.state.workItems[f.workItemId].receipt), eventId: "orphan-native" });
-  f.store.db.prepare("UPDATE rooms SET projection=? WHERE id='commons'").run(JSON.stringify(room.state));
-  f.store.db.prepare("INSERT INTO projection_checkpoints VALUES(?,?,?)").run("commons", room.sequence, JSON.stringify(room.state));
+  const state = structuredClone(room.state);
+  state.workItems[f.workItemId].receiptHistory.push({ ...structuredClone(state.workItems[f.workItemId].receipt), eventId: "orphan-native" });
+  f.store.db.prepare("UPDATE rooms SET projection=? WHERE id='commons'").run(JSON.stringify(state));
+  f.store.db.prepare("INSERT INTO projection_checkpoints VALUES(?,?,?)").run("commons", room.sequence, JSON.stringify(state));
   assert.throws(() => auditRecovery(f.store), /reconciliation/);
 });
 
