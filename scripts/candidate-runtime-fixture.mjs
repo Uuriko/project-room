@@ -100,6 +100,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/usage-summary.mjs');
   paths.add('server/notifications.mjs');
   for (const path of ['server/channel-connection.mjs', 'server/channel-import.mjs', 'server/channel-adapters/index.mjs', 'server/channel-adapters/email.mjs', 'server/channel-adapters/telegram.mjs', 'server/channel-adapters/telegram-rotation.mjs', 'server/channel-adapters/gmail.mjs', 'server/channel-adapters/whatsapp.mjs', 'server/mime-message.mjs', 'server/email-routing-inbound.mjs', 'server/channel-journal.mjs', 'server/room-export-html.mjs']) paths.add(path);
+  paths.add('server/room-export.mjs'); paths.add('cloudflare/room-backup.mjs');
   for (const path of ['server/channel-adapters/telegram-config.mjs', 'server/channel-adapters/telegram-transport.mjs', 'scripts/telegram-set-webhook.mjs', 'scripts/telegram-rotate-webhook.mjs']) paths.add(path);
   paths.add('server/spend-allowance.mjs');
   paths.add('server/autonomy-tiers.mjs'); // Graduated autonomy tiers (imported by server/store.mjs and server/http.mjs)
@@ -113,6 +114,8 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/account-login-methods.mjs'); // Multi-method login model (imported by server/store.mjs)
   paths.add('server/account-deletion.mjs'); // RC-2026-09-19-078: deletion executor (imported by server/http.mjs)
   paths.add('src/account-deletion.mjs'); // RC-2026-09-19-078: pure purge planner (imported by server/account-deletion.mjs)
+  // CP-ADMIN-0: operator auth, purge, and status (imported by server/http.mjs and server/store.mjs)
+  for (const path of ['server/operator-auth.mjs', 'server/operator-actions.mjs', 'server/purge-registry.mjs', 'server/operator-purge.mjs', 'server/operator-status.mjs', 'server/operator-routes.mjs']) paths.add(path);
   paths.add('server/account-passkeys.mjs'); // Passkey auth wiring (slice 5; imported by server/http.mjs)
   paths.add('src/passkey-login.mjs'); // WebAuthn logic (imported by server/account-passkeys.mjs)
   paths.add('src/password-auth.mjs'); // Email+password crypto (imported by server/http.mjs, slice 2)
@@ -154,11 +157,12 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/public-face.mjs'); // Opt-in public read-only face (imported by server/store.mjs)
   paths.add('server/receipts-page.mjs'); // Public receipts page (imported by server/http.mjs)
   paths.add('server/receipts-live.mjs'); // Live public-receipt reader (imported by server/http.mjs)
+  paths.add('server/public-read-model.mjs'); // Public page tables (imported by server/store.mjs and the public routes)
   paths.add('server/templates.mjs'); // GR2 room templates (imported by server/http.mjs)
   paths.add('server/public-rooms.mjs'); // GR2 public room, template, and agent pages (imported by server/http.mjs)
   paths.add('server/capability-visibility.mjs'); // RC-2026-09-27-2731: withhold-never-refused catalog predicate (imported by server/mcp-discovery.mjs and server/mcp-room-profile.mjs)
   paths.add('server/conversation-sync.mjs'); // bounded viewer-scoped conversation reads (imported by server/http.mjs)
-  paths.add('server/routes/dispatch.mjs'); paths.add('server/routes/table.mjs'); // batch RT: route table (imported by server/http.mjs)
+  paths.add('server/routes/dispatch.mjs'); paths.add('server/routes/table.mjs'); paths.add('server/routes/inbox.mjs'); // batch RT: route table (imported by server/http.mjs)
   const candidate = join(directory, 'synthetic-source'); mkdirSync(candidate);
   // No private state, credentials, docs or real checkout Git metadata.
   for (const path of paths) {

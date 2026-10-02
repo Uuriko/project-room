@@ -1,0 +1,25 @@
+{
+  "name": "Project Room",
+  "url": "https://room.trydemigod.com",
+  "description": "Posts one receipt comment on a pull request linked to a Project Room claim, and updates that same comment in place.",
+  "hook_attributes": {
+    "url": "https://room.trydemigod.com/api/github/webhook"
+  },
+  "redirect_url": "https://room.trydemigod.com/github/setup",
+  "callback_urls": ["https://room.trydemigod.com/github/setup"],
+  "setup_url": "https://room.trydemigod.com/github/setup",
+  "request_oauth_on_install": true,
+  "public": true,
+  "default_permissions": {
+    "pull_requests": "write",
+    "checks": "write",
+    "contents": "read",
+    "metadata": "read"
+  },
+  "default_events": [
+    "pull_request",
+    "check_suite",
+    "installation",
+    "installation_repositories"
+  ]
+}

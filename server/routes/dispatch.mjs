@@ -1,8 +1,9 @@
 // Route-table dispatcher (batch RT).
 //
 // Compiles ROUTES into a segment trie. A known path with the wrong method
-// answers 405 and sets Allow. An unknown path returns false so the legacy
-// chain in server/http.mjs can still serve it.
+// answers 405 and sets Allow. A mount matches its path and every path under
+// it for any method, and the handler decides. An unknown path returns false
+// so the legacy chain in server/http.mjs can still serve it.
 //
 // Shared steps, in the same order as the legacy server, run only when the
 // caller opts in with ctx.pipeline (authorize, then body parsing against
@@ -23,7 +24,15 @@ function node() {
 
 export function compileRoutes(routes) {
   const root = node();
+  const mounts = [];
   for (const row of routes) {
+    // A mount matches its path and every deeper path, for any method.
+    // The handler owns session and method checks. Putting those rows in
+    // the method trie would answer 405 before the session check.
+    if (row.mount) {
+      mounts.push(row);
+      continue;
+    }
     const segments = row.path.split("/").filter(Boolean);
     let cursor = root;
     for (const segment of segments) {
@@ -40,7 +49,7 @@ export function compileRoutes(routes) {
     if (cursor.methods.has(row.method)) throw new Error(`duplicate route ${row.method} ${row.path}`);
     cursor.methods.set(row.method, row);
   }
-  return root;
+  return { root, mounts };
 }
 
 function compiledFor(routes) {
@@ -67,15 +76,29 @@ function walk(cursor, segments, index, params) {
   return walk(cursor.param.next, segments, index + 1, { ...params, [cursor.param.name]: decoded });
 }
 
+function matchMount(mounts, pathname) {
+  let best = null;
+  for (const row of mounts) {
+    if (row.path.includes("{")) continue;
+    if (pathname !== row.path && !pathname.startsWith(`${row.path}/`)) continue;
+    if (!best || row.path.length > best.path.length) best = row;
+  }
+  return best;
+}
+
 export function matchRoute(routes, method, pathname) {
-  const trie = compiledFor(routes);
+  const { root, mounts } = compiledFor(routes);
   const segments = pathname.split("/").filter(Boolean);
-  const found = walk(trie, segments, 0, {});
-  if (!found) return null;
-  const upper = String(method || "").toUpperCase();
-  const row = found.node.methods.get(upper) ?? null;
-  const allow = [...found.node.methods.keys()].sort();
-  return { row, allow, params: found.params };
+  const found = walk(root, segments, 0, {});
+  if (found) {
+    const upper = String(method || "").toUpperCase();
+    const row = found.node.methods.get(upper) ?? null;
+    const allow = [...found.node.methods.keys()].sort();
+    return { row, allow, params: found.params };
+  }
+  const mount = matchMount(mounts, pathname);
+  if (!mount) return null;
+  return { row: mount, allow: [], params: {} };
 }
 
 const ENTITY = new Set(["POST", "PUT", "PATCH", "DELETE"]);

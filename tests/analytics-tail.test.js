@@ -85,7 +85,8 @@ test("a done merged claim is a receipt in both the live list and the growth pred
   store.db.prepare("UPDATE rooms SET projection=? WHERE id='alpha'").run(JSON.stringify(projection));
   store.workClaims.set("alpha", {
     id: "claim1", title: "LeakTitleZZ", state: "done", owner: "agent1",
-    pullRequest: { url: "https://github.com/acme/demo/pull/7", outcome: "merged" }
+    pullRequest: { url: "https://github.com/acme/demo/pull/7", outcome: "merged", syncedAt: "2026-09-30T15:00:00.000Z" },
+    history: [{ at: "2026-09-30T15:00:00.000Z", agentId: "agent1", action: "pr_merged" }]
   });
   store.workClaims.set("alpha", { id: "claim2", title: "LeakTitleZZ", state: "done", owner: "agent1", pullRequest: { outcome: "closed", url: "https://github.com/acme/demo/pull/8" } });
   const published = collectPublicReceipts(store);

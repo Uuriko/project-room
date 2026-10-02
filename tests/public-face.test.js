@@ -2,12 +2,16 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { PublicFace, roomPublicFaceSchema, PUBLIC_CODE_PREFIX } from "../server/public-face.mjs";
+import { roomDirectorySchema } from "../server/room-directory.mjs";
+import { PUBLIC_READ_MODEL_SCHEMA } from "../server/public-read-model.mjs";
 
 const member = (id, displayName, active = true) => ({ id, displayName, active, kind: "agent", permissions: [] });
 
 function makeStore(states) {
   const db = new DatabaseSync(":memory:");
   db.exec(roomPublicFaceSchema);
+  db.exec(roomDirectorySchema);
+  db.exec(PUBLIC_READ_MODEL_SCHEMA);
   return {
     db,
     transaction(fn) {
