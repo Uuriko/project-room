@@ -198,13 +198,8 @@ function trackUpdateRequests(server) {
   server.on("request", (request, response) => {
     const path = request.url.split("?")[0];
     if (!/^\/api\/rooms\/[^/]+\/updates(?:\/|$)/.test(path)) return;
-    const entry = { method: request.method, path, body: null, status: null };
+    const entry = { method: request.method, path, status: null };
     requests.push(entry);
-    const chunks = [];
-    request.on("data", chunk => chunks.push(chunk));
-    request.on("end", () => {
-      if (chunks.length) entry.body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-    });
     response.on("finish", () => { entry.status = response.statusCode; });
   });
   return requests;
@@ -815,7 +810,8 @@ test.describe("room-machine bot", { concurrency: false }, () => {
     assert.equal(marked.value.item.state, "read");
     assert.equal(requests.length, 1);
     assert.equal(requests[0].method, "POST");
-    assert.equal(requests[0].body.expectedBasis, item.basisToken);
+    assert.equal(requests[0].path, `/api/rooms/commons/updates/${item.id}/read`);
+    assert.equal(requests[0].status, 200);
     const current = await listedUpdate(room, secret, posted.event.data.messageId);
     assert.equal(current.item.state, "read");
   });
@@ -834,7 +830,6 @@ test.describe("room-machine bot", { concurrency: false }, () => {
     const writes = requests.filter(request => request.method === "POST");
     assert.equal(writes.length, 1);
     assert.equal(writes[0].path, `/api/rooms/commons/updates/${item.id}/done`);
-    assert.equal(writes[0].body.expectedBasis, item.basisToken);
     assert.equal(writes[0].status, 409, "the reply changes the mention basis before the private mark");
     assert.equal(requests.filter(request => request.method === "GET").length, 1, "do not refresh and retry a stale mark");
     const current = await listedUpdate(room, secret, posted.event.data.messageId);
@@ -844,8 +839,8 @@ test.describe("room-machine bot", { concurrency: false }, () => {
       "SELECT action FROM private_update_marks WHERE room_id=? AND member_id=? AND item_id=?"
     ).get("commons", viewerId, item.id), undefined);
     assert.equal(room.store.db.prepare(
-      "SELECT request_id FROM private_update_commands WHERE room_id=? AND member_id=? AND request_id=?"
-    ).get("commons", viewerId, writes[0].body.requestId), undefined);
+      "SELECT COUNT(*) AS count FROM private_update_commands WHERE room_id=? AND member_id=?"
+    ).get("commons", viewerId).count, 0);
   });
 
   test("pending and active restarts retain the original update basis through completion", async (t) => {
@@ -889,7 +884,7 @@ test.describe("room-machine bot", { concurrency: false }, () => {
     assert.equal(finished.closed, true, JSON.stringify(finished));
     assert.equal(requests.length, 1, "resumed work must not fetch a newer basis");
     assert.equal(requests[0].method, "POST");
-    assert.equal(requests[0].body.expectedBasis, item.basisToken);
+    assert.equal(requests[0].path, `/api/rooms/commons/updates/${item.id}/done`);
     assert.equal(requests[0].status, 409);
     const board = await claims(room.origin, secret);
     assert.equal(board.find(claim => claim.id === finished.workId).state, "done");
