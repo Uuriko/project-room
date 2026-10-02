@@ -12,6 +12,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 // `import { ServiceError } from "./store.mjs"` resolves to the exact same
 // class object and all `instanceof` checks behave identically.
 import { ServiceError } from "./service-error.mjs";
+import { stampInbox, stampSearch, stampThread, stampWorkResult, withContentTrust } from "./content-trust.mjs";
 import { createRoomFloodGuard } from "./room-flood-guard.mjs";
 import { getTracer, SPAN_NAMES, ATTR } from "./delivery-tracing.mjs"; // R1 opt-in delivery-path tracing (RC-2026-09-26-966).
 export { ServiceError };
@@ -3123,7 +3124,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // reply tree (messages whose replyToId chains back to the root).
   messageThread(token, roomId, messageId, expectedSessionBinding = null) {
     return this.readTransaction(() => {
-      this.authenticate(token, roomId, expectedSessionBinding);
+      const auth = this.authenticate(token, roomId, expectedSessionBinding);
       const { members } = this.roomAuthority(roomId);
       const room = this.room(roomId);
       const root = room.state.messages.find(m => m.id === messageId);
@@ -3139,7 +3140,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         author: members[message.authorId]?.displayName ?? message.authorId,
         replies: (byParent.get(message.id) ?? []).map(attach)
       });
-      return { roomId, thread: attach(root) };
+      return withContentTrust({ roomId, thread: stampThread(attach(root), auth.member.id) });
     });
   }
   // Round-2 #113: full-text search over messages and work items.
@@ -3174,7 +3175,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           }
         }
       }
-      return result;
+      return stampSearch(result, auth.member.id);
     });
   }
   // Round-2 #118: provider heartbeat dashboard. Per-provider liveness
@@ -3275,8 +3276,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       try { value = selectedWorkResult({ db: this.db, state: room.state, workItemId, sequence: room.sequence, now: this.now(), completionEventId, draftMessageId }); }
       catch { fail(422, "result_unavailable", "Exact text evidence is unavailable; no other result was substituted"); }
       if (!value) fail(404, "result_not_found", "Completion not found on this work; no other result was substituted");
-      return { ...value, viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null,
-        viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
+      return stampWorkResult({ ...value, viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null,
+        viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null }, auth.member.id);
     });
   }
   eventsAfter(token, roomId, after = 0, limit = 100, bindingOrOptions = null, options = {}) {
@@ -3421,18 +3422,22 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // RC-2026-09-24-210: peer-DM bodies are room-scoped — the inbox shows
       // only messages posted in this room, never another room's DM traffic.
       const peerMessages = identityId ? this.bonds.recentMessagesFor(identityId, roomId, limit) : [];
-      return Object.freeze({
+      const inbox = stampInbox({
         agentId: memberId,
         roomId,
-        directMessages: Object.freeze(directMessages),
-        assignments: Object.freeze(assignments),
-        mentions: Object.freeze(mentions),
-        directMentions: Object.freeze(directMentions),
-        bondProposals: Object.freeze(bondProposals),
-        peerMessages: Object.freeze(peerMessages),
-        next: Object.freeze(inboxNext(roomId, directMessages, assignments, mentions, directMentions, bondProposals, peerMessages, this.room(roomId).state.replyRequests)),
-        dmRequests: Object.freeze(dmRequests),
-      });
+        directMessages,
+        assignments,
+        mentions,
+        directMentions,
+        bondProposals,
+        peerMessages,
+        next: inboxNext(roomId, directMessages, assignments, mentions, directMentions, bondProposals, peerMessages, this.room(roomId).state.replyRequests),
+        dmRequests,
+      }, memberId);
+      for (const key of ["directMessages", "assignments", "mentions", "directMentions", "bondProposals", "peerMessages", "next", "dmRequests"]) {
+        inbox[key] = Object.freeze(inbox[key]);
+      }
+      return Object.freeze(inbox);
     });
   }
   // Direct @mentions of this member that nobody has answered yet, newest

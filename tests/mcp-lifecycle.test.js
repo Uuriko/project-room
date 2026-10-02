@@ -189,12 +189,19 @@ test("authorized coordinator proposes and supersedes work without transferring a
   const original = await read(a, "work-agent-a");
   assert.equal(original.work.state, "superseded"); assert.equal(original.work.claim.status, "superseded");
   assert.equal(original.work.decision, null);
-  assert.deepEqual((await read(a, "replacement")).work, originalReplacement);
+  const seenByAssignee = (await read(a, "replacement")).work;
+  assert.equal(seenByAssignee.untrusted, true);
+  assert.equal(Object.hasOwn(originalReplacement, "untrusted"), false);
+  const { untrusted, ...seenWork } = seenByAssignee;
+  assert.deepEqual(seenWork, originalReplacement);
   for (const [name, args, saved] of [["room_propose_work", proposal, proposed], ["room_supersede_work", supersession, replaced]]) {
     const retry = await recorded(coordinator, name, args);
     assert.equal(retry.eventId, saved.eventId); assert.equal(retry.duplicate, true); assert.equal(retry.currentStateVerified, false);
   }
-  assert.deepEqual((await read(a, "replacement")).work, originalReplacement);
+  const again = (await read(a, "replacement")).work;
+  const { untrusted: stillUntrusted, ...againWork } = again;
+  assert.equal(stillUntrusted, true);
+  assert.deepEqual(againWork, originalReplacement);
 });
 
 test("expired claim rejects new work while its original successful acquisition remains retryable without renewal", { timeout: 30000 }, async t => {

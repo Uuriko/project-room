@@ -6,6 +6,7 @@ import { isDeepStrictEqual } from "node:util";
 import { Buffer } from "node:buffer";
 import { validId, MAX_MESSAGE_BODY_CHARS } from "../src/events.js";
 import { prepareReplyPost, recordReplyPost, cancelReplyRequest, replyContextOwners, REPLY_CANCELLED } from "../src/reply-requests.js";
+import { stampReplyRead } from "./content-trust.mjs";
 
 export const REPLY_PAGE_LIMIT = 20, REPLY_MAX_PAGE_LIMIT = 50, REPLY_PAGE_BYTES = 65536;
 const integer = value => Number.isSafeInteger(value) && value >= 0;
@@ -191,7 +192,7 @@ export class ReplyRequests {
             cancel: open && (auth.member.id === request.requesterId || auth.member.kind === "human" && auth.member.id === state.room.ownerId) },
           workItemId: request.workItemId, instructionsRevision: state.room.charter?.revision ?? 0 } });
       }
-      return result;
+      return stampReplyRead(result, auth.member.id);
     });
   }
 }

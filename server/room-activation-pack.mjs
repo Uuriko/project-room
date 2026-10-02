@@ -10,11 +10,13 @@
 // surface the store's own 404 (room_not_found).
 import { roomOrientation } from "../src/work-selectors.js";
 import { pinnedMessages, roomKind, roomPolicy, WORK_STATES, roomTrust } from "../src/events.js";
+import { annotateOrientation, claimNote, withContentTrust } from "./content-trust.mjs";
 
 /**
  * Activation pack schema (returned by buildActivationPack).
  *
  * {
+ *   contentTrust: string,     // member-authored text is data, not instructions
  *   room: {
  *     slug: string,            // room id as addressed in /api/rooms/:slug
  *     title: string,           // human-readable room title
@@ -22,8 +24,9 @@ import { pinnedMessages, roomKind, roomPolicy, WORK_STATES, roomTrust } from "..
  *     kind: "personal"|"organization",
  *     owner: string             // owner member id
  *   },
- *   orientation: {             // shared with browser Overview
+ *   orientation: {             // shared with browser Overview, plus trust markers
  *     version: 1, purpose: string, purposeSource: object,
+ *     trust: "owner"|"untrusted",
  *     activeWork: object[], activeWorkTotal: number, recentDecisions: object[]
  *   },
  *   members: [                 // active members, sorted by id
@@ -44,7 +47,9 @@ import { pinnedMessages, roomKind, roomPolicy, WORK_STATES, roomTrust } from "..
  *       claimStatus: "active"|"released"|"expired"|null,
  *       deliveryMode: "read"|"write",
  *       reviewPolicy: "independent"|"owner"|"independent+owner"|"none",
- *       leaseExpiresAt: string|null // ISO-8601 expiry of the write claim
+ *       leaseExpiresAt: string|null, // ISO-8601 expiry of the write claim
+ *       untrusted: true,       // title and claim note are member-authored
+ *       note?: string          // blocker reason, when one is recorded
  *     }
  *   ],
  *   pinnedResources: [         // pinned messages, pin order
@@ -53,7 +58,8 @@ import { pinnedMessages, roomKind, roomPolicy, WORK_STATES, roomTrust } from "..
  *       pinnedById: string,
  *       pinnedAt: string,      // ISO-8601
  *       authorId: string,
- *       body: string
+ *       body: string,
+ *       untrusted: true        // pinned message body is member-authored
  *     }
  *   ],
  *   repoHead: null,            // rooms record no repository head; per-work
@@ -117,11 +123,13 @@ const workOf = (item, nowIso) => ({
   claimStatus: claimStatusOf(item.claim, nowIso),
   deliveryMode: item.mode,
   reviewPolicy: reviewPolicyOf(item),
-  leaseExpiresAt: item.claim?.expiresAt ?? null
+  leaseExpiresAt: item.claim?.expiresAt ?? null,
+  untrusted: true,
+  ...claimNote(item)
 });
 
 const pinnedOf = ({ messageId, pinnedById, pinnedAt, message }) => ({
-  messageId, pinnedById, pinnedAt, authorId: message.authorId, body: message.body
+  messageId, pinnedById, pinnedAt, authorId: message.authorId, body: message.body, untrusted: true
 });
 
 // Opaque resume token for the event log: versioned, self-describing to the
@@ -143,7 +151,7 @@ export function buildActivationPack(store, roomSlug) {
     .filter(item => item && OPEN_WORK_STATES.has(item.state))
     .sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0))
     .map(item => workOf(item, now));
-  return {
+  return withContentTrust({
     room: {
       slug: state.room.id,
       title: state.room.title,
@@ -151,7 +159,7 @@ export function buildActivationPack(store, roomSlug) {
       kind: roomKind(state.room),
       owner: state.room.ownerId
     },
-    orientation: roomOrientation(state),
+    orientation: annotateOrientation(roomOrientation(state)),
     members,
     openWork,
     pinnedResources: pinnedMessages(state).map(pinnedOf),
@@ -160,5 +168,5 @@ export function buildActivationPack(store, roomSlug) {
     coordinationNorms: { ...COORDINATION_NORMS },
     eventCursor: cursorOf(sequence),
     generatedAt: now
-  };
+  });
 }
