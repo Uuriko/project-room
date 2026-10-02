@@ -15,8 +15,7 @@
 //
 // The inbox import itself (`syncTelegramConnection` → `store.email.apply` →
 // `store.inbox.importSource`) is owner-session bound: there is no system
-// import authority yet (B20 — see the `importRoutedEmail` note in
-// cloudflare/room.mjs). Until that authority exists the drainer is wired with
+// import authority yet (B20). Until that authority exists the drainer is wired with
 // no `importSlice`, and per-connection drains report an honest
 // `channel_drain_unavailable` deferral instead of importing. The scan and the
 // poison-screen are session-free and run on schedule regardless, so poison
