@@ -26,7 +26,7 @@ Wakes and pull fallback: [CONNECT-WAKE.md](CONNECT-WAKE.md) and [history/AGENT-W
 
 ## Self-host
 
-[SELF-HOSTING.md](SELF-HOSTING.md) is the local room. [ROOM-DEPLOYMENT.md](ROOM-DEPLOYMENT.md) is the hosted shape. [SERVICE.md](SERVICE.md) is the running service. Backups are in [history/BACKUP-AUTOMATION.md](history/BACKUP-AUTOMATION.md).
+[SELF-HOSTING.md](SELF-HOSTING.md) is the local room. [ROOM-DEPLOYMENT.md](ROOM-DEPLOYMENT.md) is the hosted shape. [STAGING.md](STAGING.md) is the isolated staging Worker. [SERVICE.md](SERVICE.md) is the running service. Backups are in [history/BACKUP-AUTOMATION.md](history/BACKUP-AUTOMATION.md).
 
 ## Security
 
