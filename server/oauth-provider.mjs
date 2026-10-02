@@ -17,10 +17,12 @@
 //   work:read    read work items
 //   work:write   accept and complete work
 //
-// Pure module: all state is caller-owned Maps, crypto is node:crypto,
-// no network I/O. Frozen outputs; malformed inputs throw OAuthProviderError
-// (coded errors). Token secrets are never stored — only SHA-256 hashes.
+// State lives in caller-owned Maps, or in SQLite when `db` is passed (the
+// Durable Object). Crypto is node:crypto. No network I/O. Frozen outputs;
+// malformed inputs throw OAuthProviderError (coded errors). Token secrets are
+// never stored — only SHA-256 hashes.
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { createOAuthProviderSqlite } from "./oauth-provider-store.mjs";
 
 class OAuthProviderError extends Error {
   constructor(code, message) { super(message); this.name = "OAuthProviderError"; this.code = code; }
@@ -44,6 +46,7 @@ const CODE_CHALLENGE_PATTERN = /^[A-Za-z0-9_-]{43,128}$/;
 const AUTH_CODE_TTL_MS = 10 * 60 * 1000;          // 10 minutes, single use
 const ACCESS_TOKEN_TTL_MS = 60 * 60 * 1000;       // 1 hour
 const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+const CLIENT_TTL_MS = REFRESH_TOKEN_TTL_MS;
 
 const sha256 = text => createHash("sha256").update(text).digest("hex");
 const base64url = bytes => Buffer.from(bytes).toString("base64url");
@@ -51,20 +54,25 @@ const newSecret = (bytes = 32) => base64url(randomBytes(bytes));
 
 const isExpired = (record, now) => record.expiresAt !== null && now() >= record.expiresAt;
 
-export function createOAuthProvider({ clients, codes, accessTokens, refreshTokens, clock, onSecurityEvent } = {}) {
+export function createOAuthProvider({ clients, codes, accessTokens, refreshTokens, db, clock, onSecurityEvent } = {}) {
+  check(db === undefined || (clients === undefined && codes === undefined && accessTokens === undefined && refreshTokens === undefined),
+    "sqlite storage replaces the in-memory maps");
   check(clients === undefined || clients instanceof Map, "clients must be a Map if given");
   check(codes === undefined || codes instanceof Map, "codes must be a Map if given");
   check(accessTokens === undefined || accessTokens instanceof Map, "accessTokens must be a Map if given");
   check(refreshTokens === undefined || refreshTokens instanceof Map, "refreshTokens must be a Map if given");
+  check(db === undefined || typeof db?.prepare === "function", "db must be a SQLite database if given");
   check(clock === undefined || typeof clock === "function", "clock must be a function if given");
   check(onSecurityEvent === undefined || typeof onSecurityEvent === "function",
     "onSecurityEvent must be a function if given");
 
-  const clientStore = clients ?? new Map();
-  const codeStore = codes ?? new Map();
-  const accessStore = accessTokens ?? new Map();
-  const refreshStore = refreshTokens ?? new Map();
+  const sqlite = db ? createOAuthProviderSqlite(db) : null;
+  const clientStore = clients ?? sqlite?.clients ?? new Map();
+  const codeStore = codes ?? sqlite?.codes ?? new Map();
+  const accessStore = accessTokens ?? sqlite?.accessTokens ?? new Map();
+  const refreshStore = refreshTokens ?? sqlite?.refreshTokens ?? new Map();
   const now = clock ?? Date.now;
+  const pruneLazy = () => { if (sqlite) sqlite.prune(now(), 32); };
   // Caller-owned sink for security signals (e.g. reuse-detected). The module
   // itself does no I/O; the HTTP layer wires this to its logging/journaling.
   const emitSecurityEvent = onSecurityEvent ?? (() => {});
@@ -87,15 +95,27 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
         "redirectUri must be https (http allowed only for localhost)");
       check(!parsed.hash, "redirectUri must not contain a fragment");
     }
-    check(!clientStore.has(clientId), `client "${clientId}" is already registered`);
-    const client = { clientId, name, redirectUris: Object.freeze([...redirectUris]) };
+    const existing = clientStore.get(clientId);
+    if (existing && !isExpired(existing, now)) {
+      const sameName = existing.name === name;
+      const sameUris = existing.redirectUris.length === redirectUris.length
+        && existing.redirectUris.every((uri, index) => uri === redirectUris[index]);
+      check(sameName && sameUris, `client "${clientId}" is already registered`);
+      existing.expiresAt = now() + CLIENT_TTL_MS;
+      clientStore.set(clientId, existing);
+      return Object.freeze({ clientId, name, redirectUris: Object.freeze([...redirectUris]) });
+    }
+    if (existing) clientStore.delete(clientId);
+    const client = { clientId, name, redirectUris: Object.freeze([...redirectUris]), expiresAt: now() + CLIENT_TTL_MS };
     clientStore.set(clientId, client);
-    return Object.freeze({ ...client });
+    return Object.freeze({ clientId, name, redirectUris: Object.freeze([...redirectUris]) });
   };
 
   const getClient = clientId => {
     const client = clientStore.get(clientId);
-    return client ? Object.freeze({ ...client, redirectUris: Object.freeze([...client.redirectUris]) }) : null;
+    if (!client) return null;
+    if (isExpired(client, now)) { clientStore.delete(clientId); return null; }
+    return Object.freeze({ clientId: client.clientId, name: client.name, redirectUris: Object.freeze([...client.redirectUris]) });
   };
 
   const validateScopes = scopes => {
@@ -111,7 +131,7 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
   // for the consent screen; throws on invalid client/redirect/scope.
   const validateAuthorizationRequest = ({ clientId, redirectUri, scopes, state, codeChallenge }) => {
     check(typeof clientId === "string" && clientId.length > 0, "client_id is required");
-    const client = clientStore.get(clientId);
+    const client = getClient(clientId);
     check(client, "unknown client_id");
     check(typeof redirectUri === "string" && client.redirectUris.includes(redirectUri),
       "redirect_uri must exactly match a registered redirect URI");
@@ -142,6 +162,7 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
       used: false,
     };
     codeStore.set(record.codeHash, record);
+    pruneLazy();
     return Object.freeze({ code, expiresAt: record.expiresAt });
   };
 
@@ -155,7 +176,7 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
     const record = codeStore.get(sha256(code));
     check(record, "invalid authorization code");
     check(!record.used, "authorization code already used");
-    check(!isExpired(record, now), "authorization code expired");
+    if (isExpired(record, now)) { codeStore.delete(record.codeHash); fail("invalid_request", "authorization code expired"); }
     check(record.clientId === clientId, "client_id mismatch");
     check(record.redirectUri === redirectUri, "redirect_uri mismatch");
     // PKCE S256 verification.
@@ -246,7 +267,7 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
       fail("invalid_grant", "refresh token reuse detected: token family revoked");
     }
     check(!record.revoked, "refresh token revoked");
-    check(!isExpired(record, now), "refresh token expired");
+    if (isExpired(record, now)) { refreshStore.delete(record.tokenHash); fail("invalid_request", "refresh token expired"); }
     check(record.clientId === clientId, "client_id mismatch");
     record.revoked = true; // rotation: old refresh token is single-use
     const next = issueTokenPair({
@@ -260,8 +281,11 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
   // Verify a bearer access token. Returns { userId, clientId, scopes } or null.
   const verifyAccessToken = token => {
     check(typeof token === "string" && token.length > 0, "token must be a non-empty string");
-    const record = accessStore.get(sha256(token));
-    if (!record || record.revoked || isExpired(record, now)) return null;
+    const digest = sha256(token);
+    const record = accessStore.get(digest);
+    if (!record) return null;
+    if (isExpired(record, now)) { accessStore.delete(digest); return null; }
+    if (record.revoked) return null;
     return Object.freeze({
       userId: record.userId,
       clientId: record.clientId,

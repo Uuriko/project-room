@@ -81,7 +81,7 @@ server serves an undeclared route anonymously, and `scripts/open-routes.mjs
 
 `GET /api/rooms/:id/export` is the one room-data route that hands back a whole
 room at once, in two formats behind the same member credential: JSONL (the
-complete history, deleted content included) and `?format=html` (a readable
+event log; deleted and prior edited bodies are omitted) and `?format=html` (a readable
 page that shows deleted messages as deleted). The HTML is escaped
 value-by-value, contains no script, links only credential-free `https:`
 evidence URLs, and is sent with a `default-src 'none'` Content-Security-Policy
