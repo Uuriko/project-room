@@ -147,7 +147,7 @@ import { HumanPush, humanPushSchema } from "./human-push.mjs"; // Human browser 
 import { Referrals, referralSchema } from "./referrals.mjs";
 import { EmissaryGraph, emissaryGraphSchema } from "./emissary-graph.mjs"; // Emissary slice 1a: external identity graph.
 import { EmissaryReceipts, emissaryReceiptSchema } from "./emissary-receipts.mjs"; // Emissary slice 1a: external receipt index.
-import { AccountLoginMethods, accountLoginMethodsSchema } from "./account-login-methods.mjs";
+import { AccountLoginMethods, accountLoginMethodsSchema, ensureVerifiedEmailSchema } from "./account-login-methods.mjs";
 import { verifyTextCompletion, selectedWorkResult } from "./text-results.mjs";
 import { verifyCompletionEvidence, EvidenceError } from "./signed-evidence.mjs"; // Integration map slice 5: signed external evidence for work.completed.
 import { evaluateReceipt } from "./jev-receipts.mjs"; // Jev-harness receipt gate (docs/JEV-GATES.md): pure scorer, no imports of its own.
@@ -1609,6 +1609,17 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // have no code path to them, and method rows are always scoped to an
       // existing account.
       this.db.exec(accountLoginMethodsSchema);
+      // ID-SEC: verified email, the password-reset banner, and the security
+      // event journal. Additive and unfenced, same as the login-method tables.
+      ensureVerifiedEmailSchema(this.db);
+      {
+        const keyCols = new Set(this.db.prepare("PRAGMA table_info(agent_api_keys)").all().map(column => column.name));
+        if (keyCols.size > 0 && !keyCols.has("last_used_ua")) this.db.exec("ALTER TABLE agent_api_keys ADD COLUMN last_used_ua TEXT");
+        const identityCols = new Set(this.db.prepare("PRAGMA table_info(agent_identities)").all().map(column => column.name));
+        if (identityCols.size > 0 && !identityCols.has("last_used_at")) this.db.exec("ALTER TABLE agent_identities ADD COLUMN last_used_at INTEGER");
+        if (identityCols.size > 0 && !identityCols.has("last_used_ua")) this.db.exec("ALTER TABLE agent_identities ADD COLUMN last_used_ua TEXT");
+        if (identityCols.size > 0 && !identityCols.has("mcp_legacy_uses")) this.db.exec("ALTER TABLE agent_identities ADD COLUMN mcp_legacy_uses INTEGER NOT NULL DEFAULT 0");
+      }
       // Existing v35 databases predate persistent OAuth state. Converge this
       // unfenced additive table on every open, not only invitation migration.
       this.db.exec(oauthPendingSchema);
@@ -2594,6 +2605,26 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       return this.insertAccountCredential(accountId, this.now() + lifetimeMs);
     });
   }
+  // Drop other browser sessions and room keys after an unverified password
+  // is removed. The in-flight sign-in slot is left intact so that login can
+  // finish on it.
+  revokeUnverifiedPasswordSessions(accountId, preserveSlotToken = null) {
+    return this.transaction(() => {
+      this.account(accountId);
+      this.db.prepare("UPDATE account_credentials SET revoked=1 WHERE account_id=?").run(accountId);
+      this.db.prepare(`UPDATE credentials SET revoked=1 WHERE account_id=? OR EXISTS
+        (SELECT 1 FROM member_accounts m WHERE m.account_id=? AND m.room_id=credentials.room_id AND m.member_id=credentials.member_id)`)
+        .run(accountId, accountId);
+      const preserve = typeof preserveSlotToken === "string" && tokenPattern.test(preserveSlotToken) ? hash(preserveSlotToken) : null;
+      if (preserve) {
+        this.db.prepare(`UPDATE account_session_slots SET revision=revision+1,account_id=NULL,account_auth_epoch=NULL,
+          parent_credential_hash=NULL,authenticated_until=NULL WHERE account_id=? AND hash != ?`).run(accountId, preserve);
+      } else {
+        this.db.prepare(`UPDATE account_session_slots SET revision=revision+1,account_id=NULL,account_auth_epoch=NULL,
+          parent_credential_hash=NULL,authenticated_until=NULL WHERE account_id=?`).run(accountId);
+      }
+    });
+  }
   invalidateHumanAccountCredentials(accountId) {
     return this.transaction(() => {
       this.account(accountId);
@@ -2967,6 +2998,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // #643: the room owner issues on any credential; anyone else needs an
       // account session with manage_members, as before.
       const issuer = this.authenticateInvitationAdmin(accountSessionToken, roomId, expectedSessionBinding ?? null);
+      if (issuer.account) this.accountLogins.assertEmailVerified(issuer.account.id);
       if (issuer.account && typeof expectedSessionBinding !== "string") fail(422, "invalid_session_binding", "Current account session binding required");
       if (!issuer.member.permissions.includes("manage_members")) fail(403, "access_denied", "Current membership administration grant required");
       // Idempotency scope follows the issuer identity: account-scoped for
@@ -3284,6 +3316,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     if (isApiKeyToken(token)) {
       const record = this.agentPlugin.verifyPresentedApiKey(token);
       if (!record) fail(401, "unauthenticated", "Unknown, revoked, or expired API key");
+      const roomScopes = record.scopes.filter(scope => scope.startsWith("mcp:room:"));
+      if (roomScopes.length > 0 && !roomScopes.includes(`mcp:room:${roomId}`)) {
+        fail(403, "insufficient_scope", "This key is limited to its room");
+      }
       const resolved = roomId ? this.identities.resolveIdentityLink(record.identityId, roomId) : null;
       if (!resolved) fail(401, "unauthenticated", "API key identity has no access to this room");
       return {

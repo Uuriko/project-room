@@ -97,8 +97,15 @@ export class AgentConnections {
         if (typeof at === "string" && !Number.isNaN(Date.parse(at))) firstActionAt = at;
       } catch { /* retained history stays unreadable here; the list still renders */ }
     }
+    const link = this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?").get(row.room_id, row.member_id);
+    const usage = link ? this.store.identities.mcpUsage(link.identityId) : null;
+    const keyUse = link ? this.db.prepare(`SELECT last_used_at AS lastUsedAt, last_used_ua AS lastUsedUa
+      FROM agent_api_keys WHERE identity_id=? AND instr(scopes_json, ?) > 0
+      ORDER BY COALESCE(last_used_at, 0) DESC LIMIT 1`).get(link.identityId, `mcp:room:${row.room_id}`) : null;
     return { roomId: row.room_id, memberId: row.member_id, displayName: member.displayName, generation: row.generation,
-      memberRevision: member.revision, permissions: member.permissions, expiresAt: row.expires_at, status, firstActionAt };
+      memberRevision: member.revision, permissions: member.permissions, expiresAt: row.expires_at, status, firstActionAt,
+      identityLastUsedAt: usage?.lastUsedAt ?? null, identityLastUsedUa: usage?.lastUsedUa ?? null,
+      keyLastUsedAt: keyUse?.lastUsedAt ?? null, keyLastUsedUa: keyUse?.lastUsedUa ?? null };
   }
   assertCredential(credential) {
     const row = this.row(credential.room_id, credential.member_id);
@@ -262,7 +269,15 @@ export class AgentConnections {
         // the connection carried no link).
         ...(unlinkedIdentityId ? { unlinkedIdentityId } : {}) };
       this.db.prepare("INSERT INTO agent_connection_operations VALUES(?,?,?,?,?,?,?,?,?)").run(roomId, memberId, row.generation, auth.account.id, requestId, requestJSON, fingerprint, JSON.stringify(receipt), JSON.stringify(row));
-      return { receipt, connection: this.view(row), duplicate: false };
+      let mcpToken = null;
+      if (action === "create" && request.identityId) {
+        this.store.accountLogins.assertEmailVerified(auth.account.id);
+        mcpToken = this.store.agentPlugin.issueOnboardingMcpToken({
+          identityId: request.identityId, roomId,
+          label: String(request.displayName || "Add agent").trim().slice(0, 80) || "Add agent"
+        });
+      }
+      return { receipt, connection: this.view(row), duplicate: false, ...(mcpToken ? { mcpToken } : {}) };
     });
   }
   verify() {

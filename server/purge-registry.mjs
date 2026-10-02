@@ -96,6 +96,16 @@ const ROWS = [
     }
   },
   {
+    "table": "account_security_events",
+    "key": "account_id",
+    "action": "delete",
+    "match": {
+      "account": [
+        "account_id"
+      ]
+    }
+  },
+  {
     "table": "account_session_slots",
     "key": "account_id",
     "action": "delete",

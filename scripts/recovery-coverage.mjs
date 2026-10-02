@@ -236,6 +236,9 @@ export async function seedRecoveryCoverage(f) {
   f.store.db.prepare(`INSERT INTO account_recovery_codes(code_hash,account_id,used_at,created_at)
     VALUES(?,'recovery-account',NULL,?)`)
     .run("e".repeat(64), f.now());
+  f.store.db.prepare(`INSERT INTO account_security_events(id,account_id,type,at)
+    VALUES('recovery-security-event','recovery-account','account.password_revoked_unverified',?)`)
+    .run(f.now());
   // Seed one row per stitch table so the capture covers them (the stitch
   // slice created the tables but no fixture rows).
   const stitchAccount = f.emailProfile.accountId, stitchKey = `v1:${"a".repeat(64)}`;

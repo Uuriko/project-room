@@ -41,7 +41,8 @@ export function createMagicLinkMailer({ send = null, baseUrl = null } = {}) {
     },
     sendMagicLink: async ({ to, code, expiresAt, returnTo, purpose = "signin" } = {}) => {
       if (!configured) return { delivered: false, reason: "mail_not_configured" };
-      if (typeof to !== "string" || to.length === 0 || typeof code !== "string" || code.length === 0) {
+      if (typeof to !== "string" || to.length === 0) throw new Error("sendMagicLink requires a recipient");
+      if (purpose !== "signup-notice" && (typeof code !== "string" || code.length === 0)) {
         throw new Error("sendMagicLink requires a recipient and a code");
       }
       if (returnTo !== undefined && validateMagicReturnTo(returnTo) === null) throw new Error("Invalid magic-link return target");
@@ -75,14 +76,16 @@ export function validateMagicReturnTo(value) {
 }
 
 export function buildMagicLinkUrl({ baseUrl, to, code, returnTo, purpose = "signin" } = {}) {
-  if (!["signin", "password-reset"].includes(purpose)) throw new Error("Invalid email link purpose");
+  if (!["signin", "password-reset", "email-verify", "signup-notice"].includes(purpose)) throw new Error("Invalid email link purpose");
   if (returnTo !== undefined && validateMagicReturnTo(returnTo) === null) throw new Error("Invalid magic-link return target");
   if (typeof baseUrl !== "string" || !baseUrl) return null;
   const target = new URL(returnTo ?? "/", "https://return.invalid");
   const trusted = new URL(`${baseUrl.replace(/\/+$/, "")}/`);
   trusted.search = target.search;
   trusted.hash = target.hash;
-  trusted.searchParams.set(purpose === "password-reset" ? "reset" : "magic", code);
+  if (purpose === "signup-notice") trusted.searchParams.set("signin", "1");
+  else if (purpose === "email-verify") trusted.searchParams.set("verify", "email");
+  else trusted.searchParams.set(purpose === "password-reset" ? "reset" : "magic", code);
   trusted.searchParams.set("email", to);
   return trusted.href;
 }

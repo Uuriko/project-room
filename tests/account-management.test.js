@@ -47,14 +47,12 @@ async function passwordAccount(t, n) {
   const slot = f.store.createAccountSessionSlot();
   const res = await post(origin, "/api/auth/password/signup",
     { email, password: password(n), sessionToken: slot.token, sessionRevision: slot.session.sessionRevision });
-  assert.equal(res.status, 201);
-  const body = await res.json();
-  // QAS-702 (RC-2026-09-19-069): signup rotates the account-session slot, so
-  // the pre-signup token is dead — take the fresh token from the response cookie.
+  assert.equal(res.status, 202);
   const freshToken = /account_session=([^;]+)/.exec(res.headers.get("set-cookie") || "")?.[1];
   assert.ok(freshToken, "signup sets a fresh account_session cookie");
-  return { f, origin, accountId: body.account.id, email,
-    creds: { cookie: `account_session=${freshToken}`, csrf: f.store.accountSessionSlot(freshToken).csrf } };
+  const session = f.store.authenticateAccountSession(freshToken);
+  return { f, origin, accountId: session.account.id, email,
+    creds: { cookie: `account_session=${freshToken}`, csrf: session.csrf } };
 }
 
 const errBody = async res => (await res.json()).error;

@@ -314,6 +314,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   const resetRequestEmailLimiter = createRateLimiter({ capacity: 3, refillPerSecond: 3 / 3600 });
   const resetConsumeEmailLimiter = createRateLimiter({ capacity: 10, refillPerSecond: 10 / 3600 });
   const magicConsumeEmailLimiter = createRateLimiter({ capacity: 10, refillPerSecond: 10 / 3600 });
+  const signupEmailLimiter = createRateLimiter({ capacity: 3, refillPerSecond: 3 / 3600 });
   const magicEmailLimit = (limiter, normalized) => {
     const checked = limiter.check(rateHash(normalized));
     if (!checked.allowed) {
@@ -422,15 +423,16 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // so the subject attaches to the currently authenticated account. A
   // subject already owned by a different account 409s instead of silently
   // switching the browser into that account.
-  const linkGitHubSubject = ({ subject, email }) => {
+  const linkGitHubSubject = ({ subject, email, slotToken = null }) => {
     const logins = store.accountLogins;
     const owner = logins.findAccountByOAuth("github", subject);
     if (owner) {
+      if (email) logins.adoptVerifiedEmail(email, { preserveSlotToken: slotToken, preferredAccountId: owner });
       const existing = logins.listMethods(owner).find(m => m.type === "oauth" && m.provider === "github" && !m.disabled);
       return { accountId: owner, methodRef: existing ? existing.id : `github:${subject}` };
     }
     const normalized = email ? normalizeEmail(email) : null;
-    const emailOwner = normalized ? logins.findAccountByVerifiedEmail(normalized) : null;
+    const emailOwner = normalized ? logins.adoptVerifiedEmail(normalized, { preserveSlotToken: slotToken })?.accountId ?? null : null;
     if (emailOwner) {
       const method = logins.linkOAuthMethod(emailOwner, { provider: "github", subject, email: normalized });
       return { accountId: emailOwner, methodRef: method.id };
@@ -461,21 +463,23 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     }
     if (!session.account) throw new ServiceError(401, "account_session_required", "Sign in before connecting GitHub");
     const normalized = email ? normalizeEmail(email) : null;
+    if (normalized) store.accountLogins.adoptVerifiedEmail(normalized, { preserveSlotToken: slotToken, preferredAccountId: session.account.id });
     const method = store.accountLogins.linkOAuthMethod(session.account.id, { provider: "github", subject, email: normalized });
     return { accountId: session.account.id, methodRef: method.id };
   };
   // Google shared-account linking (RC-2026-09-17-017): mirrors the GitHub
   // find-or-provision order through the shared account-login model instead of
   // provisioning `google:<sub>` directly.
-  const linkGoogleSubject = ({ subject, email }) => {
+  const linkGoogleSubject = ({ subject, email, slotToken = null }) => {
     const logins = store.accountLogins;
     const owner = logins.findAccountByOAuth("google", subject);
     if (owner) {
+      if (email) logins.adoptVerifiedEmail(email, { preserveSlotToken: slotToken, preferredAccountId: owner });
       const existing = logins.listMethods(owner).find(m => m.type === "oauth" && m.provider === "google" && !m.disabled);
       return { accountId: owner, methodRef: existing ? existing.id : `google:${subject}` };
     }
     const normalized = email ? normalizeEmail(email) : null;
-    const emailOwner = normalized ? logins.findAccountByVerifiedEmail(normalized) : null;
+    const emailOwner = normalized ? logins.adoptVerifiedEmail(normalized, { preserveSlotToken: slotToken })?.accountId ?? null : null;
     if (emailOwner) {
       const method = logins.linkOAuthMethod(emailOwner, { provider: "google", subject, email: normalized });
       return { accountId: emailOwner, methodRef: method.id };
@@ -506,6 +510,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     }
     if (!session.account) throw new ServiceError(401, "account_session_required", "Sign in before connecting Google");
     const normalized = email ? normalizeEmail(email) : null;
+    if (normalized) store.accountLogins.adoptVerifiedEmail(normalized, { preserveSlotToken: slotToken, preferredAccountId: session.account.id });
     const method = store.accountLogins.linkOAuthMethod(session.account.id, { provider: "google", subject, email: normalized });
     return { accountId: session.account.id, methodRef: method.id };
   };
@@ -908,7 +913,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (req.method === "POST") {
           // Join traffic stays on the small JSON cap. A live identity secret
           // may stage one room file (base64, at most attachmentLimits.fileBytes).
-          const fileBody = typeof req.headers.authorization === "string" && req.headers.authorization.startsWith("Bearer pri_");
+          const fileBody = typeof req.headers.authorization === "string"
+            && (req.headers.authorization.startsWith("Bearer pri_") || req.headers.authorization.startsWith("Bearer rak_"));
           const text = await readText(req, fileBody ? mcpAttachmentBodyBytes : JSON_BODY_BYTES, () => new ServiceError(413, "too_large", "Request is too large"));
           return writeRoomMcpNode(req, res, url, { bodyText: text, roomMcp: hostedRoomMcp });
         }
@@ -1032,7 +1038,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           const email = typeof completed.claims.email === "string" ? completed.claims.email : null;
           const linked = completed.link
             ? linkGoogleSubjectToAccount({ subject, email, slotToken: completed.slotToken })
-            : linkGoogleSubject({ subject, email });
+            : linkGoogleSubject({ subject, email, slotToken: completed.slotToken });
           stage = "method_touch";
           store.accountLogins.touchMethodByOAuth("google", subject);
           const oldRoomToken = cookie(req, roomCookieName);
@@ -1153,7 +1159,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           catch (error) { if (error?.status === 401) return null; throw error; }
         })();
         if (alreadySignedIn?.account) {
-          const targetAccountId = store.accountLogins.findAccountByVerifiedEmail(normalized);
+          const targetAccountId = store.accountLogins.findAccountHoldingEmail(normalized);
           if (targetAccountId !== alreadySignedIn.account.id) {
             reject(409, "magic_account_mismatch",
               "This browser is already signed in to a different account; sign out before using a magic link for another email");
@@ -1164,26 +1170,28 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // The model burns the code window on failure (401 invalid_magic_code)
         // after 5 wrong attempts / 15-minute expiry / single use.
         store.accountLogins.consumeMagicCode({ email: normalized, code: data.code });
-        // Magic links prove email ownership, so find-or-create by verified
-        // email is safe. A password account on the same address links to the
-        // same account instead of forking a new one.
-        let accountId = store.accountLogins.findAccountByVerifiedEmail(normalized);
-        if (!accountId) {
-          const derived = `email:${createHash("sha256").update(normalized, "utf8").digest("hex")}`;
-          try { store.createAccount(derived, "magic-link"); }
-          catch (error) { if (!(error instanceof ServiceError) || error.status !== 409) throw error; }
-          accountId = derived;
-        }
-        let method = store.accountLogins.listMethods(accountId).find(row => row.type === "magic" && row.email === normalized);
-        if (!method) method = store.accountLogins.linkMagicMethod(accountId, { email: normalized });
-        store.accountLogins.touchMethod(accountId, method.id);
         const oldRoomToken = cookie(req, roomCookieName);
-        // QAS-702 (RC-2026-09-19-069): mint a fresh slot token on login and
-        // invalidate the pre-login one — see the Google path above.
-        const { token: freshSlotToken, session: loggedIn } = store.loginAccountSessionWithMethod(consumeToken, accountId, data.sessionRevision, {
-          method: { kind: "magic", ref: method.id },
-          revokeRoomToken: oldRoomToken && tokenPattern.test(oldRoomToken) ? oldRoomToken : null,
-          rotateSlot: true
+        // A consumed code proves the email. Attach to the verified owner, or
+        // to an unverified password account for that address (that password
+        // is removed). Otherwise provision email:<sha256>. Login shares this
+        // transaction so a failed sign-in does not remove the password.
+        const { token: freshSlotToken, session: loggedIn } = store.transaction(() => {
+          const adopted = store.accountLogins.adoptVerifiedEmail(normalized, { preserveSlotToken: consumeToken });
+          let accountId = adopted?.accountId ?? null;
+          if (!accountId) {
+            const derived = `email:${createHash("sha256").update(normalized, "utf8").digest("hex")}`;
+            try { store.createAccount(derived, "magic-link"); }
+            catch (error) { if (!(error instanceof ServiceError) || error.status !== 409) throw error; }
+            accountId = derived;
+          }
+          let method = store.accountLogins.listMethods(accountId).find(row => row.type === "magic" && row.email === normalized);
+          if (!method) method = store.accountLogins.linkMagicMethod(accountId, { email: normalized });
+          store.accountLogins.touchMethod(accountId, method.id);
+          return store.loginAccountSessionWithMethod(consumeToken, accountId, data.sessionRevision, {
+            method: { kind: "magic", ref: method.id },
+            revokeRoomToken: oldRoomToken && tokenPattern.test(oldRoomToken) ? oldRoomToken : null,
+            rotateSlot: true
+          });
         });
         setCookie(res, accountCookieName, freshSlotToken, Math.max(0, Math.floor((loggedIn.expiresAt - store.now()) / 1000)));
         return json(res, 201, sessionAccountView(loggedIn));
@@ -1264,6 +1272,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         setCookie(res, accountCookieName, freshSlotToken, Math.max(0, Math.floor((loggedIn.expiresAt - store.now()) / 1000)));
         return loggedIn;
       };
+      // ---- ID-SEC auth: verified email and uniform signup ----
+      const signupReply = () => ({ status: "check_email", mailConfigured: magicMailer.isConfigured() });
+      const deliverSignupMail = async fn => {
+        try { await fn(); } catch { /* Delivery does not change the signup response. */ }
+      };
       if (url.pathname === "/api/auth/password/signup") {
         if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
         checkOrigin(req, true);
@@ -1278,17 +1291,52 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!normalized) reject(422, "invalid_email", "A valid email address is required");
         const policy = checkPasswordPolicy(data.password);
         if (policy) reject(422, policy.code, policy.message);
-        if (store.accountLogins.findAccountByVerifiedEmail(normalized)) {
-          reject(409, "already_registered", "An account with that email already exists; sign in instead");
+        magicEmailLimit(signupEmailLimiter, normalized);
+        const verifier = hashPassword(data.password);
+        const mailConfigured = magicMailer.isConfigured();
+        const holding = store.accountLogins.findAccountHoldingEmail(normalized);
+        if (holding) {
+          if (mailConfigured) await deliverSignupMail(() => magicMailer.sendMagicLink({ to: normalized, purpose: "signup-notice" }));
+          return json(res, 202, signupReply());
         }
         const accountId = passwordAccountId(normalized);
-        store.createAccount(accountId, "password-signup");
-        const method = store.accountLogins.linkPasswordMethod(accountId, { email: normalized, verifier: hashPassword(data.password) });
-        store.accountLogins.linkMagicMethod(accountId, { email: normalized });
+        try { store.createAccount(accountId, "password-signup"); }
+        catch (error) {
+          if (!(error instanceof ServiceError) || error.status !== 409) throw error;
+          if (mailConfigured) await deliverSignupMail(() => magicMailer.sendMagicLink({ to: normalized, purpose: "signup-notice" }));
+          return json(res, 202, signupReply());
+        }
+        const method = store.accountLogins.linkPasswordMethod(accountId, { email: normalized, verifier });
         store.accountLogins.touchMethod(accountId, method.id);
-        const loggedIn = finishPasswordSlot(signupToken, accountId, data.sessionRevision, method.id);
-        return json(res, 201, sessionAccountView(loggedIn));
+        if (mailConfigured) {
+          const issued = store.accountLogins.issueEmailVerifyCode({ accountId, email: normalized });
+          await deliverSignupMail(() => magicMailer.sendMagicLink({
+            to: normalized, code: issued.code, expiresAt: issued.expiresAt, purpose: "email-verify"
+          }));
+        }
+        finishPasswordSlot(signupToken, accountId, data.sessionRevision, method.id);
+        return json(res, 202, signupReply());
       }
+      if (url.pathname === "/api/auth/email/verify") {
+        if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
+        checkOrigin(req, true);
+        rate(`email-verify:${remoteAddress}`, 10);
+        const slotToken = cookie(req, accountCookieName);
+        if (!slotToken) reject(401, "account_session_required", "Sign in before verifying your email");
+        let session;
+        try { session = store.authenticateAccountSession(slotToken); }
+        catch (error) {
+          if (error.status !== 401) throw error;
+          reject(401, "invalid_session", "That session is no longer valid; sign in again");
+        }
+        if (!session.account) reject(401, "account_session_required", "Sign in before verifying your email");
+        protectWrite(req, session, false);
+        const data = await body(req);
+        if (!exact(data, ["code"]) || typeof data.code !== "string") reject(422, "invalid_email_code", "A verification code is required");
+        const verified = store.accountLogins.consumeEmailVerifyCode({ accountId: session.account.id, code: data.code.trim() });
+        return json(res, 200, { status: "verified", email: verified.email });
+      }
+      // ---- end ID-SEC auth ----
       if (url.pathname === "/api/auth/password/login") {
         if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
         checkOrigin(req, true);
@@ -1302,7 +1350,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const normalized = normalizeEmail(data.email);
         if (!normalized) reject(422, "invalid_email", "A valid email address is required");
         rate(`password-login:${normalized}`, 10);
-        const accountId = store.accountLogins.findAccountByVerifiedEmail(normalized);
+        const accountId = store.accountLogins.findPasswordAccount(normalized);
         const verifier = accountId ? store.accountLogins.readPasswordVerifier(accountId) : null;
         // Unknown emails and verifier-less accounts verify against the dummy
         // so the response never reveals whether the email is registered.
@@ -1431,7 +1479,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           const subject = String(ghUser.id);
           const linked = pending.link
             ? linkGitHubSubjectToAccount({ subject, email: ghUser.email, slotToken: pending.sessionToken })
-            : linkGitHubSubject({ subject, email: ghUser.email });
+            : linkGitHubSubject({ subject, email: ghUser.email, slotToken: pending.sessionToken });
           store.accountLogins.touchMethodByOAuth("github", subject);
           // QAS-702 (RC-2026-09-19-069): mint a fresh slot token on login and
           // invalidate the pre-login one — see the Google path above.
@@ -2345,6 +2393,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const session = requireAccountSession();
         return json(res, 200, {
           methods: store.accountLogins.listMethods(session.account.id),
+          emailVerification: store.accountLogins.emailVerification(session.account.id),
           providers: {
             github: { configured: providerConfigured(() => github()) },
             google: { configured: providerConfigured(() => google()) },
@@ -2760,7 +2809,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           setCookie(res, roomCookieName, joined.token, Math.max(0, Math.floor((joined.expiresAt - store.now()) / 1000)));
           return json(res, 201, {
             identityId: redeemed.identityId,
-            identitySecret: redeemed.secret,
+            identitySecret: redeemed.mcpToken.credential,
+            mcpToken: redeemed.mcpToken,
             roomId: redeemed.roomId,
             memberId: redeemed.memberId,
             displayName: redeemed.displayName,
@@ -2769,8 +2819,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             sessionExpiresAt: joined.expiresAt,
             next: [
               "You are signed in — open the room below",
-              "Save identitySecret too — it is shown once and never again, for agent tooling",
-              `Authenticate: Authorization: Bearer <identitySecret> on /api/rooms/${redeemed.roomId}/…`,
+              "Save the room token — it expires in 30 days and is shown once",
+              "Use it as Authorization: Bearer on /mcp for this room",
               `Orient: GET /api/rooms/${redeemed.roomId}/activation-pack`,
               `Read the room: GET /api/rooms/${redeemed.roomId}?view=work`
             ]
@@ -2975,11 +3025,19 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }
         const registrationCredential = data.recoverable ? bearer(req) : undefined;
         if (data.recoverable && !registrationCredential) reject(401, "unauthenticated", "Saved registration credential required");
+        const slotToken = cookie(req, accountCookieName);
+        if (slotToken) {
+          try {
+            const mintSession = store.authenticateAccountSession(slotToken);
+            if (mintSession.account) store.accountLogins.assertEmailVerified(mintSession.account.id);
+          } catch (error) {
+            if (!(error instanceof ServiceError) || error.status !== 401) throw error;
+          }
+        }
         const created = store.identities.create(data.displayName, {
           secret: registrationCredential,
           anonymous: { address: String(remoteAddress ?? ""), proof: data.proof },
         });
-        const slotToken = cookie(req, accountCookieName);
         let mintAccountId = null;
         if (slotToken) {
           try { mintAccountId = store.authenticateAccountSession(slotToken).account?.id ?? null; }

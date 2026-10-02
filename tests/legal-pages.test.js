@@ -65,7 +65,9 @@ async function signup(origin, store, email, password) {
     body: JSON.stringify({ email, password, sessionToken: slot.token, sessionRevision: slot.session.sessionRevision }),
   });
   const body = JSON.parse(res.text);
-  return { status: res.status, body, cookie: cookieOf(res) };
+  const cookie = cookieOf(res);
+  const session = cookie ? store.authenticateAccountSession(cookie) : null;
+  return { status: res.status, body, cookie, account: session?.account ?? null, csrf: session?.csrf ?? null };
 }
 
 async function login(origin, store, email, password) {
@@ -125,14 +127,12 @@ test("legal pages are cacheable, indexed, and listed in the sitemap", async t =>
 test("signup records the terms version and a later version must be accepted", async t => {
   const { origin, store } = await serve(t, { operator: "" });
   const created = await signup(origin, store, OPERATOR_EMAIL, OPERATOR_PASSWORD);
-  assert.equal(created.status, 201);
-  assert.equal(created.body.terms.version, TERMS_VERSION);
-  assert.equal(created.body.terms.acceptedVersion, TERMS_VERSION);
-  assert.equal(created.body.terms.required, false);
-  const row = store.db.prepare("SELECT terms_version, accepted_at FROM account_terms WHERE account_id=?").get(created.body.account.id);
+  assert.equal(created.status, 202);
+  assert.equal(created.body.status, "check_email");
+  const row = store.db.prepare("SELECT terms_version, accepted_at FROM account_terms WHERE account_id=?").get(created.account.id);
   assert.equal(row.terms_version, TERMS_VERSION);
   assert.equal(typeof row.accepted_at, "number");
-  store.db.prepare("UPDATE account_terms SET terms_version=? WHERE account_id=?").run("2020-01-01", created.body.account.id);
+  store.db.prepare("UPDATE account_terms SET terms_version=? WHERE account_id=?").run("2020-01-01", created.account.id);
   const again = await login(origin, store, OPERATOR_EMAIL, OPERATOR_PASSWORD);
   assert.equal(again.status, 200);
   assert.equal(again.body.terms.required, true);
@@ -230,19 +230,19 @@ test("unpublish removes a room and a receipt from public reads and the sitemap",
   assert.match((await raw(origin, "/api/public/rooms/directory")).text, /commons/);
 
   const stranger = await signup(origin, store, OTHER_EMAIL, OTHER_PASSWORD);
-  assert.equal(stranger.status, 201);
+  assert.equal(stranger.status, 202);
   const denied = await raw(origin, "/api/operator/unpublish", {
     method: "POST",
-    headers: { "Content-Type": "application/json", Cookie: `account_session=${stranger.cookie}`, "X-CSRF-Token": stranger.body.csrf },
+    headers: { "Content-Type": "application/json", Cookie: `account_session=${stranger.cookie}`, "X-CSRF-Token": stranger.csrf },
     body: JSON.stringify({ kind: "receipt", id: claimId }),
   });
   assert.equal(denied.status, 403);
 
   const operator = await signup(origin, store, OPERATOR_EMAIL, OPERATOR_PASSWORD);
-  assert.equal(operator.body.account.id, operatorAccountId);
+  assert.equal(operator.account.id, operatorAccountId);
   const hideReceipt = await raw(origin, "/api/operator/unpublish", {
     method: "POST",
-    headers: { "Content-Type": "application/json", Cookie: `account_session=${operator.cookie}`, "X-CSRF-Token": operator.body.csrf },
+    headers: { "Content-Type": "application/json", Cookie: `account_session=${operator.cookie}`, "X-CSRF-Token": operator.csrf },
     body: JSON.stringify({ kind: "receipt", id: claimId }),
   });
   assert.equal(hideReceipt.status, 200);
@@ -255,7 +255,7 @@ test("unpublish removes a room and a receipt from public reads and the sitemap",
 
   const hideRoom = await raw(origin, "/api/operator/unpublish", {
     method: "POST",
-    headers: { "Content-Type": "application/json", Cookie: `account_session=${operator.cookie}`, "X-CSRF-Token": operator.body.csrf },
+    headers: { "Content-Type": "application/json", Cookie: `account_session=${operator.cookie}`, "X-CSRF-Token": operator.csrf },
     body: JSON.stringify({ kind: "room", id: "commons" }),
   });
   assert.equal(hideRoom.status, 200);
@@ -275,7 +275,7 @@ test("unpublish is refused when no operator account is configured", async t => {
   const created = await signup(origin, store, OPERATOR_EMAIL, OPERATOR_PASSWORD);
   const res = await raw(origin, "/api/operator/unpublish", {
     method: "POST",
-    headers: { "Content-Type": "application/json", Cookie: `account_session=${created.cookie}`, "X-CSRF-Token": created.body.csrf },
+    headers: { "Content-Type": "application/json", Cookie: `account_session=${created.cookie}`, "X-CSRF-Token": created.csrf },
     body: JSON.stringify({ kind: "room", id: "commons" }),
   });
   assert.equal(res.status, 403);

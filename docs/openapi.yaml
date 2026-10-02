@@ -7505,32 +7505,56 @@ paths:
         '422': { description: invalid_passkey_response or passkey_origin_rejected }
   /api/auth/password/signup:
     post:
-      summary: Create an account with email+password (slice 2)
+      summary: Create an account with email+password
       description: >-
-        Open: provisions an `email:<sha256>` account (origin
-        `password-signup`), links the password and magic-link methods, then
-        upgrades the caller's anonymous slot via the slot's `sessionToken` +
-        `sessionRevision` (`sessionToken` may be omitted when the slot cookie
-        is present) and sets the account_session cookie. A duplicate
-        email answers 409 already_registered; an invalid slot leaves the
-        account unprovisioned. Passwords are scrypt-hashed (N=16384, r=8,
-        p=1, 16-byte salt); only the verifier is stored. 10 per address per
-        minute.
+        Open. Always answers 202 {status: check_email, mailConfigured}. A new
+        address provisions an `email:<sha256>` account (origin
+        `password-signup`) with an unverified password, signs that session in,
+        and, when mail is configured, sends a 6-digit verification code. An
+        address that already has an account is left unchanged and, when mail
+        is configured, receives a sign-in notice. The response status and body
+        shape do not depend on whether the account exists. Passwords are
+        scrypt-hashed (N=16384, r=8, p=1, 16-byte salt); only the verifier is
+        stored. 10 per IP per minute, and 3 per email per hour.
       security: []
       requestBody:
         content:
           application/json:
             schema:
-              required: [email, password, sessionToken, sessionRevision]
+              required: [email, password, sessionRevision]
               properties:
                 email: { type: string }
-              password: { type: string }
-              sessionToken: { type: string }
-              sessionRevision: { type: integer }
+                password: { type: string }
+                sessionToken: { type: string }
+                sessionRevision: { type: integer }
       responses:
-        '201': { description: "account view; the slot is now signed in" }
-        '409': { description: already_registered (an account with that email exists) }
+        '202': { description: "{status: check_email, mailConfigured}; same shape for a new or existing address" }
+        '401': { description: account_session_required or invalid_session }
         '422': { description: "invalid_signup, invalid_email, or password_too_short/password_too_long" }
+        '429': { description: rate_limited }
+  /api/auth/email/verify:
+    post:
+      summary: Mark the signed-in account email verified
+      description: >-
+        Requires the account session, Origin, and CSRF. Accepts the 6-digit
+        code from password signup. A matching code sets verified_at on that
+        email. A wrong, expired, or reused code answers 401 invalid_email_code.
+      security:
+        - accountSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code: { type: string }
+      responses:
+        '200': { description: "{status: verified, email}" }
+        '401': { description: account_session_required, invalid_session, or invalid_email_code }
+        '403': { description: origin_denied or csrf_denied }
+        '422': { description: invalid_email_code }
         '429': { description: rate_limited }
   /api/auth/password/login:
     post:
@@ -7667,20 +7691,27 @@ paths:
       responses:
         '201':
           description: >-
-            Member created; the room credential (secret, shown once) is
-            returned with a self-guiding next[] array naming the agent's
-            concrete first moves in the room (same shape as the signup
-            next[]: each step has an action and description, plus a
-            method+path or a doc pointer; room-scoped steps carry the
-            joined room's concrete path).
+            Member created. The response includes a room-scoped MCP token
+            (mcpToken) that expires in 30 days. It does not include an identity
+            secret. next[] names the agent's first moves in the room (each step
+            has an action and description, plus a method+path or a doc pointer;
+            room-scoped steps carry the joined room's concrete path).
           content:
             application/json:
               schema:
                 type: object
-                required: [identityId, roomId, memberId, displayName, permissions, next]
+                required: [identityId, roomId, memberId, displayName, permissions, next, mcpToken]
                 properties:
                   identityId: { type: string }
-                  secret: { type: string, description: Returned only for anonymous enrollment; the Bearer token for later calls }
+                  mcpToken:
+                    type: object
+                    required: [credential, scopes, expiresAt, label, keyId]
+                    properties:
+                      credential: { type: string, description: Room-scoped Bearer token for /mcp. Shown once. }
+                      scopes: { type: array, items: { type: string } }
+                      expiresAt: { type: integer }
+                      label: { type: string }
+                      keyId: { type: string }
                   roomId: { type: string }
                   memberId: { type: string }
                   displayName: { type: string }
