@@ -224,6 +224,7 @@ export class ProjectRoom extends DurableObject {
   // The poll is conditional, capped, and waits out a GitHub 403 or 429.
   async refreshClaimPullRequests() {
     if (this.paused) return { checked: 0, updated: 0 };
+    await yieldToQueuedRequests();
     return syncClaimPullRequests(this.store, { env: this.env });
   }
   // Scans only disposable web-fetch/research logs. The deletion flag is
