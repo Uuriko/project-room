@@ -6,7 +6,7 @@
 // check (assertWebhookHostDnsPublic) touches. Malformed inputs throw
 // WebhookError.
 import { promises as dns } from "node:dns";
-import { parseIpv4, parseIpv6, isBlockedIp, isBlockedIpv6Value } from "./ip-blocklist.mjs";
+import { parseIpv4, parseIpv6, isBlockedIp, isBlockedIpv6Value, isWorkersRuntime } from "./ip-blocklist.mjs";
 
 class WebhookError extends Error { constructor(code, message) { super(message); this.name = "WebhookError"; this.code = code; } }
 const fail = (code, message) => { throw new WebhookError(code, message); };
@@ -32,6 +32,46 @@ const URL_PATTERN = /^https:\/\/[^\s/$.?#].[^\s]*$/i;
 
 const stripBrackets = host => (host.startsWith("[") && host.endsWith("]") ? host.slice(1, -1) : host);
 
+// Hostnames that are internal by name. On Cloudflare Workers there is no
+// DNS pin, so these stay refused even when resolution is skipped. A
+// trailing dot is already stripped by the caller.
+const METADATA_HOSTS = new Set([
+  "metadata",
+  "metadata.google.internal",
+  "metadata.goog",
+  "metadata.azure.com",
+  "instance-data",
+  "instance-data.ec2.internal",
+]);
+const METADATA_SUFFIXES = ["metadata.google.internal", "metadata.goog"];
+
+function isMetadataHostname(hostname) {
+  const name = String(hostname ?? "").toLowerCase().replace(/\.$/, "").replace(/^\[|\]$/g, "");
+  if (!name) return false;
+  if (METADATA_HOSTS.has(name)) return true;
+  return METADATA_SUFFIXES.some(suffix => name.endsWith(`.${suffix}`));
+}
+
+// True when a DNS answer is not a vetted public IP. Unparseable answers
+// fail closed: a record we cannot classify is not something we dial.
+function answerIsBlocked(answer) {
+  if (typeof answer !== "string" || answer.length === 0) return true;
+  if (parseIpv4(answer) !== null) return isBlockedIp(answer);
+  const v6 = parseIpv6(answer);
+  return v6 === null || isBlockedIpv6Value(v6);
+}
+
+function normalizeLookup(records) {
+  if (!records) return [];
+  const list = Array.isArray(records) ? records : [records];
+  const answers = [];
+  for (const record of list) {
+    if (typeof record === "string") answers.push(record);
+    else if (record && typeof record.address === "string") answers.push(record.address);
+  }
+  return answers;
+}
+
 // Reject hostnames that can only be internal. hostname comes from the
 // WHATWG parser (already lowercased); a trailing dot is stripped so
 // "localhost." cannot dodge the name check.
@@ -40,6 +80,9 @@ function assertPublicHost(hostname) {
   if (!name) fail("invalid_webhook", "webhook url must include a hostname");
   if (name === "localhost" || name.endsWith(".localhost")) {
     fail("invalid_webhook", "webhook url must not target localhost");
+  }
+  if (isMetadataHostname(name)) {
+    fail("invalid_webhook", "webhook url must not target a private or reserved metadata hostname");
   }
   if (isBlockedIp(name)) {
     fail("invalid_webhook", "webhook url must not target a private or reserved IP address");
@@ -75,30 +118,84 @@ export function validateWebhookUrl(url) {
 // already screened by validateWebhookUrl; their own address is the pinned
 // set. A name with no usable records is rejected (fail closed). The
 // resolver is injectable so tests never touch the network.
-export async function resolveWebhookTarget(url, { resolve4 = dns.resolve4, resolve6 = dns.resolve6 } = {}) {
+//
+// On Node the default resolver is dns.lookup({ all: true }), the same
+// getaddrinfo path the socket would use (it honours hosts-file entries
+// that resolve4/resolve6 never see). Callers that pass resolve4/resolve6
+// keep that older injection. On Workers, DNS is skipped: the hostname
+// denylist above still runs, and the platform egress sandbox is the
+// backstop. An explicit resolver is still honoured so a test can pin
+// answers without pretending to be Workers.
+export async function resolveWebhookTarget(url, options = {}) {
   let host;
   try { host = new URL(validateWebhookUrl(url)).hostname.toLowerCase().replace(/\.$/, ""); }
   catch (error) { throw error; }
   if (host.startsWith("[") || parseIpv4(host) !== null) {
     return { url, addresses: [stripBrackets(host)] };
   }
-  const settled = await Promise.allSettled([resolve4(host), resolve6(host)]);
-  const answers = settled.flatMap(result => (result.status === "fulfilled" ? result.value : []));
+  const explicit4 = typeof options.resolve4 === "function";
+  const explicit6 = typeof options.resolve6 === "function";
+  const explicitLookup = typeof options.lookup === "function";
+  if (!explicit4 && !explicit6 && !explicitLookup && isWorkersRuntime()) {
+    return { url, addresses: [] };
+  }
+  let answers;
+  if (explicitLookup || (!explicit4 && !explicit6)) {
+    const lookup = explicitLookup ? options.lookup : dns.lookup;
+    try {
+      answers = normalizeLookup(await lookup(host, { all: true, verbatim: true }));
+    } catch {
+      answers = [];
+    }
+  } else {
+    const resolve4 = explicit4 ? options.resolve4 : async () => [];
+    const resolve6 = explicit6 ? options.resolve6 : async () => [];
+    const settled = await Promise.allSettled([resolve4(host), resolve6(host)]);
+    answers = settled.flatMap(result => (result.status === "fulfilled" ? result.value : []));
+  }
   if (answers.length === 0) fail("invalid_webhook", "webhook hostname does not resolve to a public address");
   for (const answer of answers) {
-    const v4 = parseIpv4(answer);
-    if (v4 !== null) {
-      if (isBlockedIp(answer)) fail("invalid_webhook", "webhook hostname resolves to a private or reserved IP address");
-      continue;
-    }
-    // Fail closed on anything unparseable — a DNS answer that is not an IP
-    // literal is not something we can vet.
-    const v6 = parseIpv6(answer);
-    if (v6 === null || isBlockedIpv6Value(v6)) {
+    if (answerIsBlocked(answer)) {
       fail("invalid_webhook", "webhook hostname resolves to a private or reserved IP address");
     }
   }
   return { url, addresses: answers };
+}
+
+// Subscribe-time gate (QA2 finding P2-8). validateWebhookUrl already
+// refuses IP literals, localhost, and metadata names. On Node, also
+// dns.lookup({ all: true }) and refuse when any address is loopback,
+// RFC1918, CGNAT, link-local, unique-local, or an IPv4-mapped form of
+// those. Callers await this before opening the write transaction. A name
+// that does not resolve is not treated as public; delivery resolves again
+// and will not dial it. On Workers, skip the lookup — the hostname
+// denylist still applies.
+export async function assertAgentWebhookUrlPublic(url, { lookup = dns.lookup } = {}) {
+  let host;
+  try {
+    validateWebhookUrl(url);
+    host = new URL(url).hostname.toLowerCase().replace(/\.$/, "");
+  } catch (error) {
+    if (error?.name === "WebhookError" && /metadata hostname/.test(error.message ?? "")) {
+      fail("webhook_url_not_public", error.message);
+    }
+    throw error;
+  }
+  if (isWorkersRuntime()) return url;
+  const bare = stripBrackets(host);
+  if (parseIpv4(bare) !== null || parseIpv6(bare) !== null) return url;
+  let records;
+  try {
+    records = await lookup(bare, { all: true, verbatim: true });
+  } catch {
+    return url;
+  }
+  for (const answer of normalizeLookup(records)) {
+    if (answerIsBlocked(answer)) {
+      fail("webhook_url_not_public", "webhook hostname resolves to a private or reserved IP address");
+    }
+  }
+  return url;
 }
 
 // DNS-rebinding companion for callers that can await: run the synchronous

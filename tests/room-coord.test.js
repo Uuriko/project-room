@@ -18,7 +18,7 @@ async function fixture(t) {
   store.initialize(initialRoom('commons'));
   const ownerKey = store.issueAccessKey('commons', 'owner');
   store.command(ownerKey, 'commons', { id: 'add-reviewer', type: 'member.added',
-    data: { memberId: 'reviewer', displayName: 'Reviewer', kind: 'human', permissions: [] } });
+    data: { memberId: 'reviewer', displayName: 'Reviewer', kind: 'human', permissions: ['accept_work', 'complete_work'] } });
   const peerKey = store.issueAccessKey('commons', 'reviewer');
   const server = createRoomServer({ store });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -181,7 +181,10 @@ test('handoff moves the lease to the receiver and leaves an actionable handoff p
   assert.match(body, /\nNext: wire the guard into CI(\n|$)/);
   assert.match(body, /\nFiles: client\/room-coord\.mjs(\n|$)/);
   assert.equal((await peer.updateWorkItem('baton', { state: 'in_progress' })).state, 'in_progress');
-  await assert.rejects(owner.releaseWorkItem('baton'), error => error.status === 403);
+  const released = await owner.releaseWorkItem('baton', { reason: 'owner closed the lane' });
+  assert.equal(released.state, 'unclaimed');
+  assert.equal(released.history.at(-1).agentId, 'owner');
+  assert.equal(released.history.at(-1).note, 'owner closed the lane');
 });
 
 test('status shows live, mine, expiring and overlapping claims plus the land queue, and the digest cites each', async t => {

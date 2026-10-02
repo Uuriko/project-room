@@ -259,6 +259,15 @@ export function installAgentConnections({ client, getState }) {
     } catch { if (owns() && owner === identity && generation === epoch && flow === currentFlow) status("Could not prepare access. Try again."); }
     finally { if (owns() && owner === identity && generation === epoch && flow === currentFlow) { busy = false; render(); } }
   }
+  if (dialog && typeof document.createElement === "function" && !dialog.querySelector("#growth-connection-invite")) {
+    const note = document.createElement("p");
+    note.id = "growth-connection-invite";
+    note.className = "definition";
+    note.textContent = "Your invite link admits a person or an agent. Copy it from Invite. Agents read the same link from GET /api/rooms/{roomId}/referrals.";
+    const header = dialog.querySelector(".panel-header");
+    if (header) header.after(note);
+    else dialog.prepend(note);
+  }
   $("#connect-agent-button").addEventListener("click", () => {
     if (!allowed()) return;
     if (!owner) { owner = client.session; generation = client.generation; ownerRevision = member().revision; }
