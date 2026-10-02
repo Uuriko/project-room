@@ -23,7 +23,7 @@ import { isEdgeDoorUrl, EDGE_DOOR_HOSTS, rewriteRoomApiPrefix, isHealthAliasPath
 import { routeInboundEmail, emailRoutingLimits, emailRoutingRejections, connectionAddresses, routingKey } from '../server/email-routing-inbound.mjs';
 import { emailConnection } from '../server/email-envelope.mjs';
 import { isEmailProfile } from '../server/channel-connection.mjs';
-import { runLiveStoreRetention } from '../server/retention-run.mjs';
+import { RETENTION_TABLES, runLiveStoreRetention } from '../server/retention-run.mjs';
 import { syncClaimPullRequests } from '../server/claim-pr-sync.mjs';
 import { CRON_JOB_BUDGET_MS, HEARTBEAT_STORAGE_KEY, applyOutcomes, jobHealthResponse, jobHealthUnavailable, jobHealthView, runCronJobs } from './job-heartbeat.mjs';
 import { SOURCE_REVISION, BUILD_ID } from '../server/version.mjs';
@@ -43,6 +43,7 @@ function yieldToQueuedRequests() {
 function cronDeadline() {
   return Date.now() + CRON_JOB_BUDGET_MS;
 }
+const RETENTION_CURSOR_KEY = 'retention-table-index';
 
 // The DO transport may erase the original error type. Report availability,
 // without exposing backend details or claiming that a mutation rolled back.
@@ -287,12 +288,25 @@ export class ProjectRoom extends DurableObject {
   async planRetention() {
     if (this.paused) return { dryRun: true, deleted: 0, skipped: "paused" };
     await yieldToQueuedRequests();
+    const stored = await this.ctx.storage.get(RETENTION_CURSOR_KEY);
+    const tableIndex = Number.isSafeInteger(stored) ? stored : 0;
     const receipt = runLiveStoreRetention({ store: this.store, env: this.env,
-      now: new Date().toISOString(), record: plan => { this.lastRetentionPlan = plan; } });
-    // Applied on every retention tick, not behind the disposable-log deletion
-    // flag. Delivered and dead-letter webhook rows are a cache; pending and
-    // failed rows stay until dispatch finishes them.
-    const webhookDeliveries = this.store.agentPlugin.pruneWebhookDeliveries();
+      now: new Date().toISOString(), tableIndex, deadline: cronDeadline(),
+      record: plan => { this.lastRetentionPlan = plan; } });
+    await this.ctx.storage.put(RETENTION_CURSOR_KEY, (tableIndex + 1) % RETENTION_TABLES.length);
+    // Delivered and dead-letter webhook rows are a cache. Pending and failed
+    // rows stay until dispatch finishes them.
+    let webhookDeliveries = { deleted: 0 };
+    try {
+      webhookDeliveries = this.store.agentPlugin.pruneWebhookDeliveries();
+    } finally {
+      console.info(JSON.stringify({
+        event: 'room.retention', table: receipt.table, deleted: receipt.deleted,
+        dryRun: receipt.dryRun ? 1 : 0, budgetExceeded: receipt.budgetExceeded ? 1 : 0,
+        eligible: receipt.categories?.[receipt.table]?.eligible ?? 0,
+        webhookDeleted: webhookDeliveries?.deleted ?? 0
+      }));
+    }
     return { ...receipt, webhookDeliveries };
   }
   // E1 — RPC: hand an accepted, already-routed message to the importer. Needs
