@@ -121,9 +121,11 @@ const errorCode = async (response, status, code) => {
 test("HTTP: only the signed-in owner pauses another member; a member pauses itself", async t => {
   const f = await httpFixture(t);
   const owner = await f.login("owner"), guest = await f.login("guest");
-  await errorCode(await f.pause(guest, "producer"), 403, "owner_required");
-  await errorCode(await f.pause(f.keys.producer, "reviewer"), 403, "owner_required");
-  await errorCode(await f.inspect(guest, "producer"), 403, "owner_required");
+  const guestDenied = await errorCode(await f.pause(guest, "producer"), 403, "wake_pause_not_permitted");
+  assert.equal(guestDenied.reason, "wake_pause_not_permitted");
+  const peerDenied = await errorCode(await f.pause(f.keys.producer, "reviewer"), 403, "wake_pause_not_permitted");
+  assert.equal(peerDenied.reason, "wake_pause_not_permitted");
+  await errorCode(await f.inspect(guest, "producer"), 403, "wake_pause_not_permitted");
   await errorCode(await f.pause(owner, "nobody"), 404, "member_not_found");
   const self = await f.pause(f.keys.producer, "producer", "own maintenance");
   assert.equal(self.status, 201);
@@ -147,6 +149,20 @@ test("HTTP: only the signed-in owner pauses another member; a member pauses itse
   assert.equal("paused" in guestBody, false);
   assert.equal(f.store.wakeQueue.pauseStatus("commons", "reviewer").reason, "inspecting");
   assert.equal(f.store.wakeQueue.pauseStatus("commons", "guest"), null);
+  const bearerOwner = await f.pause(f.keys.owner, "guest", "bearer owner");
+  assert.equal(bearerOwner.status, 201);
+  assert.equal((await bearerOwner.json()).pause.reason, "bearer owner");
+  const reviewer = f.store.room("commons").state.members.reviewer;
+  f.store.command(f.keys.owner, "commons", { id: randomUUID(), type: T.MEMBER_ACCESS_CHANGED, data: {
+    memberId: "reviewer", expectedMemberRevision: reviewer.revision,
+    permissions: [...new Set([...(reviewer.permissions ?? []), "manage_members"])], active: true,
+  } });
+  const delegated = await f.pause(f.keys.reviewer, "producer", "delegate");
+  assert.equal(delegated.status, 201);
+  const delegatedBody = await delegated.json();
+  assert.ok(Array.isArray(delegatedBody.paused));
+  const stillDenied = await errorCode(await f.pause(f.keys.producer, "guest"), 403, "wake_pause_not_permitted");
+  assert.equal(stillDenied.reason, "wake_pause_not_permitted");
 });
 
 test("HTTP: a paused agent's queued wake does not start until the owner resumes it", async t => {
