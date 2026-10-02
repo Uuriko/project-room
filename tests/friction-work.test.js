@@ -8,7 +8,6 @@ import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { deriveNotifications } from "../server/notifications.mjs";
-import { getTemplate } from "../server/work-templates.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
 
 function setup() {
@@ -25,12 +24,6 @@ function setup() {
   return { directory, store, send, ownerKey, reporterKey,
     cleanup: () => { store.close(); rmSync(directory, { recursive: true, force: true }); } };
 }
-
-test("friction template exists with the friction label (RC-2026-09-23)", () => {
-  const template = getTemplate("friction");
-  assert.equal(template.templateId, "friction");
-  assert.ok(template.fields.labels.includes("friction"));
-});
 
 test("work.proposed stores labels; friction label is machine-readable (RC-2026-09-23)", () => {
   const { send, reporterKey, store, cleanup } = setup();

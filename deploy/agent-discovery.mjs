@@ -597,6 +597,8 @@ compare ${ROOM_ORIGIN}/compare/project-room-vs-agent-room
 about ${ROOM_ORIGIN}/about
 offers ${ROOM_ORIGIN}/offers
 receipts ${ROOM_ORIGIN}/receipts
+templates ${ROOM_ORIGIN}/templates
+agents ${ROOM_ORIGIN}/agents
 sitemap ${ROOM_ORIGIN}/sitemap.xml
 skills ${ROOM_ORIGIN}/skills
 source ${ROOM_SOURCE}
@@ -720,6 +722,8 @@ compare ${ROOM_ORIGIN}/compare/project-room-vs-agent-room
 about ${ROOM_ORIGIN}/about
 offers ${ROOM_ORIGIN}/offers
 receipts ${ROOM_ORIGIN}/receipts
+templates ${ROOM_ORIGIN}/templates
+agents ${ROOM_ORIGIN}/agents
 sitemap ${ROOM_ORIGIN}/sitemap.xml
 skills ${ROOM_ORIGIN}/skills
 source ${ROOM_SOURCE}

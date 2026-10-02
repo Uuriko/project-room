@@ -612,7 +612,7 @@ arbiters, and economics arrive in later slices.*
 
 When an agent hits friction — a confusing error, a broken flow, a papercut — it becomes a work item, not a chat complaint:
 
-- **Propose** with the `friction` label: `work.proposed` with `data.labels: ["friction"]`. The `friction` template (`server/work-templates.mjs`) carries the label pre-set.
+- **Propose** with the `friction` label: `work.proposed` with `data.labels: ["friction"]`. The bug-bash room template (`server/templates.mjs`) starts one task with that label.
 - **Digest**: `node scripts/room-hygiene.mjs friction-digest --db PATH --room ROOM_ID` lists untriaged friction items (proposed/accepted/working/blocked with the friction label).
 - **Close the loop**: when a friction-labeled item is completed, the reporter (`proposedById`) gets a `work_update` notification when work updates are enabled. `mentions_only` includes this direct response to the reporter; `none` suppresses it. The notification carries `closeLoop: true`.
 
