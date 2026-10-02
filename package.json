@@ -12,6 +12,7 @@
     "test:browser:ci": "node scripts/browser-ci.mjs",
     "check": "node scripts/check.mjs",
     "lint": "node scripts/lint.mjs && node scripts/reachability.mjs --check",
+    "analytics:backfill": "node scripts/analytics-backfill.mjs",
     "provision": "node scripts/provision.mjs",
     "audit:invitations": "node scripts/audit-invitations.mjs",
     "test:handoff": "node --test tests/agent-handoff.test.js",
