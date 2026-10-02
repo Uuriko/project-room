@@ -161,6 +161,48 @@ test('an identical claim retry returns its original committed result after relea
   assert.equal(f.item('first').claim.status, 'released', 'retry does not restore authority');
 });
 
+test('projection acquire, heartbeat, handoff, and supersede show up on the work-claims board', t => {
+  const f = fixture(t);
+  f.propose('lane');
+  f.mutate('a', T.CLAIM_ACQUIRED, 'lane', {
+    ...f.scope(['src/app.js']),
+    pullRequests: ['https://github.com/Uuriko/project-room/pull/4'],
+    blocks: [{ path: 'src/app.js', block: 'header' }]
+  });
+  const acquired = f.store.workClaims.get('commons', 'lane');
+  assert.equal(acquired.state, 'claimed');
+  assert.equal(acquired.owner, 'a');
+  assert.equal(acquired.repo, 'test/repo');
+  assert.equal(acquired.branch, 'draft');
+  assert.deepEqual(acquired.fileBlocks, { 'src/app.js': 'header' });
+  assert.equal(acquired.pullRequests[0].url, 'https://github.com/Uuriko/project-room/pull/4');
+  const before = Date.parse(acquired.leaseExpiresAt);
+  f.advance(1000);
+  f.mutate('a', T.CLAIM_RENEWED, 'lane', { expiresAt: new Date(Date.now() + 120000).toISOString() });
+  const renewed = f.store.workClaims.get('commons', 'lane');
+  assert.ok(Date.parse(renewed.leaseExpiresAt) > before);
+  f.mutate('a', T.WORK_HANDOFF_RECORDED, 'lane', {
+    doneSummary: 'Header is drafted', nextAction: 'Review the header', limitReason: 'Context is full'
+  });
+  const handed = f.store.workClaims.get('commons', 'lane');
+  assert.equal(handed.chain.at(-1).kind, 'handoff');
+  assert.equal(handed.chain.at(-1).targetId, 'lane-next');
+  const successor = f.store.workClaims.get('commons', 'lane-next');
+  assert.deepEqual(successor.dependsOn, ['lane']);
+  assert.equal(successor.title, 'Review the header');
+  f.store.command(f.keys.owner, 'commons', command(T.WORK_PROPOSED, {
+    workItemId: 'lane-b', title: 'Replacement', definitionOfDone: 'Versioned result',
+    accountableMemberId: 'owner', mode: 'write', independentVerificationRequired: false, ownerDecisionRequired: false
+  }));
+  f.store.command(f.keys.owner, 'commons', command(T.WORK_SUPERSEDED, {
+    workItemId: 'lane', expectedRevision: f.item('lane').revision, supersededByWorkItemId: 'lane-b', reason: 'Direction changed'
+  }));
+  const superseded = f.store.workClaims.get('commons', 'lane');
+  assert.equal(superseded.supersededBy, 'lane-b');
+  assert.equal(superseded.chain.at(-1).kind, 'supersede');
+  assert.deepEqual(f.store.workClaims.get('commons', 'lane-b').dependsOn, ['lane']);
+});
+
 test('historical overlapping reservations still initialize, replay and reopen unchanged', t => {
   const f = fixture(t);
   const roomId = 'legacy';

@@ -3939,6 +3939,38 @@ paths:
         '403': { description: work_claims_not_permitted }
         '409': { description: work_claim_exists or work_board_full }
         '422': { description: invalid_claim_input }
+  /api/rooms/{roomId}/work-claims/config:
+    get:
+      summary: Read the room's work-claim caps
+      description: |
+        Returns the room's open-claim caps. maxMemberOpenClaims defaults to
+        20. API keys need `rooms:read`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200': { description: Caps for this room }
+        '401': { description: unauthenticated }
+    post:
+      summary: Set the per-member open claim cap
+      description: |
+        The room owner sets maxMemberOpenClaims, an integer from 1 to 10000.
+        The next claim past that cap is 409 too_many_open_claims. Anyone else
+        gets 403 work_claims_not_permitted. API keys need `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [maxMemberOpenClaims]
+              properties:
+                maxMemberOpenClaims: { type: integer, minimum: 1, maximum: 10000 }
+      responses:
+        '200': { description: The saved caps }
+        '403': { description: work_claims_not_permitted }
+        '422': { description: invalid_claim_input }
   /api/rooms/{roomId}/work-claims/status:
     get:
       summary: Live revision compared with GitHub main
@@ -4978,12 +5010,11 @@ paths:
       description: |
         Owner-only; starts a fresh lease window from now, extending
         leaseExpiresAt by the lease duration (explicit leaseHours, else the
-        room's default). Lease-renewal check-in: the owner must cite their
-        own public progress message (progressMessageId), posted in this room
-        after the current lease window began — renewals are discussed in the
-        channel, never silent extensions. Refused on claims without a lease
-        and on lapsed leases (claim again instead). API keys need
-        `rooms:write`.
+        room's default). A heartbeat body is enough. progressMessageId is
+        optional evidence: when present it must be the holder's own public
+        message posted after the current lease window began. Refused on
+        claims without a lease and on lapsed leases (claim again instead).
+        API keys need `rooms:write`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: claimId
@@ -4996,7 +5027,6 @@ paths:
           application/json:
             schema:
               type: object
-              required: [progressMessageId]
               properties:
                 progressMessageId: { type: string }
                 leaseHours: { type: number }

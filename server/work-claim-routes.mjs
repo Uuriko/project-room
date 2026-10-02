@@ -588,7 +588,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   }
   if (workClaimRoute === "create" && req.method === "POST") {
     const data = body(req);
-    if (!shape(data, { required: ["id"], optional: ["title", "reviewPolicy", "note", "tags", "files", "dependsOn", "pullRequest", "kind", "revision"] })) invalidInput(reject, "{id, title?, reviewPolicy?, note?, tags?, files?, dependsOn?, pullRequest?, kind?, revision?}");
+    if (!shape(data, { required: ["id"], optional: ["title", "reviewPolicy", "note", "tags", "files", "dependsOn", "pullRequest", "pullRequests", "repo", "branch", "kind", "revision"] })) invalidInput(reject, "{id, title?, reviewPolicy?, note?, tags?, files?, dependsOn?, pullRequest?, pullRequests?, repo?, branch?, kind?, revision?}");
     requireWriter();
     const id = claimIdOf(reject, data.id);
     if (registry.has(roomId, id)) reject(409, "work_claim_exists", `Work claim "${id}" already exists in this room`);
@@ -600,7 +600,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     }
     if (data.reviewPolicy !== undefined && !REVIEW_POLICIES.includes(data.reviewPolicy)) invalidInput(reject, `reviewPolicy one of ${REVIEW_POLICIES.join(", ")}`);
     if (data.kind !== undefined && !CLAIM_KINDS.includes(data.kind)) invalidInput(reject, `kind one of ${CLAIM_KINDS.join(", ")}`);
-    const item = runPure(reject, () => createWork({ id, title: data.title, reviewPolicy: data.reviewPolicy, note: data.note, tags: data.tags, files: data.files, dependsOn: data.dependsOn, pullRequest: data.pullRequest, kind: data.kind, revision: data.revision }, { now: nowMs, agentId: caller }));
+    const item = runPure(reject, () => createWork({ id, title: data.title, reviewPolicy: data.reviewPolicy, note: data.note, tags: data.tags, files: data.files, dependsOn: data.dependsOn, pullRequest: data.pullRequest, pullRequests: data.pullRequests, repo: data.repo, branch: data.branch, kind: data.kind, revision: data.revision }, { now: nowMs, agentId: caller }));
     commit(item, "created");
     return json(res, 201, item);
   }
@@ -610,7 +610,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   }
   if (workClaimRoute === "claim" && req.method === "POST") {
     const data = body(req);
-    if (!shape(data, { optional: ["note", "leaseHours", "files", "advisory", "dependsOn", "pullRequest"] })) invalidInput(reject, "{note?, leaseHours?, files?, advisory?, dependsOn?, pullRequest?}");
+    if (!shape(data, { optional: ["note", "leaseHours", "files", "advisory", "dependsOn", "pullRequest", "pullRequests", "repo", "branch"] })) invalidInput(reject, "{note?, leaseHours?, files?, advisory?, dependsOn?, pullRequest?, pullRequests?, repo?, branch?}");
     if ("advisory" in data && typeof data.advisory !== "boolean") invalidInput(reject, "advisory true or false");
     const item = load(claimIdOf(reject, workClaimId));
     if (item.state !== "unclaimed") reject(409, "work_claim_conflict", `Work "${item.id}" is already ${item.state} — release it first`);
@@ -624,7 +624,8 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     }
     const claimed = runPure(reject, () => claimWork(item, caller, {
       note: data.note, leaseHours: leaseHoursOfBody(data), files: data.files,
-      dependsOn: data.dependsOn, pullRequest: data.pullRequest, room: roomLike, now: nowMs
+      dependsOn: data.dependsOn, pullRequest: data.pullRequest, pullRequests: data.pullRequests,
+      repo: data.repo, branch: data.branch, room: roomLike, now: nowMs
     }));
     // Exclusive file lease. Overlap with another live claim is a 409 that
     // names the holder, the files, and when that lease ends. advisory: true
@@ -784,7 +785,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // the current lease window began. Renewals are discussed in the channel —
     // a stale holder can't hold work indefinitely without showing progress.
     const data = body(req);
-    if (!shape(data, { required: ["progressMessageId"], optional: ["note", "leaseHours"] })) invalidInput(reject, "{progressMessageId, note?, leaseHours?}");
+    if (!shape(data, { optional: ["progressMessageId", "note", "leaseHours"] })) invalidInput(reject, "{progressMessageId?, note?, leaseHours?}");
     const item = load(claimIdOf(reject, workClaimId));
     // W4 (QA 2026-09-28): a lapsed lease auto-releases the claim (owner
     // cleared), so the ownership check below would misdiagnose it as an
@@ -800,35 +801,50 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     requireWriter();
     assertLeaseChoice(data);
     const progressId = data.progressMessageId;
-    if (typeof progressId !== "string" || !progressId.trim()) invalidInput(reject, "{progressMessageId, note?, leaseHours?}");
-    const messages = store.room(roomId).state.messages ?? [];
-    const message = messages.find(entry => entry.id === progressId);
-    if (!message || message.deletedAt) {
-      reject(422, "claim_renewal_source_required",
-        "Post a progress update in the room first, then renew the claim with its message id");
-    }
-    if (message.toMemberId) {
-      reject(422, "claim_renewal_source_required",
-        "The progress update must be a public room message, not a DM — post it in the room first");
-    }
-    if (message.authorId !== caller) {
-      reject(403, "claim_renewal_source_foreign",
-        "The progress update must be your own message — only the claim holder's check-in renews the lease");
-    }
-    const leaseStart = item.leaseStartAt ?? item.claimedAt;
-    if (!(Date.parse(message.createdAt) > Date.parse(leaseStart))) {
-      reject(422, "claim_renewal_source_stale",
-        "The progress update must be newer than the current lease start — post a fresh update in the room first");
+    if (progressId !== undefined && (typeof progressId !== "string" || !progressId.trim())) invalidInput(reject, "progressMessageId as a message id when citing evidence");
+    const messages = progressId ? (store.room(roomId).state.messages ?? []) : [];
+    const message = progressId ? messages.find(entry => entry.id === progressId) : null;
+    if (progressId) {
+      if (!message || message.deletedAt) {
+        reject(422, "claim_renewal_source_required",
+          "Post a progress update in the room first, then renew the claim with its message id");
+      }
+      if (message.toMemberId) {
+        reject(422, "claim_renewal_source_required",
+          "The progress update must be a public room message, not a DM — post it in the room first");
+      }
+      if (message.authorId !== caller) {
+        reject(403, "claim_renewal_source_foreign",
+          "The progress update must be your own message — only the claim holder's check-in renews the lease");
+      }
+      const leaseStart = item.leaseStartAt ?? item.claimedAt;
+      if (!(Date.parse(message.createdAt) > Date.parse(leaseStart))) {
+        reject(422, "claim_renewal_source_stale",
+          "The progress update must be newer than the current lease start — post a fresh update in the room first");
+      }
     }
     const renewed = runPure(reject, () => renewWork(item, caller,
       { note: data.note, leaseHours: leaseHoursOfBody(data), room: roomLike, now: nowMs }));
     commit(renewed, "renewed");
     return json(res, 200, renewed);
   }
+  if (workClaimRoute === "config" && (req.method === "GET" || req.method === "POST")) {
+    if (req.method === "GET") return json(res, 200, { roomId, ...config });
+    const data = body(req);
+    if (!shape(data, { required: ["maxMemberOpenClaims"] })) invalidInput(reject, "{maxMemberOpenClaims}");
+    const ownerId = typeof access.authority?.ownerId === "string" && access.authority.ownerId.length > 0
+      ? access.authority.ownerId : null;
+    if (ownerId !== caller) reject(403, "work_claims_not_permitted", "Only the room owner can set the per-member claim cap.");
+    if (!Number.isSafeInteger(data.maxMemberOpenClaims) || data.maxMemberOpenClaims < 1 || data.maxMemberOpenClaims > 10000) {
+      invalidInput(reject, "maxMemberOpenClaims as an integer 1..10000");
+    }
+    const saved = registry.configure(roomId, { maxMemberOpenClaims: data.maxMemberOpenClaims });
+    return json(res, 200, { roomId, ...saved });
+  }
   // RFC 9110: a 405 names the resource's valid methods. The route table above
   // is the source of truth; an unknown route has no meaningful Allow value.
   const WORK_CLAIM_METHODS = {
-    list: "GET", receipts: "GET", sweep: "POST", duplicates: "GET", status: "GET", create: "POST",
+    list: "GET", receipts: "GET", sweep: "POST", duplicates: "GET", status: "GET", config: "GET, POST", create: "POST",
     read: "GET", claim: "POST", update: "POST", review: "POST", release: "POST",
     reassign: "POST", renew: "POST",
   };

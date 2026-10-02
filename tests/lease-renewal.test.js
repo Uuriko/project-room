@@ -1,8 +1,6 @@
-// Lease-renewal check-ins: a claim's lease extends only when the holder cites
-// their own public progress message, posted in the room after the current
-// lease window began. Renewals are discussed in the channel — never silent
-// extensions — so a stale holder can't hold scope indefinitely without
-// showing work.
+// Lease renewal: a heartbeat with no chat post extends the lease. A message
+// id is optional evidence; when present it must be the holder's own public
+// message posted after the current lease window began.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -67,12 +65,15 @@ function renew(f, workItemId, { revision = 2, progressMessageId = `progress-${wo
     { workItemId, expectedRevision: revision, progressMessageId, expiresAt }));
 }
 
-test("renewal without a progress message id is refused at the command boundary", t => {
+test("renewal without a progress message id is a heartbeat and extends the lease", t => {
   const f = fixture(t);
   readyWithClaim(f, 'w-noid');
-  assert.throws(() => f.store.command(f.human, 'commons', command(T.CLAIM_RENEWED,
-    { workItemId: 'w-noid', expectedRevision: 2, expiresAt: iso(T0 + 48 * H) })),
-    err => err.code === "claim_renewal_source_required" && /progress update/i.test(err.message));
+  f.store.command(f.human, 'commons', command(T.CLAIM_RENEWED,
+    { workItemId: 'w-noid', expectedRevision: 2, expiresAt: iso(T0 + 48 * H) }));
+  const claim = readClaim(f, 'w-noid').claim;
+  assert.equal(claim.expiresAt, iso(T0 + 48 * H));
+  assert.equal(claim.renewals, 1);
+  assert.equal(claim.progressMessageId, undefined);
 });
 
 test("a renewal citing the holder's public progress message extends the lease", t => {
@@ -259,11 +260,12 @@ test("handler: renew extends the lease on a fresh public check-in", async () => 
   assert.equal(out.value.history.at(-1).action, "renewed");
 });
 
-test("handler: renew without a progress message id is refused", async () => {
+test("handler: renew without a progress message id extends the lease", async () => {
   const registry = await claimedRegistry();
-  const { error } = await runRoute({ route: "renew", id: "w1", body: {}, registry });
-  assert.equal(error.status, 422);
-  assert.equal(error.code, "invalid_claim_input");
+  const before = registry.get("room1", "w1").leaseExpiresAt;
+  const { out, error } = await runRoute({ route: "renew", id: "w1", body: {}, registry });
+  assert.equal(error, null);
+  assert.ok(Date.parse(out.value.leaseExpiresAt) > Date.parse(before));
 });
 
 test("handler: renew with a DM check-in is refused", async () => {

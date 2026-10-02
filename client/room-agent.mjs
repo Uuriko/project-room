@@ -704,8 +704,12 @@ export class RoomAgentClient {
   }
   renewWorkItem(id, { progressMessageId, note, leaseHours, signal } = {}) {
     return this.#request(`/work-claims/${encodeURIComponent(id)}/renew`,
-      { progressMessageId, ...(note === undefined ? {} : { note }),
+      { ...(progressMessageId === undefined ? {} : { progressMessageId }), ...(note === undefined ? {} : { note }),
         ...(leaseHours === undefined ? {} : { leaseHours }) }, signal);
+  }
+  workClaimConfig({ maxMemberOpenClaims, signal } = {}) {
+    if (maxMemberOpenClaims === undefined) return this.#request("/work-claims/config", undefined, signal);
+    return this.#request("/work-claims/config", { maxMemberOpenClaims }, signal);
   }
   releaseWorkItem(id, { note, reason, signal } = {}) {
     return this.#request(`/work-claims/${encodeURIComponent(id)}/release`,

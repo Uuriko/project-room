@@ -174,7 +174,7 @@ function viewerOf(state, session) {
   const id = session?.member?.id ?? null;
   const member = id ? state?.members?.[id] : null;
   const manage = Boolean(id && (state?.room?.ownerId === id || (member?.permissions ?? []).includes("manage_claims")));
-  return { id, manage };
+  return { id, manage, owner: Boolean(id && state?.room?.ownerId === id) };
 }
 
 function cardHtml(item, viewer, members, now) {
@@ -182,14 +182,23 @@ function cardHtml(item, viewer, members, now) {
   const owner = ownerId ? memberName(members, ownerId) : "Unclaimed";
   const mine = Boolean(viewer.id && ownerId === viewer.id);
   const files = Array.isArray(item.files) ? item.files : [];
+  const blocks = item.fileBlocks && typeof item.fileBlocks === "object" ? item.fileBlocks : {};
+  const fileLabel = file => blocks[file] ? `${file} (${blocks[file]})` : file;
   const fileBlock = files.length
-    ? `<details class="claim-files"><summary>${files.length} file${files.length === 1 ? "" : "s"}</summary><ul>${files.map(file => `<li>${escapeHtml(file)}</li>`).join("")}</ul></details>`
+    ? `<details class="claim-files"><summary>${files.length} file${files.length === 1 ? "" : "s"}</summary><ul>${files.map(file => `<li>${escapeHtml(fileLabel(file))}</li>`).join("")}</ul></details>`
     : "";
   const lease = countdown(item.leaseExpiresAt, now);
-  const number = pullNumber(item.pullRequest?.url);
-  const pr = item.pullRequest?.url
-    ? `<p class="claim-pr"><a href="${escapeHtml(item.pullRequest.url)}">PR ${number ? `#${escapeHtml(number)}` : "link"}</a>${item.ci?.state ? ` <span class="ci-badge ci-${escapeHtml(item.ci.state)}">${escapeHtml(item.ci.state)}</span>` : ""}</p>`
+  const pulls = Array.isArray(item.pullRequests) && item.pullRequests.length ? item.pullRequests : (item.pullRequest?.url ? [item.pullRequest] : []);
+  const pr = pulls.map(pull => {
+    const number = pullNumber(pull.url);
+    const outcome = pull.outcome ? ` · ${pull.outcome}` : "";
+    return `<p class="claim-pr"><a href="${escapeHtml(pull.url)}">PR ${number ? `#${escapeHtml(number)}` : "link"}</a>${escapeHtml(outcome)}</p>`;
+  }).join("");
+  const place = item.repo || item.branch
+    ? `<p class="claim-repo">${escapeHtml([item.repo, item.branch].filter(Boolean).join("@"))}</p>`
     : "";
+  const chain = Array.isArray(item.chain) ? item.chain : [];
+  const links = chain.map(link => `<li>${escapeHtml(link.kind)} → ${escapeHtml(link.targetId)}${link.note ? ` · ${escapeHtml(link.note)}` : ""}</li>`).join("");
   const reviews = Array.isArray(item.reviews) && item.reviews.length
     ? `<ul class="claim-reviews">${item.reviews.map(review => `<li>${escapeHtml(memberName(members, review.memberId) || review.memberId)} ${escapeHtml(String(review.verdict ?? "").replaceAll("_", " "))}</li>`).join("")}</ul>`
     : "";
@@ -205,16 +214,17 @@ function cardHtml(item, viewer, members, now) {
       .map(member => `<option value="${escapeHtml(member.id)}">${escapeHtml(memberName(members, member.id))}</option>`).join("");
     if (options) actions.push(`<form data-claim-reassign="${escapeHtml(item.id)}"><label>Reassign <select name="newOwner" aria-label="Reassign ${escapeHtml(item.title)}">${options}</select></label><button type="submit">Move</button></form>`);
   }
-  return `<article class="claim-card" data-claim-id="${escapeHtml(item.id)}"><h4>${escapeHtml(item.title || item.id)}</h4><p class="claim-owner">${ownerId ? `<span class="member-avatar" aria-hidden="true">${escapeHtml(initials(owner))}</span> ` : ""}<span>${escapeHtml(owner)}</span></p>${fileBlock}${lease ? `<p class="claim-lease">${escapeHtml(lease)}</p>` : ""}${pr}${reviews}${deps ? `<ul class="claim-deps">${deps}</ul>` : ""}<div class="claim-actions">${actions.join("")}</div></article>`;
+  return `<article class="claim-card" data-claim-id="${escapeHtml(item.id)}"><h4>${escapeHtml(item.title || item.id)}</h4><p class="claim-owner">${ownerId ? `<span class="member-avatar" aria-hidden="true">${escapeHtml(initials(owner))}</span> ` : ""}<span>${escapeHtml(owner)}</span></p>${place}${fileBlock}${lease ? `<p class="claim-lease">${escapeHtml(lease)}</p>` : ""}${pr}${reviews}${deps ? `<ul class="claim-deps">${deps}</ul>` : ""}${links ? `<ul class="claim-chain">${links}</ul>` : ""}<div class="claim-actions">${actions.join("")}</div></article>`;
 }
 
-function boardHtml(items, status, viewer, members, now) {
+function boardHtml(items, status, viewer, members, now, cap) {
   const columns = placeClaims(items, now);
   const sweep = viewer.manage ? `<button type="button" id="board-close-stale" data-claim-action="sweep">Close stale</button>` : "";
+  const capForm = viewer.owner ? `<form data-claim-cap><label>Claims per member <input name="maxMemberOpenClaims" type="number" min="1" max="10000" value="${escapeHtml(String(cap ?? 20))}" aria-label="Open claims per member"></label><button type="submit">Save cap</button></form>` : "";
   const body = items.length
     ? `<div class="board-columns">${COLUMNS.map(([id, label]) => `<section aria-labelledby="board-col-${id}"><h3 id="board-col-${id}">${label}</h3>${columns[id].map(item => cardHtml(item, viewer, members, now)).join("") || `<p class="form-hint">Nothing here.</p>`}</section>`).join("")}</div>`
     : `<p class="board-empty">Claim work so others don't collide. Agents can do this over MCP.</p>`;
-  return `<div class="board-head"><p class="live-chip">${escapeHtml(liveLabel(status))}</p>${sweep}</div><p id="board-status" class="form-hint" role="status"></p>${body}`;
+  return `<div class="board-head"><p class="live-chip">${escapeHtml(liveLabel(status))}</p>${sweep}${capForm}</div><p id="board-status" class="form-hint" role="status"></p>${body}`;
 }
 
 async function readClaims(client) {
@@ -236,6 +246,7 @@ export function installWorkBoard({ client, getState, getSession }) {
   if (!root) return { sync() {}, reset() {} };
   let items = [];
   let status = null;
+  let cap = 20;
   let seen = null;
   let loadedRoom = null;
   let busy = false;
@@ -243,7 +254,7 @@ export function installWorkBoard({ client, getState, getSession }) {
   function paint() {
     const state = getState();
     const focus = document.activeElement?.closest?.("[data-focus-key]")?.dataset.focusKey ?? null;
-    root.innerHTML = boardHtml(items, status, viewerOf(state, getSession()), state?.members ?? {}, Date.now());
+    root.innerHTML = boardHtml(items, status, viewerOf(state, getSession()), state?.members ?? {}, Date.now(), cap);
     if (focus) root.querySelector(`[data-focus-key="${CSS.escape(focus)}"]`)?.focus();
   }
 
@@ -260,13 +271,15 @@ export function installWorkBoard({ client, getState, getSession }) {
     if (!force && loadedRoom === session.roomId && seen === mark) return;
     busy = true;
     try {
-      const [claims, live] = await Promise.all([
+      const [claims, live, config] = await Promise.all([
         readClaims(client),
-        client.request(client.path("/work-claims/status"))
+        client.request(client.path("/work-claims/status")),
+        client.request(client.path("/work-claims/config"))
       ]);
       if (getSession()?.roomId !== session.roomId) return;
       items = claims;
       status = live;
+      cap = config?.maxMemberOpenClaims ?? cap;
       loadedRoom = session.roomId;
       seen = mark;
       paint();
@@ -305,12 +318,7 @@ export function installWorkBoard({ client, getState, getSession }) {
     else if (action === "progress") void act(() => client.request(`${path}/update`, { method: "POST", data: { state: "in_progress" } }));
     else if (action === "done") void act(() => client.request(`${path}/update`, { method: "POST", data: { state: "done" } }));
     else if (action === "renew") {
-      const title = items.find(item => item.id === id)?.title || id;
-      const messageId = crypto.randomUUID();
-      void act(async () => {
-        await client.send({ id: crypto.randomUUID(), type: "message.posted", data: { messageId, body: `Checking in on ${title}.` } });
-        await client.request(`${path}/renew`, { method: "POST", data: { progressMessageId: messageId } });
-      });
+      void act(() => client.request(`${path}/renew`, { method: "POST", data: {} }));
     }
   });
   root.addEventListener("submit", event => {
@@ -321,6 +329,17 @@ export function installWorkBoard({ client, getState, getSession }) {
     const newOwner = new FormData(form).get("newOwner");
     if (typeof newOwner !== "string" || !newOwner) return;
     void act(() => client.request(client.path(`/work-claims/${encodeURIComponent(id)}/reassign`), { method: "POST", data: { newOwner } }));
+  });
+  root.addEventListener("submit", event => {
+    const form = event.target.closest("[data-claim-cap]");
+    if (!form || !root.contains(form)) return;
+    event.preventDefault();
+    const raw = Number(new FormData(form).get("maxMemberOpenClaims"));
+    if (!Number.isSafeInteger(raw)) return;
+    void act(async () => {
+      const saved = await client.request(client.path("/work-claims/config"), { method: "POST", data: { maxMemberOpenClaims: raw } });
+      cap = saved.maxMemberOpenClaims ?? raw;
+    });
   });
 
   return {
