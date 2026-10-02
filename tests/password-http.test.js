@@ -53,46 +53,49 @@ async function signup(t, n, overrides = {}) {
   return { f, origin, res, slot };
 }
 
-test("signup provisions an email account, links password+magic methods, and upgrades the slot", async t => {
+test("signup provisions an unverified email account and upgrades the slot", async t => {
   const { f, res, slot } = await signup(t, 1);
-  assert.equal(res.status, 201);
+  assert.equal(res.status, 202);
   const body = await res.json();
-  assert.equal(body.authenticated, true);
-  assert.match(body.account.id, /^email:[0-9a-f]{64}$/);
-  assert.ok(body.sessionBinding, "upgraded session carries a binding");
-  // QAS-702: signup mints a fresh slot token — the pre-login token is dead,
-  // the fresh cookie token carries the new account's session.
+  assert.equal(body.status, "check_email");
+  assert.equal(typeof body.mailConfigured, "boolean");
   const fresh = accountCookie(res);
   assert.ok(fresh && fresh !== slot.sessionToken, "signup rotates the slot token");
   assert.throws(() => f.store.authenticateAccountSession(slot.sessionToken), { code: "unauthenticated" });
   const session = f.store.authenticateAccountSession(fresh);
-  assert.equal(session.account.id, body.account.id);
-  // Provisioning used the password-signup origin and linked both methods.
-  const row = f.store.db.prepare("SELECT id, origin FROM accounts WHERE id=?").get(body.account.id);
+  assert.match(session.account.id, /^email:[0-9a-f]{64}$/);
+  const row = f.store.db.prepare("SELECT id, origin FROM accounts WHERE id=?").get(session.account.id);
   assert.equal(row.origin, "password-signup");
-  const methods = f.store.accountLogins.listMethods(body.account.id).map(m => m.type).sort();
-  assert.deepEqual(methods, ["magic", "password"]);
-  const passwordMethod = f.store.accountLogins.listMethods(body.account.id).find(m => m.type === "password");
-  assert.equal(passwordMethod.email, email(1));
-  assert.ok(passwordMethod.lastUsedAt, "signup touches the password method");
+  const methods = f.store.accountLogins.listMethods(session.account.id);
+  assert.deepEqual(methods.map(m => m.type), ["password"]);
+  assert.equal(methods[0].email, email(1));
+  assert.equal(methods[0].verifiedAt, null);
+  assert.equal(f.store.accountLogins.findAccountByVerifiedEmail(email(1)), null);
+  assert.ok(methods[0].lastUsedAt, "signup touches the password method");
   assert.equal(JSON.stringify(body).includes(password(1)), false, "no plaintext password in the response");
 });
 
-test("duplicate signup is 409 already_registered", async t => {
+test("signup answers the same status and body shape for a new and an existing email", async t => {
   const { f, origin } = await startServer(t);
   const first = freshSlot(f);
   const ok = await post(origin, "/api/auth/password/signup", { email: email(2), password: password(2), ...first });
-  assert.equal(ok.status, 201);
+  assert.equal(ok.status, 202);
+  const created = await ok.json();
   const second = freshSlot(f);
   const dup = await post(origin, "/api/auth/password/signup", { email: email(2), password: password(2), ...second });
-  assert.equal(dup.status, 409);
-  const body = await dup.json();
-  assert.equal(body.error.code, "already_registered");
-  assert.match(body.error.message, /already exists/);
-  // Email matching is case-insensitive for duplicates.
+  assert.equal(dup.status, 202);
+  const again = await dup.json();
+  assert.deepEqual(
+    { status: again.status, mailConfigured: again.mailConfigured, keys: Object.keys(again).sort() },
+    { status: created.status, mailConfigured: created.mailConfigured, keys: Object.keys(created).sort() }
+  );
+  assert.equal(accountCookie(dup), null);
   const third = freshSlot(f);
   const dupCase = await post(origin, "/api/auth/password/signup", { email: email(2).toUpperCase(), password: password(2), ...third });
-  assert.equal(dupCase.status, 409);
+  assert.equal(dupCase.status, 202);
+  const cased = await dupCase.json();
+  assert.equal(cased.status, created.status);
+  assert.equal(cased.mailConfigured, created.mailConfigured);
 });
 
 test("signup validates email and password policy with 422s", async t => {
@@ -112,20 +115,20 @@ test("signup then login roundtrip upgrades a real slot", async t => {
   const { f, origin } = await startServer(t);
   const first = freshSlot(f);
   const created = await post(origin, "/api/auth/password/signup", { email: email(4), password: password(4), ...first });
-  assert.equal(created.status, 201);
-  const createdBody = await created.json();
+  assert.equal(created.status, 202);
+  const createdSession = f.store.authenticateAccountSession(accountCookie(created));
   const second = freshSlot(f);
   const logged = await post(origin, "/api/auth/password/login", { email: email(4), password: password(4), ...second });
   assert.equal(logged.status, 200);
   const body = await logged.json();
   assert.equal(body.authenticated, true);
-  assert.equal(body.account.id, createdBody.account.id, "login lands on the signed-up account");
+  assert.equal(body.account.id, createdSession.account.id, "login lands on the signed-up account");
   // QAS-702: login mints a fresh slot token — the presented token is retired.
   const fresh = accountCookie(logged);
   assert.ok(fresh && fresh !== second.sessionToken, "login rotates the slot token");
   assert.throws(() => f.store.authenticateAccountSession(second.sessionToken), { code: "unauthenticated" });
   const session = f.store.authenticateAccountSession(fresh);
-  assert.equal(session.account.id, createdBody.account.id);
+  assert.equal(session.account.id, createdSession.account.id);
 });
 
 test("wrong password is 401 invalid_credentials", async t => {
@@ -186,7 +189,7 @@ test("change-password flow works and the old password stops working", async t =>
   const { f, origin } = await startServer(t);
   const slot = freshSlot(f);
   const created = await post(origin, "/api/auth/password/signup", { email: email(9), password: password(9), ...slot });
-  assert.equal(created.status, 201);
+  assert.equal(created.status, 202);
   const cookie = `account_session=${accountCookie(created)}`;
   const changed = await post(origin, "/api/auth/password/change",
     { currentPassword: password(9), newPassword: "brand-new-password-99" }, cookie);
@@ -202,7 +205,7 @@ test("change-password rejects a wrong current password with 401", async t => {
   const { f, origin } = await startServer(t);
   const slot = freshSlot(f);
   const created = await post(origin, "/api/auth/password/signup", { email: email(10), password: password(10), ...slot });
-  assert.equal(created.status, 201);
+  assert.equal(created.status, 202);
   const cookie = `account_session=${accountCookie(created)}`;
   const bad = await post(origin, "/api/auth/password/change",
     { currentPassword: "not-the-current-password", newPassword: "brand-new-password-99" }, cookie);
@@ -228,7 +231,7 @@ test("change-password requires an authenticated session and policy-checks the ne
 for (const mutation of ["logout", "rotate login slot"]) {
   test(`held password-change body refuses concurrent ${mutation}`, { timeout: 5000 }, async t => {
     const { f, origin, res } = await signup(t, 30);
-    const token = accountCookie(res), view = await res.json(), cookie = `account_session=${token}`;
+    const token = accountCookie(res), view = f.store.authenticateAccountSession(token), cookie = `account_session=${token}`;
     const payload = JSON.stringify({ currentPassword: password(30), newPassword: "replacement-password-long-enough" });
     const original = f.store.authenticateAccountSession.bind(f.store);
     let sawRead; const read = new Promise(resolve => { sawRead = resolve; }); let armed = true;
@@ -266,13 +269,14 @@ for (const mutation of ["logout", "rotate login slot"]) {
 
 test("password-change cannot overwrite a verifier changed before its writer transaction", async t => {
   const { f, origin, res } = await signup(t, 31);
-  const token = accountCookie(res), view = await res.json();
+  const token = accountCookie(res);
+  const accountId = f.store.authenticateAccountSession(token).account.id;
   const concurrentPassword = "concurrent-replacement-password";
   const concurrentVerifier = hashPassword(concurrentPassword);
   const original = f.store.transaction.bind(f.store); let armed = true;
   // Simulate another writer committing after proof/hash work, before this writer obtains its transaction.
   f.store.transaction = fn => {
-    if (armed) { armed = false; f.store.accountLogins.setPasswordVerifier(view.account.id, concurrentVerifier); }
+    if (armed) { armed = false; f.store.accountLogins.setPasswordVerifier(accountId, concurrentVerifier); }
     return original(fn);
   };
   const response = await post(origin, "/api/auth/password/change", {
@@ -280,6 +284,6 @@ test("password-change cannot overwrite a verifier changed before its writer tran
   }, `account_session=${token}`);
   assert.equal(response.status, 409);
   assert.equal((await errBody(response)).code, "password_changed");
-  assert.equal(verifyPassword(concurrentPassword, f.store.accountLogins.readPasswordVerifier(view.account.id)), true);
-  assert.equal(verifyPassword("stale-request-password-long-enough", f.store.accountLogins.readPasswordVerifier(view.account.id)), false);
+  assert.equal(verifyPassword(concurrentPassword, f.store.accountLogins.readPasswordVerifier(accountId)), true);
+  assert.equal(verifyPassword("stale-request-password-long-enough", f.store.accountLogins.readPasswordVerifier(accountId)), false);
 });

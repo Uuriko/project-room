@@ -301,7 +301,7 @@ const EXECUTORS = {
     store.db.prepare("DELETE FROM account_session_slots WHERE account_id=?").run(accountId).changes,
   login_methods: (store, accountId) => {
     let removed = 0;
-    for (const table of ["account_login_methods", "account_magic_codes", "account_recovery_codes"]) {
+    for (const table of ["account_login_methods", "account_magic_codes", "account_recovery_codes", "account_security_events"]) {
       removed += store.db.prepare(`DELETE FROM ${table} WHERE account_id=?`).run(accountId).changes;
     }
     return removed;

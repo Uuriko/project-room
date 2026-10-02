@@ -44,7 +44,8 @@ export const accountLoginMethodsSchema = `
     external_subject TEXT,
     created_at INTEGER NOT NULL,
     last_used_at INTEGER,
-    disabled INTEGER NOT NULL DEFAULT 0 CHECK(disabled IN (0,1))
+    disabled INTEGER NOT NULL DEFAULT 0 CHECK(disabled IN (0,1)),
+    verified_at INTEGER
   );
   CREATE INDEX IF NOT EXISTS account_login_method_account ON account_login_methods(account_id);
   CREATE INDEX IF NOT EXISTS account_login_method_email ON account_login_methods(email_hash);
@@ -89,6 +90,34 @@ export const LOGIN_METHOD_TYPES = Object.freeze(["password", "magic", "oauth", "
 export const OAUTH_PROVIDERS = Object.freeze(["github", "google"]);
 export const MAGIC_CODE_TTL_MS = 15 * 60 * 1000; // 15 minutes
 export const MAGIC_CODE_MAX_ATTEMPTS = 5;
+export const EMAIL_VERIFY_CODE_TTL_MS = MAGIC_CODE_TTL_MS;
+
+// Additive columns and the security-event journal. Fresh databases already
+// have verified_at from the CREATE TABLE above; older files gain it here.
+export function ensureVerifiedEmailSchema(db) {
+  const methodCols = new Set(db.prepare("PRAGMA table_info(account_login_methods)").all().map(column => column.name));
+  if (methodCols.size > 0 && !methodCols.has("verified_at")) {
+    db.exec("ALTER TABLE account_login_methods ADD COLUMN verified_at INTEGER");
+  }
+  const accountCols = new Set(db.prepare("PRAGMA table_info(accounts)").all().map(column => column.name));
+  if (accountCols.size > 0 && !accountCols.has("password_reset_required")) {
+    db.exec("ALTER TABLE accounts ADD COLUMN password_reset_required INTEGER NOT NULL DEFAULT 0");
+  }
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS account_security_events (
+      id TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL,
+      type TEXT NOT NULL,
+      at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS account_security_event_account ON account_security_events(account_id, at);
+  `);
+  db.prepare(`UPDATE account_login_methods SET verified_at=created_at
+    WHERE verified_at IS NULL AND type='oauth' AND email IS NOT NULL`).run();
+  db.prepare(`UPDATE account_login_methods SET verified_at=created_at
+    WHERE verified_at IS NULL AND type='magic'
+    AND account_id NOT IN (SELECT id FROM accounts WHERE origin='password-signup')`).run();
+}
 
 const sha256hex = text => createHash("sha256").update(text, "utf8").digest("hex");
 const base64url = bytes => Buffer.from(bytes).toString("base64url");
@@ -134,7 +163,8 @@ function methodDescriptor(row) {
     email: row.email ?? null,
     createdAt: row.created_at,
     lastUsedAt: row.last_used_at ?? null,
-    disabled: row.disabled === 1
+    disabled: row.disabled === 1,
+    verifiedAt: row.verified_at ?? null
   };
 }
 
@@ -162,16 +192,61 @@ export class AccountLoginMethods {
       .all(accountId).map(methodDescriptor);
   }
 
-  // Find the account that owns a verified email login method
-  // (password or magic). Used for linking: a magic-link sign-in to an
-  // email that already has a password attaches to the same account.
+  // Account that has proved this email. A password row counts only after
+  // verified_at is set. Provider rows count when they stored an email,
+  // which callers pass only after the provider attested it.
   findAccountByVerifiedEmail(email) {
     const normalized = normalizeEmail(email);
     if (!normalized) return null;
     const row = this.db.prepare(`SELECT account_id AS accountId FROM account_login_methods
-      WHERE email_hash=? AND type IN ('password','magic') AND disabled=0
+      WHERE email_hash=? AND disabled=0 AND verified_at IS NOT NULL
+        AND (type IN ('password','magic') OR (type='oauth' AND email IS NOT NULL))
       ORDER BY created_at LIMIT 1`).get(emailLookupHash(normalized));
     return row ? row.accountId : null;
+  }
+
+  // Password sign-in, including an address that is not verified yet.
+  findPasswordAccount(email) {
+    const normalized = normalizeEmail(email);
+    if (!normalized) return null;
+    const row = this.db.prepare(`SELECT account_id AS accountId FROM account_login_methods
+      WHERE email_hash=? AND type='password' AND disabled=0 LIMIT 1`).get(emailLookupHash(normalized));
+    return row ? row.accountId : null;
+  }
+
+  // Any email-bearing method, verified or not. Used to keep signup from
+  // opening a second account for an address that already has one.
+  findAccountHoldingEmail(email) {
+    const normalized = normalizeEmail(email);
+    if (!normalized) return null;
+    const row = this.db.prepare(`SELECT account_id AS accountId FROM account_login_methods
+      WHERE email_hash=? AND disabled=0 AND email IS NOT NULL AND type IN ('password','magic','oauth')
+      ORDER BY created_at LIMIT 1`).get(emailLookupHash(normalized));
+    return row ? row.accountId : null;
+  }
+
+  emailStatus(accountId) {
+    const rows = this.db.prepare(`SELECT verified_at AS verifiedAt FROM account_login_methods
+      WHERE account_id=? AND disabled=0 AND email IS NOT NULL AND type IN ('password','magic','oauth')`).all(accountId);
+    if (rows.length === 0) return "none";
+    return rows.some(row => row.verifiedAt != null) ? "verified" : "unverified";
+  }
+
+  emailVerification(accountId) {
+    const status = this.emailStatus(accountId);
+    const row = this.db.prepare("SELECT password_reset_required AS required FROM accounts WHERE id=?").get(accountId);
+    return { status, verified: status !== "unverified", passwordResetRequired: row?.required === 1 };
+  }
+
+  assertEmailVerified(accountId) {
+    if (this.emailStatus(accountId) === "unverified") {
+      fail(403, "email_unverified", "Verify your email before this action");
+    }
+  }
+
+  securityEvents(accountId) {
+    return this.db.prepare(`SELECT id, account_id AS accountId, type, at FROM account_security_events
+      WHERE account_id=? ORDER BY at, id`).all(accountId);
   }
 
   // Find the account bound to an OAuth provider subject (never by email).
@@ -183,7 +258,7 @@ export class AccountLoginMethods {
     return row ? row.accountId : null;
   }
 
-  #insertMethod({ accountId, type, provider = null, label, email = null, verifier = null, externalSubject = null }) {
+  #insertMethod({ accountId, type, provider = null, label, email = null, verifier = null, externalSubject = null, verifiedAt = null }) {
     const knownType = LOGIN_METHOD_TYPES.includes(type);
     if (!knownType) fail(422, "invalid_login_method", "Unknown login method type");
     if (provider !== null && !OAUTH_PROVIDERS.includes(provider)) fail(422, "invalid_login_method", "Unknown OAuth provider");
@@ -192,11 +267,11 @@ export class AccountLoginMethods {
     if (email !== null && normalizedEmail === null) fail(422, "invalid_email", "A valid email address is required");
     const id = `lm_${base64url(this.random(12))}`;
     const createdAt = this.#now();
-    this.db.prepare(`INSERT INTO account_login_methods(id,account_id,type,provider,label,email,email_hash,verifier,external_subject,created_at,last_used_at,disabled)
-      VALUES(?,?,?,?,?,?,?,?,?,?,?,0)`)
+    this.db.prepare(`INSERT INTO account_login_methods(id,account_id,type,provider,label,email,email_hash,verifier,external_subject,created_at,last_used_at,disabled,verified_at)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,0,?)`)
       .run(id, accountId, type, provider, label.trim(), normalizedEmail,
         normalizedEmail ? emailLookupHash(normalizedEmail) : null,
-        verifier, externalSubject, createdAt, null);
+        verifier, externalSubject, createdAt, null, verifiedAt);
     return this.getMethod(accountId, id);
   }
 
@@ -222,7 +297,8 @@ export class AccountLoginMethods {
       const existing = this.db.prepare("SELECT id FROM account_login_methods WHERE account_id=? AND type='password' AND disabled=0")
         .get(accountId);
       if (existing) fail(409, "login_method_exists", "This account already has a password; change it instead");
-      return this.#insertMethod({ accountId, type: "password", label, email, verifier });
+      this.db.prepare("UPDATE accounts SET password_reset_required=0 WHERE id=?").run(accountId);
+      return this.#insertMethod({ accountId, type: "password", label, email, verifier, verifiedAt: null });
     });
   }
 
@@ -233,6 +309,7 @@ export class AccountLoginMethods {
     const changed = this.db.prepare("UPDATE account_login_methods SET verifier=? WHERE account_id=? AND type='password' AND disabled=0")
       .run(verifier, accountId).changes;
     if (changed !== 1) fail(404, "login_method_not_found", "No password is set on this account");
+    this.db.prepare("UPDATE accounts SET password_reset_required=0 WHERE id=?").run(accountId);
     return { updated: true };
   }
 
@@ -253,7 +330,7 @@ export class AccountLoginMethods {
       const existing = this.db.prepare("SELECT id FROM account_login_methods WHERE account_id=? AND type='magic' AND email_hash=? AND disabled=0")
         .get(accountId, emailLookupHash(normalized));
       if (existing) fail(409, "login_method_exists", "This email is already linked for magic-link sign-in");
-      return this.#insertMethod({ accountId, type: "magic", label, email: normalized });
+      return this.#insertMethod({ accountId, type: "magic", label, email: normalized, verifiedAt: this.#now() });
     });
   }
 
@@ -270,9 +347,11 @@ export class AccountLoginMethods {
       const existing = this.db.prepare("SELECT id FROM account_login_methods WHERE account_id=? AND type='oauth' AND provider=? AND external_subject=? AND disabled=0")
         .get(accountId, provider, subject);
       if (existing) fail(409, "login_method_exists", "This provider account is already linked");
+      const normalizedEmail = email === null ? null : normalizeEmail(email);
+      if (email !== null && normalizedEmail === null) fail(422, "invalid_email", "A valid email address is required");
       return this.#insertMethod({
         accountId, type: "oauth", provider, label: label ?? `Continue with ${provider[0].toUpperCase()}${provider.slice(1)}`,
-        email, externalSubject: subject
+        email: normalizedEmail, externalSubject: subject, verifiedAt: normalizedEmail ? this.#now() : null
       });
     });
   }
@@ -408,6 +487,102 @@ export class AccountLoginMethods {
     });
   }
 
+  // A verified sign-in adopts the account that already holds this email.
+  // When the only holder is an unverified password, that password is removed
+  // and account.password_revoked_unverified is recorded. preferredAccountId
+  // keeps an already-linked provider subject from taking a different account.
+  adoptVerifiedEmail(email, { preserveSlotToken = null, preferredAccountId = null } = {}) {
+    const normalized = normalizeEmail(email);
+    if (!normalized) return null;
+    return this.store.transaction(() => {
+      const verified = this.findAccountByVerifiedEmail(normalized);
+      if (verified) {
+        if (preferredAccountId && preferredAccountId !== verified) return { accountId: preferredAccountId, passwordRevoked: false };
+        return { accountId: verified, passwordRevoked: false };
+      }
+      const holder = this.db.prepare(`SELECT account_id AS accountId FROM account_login_methods
+        WHERE email_hash=? AND type='password' AND disabled=0 AND verified_at IS NULL LIMIT 1`)
+        .get(emailLookupHash(normalized));
+      if (!holder) return preferredAccountId ? { accountId: preferredAccountId, passwordRevoked: false } : null;
+      if (preferredAccountId && preferredAccountId !== holder.accountId) {
+        return { accountId: preferredAccountId, passwordRevoked: false };
+      }
+      this.db.prepare(`DELETE FROM account_login_methods
+        WHERE account_id=? AND email_hash=? AND verified_at IS NULL AND type IN ('password','magic')`)
+        .run(holder.accountId, emailLookupHash(normalized));
+      const at = this.#now();
+      this.db.prepare("INSERT INTO account_security_events(id,account_id,type,at) VALUES(?,?,?,?)")
+        .run(`sec_${base64url(this.random(9))}`, holder.accountId, "account.password_revoked_unverified", at);
+      this.db.prepare("UPDATE accounts SET password_reset_required=1 WHERE id=?").run(holder.accountId);
+      this.store.revokeUnverifiedPasswordSessions(holder.accountId, preserveSlotToken);
+      return { accountId: holder.accountId, passwordRevoked: true };
+    });
+  }
+
+  markEmailVerified(accountId, email) {
+    const normalized = normalizeEmail(email);
+    if (!normalized) fail(422, "invalid_email", "A valid email address is required");
+    this.#getAccount(accountId);
+    this.db.prepare(`UPDATE account_login_methods SET verified_at=?
+      WHERE account_id=? AND email_hash=? AND disabled=0 AND verified_at IS NULL AND type IN ('password','magic','oauth')`)
+      .run(this.#now(), accountId, emailLookupHash(normalized));
+    return { verified: true, email: normalized };
+  }
+
+  #verifyBucket(email) { return sha256hex(`email-verify:v1\0${email}`); }
+  #verifyDigest(accountId, code) { return sha256hex(`email-verify-code:v1\0${accountId}\0${code}`); }
+
+  issueEmailVerifyCode({ accountId, email } = {}) {
+    const normalized = normalizeEmail(email);
+    if (!normalized) fail(422, "invalid_email", "A valid email address is required");
+    this.#getAccount(accountId);
+    return this.store.transaction(() => {
+      const now = this.#now();
+      const bucket = this.#verifyBucket(normalized);
+      const code = String(this.random(4).readUInt32BE(0) % 1000000).padStart(6, "0");
+      this.db.prepare("DELETE FROM account_magic_codes WHERE email_hash=?").run(bucket);
+      this.db.prepare(`INSERT INTO account_magic_codes(code_hash,account_id,email,email_hash,expires_at,consumed_at,attempts,created_at)
+        VALUES(?,?,?,?,?,NULL,0,?)`)
+        .run(this.#verifyDigest(accountId, code), accountId, normalized, bucket, now + EMAIL_VERIFY_CODE_TTL_MS, now);
+      return { code, email: normalized, expiresAt: now + EMAIL_VERIFY_CODE_TTL_MS };
+    });
+  }
+
+  consumeEmailVerifyCode({ accountId, code } = {}) {
+    this.#getAccount(accountId);
+    if (typeof code !== "string" || !/^\d{6}$/.test(code)) fail(401, "invalid_email_code", "That code is not valid");
+    const emailRow = this.db.prepare(`SELECT email FROM account_login_methods
+      WHERE account_id=? AND type='password' AND disabled=0 AND email IS NOT NULL LIMIT 1`).get(accountId);
+    const normalized = emailRow ? normalizeEmail(emailRow.email) : null;
+    if (!normalized) fail(401, "invalid_email_code", "That code is not valid");
+    const now = this.#now();
+    const bucket = this.#verifyBucket(normalized);
+    const rows = this.db.prepare(`SELECT * FROM account_magic_codes
+      WHERE email_hash=? AND consumed_at IS NULL AND expires_at > ? ORDER BY created_at DESC LIMIT 20`).all(bucket, now);
+    const digest = this.#verifyDigest(accountId, code);
+    const match = rows.find(row => row.account_id === accountId && constantTimeDigestEqual(row.code_hash, digest));
+    if (!match) {
+      const newest = rows[0];
+      if (newest) {
+        if (newest.attempts + 1 >= MAGIC_CODE_MAX_ATTEMPTS) this.db.prepare("DELETE FROM account_magic_codes WHERE code_hash=?").run(newest.code_hash);
+        else this.db.prepare("UPDATE account_magic_codes SET attempts=attempts+1 WHERE code_hash=?").run(newest.code_hash);
+      }
+      fail(401, "invalid_email_code", "That code is not valid");
+    }
+    return this.store.transaction(() => {
+      const changed = this.db.prepare("UPDATE account_magic_codes SET consumed_at=? WHERE code_hash=? AND consumed_at IS NULL")
+        .run(now, match.code_hash).changes;
+      if (changed !== 1) fail(401, "invalid_email_code", "That code is not valid");
+      this.markEmailVerified(accountId, normalized);
+      try { this.linkMagicMethod(accountId, { email: normalized }); }
+      catch (error) {
+        if (!(error instanceof ServiceError) || error.code !== "login_method_exists") throw error;
+        this.markEmailVerified(accountId, normalized);
+      }
+      return { accountId, email: normalized };
+    });
+  }
+
   // --- Magic-link codes (slice 3) ---
   //
   // Single-use, short-TTL, hashed at rest. The plaintext code is returned
@@ -525,6 +700,9 @@ export class AccountLoginMethods {
         .run(now, match.code_hash, now).changes;
       if (changed !== 1) fail(401, "invalid_password_reset", "This password reset link is not valid or has expired");
       this.setPasswordVerifier(current.accountId, verifier);
+      this.db.prepare(`UPDATE account_login_methods SET verified_at=?
+        WHERE account_id=? AND type='password' AND disabled=0 AND verified_at IS NULL`)
+        .run(now, current.accountId);
       this.store.invalidateHumanAccountCredentials(current.accountId);
       return { accountId: current.accountId, email: normalized };
     });

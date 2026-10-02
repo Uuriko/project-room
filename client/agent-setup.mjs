@@ -122,7 +122,9 @@ export async function connectRoom({ target, directory, origin, name = "Room agen
       return { status: result.status, identityId: saved.identityId, roomId: step.roomId, requestId: step.requestId,
         next: "Repeat this command to check admission; no new identity or request will be created" };
     }
-    const config = { version: 1, origin: saved.origin, roomId: step.roomId, memberId: membership.memberId, token: saved.secret };
+    const mcpCredential = typeof membership.mcpToken?.credential === "string" && membership.mcpToken.credential.startsWith("rak_")
+      ? membership.mcpToken.credential : null;
+    const config = { version: 1, origin: saved.origin, roomId: step.roomId, memberId: membership.memberId, token: mcpCredential ?? saved.secret };
     const client = new RoomAgentClient({ ...config, fetchImpl });
     const access = await client.checkConnection(), orientation = await client.activationPack();
     const rooms = privateDirectory(join(journal.root, "rooms")), configDirectory = privateDirectory(join(rooms, step.roomId));

@@ -90,6 +90,7 @@ for (const [version, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBaseline
       avatar_url: () => null,
       onboarded: () => 1, // already been through whatever onboarding existed
       ever_had_room: row => memberAccounts.has(row.id) ? 1 : 0,
+      password_reset_required: () => 0,
     };
     assert.deepEqual(accountsAfter.map(row => row.id), accountsBefore.map(row => row.id), "an upgrade neither adds nor drops accounts");
     accountsAfter.forEach((row, index) => {

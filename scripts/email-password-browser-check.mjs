@@ -29,11 +29,12 @@ test("contextual email creation signs in using the actual password signup API", 
   await form.locator('[name="email"]').fill(email); await form.locator('[name="password"]').fill(password);
   const reply = page.waitForResponse(response => new URL(response.url()).pathname === "/api/auth/password/signup");
   await form.locator('button[type="submit"]').click();
-  assert.equal((await reply).status(), 201);
+  assert.equal((await reply).status(), 202);
   await page.locator("#auth-panel").waitFor({ state: "hidden" });
   const actual = await (await page.context().request.get(`${origin}/api/account-session`)).json();
   assert.equal(actual.authenticated, true);
-  assert.equal(store.accountLogins.findAccountByVerifiedEmail(email), actual.account.id);
+  assert.equal(store.accountLogins.findPasswordAccount(email), actual.account.id);
+  assert.equal(store.accountLogins.findAccountByVerifiedEmail(email), null);
   assert.doesNotMatch(page.url(), /password=|new-email-password/);
 });
 

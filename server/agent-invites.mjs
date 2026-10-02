@@ -153,6 +153,7 @@ export class AgentInvites {
     // Owner delegates (server/owner-delegates.mjs) arrive via
     // store.authenticate with the delegate flag stamped on the member copy.
     const auth = this.store.authenticate(token, roomId, expectedSessionBinding);
+    if (auth.account) this.store.accountLogins.assertEmailVerified(auth.account.id);
     const authority = this.store.roomAuthority(roomId);
     if (!auth.delegate && !canInviteMembers(authority, auth.member.id)) fail(403, "access_denied", "Invite grant required");
     // Minting invites is a membership write: the read-only autonomy tier
@@ -304,12 +305,13 @@ export class AgentInvites {
       if (row.created_by !== memberId) {
         this.store.referrals.record({ roomId: row.room_id, referrerMemberId: row.created_by, refereeMemberId: memberId, via: "invite", at: now });
       }
-      // No account session, no member_accounts row: the identity secret is the
-      // only credential. The secret is shown once, like identity-create. The
-      // response carries the same machine-readable next[] shape as signup
-      // (RC-2026-09-18-018), tailored to the invite path, so a redeemed agent
-      // knows its first moves without asking a human.
-      return { identityId: identity.identityId, ...(existingIdentity ? { duplicate: false } : { secret: identity.secret }), roomId: row.room_id, memberId, displayName: name, permissions,
+      // Onboarding returns a room-scoped MCP token. The identity credential
+      // stays in the store and is not included in this response.
+      const mcpToken = this.store.agentPlugin.issueOnboardingMcpToken({
+        identityId: identity.identityId, roomId: row.room_id, label: name
+      });
+      return { identityId: identity.identityId, ...(existingIdentity ? { duplicate: false } : {}), mcpToken,
+        roomId: row.room_id, memberId, displayName: name, permissions,
         next: redeemNext(row.room_id, name), nextActions: nextActionsForInviteRedeem(row.room_id) };
     });
   }

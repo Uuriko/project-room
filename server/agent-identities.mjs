@@ -556,6 +556,18 @@ export class AgentIdentities {
     return this.db.prepare("SELECT identity_id AS identityId, display_name AS displayName, created_at AS createdAt FROM agent_identities WHERE identity_id=?").get(identityId) ?? null;
   }
 
+  noteMcpUse(identityId, { legacy = false, ua = null, at = null } = {}) {
+    const when = Number.isSafeInteger(at) ? at : this.store.now();
+    const agent = typeof ua === "string" && ua.trim() ? ua.trim().slice(0, 200) : null;
+    this.db.prepare(`UPDATE agent_identities SET last_used_at=?, last_used_ua=?, mcp_legacy_uses=COALESCE(mcp_legacy_uses, 0) + ?
+      WHERE identity_id=?`).run(when, agent, legacy ? 1 : 0, identityId);
+  }
+
+  mcpUsage(identityId) {
+    return this.db.prepare(`SELECT last_used_at AS lastUsedAt, last_used_ua AS lastUsedUa, mcp_legacy_uses AS mcpLegacyUses
+      FROM agent_identities WHERE identity_id=?`).get(identityId) ?? null;
+  }
+
   // Owner-only: link an identity into a room, creating one member record
   // bound to it. The agent then uses its single identity secret here.
   // RC-2026-09-18-038: a membership-administration delegate may also link,

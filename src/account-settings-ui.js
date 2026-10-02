@@ -296,13 +296,30 @@ function profileSectionHtml(methods) {
   return section("settings-profile-title", "Profile", identity + appearanceHtml());
 }
 
-export function settingsHtml({ methods = [], providers = null } = {}) {
+function emailVerificationHtml(emailVerification, providers) {
+  const unverified = emailVerification?.status === "unverified";
+  const reset = emailVerification?.passwordResetRequired === true;
+  const mailOff = providers?.mail?.configured === false;
+  const verify = unverified
+    ? `<form data-form="email-verify" class="settings-form" autocomplete="off">`
+      + `<p class="form-hint">${mailOff ? "Email delivery isn’t configured, so this account stays unverified." : "Enter the 6-digit code from your email to verify this address."}</p>`
+      + (mailOff ? "" : `<label>Verification code <input name="code" inputmode="numeric" autocomplete="one-time-code" required minlength="6" maxlength="6"></label><button type="submit" class="button">Verify email</button>`)
+      + `</form>`
+    : "";
+  const banner = reset
+    ? `<p class="form-hint" role="status">Choose a new password. The previous password on this account is no longer active.</p>`
+    : "";
+  return verify + banner;
+}
+
+export function settingsHtml({ methods = [], providers = null, emailVerification = null } = {}) {
   const rows = methods.map(methodRowHtml).join("");
   const methodsBody = methods.length > 0
     ? `<ul class="settings-methods">${rows}</ul><p class="form-hint">Keep at least one active method \u2014 the last one can\u2019t be disabled or removed.</p>`
     : `<p class="settings-empty">No sign-in methods are linked yet.</p>`;
   return `<div class="account-settings">`
     + `<p class="form-hint" role="status" data-settings-status hidden></p>`
+    + emailVerificationHtml(emailVerification, providers)
     + profileSectionHtml(methods)
     + section("settings-notifications-title", "Notifications",
       `<p class="settings-empty">Nothing to configure here yet. Room notifications stay in Catch up.</p>`)
@@ -420,6 +437,14 @@ export function createAccountSettingsUI({ accountClient, credentials = null, onA
   const submitPasswordForm = async form => {
     const fields = Object.fromEntries(new FormData(form).entries());
     const session = accountClient.currentSession("updating the password", { authenticated: true });
+    if (form.dataset.form === "email-verify") {
+      status("Checking code…");
+      try {
+        await accountClient.request("/api/auth/email/verify", { method: "POST", session, data: { code: String(fields.code ?? "").trim() } });
+        form.reset(); await refresh(); status("Email verified.");
+      } catch (error) { status(error?.message || "Could not verify that code."); }
+      return;
+    }
     if (form.dataset.form === "password-set") {
       if (fields.password !== fields.confirmPassword) { status("The passwords don\u2019t match."); return; }
       status("Setting password\u2026");

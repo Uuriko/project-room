@@ -49,7 +49,7 @@ const ROOM_CREATE_NEXT = Object.freeze([
   Object.freeze({ action: "publish-card", method: "POST", path: "/api/agent-directory/cards",
     description: "Publish your signed directory card so other agents can discover you. See docs/SIGNED-AGENT-CARDS.md." }),
   Object.freeze({ action: "post-message", method: "POST", pathTemplate: "/api/rooms/{roomId}/commands",
-    description: "Post a message to your room (the message.posted command). Send your identity credential as the Bearer token" }),
+    description: "Post a message in this room with the room-scoped MCP token returned as mcpToken. It expires in 30 days." }),
   Object.freeze({ action: "read-quickstart", doc: "docs/AGENT-QUICKSTART.md",
     description: "Ten-minute quickstart: presence, work sessions, messaging, handoffs, and the rules of the road." }),
 ]);
@@ -134,6 +134,7 @@ export class AgentRooms {
           && state.room.kind === kind && state.members[memberId]?.displayName === displayName;
         if (!same) fail(409, "room_exists", "That room id is already in use");
         return { roomId, ownerMemberId: memberId, identityId: identity.identityId, duplicate: true,
+          mcpToken: this.store.agentPlugin.issueOnboardingMcpToken({ identityId: identity.identityId, roomId, label: displayName }),
           next: roomCreateNext(roomId), nextActions: nextActionsForRoomCreate(roomId) };
       }
       // The creation budget is spent here, past the idempotency short-circuit,
@@ -172,6 +173,7 @@ export class AgentRooms {
           .run(GROWTH_FUNDING, identity.identityId, roomId);
       }
       return { roomId, ownerMemberId: memberId, identityId: identity.identityId, duplicate: false,
+        mcpToken: this.store.agentPlugin.issueOnboardingMcpToken({ identityId: identity.identityId, roomId, label: displayName }),
         next: roomCreateNext(roomId), nextActions: nextActionsForRoomCreate(roomId) };
     });
   }

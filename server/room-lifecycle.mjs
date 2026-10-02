@@ -103,6 +103,7 @@ export function createAccountRoom(store, token, binding, request) {
     if (accountId.startsWith(provisionalAccountPrefix)) fail(403, "room_creation_denied", "This room key belongs to one room; sign in with an account key to create rooms");
     const memberships = store.db.prepare("SELECT room_id, member_id FROM member_accounts WHERE account_id=? ORDER BY room_id").all(accountId);
     if (memberships.length >= ACCOUNT_ROOM_LIMIT) fail(409, "pilot_limit", "Bounded pilot capacity reached; no room was created");
+    if (memberships.length > 0) store.accountLogins.assertEmailVerified(accountId);
     // The same per-room check discovery uses (active human membership with its
     // invitation evidence intact), then owner or manage_members in that room.
     // Zero memberships means a stranger's first room: always allowed, they

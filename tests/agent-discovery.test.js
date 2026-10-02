@@ -15,7 +15,7 @@ import {
   EDGE_DOOR_HOSTS, isEdgeDoorUrl
 } from "../deploy/agent-discovery.mjs";
 
-const FORBIDDEN = /Bearer (?!<saved-identity-secret>)|ROOM_AGENT_TOKEN|sk-|password|@gmail|John |Potter |Uuriko@|acct-|memberId":"[^c]/i;
+const FORBIDDEN = /Bearer (?!<saved-identity-secret>|<room-mcp-token>)|ROOM_AGENT_TOKEN|sk-|password|@gmail|John |Potter |Uuriko@|acct-|memberId":"[^c]/i;
 
 async function serve(t) {
   const directory = mkdtempSync(join(tmpdir(), "room-discovery-"));
