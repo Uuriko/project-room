@@ -283,6 +283,8 @@ optional.push("server/membership-delegation.mjs"); // RC-2026-09-18-038: owner-g
 optional.push("server/usage-summary.mjs");
 optional.push("server/channel-adapters/telegram-config.mjs", "server/channel-adapters/telegram-transport.mjs", "scripts/telegram-set-webhook.mjs", "scripts/telegram-rotate-webhook.mjs");
 optional.push("server/receipts-page.mjs", "server/receipts-live.mjs"); // public receipts page + live room reader (imported by server/http.mjs)
+optional.push("server/legal-store.mjs", "server/legal-pages.mjs", "server/legal-routes.mjs", "server/legal-documents.mjs"); // terms, privacy, public reports, unpublish
+optional.push("docs/legal/terms.md", "docs/legal/privacy.md", "docs/legal/acceptable-use.md", "docs/legal/subprocessors.json");
 optional.push("server/public-read-model.mjs"); // public page tables (imported by server/store.mjs and the public routes)
 optional.push("server/templates.mjs", "server/public-rooms.mjs"); // GR2 template gallery, public room pages, agent directory (imported by server/http.mjs)
 optional.push("src/design-tokens.js"); // token declarations embedded in the public receipts page

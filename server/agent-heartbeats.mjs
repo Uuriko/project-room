@@ -144,15 +144,28 @@ const hostView = (row, cadenceSeconds = null) => Object.freeze({
   // never declared one); drives the per-host reachability window.
   cadenceSeconds,
 });
-const signalView = row => Object.freeze({
-  signalId: row.signal_id, agentId: row.agent_id, kind: row.kind,
-  roomId: row.room_id, messageId: row.message_id,
-  createdAt: row.created_at, deliveredAt: row.delivered_at,
-  // Tag acknowledgment (2026-09-23): the one-tap ack copy rides the journaled
-  // pending-wake signal too, so an agent reading its heartbeat queue learns a
-  // bare 👍 react counts as a response. Additive — every existing field stands.
-  ackHint: WAKE_ACK_HINT,
-});
+// work-claim:{id}:{reason}:… is the claim wake id. Poll and heartbeat
+// readers triage on reason without a second table. Other signals stay
+// the same shape.
+const claimWakeOf = messageId => {
+  if (typeof messageId !== "string" || !messageId.startsWith("work-claim:")) return null;
+  const parts = messageId.split(":");
+  if (parts.length < 3 || parts[1].length === 0 || parts[2].length === 0) return null;
+  return { workClaim: parts[1], reason: parts[2] };
+};
+const signalView = row => {
+  const claim = claimWakeOf(row.message_id);
+  return Object.freeze({
+    signalId: row.signal_id, agentId: row.agent_id, kind: row.kind,
+    roomId: row.room_id, messageId: row.message_id,
+    createdAt: row.created_at, deliveredAt: row.delivered_at,
+    ...(claim ? { workClaim: claim.workClaim, reason: claim.reason } : {}),
+    // Tag acknowledgment (2026-09-23): the one-tap ack copy rides the journaled
+    // pending-wake signal too, so an agent reading its heartbeat queue learns a
+    // bare 👍 react counts as a response. Additive — every existing field stands.
+    ackHint: WAKE_ACK_HINT,
+  });
+};
 
 export class AgentHeartbeats {
   constructor(store, { staleAfterMs = HEARTBEAT_STALE_AFTER_MS } = {}) {

@@ -387,6 +387,7 @@ export function loadRouteSources(root) {
     bounty: read("server/bounty-escrow-routes.mjs"),
     collab: read("server/inbox-collab-routes.mjs"),
     worker: read("cloudflare/room.mjs"),
+    legal: read("server/legal-routes.mjs"),
     constants: readConstants(root),
   };
 }
@@ -398,7 +399,7 @@ export function extractLegacyRoutes(sources) {
   const { byVar } = matcherPaths(prepared);
   const bag = new Map();
   scanSource(prepared, bag, { names, matchers: byVar, bindings: indexRegexConsts(prepared) });
-  for (const file of [sources.plugin, sources.nextActions, sources.workClaims, sources.feedback, sources.bounty, sources.collab]) {
+  for (const file of [sources.plugin, sources.nextActions, sources.workClaims, sources.feedback, sources.bounty, sources.collab, sources.legal]) {
     const text = substitute(file, sources.constants);
     scanSource(text, bag, { names, matchers: byVar, bindings: indexRegexConsts(text) });
   }

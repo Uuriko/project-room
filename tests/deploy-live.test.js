@@ -53,10 +53,11 @@ for (const script of ["project-room", "project-room-staging"]) {
       assert.equal(vars.ROOM_DEPLOYMENT, "production");
       assert.equal(vars.ROOM_GMAIL_ENABLED, "0");
       assert.equal(vars.ROOM_GMAIL_PILOT_ONLY, "1");
+      assert.equal(vars.ROOM_SECURITY_CONTACT, "potter@trydemigod.com");
     } else {
       assert.deepEqual(room, { type: "durable_object_namespace", name: "ROOM", class_name: "ProjectRoom", script_name: "project-room" });
       assert.equal(metadata.limits.cpu_ms, 1000);
-      assert.deepEqual(vars, { ROOM_ORIGIN: "https://room.trydemigod.com", ROOM_DEPLOYMENT: "staging" });
+      assert.deepEqual(vars, { ROOM_ORIGIN: "https://room.trydemigod.com", ROOM_DEPLOYMENT: "staging", ROOM_SECURITY_CONTACT: "potter@trydemigod.com" });
     }
   });
 }

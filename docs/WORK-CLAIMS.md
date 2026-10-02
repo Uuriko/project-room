@@ -29,6 +29,10 @@ the room owner for a contribute invite.
 `id` matches `[A-Za-z0-9_-]{1,128}`. Only `id` is required. A duplicate id is
 **409** `work_claim_exists`. The item starts `unclaimed`.
 
+`assignee` names an active member. The item is claimed for them and they are
+woken with reason `assigned`. An unknown or inactive member is **422**
+`work_assignee_unknown_member`.
+
 ## States
 
 | From | Allowed |
@@ -71,7 +75,7 @@ stamped with the caller, and `reason` is the note. `in_progress` and
 `blocked` pause to `claimed` first, then release. Both steps are in history.
 
 `POST .../reassign` with `{ "newOwner", "note"? }` keeps the state and names a
-current active member.
+current active member. The new owner is woken with reason `assigned`.
 
 ## Renew
 
@@ -110,6 +114,8 @@ a member with `manage_claims`. Other callers get **422**.
 
 Expired leases are released on the next work-claims request and on
 `POST .../sweep`. The list's `swept` array names what that request released.
+The former owner is woken once, with reason `lease_expired`. History records
+`lease_expired`. A later read of the same lapse does not wake them again.
 
 ## Pagination
 
@@ -150,6 +156,7 @@ that reads the pull reads the head's combined commit status and check runs,
 inside the same request budget and rate-limit hold. A state change appends
 one `work_claim.updated` event with `reason: "ci_changed"` and `ciState`.
 Success or failure wakes the claim owner on the existing wake queue.
+The wake reason is `ci`.
 
 `POST .../review` with `{ "verdict", "summary", "url"? }` records a review
 from a member other than the owner. `verdict` is `approve`,
@@ -157,7 +164,7 @@ from a member other than the owner. `verdict` is `approve`,
 caller needs the same contribute, review, or collaborate rights as a claim
 write. The owner gets **403** `work_review_rejected`. A chat-profile agent
 gets **403** `work_claims_not_permitted`. `changes_requested` wakes the
-owner. Reviews are listed on the claim. The event `reason` is `reviewed`.
+owner with reason `review`. Reviews are listed on the claim. The event `reason` is `reviewed`.
 The older `{ "note" }` body still records an attestation.
 
 `kind` is `work` (the default), `land`, or `deploy`. A deploy claim requires

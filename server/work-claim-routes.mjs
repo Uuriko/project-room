@@ -41,11 +41,10 @@ import { findDuplicates, DuplicateError } from "./work-duplicates.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { evaluateReceipt } from "./jev-receipts.mjs";
 import { findClaimCollisions } from "./claim-collisions.mjs";
-import { emitWorkClaimEvent } from "./work-claim-events.mjs";
+import { emitWorkClaimEvent, enqueueClaimWake } from "./work-claim-events.mjs";
 import { ROOM_GUIDE_ID } from "./room-guide.mjs";
 import { fileLeaseConflictBody, fileLeaseConflicts, holdForRateLimit, readyClaims } from "./claim-coordination.mjs";
 import { collectPullRequestLookups, commitPullRequestLookup, readClaimPullBudget, readRoomDeployStatus, writeClaimPullBudget } from "./claim-pr-sync.mjs";
-import { enqueueClaimWake } from "./work-claim-events.mjs";
 import { agentErrorBody } from "../src/agent-error.mjs";
 import { SOURCE_REVISION } from "./version.mjs";
 
@@ -430,7 +429,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     db: store.db, roomId, state: { room: { ownerId: store.roomAuthority?.(roomId)?.ownerId } },
     actor: auth.member, action: `${req.method} work-claim ${workClaimRoute}`, fail: reject });
   refuseRoomGuideOffStarter(registry, roomId, auth, workClaimId, req.method, reject);
-  const nowMs = Date.now();
+  const nowMs = typeof store.now === "function" ? store.now() : Date.now();
   const caller = auth.member.id;
   // Every committed claim change appends one work_claim.updated room event
   // inside this transaction (server/work-claim-events.mjs).
@@ -440,7 +439,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // in this same transaction. A pull request that closes does the same.
     const prior = action === "released" || action === "pr_closed" ? registry.get(roomId, item.id) : null;
     registry.set(roomId, item);
-    emitWorkClaimEvent(store, roomId, {
+    const receipt = emitWorkClaimEvent(store, roomId, {
       actorId: extra.actorId ?? caller,
       item,
       action,
@@ -450,8 +449,16 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       pullRequest: extra.pullRequest,
       reason: extra.reason,
       ciState: extra.ciState,
-      verdict: extra.verdict
+      verdict: extra.verdict,
+      attention: extra.attention,
+      attentionMemberId: extra.attentionMemberId
     });
+    if (extra.wakeMemberId && extra.wakeReason) {
+      const stamp = extra.wakeStamp ?? receipt?.sequence ?? nowMs;
+      enqueueClaimWake(store, roomId, extra.wakeMemberId,
+        `work-claim:${item.id}:${extra.wakeReason}:${stamp}`,
+        { reason: extra.wakeReason, actorId: extra.actorId ?? caller });
+    }
     return item;
   };
   const closeLiveClaims = () => {
@@ -464,11 +471,18 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     }
     return closed;
   };
-  const sweptIds = sweepRoom(registry, roomId, nowMs,
-    (item, before) => emitWorkClaimEvent(store, roomId, {
+  const sweptIds = sweepRoom(registry, roomId, nowMs, (item, before) => {
+    const receipt = emitWorkClaimEvent(store, roomId, {
       actorId: before.owner, item, action: "lease_expired", previousOwnerId: before.owner,
       atMs: nowMs, paths: before.files ?? []
-    }));
+    });
+    // One wake per expiry. The message id includes the lapsed lease time, so
+    // a later claim that expires again wakes again, and a repeat sweep of
+    // this lapse coalesces.
+    enqueueClaimWake(store, roomId, before.owner,
+      `work-claim:${item.id}:lease_expired:${before.leaseExpiresAt ?? receipt?.sequence ?? nowMs}`,
+      { reason: "lease_expired", actorId: before.owner });
+  });
   const config = registry.configFor(roomId);
   const roomLike = { workClaims: registry.rawConfig(roomId) };
   const access = resolveWorkClaimAccess(store, roomId, auth);
@@ -605,7 +619,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   }
   if (workClaimRoute === "create" && req.method === "POST") {
     const data = body(req);
-    if (!shape(data, { required: ["id"], optional: ["title", "reviewPolicy", "note", "tags", "files", "dependsOn", "pullRequest", "pullRequests", "repo", "branch", "kind", "revision"] })) invalidInput(reject, "{id, title?, reviewPolicy?, note?, tags?, files?, dependsOn?, pullRequest?, pullRequests?, repo?, branch?, kind?, revision?}");
+    if (!shape(data, { required: ["id"], optional: ["title", "reviewPolicy", "note", "tags", "files", "dependsOn", "pullRequest", "pullRequests", "repo", "branch", "kind", "revision", "assignee"] })) invalidInput(reject, "{id, title?, reviewPolicy?, note?, tags?, files?, dependsOn?, pullRequest?, pullRequests?, repo?, branch?, kind?, revision?, assignee?}");
     requireWriter();
     const id = claimIdOf(reject, data.id);
     if (registry.has(roomId, id)) reject(409, "work_claim_exists", `Work claim "${id}" already exists in this room`);
@@ -617,7 +631,32 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     }
     if (data.reviewPolicy !== undefined && !REVIEW_POLICIES.includes(data.reviewPolicy)) invalidInput(reject, `reviewPolicy one of ${REVIEW_POLICIES.join(", ")}`);
     if (data.kind !== undefined && !CLAIM_KINDS.includes(data.kind)) invalidInput(reject, `kind one of ${CLAIM_KINDS.join(", ")}`);
-    const item = runPure(reject, () => createWork({ id, title: data.title, reviewPolicy: data.reviewPolicy, note: data.note, tags: data.tags, files: data.files, dependsOn: data.dependsOn, pullRequest: data.pullRequest, pullRequests: data.pullRequests, repo: data.repo, branch: data.branch, kind: data.kind, revision: data.revision }, { now: nowMs, agentId: caller }));
+    const assignee = data.assignee;
+    if (assignee !== undefined) {
+      const members = store.roomAuthority(roomId).members ?? {};
+      const member = typeof assignee === "string" ? members[assignee] : null;
+      if (!member || member.active === false) {
+        reject(422, "work_assignee_unknown_member",
+          `assignee "${typeof assignee === "string" ? assignee : "?"}" is not an active member of this room`);
+      }
+    }
+    let item = runPure(reject, () => createWork({ id, title: data.title, reviewPolicy: data.reviewPolicy, note: data.note, tags: data.tags, files: data.files, dependsOn: data.dependsOn, pullRequest: data.pullRequest, pullRequests: data.pullRequests, repo: data.repo, branch: data.branch, kind: data.kind, revision: data.revision }, { now: nowMs, agentId: caller }));
+    if (assignee) {
+      const held = registry.list(roomId).filter(entry => entry.owner === assignee && ACTIVE_CLAIM_STATES.includes(entry.state)).length;
+      if (held >= config.maxMemberOpenClaims) {
+        refuseCap("too_many_open_claims",
+          `${assignee} already holds ${config.maxMemberOpenClaims} open claims. Release or finish one before assigning another.`,
+          "Release or finish an open claim before assigning another.");
+      }
+      item = runPure(reject, () => claimWork(item, assignee, {
+        note: data.note ?? `assigned by ${caller}`, room: roomLike, now: nowMs
+      }));
+      commit(item, "claimed", {
+        attention: "assigned", attentionMemberId: assignee,
+        wakeMemberId: assignee, wakeReason: "assigned"
+      });
+      return json(res, 201, item);
+    }
     commit(item, "created");
     return json(res, 201, item);
   }
@@ -747,7 +786,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       const reviewed = runPure(reject, () => recordReview(item, caller, { verdict: data.verdict, summary: data.summary, url: data.url, now: nowMs }));
       commit(reviewed, "reviewed", { reason: "reviewed", verdict: data.verdict });
       if (data.verdict === "changes_requested") {
-        enqueueClaimWake(store, roomId, item.owner, `work-claim:${item.id}:review:${caller}:${nowMs}`);
+        enqueueClaimWake(store, roomId, item.owner, `work-claim:${item.id}:review:${caller}:${nowMs}`, { reason: "review", actorId: caller });
       }
       return json(res, 200, reviewed);
     }
@@ -793,7 +832,11 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     }
     const previousOwnerId = item.owner;
     const reassigned = runPure(reject, () => reassignWork(item, caller, target, { note: data.note, now: nowMs, authority }));
-    commit(reassigned, "reassigned", { previousOwnerId });
+    commit(reassigned, "reassigned", {
+      previousOwnerId,
+      attention: "assigned", attentionMemberId: target,
+      wakeMemberId: target, wakeReason: "assigned"
+    });
     return json(res, 200, reassigned);
   }
   if (workClaimRoute === "renew" && req.method === "POST") {

@@ -383,6 +383,11 @@ export const unfencedAdditiveTables = Object.freeze([
   // Per-room sequence and projection size for the incremental integrity
   // check. The cron writes it; a missing row means that room is due.
   "integrity_room_state",
+  // LEGAL: terms acceptance, public abuse reports, and operator unpublish.
+  // Additive and unfenced. Older writers have no code path to them.
+  "account_terms",
+  "public_abuse_reports",
+  "public_unpublish",
   // operator_actions (CP-ADMIN-0): append-only operator audit. Purely additive
   // and intentionally NOT fenced — older writers have no path to it. The
   // append-only triggers are the integrity gate.

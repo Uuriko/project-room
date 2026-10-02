@@ -3936,17 +3936,24 @@ paths:
                 revision:
                   type: string
                   description: Required for kind deploy. A land or deploy claim closes when this server's live revision matches it.
+                assignee:
+                  type: string
+                  description: |
+                    Active member id. The item is claimed for them and they
+                    are woken with reason assigned. Omit it to leave the item
+                    unclaimed. An unknown or inactive member is 422
+                    work_assignee_unknown_member.
       responses:
         '201':
-          description: The created unclaimed item
+          description: The created item. Unclaimed unless assignee is set, in which case that member owns it.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/WorkClaim'
         '401': { description: unauthenticated }
         '403': { description: work_claims_not_permitted }
-        '409': { description: work_claim_exists or work_board_full }
-        '422': { description: invalid_claim_input }
+        '409': { description: work_claim_exists, work_board_full, or too_many_open_claims }
+        '422': { description: invalid_claim_input or work_assignee_unknown_member }
   /api/rooms/{roomId}/work-claims/config:
     get:
       summary: Read the room's work-claim caps
@@ -4339,7 +4346,9 @@ paths:
       description: |
         The claim holder, the room owner, or a member with manage_claims
         hands the claim to another current member in the same state. The
-        history entry is stamped with the caller. API keys need `rooms:write`.
+        history entry is stamped with the caller. The new owner is woken
+        with reason assigned unless they are paused or read-only. API keys
+        need `rooms:write`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: claimId
@@ -6873,18 +6882,84 @@ paths:
         '200': { description: Response headers only }
   /api/health/jobs:
     get:
-      summary: Cron job heartbeat
-      x-worker-only: true
+      summary: Cron job heartbeat and open public-report count
       description: >-
-        Open (also HEAD). Answered by the Worker: per-job lastSuccessAt /
-        lastError for the cron jobs, read through one Durable Object RPC.
-        200 `{ status, jobs }` when every job is fresh; 503 when a job is
-        stale, failing, or the read is unavailable, so a plain status check
-        catches dead crons. Operational metadata only, no room data.
+        Open (also HEAD). The Worker answers with per-job lastSuccessAt /
+        lastError for the cron jobs, read through one Durable Object RPC,
+        plus `publicReports` (open public abuse reports). 200 `{ status, jobs,
+        publicReports }` when every job is fresh; 503 when a job is stale,
+        failing, or the read is unavailable. The Node process answers 200
+        `{ schema, publicReports, servedBy: "node" }` and does not invent a
+        cron status. Operational metadata only, no room data and no report bodies.
       security: []
       responses:
-        '200': { description: "{ status, jobs } - all jobs fresh" }
-        '503': { description: "a job is stale or failing, or the heartbeat read failed" }
+        '200': { description: "Worker: { status, jobs, publicReports } when fresh. Node: { schema, publicReports, servedBy: node }" }
+        '503': { description: "Worker: a job is stale or failing, or the heartbeat read failed" }
+    head:
+      summary: Read public response headers
+      description: Uses the same public GET policy and status with no response body.
+      security: []
+      responses:
+        '200': { description: Response headers only }
+        '503': { description: Response headers only }
+  /api/reports/public/challenge:
+    get:
+      summary: Public abuse-report proof challenge
+      description: >-
+        Open (GET). Returns `{ bucket, bits, algorithm }` for the proof of
+        work on POST /api/reports/public. The input is
+        `{bucket}:{kind}:{target}:{nonce}` hashed with sha256. No account and
+        no room data.
+      security: []
+      responses:
+        '200': { description: "{ bucket, bits, algorithm }" }
+  /api/reports/public:
+    post:
+      summary: File a public abuse report
+      description: >-
+        Open. Body `{ kind, target, body, bucket, nonce, email? }`. `kind` is
+        room, receipt, or agent. `body` is 1 to 1,000 characters. `email` is
+        optional. A current proof of work is required (428). Extra fields are
+        422. Five reports per IP hash per minute (429). Stores a hash of the
+        IP address, not the address. No account required.
+      security: []
+      responses:
+        '201': { description: "{ received: true, id }" }
+        '422': { description: Invalid report }
+        '428': { description: Proof of work required }
+        '429': { description: Rate limited }
+  /api/account/terms:
+    post:
+      summary: Accept the current terms version
+      description: >-
+        Account session. Body `{ version }`. Records acceptance of the current
+        terms. A stale version is 409 terms_changed. Requires the account
+        cookie, same-origin Origin, and X-CSRF-Token.
+      security:
+        - accountSession: []
+      responses:
+        '200': { description: Account session including terms status }
+        '401': { description: Sign in required }
+        '403': { description: Origin or CSRF rejected }
+        '409': { description: The terms version changed }
+        '422': { description: Invalid body }
+  /api/operator/unpublish:
+    post:
+      summary: Hide a public room or receipt
+      description: >-
+        Account session for the configured operator account
+        (ROOM_OPERATOR_ACCOUNT_ID). Body `{ kind, id }` with kind room or
+        receipt. Hides that public room (and its receipts) or that receipt
+        from public pages and the sitemap. 403 when the operator account is
+        unset or the caller is a different account. Requires the account
+        cookie, same-origin Origin, and X-CSRF-Token.
+      security:
+        - accountSession: []
+      responses:
+        '200': { description: "{ unpublished: true, kind, id }" }
+        '401': { description: Sign in required }
+        '403': { description: Operator is unset, or this account is not the operator }
+        '422': { description: Invalid body }
   /api/operator/export:
     get:
       summary: Operator Durable Object export
