@@ -287,8 +287,13 @@ export class ProjectRoom extends DurableObject {
   async planRetention() {
     if (this.paused) return { dryRun: true, deleted: 0, skipped: "paused" };
     await yieldToQueuedRequests();
-    return runLiveStoreRetention({ store: this.store, env: this.env,
+    const receipt = runLiveStoreRetention({ store: this.store, env: this.env,
       now: new Date().toISOString(), record: plan => { this.lastRetentionPlan = plan; } });
+    // Applied on every retention tick, not behind the disposable-log deletion
+    // flag. Delivered and dead-letter webhook rows are a cache; pending and
+    // failed rows stay until dispatch finishes them.
+    const webhookDeliveries = this.store.agentPlugin.pruneWebhookDeliveries();
+    return { ...receipt, webhookDeliveries };
   }
   // E1 — RPC: hand an accepted, already-routed message to the importer. Needs
   // the system import authority from B20; until then it parks the request so
