@@ -24,7 +24,7 @@ import { replyDraftKey, replyDraftData, validReplyDraft, replyFollowUp, creditQu
 import { workHelpContext, validateHelpData } from "./work-help.js";
 import { workOffersContext, validateHelpOfferData } from "./help-offers.js";
 import { installInbox } from "./inbox-ui.js";
-import { createAccountSettingsUI, applyStoredTheme, organizeRoomSettings } from "./account-settings-ui.js";
+import { createAccountSettingsUI, applyStoredTheme, organizeRoomSettings, ACCOUNT_DELETED_MESSAGE } from "./account-settings-ui.js";
 import { createAuthSigninUI, classifyAuthLink } from "./auth-signin-ui.js";
 import { createAgentSigninUI } from "./agent-signin-ui.js";
 import { stashPendingInvite, clearPendingInvite, takeRestoredInvite, stashPendingJoin, clearPendingJoin, takeRestoredJoin, inviteRequestDoor, defaultRequestPermissions, validateAccessRequestForm, newAccessRequestId, stashAccessRequest, readAccessRequest } from "./invite-context.js";
@@ -78,6 +78,16 @@ function accountHomeFromLocation() {
 function googleErrorFromLocation() {
   const values = new URLSearchParams(location.search).getAll("google");
   return values.length === 1 && ["error", "unavailable"].includes(values[0]) ? values[0] : null;
+}
+function accountDeletedFromLocation() {
+  const values = new URLSearchParams(location.search).getAll("account-deleted");
+  return values.length === 1 && values[0] === "1";
+}
+const initialAccountDeleted = accountDeletedFromLocation();
+if (initialAccountDeleted) {
+  const url = new URL(location.href);
+  url.searchParams.delete("account-deleted");
+  history.replaceState(history.state, "", `${url.pathname}${url.search}${url.hash}`);
 }
 const initialGoogleFailed = googleErrorFromLocation();
 const googleSigninFailureMessage = initialGoogleFailed === "unavailable"
@@ -530,7 +540,13 @@ function ensureAccountSession() {
 }
 // Sign-in & security settings (slice 7): mounted inside the account rooms
 // panel's <details>, opened from the session menu.
-const accountSettingsUI = createAccountSettingsUI({ accountClient });
+const accountSettingsUI = createAccountSettingsUI({
+  accountClient,
+  onAccountDeleted: async () => {
+    try { await client.logout(); } catch { /* deletion already ended the account session */ }
+    location.assign("/?account-deleted=1");
+  }
+});
 // Multi-method sign-in / create-account (slice 7): mounts into the auth
 // panel next to the Google button. After a
 // browser sign-in the cookie changed, so restore the in-memory session and
@@ -6557,13 +6573,16 @@ if (initialInvitationFragment && !initialPasswordReset) openInvitation(initialIn
   const signedOut = [401, 403].includes(error.status);
   if (signedOut) recovery.clear();
   const requestedRoom = selectedRoomFromLocation();
-  setFormStatus($("#auth-error"), initialGoogleFailed
+  const deletedNotice = initialAccountDeleted && signedOut && !requestedRoom ? ACCOUNT_DELETED_MESSAGE : "";
+  setFormStatus($("#auth-error"), deletedNotice
+    ? deletedNotice
+    : initialGoogleFailed
     ? googleSigninFailureMessage
     : initialGitHubFailed
     ? "GitHub sign-in didn't finish — it may have been cancelled, or GitHub declined the request. Try again, or sign in another way."
     : signedOut
     ? requestedRoom ? `This account cannot open #${requestedRoom}. Use an account with active membership there.` : ""
-    : unreachableRoomMessage(error), true);
+    : unreachableRoomMessage(error), !deletedNotice);
   setConnectionStatus(signedOut ? "Not connected · sign in required" : "Room service unavailable · not connected");
   $("#identity-label").textContent = signedOut ? "Not signed in" : "Session unavailable";
   $("#auth-panel").hidden = false;
