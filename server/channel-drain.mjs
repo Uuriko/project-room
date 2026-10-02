@@ -124,13 +124,14 @@ export class ChannelDrainer {
   }
   // One scheduled cycle: scan, poison-screen each connection, then drain.
   // Never throws: a failing connection is one entry in the summary.
-  async tick() {
+  async tick({ deadline = Infinity } = {}) {
     const at = this.#now(), summary = { at, connections: 0, screened: 0, parked: 0, drained: 0, deferred: 0, errors: 0, results: [] };
     let targets = [];
     try { targets = this.scan(); }
     catch (error) { summary.scanError = oneLine(error?.code ?? error?.message ?? error); this.#lastTick = summary; return summary; }
     summary.connections = targets.length;
     for (const { accountId, connectionId } of targets) {
+      if (Date.now() > deadline) { summary.budgetExceeded = 1; break; }
       let screened = { screened: 0, parked: [] };
       try { screened = this.poisonScreen({ accountId, connectionId }); }
       catch (error) { summary.errors++; summary.results.push({ accountId, connectionId, status: "error", code: oneLine(error?.code ?? "poison_screen_failed") }); continue; }

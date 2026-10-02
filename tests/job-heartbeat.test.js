@@ -66,6 +66,30 @@ test("every cron job in scheduled() has a heartbeat entry", () => {
   for (const job of CRON_JOBS) assert.equal(job.periodSeconds, 60);
 });
 
+test("runCronJobs runs one job at a time and yields between them", async () => {
+  let active = 0;
+  let max = 0;
+  let yields = 0;
+  const run = async () => {
+    active += 1;
+    max = Math.max(max, active);
+    await new Promise(resolve => setTimeout(resolve, 15));
+    active -= 1;
+    return { checked: 1 };
+  };
+  const outcomes = await runCronJobs({
+    "gmail-sync": run,
+    "channel-drain": run,
+    "webhook-dispatch": run,
+    "land-queue": run,
+    "retention": run
+  }, { log() {}, yieldTurn: async () => { yields += 1; } });
+  assert.equal(max, 1);
+  assert.equal(yields, 4);
+  assert.equal(outcomes.length, 5);
+  assert.ok(outcomes.every(outcome => outcome.ok && outcome.durationMs >= 0));
+});
+
 test("runCronJobs records failures, summary failures and redacts gmail errors", async () => {
   const logs = [];
   let t = 1_000;
@@ -93,6 +117,8 @@ test("redactError drops tokens, secrets and query strings", () => {
   assert.ok(!/pri_abc|ghp_123|sig=abc|zzz|AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/.test(out), out);
   assert.ok(redactError("x".repeat(1000)).length <= 240);
   assert.equal(summaryFailure({ errors: 2 }), "2 error(s) in tick");
+  assert.equal(summaryFailure({ budgetExceeded: 1, checked: 2 }), null);
+  assert.equal(compactSummary({ budgetExceeded: 1, checked: 2 }).budgetExceeded, 1);
   assert.equal(summaryFailure({ checked: 1 }), null);
   assert.deepEqual(compactSummary({ a: 1, b: "no", c: true, d: { x: 1 } }), { a: 1, c: true });
 });
@@ -172,8 +198,18 @@ test("Room request boundary contains DO failures without leaking or replaying", 
     } })
   ];
   const origin = "https://room.example.test";
+  // The HTML shell is static. A dead Durable Object must not be consulted,
+  // and its private error must not reach the page.
+  let shellAttempts = 0;
+  const shell = await worker.fetch(new Request(origin + "/", { headers: { "CF-Connecting-IP": "192.0.2.1" } }), {
+    ROOM_ORIGIN: origin,
+    ROOM: { getByName() { shellAttempts += 1; throw new Error("private constructor detail token=secret"); } }
+  });
+  assert.equal(shellAttempts, 0);
+  assert.equal(shell.status, 404);
+  assert.doesNotMatch(await shell.text(), /private|secret/);
   for (const getStub of failures) for (const [method, url, json] of [
-    ["GET", origin + "/", false], ["HEAD", origin + "/api/version", true],
+    ["HEAD", origin + "/api/version", true],
     ["GET", origin + "/api/version", true], ["POST", origin + "/api/rooms", true],
     ["GET", origin + "/room/api/version", true],
     ["GET", "https://www.getdasha.com/room/api/version", true],
@@ -232,7 +268,12 @@ test("Room boundary passes responses through and retains trusted forwarding head
     const response = await worker.fetch(new Request(origin + "/api/version", { headers: {
       "CF-Connecting-IP": "192.0.2.1", "X-Room-Visitor-IP": "203.0.113.1", "X-Real-IP": "203.0.113.1", "X-Forwarded-For": "203.0.113.1"
     } }), env);
-    assert.equal(response, expected);
+    // Headers on a Response are immutable, so timing is a new response that
+    // keeps the status, body, and the object's own headers.
+    assert.equal(response.status, status);
+    assert.equal(response.headers.get("x-test"), "preserved");
+    assert.match(response.headers.get("server-timing"), /^total;dur=\d+$/);
+    assert.equal(await response.text(), "existing response");
     assert.equal(calls, 1);
   }
 });
