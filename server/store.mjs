@@ -34,6 +34,7 @@ import { ensureGrantsSchema } from "./grants.mjs";
 import { canonicalInvitationData, invitationJournalEntry, invitationJournalSchema, replayInvitationJournal } from "./invitation-journal.mjs";
 import { invitationJoinedEvent, assertInvitationMembershipEvidence } from "./invitation-evidence.mjs";
 import { STORE_SCHEMA_VERSION, fenceDefinitions, registerWriter, installWriterFence, verifyWriterFence } from "./writer-fence.mjs";
+import { MESSAGES_SCHEMA, syncMessageRows } from "./messages-store.mjs";
 import { migrateRoomLifecycleV28, verifyRoomLifecycle, refuseArchivedWrite, createAccountRoom, accountRoomEntry, ACCOUNT_ROOM_SELECT, archivedAtOf } from "./room-lifecycle.mjs";
 import { ShareLinks, shareLinkSchema, shareLinkCodeSchema } from "./share-links.mjs";
 import { DmConsents, dmConsentSchema } from "./dm-consents.mjs";
@@ -981,7 +982,7 @@ function roomSchemaStamp() {
     directSendSchema, inboxStitchSchema, RETIRED_BOARD_V2_SCHEMA, EMISSARY_LURE_SCHEMA,
     agentKeyRegistrySchema, INTEGRITY_SNAPSHOT_SCHEMA, OPERATOR_ACTIONS_SCHEMA,
     INTEGRITY_JOB_CURSOR_SCHEMA, INTEGRITY_ROOM_STATE_SCHEMA, INTEGRITY_SWEEP_COLUMN,
-    ROOM_SCHEMA_STAMP_SCHEMA, LOOKUP_INDEXES,
+    ROOM_SCHEMA_STAMP_SCHEMA, LOOKUP_INDEXES, MESSAGES_SCHEMA,
     PUBLIC_READ_MODEL_SCHEMA
   ];
   for (const part of parts) hash.update("\0").update(part ?? "");
@@ -1025,6 +1026,46 @@ const LOOKUP_INDEXES = `
   CREATE INDEX IF NOT EXISTS gmail_pending_account ON gmail_pending(account_id);
   CREATE INDEX IF NOT EXISTS guest_selfserve_idem_member ON guest_selfserve_idem(member_id);
 `;
+
+// MSG-0: parsed projection cache. A hit reads sequence only, so a 4 MiB
+// room does not JSON.parse again until the sequence changes or a rooms
+// write drops the entry. Commit and rollback of a write transaction drop
+// the whole cache, including a parse of uncommitted bytes. Callers receive
+// a frozen snapshot; a rewrite clones it first.
+const PROJECTION_CACHE_MAX_ROOMS = 32;
+const PROJECTION_CACHE_MAX_BYTES = 64 * 1024 * 1024;
+const ROOMS_WRITE = /\b(?:insert\s+into|update|delete\s+from|replace\s+into)\s+rooms\b/i;
+
+function deepFreeze(value) {
+  if (value === null || typeof value !== "object" || Object.isFrozen(value)) return value;
+  if (Array.isArray(value)) { for (const item of value) deepFreeze(item); }
+  else { for (const key of Object.keys(value)) deepFreeze(value[key]); }
+  return Object.freeze(value);
+}
+
+class ProjectionCache {
+  constructor() { this.entries = new Map(); this.bytes = 0; }
+  clear() { this.entries.clear(); this.bytes = 0; }
+  lookup(roomId, sequence) {
+    const entry = this.entries.get(roomId);
+    if (!entry || entry.sequence !== sequence) return null;
+    this.entries.delete(roomId);
+    this.entries.set(roomId, entry);
+    return entry.value;
+  }
+  insert(roomId, sequence, value, weight) {
+    const prior = this.entries.get(roomId);
+    if (prior) { this.entries.delete(roomId); this.bytes -= prior.weight; }
+    this.entries.set(roomId, { sequence, value, weight });
+    this.bytes += weight;
+    while (this.entries.size > PROJECTION_CACHE_MAX_ROOMS || (this.bytes > PROJECTION_CACHE_MAX_BYTES && this.entries.size > 1)) {
+      const oldest = this.entries.keys().next().value;
+      const dropped = this.entries.get(oldest);
+      this.entries.delete(oldest);
+      this.bytes -= dropped.weight;
+    }
+  }
+}
 
 export class RoomStore {
   constructor(filename, { now = () => Date.now(), readOnly = false, database, storagePlatform = nodeStorage, storageFailureThreshold = STORAGE_FAILURE_THRESHOLD, stitch = null, identityHashKey = undefined, integrity = "eager" } = {}) {
@@ -1588,6 +1629,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // journals above — older writers have no code path to these tables.
       this.db.exec(inboxStitchSchema);
       ensureAttachmentSchema(this.db); // Converge the deployed v28-v33 attachment lineage before installing v34 fences.
+      // MSG-1: fenced messages table (schema v37). The table has to exist
+      // before installWriterFence attaches the v37 triggers. IF NOT EXISTS
+      // is idempotent. A warm wake whose stamp matches skips this block.
+      this.db.exec(MESSAGES_SCHEMA);
       // Idempotent: recreates fences for tables the additive schemas just
       // (re)created, and refuses a file whose existing triggers drifted.
       phase("fence");
@@ -2336,16 +2381,50 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (applyProvenanceRepair(state, events)) update.run(JSON.stringify(state), room.id);
     }
   }
-  close() { this.db.close(); }
+  close() { this._projectionCache?.clear(); this.db.close(); }
+  // MSG-0: drop parsed projections when a write transaction commits or rolls
+  // back, so a parse of uncommitted bytes cannot outlive the transaction.
+  _dropProjectionCache() { this._projectionCache?.clear(); }
+  _armProjectionWatch() {
+    if (this._projectionWatch || typeof this.db?.prepare !== "function") return;
+    this._projectionWatch = true;
+    const cache = () => this._projectionCache;
+    const prepare = this.db.prepare.bind(this.db);
+    this.db.prepare = sql => {
+      const stmt = prepare(sql);
+      if (typeof sql === "string" && ROOMS_WRITE.test(sql) && typeof stmt.run === "function") {
+        const run = stmt.run.bind(stmt);
+        stmt.run = (...args) => {
+          const result = run(...args);
+          cache()?.clear();
+          return result;
+        };
+      }
+      return stmt;
+    };
+    if (typeof this.db.exec === "function") {
+      const exec = this.db.exec.bind(this.db);
+      this.db.exec = sql => {
+        const result = exec(sql);
+        if (typeof sql === "string" && ROOMS_WRITE.test(sql)) cache()?.clear();
+        return result;
+      };
+    }
+  }
   transaction(fn) {
     // Nested startup helpers share the outer migration transaction and its rollback.
     const outermost = !this.db.isTransaction;
+    this._armProjectionWatch();
     // Only a commit that changed rows proves storage is writable again; an
     // idempotent replay commits nothing. Measured only while degraded.
     const before = outermost && this.storageFailures > 0 ? this.storagePlatform.changes?.(this.db) : null;
     let result;
     try { result = this.storagePlatform.transaction(this.db, fn, false); }
-    catch (error) { throw this.storageFailure(error, outermost); }
+    catch (error) {
+      if (outermost) this._dropProjectionCache();
+      throw this.storageFailure(error, outermost);
+    }
+    if (outermost) this._dropProjectionCache();
     if (before !== null && (before === undefined || this.storagePlatform.changes(this.db) !== before)) this.storageRecovered();
     return result;
   }
@@ -2376,9 +2455,19 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     return { failures: this.storageFailures, threshold: this.storageFailureThreshold, unavailable: this.storageFailures >= this.storageFailureThreshold };
   }
   room(roomId) {
-    const row = this.db.prepare("SELECT * FROM rooms WHERE id=?").get(roomId);
+    // MSG-0 projection cache. The hit path reads sequence only.
+    this._armProjectionWatch();
+    const cache = this._projectionCache ??= new ProjectionCache();
+    const meta = (this._roomSequenceStmt ??= this.db.prepare("SELECT sequence FROM rooms WHERE id=?")).get(roomId);
+    if (!meta) fail(404, "room_not_found", "Room not found");
+    const hit = cache.lookup(roomId, meta.sequence);
+    if (hit) return hit;
+    const row = (this._roomProjectionStmt ??= this.db.prepare("SELECT projection FROM rooms WHERE id=?")).get(roomId);
     if (!row) fail(404, "room_not_found", "Room not found");
-    return { sequence: row.sequence, state: JSON.parse(row.projection) };
+    const state = deepFreeze(JSON.parse(row.projection));
+    const value = Object.freeze({ sequence: meta.sequence, state });
+    cache.insert(roomId, meta.sequence, value, Buffer.byteLength(row.projection));
+    return value;
   }
   roomAuthority(roomId) {
     // Fresh storage read, not an authorization cache. Keep membership provenance
@@ -4390,6 +4479,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         if (bondEffect?.dm) this.bonds.sealDm(bondEffect.dm, incoming.id);
         this.db.prepare("INSERT INTO commands VALUES(?,?,?,?,?)").run(roomId, auth.member.id, command.id, fingerprint, sequence);
         this.db.prepare("UPDATE rooms SET sequence=?,projection=?,archived_at=? WHERE id=?").run(sequence, projection, archivedAtOf(state), roomId);
+        // MSG-1: double-write the messages table in this same transaction.
+        // A throw here rolls the event back with the row. No read path uses
+        // the table yet. Older events wait for the MSG-2 backfill.
+        syncMessageRows(this.db, { roomId, sequence, event: incoming, state });
         logSpan.setAttribute(ATTR.OUTCOME, "ok");
         logSpan.setStatusOk();
       } catch (error) {

@@ -139,7 +139,7 @@ test("failed offer receipt persistence rolls back the event and projection befor
 
 for (const corruption of ["scope", "helper", "helper-revision", "offer-revision", "selected-by", "unrecorded-release", "event-actor", "missing-opening", "missing-selection"]) test(`offer history rejects ${corruption} behind a checkpoint`, t => {
   const f = setup(t); f.send("guest", f.open("offer")); f.send("producer", f.update("offer"));
-  const room = f.store.room("commons"), state = room.state;
+  const room = f.store.room("commons"), state = structuredClone(room.state);
   f.store.db.prepare("INSERT INTO projection_checkpoints VALUES(?,?,?)").run("commons", room.sequence, JSON.stringify(state));
   auditRecovery(f.store);
   if (["event-actor", "missing-opening", "missing-selection"].includes(corruption)) {
@@ -164,7 +164,7 @@ for (const corruption of ["scope", "helper", "helper-revision", "offer-revision"
 
 test("event/projection capacity allows only valid offer cleanup with exact receipts", t => {
   const f = setup(t); f.send("guest", f.open("selected")); f.send("owner", f.open("pending")); f.send("producer", f.update("selected"));
-  const state = f.store.room("commons").state; state.messages.push({ body: "x".repeat(4 * 1024 * 1024) });
+  const state = structuredClone(f.store.room("commons").state); state.messages.push({ body: "x".repeat(4 * 1024 * 1024) });
   // Synthetic capacity projection only; not evidence of recoverable history.
   f.store.db.prepare("UPDATE rooms SET sequence=10000,projection=? WHERE id='commons'").run(JSON.stringify(state));
   assert.throws(() => f.send("producer", f.update("pending")), { code: "pilot_limit" });

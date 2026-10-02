@@ -15,7 +15,7 @@ import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { AgentRooms, agentRoomSchema } from "../server/agent-rooms.mjs";
 import { createRateLimiter } from "../server/identity-ratelimit.mjs";
-import { fenceDefinitions as _fd } from "../server/writer-fence.mjs";
+import { STORE_SCHEMA_VERSION, fenceDefinitions as _fd } from "../server/writer-fence.mjs";
 
 // Exact v35 membership_invitations DDL from main @ d2798965 (the migration's
 // "before" shape). INVITATION_ROLE_POLICY_VERSION was 1. The only difference
@@ -108,7 +108,7 @@ test("v35→v36 migration preserves invitation rows and unlocks accountless-owne
   raw.exec("PRAGMA foreign_keys=OFF");
   // The writer-fence triggers call versioned writer functions; register them
   // on this raw connection so the rebuild below can fire triggers.
-  for (let v = 6; v <= 36; v++) raw.function(`project_room_writer_v${v}`, () => v);
+  for (let v = 6; v <= STORE_SCHEMA_VERSION; v++) raw.function(`project_room_writer_v${v}`, () => v);
   const triggers = raw.prepare("SELECT sql FROM sqlite_master WHERE type='trigger' AND tbl_name='membership_invitations'").all().map(r => r.sql);
   const indexes = raw.prepare("SELECT sql FROM sqlite_master WHERE type='index' AND tbl_name='membership_invitations' AND sql IS NOT NULL").all().map(r => r.sql);
   raw.exec("CREATE TABLE membership_invitations_backup AS SELECT * FROM membership_invitations");
@@ -118,10 +118,10 @@ test("v35→v36 migration preserves invitation rows and unlocks accountless-owne
   for (const sql of triggers) raw.exec(sql);
   raw.exec("INSERT INTO membership_invitations SELECT * FROM membership_invitations_backup");
   raw.exec("DROP TABLE membership_invitations_backup");
-  // A real v35 database has writer_v6..v35 triggers but no writer_v36 ones;
-  // drop the v36 fence triggers so the pre-migration fence check passes.
-  const v36triggers = raw.prepare("SELECT name FROM sqlite_master WHERE type='trigger' AND name GLOB 'writer_v36_*'").all();
-  for (const { name } of v36triggers) raw.exec(`DROP TRIGGER ${name}`);
+  // A real v35 database has writer_v6..v35 triggers but none from the current
+  // schema. Drop those so the pre-migration fence check passes.
+  const currentTriggers = raw.prepare("SELECT name FROM sqlite_master WHERE type='trigger' AND name GLOB 'writer_v3[6-9]_*'").all();
+  for (const { name } of currentTriggers) raw.exec(`DROP TRIGGER ${name}`);
   raw.exec("PRAGMA user_version=35");
   // A real v35 DB carries the full v35 writer-trigger set; the v36 install
   // only created v36 triggers, so recreate the v35 set for every present table.
@@ -135,7 +135,7 @@ test("v35→v36 migration preserves invitation rows and unlocks accountless-owne
   // Reopen: the v36 migration runs, then the new capability works.
   store = new RoomStore(filename, { now: () => now });
   t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
-  assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, 36);
+  assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, STORE_SCHEMA_VERSION);
 
   // Both rows survived with every field intact.
   const rows = store.db.prepare("SELECT * FROM membership_invitations ORDER BY id").all();
