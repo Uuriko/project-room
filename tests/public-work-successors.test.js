@@ -13,7 +13,7 @@ function fixture(t, { mixed = false, linked = false } = {}) {
   let store = new RoomStore(file);
   const install = () => { store.db.exec(publicWorkSuccessorsSchema); store.publicWorkSuccessors = new PublicWorkSuccessors(store); store.publicWorkSuccessors.verifySchema(); };
   install(); store.initialize(initialRoom()); store.initialize(initialRoom('other'));
-  const alter = fn => { const state = store.room('commons').state; fn(state); store.db.prepare('UPDATE rooms SET projection=? WHERE id=?').run(JSON.stringify(state), 'commons'); };
+  const alter = fn => { const state = structuredClone(store.room('commons').state); fn(state); store.db.prepare('UPDATE rooms SET projection=? WHERE id=?').run(JSON.stringify(state), 'commons'); };
   alter(state => { state.members.reviewer = { id: 'reviewer', revision: 1, kind: 'agent', active: true, permissions: ['read','verify'] }; });
   if (linked) store.command(store.issueAccessKey('commons','owner'),'commons',{id:'linked',type:'work.proposed',data:{workItemId:'linked-work',title:'Linked',definitionOfDone:'Exact result',accountableMemberId:'owner',verifierMemberId:'reviewer',independentVerificationRequired:true,ownerDecisionRequired:true,humanDecisionMakerId:'owner',mode:'write'}});
   const terms = { kind:'task',title:'Initial task',summary:'Public initial scope',acceptanceCriteria:['Correct result'],repositoryUrl:'https://github.com/example/project',reward:{kind:'unpaid'},approvalPolicy:{mode:mixed?'human_with_agent_review':'human'} };

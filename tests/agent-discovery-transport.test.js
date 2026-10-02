@@ -7,7 +7,7 @@ const cases = [
   ["identity", (origin, options) => createAgentIdentity(origin, "Agent", options), { identityId: "ai_test", secret }],
   ["create", (origin, options) => createAgentRoom(origin, secret, { roomId: "test" }, options), { roomId: "test", ownerMemberId: "ai_test" }],
   ["preview", (origin, options) => previewAgentInvite(origin, "RM-code", options), { roomId: "test", permissions: [], profile: "chat" }],
-  ["redeem", (origin, options) => redeemAgentInvite(origin, "RM-code", "Agent", options), { identityId: "ai_test", secret, memberId: "ai_test" }],
+  ["redeem", (origin, options) => redeemAgentInvite(origin, "RM-code", "Agent", options), { identityId: "ai_test", memberId: "ai_test", mcpToken: { credential: "rak_" + "p".repeat(32) } }],
   ["access", (origin, options) => requestAccess(origin, { roomId: "test" }, options), { requestId: "ar_test", status: "pending" }],
   ["rooms", (origin, options) => listAgentRooms(origin, secret, options), { identityId: "ai_test", rooms: [], nextCursor: null }],
 ];

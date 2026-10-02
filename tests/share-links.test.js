@@ -5,6 +5,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
+import { STORE_SCHEMA_VERSION } from "../server/writer-fence.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { AgentRooms } from "../server/agent-rooms.mjs";
@@ -426,10 +427,10 @@ test("v34 databases migrate share-link and invitation history to v36 with issuer
   for (const { sql } of fenceDefinitions(34)) db.exec(sql);
   db.exec("PRAGMA user_version=34");
   db.close();
-  // Reopening migrates to v36 (via v35) and preserves every row and the audit.
+  // Reopening migrates to the current schema (via v35 and v36) and preserves every row and the audit.
   const store = new RoomStore(filename, { now: () => now });
   t.after(() => store.close());
-  assert.equal(store.storagePlatform.version(store.db), 36);
+  assert.equal(store.storagePlatform.version(store.db), STORE_SCHEMA_VERSION);
   assert.equal(store.db.prepare("SELECT count(*) n FROM share_links").get().n, shareCount);
   assert.equal(store.db.prepare("SELECT count(*) n FROM membership_invitations").get().n, invitationCount);
   assert.equal(store.db.prepare("SELECT count(*) n FROM share_link_joins").get().n, joinCount);

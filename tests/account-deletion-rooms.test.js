@@ -43,13 +43,13 @@ async function deletionAccount(t, n) {
   const res = await post(origin, "/api/auth/password/signup", {
     email, password: `fixture-password-${n}-long-enough`, sessionToken: slot.token, sessionRevision: slot.session.sessionRevision
   });
-  assert.equal(res.status, 201, await res.clone().text());
-  const body = await res.json();
+  assert.equal(res.status, 202, await res.clone().text());
   const token = /account_session=([^;]+)/.exec(res.headers.get("set-cookie") || "")?.[1];
   assert.ok(token, "signup sets a fresh account_session cookie");
-  const session = f.store.accountSessionSlot(token);
+  const session = f.store.authenticateAccountSession(token);
+  f.store.accountLogins.markEmailVerified(session.account.id, email);
   return {
-    f, origin, email, accountId: body.account.id, token, binding: session.sessionBinding,
+    f, origin, email, accountId: session.account.id, token, binding: session.sessionBinding,
     creds: { cookie: `account_session=${token}`, csrf: session.csrf }
   };
 }

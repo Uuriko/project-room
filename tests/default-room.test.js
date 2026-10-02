@@ -40,13 +40,12 @@ async function passwordAccount(t, n) {
   const slot = f.store.createAccountSessionSlot();
   const res = await post(origin, "/api/auth/password/signup",
     { email, password: password(n), sessionToken: slot.token, sessionRevision: slot.session.sessionRevision });
-  assert.equal(res.status, 201);
-  const body = await res.json();
+  assert.equal(res.status, 202);
   const freshToken = /account_session=([^;]+)/.exec(res.headers.get("set-cookie") || "")?.[1];
   assert.ok(freshToken, "signup sets a fresh account_session cookie");
-  const slotAfter = f.store.accountSessionSlot(freshToken);
-  const creds = { cookie: `account_session=${freshToken}`, csrf: slotAfter.csrf, binding: body.sessionBinding };
-  return { f, origin, accountId: body.account.id, creds };
+  const session = f.store.authenticateAccountSession(freshToken);
+  const creds = { cookie: `account_session=${freshToken}`, csrf: session.csrf, binding: session.sessionBinding };
+  return { f, origin, accountId: session.account.id, creds };
 }
 const authedPost = (origin, path, creds, data = {}) => post(origin, path, data,
   { Cookie: creds.cookie, "X-CSRF-Token": creds.csrf, "X-Session-Binding": creds.binding });

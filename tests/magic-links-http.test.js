@@ -99,6 +99,7 @@ test("consume links to the existing account when the email already has one", asy
   const normalized = "bob@example.com";
   store.createAccount("acct-bob", "test");
   store.accountLogins.linkPasswordMethod("acct-bob", { email: normalized, verifier: "scrypt$fixture" });
+  store.accountLogins.markEmailVerified("acct-bob", normalized);
 
   const requested = await requestCode(origin, slot, normalized);
   assert.equal(requested.status, 200);
