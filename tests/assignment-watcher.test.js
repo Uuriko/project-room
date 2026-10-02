@@ -322,7 +322,7 @@ for (const [name, alter] of [
   ["work-map key and item ID mismatch", snapshot => { snapshot.state.workItems = { different: snapshot.state.workItems.work }; }]
 ]) test(`invalid snapshot: ${name} fails without checkpoint or output`, async t => {
   const f = fixture(t); f.work();
-  const invalid = f.snapshot(); alter(invalid);
+  const invalid = structuredClone(f.snapshot()); alter(invalid);
   assert.throws(() => attentionNotices(invalid, f.now()), codes("invalid_snapshot"));
   const client = { ...f.client, async snapshot() { return structuredClone(invalid); } };
   await assert.rejects(f.watcher({ client }).tick(), codes("invalid_snapshot"));

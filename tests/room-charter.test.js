@@ -105,9 +105,10 @@ for (const corruption of ["projection", "payload", "bootstrap", "duplicate-boots
   f.store.db.prepare("INSERT INTO projection_checkpoints VALUES(?,?,?)").run("commons", room.sequence, JSON.stringify(room.state));
   auditRecovery(f.store);
   if (corruption === "projection") {
-    room.state.room.charter.purpose = "Forged";
-    f.store.db.prepare("UPDATE projection_checkpoints SET projection=? WHERE room_id='commons'").run(JSON.stringify(room.state));
-    f.store.db.prepare("UPDATE rooms SET projection=? WHERE id='commons'").run(JSON.stringify(room.state));
+    const forged = structuredClone(room.state);
+    forged.room.charter.purpose = "Forged";
+    f.store.db.prepare("UPDATE projection_checkpoints SET projection=? WHERE room_id='commons'").run(JSON.stringify(forged));
+    f.store.db.prepare("UPDATE rooms SET projection=? WHERE id='commons'").run(JSON.stringify(forged));
   } else {
     const rows = f.store.db.prepare("SELECT sequence,body FROM events WHERE room_id='commons' ORDER BY sequence").all();
     const row = rows.find(row => { const e = JSON.parse(row.body); return corruption === "payload" ? e.type === CHARTER_TYPE : corruption === "bootstrap" ? e.type === "member.added" && e.data.memberId === "owner" : e.type === "message.posted"; });
