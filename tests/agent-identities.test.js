@@ -718,9 +718,6 @@ test("a current identity secret verifies without scrypt, and a stored scrypt row
 });
 
 test("omitting ROOM_IDENTITY_HASH_KEY does not lock out fallback or previously keyed verifiers", async t => {
-  const { mkdtempSync, rmSync } = await import("node:fs");
-  const { tmpdir } = await import("node:os");
-  const { join } = await import("node:path");
   const { fastIdentityHash } = await import("../server/identity-secret-hash.mjs");
   const directory = mkdtempSync(join(tmpdir(), "project-room-identity-key-"));
   const path = join(directory, "room.sqlite");
