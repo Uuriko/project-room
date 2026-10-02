@@ -231,6 +231,7 @@ export const MCP_DISCOVERY_BLOCK = Object.freeze({
   openapi: "/openapi.json",
   governance: "/.well-known/governance.json",
   description: "Machine-readable route inventory (OpenAPI 3.1) and governance policy.",
+  fullCatalog: "Room members: this list is a profile. Call tools/list with params {\"profile\":\"full\"} for every tool (bond, work, file, wake).",
 });
 
 // ---------------------------------------------------------------------------
