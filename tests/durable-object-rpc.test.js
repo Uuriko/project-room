@@ -3,6 +3,7 @@
 // calls unless the receiving class extends DurableObject from cloudflare:workers.
 import test from "node:test";
 import assert from "node:assert/strict";
+import { emailRoutingRejections } from "../server/email-routing-inbound.mjs";
 import { register } from "node:module";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
@@ -162,8 +163,6 @@ test("RPC stub calls target a class that extends DurableObject", () => {
   assert.deepEqual(methods, [
     "drainChannelBacklog",
     "drainWebhookDeliveries",
-    "importRoutedEmail",
-    "lookupRoutedConnection",
     "planRetention",
     "probeStorage",
     "readJobHealth",
@@ -247,4 +246,27 @@ test("scheduled handler invokes cron RPC on the real ProjectRoom shape", async (
   await Promise.all(pending);
   assert.equal(name, "invite-only-pilot");
   assert.deepEqual(invoked.sort(), expected);
+});
+
+test("inbound mail is rejected while the inbox consumer is not durable", async () => {
+  let rawRead = false;
+  const reasons = [];
+  const message = {
+    from: "sender@example.test",
+    to: "room@example.test",
+    rawSize: 32,
+    get raw() { rawRead = true; return new ReadableStream(); },
+    setReject(reason) { reasons.push(reason); }
+  };
+  let woken = false;
+  await worker.email(message, {
+    ROOM_MAINTENANCE: "0",
+    ROOM_ORIGIN: "https://room.example.test",
+    ROOM: { getByName() { woken = true; throw new Error("shelved mail must not wake the room"); } }
+  }, { waitUntil() { throw new Error("shelved mail must not schedule work"); } });
+  assert.deepEqual(reasons, [emailRoutingRejections.notAccepted]);
+  assert.equal(rawRead, false, "rejected mail is not read");
+  assert.equal(woken, false, "rejected mail does not wake the Durable Object");
+  assert.equal(workerSource.includes("routedMail"), false);
+  assert.equal(typeof ProjectRoom.prototype.importRoutedEmail, "undefined");
 });
