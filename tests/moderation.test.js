@@ -209,7 +209,8 @@ test("a report outlives the message and its author: deletion and removal keep th
   [report] = f.store.moderation.list(f.keys.owner, "commons").reports.filter(r => r.reporterId === "guest");
   assert.equal(report.authorId, "producer"); assert.equal(report.message.authorId, "producer");
   // Import replaces history: a report pointing at a message that no longer exists says so instead of failing.
-  const lines = [...f.store.exportEvents(f.keys.owner, "commons")].filter(line => line.event.type !== T.MESSAGE_POSTED && line.event.type !== T.MESSAGE_DELETED).map((line, i) => ({ sequence: i + 1, event: line.event }));
+  const dropped = new Set([T.MESSAGE_POSTED, T.MESSAGE_DELETED, T.MESSAGE_REDACTED, T.RECEIPT_EVIDENCE_WITHDRAWN]);
+  const lines = [...f.store.exportEvents(f.keys.owner, "commons")].filter(line => !dropped.has(line.event.type)).map((line, i) => ({ sequence: i + 1, event: line.event }));
   f.store.importEvents(f.keys.owner, "commons", lines);
   [report] = f.store.moderation.list(f.keys.owner, "commons").reports.filter(r => r.reporterId === "guest");
   assert.equal(report.message, null); assert.equal(report.messageId, "target");

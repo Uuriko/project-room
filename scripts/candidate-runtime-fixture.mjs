@@ -166,6 +166,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/routes/dispatch.mjs'); paths.add('server/routes/table.mjs'); paths.add('server/routes/inbox.mjs'); // batch RT: route table (imported by server/http.mjs)
   paths.add('server/oauth-provider-store.mjs'); // durable OAuth grants (imported by cloudflare/room.mjs and server/writer-fence.mjs)
   paths.add('server/redact-read.mjs'); // read-time message tombstone (imported by server/http.mjs)
+  paths.add('server/message-redaction.mjs'); // PRIV-1: rewrite deleted message text (imported by server/store.mjs and server/account-deletion.mjs)
   paths.add('server/abuse-rate-buckets.mjs'); // durable abuse rate buckets (imported by cloudflare/room.mjs, server/http.mjs, and server/writer-fence.mjs)
   paths.add('server/receipt-cards.mjs'); // in-room receipt cards (imported by server/work-claim-events.mjs and server/room-guide.mjs)
   paths.add('server/room-guide.mjs'); // Room Guide demo agent (imported by cloudflare/room.mjs)

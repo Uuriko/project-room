@@ -51,12 +51,21 @@ export function nativeTextEvidence(state, work, data, { allowWithdrawn = false }
     || !/^sha256:[0-9a-f]{64}$/.test(data.evidenceVersion)) invalid("Choose exact text evidence and its current previous result");
   const message = state.messages.find(message => message.id === data.evidenceMessageId);
   const withdrawn = allowWithdrawn && Boolean(message?.deletedAt);
-  if (!message || message.workItemId !== work.id || !(withdrawn ? message.body === null : validResultBody(message.body)))
+  // Replay of a completion sees the posted body already null once the log has
+  // been rewritten. The message is not deleted yet, so the receipt stays the
+  // same shape a live completion stored. The later withdrawal adds the tombstone.
+  const redactedBeforeDelete = message?.redacted === true && message.body == null && !message.deletedAt;
+  if (!message || message.workItemId !== work.id || !(withdrawn || redactedBeforeDelete ? message.body === null : validResultBody(message.body)))
     invalid("Choose a well-formed message explicitly linked to this work");
   return { kind: "room_text", messageId: message.id, messageEventId: data.evidenceMessageEventId,
     previousCompletionEventId: data.previousCompletionEventId, postedById: message.authorId,
     proposal: message.proposal ? structuredClone(message.proposal) : null,
-    ...(withdrawn ? { withdrawnAt: message.deletedAt, withdrawnBy: message.deletedBy } : {}) };
+    ...(withdrawn ? {
+      withdrawnAt: message.deletedAt, withdrawnBy: message.deletedBy,
+      // Legacy withdrawals have no byte length. New ones record evidence: removed
+      // only when the log rewrite stored that length, so old receipts still match.
+      ...(Number.isInteger(message.redactedByteLength) && message.redactedByteLength > 0 ? { evidence: "removed" } : {})
+    } : {}) };
 }
 
 // Both clients verify the exact selected body with platform crypto, not the DOM.
@@ -148,7 +157,8 @@ export function proposalContext(data, work) {
     || (Object.hasOwn(data, "allowOlderBasis") && typeof data.allowOlderBasis !== "boolean")) invalid("Invalid handoff reference");
   if (data.basisRevision > work.revision) invalid("Handoff revision is ahead of this work");
   if (data.basisRevision < work.revision && data.allowOlderBasis !== true) invalid("Stale handoff: this work changed. Review before posting an older proposal.");
-  if (typeof data.body !== "string" || !data.body.trim() || data.body.length > 4000) invalid("Proposal must contain 1–4000 characters");
+  // PRIV-1: a redacted proposal keeps its packet links and drops the text.
+  if (!(data.redacted === true && data.body == null) && (typeof data.body !== "string" || !data.body.trim() || data.body.length > 4000)) invalid("Proposal must contain 1–4000 characters");
   return { packetId: data.packetId, basisRevision: data.basisRevision, submittedAtRevision: work.revision, attribution: "manual-unverified" };
 }
 

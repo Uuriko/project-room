@@ -39,6 +39,10 @@ export const EVENT_TYPES = Object.freeze({
   MESSAGE_POSTED: "message.posted",
   MESSAGE_EDITED: "message.edited",
   MESSAGE_DELETED: "message.deleted",
+  // --- PRIV-1 message redaction ---
+  MESSAGE_REDACTED: "message.redacted",
+  RECEIPT_EVIDENCE_WITHDRAWN: "receipt.evidence_withdrawn",
+  // --- end PRIV-1 message redaction ---
   REPLY_REQUEST_CANCELLED: REPLY_CANCELLED,
   MESSAGE_REACTION_SET: "message.reaction_set",
   MESSAGE_PINNED: "message.pinned",
@@ -455,6 +459,10 @@ export function applyEvent(current, incoming) {
     [EVENT_TYPES.MESSAGE_POSTED]: postMessage,
     [EVENT_TYPES.MESSAGE_EDITED]: editMessage,
     [EVENT_TYPES.MESSAGE_DELETED]: deleteMessage,
+    // --- PRIV-1 message redaction ---
+    [EVENT_TYPES.MESSAGE_REDACTED]: redactMessage,
+    [EVENT_TYPES.RECEIPT_EVIDENCE_WITHDRAWN]: recordEvidenceWithdrawn,
+    // --- end PRIV-1 message redaction ---
     [EVENT_TYPES.REPLY_REQUEST_CANCELLED]: cancelReplyRequest,
     [EVENT_TYPES.MESSAGE_REACTION_SET]: setMessageReaction,
     [EVENT_TYPES.MESSAGE_PINNED]: pinMessage,
@@ -1008,10 +1016,15 @@ function requireScopedMemberAdministration(state, actorId, targetId, currentTarg
 
 function postMessage(state, incoming) {
   const actor = requireMember(state, incoming.actorId);
-  requireFields(incoming.data, ["body"]);
+  // --- PRIV-1 message redaction ---
+  // A rewritten log stores body null and redacted true. Replay still has to
+  // build the same message, including a channel copy, without the text.
+  const redacted = isRedactedBody(incoming.data);
+  if (!redacted) requireFields(incoming.data, ["body"]);
+  // --- end PRIV-1 message redaction ---
   const requestMode = prepareReplyPost(state, incoming);
   if (incoming.data.toMemberId) (requestMode === "respond" ? knownMember : requireMember)(state, incoming.data.toMemberId);
-  if (typeof incoming.data.body !== "string") throw new Error("Message body must be text");
+  if (!redacted && typeof incoming.data.body !== "string") throw new Error("Message body must be text");
   // ACT-1a: receipt cards and starter choice buttons. Absent on ordinary posts.
   if (incoming.data.kind != null && incoming.data.kind !== "receipt_card") throw new Error("Message kind must be receipt_card");
   if (incoming.data.kind === "receipt_card") {
@@ -1041,6 +1054,7 @@ function postMessage(state, incoming) {
     id: incoming.data.messageId || incoming.id,
     authorId: actor.id,
     body: incoming.data.body,
+    ...(redacted ? { redacted: true } : {}),
     channelId,
     workItemId: incoming.data.workItemId || null,
     replyToId: incoming.data.replyToId || null,
@@ -1071,6 +1085,7 @@ function postMessage(state, incoming) {
       id: copyId,
       authorId: actor.id,
       body: incoming.data.body,
+      ...(redacted ? { redacted: true } : {}),
       channelId,
       workItemId: null,
       replyToId: null,
@@ -1180,7 +1195,9 @@ function findEditableMessage(state, incoming, { evidence = "refuse" } = {}) {
 
 function editMessage(state, incoming) {
   const { message } = findEditableMessage(state, incoming);
-  if (typeof incoming.data.body !== "string" || !incoming.data.body.trim()) throw new Error("Message body must be text");
+  // --- PRIV-1 message redaction ---
+  if (!isRedactedBody(incoming.data) && (typeof incoming.data.body !== "string" || !incoming.data.body.trim())) throw new Error("Message body must be text");
+  // --- end PRIV-1 message redaction ---
   message.editHistory = [...(message.editHistory ?? []), { body: message.body, editedAt: incoming.at }];
   message.body = incoming.data.body;
   message.revision = (message.revision ?? 0) + 1;
@@ -1198,6 +1215,87 @@ function deleteMessage(state, incoming) {
   withdrawTextEvidence(state, message.id, incoming);
   message.revision = (message.revision ?? 0) + 1;
 }
+
+// --- PRIV-1 message redaction ---
+function isRedactedBody(data) {
+  return data?.redacted === true && data.body == null;
+}
+
+// Server-emitted. Owner delete, author delete, and account deletion all append
+// this after the text has been removed from earlier events. Replay must match
+// a live delete: bodies stay null, a prior delete's timestamp wins, and the
+// posted byte length is kept so a receipt can still name its hash.
+function redactMessage(state, incoming) {
+  const actor = requireMember(state, incoming.actorId);
+  const messageId = incoming.data?.messageId;
+  if (!validId(messageId)) throw new Error("Event data missing messageId");
+  const primary = state.messages.find(message => message.id === messageId);
+  if (!primary) throw new Error("Message not found");
+  if (primary.authorId !== actor.id && actor.id !== state.room.ownerId) {
+    throw new Error("Only the author or the Room owner can change this message");
+  }
+  const ids = messageId.endsWith(":channel") ? [messageId] : [messageId, `${messageId}:channel`];
+  for (const id of ids) {
+    const message = state.messages.find(entry => entry.id === id);
+    if (!message) continue;
+    message.body = null;
+    message.redacted = true;
+    if (Array.isArray(message.editHistory)) {
+      message.editHistory = message.editHistory.map(entry => ({ ...entry, body: null }));
+    }
+    if (message.attachments != null) message.attachments = null;
+    if (!message.deletedAt) {
+      message.deletedAt = incoming.at;
+      message.deletedBy = incoming.actorId;
+      dropPinsForMessage(state, message.id);
+      message.revision = (message.revision ?? 0) + 1;
+    }
+  }
+  if (!messageId.endsWith(":channel") && Number.isInteger(incoming.data.byteLength) && incoming.data.byteLength > 0) {
+    primary.redactedByteLength = incoming.data.byteLength;
+  }
+  for (const work of Object.values(state.workItems ?? {})) {
+    for (const receipt of [...(work.receiptHistory ?? []), work.receipt]) {
+      if (receipt?.nativeText?.messageId !== messageId) continue;
+      if (!receipt.nativeText.withdrawnAt) {
+        receipt.nativeText.withdrawnAt = incoming.at;
+        receipt.nativeText.withdrawnBy = incoming.actorId;
+      }
+      receipt.nativeText.evidence = "removed";
+    }
+  }
+}
+
+// A receipt that cited this message keeps its hash and gains one ledger line.
+function recordEvidenceWithdrawn(state, incoming) {
+  requireMember(state, incoming.actorId);
+  const messageId = incoming.data?.messageId;
+  if (!validId(messageId)) throw new Error("Event data missing messageId");
+  if (incoming.data?.evidence !== "removed") throw new Error("Evidence withdrawal must record removed");
+  let cited = false;
+  for (const work of Object.values(state.workItems ?? {})) {
+    let here = false;
+    for (const receipt of [...(work.receiptHistory ?? []), work.receipt]) {
+      if (receipt?.nativeText?.messageId !== messageId) continue;
+      here = true;
+      cited = true;
+      receipt.nativeText.evidence ??= "removed";
+    }
+    if (!here) continue;
+    work.evidenceWithdrawals ??= [];
+    if (!work.evidenceWithdrawals.some(entry => entry.messageId === messageId)) {
+      work.evidenceWithdrawals.push({
+        messageId,
+        evidence: "removed",
+        at: incoming.at,
+        by: incoming.actorId,
+        ...(Number.isInteger(incoming.data.byteLength) && incoming.data.byteLength > 0 ? { byteLength: incoming.data.byteLength } : {})
+      });
+    }
+  }
+  if (!cited) throw new Error("Message not found");
+}
+// --- end PRIV-1 message redaction ---
 
 function setMessageReaction(state, incoming) {
   const actor = requireMember(state, incoming.actorId);
@@ -1438,7 +1536,11 @@ function recordBond(state, incoming) {
 
 function recordPeerDm(state, incoming) {
   requireMember(state, incoming.actorId);
-  requireFields(incoming.data, ["messageId", "threadId", "bondId", "body", "fromIdentityId", "toIdentityId"]);
+  // --- PRIV-1 message redaction ---
+  const fields = ["messageId", "threadId", "bondId", "fromIdentityId", "toIdentityId"];
+  if (!isRedactedBody(incoming.data)) fields.push("body");
+  requireFields(incoming.data, fields);
+  // --- end PRIV-1 message redaction ---
   if (incoming.data.fromIdentityId === incoming.data.toIdentityId) throw new Error("Cannot DM yourself");
   // Receipt only. Peer DM bodies stay out of room chat (state.messages).
 }
@@ -2061,7 +2163,9 @@ function pinMessage(state, incoming) {
   const messageId = pinTarget(incoming);
   const message = state.messages.find(m => m.id === messageId);
   if (!message) throw new Error("Pin must reference a message in this Room");
-  if (message.deletedAt || message.body == null) throw new Error("A deleted message cannot be pinned");
+  // A redacted post keeps body null in the log before message.deleted. Replay
+  // still has to accept the pin that happened while the text was readable.
+  if (message.deletedAt || (message.body == null && message.redacted !== true)) throw new Error("A deleted message cannot be pinned");
   state.pins ??= [];
   if (state.pins.some(pin => pin.messageId === messageId)) return; // idempotent
   if (state.pins.length >= PIN_LIMIT) throw new Error(`Pin capacity reached: ${PIN_LIMIT} pinned messages per room; unpin one first`);
