@@ -228,6 +228,12 @@ let landQueueUI = null;
 let instructionsUI = null;
 let inboxUI = null;
 let state = null, session = null, pendingMessage = null, pendingWork = null, pendingAction = null;
+// JDOT-COH-NAV begin
+let updatesUi = null, resetNavigationBoard = null, navigationBoardReady = null;
+const workNavigationOrigins = new Map();
+let activeWorkNavigation = null, activeWorkNavigationId = null, workNavigationEpoch = 0, workHistoryReplayKey = null;
+let navigationBoardEpoch = 0;
+// JDOT-COH-NAV end
 // Phase 2 channels: the visible channel; persisted per room, defaults to the main channel.
 let activeChannelId = DEFAULT_CHANNEL_ID, activeChannelRoomId = null;
 let workDraftId = null, replyToId = null, busy = false;
@@ -365,6 +371,9 @@ const client = new RoomClient({
     submitOperationId += 1; busy = false;
     displayNames = createMemberDisplayNames({});
     state = null; session = null; pendingMessage = null; pendingWork = null; pendingAction = null; offerContextVersion = null; actionEpoch++;
+    // JDOT-COH-NAV begin
+    clearWorkNavigation(); updatesUi?.reset();
+    // JDOT-COH-NAV end
     mutedThreads = new Set(); threadMuteBusy = false;
     dmConsents = []; dmConsentSeq++;
     friendBonds = []; friendSeq++; friendBusy = false; friendDmPeerId = null;
@@ -567,7 +576,11 @@ const memberPermissionsUI = installMemberPermissions({ client, getState: () => s
 // UPDATES HOOK (U batch). Palette Catch up, Activity, Mentions, and Saved for
 // later open this destination with the matching filter. Room UI v2 removes
 // the old entries later. The badge counts actionable updates only.
-const updatesUi = mountUpdates({ client, host: document.querySelector(".room-main") });
+// JDOT-COH-NAV begin
+updatesUi = mountUpdates({ client, host: document.querySelector(".room-main"), getContext: workNavigationContext,
+  onOpenWork: (id, origin) => navigateWorkRecord("work", id, { type: "updates", updates: origin }),
+  onOpenMessage: (id, origin) => navigateWorkRecord("message", id, { type: "updates", updates: origin }) });
+// JDOT-COH-NAV end
 portableWorkUI = installPortableWork({ client, getState: () => state, onSaved: messageId => {
   const visible = conversation?.byId.has(messageId);
   if (visible) revealMessage(messageId);
@@ -2679,6 +2692,9 @@ function revealMessage(id) {
   // inside the conversation without moving the surrounding page unnecessarily.
   const list = $("#message-list");
   if (row && row.offsetHeight > list.clientHeight) list.scrollTop += row.getBoundingClientRect().top - list.getBoundingClientRect().top;
+  // JDOT-COH-NAV begin
+  syncWorkReturnControl();
+  // JDOT-COH-NAV end
 }
 function focusRecord(node) {
   if (!node) return;
@@ -2702,12 +2718,209 @@ function revealWorkTimeline(id) {
   if (channelId && channelId !== activeChannelId) setActiveChannel(channelId);
   return workRecord(id);
 }
+// JDOT-COH-NAV begin
 function revealWork(id) {
+  if (activeWorkNavigationId && activeWorkNavigationId !== id) {
+    const previous = workRecord(activeWorkNavigationId)?.querySelector(".work-details");
+    if (previous) previous.open = false;
+  }
   const card = revealWorkTimeline(id);
-  if (!card) return;
+  if (!card) {
+    activeWorkNavigationId = null; activeWorkNavigation = null;
+    if (state && !busy) notice("That work is not available in this room.", true);
+    syncWorkReturnControl(); return null;
+  }
+  activeWorkNavigationId = id;
   card.querySelector(".work-details").open = true;
   focusRecord(card);
+  syncWorkReturnControl();
+  return card;
 }
+function workNavigationContext() {
+  const member = session?.member?.id;
+  return state && member && state.members?.[member]?.id === member && state.members[member].active !== false && !$("#main").hidden
+    ? `${client.generation}|${session.roomId}|${member}` : null;
+}
+function workHistoryState() {
+  const value = history.state && typeof history.state === "object" ? { ...history.state } : {};
+  delete value.roomWorkOrigin; delete value.roomWorkTarget;
+  return value;
+}
+function currentWorkOrigin(id = activeWorkNavigation) {
+  const origin = workNavigationOrigins.get(id);
+  return origin?.context === workNavigationContext() ? origin : null;
+}
+function syncWorkReturnControl() {
+  const button = $("#work-navigation-return");
+  const origin = currentWorkOrigin();
+  button.disabled = false;
+  button.hidden = !workNavigationContext() || !/^#pr-record\/(work|message)\//.test(location.hash);
+  button.textContent = origin ? `Back to ${origin.type === "updates" ? "Updates" : origin.type === "board" ? "Board" : "conversation"}` : "Back to room";
+}
+function clearWorkNavigation() {
+  navigationBoardEpoch++; resetNavigationBoard?.();
+  workNavigationEpoch++; workNavigationOrigins.clear(); activeWorkNavigation = null; activeWorkNavigationId = null; workHistoryReplayKey = null;
+  const button = $("#work-navigation-return");
+  if (button) { button.hidden = true; button.disabled = false; }
+}
+function captureWorkOrigin(extra = {}) {
+  saveComposer();
+  const input = $("#message-input"), focus = document.activeElement;
+  const board = $("#board-dialog");
+  return { context: workNavigationContext(), url: location.href, previous: activeWorkNavigation,
+    type: extra.type ?? (board.open ? "board" : "conversation"), ...extra,
+    channelId: activeChannelId, threadId: currentThreadId, mode: requestMode,
+    selection: [input.selectionStart, input.selectionEnd, input.selectionDirection],
+    composerScroll: input.scrollTop, listScroll: $("#message-list").scrollTop,
+    windowScroll: [window.scrollX, window.scrollY], focus,
+    focusKey: focus?.dataset?.focusKey ?? null,
+    searchWorkId: focus?.closest?.("#search-results") ? focus.dataset.openWork : null,
+    messageId: focus?.closest?.("[data-message-record-id]")?.dataset.messageRecordId ?? null,
+    messageWorkId: focus?.closest?.("[data-open-work]")?.dataset.openWork ?? null,
+    claimId: focus?.closest?.("[data-claim-id]")?.dataset.claimId ?? null,
+    boardScroll: board.scrollTop, boardBodyScroll: $("#work-board").scrollTop,
+    boardColumnsScroll: $("#work-board .board-columns")?.scrollLeft ?? 0 };
+}
+function sameWorkOrigin(a, b) {
+  if (a.type !== b.type || a.channelId !== b.channelId || a.threadId !== b.threadId
+    || JSON.stringify(a.mode ?? null) !== JSON.stringify(b.mode ?? null)) return false;
+  if (a.type === "updates") return a.updates?.itemId === b.updates?.itemId && a.updates?.filter === b.updates?.filter;
+  if (a.type === "board") return a.claimId === b.claimId;
+  const key = value => value.focusKey || value.searchWorkId || (value.messageId && `${value.messageId}|${value.messageWorkId}`);
+  return key(a) ? key(a) === key(b) : a.focus === b.focus;
+}
+function showWorkDestination(kind, id, presentation = "details") {
+  workNavigationEpoch++; updatesUi?.close();
+  if ($("#board-dialog").open) $("#board-dialog").close();
+  if (kind === "work" && presentation === "drafts") { revealDrafts(id); activeWorkNavigationId = id; }
+  else if (kind === "work") revealWork(id); else revealMessage(id);
+  syncWorkReturnControl();
+}
+function navigateWorkRecord(kind, id, extra = {}) {
+  if (!workNavigationContext() || busy) return false;
+  if (kind === "work" ? !Object.hasOwn(state.workItems, id) || state.workItems[id]?.id !== id : !conversation?.byId.has(id)) {
+    notice("That source is no longer available in this room.", true); return false;
+  }
+  const presentation = extra.presentation ?? "details";
+  const target = recordHref(kind, id), origin = { ...captureWorkOrigin(extra), presentation };
+  const current = currentWorkOrigin();
+  if (current?.target === target && location.hash === target && history.state?.roomWorkTarget === activeWorkNavigation) {
+    // A new surface can inspect the same task without a second URL entry.
+    // Its return context changes, while the existing origin entry/ticket survives.
+    if (!sameWorkOrigin(current, origin)) workNavigationOrigins.set(activeWorkNavigation,
+      { ...origin, url: current.url, previous: current.previous, target, targetUrl: current.targetUrl });
+    else if (current.presentation !== presentation) workNavigationOrigins.set(activeWorkNavigation, { ...current, presentation });
+    workHistoryReplayKey = null; showWorkDestination(kind, id, presentation);
+    return true;
+  }
+  const ticket = crypto.randomUUID();
+  origin.target = target; origin.targetUrl = new URL(target, location.href).href;
+  workNavigationOrigins.set(ticket, origin);
+  // Preserve this entry's own target when it also becomes the next entry's origin.
+  // Only opaque tickets travel in history; private context stays in memory.
+  const entry = history.state && typeof history.state === "object" ? history.state : {};
+  history.replaceState({ ...entry, roomWorkOrigin: ticket }, "", location.href);
+  history.pushState({ ...workHistoryState(), roomWorkTarget: ticket }, "", target);
+  activeWorkNavigation = ticket; workHistoryReplayKey = null;
+  showWorkDestination(kind, id, presentation);
+  return true;
+}
+async function restoreWorkOrigin(ticket) {
+  const origin = currentWorkOrigin(ticket);
+  if (!origin || busy) { returnToCurrentRoom(); return; }
+  const epoch = ++workNavigationEpoch;
+  updatesUi?.cancelPending();
+  activeWorkNavigation = currentWorkOrigin(origin.previous) ? origin.previous : null;
+  inboxUI?.showRooms();
+  if (activeChannelId !== origin.channelId) setActiveChannel(origin.channelId);
+  switchThread(origin.threadId && conversation.threads.has(origin.threadId) ? origin.threadId : null);
+  if (origin.mode) setRequestMode(origin.mode);
+  activeWorkNavigationId = null;
+  const priorOrigin = currentWorkOrigin(origin.previous);
+  const priorTarget = priorOrigin?.target;
+  const priorWork = /^#pr-record\/work\/(.+)$/.exec(priorTarget ?? "");
+  if (priorWork) {
+    const id = decodeFragment(priorWork[1]), card = id && workRecord(id);
+    if (card) {
+      const section = priorOrigin.presentation === "drafts" ? card.querySelector(".work-drafts") : card.querySelector(".work-details");
+      if (section) section.open = true;
+      activeWorkNavigationId = id;
+    }
+  }
+  const input = $("#message-input");
+  input.setSelectionRange(...origin.selection); input.scrollTop = origin.composerScroll;
+  $("#message-list").scrollTop = origin.listScroll;
+  if (origin.type === "updates") {
+    if (!await updatesUi.restore(origin.updates)) return;
+  } else if (origin.type === "board") {
+    $("#tasks-board-open").click();
+    const opening = navigationBoardEpoch;
+    if (!await navigationBoardReady?.() || opening !== navigationBoardEpoch || epoch !== workNavigationEpoch
+      || !currentWorkOrigin(ticket) || !$("#board-dialog").open) return;
+    $("#board-dialog").scrollTop = origin.boardScroll;
+    $("#work-board").scrollTop = origin.boardBodyScroll;
+    const columns = $("#work-board .board-columns"); if (columns) columns.scrollLeft = origin.boardColumnsScroll;
+  }
+  if (epoch !== workNavigationEpoch || !currentWorkOrigin(ticket)) return;
+  window.scrollTo(...origin.windowScroll);
+  if (origin.type !== "updates") {
+    const usable = node => node?.isConnected && !node.closest("[hidden]") && node.getClientRects().length > 0;
+    const keyed = origin.focusKey ? [...document.querySelectorAll("[data-focus-key]")].find(node => node.dataset.focusKey === origin.focusKey) : null;
+    const claim = origin.claimId ? $(`#work-board [data-claim-id="${CSS.escape(origin.claimId)}"] h4`) : null;
+    const search = origin.searchWorkId ? $(`#search-results [data-open-work="${CSS.escape(origin.searchWorkId)}"]`) : null;
+    const messageWork = origin.messageId && origin.messageWorkId
+      ? $(`#message-list [data-message-record-id="${CSS.escape(origin.messageId)}"] [data-open-work="${CSS.escape(origin.messageWorkId)}"]`) : null;
+    const fallback = origin.type === "board" ? $("#board-close") : $("#conversation-title");
+    const target = [origin.focus, keyed, search, messageWork, claim].find(usable) ?? fallback;
+    target?.focus({ preventScroll: true });
+    if (target === fallback) target?.scrollIntoView({ block: "nearest", behavior: "instant" });
+  }
+  syncWorkReturnControl();
+}
+function returnToCurrentRoom() {
+  updatesUi?.cancelPending(); activeWorkNavigation = null; workNavigationEpoch++;
+  const detail = activeWorkNavigationId && workRecord(activeWorkNavigationId)?.querySelector(".work-details");
+  if (detail) detail.open = false;
+  activeWorkNavigationId = null;
+  const destination = new URL(location.href);
+  if (session?.roomId) { destination.searchParams.set("room", session.roomId); destination.searchParams.delete("account"); }
+  destination.hash = "#pr-view/rooms";
+  history.replaceState(workHistoryState(), "", destination.pathname + destination.search + destination.hash);
+  updatesUi?.close();
+  if ($("#board-dialog").open) $("#board-dialog").close();
+  if (workNavigationContext()) { inboxUI?.showRooms(); switchThread(null); focusRecord($("#conversation-title")); }
+  syncWorkReturnControl();
+}
+function replayWorkNavigation() {
+  const target = history.state?.roomWorkTarget, back = history.state?.roomWorkOrigin;
+  if (!target && !back) return false;
+  const key = `${location.href}|${target ?? ""}|${back ?? ""}|${workNavigationContext()}`;
+  if (key === workHistoryReplayKey) return true;
+  workHistoryReplayKey = key;
+  const targetOrigin = currentWorkOrigin(target), backOrigin = currentWorkOrigin(back);
+  const returning = backOrigin && backOrigin.url === location.href && (!targetOrigin || activeWorkNavigation === back);
+  if (returning) { void restoreWorkOrigin(back); return true; }
+  if (targetOrigin && targetOrigin.targetUrl === location.href) {
+    activeWorkNavigation = target; workNavigationEpoch++; updatesUi?.close();
+    if ($("#board-dialog").open) $("#board-dialog").close();
+    const work = /^#pr-record\/work\/(.+)$/.exec(location.hash);
+    if (work && targetOrigin.presentation === "drafts" && state?.workItems[decodeFragment(work[1])]) revealDrafts(decodeFragment(work[1]));
+    else revealLocationHash();
+    syncWorkReturnControl();
+    return true;
+  }
+  activeWorkNavigation = null; updatesUi?.cancelPending();
+  // Reloaded/new-tab entries have no private origin: resolve the current URL only.
+  if (state) revealLocationHash();
+  syncWorkReturnControl(); return true;
+}
+$("#work-navigation-return").addEventListener("click", () => {
+  if (busy) return;
+  if (currentWorkOrigin() && history.state?.roomWorkTarget === activeWorkNavigation) {
+    $("#work-navigation-return").disabled = true; history.back();
+  } else returnToCurrentRoom();
+});
+// JDOT-COH-NAV end
 function revealDrafts(id) {
   const card = revealWorkTimeline(id);
   if (!card) return;
@@ -2764,6 +2977,14 @@ function revealLocationHash() {
     }
   }
   if (!state) return;
+  // JDOT-COH-NAV begin
+  const linkedRoom = selectedRoomFromLocation();
+  if (linkedRoom && linkedRoom !== session?.roomId) {
+    returnToCurrentRoom();
+    notice("That link belongs to another room. Open that room first.", true);
+    return;
+  }
+  // JDOT-COH-NAV end
   const deepRoom = roomIdFromHash(hash);
   if (deepRoom) {
     if (state.room?.id === deepRoom) {
@@ -4261,13 +4482,16 @@ $("#main").addEventListener("click", e => {
   if (!link || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
   e.preventDefault();
   if (busy) return;
+  // JDOT-COH-NAV begin
+  if (!link.dataset.openWork) { updatesUi?.cancelPending(); activeWorkNavigation = null; workNavigationEpoch++; $("#work-navigation-return").hidden = true; }
+  // JDOT-COH-NAV end
   if (link.dataset.openMessage) {
     history.replaceState(null, "", recordHref("message", link.dataset.openMessage));
     revealMessage(link.dataset.openMessage);
   } else if (link.dataset.openWork) {
-    history.replaceState(null, "", recordHref("work", link.dataset.openWork));
-    if (link.hasAttribute('data-view-drafts')) revealDrafts(link.dataset.openWork);
-    else revealWork(link.dataset.openWork);
+    // JDOT-COH-NAV begin
+    navigateWorkRecord("work", link.dataset.openWork, link.hasAttribute("data-view-drafts") ? { presentation: "drafts" } : {});
+    // JDOT-COH-NAV end
   } else if (link.dataset.openMember) {
     history.replaceState(null, "", recordHref("member", link.dataset.openMember));
     revealMember(link.dataset.openMember);
@@ -4282,13 +4506,18 @@ $("#main").addEventListener("click", e => {
 // History can change the room query as well as the fragment. Those entries
 // need popstate dispatch even when the browser does not emit hashchange.
 window.addEventListener("popstate", () => {
+  // JDOT-COH-NAV begin
+  if (replayWorkNavigation()) return;
+  // JDOT-COH-NAV end
   if (location.hash.startsWith("#pr-view/")) revealLocationHash();
 });
 window.addEventListener("hashchange", () => {
   revealAgentSigninLink();
   const fragment = consumeInvitationFragment();
   if (fragment) openInvitation(fragment);
-  else revealLocationHash();
+  // JDOT-COH-NAV begin
+  else if (!replayWorkNavigation()) revealLocationHash();
+  // JDOT-COH-NAV end
 });
 $("#new-messages-button").addEventListener("click", () => {
   const list = $("#message-list"); list.scrollTop = list.scrollHeight; newVisibleMessages = 0; unreadAnchorId = null;
@@ -6924,22 +7153,40 @@ if (initialInvitationFragment && !initialPasswordReset) openInvitation(initialIn
 {
   const board = lazyDisclosure({ panel: $("#board-panel"),
     load: () => import("./board-ui.js"),
-    install: module => module.installWorkBoard({ client, getState: () => state, getSession: () => session }),
+    // JDOT-COH-NAV begin
+    install: module => {
+      const controller = module.installWorkBoard({ client, getState: () => state, getSession: () => session });
+      navigationBoardReady = () => controller.whenReady();
+      return controller;
+    },
+    // JDOT-COH-NAV end
     onError: () => notice("Could not load the board. Close and reopen to retry.", true) });
+  // JDOT-COH-NAV begin
+  resetNavigationBoard = () => { $("#board-dialog").close(); $("#board-panel").open = false; board.reset(); };
+  // JDOT-COH-NAV end
   const openBoard = () => {
+    // JDOT-COH-NAV begin
+    navigationBoardEpoch++;
+    // JDOT-COH-NAV end
     const dialog = $("#board-dialog");
     if (!dialog.open) dialog.showModal();
     $("#board-panel").open = true;
     board.sync();
   };
   $("#tasks-board-open").addEventListener("click", openBoard);
-  $("#board-close").addEventListener("click", () => { $("#board-dialog").close(); $("#board-panel").open = false; });
+  // JDOT-COH-NAV begin
+  $("#board-close").addEventListener("click", () => { navigationBoardEpoch++; $("#board-dialog").close(); $("#board-panel").open = false; });
+  $("#board-dialog").addEventListener("cancel", () => { navigationBoardEpoch++; });
+  $("#board-panel").addEventListener("toggle", () => { if (!$("#board-panel").open) navigationBoardEpoch++; });
+  // JDOT-COH-NAV end
   $("#signout-button").addEventListener("click", () => { $("#board-dialog").close(); board.reset(); }, true);
   const priorEntries = roomActionEntries;
   roomActionEntries = () => priorEntries().map(entry => entry.id === "landing"
     ? { id: "board", label: "Board", words: "tasks board claims ci review lease land", always: true } : entry);
   const priorChoose = chooseRoomAction;
-  chooseRoomAction = id => { if (id === "board") { openBoard(); return; } priorChoose(id); };
+  // JDOT-COH-NAV begin
+  chooseRoomAction = id => { if (id === "board") { closeRoomActions(false); openBoard(); return; } priorChoose(id); };
+  // JDOT-COH-NAV end
   const paintChat = () => { if (state) paintClaimChat(state, $("#message-list")); };
   const priorRender = render;
   render = () => { if (!state) { board.reset(); return; } priorRender(); board.sync(); };

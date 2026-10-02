@@ -221,7 +221,7 @@ function viewerOf(state, session) {
   return { id, manage, owner: Boolean(id && state?.room?.ownerId === id) };
 }
 
-function cardHtml(item, viewer, members, now) {
+function cardHtml(item, viewer, members, now, workItems) {
   const ownerId = item.owner;
   const owner = ownerId ? memberName(members, ownerId) : "Unclaimed";
   const mine = Boolean(viewer.id && ownerId === viewer.id);
@@ -260,21 +260,23 @@ function cardHtml(item, viewer, members, now) {
       .map(member => `<option value="${escapeHtml(member.id)}">${escapeHtml(memberName(members, member.id))}</option>`).join("");
     if (options) actions.push(`<form data-claim-reassign="${escapeHtml(item.id)}"><label>Reassign <select name="newOwner" aria-label="Reassign ${escapeHtml(item.title)}">${options}</select></label><button type="submit" class="button secondary">Move</button></form>`);
   }
-  return `<article class="claim-card" data-claim-id="${escapeHtml(item.id)}"><h4 tabindex="-1">${escapeHtml(item.title || item.id)}</h4><p class="claim-owner">${ownerId ? `<span class="member-avatar" aria-hidden="true">${escapeHtml(initials(owner))}</span> ` : ""}<span>${escapeHtml(owner)}</span></p>${place}${fileBlock}${lease ? `<p class="claim-lease">${escapeHtml(lease)}</p>` : ""}${pr}${reviews}${deps ? `<ul class="claim-deps">${deps}</ul>` : ""}${links ? `<ul class="claim-chain">${links}</ul>` : ""}<div class="claim-actions">${actions.join("")}</div></article>`;
+  const linked = typeof item.workItemId === "string" && Object.hasOwn(workItems ?? {}, item.workItemId) && workItems[item.workItemId]?.id === item.workItemId;
+  const title = linked ? `<a href="#pr-record/work/${encodeURIComponent(item.workItemId)}" data-open-work="${escapeHtml(item.workItemId)}" data-focus-key="claim-work:${escapeHtml(item.id)}">${escapeHtml(item.title || item.id)}</a>` : escapeHtml(item.title || item.id);
+  return `<article class="claim-card" data-claim-id="${escapeHtml(item.id)}"><h4 tabindex="-1">${title}</h4><p class="claim-owner">${ownerId ? `<span class="member-avatar" aria-hidden="true">${escapeHtml(initials(owner))}</span> ` : ""}<span>${escapeHtml(owner)}</span></p>${place}${fileBlock}${lease ? `<p class="claim-lease">${escapeHtml(lease)}</p>` : ""}${pr}${reviews}${deps ? `<ul class="claim-deps">${deps}</ul>` : ""}${links ? `<ul class="claim-chain">${links}</ul>` : ""}<div class="claim-actions">${actions.join("")}</div></article>`;
 }
 
 function newItemForm() {
   return `<form id="board-new-item" class="board-new"><h3>New item</h3><label>Title <input name="title" maxlength="200" required autocomplete="off"></label><label>Files <input name="files" maxlength="4000" autocomplete="off" placeholder="Optional, comma-separated"></label><button type="submit" class="button primary">Add item</button></form>`;
 }
 
-function boardHtml(items, status, viewer, members, now, { older = false, canWrite = false, capabilities = [], cap = 20 } = {}) {
+function boardHtml(items, status, viewer, members, now, { older = false, canWrite = false, capabilities = [], cap = 20, workItems = {} } = {}) {
   const columns = placeClaims(items, now);
   const sweep = viewer.manage ? `<button type="button" class="button secondary" id="board-close-stale" data-claim-action="sweep">Close stale</button>` : "";
   const capForm = viewer.owner ? `<form data-claim-cap><label>Claims per member <input name="maxMemberOpenClaims" type="number" min="1" max="10000" value="${escapeHtml(String(cap ?? 20))}" aria-label="Open claims per member"></label><button type="submit">Save cap</button></form>` : "";
   const form = canWrite ? newItemForm() : "";
   const hint = older ? `<p class="form-hint board-older">Older landed work is in the API</p>` : "";
   const body = items.length
-    ? `${hint}<div class="board-columns">${COLUMNS.map(([id, label]) => `<section aria-labelledby="board-col-${id}"><h3 id="board-col-${id}">${label}</h3>${columns[id].map(item => cardHtml(item, viewer, members, now)).join("") || `<p class="form-hint">Nothing here.</p>`}</section>`).join("")}</div>`
+    ? `${hint}<div class="board-columns">${COLUMNS.map(([id, label]) => `<section aria-labelledby="board-col-${id}"><h3 id="board-col-${id}">${label}</h3>${columns[id].map(item => cardHtml(item, viewer, members, now, workItems)).join("") || `<p class="form-hint">Nothing here.</p>`}</section>`).join("")}</div>`
     : `<p class="board-empty">${escapeHtml(emptyBoardCopy(capabilities))}</p>${hint}`;
   return `${form}<div class="board-head"><p class="live-chip">${escapeHtml(liveLabel(status))}</p>${sweep}${capForm}</div><p id="board-status" class="form-hint" role="status"></p>${body}`;
 }
@@ -319,13 +321,19 @@ function filesFromField(value) {
 
 export function installWorkBoard({ client, getState, getSession }) {
   const root = document.querySelector("#work-board");
-  if (!root) return { sync() {}, reset() {} };
+  if (!root) return { sync() {}, reset() {}, async whenReady() { return false; } };
   let items = [];
   let status = null;
   let cap = 20;
   let older = false;
   let seen = null;
   let loadedRoom = null;
+  let loadedContext = null, operation = 0, readFlight = null, actionFlight = null;
+  const context = () => {
+    const current = getSession(), member = current?.member?.id;
+    return current?.roomId && member && getState()?.members?.[member]?.id === member && getState().members[member].active !== false
+      ? `${client.generation}|${current.roomId}|${member}` : null;
+  };
   let busy = false;
   let pendingFocus = null;
   let pendingStatus = "";
@@ -344,7 +352,7 @@ export function installWorkBoard({ client, getState, getSession }) {
     pendingFocus = null;
     pendingStatus = "";
     root.innerHTML = boardHtml(items, status, viewerOf(state, session), state?.members ?? {}, Date.now(), {
-      older, canWrite: canWriteClaims(state, session), capabilities: advertisedCapabilities(state), cap
+      older, canWrite: canWriteClaims(state, session), capabilities: advertisedCapabilities(state), cap, workItems: state?.workItems ?? {}
     });
     if (stick?.status) {
       const line = root.querySelector("#board-status");
@@ -379,19 +387,28 @@ export function installWorkBoard({ client, getState, getSession }) {
   }
 
   async function load({ force = false } = {}) {
-    const session = getSession();
-    if (!session?.roomId || busy) return;
+    const session = getSession(), owned = context();
+    if (!owned) return;
+    if (loadedContext !== owned) {
+      operation++; busy = false; loadedRoom = null; seen = null; items = []; status = null;
+      loadedContext = owned; pendingFocus = null; pendingStatus = ""; stick = null; paint();
+    }
+    if (busy) return;
     const events = (getState()?.eventLog ?? []).filter(event => event.type === "work_claim.updated");
     const mark = events.length ? events[events.length - 1].id : "";
     if (!force && loadedRoom === session.roomId && seen === mark) return;
+    const mine = ++operation;
+    let pending = null;
     busy = true;
     try {
-      const [page, live, config] = await Promise.all([
+      pending = Promise.all([
         readClaims(client),
         client.request(client.path("/work-claims/status")),
         client.request(client.path("/work-claims/config"))
       ]);
-      if (getSession()?.roomId !== session.roomId) return;
+      readFlight = pending;
+      const [page, live, config] = await pending;
+      if (mine !== operation || context() !== owned) return;
       items = page.claims;
       older = page.older;
       status = live;
@@ -400,25 +417,34 @@ export function installWorkBoard({ client, getState, getSession }) {
       seen = mark;
       paint();
     } catch {
-      if (getSession()?.roomId === session.roomId) note("Could not load the board.");
+      if (mine === operation && context() === owned) note("Could not load the board.");
     } finally {
-      busy = false;
+      if (readFlight === pending) readFlight = null;
+      if (mine === operation) busy = false;
     }
   }
 
   async function act(run, focus) {
-    if (busy) return;
+    const owned = context();
+    if (!owned || busy) return;
+    const mine = ++operation;
     if (focus) { pendingFocus = { key: focus.key ?? null, id: focus.id ?? null }; pendingStatus = focus.status ?? ""; }
     busy = true;
+    let pending = null;
     try {
-      await run();
+      pending = run(); actionFlight = pending;
+      await pending;
+      if (mine !== operation || context() !== owned) return;
       busy = false;
       await load({ force: true });
     } catch (error) {
+      if (mine !== operation || context() !== owned) return;
       pendingFocus = null;
       pendingStatus = "";
       busy = false;
       note(error?.message || "Could not update the claim.");
+    } finally {
+      if (actionFlight === pending) actionFlight = null;
     }
   }
 
@@ -476,6 +502,17 @@ export function installWorkBoard({ client, getState, getSession }) {
 
   return {
     sync() { void load(); },
-    reset() { items = []; status = null; cap = 20; older = false; seen = null; loadedRoom = null; pendingFocus = null; pendingStatus = ""; stick = null; if (root.isConnected) root.replaceChildren(); }
+    async whenReady() {
+      const owned = context();
+      if (!owned) return false;
+      try {
+        if (actionFlight) await actionFlight;
+        if (context() !== owned) return false;
+        if (readFlight) await readFlight;
+        else await load();
+      } catch { return false; }
+      return context() === owned && loadedContext === owned && loadedRoom === getSession()?.roomId;
+    },
+    reset() { operation++; busy = false; readFlight = null; actionFlight = null; loadedContext = null; items = []; status = null; cap = 20; older = false; seen = null; loadedRoom = null; pendingFocus = null; pendingStatus = ""; stick = null; if (root.isConnected) root.replaceChildren(); }
   };
 }
