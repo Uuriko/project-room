@@ -2,17 +2,22 @@ import { STORE_SCHEMA_VERSION, fenceDefinitions, writerVersions } from '../serve
 
 const marker = 'room_runtime_version';
 const permit = 'room_writer_permit';
-// Version and permit checks read sqlite_master. Cache them on the database
-// object for this isolate. A version write drops the cache. The permit
-// flip inside a transaction ends at 0, so a passed check for that value
-// stays valid until the schema version changes.
+// Version and permit checks read sqlite_master. Cache them once per
+// isolate on the underlying storage, so every wrapper sees a write made
+// by another. A version write drops the cache. A transaction that throws
+// drops it too: transactionSync rolls the SQL back, and a cached version
+// or permit check would still describe the uncommitted write. The permit
+// flip inside a committed transaction ends at 0, so a passed check for
+// that value stays valid until the schema version changes.
 const runtimeCache = new WeakMap();
+const cacheKey = db => db.storage ?? db;
 const cacheOf = db => {
-  let hit = runtimeCache.get(db);
-  if (!hit) { hit = {}; runtimeCache.set(db, hit); }
+  const key = cacheKey(db);
+  let hit = runtimeCache.get(key);
+  if (!hit) { hit = {}; runtimeCache.set(key, hit); }
   return hit;
 };
-const forgetRuntime = db => { runtimeCache.delete(db); };
+const forgetRuntime = db => { runtimeCache.delete(cacheKey(db)); };
 export const durableFenceDefinitions = version => fenceDefinitions(version).map(({ name, sql }) => ({ name,
   sql: sql.replace(`project_room_writer_v${version}()`, version < 8 ? `(SELECT version FROM ${marker} WHERE singleton=1)`
     : `(CASE WHEN (SELECT version FROM ${marker} WHERE singleton=1) IS ${version} AND (SELECT version FROM ${permit} WHERE singleton=1) IS ${version} THEN ${version} ELSE NULL END)`) }));
@@ -167,6 +172,9 @@ export const durableStorage = {
         if (!readOnly && hasPermit(db)) db.storage.sql.exec(`UPDATE ${permit} SET version=0 WHERE singleton=1`);
         if (this.version(db) === STORE_SCHEMA_VERSION) db.migrationSource = null;
         return result;
+      } catch (error) {
+        forgetRuntime(db);
+        throw error;
       } finally { db.isTransaction = false; db.readOnlyTransaction = false; }
     });
   }
