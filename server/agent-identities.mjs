@@ -445,10 +445,13 @@ export class AgentIdentities {
       )`);
     }
     if (table("rooms")) {
-      clauses.push(`AND NOT EXISTS (
-        SELECT 1 FROM rooms, json_each(rooms.projection, '$.workItems') AS item
-        WHERE json_extract(item.value, '$.claim.holderId') = agent_identities.identity_id
-          AND json_extract(item.value, '$.claim.status') = 'active'
+      // Uncorrelated: one work-item scan for the whole sweep. The previous
+      // NOT EXISTS re-parsed every projection once per identity candidate.
+      clauses.push(`AND identity_id NOT IN (
+        SELECT json_extract(item.value, '$.claim.holderId')
+        FROM rooms, json_each(rooms.projection, '$.workItems') AS item
+        WHERE json_extract(item.value, '$.claim.status') = 'active'
+          AND json_extract(item.value, '$.claim.holderId') IS NOT NULL
       )`);
     }
     return clauses.join("\n");
@@ -466,6 +469,11 @@ export class AgentIdentities {
     const table = name => this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name);
     if (!table("agent_identities") || !table("identity_links")) return 0;
     const cutoff = this.store.now() - this.activationWindowMs;
+    const stale = this.db.prepare(`
+      SELECT COUNT(*) AS n FROM agent_identities
+      WHERE mint_address IS NOT NULL AND activated_at IS NULL AND revoked_at IS NULL AND created_at < ?
+    `).get(cutoff).n;
+    if (!stale) return 0;
     const keep = this.retentionClauses();
     const rows = this.db.prepare(`
       SELECT identity_id AS identityId FROM agent_identities

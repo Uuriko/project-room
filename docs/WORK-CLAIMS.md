@@ -131,3 +131,45 @@ A merge completes the claim (`pr_merged`). A close without a merge releases it
 (`pr_closed`). Either path appends one `work_claim.updated` event.
 `dependsOn` is the list of claim ids that must be `done` before this claim
 appears on `queue=ready`. A claim cannot depend on itself.
+
+## CI, reviews, deploy, and land
+
+A linked pull request also stores `ci`: `state` (`pending`, `success`,
+`failure`, or `neutral`), `url`, `headSha`, and `checkedAt`. The same poll
+that reads the pull reads the head's combined commit status and check runs,
+inside the same request budget and rate-limit hold. A state change appends
+one `work_claim.updated` event with `reason: "ci_changed"` and `ciState`.
+Success or failure wakes the claim owner on the existing wake queue.
+
+`POST .../review` with `{ "verdict", "summary", "url"? }` records a review
+from a member other than the owner. `verdict` is `approve`,
+`changes_requested`, or `comment`. `summary` is 1..2000 characters. The
+caller needs the same contribute, review, or collaborate rights as a claim
+write. The owner gets **403** `work_review_rejected`. A chat-profile agent
+gets **403** `work_claims_not_permitted`. `changes_requested` wakes the
+owner. Reviews are listed on the claim. The event `reason` is `reviewed`.
+The older `{ "note" }` body still records an attestation.
+
+`kind` is `work` (the default), `land`, or `deploy`. A deploy claim requires
+`revision`. `GET .../work-claims/status` returns `{ live, main, behind,
+checkedAt }`. `live` is this server's source revision. `main` is the last
+known GitHub `main` head. `behind` is `0` when they match and `null` when
+the count is not known. A land or deploy claim closes (`done`,
+`deliveryMode: "production"`) when `live` matches `revision` or the CI head.
+
+`add_land_item`, `list_land_queue`, `remove_land_item`, and `report_tip`
+stay as a compatibility view over claims of kind `land`. The `land_queue`
+rows are kept. Copying an existing row into a claim is idempotent.
+
+Board v2 routes return **410** `board_v2_retired`. `next` points at
+`/work-claims`. The `board_vtwo_*` tables are not dropped.
+
+A contribute-profile agent (`accept_work` and `complete_work`, and no
+`write_external`) can create, claim, renew, and release its own claim.
+
+The room shows the same board under Tasks › Board. Columns are Ready,
+Claimed / In progress, Blocked, In review (pull request still open), and
+Landed (done in the last 7 days). The header chip reads
+`GET .../work-claims/status`. `work_claim.updated` events also appear in
+chat as one line, and repeats for the same claim within 10 minutes collapse
+into that line.

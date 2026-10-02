@@ -192,3 +192,31 @@ test("an open pull sends If-None-Match, and a 304 keeps the claim", async t => {
   assert.equal(store.workClaims.get("commons", "lane").state, "claimed");
   assert.equal(store.workClaims.get("commons", "lane").pullRequest.outcome, null);
 });
+
+test("a cron deadline does not call GitHub and does not start a second lookup", async t => {
+  const { store, call } = await room(t);
+  await call("create", null, { id: "lane", pullRequest: URL_A });
+  await call("claim", "lane", {});
+  await call("create", null, { id: "other", pullRequest: "https://github.com/Uuriko/project-room/pull/9" });
+  await call("claim", "other", {});
+  let calls = 0;
+  const fetchImpl = async () => {
+    calls += 1;
+    await new Promise(resolve => setTimeout(resolve, 300));
+    return { ok: true, status: 200, text: async () => "{\"merged\":false,\"state\":\"open\"}" };
+  };
+  const blocked = await syncClaimPullRequests(store, { fetchImpl, token: "ghs_test", deadline: Date.now() - 1 });
+  assert.equal(blocked.budgetExceeded, 1);
+  assert.equal(blocked.checked, 0);
+  assert.equal(calls, 0);
+  assert.equal(store.workClaims.get("commons", "lane").state, "claimed");
+  const started = Date.now();
+  const partial = await syncClaimPullRequests(store, {
+    fetchImpl, token: "ghs_test", deadline: started + 150, yieldBetween: async () => {}
+  });
+  assert.equal(calls, 1);
+  assert.equal(partial.budgetExceeded, 1);
+  assert.equal(partial.checked, 1);
+  assert.equal(store.workClaims.get("commons", "lane").pullRequest.outcome, null);
+  assert.equal(store.workClaims.get("commons", "other").pullRequest.etag ?? null, null);
+});

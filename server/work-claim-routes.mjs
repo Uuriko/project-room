@@ -33,8 +33,8 @@
 // 409; unknown ids as 404. Unknown errors are rethrown for the generic 500
 // path — never wrapped, so no internal detail leaks.
 import {
-  createWork, claimWork, updateWork, attestWork, reassignWork, releaseExpired, canCloseWork,
-  renewWork, roomWorkClaimConfig, isReceiptTag, ClaimError, REVIEW_POLICIES,
+  createWork, claimWork, updateWork, attestWork, recordReview, reassignWork, releaseExpired, canCloseWork,
+  renewWork, roomWorkClaimConfig, closeWhenLive, isReceiptTag, ClaimError, REVIEW_POLICIES, CLAIM_KINDS,
   claimUpdatedAt, ACTIVE_CLAIM_STATES, MAX_LEASE_HOURS,
 } from "./work-claims.mjs";
 import { findDuplicates, DuplicateError } from "./work-duplicates.mjs";
@@ -43,8 +43,10 @@ import { evaluateReceipt } from "./jev-receipts.mjs";
 import { findClaimCollisions } from "./claim-collisions.mjs";
 import { emitWorkClaimEvent } from "./work-claim-events.mjs";
 import { fileLeaseConflictBody, fileLeaseConflicts, holdForRateLimit, readyClaims } from "./claim-coordination.mjs";
-import { collectPullRequestLookups, commitPullRequestLookup, readClaimPullBudget, writeClaimPullBudget } from "./claim-pr-sync.mjs";
+import { collectPullRequestLookups, commitPullRequestLookup, readClaimPullBudget, readRoomDeployStatus, writeClaimPullBudget } from "./claim-pr-sync.mjs";
+import { enqueueClaimWake } from "./work-claim-events.mjs";
 import { agentErrorBody } from "../src/agent-error.mjs";
+import { SOURCE_REVISION } from "./version.mjs";
 
 const CLAIM_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 
@@ -365,6 +367,17 @@ export async function handleWorkClaims(options) {
   // mounted; sweep is the member-triggered poll, and the cron uses the same
   // lookup. An empty room, or a sweep with nothing due, does not call fetch.
   let pullBatch = { results: [], rateLimitedUntil: null, skipped: false };
+  let deployStatus = null;
+  if (options.workClaimRoute === "status" && req.method === "GET") {
+    const credential = options.githubToken !== undefined
+      ? options.githubToken
+      : (process.env.GITHUB_TOKEN || process.env.GH_TOKEN || null);
+    deployStatus = await readRoomDeployStatus(options.store, {
+      fetchImpl: options.fetchPullRequest ?? fetch,
+      token: credential || null,
+      nowMs: Date.now(),
+    });
+  }
   if (options.workClaimRoute === "sweep") {
     const nowMs = Date.now();
     const budget = readClaimPullBudget(options.store);
@@ -381,7 +394,7 @@ export async function handleWorkClaims(options) {
       });
     }
   }
-  const run = () => handleWorkClaimsCore({ ...options, registry, pullBatch,
+  const run = () => handleWorkClaimsCore({ ...options, registry, pullBatch, deployStatus,
     auth: reauthorize ? reauthorize() : options.auth,
     helpers: { ...helpers, body: () => requestData, json: (_res, status, value) => ({ status, value }) },
   });
@@ -395,7 +408,7 @@ export async function handleWorkClaims(options) {
   }
 }
 
-function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRoute, workClaimId, helpers, registry, pullBatch = { results: [], rateLimitedUntil: null, skipped: false } }) {
+function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRoute, workClaimId, helpers, registry, pullBatch = { results: [], rateLimitedUntil: null, skipped: false }, deployStatus = null }) {
   const { json, reject, body } = helpers;
   if (req.method !== "GET" && req.method !== "HEAD") enforceAutonomyTierForAction({
     db: store.db, roomId, state: { room: { ownerId: store.roomAuthority?.(roomId)?.ownerId } },
@@ -417,9 +430,22 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       previousOwnerId: extra.previousOwnerId ?? null,
       atMs: nowMs,
       paths: action === "released" || action === "pr_closed" ? (prior?.files ?? []) : undefined,
-      pullRequest: extra.pullRequest
+      pullRequest: extra.pullRequest,
+      reason: extra.reason,
+      ciState: extra.ciState,
+      verdict: extra.verdict
     });
     return item;
+  };
+  const closeLiveClaims = () => {
+    const closed = [];
+    for (const item of registry.list(roomId)) {
+      const next = closeWhenLive(item, SOURCE_REVISION, nowMs);
+      if (!next) continue;
+      commit(next, "state_changed");
+      closed.push(next.id);
+    }
+    return closed;
   };
   const sweptIds = sweepRoom(registry, roomId, nowMs,
     (item, before) => emitWorkClaimEvent(store, roomId, {
@@ -449,7 +475,13 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     reject(403, "work_not_owner", `Work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can change it`);
   };
 
+  if (workClaimRoute === "status" && req.method === "GET") {
+    closeLiveClaims();
+    const status = deployStatus ?? { live: SOURCE_REVISION, main: null, behind: null, checkedAt: null };
+    return json(res, 200, { live: status.live, main: status.main, behind: status.behind, checkedAt: status.checkedAt });
+  }
   if (workClaimRoute === "list" && req.method === "GET") {
+    closeLiveClaims();
     const params = url?.searchParams ?? new URLSearchParams();
     for (const key of params.keys()) {
       if (!BOARD_QUERY.has(key) || params.getAll(key).length !== 1) {
@@ -556,7 +588,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   }
   if (workClaimRoute === "create" && req.method === "POST") {
     const data = body(req);
-    if (!shape(data, { required: ["id"], optional: ["title", "reviewPolicy", "note", "tags", "files", "dependsOn", "pullRequest"] })) invalidInput(reject, "{id, title?, reviewPolicy?, note?, tags?, files?, dependsOn?, pullRequest?}");
+    if (!shape(data, { required: ["id"], optional: ["title", "reviewPolicy", "note", "tags", "files", "dependsOn", "pullRequest", "kind", "revision"] })) invalidInput(reject, "{id, title?, reviewPolicy?, note?, tags?, files?, dependsOn?, pullRequest?, kind?, revision?}");
     requireWriter();
     const id = claimIdOf(reject, data.id);
     if (registry.has(roomId, id)) reject(409, "work_claim_exists", `Work claim "${id}" already exists in this room`);
@@ -567,11 +599,13 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
         "Close stale claims before opening another.");
     }
     if (data.reviewPolicy !== undefined && !REVIEW_POLICIES.includes(data.reviewPolicy)) invalidInput(reject, `reviewPolicy one of ${REVIEW_POLICIES.join(", ")}`);
-    const item = runPure(reject, () => createWork({ id, title: data.title, reviewPolicy: data.reviewPolicy, note: data.note, tags: data.tags, files: data.files, dependsOn: data.dependsOn, pullRequest: data.pullRequest }, { now: nowMs, agentId: caller }));
+    if (data.kind !== undefined && !CLAIM_KINDS.includes(data.kind)) invalidInput(reject, `kind one of ${CLAIM_KINDS.join(", ")}`);
+    const item = runPure(reject, () => createWork({ id, title: data.title, reviewPolicy: data.reviewPolicy, note: data.note, tags: data.tags, files: data.files, dependsOn: data.dependsOn, pullRequest: data.pullRequest, kind: data.kind, revision: data.revision }, { now: nowMs, agentId: caller }));
     commit(item, "created");
     return json(res, 201, item);
   }
   if (workClaimRoute === "read" && req.method === "GET") {
+    closeLiveClaims();
     return json(res, 200, load(claimIdOf(reject, workClaimId)));
   }
   if (workClaimRoute === "claim" && req.method === "POST") {
@@ -682,11 +716,24 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     return json(res, 200, updated);
   }
   if (workClaimRoute === "review" && req.method === "POST") {
-    // QA-Sec 2026-09-19: the attestation endpoint. Any room member records
-    // their own review of an active claim; the attestation is bound to the
-    // caller's authenticated member id — it can never name someone else.
+    // A verdict review is a record from someone other than the owner who
+    // holds contribute or review rights. The older {note} body stays an
+    // attestation bound to the caller, for the done-transition policy.
     const data = body(req);
-    if (!shape(data, { optional: ["note"] })) invalidInput(reject, "{note?}");
+    const verdictReview = data && typeof data === "object" && !Array.isArray(data) && ("verdict" in data || "summary" in data || "url" in data);
+    if (verdictReview) {
+      if (!shape(data, { required: ["verdict", "summary"], optional: ["url"] })) invalidInput(reject, "{verdict, summary, url?}");
+      requireWriter();
+      const item = load(claimIdOf(reject, workClaimId));
+      if (item.owner === caller) reject(403, "work_review_rejected", "The owner cannot review their own claim");
+      const reviewed = runPure(reject, () => recordReview(item, caller, { verdict: data.verdict, summary: data.summary, url: data.url, now: nowMs }));
+      commit(reviewed, "reviewed", { reason: "reviewed", verdict: data.verdict });
+      if (data.verdict === "changes_requested") {
+        enqueueClaimWake(store, roomId, item.owner, `work-claim:${item.id}:review:${caller}:${nowMs}`);
+      }
+      return json(res, 200, reviewed);
+    }
+    if (!shape(data, { optional: ["note"] })) invalidInput(reject, "{note?} or {verdict, summary, url?}");
     const item = load(claimIdOf(reject, workClaimId));
     const attested = runPure(reject, () => attestWork(item, caller, { note: data.note, now: nowMs }));
     commit(attested, "reviewed");
@@ -781,7 +828,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   // RFC 9110: a 405 names the resource's valid methods. The route table above
   // is the source of truth; an unknown route has no meaningful Allow value.
   const WORK_CLAIM_METHODS = {
-    list: "GET", receipts: "GET", sweep: "POST", duplicates: "GET", create: "POST",
+    list: "GET", receipts: "GET", sweep: "POST", duplicates: "GET", status: "GET", create: "POST",
     read: "GET", claim: "POST", update: "POST", review: "POST", release: "POST",
     reassign: "POST", renew: "POST",
   };

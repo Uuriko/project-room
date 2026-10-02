@@ -1,0 +1,5 @@
+# pnpm 12 ignores the "pnpm" field in package.json. Overrides live here so
+# `pnpm install --frozen-lockfile` matches pnpm-lock.yaml.
+overrides:
+  sharp: 0.35.4
+  undici: 7.29.1

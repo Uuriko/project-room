@@ -2,14 +2,14 @@
 
 ## Current production deploy
 
-Recorded 2026-10-01T21:35Z by Grok Bot. Source `22adbde4ef95264f150f227d7e90926fc0baf481`. Canonical Worker first, then the entry Worker. Durable Object not reset. Gmail stays disabled.
+Recorded 2026-10-01 ~17:45 PT. Source `60df170cb58b79fd1714ca5dfe3ef51da939b29d` (`main` `60df170c`). Canonical Worker first, then the entry Worker. Durable Object not reset. Gmail stays disabled.
 
 `ROOM_IDENTITY_HASH_KEY` is an optional Worker secret (`pnpm exec wrangler secret put ROOM_IDENTITY_HASH_KEY` from `cloudflare/`, production env). Leave it unset and agent identity verifiers use the built-in fallback, so a deploy without the secret does not lock agents out. Verification also accepts that fallback after the secret is set. Do not put the value in `wrangler.jsonc`.
 
 | Worker | Role | Version | Rollback |
 | --- | --- | --- | --- |
-| `project-room` | Canonical namespace (`wrangler deploy --env production --keep-vars`). Production CPU budget `env.production.limits.cpu_ms` = 30000. | `5a1ea853-afad-43ed-a613-39d1cf239a9e` | `a9a06715` |
-| `project-room-staging` | Public entry. Forwards through `ROOM.script_name=project-room` (`wrangler deploy --keep-vars`). One-second forwarding budget. | `2ebb4ed9-05e3-4f47-bfd1-c9db8fd5b4b0` | `57af0010` |
+| `project-room` | Canonical namespace (`wrangler deploy --env production --keep-vars`). Production CPU budget `env.production.limits.cpu_ms` = 30000. | `86fc2647-4f88-482d-af43-3e8a3172828e` | `5a1ea853-afad-43ed-a613-39d1cf239a9e` |
+| `project-room-staging` | Public entry. Forwards through `ROOM.script_name=project-room` (`wrangler deploy --keep-vars`). One-second forwarding budget. | `4ad2f09f-35ba-4906-856c-fced4dbbcafc` | `2ebb4ed9-05e3-4f47-bfd1-c9db8fd5b4b0` |
 
 # Cloudflare staging candidate
 
@@ -75,14 +75,19 @@ and visitor-address adapters, not a second product.
 `scripts/runtime-package.mjs` and `tests/asset-packaging.test.js` read it with `JSON.parse`.
 The rationale for its `limits` and `observability` values lives here instead.
 
-- `limits.cpu_ms` is 1000. The Durable Object constructor verifies the whole audit
-  history on every cold start (provenance repair, invitation audit, help-history
-  audit). `node scripts/measure-cold-start.mjs` measured that constructor at about
-  60-70 ms wall-clock for a 10,000-event room under Node, so the earlier 50 ms cap
-  could fail the first request after each isolate restart. 1000 ms is roughly 15x
-  that measurement and still 30x below the Paid-plan default of 30,000 ms, so a
-  runaway request is still stopped quickly. The key only applies to the Standard
-  usage model (Free plan is a fixed 10 ms); the platform maximum is 300,000.
+- Top-level `limits.cpu_ms` is 1000. Production (`env.production.limits.cpu_ms`)
+  is 30000. A cold `invite-only-pilot` used to spend seconds of CPU in the
+  constructor (full event replay) and that CPU was charged to whichever RPC
+  woke the object — in production, `drainChannelBacklog`, about 14 seconds.
+  Hibernation after ~10 seconds idle, and a tail attach or detach, are what
+  start a new object. The object now opens with deferred integrity (checksum
+  only; full verify is a yielding cron job) and does not drain channel or
+  email backlog on the constructor or the first request. With no channel
+  configured the drain returns immediately; otherwise it continues in
+  `waitUntil` slices. `tests/cold-start-budget.test.js` fails if a
+  200,000-event reopen costs 500 ms of CPU or more. The limit still applies
+  only on the Paid plan's Standard usage model (Free plan is a fixed 10 ms);
+  the platform maximum is 300,000.
 - `observability.enabled` is true with `head_sampling_rate` 1 so console output
   (for example the one-time "Operator bootstrap skipped" warning) and uncaught
   errors are kept in Workers Logs for seven days. Logging every request fits the
@@ -94,7 +99,13 @@ The rationale for its `limits` and `observability` values lives here instead.
 
 ## Reproduce
 
-Use Node 24.19+ and pnpm. From `cloudflare/`:
+Use Node 24.19+ and pnpm. Wrangler 4.116 needs Node >= 22
+(`@cloudflare/kv-asset-handler` declares that engines range); this repo's own
+engines stay `>=24.19.0`. pnpm 10 (CI) reads `pnpm.overrides` in
+`package.json`. pnpm 12 ignores that field, so the same overrides also live
+in `pnpm-workspace.yaml`. Both must match `pnpm-lock.yaml` or
+`pnpm install --frozen-lockfile` fails with `ERR_PNPM_LOCKFILE_CONFIG_MISMATCH`.
+From `cloudflare/`:
 
 ```sh
 pnpm install --frozen-lockfile --ignore-scripts

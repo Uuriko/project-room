@@ -32,7 +32,7 @@ test("streams and queue modes finish in a tiny configuration with parseable JSON
   assert.equal(report.queue.lagHistogram.reduce((n, b) => n + b.count, 0), 5);
   assert.equal(report.commands.agents, 2);
   assert.ok(report.commands.ops > 0);
-  assert.equal(result.stderr.split("\n").filter(line => line && !line.startsWith("room diagnostic")).length, 0, "--quiet prints no table");
+  assert.equal(result.stderr.split("\n").filter(line => line && !line.startsWith("room diagnostic") && !line.includes('"event":"room.cold_start"')).length, 0, "--quiet prints no table");
 });
 
 test("legacy positional mode still prints the flat JSON blob", () => {

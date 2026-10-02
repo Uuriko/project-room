@@ -348,7 +348,13 @@ export const unfencedAdditiveTables = Object.freeze([
   "emissary_drops",
   "emissary_invite_attribution",
   "emissary_idempotency",
-  "emissary_journal"
+  "emissary_journal",
+  // integrity_snapshot (cold-start checksum): one row written only after the
+  // yielding integrity job finishes. Purely additive and intentionally NOT
+  // fenced — older writers have no code path to it, and a missing or stale
+  // row only means the next cron rechecks. The constructor never uses it to
+  // decide to replay the event log.
+  "integrity_snapshot"
 ]);
 export const applicationTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables, ...unfencedAdditiveTables])]);
 const v34FencedTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables])]);
