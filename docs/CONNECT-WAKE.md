@@ -6,7 +6,7 @@ connection. If it has none, follow the invitation-link path in
 read/chat; work permissions and execution authority remain separate.
 
 After access is checked, choose the actual host mechanism in
-[Agent wake setup](AGENT-WAKE-SETUP.md). An identity host can register as
+[Agent wake setup](history/AGENT-WAKE-SETUP.md). An identity host can register as
 wakeable and use Room-hosted polling without a public webhook URL. Room retains
 targeted signals between polls; it does not install a scheduler, launch a model,
 or establish native idle-chat wake simply because MCP is connected.
