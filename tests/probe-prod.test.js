@@ -54,7 +54,52 @@ test('valid public responses permit a matching revision and detect a real mismat
   liveRevision = 'f'.repeat(40);
   await assert.rejects(run(process.execPath, ['scripts/watch-deploy-drift.mjs', '--base', base, '--ref', 'HEAD']), error => {
     assert.equal(error.code, 1);
-    assert.equal(JSON.parse(error.stdout).drift, true);
+    const report = JSON.parse(error.stdout);
+    assert.equal(report.drift, true);
+    assert.equal(report.lag, 'unknown');
+    return true;
+  });
+});
+
+test('a lag inside both budgets is healthy, and crossing either budget is drift', async t => {
+  const parent = (await run('git', ['rev-parse', 'HEAD~1'])).stdout.trim();
+  const count = Number((await run('git', ['rev-list', '--count', 'HEAD~1..HEAD'])).stdout.trim());
+  assert.ok(count >= 1);
+  const base = await withServer(t, path => path === '/api/version'
+    ? { status: 200, body: { status: 'ok', sourceRevision: parent } } : healthy(path));
+  const within = await run(process.execPath, ['scripts/watch-deploy-drift.mjs', '--base', base, '--ref', 'HEAD', '--max-prs', String(count), '--max-hours', '100000']);
+  const ok = JSON.parse(within.stdout);
+  assert.equal(ok.probe_verdict, 'healthy');
+  assert.equal(ok.drift, false);
+  assert.equal(ok.lag, null);
+  assert.equal(ok.behind_prs, count);
+  await assert.rejects(run(process.execPath, ['scripts/watch-deploy-drift.mjs', '--base', base, '--ref', 'HEAD', '--max-prs', String(count - 1), '--max-hours', '100000']), error => {
+    const report = JSON.parse(error.stdout);
+    assert.equal(error.code, 1);
+    assert.equal(report.drift, true);
+    assert.equal(report.lag, 'prs');
+    assert.equal(report.probe_verdict, 'healthy');
+    return true;
+  });
+  await assert.rejects(run(process.execPath, ['scripts/watch-deploy-drift.mjs', '--base', base, '--ref', 'HEAD', '--max-prs', String(count), '--max-hours', '0']), error => {
+    const report = JSON.parse(error.stdout);
+    assert.equal(error.code, 1);
+    assert.equal(report.drift, true);
+    assert.equal(report.lag, 'hours');
+    return true;
+  });
+});
+
+test('a commit that is not an ancestor of main is drift', async t => {
+  const tree = (await run('git', ['rev-parse', 'HEAD^{tree}'])).stdout.trim();
+  const side = (await run('git', ['commit-tree', tree, '-m', 'drift side'])).stdout.trim();
+  const base = await withServer(t, path => path === '/api/version'
+    ? { status: 200, body: { status: 'ok', sourceRevision: side } } : healthy(path));
+  await assert.rejects(run(process.execPath, ['scripts/watch-deploy-drift.mjs', '--base', base, '--ref', 'HEAD']), error => {
+    const report = JSON.parse(error.stdout);
+    assert.equal(error.code, 1);
+    assert.equal(report.drift, true);
+    assert.equal(report.lag, 'not-ancestor');
     return true;
   });
 });
