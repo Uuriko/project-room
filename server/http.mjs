@@ -1,4 +1,4 @@
-import { publicSearchAssets, publicSearchCanonical, publicSearchMarketingPolicy, publicSearchSitemap, PUBLIC_SEARCH_CSP, PUBLIC_PAGE_LASTMOD, reviewedPublicSearchPaths } from "../deploy/public-search.mjs";
+import { acceptPrefersHtml, publicHtmlNotFoundPath, publicSearchAssets, publicSearchCanonical, publicSearchMarketingPolicy, publicSearchSitemap, PUBLIC_NOT_FOUND_HTML, PUBLIC_SEARCH_CSP, PUBLIC_PAGE_LASTMOD, reviewedPublicSearchPaths } from "../deploy/public-search.mjs";
 import { readConversation } from "./conversation-sync.mjs";
 import { OutsideAgents } from "./outside-agents.mjs";
 import { GmailSync } from './gmail-sync.mjs';
@@ -10,6 +10,7 @@ import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { ServiceError } from "./store.mjs";
+import { ABUSE_RATE_FAMILIES, loadAbuseRateBucket, saveAbuseRateBucket } from "./abuse-rate-buckets.mjs";
 import { peerEventVisible, visibleBonds } from "./bonds.mjs";
 import { clientAddress, STREAM_INTERVAL_DEFAULT_MS } from "./deployment.mjs";
 import { isWorkersRuntime } from "./ip-blocklist.mjs";
@@ -33,6 +34,7 @@ import { SOURCE_REVISION, BUILD_ID } from "./version.mjs";
 import { agentErrorBody, errorCategory } from "../src/agent-error.mjs";
 import { DiagnosticsLog, supportExportBundle } from "./diagnostics.mjs";
 import { renderRoomExportHtml, EXPORT_HTML_CSP } from "./room-export-html.mjs";
+import { redactEventPage, redactEventRows, redactMessageTree, redactSnapshotState } from "./redact-read.mjs";
 import { discoveryDoc, isHealthAliasPath, rewriteRoomApiPrefix, EDGE_DOOR_HOSTS, ROOM_ORIGIN } from "../deploy/agent-discovery.mjs";
 import { noteIdentityMint } from "./growth-loop.mjs";
 import { buildOpenApiJson, discoverabilityErrorOverride, nextActionsForAccessRequest, nextActionsForAccessRequestStatus, nextActionsForInviteRedeem } from "./discoverability.mjs";
@@ -99,6 +101,7 @@ import { hashPassword, verifyPassword, checkPasswordPolicy, DUMMY_PASSWORD_VERIF
 import { buildGitHubAuthUrl, codeChallengeFor, createPendingStore, exchangeCodeForToken, fetchGitHubUser,
   GitHubOAuthError, GITHUB_START_PATH, GITHUB_CALLBACK_PATH, githubPostLoginPage, githubUnavailablePage } from "./github-oauth.mjs";
 import { createOAuthProvider, OAUTH_SCOPES } from "./oauth-provider.mjs";
+import { dispatchRoute } from "./routes/dispatch.mjs";
 
 const roomCookieName = "room_session";
 const accountCookieName = "account_session";
@@ -396,6 +399,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // scoped tokens for the Project Room API. One instance per server (one per
   // Durable Object in production); client registry comes from config.
   const oauthProvider = createOAuthProvider({
+    db: store.db,
     clock: () => store.now(),
     // F-01 reuse signal: refresh-token reuse (possible theft) revokes the
     // whole token family inside the provider; log it as a structured
@@ -611,6 +615,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   const rates = new Map(), rateFamilies = new Map();
   const rateFamily = id => id.slice(0, id.indexOf(":"));
   const dropRate = (id, family = rateFamily(id)) => {
+    const entry = rates.get(id);
+    // Keep a durable count that was already being written. A key that never
+    // reached a write stride leaves no row, so a flood of one-shot keys cannot
+    // fill the table.
+    if (entry && ABUSE_RATE_FAMILIES.has(family) && entry.persistedN !== undefined && entry.persistedN !== entry.n && entry.until > Date.now())
+      saveAbuseRateBucket(store.db, id, entry);
     rates.delete(id);
     const left = rateFamilies.get(family) - 1;
     if (left > 0) rateFamilies.set(family, left); else rateFamilies.delete(family);
@@ -619,16 +629,22 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     const now = Date.now();
     for (const [k, v] of rates) if (v.until <= now) dropRate(k);
     const family = rateFamily(id);
+    const durable = ABUSE_RATE_FAMILIES.has(family);
     let entry = rates.get(id);
     if (entry) rates.delete(id);
     else {
+      if (durable) entry = loadAbuseRateBucket(store.db, id, now);
       if ((rateFamilies.get(family) ?? 0) >= RATE_FAMILY_KEYS)
         for (const k of rates.keys()) if (rateFamily(k) === family) { dropRate(k, family); break; }
       rateFamilies.set(family, (rateFamilies.get(family) ?? 0) + 1);
-      entry = { n: 0, until: now + 60000 };
+      if (!entry) entry = { n: 0, until: now + 60000 };
     }
     entry.n++;
     rates.set(id, entry);
+    if (durable) {
+      const stride = Math.max(1, Math.floor(maximum / 4));
+      if (entry.n >= maximum || entry.n % stride === 0) saveAbuseRateBucket(store.db, id, entry);
+    }
     if (entry.n > maximum) throw new ServiceError(429, "rate_limited", "Too many requests; retry after a minute",
       { "X-RateLimit-Limit": maximum, "X-RateLimit-Remaining": 0, "X-RateLimit-Reset": Math.ceil(entry.until / 1000) });
   }
@@ -730,6 +746,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Content-Length": Buffer.byteLength(body) });
     res.end(head ? undefined : body);
   }
+  // Read-time message redaction (server/redact-read.mjs). Responses that
+  // return events, the room projection, or an export show the tombstone for
+  // a deleted message and only the current body after an edit. The log
+  // itself is not rewritten.
+  function projectionMessages(id) {
+    return store.room(id).state.messages;
+  }
   // Bounded request reader shared by JSON and NDJSON routes. A declared
   // oversize is refused immediately while draining in the background: a stalled
   // sender must not hold a connection open until its request timeout. For
@@ -792,7 +815,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     const pump = () => {
       if (res.destroyed || res.writableEnded) { cleanup(); return; }
       try {
-        const batch = store.eventsAfter(token, roomId, cursor, 100, binding);
+        const batch = redactEventPage(store.eventsAfter(token, roomId, cursor, 100, binding), projectionMessages(roomId));
         if (!batch.events.length) res.write(": connected transport only\n\n");
         for (const item of batch.events) {
           res.write(`id: ${item.sequence}\nevent: room-event\ndata: ${JSON.stringify(item)}\n\n`);
@@ -903,6 +926,15 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (!previewDoorRequest) checkOrigin(req);
       url.pathname = rewriteRoomApiPrefix(inboundPath);
       if (url.pathname.startsWith("/api/")) res.setHeader("X-Operation-Id", operationId);
+      // Route table (batch RT). A matched row is finished here, including
+      // 405 Allow on a known path. Anything else falls through to the
+      // legacy chain below until that chain is empty.
+      if (await dispatchRoute({
+        req, res, url, store, remoteAddress, loopback, operationId,
+        json, reject, rate, cookie, setCookie, bearer, body, readText,
+        roomAuth, roomCredentials, expectedBinding, accountBinding,
+        checkOrigin, protectWrite, exact, pathId, expectedOrigin,
+      })) return;
       if ((url.pathname === "/api/health" || url.pathname === "/api/health/" || isHealthAliasPath(inboundPath) || isHealthAliasPath(url.pathname)) && ["GET", "HEAD"].includes(req.method)) {
         return json(res, 200, { status: "ok", mode: serviceMode, ...deploymentField }, req.method === "HEAD");
       }
@@ -3116,6 +3148,16 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": Buffer.byteLength(page), "Cache-Control": "no-store" });
         return res.end(page);
       }
+      // Q3-E HTML 404. A browser Accept that prefers text/html gets 404.html
+      // (lang, title, h1, links home / about / receipts, X-Robots-Tag: noindex).
+      // /api/, /mcp and /.well-known/ keep the JSON body, as does any client
+      // whose Accept does not prefer text/html.
+      if (publicHtmlNotFoundPath(url.pathname) && acceptPrefersHtml(req.headers.accept)) {
+        const body = Buffer.from(PUBLIC_NOT_FOUND_HTML);
+        res.setHeader("X-Robots-Tag", "noindex");
+        res.writeHead(404, { "Content-Type": "text/html; charset=utf-8", "Content-Length": body.length });
+        return res.end(req.method === "HEAD" ? undefined : body);
+      }
       if (!url.pathname.startsWith("/api/")) reject(404, "not_found", "Not found");
       if (url.pathname === "/api/session") {
         const selectedRoom = url.searchParams.get("room");
@@ -4072,7 +4114,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!dmMessageVisible(thread.thread)) reject(404, "message_not_found", "Message not found");
         const stripDmReplies = message => ({ ...message,
           replies: (message.replies ?? []).filter(dmMessageVisible).map(stripDmReplies) });
-        return json(res, 200, { ...thread, thread: stripDmReplies(thread.thread) });
+        return json(res, 200, { ...thread, thread: redactMessageTree(stripDmReplies(thread.thread)) });
       }
       if (!route && req.method === "GET") {
         const params = url.searchParams;
@@ -4100,7 +4142,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             eventLog: (snapshot.state.eventLog ?? []).filter(roomEventVisible),
             pins: (snapshot.state.pins ?? []).filter(pin => visibleIds.has(pin.messageId)) };
           if (snapshot.state.bonds) nextState.bonds = visibleBonds(snapshot.state.bonds, peerContext);
-          snapshot.state = nextState;
+          snapshot.state = redactSnapshotState(nextState);
         }
         return json(res, 200, snapshot);
       }
@@ -4317,7 +4359,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const format = url.searchParams.get("format") ?? "jsonl";
         if (!["jsonl", "html"].includes(format) || url.searchParams.getAll("format").length > 1) reject(422, "invalid_format", "format is jsonl (default) or html");
         if (format === "html") {
-          const rows = [...store.exportEvents(selected.token, roomId, fence)].filter(({ event }) => roomEventVisible(event));
+          const rows = redactEventRows([...store.exportEvents(selected.token, roomId, fence)].filter(({ event }) => roomEventVisible(event)), projectionMessages(roomId));
           const bytes = Buffer.from(renderRoomExportHtml(rows, { roomId }), "utf8");
           res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": bytes.length,
             "Content-Security-Policy": EXPORT_HTML_CSP,
@@ -4332,9 +4374,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // sequence (order + event ids are the stable references; import
         // rewrites dense row keys anyway), so renumbering is replay-safe
         // and keeps the export self-consistent for reimport.
-        let exportSequence = 0;
+        const visible = [];
         for (const line of store.exportEvents(selected.token, roomId, fence)) {
           if (!roomEventVisible(line.event)) continue;
+          visible.push(line);
+        }
+        let exportSequence = 0;
+        for (const line of redactEventRows(visible, projectionMessages(roomId))) {
           exportSequence += 1;
           lines.push(JSON.stringify({ sequence: exportSequence, event: line.event }) + "\n");
         }
@@ -4924,9 +4970,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           reject(422, "invalid_event_cursor",
             "events uses the query parameter after (a sequence number), not afterSequence. Retry with after set to the last sequence you handled. A refused afterSequence is not a filter and does not mean you are caught up.");
         }
-        return json(res, 200, store.eventsAfter(selected.token, roomId,
+        return json(res, 200, redactEventPage(store.eventsAfter(selected.token, roomId,
           Number(params.get("after") || 0), Number(params.get("limit") || 100),
-          { actor: params.get("actor"), since: params.get("since"), until: params.get("until"), expectedSessionBinding: fence }));
+          { actor: params.get("actor"), since: params.get("since"), until: params.get("until"), expectedSessionBinding: fence }), projectionMessages(roomId)));
       }
       if (route === "agent-inbox" && req.method === "GET") {
         // RC-2026-09-18-012: agent-scoped unified inbox. Agent members only
@@ -4978,7 +5024,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (route === "return-brief" && req.method === "GET") {
         const horizon = url.searchParams.get("horizon"), after = url.searchParams.get("after"), cursor = url.searchParams.get("cursor"), limit = url.searchParams.get("limit");
-        return json(res, 200, store.returnBrief(selected.token, roomId, { horizon: horizon === null ? null : Number(horizon), after: after === null ? null : Number(after), cursor: cursor === null ? null : Number(cursor), limit: limit === null ? undefined : Number(limit), expectedSessionBinding: fence }));
+        const brief = store.returnBrief(selected.token, roomId, { horizon: horizon === null ? null : Number(horizon), after: after === null ? null : Number(after), cursor: cursor === null ? null : Number(cursor), limit: limit === null ? undefined : Number(limit), expectedSessionBinding: fence });
+        if (brief?.history) brief.history.items = redactEventRows(brief.history.items, projectionMessages(roomId));
+        return json(res, 200, brief);
       }
       if (route === "cursor" && req.method === "POST") {
         const data = await body(req);

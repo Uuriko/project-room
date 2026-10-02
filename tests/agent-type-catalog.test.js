@@ -114,7 +114,7 @@ test("a member may be added with a catalog agentType through the command door", 
   const fixture = createAcceptanceFixture();
   t.after(() => { fixture.store.close(); rmSync(fixture.directory, { recursive: true, force: true }); });
   const add = (memberId, data) => fixture.store.command(fixture.keys.owner, "commons", { id: randomUUID(),
-    type: T.MEMBER_ADDED, data: { memberId, displayName: "Agent", kind: "agent", permissions: [], accountableHumanId: "owner", ...data } });
+    type: T.MEMBER_ADDED, data: { memberId, displayName: memberId, kind: "agent", permissions: [], accountableHumanId: "owner", ...data } });
   const member = id => fixture.store.room("commons").state.members[id];
 
   add("typed-agent", { agentType: "claude-code" });
