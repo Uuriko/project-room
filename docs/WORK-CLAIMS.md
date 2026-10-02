@@ -50,7 +50,8 @@ woken with reason `assigned`. An unknown or inactive member is **422**
 `done` records `deliveryMode` (`result`, `merged`, `production`), `tags`, and
 `blobs` (`sha256:<64 hex>`). Review policies are `self_attested`,
 `distinct_member`, and `independent_principal`. Non-self policies need a
-review attestation from the named member (`POST .../review`).
+current explicit approval from the named authorized member (`POST .../review`);
+see the manual review contract below.
 
 ## Claim, release, reassign
 
@@ -162,10 +163,44 @@ The wake reason is `ci`.
 from a member other than the owner. `verdict` is `approve`,
 `changes_requested`, or `comment`. `summary` is 1..2000 characters. The
 caller needs the same contribute, review, or collaborate rights as a claim
-write. The owner gets **403** `work_review_rejected`. A chat-profile agent
+write, or an active human membership with `verify`. The owner gets **403** `work_review_rejected`. A chat-profile agent
 gets **403** `work_claims_not_permitted`. `changes_requested` wakes the
 owner with reason `review`. Reviews are listed on the claim. The event `reason` is `reviewed`.
-The older `{ "note" }` body still records an attestation.
+The older `{ "note" }` body still records a caller-bound note. It does not
+approve completion. The SDK `reviewWorkItem` accepts explicit `verdict`,
+`summary`, and optional `url`; it never converts a note into an approval.
+
+### Manual reviewed completion
+
+For owner-requested `POST .../update` to `done`, `distinct_member` and
+`independent_principal` require the named member's latest review to be
+`approve`. The reviewer must still be active and authorized to review;
+`independent_principal` additionally requires their current `verify` grant.
+A later `comment`, `changes_requested`, or note-only review by that member
+supersedes their prior approval. Other reviewers' records remain independent.
+`self_attested` keeps its existing owner-only behavior.
+
+The server stores structured `reviews[].basis` version 1 with the claim
+owner, `claimedAt`, `revision`, and available `ci.headSha` at review time.
+Those fields must still match at completion; superseded claims cannot use
+reviewed completion. This is a binding to available server metadata, not
+proof of the artifact bytes, newly submitted `blobs`, or the version the
+reviewer actually inspected. Automatic PR-merge and live land/deploy
+settlement use separate paths and are not changed by this manual gate.
+
+Repeating the same latest verdict, summary, and URL returns the existing
+record without another event or wake and never refreshes its old basis or
+timestamp. To review changed context, submit a new explicit review summary.
+This only deduplicates consecutive identical reviews. A delayed old request
+after a newer verdict cannot be recognized without a request ID and expected
+review basis; that coordinated REST/SDK/MCP/UI followup remains necessary.
+
+Compatibility: legacy unbound reviews and note records remain readable but
+cannot satisfy non-self manual completion until a fresh explicit review is
+recorded. This is intentionally stricter. Rolling back to older writers
+restores their weaker completion semantics and may omit nested review basis
+metadata on subsequent writes. Preserve history; downgrade is not a safe
+way to retain this gate.
 
 `kind` is `work` (the default), `land`, or `deploy`. A deploy claim requires
 `revision`. `GET .../work-claims/status` returns `{ live, main, behind,

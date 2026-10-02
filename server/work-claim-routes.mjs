@@ -787,7 +787,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   if (workClaimRoute === "review" && req.method === "POST") {
     // A verdict review is a record from someone other than the owner who
     // holds contribute or review rights. The older {note} body stays an
-    // attestation bound to the caller, for the done-transition policy.
+    // caller-bound note; it does not satisfy reviewed completion.
     const data = body(req);
     const verdictReview = data && typeof data === "object" && !Array.isArray(data) && ("verdict" in data || "summary" in data || "url" in data);
     if (verdictReview) {
@@ -801,13 +801,14 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       if (!duplicate && data.verdict === "changes_requested") {
         enqueueClaimWake(store, roomId, item.owner, `work-claim:${item.id}:review:${caller}:${nowMs}`, { reason: "review", actorId: caller });
       }
-      return json(res, 200, reviewed);
+      return json(res, 200, duplicate ? item : reviewed);
     }
     if (!shape(data, { optional: ["note"] })) invalidInput(reject, "{note?} or {verdict, summary, url?}");
     const item = load(claimIdOf(reject, workClaimId));
     const attested = runPure(reject, () => attestWork(item, caller, { note: data.note, now: nowMs }));
-    if (attested.history !== item.history) commit(attested, "reviewed");
-    return json(res, 200, attested);
+    const duplicate = attested.history === item.history;
+    if (!duplicate) commit(attested, "reviewed");
+    return json(res, 200, duplicate ? item : attested);
   }
   if (workClaimRoute === "release" && req.method === "POST") {
     const data = body(req);

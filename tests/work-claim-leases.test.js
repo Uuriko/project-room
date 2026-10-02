@@ -2,7 +2,7 @@
 // Pure state-machine tests (no store) plus a handler smoke test with fakes.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createWork, claimWork, updateWork, attestWork, reassignWork, isLeaseExpired, releaseExpired,
+import { createWork, claimWork, updateWork, attestWork, recordReview, reassignWork, isLeaseExpired, releaseExpired,
   canCloseWork, roomWorkClaimConfig, workOwnedBy, unclaimedWork, ClaimError,
   DELIVERY_MODES, REVIEW_POLICIES, DEFAULT_LEASE_HOURS } from "../server/work-claims.mjs";
 import { createWorkClaimRegistry, handleWorkClaims } from "../server/work-claim-routes.mjs";
@@ -124,18 +124,21 @@ test("review policies: all three enforced by canCloseWork", () => {
   const item = { ...claimWork({ id: "r1" }, "quill", { now: T0 }), reviewPolicy: "self_attested" };
   assert.equal(canCloseWork(item, "quill"), true);
   assert.equal(canCloseWork(item, "grok"), false);
-  // explicit policy option beats the item's
-  assert.equal(canCloseWork(item, "grok", { policy: "distinct_member" }), true);
-  const distinct = { ...item, reviewPolicy: "distinct_member" };
+  // A policy override still needs a current explicit approval and authority.
+  assert.equal(canCloseWork(item, "grok", { policy: "distinct_member", reviewMembers: ["grok"] }), false);
+  const approved = recordReview(item, "grok", { verdict: "approve", summary: "Checked this round", now: T0 });
+  const authority = { reviewMembers: ["grok"] };
+  assert.equal(canCloseWork(approved, "grok", { policy: "distinct_member", ...authority }), true);
+  const distinct = { ...approved, reviewPolicy: "distinct_member" };
   assert.equal(canCloseWork(distinct, "quill"), false); // claimant cannot attest
-  assert.equal(canCloseWork(distinct, "grok"), true);
+  assert.equal(canCloseWork(distinct, "grok", authority), true);
   assert.equal(canCloseWork(distinct, ""), false);
-  const indep = { ...item, reviewPolicy: "independent_principal" };
-  assert.equal(canCloseWork(indep, "quill", { verifyMembers: ["grok"] }), false); // claimant excluded
-  assert.equal(canCloseWork(indep, "grok", { verifyMembers: ["grok"] }), true);
-  assert.equal(canCloseWork(indep, "grok", { verifyMembers: [] }), false); // no verify grant
-  assert.equal(canCloseWork(indep, "grok", { verifyMembers: new Set(["grok", "instinct"]) }), true); // Set accepted
-  assert.equal(canCloseWork(indep, "jillian", { verifyMembers: ["grok"] }), false); // not a verifier
+  const indep = { ...approved, reviewPolicy: "independent_principal" };
+  assert.equal(canCloseWork(indep, "quill", { ...authority, verifyMembers: ["grok"] }), false); // claimant excluded
+  assert.equal(canCloseWork(indep, "grok", { ...authority, verifyMembers: ["grok"] }), true);
+  assert.equal(canCloseWork(indep, "grok", { ...authority, verifyMembers: [] }), false); // no verify grant
+  assert.equal(canCloseWork(indep, "grok", { ...authority, verifyMembers: new Set(["grok", "instinct"]) }), true); // Set accepted
+  assert.equal(canCloseWork(indep, "jillian", { ...authority, verifyMembers: ["grok"] }), false); // not a verifier
   // nothing to close
   assert.equal(canCloseWork({ id: "u" }, "quill"), false); // unclaimed
   const done = { ...item, state: "done" };
@@ -280,6 +283,9 @@ test("handler: review policies enforced on the done transition", async () => {
   const { out: review } = await runRoute({ route: "review", id: "p1", memberId: "grok", body: { note: "looks good" }, registry });
   assert.equal(review.value.attestations.length, 1);
   assert.equal(review.value.attestations[0].memberId, "grok");
+  const noteOnly = await runRoute({ route: "update", id: "p1", body: { state: "done", reviewedBy: "grok" }, registry }).catch(error => error);
+  assert.equal(noteOnly.code, "work_review_rejected");
+  await runRoute({ route: "review", id: "p1", memberId: "grok", body: { verdict: "approve", summary: "Checked current work" }, registry });
   const attested = await runRoute({ route: "update", id: "p1", body: { state: "done", reviewedBy: "grok" }, registry });
   assert.equal(attested.out.value.state, "done");
   assert.equal(attested.out.value.reviewedBy, "grok");
@@ -288,11 +294,11 @@ test("handler: review policies enforced on the done transition", async () => {
   await runRoute({ route: "claim", id: "p2", registry });
   await runRoute({ route: "update", id: "p2", body: { state: "in_progress" }, registry });
   // an attestation from a member without verify does not close the work
-  await runRoute({ route: "review", id: "p2", memberId: "grok", registry });
+  await runRoute({ route: "review", id: "p2", memberId: "grok", body: { verdict: "approve", summary: "Checked work" }, registry });
   const noVerify = await runRoute({ route: "update", id: "p2", body: { state: "done", reviewedBy: "grok" }, registry }).catch(error => error);
   assert.equal(noVerify.code, "work_review_rejected"); // grok lacks verify
   // a verifier attests from their own session, then the owner closes
-  await runRoute({ route: "review", id: "p2", memberId: "quill2", registry,
+  await runRoute({ route: "review", id: "p2", memberId: "quill2", body: { verdict: "approve", summary: "Verified current work" }, registry,
     storeMembers: { quill2: { id: "quill2", kind: "human", active: true, permissions: ["verify"] } } });
   const { out: verified } = await runRoute({ route: "update", id: "p2", body: { state: "done", reviewedBy: "quill2" }, registry,
     storeMembers: { quill2: { id: "quill2", kind: "human", active: true, permissions: ["verify"] } } });

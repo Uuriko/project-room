@@ -283,6 +283,19 @@ test("reviewed completion requires the named reviewer's latest explicit approval
   }
 });
 
+test("manual completion uses the named reviewer's approval, not another member's verdict", async t => {
+  const f = await fixture(t);
+  await startReviewedClaim(f, "named-reviewer", "distinct_member");
+  const path = "/work-claims/named-reviewer/review";
+  assert.equal((await f.call(f.coordKey, path, { verdict: "comment", summary: "Still reviewing" })).status, 200);
+  assert.equal((await f.call(f.verifierKey, path, { verdict: "approve", summary: "Verified this result" })).status, 200);
+  await refusedCompletion(f, "named-reviewer", "coord");
+  const done = await f.call(f.ownerKey, "/work-claims/named-reviewer/update", { state: "done", reviewedBy: "verifier" });
+  assert.equal(done.status, 200);
+  assert.equal(done.value.reviewedBy, "verifier");
+  assert.equal(done.value.reviews.find(entry => entry.memberId === "coord").verdict, "comment");
+});
+
 test("human verify permits review without granting Board writes, and self-attested closure is unchanged", async t => {
   const f = await fixture(t);
   await startReviewedClaim(f, "human-review", "independent_principal");

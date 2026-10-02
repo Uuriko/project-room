@@ -28,21 +28,11 @@
 // Both are recorded on the item and frozen with the done state; the
 // GET /api/rooms/{roomId}/receipts route searches them.
 //
-// Review policies: work items (or the room config) carry reviewPolicy in
-// { self_attested, distinct_member, independent_principal }. canCloseWork
-// enforces the policy for the done transition: self_attested lets the
-// claimant close; distinct_member requires a different member to attest;
-// independent_principal requires a different member holding the verify
-// permission (supplied as verifyMembers) to attest. Enforcement lives with
-// the caller (the HTTP layer applies it); the state machine itself only
-// records the attestation (reviewedBy) on the done transition.
-//
-// SECURITY (QA-Sec 2026-09-19): attestations are first-class records, not
-// caller-supplied names. attestWork records a review attestation from the
-// authenticated caller's own session; the done transition only accepts a
-// reviewedBy that has such a recorded attestation (for non-self policies).
-// Naming another member without their attestation is rejected — the
-// previous "name anyone" behavior was a confused-deputy flaw.
+// Manual reviewed completion requires a latest explicit approve bound to the
+// current claim round and available revision/head metadata, plus current
+// reviewer authority supplied by the HTTP layer. self_attested is unchanged.
+// Note-only attestations remain caller-bound records but cannot approve work.
+// This does not gate automatic PR/land/deploy settlement or bind artifact bytes.
 import { parsePullRequestUrl } from "./claim-coordination.mjs";
 const STATES = ["unclaimed", "claimed", "in_progress", "blocked", "done"];
 const CLAIM_KINDS = ["work", "land", "deploy"];
@@ -284,7 +274,7 @@ const reviewBasisOf = value => {
   check(value && typeof value === "object" && !Array.isArray(value) && value.version === 1, "review basis must use version 1");
   check(typeof value.owner === "string" && value.owner.length > 0 && value.owner.length <= 128, "review basis owner is required");
   check(value.claimedAt === null || typeof value.claimedAt === "string" && Number.isFinite(Date.parse(value.claimedAt)), "review basis claimedAt must be an ISO timestamp or null");
-  check(value.revision === null || typeof value.revision === "string" && value.revision.length <= 128, "review basis revision must be a short string or null");
+  check(value.revision === null || typeof value.revision === "string" && value.revision.length > 0 && value.revision.length <= 200, "review basis revision must be a short string or null");
   check(value.headSha === null || typeof value.headSha === "string" && /^[0-9a-f]{40}$/.test(value.headSha), "review basis headSha must be a commit SHA or null");
   return Object.freeze({ version: 1, owner: value.owner, claimedAt: value.claimedAt, revision: value.revision, headSha: value.headSha });
 };
@@ -535,9 +525,8 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
     blobs: state === "done" && blobs != null ? blobsOf(blobs) : item.blobs };
   return withHistory(next, atMs, agent, state === undefined ? "noted" : `state:${state}`, note);
 }
-// Record a review attestation from the caller's own authenticated session.
-// One attestation per member (latest wins); the done transition consults
-// these records rather than trusting a caller-supplied reviewedBy name.
+// Record a note from the caller's own authenticated session. A new note
+// supersedes that member's active verdict but cannot approve reviewed completion.
 // Refused on unclaimed work (nothing to review) and on done work (immutable).
 export function attestWork(work, agentId, { note, now } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
@@ -557,8 +546,8 @@ export function attestWork(work, agentId, { note, now } = {}) {
   return withHistory({ ...item, attestations, reviews }, atMs, agent, "reviewed", note);
 }
 // A review record from someone other than the owner. Latest record per member
-// wins. The same member is also attested so the done-transition policy still
-// sees a caller-bound review. The owner cannot review their own claim.
+// wins. Only approve also records the caller-bound attestation used by the
+// manual done policy. The owner cannot review their own claim.
 export function recordReview(work, agentId, { verdict, summary, url, now } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
   check(item.owner !== agent, `work "${item.id}" is owned by ${item.owner ?? "nobody"} — the owner cannot review it`);
@@ -659,8 +648,9 @@ export function releaseExpired(items, now) {
 }
 // Review-policy gate for the done transition. policy resolves from the
 // explicit option, then the work item, then self_attested. verifyMembers is
-// the set/list of member ids holding the verify permission (only consulted
-// for independent_principal). Returns true when reviewerId may close the
+// the current set/list holding verify; reviewMembers is the current set/list
+// allowed to record explicit reviews. verifyMembers is only consulted
+// for independent_principal. Returns true when reviewerId may close the
 // work; unknown policies throw (programmer error), identity mismatches
 // simply return false.
 export function canCloseWork(work, reviewerId, { policy, verifyMembers, reviewMembers } = {}) {
