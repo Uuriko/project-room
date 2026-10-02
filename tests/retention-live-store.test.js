@@ -24,24 +24,65 @@ const fixture = t => {
 };
 const count = (store, table) => store.db.prepare(`SELECT count(*) n FROM ${table}`).get().n;
 
-test("store retention is dry-run by default and cannot touch room journals", t => {
-  const store = fixture(t); const events = count(store, "events");
-  const receipt = runLiveStoreRetention({ store, now: NOW });
-  assert.equal(receipt.liveStoreScanned, true); assert.equal(receipt.dryRun, true);
-  assert.equal(receipt.deleted, 0); assert.equal(receipt.categories.web_fetch_log.eligible, 3);
-  assert.equal(count(store, "web_fetch_log"), 4); assert.equal(count(store, "events"), events);
+function protect(store) {
+  store.db.prepare(`INSERT INTO activity_events(room_id,type,actor_id,actor_name,message_id,thread_id,user_id,created_at,read_at)
+    VALUES('commons','mention','owner','Owner','unread-msg','', 'owner', ?, NULL)`).run(clock - 400 * day);
+  store.db.prepare(`INSERT INTO agent_webhook_deliveries(
+      delivery_id,idempotency_key,subscription_id,agent_id,event_type,payload_json,signature,state,attempts,next_attempt_at,created_at,updated_at)
+    VALUES('pending-old','pending-old','sub','agent','message.posted','{}','sig','pending',0,?, ?, ?)`).run(clock, clock - 400 * day, clock);
+  return { events: count(store, "events"), unread: count(store, "activity_events"), pending: count(store, "agent_webhook_deliveries") };
+}
+
+test("each disposable log applies its own age policy and leaves protected rows", t => {
+  const store = fixture(t);
+  const kept = protect(store);
+  const fetchRun = runLiveStoreRetention({ store, now: NOW, tableIndex: 0 });
+  assert.equal(fetchRun.dryRun, false);
+  assert.equal(fetchRun.table, "web_fetch_log");
+  assert.equal(fetchRun.deleted, 3);
+  assert.equal(fetchRun.categories.web_fetch_log.eligible, 3);
+  assert.equal(count(store, "web_fetch_log"), 1);
+  assert.equal(count(store, "web_research_log"), 4);
+  const researchRun = runLiveStoreRetention({ store, now: NOW, tableIndex: 1 });
+  assert.equal(researchRun.table, "web_research_log");
+  assert.equal(researchRun.deleted, 3);
+  assert.equal(count(store, "web_research_log"), 1);
+  assert.equal(count(store, "web_fetch_log"), 1);
+  assert.equal(count(store, "events"), kept.events);
+  assert.equal(count(store, "activity_events"), kept.unread);
+  assert.equal(store.db.prepare("SELECT read_at FROM activity_events").get().read_at, null);
+  assert.equal(count(store, "agent_webhook_deliveries"), kept.pending);
+  assert.equal(store.db.prepare("SELECT state FROM agent_webhook_deliveries").get().state, "pending");
 });
 
-test("opt-in batches delete expired disposable log rows only and reruns are safe", t => {
-  const store = fixture(t), env = { ROOM_RETENTION_ALLOW_DELETION: "1" };
-  const first = runLiveStoreRetention({ store, env, now: NOW, limit: 2 });
-  assert.equal(first.deleted, 4); assert.equal(first.categories.web_fetch_log.moreMayRemain, true);
-  const second = runLiveStoreRetention({ store, env, now: NOW, limit: 2 });
-  assert.equal(second.deleted, 2);
-  assert.equal(runLiveStoreRetention({ store, env, now: NOW }).deleted, 0);
+test("a batch stays inside the limit and a later tick finishes the same table", t => {
+  const store = fixture(t);
+  const first = runLiveStoreRetention({ store, now: NOW, tableIndex: 0, limit: 2 });
+  assert.equal(first.deleted, 2);
+  assert.equal(first.categories.web_fetch_log.moreMayRemain, true);
+  assert.equal(count(store, "web_research_log"), 4);
+  const second = runLiveStoreRetention({ store, now: NOW, tableIndex: 0, limit: 2 });
+  assert.equal(second.deleted, 1);
   assert.equal(count(store, "web_fetch_log"), 1);
-  assert.equal(count(store, "web_research_log"), 1);
-  assert.ok(count(store, "events") > 0);
+  assert.equal(runLiveStoreRetention({ store, now: NOW, tableIndex: 0 }).deleted, 0);
+});
+
+test("an operator zero flag plans the table and deletes nothing", t => {
+  const store = fixture(t);
+  const receipt = runLiveStoreRetention({ store, env: { ROOM_RETENTION_ALLOW_DELETION: "0" }, now: NOW, tableIndex: 0 });
+  assert.equal(receipt.dryRun, true);
+  assert.equal(receipt.deleted, 0);
+  assert.equal(receipt.categories.web_fetch_log.eligible, 3);
+  assert.equal(count(store, "web_fetch_log"), 4);
+});
+
+test("a passed deadline stops the delete batch", t => {
+  const store = fixture(t);
+  const receipt = runLiveStoreRetention({ store, now: NOW, tableIndex: 0, deadline: 0 });
+  assert.equal(receipt.budgetExceeded, true);
+  assert.equal(receipt.deleted, 0);
+  assert.equal(receipt.categories.web_fetch_log.moreMayRemain, true);
+  assert.equal(count(store, "web_fetch_log"), 4);
 });
 
 test("invalid clock and batch size refuse destructive work", t => {
