@@ -72,6 +72,8 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('join.html'); // Self-serve join page
   paths.add('src/join.js'); // Join page logic
   paths.add('favicon.svg'); paths.add('icon.svg'); paths.add('manifest.webmanifest');
+  paths.add('offline.html'); paths.add('icons/icon-192.png'); paths.add('icons/icon-512.png'); paths.add('icons/maskable-512.png'); paths.add('icons/apple-touch-icon-180.png');
+  paths.add('src/pwa-install.js'); paths.add('src/push-ask.js');
   paths.add('src/public-a11y.css');
   paths.add('src/referral-board.js'); // Referral board (imported by src/app.js)
   paths.add('src/work-item-session.js');
@@ -98,6 +100,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/usage-summary.mjs');
   paths.add('server/notifications.mjs');
   for (const path of ['server/channel-connection.mjs', 'server/channel-import.mjs', 'server/channel-adapters/index.mjs', 'server/channel-adapters/email.mjs', 'server/channel-adapters/telegram.mjs', 'server/channel-adapters/telegram-rotation.mjs', 'server/channel-adapters/gmail.mjs', 'server/channel-adapters/whatsapp.mjs', 'server/mime-message.mjs', 'server/email-routing-inbound.mjs', 'server/channel-journal.mjs', 'server/room-export-html.mjs']) paths.add(path);
+  paths.add('server/room-export.mjs'); paths.add('cloudflare/room-backup.mjs');
   for (const path of ['server/channel-adapters/telegram-config.mjs', 'server/channel-adapters/telegram-transport.mjs', 'scripts/telegram-set-webhook.mjs', 'scripts/telegram-rotate-webhook.mjs']) paths.add(path);
   paths.add('server/spend-allowance.mjs');
   paths.add('server/autonomy-tiers.mjs'); // Graduated autonomy tiers (imported by server/store.mjs and server/http.mjs)

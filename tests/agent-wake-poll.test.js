@@ -444,10 +444,14 @@ test("fresh wakeable host retains between-poll mention across database restart u
   assert.equal((await post(origin, "/api/agent-heartbeats/ack", { signalIds: first.pendingWakes.map(row => row.signalId) }, worker.secret)).status, 200);
   assert.deepEqual((await (await get(origin, pollPath, worker.secret)).json()).pendingWakes, []);
   assert.deepEqual(store.db.prepare("SELECT * FROM identity_links ORDER BY room_id,identity_id").all(), linksBefore);
-  // Mode opt-out stays intact: an online pull-only host continues reading attention on its own cadence.
+  // A pull-only host is still registered, so the mention is queued. The
+  // wake poll reads that same queue; the next heartbeat returns it too.
   assert.equal((await post(origin, "/api/agent-heartbeats", { hostId: "gap-host", mode: "pull-only" }, worker.secret)).status, 200);
   assert.equal((await post(origin, "/api/rooms/gap-room/commands", { id: "pull-post", type: "message.posted", data: { messageId: "pull-message", body: "@gap-worker on your cadence" } }, owner.secret)).status, 201);
-  assert.deepEqual((await (await get(origin, pollPath, worker.secret)).json()).pendingWakes, []);
+  assert.deepEqual((await (await get(origin, pollPath, worker.secret)).json()).pendingWakes.map(row => row.messageId), ["pull-message"]);
+  const pullBeat = await (await post(origin, "/api/agent-heartbeats", { hostId: "gap-host", mode: "pull-only" }, worker.secret)).json();
+  assert.deepEqual(pullBeat.pendingWakes.map(row => row.messageId), ["pull-message"]);
+  assert.equal(pullBeat.more, false);
   const attention = await (await get(origin, "/api/needs-me", worker.secret)).json();
   assert.ok(attention.items.some(item => item.id === "pull-message"));
 });

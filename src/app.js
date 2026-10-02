@@ -769,6 +769,27 @@ async function openRememberedRoomOrInbox() {
     return false;
   }
 }
+// --- Q3-C: signup with no chosen room opens that account's room. ---
+async function openPersonalRoomAfterSignup() {
+  const owned = accountClient.session;
+  // /?start=room already asks for the name and then creates the room.
+  // A second create here would make the room while that dialog is still open.
+  if (startRoomIntent || startRoomFlight) {
+    showAccountWorkspace();
+    if (startRoomFlight) await startRoomFlight;
+    return;
+  }
+  try { await inboxUI.askSetupName?.(); } catch { /* a name is optional; the room still opens */ }
+  if (accountClient.session !== owned || state) return;
+  const body = await ensureDefaultRoom();
+  if (accountClient.session !== owned || state) return;
+  const roomId = body?.room?.id;
+  if (!roomId) { showAccountWorkspace(); return; }
+  history.replaceState(null, "", roomHandoffLocation(roomId));
+  try { await client.restore(roomId); inboxUI.refreshSetup?.(); }
+  catch { if (accountClient.session === owned && !state) showAccountWorkspace(); }
+}
+// --- end Q3-C ---
 async function landAfterSignIn() {
   const target = signInRoomTarget({
     nextRoom: roomIdFromNext(new URLSearchParams(location.search).get("next")),
@@ -777,7 +798,10 @@ async function landAfterSignIn() {
   });
   if (!target.explicit) {
     if (target.roomId) await openRememberedRoomOrInbox();
-    else showAccountWorkspace();
+    // ?account=1 is the inbox. A sign-in with no room and no account home
+    // opens that account's room after the name step.
+    else if (accountHomeFromLocation()) showAccountWorkspace();
+    else await openPersonalRoomAfterSignup();
     return;
   }
   try {
@@ -6813,7 +6837,7 @@ if (initialInvitationFragment && !initialPasswordReset) openInvitation(initialIn
       setConnectionStatus("Not connected · account sign-in required");
       configureAuthPanel();
       $("#auth-panel").hidden = false;
-      if (!$("#invitation-dialog").open) queueMicrotask(() => focusSignin());
+      // Q3-C: the skip link is the first stop. Don't move focus past it.
       return;
     }
     if (!requestedRoom) showAccountWorkspace();
@@ -6833,12 +6857,9 @@ if (initialInvitationFragment && !initialPasswordReset) openInvitation(initialIn
   // console error on the welcome screen — so skip the probe and render the
   // signed-out state directly.
   if (hasSessionHint()) {
-    try {
-      await client.restore();
-      return;
-    } catch (error) {
-      if (![401, 403].includes(error.status)) throw error;
-    }
+    // Q3-C: /api/account-session answers 200 when nobody is signed in.
+    // GET /api/session is a 401 the browser logs once the room cookie is gone,
+    // so that probe runs only when this browser still names a room.
     let account = null;
     try { account = await ensureAccountSession(); } catch { account = null; }
     if (account?.authenticated) {
@@ -6846,6 +6867,14 @@ if (initialInvitationFragment && !initialPasswordReset) openInvitation(initialIn
       if (opened) return;
       syncSessionMenu();
       return;
+    }
+    if (readLastRoom()) {
+      try {
+        await client.restore();
+        return;
+      } catch (error) {
+        if (![401, 403].includes(error.status)) throw error;
+      }
     }
   }
   syncSessionMenu();
@@ -6873,7 +6902,7 @@ if (initialInvitationFragment && !initialPasswordReset) openInvitation(initialIn
   setConnectionStatus(signedOut ? "Not connected · sign in required" : "Room service unavailable · not connected");
   $("#identity-label").textContent = signedOut ? "Not signed in" : "Session unavailable";
   $("#auth-panel").hidden = false;
-  if (!$("#invitation-dialog").open) queueMicrotask(() => focusSignin());
+  // Q3-C: leave focus at the top so the first Tab stop is the skip link.
 });
 // --- W board: Tasks › Board. The command palette opens Board. ---
 {

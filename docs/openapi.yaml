@@ -6913,6 +6913,35 @@ paths:
         '401': { description: Sign in required }
         '403': { description: Operator is unset, or this account is not the operator }
         '422': { description: Invalid body }
+  /api/operator/export:
+    get:
+      summary: Operator Durable Object export
+      x-worker-only: true
+      description: >-
+        Operator only. Answered by the Durable Object. Requires
+        Authorization: Bearer with ROOM_BACKUP_TOKEN (at least 16 characters)
+        set on the Worker that owns the object. A missing or short token is
+        404. A wrong token is 401. The body is NDJSON: one watermark line,
+        then one {table, row} line per stored row. Secret and token columns
+        are sha256 hex. Already-hashed columns are kept. auth_epoch stays a
+        number. No room credential is accepted.
+      security:
+        - bearerAuth: []
+      responses:
+        '200': { description: NDJSON export }
+        '401': { description: Wrong operator token }
+        '404': { description: Export is not configured }
+        '503': { description: Store unavailable }
+    head:
+      summary: Operator export headers
+      x-worker-only: true
+      description: Same authorization as GET, with no body.
+      security:
+        - bearerAuth: []
+      responses:
+        '200': { description: Headers only }
+        '401': { description: Wrong operator token }
+        '404': { description: Export is not configured }
   /api/version:
     get:
       summary: Deployed revision

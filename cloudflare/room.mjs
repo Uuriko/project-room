@@ -31,6 +31,8 @@ import { SOURCE_REVISION, BUILD_ID } from '../server/version.mjs';
 import { edgePublicResponse } from './edge-public.mjs';
 import { appDurationMs, logRoomRequest, requestPath, withServerTiming } from './request-timing.mjs';
 import { HEALTH_PROBE_TIMEOUT_MS, createHealthProbe, healthLivenessResponse, readyProbeResponse, workerLivenessResponse } from './health-probe.mjs';
+import { exportNdjsonStream, operatorExportResponse } from '../server/room-export.mjs';
+import { writeDailyBackup } from './room-backup.mjs';
 import { flushRoomGuide, installGuideCommandHook } from '../server/room-guide.mjs';
 
 // One probe per isolate. Concurrent health checks during a cold start share
@@ -170,6 +172,10 @@ export class ProjectRoom extends DurableObject {
       return withServerTiming(response, 'app', appMs);
     };
     if (this.paused) return respond(maintenanceResponse(request));
+    const url = new URL(request.url);
+    if (url.pathname === '/api/operator/export') {
+      return respond(operatorExportResponse(request, this.env.ROOM_BACKUP_TOKEN, this.store.db));
+    }
     try { return respond(await this.requestSignals.run(request.signal, () => this.handler.fetch(request))); }
     finally {
       this.ctx.waitUntil(this.store.humanPush.flush());
@@ -320,6 +326,11 @@ export class ProjectRoom extends DurableObject {
       }));
     }
     return { ...receipt, webhookDeliveries, oauthProvider, abuseRateBuckets };
+  }
+  // Operator and cron export. Returns a stream of NDJSON; callers must not log it.
+  exportRoomNdjson() {
+    if (this.paused || !this.store) throw new Error('Room paused');
+    return exportNdjsonStream(this.store.db);
   }
 }
 
@@ -488,6 +499,8 @@ export default {
       }
       console.info(JSON.stringify(line));
     } catch (error) { console.error(`[integrity] ${error?.message ?? error}`); }
+    try { await writeDailyBackup(env, room); }
+    catch (error) { console.error(`[room-backup] ${error?.message ?? error}`); }
     const failed = outcomes.filter(outcome => !outcome.ok).map(outcome => outcome.job);
     if (failed.length) throw new Error(`cron jobs failed: ${failed.join(', ')}`);
   }
