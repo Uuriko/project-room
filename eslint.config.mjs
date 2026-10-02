@@ -28,8 +28,16 @@ export default [
   // Node: server, agent client CLI, scripts, tests, Workers glue, deploy
   // helpers, and the small isolated packages.
   {
-    files: ["server.mjs", "server/**/*.mjs", "client/**/*.mjs", "scripts/**/*.{js,mjs}", "tests/**/*.{js,mjs}", "cloudflare/**/*.mjs", "deploy/**/*.mjs", "*/src/**/*.js", "*/tests/**/*.js"],
-    languageOptions: { ...languageOptions, globals: { ...globals.node } },
+    files: ["server.mjs", "server/**/*.mjs", "client/**/*.mjs", "scripts/**/*.{js,mjs}", "tests/**/*.{js,mjs}", "cloudflare/**/*.mjs", "deploy/**/*.mjs", "relay/**/*.mjs", "*/src/**/*.js", "*/tests/**/*.js"],
+    languageOptions: {
+      ...languageOptions,
+      globals: {
+        ...globals.node,
+        WebSocket: "readonly",
+        WebSocketPair: "readonly",
+        WebSocketRequestResponsePair: "readonly",
+      },
+    },
     rules,
   },
   // Playwright browser checks and manual exercises evaluate callbacks inside
