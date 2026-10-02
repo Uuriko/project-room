@@ -41,13 +41,14 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
   const dialog = document.createElement("dialog");
   dialog.id = "updates-dialog";
   dialog.setAttribute("aria-labelledby", "updates-title");
-  dialog.innerHTML = `<div class="dialog-head"><h2 id="updates-title">Updates</h2><button id="updates-close" class="button ghost" type="button">Close</button></div><div class="updates-filters" role="tablist" aria-label="Update filters"></div><ol class="updates-list"></ol><p id="updates-summary" class="form-hint"></p><p id="updates-partial" class="form-hint"></p><button id="updates-load-more" class="button secondary" type="button" hidden>Load more</button><p id="updates-status" class="form-hint" role="status"></p>`;
+  dialog.innerHTML = `<div class="dialog-head"><h2 id="updates-title">Updates</h2><button id="updates-close" class="button ghost" type="button">Close</button></div><div class="updates-filters" role="tablist" aria-label="Update filters"></div><ol class="updates-list"></ol><div id="updates-summary-status" role="status" aria-live="polite" aria-atomic="true"><span id="updates-page-announcement" class="sr-only"></span><p id="updates-summary" class="form-hint"></p><p id="updates-partial" class="form-hint"></p></div><button id="updates-load-more" class="button secondary" type="button" hidden>Load more</button><p id="updates-status" class="form-hint" role="status"></p>`;
   (host ?? document.body).append(dialog);
   const tabs = dialog.querySelector(".updates-filters");
   const list = dialog.querySelector(".updates-list");
   const status = dialog.querySelector("#updates-status");
   const summary = dialog.querySelector("#updates-summary");
   const partial = dialog.querySelector("#updates-partial");
+  const pageAnnouncement = dialog.querySelector("#updates-page-announcement");
   const loadMore = dialog.querySelector("#updates-load-more");
   for (const filter of FILTERS) {
     const button = document.createElement("button");
@@ -118,6 +119,8 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
       : actionable ? `Updates, ${badgeMore ? "at least " : ""}${actionable} loaded updates need you${badgeMore ? ", more available" : ""}` : "Updates");
   }
   function paintPaging() {
+    const pageCopy = loadedPages ? `Page ${loadedPages} loaded. ` : "";
+    if (pageAnnouncement.textContent !== pageCopy) pageAnnouncement.textContent = pageCopy;
     summary.textContent = `${visible(items, filter).length} loaded${hasMore ? " · More available" : ""}${filter === "saved" ? ` · ${items.length} checked` : ""}`;
     partial.textContent = incomplete ? "Some update sources are unavailable. This list may be incomplete." : "";
     loadMore.hidden = !hasMore && !incomplete;
@@ -336,10 +339,28 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
     tab?.focus();
     void load(next);
   }
-  loadMore.addEventListener("click", () => {
+  loadMore.addEventListener("click", async event => {
     if (loading) return;
     cancelPending();
-    void load(filter, hasMore && cursor ? { append: true } : { budget: 1 });
+    const owned = owner, mine = interaction;
+    const previous = new Set(visible(items, filter).map(item => item.id));
+    let retainFocus = event.detail === 0 && document.activeElement === loadMore;
+    const movedFocus = event => { if (event.target !== loadMore) retainFocus = false; };
+    const movedPointer = () => { retainFocus = false; };
+    document.addEventListener("focusin", movedFocus);
+    document.addEventListener("pointerdown", movedPointer);
+    try {
+      const loaded = await load(filter, hasMore && cursor ? { append: true } : { budget: 1 });
+      if (!loaded || !retainFocus || mine !== interaction || !owns(owned) || !dialog.open) return;
+      const added = new Set(visible(items, filter).filter(item => !previous.has(item.id)).map(item => item.id));
+      const firstNewAction = [...list.children].filter(row => added.has(row.dataset.updateId))
+        .map(row => row.querySelector("[data-update-action]:enabled")).find(Boolean);
+      const continuation = !loadMore.hidden && !loadMore.disabled ? loadMore : null;
+      (firstNewAction ?? continuation ?? tabs.querySelector('[aria-selected="true"]'))?.focus();
+    } finally {
+      document.removeEventListener("focusin", movedFocus);
+      document.removeEventListener("pointerdown", movedPointer);
+    }
   });
   entry.addEventListener("click", () => open(filter));
   dialog.querySelector("#updates-close").addEventListener("click", () => { cancelPending(); dialog.close(); });

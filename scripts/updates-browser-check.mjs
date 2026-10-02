@@ -16,6 +16,17 @@ import { hashPassword } from "../src/password-auth.mjs";
 
 const command = (type, data, id = crypto.randomUUID()) => ({ id, type, data });
 
+function seedWithFloodWait(store, token, event, advanceClock) {
+  try { return store.command(token, "commons", event); }
+  catch (error) {
+    // Exercise the ordinary flood guard. Its real retry delay advances only
+    // this fixture's clock; retry the same uncommitted command without sleeps.
+    if (error?.code !== "rate_limited" || !Number.isFinite(error.retryAfterMs) || error.retryAfterMs <= 0) throw error;
+    advanceClock(Math.ceil(error.retryAfterMs));
+    return store.command(token, "commons", event);
+  }
+}
+
 async function setup(t, storeOptions = {}) {
   const directory = mkdtempSync(join(tmpdir(), "room-updates-browser-"));
   const store = new RoomStore(join(directory, "room.sqlite"), storeOptions);
@@ -62,7 +73,8 @@ async function setup(t, storeOptions = {}) {
 }
 
 test("Updates navigation keeps review, draft and return context at 1280px and 390px", { timeout: 120000 }, async t => {
-  const { store, owner, agent, origin, page, errors, selectUpdatesFilter } = await setup(t);
+  let time = Date.now();
+  const { store, owner, agent, origin, page, errors, selectUpdatesFilter } = await setup(t, { now: () => ++time });
   const messageId = "updates-message-only", threadId = "updates-thread-root";
   store.command(owner, "commons", command(T.MESSAGE_POSTED, { messageId: threadId, body: "Starting review discussion." }));
   store.command(agent, "commons", command(T.MESSAGE_POSTED, {
@@ -119,7 +131,7 @@ test("Updates navigation keeps review, draft and return context at 1280px and 39
 
   // Genuine review updates are projected from completed work, not injected rows.
   const signEvidence = makeTestSigner(store);
-  const send = (key, type, data) => store.command(key, "commons", command(type, data));
+  const send = (key, type, data) => seedWithFloodWait(store, key, command(type, data), delay => { time += delay; });
   const reviewIds = ["review:current", "review:next"];
   for (const [index, workItemId] of reviewIds.entries()) {
     send(owner, T.WORK_PROPOSED, { workItemId, title: `Review exact result ${index + 1}`,
@@ -254,6 +266,12 @@ test("Updates navigation keeps review, draft and return context at 1280px and 39
   await assertNestedTask(reviewIds[0], "Back to conversation");
   const sameTargetHistoryLength = await page.evaluate(() => history.length);
   await page.locator("#topbar-updates").click();
+  await page.waitForFunction(id => {
+    const row = [...document.querySelectorAll(".updates-row")].find(node => node.dataset.updateId === id);
+    return document.querySelector('[data-update-filter="all"]')?.getAttribute("aria-selected") === "true"
+      && document.querySelector("#updates-status")?.textContent === ""
+      && row?.querySelector('[data-update-action="open"]')?.disabled === false;
+  }, review.id);
   await openReview(review.id).press("Enter");
   await page.locator("#updates-dialog").waitFor({ state: "hidden" });
   await page.waitForFunction(id => document.activeElement?.dataset.workRecordId === id, reviewIds[0]);
@@ -845,9 +863,9 @@ async function pagingJourney(t) {
   let time = Date.now();
   const f = revisionJourney(await setup(t, { now: () => ++time }));
   const { store, owner, agent, origin, page } = f;
-  const post = (id, recipient = "owner") => store.command(agent, "commons", command(T.MESSAGE_POSTED, {
+  const post = (id, recipient = "owner") => seedWithFloodWait(store, agent, command(T.MESSAGE_POSTED, {
     messageId: id, body: `Synthetic paging note ${id}`, toMemberId: recipient
-  }));
+  }), delay => { time += delay; });
   for (let index = 0; index < 30; index++) post(`older-${String(index).padStart(3, "0")}`);
   const review = await f.makeReview("older-paged-review");
   for (let index = 0; index < 95; index++) post(`newer-${String(index).padStart(3, "0")}`);
@@ -898,9 +916,34 @@ async function pagingJourney(t) {
     assert.doesNotMatch(await page.locator("#updates-dialog").innerText(), /OTHER-READER-PAGING-SENTINEL/);
   };
   const more = page.locator("#updates-load-more");
-  const loadMore = async expected => {
-    await more.click();
+  const announced = async (count, { partial = false, pageNumber = null } = {}) => {
+    const region = page.locator("#updates-summary-status");
+    assert.equal(await region.getAttribute("role"), "status");
+    assert.equal(await region.getAttribute("aria-live"), "polite");
+    assert.equal(await region.getAttribute("aria-atomic"), "true", "the loaded count and source uncertainty are announced together");
+    const summaryText = await page.locator("#updates-summary").textContent();
+    assert.ok(summaryText.startsWith(`${count} loaded`));
+    assert.ok((await region.innerText()).includes(summaryText));
+    if (pageNumber !== null) assert.equal((await region.locator("#updates-page-announcement").textContent()).trim(), `Page ${pageNumber} loaded.`);
+    if (partial) assert.match(await region.innerText(), /partial|unavailable|incomplete|unknown/i);
+  };
+  const loadMore = async (expected, { keyboard = false } = {}) => {
+    const before = new Set(await ids());
+    if (keyboard) { await more.focus(); await page.keyboard.press("Enter"); }
+    else await more.click();
     await waitRows(expected);
+    if (!keyboard) return;
+    const firstNew = expected.map(item => typeof item === "string" ? item : item.id).find(id => !before.has(id));
+    if (firstNew) {
+      await page.waitForFunction(id => document.activeElement?.dataset.updateAction === "open"
+        && document.activeElement?.closest("[data-update-id]")?.dataset.updateId === id, firstNew);
+      assert.equal(await f.action(firstNew, "open").isDisabled(), false);
+    } else if (await more.isVisible() && !await more.isDisabled()) {
+      await page.waitForFunction(() => document.activeElement?.id === "updates-load-more");
+    } else {
+      await page.waitForFunction(() => document.activeElement?.matches('#updates-dialog [role="tab"][aria-selected="true"]'));
+    }
+    await announced(expected.length);
   };
   const openUpdates = async (filter = "all") => {
     await page.locator("#topbar-updates").click();
@@ -914,7 +957,7 @@ async function pagingJourney(t) {
   assert.deepEqual(pages.map(value => value.items.length), [50, 50, 26]);
   assert.equal(pages[0].items.some(item => item.id === review.id), false);
   assert.equal(pages[1].items.some(item => item.id === review.id), true, "the review is genuinely older than page one");
-  return { ...f, review, post, readPage, readPages, markOutside, requests, ids, waitRows, more, loadMore, openUpdates, pages };
+  return { ...f, review, post, readPage, readPages, markOutside, requests, ids, waitRows, more, loadMore, announced, openUpdates, pages };
 }
 
 async function holdUpdatesPage(page, state = "all") {
@@ -963,9 +1006,13 @@ test("Updates page older authorized work, keep honest counts and restore the cap
   assert.doesNotMatch(await page.locator(".updates-list").innerText(), /Nothing in this filter|Nothing needs you/,
     "zero read rows in the first prefix says nothing about later pages");
   assert.match(await page.locator("#updates-summary").textContent(), /\b0 loaded\b.*\b50 checked\b/);
-  await f.loadMore([review]);
+  await f.loadMore([review], { keyboard: true });
   assert.match(await f.row(review.id).innerText(), / · read/);
   assert.match(await page.locator("#updates-summary").textContent(), /\b1 loaded\b.*\b100 checked\b/);
+  await f.loadMore([review], { keyboard: true });
+  assert.equal(await page.evaluate(() => document.activeElement?.dataset.updateFilter), "saved",
+    "an exhausted Saved page with no new matching row returns keyboard focus to its selected tab");
+  assert.match(await page.locator("#updates-summary").textContent(), /\b1 loaded\b.*\b126 checked\b/);
   assert.equal(f.countCommands(), commandsBefore, "Saved remains the read-state alias and creates no save operation");
   assert.equal(JSON.stringify(store.room("commons")), sharedBefore);
   await page.locator("#updates-close").click();
@@ -975,7 +1022,7 @@ test("Updates page older authorized work, keep honest counts and restore the cap
     await f.openUpdates();
     let currentPages = await f.readPages();
     const firstTwo = currentPages.slice(0, 2).flatMap(value => value.items);
-    await f.loadMore(firstTwo);
+    await f.loadMore(firstTwo, { keyboard: true });
     await f.action(review.id, "open").scrollIntoViewIfNeeded();
     await f.action(review.id, "open").focus();
     const scroll = await page.locator("#updates-dialog").evaluate(node => node.scrollTop);
@@ -1023,7 +1070,7 @@ test("Updates page older authorized work, keep honest counts and restore the cap
   const historyLength = await page.evaluate(() => history.length);
   await f.openUpdates();
   await f.loadMore(currentPages.slice(0, 2).flatMap(value => value.items));
-  await f.loadMore(currentPages.flatMap(value => value.items));
+  await f.loadMore(currentPages.flatMap(value => value.items), { keyboard: true });
   await f.action(review.id, "open").scrollIntoViewIfNeeded();
   const largerScroll = await page.locator("#updates-dialog").evaluate(node => node.scrollTop);
   await f.action(review.id, "open").click();
@@ -1216,12 +1263,14 @@ test("Updates replace duplicate ids with fresh authorized bases and show source 
   assert.match(await page.locator("#updates-count").textContent(), /\?/);
   assert.match(await page.locator("#updates-summary").textContent(), /\b50 loaded\b/);
   assert.doesNotMatch(await page.locator("#updates-summary").textContent(), /126 total|of 126/);
+  await f.announced(50, { partial: true });
   const currentPages = await f.readPages();
   await f.loadMore(currentPages.slice(0, 2).flatMap(value => value.items));
   await f.loadMore(currentPages.flatMap(value => value.items));
   assert.match(await page.locator("#updates-summary").textContent(), /\b126 loaded\b/);
   assert.match(await page.locator("#updates-partial").textContent(), /partial|unavailable|incomplete|unknown/i);
   assert.match(await page.locator("#updates-count").textContent(), /\?/);
+  await f.announced(126, { partial: true });
   assert.doesNotMatch(await page.locator(".updates-list").innerText(), /Nothing needs you/);
   store.db.exec("ALTER TABLE paging_unavailable_wakes RENAME TO wake_queue");
   assert.deepEqual(f.errors, []);
@@ -1232,6 +1281,18 @@ test("Updates fence repeated Load more and held real pages across filter, Close,
   const { page, review, pages, requests, store } = f;
   const sharedBefore = JSON.stringify(store.room("commons"));
   const commandsBefore = f.countCommands();
+  await f.openUpdates();
+  const focusMoved = await holdUpdatesPage(page);
+  await f.more.focus();
+  await page.keyboard.press("Enter");
+  await focusMoved.entered;
+  await page.locator("#updates-close").focus();
+  await focusMoved.finish();
+  await f.waitRows(pages.slice(0, 2).flatMap(value => value.items));
+  assert.equal(await page.evaluate(() => document.activeElement?.id), "updates-close",
+    "an append must not steal focus after the reader moves it while the page is pending");
+  await f.announced(100);
+  await page.locator("#updates-close").click();
   for (const transition of ["filter", "Close", "Escape", "newer navigation"]) {
     await f.openUpdates();
     await f.waitRows(pages[0].items);
@@ -1301,18 +1362,22 @@ test("Updates accept advancing opaque cursors even when a page adds no new rows"
     };
     await page.route(pattern, advancing);
     const continuation = page.waitForResponse(response => new URL(response.url()).searchParams.get("cursor") === pages[0].cursor);
-    await f.more.click();
+    await f.more.focus();
+    await page.keyboard.press("Enter");
     await continuation;
     await f.waitRows(pages[0].items);
+    await page.waitForFunction(() => document.activeElement?.id === "updates-load-more");
+    await f.announced(50, { pageNumber: 2 });
     assert.equal(await f.more.textContent(), "Load more", "an advancing cursor is usable even when no new row is visible");
     assert.equal(await f.more.isDisabled(), false);
     assert.equal(deliveries, 1);
     assert.equal(requests.length - before, 1, "an empty page consumes one explicit click, not an automatic crawl");
-    await f.loadMore([...pages[0].items, ...pages[2].items]);
+    await f.loadMore([...pages[0].items, ...pages[2].items], { keyboard: true });
     assert.deepEqual(requests.slice(before), [
       { state: "all", cursor: pages[0].cursor }, { state: "all", cursor: pages[1].cursor }
     ]);
     assert.match(await page.locator("#updates-summary").textContent(), /\b76 loaded\b/);
+    await f.announced(76, { pageNumber: 3 });
     assert.equal(await f.more.isVisible() && !await f.more.isDisabled(), false);
     await page.unroute(pattern, advancing);
     await page.locator("#updates-close").click();
