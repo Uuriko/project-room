@@ -60,7 +60,7 @@ There is no hostname in `wrangler.jsonc`. After the first deploy, the parent att
 
 ## Tests
 
-Workerd checks live in `relay/test` and use Miniflare. They do not run as part of the root `npm test` suite.
+Workerd checks live in `relay/checks` and use Miniflare. The directory is not named `test`, so the root `npm test` suite does not collect them.
 
 ```sh
 npm ci --prefix relay

@@ -18,7 +18,7 @@ const cloudflare = readdirSync("cloudflare", { withFileTypes: true })
   .filter(e => e.isFile() && e.name.endsWith(".mjs")).map(e => join("cloudflare", e.name));
 const deploy = readdirSync("deploy", { withFileTypes: true })
   .filter(e => e.isFile() && e.name.endsWith(".mjs")).map(e => join("deploy", e.name));
-const relay = ["relay/src", "relay/test"].filter(existsSync).flatMap(files);
+const relay = ["relay/src", "relay/checks"].filter(existsSync).flatMap(files);
 for (const path of ["server.mjs", "push-sw.js", ...["src", "server", "client", "scripts", "tests"].flatMap(files), ...cloudflare, ...deploy, ...relay]) {
   const result = spawnSync(process.execPath, ["--check", path], { stdio: "inherit" });
   if (result.status !== 0) process.exit(result.status || 1);
