@@ -34,9 +34,23 @@ async function signIn(fixture, page, origin) {
   await page.locator("#main").waitFor({ state: "visible" });
 }
 
+// The old header fits inside the viewport while breaking More into a column
+// of characters, so an overflow-only check cannot own this regression.
+async function assertMoreLabel(page) {
+  const lines = await page.locator("#room-more > summary").evaluate(node => {
+    const text = [...node.childNodes].find(child => child.nodeType === Node.TEXT_NODE && child.textContent.includes("More"));
+    const range = document.createRange();
+    range.selectNodeContents(text);
+    return [...range.getClientRects()].map(rect => Math.round(rect.top));
+  });
+  assert.equal(new Set(lines).size, 1, `More must remain one readable line, not stacked characters (line tops: ${lines})`);
+}
+
 test("mobile header: session actions fold into an accessible menu, conversation stays close", { timeout: 60000 }, async t => {
   const { fixture, page, errors, origin } = await setup(t, { width: 390, height: 844 });
   await signIn(fixture, page, origin);
+  await page.waitForFunction(() => document.querySelector("#catchup-count").textContent === "10 updates");
+  await assertMoreLabel(page);
   assert.equal(await page.locator("#session-menu-button").isVisible(), true, "menu affordance present on mobile");
   assert.equal(await page.locator("#signout-button").isVisible(), false, "sign out folded into the closed menu");
   assert.equal(await page.locator("#identity-label").isVisible(), false, "identity is in the account menu");
