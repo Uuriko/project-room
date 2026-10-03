@@ -71,6 +71,16 @@ test("browser owner issues digest-only setup; a real external client imports, re
   assert.equal(await f.page.locator("#agent-import-checklist").isVisible(), true);
   assert.match(await f.page.locator("#agent-import-checklist").innerText(), /room_check_access/);
   assert.match(await f.page.locator("#agent-import-route").innerText(), /room_check_access/);
+  // Owner-boundary regression: creating access must leave the host instructions
+  // reachable. Previously they were inside the form hidden after issuance;
+  // no existing test tried to open them from the actual setup screen.
+  assert.equal(await f.page.locator("#agent-host-snippets > summary").isVisible(), true,
+    "MCP host instructions remain reachable after access is created");
+  await f.page.locator("#agent-host-snippets > summary").click();
+  assert.equal(await f.page.locator("#agent-mcp-cli").isVisible(), true);
+  assert.match(await f.page.locator("#agent-mcp-cli").innerText(), /claude mcp add/);
+  await f.page.locator("#agent-host-snippets > summary").click();
+  assert.equal(await f.page.locator("#agent-private-config").inputValue(), "", "reading instructions never reveals the key");
   assert.equal(await f.page.locator("#agent-local-client").evaluate(node => node.open), false);
   await f.page.locator("#agent-local-client > summary").click();
   assert.match(await f.page.locator("#agent-local-command").innerText(), /pbpaste \| node scripts\/agent-inbox\.mjs import/);
