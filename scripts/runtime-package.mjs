@@ -311,6 +311,10 @@ optional.push("server/routes/dispatch.mjs", "server/routes/table.mjs", "server/r
 const dx1aAssets = ["scripts/install.sh", "docs/agents/index.html", "docs/agents/claude-code.html", "docs/agents/codex.html", "docs/agents/cursor.html", "docs/agents/cline.html", "docs/agents/vscode.html", "docs/agents/aider.html", "docs/agents/openai-agents-sdk.html", "docs/agents/langgraph.html", "docs/agents/crewai.html", "examples/integrations/claude-code/README.md", "examples/integrations/codex/README.md", "examples/integrations/cursor/README.md", "examples/integrations/cline/README.md", "examples/integrations/vscode/README.md", "examples/integrations/aider/README.md", "examples/integrations/openai-agents-sdk/README.md", "examples/integrations/langgraph/README.md", "examples/integrations/crewai/README.md"];
 publicAssets.push(...dx1aAssets);
 optional.push(...dx1aAssets, "server/connect-snippets.mjs");
+// CP-ADMIN-1: operator console (unlinked, token-only).
+const operatorConsoleAssets = ["operator.html", "src/operator-ui.js", "src/operator.css"];
+publicAssets.push(...operatorConsoleAssets);
+optional.push(...operatorConsoleAssets);
 // DX-1a end
 export const allowed = new Set([...required, ...optional]);
 const sha256 = bytes => createHash("sha256").update(bytes).digest("hex");

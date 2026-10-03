@@ -26,7 +26,7 @@ Purge is confirm-then-delete. Find and plan do not delete rows. Execute deletes 
 
 1. **Find** lists ids. It never deletes.
 
-   `POST /api/operator/purge/find` with any of `roomTitlePrefix`, `roomIdPrefix`, `identityNamePrefix`, and `createdBefore`. The answer is ids and display names.
+   `POST /api/operator/purge/find` with any of `roomTitlePrefix`, `roomIdPrefix`, `identityNamePrefix`, `accountEmail`, and `createdBefore`. The answer is ids and display names. `accountEmail` is an exact address match (case and surrounding spaces ignored) and returns `accounts` with ids and names only; the address is not echoed or written to the audit log.
 
 2. **Plan** counts rows for explicit ids.
 
@@ -63,7 +63,13 @@ Find plus plan is the dry run: it lists what would be deleted and writes an audi
 
 `GET /api/operator/status` returns the deployed version, whether storage is ready, the largest table counts, and the last 10 operator actions. Job heartbeats are on the Worker, so `jobs` is `see /api/health/jobs`.
 
-`GET /api/operator/drift?main=<sha>` compares that SHA with the revision this process was built from. The server does not call GitHub. A SHA is 7 to 64 hex characters, or `unstamped`.
+`GET /api/operator/drift?main=<sha>` compares that SHA with the revision this process was built from. The server does not call GitHub. A SHA is 7 to 64 hex characters, or `unstamped`. A short SHA matches when it is a prefix of the deployed commit.
+
+The table counts leave out Cloudflare's internal `_cf_*` tables. A table that refuses a count is listed in `skippedTables` instead of failing the status read.
+
+## Console
+
+`/operator.html` is a small page over these endpoints. Nothing in the app links to it. It asks for the operator token once and keeps it in `sessionStorage` for that tab only, never in `localStorage` or a cookie. **Forget token** clears it, and a refused token is cleared too. The page shows status and drift, runs find, builds a plan from find results or ids, and shows the per-table counts. **Execute purge** stays disabled until you type the room title (for a one-room plan) or `purge N targets`. It also lists the latest operator actions. Each page load makes two operator calls (status and actions), so stay inside the 10-per-minute limit.
 
 ## Audit
 

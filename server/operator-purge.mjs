@@ -9,6 +9,7 @@ import { ServiceError } from "./store.mjs";
 import { executeAccountDeletion, planAccountDeletion } from "./account-deletion.mjs";
 import { PURGE_TABLES } from "./purge-registry.mjs";
 import { appendOperatorAction } from "./operator-actions.mjs";
+import { emailLookupHash, normalizeEmail } from "./account-login-methods.mjs";
 
 const TOKEN_TTL_MS = 10 * 60 * 1000;
 const MAX_TARGETS = 20;
@@ -277,8 +278,10 @@ export function createOperatorPurge(store) {
         const identityNamePrefix = prefix(body.identityNamePrefix, "identityNamePrefix");
         const roomIdPrefix = prefix(body.roomIdPrefix, "roomIdPrefix");
         const createdBefore = createdBeforeMs(body.createdBefore);
-        if (!roomTitlePrefix && !identityNamePrefix && !roomIdPrefix && createdBefore == null) {
-          fail(422, "invalid_find", "Supply a room title, room id, or identity name prefix, or a createdBefore time");
+        const accountEmail = body.accountEmail == null ? null : normalizeEmail(body.accountEmail);
+        if (body.accountEmail != null && !accountEmail) fail(422, "invalid_find", "accountEmail must be an email address");
+        if (!roomTitlePrefix && !identityNamePrefix && !roomIdPrefix && createdBefore == null && !accountEmail) {
+          fail(422, "invalid_find", "Supply a room title, room id, or identity name prefix, an account email, or a createdBefore time");
         }
         const rooms = [];
         if (roomTitlePrefix || roomIdPrefix || (createdBefore != null && !identityNamePrefix)) {
@@ -303,14 +306,23 @@ export function createOperatorPurge(store) {
           for (const row of rows.slice(0, FIND_LIMIT)) identities.push({ id: row.id, displayName: row.displayName });
           if (rows.length > FIND_LIMIT) identities.truncated = true;
         }
+        // Exact address match through the lookup hash. The response carries
+        // account ids and display names only, never the address.
+        const accounts = [];
+        if (accountEmail) {
+          const rows = store.db.prepare(`SELECT DISTINCT a.id AS id, a.display_name AS displayName FROM account_login_methods m
+            JOIN accounts a ON a.id = m.account_id WHERE m.email_hash = ? ORDER BY a.id LIMIT ?`).all(emailLookupHash(accountEmail), FIND_LIMIT);
+          for (const row of rows) accounts.push({ id: row.id, displayName: typeof row.displayName === "string" ? row.displayName : null });
+        }
         const result = {
           rooms,
           identities,
+          ...(accountEmail ? { accounts } : {}),
           ...(rooms.truncated || identities.truncated ? { truncated: true } : {})
         };
         delete rooms.truncated;
         delete identities.truncated;
-        audit(store, { ...base, result: "ok", counts: { rooms: rooms.length, identities: identities.length } });
+        audit(store, { ...base, result: "ok", counts: { rooms: rooms.length, identities: identities.length, ...(accountEmail ? { accounts: accounts.length } : {}) } });
         return result;
       } catch (error) {
         audit(store, { ...base, result: error.code || "error" });

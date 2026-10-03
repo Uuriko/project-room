@@ -30,17 +30,27 @@ export function lastColdStart(store) {
 
 export function collectLargestTables(db, { deadlineMs = 1500, now = () => performance.now(), limit = 25 } = {}) {
   const started = now();
-  const names = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all()
+  // Cloudflare's own `_cf_*` tables in a Durable Object refuse reads from
+  // application code, so they are left out, and any table that still refuses
+  // a count is skipped and reported instead of failing the whole status.
+  const names = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '\\_cf\\_%' ESCAPE '\\' ORDER BY name").all()
     .map(row => row.name)
     .filter(name => IDENT.test(name));
   const counts = [];
+  const skipped = [];
+  let visited = 0;
   for (const table of names) {
     if (now() - started >= deadlineMs) break;
-    counts.push({ table, rows: db.prepare(`SELECT count(*) AS n FROM ${table}`).get().n });
+    visited++;
+    try {
+      counts.push({ table, rows: db.prepare(`SELECT count(*) AS n FROM ${table}`).get().n });
+    } catch {
+      skipped.push(table);
+    }
   }
-  const partial = counts.length < names.length;
+  const partial = visited < names.length;
   counts.sort((a, b) => b.rows - a.rows || (a.table < b.table ? -1 : 1));
-  return { tables: counts.slice(0, limit), partial };
+  return { tables: counts.slice(0, limit), partial, ...(skipped.length ? { skipped } : {}) };
 }
 
 export function operatorStatus(store, options = {}) {
@@ -52,6 +62,7 @@ export function operatorStatus(store, options = {}) {
     lastColdStart: lastColdStart(store),
     tables: tables.tables,
     partial: tables.partial,
+    ...(tables.skipped ? { skippedTables: tables.skipped } : {}),
     retention: null,
     operatorActions: listOperatorActions(store, 10)
   };
@@ -61,7 +72,19 @@ export function operatorDrift(main) {
   if (typeof main !== "string" || (!/^[0-9a-f]{7,64}$/i.test(main) && main !== "unstamped")) {
     throw new ServiceError(422, "invalid_revision", "Pass main as a commit SHA");
   }
-  const requested = /^[0-9a-f]{7,64}$/i.test(main) ? main.toLowerCase() : main;
-  const deployed = /^[0-9a-f]{7,64}$/i.test(SOURCE_REVISION) ? SOURCE_REVISION.toLowerCase() : SOURCE_REVISION;
-  return { deployed: SOURCE_REVISION, main: requested, match: deployed === requested };
+  return revisionDrift(SOURCE_REVISION, main);
+}
+
+// A short SHA (7+ hex) matches when it is a prefix of the other side, so
+// `git rev-parse --short` output works as well as a full commit.
+export function revisionDrift(deployedRevision, main) {
+  const hex = value => typeof value === "string" && /^[0-9a-f]{7,64}$/i.test(value);
+  const requested = hex(main) ? main.toLowerCase() : main;
+  const deployed = hex(deployedRevision) ? deployedRevision.toLowerCase() : deployedRevision;
+  let match = deployed === requested;
+  if (!match && hex(requested) && hex(deployed)) {
+    const [short, long] = requested.length <= deployed.length ? [requested, deployed] : [deployed, requested];
+    match = long.startsWith(short);
+  }
+  return { deployed: deployedRevision, main: requested, match };
 }
