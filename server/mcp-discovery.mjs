@@ -35,7 +35,7 @@ export const MCP_TOOL_FOCUSES = Object.freeze({
   work: ["room_list_work", "room_read_work", "room_read_work_discussion", "room_read_result",
     "room_propose_work", "room_begin_work", "room_accept_work", "room_start_work", "room_block_work",
     "room_resolve_blocker", "room_post_draft", "room_submit_text_result", "room_record_completion",
-    "room_record_handoff", "room_acquire_claim", "room_renew_claim", "room_release_claim",
+    "room_record_handoff", "room_acquire_claim", "room_renew_claim", "room_release_claim", "room_link_work_claim_pr",
     "room_list_files", "room_get_file", "room_put_file", "room_commit_file"],
   review: ["room_list_work", "room_read_work", "room_read_work_discussion", "room_read_result",
     "room_record_verification", "room_list_files", "room_get_file", "list_land_queue"],

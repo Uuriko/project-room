@@ -33,7 +33,7 @@
 // 409; unknown ids as 404. Unknown errors are rethrown for the generic 500
 // path — never wrapped, so no internal detail leaks.
 import {
-  createWork, claimWork, updateWork, attestWork, recordReview, reassignWork, releaseExpired, canCloseWork,
+  createWork, claimWork, updateWork, appendWorkPullRequest, attestWork, recordReview, reassignWork, releaseExpired, canCloseWork,
   renewWork, roomWorkClaimConfig, closeWhenLive, isReceiptTag, ClaimError, REVIEW_POLICIES, CLAIM_KINDS,
   claimUpdatedAt, ACTIVE_CLAIM_STATES, MAX_LEASE_HOURS,
 } from "./work-claims.mjs";
@@ -47,6 +47,9 @@ import { fileLeaseConflictBody, fileLeaseConflicts, holdForRateLimit, readyClaim
 import { collectPullRequestLookups, commitPullRequestLookup, readClaimPullBudget, readRoomDeployStatus, writeClaimPullBudget } from "./claim-pr-sync.mjs";
 import { agentErrorBody } from "../src/agent-error.mjs";
 import { SOURCE_REVISION } from "./version.mjs";
+import { ServiceError } from "./service-error.mjs";
+import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
+import { isRoomArchived } from "../src/events.js";
 
 const CLAIM_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 
@@ -368,6 +371,57 @@ const cursorDecode = (reject, value) => {
   reject(400, "bad_cursor", "cursor must be the opaque nextCursor from a prior receipts response");
 };
 
+// REST and hosted MCP share this owner-only mutation, including a fresh
+// authorization and claim read inside the registry transaction. This does not
+// sweep or settle other work, renew the lease, or synchronously contact GitHub.
+export function linkWorkClaimPullRequest({ store, roomId, auth, claimId, data, registry = store.workClaims, reauthorize }) {
+  const reject = (status, code, message) => { throw new ServiceError(status, code, message); };
+  const run = () => {
+    const current = reauthorize ? reauthorize() : auth;
+    if (!current?.member?.id) reject(401, "unauthenticated", "Room authentication is required");
+    if (current.member.id !== auth?.member?.id) reject(403, "access_denied", "The acting identity changed");
+    if (current.kind === "api-key" && !(current.apiKeyScopes ?? []).some(scope =>
+      scope === "rooms:write" || scope.endsWith(":*") && "rooms:write".startsWith(scope.slice(0, -1)))) {
+      reject(403, "insufficient_scope", "API key lacks the rooms:write scope");
+    }
+    if (isGuestAgentMemberId(current.member.id)) reject(403, "guest_scope_denied", "Guest members cannot perform this action");
+    const access = resolveWorkClaimAccess(store, roomId, current);
+    if (!mayWriteWorkClaims(access)) refuseWorkClaims();
+    enforceAutonomyTierForAction({ db: store.db, roomId, state: { room: { ownerId: access.ownerId } },
+      actor: access.member, action: "POST work-claim update", fail: reject });
+    if (isRoomArchived(store.room(roomId).state)) reject(409, "room_archived", "This room is archived; no PR link was recorded");
+    claimIdOf(reject, claimId);
+    refuseRoomGuideOffStarter(registry, roomId, current, claimId, "POST", reject);
+    if (!shape(data, { required: ["appendPullRequest", "expectedClaimedAt", "expectedHistoryLength"] })) {
+      invalidInput(reject, "{appendPullRequest, expectedClaimedAt, expectedHistoryLength} without other update fields");
+    }
+    const item = registry.get(roomId, claimId);
+    if (!item) reject(404, "work_claim_not_found", `No work claim "${claimId}" in this room`);
+    const now = typeof store.now === "function" ? store.now() : Date.now();
+    let linked;
+    try {
+      linked = appendWorkPullRequest(item, current.member.id, { pullRequest: data.appendPullRequest,
+        expectedClaimedAt: data.expectedClaimedAt, expectedHistoryLength: data.expectedHistoryLength, now });
+    } catch (error) {
+      if (!(error instanceof ClaimError)) throw error;
+      const status = error.code === "work_not_owner" ? 403 : error.code === "invalid_claim_input" ? 422 : 409;
+      const refusal = new ServiceError(status, error.code, error.message);
+      if (status !== 422) {
+        const href = `/api/rooms/${encodeURIComponent(roomId)}/work-claims/${encodeURIComponent(claimId)}`;
+        const hint = "Read the current claim and check its owner, round and URL before retrying. Do not release or reacquire it.";
+        refusal.body = { ...agentErrorBody({ httpStatus: status, code: error.code, message: error.message, roomId, workItemId: claimId }),
+          hint, next: [{ path: href }, { command: hint }] };
+      }
+      throw refusal;
+    }
+    if (linked === item) return item;
+    registry.set(roomId, linked);
+    emitWorkClaimEvent(store, roomId, { actorId: current.member.id, item: linked, action: "state_changed", atMs: now });
+    return linked;
+  };
+  return registry.transaction ? registry.transaction(run) : run();
+}
+
 // Consume the body before opening SQLite's synchronous transaction. The read,
 // state transition and write then share one transaction; send the response only
 // after commit, so a storage refusal cannot be reported as a successful claim.
@@ -375,6 +429,18 @@ export async function handleWorkClaims(options) {
   const { req, res, helpers, reauthorize } = options;
   const registry = options.registry ?? options.store.workClaims ?? defaultRegistry;
   const requestData = req.method === "POST" ? await helpers.body(req) : undefined;
+  // The append alternative has one shared transaction across both transports.
+  if (options.workClaimRoute === "update" && req.method === "POST"
+    && requestData && typeof requestData === "object" && Object.hasOwn(requestData, "appendPullRequest")) {
+    try {
+      const item = linkWorkClaimPullRequest({ store: options.store, roomId: options.roomId,
+        auth: options.auth, claimId: options.workClaimId, data: requestData, registry, reauthorize });
+      return helpers.json(res, 200, item);
+    } catch (error) {
+      if (Number.isInteger(error?.status) && error.body && error.code) return helpers.json(res, error.status, error.body);
+      throw error;
+    }
+  }
   // Pull-request lookups happen before the claim transaction so a GitHub
   // round trip never holds the room write lock. No webhook receiver is
   // mounted; sweep is the member-triggered poll, and the cron uses the same

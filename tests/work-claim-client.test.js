@@ -169,3 +169,28 @@ test('SDK lease renewal needs the owner and a fresh public progress message', as
     error => error.status === 422 && error.code === 'claim_renewal_source_stale');
   assert.deepEqual(await owner.workClaimGet('renewed'), renewed);
 });
+
+// Transport owner: neither a pure transition nor a handler fixture catches the
+// SDK dropping one of the mandatory compare-and-set fields before HTTP.
+test('SDK links a later PR with both preconditions and preserves HTTP refusals', async t => {
+  const { owner } = await fixture(t);
+  const claimed = await owner.workClaim('later-sdk-pr', { files: ['src/sdk.js'], leaseHours: 6 });
+  const args = { pullRequest: 'https://github.com/Uuriko/project-room/pull/17/',
+    expectedClaimedAt: claimed.claimedAt, expectedHistoryLength: claimed.history.length };
+  const linked = await owner.linkWorkItemPullRequest(claimed.id, args);
+  assert.equal(linked.pullRequests[0].url, args.pullRequest.slice(0, -1));
+  assert.deepEqual(await owner.workClaimGet(claimed.id), linked);
+  await assert.rejects(owner.linkWorkItemPullRequest(claimed.id, args), error => {
+    assert.equal(error.status, 409);
+    assert.equal(error.code, 'work_claim_conflict');
+    assert.ok(error.next.some(step => step.path === `/api/rooms/commons/work-claims/${claimed.id}`));
+    assert.match(error.hint, /do not release or reacquire/i);
+    return true;
+  });
+  const fresh = { ...args, expectedHistoryLength: linked.history.length };
+  for (const fields of [{ expectedHistoryLength: String(linked.history.length) },
+    { expectedClaimedAt: null }, { pullRequest: { url: args.pullRequest, outcome: 'merged' } }]) {
+    await assert.rejects(owner.linkWorkItemPullRequest(claimed.id, { ...fresh, ...fields }), invalid);
+  }
+  assert.deepEqual(await owner.workClaimGet(claimed.id), linked);
+});
