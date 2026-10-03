@@ -513,14 +513,14 @@ function retainedStore(t) {
   store.db.exec(RETIRED_SCHEMA);
   seedRetiredRows(store.db, "retained-room");
   seedRetiredRows(store.db, "keep-room");
-  const before = retiredRows(store.db, "retained-room");
+  const retainedBefore = retiredRows(store.db, "retained-room");
   const kept = retiredRows(store.db, "keep-room");
   store.close();
   store = new RoomStore(path);
-  assert.deepEqual(retiredRows(store.db, "retained-room"), before);
+  assert.deepEqual(retiredRows(store.db, "retained-room"), retainedBefore);
   assert.deepEqual(retiredRows(store.db, "keep-room"), kept);
   assert.doesNotThrow(() => auditRecovery(store));
-  return { store, before, kept };
+  return { store, retainedBefore, kept };
 }
 
 function planRetainedRoom(purge) {
@@ -532,7 +532,8 @@ function executePlan(purge, plan) {
 }
 
 function nonAuditRows(db) {
-  return Object.entries(tableCounts(db)).reduce((sum, [table, count]) => sum + (table === "operator_actions" ? 0 : count), 0);
+  return Object.entries(tableCounts(db)).reduce((sum, [table, count]) =>
+    sum + (["operator_actions", "integrity_snapshot"].includes(table) ? 0 : count), 0);
 }
 
 describe("retained room cleanup compatibility", () => {
@@ -568,16 +569,16 @@ describe("retained room cleanup compatibility", () => {
     const purge = createOperatorPurge(store);
     const plan = planRetainedRoom(purge);
     store.db.prepare("INSERT INTO emissary_idempotency(room_id, idempotency_key, tool, result_json, created_at) VALUES('retained-room','later','synthetic','{}',2)").run();
-    const before = retiredRows(store.db, "retained-room");
+    const retainedBefore = retiredRows(store.db, "retained-room");
     assert.throws(() => executePlan(purge, plan), error => error.code === "plan_changed");
-    assert.deepEqual(retiredRows(store.db, "retained-room"), before);
+    assert.deepEqual(retiredRows(store.db, "retained-room"), retainedBefore);
     assert.deepEqual(retiredRows(store.db, "keep-room"), kept);
     assert.ok(store.db.prepare("SELECT 1 FROM rooms WHERE id='retained-room'").get());
     assert.equal(store.db.prepare("SELECT count(*) AS n FROM operator_actions WHERE result='executed'").get().n, 0);
   });
 
   test("a retained cleanup failure rolls back earlier deletions and leaves its confirmation retryable", t => {
-    const { store, before, kept } = retainedStore(t);
+    const { store, retainedBefore, kept } = retainedStore(t);
     const purge = createOperatorPurge(store);
     const plan = planRetainedRoom(purge);
     const snapshot = store.db.prepare("SELECT * FROM integrity_snapshot").all();
@@ -586,7 +587,7 @@ describe("retained room cleanup compatibility", () => {
       WHEN OLD.room_id='retained-room' BEGIN SELECT RAISE(ABORT, 'synthetic retained cleanup failure'); END`);
     assert.throws(() => executePlan(purge, plan), /synthetic retained cleanup failure/);
     assert.equal(nonAuditRows(store.db), rowsBefore);
-    assert.deepEqual(retiredRows(store.db, "retained-room"), before);
+    assert.deepEqual(retiredRows(store.db, "retained-room"), retainedBefore);
     assert.deepEqual(retiredRows(store.db, "keep-room"), kept);
     assert.deepEqual(store.db.prepare("SELECT * FROM integrity_snapshot").all(), snapshot);
     assert.ok(store.db.prepare("SELECT 1 FROM rooms WHERE id='retained-room'").get());
