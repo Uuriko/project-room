@@ -1322,9 +1322,10 @@ summary { overflow-wrap: anywhere; }
   .room-topbar .topbar-actions > * { flex: none; }
   .room-topbar .icon-button { width: 44px; height: 44px; min-width: 44px; min-height: 44px; }
   .room-topbar .topbar-actions > .topbar-button, .room-topbar .room-more > summary { min-width: 44px; min-height: 44px; padding-inline: .4rem; white-space: nowrap; overflow-wrap: normal; }
+  .room-topbar #topbar-updates { flex-basis: min-content; flex-wrap: wrap; justify-content: center; }
   .room-topbar #topbar-catchup { display: flex; flex: 1 1 4rem; flex-wrap: wrap; gap: .1rem .4rem; min-width: min-content; justify-content: center; }
   .room-topbar .count-chip { min-width: 0; font-size: .7rem; }
-  #catchup-count { max-width: 100%; white-space: normal; overflow-wrap: normal; text-align: center; border: 0; }
+  #catchup-count { max-width: 100%; padding-inline: 0; white-space: normal; overflow-wrap: normal; text-align: center; border: 0; }
   /* A wrapped trigger may be on the left. Anchor its popover to the full row. */
   .room-topbar .room-more, .room-topbar .session-menu { position: static; }
   .room-topbar .session-menu-panel { min-width: 0; }

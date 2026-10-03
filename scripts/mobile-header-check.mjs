@@ -68,6 +68,10 @@ async function assertHeader(page, count) {
     for (const prior of boxes) assert.ok(box.x + box.width <= prior.x + 1 || prior.x + prior.width <= box.x + 1 || box.y + box.height <= prior.y + 1 || prior.y + prior.height <= box.y + 1, "header hit areas never overlap");
     boxes.push(box);
   }
+  if (await page.evaluate(() => getComputedStyle(document.documentElement).fontSize === "16px")) {
+    const centers = boxes.slice(1).map(box => box.y + box.height / 2);
+    assert.ok(Math.max(...centers) - Math.min(...centers) <= 1, "default-size actions share one compact row");
+  }
   // Independently measure words, not CSS declarations: overflow can remain
   // contained even when a label or count has become a stack of characters.
   const brokenWords = await page.locator(".room-topbar .topbar-actions").evaluate(root => {
@@ -132,10 +136,13 @@ async function exerciseHeader(page) {
     assert.equal(await page.locator("#refresh-button").isVisible(), true);
     const account = await page.locator(".session-menu-panel").boundingBox();
     assert.ok(account.x >= 0 && account.x + account.width <= page.viewportSize().width + 1, "account popover stays inside the narrow viewport");
-    for (const item of await page.locator(".session-menu-panel button:visible:not(:disabled)").all()) {
+    // Connection details is a native summary between the session buttons and
+    // Refresh, so it participates in the real Tab order too.
+    for (const item of await page.locator(".session-menu-panel button:visible:not(:disabled), .session-menu-panel summary:visible").all()) {
       if (mode === "keyboard") {
         await page.keyboard.press("Tab");
-        assert.equal(await item.evaluate(node => node === document.activeElement), true, "account menu actions remain in the Tab sequence");
+        const focus = await item.evaluate(node => ({ expected: node.id || node.getAttribute("aria-label") || node.textContent, actual: document.activeElement.id || document.activeElement.getAttribute("aria-label") || document.activeElement.textContent, matches: node === document.activeElement }));
+        assert.equal(focus.matches, true, `account menu Tab reaches ${focus.expected}, actual: ${focus.actual}`);
       }
       await item.tap({ trial: true });
     }
