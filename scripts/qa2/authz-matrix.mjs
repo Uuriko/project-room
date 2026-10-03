@@ -94,7 +94,7 @@ const A = [
   ["read events", MEMBERS, t => req("GET", `${R}/events?limit=5`, { token: t })],
   ["read activation-pack", MEMBERS, t => req("GET", `${R}/activation-pack`, { token: t })],
   ["post message", MEMBERS, t => req("POST", `${R}/commands`, { token: t, body: cmd("message.posted", { messageId: randomUUID(), body: "qa2 authz post" }) })],
-  ["export room log", MEMBERS, t => req("GET", `${R}/export`, { token: t })],
+  ["export room log", ["owner"], t => req("GET", `${R}/export`, { token: t })],
   ["list work claims", MEMBERS, t => req("GET", `${R}/work-claims`, { token: t })],
   ["create work claim", ["owner", "collaborator"], t => req("POST", `${R}/work-claims`, { token: t, body: { id: `qa2-c-${randomUUID().slice(0, 8)}`, title: "x" } })],
   ["steal claim held by collaborator", [], t => req("POST", `${R}/work-claims/qa2-held/claim`, { token: t, body: { note: "steal" } }), { okStatuses: [409] }],
@@ -108,7 +108,7 @@ const A = [
   ["list webhooks shows owner's sub", ["owner"], async t => { const r = await req("GET", "/api/agent-webhooks", { token: t }); return { ...r, status: r.status === 200 ? (r.text.includes(hook.subscriptionId) ? 200 : 403) : r.status }; }],
   ["delete owner's webhook (non-owner)", [], t => t === T.owner ? Promise.resolve({ status: 404 }) : req("DELETE", `/api/agent-webhooks/${hook.subscriptionId}`, { token: t })],
   ["owner-collab DM readable in events", ["owner", "collaborator"], async t => { const r = await req("GET", `${R}/events?limit=100`, { token: t }); return { ...r, status: r.status === 200 && r.text.includes(SECRET_DM) ? 200 : (r.status === 200 ? 403 : r.status) }; }],
-  ["owner-collab DM readable in export", ["owner", "collaborator"], async t => { const r = await req("GET", `${R}/export`, { token: t }); return { ...r, status: r.status === 200 && r.text.includes(SECRET_DM) ? 200 : (r.status === 200 ? 403 : r.status) }; }],
+  ["owner-collab DM readable in export", ["owner"], async t => { const r = await req("GET", `${R}/export`, { token: t }); return { ...r, status: r.status === 200 && r.text.includes(SECRET_DM) ? 200 : (r.status === 200 ? 403 : r.status) }; }],
   ["owner-collab DM readable via search", ["owner", "collaborator"], async t => { const r = await req("GET", `${R}/search?q=private`, { token: t }); const hit = (r.json?.messages || []).some(m => JSON.stringify(m).includes(SECRET_DM)); return { ...r, status: r.status === 200 ? (hit ? 200 : 403) : r.status }; }, { optional: true }],
   ["needs-me leaks other rooms", [], async t => { const r = await req("GET", "/api/needs-me", { token: t }); return { ...r, status: r.status === 200 && r.text.includes(SECRET_DM) && t !== T.collaborator && t !== T.owner ? 200 : 403 }; }],
 ];

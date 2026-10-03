@@ -5018,6 +5018,9 @@ function syncHistoryVisibility() {
   if (!control || !box) return;
   const viewerId = session?.member?.id;
   const show = Boolean(state && viewerId && viewerId === state.room.ownerId);
+  // Export is owner-only (PRIV-2): other members don't get a button that can only refuse.
+  const exportActions = $("#record-export-html")?.closest(".record-actions");
+  if (exportActions) exportActions.hidden = !show;
   control.hidden = !show;
   if (hint) hint.hidden = !show;
   if (!show) return;
@@ -6936,7 +6939,9 @@ async function exportRoomHtml() {
     status.textContent = `Download started: ${filename}. Deleted messages appear as deleted, as members saw them.`;
   } catch (error) {
     if (request !== exportRequest || !state) return;
-    status.textContent = error.status === 429 ? "Export is rate limited; try again in a minute." : "The export could not be prepared. Try again.";
+    status.textContent = error.status === 429 ? "Export is rate limited; try again in a minute."
+      : error.status === 403 ? "Only the room owner can export this room."
+      : "The export could not be prepared. Try again.";
   } finally { if (request === exportRequest) button.disabled = false; }
 }
 $("#record-export-html").addEventListener("click", () => exportRoomHtml());
