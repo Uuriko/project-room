@@ -2,9 +2,15 @@
 // Nothing in this file prints a credential. Writers pass values through redact.
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
+import { randomBytes } from "node:crypto";
 
 export const PROBE_VERSION = "0.1.0";
 export const USER_AGENT = `project-room-onboarding-probe/${PROBE_VERSION}`;
+
+// W3-F7: one random password per process — never the hardcoded public
+// string. Memory-only; the redact() below keeps it out of artifacts.
+const PROBE_PASSWORD = randomBytes(16).toString("base64url");
+export function probePassword() { return PROBE_PASSWORD; }
 
 const DOCUMENTED_HOSTS = [
   "https://www.getdasha.com/room",
