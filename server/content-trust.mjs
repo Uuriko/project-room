@@ -179,6 +179,33 @@ export function stampInbox(inbox, viewerId) {
   });
 }
 
+// SEC-2: Board claims over HTTP. Titles, history notes, attestation notes
+// and review summaries are member-authored. A claim is marked unless its
+// creating history entry names the viewer; each history entry, attestation
+// and review is marked unless the viewer wrote it.
+export function stampClaim(item, viewerId) {
+  if (!item || typeof item !== "object" || Array.isArray(item)) return item;
+  const history = Array.isArray(item.history) ? item.history : [];
+  const created = history[0]?.action === "created" && !(item.historyOmitted > 0) ? history[0].agentId : null;
+  const marked = markIfOther(item, viewerId, created);
+  return {
+    ...marked,
+    history: history.map(entry => markIfOther(entry, viewerId, entry?.agentId)),
+    ...(Array.isArray(item.attestations) ? { attestations: item.attestations.map(entry => markIfOther(entry, viewerId, entry?.memberId)) } : {}),
+    ...(Array.isArray(item.reviews) ? { reviews: item.reviews.map(entry => markIfOther(entry, viewerId, entry?.memberId)) } : {})
+  };
+}
+
+export function stampClaimPage(page, viewerId) {
+  if (!page || typeof page !== "object" || !Array.isArray(page.claims)) return withContentTrust(page);
+  return withContentTrust({ ...page, claims: page.claims.map(item => stampClaim(item, viewerId)) });
+}
+
+export function stampReceipts(page, viewerId) {
+  if (!page || typeof page !== "object" || !Array.isArray(page.receipts)) return withContentTrust(page);
+  return withContentTrust({ ...page, receipts: page.receipts.map(receipt => markIfOther(receipt, viewerId, receipt?.createdBy)) });
+}
+
 export function claimNote(item) {
   return typeof item?.blocker?.reason === "string" && item.blocker.reason ? { note: item.blocker.reason } : {};
 }

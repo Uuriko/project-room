@@ -29,7 +29,9 @@ test("the ready queue lists unheld claims whose dependencies are done", async ()
   const registry = createWorkClaimRegistry();
   await call(registry, "create", null, { id: "base", title: "Base" });
   await call(registry, "create", null, { id: "next", dependsOn: ["base"] });
-  await call(registry, "create", null, { id: "later", dependsOn: ["missing"] });
+  // Q3-A: dependsOn must name a claim that exists in this room.
+  await assert.rejects(call(registry, "create", null, { id: "later", dependsOn: ["missing"] }),
+    error => error.status === 422 && error.code === "invalid_claim_input" && /dependsOn/.test(error.message));
   await call(registry, "create", null, { id: "free" });
 
   const waiting = await call(registry, "list", null, null, "ready");
@@ -58,6 +60,15 @@ test("dependencies survive the durable claim registry", async t => {
   const store = new RoomStore(":memory:");
   store.initialize(initialRoom("commons"));
   t.after(() => store.close());
+  const create = body => handleWorkClaims({
+    req: { method: "POST", body },
+    res: {},
+    url: new URL("https://room.example/api/rooms/commons/work-claims"),
+    store, roomId: "commons",
+    auth: { member: { id: "owner", kind: "human", permissions: [] } },
+    workClaimRoute: "create", helpers, registry: store.workClaims,
+  });
+  assert.equal((await create({ id: "parent" })).status, 201);
   const out = await handleWorkClaims({
     req: { method: "POST", body: { id: "child", dependsOn: ["parent"] } },
     res: {},

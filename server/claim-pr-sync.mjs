@@ -525,19 +525,25 @@ function writeMainCache(store, value, nowMs) {
     .run(MAIN_ROOM, JSON.stringify(value), nowMs);
 }
 
+// The last stored deploy status, without a network read (SEC-2: Board
+// status readers share this cached value between refreshes).
+export function readCachedDeployStatus(store) {
+  const cached = readMainCache(store);
+  return {
+    live: SOURCE_REVISION,
+    main: typeof cached?.sha === "string" ? cached.sha : null,
+    behind: Number.isInteger(cached?.behind) ? cached.behind : null,
+    checkedAt: typeof cached?.checkedAt === "string" ? cached.checkedAt : null
+  };
+}
+
 // Live revision against the last known GitHub main head. One commits/main
 // read, inside the same rate-limit hold as pull polling. behind is 0 when
 // the two shas match, and null when this server is unstamped or the compare
 // is not known yet.
 export async function readRoomDeployStatus(store, { fetchImpl = fetch, token = null, nowMs = Date.now(), repo = null } = {}) {
   const live = SOURCE_REVISION;
-  const cached = readMainCache(store);
-  const fallback = {
-    live,
-    main: typeof cached?.sha === "string" ? cached.sha : null,
-    behind: Number.isInteger(cached?.behind) ? cached.behind : null,
-    checkedAt: typeof cached?.checkedAt === "string" ? cached.checkedAt : null
-  };
+  const fallback = readCachedDeployStatus(store);
   if (readClaimPullBudget(store) > nowMs) return fallback;
   const repository = repo || process.env.GITHUB_REPOSITORY || "Uuriko/project-room";
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)) return fallback;

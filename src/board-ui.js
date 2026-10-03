@@ -339,14 +339,15 @@ async function readClaims(client, current, now = Date.now()) {
   for (let page = 0; page < 20; page += 1) {
     if (!current()) break;
     const query = new URLSearchParams({ limit: "200" });
-    // SEC-2 adds updatedSince=now-7d once the list route accepts it. Until
-    // then an unknown parameter is a 422, so the query stays limit and cursor
-    // and a page of only old done items ends the walk.
+    // The list route leaves out landed work older than a week and counts it
+    // in olderDone. A page of only old done items still ends the walk, for a
+    // server that predates that window.
     if (cursor) query.set("cursor", cursor);
     const body = await client.request(client.path(`/work-claims?${query}`));
     if (!current()) break;
     const pageClaims = body.claims ?? [];
     claims.push(...pageClaims);
+    if (Number(body.olderDone) > 0) older = true;
     if (staleDonePage(pageClaims, now)) { older = true; break; }
     if (!body.nextCursor) return { claims, older };
     cursor = body.nextCursor;
@@ -539,11 +540,15 @@ export function installWorkBoard({ client, getState, getSession }) {
       let canonicalUrl;
       try { canonicalUrl = new URL(pullRequest).href.replace(/\/$/, ""); }
       catch { note("Enter a GitHub pull request URL."); return; }
-      const data = { appendPullRequest: pullRequest, expectedClaimedAt: item.claimedAt, expectedHistoryLength: item.history.length };
+      // SEC-2: list pages carry the newest history entries plus a
+      // historyOmitted count; the lifetime count is the concurrency token.
+      const historyTotal = entry => (entry?.history?.length ?? 0) + (Number(entry?.historyOmitted) || 0);
+      const data = { appendPullRequest: pullRequest, expectedClaimedAt: item.claimedAt, expectedHistoryLength: historyTotal(item) };
       const reconcile = error => {
         const current = items.find(entry => entry.id === id);
         const history = current?.history ?? [];
-        const changedRound = history.length < item.history.length || history.slice(item.history.length)
+        const added = historyTotal(current) - historyTotal(item);
+        const changedRound = added < 0 || added > history.length || history.slice(history.length - added)
           .some(entry => /^(claimed$|state:unclaimed$|lease_expired$|reassigned:)/.test(entry.action));
         const sameClaim = current?.owner === item.owner && current?.claimedAt === item.claimedAt && !changedRound;
         const linked = sameClaim && (current.pullRequests ?? [current.pullRequest]).some(pull => pull?.url === canonicalUrl);

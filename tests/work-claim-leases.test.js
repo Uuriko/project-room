@@ -231,6 +231,7 @@ const runRoute = async ({ route, id = null, body: reqBody = {}, memberId = "quil
     roomAuthority: roomId => ({ members: {
       quill: { id: "quill", kind: "agent", active: true, permissions: ["verify"] },
       grok: { id: "grok", kind: "agent", active: true, permissions: ["accept_work", "complete_work"] },
+      vera: { id: "vera", kind: "agent", active: true, permissions: ["verify"] },
       ...storeMembers,
     } }),
   };
@@ -279,11 +280,16 @@ test("handler: review policies enforced on the done transition", async () => {
   const spoofed = await runRoute({ route: "update", id: "p1", body: { state: "done", reviewedBy: "grok" }, registry }).catch(error => error);
   assert.equal(spoofed.code, "work_review_rejected");
   assert.match(spoofed.message, /no review attestation recorded by grok/);
-  // the reviewer attests from their own session, then the owner may close
-  const { out: review } = await runRoute({ route: "review", id: "p1", memberId: "grok", body: { note: "looks good" }, registry });
+  // SEC-2: a review note needs the review profile (verify), the room owner,
+  // or manage_claims; a contribute-only member is refused.
+  const { out: refusedNote } = await runRoute({ route: "review", id: "p1", memberId: "grok", body: { note: "looks good" }, registry });
+  assert.equal(refusedNote.status, 403);
+  assert.equal(refusedNote.value.error.code, "work_claims_not_permitted");
+  // the reviewer attests from their own session; a note alone never closes
+  const { out: review } = await runRoute({ route: "review", id: "p1", memberId: "vera", body: { note: "looks good" }, registry });
   assert.equal(review.value.attestations.length, 1);
-  assert.equal(review.value.attestations[0].memberId, "grok");
-  const noteOnly = await runRoute({ route: "update", id: "p1", body: { state: "done", reviewedBy: "grok" }, registry }).catch(error => error);
+  assert.equal(review.value.attestations[0].memberId, "vera");
+  const noteOnly = await runRoute({ route: "update", id: "p1", body: { state: "done", reviewedBy: "vera" }, registry }).catch(error => error);
   assert.equal(noteOnly.code, "work_review_rejected");
   await runRoute({ route: "review", id: "p1", memberId: "grok", body: { verdict: "approve", summary: "Checked current work" }, registry });
   const attested = await runRoute({ route: "update", id: "p1", body: { state: "done", reviewedBy: "grok" }, registry });
@@ -317,10 +323,10 @@ test("handler: review attestations are caller-bound and cleared on handoff", asy
   await runRoute({ route: "create", body: { id: "a1", reviewPolicy: "distinct_member" }, registry });
   await runRoute({ route: "claim", id: "a1", registry });
   // the attestation always names the caller — there is no way to attest as someone else
-  const { out: review } = await runRoute({ route: "review", id: "a1", memberId: "grok", body: {}, registry });
-  assert.equal(review.value.attestations[0].memberId, "grok");
+  const { out: review } = await runRoute({ route: "review", id: "a1", memberId: "vera", body: {}, registry });
+  assert.equal(review.value.attestations[0].memberId, "vera");
   // one attestation per member: a second review from the same member replaces the first
-  const { out: review2 } = await runRoute({ route: "review", id: "a1", memberId: "grok", body: { note: "second look" }, registry });
+  const { out: review2 } = await runRoute({ route: "review", id: "a1", memberId: "vera", body: { note: "second look" }, registry });
   assert.equal(review2.value.attestations.length, 1);
   assert.equal(review2.value.attestations[0].note, "second look");
   // reassign drops attestations — reviews belong to the previous owner's round
@@ -332,12 +338,12 @@ test("handler: review attestations are caller-bound and cleared on handoff", asy
   // release drops them too
   await runRoute({ route: "create", body: { id: "a2", reviewPolicy: "distinct_member" }, registry });
   await runRoute({ route: "claim", id: "a2", registry });
-  await runRoute({ route: "review", id: "a2", memberId: "grok", registry });
+  await runRoute({ route: "review", id: "a2", memberId: "vera", registry });
   await runRoute({ route: "release", id: "a2", registry });
   const { out: reread } = await runRoute({ route: "read", id: "a2", registry });
   assert.deepEqual(reread.value.attestations, []);
   // cannot attest unclaimed or done work
-  const unclaimed = await runRoute({ route: "review", id: "a2", memberId: "grok", registry }).catch(error => error);
+  const unclaimed = await runRoute({ route: "review", id: "a2", memberId: "vera", registry }).catch(error => error);
   assert.equal(unclaimed.code, "invalid_claim_input");
 });
 

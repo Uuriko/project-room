@@ -10,6 +10,8 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { handleWorkClaims } from "../server/work-claim-routes.mjs";
 import { applyPullRequestWebhook, syncClaimPullRequests } from "../server/claim-pr-sync.mjs";
 import { pullRequestOutcomeFromWebhook } from "../server/claim-coordination.mjs";
+// SEC-2: claim reads carry content-trust markers; compare the claim itself.
+const stripTrust = value => JSON.parse(JSON.stringify(value, (key, entry) => (key === "untrusted" || key === "contentTrust" ? undefined : entry)));
 
 const URL_A = "https://github.com/Uuriko/project-room/pull/7";
 
@@ -69,7 +71,7 @@ test("linking a draft after claiming preserves the lease and reconciles exact du
   }
   assert.equal(linked.history.length, claimed.history.length + 1);
   assert.match(linked.history.at(-1).note, /https:\/\/github\.com\/Uuriko\/project-room\/pull\/7/);
-  assert.deepEqual((await call("read", "later-pr")).value, linked);
+  assert.deepEqual(stripTrust((await call("read", "later-pr")).value), linked);
   assert.equal(claimEvents(store).length, beforeEvents + 1);
   assert.equal(claimEvents(store).at(-1).data.action, "state_changed");
   assert.equal(claimEvents(store).at(-1).data.reason, undefined);

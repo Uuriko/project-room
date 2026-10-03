@@ -7,6 +7,7 @@ export {
   checkAgentDisplayName,
   assessMemberDisplayName,
   assertMemberDisplayNameAvailable,
+  TEXT_CHARACTER_CLASSES,
 } from "../src/display-name-guard.js";
 
 // --- Q3-D: role-like names at admission ---

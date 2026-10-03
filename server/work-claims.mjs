@@ -280,6 +280,7 @@ const reviewBasisOf = value => {
 };
 const reviewBasisFor = item => Object.freeze({ version: 1, owner: item.owner, claimedAt: item.claimedAt,
   revision: item.revision ?? null, headSha: item.ci?.headSha ?? null });
+const sameBasis = (left, right) => Boolean(left && right) && Object.keys(right).every(key => left[key] === right[key]);
 const currentReviewBasis = (review, item) => {
   const basis = review?.basis, current = reviewBasisFor(item);
   return basis && Object.keys(current).every(key => basis[key] === current[key]);
@@ -306,7 +307,10 @@ const attestationOf = value => {
   check(typeof value.memberId === "string" && value.memberId.length > 0 && value.memberId.length <= 128, "attestation memberId must be 1..128 characters");
   check(typeof value.at === "string" && Number.isFinite(Date.parse(value.at)), "attestation at must be an ISO timestamp");
   if (value.note !== undefined && value.note !== null) check(typeof value.note === "string" && value.note.length <= 512, "attestation note must be at most 512 characters");
-  return Object.freeze({ memberId: value.memberId, at: value.at, note: value.note ?? null });
+  // SEC-2: note attestations record the claim round and revision they were
+  // made against, so a repeat note from the same reviewer is deduplicated.
+  const basis = reviewBasisOf(value.basis);
+  return Object.freeze({ memberId: value.memberId, at: value.at, note: value.note ?? null, ...(basis ? { basis } : {}) });
 };
 
 const workOf = value => {
@@ -336,8 +340,10 @@ const workOf = value => {
   const kind = kindOf(value.kind);
   const revision = revisionOf(value.revision);
   if (kind === "deploy") check(revision, "a deploy claim needs a revision");
+  const historyOmitted = historyOmittedOf(value.historyOmitted);
   return { id: value.id, title: value.title ?? value.id, state: value.state ?? "unclaimed",
     owner: value.owner ?? null, history: Array.isArray(value.history) ? value.history : [],
+    ...(historyOmitted > 0 ? { historyOmitted } : {}),
     claimedAt: value.claimedAt ?? null, leaseStartAt: value.leaseStartAt ?? null, leaseExpiresAt: value.leaseExpiresAt ?? null,
     deliveryMode: value.deliveryMode ?? null, reviewPolicy: value.reviewPolicy ?? null,
     reviewedBy: value.reviewedBy ?? null, attestations: Object.freeze(attestations),
@@ -350,8 +356,31 @@ const workOf = value => {
 const agentOf = value => idOf(value, "agent id", 128);
 const stamp = (atMs, agentId, action, note) =>
   Object.freeze({ at: isoOf(atMs), agentId, action, note: note ?? null });
-const withHistory = (work, atMs, agentId, action, note) =>
-  Object.freeze({ ...work, updatedAt: isoOf(atMs), history: Object.freeze([...work.history, stamp(atMs, agentId, action, note)]) });
+// SEC-2: a claim keeps at most MAX_CLAIM_HISTORY history entries. Older
+// entries are dropped from the front and counted in historyOmitted, so
+// history.length + historyOmitted is the claim's lifetime entry count and
+// still changes on every write (the PR-link concurrency check reads it).
+export const MAX_CLAIM_HISTORY = 200;
+const historyOmittedOf = value => (Number.isSafeInteger(value) && value > 0 ? value : 0);
+export const claimHistoryLength = item =>
+  (Array.isArray(item?.history) ? item.history.length : 0) + historyOmittedOf(item?.historyOmitted);
+const withHistory = (work, atMs, agentId, action, note) => {
+  const full = [...work.history, stamp(atMs, agentId, action, note)];
+  const dropped = Math.max(0, full.length - MAX_CLAIM_HISTORY);
+  const omitted = historyOmittedOf(work.historyOmitted) + dropped;
+  return Object.freeze({ ...work, updatedAt: isoOf(atMs),
+    history: Object.freeze(dropped > 0 ? full.slice(dropped) : full),
+    ...(omitted > 0 ? { historyOmitted: omitted } : {}) });
+};
+// A copy of the claim that keeps only the newest `keep` history entries,
+// with the rest counted in historyOmitted. Board lists use it; the
+// single-claim read returns the stored history.
+export function summarizeClaimHistory(item, keep) {
+  const history = Array.isArray(item?.history) ? item.history : [];
+  if (history.length <= keep) return item;
+  const dropped = history.length - keep;
+  return { ...item, history: history.slice(dropped), historyOmitted: historyOmittedOf(item.historyOmitted) + dropped };
+}
 // Board order is updatedAt desc, then id. A later history stamp wins when a
 // writer appended history without refreshing updatedAt.
 export function claimUpdatedAt(item) {
@@ -487,7 +516,7 @@ export function appendWorkPullRequest(work, agentId, { pullRequest, expectedClai
   }
   if (item.owner !== agent) fail("work_not_owner", "Only the current claim owner can link a PR");
   if (isLeaseExpired(item, atMs)) fail("claim_lease_lapsed", "The current claim lease has lapsed");
-  if (item.claimedAt !== expectedClaimedAt || item.history.length !== expectedHistoryLength) {
+  if (item.claimedAt !== expectedClaimedAt || claimHistoryLength(item) !== expectedHistoryLength) {
     fail("work_claim_conflict", "The claim changed since it was read");
   }
   if (item.pullRequests.some(pull => pull.url === parsed.url)) return work;
@@ -564,7 +593,15 @@ export function attestWork(work, agentId, { note, now } = {}) {
   const prior = item.attestations.find(entry => entry.memberId === agent);
   const explicit = item.reviews.some(entry => entry.memberId === agent);
   if (!explicit && prior && prior.note === (note ?? null)) return Object.freeze(item);
-  const attestation = Object.freeze({ memberId: agent, at: isoOf(atMs), note: note ?? null });
+  const basis = reviewBasisFor(item);
+  // SEC-2: one attestation per reviewer per claim round and revision. A
+  // repeat note on the same basis replaces the recorded note in place: no
+  // history entry, so the route appends no room event for it.
+  if (!explicit && prior && sameBasis(prior.basis, basis)) {
+    const replaced = Object.freeze({ memberId: agent, at: prior.at, note: note ?? null, basis });
+    return Object.freeze({ ...item, attestations: Object.freeze(item.attestations.map(entry => (entry.memberId === agent ? replaced : entry))) });
+  }
+  const attestation = Object.freeze({ memberId: agent, at: isoOf(atMs), note: note ?? null, basis });
   const attestations = Object.freeze([
     ...item.attestations.filter(entry => entry.memberId !== agent),
     attestation,
