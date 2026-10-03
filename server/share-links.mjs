@@ -186,17 +186,19 @@ export class ShareLinks {
       if (room.sequence >= 10000 || activeMemberCount(room.state.members) >= PILOT_LIMITS.membersPerRoom) fail(409, "pilot_limit", "This room is full");
       assertAdmissibleMemberName(displayName.trim(), room.state.members); // Q3-D: roster check plus role names
       const id = agentJoinPrefix(row) + hash(identity.identityId).slice(0, 28), now = this.store.now();
-      // A personal invite from a member who cannot mint invites is still
-      // admitted: the room owner performs the membership write, and the
-      // link issuer stays the referrer.
-      const ownerId = this.store.roomAuthority(row.room_id).ownerId;
+      // A personal invite whose issuer cannot invite members is dead: the
+      // journal records the true issuer as actor (never the owner as a
+      // stand-in), so the reducer's canInviteMembers check applies honestly.
+      // Links minted before the mint-time gate fail closed here.
       const growth = typeof row.request_id === "string" && row.request_id.startsWith(PERSONAL_INVITE_PREFIX);
-      const actorId = growth && !canInviteMembers(room.state, row.issuer_member_id) ? ownerId : row.issuer_member_id;
+      if (growth && !canInviteMembers(room.state, row.issuer_member_id)) {
+        fail(403, "invite_not_authorized", "This invite was issued by a member who cannot invite new members");
+      }
+      const actorId = row.issuer_member_id;
       const incoming = event({ id, idempotencyKey: id, roomId: row.room_id, actorId,
         type: T.MEMBER_ADDED, at: new Date(now).toISOString(), data: { memberId: identity.identityId,
           identityId: identity.identityId, displayName: displayName.trim(), kind: "agent", permissions: [],
-          authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION,
-          ...(actorId !== row.issuer_member_id ? { referredBy: row.issuer_member_id } : {}) } });
+          authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION } });
       const state = { ...applyEventWithGrowth(room.state, incoming, growthCollector).state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
       const projection = JSON.stringify(state), sequence = room.sequence + 1;
       if (Buffer.byteLength(projection) > 4 * 1024 * 1024) fail(409, "pilot_limit", "Room storage limit reached");
@@ -393,8 +395,8 @@ export class ShareLinks {
         intendedAccountId: auth.account.id, intendedMemberId: memberId, displayName: displayName.trim(), role: "guest", permissions: [],
         expiresAt: row.expires_at, expectedIssuerMemberRevision: admission.revision }));
       // Scope is copied from the link, never supplied by the joining browser.
-      // A personal invite from a member who cannot administer membership is
-      // admitted by the room owner; creditReferral still names the link issuer.
+      // A personal invite from a member who cannot invite members is refused
+      // above; creditReferral still names the link issuer.
       this.db.prepare(`INSERT INTO membership_invitations(id,token_hash,room_id,intended_account_id,intended_member_id,intended_display_name,intended_role,intended_permissions_json,role_policy_version,
         issuer_account_id,issuer_member_id,issuer_account_auth_epoch,issuer_member_revision,issue_request_id,issue_fingerprint,revision,status,created_at,expires_at)
         VALUES(?,?,?,?,?,?,'guest','[]',?,?,?,?,?,?,?,0,'pending',?,?)`).run(invitationId, privateTokenHash, row.room_id, auth.account.id, memberId, displayName.trim(), INVITATION_ROLE_POLICY_VERSION,
@@ -440,11 +442,19 @@ export class ShareLinks {
     const auth = this.store.authenticateAccountSession(slotToken, roomId);
     return { roomId, duplicate, session: this.store.sessionOwnership(auth) };
   }
-  // Human joins require manage_members on the invitation issuer. A personal
-  // growth link keeps the member as the share-link issuer (and the referrer)
-  // and records the room owner as the admission authority.
+  // Human joins require invite rights on the invitation issuer. A personal
+  // growth link from an issuer without manage_members keeps the member as the
+  // share-link issuer (and the referrer) and records the room owner as the
+  // admission authority (the sponsored flow); an issuer with no invite rights
+  // at all is refused above.
   admissionIssuer(row, room) {
     const growth = typeof row.request_id === "string" && row.request_id.startsWith(PERSONAL_INVITE_PREFIX);
+    // A personal invite whose issuer cannot invite members is dead: fail
+    // closed instead of laundering the admission through the owner. The
+    // sponsored flow below stays for issuers who can invite.
+    if (growth && !canInviteMembers(room.state, row.issuer_member_id)) {
+      fail(403, "invite_not_authorized", "This invite was issued by a member who cannot invite new members");
+    }
     const ownerId = this.store.roomAuthority(row.room_id).ownerId;
     const issuer = room.state.members?.[row.issuer_member_id];
     const canAdmit = row.issuer_member_id === ownerId || issuer?.permissions?.includes("manage_members") === true;
