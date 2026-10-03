@@ -113,12 +113,33 @@ async function exerciseHeader(page) {
     assert.equal(await page.locator("#topbar-settings").isVisible(), true);
     const menu = await page.locator(".room-more-actions").boundingBox();
     assert.ok(menu.x >= 0 && menu.x + menu.width <= page.viewportSize().width + 1, "More popover stays inside the narrow viewport");
+    if (mode === "keyboard") {
+      for (const selector of ["#topbar-activity", "#topbar-later", "#room-actions-open", "#topbar-settings"]) {
+        await page.keyboard.press("Tab");
+        assert.equal(await page.locator(selector).evaluate(node => node === document.activeElement), true, `More menu Tab reaches ${selector}`);
+      }
+      await page.keyboard.press("Enter");
+    } else {
+      await page.locator("#topbar-settings").tap({ trial: true });
+      await page.screenshot({ path: `test-results/mobile-header-more-${page.viewportSize().width}-${await page.evaluate(() => document.documentElement.style.fontSize)}.png` });
+      await page.locator("#topbar-settings").tap();
+    }
+    await page.locator("#settings-dialog").waitFor({ state: "visible" });
     await page.keyboard.press("Escape");
+    await page.locator("#settings-dialog").waitFor({ state: "hidden" });
     assert.equal(await page.locator("#room-more > summary").evaluate(node => node === document.activeElement), true);
     await activate("#session-menu-button");
     assert.equal(await page.locator("#refresh-button").isVisible(), true);
     const account = await page.locator(".session-menu-panel").boundingBox();
     assert.ok(account.x >= 0 && account.x + account.width <= page.viewportSize().width + 1, "account popover stays inside the narrow viewport");
+    for (const item of await page.locator(".session-menu-panel button:visible:not(:disabled)").all()) {
+      if (mode === "keyboard") {
+        await page.keyboard.press("Tab");
+        assert.equal(await item.evaluate(node => node === document.activeElement), true, "account menu actions remain in the Tab sequence");
+      }
+      await item.tap({ trial: true });
+    }
+    if (mode === "touch") await page.screenshot({ path: `test-results/mobile-header-account-${page.viewportSize().width}-${await page.evaluate(() => document.documentElement.style.fontSize)}.png` });
     await page.keyboard.press("Escape");
   }
 }
@@ -128,7 +149,7 @@ test("mobile header: session actions fold into an accessible menu, conversation 
   await signIn(fixture, page, origin);
   await page.waitForFunction(() => document.querySelector("#catchup-count").textContent === "10 updates");
   await assertMoreLabel(page);
-  const layouts = async (name, count, { interact = false } = {}) => {
+  const layouts = async (name, count, { interact = false, recovery = false } = {}) => {
     for (const width of [390, 320]) for (const font of [100, 200]) {
       await page.setViewportSize({ width, height: 844 });
       // Only the long name is a DOM text-size stress fixture. Counts below are
@@ -140,6 +161,7 @@ test("mobile header: session actions fold into an accessible menu, conversation 
       }, font);
       await assertHeader(page, count);
       if (interact) await exerciseHeader(page);
+      if (recovery) await page.locator("#refresh-button").tap({ trial: true });
       await page.evaluate(() => scrollTo(0, 0));
       await assertHeader(page, count);
       mkdirSync("test-results", { recursive: true });
@@ -161,10 +183,7 @@ test("mobile header: session actions fold into an accessible menu, conversation 
   await layouts("77-updates", "7 need you · 77 updates", { interact: true });
   await context.setOffline(true); server.closeStreams();
   await page.waitForFunction(() => document.querySelector("#connection-status").textContent.startsWith("Connection interrupted"));
-  await layouts("disconnected", "7 need you · 77 updates");
-  await page.locator("#session-menu-button").tap();
-  assert.equal(await page.locator("#refresh-button").isVisible(), true, "recovery remains reachable while disconnected");
-  await page.keyboard.press("Escape");
+  await layouts("disconnected", "7 need you · 77 updates", { recovery: true });
   await context.setOffline(false);
   await page.waitForFunction(() => document.querySelector("#connection-status").textContent.startsWith("Connected"));
   await page.setViewportSize({ width: 390, height: 844 });

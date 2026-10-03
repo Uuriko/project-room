@@ -1327,6 +1327,7 @@ summary { overflow-wrap: anywhere; }
   #catchup-count { max-width: 100%; white-space: normal; overflow-wrap: normal; text-align: center; border: 0; }
   /* A wrapped trigger may be on the left. Anchor its popover to the full row. */
   .room-topbar .room-more, .room-topbar .session-menu { position: static; }
+  .room-topbar .session-menu-panel { min-width: 0; }
   .room-topbar .room-more-actions .topbar-button { white-space: normal; }
 }
 @media (max-width: 520px) {
