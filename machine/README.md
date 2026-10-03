@@ -16,6 +16,14 @@ ROOM_MACHINE_ENABLED=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.
 
 `<commit>` is the commit that contains this installer. The script checks the flag first and exits 0 when the flag is off, without `sudo` and without downloading anything.
 
+Verify before you run (M7): the hash embedded in the script guards the payload against truncation only — it cannot authenticate the script itself. Download the script, compare its sha256 against the value published in the release notes (never against a value inside the script), then run the downloaded file with the expected hash exported:
+
+```bash
+curl -fsSL -o install.sh https://raw.githubusercontent.com/Uuriko/project-room/<commit>/machine/install.sh
+echo "<sha256 from the release notes>  install.sh" | shasum -a 256 -c -
+ROOM_MACHINE_ENABLED=1 ROOM_MACHINE_INSTALL_SHA256=<sha256 from the release notes> bash install.sh -- --enroll <ONE-TIME-CODE>
+```
+
 What the owner does on the Mac:
 
 1. Power, network, and a logged-in session.
