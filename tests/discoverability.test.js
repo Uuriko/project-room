@@ -676,6 +676,38 @@ test("join route is served for the inventoried method", { timeout: 30000 }, asyn
   assert.equal(body.error.code, "invalid_join");
 });
 
+// GET and POST /api/account-rooms are the account browser routes in
+// server/http.mjs. Other methods are not that handler.
+const ACCOUNT_ROOMS_INVENTORY = {
+  "/api/account-rooms": ["GET", "POST"],
+};
+
+test("openapi inventory lists served account-rooms methods", () => {
+  const doc = buildOpenApiJson({ origin: "https://room.example" });
+  for (const [path, methods] of Object.entries(ACCOUNT_ROOMS_INVENTORY)) {
+    const entry = DISCOVERABILITY_ROUTES.find(item => item.path === path);
+    assert.ok(entry, `route table lists ${path}`);
+    assert.equal(entry.auth, "account-session");
+    assert.deepEqual([...entry.methods].sort(), [...methods].sort(), path);
+    for (const method of methods) {
+      assert.equal(typeof doc.paths[path]?.[method.toLowerCase()]?.operationId, "string", `${method} ${path}`);
+    }
+  }
+});
+
+test("account-rooms routes are served for the inventoried methods", { timeout: 30000 }, async t => {
+  const { origin } = await serve(t);
+  for (const method of ACCOUNT_ROOMS_INVENTORY["/api/account-rooms"]) {
+    const res = await fetch(`${origin}/api/account-rooms`, {
+      method,
+      headers: { "Content-Type": "application/json", Origin: origin },
+      body: method === "POST" ? "{}" : undefined,
+    });
+    await res.arrayBuffer();
+    assert.ok(![404, 405].includes(res.status), `${method} /api/account-rooms served, got ${res.status}`);
+  }
+});
+
 test("openapi inventory lists served work-claims methods", () => {
   const doc = buildOpenApiJson({ origin: "https://room.example" });
   for (const [path, methods] of Object.entries(WORK_CLAIM_INVENTORY)) {

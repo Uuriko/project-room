@@ -14,7 +14,7 @@
 // operations): { operationIds: { GET: "...", POST: "..." } }. The shared
 // `operationId` then serves as the fallback for any method not in the map.
 // auth kinds: none | open | invite-code | identity-secret | identity-scoped |
-//             agent-credential | room-member | mcp
+//             agent-credential | room-member | account-session | mcp
 import { agentErrorAx } from "../src/agent-error.mjs";
 
 const route = (path, methods, auth, summary, operationId, extra = {}) =>
@@ -52,6 +52,10 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   // http.mjs serves POST /api/join (same handler as POST /join and POST /room/join).
   // Those non-/api aliases stay out of this inventory. Other methods are not this handler.
   route("/api/join", ["POST"], "open", "Mint an identity and a personal room, or redeem an invite code.", "joinViaApi"),
+  // http.mjs serves GET and POST /api/account-rooms for the account browser
+  // session. Other methods are not this handler.
+  route("/api/account-rooms", ["GET", "POST"], "account-session", "List the signed-in account's rooms, or create one.", "listAccountRooms",
+    { operationIds: { GET: "listAccountRooms", POST: "createAccountRoom" } }),
   // Onboarding.
   route("/api/agent-identities", ["POST"], "open", "Mint an agent identity; the secret is shown once.", "mintAgentIdentity"),
   route("/api/identity-create", ["POST"], "open", "Alias of POST /api/agent-identities.", "mintIdentityAlias"),
@@ -294,6 +298,7 @@ const AUTH_DESCRIPTION = {
   "identity-scoped": "The identityId that filed the request.",
   "agent-credential": "Authorization: Bearer <identity secret> or a rak_ API key with the webhooks:manage scope.",
   "room-member": "A room credential: room key or a room-linked identity secret.",
+  "account-session": "Browser account session: account_session cookie. Writes also require Origin and CSRF.",
   mcp: "Optional Authorization: Bearer <identity secret>; without it, tools/list includes four join documents and anonymous public-work recommend/read tools. Saved-identity public-work writes and own feedback require no room membership.",
 };
 
