@@ -1438,8 +1438,10 @@ paths:
     get:
       summary: Export the event log as JSONL, or as a readable HTML page
       description: >-
-        Default (format=jsonl): one {sequence, event} per line, ordered. Same
-        visibility as the events route (members only). The body is materialised
+        Default (format=jsonl): one {sequence, event} per line, ordered.
+        Owner-only (403 owner_required for other members). Each export of a
+        live room appends a room.exported audit event carrying the format
+        only; an archived room records nothing new. The body is materialised
         in full before the response starts and is framed by Content-Length: a
         failure while reading history is a JSON error response, never a
         truncated 200, and a client that receives fewer bytes than
@@ -1457,6 +1459,7 @@ paths:
           schema: { type: string, enum: [jsonl, html], default: jsonl }
       responses:
         '401': { description: unauthenticated }
+        '403': { description: owner_required - only the room owner exports }
         '200':
           description: NDJSON export (Content-Length set; the last byte is a newline) or, with format=html, the readable page (Content-Length set; ends with an "End of export" marker)
           content:

@@ -36,6 +36,7 @@ import { invitationJoinedEvent, assertInvitationMembershipEvidence } from "./inv
 import { STORE_SCHEMA_VERSION, fenceDefinitions, registerWriter, installWriterFence, verifyWriterFence } from "./writer-fence.mjs";
 import { MESSAGES_SCHEMA, syncMessageRows } from "./messages-store.mjs";
 import { commitMessageRedaction } from "./message-redaction.mjs";
+import { historyFloor as readHistoryFloor, messageInHistory, rowInHistory, indexMessages as indexHistoryMessages } from "./history-visibility.mjs"; // PRIV-2
 import { migrateRoomLifecycleV28, verifyRoomLifecycle, refuseArchivedWrite, createAccountRoom, accountRoomEntry, ACCOUNT_ROOM_SELECT, archivedAtOf } from "./room-lifecycle.mjs";
 import { ShareLinks, shareLinkSchema, shareLinkCodeSchema } from "./share-links.mjs";
 import { DmConsents, dmConsentSchema } from "./dm-consents.mjs";
@@ -646,6 +647,9 @@ const shapes = {
   [T.ROOM_SPEND_ALLOWANCE_SET]: "allowanceCents periodDays",
   [T.ROOM_TRUST_SET]: "enabled",
   [T.ROOM_PUBLIC_RECEIPTS_SET]: "enabled",
+  // --- PRIV-2: owner-only history setting and the export audit record. ---
+  [T.ROOM_HISTORY_VISIBILITY_SET]: "historyVisibility",
+  [T.ROOM_EXPORTED]: "format",
   // --- GR2 public acquisition opt-ins. Command field allowlist only. ---
   [T.ROOM_PUBLIC_PAGE_SET]: "enabled",
   [T.ROOM_JOIN_LINK_SET]: "enabled",
@@ -2278,6 +2282,20 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.replayProvenance(rooms, { upgradeV1: false });
     });
   }
+  // --- PRIV-2 history visibility ---
+  // null when the member reads the whole history, else { sequence, at } of
+  // their join event. Callers already hold a transaction.
+  // Reads only the authority and history fields, not the full projection, so
+  // event polling stays cheap.
+  historyFloor(roomId, memberId, headSequence = null) {
+    const { sequence, ownerId, members } = this.roomAuthority(roomId);
+    const row = this.db.prepare("SELECT json_extract(projection,'$.room.historyVisibility') AS visibility, json_extract(projection,'$.room.historyDefaultsVersion') AS defaults FROM rooms WHERE id=?").get(roomId);
+    let visibility = null;
+    try { visibility = row?.visibility ? JSON.parse(row.visibility) : null; } catch { visibility = null; }
+    const state = { room: { ownerId, historyVisibility: visibility, historyDefaultsVersion: row?.defaults ?? null }, members };
+    return readHistoryFloor(this.db, state, roomId, memberId, headSequence ?? sequence);
+  }
+  // --- end PRIV-2 ---
   ensureEventTypeIndex() {
     // Additive. Expression indexes do not fire writer triggers. Durable Object
     // SQL rejects SAVEPOINT, so this runs inside the open transaction itself.
@@ -3860,11 +3878,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       const { members } = this.roomAuthority(roomId);
       const room = this.room(roomId);
+      // PRIV-2: a since_join reader sees no thread rooted before their join.
+      const floor = this.historyFloor(roomId, auth.member.id);
       const root = room.state.messages.find(m => m.id === messageId);
-      if (!root) fail(404, "message_not_found", "Message not found");
+      if (!root || !messageInHistory(root, floor)) fail(404, "message_not_found", "Message not found");
       const byParent = new Map();
       for (const m of room.state.messages) {
-        if (!m.replyToId) continue;
+        if (!m.replyToId || !messageInHistory(m, floor)) continue;
         if (!byParent.has(m.replyToId)) byParent.set(m.replyToId, []);
         byParent.get(m.replyToId).push(m);
       }
@@ -3890,9 +3910,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const room = this.room(roomId);
       const needle = query.trim().toLowerCase();
       const result = { roomId, query: query.trim(), messages: [], workItems: [] };
+      const floor = this.historyFloor(roomId, auth.member.id); // PRIV-2
       if (kind === "all" || kind === "messages" || kind === "pinned") {
         for (const m of room.state.messages ?? []) {
           if (m.body == null) continue; // tombstone
+          if (!messageInHistory(m, floor)) continue; // PRIV-2: before the reader joined
           if (kind === "pinned" && !isPinned(room.state, m.id)) continue;
           if (mutedEvent(room.state, auth.member?.id, { actorId: m.authorId })) continue; // muted author (E4), every kind
           if (m.body.toLowerCase().includes(needle)) {
@@ -4065,8 +4087,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const viewerId = auth.member.id;
       const identityId = this.bonds.identityForMember(roomId, viewerId);
       const isOwner = viewerId === authority.ownerId;
-      const visible = events.filter(({ event }) => targetedEventVisible(event, viewerId)
-        && peerEventVisible(event, { memberId: viewerId, identityId, isOwner }));
+      // PRIV-2: since_join readers page past events from before their join.
+      const floor = this.historyFloor(roomId, viewerId, sequence);
+      const floorMessages = floor ? indexHistoryMessages(this.room(roomId).state.messages) : null;
+      const visible = events.filter(row => rowInHistory(row, floor, floorMessages) && targetedEventVisible(row.event, viewerId)
+        && peerEventVisible(row.event, { memberId: viewerId, identityId, isOwner }));
       // #658: mention chips ride on message views. One batched query for
       // the whole page (no N+1); only members who can read the room see it.
       const messageIds = visible.filter(({ event }) => event?.type === T.MESSAGE_POSTED).map(({ event }) => event.id);
@@ -4239,8 +4264,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const isOwner = auth.member.id === room.state.room.ownerId;
       // Derive continuation from scanned rows before removing private events:
       // an invisible page must still progress within its frozen horizon.
-      brief.history.items = brief.history.items.filter(({ event }) => targetedEventVisible(event, auth.member.id)
-        && peerEventVisible(event, { memberId: auth.member.id, identityId, isOwner }));
+      const floor = this.historyFloor(roomId, auth.member.id, room.sequence); // PRIV-2
+      const floorMessages = floor ? indexHistoryMessages(room.state.messages) : null;
+      brief.history.items = brief.history.items.filter(row => rowInHistory(row, floor, floorMessages) && targetedEventVisible(row.event, auth.member.id)
+        && peerEventVisible(row.event, { memberId: auth.member.id, identityId, isOwner }));
       return { roomId, viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null, ...brief };
     });
   }

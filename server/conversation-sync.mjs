@@ -2,6 +2,7 @@ import { createHash, createCipheriv, createDecipheriv, randomBytes } from "node:
 import { ServiceError } from "./store.mjs";
 import { validId } from "../src/events.js";
 import { markIfOther, withContentTrust } from "./content-trust.mjs";
+import { messageInHistory } from "./history-visibility.mjs";
 
 const keys = new WeakMap();
 const MAX_BYTES = 512 * 1024;
@@ -54,14 +55,18 @@ export function readConversation(store, token, roomId, { limit = 50, cursor = nu
     if ((cursor !== null || since !== null) && (!saved || saved.scope !== scope || saved.kind !== (cursor !== null ? "page" : "checkpoint"))) return reset();
     if (cursor !== null && (saved.sequence !== head.sequence || saved.anchor !== anchor || !Number.isSafeInteger(saved.before) || saved.before < 0)) return reset();
     const before = cursor !== null ? saved.before : Number.MAX_SAFE_INTEGER;
+    // PRIV-2: a since_join reader pages only messages from their join onward.
+    const floor = store.historyFloor(roomId, auth.member.id);
     const rows = store.db.prepare(`SELECT CAST(m.key AS INTEGER) AS position, json_remove(m.value, '$.editHistory') AS body
       FROM rooms r, json_each(r.projection, '$.messages') m
       WHERE r.id=? AND CAST(m.key AS INTEGER)<?
         AND (json_extract(m.value,'$.toMemberId') IS NULL OR json_extract(m.value,'$.toMemberId')=''
           OR json_extract(m.value,'$.authorId')=? OR json_extract(m.value,'$.toMemberId')=?)
         AND (? IS NULL OR json_extract(m.value,'$.id')=?)
+        AND (? IS NULL OR json_extract(m.value,'$.createdAt')>=?)
       ORDER BY CAST(m.key AS INTEGER) DESC LIMIT ?`)
-      .all(roomId, before, auth.member.id, auth.member.id, messageId, messageId, messageId === null ? limit + 1 : 1);
+      .all(roomId, before, auth.member.id, auth.member.id, messageId, messageId, floor?.at ?? null, floor?.at ?? null, messageId === null ? limit + 1 : 1)
+      .filter(row => !floor || messageInHistory(JSON.parse(row.body), floor));
     if (messageId !== null && !rows.length) fail(404, "message_not_found", "Message not found");
     const selected = [];
     let bytes = 0;
