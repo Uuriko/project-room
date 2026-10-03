@@ -379,7 +379,20 @@ export const unfencedAdditiveTables = Object.freeze([
 // Created on first use, not in the constructor. A database that has never
 // issued an OAuth grant or persisted an abuse rate bucket does not have
 // these tables; a database that has must still pass the recovery audit.
-export const lazyAdditiveTables = Object.freeze([...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES]);
+// Retired Emissary growth layer (Batch 1, PR #1402): no module creates
+// these tables anymore, but databases written before the removal still
+// carry them (no DROP was issued, for data preservation). They stay in
+// the allowed set so the recovery audit passes on upgraded databases,
+// while fresh databases simply do not have them.
+const RETIRED_EMISSARY_TABLES = Object.freeze([
+  "external_identities",
+  "external_receipts",
+  "emissary_drops",
+  "emissary_invite_attribution",
+  "emissary_idempotency",
+  "emissary_journal",
+]);
+export const lazyAdditiveTables = Object.freeze([...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES, ...RETIRED_EMISSARY_TABLES]);
 // messages (MSG-1) is fenced at v37 only. v34–v36 files do not have the
 // table or its triggers; verifyWriterFence(36) must not require them.
 const v34FencedTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables])]);
