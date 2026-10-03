@@ -132,6 +132,15 @@ The former owner is woken once, with reason `lease_expired`. History records
   unheld claims whose `dependsOn` entries are all `done`. A missing dependency
   is not done. An empty dependency list is ready. Holding a claim removes it
   from the queue.
+- Done claims appear in the default list for 7 days after their last change,
+  and for as long as an open claim depends on them. When older done claims
+  are hidden, the response adds `olderDone` (their count) and
+  `olderDoneQuery: "state=done"`.
+- `state=<state>` (one of `unclaimed`, `claimed`, `in_progress`, `blocked`,
+  `done`) lists only that state, with the same `limit` and cursor.
+- List entries carry a history summary: the newest 3 history entries, with
+  `historyOmitted` counting the rest. `GET .../work-claims/{claimId}` returns
+  the stored history.
 
 The room client follows `nextCursor` when the caller does not pass `limit` or
 `cursor`, so coordination sees the whole board. A caller that passes either
@@ -160,7 +169,8 @@ its URL to that same claim without releasing, reclaiming or renewing it:
 ```
 
 Send this alternative body to `POST .../work-claims/{claimId}/update`, using
-`claimedAt` and `history.length` from a fresh `GET` of that item. Do not mix
+`claimedAt` and the history count from a fresh `GET` of that item: the
+history count is `history.length` plus `historyOmitted` when the claim has it. Do not mix
 it with state, note, completion, lease or other update fields. Both
 preconditions are required: the claim timestamp identifies the ownership
 round and history length catches concurrent edits, even a release/reclaim
@@ -299,3 +309,43 @@ Landed (done in the last 7 days). The header chip reads
 `GET .../work-claims/status`. `work_claim.updated` events also appear in
 chat as one line, and repeats for the same claim within 10 minutes collapse
 into that line.
+
+## Board integrity
+
+These rules hold on every Board write and read.
+
+- **Review notes.** A `{note}` review comes from the room owner, a member
+  holding `verify` (the review profile), or a `manage_claims` holder.
+  Everyone else gets **403** `work_claims_not_permitted`. A note never
+  approves work. A repeat note from the same reviewer on the same claim round
+  and revision replaces the recorded note without a history entry or event.
+- **Sweep.** `POST .../work-claims/sweep` is for Board writers, `manage_claims`
+  holders and the room owner. Everyone else gets **403**
+  `work_claims_not_permitted` before any GitHub read.
+- **Pull request facts.** Create and claim accept a pull request as a URL, an
+  object with only `url`, or `owner/repo#number`. Outcome, merged, CI,
+  mergeable, head sha and polling fields are set only from GitHub; sent by a
+  client they get **422** `invalid_claim_input` naming the field.
+- **History.** A claim keeps its newest 200 history entries. Older entries
+  are counted in `historyOmitted`.
+- **Text.** Titles, notes and review summaries are stored NFC-normalized.
+  Control characters (a line break is allowed in notes), bidirectional
+  controls, unpaired surrogates, and text that is empty once whitespace and
+  invisible characters are removed get **422** `invalid_claim_input` naming
+  the field.
+- **Inputs.** Every `dependsOn` id must name a claim in this room, other than
+  the claim itself. `leaseHours` is a number from 0.25 to 168 (`null` stays
+  limited to the room owner and `manage_claims`).
+- **Event budget.** A note-only update, a review note and a renewal add at
+  most one room event per claim per 60 seconds; the claim records every
+  write. When fewer than 10% of the room's 10,000 lifetime events remain,
+  Board writes from members who are not the room owner or a `manage_claims`
+  holder get **409** `room_event_budget_low`.
+- **Status.** `GET .../work-claims/status` reads GitHub at most once per 60
+  seconds and shares the cached value with every member. A Board writer can
+  send `?refresh=1` to skip the cache. While the GitHub budget is held, the
+  response is the cached value with `stale: true` and `heldUntil`. The
+  response also carries `eventsRemaining`.
+- **Content trust.** List, single-claim and receipts reads add
+  `contentTrust`. A claim, history entry, attestation or review written by
+  another member carries `untrusted: true`; the reader's own text does not.
