@@ -48,6 +48,6 @@ The bot loop stays off until `room-machine bot enable --room <roomId>`. `room-ma
 
 ## Commands
 
-`status`, `doctor`, `stop`, `pause --minutes N`, `resume`, `uninstall`, `preflight`, `enroll --enroll CODE`, `provider set NAME`, `bot enable --room ROOM`, `bot disable`, `run`.
+`status`, `doctor`, `stop`, `pause --minutes N`, `resume`, `uninstall`, `preflight`, `enroll` (code via `--enroll CODE` or stdin), `provider set NAME`, `bot enable --room ROOM`, `bot disable`, `run`.
 
 `doctor` posts measured facts only: architecture, chip, RAM, free disk, macOS version, Lume version, driver version, guest grants, and whether Ollama and Xcode answered. A probe that fails is `not measured` or `absent`.
