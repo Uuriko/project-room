@@ -519,6 +519,50 @@ const INVENTORY_METHOD_CONTRACT = {
   "/api/agent-rooms": ["GET", "POST"],
 };
 
+// Served methods read from server/http.mjs (workClaimsMatch classifies GET as
+// list and every other method as create) and handleWorkClaimsCore (only GET
+// or POST returns a claim body; other methods 405).
+const WORK_CLAIM_INVENTORY = {
+  "/api/rooms/{roomId}/work-claims": ["GET", "POST"],
+  "/api/rooms/{roomId}/work-claims/sweep": ["POST"],
+  "/api/rooms/{roomId}/work-claims/duplicates": ["GET"],
+  "/api/rooms/{roomId}/work-claims/{claimId}": ["GET"],
+  "/api/rooms/{roomId}/work-claims/{claimId}/claim": ["POST"],
+  "/api/rooms/{roomId}/work-claims/{claimId}/update": ["POST"],
+  "/api/rooms/{roomId}/work-claims/{claimId}/review": ["POST"],
+  "/api/rooms/{roomId}/work-claims/{claimId}/release": ["POST"],
+  "/api/rooms/{roomId}/work-claims/{claimId}/reassign": ["POST"],
+  "/api/rooms/{roomId}/work-claims/{claimId}/renew": ["POST"],
+};
+
+test("openapi inventory lists served work-claims methods", () => {
+  const doc = buildOpenApiJson({ origin: "https://room.example" });
+  for (const [path, methods] of Object.entries(WORK_CLAIM_INVENTORY)) {
+    const entry = DISCOVERABILITY_ROUTES.find(item => item.path === path);
+    assert.ok(entry, `route table lists ${path}`);
+    assert.deepEqual([...entry.methods].sort(), [...methods].sort(), path);
+    for (const method of methods) {
+      assert.equal(typeof doc.paths[path]?.[method.toLowerCase()]?.operationId, "string", `${method} ${path}`);
+    }
+  }
+});
+
+test("work-claims routes are served for the inventoried methods", { timeout: 30000 }, async t => {
+  const { origin } = await serve(t);
+  for (const [path, methods] of Object.entries(WORK_CLAIM_INVENTORY)) {
+    const concrete = path.replace("{roomId}", "no-such-room").replace("{claimId}", "no-such-claim");
+    for (const method of methods) {
+      const res = await fetch(`${origin}${concrete}`, {
+        method,
+        headers: { "Content-Type": "application/json", Origin: origin },
+        body: method === "POST" ? "{}" : undefined,
+      });
+      await res.arrayBuffer();
+      assert.ok(![404, 405].includes(res.status), `${method} ${concrete} served, got ${res.status}`);
+    }
+  }
+});
+
 test("inventory method accuracy: served methods match the route table", { timeout: 30000 }, async t => {
   const { origin } = await serve(t);
   for (const [path, methods] of Object.entries(INVENTORY_METHOD_CONTRACT)) {

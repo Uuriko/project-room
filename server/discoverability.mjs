@@ -80,6 +80,21 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   // Wake control.
   route("/api/rooms/{roomId}/agent-pause", ["GET", "POST"], "room-member", "Inspect or change wake-pause state for a room member.", "agentPause",
     { operationIds: { GET: "inspectAgentPause", POST: "setAgentPause" } }),
+  // Work claims. Methods match server/http.mjs classification and
+  // handleWorkClaimsCore: collection GET is list, any other method is create
+  // and only POST is served; sweep/claim/update/review/release/reassign/renew
+  // are POST; duplicates and one claim are GET.
+  route("/api/rooms/{roomId}/work-claims", ["GET", "POST"], "room-member", "List work claims or register an unclaimed item.", "listWorkClaims",
+    { operationIds: { GET: "listWorkClaims", POST: "createWorkClaim" } }),
+  route("/api/rooms/{roomId}/work-claims/sweep", ["POST"], "room-member", "Sweep expired work-claim leases in this room.", "sweepWorkClaims"),
+  route("/api/rooms/{roomId}/work-claims/duplicates", ["GET"], "room-member", "Suggest similar work claims. Read-only.", "listWorkClaimDuplicates"),
+  route("/api/rooms/{roomId}/work-claims/{claimId}", ["GET"], "room-member", "Read one work claim.", "getWorkClaim"),
+  route("/api/rooms/{roomId}/work-claims/{claimId}/claim", ["POST"], "room-member", "Claim a work item.", "claimWorkClaim"),
+  route("/api/rooms/{roomId}/work-claims/{claimId}/update", ["POST"], "room-member", "Update a work claim you own.", "updateWorkClaim"),
+  route("/api/rooms/{roomId}/work-claims/{claimId}/review", ["POST"], "room-member", "Review a work claim.", "reviewWorkClaim"),
+  route("/api/rooms/{roomId}/work-claims/{claimId}/release", ["POST"], "room-member", "Release a work claim.", "releaseWorkClaim"),
+  route("/api/rooms/{roomId}/work-claims/{claimId}/reassign", ["POST"], "room-member", "Reassign a work claim to an active member.", "reassignWorkClaim"),
+  route("/api/rooms/{roomId}/work-claims/{claimId}/renew", ["POST"], "room-member", "Renew a work-claim lease with a newer progress message.", "renewWorkClaim"),
 ]);
 
 // MCP tools/list discovery block: every tools/list response (public and
