@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { event, EVENT_TYPES as T, MEMBERSHIP_AUTHORITY_POLICY_VERSION } from "../src/events.js";
+import { event, EVENT_TYPES as T, MEMBERSHIP_AUTHORITY_POLICY_VERSION, DISPLAY_NAME_POLICY_VERSION } from "../src/events.js";
 import { canonicalInvitationData } from "./invitation-journal.mjs";
 
 // One complete receipt contract is shared by issuance of the joined event and audit.
@@ -20,7 +20,8 @@ export function invitationJoinedEvent(record) {
       invitedByMemberId: record.issuer_member_id,
       invitationId: record.id,
       rolePolicyVersion: record.role_policy_version,
-      authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION
+      authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION,
+      displayNamePolicyVersion: DISPLAY_NAME_POLICY_VERSION
     }
   });
 }

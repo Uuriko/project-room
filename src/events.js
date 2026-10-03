@@ -963,6 +963,12 @@ function joinMemberViaInvitation(state, incoming) {
   if (authorityPolicyVersion !== MEMBERSHIP_AUTHORITY_POLICY_VERSION) throw new Error("Unsupported membership authority policy");
   validatePermissions(permissions, "human");
   requireScopedMemberAdministration(state, invitedByMemberId, memberId, null, permissions);
+  // Reserved, duplicate, confusable, and control-character names are refused
+  // on the invitation join path too. Older events omit the policy stamp, so
+  // replay never throws for already-admitted members.
+  if (incoming.data.displayNamePolicyVersion === DISPLAY_NAME_POLICY_VERSION) {
+    assertMemberDisplayNameAvailable(incoming.data.displayName, state.members);
+  }
   state.members[memberId] = {
     id: memberId,
     displayName: incoming.data.displayName,
