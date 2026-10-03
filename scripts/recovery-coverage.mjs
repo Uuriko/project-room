@@ -166,26 +166,6 @@ export async function seedRecoveryCoverage(f) {
   f.store.db.prepare(`INSERT INTO board_vtwo_idempotency(scoped_key,status,body,fingerprint,created_at)
     VALUES('recovery-scope',200,'{}','recovery-fingerprint',?)`)
     .run(Date.now());
-  // Seed the emissary lure-generation ledgers (Slice 2, RC-2026-09-28-2873)
-  // so the audit's exact-table-set check covers them: the tables are
-  // created at store boot (server/store.mjs). Rows are written directly:
-  // the fixture has no reason to run the lure-generation path (it would
-  // mint share links), and the raw invite token is never fixture data —
-  // only its hash shape.
-  f.store.db.prepare(`INSERT INTO emissary_drops
-    (drop_id,room_id,issuer_member_id,venue,title,terms,deadline_at,artifact_text,artifact_sha256,truncated,source,idempotency_key,created_at)
-    VALUES(?, 'commons','owner','sssnack','Recovery drop','Recovery fixture terms',NULL,'Recovery drop text',?,0,'verified',NULL,?)`)
-    .run(`emd1.${"ab".repeat(16)}`, "d".repeat(64), f.now());
-  f.store.db.prepare(`INSERT INTO emissary_invite_attribution
-    (attribution_id,room_id,issuer_member_id,invite_token_hash,note,minted_at,expires_at)
-    VALUES(?, 'commons','owner',?,'recovery fixture',?,?)`)
-    .run(`eia1.${"cd".repeat(16)}`, "e".repeat(64), f.now(), f.now() + 7 * 86400000);
-  f.store.db.prepare(`INSERT INTO emissary_idempotency (room_id,idempotency_key,tool,result_json,created_at)
-    VALUES('commons','recovery-idem-key','emissary_drop','{}',?)`)
-    .run(f.now());
-  f.store.db.prepare(`INSERT INTO emissary_journal (event_id,room_id,kind,actor_member_id,subject_id,details_json,created_at)
-    VALUES(?,'commons','emissary.drop_generated','owner',?,'{}',?)`)
-    .run(randomUUID(), `emd1.${"ab".repeat(16)}`, f.now());
   // Seed one referral invite (redeemed) + its key row + chain membership so
   // the capture covers referral_invite_keys, referral_invites and
   // referral_chain_members (#1025 signed agent-carried referral invites).
@@ -401,21 +381,6 @@ export async function seedRecoveryCoverage(f) {
     (endpoint, room_id, member_id, p256dh, auth, expiration_time, created_at)
     VALUES ('https://push.example.test/recovery', 'commons', 'owner', 'recovery-p256dh', 'recovery-auth', NULL, ?)`)
     .run(f.now());
-  // Seed one external identity + one receipt so the capture covers the Emissary
-  // slice-1a tables (external_identities, external_receipts, RC-2026-09-27-2860).
-  // register/record are the product writers; the audit's "every table has
-  // substantive data" check needs one row in each.
-  const recoveryExternal = f.store.emissaryGraph.register("commons", {
-    kind: "agent",
-    displayName: "Recovery emissary",
-    venues: [{ venue: "thecolony", handle: "@recovery-emissary", proof: "self_asserted" }],
-  });
-  f.store.emissaryReceipts.record("commons", {
-    externalId: recoveryExternal.external_id,
-    offerId: null,
-    kind: "work",
-    payload: { synthetic: true },
-  });
   // Seed one live grant edge so the capture covers agent_capability_grants
   // (per-agent capability grant edges, UFO-steal slice 1 RC-2026-09-27-2728).
   // issueGrant is the product writer; the audit's "every table has
@@ -464,6 +429,17 @@ export async function seedRecoveryCoverage(f) {
   const followInput = { requestId: "recovery-create-follow-up", expectedReviewRevision: followRevision.review.revision, taskId: "follow-parent", expectedTermsVersion: 1,
     generation: 1, artifactSha256: followReceipt.artifact.sha256, successorTaskId: "follow-child", terms: { ...followTerms, title: "Explicit new recovery task" }, repositoryRef: "main", files: ["synthetic/revised.txt"] };
   const followResult = f.store.publicWorkSuccessors.create("commons", "owner", followReceipt.receiptId, followInput);
+  // Seed terms acceptance, one public report, and one unpublish. The recovery
+  // audit and the cold-start budget require a row in every application table.
+  // The unpublish target is not a room in this fixture.
+  const termsAccount = f.store.db.prepare("SELECT id FROM accounts LIMIT 1").get();
+  f.store.db.prepare("INSERT INTO account_terms (account_id, terms_version, accepted_at) VALUES (?, ?, ?)")
+    .run(termsAccount.id, "2026-10-02", f.now());
+  f.store.db.prepare(`INSERT INTO public_abuse_reports (id, kind, target, body, email, ip_hash, created_at, status)
+    VALUES ('rpt_recovery', 'room', 'recovery-public-room', 'Seeded so the capture covers public abuse reports.', NULL, ?, ?, 'open')`)
+    .run(createHash("sha256").update("project-room-public-report:recovery").digest("hex"), f.now());
+  f.store.db.prepare("INSERT INTO public_unpublish (kind, target, at, by_account) VALUES ('room', 'recovery-public-room', ?, ?)")
+    .run(f.now(), termsAccount.id);
 
   return {
     runRequest, runInput, offerRecords: f.store.projectOffers.ownerList("commons", "owner"),

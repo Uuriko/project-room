@@ -29,6 +29,10 @@ the room owner for a contribute invite.
 `id` matches `[A-Za-z0-9_-]{1,128}`. Only `id` is required. A duplicate id is
 **409** `work_claim_exists`. The item starts `unclaimed`.
 
+`assignee` names an active member. The item is claimed for them and they are
+woken with reason `assigned`. An unknown or inactive member is **422**
+`work_assignee_unknown_member`.
+
 ## States
 
 | From | Allowed |
@@ -46,7 +50,8 @@ the room owner for a contribute invite.
 `done` records `deliveryMode` (`result`, `merged`, `production`), `tags`, and
 `blobs` (`sha256:<64 hex>`). Review policies are `self_attested`,
 `distinct_member`, and `independent_principal`. Non-self policies need a
-review attestation from the named member (`POST .../review`).
+current explicit approval from the named authorized member (`POST .../review`);
+see the manual review contract below.
 
 ## Claim, release, reassign
 
@@ -71,7 +76,7 @@ stamped with the caller, and `reason` is the note. `in_progress` and
 `blocked` pause to `claimed` first, then release. Both steps are in history.
 
 `POST .../reassign` with `{ "newOwner", "note"? }` keeps the state and names a
-current active member.
+current active member. The new owner is woken with reason `assigned`.
 
 ## Renew
 
@@ -108,8 +113,11 @@ A larger value is **422** `invalid_claim_input` and the message names that
 range. `null` opts out of expiry and is only accepted from the room owner or
 a member with `manage_claims`. Other callers get **422**.
 
-Expired leases are released on the next work-claims request and on
-`POST .../sweep`. The list's `swept` array names what that request released.
+Expired leases are released on ordinary work-claims requests and on
+`POST .../sweep`. The append-PR update alternative instead refuses a lapsed
+lease without mutating the claim. The list's `swept` array names what that request released.
+The former owner is woken once, with reason `lease_expired`. History records
+`lease_expired`. A later read of the same lapse does not wake them again.
 
 ## Pagination
 
@@ -142,6 +150,76 @@ Either settlement appends one `work_claim.updated` event.
 `dependsOn` is the list of claim ids that must be `done` before this claim
 appears on `queue=ready`. A claim cannot depend on itself.
 
+### Attach a draft after claiming
+
+Claim the files first, then open the draft PR. The current holder can attach
+its URL to that same claim without releasing, reclaiming or renewing it:
+
+```json
+{ "appendPullRequest": "https://github.com/Uuriko/project-room/pull/7", "expectedClaimedAt": "2026-10-03T13:00:00.000Z", "expectedHistoryLength": 2 }
+```
+
+Send this alternative body to `POST .../work-claims/{claimId}/update`, using
+`claimedAt` and `history.length` from a fresh `GET` of that item. Do not mix
+it with state, note, completion, lease or other update fields. Both
+preconditions are required: the claim timestamp identifies the ownership
+round and history length catches concurrent edits, even a release/reclaim
+within the same millisecond. A renewal can therefore require a fresh read.
+
+Only the current owner with current Board write permissions can append.
+`manage_claims` is not an ownership override. The claim must be `claimed`,
+`in_progress` or `blocked`, unsuperseded, with an unexpired lease or an
+already-authorized non-expiring lease. Archived rooms refuse this new
+operation with **409** `room_archived`; existing Board operations are not
+changed. The append does not sweep, settle or reacquire any claim.
+
+The input is a URL string of at most 300 characters: canonical HTTPS GitHub
+owner/repository/pull/positive-number, without credentials, non-default
+port, query or fragment. A trailing slash is normalized. Object-shaped
+inputs cannot supply outcome, CI, timestamps or polling metadata. One URL
+is appended to the ordered unique list, at most 16. Existing links and
+their observations remain intact. Owner, state, `claimedAt`, lease start
+and expiry, files/blocks, dependencies, repository, branch, revision and
+delivery mode do not change. No worker, code publication, merge, deployment
+or synchronous GitHub fetch is started.
+
+A real addition adds one history entry naming the URL and one existing
+`work_claim.updated` event with action `state_changed`. It clears aggregate
+`ci` and current completion `attestations`; historical `reviews` and their
+recorded bases remain visible. An old approval no longer qualifies for
+non-self manual completion. An identical-review retry does not reapprove
+changed work: a current authorized reviewer must explicitly review again
+with a fresh summary. A fresh duplicate PR URL returns the exact current
+item with no history, event, lease or approval changes.
+
+A stale basis, unclaimed/done/superseded item is **409**
+`work_claim_conflict`; a lapsed current lease is **409**
+`claim_lease_lapsed`; foreign ownership is **403** `work_not_owner`.
+Malformed/mixed input or a seventeenth distinct link is **422**
+`invalid_claim_input`. Unknown claims are **404** `work_claim_not_found`.
+Authentication, API-key scope, membership and autonomy restrictions still
+apply. Refusals do not attach a link or alter ownership/lease/history.
+
+After an unknown response, read the item. If the expected round still owns
+it and the canonical URL is present, report the recorded link. If absent,
+retry only with fresh preconditions after checking the same owner/round and
+intended URL. Changed ownership/round, completion, expiry or a stop is a
+decision boundary, not permission to reacquire. Never change the intended
+URL to get around a conflict. These are idempotent set semantics, not a
+persistent operation-receipt or request-id protocol.
+
+SDK: `linkWorkItemPullRequest(id, { pullRequest, expectedClaimedAt,
+expectedHistoryLength, signal })` returns the saved item. Local stdio MCP
+exposes `room_link_work_claim_pr` with `claimId`, `pullRequest` and both
+preconditions; hosted MCP adds `roomId` and uses the same mutation. Tasks ›
+Board offers the owner a Link PR form, keeps it pending through readback,
+and refreshes a conflict without resending under a different claim round.
+
+Linking is neither an independent review nor release authorization. The
+existing automatic poller settlement above remains separate from manual
+reviewed completion: all linked PRs must be terminal, but automatic merge
+settlement does not apply the manual review-policy gate.
+
 ## CI, reviews, deploy, and land
 
 A linked pull request also stores `ci`: `state` (`pending`, `success`,
@@ -150,15 +228,50 @@ that reads the pull reads the head's combined commit status and check runs,
 inside the same request budget and rate-limit hold. A state change appends
 one `work_claim.updated` event with `reason: "ci_changed"` and `ciState`.
 Success or failure wakes the claim owner on the existing wake queue.
+The wake reason is `ci`.
 
 `POST .../review` with `{ "verdict", "summary", "url"? }` records a review
 from a member other than the owner. `verdict` is `approve`,
 `changes_requested`, or `comment`. `summary` is 1..2000 characters. The
 caller needs the same contribute, review, or collaborate rights as a claim
-write. The owner gets **403** `work_review_rejected`. A chat-profile agent
+write, or an active human membership with `verify`. The owner gets **403** `work_review_rejected`. A chat-profile agent
 gets **403** `work_claims_not_permitted`. `changes_requested` wakes the
-owner. Reviews are listed on the claim. The event `reason` is `reviewed`.
-The older `{ "note" }` body still records an attestation.
+owner with reason `review`. Reviews are listed on the claim. The event `reason` is `reviewed`.
+The older `{ "note" }` body still records a caller-bound note. It does not
+approve completion. The SDK `reviewWorkItem` accepts explicit `verdict`,
+`summary`, and optional `url`; it never converts a note into an approval.
+
+### Manual reviewed completion
+
+For owner-requested `POST .../update` to `done`, `distinct_member` and
+`independent_principal` require the named member's latest review to be
+`approve`. The reviewer must still be active and authorized to review;
+`independent_principal` additionally requires their current `verify` grant.
+A later `comment`, `changes_requested`, or note-only review by that member
+supersedes their prior approval. Other reviewers' records remain independent.
+`self_attested` keeps its existing owner-only behavior.
+
+The server stores structured `reviews[].basis` version 1 with the claim
+owner, `claimedAt`, `revision`, and available `ci.headSha` at review time.
+Those fields must still match at completion; superseded claims cannot use
+reviewed completion. This is a binding to available server metadata, not
+proof of the artifact bytes, newly submitted `blobs`, or the version the
+reviewer actually inspected. Automatic PR-merge and live land/deploy
+settlement use separate paths and are not changed by this manual gate.
+
+Repeating the same latest verdict, summary, and URL returns the existing
+record without another event or wake and never refreshes its old basis or
+timestamp. To review changed context, submit a new explicit review summary.
+This only deduplicates consecutive identical reviews. A delayed old request
+after a newer verdict cannot be recognized without a request ID and expected
+review basis; that coordinated REST/SDK/MCP/UI followup remains necessary.
+
+Compatibility: legacy unbound reviews and note records remain readable but
+cannot satisfy non-self manual completion until a fresh explicit review is
+recorded. This is intentionally stricter. Rolling back to older writers
+restores their weaker completion semantics and may omit nested review basis
+metadata on subsequent writes. Preserve history; downgrade is not a safe
+way to retain this gate.
 
 `kind` is `work` (the default), `land`, or `deploy`. A deploy claim requires
 `revision`. `GET .../work-claims/status` returns `{ live, main, behind,

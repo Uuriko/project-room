@@ -66,15 +66,45 @@ test("Invite reveals agent setup from the mobile sidebar", { timeout: 20000 }, a
 test("browser owner issues digest-only setup; a real external client imports, reads, rotates and loses access", { timeout: 30000 }, async t => {
   const f = await setup(t), requests = [];
   f.page.on("request", request => { if (request.url().endsWith("/agent-connections") && request.method() === "POST") requests.push(request.postDataJSON()); });
-  await f.open(); await f.capture("desktop-form"); await f.create();
+  await f.open();
+  assert.equal(await f.page.evaluate(() => document.activeElement?.dataset.agentType), "claude-code", "keyboard setup begins with the app choice");
+  await f.page.keyboard.press("Enter");
+  assert.equal(await f.page.locator("#agent-connect-name").inputValue(), "Claude Code");
+  assert.equal(requests.length, 0, "choosing a host grants no access");
+  await f.capture("desktop-form"); await f.create();
   await f.page.locator("#agent-setup").waitFor({ state: "visible" });
-  assert.equal(await f.page.locator("#agent-import-checklist").isVisible(), true);
-  assert.match(await f.page.locator("#agent-import-checklist").innerText(), /room_check_access/);
+  assert.equal(await f.page.evaluate(() => document.activeElement?.id), "agent-setup-title");
+  assert.match(await f.page.locator("#agent-setup").innerText(), /Host connection and replies have not been verified/);
+  assert.equal(await f.page.locator("#agent-all-steps").evaluate(node => node.open), false, "full instructions wait until requested");
   assert.match(await f.page.locator("#agent-import-route").innerText(), /room_check_access/);
+  // Owner-boundary regression: creating access must leave the host instructions
+  // reachable. Previously they were inside the form hidden after issuance;
+  // no existing test tried to open them from the actual setup screen.
+  assert.equal(await f.page.locator("#agent-host-snippets > summary").isVisible(), true,
+    "MCP host instructions remain reachable after access is created");
+  await f.page.locator("#agent-host-snippets > summary").click();
+  assert.equal(await f.page.locator("#agent-mcp-cli").isVisible(), true);
+  assert.match(await f.page.locator("#agent-mcp-cli").innerText(), /claude mcp add/);
+  await f.page.locator("#agent-host-snippets > summary").click();
+  assert.equal(await f.page.locator("#agent-private-config").inputValue(), "", "reading instructions never reveals the key");
+  await f.page.locator("#agent-all-steps > summary").click();
+  assert.match(await f.page.locator("#agent-import-checklist").innerText(), /room_check_access/);
+  assert.match(await f.page.locator("#agent-import-checklist").innerText(), /linked Room reply/);
+  await f.page.locator("#agent-all-steps > summary").click();
+  await f.capture("desktop-ready");
   assert.equal(await f.page.locator("#agent-local-client").evaluate(node => node.open), false);
   await f.page.locator("#agent-local-client > summary").click();
   assert.match(await f.page.locator("#agent-local-command").innerText(), /pbpaste \| node scripts\/agent-inbox\.mjs import/);
-  await f.capture("desktop-ready"); const config = await f.config();
+  const config = await f.config();
+  await f.page.locator("#agent-private-details > summary").click();
+  await f.page.waitForFunction(() => document.querySelector("#agent-private-config").value === "");
+  await f.page.locator("#agent-host-snippets > summary").click();
+  assert.equal((await f.page.locator("#agent-host-snippets").innerText()).includes(config.token), false,
+    "placeholder host instructions never include the issued credential");
+  assert.equal((await f.page.locator("body").innerText()).includes(config.token), false,
+    "the private credential stays out of visible text after concealment");
+  assert.equal(await f.page.locator("#agent-private-config").inputValue(), "");
+  await f.page.locator("#agent-host-snippets > summary").click();
   assert.equal(JSON.stringify(requests).includes(config.token), false); assert.equal(requests[0].keyHash.length, 64);
   const env = { PATH: process.env.PATH }, directory = join(f.directory, "connection");
   const imported = await new Promise(resolve => {
@@ -90,7 +120,6 @@ test("browser owner issues digest-only setup; a real external client imports, re
   assert.equal((await agent.checkConnection()).status, "credential_accepted");
   const work = await agent.workContext("test-handoff"); assert.equal(work.work.id, "test-handoff");
   assert.equal(f.store.room("commons").sequence, before);
-  await f.page.locator("#agent-private-details > summary").click();
   await f.page.locator("#agent-connect-done").click();
   await f.page.locator("#agent-connect-advanced > summary").click();
   await f.page.getByText("Manage connections", { exact: true }).click();
@@ -131,11 +160,14 @@ test("agent type catalog renders and click fills the same join path", { timeout:
   const catalogText = await catalog.innerText();
   assert.match(catalogText, /Best for local coding sessions/, 'the agent catalog keeps the shortened agent-type copy');
   assert.doesNotMatch(catalogText, /with MCP tools/, 'the old verbose agent-type suffix is gone');
-  await f.page.locator('[data-agent-type="claude-code"]').click();
+  await f.page.locator('#agent-type-catalog button[data-agent-type="claude-code"]').click();
   assert.equal(await f.page.locator("#agent-connect-name").inputValue(), "Claude Code");
   assert.equal(await f.page.locator("#agent-connect-access").inputValue(), "contribute");
   assert.equal(await f.page.locator("#agent-connect-route").inputValue(), "mcp");
+  assert.equal(await f.page.locator("#agent-roster-hint").isVisible(), false, "technical host guidance starts collapsed");
+  await f.page.locator("#agent-connect-advanced > summary").click();
   assert.match(await f.page.locator("#agent-roster-hint").innerText(), /room_check_access/);
+  await f.page.locator("#agent-connect-advanced > summary").click();
   assert.equal(await f.page.locator("#agent-create").isHidden(), false);
   const requests = [];
   f.page.on("request", request => { if (request.url().endsWith("/agent-connections") && request.method() === "POST") requests.push(request.postDataJSON()); });
@@ -148,6 +180,16 @@ test("agent type catalog renders and click fills the same join path", { timeout:
   assert.match(await f.page.locator("#agent-import-route").innerText(), /room_check_access/);
   assert.equal(f.store.room("commons").state.members[requests[0].memberId].agentType, "claude-code");
   await f.capture("catalog-claude-code");
+  // Keep duplicate identity caution visible even with technical guidance closed.
+  await f.page.waitForFunction(() => document.querySelector("#presence-list").textContent.includes("Claude Code"));
+  await f.page.locator("#agent-connect-done").click();
+  await f.page.locator('#agent-type-catalog button[data-agent-type="claude-code"]').click();
+  assert.equal(await f.page.locator("#agent-connect-advanced").evaluate(node => node.open), false);
+  assert.equal(await f.page.locator("#agent-name-warning").isVisible(), true);
+  assert.match(await f.page.locator("#agent-name-warning").innerText(), /second identity/);
+  await f.page.locator("#agent-connect-name").fill("Another assistant");
+  assert.equal(await f.page.locator("#agent-name-warning").isVisible(), false);
+  assert.equal(requests.length, 1, "the warning and name edit never create a second identity");
 });
 
 test("named roster fills Muse and Grok Build; Grok Build shows import checklist", { timeout: 25000 }, async t => {
@@ -175,6 +217,7 @@ test("named roster fills Muse and Grok Build; Grok Build shows import checklist"
   await f.page.locator("#agent-create").click();
   await f.page.locator("#agent-setup").waitFor({ state: "visible" });
   assert.match(await f.page.locator("#agent-import-route").innerText(), /room_check_access/);
+  await f.page.locator("#agent-all-steps > summary").click();
   assert.match(await f.page.locator("#agent-import-checklist").innerText(), /room_check_access/);
   await f.page.locator("#agent-copy-checklist").click();
   await f.page.waitForFunction(() => /plug-in steps|Select and copy/.test(document.querySelector("#agent-connect-status")?.textContent || ""));
@@ -199,15 +242,27 @@ test("unknown enrollment survives close and retries the original digest and iden
 
 test("mobile disclosure stays lightweight, fits the viewport and conceals setup on close", { timeout: 30000 }, async t => {
   const f = await setup(t, true); await f.open(); await f.capture("mobile-form"); await f.create();
-  await f.page.locator("#agent-setup").waitFor({ state: "visible" }); await f.capture("mobile-ready");
+  await f.page.locator("#agent-setup").waitFor({ state: "visible" });
+  for (const selector of ["#agent-connect-title", "#agent-connect-close", "#agent-setup-title", "#agent-connect-done"]) {
+    const box = await f.page.locator(selector).boundingBox();
+    assert.ok(box && box.y >= 0 && box.y + box.height <= 844, `${selector} stays in the mobile viewport after issuance`);
+  }
+  assert.equal(await f.page.locator("#agent-host-snippets > summary").isVisible(), true);
+  await f.capture("mobile-ready");
+  await f.page.locator("#agent-all-steps > summary").click();
   assert.equal(await f.page.locator('#agent-import-checklist').evaluate(node => node.scrollWidth <= node.clientWidth + 1), true,
     'setup commands wrap within the mobile dialog');
   const config = await f.config();
   assert.equal(await f.page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
-  await f.page.locator("#agent-connect-close").click(); await f.open();
+  await f.page.keyboard.press("Escape");
+  await f.page.locator("#agent-connect-dialog").waitFor({ state: "hidden" });
+  await f.open();
   assert.equal(await f.page.locator("#agent-private-config").inputValue(), "");
   assert.equal(await f.page.locator("#agent-private-details").evaluate(node => node.open), false);
+  assert.equal(await f.page.locator("#agent-host-snippets > summary").isVisible(), true, "safe host instructions survive closing and reopening setup");
   assert.equal((await new RoomAgentClient(config).checkConnection()).status, "credential_accepted");
+  assert.match(await f.page.locator("#agent-setup").innerText(), /Host connection and replies have not been verified/,
+    "a read-only credential check does not claim a running host or verified reply");
 });
 
 test("owned list access denial clears previously revealed setup", { timeout: 30000 }, async t => {

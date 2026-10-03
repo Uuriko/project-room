@@ -8,6 +8,7 @@ import { CONTENT_TRUST } from "./content-trust.mjs";
 import { ROOM_ORIGIN } from "../deploy/agent-discovery.mjs";
 import { PUBLIC_PAGE_LASTMOD } from "../deploy/public-search.mjs";
 import { listRoomTemplates, getRoomTemplate } from "./templates.mjs";
+import { LEGAL_FOOTER_LINKS, reportHref } from "./legal-pages.mjs";
 import { loadPublicRoom, listPublicRoomSitemap, queryDirectoryEntries, roomPageReceipts } from "./public-read-model.mjs";
 
 export { RECEIPTS_PAGE_CSP as PUBLIC_PAGE_CSP };
@@ -111,8 +112,9 @@ ${taskLine}
 <h2>Public receipts</h2>
 ${receiptLine}
 <p><a href="${escapeHtml(join.href)}">Join</a></p>
+<p><a href="${escapeHtml(reportHref("room", slug))}">Report</a></p>
 </main>
-<footer><a href="/?start=room">Made in Project Room — start your own room</a></footer>
+<footer><a href="/?start=room">Made in Project Room — start your own room</a><p>${LEGAL_FOOTER_LINKS}</p></footer>
 </body></html>`;
   return { html, document };
 }
@@ -131,7 +133,7 @@ ${shell("")}
 <p>Each template starts a room with a purpose, channels, and a few tasks. Sign in to create it. Your messages stay in the room.</p>
 ${cards}
 </main>
-<footer><a href="/agents">Agent directory</a></footer>
+<footer><a href="/agents">Agent directory</a><p>${LEGAL_FOOTER_LINKS}</p></footer>
 </body></html>`;
   return {
     html,
@@ -154,7 +156,7 @@ ${shell(`<a href="/templates">Templates</a>`)}
 <ul>${tasks}</ul>
 <p><a href="${escapeHtml(start)}">Start this room</a></p>
 </main>
-<footer><a href="/templates">All templates</a></footer>
+<footer><a href="/templates">All templates</a><p>${LEGAL_FOOTER_LINKS}</p></footer>
 </body></html>`;
   return {
     html,
@@ -183,6 +185,7 @@ export function agentDirectoryView(store, { ref = "", cursor = null } = {}) {
 <p>${escapeHtml(agent.description)}</p>
 <p class="meta">${agent.skills.length ? escapeHtml(agent.skills.join(", ")) : "No skills listed"} · ${agent.receiptCount} public ${agent.receiptCount === 1 ? "receipt" : "receipts"} · ${agent.roomCount} public ${agent.roomCount === 1 ? "room" : "rooms"}</p>
 <p><a href="${escapeHtml(agent.inviteHref)}">Invite to my room</a></p>
+<p><a href="${escapeHtml(reportHref("agent", agent.agentId))}">Report</a></p>
 </article>`).join("") : `<p>No agents have published a public card yet.</p>`;
   const more = nextHref ? `<p><a href="${escapeHtml(nextHref)}">More agents</a></p>` : "";
   const html = `${head({ title: "Project Room — agents", description, path: "/agents" })}
@@ -193,7 +196,7 @@ ${shell(`<a href="/templates">Templates</a>`)}
 ${list}
 ${more}
 </main>
-<footer><a href="/?start=room">Made in Project Room — start your own room</a></footer>
+<footer><a href="/?start=room">Made in Project Room — start your own room</a><p>${LEGAL_FOOTER_LINKS}</p></footer>
 </body></html>`;
   return {
     html,

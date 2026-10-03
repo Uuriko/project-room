@@ -1287,10 +1287,6 @@ summary { overflow-wrap: anywhere; }
   .conversation-heading h2 { font-size: 1rem; }
 }
 @media (max-width: 520px) {
-  .room-topbar { display: grid; grid-template-columns: 36px minmax(0, 1fr); gap: .25rem .5rem; }
-  .room-topbar .topbar-actions { grid-column: 1 / -1; justify-content: flex-end; width: 100%; gap: .35rem; }
-  .room-topbar .topbar-button { white-space: normal; }
-  .room-topbar .count-chip { min-width: 0; font-size: .7rem; }
   .composer-row { flex-wrap: nowrap; }
   .composer-add { flex: none; width: 36px; padding: .3rem; }
   .composer-add-label { display: none; }
@@ -1299,11 +1295,6 @@ summary { overflow-wrap: anywhere; }
 /* Popovers anchor to the action row, not to a trigger shifted by a thread link. */
 .message-links { position: relative; }
 .composer-row { grid-template-columns: auto minmax(0, 1fr) 36px 40px; }
-@media (max-width: 520px) {
-  .room-topbar .topbar-actions { justify-content: space-between; }
-  #topbar-catchup { white-space: nowrap; }
-  #catchup-count { max-width: 7rem; white-space: normal; text-align: left; border: 0; }
-}
 .sidebar-head { margin: 0; padding: 0; }
 .sidebar-head .room-overview-open { display: flex; align-items: center; justify-content: space-between; gap: .5rem; width: 100%; min-width: 0; padding: .35rem; border: 0; border-radius: .4rem; background: transparent; color: var(--text); text-align: left; }
 .sidebar-head .room-overview-open:hover { background: var(--panel-raised); }
@@ -1324,9 +1315,28 @@ summary { overflow-wrap: anywhere; }
 }
 .sidebar-head .room-overview-open > span:last-child { flex: none; font-size: 1rem; font-weight: 400; color: var(--muted); }
 @media (max-width: 520px) {
-  .room-topbar .topbar-actions { display: flex; justify-content: flex-end; }
-  #topbar-catchup { display: flex; flex-wrap: wrap; gap: .1rem .4rem; min-width: 0; justify-content: center; }
-  #catchup-count { max-width: 100%; overflow-wrap: anywhere; text-align: center; }
+  /* Keep each action intact. Catch-up uses the remaining room; enlarged text
+     reflows whole controls rather than squeezing More into stacked letters. */
+  .room-topbar { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: .25rem .5rem; }
+  .room-topbar .topbar-actions { position: relative; display: flex; flex-wrap: wrap; grid-column: 1 / -1; justify-content: flex-end; width: 100%; gap: .25rem; }
+  .room-topbar .topbar-actions > * { flex: none; }
+  .room-topbar .icon-button { width: 44px; height: 44px; min-width: 44px; min-height: 44px; }
+  .room-topbar .topbar-actions > .topbar-button, .room-topbar .room-more > summary { min-width: 44px; min-height: 44px; padding-inline: .2rem; white-space: nowrap; overflow-wrap: normal; }
+  .room-topbar #topbar-updates { flex-basis: min-content; flex-wrap: wrap; justify-content: center; }
+  .room-topbar #topbar-catchup { display: flex; flex: 1 1 4rem; flex-wrap: wrap; gap: .1rem .4rem; min-width: min-content; justify-content: center; }
+  .room-topbar .count-chip { min-width: 0; font-size: .7rem; }
+  #catchup-count { max-width: 100%; padding-inline: 0; white-space: normal; overflow-wrap: normal; text-align: center; border: 0; }
+  /* A wrapped trigger may be on the left. Anchor its popover to the full row. */
+  .room-topbar .room-more, .room-topbar .session-menu { position: static; }
+  .room-topbar .session-menu-panel { min-width: 0; }
+  .room-topbar .room-more-actions .topbar-button { white-space: normal; }
+  /* Recovery text gets a full line before its controls. Limit this to an
+     interrupted active room; signed-out, inbox and healthy bars stay as-is. */
+  .app-shell:has(#main:not([hidden])) > .connection-bar:has(#connection-status[data-state="other"]) { padding: .25rem .75rem; }
+  .app-shell:has(#main:not([hidden])) > .connection-bar:has(#connection-status[data-state="other"]) > #connection-status { flex: 1 0 100%; padding: .2rem 0; overflow-wrap: normal; }
+  .app-shell:has(#main:not([hidden])) > .connection-bar:has(#connection-status[data-state="other"]) > #connection-details { flex: none; max-width: 100%; margin: 0; }
+  .app-shell:has(#main:not([hidden])) > .connection-bar:has(#connection-status[data-state="other"]) > #connection-details > summary { min-width: 44px; min-height: 44px; white-space: nowrap; overflow-wrap: normal; }
+  .app-shell:has(#main:not([hidden])) > .connection-bar:has(#connection-status[data-state="other"]) > #refresh-button { flex: none; min-width: min-content; min-height: 44px; max-width: 100%; white-space: normal; overflow-wrap: normal; }
 }
 @media (max-width: 520px) {
   .composer-row { display: flex; flex-wrap: wrap; }
@@ -1521,6 +1531,10 @@ summary { overflow-wrap: anywhere; }
 .settings-form { display: grid; gap: var(--space-3); }
 .settings-identity { margin: 0; padding-left: 1.1rem; }
 #settings-dialog details > summary { min-height: 44px; cursor: pointer; }
+/* Not a scroll anchor: on a phone the inbox scrolls the document, and anchoring
+   to this footer sends a restored reading position to the bottom. */
+.site-footer { margin: 2rem 1rem 1rem; color: var(--muted); font-size: var(--text-sm); overflow-anchor: none; }
+.site-footer a { color: inherit; }
 
 /* Updates destination. Styles live here so the page content policy allows them. */
 #updates-dialog { width: min(40rem, calc(100vw - 1.5rem)); max-height: min(36rem, calc(100vh - 2rem)); }

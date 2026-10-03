@@ -1,3 +1,6 @@
+// JDOT-PUBLIC-CSP-RUM begin: outer-response policy
+import { publicPageCsp } from "../deploy/public-search.mjs";
+// JDOT-PUBLIC-CSP-RUM end
 import { GmailSync } from '../server/gmail-sync.mjs';
 import { GmailMailbox, gmailConfig } from '../server/gmail-mailbox.mjs';
 import { DurableObject } from 'cloudflare:workers';
@@ -28,6 +31,7 @@ import { pruneOAuthProvider } from '../server/oauth-provider-store.mjs';
 import { syncClaimPullRequests } from '../server/claim-pr-sync.mjs';
 import { CRON_JOB_BUDGET_MS, HEARTBEAT_STORAGE_KEY, applyOutcomes, jobHealthResponse, jobHealthUnavailable, jobHealthView, runCronJobs, selectWorkerJobs } from './job-heartbeat.mjs';
 import { ALARM_RETRY_MS, JOBS, earliestFutureAlarm, jobIsDue, lastRanFrom } from '../server/jobs.mjs';
+import { countOpenPublicReports } from '../server/legal-store.mjs'; // open public-report count on GET /api/health/jobs
 import { SOURCE_REVISION, BUILD_ID } from '../server/version.mjs';
 import { edgePublicResponse } from './edge-public.mjs';
 import { appDurationMs, logRoomRequest, requestPath, withServerTiming } from './request-timing.mjs';
@@ -131,6 +135,7 @@ export class ProjectRoom extends DurableObject {
       // Verified provider webhook updates are journaled in the Durable Object's
       // SQLite (pending_channel_updates), so they survive eviction and restart.
       channelWebhooks: (this.channelWebhooks = new ChannelWebhookInbox(this.store)),
+      operatorAccountId: env.ROOM_OPERATOR_ACCOUNT_ID || "",
       resolveRequestSignal: () => this.requestSignals.getStore(),
       loadAsset: async path => {
         const response = await env.ASSETS.fetch(new Request(new URL('/' + path, env.ROOM_ORIGIN)));
@@ -215,7 +220,8 @@ export class ProjectRoom extends DurableObject {
     return { recorded: Array.isArray(outcomes) ? outcomes.length : 0 };
   }
   async readJobHealth() {
-    return jobHealthView(await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY), Date.now(), this.env, this.store);
+    const view = jobHealthView(await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY), Date.now(), this.env, this.store);
+    return { ...view, publicReports: countOpenPublicReports(this.store) };
   }
 
   // Task 9 — auto-drain RPC for the Worker's cron trigger. Scans the webhook
@@ -424,7 +430,21 @@ export class ProjectRoom extends DurableObject {
 export default {
   async fetch(request, env, ctx) {
     const started = Date.now();
+    // JDOT-PUBLIC-CSP-RUM begin: outer-response policy
+    const browserOrigin = new URL(request.url).origin;
+    let internalPublicPolicy = null, browserPublicPolicy = null;
+    // JDOT-PUBLIC-CSP-RUM end
     const finish = (response, servedBy) => {
+      // JDOT-PUBLIC-CSP-RUM begin: outer-response policy
+      // Door routing rewrites to ROOM_ORIGIN before the edge/DO handles it.
+      // Rebase only our known public-page policy, and only after that request
+      // passed the existing configured-origin/edge-door guard below.
+      if (browserPublicPolicy && response.headers.get('Content-Security-Policy') === internalPublicPolicy) {
+        const headers = new Headers(response.headers);
+        headers.set('Content-Security-Policy', browserPublicPolicy);
+        response = new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+      }
+      // JDOT-PUBLIC-CSP-RUM end
       const totalMs = Date.now() - started;
       const appMs = appDurationMs(response.headers);
       logRoomRequest({ method: request.method, path: requestPath(request.url), status: response.status, totalMs, servedBy, appMs });
@@ -448,6 +468,10 @@ export default {
     const url = new URL(request.url);
     // Never derive the trusted origin from a caller-controlled Host header.
     if (url.origin !== roomOrigin(env).origin) return finish(new Response('Unexpected host', { status: 403 }), 'worker');
+    // JDOT-PUBLIC-CSP-RUM begin: outer-response policy
+    internalPublicPolicy = publicPageCsp(url.origin);
+    browserPublicPolicy = publicPageCsp(browserOrigin);
+    // JDOT-PUBLIC-CSP-RUM end
     // Storage/DO-independent version signal: answered entirely from module
     // scope and env, never touching the Durable Object, so deploy
     // verification stays available when the DO is down (2026-09-25 outage:

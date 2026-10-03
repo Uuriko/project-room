@@ -16,7 +16,7 @@
   "durable_objects": { "bindings": [{ "name": "ROOM", "class_name": "ProjectRoom", "script_name": "project-room" }] },
   "migrations": [{ "tag": "room-sqlite-v1", "new_sqlite_classes": ["ProjectRoom"] }],
   "triggers": { "crons": [] },
-  "vars": { "ROOM_ORIGIN": "https://room.trydemigod.com", "ROOM_DEPLOYMENT": "staging" },
+  "vars": { "ROOM_ORIGIN": "https://room.trydemigod.com", "ROOM_DEPLOYMENT": "staging", "ROOM_SECURITY_CONTACT": "potter@trydemigod.com" },
   "limits": { "cpu_ms": 1000 },
   "observability": { "enabled": true, "head_sampling_rate": 1 },
   "env": {
@@ -26,7 +26,7 @@
       "routes": [{ "pattern": "room.trydemigod.com", "custom_domain": true }],
       "durable_objects": { "bindings": [{ "name": "ROOM", "class_name": "ProjectRoom" }] },
       "triggers": { "crons": ["*/30 * * * *"] },
-      "vars": { "ROOM_ORIGIN": "https://room.trydemigod.com", "ROOM_DEPLOYMENT": "production", "ROOM_GMAIL_ENABLED": "0", "ROOM_GMAIL_PILOT_ONLY": "1", "ROOM_SERVICE_MODE": "cloudflare-production" }
+      "vars": { "ROOM_ORIGIN": "https://room.trydemigod.com", "ROOM_DEPLOYMENT": "production", "ROOM_GMAIL_ENABLED": "0", "ROOM_GMAIL_PILOT_ONLY": "1", "ROOM_SERVICE_MODE": "cloudflare-production", "ROOM_SECURITY_CONTACT": "potter@trydemigod.com" }
     },
     "staging": {
       "name": "project-room-stage",
@@ -37,7 +37,7 @@
       "durable_objects": { "bindings": [{ "name": "ROOM", "class_name": "ProjectRoom" }] },
       "migrations": [{ "tag": "room-sqlite-v1", "new_sqlite_classes": ["ProjectRoom"] }],
       "triggers": { "crons": [] },
-      "vars": { "ROOM_ORIGIN": "https://project-room-stage.getdasha.workers.dev", "ROOM_DEPLOYMENT": "staging", "ROOM_GMAIL_ENABLED": "0", "ROOM_GMAIL_PILOT_ONLY": "1", "ROOM_SERVICE_MODE": "cloudflare-staging" }
+      "vars": { "ROOM_ORIGIN": "https://project-room-stage.getdasha.workers.dev", "ROOM_DEPLOYMENT": "staging", "ROOM_GMAIL_ENABLED": "0", "ROOM_GMAIL_PILOT_ONLY": "1", "ROOM_SERVICE_MODE": "cloudflare-staging", "ROOM_SECURITY_CONTACT": "potter@trydemigod.com" }
     }
   }
 }

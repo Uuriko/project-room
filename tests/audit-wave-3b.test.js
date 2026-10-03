@@ -4,9 +4,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
-import { rmSync, mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 
 // ---- M-3: push-delivery promises must not accumulate unboundedly ----
@@ -87,75 +84,6 @@ test("M-9: nameSimilarity floors the matching window (odd max length)", () => {
   // reference pairs unchanged
   assert.ok(Math.abs(nameSimilarity("dixon", "dicksonx") - 0.8133) < 0.01);
   assert.ok(Math.abs(nameSimilarity("martha", "marhta") - 0.9611) < 0.01);
-});
-
-// ---- M-10: share link must not be minted before attribution/idempotency ----
-import { mintHumanInvite, ensureEmissaryLureSchema } from "../server/emissary-lure.mjs";
-
-const lureDb = t => { const d = new DatabaseSync(":memory:"); ensureEmissaryLureSchema(d); t.after(() => d.close()); return d; };
-
-test("M-10: attribution is persisted before the live link is minted", t => {
-  const db = lureDb(t);
-  const order = [];
-  const deps = {
-    createShareLink: () => {
-      const row = db.prepare("SELECT attribution_id FROM emissary_invite_attribution").get();
-      order.push(row ? "attributed" : "orphan");
-      return { link: { id: "sl1" } };
-    },
-  };
-  const out = mintHumanInvite(db, "room1", "member1",
-    { expires_in_days: 7, idempotencyKey: "idem-1" }, deps, { nowMs: 1789000000000 });
-  assert.ok(out.url, "mint succeeds");
-  assert.deepEqual(order, ["attributed"], "attribution+idempotency must precede the live link mint");
-});
-
-test("M-10: a mint failure leaves no unretryable state (retry re-mints)", t => {
-  const db = lureDb(t);
-  let calls = 0;
-  const deps = {
-    createShareLink: () => { calls++; if (calls === 1) throw new Error("share-link service down"); return { link: { id: "sl2" } }; },
-  };
-  assert.throws(() => mintHumanInvite(db, "room1", "member1",
-    { expires_in_days: 7, idempotencyKey: "idem-2" }, deps, { nowMs: 1789000000000 }));
-  const retry = mintHumanInvite(db, "room1", "member1",
-    { expires_in_days: 7, idempotencyKey: "idem-2" }, deps, { nowMs: 1789000000000 });
-  assert.ok(retry.url, "retry after mint failure must succeed");
-  assert.equal(calls, 2, "retry must re-attempt the mint, not replay a stale 'minting' marker");
-});
-
-// ---- M-11: merge reassigns referrers and enforces the venue cap ----
-import { RoomStore } from "../server/store.mjs";
-import { initialRoom } from "../server/bootstrap.mjs";
-
-function graphStore(t) {
-  const dir = mkdtempSync(join(tmpdir(), "project-room-3b-"));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
-  const store = new RoomStore(join(dir, "room.sqlite"));
-  store.initialize(initialRoom("commons"));
-  return store;
-}
-
-test("M-11: merge reassigns referrers to the survivor (no dangling referrer_external_id)", t => {
-  const store = graphStore(t);
-  const g = store.emissaryGraph;
-  const a = g.register("commons", { kind: "agent", displayName: "Alpha" });
-  const b = g.register("commons", { kind: "agent", displayName: "Beta" });
-  const c = g.register("commons", { kind: "agent", displayName: "Gamma", referrerExternalId: a.external_id });
-  g.merge("commons", a.external_id, b.external_id);
-  const reread = g.get("commons", c.external_id);
-  assert.notEqual(reread.referrer_external_id, a.external_id, "referrer must not dangle at the deleted identity");
-  assert.equal(reread.referrer_external_id, b.external_id, "referrer must be reassigned to the survivor");
-});
-
-test("M-11: merge fails when the merged venue list would exceed MAX_VENUES=8", t => {
-  const store = graphStore(t);
-  const g = store.emissaryGraph;
-  const venues = n => Array.from({ length: n }, (_, i) => ({ venue: "generic", handle: `h${i}`, proof: "self_asserted" }));
-  const a = g.register("commons", { kind: "agent", displayName: "Alpha", venues: venues(5) });
-  const b = g.register("commons", { kind: "agent", displayName: "Beta", venues: venues(5).map((v, i) => ({ ...v, handle: `k${i}` })) });
-  assert.throws(() => g.merge("commons", a.external_id, b.external_id),
-    err => { assert.equal(err.code, "too_many_venues"); return true; });
 });
 
 // ---- M-12: rejected clusters must re-open on refile, not absorb as duplicate ----

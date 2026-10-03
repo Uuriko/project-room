@@ -105,8 +105,8 @@ function textOrNull(value) {
 }
 
 // Same rule as currentBody in server/redact-read.mjs. A deleted message
-// stores no text. An edit stores only the current body. Prior wording stays
-// in the event log and is left out of this table.
+// stores no text. An edit stores only the current body. PRIV-1 also rewrites
+// deleted wording out of the event log; this table never kept it.
 function storedBody(message) {
   if (!message || message.deletedAt || message.body == null) return null;
   return typeof message.body === "string" ? message.body : null;

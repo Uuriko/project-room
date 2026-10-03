@@ -1,0 +1,204 @@
+{
+  "rows": [
+    {
+      "id": "mcp-registry",
+      "title": "Official MCP Registry",
+      "kind": "api",
+      "group": "directory",
+      "url": "https://registry.modelcontextprotocol.io/v0.1/servers/io.github.Uuriko%2Fproject-room/versions",
+      "expect": { "type": "registry" },
+      "update": "CI publishes server.json when a merge to main changes that file, and when a v* tag is pushed. Auth is GitHub OIDC.",
+      "owner": "This repository. No registry secret."
+    },
+    {
+      "id": "glama",
+      "title": "Glama",
+      "kind": "html",
+      "group": "directory",
+      "url": "https://glama.ai/mcp/servers/Uuriko/project-room",
+      "expect": { "oneLiner": true },
+      "update": "Claim the indexed page so the description matches server.json.",
+      "owner": "A maintainer, in a browser, signed in as the Uuriko GitHub account."
+    },
+    {
+      "id": "pulsemcp",
+      "title": "PulseMCP",
+      "kind": "api",
+      "group": "directory",
+      "url": "https://api.pulsemcp.com/v0.1/servers?query=project-room",
+      "expect": { "type": "search" },
+      "update": "PulseMCP ingests the official registry. The v0.1 search API requires an API key this workflow does not store, so a 401 stays unknown.",
+      "owner": "No account step in this repo."
+    },
+    {
+      "id": "smithery",
+      "title": "Smithery",
+      "kind": "html",
+      "group": "directory",
+      "url": "https://smithery.ai/servers/uuriko/project-room",
+      "expect": { "contains": "Project Room" },
+      "update": "Submit the server from a signed-in Smithery account.",
+      "owner": "A maintainer with a Smithery account."
+    },
+    {
+      "id": "cursor-directory",
+      "title": "cursor.directory",
+      "kind": "html",
+      "group": "directory",
+      "url": "https://cursor.directory/mcp/project-room",
+      "expect": { "contains": "Project Room" },
+      "update": "Submit the server. A 429 or security checkpoint is unknown, not a missing listing.",
+      "owner": "A maintainer signed in with GitHub."
+    },
+    {
+      "id": "mcpservers-org",
+      "title": "mcpservers.org",
+      "kind": "html",
+      "group": "directory",
+      "url": "https://mcpservers.org/servers/project-room",
+      "expect": { "contains": "Project Room" },
+      "update": "Submit the free listing. A bot wall is unknown.",
+      "owner": "A maintainer, in a browser."
+    },
+    {
+      "id": "mcp-so",
+      "title": "mcp.so",
+      "kind": "html",
+      "group": "directory",
+      "url": "https://mcp.so/server/project-room",
+      "expect": { "contains": "Project Room" },
+      "update": "The listing is a purchase. It is not bought. A bot wall is unknown.",
+      "owner": "A maintainer, after they approve the purchase."
+    },
+    {
+      "id": "cursor-marketplace",
+      "title": "Cursor Marketplace",
+      "kind": "html",
+      "group": "directory",
+      "url": "https://cursor.com/marketplace",
+      "expect": { "contains": "Project Room" },
+      "update": "Publish the Cursor plugin. The page is a client app; the check reads the HTML it returns.",
+      "owner": "A maintainer with a Cursor publisher account."
+    },
+    {
+      "id": "claude-connectors",
+      "title": "Claude connectors",
+      "kind": "html",
+      "group": "directory",
+      "url": "https://claude.ai/directory",
+      "expect": { "contains": "Project Room" },
+      "update": "Submit from a Team or Enterprise admin portal. OAuth discovery for that submission is a later change. A bot wall is unknown.",
+      "owner": "A maintainer with Claude admin access."
+    },
+    {
+      "id": "claude-code-plugins",
+      "title": "Claude Code plugins",
+      "kind": "html",
+      "group": "directory",
+      "url": "https://github.com/anthropics/claude-plugins-official",
+      "expect": { "contains": "Project Room" },
+      "update": "Add the plugin to the community directory.",
+      "owner": "A maintainer."
+    },
+    {
+      "id": "chatgpt-apps",
+      "title": "ChatGPT apps",
+      "kind": "html",
+      "group": "directory",
+      "url": "https://chatgpt.com/apps",
+      "expect": { "contains": "Project Room" },
+      "update": "Submit as a verified publisher. OAuth discovery for that submission is a later change. A bot wall is unknown.",
+      "owner": "A maintainer with a verified publisher account."
+    },
+    {
+      "id": "github-vscode-mcp",
+      "title": "GitHub MCP Registry / VS Code",
+      "kind": "html",
+      "group": "directory",
+      "url": "https://code.visualstudio.com/mcp",
+      "expect": { "contains": "Project Room" },
+      "update": "Request onboarding to the GitHub MCP Registry. The check reads the public VS Code MCP page.",
+      "owner": "A maintainer."
+    },
+    {
+      "id": "cline",
+      "title": "Cline marketplace",
+      "kind": "html",
+      "group": "directory",
+      "url": "https://github.com/cline/mcp-marketplace",
+      "expect": { "contains": "Project Room" },
+      "update": "Open the marketplace issue Cline documents, with a logo.",
+      "owner": "A maintainer."
+    },
+    {
+      "id": "awesome-mcp-servers",
+      "title": "punkpeye/awesome-mcp-servers",
+      "kind": "github_pr",
+      "group": "directory",
+      "url": "https://github.com/punkpeye/awesome-mcp-servers/pull/14997",
+      "expect": { "repo": "punkpeye/awesome-mcp-servers", "number": 14997 },
+      "update": "Keep pull request 14997 open until it merges. An open pull request is unknown, with detail 'pull request open'.",
+      "owner": "A maintainer updates the pull request."
+    },
+    {
+      "id": "awesome-agent-swarm",
+      "title": "EvoMap/awesome-agent-swarm",
+      "kind": "github_pr",
+      "group": "directory",
+      "url": "https://github.com/EvoMap/awesome-agent-swarm/pull/20",
+      "expect": { "repo": "EvoMap/awesome-agent-swarm", "number": 20 },
+      "update": "Keep pull request 20 open until it merges.",
+      "owner": "A maintainer updates the pull request."
+    },
+    {
+      "id": "awesome-ai-agents-2026",
+      "title": "ARUNAGIRINATHAN-K/awesome-ai-agents-2026",
+      "kind": "github_pr",
+      "group": "directory",
+      "url": "https://github.com/ARUNAGIRINATHAN-K/awesome-ai-agents-2026/pull/309",
+      "expect": { "repo": "ARUNAGIRINATHAN-K/awesome-ai-agents-2026", "number": 309 },
+      "update": "Keep pull request 309 open until it merges.",
+      "owner": "A maintainer updates the pull request."
+    },
+    {
+      "id": "curated-mcp-servers",
+      "title": "awesome-ai-tools/curated-mcp-servers",
+      "kind": "github_pr",
+      "group": "directory",
+      "url": "https://github.com/awesome-ai-tools/curated-mcp-servers/pull/30",
+      "expect": { "repo": "awesome-ai-tools/curated-mcp-servers", "number": 30 },
+      "update": "Keep pull request 30 open until it merges.",
+      "owner": "A maintainer updates the pull request."
+    },
+    {
+      "id": "agent-card",
+      "title": "Room agent card",
+      "kind": "api",
+      "group": "room",
+      "url": "https://room.trydemigod.com/.well-known/agent-card.json",
+      "expect": { "type": "status", "status": 200, "contains": "Project Room" },
+      "update": "Served by this repository.",
+      "owner": "This repository."
+    },
+    {
+      "id": "llms-txt",
+      "title": "Room llms.txt",
+      "kind": "html",
+      "group": "room",
+      "url": "https://room.trydemigod.com/llms.txt",
+      "expect": { "contains": "Project Room" },
+      "update": "Served by this repository.",
+      "owner": "This repository."
+    },
+    {
+      "id": "oauth-protected-resource",
+      "title": "OAuth protected resource",
+      "kind": "api",
+      "group": "room",
+      "url": "https://room.trydemigod.com/.well-known/oauth-protected-resource",
+      "expect": { "type": "status", "status": 200 },
+      "update": "The route is not served yet. HTTP 404 is missing. A later change serves it and this row becomes listed.",
+      "owner": "A later change. This check only records the status code."
+    }
+  ]
+}

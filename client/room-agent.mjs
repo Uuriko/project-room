@@ -674,7 +674,7 @@ export class RoomAgentClient {
     }
     return { ...page, claims, hasMore: false, nextCursor: null };
   }
-  workClaimCreate({ id, title, reviewPolicy, note, tags, files, dependsOn, pullRequest } = {}, { signal } = {}) {
+  workClaimCreate({ id, title, reviewPolicy, note, tags, files, dependsOn, pullRequest, assignee } = {}, { signal } = {}) {
     if (typeof id !== "string" || !id) throw new Error("Choose a work claim id");
     return this.#request("/work-claims", { id,
       ...(title === undefined ? {} : { title }),
@@ -683,6 +683,7 @@ export class RoomAgentClient {
       ...(files === undefined ? {} : { files }),
       ...(dependsOn === undefined ? {} : { dependsOn }),
       ...(pullRequest === undefined ? {} : { pullRequest }),
+      ...(assignee === undefined ? {} : { assignee }),
       ...(note === undefined ? {} : { note }) }, signal);
   }
   workClaimGet(id, { signal } = {}) { return this.#request(`/work-claims/${encodeURIComponent(id)}`, undefined, signal); }
@@ -700,9 +701,14 @@ export class RoomAgentClient {
         ...(reviewedBy === undefined ? {} : { reviewedBy }),
         ...(tags === undefined ? {} : { tags }), ...(blobs === undefined ? {} : { blobs }) }, signal);
   }
-  reviewWorkItem(id, { note, signal } = {}) {
+  linkWorkItemPullRequest(id, { pullRequest, expectedClaimedAt, expectedHistoryLength, signal } = {}) {
+    return this.#request(`/work-claims/${encodeURIComponent(id)}/update`,
+      { appendPullRequest: pullRequest, expectedClaimedAt, expectedHistoryLength }, signal);
+  }
+  reviewWorkItem(id, { note, verdict, summary, url, signal } = {}) {
     return this.#request(`/work-claims/${encodeURIComponent(id)}/review`,
-      { ...(note === undefined ? {} : { note }) }, signal);
+      { ...(note === undefined ? {} : { note }), ...(verdict === undefined ? {} : { verdict }),
+        ...(summary === undefined ? {} : { summary }), ...(url === undefined ? {} : { url }) }, signal);
   }
   renewWorkItem(id, { progressMessageId, note, leaseHours, signal } = {}) {
     return this.#request(`/work-claims/${encodeURIComponent(id)}/renew`,

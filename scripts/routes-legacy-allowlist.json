@@ -1,5 +1,5 @@
 {
-  "note": "Legacy routes still served outside server/routes/table.mjs. baseline is the RT-0 set plus routes main added after that cut. This batch does not add legacy routes. routes is the set still in the legacy chain and only shrinks as groups move into the table.",
+  "note": "Legacy routes still served outside server/routes/table.mjs. baseline is the RT-0 set plus routes main added after that cut, including the legal API routes and /security.txt. routes is the set still in the legacy chain and only shrinks as groups move into the table.",
   "baseline": [
     {
       "method": "GET",
@@ -212,6 +212,10 @@
     {
       "method": "GET",
       "path": "/api/account/retention"
+    },
+    {
+      "method": "POST",
+      "path": "/api/account/terms"
     },
     {
       "method": "GET",
@@ -778,6 +782,10 @@
       "path": "/api/oauth/sessions/revoke-all"
     },
     {
+      "method": "POST",
+      "path": "/api/operator/unpublish"
+    },
+    {
       "method": "GET",
       "path": "/api/operator/export"
     },
@@ -960,6 +968,14 @@
     {
       "method": "POST",
       "path": "/api/referral-invites/redeem"
+    },
+    {
+      "method": "POST",
+      "path": "/api/reports/public"
+    },
+    {
+      "method": "GET",
+      "path": "/api/reports/public/challenge"
     },
     {
       "method": "GET",
@@ -3531,6 +3547,14 @@
     },
     {
       "method": "GET",
+      "path": "/security.txt"
+    },
+    {
+      "method": "HEAD",
+      "path": "/security.txt"
+    },
+    {
+      "method": "GET",
       "path": "/sitemap.xml"
     },
     {
@@ -3798,6 +3822,10 @@
     {
       "method": "GET",
       "path": "/api/account/retention"
+    },
+    {
+      "method": "POST",
+      "path": "/api/account/terms"
     },
     {
       "method": "GET",
@@ -4136,6 +4164,10 @@
       "path": "/api/oauth/sessions/revoke-all"
     },
     {
+      "method": "POST",
+      "path": "/api/operator/unpublish"
+    },
+    {
       "method": "GET",
       "path": "/api/operator/export"
     },
@@ -4318,6 +4350,14 @@
     {
       "method": "POST",
       "path": "/api/referral-invites/redeem"
+    },
+    {
+      "method": "POST",
+      "path": "/api/reports/public"
+    },
+    {
+      "method": "GET",
+      "path": "/api/reports/public/challenge"
     },
     {
       "method": "GET",
@@ -6886,6 +6926,14 @@
     {
       "method": "HEAD",
       "path": "/room/tools.txt"
+    },
+    {
+      "method": "GET",
+      "path": "/security.txt"
+    },
+    {
+      "method": "HEAD",
+      "path": "/security.txt"
     },
     {
       "method": "GET",

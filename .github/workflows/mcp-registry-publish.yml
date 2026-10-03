@@ -1,16 +1,20 @@
 # Publishes server.json to the official MCP Registry (registry.modelcontextprotocol.io).
 #
-# Auth is keyless GitHub OIDC: the workflow's OIDC identity proves the repo
-# belongs to the Uuriko org, which owns the io.github.Uuriko namespace. No
-# stored tokens, no paid listing, nothing interactive.
+# Auth is keyless GitHub OIDC. The registry grants publish on
+# io.github.<repository_owner>/* to a GitHub Actions identity, and the
+# workflow's id-token: write permission is that credential. No registry
+# secret. A tag is not required for the exchange.
 #
-# Bump server.json's version for every publish (registry versions are immutable).
-# The publish runs on release tags (v*) or manually via workflow_dispatch.
+# A push to main publishes only when that push changes server.json.
+# A v* tag publishes and sets the version from the tag. workflow_dispatch
+# publishes the file as committed. The version must be greater than the
+# latest version the registry already reports.
 name: mcp-registry-publish
 
 on:
   push:
     tags: ["v*"]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -22,15 +26,30 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Decide whether this run publishes
+        id: gate
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ] || [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if jq -e '[.commits[]?.added[]?, .commits[]?.modified[]?] | index("server.json")' "$GITHUB_EVENT_PATH" >/dev/null; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "server.json did not change on this push; not publishing."
+          fi
       - name: Set version from tag
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: ${{ steps.gate.outputs.publish == 'true' && startsWith(github.ref, 'refs/tags/v') }}
         run: |
           VERSION="${GITHUB_REF#refs/tags/v}"
           jq --arg v "$VERSION" '.version = $v' server.json > server.tmp && mv server.tmp server.json
       - name: Validate server.json
-        run: |
-          node -e "const m=require('./server.json'); if(!/^io\.github\.Uuriko\/project-room$/.test(m.name)) throw new Error('bad name'); if(!(m.description&&m.description.length<=100)) throw new Error('bad description'); if(!m.version) throw new Error('missing version'); if(!m.remotes?.length) throw new Error('no remotes'); console.log('server.json OK', m.name, m.version);"
+        if: steps.gate.outputs.publish == 'true'
+        run: node scripts/server-json-check.mjs --against-registry
       - name: Install mcp-publisher
+        if: steps.gate.outputs.publish == 'true'
         # Supply-chain: pin the mcp-publisher release AND verify sha256 against the
         # release's published checksums file before extracting. The old
         # floating `latest` download URL moved with every upstream release and
@@ -46,6 +65,8 @@ jobs:
           tar xz -f "${TARBALL}" mcp-publisher
           rm "${TARBALL}" checksums.txt
       - name: Authenticate to MCP Registry
+        if: steps.gate.outputs.publish == 'true'
         run: ./mcp-publisher login github-oidc
       - name: Publish server to MCP Registry
+        if: steps.gate.outputs.publish == 'true'
         run: ./mcp-publisher publish

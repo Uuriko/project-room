@@ -71,7 +71,7 @@ export function attentionReport(deps, token, roomId, expectedSessionBinding = nu
       kind: "access_request",
       id: request.requestId,
       severity: "action",
-      title: `${request.displayName} asks to join`,
+      title: request.kind === "permissions" ? `${request.displayName} wants: ${request.requestedPermissions.join(", ")}` : `${request.displayName} asks to join`,
       detail: `Requested ${request.requestedPermissions.join(", ")}`,
       actions: decideActions(roomId, request),
     }));

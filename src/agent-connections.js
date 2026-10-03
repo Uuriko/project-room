@@ -53,6 +53,12 @@ export function installAgentConnections({ client, getState }) {
       return li;
     }));
   }
+  function describeName() {
+    const warning = $("#agent-name-warning");
+    const taken = rosterNameTaken(getState()?.members, $("#agent-connect-name").value);
+    warning.hidden = !taken;
+    warning.textContent = taken ? "A member with this name already exists. Create access only if you want a second identity." : "";
+  }
   function describeAccess() {
     if ($("#agent-access-hint")) $("#agent-access-hint").textContent = ACCESS_HINT[$("#agent-connect-access").value] ?? ACCESS_HINT.chat;
     fillList($("#agent-capabilities"), capabilitySummary($("#agent-connect-access").value));
@@ -91,6 +97,7 @@ export function installAgentConnections({ client, getState }) {
       if ($("#agent-mcp-json")) $("#agent-mcp-json").textContent = "";
       if ($("#agent-mcp-cli")) $("#agent-mcp-cli").textContent = "";
     }
+    describeName();
     describeAccess();
     describeImport();
   }
@@ -239,7 +246,9 @@ export function installAgentConnections({ client, getState }) {
         sequence: result.receipt.membershipSequence ?? client.sequence } : null;
       armExpiry();
       status(usable ? "Access ready. Setup does not start an AI." : operation.request.action === "disconnect" ? "Room access ended." : "Original request confirmed. That key is no longer active.");
-      conceal(); render(); void load(); void client.refresh().catch(() => {});
+      conceal(); render();
+      if (setup && dialog.open) $("#agent-setup-title").focus();
+      void load(); void client.refresh().catch(() => {});
     } catch (error) {
       if (!owns() || pending !== operation) return;
       if (accessDenied(error)) { reset(); client.handleFailure(error); return; }
@@ -273,9 +282,8 @@ export function installAgentConnections({ client, getState }) {
     note.id = "growth-connection-invite";
     note.className = "definition";
     note.textContent = "Your invite link admits a person or an agent. Copy it from Invite. Agents read the same link from GET /api/rooms/{roomId}/referrals.";
-    const header = dialog.querySelector(".panel-header");
-    if (header) header.after(note);
-    else dialog.prepend(note);
+    // Optional invite/API detail should not precede the first host choice.
+    $("#agent-connect-advanced").append(note);
   }
   $("#connect-agent-button").addEventListener("click", () => {
     if (!allowed()) return;
@@ -283,11 +291,13 @@ export function installAgentConnections({ client, getState }) {
     if (!owns()) { reset(); return; }
     checkExpiry(); conceal(); describeRoute(); render(); dialog.showModal(); void load();
     if (pending) status("Change not confirmed. Retry the original.");
-    if (!setup && !pending) $("#agent-connect-name").focus();
+    if (setup) $("#agent-setup-title").focus();
+    else if (!pending) (rosterId ? $("#agent-connect-name") : catalogButtons()[0])?.focus();
   });
   $("#agent-connect-close").addEventListener("click", () => dialog.close());
   dialog.addEventListener("close", conceal);
   form.addEventListener("submit", event => { event.preventDefault(); if (pending) void submit(); else void prepare("create"); });
+  $("#agent-connect-name").addEventListener("input", describeName);
   $("#agent-connect-access")?.addEventListener("change", describeAccess);
   $("#agent-connect-route")?.addEventListener("change", describeRoute);
   $("#agent-retry").addEventListener("click", () => { void submit(); });
@@ -296,7 +306,7 @@ export function installAgentConnections({ client, getState }) {
       forget(); form.reset(); rosterId = null;
       if ($("#agent-roster-hint")) $("#agent-roster-hint").textContent = "";
       if ($("#agent-import-route")) $("#agent-import-route").textContent = "";
-      describeRoute(); status(""); render();
+      describeRoute(); status(""); render(); catalogButtons()[0]?.focus();
     }
   });
   function applyCatalogChoice(id) {
@@ -309,11 +319,8 @@ export function installAgentConnections({ client, getState }) {
     rosterId = row.agentType || id;
     describeRoute();
     if ($("#agent-roster-hint")) {
-      const taken = rosterNameTaken(getState()?.members, row.name)
-        ? ` A member with this name already exists. Create access only if you want a second identity.`
-        : "";
       const best = row.bestFor ? `${row.bestFor}. ` : "";
-      $("#agent-roster-hint").textContent = `${best}${row.hint}${taken}`;
+      $("#agent-roster-hint").textContent = `${best}${row.hint}`;
     }
   }
   for (const button of catalogButtons()) {

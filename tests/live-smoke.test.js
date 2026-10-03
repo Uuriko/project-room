@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { PUBLIC_PAGES } from "../scripts/live-smoke.mjs";
+import { PUBLIC_PAGES, browserSmoke } from "../scripts/live-smoke.mjs";
 
 const run = promisify(execFile);
 const LIVE = "a".repeat(40);
@@ -87,4 +87,24 @@ test("deploy lag: past the threshold fails, a fresh merge only warns", async () 
   const fresh = await smoke(await stand({ "/repos/Uuriko/project-room/commits/main": main, [comparePath]: compare(1) }));
   assert.equal(fresh.code, 0);
   assert.equal(fresh.report.deploy.status, "pending");
+});
+
+// A smoke classification regression must not hide CSP breakage on repaired
+// pages behind historical warnings. Transport/browser enforcement lives in
+// the public-page browser journey; this isolates the reporting boundary.
+test("public-page CSP regressions remain hard failures after the analytics repair", async () => {
+  const browser = {
+    async newContext() { return {
+      async newPage() { let onConsole; return {
+        on(type, callback) { if (type === "console") onConsole = callback; },
+        async goto() { onConsole({ type: () => "error", text: () => "Connecting violates Content Security Policy connect-src" }); },
+        async waitForTimeout() {}, async evaluate() { return 0; }
+      }; }, async close() {}
+    }; }, async close() {}
+  };
+  const paths = ["/about", "/receipts", ...PUBLIC_PAGES.filter(path => path.startsWith("/compare/"))];
+  const report = await browserSmoke({ browserFactory: async () => browser, pages: paths, viewports: [390] });
+  assert.equal(report.ok, false);
+  assert.deepEqual(report.findings.filter(f => f.code === "csp_console").map(f => [f.detail.split("@")[0], f.severity, f.known]),
+    paths.map(path => [path, "fail", undefined]));
 });

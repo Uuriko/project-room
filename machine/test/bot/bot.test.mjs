@@ -16,6 +16,7 @@ import { mintIdentity, redeemInvite } from "../../lib/room.mjs";
 import { dispatchTool } from "../../lib/tools.mjs";
 import { MachineDaemon } from "../../lib/daemon.mjs";
 import { MachineBot } from "../../bot/loop.mjs";
+import { createRoomApi } from "../../bot/room-api.mjs";
 import { botTierFromRoom } from "../../bot/config.mjs";
 import { createProvider } from "../../bot/providers/index.mjs";
 import { createAnthropicProvider } from "../../bot/providers/anthropic.mjs";
@@ -103,7 +104,7 @@ async function serve(t) {
     store.close();
     rmSync(directory, { recursive: true, force: true });
   });
-  return { origin, ownerKey, store };
+  return { origin, ownerKey, store, server };
 }
 
 async function post(origin, path, body, token) {
@@ -189,6 +190,27 @@ async function claims(origin, token, roomId = "commons") {
   const page = await get(origin, `/api/rooms/${roomId}/work-claims?limit=50`, token);
   assert.equal(page.status, 200, JSON.stringify(page.json));
   return page.json.claims ?? [];
+}
+
+// Observe the real transport without replacing fetch or the server handler.
+function trackUpdateRequests(server) {
+  const requests = [];
+  server.on("request", (request, response) => {
+    const path = request.url.split("?")[0];
+    if (!/^\/api\/rooms\/[^/]+\/updates(?:\/|$)/.test(path)) return;
+    const entry = { method: request.method, path, status: null };
+    requests.push(entry);
+    response.on("finish", () => { entry.status = response.statusCode; });
+  });
+  return requests;
+}
+
+async function listedUpdate(room, secret, messageId) {
+  const listed = await get(room.origin, "/api/rooms/commons/updates?state=all", secret);
+  assert.equal(listed.status, 200, JSON.stringify(listed.json));
+  const item = listed.json.items.find(entry => entry.sourceRef?.messageId === messageId);
+  assert.ok(item, JSON.stringify(listed.json.items));
+  return { item, viewerId: listed.json.viewerId };
 }
 
 async function secretOf(room) {
@@ -737,6 +759,184 @@ test.describe("room-machine bot", { concurrency: false }, () => {
     assert.equal(readFileSync(join(room.home, "env-log"), "utf8").includes(key), false);
     assert.equal(readFileSync(join(room.home, "bot-state.json"), "utf8").includes(key), false);
     assert.equal(readFileSync(join(room.home, "config.json"), "utf8").includes(key), false);
+  });
+
+  test("a handled update is acked without a plan, and a long mention is planned from the full message", async (t) => {
+    const room = await enrolled(t);
+    saveBot(room.home, { tier: "t1" });
+    const secret = await secretOf(room);
+    const bot = new MachineBot({ home: room.home, env: room.env, waitMs: 0, provider: scripted([]) });
+    const posted = await mention(room, "@Room machine short task");
+    const messageId = posted.event?.data?.messageId;
+    assert.equal(typeof messageId, "string");
+    const listed = await get(room.origin, "/api/rooms/commons/updates?state=actionable", secret);
+    assert.equal(listed.status, 200, JSON.stringify(listed.json));
+    const item = (listed.json.items ?? []).find(entry => entry.sourceRef?.messageId === messageId);
+    assert.ok(item, JSON.stringify(listed.json.items));
+    const done = await post(room.origin, `/api/rooms/commons/updates/${item.id}/done`, { requestId: randomUUID(), expectedBasis: item.basisToken }, secret);
+    assert.equal(done.status, 200, JSON.stringify(done.json));
+    const skipped = await step(room, bot);
+    assert.equal(skipped.results?.[0]?.ignored, "handled", JSON.stringify(skipped));
+    assert.equal((await bodies(room.origin, "commons", secret)).some(body => body.startsWith("Plan:")), false);
+    const polled = await get(room.origin, "/api/agent-wakes/poll?hostId=room-machine&waitMs=0", secret);
+    assert.equal(polled.json.pendingWakes.length, 0);
+
+    const tail = "TAIL-TOKEN-beyond-the-clip";
+    await mention(room, `@Room machine ${"x".repeat(130)} ${tail}`);
+    const planned = await step(room, bot);
+    assert.equal(planned.results?.[0]?.planned, true, JSON.stringify(planned));
+    const plan = (await bodies(room.origin, "commons", secret)).find(body => body.startsWith("Plan:"));
+    assert.match(plan, new RegExp(tail));
+    const open = await get(room.origin, "/api/rooms/commons/updates?state=actionable", secret);
+    assert.equal((open.json.items ?? []).some(entry => String(entry.title).includes(tail)), false);
+  });
+
+  test("the room API marks the observed update basis and explicitly skips a tokenless mark", async (t) => {
+    const room = await enrolled(t);
+    const secret = await secretOf(room);
+    const posted = await mention(room, "@Room machine observe this update");
+    const { item } = await listedUpdate(room, secret, posted.event.data.messageId);
+    assert.match(item.basisToken, /^ub1_[0-9a-f]{64}$/);
+    const requests = trackUpdateRequests(room.server);
+    const api = createRoomApi({ origin: room.origin, secret });
+    const skipped = await api.markUpdate("commons", item.id, "read");
+    assert.equal(skipped.ok, false);
+    assert.equal(skipped.skipped, true);
+    assert.equal(skipped.reason, "update_basis_required");
+    assert.equal(requests.length, 0, "a missing basis must not trigger a write or a refresh");
+
+    const marked = await api.markUpdate("commons", item.id, "read", item.basisToken);
+    assert.equal(marked.ok, true, JSON.stringify(marked));
+    assert.equal(marked.value.item.state, "read");
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].method, "POST");
+    assert.equal(requests[0].path, `/api/rooms/commons/updates/${item.id}/read`);
+    assert.equal(requests[0].status, 200);
+    const current = await listedUpdate(room, secret, posted.event.data.messageId);
+    assert.equal(current.item.state, "read");
+  });
+
+  test("a mention reply sends its queued basis and stale refusal leaves no private mark", async (t) => {
+    const room = await enrolled(t);
+    saveBot(room.home, { tier: "t3" });
+    const secret = await secretOf(room);
+    const posted = await mention(room, "@Room machine reply without taking a slot");
+    const { item, viewerId } = await listedUpdate(room, secret, posted.event.data.messageId);
+    const requests = trackUpdateRequests(room.server);
+    const bot = new MachineBot({ home: room.home, env: room.env, waitMs: 0, provider: createNoneProvider() });
+    const result = await step(room, bot);
+    assert.equal(result.results[0].refused, "none", JSON.stringify(result));
+    assert.equal((await bodies(room.origin, "commons", secret)).includes(NONE_MESSAGE), true);
+    const writes = requests.filter(request => request.method === "POST");
+    assert.equal(writes.length, 1);
+    assert.equal(writes[0].path, `/api/rooms/commons/updates/${item.id}/done`);
+    assert.equal(writes[0].status, 409, "the reply changes the mention basis before the private mark");
+    assert.equal(requests.filter(request => request.method === "GET").length, 1, "do not refresh and retry a stale mark");
+    const current = await listedUpdate(room, secret, posted.event.data.messageId);
+    assert.notEqual(current.item.basisToken, item.basisToken);
+    assert.equal(current.item.state, "answered", "reply semantics still come from the source journal");
+    assert.equal(room.store.db.prepare(
+      "SELECT action FROM private_update_marks WHERE room_id=? AND member_id=? AND item_id=?"
+    ).get("commons", viewerId, item.id), undefined);
+    assert.equal(room.store.db.prepare(
+      "SELECT COUNT(*) AS count FROM private_update_commands WHERE room_id=? AND member_id=?"
+    ).get("commons", viewerId).count, 0);
+  });
+
+  test("pending and active restarts retain the original update basis through completion", async (t) => {
+    const room = await enrolled(t);
+    saveBot(room.home, { tier: "t1" });
+    const secret = await secretOf(room);
+    const posted = await mention(room, "@Room machine resume this task after restart");
+    const { item } = await listedUpdate(room, secret, posted.event.data.messageId);
+    const planner = new MachineBot({ home: room.home, env: room.env, waitMs: 0, provider: scripted([]) });
+    const planned = await step(room, planner);
+    assert.equal(planned.results[0].planned, true, JSON.stringify(planned));
+    const pendingState = JSON.parse(readFileSync(join(room.home, "bot-state.json"), "utf8"));
+    assert.equal(pendingState.pending.basisToken, item.basisToken);
+
+    const resumed = new MachineBot({
+      home: room.home, env: room.env, waitMs: 0,
+      provider: scripted([{ actions: [{ tool: "files.get", args: { name: "checkpoint" } }] }]),
+      dispatch: async () => {
+        await resumed.stop();
+        return { ok: true, result: { output: "checkpoint" } };
+      },
+    });
+    const go = await post(room.origin, "/api/rooms/commons/commands", {
+      id: randomUUID(), type: "message.posted",
+      data: { messageId: randomUUID(), body: "go", replyToId: pendingState.pending.planMessageId },
+    }, room.ownerKey);
+    assert.equal(go.status, 201, JSON.stringify(go.json));
+    const stopped = await step(room, resumed);
+    assert.equal(stopped.stopped, true, JSON.stringify(stopped));
+    const activeState = JSON.parse(readFileSync(join(room.home, "bot-state.json"), "utf8"));
+    assert.equal(activeState.pending, null);
+    assert.equal(activeState.active.basisToken, item.basisToken);
+    assert.equal(activeState.active.updateId, item.id);
+
+    const requests = trackUpdateRequests(room.server);
+    const restarted = new MachineBot({
+      home: room.home, env: room.env, waitMs: 0, provider: scripted([{ text: "Resumed task complete." }]),
+    });
+    const finished = await step(room, restarted);
+    assert.equal(finished.done, true, JSON.stringify(finished));
+    assert.equal(finished.closed, true, JSON.stringify(finished));
+    assert.equal(requests.length, 1, "resumed work must not fetch a newer basis");
+    assert.equal(requests[0].method, "POST");
+    assert.equal(requests[0].path, `/api/rooms/commons/updates/${item.id}/done`);
+    assert.equal(requests[0].status, 409);
+    const board = await claims(room.origin, secret);
+    assert.equal(board.find(claim => claim.id === finished.workId).state, "done");
+    assert.equal(board.find(claim => claim.id === finished.leaseId).state, "done");
+    const saved = JSON.parse(readFileSync(join(room.home, "bot-state.json"), "utf8"));
+    assert.equal(saved.pending, null);
+    assert.equal(saved.active, null);
+  });
+
+  test("legacy pending and active state reply without refreshing or marking an unseen basis", async (t) => {
+    for (const stateName of ["pending", "active"]) {
+      await t.test(stateName, async (t) => {
+        const room = await enrolled(t);
+        saveBot(room.home, { tier: stateName === "pending" ? "t1" : "t3" });
+        const secret = await secretOf(room);
+        const posted = await mention(room, "@Room machine finish a legacy saved task");
+        const { item, viewerId } = await listedUpdate(room, secret, posted.event.data.messageId);
+        const original = new MachineBot({
+          home: room.home, env: room.env, waitMs: 0,
+          provider: scripted([{ actions: [{ tool: "files.get", args: { name: "checkpoint" } }] }]),
+          dispatch: async () => {
+            await original.stop();
+            return { ok: true, result: { output: "checkpoint" } };
+          },
+        });
+        await step(room, original);
+        const statePath = join(room.home, "bot-state.json");
+        const legacy = JSON.parse(readFileSync(statePath, "utf8"));
+        assert.equal(legacy[stateName].updateId, item.id);
+        delete legacy[stateName].basisToken;
+        writeFileSync(statePath, JSON.stringify(legacy));
+        if (stateName === "pending") {
+          const go = await post(room.origin, "/api/rooms/commons/commands", {
+            id: randomUUID(), type: "message.posted",
+            data: { messageId: randomUUID(), body: "go", replyToId: legacy.pending.planMessageId },
+          }, room.ownerKey);
+          assert.equal(go.status, 201, JSON.stringify(go.json));
+        }
+        const requests = trackUpdateRequests(room.server);
+        const restarted = new MachineBot({
+          home: room.home, env: room.env, waitMs: 0, provider: scripted([{ text: "Legacy task complete." }]),
+        });
+        const finished = await step(room, restarted);
+        assert.equal(finished.done, true, JSON.stringify(finished));
+        assert.equal(finished.closed, true, JSON.stringify(finished));
+        assert.equal((await bodies(room.origin, "commons", secret)).some(body => body.startsWith("Legacy task complete.")), true);
+        assert.deepEqual(requests, [], "old state must neither mark nor fetch a basis it never observed");
+        assert.equal(room.store.db.prepare(
+          "SELECT action FROM private_update_marks WHERE room_id=? AND member_id=? AND item_id=?"
+        ).get("commons", viewerId, item.id), undefined);
+      });
+    }
   });
 
   test("room-machine run starts the bot loop when bot.enabled is on", async (t) => {

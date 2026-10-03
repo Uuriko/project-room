@@ -1,3 +1,6 @@
+// JDOT-PUBLIC-CSP-RUM begin: public-page policy
+import { publicPageCsp } from "../deploy/public-search.mjs";
+// JDOT-PUBLIC-CSP-RUM end
 import { acceptPrefersHtml, publicHtmlNotFoundPath, publicSearchAssets, publicSearchCanonical, publicSearchMarketingPolicy, publicSearchSitemap, PUBLIC_NOT_FOUND_HTML, PUBLIC_SEARCH_CSP, PUBLIC_PAGE_LASTMOD, reviewedPublicSearchPaths } from "../deploy/public-search.mjs";
 import { readConversation } from "./conversation-sync.mjs";
 import { OutsideAgents } from "./outside-agents.mjs";
@@ -78,6 +81,11 @@ import { queryPublicReceipts, publicReceiptById, listPublicReceiptSitemap, PUBLI
 import { applyRoomTemplate } from "./templates.mjs";
 import { templatesIndex, templatePage, publicRoomView, agentDirectoryView, publicSitemapEntries, PUBLIC_PAGE_CSP } from "./public-rooms.mjs";
 // --- end GR2 ---
+// --- LEGAL public pages, terms acceptance, abuse reports, operator unpublish (G-SEC-11, G-SEC-14). ---
+import { termsStatus } from "./legal-store.mjs";
+import { LEGAL_SITEMAP_PATHS } from "./legal-pages.mjs";
+import { handleLegalRequest, isLegalPath } from "./legal-routes.mjs";
+// --- end LEGAL ---
 import {
   listActivity, activityUnreadCount, markActivityRead, markActivityReadAll,
   getReadHorizon, setReadHorizon, listSaved, setSaved
@@ -271,7 +279,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   fetchPullRequest = null,
   githubToken = undefined,
   connectorClients = [], // OAuth2 clients for third-party connectors (e.g. [{ clientId, name, redirectUris }])
-  serviceMode = trustedLocalProxy ? "invite-only-pilot" : "single-node-pilot", deployment = undefined, growth = null, push = undefined }) {
+  serviceMode = trustedLocalProxy ? "invite-only-pilot" : "single-node-pilot", deployment = undefined, growth = null, push = undefined,
+  operatorAccountId = (globalThis.process && globalThis.process.env.ROOM_OPERATOR_ACCOUNT_ID) || "" }) {
   // Human browser push stays off until VAPID keys are present. Node reads
   // process.env; the Worker passes its bindings as `push` so a secret never
   // has to live in the source tree.
@@ -282,6 +291,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // config never holds up startup and the card reports "not configured".
   if (typeof telegram?.configured !== "boolean" || !Array.isArray(telegram.bindings)) throw new Error("Telegram configuration must come from telegramConfig()");
   if (deployment !== undefined && deployment !== "production" && deployment !== "staging") throw new Error("deployment must be production or staging");
+  const sessionAccountView = auth => {
+    const view = accountView(auth);
+    if (!auth?.account) return view;
+    return { ...view, terms: termsStatus(store.db, auth.account.id) };
+  };
+  // Literals stay in this file so scripts/open-routes.mjs sees the legal API.
+  const legalApiPaths = new Set(["/api/reports/public/challenge", "/api/reports/public", "/api/account/terms", "/api/operator/unpublish", "/api/health/jobs"]);
   // The Worker reads ROOM_SECURITY_CONTACT from its binding in edge-public.
   // Logging process.env here would warn on every isolate that has no env var.
   if (!isWorkersRuntime()) warnMissingSecurityContactCheck();
@@ -860,7 +876,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       try { remoteAddress = resolveClientAddress(req); }
       catch { reject(403, "proxy_denied", "Invalid proxy configuration"); }
       const url = new URL(req.url, expectedOrigin()), loopback = ["127.0.0.1", "::1"].includes(remoteAddress);
-      if (url.pathname === "/.well-known/security.txt" || url.pathname === "/room/.well-known/security.txt") {
+      if (url.pathname === "/.well-known/security.txt" || url.pathname === "/security.txt" || url.pathname === "/room/.well-known/security.txt") {
         return writeSecurityTxt(req, res);
       }
       // Jev-harness admission gate, shadow mode (docs/JEV-GATES.md): score
@@ -964,10 +980,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // to the legacy chain below until that chain is empty.
       if (await dispatchRoute({
         req, res, url, store, remoteAddress, loopback, operationId,
+        // JDOT-MEMBER-PERMS begin: share quotas across request aliases.
+        accessRequests,
+        // JDOT-MEMBER-PERMS end
         json, reject, rate, cookie, setCookie, bearer, body, readText,
         roomAuth, roomCredentials, expectedBinding, accountBinding,
         checkOrigin, protectWrite, exact, pathId, expectedOrigin,
-        accountCookieName, roomCookieName, tokenPattern, accountView,
+        accountCookieName, roomCookieName, tokenPattern, accountView: sessionAccountView,
         signInSlotToken, magicMailer, magicEmailLimit, passkeys,
         magicRequestEmailLimiter, magicConsumeEmailLimiter,
         resetRequestEmailLimiter, resetConsumeEmailLimiter, signupEmailLimiter,
@@ -1708,7 +1727,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Content-Length": body.length });
             return res.end(req.method === "HEAD" ? undefined : body);
           }
-          res.setHeader("Content-Security-Policy", RECEIPTS_PAGE_CSP);
+          // JDOT-PUBLIC-CSP-RUM begin: public-page policy
+          res.setHeader("Content-Security-Policy", publicPageCsp(expectedOrigin(), RECEIPTS_PAGE_CSP));
+          // JDOT-PUBLIC-CSP-RUM end
           const html = Buffer.from(renderReceiptDetailHtml(receipt));
           res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": html.length });
           return res.end(req.method === "HEAD" ? undefined : html);
@@ -1727,7 +1748,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Content-Length": body.length });
           return res.end(req.method === "HEAD" ? undefined : body);
         }
-        res.setHeader("Content-Security-Policy", RECEIPTS_PAGE_CSP);
+        // JDOT-PUBLIC-CSP-RUM begin: public-page policy
+        res.setHeader("Content-Security-Policy", publicPageCsp(expectedOrigin(), RECEIPTS_PAGE_CSP));
+        // JDOT-PUBLIC-CSP-RUM end
         const html = Buffer.from(renderReceiptsHtml(queried));
         res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": html.length });
         return res.end(req.method === "HEAD" ? undefined : html);
@@ -1741,6 +1764,15 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         res.writeHead(301, { Location: (url.pathname.startsWith("/room/") ? "/room" : "") + "/favicon.svg" });
         return res.end();
       }
+      // --- LEGAL public pages, terms acceptance, abuse reports, operator unpublish (G-SEC-11, G-SEC-14). ---
+      if (legalApiPaths.has(url.pathname) || isLegalPath(url.pathname)) {
+        const handled = await handleLegalRequest({
+          req, res, url, store, rate, remoteAddress, readBody: body, json, cookie, protectWrite, reject,
+          operatorAccountId, accountCookieName, accountView: sessionAccountView,
+        });
+        if (handled) return;
+      }
+      // --- end LEGAL ---
       if (url.pathname === "/sitemap.xml" && ["GET", "HEAD"].includes(req.method)) {
         // Confirm bytes exist before advertising an asset-backed canonical URL.
         const available = [];
@@ -1755,6 +1787,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const xml = publicSearchSitemap(ROOM_ORIGIN, [
           ...available.map(path => ({ path, lastmod: PUBLIC_PAGE_LASTMOD })),
           { path: "/receipts", lastmod: PUBLIC_PAGE_LASTMOD },
+          ...LEGAL_SITEMAP_PATHS.map(path => ({ path, lastmod: PUBLIC_PAGE_LASTMOD })),
           ...receiptEntries,
           ...publicSitemapEntries(store), // GR2 templates, agents, and opted-in room pages
         ]);
@@ -1780,7 +1813,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Content-Length": body.length });
             return res.end(req.method === "HEAD" ? undefined : body);
           }
-          res.setHeader("Content-Security-Policy", PUBLIC_PAGE_CSP);
+          // JDOT-PUBLIC-CSP-RUM begin: public-page policy
+          res.setHeader("Content-Security-Policy", publicPageCsp(expectedOrigin(), PUBLIC_PAGE_CSP));
+          // JDOT-PUBLIC-CSP-RUM end
           const body = Buffer.from(html);
           res.writeHead(status, { "Content-Type": "text/html; charset=utf-8", "Content-Length": body.length });
           return res.end(req.method === "HEAD" ? undefined : body);
@@ -1809,7 +1844,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const [path, type] = assets.get(url.pathname);
         const data = await loadAsset(path);
         const canonical = publicSearchCanonical(url.pathname, publicAssetPaths);
-        if (canonical && publicSearchMarketingPolicy(canonical)) res.setHeader("Content-Security-Policy", PUBLIC_SEARCH_CSP);
+        // JDOT-PUBLIC-CSP-RUM begin: public-page policy
+        if (canonical && publicSearchMarketingPolicy(canonical)) res.setHeader("Content-Security-Policy", publicPageCsp(expectedOrigin(), PUBLIC_SEARCH_CSP));
+        // JDOT-PUBLIC-CSP-RUM end
         if (canonical && !url.search) {
           if (canonical !== url.pathname) {
             res.writeHead(301, { Location: canonical });
@@ -1880,7 +1917,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             rate(`account-slot:${remoteAddress}`, 20);
             const created = store.createAccountSessionSlot();
             setCookie(res, accountCookieName, created.token, Math.max(0, Math.floor((created.session.expiresAt - store.now()) / 1000)));
-            return json(res, 200, accountView(created.session));
+            return json(res, 200, sessionAccountView(created.session));
           }
           let slot;
           try { slot = store.authenticateAccountSession(slotToken); }
@@ -1895,7 +1932,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
               slot = created.session;
             }
           }
-          return json(res, 200, accountView(slot));
+          return json(res, 200, sessionAccountView(slot));
         }
         checkOrigin(req, true);
         if (!slotToken) reject(401, "account_session_required", "Start an account browser session before signing in");
@@ -1914,11 +1951,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             rotateSlot: true
           });
           setCookie(res, accountCookieName, freshSlotToken, Math.max(0, Math.floor((loggedIn.expiresAt - store.now()) / 1000)));
-          return json(res, 201, accountView(loggedIn));
+          return json(res, 201, sessionAccountView(loggedIn));
         }
         if (req.method === "DELETE") {
           if (!exact(data, ["expectedSessionRevision"])) reject(422, "invalid_logout", "Current session revision required");
-          return json(res, 200, accountView(store.logoutAccountSession(slotToken, data.expectedSessionRevision)));
+          return json(res, 200, sessionAccountView(store.logoutAccountSession(slotToken, data.expectedSessionRevision)));
         }
         reject(405, "method_not_allowed", "Method not allowed");
       }
@@ -1986,7 +2023,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           rotateSlot: true
         });
         setCookie(res, accountCookieName, freshSlotToken, Math.max(0, Math.floor((loggedIn.expiresAt - store.now()) / 1000)));
-        return json(res, 200, { remaining: redemption.remaining, session: accountView(loggedIn) });
+        return json(res, 200, { remaining: redemption.remaining, session: sessionAccountView(loggedIn) });
       }
       // ---- Login method settings (slice 7, RC-2026-09-17-016) ----
       // Authenticated management of an account's linked sign-in methods.
@@ -2816,7 +2853,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // pending responses carry poll-status + cancel guidance, approved
         // ones carry the new member's first moves. Never overwrite an
         // approval's next[] with poll/cancel.
-        const filed = accessRequests.request(data.roomId, data);
+        // JDOT-ACCESS-UPGRADE-HTTP begin: upgrades require identity-holder proof.
+        const filed = accessRequests.request(data.roomId, data, bearer(req));
+        // JDOT-ACCESS-UPGRADE-HTTP end
         return json(res, 201, {
           ...filed,
           next: filed.next ?? [],
@@ -2925,9 +2964,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         protectWrite(req, auth, selected.bearer);
         rate(`write:${auth.credentialHash}`, 60);
         const data = await body(req);
-        if (!exact(data, ["requestId"]) || typeof data.requestId !== "string") reject(422, "invalid_update", "requestId is the only accepted field");
+        // JDOT-COH-UPDATES-BASIS begin
+        // Missing expectedBasis can reach only an authenticated legacy receipt;
+        // the service refuses every new unbound operation.
+        if ((!exact(data, ["requestId"]) && !exact(data, ["requestId", "expectedBasis"])) || typeof data.requestId !== "string") reject(422, "invalid_update", "Supply requestId and the observed expectedBasis");
         const action = updatesReadMatch ? "read" : updatesDoneMatch ? "done" : "clear";
-        return json(res, 200, markUpdate(store, selected.token, roomId, pathId(updatesMarkMatch[2]), action, data.requestId, fence));
+        return json(res, 200, markUpdate(store, selected.token, roomId, pathId(updatesMarkMatch[2]), action, data.requestId, fence, data.expectedBasis));
+        // JDOT-COH-UPDATES-BASIS end
       }
       const accessStatusMatch = /^\/api\/access-requests\/([^/]{1,64})$/.exec(url.pathname);
       if (accessStatusMatch && req.method === "GET") {
@@ -2938,7 +2981,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         rate(`access-request-status:${remoteAddress}`, 60);
         const identityId = url.searchParams.get("identityId");
         if (!identityId) reject(422, "invalid_request", "identityId query param is required");
-        const record = accessRequests.status(pathId(accessStatusMatch[1]), identityId);
+        // JDOT-ACCESS-UPGRADE-HTTP begin: upgrade status has the same identity boundary.
+        const record = accessRequests.status(pathId(accessStatusMatch[1]), identityId, bearer(req));
+        // JDOT-ACCESS-UPGRADE-HTTP end
         // The poll read is the requester's only window on the decision. Return
         // the status with the continuation for that status, so an approved
         // requester learns where the room read lives (mirrors the filing

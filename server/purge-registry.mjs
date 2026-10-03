@@ -21,6 +21,12 @@ function freezeVia(via) {
 }
 
 const ROWS = [
+  // Retired schemas remain in upgraded databases but are never created on a
+  // fresh store. Their room-owned rows still belong in confirmed room purge.
+  ...[
+    "emissary_drops", "emissary_idempotency", "emissary_invite_attribution",
+    "emissary_journal", "external_identities", "external_receipts"
+  ].map(table => ({ table, key: "room_id", action: "delete", optional: true, match: { room: ["room_id"] } })),
   {
     "table": "access_requests",
     "key": "room_id",
@@ -117,6 +123,16 @@ const ROWS = [
   },
   {
     "table": "account_setup",
+    "key": "account_id",
+    "action": "delete",
+    "match": {
+      "account": [
+        "account_id"
+      ]
+    }
+  },
+  {
+    "table": "account_terms",
     "key": "account_id",
     "action": "delete",
     "match": {
@@ -560,67 +576,7 @@ const ROWS = [
     }
   },
   {
-    "table": "emissary_drops",
-    "key": "room_id",
-    "action": "delete",
-    "match": {
-      "room": [
-        "room_id"
-      ]
-    }
-  },
-  {
-    "table": "emissary_idempotency",
-    "key": "room_id",
-    "action": "delete",
-    "match": {
-      "room": [
-        "room_id"
-      ]
-    }
-  },
-  {
-    "table": "emissary_invite_attribution",
-    "key": "room_id",
-    "action": "delete",
-    "match": {
-      "room": [
-        "room_id"
-      ]
-    }
-  },
-  {
-    "table": "emissary_journal",
-    "key": "room_id",
-    "action": "delete",
-    "match": {
-      "room": [
-        "room_id"
-      ]
-    }
-  },
-  {
     "table": "events",
-    "key": "room_id",
-    "action": "delete",
-    "match": {
-      "room": [
-        "room_id"
-      ]
-    }
-  },
-  {
-    "table": "external_identities",
-    "key": "room_id",
-    "action": "delete",
-    "match": {
-      "room": [
-        "room_id"
-      ]
-    }
-  },
-  {
-    "table": "external_receipts",
     "key": "room_id",
     "action": "delete",
     "match": {
@@ -1630,6 +1586,7 @@ export const PURGE_TABLES = Object.freeze(ROWS.map(row => Object.freeze({
   key: row.key,
   action: row.action,
   match: freezeMatch(row.match),
+  ...(row.optional ? { optional: true } : {}),
   ...(row.reason ? { reason: row.reason } : {}),
   ...(row.via ? { via: freezeVia(row.via) } : {})
 })));

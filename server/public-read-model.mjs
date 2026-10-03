@@ -5,6 +5,7 @@
 // Durable Object constructor.
 import { createHash } from "node:crypto";
 import { publicPage, joinLink, publicName, publicTask, publicReceipts } from "../src/events.js";
+import { isUnpublished } from "./legal-store.mjs"; // operator unpublish hides a room or receipt from every public read
 
 export const PUBLIC_START_URL = "https://room.trydemigod.com/?start=room";
 const SHA256 = /^sha256:[a-f0-9]{64}$/;
@@ -558,6 +559,13 @@ export function backfillPublicReadModel(store, { limit = PUBLIC_BACKFILL_BATCH, 
   return { done: rows.length < cap, rooms: 0, receipts: 0, cards };
 }
 
+// An unpublished room or receipt stays out of listings, detail reads, and the sitemap.
+const HIDDEN_RECEIPT = `NOT EXISTS (
+  SELECT 1 FROM public_unpublish u
+  WHERE (u.kind='receipt' AND u.target=public_receipts.id)
+     OR (u.kind='room' AND u.target=public_receipts.room_id)
+     OR (u.kind='room' AND u.target=public_receipts.origin_room_id))`;
+
 const receiptFilter = (room, needle) => {
   const clauses = [];
   const params = [];
@@ -590,7 +598,7 @@ export function queryPublicReceipts(store, { room = null, agent = null, cursor =
     after = "(at < ? OR (at = ? AND id > ?))";
     afterParams.push(current.at, current.at, current.id);
   }
-  const clauses = [...filter.clauses];
+  const clauses = [...filter.clauses, HIDDEN_RECEIPT];
   if (after) clauses.push(after);
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   const rows = store.db.prepare(`SELECT ${RECEIPT_COLUMNS} FROM public_receipts ${where} ORDER BY at DESC, id ASC LIMIT ?`)
@@ -602,24 +610,24 @@ export function queryPublicReceipts(store, { room = null, agent = null, cursor =
 
 export function publicReceiptById(store, id) {
   if (typeof id !== "string" || !PUBLIC_RECEIPT_ID.test(id)) return null;
-  const row = store.db.prepare(`SELECT ${RECEIPT_COLUMNS} FROM public_receipts WHERE id=?`).get(id);
+  const row = store.db.prepare(`SELECT ${RECEIPT_COLUMNS} FROM public_receipts WHERE id=? AND ${HIDDEN_RECEIPT}`).get(id);
   return row ? rowToPublic(row) : null;
 }
 
 export function collectPublicReceipts(store) {
-  return store.db.prepare(`SELECT ${RECEIPT_COLUMNS} FROM public_receipts ORDER BY at DESC, id ASC`).all().map(rowToPublic);
+  return store.db.prepare(`SELECT ${RECEIPT_COLUMNS} FROM public_receipts WHERE ${HIDDEN_RECEIPT} ORDER BY at DESC, id ASC`).all().map(rowToPublic);
 }
 
 export function listPublicReceiptSitemap(store, limit = 1000) {
   const cap = Number.isInteger(limit) && limit > 0 ? Math.min(limit, 1000) : 1000;
-  return store.db.prepare("SELECT id, at FROM public_receipts ORDER BY at DESC, id ASC LIMIT ?").all(cap).map(row => ({
+  return store.db.prepare(`SELECT id, at FROM public_receipts WHERE ${HIDDEN_RECEIPT} ORDER BY at DESC, id ASC LIMIT ?`).all(cap).map(row => ({
     path: `/receipts/${row.id}`,
     lastmod: typeof row.at === "string" ? row.at.slice(0, 10) : null,
   }));
 }
 
 export function loadPublicRoom(store, slug) {
-  if (!SLUG.test(slug)) return null;
+  if (!SLUG.test(slug) || isUnpublished(store.db, "room", slug)) return null;
   const row = store.db.prepare(`SELECT slug, title, purpose, humans, agents, names_json, tasks_json, receipts_enabled, join_mode, join_token, set_at
     FROM public_rooms WHERE slug=?`).get(slug);
   if (!row) return null;
@@ -638,15 +646,17 @@ export function loadPublicRoom(store, slug) {
 }
 
 export function listPublicRoomSitemap(store) {
-  return store.db.prepare("SELECT slug, set_at FROM public_rooms ORDER BY slug ASC").all().map(row => ({
-    slug: row.slug,
-    setAt: row.set_at,
-  }));
+  return store.db.prepare("SELECT slug, set_at FROM public_rooms ORDER BY slug ASC").all()
+    .filter(row => !isUnpublished(store.db, "room", row.slug))
+    .map(row => ({
+      slug: row.slug,
+      setAt: row.set_at,
+    }));
 }
 
 export function roomPageReceipts(store, slug, receiptsEnabled) {
   return store.db.prepare(`SELECT id, title FROM public_receipts
-    WHERE room_id=? OR (?=1 AND origin_room_id=? AND source IN ('work-claim','work-item'))
+    WHERE ${HIDDEN_RECEIPT} AND (room_id=? OR (?=1 AND origin_room_id=? AND source IN ('work-claim','work-item')))
     ORDER BY at DESC, id ASC LIMIT 5`).all(slug, receiptsEnabled ? 1 : 0, slug);
 }
 

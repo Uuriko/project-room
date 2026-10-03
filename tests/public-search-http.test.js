@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { request as httpRequest } from "node:http";
 import { join } from "node:path";
 import { publicSearchAssets, reviewedPublicSearchPaths } from "../deploy/public-search.mjs";
 import { publicAssetPaths } from "../deploy/public-assets.mjs";
@@ -17,12 +18,25 @@ async function serve(t, options = {}) {
   return `http://127.0.0.1:${server.address().port}`;
 }
 
+// Response headers are the contract: no helper-generated expectations.
+function assertPublicPolicy(response, origin) {
+  const policy = Object.fromEntries(response.headers.get("content-security-policy").split(";").map(part => {
+    const [name, ...values] = part.trim().split(/\s+/); return [name, values.join(" ")];
+  }));
+  assert.deepEqual(policy, {
+    "default-src": "'none'", "script-src": "https://static.cloudflareinsights.com",
+    "style-src": "'unsafe-inline'", "connect-src": `https://cloudflareinsights.com ${origin}/cdn-cgi/rum`,
+    "img-src": "'self'", "manifest-src": "'self'", "base-uri": "'none'",
+    "form-action": "'none'", "frame-ancestors": "'none'"
+  });
+}
+
 test("public doors are indexable while credentials and unknown pages keep private defaults", async t => {
   const origin = await serve(t);
   const about = await fetch(origin + "/about");
   assert.equal(about.status, 200); assert.match(about.headers.get("content-type"), /text\/html/);
   assert.equal(about.headers.get("x-robots-tag"), "all");
-  assert.match(about.headers.get("content-security-policy"), /default-src 'none'/);
+  assertPublicPolicy(about, origin);
   assert.match(about.headers.get("content-security-policy"), /script-src https:\/\/static\.cloudflareinsights\.com/);
   assert.match(about.headers.get("content-security-policy"), /connect-src https:\/\/cloudflareinsights\.com/);
   assert.match(about.headers.get("content-security-policy"), /style-src 'unsafe-inline'/);
@@ -48,12 +62,29 @@ test("public doors are indexable while credentials and unknown pages keep privat
     const canonical = "/" + file.slice(0, -5);
     const page = await fetch(origin + canonical);
     assert.equal(page.status, 200, canonical);
+    assertPublicPolicy(page, origin);
     assert.equal(page.headers.get("x-robots-tag"), "all", canonical);
     const html = await page.text();
     assert.match(html, new RegExp('rel="canonical" href="https://room.trydemigod.com' + canonical + '"'));
     assert.match(page.headers.get("link") ?? "", new RegExp(`<https://room\\.trydemigod\\.com${canonical}>; rel="canonical"`));
     for (const block of html.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)) JSON.parse(block[1]);
     assert.match(html, /"@type":"FAQPage"/);
+  }
+  for (const path of ["/receipts", "/templates", "/agents", "/docs/agents"]) {
+    const response = await fetch(origin + path, { headers: { "x-forwarded-host": "csp-denied.example", forwarded: "host=csp-denied.example;proto=https" } });
+    assert.equal(response.status, 200, path);
+    assertPublicPolicy(response, origin);
+  }
+  const forged = await new Promise((resolve, reject) => {
+    const req = httpRequest(origin + "/about", { headers: { host: "csp-denied.example" } }, res => {
+      res.resume(); res.once("end", () => resolve({ status: res.statusCode, policy: res.headers["content-security-policy"] }));
+    });
+    req.once("error", reject); req.end();
+  });
+  assert.equal(forged.status, 403);
+  assert.doesNotMatch(forged.policy, /csp-denied|cdn-cgi\/rum/);
+  for (const response of [home, offers, await fetch(origin + "/api/version")]) {
+    assert.doesNotMatch(response.headers.get("content-security-policy"), /cdn-cgi\/rum/);
   }
   assert.equal((await fetch(origin + "/room/about")).status, 404);
   assert.equal((await fetch(origin + "/room/offers")).status, 404);
