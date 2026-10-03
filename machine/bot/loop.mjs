@@ -471,7 +471,12 @@ export class MachineBot {
       const approved = await this.approve(className, tool);
       if (!approved.ok) return approved;
     }
-    const state = this.toolState();
+    let state;
+    try {
+      state = this.toolState();
+    } catch (error) {
+      return { ok: false, message: error.message };
+    }
     const dispatched = await this.dispatch({
       tool, args, slot: this.active.slot, claimId: this.active.leaseId, state, home: this.home,
     });
@@ -508,6 +513,13 @@ export class MachineBot {
     const state = this.daemon?.state ?? (this.toolRuntime ??= {
       running: {}, slots: { desk: null, scratch: null }, halted: false, snapshots: {},
     });
+    // M2: never stomp a slot another lease holds. The daemon's own call()
+    // path rejects foreign claimIds with SLOT_HELD; the bot must apply the
+    // same rule before writing instead of blindly overwriting.
+    const held = state.slots[this.active.slot];
+    if (held && held.claimId !== this.active.leaseId) {
+      throw new Error(`Slot ${this.active.slot} is held by another lease; the bot refused to seize it.`);
+    }
     state.slots[this.active.slot] = {
       claimId: this.active.leaseId,
       identityId: this.memberIds.get(this.active.roomId) ?? "bot",
