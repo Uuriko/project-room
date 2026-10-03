@@ -325,6 +325,48 @@ test("openapi: operationIds are unique across every documented operation", { tim
   assert.equal(firstSeen.size, expected, "every inventoried operation has a distinct operationId");
 });
 
+// Lazarus round-1 finding (2026-09-27): the served openapi.json carried no
+// requestBody on the enrollment POSTs, forcing agents to cold-read source.
+// This guards the general contract: any route declaring requestBodies has
+// them emitted verbatim on the served spec's operations.
+test("openapi: routes declaring request bodies document them on the served spec", { timeout: 30000 }, async t => {
+  const { origin } = await serve(t);
+  const doc = await (await get(origin, "/openapi.json")).json();
+  // Pinned regression (RC-2026-09-27, Lazarus round-1 finding): the enrollment
+  // POSTs must carry a JSON requestBody so cold agents can construct payloads
+  // without reading server source.
+  const ENROLLMENT = {
+    "/api/agent-identities": ["displayName"],
+    "/api/identity-create": ["displayName"],
+    "/api/access-requests": ["roomId", "identityId", "displayName", "requestedPermissions"],
+  };
+  for (const [path, required] of Object.entries(ENROLLMENT)) {
+    const op = doc.paths[path]?.post;
+    assert.ok(op, `openapi documents POST ${path}`);
+    const body = op.requestBody;
+    assert.equal(body?.required, true, `POST ${path} marks its body required`);
+    const schema = body?.content?.["application/json"]?.schema;
+    assert.ok(schema, `POST ${path} documents a JSON requestBody`);
+    assert.equal(schema.type, "object", `POST ${path} body is an object`);
+    assert.equal(schema.additionalProperties, false, `POST ${path} rejects undeclared fields`);
+    for (const field of required) {
+      assert.ok(schema.required?.includes(field), `POST ${path} requires ${field}`);
+      assert.ok(schema.properties?.[field], `POST ${path} defines required field ${field}`);
+    }
+  }
+  // General contract: every route-table-declared body is emitted verbatim —
+  // the served spec cannot drift from the table's declared schemas.
+  let declared = 0;
+  for (const entry of DISCOVERABILITY_ROUTES) {
+    for (const [method, body] of Object.entries(entry.requestBodies ?? {})) {
+      declared += 1;
+      assert.deepEqual(doc.paths[entry.path]?.[method.toLowerCase()]?.requestBody, body,
+        `${method} ${entry.path} requestBody matches the route table`);
+    }
+  }
+  assert.ok(declared > 0, "at least one route declares a request body");
+});
+
 // ---------------------------------------------------------------------------
 // 4. Governance.
 // ---------------------------------------------------------------------------
