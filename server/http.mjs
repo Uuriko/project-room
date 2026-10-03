@@ -35,6 +35,7 @@ import { agentErrorBody, errorCategory } from "../src/agent-error.mjs";
 import { DiagnosticsLog, supportExportBundle } from "./diagnostics.mjs";
 import { renderRoomExportHtml, EXPORT_HTML_CSP } from "./room-export-html.mjs";
 import { redactEventPage, redactEventRows, redactMessageTree, redactSnapshotState } from "./redact-read.mjs";
+import { messageInHistory, eventInHistory, indexMessages as indexHistoryMessages, requireExportOwner, recordRoomExport } from "./history-visibility.mjs"; // PRIV-2
 import { discoveryDoc, isHealthAliasPath, rewriteRoomApiPrefix, EDGE_DOOR_HOSTS, ROOM_ORIGIN } from "../deploy/agent-discovery.mjs";
 import { noteIdentityMint } from "./growth-loop.mjs";
 import { buildOpenApiJson, discoverabilityErrorOverride, nextActionsForAccessRequest, nextActionsForAccessRequestStatus, nextActionsForInviteRedeem } from "./discoverability.mjs";
@@ -3394,11 +3395,17 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // surfaces below apply the same predicate at the HTTP layer so
       // non-participants see no DM existence, count, or metadata.
       const viewerId = auth.member.id;
-      const dmMessageVisible = ({ authorId, toMemberId }) =>
-        !toMemberId || authorId === viewerId || toMemberId === viewerId;
-      const dmEventVisible = event =>
+      // --- PRIV-2 history visibility ---
+      // A since_join reader also loses messages and events from before their
+      // join (server/history-visibility.mjs). null for everyone else.
+      const historyFloor = store.historyFloor(roomId, viewerId);
+      const historyMessages = historyFloor ? indexHistoryMessages(store.room(roomId).state.messages) : null;
+      const dmMessageVisible = message => messageInHistory(message, historyFloor)
+        && (!message.toMemberId || message.authorId === viewerId || message.toMemberId === viewerId);
+      const dmEventVisible = event => eventInHistory(event, historyFloor, historyMessages) && (
         event?.type !== "message.posted" || !event?.data?.toMemberId
-        || event.actorId === viewerId || event.data.toMemberId === viewerId;
+        || event.actorId === viewerId || event.data.toMemberId === viewerId);
+      // --- end PRIV-2 ---
       // Bond receipts and peer DMs are ledger events, visible to the two
       // identities (bond metadata also to the room owner). Not room chat.
       const peerContext = {
@@ -3845,11 +3852,17 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // framing; the CSP header pins the document's single style block and
         // forbids everything else, so a browser that opens it inline runs
         // nothing.
+        //
+        // PRIV-2: owner-only. The export is materialised first, then the
+        // room.exported audit record is appended, so a failed audit write
+        // answers with an error instead of an unaudited download.
+        requireExportOwner(store, roomId, viewerId, reject);
         const format = url.searchParams.get("format") ?? "jsonl";
         if (!["jsonl", "html"].includes(format) || url.searchParams.getAll("format").length > 1) reject(422, "invalid_format", "format is jsonl (default) or html");
         if (format === "html") {
           const rows = redactEventRows([...store.exportEvents(selected.token, roomId, fence)].filter(({ event }) => roomEventVisible(event)), projectionMessages(roomId));
           const bytes = Buffer.from(renderRoomExportHtml(rows, { roomId }), "utf8");
+          recordRoomExport(store, selected.token, roomId, "html", fence); // PRIV-2
           res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": bytes.length,
             "Content-Security-Policy": EXPORT_HTML_CSP,
             "Content-Disposition": `attachment; filename="room-${roomId}-export.html"` });
@@ -3874,6 +3887,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           lines.push(JSON.stringify({ sequence: exportSequence, event: line.event }) + "\n");
         }
         const bytes = Buffer.from(lines.join(""), "utf8");
+        recordRoomExport(store, selected.token, roomId, "jsonl", fence); // PRIV-2
         res.writeHead(200, { "Content-Type": "application/x-ndjson; charset=utf-8", "Content-Length": bytes.length,
           "Content-Disposition": `attachment; filename="room-${roomId}-export.jsonl"` });
         return res.end(bytes);
