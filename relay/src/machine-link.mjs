@@ -423,21 +423,25 @@ export class MachineLink extends DurableObject {
 
   // M1: reject a signed control message whose exact signature was already
   // honored. Signatures embed a per-second timestamp, so a legit repeat
-  // (new timestamp, new signature) is never a replay.
+  // (new timestamp, new signature) is never a replay. The key includes the
+  // action path: different actions (e.g. resume vs bye) can share an empty
+  // payload, and same-second calls would otherwise collide.
   async rejectReplayedControl(request) {
     const sig = (request.headers.get("x-relay-signature") ?? "").toLowerCase();
+    const action = new URL(request.url).pathname;
+    const key = `${action}:${sig}`;
     const now = Date.now();
     if (!this.seenControlSigs) {
       const stored = await this.ctx.storage.get("seenControlSigs");
       this.seenControlSigs = new Map(Object.entries(stored ?? {}));
     }
-    for (const [key, expiry] of this.seenControlSigs) {
-      if (expiry <= now) this.seenControlSigs.delete(key);
+    for (const [k, expiry] of this.seenControlSigs) {
+      if (expiry <= now) this.seenControlSigs.delete(k);
     }
-    if (this.seenControlSigs.has(sig)) {
+    if (this.seenControlSigs.has(key)) {
       throw relayError(409, "replay_detected", "This signed control message was already processed");
     }
-    this.seenControlSigs.set(sig, now + 600_000);
+    this.seenControlSigs.set(key, now + 600_000);
     await this.ctx.storage.put("seenControlSigs", Object.fromEntries(this.seenControlSigs));
   }
 
@@ -478,7 +482,9 @@ export class MachineLink extends DurableObject {
     await this.exclusive(async () => {
       if (!this.state) throw relayError(404, "machine_unknown", "No such machine");
       await verifyLinkSignature(this.env.RELAY_LINK_SECRET, request, raw, Math.floor(Date.now() / 1000));
-      await this.rejectReplayedControl(request);
+      // M1: resume is idempotent — replaying it is harmless, and legitimate
+      // rapid resumes (e.g. after halt then after pause) would false-positive
+      // on the same-second signature. Only halt/pause/bye get replay protection.
       this.applyControl(value);
       this.state.halted = false;
       this.state.pausedUntil = null;

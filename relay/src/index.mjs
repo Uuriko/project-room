@@ -115,6 +115,9 @@ async function mintEnroll(request, env) {
       roomOrigin,
       codeHash: await sha256Hex(verifier),
       expiresAt,
+      // W5-M5: forward the per-machine passthrough opt-in and caps.
+      passthroughOptIn: value.passthroughOptIn === true,
+      passthroughCaps: Array.isArray(value.passthroughCaps) ? value.passthroughCaps : null,
     }),
   }));
   if (!response.ok) return response;
