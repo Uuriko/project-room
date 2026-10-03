@@ -426,7 +426,8 @@ test("waiting prerequisites stay visible, link by keyboard, and become claimable
   ]) seedClaim(fixture.store, { state: "unclaimed", updatedAt, ...item });
   const browser = await chromium.launch({ headless: true });
   t.after(async () => { await browser.close(); });
-  const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const page = await context.newPage();
   page.setDefaultTimeout(8000);
   page.on("pageerror", error => errors.push(error.message));
   await page.goto(origin);
