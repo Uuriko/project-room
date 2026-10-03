@@ -12,7 +12,7 @@
 // Writes only to the room it creates (qa2-authz-*), archives it at the end unless --keep.
 import { argv, exit } from "node:process";
 import { randomUUID, randomBytes } from "node:crypto";
-import { writeFileSync, rmSync } from "node:fs";
+import { writeFileSync, rmSync, renameSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createQaClient } from "./lib/client.mjs";
@@ -29,7 +29,11 @@ async function req(method, path, { token, body } = {}) {
 const must = (r, what) => { if (r.status < 200 || r.status >= 300) throw new Error(`${what}: HTTP ${r.status} ${r.text.slice(0, 200)}`); return r.json; };
 const recovery = join(tmpdir(), `qa2-authz-${stamp}.json`); // secrets for manual cleanup if the run dies; 0600, deleted on success
 const minted = [];
-const remember = extra => writeFileSync(recovery, JSON.stringify({ origin, minted, ...extra }), { mode: 0o600 });
+// W3-F9: atomic write — a torn file defeats the recovery purpose.
+const remember = extra => {
+  writeFileSync(`${recovery}.tmp`, JSON.stringify({ origin, minted, ...extra }), { mode: 0o600 });
+  renameSync(`${recovery}.tmp`, recovery);
+};
 const mint = async name => { const m = must(await req("POST", "/api/agent-identities", { body: { displayName: name } }), `mint ${name}`); minted.push({ identityId: m.identityId, secret: m.secret }); remember({}); return m; };
 const cmd = (type, data) => ({ id: randomUUID(), type, data });
 

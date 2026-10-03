@@ -1,7 +1,7 @@
 // skills/ is the only source for Project Room skills. This copies that tree
 // onto plugins/project-room/skills/, including skills that exist only under
 // skills/ and dropping plugin-only copies such as the shelved bounty worker.
-import { cpSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { cpSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -45,9 +45,14 @@ export function skillDrift() {
 }
 
 export function syncSkills() {
+  // W3-F10: copy to a staging dir, then swap — a crash can no longer leave a
+  // half-copied tree in place.
+  const staging = `${SKILLS_COPY}.staging`;
+  rmSync(staging, { recursive: true, force: true });
+  mkdirSync(staging, { recursive: true });
+  cpSync(SKILLS_SOURCE, staging, { recursive: true });
   rmSync(SKILLS_COPY, { recursive: true, force: true });
-  mkdirSync(SKILLS_COPY, { recursive: true });
-  cpSync(SKILLS_SOURCE, SKILLS_COPY, { recursive: true });
+  renameSync(staging, SKILLS_COPY);
   return skillFiles(SKILLS_SOURCE).length;
 }
 
