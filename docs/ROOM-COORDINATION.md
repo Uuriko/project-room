@@ -146,7 +146,7 @@ auto-deploy consent.
    fails with `claim_conflict`. Pass `--allow-overlap` only after agreeing it in the room.
 3. **Work**: `room-guard` runs before each commit and refuses staged changes
    to files another member holds.
-4. **Renew**: `room-coord renew <id> --progress "what moved"` reads the claim
+4. **Renew**: `room-coord renew <id> --lease-hours 6 --progress "what moved"` reads the claim
    first. It posts the progress line only when that read shows you holding a
    live lease, then renews the lease against that message. The room
    validates that supplied update as the holder's own public message. The
