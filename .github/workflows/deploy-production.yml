@@ -55,19 +55,33 @@ jobs:
     outputs:
       sha: ${{ steps.resolve.outputs.sha }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b885af677262 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
       - name: Resolve ref to SHA
         id: resolve
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The ref travels via env, never interpolated into the script text:
+          # a hostile ref value cannot inject shell commands.
+          DEPLOY_REF: ${{ inputs.ref }}
         run: |
           set -euo pipefail
+          case "$DEPLOY_REF" in
+            ''|*[!A-Za-z0-9._/-]*)
+              echo "ref contains illegal characters; refusing to deploy" >&2
+              exit 1 ;;
+          esac
           git fetch origin main --quiet
-          SHA="$(git rev-parse --verify "${{ inputs.ref }}^{commit}")"
+          # Resolve the default ref against the freshly fetched origin/main so
+          # a stale local branch can neither substitute nor block the tip.
+          case "$DEPLOY_REF" in
+            main) RESOLVE_REF="origin/main" ;;
+            *)    RESOLVE_REF="$DEPLOY_REF" ;;
+          esac
+          SHA="$(git rev-parse --verify "${RESOLVE_REF}^{commit}")"
           if ! git merge-base --is-ancestor "$SHA" origin/main; then
-            echo "ref ${{ inputs.ref }} ($SHA) is not on main; refusing to deploy" >&2
+            echo "ref $DEPLOY_REF ($SHA) is not on main; refusing to deploy" >&2
             exit 1
           fi
           echo "sha=$SHA" >> "$GITHUB_OUTPUT"
@@ -75,23 +89,28 @@ jobs:
       - name: Require fully green CI on the ref
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEPLOY_SHA: ${{ steps.resolve.outputs.sha }}
         run: |
           set -euo pipefail
-          SHA="${{ steps.resolve.outputs.sha }}"
-          BAD="$(gh api "repos/${{ github.repository }}/commits/$SHA/check-runs" --paginate \
-            --jq '[.check_runs[] | select(.status != "completed" or (.conclusion != "success" and .conclusion != "skipped")) | .name] | unique | join(", ")')"
-          if [ -n "$BAD" ]; then
-            echo "ref $SHA is not fully green; blocking: $BAD" >&2
+          CHECKS="$(gh api "repos/${{ github.repository }}/commits/$DEPLOY_SHA/check-runs" --paginate)"
+          TOTAL="$(printf '%s' "$CHECKS" | jq -s '[.[].check_runs[]] | length')"
+          BAD="$(printf '%s' "$CHECKS" | jq -s -r '[.[].check_runs[] | select(.status != "completed" or (.conclusion != "success" and .conclusion != "skipped")) | .name] | unique | join(", ")')"
+          if [ "$TOTAL" -eq 0 ]; then
+            echo "ref $DEPLOY_SHA has no check runs; refusing to deploy without CI signal" >&2
             exit 1
           fi
-          echo "all checks green on $SHA"
+          if [ -n "$BAD" ]; then
+            echo "ref $DEPLOY_SHA is not fully green; blocking: $BAD" >&2
+            exit 1
+          fi
+          echo "all $TOTAL checks green on $DEPLOY_SHA"
 
   ship:
     name: Build (signed), deploy, verify
     runs-on: ubuntu-latest
     needs: guard
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b885af677262 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ needs.guard.outputs.sha }}
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -126,18 +145,20 @@ jobs:
             "$WORKER_NAME" "$CLOUDFLARE_ACCOUNT_ID" \
             cloudflare/public cloudflare/dist/room.js
       - name: Verify production revision
+        env:
+          DEPLOY_SHA: ${{ needs.guard.outputs.sha }}
         run: |
           set -euo pipefail
-          SHA="${{ needs.guard.outputs.sha }}"
           # Edge propagation can serve the old revision briefly after upload.
           for i in $(seq 1 24); do
             REV="$(curl -s --max-time 15 "$PROD_ORIGIN/api/version" | python3 -c "import json,sys; print(json.load(sys.stdin).get('sourceRevision',''))" || true)"
-            if [ "$REV" = "$SHA" ]; then
-              echo "production is on $SHA"
+            if [ "$REV" = "$DEPLOY_SHA" ]; then
+              echo "production is on $DEPLOY_SHA"
               exit 0
             fi
-            echo "attempt $i: prod reports ${REV:0:12:-none}, waiting for $SHA..."
+            GOT="${REV:0:12}"
+            echo "attempt $i: prod reports ${GOT:-none}, waiting for ${DEPLOY_SHA:0:12}..."
             sleep 15
           done
-          echo "production did not reach $SHA within 6 minutes" >&2
+          echo "production did not reach $DEPLOY_SHA within 6 minutes" >&2
           exit 1
