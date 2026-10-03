@@ -683,3 +683,21 @@ test("M-53: journal write replaces the file instead of truncating in place", asy
     "no temp write files litter the directory",
   );
 });
+
+test("text claim posts the stored work-item id, not a lowercased copy", async t => {
+  const directory = fixtureDir();
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const urls = [];
+  const fetchImpl = async (url) => {
+    urls.push(String(url));
+    return new Response(JSON.stringify({ id: "ROLE-DRIVER", state: "claimed" }), { status: 200 });
+  };
+  const env = { ROOM_AGENT_CONFIG: directory };
+  const first = await handleTextCommand({ env, fetchImpl, line: "claim ROLE-DRIVER" });
+  const second = await handleTextCommand({ env, fetchImpl, line: "PR claim ROLE-DRIVER" });
+  assert.equal(first.workItemId, "ROLE-DRIVER");
+  assert.equal(second.workItemId, "ROLE-DRIVER");
+  assert.equal(urls.length, 2);
+  assert.ok(urls.every(url => url.endsWith("/work-claims/ROLE-DRIVER/claim")), urls.join("\n"));
+  assert.equal(JSON.stringify(first).includes(secret), false);
+});

@@ -15,6 +15,12 @@ test("cash seekers are distinct from hobby", () => {
 
 test("secrets and unknown verbs fail closed", () => {
   assert.throws(() => parseRoomText("match hobby pri_abcdefghijk"), /secret_in_text/);
+  assert.throws(() => parseRoomText("match hobby PRI_abcdefghijk"), /secret_in_text/);
   assert.throws(() => parseRoomText("hello world"), /unknown_text_verb/);
   assert.throws(() => parseRoomText(""), /invalid_text_plug/);
+});
+
+test("claim keeps the work-item id case the room stored", () => {
+  assert.deepEqual(parseRoomText("claim ROLE-DRIVER"), { verb: "claim", workItemId: "ROLE-DRIVER" });
+  assert.deepEqual(parseRoomText("PR claim JDOT-CLAIM-PR-LINK"), { verb: "claim", workItemId: "JDOT-CLAIM-PR-LINK" });
 });

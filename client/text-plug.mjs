@@ -13,23 +13,27 @@ function fail(code) {
 
 export function parseRoomText(text) {
   if (typeof text !== "string") fail("invalid_text_plug");
-  if (/pri_[A-Za-z0-9_-]{8,}/.test(text)) fail("secret_in_text");
-  const line = text.trim().replace(/\s+/g, " ");
-  if (!line || line.length > 280) fail("invalid_text_plug");
-  const parts = line.toLowerCase().split(" ");
-  const head = parts[0] === "pr" || parts[0] === "room" ? parts.slice(1) : parts;
-  const verb = head[0];
+  if (/pri_[A-Za-z0-9_-]{8,}/i.test(text)) fail("secret_in_text");
+  const raw = text.trim().replace(/\s+/g, " ");
+  if (!raw || raw.length > 280) fail("invalid_text_plug");
+  const rawParts = raw.split(" ");
+  const lowerParts = rawParts.map(part => part.toLowerCase());
+  const start = lowerParts[0] === "pr" || lowerParts[0] === "room" ? 1 : 0;
+  const verb = lowerParts[start];
+  const restLower = lowerParts.slice(start + 1);
+  const restRaw = rawParts.slice(start + 1);
   if (!VERBS.has(verb)) fail("unknown_text_verb");
   if (verb === "pull" || verb === "done") {
-    if (head.length !== 1) fail("invalid_text_plug");
+    if (restLower.length !== 0) fail("invalid_text_plug");
     return { verb };
   }
   if (verb === "claim") {
-    const id = head[1];
-    if (!id || head.length !== 2 || id.length > 128) fail("invalid_text_plug");
+    const id = restRaw[0];
+    if (!id || restRaw.length !== 1 || id.length > 128) fail("invalid_text_plug");
     return { verb, workItemId: id };
   }
-  const motive = MOTIVES.has(head[1]) ? head[1] : "any";
-  const tags = head.slice(MOTIVES.has(head[1]) ? 2 : 1).filter(tag => tag.length <= 32).slice(0, 8);
+  const motive = MOTIVES.has(restLower[0]) ? restLower[0] : "any";
+  const tagSource = MOTIVES.has(restLower[0]) ? restLower.slice(1) : restLower;
+  const tags = tagSource.filter(tag => tag.length <= 32).slice(0, 8);
   return { verb: "match", motive, tags };
 }
