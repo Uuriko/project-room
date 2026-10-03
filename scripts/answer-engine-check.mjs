@@ -1,4 +1,4 @@
-import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { postAnalyticsSnapshot, postOpsSummary, redact, resolveIngestPath } from "./snippet-adoption.mjs";
@@ -362,8 +362,11 @@ export async function runAnswerCheck({
   const report = { date, engines };
   const summaryPath = resolve(outDir, `answer-engine-${date}.json`);
   const rawPath = resolve(outDir, `answer-engine-raw-${date}.json`);
-  writeFileSync(summaryPath, `${JSON.stringify(report, null, 2)}\n`);
-  writeFileSync(rawPath, `${JSON.stringify({ date, runs: raw }, null, 2)}\n`);
+  // W3-F1: atomic report writes.
+  writeFileSync(`${summaryPath}.tmp`, `${JSON.stringify(report, null, 2)}\n`);
+  renameSync(`${summaryPath}.tmp`, summaryPath);
+  writeFileSync(`${rawPath}.tmp`, `${JSON.stringify({ date, runs: raw }, null, 2)}\n`);
+  renameSync(`${rawPath}.tmp`, rawPath);
   const markdown = answerSummaryMarkdown(report);
   say(answerOpsText(report));
   if (env.GITHUB_STEP_SUMMARY) appendFileSync(env.GITHUB_STEP_SUMMARY, markdown);
