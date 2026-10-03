@@ -8,6 +8,12 @@ name: deploy-prod
 #   workflow_dispatch  sha = full 40-hex commit on main. The run refuses the
 #                      deploy unless the `test` and `schema-gate` push runs on
 #                      that commit both concluded success.
+#   onboarding gate    optional. When the repo variable ROOM_ONBOARDING_GATE is
+#                      "1", the `probe` job runs the onboarding probe against
+#                      staging at the same commit and blocks the deploy on a
+#                      regression (docs/ONBOARDING-PROBE.md). A dispatch can pass
+#                      probe_override with a reason; the reason goes into the
+#                      summary and the receipt. Unset by default.
 #   workflow_run       optional auto-deploy when `test` or `schema-gate`
 #                      finishes on main. Off unless the repo variable
 #                      ROOM_AUTO_DEPLOY is "1". It deploys only the current
@@ -35,6 +41,10 @@ on:
         type: string
       reason:
         description: "Optional note for the receipt"
+        required: false
+        type: string
+      probe_override:
+        description: "Only when ROOM_ONBOARDING_GATE is 1: deploy even if the staging onboarding probe fails, recording this reason"
         required: false
         type: string
   workflow_run:
@@ -113,9 +123,58 @@ jobs:
           echo "go=true" >> "$GITHUB_OUTPUT"
           echo "Deploying $SHA (test + schema-gate green)" >> "$GITHUB_STEP_SUMMARY"
 
-  deploy:
+  # --- ACT-5b onboarding gate (off unless vars.ROOM_ONBOARDING_GATE == '1') ---
+  # Probes staging at the commit about to ship and fails on a >20% regression
+  # or a newly unreachable step. When the job is skipped (variable unset) the
+  # deploy proceeds exactly as before.
+  probe:
     needs: gate
-    if: needs.gate.outputs.go == 'true'
+    if: needs.gate.outputs.go == 'true' && vars.ROOM_ONBOARDING_GATE == '1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      verdict: ${{ steps.predeploy.outputs.verdict }}
+      override: ${{ steps.predeploy.outputs.override }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.gate.outputs.sha }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - run: npm ci --no-audit --no-fund
+      - run: npx playwright install --with-deps chromium
+      - name: Onboarding probe gate on staging
+        id: predeploy
+        env:
+          SHA: ${{ needs.gate.outputs.sha }}
+          ROOM_STAGING_ORIGIN: ${{ vars.ROOM_STAGING_ORIGIN }}
+          PROBE_OVERRIDE: ${{ inputs.probe_override }}
+          PROBE_ROUND: predeploy${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          if [ -n "${PROBE_OVERRIDE//[[:space:]]/}" ]; then
+            node scripts/onboarding-probe/predeploy.mjs --target staging --sha "$SHA" --runs 3 --out probe-out --override "$PROBE_OVERRIDE"
+          else
+            node scripts/onboarding-probe/predeploy.mjs --target staging --sha "$SHA" --runs 3 --out probe-out
+          fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: predeploy-probe-${{ needs.gate.outputs.sha }}
+          path: probe-out
+          if-no-files-found: warn
+  # --- end ACT-5b onboarding gate ---
+
+  deploy:
+    needs: [gate, probe]
+    # The probe job is skipped unless the gate variable is on; a skipped probe
+    # does not block. A failed or cancelled probe does.
+    if: >-
+      !cancelled() &&
+      needs.gate.result == 'success' &&
+      needs.gate.outputs.go == 'true' &&
+      (needs.probe.result == 'success' || needs.probe.result == 'skipped')
     runs-on: ubuntu-latest
     timeout-minutes: 40
     env:
@@ -226,6 +285,7 @@ jobs:
           ENTRY_PRE: ${{ steps.pre.outputs.entry }}
           ROLLBACK_OUTCOME: ${{ steps.rollback.outcome }}
           REASON: ${{ inputs.reason }}
+          PROBE_OVERRIDE: ${{ needs.probe.outputs.override }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           if [ -z "$ROOM_RECEIPT_TOKEN" ]; then echo "ROOM_RECEIPT_TOKEN not set; no receipt posted."; exit 0; fi
@@ -233,7 +293,7 @@ jobs:
             const e = process.env, s = v => (v || "?").slice(0, 8);
             const body = e.ROLLBACK_OUTCOME && e.ROLLBACK_OUTCOME !== "skipped"
               ? `PROD DEPLOY ${s(e.SHA)} FAILED · rolled back prod to ${s(e.PROD_PRE)} · entry to ${s(e.ENTRY_PRE)} (rollback ${e.ROLLBACK_OUTCOME}) · ${e.RUN_URL}`
-              : `PROD DEPLOY ${s(e.SHA)} · prod ${s(e.PROD_NEW)} (rollback ${s(e.PROD_PRE)}) · entry ${s(e.ENTRY_NEW)} (rollback ${s(e.ENTRY_PRE)}) · smoke ${e.OUTCOME === "success" ? "ok" : e.OUTCOME} · ${e.RUN_URL}${e.REASON ? " · " + e.REASON.slice(0, 200) : ""}`;
+              : `PROD DEPLOY ${s(e.SHA)} · prod ${s(e.PROD_NEW)} (rollback ${s(e.PROD_PRE)}) · entry ${s(e.ENTRY_NEW)} (rollback ${s(e.ENTRY_PRE)}) · smoke ${e.OUTCOME === "success" ? "ok" : e.OUTCOME} · ${e.RUN_URL}${e.REASON ? " · " + e.REASON.slice(0, 200) : ""}${e.PROBE_OVERRIDE ? " · onboarding probe overridden: " + e.PROBE_OVERRIDE.slice(0, 200) : ""}`;
             const command = { id: crypto.randomUUID(), type: "message.posted", data: { messageId: crypto.randomUUID(), body } };
             const res = await fetch(`${e.PROD_ORIGIN}/api/rooms/${e.RECEIPT_ROOM}/commands`, {
               method: "POST",
@@ -252,6 +312,8 @@ jobs:
           PROD_PRE: ${{ steps.pre.outputs.prod }}
           ENTRY_PRE: ${{ steps.pre.outputs.entry }}
           ROLLBACK_OUTCOME: ${{ steps.rollback.outcome }}
+          PROBE_VERDICT: ${{ needs.probe.outputs.verdict }}
+          PROBE_OVERRIDE: ${{ needs.probe.outputs.override }}
         run: |
           {
             echo "## deploy-prod ${SHA:0:8}"
@@ -262,4 +324,5 @@ jobs:
             echo "| project-room-staging (entry) | ${ENTRY_NEW:-not deployed} | ${ENTRY_PRE:-unknown} |"
             echo ""
             echo "Rollback step: ${ROLLBACK_OUTCOME:-not run}"
+            echo "Onboarding probe gate: ${PROBE_VERDICT:-off}${PROBE_OVERRIDE:+ (override: $PROBE_OVERRIDE)}"
           } >> "$GITHUB_STEP_SUMMARY"

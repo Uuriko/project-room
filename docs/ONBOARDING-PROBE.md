@@ -2,7 +2,7 @@
 
 The probe is a black-box client. It signs up, reads the public docs, and follows only the calls those docs and the invite page print. It does not import room behavior to decide what to do next.
 
-A weekly job runs it and writes a table. The job reports the gate. It does not block deploy.
+A weekly job runs it and writes a table. That job reports the gate and does not block deploy. A separate pre-deploy gate can block a production deploy; see [Pre-deploy gate](#pre-deploy-gate).
 
 ## What each path measures
 
@@ -25,6 +25,21 @@ The current column is this run. The 4-week median column is [onboarding-probe/ba
 The gate fails a path when the median of its runs is more than 20% slower than the baseline, when the call count is more than 1.2 times the baseline, or when a step the baseline could reach becomes unreachable. Exactly 20% still passes. A close that the baseline could not reach is an improvement. If `/api/ready` is slower than three times `ready.medianMs`, the probe samples ready once more. If it is still that slow, the run is inconclusive rather than a failure.
 
 `ready.medianMs` in the baseline is a 1000 ms starting allowance. Replace it with a measured median in a pull request when one exists.
+
+## Pre-deploy gate
+
+`scripts/onboarding-probe/predeploy.mjs` runs the probe against staging and then the gate above:
+
+```
+node scripts/onboarding-probe/predeploy.mjs --target staging --sha <40-hex> [--runs 3] [--out probe-out] [--override "<reason>"]
+```
+
+- `--target staging` uses `ROOM_STAGING_ORIGIN` when it is set, otherwise the checked-in staging origin. An explicit origin also works.
+- With `--sha`, it waits up to 10 minutes (`--wait-ms`) for the target's `/api/version` to report that commit. If the target never does, the gate fails without probing, because the run would measure a different build.
+- Agent paths run 3 times and human paths once. The verdict goes to `probe-out/predeploy.json`, the job summary and the step outputs `verdict` and `override`.
+- It exits 1 on a failing gate and prints each failing path, step and reason. `--override "<reason>"` exits 0 on a failure and records the reason. A blank reason is refused.
+
+[deploy-prod](DEPLOY-LANE.md) runs this as its `probe` job when the repository variable `ROOM_ONBOARDING_GATE` is `1`. The deploy job starts only when the probe passes, is overridden, or is skipped because the variable is unset. A dispatch passes an override as the `probe_override` input, and the reason appears in the run summary and the muse-room receipt. The variable is unset by default, so a flaky probe cannot block deploys until someone turns it on.
 
 ## Update the baseline
 
