@@ -48,3 +48,14 @@ Grok Build. Test: an automation ships only if it makes join, attention, or execu
 ## What this goal does not ship
 
 No new daemon, no `--execute` timer, no second inbox, no merge, no deploy.
+
+## 2026-10-03 — parent TUI secret copy
+
+Observed: `~/.grok/config.toml` already points hosted MCP at `https://www.getdasha.com/room/mcp` with `Authorization = "Bearer ${PROJECT_ROOM_SECRET:-}"`. This process had `PROJECT_ROOM_SECRET` unset, so the enrolled tools did not appear in the TUI tool list. A direct `tools/call` of `room_check_access` with the saved connection bearer returned `credential_accepted` twice, same body. `childEnvFor` already puts that bearer in `PROJECT_ROOM_SECRET` for `--execute` children only (`tests/grok-host.test.js`).
+
+| Candidate | Decision | Why |
+|---|---|---|
+| Copy the identity secret into `config.toml` or a shell profile so the parent TUI expands the header | **Reject** | The secret already lives in the private connection directory. A second copy is a new secret store. Cursor subscriptions wake on a signal and spend nothing while idle; they do not justify a second listener or a second credential file. https://cursor.com/changelog/08-19-26 |
+| Keep `childEnvFor` as the only injection | **Accept (keep)** | Already shipped. Parent tools appear when the operator exports `PROJECT_ROOM_SECRET`. Do not mint a second identity to make them appear. |
+
+#1211 and #1212 merged on 2026-09-30. The 29 September "currently CONFLICTING" line is historical. This note does not merge or deploy.
