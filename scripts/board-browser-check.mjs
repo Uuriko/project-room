@@ -440,13 +440,20 @@ test("waiting prerequisites stay visible, link by keyboard, and become claimable
   });
   const beforeNavigation = snapshot();
   const dialog = page.locator("#board-dialog");
+  const openBoard = async () => {
+    await page.keyboard.press("Control+k");
+    await page.locator("#room-actions-query").waitFor({ state: "visible" });
+    await page.locator("#room-actions-query").fill("board");
+    await page.keyboard.press("Enter");
+    await dialog.waitFor({ state: "visible" });
+  };
   const dependent = page.locator("article[data-claim-id='dependent']");
   const unknown = page.locator("article[data-claim-id='unknown']");
   const link = dependent.locator(".claim-deps [data-open-work]");
   const boardIds = () => page.locator("#work-board article").evaluateAll(nodes => nodes.map(node => node.dataset.claimId).sort());
   for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 800 });
-    await page.locator("#tasks-board-open").click();
+    await openBoard();
     await dependent.waitFor({ state: "visible" });
     assert.equal(await dependent.evaluate(node => node.parentElement.getAttribute("aria-labelledby")), "board-col-blocked");
     assert.equal(await page.locator("#board-col-blocked").innerText(), "Blocked · 2 waiting");
@@ -480,7 +487,7 @@ test("waiting prerequisites stay visible, link by keyboard, and become claimable
     await dialog.waitFor({ state: "hidden" });
     const targetUrl = page.url();
     const historyLength = await page.evaluate(() => history.length);
-    await page.locator("#tasks-board-open").click();
+    await openBoard();
     await dialog.waitFor({ state: "visible" });
     const chainLink = dependent.locator(".claim-chain [data-open-work]");
     await chainLink.focus();
@@ -505,7 +512,7 @@ test("waiting prerequisites stay visible, link by keyboard, and become claimable
     await axe(page);
     await page.locator("#board-close").click();
   }
-  await page.locator("#tasks-board-open").click();
+  await openBoard();
   await post(page, origin, "/work-claims/prerequisite/claim", {});
   await post(page, origin, "/work-claims/prerequisite/update", { state: "in_progress" });
   await post(page, origin, "/work-claims/prerequisite/update", { state: "done" });
