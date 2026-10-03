@@ -12,6 +12,10 @@ import { handleWorkClaims } from "../server/work-claim-routes.mjs";
 import { MAX_CLAIM_HISTORY, claimWork, createWork, updateWork } from "../server/work-claims.mjs";
 import { CONTENT_TRUST } from "../server/content-trust.mjs";
 import { readClaimPullBudget, writeClaimPullBudget } from "../server/claim-pr-sync.mjs";
+import {
+  boardText, clientPullRequestInput, assertBoardLeaseHours, assertDependsOnKnown, assertBoardEventBudget,
+  roomEventsRemaining, BOARD_LEASE_HOURS_MAX, EVENT_BUDGET_RESERVE
+} from "../server/work-claim-integrity.mjs";
 
 const helpers = {
   json: (_res, status, value) => ({ status, value }),
@@ -388,4 +392,33 @@ test("over real HTTP a guest's review note and sweep are refused and the list is
   assert.equal(status.status, 200);
   assert.equal(typeof status.value.eventsRemaining, "number");
   assert.equal(status.value.stale, false);
+});
+
+// The pure input rules the routes apply before the claim state machine runs.
+test("board input rules: text normalization, client PR facts, lease bounds, dependencies and the event budget", () => {
+  const reject = (status, code, message) => { const error = new Error(message); error.status = status; error.code = code; throw error; };
+  assert.equal(boardText(reject, "title", "Cafe\u0301"), "Caf\u00e9");
+  assert.equal(boardText(reject, "note", "a\r\nb", { multiline: true }), "a\nb");
+  assert.equal(boardText(reject, "title", undefined), undefined);
+  for (const bad of ["a\u0007b", "\u202Eevil", "\u200B \u200B", "\uD800x"]) {
+    assert.throws(() => boardText(reject, "title", bad), { status: 422, code: "invalid_claim_input" }, JSON.stringify(bad));
+  }
+  assert.deepEqual(clientPullRequestInput(reject, { pullRequest: "Uuriko/project-room#12" }),
+    { pullRequest: "https://github.com/Uuriko/project-room/pull/12" });
+  assert.deepEqual(clientPullRequestInput(reject, { pullRequests: [{ url: "o/r#3" }] }), { pullRequests: [{ url: "https://github.com/o/r/pull/3" }] });
+  assert.throws(() => clientPullRequestInput(reject, { pullRequest: { url: "o/r#3", merged: true } }), /pullRequest\.merged: is recorded by the server/);
+  assert.doesNotThrow(() => assertBoardLeaseHours(reject, { leaseHours: BOARD_LEASE_HOURS_MAX }));
+  assert.doesNotThrow(() => assertBoardLeaseHours(reject, { leaseHours: null }));
+  assert.throws(() => assertBoardLeaseHours(reject, { leaseHours: BOARD_LEASE_HOURS_MAX + 1 }), { code: "invalid_claim_input" });
+  assert.throws(() => assertBoardLeaseHours(reject, { leaseHours: "4" }), { code: "invalid_claim_input" });
+  const known = new Set(["a"]);
+  assert.doesNotThrow(() => assertDependsOnKnown(reject, { dependsOn: ["a"] }, { selfId: "b", has: id => known.has(id) }));
+  assert.throws(() => assertDependsOnKnown(reject, { dependsOn: ["b"] }, { selfId: "b", has: id => known.has(id) }), /cannot depend on itself/);
+  assert.throws(() => assertDependsOnKnown(reject, { dependsOn: ["zz"] }, { selfId: "b", has: id => known.has(id) }), /no claim "zz"/);
+  const limit = PILOT_LIMITS.eventsPerRoom;
+  assert.equal(roomEventsRemaining(limit - 5), 5);
+  const low = limit - Math.floor(limit * EVENT_BUDGET_RESERVE) + 1;
+  assert.throws(() => assertBoardEventBudget(low, { privileged: false }), error => error.status === 409 && error.code === "room_event_budget_low");
+  assert.doesNotThrow(() => assertBoardEventBudget(low, { privileged: true }));
+  assert.doesNotThrow(() => assertBoardEventBudget(1, { privileged: false }));
 });
