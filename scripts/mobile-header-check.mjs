@@ -1,13 +1,15 @@
 // Automated usability checks with synthetic identities, not human participant research.
-// C1: the mobile header stays one short row; infrequent session actions live in an
+// C1: mobile actions stay readable and reflow as whole controls; infrequent actions live in an
 // accessible menu; identity and connection recovery are available in the account menu.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { rmSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
 import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { signInFixture } from "./auth-signin.mjs";
+import { EVENT_TYPES as T } from "../src/events.js";
+import { openCatchUp, closeCatchUp } from "./room-chrome.mjs";
 
 async function setup(t, viewport) {
   const fixture = createAcceptanceFixture();
@@ -21,10 +23,11 @@ async function setup(t, viewport) {
   });
   await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
   browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
-  const page = await browser.newPage({ viewport, reducedMotion: "reduce" });
+  const context = await browser.newContext({ viewport, hasTouch: viewport.width <= 520, reducedMotion: "reduce" });
+  const page = await context.newPage();
   page.setDefaultTimeout(8000);
   const errors = []; page.on("pageerror", error => errors.push(error.message));
-  return { fixture, page, errors, origin: `http://127.0.0.1:${server.address().port}` };
+  return { fixture, page, errors, server, context, origin: `http://127.0.0.1:${server.address().port}` };
 }
 
 async function signIn(fixture, page, origin) {
@@ -46,11 +49,126 @@ async function assertMoreLabel(page) {
   assert.equal(new Set(lines).size, 1, `More must remain one readable line, not stacked characters (line tops: ${lines})`);
 }
 
-test("mobile header: session actions fold into an accessible menu, conversation stays close", { timeout: 60000 }, async t => {
-  const { fixture, page, errors, origin } = await setup(t, { width: 390, height: 844 });
+const headerControls = ["#sidebar-toggle", "#topbar-updates", "#topbar-search-toggle", "#topbar-catchup", "#room-more > summary", "#session-menu-button"];
+
+async function assertHeader(page, count) {
+  await assertMoreLabel(page);
+  assert.equal(await page.getByRole("button", { name: `Catch up ${count}`, exact: true }).count(), 1, "the full count meaning remains in the accessible name");
+  const boxes = [];
+  for (const selector of headerControls) {
+    const control = page.locator(selector);
+    assert.equal(await control.isVisible(), true, `${selector} remains visible`);
+    const box = await control.boundingBox();
+    assert.ok(box.width >= 44 && box.height >= 44, `${selector} retains a 44px target: ${JSON.stringify(box)}`);
+    assert.ok(box.x >= 0 && box.x + box.width <= page.viewportSize().width + 1, `${selector} stays within the viewport`);
+    assert.equal(await control.evaluate(node => {
+      const rect = node.getBoundingClientRect();
+      return node.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2));
+    }), true, `${selector} is not covered by another surface`);
+    for (const prior of boxes) assert.ok(box.x + box.width <= prior.x + 1 || prior.x + prior.width <= box.x + 1 || box.y + box.height <= prior.y + 1 || prior.y + prior.height <= box.y + 1, "header hit areas never overlap");
+    boxes.push(box);
+  }
+  // Independently measure words, not CSS declarations: overflow can remain
+  // contained even when a label or count has become a stack of characters.
+  const brokenWords = await page.locator(".room-topbar .topbar-actions").evaluate(root => {
+    const broken = [];
+    for (const selector of ["#topbar-updates", "#topbar-catchup"]) {
+      const walker = document.createTreeWalker(root.querySelector(selector), NodeFilter.SHOW_TEXT);
+      for (let text = walker.nextNode(); text; text = walker.nextNode()) {
+        for (const match of text.textContent.matchAll(/\S+/g)) {
+          const range = document.createRange();
+          range.setStart(text, match.index); range.setEnd(text, match.index + match[0].length);
+          const lines = [...range.getClientRects()].map(rect => Math.round(rect.top));
+          if (new Set(lines).size !== 1) broken.push(match[0]);
+        }
+      }
+    }
+    return broken;
+  });
+  assert.deepEqual(brokenWords, [], "visible labels and count words are never split into characters");
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1), true, "no horizontal document overflow");
+}
+
+async function exerciseHeader(page) {
+  // Tab order stays the authored reading order even when whole controls wrap.
+  await page.locator("#topbar-updates").focus();
+  for (const selector of headerControls.slice(2)) {
+    await page.keyboard.press("Tab");
+    assert.equal(await page.locator(selector).evaluate(node => node === document.activeElement), true, `Tab reaches ${selector}`);
+  }
+  for (const mode of ["keyboard", "touch"]) {
+    const activate = async selector => {
+      const target = page.locator(selector);
+      if (mode === "keyboard") { await target.focus(); await page.keyboard.press("Enter"); }
+      else await target.tap();
+    };
+    for (const [trigger, dialog] of [["#topbar-updates", "#updates-dialog"], ["#topbar-catchup", "#catchup-dialog"]]) {
+      await activate(trigger); await page.locator(dialog).waitFor({ state: "visible" });
+      await page.keyboard.press("Escape"); await page.locator(dialog).waitFor({ state: "hidden" });
+    }
+    await activate("#topbar-search-toggle");
+    assert.equal(await page.locator("#message-search").isVisible(), true);
+    await activate("#topbar-search-toggle");
+    await activate("#room-more > summary");
+    assert.equal(await page.locator("#topbar-settings").isVisible(), true);
+    const menu = await page.locator(".room-more-actions").boundingBox();
+    assert.ok(menu.x >= 0 && menu.x + menu.width <= page.viewportSize().width + 1, "More popover stays inside the narrow viewport");
+    await page.keyboard.press("Escape");
+    assert.equal(await page.locator("#room-more > summary").evaluate(node => node === document.activeElement), true);
+    await activate("#session-menu-button");
+    assert.equal(await page.locator("#refresh-button").isVisible(), true);
+    const account = await page.locator(".session-menu-panel").boundingBox();
+    assert.ok(account.x >= 0 && account.x + account.width <= page.viewportSize().width + 1, "account popover stays inside the narrow viewport");
+    await page.keyboard.press("Escape");
+  }
+}
+
+test("mobile header: session actions fold into an accessible menu, conversation stays close", { timeout: 90000 }, async t => {
+  const { fixture, page, errors, server, context, origin } = await setup(t, { width: 390, height: 844 });
   await signIn(fixture, page, origin);
   await page.waitForFunction(() => document.querySelector("#catchup-count").textContent === "10 updates");
   await assertMoreLabel(page);
+  const layouts = async (name, count, { interact = false } = {}) => {
+    for (const width of [390, 320]) for (const font of [100, 200]) {
+      await page.setViewportSize({ width, height: 844 });
+      // Only the long name is a DOM text-size stress fixture. Counts below are
+      // rendered from real commands and the actual acknowledgement flow.
+      await page.evaluate(size => {
+        document.documentElement.style.fontSize = `${size}%`;
+        document.querySelector("#mobile-room-name").textContent = "Project Room — A deliberately long research and delivery room name";
+        scrollTo(0, 0);
+      }, font);
+      await assertHeader(page, count);
+      if (interact) await exerciseHeader(page);
+      await page.evaluate(() => scrollTo(0, 0));
+      await assertHeader(page, count);
+      mkdirSync("test-results", { recursive: true });
+      await page.screenshot({ path: `test-results/mobile-header-${width}-${font}-${name}.png` });
+    }
+  };
+  await layouts("10-updates", "10 updates");
+  await openCatchUp(page);
+  await page.waitForFunction(() => !document.querySelector("#rb-ack-button").disabled && Boolean(document.querySelector("#rb-ack-button").dataset.horizon));
+  await page.locator("#rb-ack-button").click();
+  await page.waitForFunction(() => document.querySelector("#catchup-count").textContent === "No new updates");
+  await closeCatchUp(page);
+  await layouts("0-updates", "No new updates");
+  let now = Date.now(); fixture.store.now = () => now;
+  const send = (type, data) => { now += 2100; return fixture.store.command(fixture.keys.owner, "commons", { id: crypto.randomUUID(), type, data }); };
+  for (let n = 0; n < 7; n++) send(T.WORK_PROPOSED, { workItemId: `header-work-${n}`, title: `Synthetic header task ${n + 1}`, definitionOfDone: "Exercise the visible current-needs count.", accountableMemberId: "owner", independentVerificationRequired: false, ownerDecisionRequired: false, mode: "read" });
+  for (let n = 0; n < 70; n++) send(T.MESSAGE_POSTED, { messageId: `header-message-${n}`, body: `Synthetic header update ${n + 1}.` });
+  await page.waitForFunction(() => document.querySelector("#catchup-count").textContent === "7 need you · 77 updates");
+  await layouts("77-updates", "7 need you · 77 updates", { interact: true });
+  await context.setOffline(true); server.closeStreams();
+  await page.waitForFunction(() => document.querySelector("#connection-status").textContent.startsWith("Connection interrupted"));
+  await layouts("disconnected", "7 need you · 77 updates");
+  await page.locator("#session-menu-button").tap();
+  assert.equal(await page.locator("#refresh-button").isVisible(), true, "recovery remains reachable while disconnected");
+  await page.keyboard.press("Escape");
+  await context.setOffline(false);
+  await page.waitForFunction(() => document.querySelector("#connection-status").textContent.startsWith("Connected"));
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.evaluate(() => { document.documentElement.style.fontSize = ""; scrollTo(0, 0); });
   assert.equal(await page.locator("#session-menu-button").isVisible(), true, "menu affordance present on mobile");
   assert.equal(await page.locator("#signout-button").isVisible(), false, "sign out folded into the closed menu");
   assert.equal(await page.locator("#identity-label").isVisible(), false, "identity is in the account menu");
