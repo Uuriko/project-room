@@ -138,6 +138,7 @@ export const MCP_DISCOVERY_BLOCK = Object.freeze({
   openapi: "/openapi.json",
   governance: "/.well-known/governance.json",
   description: "Machine-readable route inventory (OpenAPI 3.1) and governance policy.",
+  fullCatalog: "tools/list {\"profile\":\"full\"} lists every tool.",
 });
 
 // ---------------------------------------------------------------------------
