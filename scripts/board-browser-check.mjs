@@ -656,7 +656,8 @@ test("owners link a draft PR, reconcile held responses, and refresh a changed cl
     fixture.store.close(); rmSync(fixture.directory, { recursive: true, force: true });
     assert.deepEqual(errors, []);
   });
-  const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const page = await context.newPage();
   page.setDefaultTimeout(8000);
   page.on("pageerror", error => errors.push(error.message));
   await page.goto(origin);
