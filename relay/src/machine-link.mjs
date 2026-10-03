@@ -16,10 +16,18 @@ import {
   isResourceId, isSlot, listedTools, toolAllowed,
 } from "./protocol.mjs";
 
-const MCP_HEADERS = Object.freeze({
-  "access-control-allow-origin": "*",
-  "access-control-expose-headers": "mcp-protocol-version, mcp-session-id, www-authenticate",
-});
+// L4: no wildcard CORS with Authorization allowed. The request origin is
+// echoed only when it appears in the RELAY_CORS_ORIGINS allowlist
+// (comma-separated); otherwise no allow-origin header is sent.
+function mcpHeaders(env, request) {
+  const allowlist = String(env.RELAY_CORS_ORIGINS ?? "").split(",").map(s => s.trim()).filter(Boolean);
+  const origin = request.headers.get("origin") ?? "";
+  const headers = {
+    "access-control-expose-headers": "mcp-protocol-version, mcp-session-id, www-authenticate",
+  };
+  if (origin && allowlist.includes(origin)) headers["access-control-allow-origin"] = origin;
+  return headers;
+}
 
 function emptyState(machineId) {
   return {
@@ -86,7 +94,7 @@ export class MachineLink extends DurableObject {
       return json(404, { error: { code: "not_found", message: "Not found" } });
     } catch (error) {
       if (!(error instanceof RelayError)) console.error(JSON.stringify(redact({ where: "machine", message: String(error?.message ?? error) })));
-      const headers = route === "mcp" ? MCP_HEADERS : {};
+      const headers = route === "mcp" ? mcpHeaders(this.env, request) : {};
       return errorResponse(error, headers);
     }
   }
@@ -220,7 +228,10 @@ export class MachineLink extends DurableObject {
         const hash = await sha256Hex(value.verifier);
         if (!timingEqual(hash, this.state.enroll.codeHash ?? "")) throw relayError(401, "code_invalid", "The enroll code was refused");
         if (this.state.enroll.used) throw relayError(410, "code_used", "The enroll code was already used");
-        if (Date.parse(this.state.enroll.expiresAt) <= Date.now()) throw relayError(410, "code_expired", "The enroll code has expired");
+        // L3: a corrupt (NaN) expiresAt must fail closed, not fail open.
+        if (!Number.isFinite(Date.parse(this.state.enroll.expiresAt)) || Date.parse(this.state.enroll.expiresAt) <= Date.now()) {
+          throw relayError(410, "code_expired", "The enroll code has expired");
+        }
         const token = `${this.state.machineId}.${bytesToB64url(crypto.getRandomValues(new Uint8Array(32)))}`;
         this.state.tokenHash = await sha256Hex(token);
         this.state.enroll = { codeHash: this.state.enroll.codeHash, expiresAt: this.state.enroll.expiresAt, used: true };
@@ -300,37 +311,37 @@ export class MachineLink extends DurableObject {
 
   async mcp(request) {
     if (request.method === "OPTIONS") {
-      return new Response(null, { status: 204, headers: { ...MCP_HEADERS, allow: "POST, DELETE, OPTIONS", "access-control-allow-headers": "content-type, accept, authorization, mcp-protocol-version, mcp-session-id, x-room-id, x-machine-slot" } });
+      return new Response(null, { status: 204, headers: { ...mcpHeaders(this.env, request), allow: "POST, DELETE, OPTIONS", "access-control-allow-headers": "content-type, accept, authorization, mcp-protocol-version, mcp-session-id, x-room-id, x-machine-slot" } });
     }
-    if (request.method === "DELETE") return new Response(null, { status: 204, headers: MCP_HEADERS });
+    if (request.method === "DELETE") return new Response(null, { status: 204, headers: mcpHeaders(this.env, request) });
     if (request.method !== "POST") throw relayError(405, "method_not_allowed", "Send POST with a JSON-RPC body");
     const { value } = await readJson(request, MAX_CALL_BYTES, "Tool call payload");
     const parsed = parseRpc(value);
-    if (parsed.error) return json(200, parsed.error, MCP_HEADERS);
+    if (parsed.error) return json(200, parsed.error, mcpHeaders(this.env, request));
     if (parsed.notification && parsed.method === "notifications/initialized") {
       await this.requireCaller(request, { needLease: false });
-      return new Response(null, { status: 202, headers: MCP_HEADERS });
+      return new Response(null, { status: 202, headers: mcpHeaders(this.env, request) });
     }
     if (parsed.method === "ping") {
       await this.requireCaller(request, { needLease: false });
-      return json(200, rpcResult(parsed.id, {}).body, MCP_HEADERS);
+      return json(200, rpcResult(parsed.id, {}).body, mcpHeaders(this.env, request));
     }
     if (parsed.method === "initialize") {
       await this.requireCaller(request, { needLease: false });
       const result = initializeResult(parsed.id, parsed.params);
-      return json(result.status, result.body, { ...MCP_HEADERS, ...(result.headers ?? {}) });
+      return json(result.status, result.body, { ...mcpHeaders(this.env, request), ...(result.headers ?? {}) });
     }
     if (parsed.method === "tools/list") {
       await this.requireCaller(request, { needLease: false });
-      return json(200, rpcResult(parsed.id, { tools: listedTools() }).body, MCP_HEADERS);
+      return json(200, rpcResult(parsed.id, { tools: listedTools() }).body, mcpHeaders(this.env, request));
     }
     if (parsed.method === "tools/call") {
       const { name, args } = requireToolName(parsed.params);
       const slot = request.headers.get("x-machine-slot");
       const envelope = await this.invoke(request, name, args, slot);
-      return json(200, rpcResult(parsed.id, envelope).body, MCP_HEADERS);
+      return json(200, rpcResult(parsed.id, envelope).body, mcpHeaders(this.env, request));
     }
-    return json(200, rpcError(parsed.id, -32601, "Method not found").body, MCP_HEADERS);
+    return json(200, rpcError(parsed.id, -32601, "Method not found").body, mcpHeaders(this.env, request));
   }
 
   async call(request) {
@@ -540,8 +551,9 @@ export class MachineLink extends DurableObject {
       const machineAuthed = this.state.tokenHash && timingEqual(await sha256Hex(token), this.state.tokenHash);
       const adminAuthed = this.env.RELAY_ADMIN_TOKEN && timingEqual(await sha256Hex(token), await sha256Hex(this.env.RELAY_ADMIN_TOKEN));
       if (!machineAuthed && !adminAuthed) {
-        this.dirty = true;
-        await authorize(this.env, this.state, request, { needLease: false, slotHint: null, tool: null, now: Date.now() });
+        // L2: no lease fallback — machine metadata (label, rooms, owner,
+        // active lease holder) requires the machine or admin token.
+        throw relayError(401, "unauthenticated", "Send the machine token or admin token");
       }
       const lease = this.state.activeLease;
       return {
