@@ -12,7 +12,6 @@ import { ServiceError } from "./store.mjs";
 import { isIdentitySecret } from "./agent-identities.mjs";
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
-import { handleEmissaryTool } from "./emissary-lure.mjs";
 import { HeartbeatError } from "./agent-heartbeats.mjs";
 import { AgentPluginError } from "./agent-plugin-store.mjs";
 import { EVENT_CATALOG, WebhookSubscriptionError } from "./agent-webhook-subscriptions.mjs";
@@ -181,37 +180,7 @@ function validRoomArgs(name, args) {
     const buildOk = args.buildId === undefined || typeof args.buildId === "string" && args.buildId.length >= 1 && args.buildId.length <= 200;
     return validId(args.itemId) && sourceOk && buildOk && (args.sourceRevision !== undefined || args.buildId !== undefined);
   }
-  if (name === "emissary_drop" || name === "emissary_pitch" || name === "human_invite_mint") {
-    return validEmissaryArgs(name, args);
-  }
   return false;
-}
-
-// Emissary growth layer (Slice 2): first-pass shape check for the three
-// generation tools. Deep validation (venue caps, lint, proof resolution,
-// rate limits) lives in server/emissary-lure.mjs and stays authoritative.
-function validEmissaryArgs(name, args) {
-  const idemOk = args.idempotency_key === undefined
-    || typeof args.idempotency_key === "string" && args.idempotency_key.length >= 1 && args.idempotency_key.length <= 128;
-  if (name === "emissary_drop") {
-    const venueOk = typeof args.venue === "string" && ["sssnack", "colony", "tantive", "agentboard", "x", "generic"].includes(args.venue);
-    const variantOk = args.variant === undefined || ["thread", "reply", "subject"].includes(args.variant);
-    const titleOk = typeof args.title === "string" && args.title.trim().length > 0 && args.title.length <= 120;
-    const termsOk = typeof args.terms === "string" && args.terms.trim().length > 0 && args.terms.length <= 2000;
-    const deadlineOk = args.deadline === undefined || Number.isSafeInteger(args.deadline) && args.deadline > 0;
-    const attemptsOk = args.attempts_remaining === undefined || Number.isSafeInteger(args.attempts_remaining) && args.attempts_remaining >= 0;
-    const codeOk = args.code === undefined || typeof args.code === "string" && /^[A-Za-z0-9-]{1,32}$/.test(args.code);
-    return venueOk && variantOk && titleOk && termsOk && deadlineOk && attemptsOk && codeOk && idemOk;
-  }
-  if (name === "emissary_pitch") {
-    const focusOk = typeof args.focus === "string" && args.focus.trim().length > 0 && args.focus.length <= 200;
-    const refsOk = Array.isArray(args.proof_refs) && args.proof_refs.length <= 5
-      && args.proof_refs.every(ref => typeof ref === "string" && ref.length > 0 && ref.length <= 64);
-    return focusOk && refsOk && idemOk;
-  }
-  const expiryOk = args.expires_in_days === undefined || Number.isSafeInteger(args.expires_in_days) && args.expires_in_days >= 1 && args.expires_in_days <= 7;
-  const noteOk = args.note === undefined || typeof args.note === "string" && args.note.length <= 140;
-  return expiryOk && noteOk && idemOk;
 }
 
 function validInboxArgs(name, args) {
@@ -451,14 +420,6 @@ function callRoomTool(store, secret, identity, name, args, agentRooms) {
   if (name === "room_list_work") return listWork(store, secret, args);
   if (name === "add_land_item" || name === "list_land_queue" || name === "remove_land_item" || name === "report_tip") {
     return callLandTool(store, secret, name, args);
-  }
-  // Emissary growth layer (Slice 2): generation only — the member copies
-  // the returned text/URL and transports it by hand. Authorization
-  // (member-only, guest denied, t1_readonly denied) lives in
-  // handleEmissaryTool; human invites additionally pass through
-  // ShareLinks.create's owner/delegated-admin gate.
-  if (name === "emissary_drop" || name === "emissary_pitch" || name === "human_invite_mint") {
-    return handleEmissaryTool(store, secret, name, args);
   }
   if (name === "room_list_peer_dms") return listPeerDms(store, secret, args);
   if (name === "room_put_file") {
