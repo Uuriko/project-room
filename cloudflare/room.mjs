@@ -1,3 +1,6 @@
+// JDOT-PUBLIC-CSP-RUM begin: outer-response policy
+import { publicPageCsp } from "../deploy/public-search.mjs";
+// JDOT-PUBLIC-CSP-RUM end
 import { GmailSync } from '../server/gmail-sync.mjs';
 import { GmailMailbox, gmailConfig } from '../server/gmail-mailbox.mjs';
 import { DurableObject } from 'cloudflare:workers';
@@ -427,7 +430,21 @@ export class ProjectRoom extends DurableObject {
 export default {
   async fetch(request, env, ctx) {
     const started = Date.now();
+    // JDOT-PUBLIC-CSP-RUM begin: outer-response policy
+    const browserOrigin = new URL(request.url).origin;
+    let internalPublicPolicy = null, browserPublicPolicy = null;
+    // JDOT-PUBLIC-CSP-RUM end
     const finish = (response, servedBy) => {
+      // JDOT-PUBLIC-CSP-RUM begin: outer-response policy
+      // Door routing rewrites to ROOM_ORIGIN before the edge/DO handles it.
+      // Rebase only our known public-page policy, and only after that request
+      // passed the existing configured-origin/edge-door guard below.
+      if (browserPublicPolicy && response.headers.get('Content-Security-Policy') === internalPublicPolicy) {
+        const headers = new Headers(response.headers);
+        headers.set('Content-Security-Policy', browserPublicPolicy);
+        response = new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+      }
+      // JDOT-PUBLIC-CSP-RUM end
       const totalMs = Date.now() - started;
       const appMs = appDurationMs(response.headers);
       logRoomRequest({ method: request.method, path: requestPath(request.url), status: response.status, totalMs, servedBy, appMs });
@@ -451,6 +468,10 @@ export default {
     const url = new URL(request.url);
     // Never derive the trusted origin from a caller-controlled Host header.
     if (url.origin !== roomOrigin(env).origin) return finish(new Response('Unexpected host', { status: 403 }), 'worker');
+    // JDOT-PUBLIC-CSP-RUM begin: outer-response policy
+    internalPublicPolicy = publicPageCsp(url.origin);
+    browserPublicPolicy = publicPageCsp(browserOrigin);
+    // JDOT-PUBLIC-CSP-RUM end
     // Storage/DO-independent version signal: answered entirely from module
     // scope and env, never touching the Durable Object, so deploy
     // verification stays available when the DO is down (2026-09-25 outage:

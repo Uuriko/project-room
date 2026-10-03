@@ -1,3 +1,6 @@
+// JDOT-PUBLIC-CSP-RUM begin: public-page policy
+import { publicPageCsp } from "../deploy/public-search.mjs";
+// JDOT-PUBLIC-CSP-RUM end
 import { acceptPrefersHtml, publicHtmlNotFoundPath, publicSearchAssets, publicSearchCanonical, publicSearchMarketingPolicy, publicSearchSitemap, PUBLIC_NOT_FOUND_HTML, PUBLIC_SEARCH_CSP, PUBLIC_PAGE_LASTMOD, reviewedPublicSearchPaths } from "../deploy/public-search.mjs";
 import { readConversation } from "./conversation-sync.mjs";
 import { OutsideAgents } from "./outside-agents.mjs";
@@ -2074,7 +2077,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Content-Length": body.length });
             return res.end(req.method === "HEAD" ? undefined : body);
           }
-          res.setHeader("Content-Security-Policy", RECEIPTS_PAGE_CSP);
+          // JDOT-PUBLIC-CSP-RUM begin: public-page policy
+          res.setHeader("Content-Security-Policy", publicPageCsp(expectedOrigin(), RECEIPTS_PAGE_CSP));
+          // JDOT-PUBLIC-CSP-RUM end
           const html = Buffer.from(renderReceiptDetailHtml(receipt));
           res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": html.length });
           return res.end(req.method === "HEAD" ? undefined : html);
@@ -2093,7 +2098,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Content-Length": body.length });
           return res.end(req.method === "HEAD" ? undefined : body);
         }
-        res.setHeader("Content-Security-Policy", RECEIPTS_PAGE_CSP);
+        // JDOT-PUBLIC-CSP-RUM begin: public-page policy
+        res.setHeader("Content-Security-Policy", publicPageCsp(expectedOrigin(), RECEIPTS_PAGE_CSP));
+        // JDOT-PUBLIC-CSP-RUM end
         const html = Buffer.from(renderReceiptsHtml(queried));
         res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": html.length });
         return res.end(req.method === "HEAD" ? undefined : html);
@@ -2156,7 +2163,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Content-Length": body.length });
             return res.end(req.method === "HEAD" ? undefined : body);
           }
-          res.setHeader("Content-Security-Policy", PUBLIC_PAGE_CSP);
+          // JDOT-PUBLIC-CSP-RUM begin: public-page policy
+          res.setHeader("Content-Security-Policy", publicPageCsp(expectedOrigin(), PUBLIC_PAGE_CSP));
+          // JDOT-PUBLIC-CSP-RUM end
           const body = Buffer.from(html);
           res.writeHead(status, { "Content-Type": "text/html; charset=utf-8", "Content-Length": body.length });
           return res.end(req.method === "HEAD" ? undefined : body);
@@ -2185,7 +2194,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const [path, type] = assets.get(url.pathname);
         const data = await loadAsset(path);
         const canonical = publicSearchCanonical(url.pathname, publicAssetPaths);
-        if (canonical && publicSearchMarketingPolicy(canonical)) res.setHeader("Content-Security-Policy", PUBLIC_SEARCH_CSP);
+        // JDOT-PUBLIC-CSP-RUM begin: public-page policy
+        if (canonical && publicSearchMarketingPolicy(canonical)) res.setHeader("Content-Security-Policy", publicPageCsp(expectedOrigin(), PUBLIC_SEARCH_CSP));
+        // JDOT-PUBLIC-CSP-RUM end
         if (canonical && !url.search) {
           if (canonical !== url.pathname) {
             res.writeHead(301, { Location: canonical });

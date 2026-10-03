@@ -48,6 +48,9 @@ test("a private room's claim stays hidden until the owner publishes, and a non-o
   const hidden = await raw(origin, "/receipts");
   assert.equal(hidden.status, 200);
   assert.equal(hidden.headers.get("x-robots-tag"), "all");
+  const publicPolicy = hidden.headers.get("content-security-policy");
+  assert.equal(publicPolicy.split("; ").find(d => d.startsWith("connect-src ")), `connect-src https://cloudflareinsights.com ${origin}/cdn-cgi/rum`);
+  assert.doesNotMatch(publicPolicy, /connect-src 'self'|script-src 'self'|\*/);
   assert.equal(hidden.text.includes("Ship the door"), false);
   assert.equal(hidden.text.includes("Project Room Commons"), false);
   assert.match(hidden.text, /Public task/);
@@ -74,6 +77,7 @@ test("a private room's claim stays hidden until the owner publishes, and a non-o
   assert.match(id, /^wcr_[a-f0-9]{32}$/);
   const page = await raw(origin, `/receipts/${id}`);
   assert.equal(page.status, 200);
+  assert.equal(page.headers.get("content-security-policy"), publicPolicy);
   assert.match(page.text, /<main>/);
   assert.match(page.text, /<footer>/);
   assert.match(page.text, /Made in Project Room — start your own room/);
@@ -82,6 +86,7 @@ test("a private room's claim stays hidden until the owner publishes, and a non-o
   assert.match(page.text, /github.com\/Uuriko\/project-room\/pull\/9/);
   assert.equal(page.text.includes("Project Room Commons"), false);
   const json = await raw(origin, `/receipts/${id}.json`);
+  assert.doesNotMatch(json.headers.get("content-security-policy"), /cdn-cgi\/rum/);
   const body = JSON.parse(json.text);
   assert.equal(body.schema, "project-room-public-receipt/1");
   assert.equal(body.room, null);
@@ -89,6 +94,10 @@ test("a private room's claim stays hidden until the owner publishes, and a non-o
   assert.deepEqual(body.humans, ["Room owner"]);
   assert.equal(page.text.includes("ada"), false);
   store.roomDirectory.set("commons", "owner", true);
+  store.command(ownerKey, "commons", { id: "publish-room-page", type: "room.public_page_set", data: { enabled: true } });
+  const roomPage = await raw(origin, "/r/commons");
+  assert.equal(roomPage.status, 200);
+  assert.equal(roomPage.headers.get("content-security-policy"), publicPolicy);
   const named = await raw(origin, `/receipts/${id}`);
   assert.match(named.text, /Project Room Commons/);
   const off = await raw(origin, "/api/rooms/commons/commands", {
