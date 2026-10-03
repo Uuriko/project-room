@@ -95,6 +95,7 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/api/rooms/{roomId}/work-claims/{claimId}/release", ["POST"], "room-member", "Release a work claim.", "releaseWorkClaim"),
   route("/api/rooms/{roomId}/work-claims/{claimId}/reassign", ["POST"], "room-member", "Reassign a work claim to an active member.", "reassignWorkClaim"),
   route("/api/rooms/{roomId}/work-claims/{claimId}/renew", ["POST"], "room-member", "Renew a work-claim lease with a newer progress message.", "renewWorkClaim"),
+  route("/api/rooms/{roomId}/receipts", ["GET"], "room-member", "Search completed work-claim receipts in this room.", "searchWorkClaimReceipts"),
 ]);
 
 // MCP tools/list discovery block: every tools/list response (public and

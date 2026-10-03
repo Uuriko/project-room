@@ -533,6 +533,7 @@ const WORK_CLAIM_INVENTORY = {
   "/api/rooms/{roomId}/work-claims/{claimId}/release": ["POST"],
   "/api/rooms/{roomId}/work-claims/{claimId}/reassign": ["POST"],
   "/api/rooms/{roomId}/work-claims/{claimId}/renew": ["POST"],
+  "/api/rooms/{roomId}/receipts": ["GET"],
 };
 
 test("openapi inventory lists served work-claims methods", () => {
