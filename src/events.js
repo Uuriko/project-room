@@ -2267,6 +2267,11 @@ function pinMessage(state, incoming) {
   const messageId = pinTarget(incoming);
   const message = state.messages.find(m => m.id === messageId);
   if (!message) throw new Error("Pin must reference a message in this Room");
+  // A DM can only be pinned by one of its parties; the read paths filter
+  // pins per viewer, but pinning a DM you cannot read is never legitimate.
+  if (message.toMemberId && message.authorId !== incoming.actorId && message.toMemberId !== incoming.actorId) {
+    throw new Error("Cannot pin a direct message you are not a party to");
+  }
   // A redacted post keeps body null in the log before message.deleted. Replay
   // still has to accept the pin that happened while the text was readable.
   if (message.deletedAt || (message.body == null && message.redacted !== true)) throw new Error("A deleted message cannot be pinned");

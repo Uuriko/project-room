@@ -10,6 +10,7 @@
 // surface the store's own 404 (room_not_found).
 import { roomOrientation } from "../src/work-selectors.js";
 import { pinnedMessages, roomKind, roomPolicy, WORK_STATES, roomTrust } from "../src/events.js";
+import { pinVisibleToViewer } from "./pins.mjs";
 import { annotateOrientation, claimNote, withContentTrust } from "./content-trust.mjs";
 import { buildOrient } from "./orient.mjs";
 import { messageVisibleToViewer, summaryHistoryFloor } from "./history-visibility.mjs"; // QA4 Q4-SEC-1
