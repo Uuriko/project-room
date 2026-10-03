@@ -434,10 +434,16 @@ test("provider preview cannot repopulate private content after another tab chang
 test("account-only confirmation preserves a newer login and retires a held private preview", { timeout: 35000 }, async t => {
   let releasePreview = () => {}, releaseConfirmation = () => {};
   let previewSettled = Promise.resolve(), confirmationSettled = Promise.resolve();
+  let phase = "fixture", held = false, confirmationState = "not captured", confirmationAt = null;
   // Drain held requests before setup's browser/server/store cleanup, even on failure.
-  t.after(async () => { releasePreview(); releaseConfirmation(); await Promise.allSettled([previewSettled, confirmationSettled]); });
+  t.after(async () => {
+    t.diagnostic(JSON.stringify({ phase, requestHeld: held, confirmationState,
+      confirmationElapsedMs: confirmationAt === null ? null : Date.now() - confirmationAt }));
+    releasePreview(); releaseConfirmation(); await Promise.allSettled([previewSettled, confirmationSettled]);
+  });
   // No Room stream exists in this tab: confirmation must retire its private view.
   const f = await reviewFixture(t, false, true), p = f.page;
+  phase = "private preview request";
   await p.setExtraHTTPHeaders({ "X-Fixture-Tab": "account-confirmation" });
   let previewStarted, confirmationStarted, confirmationFinished;
   const previewGate = new Promise(resolve => { releasePreview = resolve; });
@@ -452,24 +458,35 @@ test("account-only confirmation preserves a newer login and retires a held priva
     await previewSettled;
   });
   await p.locator("#inbox-reply-open").click(); await previewReady;
+  phase = "second tab room";
   const other = await p.context().newPage(); await other.goto(f.origin + "/?room=commons");
   await other.locator("#main").waitFor();
   const handler = f.server.listeners("request")[0];
-  let held = false;
   f.server.removeListener("request", handler);
   f.server.on("request", async (request, response) => {
     if (!held && request.method === "GET" && request.url === "/api/account-session"
       && request.headers["x-fixture-tab"] === "account-confirmation") {
-      held = true;
-      response.once("finish", () => confirmationFinished({ status: response.statusCode, setCookie: response.getHeader("set-cookie") }));
+      held = true; confirmationAt = Date.now(); confirmationState = "pending";
+      const completed = state => {
+        if (confirmationState !== "pending") return;
+        confirmationState = state;
+        confirmationFinished({ state, status: response.statusCode, setCookie: response.getHeader("set-cookie") });
+      };
+      response.once("finish", () => completed("finished"));
+      response.once("close", () => completed("closed before finish"));
       confirmationStarted({ cookie: request.headers.cookie, binding: request.headers["x-session-binding"] });
       confirmationSettled = confirmationGate.then(() => handler(request, response));
       return confirmationSettled;
     }
     return handler(request, response);
   });
+  phase = "first tab confirmation request";
   await p.bringToFront();
+  // Focus changes are browser-dependent in headless multi-page runs. Exercise
+  // the same public listener deliberately; its in-flight guard still coalesces.
+  await p.evaluate(() => window.dispatchEvent(new Event("focus")));
   const captured = await confirmationReady;
+  phase = "second tab sign-out";
   const oldCookie = (await p.context().cookies()).find(cookie => cookie.name === "account_session");
   assert.ok(oldCookie); assert.ok(captured.cookie?.split("; ").includes(`account_session=${oldCookie.value}`));
   const oldBinding = f.store.authenticateAccountSession(oldCookie.value).sessionBinding;
@@ -477,21 +494,27 @@ test("account-only confirmation preserves a newer login and retires a held priva
   const logoutResponse = other.waitForResponse(response => new URL(response.url()).pathname === "/api/account-session" && response.request().method() === "DELETE");
   await clickChrome(other, "#signout-button"); assert.equal((await logoutResponse).status(), 200);
   await other.locator('#auth-panel[aria-busy="false"]').waitFor();
+  phase = "second tab guest login";
   const guest = f.store.accountForMember("commons", "guest");
   await signInFixture(other, f.store.issueAccountAccessKey(guest.id)); await other.locator("#main").waitFor();
   assert.equal(await p.locator("#auth-panel").isVisible(), false, "old account-only view awaits confirmation");
+  phase = "confirmation response";
   releaseConfirmation();
   const confirmation = await confirmationResult;
+  assert.equal(confirmation.state, "finished", "held confirmation must reach its actual response contract");
   assert.equal(Boolean(confirmation.setCookie), false, "stale confirmation cannot replace the newer login cookie");
   assert.equal(confirmation.status, 401); assert.ok(captured.binding === oldBinding, "confirmation keeps the original account binding");
+  phase = "first tab retirement";
   await p.locator("#auth-panel").waitFor();
   const current = await (await p.context().request.get(f.origin + "/api/account-session")).json();
   assert.equal(current.authenticated, true); assert.equal(current.account.id, guest.id);
+  phase = "private preview retirement";
   releasePreview(); await p.waitForLoadState("networkidle");
   assert.equal(await p.locator("#inbox-reply-dialog").isVisible(), false);
   assert.equal(await p.locator("#inbox-reply-body").textContent(), ""); assert.equal(await p.locator("#inbox-reply-addresses").textContent(), "");
   for (const id of ["inbox-reply-original-body", "inbox-reply-local-body"]) assert.equal(await p.locator("#" + id).textContent(), "");
   assert.equal(await p.evaluate(() => sessionStorage.getItem("project-room:pending-reply-review:v1")), null);
+  phase = "complete";
 });
 
 for (const updated of [false, true]) test(`two browser tabs reviewing the same ${updated ? "updated" : "original"} version record one acknowledgment`, { timeout: 35000 }, async t => {
