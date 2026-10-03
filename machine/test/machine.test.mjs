@@ -393,6 +393,7 @@ test.describe("room-machine", { concurrency: false }, () => {
       home,
       env: { ...env, ROOM_MACHINE_RELAY_URL: relay.http },
       relayHttp: relay.http,
+      insecure: true, // local fake relay over plain http
     }));
     assert.equal(enrolled.ok, true, JSON.stringify(enrolled));
     const secret = await spawnContext.run({ env }, () => readSecret("identity", home));
@@ -446,7 +447,7 @@ test.describe("room-machine", { concurrency: false }, () => {
       ROOM_MACHINE_DEADMAN_SECONDS: "30",
       ROOM_ORIGIN: origin,
     });
-    const enrolled = await spawnContext.run({ env }, () => enroll({ code: "desk-code", home, env, relayHttp: relay.http }));
+    const enrolled = await spawnContext.run({ env }, () => enroll({ code: "desk-code", home, env, relayHttp: relay.http, insecure: true }));
     assert.equal(enrolled.ok, true, JSON.stringify(enrolled));
     const secret = await spawnContext.run({ env }, () => readSecret("identity", home));
     const presence = await get(origin, "/api/agent-heartbeats", secret);
