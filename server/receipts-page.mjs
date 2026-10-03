@@ -4,8 +4,9 @@ import { DARK_DECLARATIONS, LIGHT_DECLARATIONS } from "../src/design-tokens.js";
 import { ROOM_ORIGIN } from "../deploy/agent-discovery.mjs";
 import { LEGAL_FOOTER_LINKS, reportHref } from "./legal-pages.mjs";
 
-export const RECEIPTS_PAGE_CSP =
-  "default-src 'none'; script-src https://static.cloudflareinsights.com; style-src 'unsafe-inline'; connect-src https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+// These script-free pages share the marketing policy; the HTTP boundary adds
+// the exact served-origin analytics endpoint. App/export policies stay separate.
+export { PUBLIC_SEARCH_CSP as RECEIPTS_PAGE_CSP } from "../deploy/public-search.mjs";
 
 const OG_IMAGE = `${ROOM_ORIGIN}/og/receipts.png`;
 

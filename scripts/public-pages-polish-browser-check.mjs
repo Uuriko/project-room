@@ -4,6 +4,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { createServer } from "node:http";
 import { join } from "node:path";
 import { chromium } from "playwright";
 import AxeBuilder from "@axe-core/playwright";
@@ -30,9 +31,20 @@ test("public pages permit only the intended analytics connection and remain axe-
   const server = createRoomServer({ store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
+  // Different port is a different origin. A broken CSP reaches a real local
+  // sink rather than failing DNS and masquerading as successful CSP denial.
+  const redirectedRequests = [];
+  const collector = createServer((req, res) => {
+    redirectedRequests.push(req.url);
+    req.resume(); res.writeHead(204); res.end();
+  });
+  await new Promise(resolve => collector.listen(0, "127.0.0.1", resolve));
+  const deniedRedirectOrigin = `http://127.0.0.1:${collector.address().port}`;
   const browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
   t.after(async () => {
     await browser.close();
+    collector.closeAllConnections();
+    await new Promise(resolve => collector.close(resolve));
     server.closeStreams();
     server.closeAllConnections();
     await new Promise(resolve => server.close(resolve));
@@ -45,12 +57,18 @@ test("public pages permit only the intended analytics connection and remain axe-
     mkdirSync(shots, { recursive: true });
   } catch { shots = null; }
   const context = await browser.newContext();
+  await context.addInitScript(() => {
+    globalThis.cspViolations = [];
+    document.addEventListener("securitypolicyviolation", event => {
+      globalThis.cspViolations.push({ directive: event.effectiveDirective, blocked: event.blockedURI });
+    });
+  });
   const page = await context.newPage();
   const csp = [];
   const analyticsRequests = [];
   // Simulate the edge-injected script at its already-authorized script origin.
-  // Every probe destination is intercepted: no synthetic data reaches analytics
-  // or any other external service. Only Chromium decides whether CSP permits it.
+  // Probe destinations are intercepted or local fixtures: no synthetic data
+  // reaches analytics or any external service. Chromium enforces the policy.
   await context.route("https://static.cloudflareinsights.com/beacon.min.js", route => route.fulfill({
     contentType: "text/javascript",
     body: `globalThis.rumProbe = fetch('/cdn-cgi/rum?', { method: 'POST', body: 'synthetic-csp-test' })
@@ -62,7 +80,7 @@ test("public pages permit only the intended analytics connection and remain axe-
     const url = new URL(request.url());
     analyticsRequests.push({ url: url.href, method: request.method() });
     if (url.searchParams.has("redirect")) return route.fulfill({
-      status: 307, headers: { location: "https://csp-denied.example/cdn-cgi/rum" }
+      status: 307, headers: { location: `${deniedRedirectOrigin}/cdn-cgi/rum` }
     });
     return route.fulfill({ status: 204 });
   });
@@ -90,11 +108,23 @@ test("public pages permit only the intended analytics connection and remain axe-
         // redirect; do not claim it confines same-origin redirect destinations.
         for (const target of ["/__csp-denied", "/cdn-cgi/rum/extra", "https://csp-denied.example/cdn-cgi/rum", "/cdn-cgi/rum?redirect=1"]) {
           analyticsRequests.length = 0;
+          const violationsBefore = await page.evaluate(() => globalThis.cspViolations.length);
           const blocked = await page.evaluate(async target => {
             try { await fetch(target, { method: "POST", body: "synthetic-csp-test", mode: "no-cors" }); return false; }
             catch { return true; }
           }, target);
           assert.equal(blocked, true, `${path}@${viewport.width}: ${target} must stay blocked`);
+          await page.waitForFunction(count => globalThis.cspViolations.length > count, violationsBefore);
+          const violations = await page.evaluate(count => globalThis.cspViolations.slice(count), violationsBefore);
+          const requested = new URL(target, origin);
+          // CSP reports can name the original URL after a redirect to avoid
+          // disclosing cross-origin path data. Accept that standard form as
+          // well as a target-origin report; delivery is independently checked.
+          const reportedUrls = target.includes("redirect=")
+            ? [requested.href, requested.origin, deniedRedirectOrigin, `${deniedRedirectOrigin}/cdn-cgi/rum`]
+            : [requested.href, requested.origin];
+          assert.ok(violations.some(v => v.directive === "connect-src" && reportedUrls.includes(v.blocked)), `${target}: CSP-specific denial, not a network failure`);
+          assert.deepEqual(redirectedRequests, [], "no redirect reached the foreign-origin local collector");
           assert.deepEqual(analyticsRequests, target.includes("redirect=")
             ? [{ url: `${origin}/cdn-cgi/rum?redirect=1`, method: "POST" }] : [], target);
         }

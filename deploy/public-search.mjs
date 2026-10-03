@@ -17,8 +17,20 @@ export const reviewedPublicSearchPaths = Object.freeze(["/", "/offers", "/about"
 export const PUBLIC_PAGE_LASTMOD = "2026-10-02";
 // About and compare documents ship no first-party scripts. Cloudflare injects
 // its Web Analytics beacon at the edge, so script-src and connect-src name
-// only that host. default-src stays 'none'; every other directive is unchanged.
+// the manual beacon host. publicPageCsp adds only the exact auto-injected
+// same-origin endpoint; default-src and every other directive stay unchanged.
 export const PUBLIC_SEARCH_CSP = "default-src 'none'; script-src https://static.cloudflareinsights.com; style-src 'unsafe-inline'; connect-src https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+// Use only a trusted, exact configured/validated served origin, never a
+// forwarded Host header. An absolute path source (without a trailing slash)
+// allows /cdn-cgi/rum and its query variants, not arbitrary same-origin APIs.
+// CSP does not enforce path constraints after redirects, so the endpoint must
+// remain a direct collector; host restrictions still apply to redirect targets.
+export function publicPageCsp(origin, policy = PUBLIC_SEARCH_CSP) {
+  const url = new URL(origin);
+  if (!["http:", "https:"].includes(url.protocol) || url.origin !== origin) throw new TypeError("Exact HTTP(S) public page origin required");
+  return policy.replace(/\bconnect-src([^;]*)/, (_, sources) => `connect-src${sources} ${url.origin}/cdn-cgi/rum`);
+}
+
 // Static browser 404. 404.html is the same document.
 export const PUBLIC_NOT_FOUND_HTML = `<!doctype html>
 <html lang="en">
