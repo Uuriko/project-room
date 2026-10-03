@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, writeFileSync, existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { runCommand } from "./spawn.mjs";
+import { runCommand, spawnContext } from "./spawn.mjs";
 import { configHome } from "./config.mjs";
 import { gatewayAddress, hostAddresses } from "./measure.mjs";
 
@@ -55,27 +55,45 @@ export async function anchorRules() {
 }
 
 const PF_ANCHOR_NAME = "room.machine";
-const PF_CONF_PATH = "/etc/pf.conf";
+// Overridable for tests and non-standard layouts; production default is the
+// macOS system path. The bound operation env (spawnContext) wins when set,
+// matching what child commands see. Never point this at a live pf.conf
+// except on the host being provisioned.
+const pfConfPath = () => spawnContext.getStore()?.env?.ROOM_MACHINE_PF_CONF
+  ?? process.env.ROOM_MACHINE_PF_CONF
+  ?? "/etc/pf.conf";
 const PF_ANCHOR_LINE = `anchor "${PF_ANCHOR_NAME}"`;
 
 // An anchor loaded with pfctl -a only evaluates when it is referenced from
 // the main pf.conf, and pf is disabled by default on macOS. Without both,
 // the anchor rules are dead config. This wires the anchor and enables pf,
 // failing loudly when the host cannot be protected.
-async function wirePfAnchor() {
+async function wirePfAnchor(pfConf) {
   let conf;
   try {
-    conf = readFileSync(PF_CONF_PATH, "utf8");
+    conf = readFileSync(pfConf, "utf8");
   } catch {
-    return { ok: false, error: "could not read /etc/pf.conf" };
+    return { ok: false, error: `could not read ${pfConf}` };
   }
   let addedLine = false;
   if (!conf.split("\n").some(line => line.trim() === PF_ANCHOR_LINE)) {
     try {
-      writeFileSync(PF_CONF_PATH, conf.endsWith("\n") ? `${conf}${PF_ANCHOR_LINE}\n` : `${conf}\n${PF_ANCHOR_LINE}\n`);
+      writeFileSync(pfConf, conf.endsWith("\n") ? `${conf}${PF_ANCHOR_LINE}\n` : `${conf}\n${PF_ANCHOR_LINE}\n`);
       addedLine = true;
     } catch {
-      return { ok: false, error: "could not write /etc/pf.conf (needs sudo)" };
+      return { ok: false, error: `could not write ${pfConf} (needs sudo)` };
+    }
+    // Editing pf.conf does nothing until the main ruleset is reloaded: the
+    // anchor reference becomes active only via pfctl -f. If the reload
+    // fails, roll the edit back immediately so a failed wiring never leaves
+    // a partial pf.conf behind.
+    const reloaded = await runCommand("pfctl", ["-f", pfConf], { timeoutMs: 5000 });
+    if (reloaded.code !== 0) {
+      try {
+        const current = readFileSync(pfConf, "utf8");
+        writeFileSync(pfConf, current.split("\n").filter(line => line.trim() !== PF_ANCHOR_LINE).join("\n"));
+      } catch { /* best-effort rollback */ }
+      return { ok: false, error: `pfctl -f ${pfConf} failed: anchor reference not activated` };
     }
   }
   const info = await runCommand("pfctl", ["-s", "info"], { timeoutMs: 5000 });
@@ -94,6 +112,8 @@ async function wirePfAnchor() {
 // Uninstall runs the recorded revert commands and no others.
 export async function applySystemChanges(home = configHome()) {
   const changes = [];
+  // Capture once: the wire and its revert must target the same file.
+  const pfConf = pfConfPath();
   for (const key of ["disablesleep", "autorestart"]) {
     const previous = await readPmset(key);
     const revertValue = previous ?? "0";
@@ -115,7 +135,7 @@ export async function applySystemChanges(home = configHome()) {
   if (loaded.code !== 0) return { ok: false, error: "pf anchor failed", changes };
   // The loaded anchor evaluates only when referenced from /etc/pf.conf and
   // pf is enabled. Wire both and verify the anchor is live.
-  const wired = await wirePfAnchor();
+  const wired = await wirePfAnchor(pfConf);
   if (!wired.ok) return { ok: false, error: `pf anchor wiring failed: ${wired.error}`, changes };
   const anchors = await runCommand("pfctl", ["-s", "Anchors"], { timeoutMs: 5000 });
   if (anchors.code !== 0 || !anchors.stdout.toString("utf8").split("\n").some(line => line.trim() === PF_ANCHOR_NAME)) {
@@ -126,8 +146,9 @@ export async function applySystemChanges(home = configHome()) {
     gateway: anchor.gateway,
     hosts: anchor.hosts,
     revert: wired.addedLine
-      // One command: remove the anchor reference from pf.conf, then flush.
-      ? ["sh", "-c", `sed -i '' '/^anchor "${PF_ANCHOR_NAME}"$/d' ${PF_CONF_PATH} && pfctl -a ${PF_ANCHOR_NAME} -F all`]
+      // Remove the anchor reference from pf.conf, reload the main ruleset so
+      // the reference is gone, then flush the anchor's rules.
+      ? ["sh", "-c", `sed -i'' '/^anchor "${PF_ANCHOR_NAME}"$/d' ${pfConf} && pfctl -f ${pfConf} && pfctl -a ${PF_ANCHOR_NAME} -F all`]
       : ["pfctl", "-a", PF_ANCHOR_NAME, "-F", "all"],
   });
   const domains = [
