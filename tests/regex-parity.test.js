@@ -23,8 +23,6 @@ import {
   LEASE_RE as indexLeaseRe,
   STATE_RE as indexStateRe,
 } from "../scripts/claims-index.mjs";
-import { EXTERNAL_ID_RE as graphExternalIdRe } from "../server/emissary-graph.mjs";
-import { EXTERNAL_ID_RE as receiptsExternalIdRe } from "../server/emissary-receipts.mjs";
 
 // Behavioral fingerprint: accept/reject plus the full exec match (capture
 // groups matter — LEASE_RE's group is the parsed hour count).
@@ -69,12 +67,4 @@ test("STATE_RE parity: claim-validate, claims-index", () => {
     [validateStateRe, indexStateRe],
     ["submitted", "working", "cancelled", "suspended", "completed", "failed(abc_123)"],
     ["failed()", "failed(a-b)", "failed(a b)", "done", "WORKING", "", "failed"]);
-});
-
-test("EXTERNAL_ID_RE parity: emissary-graph, emissary-receipts", () => {
-  checkParity("EXTERNAL_ID_RE",
-    [graphExternalIdRe, receiptsExternalIdRe],
-    ["ex1." + "a".repeat(32), "ex1." + "0f".repeat(16)],
-    ["ex1." + "a".repeat(31), "ex1." + "a".repeat(33), "ex1." + "A".repeat(32),
-     "ex2." + "a".repeat(32), "", "ex1."]);
 });

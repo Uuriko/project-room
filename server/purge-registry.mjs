@@ -570,67 +570,7 @@ const ROWS = [
     }
   },
   {
-    "table": "emissary_drops",
-    "key": "room_id",
-    "action": "delete",
-    "match": {
-      "room": [
-        "room_id"
-      ]
-    }
-  },
-  {
-    "table": "emissary_idempotency",
-    "key": "room_id",
-    "action": "delete",
-    "match": {
-      "room": [
-        "room_id"
-      ]
-    }
-  },
-  {
-    "table": "emissary_invite_attribution",
-    "key": "room_id",
-    "action": "delete",
-    "match": {
-      "room": [
-        "room_id"
-      ]
-    }
-  },
-  {
-    "table": "emissary_journal",
-    "key": "room_id",
-    "action": "delete",
-    "match": {
-      "room": [
-        "room_id"
-      ]
-    }
-  },
-  {
     "table": "events",
-    "key": "room_id",
-    "action": "delete",
-    "match": {
-      "room": [
-        "room_id"
-      ]
-    }
-  },
-  {
-    "table": "external_identities",
-    "key": "room_id",
-    "action": "delete",
-    "match": {
-      "room": [
-        "room_id"
-      ]
-    }
-  },
-  {
-    "table": "external_receipts",
     "key": "room_id",
     "action": "delete",
     "match": {

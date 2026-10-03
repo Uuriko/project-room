@@ -132,7 +132,6 @@ const RETIRED_BOARD_V2_SCHEMA = `
   CREATE INDEX IF NOT EXISTS idx_board_vtwo_events_task ON board_vtwo_events(task_id);
   CREATE INDEX IF NOT EXISTS idx_board_vtwo_events_lane ON board_vtwo_events(lane);
 `;
-import { EMISSARY_LURE_SCHEMA } from "./emissary-lure.mjs"; // Emissary Slice 2 (RC-2026-09-28-2873): lure-generation ledgers (additive, unfenced).
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { AgentHeartbeats, agentHeartbeatSchema } from "./agent-heartbeats.mjs"; // RC-2026-09-18-051: wakeable agent presence.
 import { WorkWakes, workWakeSchema } from "./work-wakes.mjs"; // Opt-in pointer-only work delivery on heartbeat reads.
@@ -148,8 +147,6 @@ import { ReferralInvites, referralInviteSchema } from "./referral-invites.mjs";
 import { ThreadMutes, threadMutesSchema } from "./thread-mutes.mjs"; // Per-thread mutes: private side table, additive.
 import { HumanPush, humanPushSchema } from "./human-push.mjs"; // Human browser push: mentions and DMs, additive.
 import { Referrals, referralSchema } from "./referrals.mjs";
-import { EmissaryGraph, emissaryGraphSchema } from "./emissary-graph.mjs"; // Emissary slice 1a: external identity graph.
-import { EmissaryReceipts, emissaryReceiptSchema } from "./emissary-receipts.mjs"; // Emissary slice 1a: external receipt index.
 import { AccountLoginMethods, accountLoginMethodsSchema, ensureVerifiedEmailSchema } from "./account-login-methods.mjs";
 import { verifyTextCompletion, selectedWorkResult } from "./text-results.mjs";
 import { verifyCompletionEvidence, EvidenceError } from "./signed-evidence.mjs"; // Integration map slice 5: signed external evidence for work.completed.
@@ -966,7 +963,7 @@ function roomSchemaStamp() {
   hash.update(String(STORE_SCHEMA_VERSION));
   const parts = [
     invitationSchema, agentIdentitySchema, accountLoginMethodsSchema, agentInviteSchema,
-    referralInviteSchema, referralSchema, emissaryGraphSchema, emissaryReceiptSchema,
+    referralInviteSchema, referralSchema,
     shareLinkSchema, shareLinkCodeSchema, reminderSchema, agentConnectionSchema,
     inboxSchema, inboxReadSchema, emailImportSchema, wakeQueueSchema, wakeQueuePauseSchema,
     attentionSchema, workClaimSchema, nextActionsSchema, agentHeartbeatSchema, workWakeSchema,
@@ -981,7 +978,7 @@ function roomSchemaStamp() {
     publicWorkClaimFenceSchema, publicWorkReviewsSchema, publicWorkSuccessorsSchema,
     accessRequestSchema, membershipDelegationSchema, membershipDelegationJournalSchema,
     ownerDelegateSchema, agentRoomSchema, oauthPendingSchema, gmailSchema, requestRunSchema,
-    directSendSchema, inboxStitchSchema, RETIRED_BOARD_V2_SCHEMA, EMISSARY_LURE_SCHEMA,
+    directSendSchema, inboxStitchSchema, RETIRED_BOARD_V2_SCHEMA,
     agentKeyRegistrySchema, INTEGRITY_SNAPSHOT_SCHEMA, OPERATOR_ACTIONS_SCHEMA,
     INTEGRITY_JOB_CURSOR_SCHEMA, INTEGRITY_ROOM_STATE_SCHEMA, INTEGRITY_SWEEP_COLUMN,
     ROOM_SCHEMA_STAMP_SCHEMA, LOOKUP_INDEXES, MESSAGES_SCHEMA,
@@ -1102,8 +1099,6 @@ export class RoomStore {
     this.invites = new AgentInvites(this);
     this.referralInvites = new ReferralInvites(this);
     this.referrals = new Referrals(this);
-    this.emissaryGraph = new EmissaryGraph(this); // Emissary slice 1a: external identity graph (tracking only).
-    this.emissaryReceipts = new EmissaryReceipts(this); // Emissary slice 1a: external receipt index.
     this.accountLogins = new AccountLoginMethods(this);
     this.reminders = new Reminders(this);
     this.notifications = new Notifications(this);
@@ -1287,9 +1282,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       ${accountLoginMethodsSchema}
       ${agentInviteSchema}
       ${referralInviteSchema}
-      ${referralSchema}
-      ${emissaryGraphSchema}
-      ${emissaryReceiptSchema}`);
+      ${referralSchema}`);
       this.storagePlatform.setVersion(this.db, 4);
     }
     if (version > 0 && version < 26 && (
@@ -1354,14 +1347,6 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // Applied here (not only where the registry is instantiated) so upgrades,
       // store-only fixtures, and the recovery audit see the tables.
       this.db.exec(RETIRED_BOARD_V2_SCHEMA);
-      // Emissary Slice 2 (RC-2026-09-28-2873): lure-generation ledgers
-      // (emissary_drops, emissary_invite_attribution, emissary_idempotency,
-      // emissary_journal) — purely additive, IF NOT EXISTS is idempotent, no
-      // schema version bump, intentionally outside the writer fence (see
-      // unfencedAdditiveTables). Applied here so upgrades, store-only
-      // fixtures, and the recovery audit see the tables; the module also
-      // ensures its schema lazily on first use.
-      this.db.exec(EMISSARY_LURE_SCHEMA);
       // RC-2026-09-23-106: agent browser sessions record the identity secret
       // hash at creation time. If the secret is rotated or revoked, sessions
       // minted with the old secret are rejected at authenticate() time.
@@ -1412,11 +1397,6 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // no migration, no fence impact; referrals are only written by the join
       // paths, and the table holds no credential data.
       this.db.exec(referralSchema);
-      // Emissary slice 1a (RC-2026-09-27-2860): external identity graph +
-      // receipt index — purely additive, IF NOT EXISTS is idempotent, no
-      // schema version bump. Tracking only: no capabilities, no money.
-      this.db.exec(emissaryGraphSchema);
-      this.db.exec(emissaryReceiptSchema);
       // Wake queue rows are purely additive (no data migration, no fence
       // impact), so no schema version bump: IF NOT EXISTS is idempotent here.
       this.db.exec(wakeQueueSchema);

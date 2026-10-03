@@ -19,12 +19,6 @@ export class HttpTestRoom extends ProjectRoom {
     if (url.pathname === '/__test-password-reset-state') {
       return Response.json(this.store.db.prepare('SELECT attempts, consumed_at FROM account_magic_codes').get() ?? null);
     }
-    if (url.pathname === '/__test-emissary-receipt' && request.method === 'POST') {
-      const { roomId } = await request.json();
-      return Response.json(this.store.emissaryReceipts.record(roomId, {
-        kind: 'jury', payload: { summary: 'Synthetic review completed' }
-      }));
-    }
     if (url.pathname === '/__test-bounty-provision') {
       this.store.agentPlugin.setDispatchKick(null); // Queue proof only; never send externally.
       this.store.initialize(initialRoom());
