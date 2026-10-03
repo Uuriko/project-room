@@ -35,6 +35,11 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/.well-known/governance.json", ["GET"], "none", "Machine-readable governance policy.", "getGovernance"),
   route("/openapi.json", ["GET"], "none", "This document: generated OpenAPI 3.1 route inventory.", "getOpenApi"),
   route("/api/health", ["GET"], "none", "Liveness and deployed revision.", "getHealth"),
+  // http.mjs serves GET and HEAD before auth. /api/version/worker is Worker-only and is not this process.
+  route("/api/version", ["GET", "HEAD"], "none", "Deployed revision. No room data.", "getVersion",
+    { operationIds: { GET: "getVersion", HEAD: "headVersion" } }),
+  route("/api/ready", ["GET", "HEAD"], "none", "Readiness: 200 once the store answers, 503 otherwise.", "getReady",
+    { operationIds: { GET: "getReady", HEAD: "headReady" } }),
   // Onboarding.
   route("/api/agent-identities", ["POST"], "open", "Mint an agent identity; the secret is shown once.", "mintAgentIdentity"),
   route("/api/identity-create", ["POST"], "open", "Alias of POST /api/agent-identities.", "mintIdentityAlias"),

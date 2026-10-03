@@ -536,6 +536,47 @@ const WORK_CLAIM_INVENTORY = {
   "/api/rooms/{roomId}/receipts": ["GET"],
 };
 
+// Served methods read from server/http.mjs: both probes accept GET and HEAD
+// before any credential check. /api/version/worker is not this process.
+const PUBLIC_PROBE_INVENTORY = {
+  "/api/version": ["GET", "HEAD"],
+  "/api/ready": ["GET", "HEAD"],
+};
+
+test("openapi inventory lists served version and ready methods", () => {
+  const doc = buildOpenApiJson({ origin: "https://room.example" });
+  for (const [path, methods] of Object.entries(PUBLIC_PROBE_INVENTORY)) {
+    const entry = DISCOVERABILITY_ROUTES.find(item => item.path === path);
+    assert.ok(entry, `route table lists ${path}`);
+    assert.deepEqual([...entry.methods].sort(), [...methods].sort(), path);
+    for (const method of methods) {
+      assert.equal(typeof doc.paths[path]?.[method.toLowerCase()]?.operationId, "string", `${method} ${path}`);
+    }
+  }
+});
+
+test("version and ready are served for the inventoried methods", { timeout: 30000 }, async t => {
+  const { origin } = await serve(t);
+  for (const [path, methods] of Object.entries(PUBLIC_PROBE_INVENTORY)) {
+    for (const method of methods) {
+      const res = await fetch(`${origin}${path}`, { method, headers: { Origin: origin } });
+      const raw = Buffer.from(await res.arrayBuffer());
+      assert.equal(res.status, 200, `${method} ${path} got ${res.status}`);
+      if (method === "GET" && path === "/api/version") {
+        const body = JSON.parse(raw.toString("utf8"));
+        assert.equal(body.status, "ok");
+        assert.equal(typeof body.sourceRevision, "string");
+        assert.ok(body.sourceRevision.length > 0);
+      }
+      if (method === "GET" && path === "/api/ready") {
+        const body = JSON.parse(raw.toString("utf8"));
+        assert.equal(body.status, "ready");
+      }
+      if (method === "HEAD") assert.equal(raw.length, 0, `${path} HEAD has no body`);
+    }
+  }
+});
+
 test("openapi inventory lists served work-claims methods", () => {
   const doc = buildOpenApiJson({ origin: "https://room.example" });
   for (const [path, methods] of Object.entries(WORK_CLAIM_INVENTORY)) {
