@@ -1,8 +1,9 @@
 // Route table (batch RT). These tests own fallthrough for paths still on the
 // legacy chain, the dispatcher's 405 Allow contract, the inbox mount's
-// session checks, and the gates that keep the OpenAPI document and the
-// legacy allowlist honest. Recorded per-route parity rows join this file
-// as later groups leave the legacy chain.
+// session checks, the auth group's status and error-code parity, and the
+// gates that keep the OpenAPI document and the legacy allowlist honest.
+// Recorded per-route parity rows join this file as later groups leave the
+// legacy chain.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
@@ -11,7 +12,9 @@ import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { ServiceError } from "../server/service-error.mjs";
 import { ROUTES, assertRouteRow, assertRouteTable } from "../server/routes/table.mjs";
+import { AUTH_ROUTES } from "../server/routes/auth.mjs";
 import { INBOX_ROUTES } from "../server/routes/inbox.mjs";
+import { createMagicLinkMailer } from "../server/magic-links.mjs";
 import { dispatchRoute } from "../server/routes/dispatch.mjs";
 import { EVENT_TYPES } from "../src/events.js";
 import { allowlistProblems, extractLegacyRoutes, loadRouteSources } from "../scripts/routes-inventory.mjs";
@@ -154,6 +157,163 @@ test("inbox mounts require an account session before they choose a method", asyn
   assert.equal(listRow.auth, "account");
   assert.equal(listRow.mount, true);
   assert.equal(listRow.path, "/api/inbox");
+});
+
+test("auth routes keep their status, error code, and 405 Allow", async t => {
+  const fixture = createAcceptanceFixture();
+  const sent = [];
+  const server = createRoomServer({
+    store: fixture.store,
+    magicLinkMailer: createMagicLinkMailer({ send: async payload => { sent.push(payload); } }),
+  });
+  const origin = await listen(server);
+  t.after(async () => {
+    server.closeStreams();
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    fixture.store.close();
+  });
+  const codeOf = async response => (await response.json()).error.code;
+  const post = (path, { cookie, csrf, bearer, body, originHeader = origin } = {}) => fetch(origin + path, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(originHeader ? { Origin: originHeader } : {}),
+      ...(cookie ? { Cookie: `account_session=${cookie}` } : {}),
+      ...(csrf ? { "X-CSRF-Token": csrf } : {}),
+      ...(bearer ? { Authorization: `Bearer ${bearer}` } : {}),
+    },
+    body: JSON.stringify(body ?? {}),
+  });
+  const openSlot = async () => {
+    const response = await fetch(`${origin}/api/account-session`);
+    assert.equal(response.status, 200);
+    const view = await response.json();
+    const cookie = /account_session=([A-Za-z0-9_-]{43})/.exec(response.headers.get("set-cookie") ?? "")?.[1];
+    assert.ok(cookie);
+    return { cookie, csrf: view.csrf, revision: view.sessionRevision };
+  };
+  const slotToken = () => {
+    const slot = fixture.store.createAccountSessionSlot();
+    return { sessionToken: slot.token, sessionRevision: slot.session.sessionRevision };
+  };
+
+  for (const row of AUTH_ROUTES) {
+    assert.equal(row.method, "POST", row.id);
+    const wrong = await fetch(`${origin}${row.path}`);
+    assert.equal(wrong.status, 405, row.path);
+    assert.equal(wrong.headers.get("allow"), "POST", row.path);
+    assert.equal((await wrong.json()).error.code, "method_not_allowed");
+  }
+
+  const anonymousCookie = [
+    "/api/auth/magic/request",
+    "/api/auth/magic/consume",
+    "/api/auth/password/reset/request",
+    "/api/auth/password/reset/consume",
+    "/api/auth/password/change",
+    "/api/auth/passkey/register/options",
+    "/api/auth/passkey/register/finish",
+  ];
+  for (const path of anonymousCookie) {
+    const response = await post(path, { body: {} });
+    assert.equal(response.status, 401, path);
+    assert.equal(await codeOf(response), "account_session_required", path);
+  }
+
+  const slot = await openSlot();
+  const missingCsrf = await post("/api/auth/magic/request", { cookie: slot.cookie, body: { email: "rt1@example.invalid" } });
+  assert.equal(missingCsrf.status, 403);
+  assert.equal(await codeOf(missingCsrf), "csrf_denied");
+
+  const bearerWrite = await post("/api/auth/magic/request", { bearer: "not-a-session", body: { email: "rt1@example.invalid" } });
+  assert.equal(bearerWrite.status, 401);
+  assert.equal(await codeOf(bearerWrite), "account_session_required");
+
+  const requested = await post("/api/auth/magic/request", { cookie: slot.cookie, csrf: slot.csrf, body: { email: "Ada@Example.INVALID" } });
+  assert.equal(requested.status, 200);
+  assert.deepEqual(await requested.json(), { status: "sent" });
+  assert.equal(sent.at(-1).to, "ada@example.invalid");
+  const consumed = await post("/api/auth/magic/consume", {
+    cookie: slot.cookie, csrf: slot.csrf,
+    body: { email: "ada@example.invalid", code: sent.at(-1).code, sessionRevision: slot.revision },
+  });
+  assert.equal(consumed.status, 201);
+  assert.equal((await consumed.json()).authenticated, true);
+
+  const resetSlot = await openSlot();
+  const resetRequested = await post("/api/auth/password/reset/request", {
+    cookie: resetSlot.cookie, csrf: resetSlot.csrf, body: { email: "reset@example.invalid" },
+  });
+  assert.equal(resetRequested.status, 200);
+  assert.deepEqual(await resetRequested.json(), { status: "sent" });
+  const resetConsumed = await post("/api/auth/password/reset/consume", {
+    cookie: resetSlot.cookie, csrf: resetSlot.csrf,
+    body: { email: "reset@example.invalid", code: "not-the-code", newPassword: "a-new-password-value", sessionRevision: resetSlot.revision },
+  });
+  assert.equal(resetConsumed.status, 401);
+  assert.equal(await codeOf(resetConsumed), "invalid_password_reset");
+
+  const signupBody = { email: "rt1-signup@example.invalid", password: "fixture-password-long-enough", ...slotToken() };
+  const bareSignup = await post("/api/auth/password/signup", { body: { email: signupBody.email, password: signupBody.password, sessionRevision: 0 } });
+  assert.equal(bareSignup.status, 401);
+  assert.equal(await codeOf(bareSignup), "account_session_required");
+  const signedUp = await post("/api/auth/password/signup", { body: signupBody });
+  assert.equal(signedUp.status, 202);
+  assert.deepEqual(await signedUp.json(), { status: "check_email", mailConfigured: true });
+  const signupCookie = /account_session=([A-Za-z0-9_-]{43})/.exec(signedUp.headers.get("set-cookie") ?? "")?.[1];
+  assert.ok(signupCookie);
+
+  const bareLogin = await post("/api/auth/password/login", {
+    body: { email: signupBody.email, password: signupBody.password, sessionRevision: 0 },
+  });
+  assert.equal(bareLogin.status, 401);
+  assert.equal(await codeOf(bareLogin), "account_session_required");
+  const loggedIn = await post("/api/auth/password/login", {
+    body: { email: signupBody.email, password: signupBody.password, ...slotToken() },
+  });
+  assert.equal(loggedIn.status, 200);
+  assert.equal((await loggedIn.json()).authenticated, true);
+
+  const changed = await post("/api/auth/password/change", {
+    cookie: signupCookie,
+    body: { currentPassword: signupBody.password, newPassword: "brand-new-password-99" },
+  });
+  assert.equal(changed.status, 200);
+  assert.deepEqual(await changed.json(), { status: "ok" });
+
+  const passkeyAccount = "rt1-passkey";
+  fixture.store.createAccount(passkeyAccount);
+  const passkeyKey = fixture.store.issueAccountAccessKey(passkeyAccount);
+  const passkeySlot = fixture.store.createAccountSessionSlot();
+  const passkeySession = fixture.store.loginAccountSession(passkeySlot.token, passkeyKey, 0);
+  const registerOptions = await post("/api/auth/passkey/register/options", {
+    cookie: passkeySlot.token, csrf: passkeySession.csrf, body: {},
+  });
+  assert.equal(registerOptions.status, 200);
+  assert.equal(typeof (await registerOptions.json()).challengeId, "string");
+  const registerFinish = await post("/api/auth/passkey/register/finish", {
+    cookie: passkeySlot.token, csrf: passkeySession.csrf,
+    body: { challengeId: "nope", response: {} },
+  });
+  assert.equal(registerFinish.status, 401);
+  assert.equal(await codeOf(registerFinish), "invalid_passkey_challenge");
+
+  const authOptions = await post("/api/auth/passkey/authenticate/options", { body: {} });
+  assert.equal(authOptions.status, 200);
+  assert.equal(typeof (await authOptions.json()).challengeId, "string");
+  const bearerOptions = await post("/api/auth/passkey/authenticate/options", { bearer: "not-a-session", body: {} });
+  assert.equal(bearerOptions.status, 200);
+  const bareFinish = await post("/api/auth/passkey/authenticate/finish", {
+    body: { challengeId: "nope", response: {}, sessionRevision: 0 },
+  });
+  assert.equal(bareFinish.status, 401);
+  assert.equal(await codeOf(bareFinish), "account_session_required");
+  const authFinish = await post("/api/auth/passkey/authenticate/finish", {
+    body: { challengeId: "nope", response: {}, ...slotToken() },
+  });
+  assert.equal(authFinish.status, 401);
+  assert.equal(await codeOf(authFinish), "invalid_passkey_challenge");
 });
 
 test("docs/openapi.yaml parses as OpenAPI 3.1", () => {
