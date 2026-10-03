@@ -8,7 +8,8 @@ import AxeBuilder from "@axe-core/playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { signInFixture } from "./auth-signin.mjs";
-import { openSearch } from "./room-chrome.mjs";
+import { clickChrome, openSearch } from "./room-chrome.mjs";
+import { initialRoom } from "../server/bootstrap.mjs";
 
 const shots = "/opt/cursor/artifacts/screenshots";
 
@@ -528,7 +529,8 @@ test("waiting prerequisites stay visible, link by keyboard, and become claimable
   const claimPattern = "**/api/rooms/commons/work-claims/dependent/claim";
   const readArrived = Promise.withResolvers(), releaseRead = Promise.withResolvers();
   const actionArrived = Promise.withResolvers(), releaseAction = Promise.withResolvers();
-  let heldRead = false;
+  const reconcileArrived = Promise.withResolvers(), releaseReconcile = Promise.withResolvers();
+  let heldRead = null, holdReconcile = false, heldReconcile = false;
   const posts = [], responses = [];
   page.on("request", request => {
     if (request.method() === "POST" && new URL(request.url()).pathname.endsWith("/work-claims/dependent/claim")) {
@@ -541,8 +543,17 @@ test("waiting prerequisites stay visible, link by keyboard, and become claimable
     }
   });
   const holdRead = async route => {
-    if (heldRead) { await route.continue(); return; }
-    heldRead = true;
+    if (heldRead) {
+      if (!holdReconcile || heldReconcile) { await route.continue(); return; }
+      heldReconcile = true;
+      const response = await route.fetch();
+      assert.equal(response.status(), 200);
+      reconcileArrived.resolve();
+      await releaseReconcile.promise;
+      await route.fulfill({ response });
+      return;
+    }
+    heldRead = route.request();
     const response = await route.fetch();
     assert.equal(response.status(), 200);
     const body = await response.json();
@@ -585,13 +596,16 @@ test("waiting prerequisites stay visible, link by keyboard, and become claimable
     // activation must not send a second mutation from the unchanged control.
     await page.keyboard.press("Enter");
     await page.keyboard.press("Enter");
+    holdReconcile = true;
     releaseAction.resolve();
+    await reconcileArrived.promise;
+    await page.keyboard.press("Enter");
+    releaseReconcile.resolve();
     await page.locator("[aria-labelledby='board-col-claimed'] article[data-claim-id='dependent']").waitFor();
     assert.equal(await page.locator("#board-status").innerText(), "Claimed 'Continue after the handoff'");
     assert.equal(await page.evaluate(() => document.activeElement?.closest("article")?.dataset.claimId), "dependent");
     await page.locator("#board-close").focus();
-    const settled = page.waitForResponse(response => response.request().method() === "GET"
-      && new URL(response.url()).pathname === "/api/rooms/commons/work-claims");
+    const settled = page.waitForResponse(response => response.request() === heldRead);
     releaseRead.resolve();
     await (await settled).finished();
     await page.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)));
@@ -614,9 +628,135 @@ test("waiting prerequisites stay visible, link by keyboard, and become claimable
     console.error("Board Claim diagnostic:", JSON.stringify(diagnostic));
     throw error;
   } finally {
-    releaseRead.resolve(); releaseAction.resolve();
+    releaseRead.resolve(); releaseAction.resolve(); releaseReconcile.resolve();
     await page.unroute(listPattern, holdRead);
     await page.unroute(claimPattern, holdAction);
+  }
+});
+
+// Authoring gate: lifecycle ownership of real Board HTTP continuations.
+// A late page must not carry its cursor into a new room, and a late mutation
+// must not repaint, refocus or refresh after its room/session has retired.
+// Existing navigation tests own return tickets, not these Board continuations.
+// All payloads and writes below pass through the actual fixture HTTP server.
+test("held Board reads and mutations retire on room switch and sign-out", { timeout: 120000 }, async t => {
+  const fixture = createAcceptanceFixture();
+  const accountId = "board-lifecycle-account", memberId = "board-reader";
+  fixture.store.command(fixture.keys.owner, "commons", {
+    id: crypto.randomUUID(), type: "member.added",
+    data: { memberId, displayName: "Board reader", kind: "human", permissions: ["accept_work", "complete_work"] }
+  });
+  fixture.store.createAccount(accountId); fixture.store.completeOnboarding(accountId);
+  fixture.store.bindHumanAccount("commons", memberId, accountId);
+  fixture.store.initialize(initialRoom("board-other", memberId));
+  fixture.store.bindHumanAccount("board-other", memberId, accountId);
+  const accountKey = fixture.store.issueAccountAccessKey(accountId);
+  const updatedAt = new Date().toISOString();
+  // More than one page makes a retired continuation's next request observable.
+  for (let index = 0; index < 201; index += 1) {
+    seedClaim(fixture.store, { id: `retirement-${index}`, title: `Retirement fixture ${index}`, state: "done", owner: "owner", updatedAt });
+  }
+  const server = createRoomServer({ store: fixture.store, streamInterval: 40, fetchPullRequest: github() });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const browser = await chromium.launch({ headless: true });
+  t.after(async () => {
+    await browser.close(); server.closeStreams(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    fixture.store.close(); rmSync(fixture.directory, { recursive: true, force: true });
+  });
+  for (const boundary of ["room", "sign-out"]) for (const operation of ["read", "mutation"]) {
+    const id = `retired-${boundary}-${operation}`;
+    seedClaim(fixture.store, { id, title: `Original ${id}`, state: "unclaimed", updatedAt: new Date().toISOString() });
+    fixture.store.workClaims.set("board-other", { ...fixture.store.workClaims.get("commons", id), title: `Other room ${id}` });
+    const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+    const page = await context.newPage();
+    page.setDefaultTimeout(8000);
+    const requests = [], errors = [];
+    page.on("pageerror", error => errors.push(error.message));
+    page.on("request", request => {
+      const url = new URL(request.url());
+      if (url.pathname.includes("/work-claims")) requests.push({ method: request.method(), path: url.pathname, search: url.search });
+    });
+    await page.goto(`${origin}/?account=1`);
+    await signInFixture(page, accountKey);
+    await page.locator("#inbox-panel").waitFor({ state: "visible" });
+    const chooseRoom = async roomId => {
+      await clickChrome(page, await page.locator("#main").isVisible() ? "#choose-room" : "#nav-rooms");
+      await page.locator(`[data-account-room="${roomId}"]`).click();
+      await page.locator("#main").waitFor({ state: "visible" });
+      await page.waitForFunction(expected => new URL(location.href).searchParams.get("room") === expected, roomId);
+    };
+    const openBoard = async () => {
+      await page.locator("#tasks-board-open").click();
+      await page.locator(`#work-board article[data-claim-id='${id}']`).waitFor({ state: "attached" });
+    };
+    await chooseRoom("commons"); await openBoard();
+    const documentOrigin = await page.evaluate(() => performance.timeOrigin);
+    const arrived = Promise.withResolvers(), release = Promise.withResolvers();
+    const pattern = operation === "read" ? "**/api/rooms/commons/work-claims?*" : `**/api/rooms/commons/work-claims/${id}/claim`;
+    let captured = null;
+    const hold = async route => {
+      if (captured) { await route.continue(); return; }
+      captured = route.request();
+      const response = await route.fetch();
+      assert.equal(response.status(), 200);
+      if (operation === "read") assert.ok((await response.json()).nextCursor, "the held real list has another page");
+      arrived.resolve();
+      await release.promise;
+      await route.fulfill({ response });
+    };
+    await page.route(pattern, hold);
+    try {
+      if (operation === "read") {
+        // This page has an account session, not a legacy Room cookie. A
+        // separate fixture bearer write supplies a real event without using
+        // the browser's current identity or fabricating a list response.
+        const created = await fetch(`${origin}/api/rooms/commons/work-claims`, {
+          method: "POST", headers: { Origin: origin, "Content-Type": "application/json", Authorization: `Bearer ${fixture.keys.owner}` },
+          body: JSON.stringify({ id: `refresh-${id}`, title: `Refresh ${id}` })
+        });
+        assert.equal(created.status, 201, await created.text());
+      } else await page.locator(`article[data-claim-id='${id}'] [data-claim-action='claim']`).click();
+      await arrived.promise;
+      await page.locator("#board-close").click();
+      if (boundary === "room") {
+        await chooseRoom("board-other"); await openBoard();
+        await page.locator("#board-close").focus();
+        assert.match(await page.locator(`article[data-claim-id='${id}'] h4`).innerText(), /^Other room /);
+      } else {
+        await clickChrome(page, "#signout-button");
+        await page.locator("#auth-panel").waitFor({ state: "visible" });
+        await page.locator('#auth-signin-ui [data-signin-form="password"] [name="email"]').focus();
+      }
+      assert.equal(await page.evaluate(() => performance.timeOrigin), documentOrigin, "the old callback survives in the same document");
+      const destination = page.url();
+      const beforeRelease = requests.length;
+      const focus = await page.evaluate(() => ({ id: document.activeElement?.id, name: document.activeElement?.getAttribute("name") }));
+      const delivered = page.waitForResponse(response => response.request() === captured);
+      release.resolve();
+      await (await delivered).finished();
+      await page.waitForLoadState("networkidle");
+      assert.equal(requests.length, beforeRelease, `${boundary}/${operation}: retired continuation sends no further Board request`);
+      assert.equal(page.url(), destination);
+      assert.deepEqual(await page.evaluate(() => ({ id: document.activeElement?.id, name: document.activeElement?.getAttribute("name") })), focus);
+      assert.equal(fixture.store.workClaims.get("board-other", id).owner, null, "same-ID work in the new room is untouched");
+      assert.equal(fixture.store.workClaims.get("commons", id).owner, operation === "read" ? null : memberId,
+        "only the one mutation already accepted before retirement persists");
+      assert.equal(requests.filter(request => request.method === "POST").length, operation === "read" ? 0 : 1);
+      if (boundary === "room") {
+        assert.equal(await page.locator(`[aria-labelledby='board-col-ready'] article[data-claim-id='${id}']`).count(), 1);
+        assert.equal(await page.locator("#board-status").textContent(), "");
+      } else {
+        assert.equal(await page.locator("#board-dialog").evaluate(node => node.open), false);
+        assert.equal(await page.locator("#work-board article").count(), 0);
+      }
+      assert.deepEqual(errors, []);
+    } finally {
+      release.resolve();
+      await page.unroute(pattern, hold);
+      await context.close();
+    }
   }
 });
 
