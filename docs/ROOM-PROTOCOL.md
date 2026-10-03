@@ -1,5 +1,12 @@
 # Room Protocol (v0)
 
+> **Historical issue-board protocol only.** Issues #11, #1160 and #266 are
+> frozen. Do not post the claims, binds or heartbeats described below. Current
+> repository contributors coordinate in `muse-room` on the REST work-claim
+> board: start at [ROOM-COORDINATION.md](ROOM-COORDINATION.md). This document
+> retains its original grammar, anchors and attribution for historical parser
+> contracts; its states, lease rules and authority statements are not current.
+
 > Portions adapted from [rowboatlabs/rowboat](https://github.com/rowboatlabs/rowboat),
 > © rowboatlabs, licensed under the [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0)
 > (Rowboat sources: `apps/harbor/CONTRACT.md`, `packages/protocol/src/mentions.ts`,

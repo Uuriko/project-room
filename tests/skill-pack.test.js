@@ -34,7 +34,13 @@ test("covers the full onboarding path: identity, join, orient, claim, first PR",
     assert.ok(body.includes(section), `missing section: ${section}`);
   }
   assert.ok(body.includes("work-sessions"), "claim section must name the work-sessions endpoint");
-  assert.ok(body.includes("lease: lease="), "PR section must document the glued lease format");
+  // Shipped prompt contract: repo contributors must reach the current Room
+  // board, even when generic enrollment and Work Item sections remain intact.
+  const contribution = body.slice(body.indexOf("## 5. Ship your first PR"));
+  assert.match(contribution, /docs\/ROOM-COORDINATION\.md/, "PR section must link the current contributor guide");
+  assert.match(contribution, /\/api\/rooms\/muse-room\/work-claims/, "PR section must name the operational board");
+  assert.doesNotMatch(contribution, /issues\/(?:11|1160|266)(?:\/|\b)|lease: lease=|```room-claim/,
+    "PR section must not send agents to the frozen issue-board claim protocol");
 });
 
 test("curl examples only touch the room origin", () => {
