@@ -49,6 +49,36 @@ const claimEvents = store => store.db.prepare(
   "SELECT body FROM events WHERE room_id=? ORDER BY sequence"
 ).all("commons").map(row => JSON.parse(row.body)).filter(event => event.type === "work_claim.updated");
 
+// Authoring gate: the real route/storage/event boundary owns attach-after-claim.
+// A dropped update alternative, unconditional write, or weaker CAS breaks this
+// journey. Existing create-time PR tests cannot reach the missing transition.
+test("linking a draft after claiming preserves the lease and reconciles exact duplicates", async t => {
+  const { store, call } = await room(t);
+  await call("create", null, { id: "later-pr", files: ["src/held.js"], repo: "Uuriko/project-room", branch: "draft" });
+  const claimed = (await call("claim", "later-pr", { leaseHours: 6 })).value;
+  const body = { appendPullRequest: URL_A + "/", expectedClaimedAt: claimed.claimedAt, expectedHistoryLength: claimed.history.length };
+  const beforeEvents = claimEvents(store).length;
+  const linked = (await call("update", "later-pr", body)).value;
+  assert.equal(linked.pullRequests.length, 1);
+  assert.equal(linked.pullRequest.url, URL_A);
+  assert.equal(linked.pullRequest.outcome, null);
+  assert.equal(linked.ci, null);
+  for (const key of ["owner", "state", "claimedAt", "leaseStartAt", "leaseExpiresAt", "files", "fileBlocks", "dependsOn", "repo", "branch", "revision", "deliveryMode"]) {
+    assert.deepEqual(linked[key], claimed[key], key);
+  }
+  assert.equal(linked.history.length, claimed.history.length + 1);
+  assert.match(linked.history.at(-1).note, /https:\/\/github\.com\/Uuriko\/project-room\/pull\/7/);
+  assert.deepEqual((await call("read", "later-pr")).value, linked);
+  assert.equal(claimEvents(store).length, beforeEvents + 1);
+  assert.equal(claimEvents(store).at(-1).data.action, "state_changed");
+  assert.equal(claimEvents(store).at(-1).data.reason, undefined);
+  await assert.rejects(call("update", "later-pr", body), error => error.status === 409 && error.code === "work_claim_conflict");
+  const repeated = (await call("update", "later-pr", { ...body, expectedHistoryLength: linked.history.length })).value;
+  assert.deepEqual(repeated, linked);
+  assert.equal(claimEvents(store).length, beforeEvents + 1);
+  assert.deepEqual(store.workClaims.get("commons", "later-pr"), linked);
+});
+
 test("a webhook close and a polled pull reduce to the same outcomes", () => {
   assert.equal(pullRequestOutcomeFromWebhook({ action: "opened", pull_request: { html_url: URL_A, merged: false } }), null);
   assert.equal(pullRequestOutcomeFromWebhook({ action: "closed", pull_request: { html_url: URL_A + "?utm=1", merged: true } }), null);
