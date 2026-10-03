@@ -313,7 +313,7 @@ test("a fresh default-profile client can discover, answer and verify a formal re
 
 test("tools/list focus is explicit, stateless discovery with full-catalog escape and unchanged authorization", async t => {
   const { origin, store, rooms } = await serve(t);
-  const owner = store.identities.create("Owner"), reader = store.identities.create("Reader");
+  const owner = store.identities.create("Owen"), reader = store.identities.create("Reader");
   const roomId = rooms.create(owner.secret, {
     roomId: "focused-tools", title: "Focused tools", purpose: "Discover appropriate actions", kind: "personal"
   }).roomId;

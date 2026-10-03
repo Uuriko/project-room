@@ -624,7 +624,7 @@ test("HTTP: agent owner administers by ID; non-owner agent is denied", async t =
   const get = (path, token) => fetch(`${origin}${path}`, {
     headers: token ? { Authorization: `Bearer ${token}` } : {}
   }).then(async res => ({ status: res.status, body: await res.json().catch(() => null) }));
-  const minted = await post("/room/api/agent-identities", { data: { displayName: "Owner Agent" } });
+  const minted = await post("/room/api/agent-identities", { data: { displayName: "Olive Agent" } });
   assert.equal(minted.status, 201);
   const ownerSecret = minted.body.secret;
   const created = await post("/room/api/agent-rooms", { token: ownerSecret, data: createArgs("owner-den") });

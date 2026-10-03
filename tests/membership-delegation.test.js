@@ -247,9 +247,9 @@ test("the owner remains sovereign: may approve and link with manage_members", t 
   const decided = requests.decide(ownerToken, "commons", req.requestId,
     { decision: "approve", permissions: ["accept_work", "manage_members"] });
   assert.deepEqual([...decided.grantedPermissions].sort(), ["accept_work", "manage_members"]);
-  const fresh = store.identities.create("Owner Linked Agent");
+  const fresh = store.identities.create("Delegate Linked Agent");
   const linked = store.identities.link(ownerToken, "commons", {
-    identityId: fresh.identityId, displayName: "Owner Linked Agent",
+    identityId: fresh.identityId, displayName: "Delegate Linked Agent",
     permissions: ["manage_members"]
   });
   assert.equal(linked.roomId, "commons");

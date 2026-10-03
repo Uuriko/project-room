@@ -174,7 +174,7 @@ test('CLI help/invalid arguments never touch config or network and errors are sa
 
 test('real HTTP compact resume measures bytes against existing full snapshot and conditional repeat', async t => {
   const store = new RoomStore(':memory:');
-  const rooms = new AgentRooms(store); const owner = store.identities.create('Owner'); const worker = store.identities.create('Worker');
+  const rooms = new AgentRooms(store); const owner = store.identities.create('Owen'); const worker = store.identities.create('Worker');
   rooms.create(owner.secret, { roomId: 'commons', title: 'Test', purpose: 'Resume fixture', kind: 'personal' });
   store.identities.link(owner.secret, 'commons', { identityId: worker.identityId, displayName: 'Worker', permissions: [] });
   for (let i = 0; i < 30; i++) store.command(owner.secret, 'commons', { id: `post${i}`, type: 'message.posted', data: { messageId: `msg${i}`, body: 'private-body-sentinel-' + 'x'.repeat(1000) } });
@@ -235,7 +235,7 @@ test('real HTTP compact resume measures bytes against existing full snapshot and
 // cost test has no reply requests. No production seam: actual Room commands and HTTP.
 test('reply-only resume retains old open requests independently of delta observations and clears revoked reads', async t => {
   const store = new RoomStore(':memory:');
-  const owner = store.identities.create('Owner'), worker = store.identities.create('Worker');
+  const owner = store.identities.create('Owen'), worker = store.identities.create('Worker');
   new AgentRooms(store).create(owner.secret, { roomId: 'commons', title: 'Replies', purpose: 'Reply fixture', kind: 'personal' });
   store.identities.link(owner.secret, 'commons', { identityId: worker.identityId, memberId: 'reply-worker', displayName: 'Worker', permissions: [] });
   store.dmConsents.request('commons', owner.identityId, 'reply-worker', 'Fixture');

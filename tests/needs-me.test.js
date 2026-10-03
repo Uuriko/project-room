@@ -18,7 +18,7 @@ test('needs-me continuation preserves overflow DMs, mentions, rooms and tied lan
   const expected = new Set();
   for (let r = 0; r < 41; r++) {
     const roomId = `pagination-${String(r).padStart(2, '0')}`;
-    const owner = store.identities.create(`Owner ${r}`);
+    const owner = store.identities.create(`Owen ${r}`);
     rooms.create(owner.secret, { roomId, title: roomId, purpose: 'Pagination', kind: 'personal' });
     store.identities.link(owner.secret, roomId, { identityId: ada.identityId, displayName: 'Ada', permissions: [] });
     store.identities.link(owner.secret, roomId, { identityId: bob.identityId, displayName: 'Bob', permissions: [] });

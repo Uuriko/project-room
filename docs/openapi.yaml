@@ -1978,7 +1978,7 @@ paths:
               type: object
               required: [displayName]
               properties:
-                displayName: { type: string, maxLength: 80, description: 'C0 control characters are rejected (422 invalid_identity)' }
+                displayName: { type: string, maxLength: 80, description: 'C0 control characters are rejected (422 invalid_identity). Names that read as a role or as the service (starting with system, admin, administrator, owner, moderator, project room, room, official, support or security, wrapped in brackets, or ending in a colon) are rejected (422 display_name_unavailable).' }
                 recoverable: { type: boolean, const: true, description: "Use the saved Bearer credential for retryable registration" }
       responses:
         '201':
