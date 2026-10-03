@@ -49,15 +49,26 @@ export async function takeApproval({ home = configHome(), origin, roomId, secret
     save(home, pending);
     return { ok: false, reason: "approval_denied" };
   }
-  const page = await listEvents(origin, roomId, secret, 0);
-  if (!page.ok) return { ok: false, reason: "approval_required" };
-  const reply = page.events.find(entry => {
+  const matches = entry => {
     const event = entry.event ?? entry;
     return event.type === "message.posted"
       && event.actorId === row.ownerMemberId
       && String(event.data?.body ?? "").trim() === `approve ${code}`;
-  });
-  if (!reply) return { ok: false, reason: "approval_required" };
+  };
+  // M4: page through the room's events instead of reading only the first
+  // 100. Stop at the first page containing the approval reply; the code is
+  // unique, so an older page can never hold it. Cap the scan to bound the
+  // loop against pathological rooms.
+  let after = 0;
+  let found = false;
+  for (let pages = 0; pages < 100 && !found; pages += 1) {
+    const page = await listEvents(origin, roomId, secret, after);
+    if (!page.ok) return { ok: false, reason: "approval_required" };
+    found = page.events.some(matches);
+    if (!found && (!page.events.length || page.next <= after)) return { ok: false, reason: "approval_required" };
+    after = page.next;
+  }
+  if (!found) return { ok: false, reason: "approval_required" };
   row.used = true;
   pending[code] = row;
   save(home, pending);
