@@ -52,6 +52,25 @@ async function assertMoreLabel(page) {
 const headerControls = ["#sidebar-toggle", "#topbar-updates", "#topbar-search-toggle", "#topbar-catchup", "#room-more > summary", "#session-menu-button"];
 const longRoomName = "Project Room — A deliberately long research and delivery room name";
 
+async function assertReadableWords(page, selectors) {
+  const brokenWords = await page.evaluate(selectors => {
+    const broken = [];
+    for (const selector of selectors) {
+      const walker = document.createTreeWalker(document.querySelector(selector), NodeFilter.SHOW_TEXT);
+      for (let text = walker.nextNode(); text; text = walker.nextNode()) {
+        for (const match of text.textContent.matchAll(/\S+/g)) {
+          const range = document.createRange();
+          range.setStart(text, match.index); range.setEnd(text, match.index + match[0].length);
+          const lines = [...range.getClientRects()].map(rect => Math.round(rect.top));
+          if (new Set(lines).size !== 1) broken.push(`${selector}: ${match[0]}`);
+        }
+      }
+    }
+    return broken;
+  }, selectors);
+  assert.deepEqual(brokenWords, [], "visible labels, counts and connection status words are never split into characters");
+}
+
 async function assertHeader(page, count) {
   await assertMoreLabel(page);
   assert.equal(await page.getByRole("button", { name: `Catch up ${count}`, exact: true }).count(), 1, "the full count meaning remains in the accessible name");
@@ -92,22 +111,7 @@ async function assertHeader(page, count) {
   }
   // Independently measure words, not CSS declarations: overflow can remain
   // contained even when a label or count has become a stack of characters.
-  const brokenWords = await page.locator(".room-topbar .topbar-actions").evaluate(root => {
-    const broken = [];
-    for (const selector of ["#topbar-updates", "#topbar-catchup"]) {
-      const walker = document.createTreeWalker(root.querySelector(selector), NodeFilter.SHOW_TEXT);
-      for (let text = walker.nextNode(); text; text = walker.nextNode()) {
-        for (const match of text.textContent.matchAll(/\S+/g)) {
-          const range = document.createRange();
-          range.setStart(text, match.index); range.setEnd(text, match.index + match[0].length);
-          const lines = [...range.getClientRects()].map(rect => Math.round(rect.top));
-          if (new Set(lines).size !== 1) broken.push(match[0]);
-        }
-      }
-    }
-    return broken;
-  });
-  assert.deepEqual(brokenWords, [], "visible labels and count words are never split into characters");
+  await assertReadableWords(page, ["#topbar-updates", "#topbar-catchup"]);
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1), true, "no horizontal document overflow");
 }
 
@@ -188,7 +192,10 @@ test("mobile header: session actions fold into an accessible menu, conversation 
       try {
         await assertHeader(page, count);
         if (interact) await exerciseHeader(page);
-        if (recovery) await page.locator("#refresh-button").tap({ trial: true });
+        if (recovery) {
+          await assertReadableWords(page, ["#connection-status", "#connection-details > summary", "#refresh-button"]);
+          await page.locator("#refresh-button").tap({ trial: true });
+        }
         await page.evaluate(() => scrollTo(0, 0));
         await assertHeader(page, count);
       } catch (error) {
