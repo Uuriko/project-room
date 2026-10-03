@@ -314,17 +314,19 @@ function staleDonePage(claims, now) {
   });
 }
 
-async function readClaims(client, now = Date.now()) {
+async function readClaims(client, current, now = Date.now()) {
   const claims = [];
   let cursor = null;
   let older = false;
   for (let page = 0; page < 20; page += 1) {
+    if (!current()) break;
     const query = new URLSearchParams({ limit: "200" });
     // SEC-2 adds updatedSince=now-7d once the list route accepts it. Until
     // then an unknown parameter is a 422, so the query stays limit and cursor
     // and a page of only old done items ends the walk.
     if (cursor) query.set("cursor", cursor);
     const body = await client.request(client.path(`/work-claims?${query}`));
+    if (!current()) break;
     const pageClaims = body.claims ?? [];
     claims.push(...pageClaims);
     if (staleDonePage(pageClaims, now)) { older = true; break; }
@@ -359,7 +361,7 @@ export function installWorkBoard({ client, getState, getSession }) {
     return current?.roomId && member && getState()?.members?.[member]?.id === member && getState().members[member].active !== false
       ? `${client.generation}|${current.roomId}|${member}` : null;
   };
-  let busy = false;
+  let mutating = false;
   let pendingFocus = null;
   let pendingStatus = "";
   let stick = null;
@@ -415,19 +417,18 @@ export function installWorkBoard({ client, getState, getSession }) {
     const session = getSession(), owned = context();
     if (!owned) return;
     if (loadedContext !== owned) {
-      operation++; busy = false; loadedRoom = null; seen = null; items = []; status = null;
+      operation++; mutating = false; readFlight = null; actionFlight = null; loadedRoom = null; seen = null; items = []; status = null;
       loadedContext = owned; pendingFocus = null; pendingStatus = ""; stick = null; paint();
     }
-    if (busy) return;
+    if ((mutating && !force) || readFlight) return;
     const events = (getState()?.eventLog ?? []).filter(event => event.type === "work_claim.updated");
     const mark = events.length ? events[events.length - 1].id : "";
     if (!force && loadedRoom === session.roomId && seen === mark) return;
     const mine = ++operation;
     let pending = null;
-    busy = true;
     try {
       pending = Promise.all([
-        readClaims(client),
+        readClaims(client, () => mine === operation && context() === owned),
         client.request(client.path("/work-claims/status")),
         client.request(client.path("/work-claims/config"))
       ]);
@@ -445,31 +446,32 @@ export function installWorkBoard({ client, getState, getSession }) {
       if (mine === operation && context() === owned) note("Could not load the board.");
     } finally {
       if (readFlight === pending) readFlight = null;
-      if (mine === operation) busy = false;
     }
   }
 
   async function act(run, focus) {
     const owned = context();
-    if (!owned || busy) return;
+    if (!owned || loadedContext !== owned || mutating) return;
     const mine = ++operation;
+    // An explicit action supersedes a background read; its stale response
+    // cannot paint or block the fresh list after this mutation.
+    readFlight = null;
     if (focus) { pendingFocus = { key: focus.key ?? null, id: focus.id ?? null }; pendingStatus = focus.status ?? ""; }
-    busy = true;
+    mutating = true;
     let pending = null;
     try {
       pending = run(); actionFlight = pending;
       await pending;
       if (mine !== operation || context() !== owned) return;
-      busy = false;
+      // Keep duplicate mutations excluded until their new state is visible.
       await load({ force: true });
     } catch (error) {
       if (mine !== operation || context() !== owned) return;
       pendingFocus = null;
       pendingStatus = "";
-      busy = false;
       note(error?.message || "Could not update the claim.");
     } finally {
-      if (actionFlight === pending) actionFlight = null;
+      if (actionFlight === pending) { actionFlight = null; mutating = false; }
     }
   }
 
@@ -538,6 +540,6 @@ export function installWorkBoard({ client, getState, getSession }) {
       } catch { return false; }
       return context() === owned && loadedContext === owned && loadedRoom === getSession()?.roomId;
     },
-    reset() { operation++; busy = false; readFlight = null; actionFlight = null; loadedContext = null; items = []; status = null; cap = 20; older = false; seen = null; loadedRoom = null; pendingFocus = null; pendingStatus = ""; stick = null; if (root.isConnected) root.replaceChildren(); }
+    reset() { operation++; mutating = false; readFlight = null; actionFlight = null; loadedContext = null; items = []; status = null; cap = 20; older = false; seen = null; loadedRoom = null; pendingFocus = null; pendingStatus = ""; stick = null; if (root.isConnected) root.replaceChildren(); }
   };
 }
