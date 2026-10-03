@@ -2,7 +2,7 @@
 // The room page and the work-claim HTTP API are the boundary. No test doubles.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { chromium } from "playwright";
 import AxeBuilder from "@axe-core/playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
@@ -520,13 +520,104 @@ test("waiting prerequisites stay visible, link by keyboard, and become claimable
   assert.equal(await dependent.locator(".claim-waiting").count(), 0);
   assert.equal(await page.locator("#board-col-blocked").innerText(), "Blocked · 1 waiting");
   assert.deepEqual(await boardIds(), ["available", "dependent", "prerequisite", "unknown"]);
-  const claim = dependent.locator("[data-claim-action='claim']");
-  await claim.focus();
-  await page.keyboard.press("Enter");
-  await page.locator("[aria-labelledby='board-col-claimed'] article[data-claim-id='dependent']").waitFor();
-  assert.equal(fixture.store.workClaims.get("commons", "dependent").owner, "owner");
-  assert.equal(fixture.store.workClaims.get("commons", "unknown").owner, null);
-  assert.equal(await unknown.locator("[data-claim-action='claim']").count(), 0);
+  // Authoring gate: an enabled keyboard action must survive a concurrent
+  // background refresh. The existing happy path never forces this ordering.
+  // Hold real HTTP responses, without replacing their status/body or adding
+  // production seams. The old shared busy flag loses this Claim entirely.
+  const listPattern = "**/api/rooms/commons/work-claims?*";
+  const claimPattern = "**/api/rooms/commons/work-claims/dependent/claim";
+  const readArrived = Promise.withResolvers(), releaseRead = Promise.withResolvers();
+  const actionArrived = Promise.withResolvers(), releaseAction = Promise.withResolvers();
+  let heldRead = false;
+  const posts = [], responses = [];
+  page.on("request", request => {
+    if (request.method() === "POST" && new URL(request.url()).pathname.endsWith("/work-claims/dependent/claim")) {
+      posts.push({ method: request.method(), path: new URL(request.url()).pathname });
+    }
+  });
+  page.on("response", response => {
+    if (response.request().method() === "POST" && new URL(response.url()).pathname.endsWith("/work-claims/dependent/claim")) {
+      responses.push({ status: response.status() });
+    }
+  });
+  const holdRead = async route => {
+    if (heldRead) { await route.continue(); return; }
+    heldRead = true;
+    const response = await route.fetch();
+    assert.equal(response.status(), 200);
+    const body = await response.json();
+    assert.equal(body.claims.find(item => item.id === "dependent").owner, null, "held data predates the claim");
+    readArrived.resolve();
+    await releaseRead.promise;
+    await route.fulfill({ response });
+  };
+  const holdAction = async route => {
+    const response = await route.fetch();
+    assert.equal(response.status(), 200);
+    actionArrived.resolve();
+    await releaseAction.promise;
+    await route.fulfill({ response });
+  };
+  await page.route(listPattern, holdRead);
+  await page.route(claimPattern, holdAction);
+  let keyboardTarget = null;
+  try {
+    await post(page, origin, "/work-claims", { id: "refresh-race", title: "Trigger a real background refresh" }, 201);
+    await readArrived.promise;
+    const claim = dependent.locator("[data-claim-action='claim']");
+    assert.equal(await claim.isEnabled(), true);
+    await claim.focus();
+    keyboardTarget = await page.evaluate(() => ({
+      tag: document.activeElement?.tagName, action: document.activeElement?.dataset.claimAction,
+      claimId: document.activeElement?.dataset.claimId, focusKey: document.activeElement?.dataset.focusKey
+    }));
+    assert.equal(keyboardTarget.action, "claim");
+    assert.equal(keyboardTarget.claimId, "dependent");
+    // Register before Enter: the pending read cannot make this enabled action
+    // vanish. A timeout here records the actual keyboard target and zero POSTs.
+    const accepted = page.waitForRequest(request => request.method() === "POST"
+      && new URL(request.url()).pathname.endsWith("/work-claims/dependent/claim"));
+    await page.keyboard.press("Enter");
+    await accepted;
+    await actionArrived.promise;
+    assert.equal(fixture.store.workClaims.get("commons", "dependent").owner, "owner");
+    // The first write is persisted but its response is still held. Repeated
+    // activation must not send a second mutation from the unchanged control.
+    await page.keyboard.press("Enter");
+    await page.keyboard.press("Enter");
+    releaseAction.resolve();
+    await page.locator("[aria-labelledby='board-col-claimed'] article[data-claim-id='dependent']").waitFor();
+    assert.equal(await page.locator("#board-status").innerText(), "Claimed 'Continue after the handoff'");
+    assert.equal(await page.evaluate(() => document.activeElement?.closest("article")?.dataset.claimId), "dependent");
+    await page.locator("#board-close").focus();
+    const settled = page.waitForResponse(response => response.request().method() === "GET"
+      && new URL(response.url()).pathname === "/api/rooms/commons/work-claims");
+    releaseRead.resolve();
+    await (await settled).finished();
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)));
+    assert.equal(await page.locator("[aria-labelledby='board-col-claimed'] article[data-claim-id='dependent']").count(), 1,
+      "the older list cannot repaint the just-claimed card as Ready");
+    assert.equal(await page.evaluate(() => document.activeElement?.id), "board-close", "stale reads cannot retake keyboard focus");
+    assert.equal(posts.length, 1, "repeated Enter while the mutation is in flight sends exactly one POST");
+    assert.deepEqual(responses, [{ status: 200 }]);
+    assert.equal(fixture.store.workClaims.get("commons", "dependent").history.filter(item => item.action === "claimed").length, 1);
+    assert.equal(fixture.store.workClaims.get("commons", "unknown").owner, null);
+    assert.equal(await unknown.locator("[data-claim-action='claim']").count(), 0);
+    await page.screenshot({ path: "test-results/board-refresh-action.png" });
+  } catch (error) {
+    const diagnostic = { keyboardTarget, posts, responses,
+      active: await page.evaluate(() => ({ id: document.activeElement?.id, tag: document.activeElement?.tagName,
+        action: document.activeElement?.dataset.claimAction, claimId: document.activeElement?.dataset.claimId })),
+      notice: await page.locator("#board-status").textContent(),
+      persisted: fixture.store.workClaims.get("commons", "dependent") };
+    writeFileSync("test-results/board-refresh-action-diagnostic.json", JSON.stringify(diagnostic, null, 2));
+    console.error("Board Claim diagnostic:", JSON.stringify(diagnostic));
+    throw error;
+  } finally {
+    releaseRead.resolve(); releaseAction.resolve();
+    await page.unroute(listPattern, holdRead);
+    await page.unroute(claimPattern, holdAction);
+  }
 });
 
 test("first board open requests at most two list pages when most claims are old", { timeout: 60000 }, async t => {
