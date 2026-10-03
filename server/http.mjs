@@ -97,7 +97,7 @@ import { listOpenQuestions } from "./open-questions.mjs";
 import { GoogleSignIn, GOOGLE_START_PATH, GOOGLE_CALLBACK_PATH, googlePostLoginPage } from "./google-oauth.mjs";
 import { createMagicLinkMailer } from "./magic-links.mjs";
 import { createRateLimiter } from "./identity-ratelimit.mjs";
-import { normalizeEmail } from "./account-login-methods.mjs";
+import { emailLookupHash, normalizeEmail } from "./account-login-methods.mjs";
 import { createPasskeyAuth, resolvePasskeyParams } from "./account-passkeys.mjs";
 import { createDeletionSecret, executeAccountDeletion, issueDeletionToken, planAccountDeletion, verifyDeletionToken, RETENTION_POLICY } from "./account-deletion.mjs"; // RC-2026-09-19-078: account-management surface
 import { createOperatorRoutes } from "./operator-routes.mjs"; // CP-ADMIN-0: operator purge, status, and audit. Paths stay in that module.
