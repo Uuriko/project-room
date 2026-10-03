@@ -20,7 +20,7 @@ test("all CREATE TABLE tables in server modules are registered application table
       if (entry.isDirectory()) { walk(full); continue; }
       if (!entry.name.endsWith(".mjs")) continue;
       const src = readFileSync(full, "utf8");
-      for (const match of src.matchAll(/CREATE TABLE IF NOT EXISTS\s+([a-z_][a-z0-9_]*)/gi)) {
+      for (const match of src.matchAll(/CREATE TABLE IF NOT EXISTS\s+([a-z_][a-z0-9_]*)\s*\(/gi)) {
         created.add(match[1].toLowerCase());
       }
     }
