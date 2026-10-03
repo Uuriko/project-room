@@ -55,6 +55,6 @@ The public page `/receipts/{id}.json` is an unsigned `project-room-public-receip
 
 `docs/a2a-receipt-extension.md` defines a separate signed shape, `project-room-receipt/1`, carried in A2A message metadata. The board receipt route does not serve that shape. See [the A2A binding](../bindings/a2a.md).
 
-Bounty receipts (`server/bounty-receipts.mjs`, `room-bounty-receipt/1`) and emissary receipts (`server/emissary-receipts.mjs`) are other records. They are not the board receipt.
+Bounty receipts (`server/bounty-receipts.mjs`, `room-bounty-receipt/1`) are other records. They are not the board receipt. (The Emissary growth layer, including its receipt index, was removed in PR #1402.)
 
 `server/jev-receipts.mjs` scores a completion for a shadow journal. That score is not a field of the board receipt and it does not accept or reject the claim.

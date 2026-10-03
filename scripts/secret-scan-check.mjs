@@ -85,6 +85,11 @@ export const ALLOWLIST = [
     // The private Ed25519 seed is never in the repo (deploy host key file / env only).
   /"sha(?:Full|Url)?":\s*"([0-9a-f]{40}|https:\/\/github\.com\/Uuriko\/project-room\/commit\/[0-9a-f]{40})"/, // receipts-data.mjs: git merge-commit SHAs from public
     // upstream history (verified via `gh api`), not secrets — 40-char hex is the git SHA-1 shape.
+  /CITABLE_PROOF_KINDS/, // emissary-lure.mjs (removed on this branch, still on origin/main):
+    // constant naming the citable Slice 1 receipt kinds (work/jury/oracle).
+    // The `!` prefix in `!CITABLE_PROOF_KINDS.includes(...)` trips the
+    // high-entropy detector; it is a code constant, not a secret. Kept so
+    // the origin/main-tree diff scan stays false-positive-free.
   // 2026-09-30 (phase-2 gap audit L-P2-17): fixture/check scripts are scanned
   // (no blanket *-fixture.mjs / *-check.mjs skip). Their genuinely-safe
   // placeholder values are allowlisted explicitly below — each entry names

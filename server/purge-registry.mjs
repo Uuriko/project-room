@@ -580,26 +580,6 @@ const ROWS = [
     }
   },
   {
-    "table": "external_identities",
-    "key": "room_id",
-    "action": "delete",
-    "match": {
-      "room": [
-        "room_id"
-      ]
-    }
-  },
-  {
-    "table": "external_receipts",
-    "key": "room_id",
-    "action": "delete",
-    "match": {
-      "room": [
-        "room_id"
-      ]
-    }
-  },
-  {
     "table": "gmail_linked_mailboxes",
     "key": "account_id",
     "action": "delete",
