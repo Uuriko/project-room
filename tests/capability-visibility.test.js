@@ -68,7 +68,7 @@ function writeNames(tools) {
 // returns the MCP caller bound to the demoted identity plus both rooms.
 async function demotedPeer(t) {
   const { store, rooms } = setup(t);
-  const owner = store.identities.create("Owner");
+  const owner = store.identities.create("Owen");
   const peer = store.identities.create("Peer agent");
   const created = rooms.create(owner.secret, { title: "Tier room", purpose: "Withhold", displayName: "Owner" });
   const invite = store.invites.create(owner.secret, created.roomId, { profile: "chat", displayName: "Peer agent" }, null);

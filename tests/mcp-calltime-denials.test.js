@@ -57,7 +57,7 @@ const denied = value => {
 // #1170 listing tests, driven against tools/call instead.
 async function demotedPeer(t) {
   const { store, rooms } = setup(t);
-  const owner = store.identities.create("Owner");
+  const owner = store.identities.create("Owen");
   const peer = store.identities.create("Peer agent");
   const created = rooms.create(owner.secret, { title: "Tier room", purpose: "Call-time", displayName: "Owner" });
   const invite = store.invites.create(owner.secret, created.roomId, { profile: "chat", displayName: "Peer agent" }, null);
@@ -76,7 +76,7 @@ async function demotedPeer(t) {
 // secret, which is what resolveCatalogAgent reads for the call-time check.
 async function guestPeer(t) {
   const { store, rooms } = setup(t);
-  const owner = store.identities.create("Owner");
+  const owner = store.identities.create("Owen");
   const guest = store.identities.create("Guest agent");
   const created = rooms.create(owner.secret, { title: "Guest room", purpose: "Call-time", displayName: "Owner" });
   const memberId = `guest-agent-${randomUUID().replace(/-/g, "").slice(0, 12)}`;

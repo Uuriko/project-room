@@ -75,24 +75,27 @@ function normalizeLookup(records) {
 // Reject hostnames that can only be internal. hostname comes from the
 // WHATWG parser (already lowercased); a trailing dot is stripped so
 // "localhost." cannot dodge the name check.
+// Q3-D: a host or port that cannot be public answers webhook_url_not_public,
+// the same code the subscribe-time DNS check uses.
+const notPublic = message => fail("webhook_url_not_public", message);
 function assertPublicHost(hostname) {
   const name = hostname.toLowerCase().replace(/\.$/, "");
   if (!name) fail("invalid_webhook", "webhook url must include a hostname");
   if (name === "localhost" || name.endsWith(".localhost")) {
-    fail("invalid_webhook", "webhook url must not target localhost");
+    notPublic("webhook url must not target localhost");
   }
   if (isMetadataHostname(name)) {
-    fail("invalid_webhook", "webhook url must not target a private or reserved metadata hostname");
+    notPublic("webhook url must not target a private or reserved metadata hostname");
   }
   // Link-local and cluster names are not public hosts. .localhost is already
   // refused above. A trailing dot was stripped, so "db.internal." cannot dodge.
   const internalNames = new Set(["internal", "local", "svc", "cluster.local"]);
   const internalSuffixes = [".internal", ".local", ".svc", ".cluster.local"];
   if (internalNames.has(name) || internalSuffixes.some(suffix => name.endsWith(suffix))) {
-    fail("invalid_webhook", "webhook url must not target a private or reserved hostname");
+    notPublic("webhook url must not target a private or reserved hostname");
   }
   if (isBlockedIp(name)) {
-    fail("invalid_webhook", "webhook url must not target a private or reserved IP address");
+    notPublic("webhook url must not target a private or reserved IP address");
   }
   if (name.startsWith("[")) {
     // A bracketed host that is not a blocked IP literal is either public
@@ -100,7 +103,7 @@ function assertPublicHost(hostname) {
     // it cannot be a DNS name, so there is nothing else it could be.
     const v6 = parseIpv6(name);
     if (v6 === null || isBlockedIpv6Value(v6)) {
-      fail("invalid_webhook", "webhook url must not target a private or reserved IP address");
+      notPublic("webhook url must not target a private or reserved IP address");
     }
   }
   // Anything else is a DNS name: subscribe-time resolution is
@@ -111,6 +114,9 @@ function assertPublicHost(hostname) {
 // RC-2026-09-19-087). Returns the url unchanged when it passes.
 export function validateWebhookUrl(url) {
   check(typeof url === "string" && url.length > 0 && url.length <= 2000, "url must be 1-2000 chars");
+  // Q3-D: the WHATWG parser silently strips some control characters, so the
+  // raw string is checked before parsing.
+  check(!/[\u0000-\u001f\u007f-\u009f]/.test(url), "url must not contain control characters");
   check(URL_PATTERN.test(url), "url must be a valid https URL");
   let parsed;
   try { parsed = new URL(url); } catch { fail("invalid_webhook", "url must be a valid https URL"); }
@@ -118,7 +124,7 @@ export function validateWebhookUrl(url) {
   assertPublicHost(parsed.hostname);
   // Default https is 443. An explicit port is only 443 or 8443.
   if (parsed.port !== "" && parsed.port !== "443" && parsed.port !== "8443") {
-    fail("invalid_webhook", "webhook url must not target a private or reserved port");
+    notPublic("webhook url must use port 443 or 8443");
   }
   return url;
 }
@@ -230,16 +236,9 @@ export async function resolveWebhookTarget(url, options = {}) {
 // treating it as allowed.
 export async function assertAgentWebhookUrlPublic(url, options = {}) {
   const lookup = typeof options.lookup === "function" ? options.lookup : dns.lookup;
-  let host;
-  try {
-    validateWebhookUrl(url);
-    host = new URL(url).hostname.toLowerCase().replace(/\.$/, "");
-  } catch (error) {
-    if (error?.name === "WebhookError" && /metadata hostname/.test(error.message ?? "")) {
-      fail("webhook_url_not_public", error.message);
-    }
-    throw error;
-  }
+  // A non-public host or port already throws webhook_url_not_public here.
+  validateWebhookUrl(url);
+  const host = new URL(url).hostname.toLowerCase().replace(/\.$/, "");
   if (isWorkersRuntime()) {
     try {
       await resolveWebhookTarget(url, { dohFetch: options.dohFetch, now: options.now });

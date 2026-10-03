@@ -143,7 +143,7 @@ test("redeem, share-link join, access requests, and referral redeem refuse a tak
   assert.equal(blocked.status, 422);
   assert.equal(blocked.code, "display_name_unavailable");
   assert.equal(blocked.reason, "reserved");
-  assert.equal(blocked.suggestion, "SYSTEM 2");
+  assert.equal(blocked.suggestion, "Member", "a suggestion the role-name rule would refuse (\"SYSTEM 2\") is not offered");
   assert.equal(store.db.prepare("SELECT count(*) AS n FROM access_requests").get().n, 0);
   const pending = requests.request("commons", {
     identityId: identity.identityId, displayName: "Quiet Person", requestedPermissions: [], requestId: "ar_quiet",

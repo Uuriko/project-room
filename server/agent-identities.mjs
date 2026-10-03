@@ -14,7 +14,7 @@ import { ServiceError } from "./store.mjs";
 import { generateKeyPair as generateEd25519KeyPair } from "./agent-card-signing.mjs";
 import { memberCan } from "../src/events.js";
 import { nextActionsForIdentityMint } from "./discoverability.mjs";
-import { checkAgentDisplayName } from "./display-name-guard.mjs";
+import { checkAgentDisplayName, assertNotReservedRoleName } from "./display-name-guard.mjs";
 import { refreshDirectoryIdentity } from "./public-read-model.mjs";
 
 const fail = (status, code, message, headers = null, detail = null) => {
@@ -319,6 +319,7 @@ export class AgentIdentities {
     // RC-2026-09-19-086: reject C0 control chars like share-link join does
     // (422 there) — storing them raw corrupts logs, exports, and renders.
     if (/[\u0000-\u001f\u007f]/.test(name)) fail(422, "invalid_identity", "displayName must not contain control characters");
+    assertNotReservedRoleName(name); // Q3-D: role-like names are refused at mint
     if (suppliedSecret !== undefined && !/^pri_[A-Za-z0-9_-]{43}$/.test(suppliedSecret))
       fail(422, "invalid_identity", "Recoverable registration requires a generated identity credential");
     return this.store.transaction(() => {
@@ -641,6 +642,7 @@ export class AgentIdentities {
         .filter(member => member.active !== false && member.id !== resolvedMemberId
           && canonical(member.displayName) !== canonical(memberName))
         .map(member => ({ memberId: member.id, displayName: member.displayName }));
+      assertNotReservedRoleName(memberName); // Q3-D: and when the identity joins a room
       const checked = checkAgentDisplayName(memberName, { activeNames });
       if (!checked.safe) fail(422, "invalid_identity", "displayName is unsafe or already used in this room");
       this.store.command(token, roomId, { id: randomUUID(), type: "member.added",

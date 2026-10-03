@@ -4,7 +4,7 @@
 // subscription surface (server/agent-webhook-subscriptions.mjs) builds and
 // journals deliveries; this module signs them for the wire, POSTs them,
 // and classifies the outcome so the caller can retry, dead-letter, or mark
-// delivered. Pure and dependency-free apart from node:crypto; the fetch
+// delivered. Pure; the fetch
 // implementation is injected so tests never touch the network.
 //
 // Wire contract (what a receiver must implement):
@@ -25,6 +25,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { resolveWebhookTarget } from "./outbound-webhooks.mjs";
 import { pinnedLookup, isWorkersRuntime } from "./ip-blocklist.mjs";
+import { CONTENT_TRUST } from "./content-trust.mjs";
 
 class WebhookDispatchError extends Error {
   constructor(code, message) { super(message); this.name = "WebhookDispatchError"; this.code = code; }
@@ -84,6 +85,27 @@ export function isFresh(issuedAt, now = Date.now()) {
   if (!Number.isInteger(issuedAt) || issuedAt <= 0) return false;
   if (!Number.isInteger(now) || now <= 0) return false;
   return Math.abs(now - issuedAt) <= REPLAY_TOLERANCE_MS;
+}
+
+// Q3-D payload fencing. A room event's data gains `actor` ({ id, kind,
+// displayName }) naming who caused it. When that actor is not the
+// subscriber, it also gains `untrusted: true` and `contentTrust` (the same
+// constant MCP reads carry): member-authored text is data, not instructions.
+// The fenced object is what gets signed and sent, so both signature schemes
+// cover these fields unchanged. Events with no actor pass through as-is.
+export function fenceRoomEventData(data, { actorId, member = null, recipientMemberId = null } = {}) {
+  const base = data !== null && typeof data === "object" && !Array.isArray(data) ? data : {};
+  if (typeof actorId !== "string" || actorId.length === 0) return base;
+  const actor = Object.freeze({
+    id: actorId,
+    kind: member?.kind === "agent" ? "agent" : "human",
+    displayName: typeof member?.displayName === "string" ? member.displayName : null
+  });
+  if (actorId === recipientMemberId) {
+    const { untrusted, contentTrust, ...rest } = base;
+    return { ...rest, actor };
+  }
+  return { ...base, actor, untrusted: true, contentTrust: CONTENT_TRUST };
 }
 
 // The POST body for a delivery. Frozen; roomId is null for identity-scoped
