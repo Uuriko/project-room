@@ -17,7 +17,7 @@ async function fixture(t) {
   store.initialize(initialRoom('commons'));
   const ownerKey = store.issueAccessKey('commons', 'owner');
   store.command(ownerKey, 'commons', { id: 'add-reviewer', type: 'member.added',
-    data: { memberId: 'reviewer', displayName: 'Reviewer', kind: 'human', permissions: [] } });
+    data: { memberId: 'reviewer', displayName: 'Reviewer', kind: 'human', permissions: ['verify'] } });
   const peerKey = store.issueAccessKey('commons', 'reviewer');
   const server = createRoomServer({ store });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -108,13 +108,12 @@ test('the full event log, claim events included, replays from an empty room', as
   assert.equal(projection.workClaims, undefined, 'the claim stays in the work_claims table, not the room projection');
 });
 
-test('a blank title still records the claim, and the event names the id', async t => {
+test('a blank title is refused before any claim or event is recorded', async t => {
   const { owner } = await fixture(t);
-  const created = await owner.workClaimCreate({ id: 'blank-title', title: '   ' });
-  assert.equal(created.title, '   ');
-  const [event] = await claimEvents(owner);
-  assert.equal(event.action, 'created');
-  assert.equal(event.title, 'blank-title');
+  // Q3-A: a title that is empty once whitespace is removed is invalid input.
+  await assert.rejects(owner.workClaimCreate({ id: 'blank-title', title: '   ' }),
+    error => error.status === 422 && error.code === 'invalid_claim_input' && /title/.test(error.message));
+  assert.equal((await claimEvents(owner)).length, 0);
 });
 
 test('an archived room still records a claim and appends no event', async t => {
