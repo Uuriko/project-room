@@ -366,6 +366,11 @@ export const unfencedAdditiveTables = Object.freeze([
   // Per-room sequence and projection size for the incremental integrity
   // check. The cron writes it; a missing row means that room is due.
   "integrity_room_state",
+  // messages_backfill_cursor (MSG-2): per-room replay cursor for events that
+  // landed before the messages table, plus importEvents and initialize.
+  // The integrity cron writes it. Older writers have no path to it. A missing
+  // row means that room has not been replayed. The parity check is the gate.
+  "messages_backfill_cursor",
   // LEGAL: terms acceptance, public abuse reports, and operator unpublish.
   // Additive and unfenced. Older writers have no code path to them.
   "account_terms",
