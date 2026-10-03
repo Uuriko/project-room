@@ -50,27 +50,45 @@ async function assertMoreLabel(page) {
 }
 
 const headerControls = ["#sidebar-toggle", "#topbar-updates", "#topbar-search-toggle", "#topbar-catchup", "#room-more > summary", "#session-menu-button"];
+const longRoomName = "Project Room — A deliberately long research and delivery room name";
 
 async function assertHeader(page, count) {
   await assertMoreLabel(page);
   assert.equal(await page.getByRole("button", { name: `Catch up ${count}`, exact: true }).count(), 1, "the full count meaning remains in the accessible name");
-  const boxes = [];
-  for (const selector of headerControls) {
+  const layout = await page.evaluate(selectors => ({
+    name: document.querySelector("#mobile-room-name").textContent,
+    boxes: selectors.map(selector => {
+      const rect = document.querySelector(selector).getBoundingClientRect();
+      return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+    })
+  }), headerControls);
+  assert.equal(layout.name, longRoomName, "the long-name stress fixture survives throughout the layout check");
+  const boxes = layout.boxes;
+  for (const [index, selector] of headerControls.entries()) {
     const control = page.locator(selector);
     assert.equal(await control.isVisible(), true, `${selector} remains visible`);
-    const box = await control.boundingBox();
+    const box = boxes[index];
     assert.ok(box.width >= 44 && box.height >= 44, `${selector} retains a 44px target: ${JSON.stringify(box)}`);
     assert.ok(box.x >= 0 && box.x + box.width <= page.viewportSize().width + 1, `${selector} stays within the viewport`);
+    for (const prior of boxes.slice(0, index)) assert.ok(box.x + box.width <= prior.x + 1 || prior.x + prior.width <= box.x + 1 || box.y + box.height <= prior.y + 1 || prior.y + prior.height <= box.y + 1, "header hit areas never overlap");
+  }
+  if (await page.evaluate(() => getComputedStyle(document.documentElement).fontSize === "16px")) {
+    const actions = boxes.slice(1);
+    // Native details and an inline-grid account button can have different
+    // baselines within one flex row. Require a substantial shared band instead
+    // of pixel-identical centers; a control on the next row cannot satisfy it.
+    const sharedBand = Math.min(...actions.map(box => box.y + box.height)) - Math.max(...actions.map(box => box.y));
+    assert.ok(sharedBand >= Math.min(...actions.map(box => box.height)) * .75, `default-size actions share one compact row (shared ${sharedBand}px): ${JSON.stringify(actions)}`);
+  }
+  // Compare geometry before scrolling, then test each target's actual hit
+  // area. Enlarged text may need vertical scrolling; it must remain usable.
+  for (const selector of headerControls) {
+    const control = page.locator(selector);
+    await control.scrollIntoViewIfNeeded();
     assert.equal(await control.evaluate(node => {
       const rect = node.getBoundingClientRect();
       return node.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2));
-    }), true, `${selector} is not covered by another surface`);
-    for (const prior of boxes) assert.ok(box.x + box.width <= prior.x + 1 || prior.x + prior.width <= box.x + 1 || box.y + box.height <= prior.y + 1 || prior.y + prior.height <= box.y + 1, "header hit areas never overlap");
-    boxes.push(box);
-  }
-  if (await page.evaluate(() => getComputedStyle(document.documentElement).fontSize === "16px")) {
-    const centers = boxes.slice(1).map(box => box.y + box.height / 2);
-    assert.ok(Math.max(...centers) - Math.min(...centers) <= 1, "default-size actions share one compact row");
+    }), true, `${selector} is reachable and not covered by another surface`);
   }
   // Independently measure words, not CSS declarations: overflow can remain
   // contained even when a label or count has become a stack of characters.
@@ -161,17 +179,25 @@ test("mobile header: session actions fold into an accessible menu, conversation 
       await page.setViewportSize({ width, height: 844 });
       // Only the long name is a DOM text-size stress fixture. Counts below are
       // rendered from real commands and the actual acknowledgement flow.
-      await page.evaluate(size => {
+      await page.evaluate(([size, roomName]) => {
         document.documentElement.style.fontSize = `${size}%`;
-        document.querySelector("#mobile-room-name").textContent = "Project Room — A deliberately long research and delivery room name";
+        document.querySelector("#mobile-room-name").textContent = roomName;
         scrollTo(0, 0);
-      }, font);
-      await assertHeader(page, count);
-      if (interact) await exerciseHeader(page);
-      if (recovery) await page.locator("#refresh-button").tap({ trial: true });
-      await page.evaluate(() => scrollTo(0, 0));
-      await assertHeader(page, count);
+      }, [font, longRoomName]);
       mkdirSync("test-results", { recursive: true });
+      try {
+        await assertHeader(page, count);
+        if (interact) await exerciseHeader(page);
+        if (recovery) await page.locator("#refresh-button").tap({ trial: true });
+        await page.evaluate(() => scrollTo(0, 0));
+        await assertHeader(page, count);
+      } catch (error) {
+        // A diagnostic after a failed assertion is explicitly separate from
+        // the success evidence below and never turns the test into a pass.
+        await page.screenshot({ path: `test-results/mobile-header-failure-${width}-${font}-${name}.png` });
+        throw error;
+      }
+      await page.evaluate(() => scrollTo(0, 0));
       await page.screenshot({ path: `test-results/mobile-header-${width}-${font}-${name}.png` });
     }
   };
@@ -183,15 +209,27 @@ test("mobile header: session actions fold into an accessible menu, conversation 
   await closeCatchUp(page);
   await layouts("0-updates", "No new updates");
   let now = Date.now(); fixture.store.now = () => now;
-  const send = (type, data) => { now += 2100; return fixture.store.command(fixture.keys.owner, "commons", { id: crypto.randomUUID(), type, data }); };
+  const send = (type, data, key = fixture.keys.owner) => { now += 2100; return fixture.store.command(key, "commons", { id: crypto.randomUUID(), type, data }); };
   for (let n = 0; n < 7; n++) send(T.WORK_PROPOSED, { workItemId: `header-work-${n}`, title: `Synthetic header task ${n + 1}`, definitionOfDone: "Exercise the visible current-needs count.", accountableMemberId: "owner", independentVerificationRequired: false, ownerDecisionRequired: false, mode: "read" });
-  for (let n = 0; n < 70; n++) send(T.MESSAGE_POSTED, { messageId: `header-message-${n}`, body: `Synthetic header update ${n + 1}.` });
+  for (let n = 0; n < 69; n++) send(T.MESSAGE_POSTED, { messageId: `header-message-${n}`, body: `Synthetic header update ${n + 1}.` });
+  send(T.MESSAGE_POSTED, { messageId: "header-mention", body: "@owner Please check this synthetic header update." }, fixture.keys.guest);
   await page.waitForFunction(() => document.querySelector("#catchup-count").textContent === "7 need you · 77 updates");
+  // Catch-up proposals are not actionable Updates. Load a real mention so
+  // the compact-row contract also exercises the Updates badge, not an empty span.
+  await page.locator("#topbar-updates").click();
+  await page.waitForFunction(() => !document.querySelector("#updates-count").hidden && document.querySelector("#updates-count").textContent === "1");
+  await page.keyboard.press("Escape");
+  await page.locator("#updates-dialog").waitFor({ state: "hidden" });
   await layouts("77-updates", "7 need you · 77 updates", { interact: true });
   await context.setOffline(true); server.closeStreams();
   await page.waitForFunction(() => document.querySelector("#connection-status").textContent.startsWith("Connection interrupted"));
   await layouts("disconnected", "7 need you · 77 updates", { recovery: true });
+  // CLOSED EventSource recovery backs off to30s plus up to25% jitter.
+  // Require a new successful stream response after the observed interrupted
+  // state, not just a status string or an arbitrary extra sleep.
+  const reconnected = page.waitForResponse(response => new URL(response.url()).pathname === "/api/rooms/commons/stream" && response.status() === 200, { timeout: 40000 });
   await context.setOffline(false);
+  await reconnected;
   await page.waitForFunction(() => document.querySelector("#connection-status").textContent.startsWith("Connected"));
   await page.setViewportSize({ width: 390, height: 844 });
   await page.evaluate(() => { document.documentElement.style.fontSize = ""; scrollTo(0, 0); });
