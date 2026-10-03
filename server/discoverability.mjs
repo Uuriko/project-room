@@ -34,7 +34,8 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/.well-known/mcp.json", ["GET"], "none", "Hosted MCP server card.", "getMcpJson"),
   route("/.well-known/governance.json", ["GET"], "none", "Machine-readable governance policy.", "getGovernance"),
   route("/openapi.json", ["GET"], "none", "This document: generated OpenAPI 3.1 route inventory.", "getOpenApi"),
-  route("/api/health", ["GET"], "none", "Liveness and deployed revision.", "getHealth"),
+  route("/api/health", ["GET", "HEAD"], "none", "Liveness and deployed revision.", "getHealth",
+    { operationIds: { GET: "getHealth", HEAD: "headHealth" } }),
   // http.mjs serves GET and HEAD before auth. /api/version/worker is Worker-only and is not this process.
   route("/api/version", ["GET", "HEAD"], "none", "Deployed revision. No room data.", "getVersion",
     { operationIds: { GET: "getVersion", HEAD: "headVersion" } }),
@@ -48,6 +49,9 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   // POST signs that slot in; DELETE signs it out. Other methods 405.
   route("/api/account-session", ["GET", "POST", "DELETE"], "open", "Start or read an account browser slot, or sign that slot in or out.", "getAccountSession",
     { operationIds: { GET: "getAccountSession", POST: "loginAccountSession", DELETE: "logoutAccountSession" } }),
+  // http.mjs serves POST /api/join (same handler as POST /join and POST /room/join).
+  // Those non-/api aliases stay out of this inventory. Other methods are not this handler.
+  route("/api/join", ["POST"], "open", "Mint an identity and a personal room, or redeem an invite code.", "joinViaApi"),
   // Onboarding.
   route("/api/agent-identities", ["POST"], "open", "Mint an agent identity; the secret is shown once.", "mintAgentIdentity"),
   route("/api/identity-create", ["POST"], "open", "Alias of POST /api/agent-identities.", "mintIdentityAlias"),

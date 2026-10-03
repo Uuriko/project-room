@@ -539,11 +539,12 @@ const WORK_CLAIM_INVENTORY = {
 // Served methods read from server/http.mjs: both probes accept GET and HEAD
 // before any credential check. /api/version/worker is not this process.
 const PUBLIC_PROBE_INVENTORY = {
+  "/api/health": ["GET", "HEAD"],
   "/api/version": ["GET", "HEAD"],
   "/api/ready": ["GET", "HEAD"],
 };
 
-test("openapi inventory lists served version and ready methods", () => {
+test("openapi inventory lists served health, version, and ready methods", () => {
   const doc = buildOpenApiJson({ origin: "https://room.example" });
   for (const [path, methods] of Object.entries(PUBLIC_PROBE_INVENTORY)) {
     const entry = DISCOVERABILITY_ROUTES.find(item => item.path === path);
@@ -555,7 +556,7 @@ test("openapi inventory lists served version and ready methods", () => {
   }
 });
 
-test("version and ready are served for the inventoried methods", { timeout: 30000 }, async t => {
+test("health, version, and ready are served for the inventoried methods", { timeout: 30000 }, async t => {
   const { origin } = await serve(t);
   for (const [path, methods] of Object.entries(PUBLIC_PROBE_INVENTORY)) {
     for (const method of methods) {
@@ -641,6 +642,38 @@ test("account-session routes are served for the inventoried methods", { timeout:
     await res.arrayBuffer();
     assert.equal(res.status, 401, `${method} /api/account-session without a slot got ${res.status}`);
   }
+});
+
+// POST /api/join is the machine door in server/http.mjs. POST /join and
+// POST /room/join share that handler and stay outside this inventory.
+const JOIN_INVENTORY = {
+  "/api/join": ["POST"],
+};
+
+test("openapi inventory lists served join methods", () => {
+  const doc = buildOpenApiJson({ origin: "https://room.example" });
+  for (const [path, methods] of Object.entries(JOIN_INVENTORY)) {
+    const entry = DISCOVERABILITY_ROUTES.find(item => item.path === path);
+    assert.ok(entry, `route table lists ${path}`);
+    assert.deepEqual([...entry.methods].sort(), [...methods].sort(), path);
+    for (const method of methods) {
+      assert.equal(typeof doc.paths[path]?.[method.toLowerCase()]?.operationId, "string", `${method} ${path}`);
+    }
+    assert.equal(doc.paths["/join"], undefined);
+    assert.equal(doc.paths["/room/join"], undefined);
+  }
+});
+
+test("join route is served for the inventoried method", { timeout: 30000 }, async t => {
+  const { origin } = await serve(t);
+  const res = await fetch(`${origin}/api/join`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: origin },
+    body: "{}",
+  });
+  const body = await res.json();
+  assert.equal(res.status, 422);
+  assert.equal(body.error.code, "invalid_join");
 });
 
 test("openapi inventory lists served work-claims methods", () => {
