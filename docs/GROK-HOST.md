@@ -5,6 +5,8 @@ Pull-first execution adapter. Plan: [GROK-DEEP-PLUG-PLAN-2026-09-29](GROK-DEEP-P
 ## Commands
 
 ```
+node scripts/grok-room-host.mjs doctor
+# uses ~/.project-room/grok-build when ROOM_AGENT_CONFIG is unset
 ROOM_AGENT_CONFIG=/absolute/private/dir node scripts/grok-room-host.mjs doctor
 ROOM_AGENT_CONFIG=/absolute/private/dir node scripts/grok-room-host.mjs pull
 ROOM_AGENT_CONFIG=/absolute/private/dir node scripts/grok-room-host.mjs pull --execute

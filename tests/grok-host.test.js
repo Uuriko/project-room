@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, chmodSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, chmodSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -153,6 +153,31 @@ test("doctor without a connection reports config_not_found and no secret", async
   const result = await doctor({ env: {} });
   assert.equal(result.ok, false);
   assert.equal(result.code, "config_not_found");
+  assert.equal(JSON.stringify(result).includes(secret), false);
+});
+
+test("doctor uses ~/.project-room/grok-build when ROOM_AGENT_CONFIG is unset", async t => {
+  const home = mkdtempSync(join(tmpdir(), "grok-host-home-"));
+  chmodSync(home, 0o700);
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  const parent = join(home, ".project-room");
+  mkdirSync(parent, { mode: 0o700 });
+  chmodSync(parent, 0o700);
+  const directory = join(parent, "grok-build");
+  saveAgentConnection(directory, {
+    version: 1, origin: "https://room.example", roomId: "den", memberId: "ai_x", token: secret
+  });
+  const fetchImpl = async (url) => {
+    if (String(url).endsWith("/api/health")) return new Response("{\"ok\":true}", { status: 200 });
+    if (String(url).includes("/api/agent-heartbeats")) return new Response(JSON.stringify({ host: { hostId: "grok-build" }, pendingWakes: [] }), { status: 200 });
+    return new Response(JSON.stringify(needsMe([])), { status: 200 });
+  };
+  const missing = await doctor({ env: { HOME: home + "-absent" }, fetchImpl });
+  assert.equal(missing.code, "config_not_found");
+  const result = await doctor({ env: { HOME: home }, fetchImpl });
+  assert.equal(result.ok, true);
+  assert.equal(result.code, "credential_accepted");
+  assert.equal(result.roomId, "den");
   assert.equal(JSON.stringify(result).includes(secret), false);
 });
 
