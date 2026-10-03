@@ -135,7 +135,8 @@ owner's or owner-appointed agent admin's identity bearer (`manage_members` +
 `delegatedAdmin`; `403 access_denied` for any other bearer).
 `GET /api/rooms/:id/reports` additionally requires the room
 owner (403 `owner_required` for every other member): reports and the reporter
-identity are never served to non-owners (`docs/MODERATION.md`). `GET /api/rooms/:id/export` returns the full event log as
+identity are never served to non-owners (`docs/MODERATION.md`). `GET /api/rooms/:id/export` is owner-only (403
+`owner_required` for every other member), appends a `room.exported` audit event in a live room, and returns the full event log as
 one `Content-Length`-framed JSONL body (never a partial 200); with
 `?format=html` it returns the same walk as one escaped, script-free HTML page
 under a `default-src 'none'` Content-Security-Policy, same auth and framing;

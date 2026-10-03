@@ -301,6 +301,12 @@ test("HTML export carries the account headers, hands back a Blob and treats anyt
   await assert.rejects(denied.exportHtml(), error => error.status === 403 && error.code === "access_denied");
   assert.equal(ended.length, 1, "a 403 ends the client's access like every other room read");
 
+  const notOwner = new RoomClient({ onAccessEnded: () => ended.push(true), fetcher: async () => fileResponse(JSON.stringify({ error: { code: "owner_required", message: "Only the owner can export" } }), "application/json", 403) });
+  notOwner.session = identity();
+  await assert.rejects(notOwner.exportHtml(), error => error.status === 403 && error.code === "owner_required");
+  assert.equal(ended.length, 1, "owner-only export refusal keeps the member's session");
+  assert.ok(notOwner.session, "the session survives an owner-only refusal");
+
   const wrong = new RoomClient({ fetcher: async () => fileResponse("{\"sequence\":1}\n", "application/x-ndjson; charset=utf-8") });
   wrong.session = identity();
   await assert.rejects(wrong.exportHtml(), error => error.code === "invalid_response");

@@ -10,6 +10,7 @@
 // An answer the asker could not read (a DM to someone else) does not close
 // the question.
 import { ServiceError } from "./store.mjs";
+import { messageInHistory } from "./history-visibility.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 
@@ -94,7 +95,10 @@ export function listOpenQuestions(store, token, roomId, params = {}, expectedSes
   return store.readTransaction(() => {
     const room = store.room(roomId);
     const member = room.state.members[auth.member.id] ?? auth.member;
-    const questions = findOpenQuestions({ messages: room.state.messages ?? [], viewerId: member.id });
+    // PRIV-2: questions from before a since_join reader joined stay out.
+    const floor = store.historyFloor(roomId, member.id);
+    const messages = (room.state.messages ?? []).filter(message => messageInHistory(message, floor));
+    const questions = findOpenQuestions({ messages, viewerId: member.id });
     return {
       roomId,
       viewerId: member.id,

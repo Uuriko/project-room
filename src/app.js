@@ -1962,6 +1962,7 @@ function render() {
   syncRoomHealth();
   syncRoomTrust();
   syncPublicReceipts(); // GR1 owner control for the public receipts page
+  syncHistoryVisibility(); // PRIV-2 owner control for new members' history
   syncAcquisitionControls(); // GR2 public room page, join link, name, and tasks
   $("#event-count").textContent = `${client.sequence}`;
   renderReturnBrief({ timelineRendered: true });
@@ -5005,6 +5006,49 @@ $("#public-receipts-toggle")?.addEventListener("change", async () => {
   }
 });
 // --- end GR1 ---
+// --- PRIV-2 history visibility: owner-only. ---
+let historyVisibilityBusy = false;
+function historyVisibilitySinceJoin() {
+  return state?.room?.historyVisibility?.value === "since_join";
+}
+function syncHistoryVisibility() {
+  const control = $("#history-visibility-control");
+  const box = $("#history-visibility-toggle");
+  const hint = $("#history-visibility-hint");
+  if (!control || !box) return;
+  const viewerId = session?.member?.id;
+  const show = Boolean(state && viewerId && viewerId === state.room.ownerId);
+  // Export is owner-only (PRIV-2): other members don't get a button that can only refuse.
+  const exportActions = $("#record-export-html")?.closest(".record-actions");
+  if (exportActions) exportActions.hidden = !show;
+  control.hidden = !show;
+  if (hint) hint.hidden = !show;
+  if (!show) return;
+  box.checked = historyVisibilitySinceJoin();
+  box.disabled = historyVisibilityBusy;
+  if (hint) {
+    const guestDefault = !state.room.historyVisibility && state.room.historyDefaultsVersion === 1;
+    hint.textContent = guestDefault
+      ? "Until you choose, link guests and agent guests see only messages from after they join. You and members who manage membership always see the full history."
+      : "You and members who manage membership always see the full history.";
+  }
+}
+$("#history-visibility-toggle")?.addEventListener("change", async () => {
+  if (!state || historyVisibilityBusy || session?.member?.id !== state.room.ownerId) return;
+  const historyVisibility = $("#history-visibility-toggle").checked ? "since_join" : "all";
+  historyVisibilityBusy = true;
+  syncHistoryVisibility();
+  try {
+    await client.send({ id: crypto.randomUUID(), type: T.ROOM_HISTORY_VISIBILITY_SET, data: { historyVisibility } });
+  } catch (error) {
+    notice(error.message || "History visibility was not changed.", true);
+    if (state) $("#history-visibility-toggle").checked = historyVisibilitySinceJoin();
+  } finally {
+    historyVisibilityBusy = false;
+    if (state) syncHistoryVisibility();
+  }
+});
+// --- end PRIV-2 ---
 // --- GR2 public room page, join link, name, and starter-template controls. ---
 let acquisitionBusy = false;
 function syncAcquisitionControls() {
@@ -6895,7 +6939,9 @@ async function exportRoomHtml() {
     status.textContent = `Download started: ${filename}. Deleted messages appear as deleted, as members saw them.`;
   } catch (error) {
     if (request !== exportRequest || !state) return;
-    status.textContent = error.status === 429 ? "Export is rate limited; try again in a minute." : "The export could not be prepared. Try again.";
+    status.textContent = error.status === 429 ? "Export is rate limited; try again in a minute."
+      : error.status === 403 ? "Only the room owner can export this room."
+      : "The export could not be prepared. Try again.";
   } finally { if (request === exportRequest) button.disabled = false; }
 }
 $("#record-export-html").addEventListener("click", () => exportRoomHtml());
