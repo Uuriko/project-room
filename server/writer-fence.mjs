@@ -53,14 +53,10 @@ export const unfencedAdditiveTables = Object.freeze([
   // owner-delegation for agent identities, server/owner-delegates.mjs):
   // purely additive and intentionally NOT fenced — older writers have no
   // code path to them, and the owner-only grant rule is the integrity gate.
-  // analytics_events + analytics_room_cursor + analytics_table_cursor +
-  // analytics_firsts + analytics_daily + analytics_ctx (analytics subsystem,
-  // server/analytics/schema.mjs): purely additive and intentionally NOT
-  // fenced — created on first use, older writers have no code path to them.
+  // owner_delegate_* (delegation subsystem): purely additive and intentionally
+  // NOT fenced — older writers have no code path to them.
   "owner_delegate_grants",
   "owner_delegate_journal",
-  "analytics_events", "analytics_room_cursor", "analytics_table_cursor",
-  "analytics_firsts", "analytics_daily", "analytics_ctx",
   // account_login_methods + account_passkey_credentials + account_magic_codes
   // + account_recovery_codes (multi-method login, slice 1): purely additive,
   // outside the fence like access_requests — older writers have no code path
@@ -402,7 +398,14 @@ export const unfencedAdditiveTables = Object.freeze([
 // Created on first use, not in the constructor. A database that has never
 // issued an OAuth grant or persisted an abuse rate bucket does not have
 // these tables; a database that has must still pass the recovery audit.
-export const lazyAdditiveTables = Object.freeze([...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES]);
+export const lazyAdditiveTables = Object.freeze([...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES,
+  // analytics_events + analytics_room_cursor + analytics_table_cursor +
+  // analytics_firsts + analytics_daily + analytics_ctx (analytics subsystem,
+  // server/analytics/schema.mjs): purely additive, created on first use.
+  // A database that has never run analytics does not have these tables;
+  // a database that has must still pass the recovery audit.
+  "analytics_events", "analytics_room_cursor", "analytics_table_cursor",
+  "analytics_firsts", "analytics_daily", "analytics_ctx"]);
 // messages (MSG-1) is fenced at v37 only. v34–v36 files do not have the
 // table or its triggers; verifyWriterFence(36) must not require them.
 const v34FencedTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables])]);
