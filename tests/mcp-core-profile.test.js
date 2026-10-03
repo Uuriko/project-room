@@ -381,11 +381,14 @@ async function claimLinkFixture(t) {
   setTier(store.db, roomId, writer.identityId, "t2_standard", { updatedBy: owner.identityId, nowMs: Date.now() });
   const client = new RoomAgentClient({ origin, roomId, token: writer.secret });
   await client.workClaim("hosted-pr", { leaseHours: 6 });
-  const claimed = await client.workClaimGet("hosted-pr");
+  // HTTP reads carry the Board content-trust stamp; saved records do not.
+  const claimed = stripTrust(await client.workClaimGet("hosted-pr"));
   const args = { roomId, claimId: claimed.id, pullRequest: "https://github.com/Uuriko/project-room/pull/19",
     expectedClaimedAt: claimed.claimedAt, expectedHistoryLength: claimed.history.length };
   return { ...fixture, owner, writer, roomId, client, claimed, args };
 }
+
+const stripTrust = ({ contentTrust, ...rest }) => rest;
 
 // Hosted dispatch bypasses HTTP work-claim routing. This journey owns its
 // independent API-key scope, argument validation and saved-record parity.
@@ -399,14 +402,14 @@ test("hosted claim PR tool preserves API-key scope and current-owner authorizati
     assert.equal(denied.value.status, 403);
     assert.equal(denied.value.code, code);
     if (code === "work_not_owner") assert.ok(denied.value.next.some(step => step.path === `/api/rooms/${roomId}/work-claims/${claimed.id}`));
-    assert.deepEqual(await client.workClaimGet(claimed.id), claimed);
+    assert.deepEqual(stripTrust(await client.workClaimGet(claimed.id)), claimed);
   }
   const invalid = await call(origin, "room_link_work_claim_pr", { ...args, pullRequest: { url: args.pullRequest } }, writer.secret);
   assert.equal(invalid.body.error.data.reason, "invalid_arguments");
   const linked = await call(origin, "room_link_work_claim_pr", args, issue(["rooms:write"]));
   assert.equal(linked.body.result.isError, undefined);
   assert.equal(linked.value.pullRequests[0].url, args.pullRequest);
-  assert.deepEqual(await client.workClaimGet(claimed.id), linked.value);
+  assert.deepEqual(stripTrust(await client.workClaimGet(claimed.id)), linked.value);
   store.command(owner.secret, roomId, { id: "archive-linked-room", type: "room.archived", data: { reason: "Complete" } });
   const archivedSequence = store.snapshot(owner.secret, roomId).sequence;
   const archived = await call(origin, "room_link_work_claim_pr", { ...args,
