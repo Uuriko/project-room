@@ -88,7 +88,7 @@ async function setup(t, mobile = false, simulate = false, accountOnly = false) {
   const saved = () => f.store.inbox.read(slot.token, "note", session.sessionBinding);
   const capture = async name => { mkdirSync("test-results", { recursive: true }); await page.screenshot({ path: "test-results/inbox-" + name + ".png", fullPage: true }); };
   t.after(() => { assert.deepEqual(errors, []); assert.deepEqual(external, []); });
-  return { ...f, page, origin, browser, inbox, pick, saved, capture, apply, source, slot, session, provider };
+  return { ...f, page, origin, browser, server, inbox, pick, saved, capture, apply, source, slot, session, provider };
 }
 
 async function previewReply(f, body = "A private reply 🪷") {
@@ -98,8 +98,8 @@ async function previewReply(f, body = "A private reply 🪷") {
   await p.locator("#inbox-send-preview").click();
   await p.waitForFunction(() => !document.getElementById("inbox-send-confirm").disabled);
 }
-async function reviewFixture(t, mobile = false) {
-  const f = await setup(t, mobile), mail = seedEmail(f), sourceId = mail.importMessage();
+async function reviewFixture(t, mobile = false, accountOnly = false) {
+  const f = await setup(t, mobile, false, accountOnly), mail = seedEmail(f), sourceId = mail.importMessage();
   const provider = seedRecordedReply({ store: f.store, token: f.slot.token, binding: f.session.sessionBinding, sourceId });
   await f.inbox(); await f.pick(sourceId); await f.page.locator("#inbox-reply-open").waitFor();
   return { ...f, mail, sourceId, recorded: provider };
@@ -431,6 +431,69 @@ test("provider preview cannot repopulate private content after another tab chang
   for (const id of ["inbox-reply-original-body", "inbox-reply-local-body"]) assert.equal(await p.locator("#" + id).textContent(), "");
   assert.equal(await p.evaluate(() => sessionStorage.getItem("project-room:pending-reply-review:v1")), null);
 });
+test("account-only confirmation preserves a newer login and retires a held private preview", { timeout: 35000 }, async t => {
+  let releasePreview = () => {}, releaseConfirmation = () => {};
+  let previewSettled = Promise.resolve(), confirmationSettled = Promise.resolve();
+  // Drain held requests before setup's browser/server/store cleanup, even on failure.
+  t.after(async () => { releasePreview(); releaseConfirmation(); await Promise.allSettled([previewSettled, confirmationSettled]); });
+  // No Room stream exists in this tab: confirmation must retire its private view.
+  const f = await reviewFixture(t, false, true), p = f.page;
+  await p.setExtraHTTPHeaders({ "X-Fixture-Tab": "account-confirmation" });
+  let previewStarted, confirmationStarted, confirmationFinished;
+  const previewGate = new Promise(resolve => { releasePreview = resolve; });
+  const previewReady = new Promise(resolve => { previewStarted = resolve; });
+  const confirmationGate = new Promise(resolve => { releaseConfirmation = resolve; });
+  const confirmationReady = new Promise(resolve => { confirmationStarted = resolve; });
+  const confirmationResult = new Promise(resolve => { confirmationFinished = resolve; });
+  await p.route("**/reply-review?view=reply-review-v4", async route => {
+    previewSettled = (async () => {
+      const response = await route.fetch(); previewStarted(); await previewGate; await route.fulfill({ response });
+    })();
+    await previewSettled;
+  });
+  await p.locator("#inbox-reply-open").click(); await previewReady;
+  const other = await p.context().newPage(); await other.goto(f.origin + "/?room=commons");
+  await other.locator("#main").waitFor();
+  const handler = f.server.listeners("request")[0];
+  let held = false;
+  f.server.removeListener("request", handler);
+  f.server.on("request", async (request, response) => {
+    if (!held && request.method === "GET" && request.url === "/api/account-session"
+      && request.headers["x-fixture-tab"] === "account-confirmation") {
+      held = true;
+      response.once("finish", () => confirmationFinished({ status: response.statusCode, setCookie: response.getHeader("set-cookie") }));
+      confirmationStarted({ cookie: request.headers.cookie, binding: request.headers["x-session-binding"] });
+      confirmationSettled = confirmationGate.then(() => handler(request, response));
+      return confirmationSettled;
+    }
+    return handler(request, response);
+  });
+  await p.bringToFront();
+  const captured = await confirmationReady;
+  const oldCookie = (await p.context().cookies()).find(cookie => cookie.name === "account_session");
+  assert.ok(oldCookie); assert.ok(captured.cookie?.split("; ").includes(`account_session=${oldCookie.value}`));
+  const oldBinding = f.store.authenticateAccountSession(oldCookie.value).sessionBinding;
+  if (await other.locator("#session-menu-button").isVisible()) await other.locator("#session-menu-button").click();
+  const logoutResponse = other.waitForResponse(response => new URL(response.url()).pathname === "/api/account-session" && response.request().method() === "DELETE");
+  await clickChrome(other, "#signout-button"); assert.equal((await logoutResponse).status(), 200);
+  await other.locator('#auth-panel[aria-busy="false"]').waitFor();
+  const guest = f.store.accountForMember("commons", "guest");
+  await signInFixture(other, f.store.issueAccountAccessKey(guest.id)); await other.locator("#main").waitFor();
+  assert.equal(await p.locator("#auth-panel").isVisible(), false, "old account-only view awaits confirmation");
+  releaseConfirmation();
+  const confirmation = await confirmationResult;
+  assert.equal(Boolean(confirmation.setCookie), false, "stale confirmation cannot replace the newer login cookie");
+  assert.equal(confirmation.status, 401); assert.ok(captured.binding === oldBinding, "confirmation keeps the original account binding");
+  await p.locator("#auth-panel").waitFor();
+  const current = await (await p.context().request.get(f.origin + "/api/account-session")).json();
+  assert.equal(current.authenticated, true); assert.equal(current.account.id, guest.id);
+  releasePreview(); await p.waitForLoadState("networkidle");
+  assert.equal(await p.locator("#inbox-reply-dialog").isVisible(), false);
+  assert.equal(await p.locator("#inbox-reply-body").textContent(), ""); assert.equal(await p.locator("#inbox-reply-addresses").textContent(), "");
+  for (const id of ["inbox-reply-original-body", "inbox-reply-local-body"]) assert.equal(await p.locator("#" + id).textContent(), "");
+  assert.equal(await p.evaluate(() => sessionStorage.getItem("project-room:pending-reply-review:v1")), null);
+});
+
 for (const updated of [false, true]) test(`two browser tabs reviewing the same ${updated ? "updated" : "original"} version record one acknowledgment`, { timeout: 35000 }, async t => {
   const f = await (updated ? updateFixture(t) : reviewFixture(t)), p = f.page, other = await p.context().newPage();
   if (updated) f.inspect();
