@@ -133,6 +133,9 @@ export class MachineDaemon {
       this.config.haltEpoch = Number(message.epoch) || this.config.haltEpoch + 1;
       saveConfig(this.config, this.home);
       await stopAllGuests(this.state);
+      // The autonomous bot must stop too: its active execution is released
+      // and it will not pick the work back up while halted.
+      await this.botLoop?.haltActive?.();
       return;
     }
     if (message.type === "pause") {

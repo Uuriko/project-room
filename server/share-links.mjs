@@ -265,6 +265,11 @@ export class ShareLinks {
       if (error.code === "agent_readonly") return null;
       throw error;
     }
+    // Minting admits a new member: same gate as referral-invite mint
+    // (referral-invites.mjs) — the owner, or a member with invite_member or
+    // manage_members. Guests and other members without invite rights get no
+    // link; the board itself still loads.
+    if (!canInviteMembers(this.store.room(roomId).state, auth.member.id)) return null;
     const memberId = auth.member.id;
     const rows = auth.account
       ? this.db.prepare("SELECT * FROM share_links WHERE room_id=? AND issuer_account_id=? AND issuer_member_id=? AND request_id LIKE ? ORDER BY created_at DESC, id DESC")

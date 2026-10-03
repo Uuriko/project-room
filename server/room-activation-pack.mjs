@@ -10,6 +10,7 @@
 // surface the store's own 404 (room_not_found).
 import { roomOrientation } from "../src/work-selectors.js";
 import { pinnedMessages, roomKind, roomPolicy, WORK_STATES, roomTrust } from "../src/events.js";
+import { pinVisibleToViewer } from "./pins.mjs";
 import { annotateOrientation, claimNote, withContentTrust } from "./content-trust.mjs";
 import { buildOrient } from "./orient.mjs";
 
@@ -163,7 +164,12 @@ export function buildActivationPack(store, roomSlug, viewerId = null) {
     orientation: annotateOrientation(roomOrientation(state)),
     members,
     openWork,
-    pinnedResources: pinnedMessages(state).map(pinnedOf),
+    // Pinned resources follow message visibility: a DM is shown only to its
+    // author and its recipient (null viewer sees no DMs). Without this, any
+    // member could pin a DM and expose its body to the whole room.
+    pinnedResources: pinnedMessages(state)
+      .filter(({ message }) => pinVisibleToViewer(message, viewerId))
+      .map(pinnedOf),
     repoHead: null,
     participationRules: { ...roomPolicy(state), trust: roomTrust(state).enabled },
     coordinationNorms: { ...COORDINATION_NORMS },
