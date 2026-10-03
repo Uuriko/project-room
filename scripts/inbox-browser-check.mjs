@@ -434,10 +434,10 @@ test("provider preview cannot repopulate private content after another tab chang
 test("account-only confirmation preserves a newer login and retires a held private preview", { timeout: 35000 }, async t => {
   let releasePreview = () => {}, releaseConfirmation = () => {};
   let previewSettled = Promise.resolve(), confirmationSettled = Promise.resolve();
-  let phase = "fixture", held = false, confirmationState = "not captured", confirmationAt = null;
+  let phase = "fixture", held = false, confirmationState = "not captured", confirmationAt = null, confirmationReleasedMs = null;
   // Drain held requests before setup's browser/server/store cleanup, even on failure.
   t.after(async () => {
-    t.diagnostic(JSON.stringify({ phase, requestHeld: held, confirmationState,
+    t.diagnostic(JSON.stringify({ phase, requestHeld: held, confirmationState, confirmationReleasedMs,
       confirmationElapsedMs: confirmationAt === null ? null : Date.now() - confirmationAt }));
     releasePreview(); releaseConfirmation(); await Promise.allSettled([previewSettled, confirmationSettled]);
   });
@@ -495,10 +495,19 @@ test("account-only confirmation preserves a newer login and retires a held priva
   await clickChrome(other, "#signout-button"); assert.equal((await logoutResponse).status(), 200);
   await other.locator('#auth-panel[aria-busy="false"]').waitFor();
   phase = "second tab guest login";
-  const guest = f.store.accountForMember("commons", "guest");
-  await signInFixture(other, f.store.issueAccountAccessKey(guest.id)); await other.locator("#main").waitFor();
   assert.equal(await p.locator("#auth-panel").isVisible(), false, "old account-only view awaits confirmation");
+  const guest = f.store.accountForMember("commons", "guest");
+  // Commit through the same real credential API and shared browser cookie jar
+  // as signInFixture, but release the old read before unrelated reload/UI work.
+  const slotResponse = await other.context().request.get(f.origin + "/api/account-session");
+  assert.equal(slotResponse.status(), 200); const browserSlot = await slotResponse.json();
+  const signedIn = await other.context().request.post(f.origin + "/api/account-session", {
+    headers: { Origin: f.origin, "X-CSRF-Token": browserSlot.csrf, "X-Session-Binding": browserSlot.sessionBinding },
+    data: { accountAccessKey: f.store.issueAccountAccessKey(guest.id), expectedSessionRevision: browserSlot.sessionRevision }
+  });
+  assert.equal(signedIn.status(), 201); assert.equal((await signedIn.json()).account.id, guest.id);
   phase = "confirmation response";
+  confirmationReleasedMs = Date.now() - confirmationAt;
   releaseConfirmation();
   const confirmation = await confirmationResult;
   assert.equal(confirmation.state, "finished", "held confirmation must reach its actual response contract");
@@ -508,6 +517,8 @@ test("account-only confirmation preserves a newer login and retires a held priva
   await p.locator("#auth-panel").waitFor();
   const current = await (await p.context().request.get(f.origin + "/api/account-session")).json();
   assert.equal(current.authenticated, true); assert.equal(current.account.id, guest.id);
+  phase = "second tab guest room";
+  await other.reload(); await other.locator("#main").waitFor();
   phase = "private preview retirement";
   releasePreview(); await p.waitForLoadState("networkidle");
   assert.equal(await p.locator("#inbox-reply-dialog").isVisible(), false);
