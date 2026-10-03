@@ -1330,6 +1330,13 @@ summary { overflow-wrap: anywhere; }
   .room-topbar .room-more, .room-topbar .session-menu { position: static; }
   .room-topbar .session-menu-panel { min-width: 0; }
   .room-topbar .room-more-actions .topbar-button { white-space: normal; }
+  /* Recovery text gets a full line before its controls. Limit this to an
+     interrupted active room; signed-out, inbox and healthy bars stay as-is. */
+  .app-shell:has(#main:not([hidden])) > .connection-bar:has(#connection-status[data-state="other"]) { padding: .25rem .75rem; }
+  .app-shell:has(#main:not([hidden])) > .connection-bar:has(#connection-status[data-state="other"]) > #connection-status { flex: 1 0 100%; padding: .2rem 0; overflow-wrap: normal; }
+  .app-shell:has(#main:not([hidden])) > .connection-bar:has(#connection-status[data-state="other"]) > #connection-details { flex: none; max-width: 100%; margin: 0; }
+  .app-shell:has(#main:not([hidden])) > .connection-bar:has(#connection-status[data-state="other"]) > #connection-details > summary { min-width: 44px; min-height: 44px; white-space: nowrap; overflow-wrap: normal; }
+  .app-shell:has(#main:not([hidden])) > .connection-bar:has(#connection-status[data-state="other"]) > #refresh-button { flex: none; min-width: min-content; min-height: 44px; max-width: 100%; white-space: normal; overflow-wrap: normal; }
 }
 @media (max-width: 520px) {
   .composer-row { display: flex; flex-wrap: wrap; }

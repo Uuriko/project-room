@@ -194,6 +194,15 @@ test("mobile header: session actions fold into an accessible menu, conversation 
         if (interact) await exerciseHeader(page);
         if (recovery) {
           await assertReadableWords(page, ["#connection-status", "#connection-details > summary", "#refresh-button"]);
+          const details = page.locator("#connection-details > summary");
+          for (const control of [details, page.locator("#refresh-button")]) {
+            const box = await control.boundingBox();
+            assert.ok(box.width >= 44 && box.height >= 44, "disconnected recovery controls retain44px targets");
+            await control.tap({ trial: true });
+          }
+          await details.focus(); await page.keyboard.press("Enter");
+          assert.equal(await page.locator("#connection-explanation").isVisible(), true, "the unchanged connection explanation remains reachable");
+          await page.keyboard.press("Enter");
           await page.locator("#refresh-button").tap({ trial: true });
         }
         await page.evaluate(() => scrollTo(0, 0));
