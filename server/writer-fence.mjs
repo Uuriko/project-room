@@ -53,14 +53,10 @@ export const unfencedAdditiveTables = Object.freeze([
   // owner-delegation for agent identities, server/owner-delegates.mjs):
   // purely additive and intentionally NOT fenced — older writers have no
   // code path to them, and the owner-only grant rule is the integrity gate.
-  // analytics_events + analytics_room_cursor + analytics_table_cursor +
-  // analytics_firsts + analytics_daily + analytics_ctx (analytics subsystem,
-  // server/analytics/schema.mjs): purely additive and intentionally NOT
-  // fenced — created on first use, older writers have no code path to them.
+  // owner_delegate_* (delegation subsystem): purely additive and intentionally
+  // NOT fenced — older writers have no code path to them.
   "owner_delegate_grants",
   "owner_delegate_journal",
-  "analytics_events", "analytics_room_cursor", "analytics_table_cursor",
-  "analytics_firsts", "analytics_daily", "analytics_ctx",
   // account_login_methods + account_passkey_credentials + account_magic_codes
   // + account_recovery_codes (multi-method login, slice 1): purely additive,
   // outside the fence like access_requests — older writers have no code path
