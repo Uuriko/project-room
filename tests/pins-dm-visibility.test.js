@@ -82,7 +82,7 @@ test("room message pins remain visible to every room member", () => {
 });
 
 test("the activation pack hides another pair's pinned DM from a bystander", () => {
-  const { aliceKey, bobKey, malloryKey, cmd } = storeFixture();
+  const { aliceKey, cmd } = storeFixture();
   const dmId = cmd(aliceKey, T.MESSAGE_POSTED, {
     messageId: randomUUID(), body: "secret DM body", toMemberId: "bob",
   }).event.data.messageId;
