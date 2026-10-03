@@ -410,6 +410,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     onSecurityEvent: event => {
       console.warn(`oauth security event: ${JSON.stringify(event)}`);
     },
+    // Deleted/deactivated accounts lose connector access immediately: token
+    // verification fails closed even if a token row survived a purge.
+    isAccountActive: userId => {
+      try {
+        return store.db.prepare("SELECT active FROM accounts WHERE id=?").get(userId)?.active === 1;
+      } catch { return false; }
+    },
   });
   for (const c of connectorClients) {
     oauthProvider.registerClient(c);

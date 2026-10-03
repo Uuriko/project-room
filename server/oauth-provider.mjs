@@ -54,7 +54,7 @@ const newSecret = (bytes = 32) => base64url(randomBytes(bytes));
 
 const isExpired = (record, now) => record.expiresAt !== null && now() >= record.expiresAt;
 
-export function createOAuthProvider({ clients, codes, accessTokens, refreshTokens, db, clock, onSecurityEvent } = {}) {
+export function createOAuthProvider({ clients, codes, accessTokens, refreshTokens, db, clock, onSecurityEvent, isAccountActive } = {}) {
   check(db === undefined || (clients === undefined && codes === undefined && accessTokens === undefined && refreshTokens === undefined),
     "sqlite storage replaces the in-memory maps");
   check(clients === undefined || clients instanceof Map, "clients must be a Map if given");
@@ -65,6 +65,8 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
   check(clock === undefined || typeof clock === "function", "clock must be a function if given");
   check(onSecurityEvent === undefined || typeof onSecurityEvent === "function",
     "onSecurityEvent must be a function if given");
+  check(isAccountActive === undefined || typeof isAccountActive === "function",
+    "isAccountActive must be a function if given");
 
   const sqlite = db ? createOAuthProviderSqlite(db) : null;
   const clientStore = clients ?? sqlite?.clients ?? new Map();
@@ -268,6 +270,7 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
     }
     check(!record.revoked, "refresh token revoked");
     if (isExpired(record, now)) { refreshStore.delete(record.tokenHash); fail("invalid_request", "refresh token expired"); }
+    if (isAccountActive && !isAccountActive(record.userId)) fail("invalid_grant", "account is no longer active");
     check(record.clientId === clientId, "client_id mismatch");
     record.revoked = true; // rotation: old refresh token is single-use
     const next = issueTokenPair({
@@ -286,6 +289,9 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
     if (!record) return null;
     if (isExpired(record, now)) { accessStore.delete(digest); return null; }
     if (record.revoked) return null;
+    // Deleted/deactivated accounts lose API access immediately, even if a
+    // token row somehow survived the deletion purge.
+    if (isAccountActive && !isAccountActive(record.userId)) return null;
     return Object.freeze({
       userId: record.userId,
       clientId: record.clientId,

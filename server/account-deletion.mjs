@@ -49,6 +49,8 @@ export const RETENTION_POLICY = Object.freeze({
     Object.freeze({ category: "passkeys", description: "All registered passkey credentials are deleted." }),
     Object.freeze({ category: "memberships", description: "Room membership bindings (member_accounts) are deleted; the account leaves every room." }),
     Object.freeze({ category: "connected_data", description: "Connected Gmail data (gmail_mailboxes, gmail_linked_mailboxes, gmail_pending, gmail_operations) and account setup answers (account_setup) are permanently deleted." }),
+    Object.freeze({ category: "oauth_tokens", description: "Third-party OAuth grants (authorization codes, access and refresh tokens) are deleted and revoked; connectors lose access immediately." }),
+    Object.freeze({ category: "analytics", description: "Analytics events attributed to the account (analytics_events) are permanently deleted." }),
     Object.freeze({ category: "profile", description: "The account row is deactivated (active=0), its auth epoch is rotated so no residual credential can authenticate, and display name / avatar are scrubbed." }),
   ]),
   retained: Object.freeze([
@@ -60,6 +62,23 @@ export const RETENTION_POLICY = Object.freeze({
 
 const countWhere = (store, table, accountId) =>
   store.db.prepare(`SELECT count(*) AS n FROM ${table} WHERE account_id=?`).get(accountId)?.n ?? 0;
+
+// Some tables are created on first use; count them only when they exist.
+const countWhereIfExists = (store, table, idColumn, accountId) => {
+  try {
+    const exists = store.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table);
+    if (!exists) return 0;
+    return store.db.prepare(`SELECT count(*) AS n FROM ${table} WHERE ${idColumn}=?`).get(accountId)?.n ?? 0;
+  } catch { return 0; }
+};
+
+const deleteWhereIfExists = (store, table, idColumn, accountId) => {
+  try {
+    const exists = store.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table);
+    if (!exists) return 0;
+    return store.db.prepare(`DELETE FROM ${table} WHERE ${idColumn}=?`).run(accountId).changes;
+  } catch { return 0; }
+};
 
 
 const byId = (a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
@@ -274,6 +293,16 @@ export function inventoryFromStore(store, accountId, rooms = null) {
       itemCount: ["gmail_mailboxes", "gmail_linked_mailboxes", "gmail_pending", "gmail_operations", "account_setup"]
         .reduce((sum, table) => sum + countWhere(store, table, accountId), 0),
     },
+    // OAuth provider tokens (third-party connector grants): without this a
+    // deleted user's refresh tokens stay valid for up to 30 days.
+    oauth_tokens: {
+      itemCount: ["oauth_provider_codes", "oauth_provider_access_tokens", "oauth_provider_refresh_tokens"]
+        .reduce((sum, table) => sum + countWhereIfExists(store, table, "user_id", accountId), 0),
+    },
+    // Analytics events attributed to the account.
+    analytics: {
+      itemCount: countWhereIfExists(store, "analytics_events", "account_id", accountId),
+    },
   };
   if (roomWork) inventory.owned_rooms = { itemCount: owned.archive.length + owned.transfer.length, dependsOn: [] };
   return inventory;
@@ -324,6 +353,18 @@ const EXECUTORS = {
     }
     return removed;
   },
+  // Third-party connector grants: delete the durable rows directly so no
+  // provider instance needs to be threaded through the deletion planner.
+  // The provider's isAccountActive check (below) is the second layer.
+  oauth_tokens: (store, accountId) => {
+    let removed = 0;
+    for (const table of ["oauth_provider_codes", "oauth_provider_access_tokens", "oauth_provider_refresh_tokens"]) {
+      removed += deleteWhereIfExists(store, table, "user_id", accountId);
+    }
+    return removed;
+  },
+  analytics: (store, accountId) =>
+    deleteWhereIfExists(store, "analytics_events", "account_id", accountId),
   profile: (store, accountId) => {
     return store.db.prepare(`UPDATE accounts SET active=0, auth_epoch=auth_epoch+1,
       display_name=NULL, avatar_url=NULL, onboarded=1 WHERE id=?`).run(accountId).changes;
