@@ -1,0 +1,143 @@
+# Production deploy for Project Room (room.trydemigod.com).
+#
+# Why this exists: production builds fail closed without the agent-card
+# signing key, which lives with one custodian — so deploys bottlenecked on a
+# single machine. This workflow moves deploy authority into CI: the signing
+# key and the Cloudflare API token live as Actions secrets, and any lane with
+# repo write access can ship a green ref via workflow_dispatch. No private key
+# material ever lives on an agent machine. Custody details:
+# docs/AGENT-CARD-CUSTODY.md ("CI custody").
+#
+# Safety gates (all enforced before anything touches production):
+#   1. The ref must resolve to a commit reachable from origin/main
+#      (older green commits are allowed: that is the rollback path).
+#   2. Every check run on that commit must be completed with
+#      success/skipped — fully green hosted CI, the standing merge gate.
+#   3. The build uses the real wrangler.jsonc build command, which runs
+#      sign-agent-card.mjs WITHOUT --allow-unsigned: missing or wrong key
+#      fails the build closed. There is no unsigned path here.
+#   4. After deploy, /api/version must report the deployed SHA (edge
+#      propagation gets a grace window) or the run fails loud.
+#
+# One deploy at a time: concurrency group production-deploy,
+# cancel-in-progress false.
+#
+# Required Actions secrets (placed once by the key custodian / John; the
+# workflow is inert without them):
+#   ROOM_AGENT_CARD_SIGNING_KEY — Ed25519 seed for the agent-card signer.
+#   CLOUDFLARE_API_TOKEN        — API token with Workers Scripts write and
+#                                 Workers Assets write on the account below.
+
+name: Deploy production
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to deploy (branch, tag, or SHA). Must be on main."
+        required: false
+        default: "main"
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+env:
+  # Production Cloudflare account. Not a secret (appears in dashboard URLs).
+  CLOUDFLARE_ACCOUNT_ID: 5a919d6c1785d47e15e10c24450a8ff7
+  WORKER_NAME: project-room
+  PROD_ORIGIN: https://room.trydemigod.com
+
+jobs:
+  guard:
+    name: Guard (ref on main, CI fully green)
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.resolve.outputs.sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b885af677262 # v4
+        with:
+          fetch-depth: 0
+      - name: Resolve ref to SHA
+        id: resolve
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git fetch origin main --quiet
+          SHA="$(git rev-parse --verify "${{ inputs.ref }}^{commit}")"
+          if ! git merge-base --is-ancestor "$SHA" origin/main; then
+            echo "ref ${{ inputs.ref }} ($SHA) is not on main; refusing to deploy" >&2
+            exit 1
+          fi
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "deploying $SHA"
+      - name: Require fully green CI on the ref
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          SHA="${{ steps.resolve.outputs.sha }}"
+          BAD="$(gh api "repos/${{ github.repository }}/commits/$SHA/check-runs" --paginate \
+            --jq '[.check_runs[] | select(.status != "completed" or (.conclusion != "success" and .conclusion != "skipped")) | .name] | unique | join(", ")')"
+          if [ -n "$BAD" ]; then
+            echo "ref $SHA is not fully green; blocking: $BAD" >&2
+            exit 1
+          fi
+          echo "all checks green on $SHA"
+
+  ship:
+    name: Build (signed), deploy, verify
+    runs-on: ubuntu-latest
+    needs: guard
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b885af677262 # v4
+        with:
+          ref: ${{ needs.guard.outputs.sha }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - run: npm ci
+      - name: Build signed production bundle
+        working-directory: cloudflare
+        env:
+          ROOM_AGENT_CARD_SIGNING_KEY: ${{ secrets.ROOM_AGENT_CARD_SIGNING_KEY }}
+          WRANGLER_SEND_METRICS: "false"
+        run: |
+          set -euo pipefail
+          if [ -z "${ROOM_AGENT_CARD_SIGNING_KEY:-}" ]; then
+            echo "ROOM_AGENT_CARD_SIGNING_KEY is not set; cannot sign the release. Failing closed." >&2
+            exit 1
+          fi
+          # Real build command from wrangler.jsonc: runs sign-agent-card.mjs
+          # WITHOUT --allow-unsigned, so a missing/wrong key fails the build.
+          npx wrangler deploy --dry-run --outdir dist --config wrangler.jsonc
+          test -f dist/room.js
+      - name: Deploy to production
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
+            echo "CLOUDFLARE_API_TOKEN is not set; refusing to deploy." >&2
+            exit 1
+          fi
+          python3 scripts/deploy-production.py \
+            "$WORKER_NAME" "$CLOUDFLARE_ACCOUNT_ID" \
+            cloudflare/public cloudflare/dist/room.js
+      - name: Verify production revision
+        run: |
+          set -euo pipefail
+          SHA="${{ needs.guard.outputs.sha }}"
+          # Edge propagation can serve the old revision briefly after upload.
+          for i in $(seq 1 24); do
+            REV="$(curl -s --max-time 15 "$PROD_ORIGIN/api/version" | python3 -c "import json,sys; print(json.load(sys.stdin).get('sourceRevision',''))" || true)"
+            if [ "$REV" = "$SHA" ]; then
+              echo "production is on $SHA"
+              exit 0
+            fi
+            echo "attempt $i: prod reports ${REV:0:12:-none}, waiting for $SHA..."
+            sleep 15
+          done
+          echo "production did not reach $SHA within 6 minutes" >&2
+          exit 1

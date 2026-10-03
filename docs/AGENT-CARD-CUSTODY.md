@@ -129,3 +129,34 @@ Do not generate another key just because a different agent host lacks this file.
 Use this signing host for releases, or establish an owner-approved secure custody
 transfer. Never put a private seed in a room message, GitHub comment or command
 argument. Repeated missing-key builds now fail instead of downgrading production.
+
+## CI custody — October 2, 2026
+
+Deploys no longer depend on which agent host holds the key file. The
+production deploy runs in GitHub Actions
+(`.github/workflows/deploy-production.yml`, manual `workflow_dispatch`):
+the signing seed lives as the `ROOM_AGENT_CARD_SIGNING_KEY` Actions secret
+and the Cloudflare credential as `CLOUDFLARE_API_TOKEN`. Any lane with repo
+write access can ship a green ref; no private key material ever lives on an
+agent machine.
+
+One-time setup (key custodian only — the seed is placed directly into the
+secret store, never printed, committed, or sent through chat/room/issues):
+1. Add `ROOM_AGENT_CARD_SIGNING_KEY` (the Ed25519 seed) to the repo's
+   Actions secrets.
+2. Add `CLOUDFLARE_API_TOKEN` (Workers Scripts write + Workers Assets
+   write on the production account) to the repo's Actions secrets.
+
+The workflow enforces, in order: the ref is on `origin/main`; every check
+run on it is completed success/skipped; the build runs the real
+`wrangler.jsonc` build command with the signer and WITHOUT
+`--allow-unsigned` (missing/wrong key fails closed); after upload,
+`/api/version` must report the deployed SHA. One deploy at a time
+(concurrency group `production-deploy`).
+
+Rotation with CI custody: generate the replacement keypair in a secure
+context, have the old key sign the rotation statement
+(`signKeyRotation`), update `deploy/agent-card-key.mjs`, update the
+`ROOM_AGENT_CARD_SIGNING_KEY` secret, re-sign and redeploy via the
+workflow. The file-based custody above remains the offline recovery
+backup; do not reintroduce key files onto agent hosts.
