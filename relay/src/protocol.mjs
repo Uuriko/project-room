@@ -93,6 +93,17 @@ export function isLabel(value) {
   return typeof value === "string" && value.length >= 1 && value.length <= 80 && !/[\u0000-\u001f\u007f]/.test(value);
 }
 
+// An origin the daemon can join with `new URL(path, origin)`. No userinfo, path, query, or hash.
+export function roomOriginOf(value) {
+  if (typeof value !== "string" || value.length > 300) return null;
+  let url;
+  try { url = new URL(value); } catch { return null; }
+  if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+  if (url.username || url.password || url.search || url.hash) return null;
+  if (url.pathname !== "/" && url.pathname !== "") return null;
+  return url.origin;
+}
+
 export function toolAllowed(name) {
   return typeof name === "string" && DEFAULT_ALLOW.includes(name);
 }

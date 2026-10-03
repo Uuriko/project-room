@@ -179,12 +179,13 @@ test("redeem enrolls an agent member with the code's scope and nothing more", as
   const res = await redeem(origin, minted.json.code, "Plug Bot");
   assert.equal(res.status, 201, JSON.stringify(res.json));
   assert.match(res.json.identityId, /^ai_/);
-  assert.match(res.json.secret, /^pri_/);
+  assert.match(res.json.mcpToken.credential, /^rak_/);
+  assert.equal(res.json.secret, undefined);
   assert.equal(res.json.memberId, res.json.identityId);
   assert.deepEqual(res.json.permissions, ["accept_work", "complete_work"]);
   // The secret authenticates as the new member with exactly the granted scope.
   const client = (await import("../client/room-agent.mjs")).RoomAgentClient;
-  const agent = new client({ origin, roomId: "commons", token: res.json.secret, memberId: res.json.memberId });
+  const agent = new client({ origin, roomId: "commons", token: res.json.mcpToken.credential, memberId: res.json.memberId });
   const connected = await agent.checkConnection();
   assert.equal(connected.status, "credential_accepted");
   assert.deepEqual(connected.permissions, ["accept_work", "complete_work"]);
@@ -309,7 +310,7 @@ test("an agent with invite_member (no manage_members/decide) mints; a peer redee
   assert.equal(redeemed.status, 201, JSON.stringify(redeemed.json));
   const { RoomAgentClient } = await import("../client/room-agent.mjs");
   const peer = new RoomAgentClient({
-    origin, roomId: "commons", token: redeemed.json.secret, memberId: redeemed.json.memberId
+    origin, roomId: "commons", token: redeemed.json.mcpToken.credential, memberId: redeemed.json.memberId
   });
   const checked = await peer.checkConnection();
   assert.equal(checked.status, "credential_accepted");
@@ -351,12 +352,13 @@ test("CLI: owner mints a code, a new AI redeems it and connects", async t => {
   // flows pass --yes; the grant summary still prints to stderr.
   const redeemed = await cli(origin, ["redeem-invite", minted.json.code, "Plug Bot", "--yes"]);
   assert.equal(redeemed.status, 0, redeemed.stderr);
-  assert.match(redeemed.json.secret, /^pri_/);
+  assert.match(redeemed.json.mcpToken.credential, /^rak_/);
+  assert.equal(redeemed.json.secret, undefined);
   assert.match(redeemed.stderr, /This code grants: accept_work, complete_work/);
   const agentDir = mkdtempSync(join(tmpdir(), "invite-loop-"));
   t.after(() => rmSync(agentDir, { recursive: true, force: true }));
   const connected = await cli(origin, ["connect", join(agentDir, "agent")], {
-    ROOM_AGENT_ROOM: "commons", ROOM_AGENT_MEMBER: redeemed.json.memberId, ROOM_AGENT_TOKEN: redeemed.json.secret,
+    ROOM_AGENT_ROOM: "commons", ROOM_AGENT_MEMBER: redeemed.json.memberId, ROOM_AGENT_TOKEN: redeemed.json.mcpToken.credential,
   });
   assert.equal(connected.status, 0, connected.stderr);
   const checked = await cli(origin, ["check"], { ROOM_AGENT_CONFIG: join(agentDir, "agent") });
@@ -424,7 +426,7 @@ test("chat profile mints a read-only agent: redeem enrolls with no extra authori
   assert.equal(redeemed.status, 201, JSON.stringify(redeemed.json));
   // The member's authority is exactly the profile's fixed set — prove it by
   // reaching owner-only diagnostics with the agent's own credential.
-  const agentToken = redeemed.json.secret;
+  const agentToken = redeemed.json.mcpToken.credential;
   const check = await get(origin, "/api/rooms/commons/diagnostics", agentToken);
   assert.notEqual(check.status, 200, "a read-only agent must not reach owner diagnostics");
 });
@@ -505,7 +507,8 @@ test("CLI consent: --yes prints the grant and redeems; --no aborts without creat
   // --yes: the same summary prints, then the identity is created.
   const accepted = await cli(origin, ["redeem-invite", minted.json.code, "Consent Bot", "--yes"]);
   assert.equal(accepted.status, 0, accepted.stderr);
-  assert.match(accepted.json.secret, /^pri_/);
+  assert.match(accepted.json.mcpToken.credential, /^rak_/);
+  assert.equal(accepted.json.secret, undefined);
   assert.match(accepted.stderr, /This code grants: accept_work, complete_work/);
 });
 
@@ -559,7 +562,7 @@ async function ladderAgent(t, origin, ownerKey) {
   const agentDir = mkdtempSync(join(tmpdir(), "check-ladder-"));
   t.after(() => rmSync(agentDir, { recursive: true, force: true }));
   const connected = await cli(origin, ["connect", join(agentDir, "agent")], {
-    ROOM_AGENT_ROOM: "commons", ROOM_AGENT_MEMBER: redeemed.json.memberId, ROOM_AGENT_TOKEN: redeemed.json.secret,
+    ROOM_AGENT_ROOM: "commons", ROOM_AGENT_MEMBER: redeemed.json.memberId, ROOM_AGENT_TOKEN: redeemed.json.mcpToken.credential,
   });
   assert.equal(connected.status, 0, connected.stderr);
   return { ROOM_AGENT_CONFIG: join(agentDir, "agent") };
@@ -586,7 +589,8 @@ test("check ladder stops at the first failing rung and names the doctor repair",
   const redeemed = await cli(origin, ["redeem-invite", minted.json.code, "Fail Bot", "--yes"]);
   assert.equal(redeemed.status, 0, redeemed.stderr);
   // Valid format, wrong value: config parsing passes, the access probe fails.
-  const tampered = redeemed.json.secret.slice(0, -1) + (redeemed.json.secret.endsWith("A") ? "B" : "A");
+  const roomToken = redeemed.json.mcpToken.credential;
+  const tampered = roomToken.slice(0, -1) + (roomToken.endsWith("A") ? "B" : "A");
   const checked = await cliJson(origin, ["check"], {
     ROOM_AGENT_ORIGIN: origin, ROOM_AGENT_ROOM: "commons",
     ROOM_AGENT_MEMBER: redeemed.json.memberId, ROOM_AGENT_TOKEN: tampered,
@@ -644,7 +648,8 @@ test("invite redeem returns machine-readable next steps for a redeemed agent (RC
   const minted = await mint(origin, ownerKey, { permissions: ["accept_work", "complete_work"] });
   const res = await redeem(origin, minted.json.code, "Guided Bot");
   assert.equal(res.status, 201, JSON.stringify(res.json));
-  assert.match(res.json.secret, /^pri_/);
+  assert.match(res.json.mcpToken.credential, /^rak_/);
+  assert.equal(res.json.secret, undefined);
   // The redeem response must guide a freshly-redeemed agent to its first
   // moves, with the same shape as the signup next[] (RC-2026-09-18-018).
   assert.ok(Array.isArray(res.json.next) && res.json.next.length >= 4, "next[] is present and non-empty");

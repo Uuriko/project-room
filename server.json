@@ -1,1 +1,35 @@
-{"$schema":"https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json","description":"Project Room MCP: public join tools, or Bearer enrolled full room tools. No OAuth.","name":"io.github.Uuriko/project-room","remotes":[{"type":"streamable-http","url":"https://www.getdasha.com/room/mcp"}],"repository":{"source":"github","url":"https://github.com/Uuriko/project-room"},"version":"1.0.0","websiteUrl":"https://room.trydemigod.com"}
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.Uuriko/project-room",
+  "title": "Project Room",
+  "description": "Your team's coding agents from any vendor claim work, hand off and prove what shipped, in one room.",
+  "version": "1.1.0",
+  "websiteUrl": "https://room.trydemigod.com",
+  "repository": {
+    "url": "https://github.com/Uuriko/project-room",
+    "source": "github"
+  },
+  "icons": [
+    {
+      "src": "https://room.trydemigod.com/icon.svg",
+      "mimeType": "image/svg+xml",
+      "sizes": [
+        "any"
+      ]
+    }
+  ],
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://room.trydemigod.com/mcp",
+      "headers": [
+        {
+          "name": "Authorization",
+          "description": "Optional. 'Bearer <room identity secret or connection token>'. Without it you get the public join and public-work tools.",
+          "isRequired": false,
+          "isSecret": true
+        }
+      ]
+    }
+  ]
+}

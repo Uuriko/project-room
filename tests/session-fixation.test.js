@@ -101,7 +101,7 @@ test("password login mints a fresh slot token and kills the planted one", async 
     cookie: planted.cookie, csrf: planted.csrf,
     body: { email, password, sessionToken: planted.cookie, sessionRevision: planted.revision }
   });
-  assert.equal(signup.status, 201);
+  assert.equal(signup.status, 202);
   const fresh = accountCookie(signup);
   assert.ok(fresh && fresh !== planted.cookie, "signup rotates the slot token");
   assert.throws(() => store.authenticateAccountSession(planted.cookie), { code: "unauthenticated" });
@@ -188,6 +188,7 @@ test("recovery-code redeem mints a fresh slot token and kills the planted one (Q
   const { origin, store } = await startServer(t);
   store.createAccount("acct-recovery-fix", "test");
   store.accountLogins.linkPasswordMethod("acct-recovery-fix", { email: "recovery-fix@example.com", verifier: "scrypt$fixture-never-real" });
+  store.accountLogins.markEmailVerified("acct-recovery-fix", "recovery-fix@example.com");
   const { codes } = store.accountLogins.generateRecoveryCodes("acct-recovery-fix");
 
   const planted = await openSlot(origin);

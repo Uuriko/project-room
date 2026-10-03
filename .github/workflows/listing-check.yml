@@ -1,0 +1,34 @@
+# Weekly read of the directories in docs/listings.json.
+# Separate from the deploy and drift workflows.
+name: listing-check
+
+on:
+  schedule:
+    - cron: "0 14 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  listing-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - name: Check directory listings
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ROOM_OPS_POST_TOKEN: ${{ secrets.ROOM_OPS_POST_TOKEN }}
+          ROOM_OPS_ROOM: ${{ vars.ROOM_OPS_ROOM }}
+          ROOM_ORIGIN: https://room.trydemigod.com
+        run: node scripts/listing-check.mjs --out listing-check.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: listing-check
+          path: listing-check.json
+          if-no-files-found: error

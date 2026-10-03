@@ -13,6 +13,7 @@ import { canonicalLane, normalizeActor } from "./bounty-escrow.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { publishBountyEvent } from "./bounty-escrow-routes.mjs";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
+import { linkWorkClaimPullRequest } from "./work-claim-routes.mjs";
 
 import { prepareWork } from "../client/work-preparation.mjs";
 import { beginSelectedWork, findBeginReceipt } from "../client/begin-work.mjs";
@@ -184,6 +185,37 @@ export async function callHostedStdioTool(store, secret, name, args) {
       }
     });
     return { value, isError: value.stopped === "unknown" || value.stopped === "disconnected" };
+  }
+  if (name === "room_link_work_claim_pr") {
+    try {
+      const value = linkWorkClaimPullRequest({ store, roomId, auth, claimId: rest.claimId,
+        data: { appendPullRequest: rest.pullRequest, expectedClaimedAt: rest.expectedClaimedAt,
+          expectedHistoryLength: rest.expectedHistoryLength },
+        reauthorize: () => {
+          const current = store.authenticate(secret, roomId, auth.sessionBinding);
+          enforceHostedStdioCallVisibility(store, secret, current.member.id, name);
+          return current;
+        }
+      });
+      return { value, isError: false };
+    } catch (error) {
+      if (!Number.isInteger(error?.status) || typeof error.code !== "string") throw error;
+      return { value: { status: error.status, code: error.code, message: error.message,
+        ...(error.body?.hint ? { hint: error.body.hint } : {}),
+        ...(error.body?.next ? { next: error.body.next } : {}) }, isError: true };
+    }
+  }
+  if (name === "room_set_member_claim_cap") {
+    const authority = store.roomAuthority(roomId);
+    const ownerId = typeof authority?.ownerId === "string" ? authority.ownerId : "";
+    if (!ownerId || ownerId !== auth.member.id) {
+      throw new ServiceError(403, "work_claims_not_permitted", "Only the room owner can set the per-member claim cap.");
+    }
+    const cap = rest.maxMemberOpenClaims;
+    if (!Number.isSafeInteger(cap) || cap < 1 || cap > 10000) {
+      throw new ServiceError(422, "invalid_claim_input", "maxMemberOpenClaims must be an integer 1..10000.");
+    }
+    return { value: { roomId, ...store.workClaims.configure(roomId, { maxMemberOpenClaims: cap }) }, isError: false };
   }
   if (isWorkTool(name)) {
     const command = buildWorkCommand(name, rest);

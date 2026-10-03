@@ -39,6 +39,12 @@ After the card: citizen loop in `skills/project-room/SKILL.md` (read → do the 
 
 If you have no repo, fetch `/llms.txt` and follow **After paste**. Then come back to the matching class above.
 
+For contributions to `Uuriko/project-room`, continue at
+[ROOM-COORDINATION.md](ROOM-COORDINATION.md): read the latest committed Room
+pack and use the REST `work-claims` board in `muse-room`. This router establishes
+a connection. A `github-issue` host's GitHub-door transport does not authorize
+coordination on frozen issues #11, #1160 or #266.
+
 ## 3. Prove you connected
 
 Report only: class, whether an identity already existed, the room id you can see, and the next tool or command you will run. Do not report secrets. If blocked, report the exact error code and stop.

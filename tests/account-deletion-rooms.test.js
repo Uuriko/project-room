@@ -43,13 +43,13 @@ async function deletionAccount(t, n) {
   const res = await post(origin, "/api/auth/password/signup", {
     email, password: `fixture-password-${n}-long-enough`, sessionToken: slot.token, sessionRevision: slot.session.sessionRevision
   });
-  assert.equal(res.status, 201, await res.clone().text());
-  const body = await res.json();
+  assert.equal(res.status, 202, await res.clone().text());
   const token = /account_session=([^;]+)/.exec(res.headers.get("set-cookie") || "")?.[1];
   assert.ok(token, "signup sets a fresh account_session cookie");
-  const session = f.store.accountSessionSlot(token);
+  const session = f.store.authenticateAccountSession(token);
+  f.store.accountLogins.markEmailVerified(session.account.id, email);
   return {
-    f, origin, email, accountId: body.account.id, token, binding: session.sessionBinding,
+    f, origin, email, accountId: session.account.id, token, binding: session.sessionBinding,
     creds: { cookie: `account_session=${token}`, csrf: session.csrf }
   };
 }
@@ -90,7 +90,7 @@ test("a solely owned personal room is archived and its messages and files are pu
 
   const room = ctx.f.store.room(roomId);
   assert.equal(typeof room.state.room.archivedAt, "string");
-  assert.equal(room.state.messages.find(message => message.id === "secret-note").body, "[purged]");
+  assert.equal(room.state.messages.find(message => message.id === "secret-note").body, null);
   const logged = ctx.f.store.db.prepare("SELECT body FROM events WHERE room_id=?").all(roomId).map(row => row.body).join("\n");
   const projection = ctx.f.store.db.prepare("SELECT projection FROM rooms WHERE id=?").get(roomId).projection;
   assert.equal(logged.includes(SECRET), false);
@@ -105,7 +105,7 @@ test("a solely owned personal room is archived and its messages and files are pu
   ctx.f.store.db.prepare("DELETE FROM projection_checkpoints WHERE room_id=?").run(roomId);
   const rebuilt = ctx.f.store.rebuildProjection(roomId);
   assert.equal(rebuilt.state.room.archivedAt, room.state.room.archivedAt);
-  assert.equal(rebuilt.state.messages.find(message => message.id === "secret-note").body, "[purged]");
+  assert.equal(rebuilt.state.messages.find(message => message.id === "secret-note").body, null);
 });
 
 test("a shared room with another owner transfers and the account is deleted", async t => {
@@ -174,6 +174,6 @@ test("the confirmation token covers room contents, so a later message requires a
   const done = await authedPost(ctx.origin, "/api/account/delete", { confirmationToken: fresh.confirmationToken }, ctx.creds);
   assert.equal(done.status, 200, await done.clone().text());
   const messages = ctx.f.store.room(roomId).state.messages;
-  assert.equal(messages.find(message => message.id === "later-note").body, "[purged]");
-  assert.equal(messages.find(message => message.id === "first-note").body, "[purged]");
+  assert.equal(messages.find(message => message.id === "later-note").body, null);
+  assert.equal(messages.find(message => message.id === "first-note").body, null);
 });

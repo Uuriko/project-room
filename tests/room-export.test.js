@@ -57,14 +57,23 @@ test("room export returns the full event log as JSONL, framed by Content-Length"
   // Sequences are dense and ordered.
   assert.deepEqual(events.map(e => e.sequence), events.map((_, i) => i + 1));
   assert.ok(events.every(e => e.event && e.event.type && e.event.actorId && e.event.at));
-  // Matches what the events route reports: every event, not a prefix.
-  const { next } = store.eventsAfter(ownerKey, "commons", 0, 100);
-  assert.equal(events.at(-1).sequence, next);
-  assert.equal(events.length, store.room("commons").sequence);
+  // Every event up to the export, not a prefix. PRIV-2: the export then
+  // appended exactly one room.exported audit record (format, no content).
+  const { next, events: page } = store.eventsAfter(ownerKey, "commons", 0, 100);
+  assert.equal(events.at(-1).sequence, next - 1);
+  assert.equal(events.length, store.room("commons").sequence - 1);
+  const audit = page.at(-1).event;
+  assert.equal(audit.type, T.ROOM_EXPORTED);
+  assert.equal(audit.actorId, "owner");
+  assert.deepEqual(audit.data, { format: "jsonl" });
   // A non-member gets nothing.
   assert.equal((await request("/api/rooms/commons/export")).status, 401);
-  // Members can export too (same visibility as the events route).
-  assert.equal((await request("/api/rooms/commons/export", { token: agentKey })).status, 200);
+  // PRIV-2: export is owner-only. A member is refused and nothing is recorded.
+  const sequence = store.room("commons").sequence;
+  const refused = await request("/api/rooms/commons/export", { token: agentKey });
+  assert.equal(refused.status, 403);
+  assert.equal((await refused.json()).error.code, "owner_required");
+  assert.equal(store.room("commons").sequence, sequence);
   return ndjson;
 });
 
@@ -91,17 +100,22 @@ test("an export that fails part-way is a JSON error, never a clean-looking parti
   const unavailable = await request("/api/rooms/commons/export", { token: ownerKey });
   assert.equal(unavailable.status, 503);
   assert.equal((await unavailable.json()).error.code, "storage_unavailable");
-  // Once storage recovers the export is whole again, byte-exact.
+  // Once storage recovers the export is whole again, byte-exact. The failed
+  // exports recorded nothing; the first export added one audit line.
   store.exportEvents = real;
   const recovered = await request("/api/rooms/commons/export", { token: ownerKey });
   assert.equal(recovered.status, 200);
-  assert.equal(await recovered.text(), full);
+  const recoveredText = await recovered.text();
+  assert.ok(recoveredText.startsWith(full), "the earlier export is a prefix of the recovered one");
+  const extra = recoveredText.slice(full.length).trim().split("\n").map(line => JSON.parse(line));
+  assert.deepEqual(extra.map(line => line.event.type), [T.ROOM_EXPORTED]);
 });
 
 test("room import round-trips an export (round-2 #107)", async t => {
   const { request, importNdjson, ownerKey, agentKey } = await serve(t);
-  const ndjson = await (await request("/api/rooms/commons/export", { token: ownerKey })).text();
+  // Read the room first: the export appends its own room.exported record.
   const before = await (await request("/api/rooms/commons", { token: ownerKey })).json();
+  const ndjson = await (await request("/api/rooms/commons/export", { token: ownerKey })).text();
   const lineCount = ndjson.trim().split("\n").length;
 
   // Wrong content type rejected.
@@ -167,10 +181,10 @@ test("room import round-trips a large (1500-event) export", async t => {
     store.command(ownerKey, "commons", { id: randomUUID(), type: T.MESSAGE_POSTED,
       data: { messageId: `bulk-${i}`, body: `bulk message ${i}` } });
   }
+  const before = await (await request("/api/rooms/commons", { token: ownerKey })).json();
   const ndjson = await (await request("/api/rooms/commons/export", { token: ownerKey })).text();
   const lineCount = ndjson.trim().split("\n").length;
   assert.ok(lineCount > 1500, `expected >1500 lines, got ${lineCount}`);
-  const before = await (await request("/api/rooms/commons", { token: ownerKey })).json();
   const ok = await importNdjson(ownerKey, ndjson);
   assert.equal(ok.status, 200);
   assert.deepEqual(await ok.json(), { imported: lineCount, sequence: lineCount });
@@ -364,8 +378,10 @@ test("HTML export renders the same event walk for people: escaped, tombstoned, f
   assert.match(html, /Room owner/);
   assert.match(html, /Test agent/);
   assert.match(html, /<span class="flag">completed<\/span>/);
-  // Same auth as the JSONL format: any member, no one else.
-  assert.equal((await request("/api/rooms/commons/export?format=html", { token: agentKey })).status, 200);
+  // Same auth as the JSONL format: the owner only (PRIV-2), and the export
+  // is recorded with its format.
+  assert.deepEqual(store.eventsAfter(ownerKey, "commons", store.room("commons").sequence - 1, 1).events[0].event.data, { format: "html" });
+  assert.equal((await request("/api/rooms/commons/export?format=html", { token: agentKey })).status, 403);
   assert.equal((await request("/api/rooms/commons/export?format=html")).status, 401);
   // Unknown or repeated formats are refused as input, not guessed.
   const bad = await request("/api/rooms/commons/export?format=pdf", { token: ownerKey });
@@ -377,8 +393,9 @@ test("HTML export renders the same event walk for people: escaped, tombstoned, f
 test("HTML export respects current membership: a removed member gets nothing, the room shows access ended", async t => {
   const { request, ownerKey, agentKey, store } = await serve(t);
   await seedReadableRoom(store, ownerKey);
-  assert.equal((await request("/api/rooms/commons/export?format=html", { token: agentKey })).status, 200);
-  assert.equal((await request("/api/rooms/commons/export", { token: agentKey })).status, 200);
+  // PRIV-2: a non-owner member is refused before and after removal.
+  assert.equal((await request("/api/rooms/commons/export?format=html", { token: agentKey })).status, 403);
+  assert.equal((await request("/api/rooms/commons/export", { token: agentKey })).status, 403);
   store.command(ownerKey, "commons", { id: randomUUID(), type: T.MEMBER_ACCESS_CHANGED,
     data: { memberId: "agent", expectedMemberRevision: 0, permissions: ["accept_work"], active: false } });
   for (const path of ["/api/rooms/commons/export?format=html", "/api/rooms/commons/export"]) {
@@ -395,7 +412,9 @@ test("JSONL format variants match and omit deleted message text", async t => {
   await seedReadableRoom(store, ownerKey);
   const plain = await (await request("/api/rooms/commons/export", { token: ownerKey })).text();
   const explicit = await (await request("/api/rooms/commons/export?format=jsonl", { token: ownerKey })).text();
-  assert.equal(plain, explicit);
+  // The second export also carries the first export's audit record.
+  assert.ok(explicit.startsWith(plain));
+  assert.deepEqual(explicit.slice(plain.length).trim().split("\n").map(line => JSON.parse(line).event.type), [T.ROOM_EXPORTED]);
   assert.equal(plain.includes("original secret wording"), false);
   assert.equal(plain.includes("revised secret wording"), false);
   // A failure part-way through the walk is a JSON error, never a clean-looking partial page.

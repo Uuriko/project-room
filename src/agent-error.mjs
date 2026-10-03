@@ -149,18 +149,16 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
         : "Claim the work item first (POST …/work-claims/{id}/claim).")]
     };
   }
-  // W6/WD1: review-policy denials never mentioned the attestation route.
-  // The recovery is reviewer-first: the named reviewer attests from their
-  // own session; solo with no second member, release and recreate under
-  // self_attested.
+  // Recovery requires an actual current review, never an implied approval
+  // from a note or a suggested automatic verdict.
   if (reasonCode === "work_review_rejected") {
     const reviewPath = roomId && workItemId ? `/api/rooms/${roomId}/work-claims/${workItemId}/review` : null;
     return {
       status: "action_required", reason: "work_review_rejected",
-      hint: "The named reviewer must attest from their own session before this work can close. Solo with no second member? Release and recreate it under self_attested.",
+      hint: "A current authorized reviewer must review this work from their own session. If they approve, they must explicitly submit approve with a summary; notes alone do not approve. Changed context needs a fresh review with a new summary. Solo work may use self_attested only when that is the intended policy.",
       next: [...(reviewPath ? [path(reviewPath)] : []), command(reviewPath
-        ? `The named reviewer must POST ${reviewPath} {note?} from their own session first.`
-        : "The named reviewer must POST the item's /review route from their own session first.")]
+        ? `After reviewing the current work, the named authorized reviewer who approves must POST ${reviewPath} {verdict:"approve",summary:"Review findings"} from their own session. Changed context needs a fresh review with a new summary.`
+        : `After reviewing the current work, the named authorized reviewer who approves must POST the item's /review route with {verdict:"approve",summary:"Review findings"} from their own session. Changed context needs a fresh review with a new summary.`)]
     };
   }
   // W4: a lapsed lease auto-releases the claim — the recovery is to claim

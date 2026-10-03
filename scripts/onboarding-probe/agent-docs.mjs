@@ -16,14 +16,16 @@ function stepName(curl) {
   return "documented-call";
 }
 
-function remember(created, secret, body) {
+function remember(created, creds, body) {
   if (typeof body.secret === "string" && typeof body.identityId === "string") {
-    secret.current = body.secret;
+    creds.identity = body.secret;
     created.identities.push({ id: body.identityId, secret: body.secret });
   }
-  if (typeof body.roomId === "string" && secret.current) {
-    secret.roomId = body.roomId;
-    created.rooms.push({ id: body.roomId, auth: "bearer", secret: secret.current });
+  const roomToken = body.mcpToken?.credential;
+  if (typeof roomToken === "string") creds.roomToken = roomToken;
+  if (typeof body.roomId === "string" && creds.identity) {
+    creds.roomId = body.roomId;
+    created.rooms.push({ id: body.roomId, auth: "bearer", secret: creds.identity });
   }
 }
 
@@ -34,7 +36,7 @@ export async function runAgentDocs({ target, outDir = null, created = emptyCreat
   const confusions = [];
   const name = qaStamp(round);
   let calls = 0;
-  const secret = { current: null, roomId: null };
+  const creds = { identity: null, roomToken: null, roomId: null };
   const read = await probeFetch(`${origin}/llms.txt`);
   calls += 1;
   steps.push({ step: "read-llms", t: elapsed(started), calls, bytes: read.bytes, status: read.status });
@@ -47,11 +49,11 @@ export async function runAgentDocs({ target, outDir = null, created = emptyCreat
   let firstPost = null;
   for (const curl of curls) {
     const data = curl.data ? curl.data.replaceAll('"displayName":"Ada"', `"displayName":"${name}"`) : curl.data;
-    const done = await executeCurl({ ...curl, data }, { secret: secret.current, roomId: secret.roomId, target: origin });
+    const done = await executeCurl({ ...curl, data }, { secret: creds.identity, roomToken: creds.roomToken, roomId: creds.roomId, target: origin });
     calls += done.calls;
     const step = { step: stepName(curl), t: elapsed(started), calls, bytes: done.bytes, status: done.response.status };
     steps.push(step);
-    remember(created, secret, done.response.json ?? {});
+    remember(created, creds, done.response.json ?? {});
     if (step.step === "post" && done.response.status < 300) firstPost = { t: step.t, calls };
   }
   if (!firstPost) confusions.push("The documented post did not succeed.");
@@ -62,7 +64,7 @@ export async function runAgentDocs({ target, outDir = null, created = emptyCreat
     confusions.push("The packet has no work-claim close, so this path does not invent board calls.");
   } else {
     for (const curl of board) {
-      const done = await executeCurl(curl, { secret: secret.current, roomId: secret.roomId, target: origin });
+      const done = await executeCurl(curl, { secret: creds.identity, roomToken: creds.roomToken, roomId: creds.roomId, target: origin });
       calls += done.calls;
       const step = { step: "board-close", t: elapsed(started), calls, bytes: done.bytes, status: done.response.status };
       steps.push(step);

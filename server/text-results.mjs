@@ -17,9 +17,9 @@ export function storedText(db, state, workItemId, messageId, messageEventId = nu
     : db.prepare("SELECT sequence,id,body FROM events WHERE room_id=? AND json_extract(body,'$.type')='message.posted' AND coalesce(json_extract(body,'$.data.messageId'),id)=?").get(state.room.id, messageId);
   check(row);
   const post = JSON.parse(row.body), message = state.messages.find(message => message.id === messageId);
-  // A withdrawn message is a tombstone in the projection and unchanged in the
-  // log. Everything below still has to line up; the body is the one thing the
-  // room no longer shows, so it is compared against null and never returned.
+  // A withdrawn message is a tombstone. PRIV-1 nulls the log body; older
+  // withdrawals still have the string there. Either way the body returned
+  // to a reader is null.
   const withdrawn = Boolean(message?.deletedAt);
   check(message && post.type === "message.posted" && post.roomId === state.room.id && post.id === row.id
     && (post.data.messageId || post.id) === messageId && post.data.workItemId === workItemId && message.workItemId === workItemId
@@ -33,10 +33,30 @@ export function storedText(db, state, workItemId, messageId, messageEventId = nu
     proposal = proposalContext(post.data, { revision: previous.type === "work.proposed" ? 0 : previous.data.expectedRevision + 1 });
   }
   check(isDeepStrictEqual(message.proposal ?? null, proposal));
+  // PRIV-1: a redacted log no longer holds the text. The hash stays on the
+  // receipt; the byte length stays on the message.
+  if (withdrawn && post.data.body == null) {
+    check(post.data.redacted === true && message.body === null);
+    const version = citedEvidenceVersion(state, messageId);
+    check(typeof version === "string" && /^sha256:[0-9a-f]{64}$/.test(version));
+    check(Number.isInteger(message.redactedByteLength) && message.redactedByteLength > 0);
+    return { messageId, messageEventId: post.id, postedById: post.actorId, createdAt: post.at,
+      body: null, byteLength: message.redactedByteLength, evidenceVersion: version, evidence: "removed",
+      proposal, postSequence: row.sequence, withdrawnAt: message.deletedAt, withdrawnBy: message.deletedBy };
+  }
   return { messageId, messageEventId: post.id, postedById: post.actorId, createdAt: post.at,
     body: withdrawn ? null : post.data.body, byteLength: Buffer.byteLength(post.data.body, "utf8"),
     evidenceVersion: textVersion(post.data.body), proposal, postSequence: row.sequence,
     ...(withdrawn ? { withdrawnAt: message.deletedAt, withdrawnBy: message.deletedBy } : {}) };
+}
+
+function citedEvidenceVersion(state, messageId) {
+  for (const work of Object.values(state.workItems ?? {})) {
+    for (const receipt of [...(work.receiptHistory ?? []), work.receipt]) {
+      if (receipt?.nativeText?.messageId === messageId && typeof receipt.evidenceVersion === "string") return receipt.evidenceVersion;
+    }
+  }
+  return null;
 }
 
 export function verifyTextCompletion(db, state, work, data, { allowWithdrawn = false } = {}) {

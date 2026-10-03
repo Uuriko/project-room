@@ -73,7 +73,9 @@ test("but it can be deleted, and the receipt says its text was withdrawn", t => 
   const receipt = room.item().receipt;
   assert.equal(receipt.nativeText.withdrawnBy, "owner");
   assert.equal(receipt.nativeText.withdrawnAt, room.message("draft-1").deletedAt);
-  const { withdrawnAt, withdrawnBy, ...nativeText } = receipt.nativeText;
+  const { withdrawnAt, withdrawnBy, evidence, ...nativeText } = receipt.nativeText;
+  assert.equal(evidence, "removed");
+  assert.ok(room.item().evidenceWithdrawals.some(entry => entry.messageId === "draft-1" && entry.evidence === "removed" && entry.byteLength > 0));
   assert.deepEqual({ ...receipt, nativeText }, before,
     "a withdrawal adds a fact; it never rewrites what the receipt already claimed");
   assert.equal(receipt.evidenceVersion, before.evidenceVersion,

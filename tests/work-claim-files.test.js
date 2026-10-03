@@ -22,6 +22,7 @@ const call = (registry, member, route, id, body) => handleWorkClaims({
     jill: { id: "jill", kind: "agent", active: true, permissions: ["accept_work", "complete_work", "manage_claims"] },
     claude: { id: "claude", kind: "agent", active: true, permissions: ["accept_work", "complete_work", "manage_claims"] },
     grokbot: { id: "grokbot", kind: "agent", active: true, permissions: ["accept_work", "complete_work", "manage_claims"] },
+    ada: { id: "ada", kind: "agent", active: true, permissions: ["accept_work", "complete_work", "manage_claims"] },
   } }) },
   roomId: "room1",
   auth: { member: { id: member, kind: "agent", permissions: [] } },
@@ -97,6 +98,29 @@ test("done claims and claims without files never produce warnings", async () => 
   const out = await call(registry, "claude", "claim", "b", {});
   assert.deepEqual(out.value.files, ["scripts/room"]);
   assert.deepEqual(out.value.fileWarnings, []);
+});
+
+test("different block labels on one file do not conflict, and a whole-file claim still does", async () => {
+  const registry = createWorkClaimRegistry();
+  await call(registry, "jill", "create", null, { id: "a", files: [{ path: "scripts/room", block: "header" }] });
+  const held = await call(registry, "jill", "claim", "a", {});
+  assert.equal(held.status, 200);
+  assert.deepEqual(held.value.fileBlocks, { "scripts/room": "header" });
+  await call(registry, "claude", "create", null, { id: "b" });
+  const other = await call(registry, "claude", "claim", "b", { files: [{ path: "scripts/room", region: "footer" }] });
+  assert.equal(other.status, 200);
+  assert.equal(other.value.state, "claimed");
+  assert.deepEqual(other.value.fileBlocks, { "scripts/room": "footer" });
+  await call(registry, "ada", "create", null, { id: "c" });
+  const same = await call(registry, "ada", "claim", "c", { files: [{ path: "scripts/room", block: "header" }] });
+  assert.equal(same.status, 409);
+  assert.equal(same.value.error.code, "file_lease_conflict");
+  assert.deepEqual(same.value.files, ["scripts/room (header)"]);
+  await call(registry, "ada", "create", null, { id: "d" });
+  const whole = await call(registry, "ada", "claim", "d", { files: ["scripts/room"] });
+  assert.equal(whole.status, 409);
+  assert.equal(whole.value.error.code, "file_lease_conflict");
+  assert.equal(registry.get("room1", "d").state, "unclaimed");
 });
 
 test("paths are normalized and paths that escape the repo are refused", async () => {

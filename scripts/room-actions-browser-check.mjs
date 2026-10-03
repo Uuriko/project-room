@@ -86,9 +86,10 @@ test("room actions filter by intent, support keyboard selection, empty state and
 test("room actions open existing work and catch-up flows; shortcuts do not interrupt another dialog", { timeout: 30000 }, async t => {
   const f = await setup(t), p = f.page;
   await f.open(); await f.action("catch-up").click();
-  assert.equal(await p.locator("#return-brief-panel").evaluate(node => node.open), true);
-  assert.equal(await p.locator("#return-brief-panel > summary").evaluate(node => node === document.activeElement), true);
-  await p.locator("#catchup-close").click();
+  assert.equal(await p.locator("#updates-dialog").isVisible(), true);
+  assert.equal(await p.locator("[data-update-filter=needs]").getAttribute("aria-selected"), "true");
+  await p.locator("#updates-close").click();
+  await p.locator("#updates-dialog").waitFor({ state: "hidden" });
   await f.open(); await f.action("new-work").click();
   await p.locator("#work-dialog").waitFor(); await p.locator("#work-title-input").fill("An unsaved idea");
   await p.keyboard.press("Control+k");

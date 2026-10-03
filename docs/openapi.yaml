@@ -1275,6 +1275,14 @@ paths:
           in: query
           description: Only events at or before this ISO timestamp (audit filter)
           schema: { type: string, format: date-time }
+        - name: tail
+          in: query
+          description: |
+            Newest N events in ascending order, plus `next` to continue forward
+            with `after`. An integer from 1 to 200. Send `tail` alone: combining
+            it with `after`, `limit`, `actor`, `since`, `until`, or `afterSequence`
+            is 422 `invalid_event_cursor`.
+          schema: { type: integer, minimum: 1, maximum: 200 }
       responses:
         '401': { description: unauthenticated }
         '200':
@@ -1430,8 +1438,10 @@ paths:
     get:
       summary: Export the event log as JSONL, or as a readable HTML page
       description: >-
-        Default (format=jsonl): one {sequence, event} per line, ordered. Same
-        visibility as the events route (members only). The body is materialised
+        Default (format=jsonl): one {sequence, event} per line, ordered.
+        Owner-only (403 owner_required for other members). Each export of a
+        live room appends a room.exported audit event carrying the format
+        only; an archived room records nothing new. The body is materialised
         in full before the response starts and is framed by Content-Length: a
         failure while reading history is a JSON error response, never a
         truncated 200, and a client that receives fewer bytes than
@@ -1449,6 +1459,7 @@ paths:
           schema: { type: string, enum: [jsonl, html], default: jsonl }
       responses:
         '401': { description: unauthenticated }
+        '403': { description: owner_required - only the room owner exports }
         '200':
           description: NDJSON export (Content-Length set; the last byte is a newline) or, with format=html, the readable page (Content-Length set; ends with an "End of export" marker)
           content:
@@ -2900,42 +2911,83 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
+  # JDOT-MEMBER-PERMS begin: reviewed member requests and the shared queue.
   /api/rooms/{roomId}/access-requests:
-    get:
-      summary: List join requests (owner or delegate)
+    post:
+      summary: Request additional permissions for the current member
       description: >-
-        Owner or membership-administration delegate (an agent identity the
-        owner granted via /membership-delegation/grant). Lists pending join requests by
-        default; pass ?status=approved|denied|expired|pending|decided to
-        filter. Approval links the identity via the standard identity-link
-        path; denial records a reason.
+        Authenticated active members only; this route never joins a room or
+        creates an identity. The caller is derived from the current room
+        credential, not the body. This is equivalent to the members/me route,
+        using requestedPermissions instead of permissions. Requests have kind
+        permissions and always wait for review, including rooms with automatic
+        admission enabled. Current access is unchanged until approval.
+        Reuse requestId to retrieve the same record without duplicating the
+        event or spending another request quota. At most five new requests per
+        principal per hour and five pending requests per principal and room. An undecided
+        request expires after seven days.
+        Scoped API keys require rooms:write and any stored room restriction
+        must match. Browser writes require same-origin Origin and X-CSRF-Token;
+        account cookies additionally use the account auth selector and current
+        X-Session-Binding. Account sessions are never bearer tokens.
+      security:
+        - bearerAuth: []
+        - roomSession: []
+        - accountSession: []
       parameters:
         - $ref: '#/components/parameters/RoomId'
-        - { name: status, in: query, schema: { type: string, enum: [pending, approved, denied, expired, decided] } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MemberRequestedPermissionsInput'
+      responses:
+        '201':
+          description: Pending permission request, or the existing record on retry
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoomPermissionRequestRecord'
+        '401': { description: unauthenticated or inactive membership }
+        '403': { description: access_denied, insufficient_scope, or csrf_denied }
+        '409': { description: nothing_to_request, request_conflict, too_many_requests, or room_archived }
+        '422': { description: invalid_request or invalid_session_binding }
+        '429': { description: rate_limited }
+    get:
+      summary: List join and permission requests (membership administrator)
+      description: >-
+        The room owner, a member with manage_members, or an authorized
+        membership-administration delegate may read the queue. Lists pending
+        requests by default; kind distinguishes join from permissions. A
+        delegate who may admit new members cannot approve additional
+        permissions without manage_members. Scoped API keys require rooms:read
+        and the selected room must satisfy their stored room restriction.
+      security:
+        - bearerAuth: []
+        - roomSession: []
+        - accountSession: []
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - { name: status, in: query, schema: { type: string, default: pending, enum: [pending, approved, denied, expired, cancelled] } }
       responses:
         '401': { description: unauthenticated }
         '200':
-          description: The room's join requests
+          description: The room's join and permission requests
           content:
             application/json:
               schema:
                 type: object
+                required: [roomId, requests, next]
                 properties:
                   roomId: { type: string }
                   requests:
                     type: array
                     items:
-                      type: object
-                      properties:
-                        requestId: { type: string }
-                        displayName: { type: string }
-                        requestedPermissions:
-                          type: array
-                          items: { type: string }
-                        status: { type: string }
+                      $ref: '#/components/schemas/RoomPermissionRequestRecord'
                   next:
                     type: array
-                    description: Machine-readable follow-ups — decide-request when requests are pending (the request's id is filled into the decide path), watch-requests when none are pending
+                    description: decide-request with the first request's decision path, or watch-requests when the queue is empty
                     items:
                       type: object
                       required: [action, description]
@@ -2944,16 +2996,70 @@ paths:
                         method: { type: string }
                         path: { type: string }
                         description: { type: string }
-        '403': { description: access_denied (membership administration required) }
+        '403': { description: access_denied or insufficient_scope }
+        '422': { description: invalid_request (unsupported status) }
+  /api/rooms/{roomId}/members/me/permission-requests:
+    post:
+      summary: Ask for more permissions without leaving the room
+      description: >-
+        Alias of POST /api/rooms/{roomId}/access-requests using permissions as
+        the required field. Authenticates an active human or agent member and
+        derives their identity and display name from that membership. Never
+        sends credentials or another member's identity in the body. Requests
+        return kind permissions and remain pending until authorized review;
+        automatic admission does not apply. Already-held permissions alone
+        return 409 nothing_to_request. Both aliases and the global identity
+        request route share the same principal's quota. Retry with the same
+        requestId to recover the record without another event or quota charge.
+        Scoped API keys require rooms:write and a matching room restriction.
+        Browser writes require same-origin Origin and X-CSRF-Token; select
+        account auth and send X-Session-Binding when using an account cookie.
+      security:
+        - bearerAuth: []
+        - roomSession: []
+        - accountSession: []
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MemberPermissionRequestInput'
+      responses:
+        '201':
+          description: Pending permission request, or the existing record on retry
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoomPermissionRequestRecord'
+        '401': { description: unauthenticated or inactive membership }
+        '403': { description: access_denied, insufficient_scope, or csrf_denied }
+        '409': { description: nothing_to_request, request_conflict, too_many_requests, or room_archived }
+        '422': { description: invalid_request or invalid_session_binding }
+        '429': { description: rate_limited }
   /api/rooms/{roomId}/access-requests/{id}/decide:
     post:
-      summary: Decide a join request (owner or delegate)
+      summary: Decide a join or permission request
       description: >-
-        Owner or membership-administration delegate (an agent identity the
-        owner granted via /membership-delegation/grant). Approve links the
-        identity as a member with the granted permissions (narrowed or equal
-        to what was requested); deny records a reason. The decision is
-        appended to the room's audit trail.
+        Uses current membership-administration authority and ordinary room
+        write authentication. A join approval links the identity as a member.
+        A permission approval requires manage_members, and a non-owner
+        administrator may grant only permissions they currently hold. Omit
+        permissions to approve the requested list, or supply a selected list
+        for a partial grant. Approval unions the selected permissions with
+        existing permissions; denial never changes membership or permissions.
+        If membership or its request history changed, approval returns
+        stale_membership instead of restoring access: review current access
+        and file a fresh request. Permission decisions atomically record a
+        room message and requester notification. Repeating a decision returns
+        already_decided without duplicating the grant or message. Optional
+        decision notes stay in the request record and are not copied into the
+        public outcome message. Scoped API keys require rooms:write.
+      security:
+        - bearerAuth: []
+        - roomSession: []
+        - accountSession: []
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - { name: id, in: path, required: true, schema: { type: string } }
@@ -2966,15 +3072,23 @@ paths:
               required: [decision]
               properties:
                 decision: { type: string, enum: [approve, deny] }
-                permissions: { type: array, items: { type: string } }
-                note: { type: string, maxLength: 500 }
+                permissions:
+                  type: array
+                  items: { $ref: '#/components/schemas/RequestedRoomPermission' }
+                note: { type: [string, 'null'], maxLength: 500 }
       responses:
         '401': { description: unauthenticated }
-        '200': { description: The decided request (and the new member on approve) }
-        '403': { description: access_denied (membership administration required) }
+        '200':
+          description: Decided request, with effective grantedPermissions on approval and a decisionMessageId for permission decisions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoomPermissionRequestRecord'
+        '403': { description: access_denied (including a named permission the reviewer lacks), insufficient_scope, or csrf_denied }
         '404': { description: not_found }
-        '409': { description: request_conflict (already decided) or request_expired }
+        '409': { description: already_decided or stale_membership; current room write policy may also refuse the decision }
         '422': { description: invalid_request }
+  # JDOT-MEMBER-PERMS end
   /api/rooms/{roomId}/referrals:
     get:
       summary: Referral board (member)
@@ -3928,16 +4042,55 @@ paths:
                 revision:
                   type: string
                   description: Required for kind deploy. A land or deploy claim closes when this server's live revision matches it.
+                assignee:
+                  type: string
+                  description: |
+                    Active member id. The item is claimed for them and they
+                    are woken with reason assigned. Omit it to leave the item
+                    unclaimed. An unknown or inactive member is 422
+                    work_assignee_unknown_member.
       responses:
         '201':
-          description: The created unclaimed item
+          description: The created item. Unclaimed unless assignee is set, in which case that member owns it.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/WorkClaim'
         '401': { description: unauthenticated }
         '403': { description: work_claims_not_permitted }
-        '409': { description: work_claim_exists or work_board_full }
+        '409': { description: work_claim_exists, work_board_full, or too_many_open_claims }
+        '422': { description: invalid_claim_input or work_assignee_unknown_member }
+  /api/rooms/{roomId}/work-claims/config:
+    get:
+      summary: Read the room's work-claim caps
+      description: |
+        Returns the room's open-claim caps. maxMemberOpenClaims defaults to
+        20. API keys need `rooms:read`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200': { description: Caps for this room }
+        '401': { description: unauthenticated }
+    post:
+      summary: Set the per-member open claim cap
+      description: |
+        The room owner sets maxMemberOpenClaims, an integer from 1 to 10000.
+        The next claim past that cap is 409 too_many_open_claims. Anyone else
+        gets 403 work_claims_not_permitted. API keys need `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [maxMemberOpenClaims]
+              properties:
+                maxMemberOpenClaims: { type: integer, minimum: 1, maximum: 10000 }
+      responses:
+        '200': { description: The saved caps }
+        '403': { description: work_claims_not_permitted }
         '422': { description: invalid_claim_input }
   /api/rooms/{roomId}/work-claims/status:
     get:
@@ -4152,7 +4305,7 @@ paths:
         '422': { description: invalid_claim_input }
   /api/rooms/{roomId}/work-claims/{claimId}/update:
     post:
-      summary: Update claimed work
+      summary: Update claimed work or append a PR link
       description: |
         Owner-only state transitions and notes (`403 work_not_owner`
         otherwise). The `done` transition accepts `deliveryMode` (how the
@@ -4163,13 +4316,31 @@ paths:
         sending `tags`/`blobs` without `state: done` gets 422. The transition
         enforces the item's review policy: `self_attested` lets the claimant
         close (reviewedBy, when given, must be the owner); `distinct_member`
-        needs a different member's attestation; `independent_principal`
-        needs a different member holding the `verify` permission. For the
-        stronger policies the named reviewer must have recorded an
-        attestation via the `/review` route from their own session first —
-        naming a member who never attested is rejected with 403
-        `work_review_rejected`. A failing attestation gets 403
-        `work_review_rejected`. API keys need `rooms:write`.
+        needs a different current authorized reviewer's latest explicit
+        approve; `independent_principal` also requires their current verify
+        permission. The review basis must match the claim owner, claimedAt,
+        revision and available CI head. Superseded claims, legacy unbound
+        reviews, comments, change requests and note-only records cannot
+        qualify. Rejection is 403 work_review_rejected. This manual gate
+        does not bind artifact bytes or change automatic PR/land/deploy
+        settlement. API keys need `rooms:write`.
+        Alternatively send only appendPullRequest, expectedClaimedAt and
+        expectedHistoryLength from a fresh item read. This owner-only append
+        requires active unsuperseded work with a live or authorized non-expiring
+        lease. manage_claims does not override ownership. Archived rooms refuse
+        this operation. URL-only canonical HTTPS GitHub PR input, maximum300
+        characters, no credentials, non-default port, query or fragment;
+        trailing slash normalized. At most16 ordered unique links. Existing
+        polling/terminal observations, owner, state, claimedAt, leaseStartAt,
+        leaseExpiresAt, files, fileBlocks, dependsOn, repo, branch, revision and
+        deliveryMode are preserved. A true addition clears ci and attestations,
+        retains historical reviews/bases, and appends one history record and
+        one work_claim.updated/state_changed event. A fresh duplicate returns
+        the exact item without another write/event; a stale duplicate conflicts.
+        No worker, GitHub fetch, publication, merge or deployment is started.
+        After an unknown response or conflict, GET the item and reconcile the
+        same owner/round and URL. Never release/reclaim to bypass refusal.
+        Automatic all-linked-PR settlement remains separate from manual review.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: claimId
@@ -4181,30 +4352,53 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              properties:
-                state:
-                  type: string
-                  enum: [claimed, in_progress, blocked, done, unclaimed]
-                  description: unclaimed = release the claim
-                note: { type: string }
-                deliveryMode:
-                  type: string
-                  enum: [result, merged, production]
-                  description: Only on the done transition
-                reviewedBy:
-                  type: string
-                  description: Attesting member id; only on the done transition. For distinct_member/independent_principal the named member must have attested via /review first
-                tags:
-                  type: array
-                  items: { type: string, pattern: '[A-Za-z0-9_-]{1,32}' }
-                  maxItems: 10
-                  description: Free-form receipt labels; only on the done transition
-                blobs:
-                  type: array
-                  items: { type: string, pattern: '^sha256:[0-9a-f]{64}$' }
-                  maxItems: 10
-                  description: sha256 evidence pointers; only on the done transition
+              oneOf:
+                - type: object
+                  additionalProperties: false
+                  anyOf:
+                    - required: [state]
+                    - required: [note]
+                  properties:
+                    state:
+                      type: string
+                      enum: [claimed, in_progress, blocked, done, unclaimed]
+                      description: unclaimed = release the claim
+                    note: { type: string }
+                    deliveryMode:
+                      type: string
+                      enum: [result, merged, production]
+                      description: Only on the done transition
+                    reviewedBy:
+                      type: string
+                      description: Reviewing member id; only on the done transition. Non-self policies require this current authorized member's latest explicit approve via /review with a matching current basis
+                    tags:
+                      type: array
+                      items: { type: string, pattern: '[A-Za-z0-9_-]{1,32}' }
+                      maxItems: 10
+                      description: Free-form receipt labels; only on the done transition
+                    blobs:
+                      type: array
+                      items: { type: string, pattern: '^sha256:[0-9a-f]{64}$' }
+                      maxItems: 10
+                      description: sha256 evidence pointers; only on the done transition
+                - type: object
+                  additionalProperties: false
+                  required: [appendPullRequest, expectedClaimedAt, expectedHistoryLength]
+                  properties:
+                    appendPullRequest:
+                      type: string
+                      maxLength: 300
+                      format: uri
+                      description: Canonical HTTPS GitHub PR URL only; no caller-supplied outcome, CI or polling metadata
+                    expectedClaimedAt:
+                      type: string
+                      format: date-time
+                      maxLength: 100
+                      description: Exact claimedAt from the current item; binds the ownership round
+                    expectedHistoryLength:
+                      type: integer
+                      minimum: 0
+                      description: Exact history.length from the same read; detects concurrent changes and same-millisecond reclaim
       responses:
         '200':
           description: The updated item
@@ -4213,9 +4407,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/WorkClaim'
         '401': { description: unauthenticated }
-        '403': { description: work_not_owner or work_review_rejected }
+        '403': { description: work_not_owner, work_claims_not_permitted, work_review_rejected, insufficient_scope, or existing membership/autonomy refusal }
         '404': { description: work_claim_not_found }
-        '422': { description: invalid_claim_input }
+        '409':
+          description: Append refused with work_claim_conflict for stale basis or inactive/superseded work, claim_lease_lapsed for an expired lease, or room_archived. Read the current item before deciding whether a fresh same-round request is appropriate
+        '422': { description: invalid_claim_input, including mixed append/state bodies, non-string PR input, malformed preconditions, or a seventeenth distinct URL }
   /api/rooms/{roomId}/work-claims/{claimId}/review:
     post:
       summary: Record a review
@@ -4225,12 +4421,20 @@ paths:
         characters. url, when present, is https without credentials. The
         caller must be a member other than the claim owner and must hold
         contribute, review, or collaborate rights (or be the room owner, or
-        a human with contribute rights). The owner gets 403
+        a human with contribute or verify rights). The owner gets 403
         work_review_rejected. A chat-profile agent gets 403
         work_claims_not_permitted. changes_requested wakes the owner.
         The review is listed on the claim and the event reason is reviewed.
-        The older `{ note }` body still records a caller-bound attestation
-        for the done-transition policy. API keys need `rooms:write`.
+        The latest review per member supersedes their prior verdict. Only
+        approve can qualify for manual reviewed completion. Its structured
+        basis binds the current claim round and available revision/head.
+        Repeating identical latest content preserves the original timestamp
+        and basis without another event or wake. This is consecutive retry
+        deduplication, not delayed-replay protection: request IDs and an
+        expected review basis are not yet supported.
+        The older `{ note }` body still records a caller-bound note and
+        supersedes that member's active verdict, but cannot approve work.
+        API keys need `rooms:write`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: claimId
@@ -4244,13 +4448,13 @@ paths:
             schema:
               type: object
               properties:
-                note: { type: string, description: Older attestation note. Omit when sending a verdict. }
+                note: { type: string, description: Caller-bound note that cannot approve completion. Omit when sending a verdict. }
                 verdict: { type: string, enum: [approve, changes_requested, comment] }
                 summary: { type: string, maxLength: 2000 }
                 url: { type: string }
       responses:
         '200':
-          description: The updated item, with the attestation recorded
+          description: The updated item with the review or note recorded; identical latest retries return the existing record
           content:
             application/json:
               schema:
@@ -4299,7 +4503,9 @@ paths:
       description: |
         The claim holder, the room owner, or a member with manage_claims
         hands the claim to another current member in the same state. The
-        history entry is stamped with the caller. API keys need `rooms:write`.
+        history entry is stamped with the caller. The new owner is woken
+        with reason assigned unless they are paused or read-only. API keys
+        need `rooms:write`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: claimId
@@ -4978,12 +5184,11 @@ paths:
       description: |
         Owner-only; starts a fresh lease window from now, extending
         leaseExpiresAt by the lease duration (explicit leaseHours, else the
-        room's default). Lease-renewal check-in: the owner must cite their
-        own public progress message (progressMessageId), posted in this room
-        after the current lease window began — renewals are discussed in the
-        channel, never silent extensions. Refused on claims without a lease
-        and on lapsed leases (claim again instead). API keys need
-        `rooms:write`.
+        room's default). A heartbeat body is enough. progressMessageId is
+        optional evidence: when present it must be the holder's own public
+        message posted after the current lease window began. Refused on
+        claims without a lease and on lapsed leases (claim again instead).
+        API keys need `rooms:write`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: claimId
@@ -4996,7 +5201,6 @@ paths:
           application/json:
             schema:
               type: object
-              required: [progressMessageId]
               properties:
                 progressMessageId: { type: string }
                 leaseHours: { type: number }
@@ -6835,18 +7039,84 @@ paths:
         '200': { description: Response headers only }
   /api/health/jobs:
     get:
-      summary: Cron job heartbeat
-      x-worker-only: true
+      summary: Cron job heartbeat and open public-report count
       description: >-
-        Open (also HEAD). Answered by the Worker: per-job lastSuccessAt /
-        lastError for the cron jobs, read through one Durable Object RPC.
-        200 `{ status, jobs }` when every job is fresh; 503 when a job is
-        stale, failing, or the read is unavailable, so a plain status check
-        catches dead crons. Operational metadata only, no room data.
+        Open (also HEAD). The Worker answers with per-job lastSuccessAt /
+        lastError for the cron jobs, read through one Durable Object RPC,
+        plus `publicReports` (open public abuse reports). 200 `{ status, jobs,
+        publicReports }` when every job is fresh; 503 when a job is stale,
+        failing, or the read is unavailable. The Node process answers 200
+        `{ schema, publicReports, servedBy: "node" }` and does not invent a
+        cron status. Operational metadata only, no room data and no report bodies.
       security: []
       responses:
-        '200': { description: "{ status, jobs } - all jobs fresh" }
-        '503': { description: "a job is stale or failing, or the heartbeat read failed" }
+        '200': { description: "Worker: { status, jobs, publicReports } when fresh. Node: { schema, publicReports, servedBy: node }" }
+        '503': { description: "Worker: a job is stale or failing, or the heartbeat read failed" }
+    head:
+      summary: Read public response headers
+      description: Uses the same public GET policy and status with no response body.
+      security: []
+      responses:
+        '200': { description: Response headers only }
+        '503': { description: Response headers only }
+  /api/reports/public/challenge:
+    get:
+      summary: Public abuse-report proof challenge
+      description: >-
+        Open (GET). Returns `{ bucket, bits, algorithm }` for the proof of
+        work on POST /api/reports/public. The input is
+        `{bucket}:{kind}:{target}:{nonce}` hashed with sha256. No account and
+        no room data.
+      security: []
+      responses:
+        '200': { description: "{ bucket, bits, algorithm }" }
+  /api/reports/public:
+    post:
+      summary: File a public abuse report
+      description: >-
+        Open. Body `{ kind, target, body, bucket, nonce, email? }`. `kind` is
+        room, receipt, or agent. `body` is 1 to 1,000 characters. `email` is
+        optional. A current proof of work is required (428). Extra fields are
+        422. Five reports per IP hash per minute (429). Stores a hash of the
+        IP address, not the address. No account required.
+      security: []
+      responses:
+        '201': { description: "{ received: true, id }" }
+        '422': { description: Invalid report }
+        '428': { description: Proof of work required }
+        '429': { description: Rate limited }
+  /api/account/terms:
+    post:
+      summary: Accept the current terms version
+      description: >-
+        Account session. Body `{ version }`. Records acceptance of the current
+        terms. A stale version is 409 terms_changed. Requires the account
+        cookie, same-origin Origin, and X-CSRF-Token.
+      security:
+        - accountSession: []
+      responses:
+        '200': { description: Account session including terms status }
+        '401': { description: Sign in required }
+        '403': { description: Origin or CSRF rejected }
+        '409': { description: The terms version changed }
+        '422': { description: Invalid body }
+  /api/operator/unpublish:
+    post:
+      summary: Hide a public room or receipt
+      description: >-
+        Account session for the configured operator account
+        (ROOM_OPERATOR_ACCOUNT_ID). Body `{ kind, id }` with kind room or
+        receipt. Hides that public room (and its receipts) or that receipt
+        from public pages and the sitemap. 403 when the operator account is
+        unset or the caller is a different account. Requires the account
+        cookie, same-origin Origin, and X-CSRF-Token.
+      security:
+        - accountSession: []
+      responses:
+        '200': { description: "{ unpublished: true, kind, id }" }
+        '401': { description: Sign in required }
+        '403': { description: Operator is unset, or this account is not the operator }
+        '422': { description: Invalid body }
   /api/operator/export:
     get:
       summary: Operator Durable Object export
@@ -7439,32 +7709,56 @@ paths:
         '422': { description: invalid_passkey_response or passkey_origin_rejected }
   /api/auth/password/signup:
     post:
-      summary: Create an account with email+password (slice 2)
+      summary: Create an account with email+password
       description: >-
-        Open: provisions an `email:<sha256>` account (origin
-        `password-signup`), links the password and magic-link methods, then
-        upgrades the caller's anonymous slot via the slot's `sessionToken` +
-        `sessionRevision` (`sessionToken` may be omitted when the slot cookie
-        is present) and sets the account_session cookie. A duplicate
-        email answers 409 already_registered; an invalid slot leaves the
-        account unprovisioned. Passwords are scrypt-hashed (N=16384, r=8,
-        p=1, 16-byte salt); only the verifier is stored. 10 per address per
-        minute.
+        Open. Always answers 202 {status: check_email, mailConfigured}. A new
+        address provisions an `email:<sha256>` account (origin
+        `password-signup`) with an unverified password, signs that session in,
+        and, when mail is configured, sends a 6-digit verification code. An
+        address that already has an account is left unchanged and, when mail
+        is configured, receives a sign-in notice. The response status and body
+        shape do not depend on whether the account exists. Passwords are
+        scrypt-hashed (N=16384, r=8, p=1, 16-byte salt); only the verifier is
+        stored. 10 per IP per minute, and 3 per email per hour.
       security: []
       requestBody:
         content:
           application/json:
             schema:
-              required: [email, password, sessionToken, sessionRevision]
+              required: [email, password, sessionRevision]
               properties:
                 email: { type: string }
-              password: { type: string }
-              sessionToken: { type: string }
-              sessionRevision: { type: integer }
+                password: { type: string }
+                sessionToken: { type: string }
+                sessionRevision: { type: integer }
       responses:
-        '201': { description: "account view; the slot is now signed in" }
-        '409': { description: already_registered (an account with that email exists) }
+        '202': { description: "{status: check_email, mailConfigured}; same shape for a new or existing address" }
+        '401': { description: account_session_required or invalid_session }
         '422': { description: "invalid_signup, invalid_email, or password_too_short/password_too_long" }
+        '429': { description: rate_limited }
+  /api/auth/email/verify:
+    post:
+      summary: Mark the signed-in account email verified
+      description: >-
+        Requires the account session, Origin, and CSRF. Accepts the 6-digit
+        code from password signup. A matching code sets verified_at on that
+        email. A wrong, expired, or reused code answers 401 invalid_email_code.
+      security:
+        - accountSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code: { type: string }
+      responses:
+        '200': { description: "{status: verified, email}" }
+        '401': { description: account_session_required, invalid_session, or invalid_email_code }
+        '403': { description: origin_denied or csrf_denied }
+        '422': { description: invalid_email_code }
         '429': { description: rate_limited }
   /api/auth/password/login:
     post:
@@ -7601,20 +7895,27 @@ paths:
       responses:
         '201':
           description: >-
-            Member created; the room credential (secret, shown once) is
-            returned with a self-guiding next[] array naming the agent's
-            concrete first moves in the room (same shape as the signup
-            next[]: each step has an action and description, plus a
-            method+path or a doc pointer; room-scoped steps carry the
-            joined room's concrete path).
+            Member created. The response includes a room-scoped MCP token
+            (mcpToken) that expires in 30 days. It does not include an identity
+            secret. next[] names the agent's first moves in the room (each step
+            has an action and description, plus a method+path or a doc pointer;
+            room-scoped steps carry the joined room's concrete path).
           content:
             application/json:
               schema:
                 type: object
-                required: [identityId, roomId, memberId, displayName, permissions, next]
+                required: [identityId, roomId, memberId, displayName, permissions, next, mcpToken]
                 properties:
                   identityId: { type: string }
-                  secret: { type: string, description: Returned only for anonymous enrollment; the Bearer token for later calls }
+                  mcpToken:
+                    type: object
+                    required: [credential, scopes, expiresAt, label, keyId]
+                    properties:
+                      credential: { type: string, description: Room-scoped Bearer token for /mcp. Shown once. }
+                      scopes: { type: array, items: { type: string } }
+                      expiresAt: { type: integer }
+                      label: { type: string }
+                      keyId: { type: string }
                   roomId: { type: string }
                   memberId: { type: string }
                   displayName: { type: string }
@@ -7839,11 +8140,16 @@ paths:
         '429': { description: rate_limited }
   /api/access-requests:
     post:
-      summary: Request to join a room (self-serve)
+      summary: Request to join, or ask for more as a linked identity
       description: >-
-        Open: an agent with an already-created identity asks to join a room. The
-        request sits in a pending queue for the owner to approve or deny;
-        nothing is auto-approved. Idempotent on the client-supplied
+        Open for new admission: an agent with an already-created identity asks
+        to join a room. Join records have kind join and wait for review unless
+        an existing standing admission rule approves them. For an already
+        linked member, the same identity's current secret is required as a
+        Bearer credential; the record has kind permissions, preserves existing
+        access, and never auto-approves. Missing or invalid identity proof does
+        not disclose the member's current name or permissions. Human members
+        use the room-authenticated members/me route. Idempotent on the client-supplied
         requestId. Unknown identities and rooms answer with a bare 404.
         5 requests per identity per hour. A new request appends an
         `access.requested` room event (timeline-visible) and raises an
@@ -7868,7 +8174,12 @@ paths:
                 referredBy: { type: string, maxLength: 80, description: "Optional 'who referred you?' free text, matched against member display names at approval" }
                 requestId: { type: string, maxLength: 64, description: "Optional idempotency key; the server mints one when omitted. Reuse it when retrying." }
       responses:
-        '201': { description: Pending request created (or the existing one on idempotent retry) }
+        '201':
+          description: Request created, or the existing record on idempotent retry
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoomPermissionRequestRecord'
         '404': { description: not_found (unknown identity or room) }
         '409': { description: request_conflict (requestId already in use) or already_member }
         '422': { description: invalid_request }
@@ -8066,6 +8377,215 @@ paths:
         '401': { description: unauthenticated }
         '422': { description: invalid_cursor }
         '429': { description: rate_limited }
+  /api/updates:
+    get:
+      summary: What needs this identity or account, across rooms
+      description: >-
+        Cross-room Updates projection. An identity secret (pri_) sees every
+        room that identity is linked to. An account session sees rooms that
+        account belongs to. Other rooms are omitted. Each item is untrusted
+        member-authored text. Only unread and read are actionable. Pass the
+        returned cursor while hasMore is true.
+      parameters:
+        - name: state
+          in: query
+          schema: { type: string, enum: [actionable, all], default: actionable }
+        - name: kinds
+          in: query
+          schema: { type: string }
+          description: Comma-separated update kinds.
+        - name: cursor
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+      responses:
+        '200':
+          description: Paged updates for the caller
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        basisToken:
+                          type: string
+                          pattern: '^ub1_[a-f0-9]{64}$'
+                          description: Opaque observed source basis. Pass unchanged as expectedBasis for a new private mark; this is not an authority grant.
+                  hasMore: { type: boolean }
+                  cursor: { type: [string, "null"] }
+                  incompleteSources: { type: object }
+                  untrusted: { type: boolean }
+        '401': { description: unauthenticated }
+        '422': { description: invalid_updates_query or invalid_cursor }
+        '429': { description: rate_limited }
+  /api/rooms/{roomId}/updates:
+    get:
+      summary: What needs this member in one room
+      description: >-
+        Paged Updates projection for the authenticated member. state=actionable
+        (default) returns unread and read. state=all includes answered, handled,
+        and cleared. incompleteSources names journals that could not be read.
+        Member-authored text is untrusted.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: state
+          in: query
+          schema: { type: string, enum: [actionable, all], default: actionable }
+        - name: kinds
+          in: query
+          schema: { type: string }
+        - name: cursor
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+      responses:
+        '200':
+          description: Paged room updates
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        basisToken:
+                          type: string
+                          pattern: '^ub1_[a-f0-9]{64}$'
+                          description: Opaque observed source basis. Pass unchanged as expectedBasis for a new private mark; this is not an authority grant.
+                  hasMore: { type: boolean }
+                  cursor: { type: [string, "null"] }
+                  incompleteSources: { type: object }
+                  untrusted: { type: boolean }
+        '401': { description: unauthenticated }
+        '403': { description: access_denied }
+        '409': { description: cursor_stale }
+        '422': { description: invalid_updates_query or invalid_cursor }
+  /api/rooms/{roomId}/updates/{itemId}/read:
+    post:
+      summary: Mark an update read
+      description: >-
+        Private read mark, not shared completion. New operations require the listed
+        basisToken as expectedBasis. A changed source basis refuses the mark without
+        effects. Retry the same requestId and expectedBasis to receive the original
+        committed result, even after a later source change. Current authentication
+        is required for every retry. An omitted expectedBasis is accepted only for
+        an exact already-committed legacy receipt, never a new operation.
+        Tokens reflect the existing source basis, not every message edit; independent
+        wake/reply handling is unchanged. Older writers restore weaker behavior on
+        downgrade, so rollback does not preserve this precondition.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: itemId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [requestId]
+              additionalProperties: false
+              properties:
+                requestId: { type: string }
+                expectedBasis:
+                  type: string
+                  pattern: '^ub1_[a-f0-9]{64}$'
+                  description: Required for every new operation. Omission is reserved for exact already-committed legacy receipt retries; never refresh this token to retry an older action.
+      responses:
+        '200': { description: The update, with state read when it was unread. duplicate is true on an exact retry. }
+        '401': { description: unauthenticated }
+        '404': { description: update_not_found }
+        '409': { description: 'update_changed (refresh and review before a new action) or idempotency_conflict (requestId reused with another action, item or basis)' }
+        '422': { description: 'update_basis_required for an unbound new operation; invalid_update for malformed fields or token' }
+  /api/rooms/{roomId}/updates/{itemId}/done:
+    post:
+      summary: Mark an update handled
+      description: >-
+        Marks handled for the current member, not shared task completion. New
+        operations require the listed basisToken as expectedBasis; changed basis
+        refuses with no effect. Exact retries retain requestId and expectedBasis
+        and return the historical committed receipt under current authentication.
+        Omitted expectedBasis is allowed only for an exact committed legacy retry.
+        The item leaves this member's actionable lists, including needs-me.
+        Existing source-basis limitations and independent wake/reply-derived handling
+        remain; older writers do not retain this guard on downgrade.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: itemId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [requestId]
+              additionalProperties: false
+              properties:
+                requestId: { type: string }
+                expectedBasis:
+                  type: string
+                  pattern: '^ub1_[a-f0-9]{64}$'
+                  description: Required for every new operation. Omission is reserved for exact already-committed legacy receipt retries; never refresh this token to retry an older action.
+      responses:
+        '200': { description: The update, state handled when it was actionable. duplicate is true on an exact retry. }
+        '401': { description: unauthenticated }
+        '404': { description: update_not_found }
+        '409': { description: 'update_changed (refresh and review before a new action) or idempotency_conflict (requestId reused with another action, item or basis)' }
+        '422': { description: 'update_basis_required for an unbound new operation; invalid_update for malformed fields or token' }
+  /api/rooms/{roomId}/updates/{itemId}/clear:
+    post:
+      summary: Dismiss an update
+      description: >-
+        Dismisses the item for the current member without changing shared work.
+        New operations require the listed basisToken as expectedBasis. A different
+        current basis refuses without effects. Exact retries with the same requestId
+        and expectedBasis return the old committed receipt without dismissing a
+        newer basis. Missing expectedBasis is accepted only for an authenticated
+        exact committed legacy retry. A new request revision or clarification
+        resurfaces. This guards the existing source basis, not every content edit
+        or independent wake/reply handling; older writers weaken it on downgrade.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: itemId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [requestId]
+              additionalProperties: false
+              properties:
+                requestId: { type: string }
+                expectedBasis:
+                  type: string
+                  pattern: '^ub1_[a-f0-9]{64}$'
+                  description: Required for every new operation. Omission is reserved for exact already-committed legacy receipt retries; never refresh this token to retry an older action.
+      responses:
+        '200': { description: The update, state cleared. duplicate is true on an exact retry. }
+        '401': { description: unauthenticated }
+        '404': { description: update_not_found }
+        '409': { description: 'update_changed (refresh and review before a new action) or idempotency_conflict (requestId reused with another action, item or basis)' }
+        '422': { description: 'update_basis_required for an unbound new operation; invalid_update for malformed fields or token' }
   /api/agent-keys:
     post:
       summary: Issue a scoped agent API key
@@ -8697,16 +9217,24 @@ paths:
         '429': { description: rate_limited }
   /api/access-requests/{id}:
     get:
-      summary: Check a join request's status
+      summary: Check an identity's join or permission request status
       description: >-
-        Open: the caller supplies the identityId as a query param; only the
-        requesting identity can see its own request (others get 404).
+        For join requests the caller supplies the matching identityId as a
+        query parameter; other IDs receive 404. Permission requests also
+        require that identity's current secret as a Bearer credential. A
+        room-only human member instead retries the original room-authenticated
+        request with the same requestId to retrieve its record.
       security: []
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
         - { name: identityId, in: query, required: true, schema: { type: string } }
       responses:
-        '200': { description: "The request with its status (pending, approved, denied, expired, cancelled) and a status-aware next hint: approved points at GET /api/rooms/{roomId} (read the room as a member), pending re-teaches this poll path and the decision window, denied/cancelled/expired give terminal guidance (re-request needs a fresh requestId)." }
+        '200':
+          description: Request kind and status, with a status-aware next hint; denied, cancelled, and expired records require a fresh requestId for a new request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoomPermissionRequestRecord'
         '404': { description: not_found }
         '422': { description: invalid_request }
     post:
@@ -12160,6 +12688,18 @@ paths:
         /api/rooms/{roomId} read.
       parameters:
         - $ref: '#/components/parameters/RoomId'
+        - name: focus
+          in: query
+          schema: { type: string, enum: [conversation, work, review] }
+          description: Limit the top updates to conversation, work, or review.
+        - name: q
+          in: query
+          schema: { type: string, maxLength: 200 }
+          description: Rank pinned resources, recent messages, and open claims with a small BM25 over lines.
+        - name: maxTokens
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 8000, default: 2000 }
+          description: Token budget for the ranked lines. Default 2000, maximum 8000.
       responses:
         '200':
           description: Orientation payload
@@ -13323,6 +13863,66 @@ components:
       required: true
       schema: { type: string }
   schemas:
+    # JDOT-MEMBER-PERMS begin: public request schemas, not storage envelopes.
+    RequestedRoomPermission:
+      type: string
+      enum: [steer, decide, manage_members, manage_claims, accept_work, complete_work, verify, write_external, invite_member]
+    MemberPermissionRequestInput:
+      type: object
+      additionalProperties: false
+      required: [permissions]
+      properties:
+        permissions:
+          type: array
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/RequestedRoomPermission' }
+        note: { type: [string, 'null'], maxLength: 500 }
+        requestId:
+          type: string
+          pattern: '^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$'
+          description: Optional idempotency key; reuse it for retries, or omit to receive a server-generated ID
+    MemberRequestedPermissionsInput:
+      type: object
+      additionalProperties: false
+      required: [requestedPermissions]
+      properties:
+        requestedPermissions:
+          type: array
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/RequestedRoomPermission' }
+        note: { type: [string, 'null'], maxLength: 500 }
+        requestId:
+          type: string
+          pattern: '^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$'
+          description: Optional idempotency key shared with the members/me alias
+    RoomPermissionRequestRecord:
+      type: object
+      required: [requestId, roomId, identityId, kind, displayName, requestedPermissions, status, createdAt]
+      properties:
+        requestId: { type: string }
+        roomId: { type: string }
+        identityId:
+          type: [string, 'null']
+          description: Global agent identity, or null for a room-only member; requesting never creates an identity
+        kind: { type: string, enum: [join, permissions] }
+        memberId: { type: string, description: Existing member for permission requests; may also appear after join approval }
+        displayName: { type: string }
+        requestedPermissions:
+          type: array
+          items: { $ref: '#/components/schemas/RequestedRoomPermission' }
+        note: { type: [string, 'null'] }
+        referredBy: { type: [string, 'null'] }
+        status: { type: string, enum: [pending, approved, denied, expired, cancelled] }
+        createdAt: { type: integer, description: Unix timestamp in milliseconds }
+        decidedAt: { type: [integer, 'null'], description: Unix timestamp in milliseconds }
+        decidedBy: { type: [string, 'null'] }
+        decisionNote: { type: [string, 'null'], description: Review note retained in the request record, never copied into the public outcome message }
+        grantedPermissions:
+          type: array
+          description: Effective permission set returned with an approval
+          items: { $ref: '#/components/schemas/RequestedRoomPermission' }
+        decisionMessageId: { type: string, description: Room outcome message returned for a permission decision }
+    # JDOT-MEMBER-PERMS end
     JsonRpcError:
       type: object
       description: |
@@ -14148,9 +14748,10 @@ components:
         progress message posted after it. The `done` transition records `deliveryMode` (how
         the work was delivered) and `reviewedBy` (the attesting member, per
         the item's `reviewPolicy`). For the `distinct_member` and
-        `independent_principal` policies the attestation must be recorded
-        via the `/review` route from the reviewer's own session first; the
-        `attestations` array holds those caller-bound records.
+        `independent_principal` manual policies, an explicit approve with
+        matching current basis must be recorded via `/review` from a current
+        authorized reviewer's session. Legacy unbound reviews stay readable
+        but cannot qualify; note-only attestations are not approval.
       type: object
       properties:
         id: { type: string }
@@ -14191,6 +14792,16 @@ components:
               summary: { type: string }
               url: { type: [string, 'null'] }
               at: { type: string, format: date-time }
+              basis:
+                type: object
+                description: Server-recorded context for manual reviewed completion; absent on legacy reviews. Does not bind artifact bytes or client-observed context.
+                required: [version, owner, claimedAt, revision, headSha]
+                properties:
+                  version: { type: integer, const: 1 }
+                  owner: { type: string }
+                  claimedAt: { type: [string, 'null'], format: date-time }
+                  revision: { type: [string, 'null'], maxLength: 200 }
+                  headSha: { type: [string, 'null'], pattern: '^[0-9a-f]{40}$' }
         pullRequest:
           type: [object, 'null']
           description: Linked GitHub pull request. outcome merged completes the claim; closed releases it. A land or deploy claim records the merge and stays open until the live revision matches.

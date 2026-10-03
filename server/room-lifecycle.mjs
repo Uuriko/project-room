@@ -15,7 +15,7 @@
 // in server/writer-fence.mjs, advanced by the 0→34 migration chain in
 // server/store.mjs (recovery.mjs requires the version to equal it exactly).
 // This module owns the column and its data only — never PRAGMA user_version.
-import { EVENT_TYPES as T, PERMISSIONS, event, validId, ROOM_KINDS, roomKind, isRoomArchived } from "../src/events.js";
+import { EVENT_TYPES as T, PERMISSIONS, event, validId, ROOM_KINDS, roomKind, isRoomArchived, HISTORY_DEFAULTS_VERSION } from "../src/events.js";
 import { ServiceError, provisionalAccountPrefix } from "./store.mjs";
 import { accountRoomCredits, GROWTH_ROOM_ORIGIN } from "./growth-loop.mjs";
 import { getRoomTemplate } from "./templates.mjs";
@@ -131,6 +131,7 @@ export function createAccountRoom(store, token, binding, request) {
     if (accountId.startsWith(provisionalAccountPrefix)) fail(403, "room_creation_denied", "This room key belongs to one room; sign in with an account key to create rooms");
     const memberships = store.db.prepare("SELECT room_id, member_id FROM member_accounts WHERE account_id=? ORDER BY room_id").all(accountId);
     if (memberships.length >= ACCOUNT_ROOM_LIMIT) fail(409, "pilot_limit", "Bounded pilot capacity reached; no room was created");
+    if (memberships.length > 0) store.accountLogins.assertEmailVerified(accountId);
     // The same per-room check discovery uses (active human membership with its
     // invitation evidence intact), then owner or manage_members in that room.
     // Zero memberships means a stranger's first room: always allowed, they
@@ -155,7 +156,7 @@ export function createAccountRoom(store, token, binding, request) {
     }
     const ownerId = "owner", at = new Date(store.now()).toISOString();
     store.initialize([
-      event({ type: T.ROOM_CREATED, actorId: ownerId, roomId, at, data: { roomId, ownerId, title, purpose, kind } }),
+      event({ type: T.ROOM_CREATED, actorId: ownerId, roomId, at, data: { roomId, ownerId, title, purpose, kind, historyDefaultsVersion: HISTORY_DEFAULTS_VERSION } }), // PRIV-2
       event({ type: T.MEMBER_ADDED, actorId: ownerId, roomId, at, data: { memberId: ownerId, displayName, kind: "human", permissions: [...PERMISSIONS] } })
     ]);
     store.ensureHumanAccountBinding(roomId, ownerId, accountId, foundedWithGrowth ? GROWTH_ROOM_ORIGIN : "account-room-create");

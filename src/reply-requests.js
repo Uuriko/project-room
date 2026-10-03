@@ -104,7 +104,8 @@ export async function confirmsReplyCommand(receipt, command, roomId, memberId) {
 export function replyPostMode(data) {
   const fields = REPLY_FIELDS.filter(key => own(data, key));
   if (!fields.length) return null;
-  requireValid(id(data.messageId) && text(data.body), "Reply requests require an explicit message and text");
+  const bodyKept = text(data.body) || (data.redacted === true && data.body == null);
+  requireValid(id(data.messageId) && bodyKept, "Reply requests require an explicit message and text");
   requireValid(!["packetId", "basisRevision", "allowOlderBasis"].some(key => own(data, key)), "Reply requests cannot include proposal fields");
   if (own(data, "requestKind")) {
     requireValid(fields.length === 1 && data.requestKind === "reply" && id(data.toMemberId), "Invalid reply request fields");
@@ -139,7 +140,8 @@ export function prepareReplyPost(state, incoming) {
   // the composer sends now carries one, and message.posted's command shape
   // already permits it, so leaving it out here refused every reply request and
   // every answer with "Unexpected reply request fields".
-  const allowed = ["messageId", "body", "channelId", "workItemId", "replyToId", "toMemberId", "requestPolicyVersion", ...REPLY_FIELDS];
+  // PRIV-1: rewritten reply-request posts carry redacted:true and a null body.
+  const allowed = ["messageId", "body", "channelId", "workItemId", "replyToId", "toMemberId", "requestPolicyVersion", "redacted", ...REPLY_FIELDS];
   requireValid(Object.keys(data).every(key => allowed.includes(key)), "Unexpected reply request fields");
   if (mode === "open") {
     requireValid(data.toMemberId !== incoming.actorId, "A reply request needs another participant");

@@ -379,7 +379,9 @@ export class RoomClient {
     if (!response.ok) {
       const body = await response.json().catch(() => null);
       const error = new Error(body?.error?.message || "Room export failed"); error.status = response.status; error.code = body?.error?.code;
-      if ([401, 403].includes(response.status) || (authMode === "account" && error.code === "session_binding_changed")) this.endAccess();
+      // PRIV-2: a member who is not the owner keeps their session; only the export is refused.
+      const ownerOnly = response.status === 403 && error.code === "owner_required";
+      if ((!ownerOnly && [401, 403].includes(response.status)) || (authMode === "account" && error.code === "session_binding_changed")) this.endAccess();
       throw error;
     }
     if (!/^text\/html/i.test(response.headers?.get("content-type") ?? "")) { const error = new Error("Room returned an unexpected export"); error.status = response.status; error.code = "invalid_response"; throw error; }

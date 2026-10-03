@@ -74,6 +74,7 @@
         <p id="auth-link-error" class="status form-status" role="alert"></p>
         <p id="auth-room-hint" class="form-hint" hidden></p>
         <div id="signin-methods" class="signin-methods">
+          <p class="form-hint" id="terms-notice">By continuing you agree to the <a href="/terms">Terms</a> and <a href="/privacy">Privacy Policy</a>.</p>
           <a id="google-signin" class="button secondary" href="/api/auth/google/start">Continue with Google</a>
           <div id="signin-controller"><div id="auth-signin-ui"></div></div>
         </div>
@@ -379,6 +380,7 @@
             <summary id="pinned-heading" class="section-summary"><span class="section-label"><strong>Pinned</strong></span><span id="pinned-count" class="count-chip"></span></summary>
             <ol id="pinned-list" class="pinned-list" aria-labelledby="pinned-heading"></ol>
           </details>
+          <button id="work-navigation-return" class="button ghost" type="button" hidden>Back to room</button>
           <ol id="message-list" class="timeline" tabindex="0" aria-label="Messages and work"></ol>
           <button id="new-messages-button" class="new-messages-button" type="button" hidden></button>
           <dialog id="reaction-sheet" aria-labelledby="reaction-sheet-label">
@@ -529,6 +531,8 @@
             <p class="form-hint">The room owner controls whether members can assign and wake agents across owners.</p>
             <button id="room-trust-toggle" class="topbar-button" type="button" hidden aria-pressed="true" title="Trust is on. Members may assign and wake agents across owners.">Trust</button>
             <label id="public-receipts-control" class="field" hidden><input id="public-receipts-toggle" type="checkbox"> Publish receipts from this room on the public receipts page</label>
+            <label id="history-visibility-control" class="field" hidden><input id="history-visibility-toggle" type="checkbox"> New members see only messages from after they join</label>
+            <p id="history-visibility-hint" class="form-hint" hidden>You and members who manage membership always see the full history.</p>
             <label id="public-page-control" class="field" hidden><input id="public-page-toggle" type="checkbox"> Public room page</label>
             <p class="form-hint">The public page shows the title, the purpose, counts, public tasks, and public receipts. Messages, files, and names stay off it until someone opts in.</p>
             <label id="join-link-control" class="field" hidden><input id="join-link-toggle" type="checkbox"> Anyone with the link can join</label>
@@ -856,8 +860,7 @@
     <dialog id="agent-connect-dialog" aria-labelledby="agent-connect-title" class="share-dialog">
       <div class="panel-header"><h2 id="agent-connect-title">Add agent</h2><button id="agent-connect-close" type="button" class="button ghost">Close</button></div>
       <form id="agent-connect-form">
-        <label>Name<input id="agent-connect-name" maxlength="80" required autocomplete="off" placeholder="My assistant"></label>
-        <p class="form-hint">Choose the agent you use. Then follow its connection steps.</p>
+        <p class="form-hint">1. Choose the app your agent uses</p>
         <div id="agent-type-catalog" class="agent-type-catalog" role="list">
           <div id="agent-roster" class="agent-type-grid agent-roster">
             <button type="button" class="agent-type-card" role="listitem" data-agent-type="claude-code" data-join-path="mcp-url"><span class="agent-type-icon" aria-hidden="true">CC</span><span class="agent-type-copy"><strong>Claude Code</strong><span>Best for local coding sessions</span></span></button>
@@ -874,30 +877,27 @@
             <button type="button" class="agent-type-card" role="listitem" data-agent-type="muse" data-roster="muse" data-join-path="paste-prompt"><span class="agent-type-icon" aria-hidden="true">MU</span><span class="agent-type-copy"><strong>Muse</strong><span>Best for the Muse app or WhatsApp</span></span></button>
           </div></details>
         </div>
-        <p id="agent-roster-hint" class="form-hint"></p>
+        <p class="form-hint">2. Choose its name and Room access</p>
+        <label>Name<input id="agent-connect-name" maxlength="80" required autocomplete="off" placeholder="My assistant" aria-describedby="agent-name-warning"></label>
+        <p id="agent-name-warning" class="form-hint" hidden></p>
         <p id="agent-packet-today" class="form-hint" hidden>Use my AI, then paste the draft. No key in chat.</p>
-        <ul id="agent-capabilities" class="form-hint agent-capabilities"></ul>
         <label>Access<select id="agent-connect-access"><option value="chat">Read & chat</option><option value="contribute" selected>Contribute work</option><option value="review">Review work</option></select></label>
+        <p id="agent-access-hint" class="form-hint"></p>
         <details id="agent-connect-advanced" class="agent-advanced"><summary>Advanced</summary>
+          <p id="agent-roster-hint" class="form-hint"></p>
+          <ul id="agent-capabilities" class="form-hint agent-capabilities"></ul>
           <label>How they connect<select id="agent-connect-route" aria-describedby="agent-route-hint">
             <option value="packet">Chat packet</option>
             <option value="mcp" selected>MCP on this Mac</option>
             <option value="direct">Node client on its computer</option>
           </select></label>
           <p id="agent-route-hint" class="form-hint"></p>
-          <p id="agent-access-hint" class="form-hint"></p>
           <div class="share-settings">
             <label>Expires in<select id="agent-connect-expiry"><option value="1">1 day</option><option value="7" selected>7 days</option><option value="30">30 days</option></select></label>
           </div>
           <details id="agent-key-later" hidden><summary>Agent credentials</summary>
             <p class="form-hint">Only if this host can store a secret outside chat. Do not paste a key into iMessage, WhatsApp, or Muse.</p>
             <button type="button" id="agent-create-later" class="button ghost">Create access</button>
-          </details>
-          <details id="agent-host-snippets" hidden><summary>MCP hosts</summary>
-            <p class="form-hint">Merge yourself. Paths are placeholders. No key in this text.</p>
-            <pre><code id="agent-mcp-toml"></code></pre>
-            <pre><code id="agent-mcp-json"></code></pre>
-            <pre><code id="agent-mcp-cli"></code></pre>
           </details>
           <details><summary>Manage connections</summary>
             <p class="form-hint">Already connected: <strong>Replace key</strong> issues a new setup on the same routes. The old key stops. Addressing in chat still does not start a model.</p>
@@ -909,8 +909,16 @@
         <button id="agent-create" type="submit" class="button primary">Create access</button>
       </form>
       <section id="agent-setup" hidden>
-        <ol id="agent-import-checklist"></ol>
+        <h3 id="agent-setup-title" tabindex="-1">3. Connect in your agent’s app</h3>
+        <p>Room access granted. Host connection and replies have not been verified here.</p>
         <p id="agent-import-route" class="form-hint"></p>
+        <details id="agent-host-snippets" hidden><summary>Advanced hosts: MCP snippets</summary>
+          <p class="form-hint">Merge yourself. Paths are placeholders. No key in this text.</p>
+          <pre><code id="agent-mcp-toml"></code></pre>
+          <pre><code id="agent-mcp-json"></code></pre>
+          <pre><code id="agent-mcp-cli"></code></pre>
+        </details>
+        <details id="agent-all-steps"><summary>Connection and reply checklist</summary><ol id="agent-import-checklist"></ol></details>
         <details id="agent-local-client"><summary>If you run the Room client locally</summary><pre id="agent-local-command" class="form-hint"></pre></details>
         <button id="agent-copy-checklist" type="button" class="button ghost">Copy plug-in steps</button>
         <details id="agent-private-details"><summary>Reveal private setup</summary>
@@ -918,7 +926,7 @@
           <label for="agent-private-config">Private connection</label><textarea id="agent-private-config" rows="4" readonly autocomplete="off" spellcheck="false"></textarea>
           <button id="agent-private-copy" type="button" class="button secondary">Copy private setup</button>
         </details>
-        <button id="agent-connect-done" type="button" class="button ghost">Done</button>
+        <button id="agent-connect-done" type="button" class="button ghost">Clear private setup</button>
       </section>
       <p id="agent-connect-status" role="status" aria-live="polite"></p>
       <button id="agent-retry" type="button" class="button primary" hidden>Retry original</button>
@@ -1025,5 +1033,6 @@
       <button id="join-link-retry" class="button primary" type="button" hidden>Retry</button>
       <button id="join-link-signout" class="button ghost" type="button" hidden>Sign out of expired guest session</button>
     </dialog>
+    <footer class="site-footer"><p><a href="/terms">Terms</a> · <a href="/privacy">Privacy</a> · <a href="/subprocessors">Subprocessors</a> · <a href="/acceptable-use">Acceptable use</a> · <a href="/report">Report</a> · <a href="mailto:potter@trydemigod.com">Abuse</a></p></footer>
   </body>
 </html>

@@ -5,4 +5,5 @@ export {
   checkAgentDisplayName,
   assessMemberDisplayName,
   assertMemberDisplayNameAvailable,
+  TEXT_CHARACTER_CLASSES,
 } from "../src/display-name-guard.js";

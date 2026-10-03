@@ -4,14 +4,16 @@
 // row. Unmatched paths fall through. Batch C fills `capability`. SPLIT reads
 // `scope`. Both columns are required now.
 
+import { AUTH_ROUTES } from "./auth.mjs";
 import { INBOX_ROUTES } from "./inbox.mjs";
+import { MEMBER_PERMISSION_ROUTES } from "./member-permissions.mjs";
 
 export const AUTH_CLASSES = Object.freeze(["none", "room", "account", "bearer", "roomToken", "door", "mcp"]);
 export const ROUTE_SCOPES = Object.freeze(["worker", "public", "directory", "room"]);
 export const ROUTE_METHODS = Object.freeze(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]);
 
 // Rows land here as groups leave the legacy chain. Do not push; replace the array.
-export const ROUTES = Object.freeze([...INBOX_ROUTES]);
+export const ROUTES = Object.freeze([...AUTH_ROUTES, ...INBOX_ROUTES, ...MEMBER_PERMISSION_ROUTES]);
 
 export function assertRouteRow(row) {
   const problems = [];
@@ -30,6 +32,29 @@ export function assertRouteRow(row) {
   if (row.bodyLimit !== undefined && (!Number.isInteger(row.bodyLimit) || row.bodyLimit < 1)) problems.push("bodyLimit");
   return problems;
 }
+
+// PRIV-1: reads that can carry a message body. The redaction test walks this
+// list. A new row here is a surface that must show no deleted text.
+export const MESSAGE_BODY_READS = Object.freeze([
+  Object.freeze({ id: "snapshot", group: "room", method: "GET", path: "/api/rooms/{roomId}" }),
+  Object.freeze({ id: "events", group: "room", method: "GET", path: "/api/rooms/{roomId}/events?after=0&limit=100" }),
+  Object.freeze({ id: "thread", group: "room", method: "GET", path: "/api/rooms/{roomId}/messages/{messageId}/thread" }),
+  Object.freeze({ id: "search", group: "room", method: "GET", path: "/api/rooms/{roomId}/search?q={needle}" }),
+  Object.freeze({ id: "export-jsonl", group: "room", method: "GET", path: "/api/rooms/{roomId}/export" }),
+  Object.freeze({ id: "export-html", group: "room", method: "GET", path: "/api/rooms/{roomId}/export?format=html" }),
+  Object.freeze({ id: "conversation", group: "room", method: "GET", path: "/api/rooms/{roomId}/conversation" }),
+  Object.freeze({ id: "return-brief", group: "room", method: "GET", path: "/api/rooms/{roomId}/return-brief" }),
+  Object.freeze({ id: "context", group: "room", method: "GET", path: "/api/rooms/{roomId}/context" }),
+  Object.freeze({ id: "open-questions", group: "room", method: "GET", path: "/api/rooms/{roomId}/open-questions" }),
+  Object.freeze({ id: "activity", group: "room", method: "GET", path: "/api/rooms/{roomId}/activity" }),
+  Object.freeze({ id: "mentions", group: "room", method: "GET", path: "/api/rooms/{roomId}/mentions" }),
+  Object.freeze({ id: "pins", group: "room", method: "GET", path: "/api/rooms/{roomId}/pins" }),
+  Object.freeze({ id: "stream", group: "room", method: "GET", path: "/api/rooms/{roomId}/stream?after=0", stream: true }),
+  Object.freeze({ id: "agent-inbox", group: "room", method: "GET", path: "/api/rooms/{roomId}/agent-inbox", auth: "agent" }),
+  Object.freeze({ id: "work-result", group: "receipt", method: "GET", path: "/api/rooms/{roomId}/work-result?workItemId={workItemId}" }),
+  Object.freeze({ id: "mcp-list-events", group: "mcp", tool: "room_list_events" }),
+  Object.freeze({ id: "mcp-read-messages", group: "mcp", tool: "room_read_messages" })
+]);
 
 export function assertRouteTable(routes = ROUTES) {
   const seen = new Set();

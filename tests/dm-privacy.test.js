@@ -196,11 +196,14 @@ test("pins: a pinned DM is invisible to non-participants on /pins and in the sna
 
 test("export: non-participants get no DM events in the JSONL export", async t => {
   const f = await seed(t);
-  const res = await f.get("/api/rooms/commons/export", f.keys.guest);
+  // PRIV-2: export is owner-only; a member who is not the owner gets 403.
+  assert.equal((await f.get("/api/rooms/commons/export", f.keys.guest)).status, 403);
+  // The owner is not a party to these DMs either.
+  const res = await f.get("/api/rooms/commons/export", f.keys.owner);
   assert.equal(res.status, 200);
   const text = await res.text();
-  assert.equal(text.includes(DM_BODY), false, "guest must not see the DM body in the export");
-  assert.equal(text.includes(DM_WORK_BODY), false, "guest must not see the work DM body in the export");
+  assert.equal(text.includes(DM_BODY), false, "the owner must not see the DM body in the export");
+  assert.equal(text.includes(DM_WORK_BODY), false, "the owner must not see the work DM body in the export");
   assert.ok(text.includes(PUBLIC_BODY), "public messages stay in the export");
   const ownerExport = await f.get("/api/rooms/commons/export?format=html", f.keys.owner);
   assert.equal(ownerExport.status, 200);

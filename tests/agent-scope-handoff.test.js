@@ -65,7 +65,7 @@ test('two real HTTP clients coordinate a fictional scope, preserve late proposal
   const loserIndex = 1 - winnerIndex;
   const winner = agents[winnerIndex], loser = agents[loserIndex];
   const raced = await winner.client.snapshot();
-  assert.equal(raced.sequence, beforeRace.sequence + 1, 'Rejected claim saves no event');
+  assert.equal(raced.sequence, beforeRace.sequence + 2, 'Rejected claim saves no event; the winner records the claim and its board receipt');
   assert.equal((await current(loser)).revision, 1);
   assert.equal((await current(loser)).claim, null);
   const orientedWinner = (await winner.client.orient()).work.find(item => item.id === winner.config.workItemId);

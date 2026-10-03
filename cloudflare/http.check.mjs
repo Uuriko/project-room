@@ -367,7 +367,7 @@ test('getdasha entry and canonical browser app share identities, rooms and invit
   assert.equal(productionVars.ROOM_ORIGIN, 'https://room.trydemigod.com');
   assert.equal(productionVars["ROOM_DEPLOYMENT"], 'production');
   assert.deepEqual(release.triggers.crons, []);
-  assert.deepEqual(release.env.production.triggers.crons, ['* * * * *']);
+  assert.deepEqual(release.env.production.triggers.crons, ['*/30 * * * *']);
   // Isolated staging owns its Durable Object. It must not inherit the entry
   // binding that points at production, and it must not take the public routes.
   assert.equal(release.name, 'project-room-staging');
@@ -406,48 +406,10 @@ test('getdasha entry and canonical browser app share identities, rooms and invit
     assert.equal((await call(true, '/api/agent-rooms', null, owner.secret)).rooms[0].roomId, room.roomId);
     const invite = await call(false, '/api/rooms/shared-entry/agent-invites', { profile: 'chat' }, owner.secret);
     const peer = await call(true, '/api/agent-invites/redeem', { code: invite.code, displayName: 'Cross-entry peer' });
-    const snapshot = await call(false, '/api/rooms/shared-entry', null, peer.secret);
+    const snapshot = await call(false, '/api/rooms/shared-entry', null, peer.mcpToken.credential);
     assert.equal(snapshot.viewerId, peer.memberId);
     assert.equal(snapshot.state.members[peer.memberId].displayName, 'Cross-entry peer');
   } finally { await mf.dispose(); }
-});
-
-// Independent platform contract: an actual Durable Object receipt survives restart
-// and is citable through HTTP MCP. Node SQLite tests cannot exercise this adapter
-// or transport. The prior nonexistent receipt id column breaks the final assertion.
-// Setup uses the receipt owner; no invented schema or production test seam.
-test('Worker MCP pitch cites a canonical receipt after Durable Object restart', async () => {
-  const bundled = await build({ entryPoints: [fileURLToPath(new URL('./http-worker.test-fixture.mjs', import.meta.url))],
-    bundle: true, write: false, format: 'esm', platform: 'neutral', external: ['node:*', 'cloudflare:*'] });
-  const origin = 'https://room.example.test', directory = await mkdtemp(join(tmpdir(), 'project-room-cf-emissary-'));
-  const config = { modules: true, script: bundled.outputFiles[0].text,
-    compatibilityDate: '2026-07-30', compatibilityFlags: ['nodejs_compat'],
-    durableObjects: { ROOM: { className: 'HttpTestRoom', useSQLite: true } },
-    durableObjectsPersist: directory, bindings: { ROOM_ORIGIN: origin } };
-  let mf = new Miniflare(config);
-  const call = async (path, data, key) => {
-    const response = await mf.dispatchFetch(origin + path, { method: 'POST',
-      headers: { Host: new URL(origin).host, 'CF-Connecting-IP': '192.0.2.1',
-        Origin: origin, 'Content-Type': 'application/json', ...(key ? { Authorization: `Bearer ${key}` } : {}) },
-      body: JSON.stringify(data) });
-    assert.ok(response.ok, await response.clone().text());
-    return response.json();
-  };
-  try {
-    const owner = await call('/api/agent-identities', { displayName: 'Receipt reviewer' });
-    const room = await call('/api/agent-rooms', { title: 'Receipt room', purpose: 'Synthetic review evidence' }, owner.secret);
-    const receipt = await call('/__test-emissary-receipt', { roomId: room.roomId });
-    await mf.dispose(); mf = new Miniflare(config);
-    const reply = await call('/mcp', { jsonrpc: '2.0', id: 'pitch', method: 'tools/call',
-      params: { name: 'emissary_pitch', arguments: { roomId: room.roomId,
-        focus: 'We need reviewers.', proof_refs: [receipt.receipt_id] } } }, owner.secret);
-    assert.equal(reply.error, undefined, JSON.stringify(reply));
-    assert.notEqual(reply.result?.isError, true, JSON.stringify(reply));
-    const result = reply.result?.structuredContent ?? JSON.parse(reply.result?.content?.[0]?.text ?? '{}');
-    assert.equal(typeof result.text, 'string', JSON.stringify(reply));
-    assert.ok(result.text.includes(receipt.receipt_id), 'pitch cites the persisted receipt');
-    assert.ok(result.text.startsWith('We need reviewers.'));
-  } finally { await mf.dispose(); await rm(directory, { recursive: true, force: true }); }
 });
 
 test('Worker bounty HTTP receipts create distinct durable webhook deliveries without dispatch', async () => {

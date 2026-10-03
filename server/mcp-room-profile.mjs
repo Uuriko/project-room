@@ -10,13 +10,14 @@ import { handlePublicWorkMcp, isPublicWorkMcpTool } from './mcp-public-work.mjs'
 import { MCP_DISCOVERY_BLOCK } from "./discoverability.mjs";
 import { ServiceError } from "./store.mjs";
 import { isIdentitySecret } from "./agent-identities.mjs";
+import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
-import { handleEmissaryTool } from "./emissary-lure.mjs";
 import { HeartbeatError } from "./agent-heartbeats.mjs";
 import { AgentPluginError } from "./agent-plugin-store.mjs";
 import { EVENT_CATALOG, WebhookSubscriptionError } from "./agent-webhook-subscriptions.mjs";
 import { BOND_SCOPES } from "./bonds.mjs";
 import { buildActivationPack } from "./room-activation-pack.mjs";
+import { buildOrient } from "./orient.mjs";
 import { randomUUID } from "node:crypto";
 import { validId, ROOM_KINDS, MAX_MESSAGE_BODY_CHARS } from "../src/events.js";
 import { nextWorkStep } from "../src/workflow.js";
@@ -74,11 +75,11 @@ function failureValue(error) {
 
 export function identityBearer(authorization) {
   if (typeof authorization !== "string" || !authorization.startsWith("Bearer ")) {
-    return { error: "Hosted room tools require Authorization: Bearer and a live identity secret" };
+    return { error: "Hosted room tools require Authorization: Bearer and a live identity or room token" };
   }
   const token = authorization.slice("Bearer ".length);
-  if (!token || /\s/.test(token) || !isIdentitySecret(token)) {
-    return { error: "Hosted room tools require a live identity secret" };
+  if (!token || /\s/.test(token) || !(isIdentitySecret(token) || token.startsWith(API_KEY_PREFIX))) {
+    return { error: "Hosted room tools require a live identity or room token" };
   }
   return { secret: token };
 }
@@ -179,37 +180,7 @@ function validRoomArgs(name, args) {
     const buildOk = args.buildId === undefined || typeof args.buildId === "string" && args.buildId.length >= 1 && args.buildId.length <= 200;
     return validId(args.itemId) && sourceOk && buildOk && (args.sourceRevision !== undefined || args.buildId !== undefined);
   }
-  if (name === "emissary_drop" || name === "emissary_pitch" || name === "human_invite_mint") {
-    return validEmissaryArgs(name, args);
-  }
   return false;
-}
-
-// Emissary growth layer (Slice 2): first-pass shape check for the three
-// generation tools. Deep validation (venue caps, lint, proof resolution,
-// rate limits) lives in server/emissary-lure.mjs and stays authoritative.
-function validEmissaryArgs(name, args) {
-  const idemOk = args.idempotency_key === undefined
-    || typeof args.idempotency_key === "string" && args.idempotency_key.length >= 1 && args.idempotency_key.length <= 128;
-  if (name === "emissary_drop") {
-    const venueOk = typeof args.venue === "string" && ["sssnack", "colony", "tantive", "agentboard", "x", "generic"].includes(args.venue);
-    const variantOk = args.variant === undefined || ["thread", "reply", "subject"].includes(args.variant);
-    const titleOk = typeof args.title === "string" && args.title.trim().length > 0 && args.title.length <= 120;
-    const termsOk = typeof args.terms === "string" && args.terms.trim().length > 0 && args.terms.length <= 2000;
-    const deadlineOk = args.deadline === undefined || Number.isSafeInteger(args.deadline) && args.deadline > 0;
-    const attemptsOk = args.attempts_remaining === undefined || Number.isSafeInteger(args.attempts_remaining) && args.attempts_remaining >= 0;
-    const codeOk = args.code === undefined || typeof args.code === "string" && /^[A-Za-z0-9-]{1,32}$/.test(args.code);
-    return venueOk && variantOk && titleOk && termsOk && deadlineOk && attemptsOk && codeOk && idemOk;
-  }
-  if (name === "emissary_pitch") {
-    const focusOk = typeof args.focus === "string" && args.focus.trim().length > 0 && args.focus.length <= 200;
-    const refsOk = Array.isArray(args.proof_refs) && args.proof_refs.length <= 5
-      && args.proof_refs.every(ref => typeof ref === "string" && ref.length > 0 && ref.length <= 64);
-    return focusOk && refsOk && idemOk;
-  }
-  const expiryOk = args.expires_in_days === undefined || Number.isSafeInteger(args.expires_in_days) && args.expires_in_days >= 1 && args.expires_in_days <= 7;
-  const noteOk = args.note === undefined || typeof args.note === "string" && args.note.length <= 140;
-  return expiryOk && noteOk && idemOk;
 }
 
 function validInboxArgs(name, args) {
@@ -399,9 +370,10 @@ function callRoomTool(store, secret, identity, name, args, agentRooms) {
     return store.invites.redeem(args.inviteCode, { displayName, identitySecret: secret });
   }
   if (name === "room_check_access" && args.roomId === undefined) {
+    const allowed = mcpRoomAllowlist(store, secret);
     const rooms = store.identities.roomsForIdentity(identity.identityId).map(row => ({
       roomId: row.roomId, title: row.title ?? row.roomId, memberId: row.memberId
-    }));
+    })).filter(row => !allowed || allowed.includes(row.roomId));
     return {
       contractVersion: 1, type: "agent_connection_check", status: "credential_accepted",
       identityId: identity.identityId, displayName: identity.displayName, rooms,
@@ -419,13 +391,16 @@ function callRoomTool(store, secret, identity, name, args, agentRooms) {
     };
   }
   if (name === "room_activation_pack") {
-    store.authenticate(secret, roomId);
-    return buildActivationPack(store, roomId);
+    const auth = store.authenticate(secret, roomId);
+    return buildActivationPack(store, roomId, auth.member.id);
   }
   if (name === "get_room_context") {
-    return store.roomContext(secret, roomId, {
+    const context = store.roomContext(secret, roomId, {
       sinceVersion: args.since_version === undefined ? null : args.since_version
     });
+    if (context.not_modified) return context;
+    const auth = store.authenticate(secret, roomId);
+    return { ...context, orient: buildOrient(store, roomId, auth.member.id, { text: false, token: secret }) };
   }
   if (name === "room_list_events") {
     const auth = store.authenticate(secret, roomId);
@@ -445,14 +420,6 @@ function callRoomTool(store, secret, identity, name, args, agentRooms) {
   if (name === "room_list_work") return listWork(store, secret, args);
   if (name === "add_land_item" || name === "list_land_queue" || name === "remove_land_item" || name === "report_tip") {
     return callLandTool(store, secret, name, args);
-  }
-  // Emissary growth layer (Slice 2): generation only — the member copies
-  // the returned text/URL and transports it by hand. Authorization
-  // (member-only, guest denied, t1_readonly denied) lives in
-  // handleEmissaryTool; human invites additionally pass through
-  // ShareLinks.create's owner/delegated-admin gate.
-  if (name === "emissary_drop" || name === "emissary_pitch" || name === "human_invite_mint") {
-    return handleEmissaryTool(store, secret, name, args);
   }
   if (name === "room_list_peer_dms") return listPeerDms(store, secret, args);
   if (name === "room_put_file") {
@@ -752,9 +719,33 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
   return { jsonrpc: "2.0", id: requestId, error: { code: -32601, message: "Method not found" } };
 }
 
+function mcpRoomAllowlist(store, secret) {
+  if (typeof secret !== "string" || !secret.startsWith(API_KEY_PREFIX)) return null;
+  const record = store.agentPlugin.verifyPresentedApiKey(secret);
+  if (!record) return [];
+  const rooms = record.scopes.filter(scope => scope.startsWith("mcp:room:")).map(scope => scope.slice("mcp:room:".length));
+  return rooms.length > 0 ? rooms : null;
+}
+
+function resolveMcpIdentity(store, secret, userAgent) {
+  if (secret.startsWith(API_KEY_PREFIX)) {
+    const record = store.agentPlugin.verifyPresentedApiKey(secret);
+    if (!record) return null;
+    const row = store.identities.get(record.identityId);
+    if (!row) return null;
+    store.agentPlugin.notePresentedKeyUse(record.keyId, { ua: userAgent });
+    store.identities.noteMcpUse(row.identityId, { legacy: false, ua: userAgent });
+    return { identityId: row.identityId, displayName: row.displayName };
+  }
+  const identity = store.identities.resolveGlobalIdentitySecret(secret);
+  if (!identity) return null;
+  store.identities.noteMcpUse(identity.identityId, { legacy: true, ua: userAgent });
+  return identity;
+}
+
 export function createHostedRoomMcp(store, { agentRooms } = {}) {
   const rooms = agentRooms ?? new AgentRooms(store);
-  return async function hostedRoomMcp(message, { authorization, mcpUrl, searchParams } = {}) {
+  return async function hostedRoomMcp(message, { authorization, mcpUrl, searchParams, userAgent } = {}) {
     if (message?.method === "tools/call" && isPublicWorkMcpTool(message.params?.name)) {
       const absent = authorization === undefined;
       const parsed = absent ? { secret: null } : identityBearer(authorization);
@@ -763,8 +754,8 @@ export function createHostedRoomMcp(store, { agentRooms } = {}) {
     }
     const parsed = identityBearer(authorization);
     if (parsed.error) return rpcError(message, MCP_AUTH_REQUIRED, parsed.error);
-    const identity = store.identities.resolveGlobalIdentitySecret(parsed.secret);
-    if (!identity) return rpcError(message, MCP_AUTH_REQUIRED, "Unknown or revoked identity secret");
+    const identity = resolveMcpIdentity(store, parsed.secret, userAgent);
+    if (!identity) return rpcError(message, MCP_AUTH_REQUIRED, "Unknown or revoked identity credential");
     return handleAuthed(message, { store, secret: parsed.secret, identity, mcpUrl, searchParams, agentRooms: rooms });
   };
 }

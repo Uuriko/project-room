@@ -10,6 +10,8 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { handleWorkClaims } from "../server/work-claim-routes.mjs";
 import { applyPullRequestWebhook, syncClaimPullRequests } from "../server/claim-pr-sync.mjs";
 import { pullRequestOutcomeFromWebhook } from "../server/claim-coordination.mjs";
+// SEC-2: claim reads carry content-trust markers; compare the claim itself.
+const stripTrust = value => JSON.parse(JSON.stringify(value, (key, entry) => (key === "untrusted" || key === "contentTrust" ? undefined : entry)));
 
 const URL_A = "https://github.com/Uuriko/project-room/pull/7";
 
@@ -36,7 +38,8 @@ async function room(t) {
     res: {},
     url: new URL("https://room.example/api/rooms/commons/work-claims"),
     store, roomId: "commons",
-    auth: { member: { id: "owner", kind: "human", permissions: [] } },
+    auth: extra.auth ?? { member: { id: "owner", kind: "human", permissions: [] } },
+    reauthorize: extra.reauthorize,
     workClaimRoute: route, workClaimId: id, helpers,
     registry: store.workClaims,
     fetchPullRequest: extra.fetchImpl,
@@ -48,6 +51,39 @@ async function room(t) {
 const claimEvents = store => store.db.prepare(
   "SELECT body FROM events WHERE room_id=? ORDER BY sequence"
 ).all("commons").map(row => JSON.parse(row.body)).filter(event => event.type === "work_claim.updated");
+
+// Authoring gate: the real route/storage/event boundary owns attach-after-claim.
+// A dropped update alternative, unconditional write, or weaker CAS breaks this
+// journey. Existing create-time PR tests cannot reach the missing transition.
+test("linking a draft after claiming preserves the lease and reconciles exact duplicates", async t => {
+  const { store, call } = await room(t);
+  await call("create", null, { id: "later-pr", files: ["src/held.js"], repo: "Uuriko/project-room", branch: "draft" });
+  const claimed = (await call("claim", "later-pr", { leaseHours: 6 })).value;
+  const body = { appendPullRequest: URL_A + "/", expectedClaimedAt: claimed.claimedAt, expectedHistoryLength: claimed.history.length };
+  const beforeEvents = claimEvents(store).length;
+  const linked = (await call("update", "later-pr", body)).value;
+  assert.equal(linked.pullRequests.length, 1);
+  assert.equal(linked.pullRequest.url, URL_A);
+  assert.equal(linked.pullRequest.outcome, null);
+  assert.equal(linked.ci, null);
+  for (const key of ["owner", "state", "claimedAt", "leaseStartAt", "leaseExpiresAt", "files", "fileBlocks", "dependsOn", "repo", "branch", "revision", "deliveryMode"]) {
+    assert.deepEqual(linked[key], claimed[key], key);
+  }
+  assert.equal(linked.history.length, claimed.history.length + 1);
+  assert.match(linked.history.at(-1).note, /https:\/\/github\.com\/Uuriko\/project-room\/pull\/7/);
+  assert.deepEqual(stripTrust((await call("read", "later-pr")).value), linked);
+  assert.equal(claimEvents(store).length, beforeEvents + 1);
+  assert.equal(claimEvents(store).at(-1).data.action, "state_changed");
+  assert.equal(claimEvents(store).at(-1).data.reason, undefined);
+  const stale = await call("update", "later-pr", body);
+  assert.equal(stale.status, 409);
+  assert.equal(stale.value.error.code, "work_claim_conflict");
+  assert.equal(stale.value.next[0].path, "/api/rooms/commons/work-claims/later-pr");
+  const repeated = (await call("update", "later-pr", { ...body, expectedHistoryLength: linked.history.length })).value;
+  assert.deepEqual(repeated, linked);
+  assert.equal(claimEvents(store).length, beforeEvents + 1);
+  assert.deepEqual(store.workClaims.get("commons", "later-pr"), linked);
+});
 
 test("a webhook close and a polled pull reduce to the same outcomes", () => {
   assert.equal(pullRequestOutcomeFromWebhook({ action: "opened", pull_request: { html_url: URL_A, merged: false } }), null);
@@ -96,6 +132,41 @@ test("a closing webhook releases the claim, and a second delivery does not settl
   assert.deepEqual(settled.data.pullRequest, { url: URL_A, outcome: "closed" });
   assert.deepEqual(settled.data.paths, ["docs/a.md"]);
   assert.deepEqual(applyPullRequestWebhook(store, payload).applied, []);
+});
+
+test("a batch stays claimed until every linked pull is merged or closed", async t => {
+  const { store, call } = await room(t);
+  const second = "https://github.com/Uuriko/project-room/pull/9";
+  await call("create", null, { id: "batch", repo: "Uuriko/project-room", branch: "coord" });
+  let current = (await call("claim", "batch", {})).value;
+  for (const appendPullRequest of [URL_A, second]) {
+    current = (await call("update", "batch", { appendPullRequest, expectedClaimedAt: current.claimedAt, expectedHistoryLength: current.history.length })).value;
+  }
+  const firstFetch = githubFetch({ merged: true, state: "closed" });
+  await call("sweep", null, {}, { fetchImpl: firstFetch.fetchImpl });
+  const midway = store.workClaims.get("commons", "batch");
+  assert.equal(midway.state, "claimed");
+  assert.equal(midway.repo, "Uuriko/project-room");
+  assert.equal(midway.branch, "coord");
+  assert.equal(midway.pullRequests.find(pull => pull.url === URL_A).outcome, "merged");
+  assert.equal(midway.pullRequests.find(pull => pull.url === second).outcome, null);
+  assert.equal(midway.pullRequest.url, second);
+  assert.equal(claimEvents(store).some(event => event.data.action === "pr_merged"), false);
+  const closedFetch = githubFetch({ merged: false, state: "closed" });
+  await call("sweep", null, {}, { fetchImpl: closedFetch.fetchImpl });
+  const settled = store.workClaims.get("commons", "batch");
+  assert.equal(settled.state, "unclaimed");
+  assert.equal(settled.pullRequests.every(pull => pull.outcome), true);
+  assert.equal(claimEvents(store).some(event => event.data.action === "pr_closed"), true);
+});
+
+test("an explicit release settles a batch while a linked pull is still open", async t => {
+  const { store, call } = await room(t);
+  await call("create", null, { id: "open-batch", pullRequests: [URL_A, "https://github.com/Uuriko/project-room/pull/11"] });
+  await call("claim", "open-batch", {});
+  const released = await call("release", "open-batch", { reason: "handed off" });
+  assert.equal(released.value.state, "unclaimed");
+  assert.equal(store.workClaims.get("commons", "open-batch").owner, null);
 });
 
 test("an open pull is not settled, and the next sweep waits instead of polling again", async t => {
@@ -219,4 +290,55 @@ test("a cron deadline does not call GitHub and does not start a second lookup", 
   assert.equal(partial.checked, 1);
   assert.equal(store.workClaims.get("commons", "lane").pullRequest.outcome, null);
   assert.equal(store.workClaims.get("commons", "other").pullRequest.etag ?? null, null);
+});
+
+// Distinct storage contract: a common read permits one append, and the losing
+// writer must reconcile before adding its own URL. No link or event is lost.
+test("concurrent PR attachments serialize and invalid update alternatives cannot write", async t => {
+  const { store, call } = await room(t);
+  await call("create", null, { id: "concurrent" });
+  const claim = (await call("claim", "concurrent", {})).value;
+  const basis = { expectedClaimedAt: claim.claimedAt, expectedHistoryLength: claim.history.length };
+  const urls = [URL_A, "https://github.com/Uuriko/project-room/pull/12"];
+  const results = await Promise.all(urls.map(appendPullRequest => call("update", "concurrent", { ...basis, appendPullRequest })));
+  assert.deepEqual(results.map(result => result.status).sort(), [200, 409]);
+  let current = store.workClaims.get("commons", "concurrent");
+  const missing = urls.find(url => !current.pullRequests.some(pull => pull.url === url));
+  current = (await call("update", "concurrent", { ...basis, expectedHistoryLength: current.history.length, appendPullRequest: missing })).value;
+  assert.deepEqual(new Set(current.pullRequests.map(pull => pull.url)), new Set(urls));
+  const eventsBefore = claimEvents(store);
+  for (const extra of [{ state: "done" }, { note: "do more" }, { pullRequests: [] }, { ci: { state: "success" } }, { leaseHours: 12 }]) {
+    await assert.rejects(call("update", "concurrent", { ...basis, expectedHistoryLength: current.history.length, appendPullRequest: URL_A, ...extra }), error => error.status === 422 && error.code === "invalid_claim_input");
+  }
+  assert.deepEqual(store.workClaims.get("commons", "concurrent"), current);
+  assert.deepEqual(claimEvents(store), eventsBefore);
+});
+
+test("PR link and event roll back together, and expiry or archived rooms cannot mutate", async t => {
+  const { store, call } = await room(t);
+  const now = Date.parse("2026-10-03T13:00:00Z");
+  store.now = () => now;
+  await call("create", null, { id: "atomic" });
+  await call("claim", "atomic", { leaseHours: 6 });
+  const claimed = store.workClaims.get("commons", "atomic");
+  const input = { appendPullRequest: URL_A, expectedClaimedAt: claimed.claimedAt, expectedHistoryLength: claimed.history.length };
+  const eventsBefore = claimEvents(store);
+  store.db.exec("CREATE TEMP TRIGGER refuse_claim_link_event BEFORE INSERT ON events WHEN json_extract(NEW.body, '$.type') = 'work_claim.updated' BEGIN SELECT RAISE(ABORT, 'event storage refused'); END");
+  await assert.rejects(call("update", "atomic", input), /event storage refused/);
+  assert.deepEqual(store.workClaims.get("commons", "atomic"), claimed);
+  assert.deepEqual(claimEvents(store), eventsBefore);
+  store.db.exec("DROP TRIGGER refuse_claim_link_event");
+  store.now = () => now + 6 * 3600000;
+  const expired = await call("update", "atomic", input);
+  assert.equal(expired.status, 409);
+  assert.equal(expired.value.error.code, "claim_lease_lapsed");
+  assert.equal(expired.value.next[0].path, "/api/rooms/commons/work-claims/atomic");
+  assert.deepEqual(store.workClaims.get("commons", "atomic"), claimed);
+  assert.deepEqual(claimEvents(store), eventsBefore);
+  store.now = () => now;
+  const token = store.issueAccessKey("commons", "owner");
+  store.command(token, "commons", { id: "archive-link-room", type: "room.archived", data: { reason: "finished" } });
+  await assert.rejects(call("update", "atomic", input), error => error.status === 409 && error.code === "room_archived");
+  assert.deepEqual(store.workClaims.get("commons", "atomic"), claimed);
+  assert.deepEqual(claimEvents(store), eventsBefore);
 });

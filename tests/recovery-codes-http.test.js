@@ -34,6 +34,7 @@ async function fixture(t) {
   store.initialize(initialRoom());
   store.createAccount("acct-1");
   store.accountLogins.linkPasswordMethod("acct-1", { email: EMAIL, verifier: "scrypt$fixture-never-real" });
+  store.accountLogins.markEmailVerified("acct-1", EMAIL);
   const accountAccessKey = store.issueAccountAccessKey("acct-1");
   const server = createRoomServer({ store, streamInterval: 15 });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));

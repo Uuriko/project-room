@@ -1,4 +1,4 @@
-import { clickChrome } from "./room-chrome.mjs";
+import { clickChrome, ensureSidebarOpen, ensureSidebarClosed, openComposerOptions } from "./room-chrome.mjs";
 // Simulated local people. Search must not submit, acknowledge or create work.
 import './discovery-contribution-browser-check.mjs';
 import test from 'node:test';
@@ -12,18 +12,22 @@ import { signInFixture } from "./auth-signin.mjs";
 import { openSearch } from "./room-chrome.mjs";
 import { makeTestSigner } from "./helpers/signed-evidence.mjs";
 
-for (const touch of [false, true]) test(`work search ${touch ? 'touch' : 'desktop'}: return to outcomes without losing context`, { timeout: 60000 }, async t => {
+for (const touch of [false, true]) test(`work search ${touch ? 'touch' : 'desktop'}: return to outcomes without losing context`, { timeout: 90000 }, async t => {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 50 });
   let browser;
   t.after(async () => { await browser?.close(); server.closeStreams(); server.closeAllConnections();
     if (server.listening) await new Promise(resolve => server.close(resolve));
     f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
   const send = (type, data) => f.store.command(f.keys.owner, 'commons', { id: crypto.randomUUID(), type, data });
-  const propose = (id, title, done = 'Name the person and next step.') => send('work.proposed', { workItemId: id, title,
-    definitionOfDone: done, accountableMemberId: 'owner', independentVerificationRequired: false, ownerDecisionRequired: false });
+  const propose = (id, title, done = 'Name the person and next step.', sourceMessageId = null) => send('work.proposed', { workItemId: id, title,
+    definitionOfDone: done, accountableMemberId: 'owner', independentVerificationRequired: false, ownerDecisionRequired: false,
+    ...(sourceMessageId ? { sourceMessageId } : {}) });
   const pair = 'search:same-id';
-  propose(pair, 'Orbit <b>agenda</b>', 'Gather the telescope notes.');
-  send('message.posted', { messageId: pair, body: 'Orbit discussion from the same ID.' });
+  send('channel.created', { channelId: 'design', name: 'design' });
+  send('message.posted', { messageId: pair, channelId: 'design', body: 'Orbit discussion from the same ID.' });
+  propose(pair, 'Orbit <b>agenda</b>', 'Gather the telescope notes.', pair);
+  send('message.posted', { messageId: 'canonical-task-proposal', channelId: 'general', workItemId: pair,
+    packetId: 'manual-packet', basisRevision: 0, body: 'Candidate agenda wording.' });
   propose('finished', 'Previous Orbit outcome');
   const mutate = (type, extra = {}) => send(type, { workItemId: 'finished', expectedRevision: f.store.room('commons').state.workItems.finished.revision, ...extra });
   mutate('work.accepted');
@@ -50,12 +54,34 @@ for (const touch of [false, true]) test(`work search ${touch ? 'touch' : 'deskto
   assert.equal(await hits.locator('a').first().getAttribute('data-open-work'), pair, 'open work precedes finished work');
   assert.equal(await hits.locator('b').count(), 0, 'titles are literal text');
   const target = workHit(pair);
+  const canonicalHash = `#pr-record/work/${encodeURIComponent(pair)}`;
+  assert.equal(await target.getAttribute('href'), canonicalHash);
   await target.focus(); await page.keyboard.press('Enter');
   const card = page.locator('[data-work-record-id]').filter({ has: page.locator('h3', { hasText: 'Orbit <b>agenda</b>' }) });
   assert.equal(await card.locator('.work-details').evaluate(node => node.open), true);
   assert.equal(await card.evaluate(node => node === document.activeElement), true);
   assert.equal(await page.locator('#message-input').inputValue(), 'Keep my unsent thought.');
   assert.equal(auditRecovery(f.store).dataSha256, before, 'search/navigation do not change any Room table');
+
+  // The same destination owns keyboard search, contextual return and browser history.
+  const back = page.locator('#work-navigation-return');
+  assert.equal(await back.textContent(), 'Back to conversation');
+  assert.equal(new URL(page.url()).hash, canonicalHash);
+  await back.press('Enter');
+  await page.waitForFunction(id => document.activeElement?.dataset.openWork === id, pair);
+  assert.equal(await search.inputValue(), 'Orbit');
+  assert.equal(await page.locator('#message-input').inputValue(), 'Keep my unsent thought.');
+  await page.goForward();
+  await page.waitForFunction(id => document.activeElement?.dataset.workRecordId === id, pair);
+  assert.equal(await card.locator('.work-details').evaluate(node => node.open), true);
+  await page.goBack();
+  await page.waitForFunction(id => document.activeElement?.dataset.openWork === id, pair);
+  await target.press('Enter');
+  const historyLength = await page.evaluate(() => history.length);
+  await target.press('Enter');
+  assert.equal(await page.evaluate(() => history.length), historyLength, 'repeated Open does not add duplicate history entries');
+  assert.equal(await page.locator('[data-work-record-id="search:same-id"]').count(), 1);
+  assert.equal(auditRecovery(f.store).dataSha256, before, 'return and history never acknowledge or create work');
 
   // Live updates preserve focus by both record kind and ID, not ID alone.
   const messageHit = hits.locator('[data-open-message]'); await messageHit.focus();
@@ -87,6 +113,96 @@ for (const touch of [false, true]) test(`work search ${touch ? 'touch' : 'deskto
   await page.waitForFunction(seq => document.querySelector('#event-count').textContent === String(seq), replacement.sequence);
   assert.equal(await hits.locator('a').count(), 0, 'old completion text is not a current search result');
   assert.equal(await page.evaluate(() => document.activeElement.id), 'message-search', 'removed focused hit returns to search');
+  const revisedCard = page.locator('[data-work-record-id="finished"]');
+  assert.equal(await revisedCard.locator('.work-details').evaluate(node => node.open), true, 'live revision keeps the canonical detail open');
+  assert.match(await revisedCard.locator('.mode').textContent(), /revision 5$/);
+  assert.match(await revisedCard.innerText(), /Replacement finding is ready/);
+  await back.press('Enter');
+  await page.waitForFunction(() => document.activeElement?.id === 'conversation-title');
+  assert.equal(await search.inputValue(), 'handoff-only');
+  assert.equal(await hits.locator('a').count(), 0, 'return falls back safely when the originating search result no longer exists');
+
+  // Cross-channel navigation restores the real source thread and its unsent request.
+  // The source discussion is in #design; its canonical proposal is in #general.
+  await ensureSidebarOpen(page);
+  await page.locator('#channel-list [data-channel="design"]').click();
+  await ensureSidebarClosed(page);
+  assert.equal(await page.locator('#conversation-title').textContent(), '# design');
+  await page.locator('[data-message-id="search:same-id"][data-message-action="reply"]').click();
+  await page.locator('#thread-bar').waitFor({ state: 'visible' });
+  await openComposerOptions(page);
+  await page.locator('#request-reply').click();
+  await page.locator('#message-to-select').selectOption('producer');
+  const threadDraft = 'Keep this thread request and its recipient.';
+  await page.locator('#message-input').fill(threadDraft);
+  await page.locator('#message-input').press('Home');
+  for (let index = 0; index < 8; index++) await page.locator('#message-input').press('Shift+ArrowRight');
+  const chatLink = page.locator('#message-list [data-message-record-id="search:same-id"] [data-open-work="search:same-id"]');
+  const beforeChannelNavigation = auditRecovery(f.store).dataSha256;
+  await chatLink.focus();
+  assert.equal(await chatLink.getAttribute('href'), canonicalHash);
+  await chatLink.press('Enter');
+  await page.locator('#thread-bar').waitFor({ state: 'hidden' });
+  assert.equal(await page.locator('#conversation-title').textContent(), '# general');
+  assert.equal(new URL(page.url()).hash, canonicalHash);
+  assert.equal(await card.locator('.work-details').evaluate(node => node.open), true);
+  assert.equal(await card.evaluate(node => node === document.activeElement), true);
+  assert.equal(await page.locator('#request-mode-bar').isVisible(), false);
+  const assertThreadOrigin = async () => {
+    await page.locator('#thread-bar').waitFor({ state: 'visible' });
+    await page.waitForFunction(() => document.activeElement?.closest('[data-message-record-id="search:same-id"]')
+      && document.activeElement?.dataset.openWork === 'search:same-id');
+    assert.equal(await page.locator('#conversation-title').textContent(), '# design');
+    assert.equal(await page.locator('#channel-list [data-channel="design"]').getAttribute('aria-current'), 'page');
+    assert.equal(await page.locator('#message-input').inputValue(), threadDraft);
+    assert.equal(await page.locator('#message-to-select').inputValue(), 'producer');
+    assert.equal(await page.locator('#request-mode-label').textContent(), 'Request a reply');
+    assert.equal(await page.locator('#request-mode-bar').isVisible(), true);
+    assert.deepEqual(await page.locator('#message-input').evaluate(node => [node.selectionStart, node.selectionEnd, node.selectionDirection]), [0, 8, 'forward']);
+    assert.equal(await chatLink.evaluate(node => node === document.activeElement), true);
+  };
+  await back.press('Enter');
+  await assertThreadOrigin();
+  await page.goForward();
+  await page.waitForFunction(id => document.activeElement?.dataset.workRecordId === id, pair);
+  assert.equal(await page.locator('#conversation-title').textContent(), '# general');
+  assert.equal(await page.locator('#thread-bar').isVisible(), false);
+  assert.equal(await card.locator('.work-details').evaluate(node => node.open), true);
+  await page.goBack();
+  await assertThreadOrigin();
+  assert.equal(auditRecovery(f.store).dataSha256, beforeChannelNavigation, 'channel/thread return and history neither submit the draft nor mutate Room data');
+  await page.locator('#message-input').fill('');
+  await page.locator('#thread-back').click();
+  await ensureSidebarOpen(page);
+  await page.locator('#channel-list [data-channel="general"]').click();
+  await ensureSidebarClosed(page);
+
+  // Reopening the same search hit after a channel change refreshes its return
+  // context without adding another copy of the canonical destination to history.
+  await search.fill('telescope');
+  await target.press('Enter');
+  await page.waitForFunction(id => document.activeElement?.dataset.workRecordId === id, pair);
+  const sameTargetHistoryLength = await page.evaluate(() => history.length);
+  await ensureSidebarOpen(page);
+  await page.locator('#channel-list [data-channel="design"]').click();
+  await ensureSidebarClosed(page);
+  assert.equal(await page.locator('#conversation-title').textContent(), '# design');
+  const channelDraft = 'Keep this design channel thought.';
+  await page.locator('#message-input').fill(channelDraft);
+  await target.press('Enter');
+  await page.waitForFunction(id => document.activeElement?.dataset.workRecordId === id, pair);
+  assert.equal(await page.locator('#conversation-title').textContent(), '# general');
+  assert.equal(await page.evaluate(() => history.length), sameTargetHistoryLength);
+  await back.press('Enter');
+  await page.waitForFunction(id => document.activeElement?.dataset.openWork === id, pair);
+  assert.equal(await page.locator('#conversation-title').textContent(), '# design', 'the same search hit returns to its latest originating channel');
+  assert.equal(await search.inputValue(), 'telescope');
+  assert.equal(await page.locator('#message-input').inputValue(), channelDraft);
+  assert.equal(await target.evaluate(node => node === document.activeElement), true);
+  assert.equal(auditRecovery(f.store).dataSha256, beforeChannelNavigation, 'refreshing a same-target origin is read-only');
+  await ensureSidebarOpen(page);
+  await page.locator('#channel-list [data-channel="general"]').click();
+  await ensureSidebarClosed(page);
 
   await search.fill('Bounds');
   assert.equal(await hits.locator('[data-open-work]').count(), 25);
@@ -109,5 +225,32 @@ for (const touch of [false, true]) test(`work search ${touch ? 'touch' : 'deskto
   if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await clickChrome(page, "#signout-button"); await page.locator('#auth-panel').waitFor({ state: 'visible' });
   assert.equal(await search.inputValue(), ''); assert.equal(await hits.textContent(), '');
   assert.equal(f.store.db.prepare('SELECT sequence FROM cursors WHERE room_id=? AND member_id=?').get('commons', 'owner')?.sequence ?? 0, 0);
+  // A new authenticated browser has no in-memory origin, even for a valid URL.
+  const freshContext = await browser.newContext({ viewport: touch ? { width: 390, height: 844 } : { width: 1280, height: 900 } });
+  const fresh = await freshContext.newPage();
+  fresh.on('pageerror', error => errors.push(error.message));
+  const direct = `${new URL(page.url()).origin}/?room=commons${canonicalHash}`;
+  const beforeDirect = JSON.stringify(f.store.room('commons'));
+  await fresh.goto(direct);
+  await signInFixture(fresh, f.keys.owner, { returnTo: direct });
+  const directCard = fresh.locator('[data-work-record-id="search:same-id"]');
+  await fresh.waitForFunction(() => document.querySelector('[data-work-record-id="search:same-id"] .work-details')?.open);
+  assert.equal(await directCard.locator('.mode').textContent(), `read · revision ${f.store.room('commons').state.workItems[pair].revision}`);
+  assert.equal(await fresh.locator('#work-navigation-return').textContent(), 'Back to room');
+  await fresh.locator('#work-navigation-return').press('Enter');
+  await fresh.locator('#main').waitFor({ state: 'visible' });
+  await openSearch(fresh);
+  await fresh.locator('#message-search').fill('telescope');
+  await fresh.locator('#search-list [data-open-work="search:same-id"]').press('Enter');
+  assert.equal(await fresh.locator('#work-navigation-return').textContent(), 'Back to conversation');
+  await fresh.reload();
+  await fresh.waitForFunction(() => document.querySelector('[data-work-record-id="search:same-id"] .work-details')?.open);
+  assert.equal(await fresh.locator('#work-navigation-return').textContent(), 'Back to room', 'a reload loses the private origin ticket safely');
+  await fresh.locator('#work-navigation-return').press('Enter');
+  await fresh.goto(`${new URL(direct).origin}/?room=commons#pr-record/work/missing-task`);
+  await fresh.locator('#main').waitFor({ state: 'visible' });
+  assert.equal(await fresh.locator('[data-work-record-id="missing-task"]').count(), 0);
+  assert.equal(JSON.stringify(f.store.room('commons')), beforeDirect, 'direct and unknown targets do not fabricate records');
+  await freshContext.close();
   assert.deepEqual(errors, []);
 });

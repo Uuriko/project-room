@@ -72,6 +72,11 @@ const reservedLabels = new Set([
 // marks rejected if the general format class is ever narrowed.
 const bidiControls = /[\u202A-\u202E\u2066-\u2069\u200E\u200F]/u;
 
+// SEC-2: the same classes guard Board titles and notes
+// (server/work-claim-integrity.mjs). spaces carries the g flag; use it with
+// replace, not test.
+export const TEXT_CHARACTER_CLASSES = Object.freeze({ invisible, bidiControls, spaces });
+
 function hasBlockedControls(value) {
   return controls.test(value) || bidiControls.test(value);
 }

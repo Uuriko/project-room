@@ -104,7 +104,13 @@ export function handleMcpJoinRpc(message, { mcpUrl } = {}) {
   return { jsonrpc: "2.0", id: requestId, error: { code: -32601, message: "Method not found" } };
 }
 
-export async function dispatchRoomMcp(message, { mcpUrl, authorization, roomMcp, searchParams } = {}) {
+export function legacyMcpHeaders(authorization) {
+  const token = typeof authorization === "string" && authorization.startsWith("Bearer ") ? authorization.slice("Bearer ".length) : "";
+  if (!token.startsWith("pri_")) return {};
+  return { Deprecation: "@1798761600", Link: '</llms.txt>; rel="deprecation"' };
+}
+
+export async function dispatchRoomMcp(message, { mcpUrl, authorization, roomMcp, searchParams, userAgent } = {}) {
   // An empty "Bearer" (an MCP host config with an unset secret variable) is
   // treated as no credential, so the public join tools still load.
   const presented = typeof authorization === "string" && !/^(?:bearer)?\s*$/i.test(authorization);
@@ -122,7 +128,7 @@ export async function dispatchRoomMcp(message, { mcpUrl, authorization, roomMcp,
       ? requestId : null;
     return { jsonrpc: "2.0", id, error: { code: MCP_AUTH_REQUIRED, message: "Authenticated room tools require the Room service" } };
   }
-  return roomMcp(message, { authorization, mcpUrl, searchParams });
+  return roomMcp(message, { authorization, mcpUrl, searchParams, userAgent });
 }
 
 export function mcpRpcStatus(reply) {
@@ -135,7 +141,7 @@ export function mcpJoinCorsHeaders() {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, HEAD, POST, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Accept, Authorization, MCP-Protocol-Version, Mcp-Session-Id",
-    "Access-Control-Expose-Headers": "MCP-Protocol-Version",
+    "Access-Control-Expose-Headers": "MCP-Protocol-Version, Deprecation, Link",
     "MCP-Protocol-Version": MCP_VERSION
   };
 }
@@ -208,7 +214,8 @@ export async function roomMcpFetchPost(request, options = {}) {
       mcpUrl: roomMcpUrlForHost(url),
       authorization: request.headers.get("authorization"),
       roomMcp: options.roomMcp,
-      searchParams: url.searchParams
+      searchParams: url.searchParams,
+      userAgent: request.headers.get("user-agent")
     });
   } catch {
     reply = mcpTransportError(-32603, "Request could not be completed", {
@@ -220,7 +227,7 @@ export async function roomMcpFetchPost(request, options = {}) {
     });
   }
   if (!reply) return new Response(null, { status: 202, headers });
-  return new Response(JSON.stringify(reply), { status: mcpRpcStatus(reply), headers });
+  return new Response(JSON.stringify(reply), { status: mcpRpcStatus(reply), headers: { ...headers, ...legacyMcpHeaders(request.headers.get("authorization")) } });
 }
 
 export async function writeRoomMcpNode(req, res, url, { bodyText, accept, roomMcp } = {}) {
@@ -268,7 +275,8 @@ export async function writeRoomMcpNode(req, res, url, { bodyText, accept, roomMc
       mcpUrl: roomMcpUrlForHost(url),
       authorization: req.headers.authorization,
       roomMcp,
-      searchParams: url.searchParams
+      searchParams: url.searchParams,
+      userAgent: req.headers["user-agent"]
     });
   } catch {
     reply = mcpTransportError(-32603, "Request could not be completed", {
@@ -286,6 +294,7 @@ export async function writeRoomMcpNode(req, res, url, { bodyText, accept, roomMc
   const bytes = Buffer.from(JSON.stringify(reply));
   res.writeHead(mcpRpcStatus(reply), {
     ...cors,
+    ...legacyMcpHeaders(req.headers.authorization),
     "Content-Type": "application/json; charset=utf-8",
     "Content-Length": bytes.length,
     "Cache-Control": "no-store",

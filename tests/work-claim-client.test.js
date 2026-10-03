@@ -6,13 +6,15 @@ import { RoomAgentClient } from '../client/room-agent.mjs';
 import { RoomStore } from '../server/store.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { createRoomServer } from '../server/http.mjs';
+// SEC-2: claim reads carry content-trust markers; compare the claim itself.
+const stripTrust = value => JSON.parse(JSON.stringify(value, (key, entry) => (key === 'untrusted' || key === 'contentTrust' ? undefined : entry)));
 
-async function fixture(t) {
+async function fixture(t, { reviewerPermissions = [] } = {}) {
   const store = new RoomStore(':memory:');
   store.initialize(initialRoom('commons'));
   const token = store.issueAccessKey('commons', 'owner');
   store.command(token, 'commons', { id: 'add-reviewer', type: 'member.added',
-    data: { memberId: 'reviewer', displayName: 'Reviewer', kind: 'human', permissions: [] } });
+    data: { memberId: 'reviewer', displayName: 'Reviewer', kind: 'human', permissions: reviewerPermissions } });
   const peerToken = store.issueAccessKey('commons', 'reviewer');
   const server = createRoomServer({ store });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -77,7 +79,7 @@ test('SDK convenience claim and completion preserve creation metadata and explic
 });
 
 test('SDK sends invalid declarations for server rejection instead of silently dropping them', async t => {
-  const { owner: client } = await fixture(t);
+  const { owner: client, peer } = await fixture(t, { reviewerPermissions: ['verify'] });
   for (const [id, fields] of [['invalid-path', { files: ['../outside'] }], ['invalid-tag', { tags: ['not a tag'] }]]) {
     await assert.rejects(client.workClaimCreate({ id, ...fields }), invalid);
     await assert.rejects(client.workClaimGet(id), error => error.status === 404);
@@ -91,28 +93,56 @@ test('SDK sends invalid declarations for server rejection instead of silently dr
     await assert.rejects(client.workComplete('pending', fields), invalid);
     assert.equal((await client.workClaimGet('pending')).state, 'in_progress');
   }
+  const beforeReview = await client.workClaimGet('pending');
+  for (const fields of [
+    { verdict: 'approved', summary: 'Invalid verdict' },
+    { verdict: 'approve' },
+    { verdict: 'approve', summary: '' },
+    { verdict: 'approve', summary: 'Invalid URL', url: 'http://example.com/review' },
+    { verdict: 'approve', summary: 'Mixed review forms', note: 'Legacy note' },
+  ]) {
+    await assert.rejects(peer.reviewWorkItem('pending', fields), invalid);
+    assert.deepEqual(await client.workClaimGet('pending'), beforeReview);
+  }
 });
 
 
-test('SDK review records the authenticated reviewer and satisfies distinct-member completion', async t => {
-  const { owner, peer } = await fixture(t);
+test('SDK preserves legacy notes and requires an explicit approval for reviewed completion', async t => {
+  const { owner, peer } = await fixture(t, { reviewerPermissions: ['verify'] });
   await owner.workClaim('reviewed', { reviewPolicy: 'distinct_member' });
   await owner.updateWorkItem('reviewed', { state: 'in_progress' });
-  const before = await owner.workClaimGet('reviewed');
+  const before = stripTrust(await owner.workClaimGet('reviewed'));
   await assert.rejects(owner.workComplete('reviewed', { reviewedBy: 'reviewer' }),
     error => error.status === 403 && error.code === 'work_review_rejected');
-  assert.deepEqual(await owner.workClaimGet('reviewed'), before);
+  assert.deepEqual(stripTrust(await owner.workClaimGet('reviewed')), before);
   const reviewed = await peer.reviewWorkItem('reviewed', { note: 'Checked the result' });
   assert.equal(reviewed.attestations.length, 1);
   assert.equal(reviewed.attestations[0].memberId, 'reviewer');
   assert.equal(reviewed.attestations[0].note, 'Checked the result');
+  assert.deepEqual(reviewed.reviews, []);
+  await assert.rejects(owner.workComplete('reviewed', { reviewedBy: 'reviewer' }),
+    error => error.status === 403 && error.code === 'work_review_rejected');
   await assert.rejects(peer.workComplete('reviewed', { reviewedBy: 'reviewer' }),
     error => error.status === 403 && error.code === 'work_not_owner');
-  assert.deepEqual(await owner.workClaimGet('reviewed'), reviewed);
+  assert.deepEqual(stripTrust(await owner.workClaimGet('reviewed')), reviewed);
+  for (const verdict of ['comment', 'changes_requested']) {
+    const negative = await peer.reviewWorkItem('reviewed', { verdict, summary: `Feedback: ${verdict}` });
+    assert.equal(negative.reviews[0].verdict, verdict);
+    assert.equal(negative.reviews[0].memberId, 'reviewer');
+    await assert.rejects(owner.workComplete('reviewed', { reviewedBy: 'reviewer' }),
+      error => error.status === 403 && error.code === 'work_review_rejected');
+    assert.deepEqual(stripTrust(await owner.workClaimGet('reviewed')), negative);
+  }
+  const approval = { verdict: 'approve', summary: 'Explicitly approved the current result', url: 'https://example.com/review/result' };
+  const approved = await peer.reviewWorkItem('reviewed', approval);
+  assert.equal(approved.reviews[0].memberId, 'reviewer');
+  for (const [field, value] of Object.entries(approval)) assert.equal(approved.reviews[0][field], value);
+  assert.deepEqual(stripTrust((await owner.workClaimGet('reviewed')).reviews), approved.reviews);
   const done = await owner.workComplete('reviewed', { reviewedBy: 'reviewer' });
   assert.equal(done.state, 'done');
+  assert.equal(done.reviewedBy, 'reviewer');
   await assert.rejects(peer.reviewWorkItem('reviewed', { note: 'Too late' }), invalid);
-  assert.deepEqual(await owner.workClaimGet('reviewed'), done);
+  assert.deepEqual(stripTrust(await owner.workClaimGet('reviewed')), done);
 });
 
 test('SDK lease renewal needs the owner and a fresh public progress message', async t => {
@@ -123,14 +153,14 @@ test('SDK lease renewal needs the owner and a fresh public progress message', as
   const progress = (await owner.say('Implemented the client boundary')).event.data.messageId;
   const foreign = (await peer.say('Someone else checked in')).event.data.messageId;
   const privateProgress = (await owner.say('Private update', { toMemberId: 'reviewer' })).event.data.messageId;
-  const before = await owner.workClaimGet('renewed');
+  const before = stripTrust(await owner.workClaimGet('renewed'));
   await assert.rejects(peer.renewWorkItem('renewed', { progressMessageId: foreign }),
     error => error.status === 403 && error.code === 'work_not_owner');
-  assert.deepEqual(await owner.workClaimGet('renewed'), before);
+  assert.deepEqual(stripTrust(await owner.workClaimGet('renewed')), before);
   for (const [progressMessageId, code] of [[foreign, 'claim_renewal_source_foreign'],
     [privateProgress, 'claim_renewal_source_required'], ['missing', 'claim_renewal_source_required']]) {
     await assert.rejects(owner.renewWorkItem('renewed', { progressMessageId }), error => error.code === code);
-    assert.deepEqual(await owner.workClaimGet('renewed'), before);
+    assert.deepEqual(stripTrust(await owner.workClaimGet('renewed')), before);
   }
   const renewed = await owner.renewWorkItem('renewed', {
     progressMessageId: progress, leaseHours: 2, note: 'Continue the verified scope'
@@ -139,5 +169,30 @@ test('SDK lease renewal needs the owner and a fresh public progress message', as
   assert.equal(renewed.history.at(-1).note, 'Continue the verified scope');
   await assert.rejects(owner.renewWorkItem('renewed', { progressMessageId: progress }),
     error => error.status === 422 && error.code === 'claim_renewal_source_stale');
-  assert.deepEqual(await owner.workClaimGet('renewed'), renewed);
+  assert.deepEqual(stripTrust(await owner.workClaimGet('renewed')), renewed);
+});
+
+// Transport owner: neither a pure transition nor a handler fixture catches the
+// SDK dropping one of the mandatory compare-and-set fields before HTTP.
+test('SDK links a later PR with both preconditions and preserves HTTP refusals', async t => {
+  const { owner } = await fixture(t);
+  const claimed = await owner.workClaim('later-sdk-pr', { files: ['src/sdk.js'], leaseHours: 6 });
+  const args = { pullRequest: 'https://github.com/Uuriko/project-room/pull/17/',
+    expectedClaimedAt: claimed.claimedAt, expectedHistoryLength: claimed.history.length };
+  const linked = await owner.linkWorkItemPullRequest(claimed.id, args);
+  assert.equal(linked.pullRequests[0].url, args.pullRequest.slice(0, -1));
+  assert.deepEqual(stripTrust(await owner.workClaimGet(claimed.id)), linked);
+  await assert.rejects(owner.linkWorkItemPullRequest(claimed.id, args), error => {
+    assert.equal(error.status, 409);
+    assert.equal(error.code, 'work_claim_conflict');
+    assert.ok(error.next.some(step => step.path === `/api/rooms/commons/work-claims/${claimed.id}`));
+    assert.match(error.hint, /do not release or reacquire/i);
+    return true;
+  });
+  const fresh = { ...args, expectedHistoryLength: linked.history.length };
+  for (const fields of [{ expectedHistoryLength: String(linked.history.length) },
+    { expectedClaimedAt: null }, { pullRequest: { url: args.pullRequest, outcome: 'merged' } }]) {
+    await assert.rejects(owner.linkWorkItemPullRequest(claimed.id, { ...fresh, ...fields }), invalid);
+  }
+  assert.deepEqual(stripTrust(await owner.workClaimGet(claimed.id)), linked);
 });

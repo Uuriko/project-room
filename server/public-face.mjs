@@ -19,6 +19,7 @@
 // store.mjs to apply. Local ServiceError avoids the store.mjs import cycle.
 
 import { randomBytes } from "node:crypto";
+import { LEGAL_FOOTER_LINKS } from "./legal-pages.mjs";
 import { refreshListedRoom } from "./public-read-model.mjs";
 
 class ServiceError extends Error {
@@ -238,7 +239,7 @@ footer{margin-top:2rem;font-size:.8rem;color:var(--muted)}</style></head><body>
 <header class="page"><h1>${esc(face.room.title || "Project Room")}</h1><p>${esc(face.room.purpose)}</p></header>
 <section><h2>Members</h2><ul class="members">${members}</ul></section>
 <section><h2>Recent activity</h2>${items || "<p>No public messages yet.</p>"}</section>
-<footer>Public read-only face · updates as the room works</footer>
+<footer>Public read-only face · updates as the room works<p>${LEGAL_FOOTER_LINKS}</p></footer>
 </body></html>`;
   }
 }

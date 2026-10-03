@@ -14,7 +14,29 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 const read = path => readFileSync(path, "utf8");
 
 function parseJsonc(text) {
-  return JSON.parse(text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/.*$/gm, "$1"));
+  let out = "";
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (ch === '"' || ch === "'") {
+      const end = skipString(text, i);
+      out += text.slice(i, end + 1);
+      i = end;
+      continue;
+    }
+    if (ch === "/" && text[i + 1] === "/") {
+      const nl = text.indexOf("\n", i);
+      i = nl < 0 ? text.length : nl;
+      continue;
+    }
+    if (ch === "/" && text[i + 1] === "*") {
+      const end = text.indexOf("*/", i + 2);
+      i = end < 0 ? text.length : end + 1;
+      out += " ";
+      continue;
+    }
+    out += ch;
+  }
+  return JSON.parse(out);
 }
 
 function walk(dir, acc = []) {
@@ -161,17 +183,9 @@ test("RPC stub calls target a class that extends DurableObject", () => {
   }
   const methods = [...new Set(calls.map(call => call.method))].sort();
   assert.deepEqual(methods, [
-    "backfillPublicReadModel",
-    "drainChannelBacklog",
-    "drainWebhookDeliveries",
-    "planRetention",
+    "ensureJobAlarm",
     "probeStorage",
-    "readJobHealth",
-    "recordCronTick",
-    "refreshClaimPullRequests",
-    "refreshLandQueue",
-    "syncGmailMailboxes",
-    "verifyRoomIntegrity"
+    "readJobHealth"
   ]);
   assert.match(workerSource, /env\.ROOM\.getByName\('invite-only-pilot'\)\.fetch\(/);
   assert.match(workerSource, /import\s*\{[^}]*\bDurableObject\b[^}]*\}\s*from\s*['"]cloudflare:workers['"]/);
@@ -207,19 +221,9 @@ test("scheduled handler invokes cron RPC on the real ProjectRoom shape", async (
   const scheduledAt = workerSource.indexOf("async scheduled(");
   const scheduledBody = sliceBalanced(workerSource, workerSource.indexOf("{", scheduledAt));
   const expected = rpcStubCalls(scheduledBody).map(call => call.method).sort();
-  assert.deepEqual(expected, [
-    "backfillPublicReadModel",
-    "drainChannelBacklog",
-    "drainWebhookDeliveries",
-    "planRetention",
-    "recordCronTick",
-    "refreshClaimPullRequests",
-    "refreshLandQueue",
-    "syncGmailMailboxes",
-    "verifyRoomIntegrity"
-  ]);
+  assert.deepEqual(expected, ["ensureJobAlarm"]);
 
-  await worker.scheduled({ cron: "* * * * *" }, {
+  await worker.scheduled({ cron: "*/30 * * * *" }, {
     ROOM_MAINTENANCE: "1",
     ROOM: { getByName() { throw new Error("maintenance must not resolve the room"); } }
   }, { waitUntil() { throw new Error("maintenance must not schedule work"); } });
@@ -241,8 +245,7 @@ test("scheduled handler invokes cron RPC on the real ProjectRoom shape", async (
     }
   });
   const pending = [];
-  // Gmail and Telegram must be configured or scheduled() never calls those RPC methods.
-  await worker.scheduled({ cron: "* * * * *" }, {
+  await worker.scheduled({ cron: "*/30 * * * *" }, {
     ROOM_MAINTENANCE: "0",
     ROOM_GMAIL_ENABLED: "1",
     TELEGRAM_BOT_TOKEN: "123456789:AAFakeFakeFakeFakeFakeFakeFakeFakeFa",

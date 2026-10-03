@@ -47,16 +47,29 @@ function where(entry, kind) {
   return { sql: parts.join(" OR "), params };
 }
 
+function purgeTable(db, entry) {
+  const table = q(entry.table);
+  if (!entry.optional) return table;
+  // Only the explicitly retired registry entries may be absent. Query main
+  // both here and below so a temp table cannot stand in for retained data.
+  return db.prepare("SELECT 1 FROM main.sqlite_master WHERE type='table' AND name=?").get(table)
+    ? `main.${table}` : null;
+}
+
 function countEntry(db, entry, kind, id) {
   const clause = where(entry, kind);
   if (!clause) return 0;
-  return db.prepare(`SELECT count(*) AS n FROM ${q(entry.table)} WHERE ${clause.sql}`).get(...Array(clause.params).fill(id)).n;
+  const table = purgeTable(db, entry);
+  if (!table) return 0;
+  return db.prepare(`SELECT count(*) AS n FROM ${table} WHERE ${clause.sql}`).get(...Array(clause.params).fill(id)).n;
 }
 
 function deleteEntry(db, entry, kind, id) {
   const clause = where(entry, kind);
   if (!clause) return 0;
-  return db.prepare(`DELETE FROM ${q(entry.table)} WHERE ${clause.sql}`).run(...Array(clause.params).fill(id)).changes;
+  const table = purgeTable(db, entry);
+  if (!table) return 0;
+  return db.prepare(`DELETE FROM ${table} WHERE ${clause.sql}`).run(...Array(clause.params).fill(id)).changes;
 }
 
 export function countPurge(store, targets) {

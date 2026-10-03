@@ -58,6 +58,8 @@ test("exact-commit runtime package verifies cold, excludes private state and pre
     const packagedWorkActions = existsSync(join(destination, "client/work-actions.mjs"))
       ? readFileSync(join(destination, "client/work-actions.mjs"), "utf8") : "";
     const toolCount = !existsSync(join(destination, "client/help-actions.mjs")) ? 27
+      : packagedTools.includes('"room_link_work_claim_pr"') ? 41
+      : packagedTools.includes('"room_set_member_claim_cap"') ? 40
       : packagedTools.includes('"room_list_outside_agents"') ? 39
       : packagedTools.includes('"room_begin_work"') ? 37
       : packagedWorkActions.includes('"renew_claim"') ? 36

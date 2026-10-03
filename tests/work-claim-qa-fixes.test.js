@@ -212,7 +212,7 @@ test("W5: work_not_owner on unclaimed work says claim it first", () => {
   assert.match(value.hint, /claim it first/i);
 });
 
-test("W6: work_review_rejected points at the attestation route and the solo escape hatch", () => {
+test("W6: review recovery points to an explicit current approval without inferring a verdict", () => {
   const value = ax({ code: "work_review_rejected", httpStatus: 403,
     message: 'Review policy "distinct_member" not satisfied for "w1": no review attestation recorded by grok' });
   assert.equal(value.reason, "work_review_rejected");
@@ -220,6 +220,13 @@ test("W6: work_review_rejected points at the attestation route and the solo esca
   assert.match(value.hint, /self_attested/);
   assert.ok(validAgentNext(value.next));
   assert.ok(value.next.some(step => step.path === "/api/rooms/room1/work-claims/w1/review"));
+  assert.match(value.hint, /current authorized reviewer/i);
+  assert.match(value.hint, /if they approve/i);
+  assert.match(value.hint, /fresh review with a new summary/i);
+  const guidance = value.next.find(step => step.command)?.command;
+  assert.match(guidance, /verdict:"approve"/);
+  assert.match(guidance, /summary:/);
+  assert.doesNotMatch(guidance, /\{note\?\}/);
 });
 
 test("W4: claim_lease_lapsed recovery is claim-again, not an access debug", () => {

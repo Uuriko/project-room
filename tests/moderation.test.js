@@ -146,10 +146,12 @@ test("reports: any member reports another member's message once; only the owner 
   // Reports live outside the shared log: no event, snapshot or export carries them.
   const events = await http.call(f.keys.guest, "events?after=0&limit=100");
   assert.equal(events.body.events.some(e => /report/i.test(e.event.type)), false);
+  // Export is owner-only (PRIV-2); the owner's export carries no reports.
+  const ownerExport = await http.call(f.keys.owner, "export");
+  assert.equal(ownerExport.status, 200);
+  assert.equal(ownerExport.text.includes("Off-topic"), false); assert.equal(ownerExport.text.includes("Agent-side"), false);
+  assert.equal((await http.call(f.keys.guest, "export")).status, 403);
   for (const key of [f.keys.owner, f.keys.guest]) {
-    const exported = await http.call(key, "export");
-    assert.equal(exported.status, 200);
-    assert.equal(exported.text.includes("Off-topic"), false); assert.equal(exported.text.includes("Agent-side"), false);
     const snapshot = await http.call(key, "");
     assert.equal(snapshot.text.includes("Off-topic"), false);
   }
@@ -209,7 +211,8 @@ test("a report outlives the message and its author: deletion and removal keep th
   [report] = f.store.moderation.list(f.keys.owner, "commons").reports.filter(r => r.reporterId === "guest");
   assert.equal(report.authorId, "producer"); assert.equal(report.message.authorId, "producer");
   // Import replaces history: a report pointing at a message that no longer exists says so instead of failing.
-  const lines = [...f.store.exportEvents(f.keys.owner, "commons")].filter(line => line.event.type !== T.MESSAGE_POSTED && line.event.type !== T.MESSAGE_DELETED).map((line, i) => ({ sequence: i + 1, event: line.event }));
+  const dropped = new Set([T.MESSAGE_POSTED, T.MESSAGE_DELETED, T.MESSAGE_REDACTED, T.RECEIPT_EVIDENCE_WITHDRAWN]);
+  const lines = [...f.store.exportEvents(f.keys.owner, "commons")].filter(line => !dropped.has(line.event.type)).map((line, i) => ({ sequence: i + 1, event: line.event }));
   f.store.importEvents(f.keys.owner, "commons", lines);
   [report] = f.store.moderation.list(f.keys.owner, "commons").reports.filter(r => r.reporterId === "guest");
   assert.equal(report.message, null); assert.equal(report.messageId, "target");

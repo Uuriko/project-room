@@ -75,6 +75,10 @@ function sweep() {
   step(T.ROOM_SPEND_ALLOWANCE_SET, "owner", { allowanceCents: 10000, periodDays: 30 });
   step(T.ROOM_TRUST_SET, "owner", { enabled: false });
   step(T.ROOM_PUBLIC_RECEIPTS_SET, "owner", { enabled: true });
+  // --- PRIV-2: history setting (restored to "all" for the rest of the sweep) and export audit. ---
+  step(T.ROOM_HISTORY_VISIBILITY_SET, "owner", { historyVisibility: "since_join" });
+  step(T.ROOM_HISTORY_VISIBILITY_SET, "owner", { historyVisibility: "all" });
+  step(T.ROOM_EXPORTED, "owner", { format: "jsonl" });
   // --- GR2 opt-ins. Each one has to replay through auditRecovery. ---
   step(T.ROOM_PUBLIC_PAGE_SET, "owner", { enabled: true });
   step(T.ROOM_JOIN_LINK_SET, "owner", { enabled: true });
@@ -134,6 +138,13 @@ function sweep() {
       workItemId: W, expectedRevision: item().revision, result: "pass",
       completionEventId: item().receipt.eventId, evidenceVersion: item().receipt.evidenceVersion, summary: "Looks right"
     }));
+    // PRIV-1: deleting the recorded result appends message.redacted and
+    // receipt.evidence_withdrawn. Those are not commands; the delete is.
+    step(T.MESSAGE_DELETED, "owner", { messageId: "draft-1", expectedMessageRevision: 0, reason: "remove the recorded text" });
+    for (const type of [T.MESSAGE_REDACTED, T.RECEIPT_EVIDENCE_WITHDRAWN]) {
+      if (fixture.store.db.prepare("SELECT 1 FROM events WHERE room_id='commons' AND json_extract(body,'$.type')=? LIMIT 1").get(type)) exercised.add(type);
+      else broke.push(`${type}: deleting recorded text did not write this event`);
+    }
   }
   step(T.DECISION_RECORDED, "owner", { sourceMessageId: "req-1", statement: "We ship Friday", note: "agreed" });
 
@@ -325,6 +336,6 @@ test("the event surface has not grown without this sweep noticing", () => {
   // land.updated is exercised above via report_tip (it is not a command).
   // work_claim.updated is exercised above via emitWorkClaimEvent (it is not a command).
   // room.starter_seeded is exercised above via seedStarter (it is not a command).
-  assert.equal(Object.values(T).length, 60,
+  assert.equal(Object.values(T).length, 64,
     "EVENT_TYPES changed: add the new type to this sweep, then update this count");
 });

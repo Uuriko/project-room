@@ -63,6 +63,9 @@ export const unfencedAdditiveTables = Object.freeze([
   "account_passkey_credentials",
   "account_magic_codes",
   "account_recovery_codes",
+  // account_security_events (verified-email audit): additive and unfenced.
+  // Older writers have no code path to it. Rows name an account and an event type.
+  "account_security_events",
   // agent_room_ownership (agent room creation provenance) is purely additive
   // at v34 and intentionally NOT fenced: same rationale as
   // private_inbox_reads above — older writers have no code path to it, and
@@ -85,6 +88,12 @@ export const unfencedAdditiveTables = Object.freeze([
   // to an existing (room_id, member_id).
   "private_next_action_dismissals",
   "private_next_action_suppressions",
+  // private_update_marks + private_update_commands (Updates projection):
+  // per-member read/done/clear marks. Purely additive and intentionally NOT
+  // fenced — older writers have no code path to them, and every row is scoped
+  // to an existing room member. A new source revision stops matching the mark.
+  "private_update_marks",
+  "private_update_commands",
   // inbox_handoff_rooms records which room a collab-route handoff was made in,
   // so an agent acting under the owner's account is held to that room. Purely
   // additive beside inbox_handoffs, with no path from any older writer.
@@ -335,23 +344,6 @@ export const unfencedAdditiveTables = Object.freeze([
   "board_vtwo_events",
   "board_vtwo_mirror",
   "board_vtwo_idempotency",
-  // external_identities + external_receipts (Emissary slice 1a,
-  // RC-2026-09-27-2860): external identity graph + receipt index. Purely
-  // additive and intentionally NOT fenced — older writers have no code path
-  // to them, and the modules verify their own schema on open (IF NOT EXISTS).
-  "external_identities",
-  "external_receipts",
-  // emissary_drops + emissary_invite_attribution + emissary_idempotency +
-  // emissary_journal (Emissary growth layer Slice 2, RC-2026-09-28-2873):
-  // lure-generation ledgers (drop artifacts, invite attribution with
-  // token-hash only, idempotency records, generation journal). Purely
-  // additive and intentionally NOT fenced — older writers have no code
-  // path to them, and server/emissary-lure.mjs verifies its own schema
-  // lazily on first use.
-  "emissary_drops",
-  "emissary_invite_attribution",
-  "emissary_idempotency",
-  "emissary_journal",
   // integrity_snapshot (cold-start checksum): one row written only after the
   // yielding integrity job finishes. Purely additive and intentionally NOT
   // fenced — older writers have no code path to it, and a missing or stale
@@ -379,6 +371,11 @@ export const unfencedAdditiveTables = Object.freeze([
   // The integrity cron writes it. Older writers have no path to it. A missing
   // row means that room has not been replayed. The parity check is the gate.
   "messages_backfill_cursor",
+  // LEGAL: terms acceptance, public abuse reports, and operator unpublish.
+  // Additive and unfenced. Older writers have no code path to them.
+  "account_terms",
+  "public_abuse_reports",
+  "public_unpublish",
   // operator_actions (CP-ADMIN-0): append-only operator audit. Purely additive
   // and intentionally NOT fenced — older writers have no path to it. The
   // append-only triggers are the integrity gate.
@@ -387,7 +384,20 @@ export const unfencedAdditiveTables = Object.freeze([
 // Created on first use, not in the constructor. A database that has never
 // issued an OAuth grant or persisted an abuse rate bucket does not have
 // these tables; a database that has must still pass the recovery audit.
-export const lazyAdditiveTables = Object.freeze([...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES]);
+// Retired Emissary growth layer (Batch 1, PR #1402): no module creates
+// these tables anymore, but databases written before the removal still
+// carry them (no DROP was issued, for data preservation). They stay in
+// the allowed set so the recovery audit passes on upgraded databases,
+// while fresh databases simply do not have them.
+const RETIRED_EMISSARY_TABLES = Object.freeze([
+  "external_identities",
+  "external_receipts",
+  "emissary_drops",
+  "emissary_invite_attribution",
+  "emissary_idempotency",
+  "emissary_journal",
+]);
+export const lazyAdditiveTables = Object.freeze([...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES, ...RETIRED_EMISSARY_TABLES]);
 // messages (MSG-1) is fenced at v37 only. v34–v36 files do not have the
 // table or its triggers; verifyWriterFence(36) must not require them.
 const v34FencedTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables])]);

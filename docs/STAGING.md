@@ -17,7 +17,7 @@ pnpm exec wrangler deploy --env staging --keep-vars
 
 GitHub Actions does the same on every push to `main`, then runs the cold-start probe, `scripts/live-smoke.mjs --browser`, and uploads both results. The workflow is `.github/workflows/staging.yml`. It also runs from the Actions tab.
 
-The workflow needs the Actions secret `CLOUDFLARE_API_TOKEN` (Workers script edit on this account). If the token can see more than one account, also set `CLOUDFLARE_ACCOUNT_ID`. When `CLOUDFLARE_API_TOKEN` is absent the workflow prints a notice and succeeds. It does not deploy production.
+The workflow needs the Actions secrets `CLOUDFLARE_API_TOKEN` (Workers script edit on this account) and `ROOM_AGENT_CARD_SIGNING_KEY` (the build signs the agent card). If the token can see more than one account, also set `CLOUDFLARE_ACCOUNT_ID`. When either secret is absent the workflow fails with `missing <NAME>` and deploys nothing. It is not a required check, so it does not block merges, and it never deploys production. Production ships through the shared lane in [DEPLOY-LANE.md](DEPLOY-LANE.md).
 
 `env.staging.vars.ROOM_ORIGIN` is `https://project-room-stage.getdasha.workers.dev` because the account subdomain is `getdasha`. If a deploy prints a different `workers.dev` host, change `ROOM_ORIGIN` to that host before treating smoke as meaningful. The host check rejects every other origin.
 
@@ -58,4 +58,4 @@ Set these on the staging script only, with `pnpm exec wrangler secret put NAME -
 
 `CHANNEL_SEND_BUDGET` settings and `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME`, and `TELEMETRY` are read when present. Names only. Leave them unset unless you are rehearsing that path.
 
-Checked-in staging vars, not secrets: `ROOM_ORIGIN`, `ROOM_DEPLOYMENT`, `ROOM_GMAIL_ENABLED`, `ROOM_GMAIL_PILOT_ONLY`, `ROOM_SERVICE_MODE`. Gmail stays off.
+Checked-in staging vars, not secrets: `ROOM_ORIGIN`, `ROOM_DEPLOYMENT`, `ROOM_GMAIL_ENABLED`, `ROOM_GMAIL_PILOT_ONLY`, `ROOM_SERVICE_MODE`, `ROOM_SECURITY_CONTACT`. Gmail stays off.

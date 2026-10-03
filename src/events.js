@@ -39,6 +39,14 @@ export const EVENT_TYPES = Object.freeze({
   MESSAGE_POSTED: "message.posted",
   MESSAGE_EDITED: "message.edited",
   MESSAGE_DELETED: "message.deleted",
+  // --- PRIV-1 message redaction ---
+  MESSAGE_REDACTED: "message.redacted",
+  RECEIPT_EVIDENCE_WITHDRAWN: "receipt.evidence_withdrawn",
+  // --- PRIV-2 history visibility and export authority ---
+  ROOM_HISTORY_VISIBILITY_SET: "room.history_visibility_set",
+  ROOM_EXPORTED: "room.exported",
+  // --- end PRIV-2 ---
+  // --- end PRIV-1 message redaction ---
   REPLY_REQUEST_CANCELLED: REPLY_CANCELLED,
   MESSAGE_REACTION_SET: "message.reaction_set",
   MESSAGE_PINNED: "message.pinned",
@@ -158,6 +166,41 @@ export function roomPolicy(state) {
 export const TRUST_OFF_CODE = "trust_off";
 export const trustOffMessage = targetId =>
   `Room Trust is off: cross-owner assign and wake are blocked${targetId ? ` (${targetId})` : ""}. Ask the room owner to turn Trust on.`;
+
+// --- PRIV-2 history visibility ---
+// "all": members read the whole history. "since_join": a member reads
+// messages and events from their own join onward. The owner and members who
+// hold manage_members always read everything. Without a recorded setting,
+// rooms created with historyDefaultsVersion 1 start link guests and agent
+// guests at their join point; older rooms keep "all" for everyone.
+export const HISTORY_VISIBILITIES = Object.freeze(["all", "since_join"]);
+export const HISTORY_DEFAULTS_VERSION = 1;
+export const ROOM_EXPORT_FORMATS = Object.freeze(["jsonl", "html"]);
+const LINK_GUEST_ID = /^guest-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+export function isHistoryGuestMemberId(memberId) {
+  return typeof memberId === "string" && (LINK_GUEST_ID.test(memberId) || memberId.startsWith("guest-agent-"));
+}
+export function historyVisibility(state) {
+  const stored = state?.room?.historyVisibility;
+  const value = HISTORY_VISIBILITIES.includes(stored?.value) ? stored.value : null;
+  return {
+    value,
+    guestsSinceJoin: value === null && state?.room?.historyDefaultsVersion === HISTORY_DEFAULTS_VERSION,
+    revision: Number.isSafeInteger(stored?.revision) ? stored.revision : 0,
+    setById: typeof stored?.setById === "string" ? stored.setById : null,
+    setAt: typeof stored?.setAt === "string" ? stored.setAt : null
+  };
+}
+export function memberHistoryVisibility(state, memberId) {
+  const room = state?.room;
+  if (!room || typeof memberId !== "string" || memberId === room.ownerId) return "all";
+  const member = state.members?.[memberId];
+  if (Array.isArray(member?.permissions) && member.permissions.includes("manage_members")) return "all";
+  const setting = historyVisibility(state);
+  if (setting.value) return setting.value;
+  return setting.guestsSinceJoin && isHistoryGuestMemberId(memberId) ? "since_join" : "all";
+}
+// --- end PRIV-2 ---
 
 // Public receipts stay off until the owner records room.public_receipts_set.
 // Absent means off, so older logs replay without a publicReceipts field.
@@ -455,6 +498,14 @@ export function applyEvent(current, incoming) {
     [EVENT_TYPES.MESSAGE_POSTED]: postMessage,
     [EVENT_TYPES.MESSAGE_EDITED]: editMessage,
     [EVENT_TYPES.MESSAGE_DELETED]: deleteMessage,
+    // --- PRIV-1 message redaction ---
+    [EVENT_TYPES.MESSAGE_REDACTED]: redactMessage,
+    [EVENT_TYPES.RECEIPT_EVIDENCE_WITHDRAWN]: recordEvidenceWithdrawn,
+    // --- end PRIV-1 message redaction ---
+    // --- PRIV-2 history visibility and export authority ---
+    [EVENT_TYPES.ROOM_HISTORY_VISIBILITY_SET]: setHistoryVisibility,
+    [EVENT_TYPES.ROOM_EXPORTED]: recordRoomExport,
+    // --- end PRIV-2 ---
     [EVENT_TYPES.REPLY_REQUEST_CANCELLED]: cancelReplyRequest,
     [EVENT_TYPES.MESSAGE_REACTION_SET]: setMessageReaction,
     [EVENT_TYPES.MESSAGE_PINNED]: pinMessage,
@@ -544,6 +595,8 @@ function validateEnvelope(incoming) {
     if (["expectedRevision", "expectedMemberRevision"].includes(key) && (!Number.isSafeInteger(value) || value < 0)) throw new Error(`Invalid ${key}`);
     if (["independentVerificationRequired", "ownerDecisionRequired", "active", ...ROOM_POLICY_FIELDS].includes(key) && typeof value !== "boolean") throw new Error(`Invalid ${key}`);
     if (["permissions", "paths", "checksClaimed", "capabilities", "scopes", "acceptedScopes"].includes(key) && (!Array.isArray(value) || value.length > 64 || value.some(v => typeof v !== "string" || !v.trim() || v.length > 512))) throw new Error(`Invalid ${key}`);
+    if (key === "pullRequests" && (!Array.isArray(value) || value.length > 16 || value.some(v => typeof v !== "string" || !/^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/pull\/[1-9]\d{0,9}$/.test(v)))) throw new Error(`Invalid ${key}`);
+    if (key === "blocks" && (!Array.isArray(value) || value.length > 64 || value.some(entry => !entry || typeof entry !== "object" || Array.isArray(entry) || typeof entry.path !== "string" || !entry.path.trim() || entry.path.length > 512 || (entry.block != null && (typeof entry.block !== "string" || entry.block.length > 80)) || (entry.region != null && (typeof entry.region !== "string" || entry.region.length > 80))))) throw new Error(`Invalid ${key}`);
     // Legacy events (v11-v18) used data.outputs as a plain string; keep that shape valid for strict replay.
     if (key === "outputs" && typeof value !== "string" && (!Array.isArray(value) || value.length > 64 || value.some(v => typeof v !== "string" || !v.trim() || v.length > 512))) throw new Error(`Invalid ${key}`);
     if (key === "preferences" && (Array.isArray(value) || typeof value !== "object" || Object.entries(value).some(([k, v]) => typeof k !== "string" || typeof v !== "string" || k.length > 64 || v.length > 64))) throw new Error(`Invalid ${key}`);
@@ -573,7 +626,7 @@ function validateEnvelope(incoming) {
       || typeof action.claimId !== "string" || !validId(action.claimId)
       || typeof action.label !== "string" || !action.label.trim() || action.label.length > 512
       || Object.keys(action).some(field => field !== "claimId" && field !== "label")))) throw new Error(`Invalid ${key}`);
-    if (!["string", "boolean", "number"].includes(typeof value) && !["permissions", "paths", "checksClaimed", "capabilities", "preferences", "budget", "outputs", "segments", "signedEvidence", "labels", "scopes", "acceptedScopes", "changed", "state", "pullRequest", "actions"].includes(key)) throw new Error(`Invalid ${key}`);
+    if (!["string", "boolean", "number"].includes(typeof value) && !["permissions", "paths", "checksClaimed", "capabilities", "preferences", "budget", "outputs", "segments", "signedEvidence", "labels", "scopes", "acceptedScopes", "changed", "state", "pullRequest", "pullRequests", "blocks", "actions"].includes(key)) throw new Error(`Invalid ${key}`);
   }
 }
 
@@ -583,6 +636,11 @@ function createRoom(state, incoming) {
   if (incoming.data.kind !== undefined && !ROOM_KINDS.includes(incoming.data.kind)) throw new Error("Room kind must be personal or organization");
   if (incoming.roomId !== incoming.data.roomId) throw new Error("Room event id mismatch");
   if (incoming.actorId !== incoming.data.ownerId) throw new Error("Room must be created by its owner");
+  // PRIV-2: rooms created after history visibility shipped carry version 1,
+  // which starts link guests and agent guests at their join point.
+  if (incoming.data.historyDefaultsVersion !== undefined && incoming.data.historyDefaultsVersion !== HISTORY_DEFAULTS_VERSION) {
+    throw new Error("Unsupported history defaults version");
+  }
   state.room = { id: incoming.data.roomId, ...incoming.data, createdAt: incoming.at };
   state.channels = {
     [DEFAULT_CHANNEL_ID]: {
@@ -645,6 +703,28 @@ function setPublicReceipts(state, incoming) {
     setAt: incoming.at
   };
 }
+
+// --- PRIV-2 writers: owner-only. Absent stays absent, so older logs replay byte-identically. ---
+function setHistoryVisibility(state, incoming) {
+  const actor = requireMember(state, incoming.actorId);
+  if (actor.id !== state.room.ownerId) throw new Error("Only the Room owner may set history visibility");
+  if (!HISTORY_VISIBILITIES.includes(incoming.data.historyVisibility)) throw new Error("History visibility is all or since_join");
+  const previous = state.room.historyVisibility ?? null;
+  state.room.historyVisibility = {
+    value: incoming.data.historyVisibility,
+    revision: (previous?.revision ?? 0) + 1,
+    setById: incoming.actorId,
+    setAt: incoming.at
+  };
+}
+
+// The export itself is a read. This audit record changes no projection field.
+function recordRoomExport(state, incoming) {
+  const actor = requireMember(state, incoming.actorId);
+  if (actor.id !== state.room.ownerId) throw new Error("Only the Room owner may export the room");
+  if (!ROOM_EXPORT_FORMATS.includes(incoming.data.format)) throw new Error("Export format is jsonl or html");
+}
+// --- end PRIV-2 writers ---
 
 // --- GR2 opt-in writers. Same shape as public receipts: owner or the member who owns the text. ---
 function writeOptIn(previous, incoming) {
@@ -1006,10 +1086,15 @@ function requireScopedMemberAdministration(state, actorId, targetId, currentTarg
 
 function postMessage(state, incoming) {
   const actor = requireMember(state, incoming.actorId);
-  requireFields(incoming.data, ["body"]);
+  // --- PRIV-1 message redaction ---
+  // A rewritten log stores body null and redacted true. Replay still has to
+  // build the same message, including a channel copy, without the text.
+  const redacted = isRedactedBody(incoming.data);
+  if (!redacted) requireFields(incoming.data, ["body"]);
+  // --- end PRIV-1 message redaction ---
   const requestMode = prepareReplyPost(state, incoming);
   if (incoming.data.toMemberId) (requestMode === "respond" ? knownMember : requireMember)(state, incoming.data.toMemberId);
-  if (typeof incoming.data.body !== "string") throw new Error("Message body must be text");
+  if (!redacted && typeof incoming.data.body !== "string") throw new Error("Message body must be text");
   // ACT-1a: receipt cards and starter choice buttons. Absent on ordinary posts.
   if (incoming.data.kind != null && incoming.data.kind !== "receipt_card") throw new Error("Message kind must be receipt_card");
   if (incoming.data.kind === "receipt_card") {
@@ -1039,6 +1124,7 @@ function postMessage(state, incoming) {
     id: incoming.data.messageId || incoming.id,
     authorId: actor.id,
     body: incoming.data.body,
+    ...(redacted ? { redacted: true } : {}),
     channelId,
     workItemId: incoming.data.workItemId || null,
     replyToId: incoming.data.replyToId || null,
@@ -1069,6 +1155,7 @@ function postMessage(state, incoming) {
       id: copyId,
       authorId: actor.id,
       body: incoming.data.body,
+      ...(redacted ? { redacted: true } : {}),
       channelId,
       workItemId: null,
       replyToId: null,
@@ -1178,7 +1265,9 @@ function findEditableMessage(state, incoming, { evidence = "refuse" } = {}) {
 
 function editMessage(state, incoming) {
   const { message } = findEditableMessage(state, incoming);
-  if (typeof incoming.data.body !== "string" || !incoming.data.body.trim()) throw new Error("Message body must be text");
+  // --- PRIV-1 message redaction ---
+  if (!isRedactedBody(incoming.data) && (typeof incoming.data.body !== "string" || !incoming.data.body.trim())) throw new Error("Message body must be text");
+  // --- end PRIV-1 message redaction ---
   message.editHistory = [...(message.editHistory ?? []), { body: message.body, editedAt: incoming.at }];
   message.body = incoming.data.body;
   message.revision = (message.revision ?? 0) + 1;
@@ -1196,6 +1285,87 @@ function deleteMessage(state, incoming) {
   withdrawTextEvidence(state, message.id, incoming);
   message.revision = (message.revision ?? 0) + 1;
 }
+
+// --- PRIV-1 message redaction ---
+function isRedactedBody(data) {
+  return data?.redacted === true && data.body == null;
+}
+
+// Server-emitted. Owner delete, author delete, and account deletion all append
+// this after the text has been removed from earlier events. Replay must match
+// a live delete: bodies stay null, a prior delete's timestamp wins, and the
+// posted byte length is kept so a receipt can still name its hash.
+function redactMessage(state, incoming) {
+  const actor = requireMember(state, incoming.actorId);
+  const messageId = incoming.data?.messageId;
+  if (!validId(messageId)) throw new Error("Event data missing messageId");
+  const primary = state.messages.find(message => message.id === messageId);
+  if (!primary) throw new Error("Message not found");
+  if (primary.authorId !== actor.id && actor.id !== state.room.ownerId) {
+    throw new Error("Only the author or the Room owner can change this message");
+  }
+  const ids = messageId.endsWith(":channel") ? [messageId] : [messageId, `${messageId}:channel`];
+  for (const id of ids) {
+    const message = state.messages.find(entry => entry.id === id);
+    if (!message) continue;
+    message.body = null;
+    message.redacted = true;
+    if (Array.isArray(message.editHistory)) {
+      message.editHistory = message.editHistory.map(entry => ({ ...entry, body: null }));
+    }
+    if (message.attachments != null) message.attachments = null;
+    if (!message.deletedAt) {
+      message.deletedAt = incoming.at;
+      message.deletedBy = incoming.actorId;
+      dropPinsForMessage(state, message.id);
+      message.revision = (message.revision ?? 0) + 1;
+    }
+  }
+  if (!messageId.endsWith(":channel") && Number.isInteger(incoming.data.byteLength) && incoming.data.byteLength > 0) {
+    primary.redactedByteLength = incoming.data.byteLength;
+  }
+  for (const work of Object.values(state.workItems ?? {})) {
+    for (const receipt of [...(work.receiptHistory ?? []), work.receipt]) {
+      if (receipt?.nativeText?.messageId !== messageId) continue;
+      if (!receipt.nativeText.withdrawnAt) {
+        receipt.nativeText.withdrawnAt = incoming.at;
+        receipt.nativeText.withdrawnBy = incoming.actorId;
+      }
+      receipt.nativeText.evidence = "removed";
+    }
+  }
+}
+
+// A receipt that cited this message keeps its hash and gains one ledger line.
+function recordEvidenceWithdrawn(state, incoming) {
+  requireMember(state, incoming.actorId);
+  const messageId = incoming.data?.messageId;
+  if (!validId(messageId)) throw new Error("Event data missing messageId");
+  if (incoming.data?.evidence !== "removed") throw new Error("Evidence withdrawal must record removed");
+  let cited = false;
+  for (const work of Object.values(state.workItems ?? {})) {
+    let here = false;
+    for (const receipt of [...(work.receiptHistory ?? []), work.receipt]) {
+      if (receipt?.nativeText?.messageId !== messageId) continue;
+      here = true;
+      cited = true;
+      receipt.nativeText.evidence ??= "removed";
+    }
+    if (!here) continue;
+    work.evidenceWithdrawals ??= [];
+    if (!work.evidenceWithdrawals.some(entry => entry.messageId === messageId)) {
+      work.evidenceWithdrawals.push({
+        messageId,
+        evidence: "removed",
+        at: incoming.at,
+        by: incoming.actorId,
+        ...(Number.isInteger(incoming.data.byteLength) && incoming.data.byteLength > 0 ? { byteLength: incoming.data.byteLength } : {})
+      });
+    }
+  }
+  if (!cited) throw new Error("Message not found");
+}
+// --- end PRIV-1 message redaction ---
 
 function setMessageReaction(state, incoming) {
   const actor = requireMember(state, incoming.actorId);
@@ -1436,7 +1606,11 @@ function recordBond(state, incoming) {
 
 function recordPeerDm(state, incoming) {
   requireMember(state, incoming.actorId);
-  requireFields(incoming.data, ["messageId", "threadId", "bondId", "body", "fromIdentityId", "toIdentityId"]);
+  // --- PRIV-1 message redaction ---
+  const fields = ["messageId", "threadId", "bondId", "fromIdentityId", "toIdentityId"];
+  if (!isRedactedBody(incoming.data)) fields.push("body");
+  requireFields(incoming.data, fields);
+  // --- end PRIV-1 message redaction ---
   if (incoming.data.fromIdentityId === incoming.data.toIdentityId) throw new Error("Cannot DM yourself");
   // Receipt only. Peer DM bodies stay out of room chat (state.messages).
 }
@@ -1500,6 +1674,8 @@ function recordWorkClaimUpdate(state, incoming) {
     }
   }
   if (data.reason !== undefined && data.reason !== "ci_changed" && data.reason !== "reviewed") throw new Error("Event data missing reason");
+  if (data.attention !== undefined && !["assigned", "lease_expiring", "lease_expired", "ci_failed", "changes_requested"].includes(data.attention)) throw new Error("Event data missing attention");
+  if (data.attentionMemberId !== undefined && (typeof data.attentionMemberId !== "string" || data.attentionMemberId.length === 0 || data.attentionMemberId.length > 128)) throw new Error("Event data missing attentionMemberId");
   if (data.ciState !== undefined && !["pending", "success", "failure", "neutral"].includes(data.ciState)) throw new Error("Event data missing ciState");
   if (data.verdict !== undefined && !["approve", "changes_requested", "comment"].includes(data.verdict)) throw new Error("Event data missing verdict");
   if (data.action === "ci_changed" && (data.reason !== "ci_changed" || !data.ciState)) throw new Error("Event data missing ciState");
@@ -1707,13 +1883,15 @@ function renewClaim(state, incoming) {
   const item = mutableWorkItem(state, incoming, [WORK_STATES.ACCEPTED, WORK_STATES.WORKING, WORK_STATES.BLOCKED]);
   if (!item.claim || !claimIsActive(item.claim, incoming.at)) throw new Error("No active claim to renew — acquire a fresh claim instead");
   if (incoming.actorId !== item.claim.holderId) throw new Error("Only the claim holder may renew this claim");
-  requireFields(incoming.data, ["progressMessageId", "expiresAt"]);
+  requireFields(incoming.data, ["expiresAt"]);
   if (!Number.isFinite(Date.parse(incoming.data.expiresAt)) || Date.parse(incoming.data.expiresAt) <= Date.parse(incoming.at)) throw new Error("Claim expiry must be in the future");
-  requireProgressCheckin(state, item.claim, incoming.actorId, incoming.data.progressMessageId);
+  if (incoming.data.progressMessageId != null) {
+    requireProgressCheckin(state, item.claim, incoming.actorId, incoming.data.progressMessageId);
+    item.claim.progressMessageId = incoming.data.progressMessageId;
+  }
   item.claim.expiresAt = incoming.data.expiresAt;
   item.claim.renewedAt = incoming.at;
   item.claim.renewals = (item.claim.renewals ?? 0) + 1;
-  item.claim.progressMessageId = incoming.data.progressMessageId;
   commitMutation(item, incoming);
 }
 
@@ -2057,7 +2235,9 @@ function pinMessage(state, incoming) {
   const messageId = pinTarget(incoming);
   const message = state.messages.find(m => m.id === messageId);
   if (!message) throw new Error("Pin must reference a message in this Room");
-  if (message.deletedAt || message.body == null) throw new Error("A deleted message cannot be pinned");
+  // A redacted post keeps body null in the log before message.deleted. Replay
+  // still has to accept the pin that happened while the text was readable.
+  if (message.deletedAt || (message.body == null && message.redacted !== true)) throw new Error("A deleted message cannot be pinned");
   state.pins ??= [];
   if (state.pins.some(pin => pin.messageId === messageId)) return; // idempotent
   if (state.pins.length >= PIN_LIMIT) throw new Error(`Pin capacity reached: ${PIN_LIMIT} pinned messages per room; unpin one first`);

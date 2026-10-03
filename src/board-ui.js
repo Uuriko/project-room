@@ -45,6 +45,7 @@ export function columnOf(item, byId, now) {
     const at = Date.parse(updatedAt(item));
     return Number.isFinite(at) && now - at <= WEEK ? "landed" : null;
   }
+  if (item.state === "unclaimed" && !item.owner && !dependenciesMet(item, byId)) return "blocked";
   if (openPull(item)) return "review";
   if (item.state === "blocked") return "blocked";
   if (item.state === "claimed" || item.state === "in_progress") return "claimed";
@@ -218,29 +219,80 @@ function viewerOf(state, session) {
   const id = session?.member?.id ?? null;
   const member = id ? state?.members?.[id] : null;
   const manage = Boolean(id && (state?.room?.ownerId === id || (member?.permissions ?? []).includes("manage_claims")));
-  return { id, manage };
+  return { id, manage, owner: Boolean(id && state?.room?.ownerId === id), write: canWriteClaims(state, session) };
 }
 
-function cardHtml(item, viewer, members, now) {
+function workLink(item, workItems, key, label) {
+  const linked = typeof item?.workItemId === "string" && Object.hasOwn(workItems ?? {}, item.workItemId) && workItems[item.workItemId]?.id === item.workItemId;
+  return linked ? `<a href="#pr-record/work/${encodeURIComponent(item.workItemId)}" data-open-work="${escapeHtml(item.workItemId)}" data-focus-key="${escapeHtml(key)}">${escapeHtml(label)}</a>` : escapeHtml(label);
+}
+
+function claimReference(id, byId, workItems, key) {
+  const target = byId.get(id);
+  const label = target?.title ? `${target.title} (#${id})` : `#${id}`;
+  return workLink(target, workItems, key, label);
+}
+
+function canLinkPullRequest(item, viewer, now) {
+  return viewer.write && viewer.id === item.owner && !item.supersededBy
+    && ["claimed", "in_progress", "blocked"].includes(item.state)
+    && (!item.leaseExpiresAt || Date.parse(item.leaseExpiresAt) > now);
+}
+
+function reviewLabel(review, item) {
+  if (review.verdict !== "approve") return String(review.verdict ?? "").replaceAll("_", " ");
+  const basis = review.basis;
+  const current = basis?.version === 1 && basis.owner === item.owner && basis.claimedAt === item.claimedAt
+    && basis.revision === (item.revision ?? null) && basis.headSha === (item.ci?.headSha ?? null);
+  const attested = (item.attestations ?? []).some(entry => entry.memberId === review.memberId && entry.at === review.at);
+  return current && attested ? "approve" : "previous approval · does not qualify for current work";
+}
+
+function cardHtml(item, viewer, members, now, workItems, byId) {
   const ownerId = item.owner;
   const owner = ownerId ? memberName(members, ownerId) : "Unclaimed";
   const mine = Boolean(viewer.id && ownerId === viewer.id);
   const files = Array.isArray(item.files) ? item.files : [];
+  const blocks = item.fileBlocks && typeof item.fileBlocks === "object" ? item.fileBlocks : {};
+  const fileLabel = file => blocks[file] ? `${file} (${blocks[file]})` : file;
   const fileBlock = files.length
-    ? `<details class="claim-files"><summary>${files.length} file${files.length === 1 ? "" : "s"}</summary><ul>${files.map(file => `<li>${escapeHtml(file)}</li>`).join("")}</ul></details>`
+    ? `<details class="claim-files"><summary>${files.length} file${files.length === 1 ? "" : "s"}</summary><ul>${files.map(file => `<li>${escapeHtml(fileLabel(file))}</li>`).join("")}</ul></details>`
     : "";
   const lease = item.state === "done" ? "" : countdown(item.leaseExpiresAt, now);
-  const number = pullNumber(item.pullRequest?.url);
-  const pr = item.pullRequest?.url
-    ? `<p class="claim-pr"><a href="${escapeHtml(item.pullRequest.url)}">PR ${number ? `#${escapeHtml(number)}` : "link"}</a>${item.ci?.state ? ` <span class="ci-badge ci-${escapeHtml(item.ci.state)}">${escapeHtml(item.ci.state)}</span>` : ""}</p>`
+  const pulls = Array.isArray(item.pullRequests) && item.pullRequests.length ? item.pullRequests : (item.pullRequest?.url ? [item.pullRequest] : []);
+  const pr = pulls.map((pull, index) => {
+    const number = pullNumber(pull.url);
+    const outcome = pull.outcome ? ` · ${pull.outcome}` : "";
+    const ci = index === 0 && item.ci?.state ? ` <span class="ci-badge ci-${escapeHtml(item.ci.state)}">${escapeHtml(item.ci.state)}</span>` : "";
+    return `<p class="claim-pr"><a href="${escapeHtml(pull.url)}">PR ${number ? `#${escapeHtml(number)}` : "link"}</a>${escapeHtml(outcome)}${ci}</p>`;
+  }).join("");
+  const place = item.repo || item.branch
+    ? `<p class="claim-repo">${escapeHtml([item.repo, item.branch].filter(Boolean).join("@"))}</p>`
     : "";
+  const chain = Array.isArray(item.chain) ? item.chain : [];
+  const links = chain.map((link, index) => `<li>${escapeHtml(link.kind)} → ${claimReference(link.targetId, byId, workItems, `claim-chain:${item.id}:${index}`)}${link.note ? ` · ${escapeHtml(link.note)}` : ""}</li>`).join("");
   const reviews = Array.isArray(item.reviews) && item.reviews.length
-    ? `<ul class="claim-reviews">${item.reviews.map(review => `<li>${escapeHtml(memberName(members, review.memberId) || review.memberId)} ${escapeHtml(String(review.verdict ?? "").replaceAll("_", " "))}</li>`).join("")}</ul>`
+    ? `<ul class="claim-reviews">${item.reviews.map(review => `<li>${escapeHtml(memberName(members, review.memberId) || review.memberId)} ${escapeHtml(reviewLabel(review, item))}</li>`).join("")}</ul>`
     : "";
-  const deps = (item.dependsOn ?? []).map(id => `<li>lands after #${escapeHtml(id)}</li>`).join("");
+  const dependencies = Array.isArray(item.dependsOn) ? item.dependsOn : [];
+  const remaining = dependencies.filter(id => byId.get(id)?.state !== "done");
+  const waiting = item.state === "unclaimed" && !item.owner && remaining.length > 0;
+  const reason = waiting ? `<p class="form-hint claim-waiting">Waiting for ${remaining.length} prerequisite${remaining.length === 1 ? "" : "s"} before claiming.</p>` : "";
+  const deps = dependencies.map((id, index) => {
+    const target = byId.get(id);
+    const status = !target ? "Not loaded or unavailable; status unknown"
+      : target.state === "done" ? "Completed"
+      : target.state === "unclaimed" && !target.owner ? "Unclaimed; needs an owner"
+      : ({ claimed: "Claimed", in_progress: "In progress", blocked: "Blocked" }[target.state] ?? "Status unknown");
+    const reference = claimReference(id, byId, workItems, `claim-dependency:${item.id}:${index}`);
+    return `<li>${target?.state === "done" ? "Prerequisite" : "Waiting for"} ${reference} · ${escapeHtml(status)}</li>`;
+  }).join("");
   const button = (action, label, tone) => `<button type="button" class="button ${tone}" data-claim-action="${action}" data-claim-id="${escapeHtml(item.id)}" data-focus-key="${action}:${escapeHtml(item.id)}">${label}</button>`;
   const actions = [];
-  if (item.state === "unclaimed") actions.push(button("claim", "Claim", "primary"));
+  if (canLinkPullRequest(item, viewer, now)) {
+    actions.push(`<form class="board-new" data-claim-link-pr="${escapeHtml(item.id)}"><label>Pull request URL <input name="pullRequest" type="url" size="1" maxlength="300" required autocomplete="off" placeholder="https://github.com/…/pull/…" aria-label="Pull request URL for ${escapeHtml(item.title || item.id)}" data-focus-key="link-pr:${escapeHtml(item.id)}"></label><button type="submit" class="button secondary">Link PR</button></form>`);
+  }
+  if (item.state === "unclaimed" && !item.owner && !waiting) actions.push(button("claim", "Claim", "primary"));
   if (mine && ["claimed", "in_progress", "blocked"].includes(item.state)) actions.push(button("renew", "Renew", "secondary"));
   if (mine && (item.state === "claimed" || item.state === "blocked")) actions.push(button("progress", "Mark in progress", "secondary"));
   if (mine && item.state === "in_progress") actions.push(button("done", "Done", "primary"));
@@ -250,22 +302,26 @@ function cardHtml(item, viewer, members, now) {
       .map(member => `<option value="${escapeHtml(member.id)}">${escapeHtml(memberName(members, member.id))}</option>`).join("");
     if (options) actions.push(`<form data-claim-reassign="${escapeHtml(item.id)}"><label>Reassign <select name="newOwner" aria-label="Reassign ${escapeHtml(item.title)}">${options}</select></label><button type="submit" class="button secondary">Move</button></form>`);
   }
-  return `<article class="claim-card" data-claim-id="${escapeHtml(item.id)}"><h4 tabindex="-1">${escapeHtml(item.title || item.id)}</h4><p class="claim-owner">${ownerId ? `<span class="member-avatar" aria-hidden="true">${escapeHtml(initials(owner))}</span> ` : ""}<span>${escapeHtml(owner)}</span></p>${fileBlock}${lease ? `<p class="claim-lease">${escapeHtml(lease)}</p>` : ""}${pr}${reviews}${deps ? `<ul class="claim-deps">${deps}</ul>` : ""}<div class="claim-actions">${actions.join("")}</div></article>`;
+  const title = workLink(item, workItems, `claim-work:${item.id}`, item.title || item.id);
+  return `<article class="claim-card" data-claim-id="${escapeHtml(item.id)}"><h4 tabindex="-1">${title}</h4><p class="claim-owner">${ownerId ? `<span class="member-avatar" aria-hidden="true">${escapeHtml(initials(owner))}</span> ` : ""}<span>${escapeHtml(owner)}</span></p>${place}${fileBlock}${lease ? `<p class="claim-lease">${escapeHtml(lease)}</p>` : ""}${pr}${reviews}${reason}${deps ? `<ul class="claim-deps">${deps}</ul>` : ""}${links ? `<ul class="claim-chain">${links}</ul>` : ""}<div class="claim-actions">${actions.join("")}</div></article>`;
 }
 
 function newItemForm() {
   return `<form id="board-new-item" class="board-new"><h3>New item</h3><label>Title <input name="title" maxlength="200" required autocomplete="off"></label><label>Files <input name="files" maxlength="4000" autocomplete="off" placeholder="Optional, comma-separated"></label><button type="submit" class="button primary">Add item</button></form>`;
 }
 
-function boardHtml(items, status, viewer, members, now, { older = false, canWrite = false, capabilities = [] } = {}) {
+function boardHtml(items, status, viewer, members, now, { older = false, canWrite = false, capabilities = [], cap = 20, workItems = {} } = {}) {
   const columns = placeClaims(items, now);
+  const byId = new Map(items.map(item => [item.id, item]));
+  const waitingCount = columns.blocked.filter(item => item.state === "unclaimed" && !item.owner).length;
   const sweep = viewer.manage ? `<button type="button" class="button secondary" id="board-close-stale" data-claim-action="sweep">Close stale</button>` : "";
+  const capForm = viewer.owner ? `<form data-claim-cap><label>Claims per member <input name="maxMemberOpenClaims" type="number" min="1" max="10000" value="${escapeHtml(String(cap ?? 20))}" aria-label="Open claims per member"></label><button type="submit">Save cap</button></form>` : "";
   const form = canWrite ? newItemForm() : "";
   const hint = older ? `<p class="form-hint board-older">Older landed work is in the API</p>` : "";
   const body = items.length
-    ? `${hint}<div class="board-columns">${COLUMNS.map(([id, label]) => `<section aria-labelledby="board-col-${id}"><h3 id="board-col-${id}">${label}</h3>${columns[id].map(item => cardHtml(item, viewer, members, now)).join("") || `<p class="form-hint">Nothing here.</p>`}</section>`).join("")}</div>`
+    ? `${hint}<div class="board-columns">${COLUMNS.map(([id, label]) => `<section aria-labelledby="board-col-${id}"><h3 id="board-col-${id}">${label}${id === "blocked" && waitingCount ? ` · ${waitingCount} waiting` : ""}</h3>${columns[id].map(item => cardHtml(item, viewer, members, now, workItems, byId)).join("") || `<p class="form-hint">Nothing here.</p>`}</section>`).join("")}</div>`
     : `<p class="board-empty">${escapeHtml(emptyBoardCopy(capabilities))}</p>${hint}`;
-  return `${form}<div class="board-head"><p class="live-chip">${escapeHtml(liveLabel(status))}</p>${sweep}</div><p id="board-status" class="form-hint" role="status"></p>${body}`;
+  return `${form}<div class="board-head"><p class="live-chip">${escapeHtml(liveLabel(status))}</p>${sweep}${capForm}</div><p id="board-status" class="form-hint" role="status"></p>${body}`;
 }
 
 function staleDonePage(claims, now) {
@@ -276,19 +332,22 @@ function staleDonePage(claims, now) {
   });
 }
 
-async function readClaims(client, now = Date.now()) {
+async function readClaims(client, current, now = Date.now()) {
   const claims = [];
   let cursor = null;
   let older = false;
   for (let page = 0; page < 20; page += 1) {
+    if (!current()) break;
     const query = new URLSearchParams({ limit: "200" });
-    // SEC-2 adds updatedSince=now-7d once the list route accepts it. Until
-    // then an unknown parameter is a 422, so the query stays limit and cursor
-    // and a page of only old done items ends the walk.
+    // The list route leaves out landed work older than a week and counts it
+    // in olderDone. A page of only old done items still ends the walk, for a
+    // server that predates that window.
     if (cursor) query.set("cursor", cursor);
     const body = await client.request(client.path(`/work-claims?${query}`));
+    if (!current()) break;
     const pageClaims = body.claims ?? [];
     claims.push(...pageClaims);
+    if (Number(body.olderDone) > 0) older = true;
     if (staleDonePage(pageClaims, now)) { older = true; break; }
     if (!body.nextCursor) return { claims, older };
     cursor = body.nextCursor;
@@ -308,13 +367,20 @@ function filesFromField(value) {
 
 export function installWorkBoard({ client, getState, getSession }) {
   const root = document.querySelector("#work-board");
-  if (!root) return { sync() {}, reset() {} };
+  if (!root) return { sync() {}, reset() {}, async whenReady() { return false; } };
   let items = [];
   let status = null;
+  let cap = 20;
   let older = false;
   let seen = null;
   let loadedRoom = null;
-  let busy = false;
+  let loadedContext = null, operation = 0, readFlight = null, actionFlight = null;
+  const context = () => {
+    const current = getSession(), member = current?.member?.id;
+    return current?.roomId && member && getState()?.members?.[member]?.id === member && getState().members[member].active !== false
+      ? `${client.generation}|${current.roomId}|${member}` : null;
+  };
+  let mutating = false;
   let pendingFocus = null;
   let pendingStatus = "";
   let stick = null;
@@ -332,7 +398,7 @@ export function installWorkBoard({ client, getState, getSession }) {
     pendingFocus = null;
     pendingStatus = "";
     root.innerHTML = boardHtml(items, status, viewerOf(state, session), state?.members ?? {}, Date.now(), {
-      older, canWrite: canWriteClaims(state, session), capabilities: advertisedCapabilities(state)
+      older, canWrite: canWriteClaims(state, session), capabilities: advertisedCapabilities(state), cap, workItems: state?.workItems ?? {}
     });
     if (stick?.status) {
       const line = root.querySelector("#board-status");
@@ -367,44 +433,78 @@ export function installWorkBoard({ client, getState, getSession }) {
   }
 
   async function load({ force = false } = {}) {
-    const session = getSession();
-    if (!session?.roomId || busy) return;
+    const session = getSession(), owned = context();
+    if (!owned) return;
+    if (loadedContext !== owned) {
+      operation++; mutating = false; readFlight = null; actionFlight = null; loadedRoom = null; seen = null; items = []; status = null;
+      loadedContext = owned; pendingFocus = null; pendingStatus = ""; stick = null; paint();
+    }
+    if ((mutating && !force) || readFlight) return;
     const events = (getState()?.eventLog ?? []).filter(event => event.type === "work_claim.updated");
     const mark = events.length ? events[events.length - 1].id : "";
     if (!force && loadedRoom === session.roomId && seen === mark) return;
-    busy = true;
+    const mine = ++operation;
+    let pending = null;
     try {
-      const [page, live] = await Promise.all([
-        readClaims(client),
-        client.request(client.path("/work-claims/status"))
+      pending = Promise.all([
+        readClaims(client, () => mine === operation && context() === owned),
+        client.request(client.path("/work-claims/status")),
+        client.request(client.path("/work-claims/config"))
       ]);
-      if (getSession()?.roomId !== session.roomId) return;
+      readFlight = pending;
+      const [page, live, config] = await pending;
+      if (mine !== operation || context() !== owned) return;
       items = page.claims;
       older = page.older;
       status = live;
+      cap = config?.maxMemberOpenClaims ?? cap;
       loadedRoom = session.roomId;
       seen = mark;
       paint();
+      return true;
     } catch {
-      if (getSession()?.roomId === session.roomId) note("Could not load the board.");
+      if (mine === operation && context() === owned) note("Could not load the board.");
+      return false;
     } finally {
-      busy = false;
+      if (readFlight === pending) readFlight = null;
     }
   }
 
-  async function act(run, focus) {
-    if (busy) return;
+  async function act(run, focus, reconcile = null) {
+    const owned = context();
+    if (!owned || loadedContext !== owned || mutating) return;
+    const mine = ++operation;
+    // An explicit action supersedes a background read; its stale response
+    // cannot paint or block the fresh list after this mutation.
+    readFlight = null;
     if (focus) { pendingFocus = { key: focus.key ?? null, id: focus.id ?? null }; pendingStatus = focus.status ?? ""; }
-    busy = true;
+    mutating = true;
+    if (focus?.pending) note(focus.pending);
+    let pending = null;
     try {
-      await run();
-      busy = false;
-      await load({ force: true });
+      pending = run(); actionFlight = pending;
+      await pending;
+      if (mine !== operation || context() !== owned) return;
+      // Keep duplicate mutations excluded until their new state is visible.
+      const refreshed = await load({ force: true });
+      if (reconcile && actionFlight === pending && context() === owned) {
+        note(refreshed ? reconcile(null) : "Could not confirm the PR link. Refresh the board before trying again.");
+      }
     } catch (error) {
-      pendingFocus = null;
-      pendingStatus = "";
-      busy = false;
-      note(error?.message || "Could not update the claim.");
+      if (mine !== operation || context() !== owned) return;
+      if (reconcile) {
+        note("Checking the current claim…");
+        const refreshed = await load({ force: true });
+        if (actionFlight === pending && context() === owned) {
+          note(refreshed ? reconcile(error) : "Could not confirm the PR link. Refresh the board before trying again.");
+        }
+      } else {
+        pendingFocus = null;
+        pendingStatus = "";
+        note(error?.message || "Could not update the claim.");
+      }
+    } finally {
+      if (actionFlight === pending) { actionFlight = null; mutating = false; }
     }
   }
 
@@ -424,15 +524,54 @@ export function installWorkBoard({ client, getState, getSession }) {
     else if (action === "progress") void act(() => client.request(`${path}/update`, { method: "POST", data: { state: "in_progress" } }), focus);
     else if (action === "done") void act(() => client.request(`${path}/update`, { method: "POST", data: { state: "done" } }), focus);
     else if (action === "renew") {
-      const title = titleOf(id);
-      const messageId = crypto.randomUUID();
-      void act(async () => {
-        await client.send({ id: crypto.randomUUID(), type: "message.posted", data: { messageId, body: `Checking in on ${title}.` } });
-        await client.request(`${path}/renew`, { method: "POST", data: { progressMessageId: messageId } });
-      }, focus);
+      void act(() => client.request(`${path}/renew`, { method: "POST", data: {} }), focus);
     }
   });
   root.addEventListener("submit", event => {
+    const linkForm = event.target.closest("[data-claim-link-pr]");
+    if (linkForm && root.contains(linkForm)) {
+      event.preventDefault();
+      if (mutating) return;
+      const id = linkForm.dataset.claimLinkPr;
+      const item = items.find(entry => entry.id === id);
+      if (!item || !canLinkPullRequest(item, viewerOf(getState(), getSession()), Date.now())) return;
+      const pullRequest = String(new FormData(linkForm).get("pullRequest") ?? "").trim();
+      if (!pullRequest) return;
+      let canonicalUrl;
+      try { canonicalUrl = new URL(pullRequest).href.replace(/\/$/, ""); }
+      catch { note("Enter a GitHub pull request URL."); return; }
+      // SEC-2: list pages carry the newest history entries plus a
+      // historyOmitted count; the lifetime count is the concurrency token.
+      const historyTotal = entry => (entry?.history?.length ?? 0) + (Number(entry?.historyOmitted) || 0);
+      const data = { appendPullRequest: pullRequest, expectedClaimedAt: item.claimedAt, expectedHistoryLength: historyTotal(item) };
+      const reconcile = error => {
+        const current = items.find(entry => entry.id === id);
+        const history = current?.history ?? [];
+        const added = historyTotal(current) - historyTotal(item);
+        const changedRound = added < 0 || added > history.length || history.slice(history.length - added)
+          .some(entry => /^(claimed$|state:unclaimed$|lease_expired$|reassigned:)/.test(entry.action));
+        const sameClaim = current?.owner === item.owner && current?.claimedAt === item.claimedAt && !changedRound;
+        const linked = sameClaim && (current.pullRequests ?? [current.pullRequest]).some(pull => pull?.url === canonicalUrl);
+        if (error?.code === "room_archived") return error.message || "This room is archived; no PR link was recorded.";
+        if (error?.status === 409) return linked
+          ? "Claim changed. This PR is already linked; the board is refreshed."
+          : "Claim changed. The board is refreshed; check its current owner and claim before trying again.";
+        if (linked) return `PR linked to '${item.title || id}'`;
+        return error?.message || "Could not confirm the PR link. Check the refreshed claim before trying again.";
+      };
+      void act(() => {
+        linkForm.setAttribute("aria-busy", "true");
+        linkForm.querySelector("input").readOnly = true;
+        linkForm.querySelector("button").disabled = true;
+        return client.request(client.path(`/work-claims/${encodeURIComponent(id)}/update`), { method: "POST", data });
+      }, { id, key: `link-pr:${id}`, pending: "Linking PR and checking the current claim…" }, reconcile).finally(() => {
+        if (!root.contains(linkForm)) return;
+        linkForm.removeAttribute("aria-busy");
+        linkForm.querySelector("input").readOnly = false;
+        linkForm.querySelector("button").disabled = false;
+      });
+      return;
+    }
     const created = event.target.closest("#board-new-item");
     if (created && root.contains(created)) {
       event.preventDefault();
@@ -453,9 +592,31 @@ export function installWorkBoard({ client, getState, getSession }) {
     if (typeof newOwner !== "string" || !newOwner) return;
     void act(() => client.request(client.path(`/work-claims/${encodeURIComponent(id)}/reassign`), { method: "POST", data: { newOwner } }), { id, status: outcome("reassign", id) });
   });
+  root.addEventListener("submit", event => {
+    const form = event.target.closest("[data-claim-cap]");
+    if (!form || !root.contains(form)) return;
+    event.preventDefault();
+    const raw = Number(new FormData(form).get("maxMemberOpenClaims"));
+    if (!Number.isSafeInteger(raw)) return;
+    void act(async () => {
+      const saved = await client.request(client.path("/work-claims/config"), { method: "POST", data: { maxMemberOpenClaims: raw } });
+      cap = saved.maxMemberOpenClaims ?? raw;
+    });
+  });
 
   return {
     sync() { void load(); },
-    reset() { items = []; status = null; older = false; seen = null; loadedRoom = null; pendingFocus = null; pendingStatus = ""; stick = null; if (root.isConnected) root.replaceChildren(); }
+    async whenReady() {
+      const owned = context();
+      if (!owned) return false;
+      try {
+        if (actionFlight) await actionFlight;
+        if (context() !== owned) return false;
+        if (readFlight) await readFlight;
+        else await load();
+      } catch { return false; }
+      return context() === owned && loadedContext === owned && loadedRoom === getSession()?.roomId;
+    },
+    reset() { operation++; mutating = false; readFlight = null; actionFlight = null; loadedContext = null; items = []; status = null; cap = 20; older = false; seen = null; loadedRoom = null; pendingFocus = null; pendingStatus = ""; stick = null; if (root.isConnected) root.replaceChildren(); }
   };
 }

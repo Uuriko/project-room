@@ -15,7 +15,7 @@
 // for the pilot bound. It is non-authoritative: the projection's ownerId
 // and the event log are the source of truth for who owns a room.
 import { randomBytes, randomUUID } from "node:crypto";
-import { EVENT_TYPES as T, PERMISSIONS, event, validId, ROOM_KINDS } from "../src/events.js";
+import { EVENT_TYPES as T, PERMISSIONS, event, validId, ROOM_KINDS, HISTORY_DEFAULTS_VERSION } from "../src/events.js";
 import { ServiceError } from "./store.mjs";
 import { createRateLimiter } from "./identity-ratelimit.mjs";
 import { nextActionsForRoomCreate } from "./discoverability.mjs";
@@ -53,7 +53,7 @@ export function roomCreateNext(roomId) {
     { action: "start-work", method: "POST", path: starterUpdate, body: { state: "in_progress" },
       description: "Start the starter task. It is already claimed for you." },
     { action: "post-message", method: "POST", path: `${room}/commands`,
-      description: "Post a message to your room (the message.posted command). Send your identity credential as the Bearer token" },
+      description: "Post a message to your room (the message.posted command). Use the room-scoped MCP token returned as mcpToken. It expires in 30 days." },
     { action: "finish-work", method: "POST", path: starterUpdate, body: { state: "done", deliveryMode: "result", note: "<what you did>" },
       description: "Close the starter task with a result note of what you did." },
     { action: "create-task", method: "POST", path: `${room}/work-claims`, body: { id: "<id>", title: "<title>" },
@@ -163,6 +163,7 @@ export class AgentRooms {
           && state.room.kind === kind && state.members[memberId]?.displayName === displayName;
         if (!same) fail(409, "room_exists", "That room id is already in use");
         return { roomId, ownerMemberId: memberId, identityId: identity.identityId, duplicate: true,
+          mcpToken: this.store.agentPlugin.issueOnboardingMcpToken({ identityId: identity.identityId, roomId, label: displayName }),
           starter: starterView(this.store, roomId),
           next: roomCreateNext(roomId), nextActions: nextActionsForRoomCreate(roomId) };
       }
@@ -189,7 +190,7 @@ export class AgentRooms {
       // The identity is its own founding member: member id = identity id,
       // full owner permission set (bootstrap owner path in addMember).
       this.store.initialize([
-        event({ type: T.ROOM_CREATED, actorId: memberId, roomId, at, data: { roomId, ownerId: memberId, title, purpose, kind } }),
+        event({ type: T.ROOM_CREATED, actorId: memberId, roomId, at, data: { roomId, ownerId: memberId, title, purpose, kind, historyDefaultsVersion: HISTORY_DEFAULTS_VERSION } }), // PRIV-2
         event({ type: T.MEMBER_ADDED, actorId: memberId, roomId, at, data: { memberId, displayName, kind: "agent", permissions: [...PERMISSIONS], identityId: identity.identityId } })
       ]);
       // Link the identity so its pri_ secret authenticates to the new room.
@@ -203,6 +204,7 @@ export class AgentRooms {
       }
       const starter = wantStarter ? ensureAgentStarter(this.store, roomId, memberId) : null;
       return { roomId, ownerMemberId: memberId, identityId: identity.identityId, duplicate: false, starter,
+        mcpToken: this.store.agentPlugin.issueOnboardingMcpToken({ identityId: identity.identityId, roomId, label: displayName }),
         next: roomCreateNext(roomId), nextActions: nextActionsForRoomCreate(roomId) };
     });
   }

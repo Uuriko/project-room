@@ -35,6 +35,8 @@ import { canonicalInvitationData, invitationJournalEntry, invitationJournalSchem
 import { invitationJoinedEvent, assertInvitationMembershipEvidence } from "./invitation-evidence.mjs";
 import { STORE_SCHEMA_VERSION, fenceDefinitions, registerWriter, installWriterFence, verifyWriterFence } from "./writer-fence.mjs";
 import { MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, syncMessageRows, runMessagesBackfill, checkMessagesParity as verifyMessagesParity } from "./messages-store.mjs";
+import { commitMessageRedaction } from "./message-redaction.mjs";
+import { historyFloor as readHistoryFloor, messageInHistory, rowInHistory, indexMessages as indexHistoryMessages } from "./history-visibility.mjs"; // PRIV-2
 import { migrateRoomLifecycleV28, verifyRoomLifecycle, refuseArchivedWrite, createAccountRoom, accountRoomEntry, ACCOUNT_ROOM_SELECT, archivedAtOf } from "./room-lifecycle.mjs";
 import { ShareLinks, shareLinkSchema, shareLinkCodeSchema } from "./share-links.mjs";
 import { DmConsents, dmConsentSchema } from "./dm-consents.mjs";
@@ -45,12 +47,14 @@ import { conflictingClaim } from "./claim-scopes.mjs";
 import { Reminders, reminderSchema } from "./reminders.mjs";
 import { Notifications } from "./notifications.mjs";
 import { Moderation, moderationSchema, mutedEvent } from "./moderation.mjs";
+import { accountTermsSchema, publicAbuseSchema, publicUnpublishSchema, recordSignupTerms } from "./legal-store.mjs"; // terms, public reports, unpublish (G-SEC-11, G-SEC-14)
 import { RequestRuns, requestRunSchema } from "./request-runs.mjs";
 import { WakeQueue, wakeQueueSchema, wakeQueuePauseSchema } from "./wake-queue.mjs";
 import { Attention, attentionSchema } from "./attention.mjs";
 import { createDurableWorkClaimRegistry, workClaimSchema } from "./work-claim-sqlite.mjs";
 import { PUBLIC_READ_MODEL_SCHEMA, noteWorkClaimChange, syncRoomPublication } from "./public-read-model.mjs";
 import { NextActions, nextActionsSchema } from "./next-actions.mjs"; // RC-2026-09-25-911: ranked per-agent next actions.
+import { updatesSchema } from "./updates.mjs"; // Updates marks: private read/done/clear, additive.
 import { ChannelUpdateJournal, channelJournalSchema } from "./channel-journal.mjs";
 import { DurableTelegramLiveStatus, telegramLiveStatusSchema } from "./channel-live-status.mjs";
 import { SpamQuarantineJournal, spamQuarantineSchema, migrateSpamQuarantineColumns } from "./spam-quarantine-journal.mjs";
@@ -75,6 +79,7 @@ import { InboxAttachmentBytes, inboxAttachmentBytesSchema } from "./inbox-attach
 import { BountyEscrow, bountyEscrowSchema, convergeBountyDeployedSchema } from "./bounty-escrow.mjs"; // Escrowed bounties, agent work exchange slice 1.
 import { selectedWorkContext, currentWorkRecord } from "./work-context.mjs";
 import { workItemChanges, mayWriteBoardClaims } from "../src/workflow.js";
+import { mirrorProjectionClaim } from "./work-claim-mirror.mjs";
 import { discussionWindow, selectedWorkDiscussion } from "./work-discussion.mjs";
 import { AgentConnections, agentConnectionSchema } from "./agent-connections.mjs";
 import { GuestAgentLinks, isRoomAccessToken, isGuestAgentMemberId } from "./guest-agent-links.mjs";
@@ -128,7 +133,6 @@ const RETIRED_BOARD_V2_SCHEMA = `
   CREATE INDEX IF NOT EXISTS idx_board_vtwo_events_task ON board_vtwo_events(task_id);
   CREATE INDEX IF NOT EXISTS idx_board_vtwo_events_lane ON board_vtwo_events(lane);
 `;
-import { EMISSARY_LURE_SCHEMA } from "./emissary-lure.mjs"; // Emissary Slice 2 (RC-2026-09-28-2873): lure-generation ledgers (additive, unfenced).
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { AgentHeartbeats, agentHeartbeatSchema } from "./agent-heartbeats.mjs"; // RC-2026-09-18-051: wakeable agent presence.
 import { WorkWakes, workWakeSchema } from "./work-wakes.mjs"; // Opt-in pointer-only work delivery on heartbeat reads.
@@ -144,9 +148,7 @@ import { ReferralInvites, referralInviteSchema } from "./referral-invites.mjs";
 import { ThreadMutes, threadMutesSchema } from "./thread-mutes.mjs"; // Per-thread mutes: private side table, additive.
 import { HumanPush, humanPushSchema } from "./human-push.mjs"; // Human browser push: mentions and DMs, additive.
 import { Referrals, referralSchema } from "./referrals.mjs";
-import { EmissaryGraph, emissaryGraphSchema } from "./emissary-graph.mjs"; // Emissary slice 1a: external identity graph.
-import { EmissaryReceipts, emissaryReceiptSchema } from "./emissary-receipts.mjs"; // Emissary slice 1a: external receipt index.
-import { AccountLoginMethods, accountLoginMethodsSchema } from "./account-login-methods.mjs";
+import { AccountLoginMethods, accountLoginMethodsSchema, ensureVerifiedEmailSchema } from "./account-login-methods.mjs";
 import { verifyTextCompletion, selectedWorkResult } from "./text-results.mjs";
 import { verifyCompletionEvidence, EvidenceError } from "./signed-evidence.mjs"; // Integration map slice 5: signed external evidence for work.completed.
 import { evaluateReceipt } from "./jev-receipts.mjs"; // Jev-harness receipt gate (docs/JEV-GATES.md): pure scorer, no imports of its own.
@@ -645,6 +647,9 @@ const shapes = {
   [T.ROOM_SPEND_ALLOWANCE_SET]: "allowanceCents periodDays",
   [T.ROOM_TRUST_SET]: "enabled",
   [T.ROOM_PUBLIC_RECEIPTS_SET]: "enabled",
+  // --- PRIV-2: owner-only history setting and the export audit record. ---
+  [T.ROOM_HISTORY_VISIBILITY_SET]: "historyVisibility",
+  [T.ROOM_EXPORTED]: "format",
   // --- GR2 public acquisition opt-ins. Command field allowlist only. ---
   [T.ROOM_PUBLIC_PAGE_SET]: "enabled",
   [T.ROOM_JOIN_LINK_SET]: "enabled",
@@ -679,7 +684,7 @@ const shapes = {
   [T.WORK_SUPERSEDED]: `${work} supersededByWorkItemId reason`,
   [T.WORK_HANDOFF_RECORDED]: `${work} doneSummary evidenceUrl evidenceVersion nextAction limitReason haltAll`,
   [T.WORK_HALT_CLEARED]: "memberId haltEventId note",
-  [T.CLAIM_ACQUIRED]: `${work} repository ref paths expiresAt`,
+  [T.CLAIM_ACQUIRED]: `${work} repository ref paths expiresAt pullRequests blocks`,
   [T.CLAIM_RELEASED]: work,
   [T.CLAIM_RENEWED]: `${work} progressMessageId expiresAt`,
   [T.VERIFICATION_RECORDED]: `${work} result completionEventId evidenceVersion summary nextAction`,
@@ -744,7 +749,7 @@ export function validateCommand(command) {
   for (const [name, value] of Object.entries(command.data)) {
     if (!allowed.includes(name)) fail(422, "invalid_command", `Unexpected field: ${name}`);
     if (value === null) continue;
-    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents", "allowanceCents", "periodDays", "rounds", "toolCalls"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced", "muted", "resumeApproved", "alsoSendToChannel", "enabled", ...ROOM_POLICY_FIELDS].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities", "segments", "labels", "scopes"].includes(name) ? "array" : name === "outputs" ? "outputs" : ["preferences", "budget", "signedEvidence"].includes(name) ? "object" : "string";
+    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents", "allowanceCents", "periodDays", "rounds", "toolCalls"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced", "muted", "resumeApproved", "alsoSendToChannel", "enabled", ...ROOM_POLICY_FIELDS].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities", "segments", "labels", "scopes", "pullRequests", "blocks"].includes(name) ? "array" : name === "outputs" ? "outputs" : ["preferences", "budget", "signedEvidence"].includes(name) ? "object" : "string";
     if (type === "array" ? !Array.isArray(value) : type === "object" ? !(value && typeof value === "object" && !Array.isArray(value)) : type === "outputs" ? !(typeof value === "string" || (Array.isArray(value) && value.every(v => typeof v === "string"))) : typeof value !== type) fail(422, "invalid_command", `Invalid field: ${name}`);
   }
   if (command.type === T.MESSAGE_POSTED && (typeof command.data.body !== "string" || !command.data.body.trim())) fail(422, "invalid_command", messageBody);
@@ -764,13 +769,10 @@ export function validateCommand(command) {
     && (typeof command.data.sourceMessageId !== "string" || !command.data.sourceMessageId.trim())) {
     fail(422, "decision_source_required", "Post the rationale in the room first, then record the decision with its message id");
   }
-  // Lease-renewal check-ins: every renewal must cite the holder's public
-  // progress message. The reducer validates the cited message when present;
-  // the command gate below is what makes the citation mandatory going forward.
-  if (command.type === T.CLAIM_RENEWED
-    && (typeof command.data.progressMessageId !== "string" || !command.data.progressMessageId.trim())) {
-    fail(422, "claim_renewal_source_required", "Post a progress update in the room first, then renew the claim with its message id");
-  }
+  // A renewal may cite a public progress message. The citation is evidence,
+  // not a requirement: a heartbeat extends the lease with no new chat post.
+  // When the id is present, the reducer still checks that it is the holder's
+  // own public message newer than the current lease start.
   if (command.type === T.WORK_HELP_UPDATED) {
     try { validateHelpData(command.data); } catch (error) { fail(422, "invalid_command", error.message); }
   }
@@ -965,7 +967,7 @@ function roomSchemaStamp() {
   hash.update(String(STORE_SCHEMA_VERSION));
   const parts = [
     invitationSchema, agentIdentitySchema, accountLoginMethodsSchema, agentInviteSchema,
-    referralInviteSchema, referralSchema, emissaryGraphSchema, emissaryReceiptSchema,
+    referralInviteSchema, referralSchema,
     shareLinkSchema, shareLinkCodeSchema, reminderSchema, agentConnectionSchema,
     inboxSchema, inboxReadSchema, emailImportSchema, wakeQueueSchema, wakeQueuePauseSchema,
     attentionSchema, workClaimSchema, nextActionsSchema, agentHeartbeatSchema, workWakeSchema,
@@ -975,11 +977,12 @@ function roomSchemaStamp() {
     webFetchSchema, webResearchSchema, mentionStateSchema, activitySchema, threadMutesSchema,
     humanPushSchema, quarantineThreadSplitSchema, slaBreachAlertSchema, inboxHandoffSchema,
     inboxHandoffRoomSchema, handoffEnvelopeSchema, agentPluginSchema, inboxCollabSchema,
-    moderationSchema, bountyEscrowSchema, projectOffersSchema, publicWorkClaimsSchema,
+    moderationSchema, accountTermsSchema, publicAbuseSchema, publicUnpublishSchema,
+    bountyEscrowSchema, projectOffersSchema, publicWorkClaimsSchema,
     publicWorkClaimFenceSchema, publicWorkReviewsSchema, publicWorkSuccessorsSchema,
     accessRequestSchema, membershipDelegationSchema, membershipDelegationJournalSchema,
     ownerDelegateSchema, agentRoomSchema, oauthPendingSchema, gmailSchema, requestRunSchema,
-    directSendSchema, inboxStitchSchema, RETIRED_BOARD_V2_SCHEMA, EMISSARY_LURE_SCHEMA,
+    directSendSchema, inboxStitchSchema, RETIRED_BOARD_V2_SCHEMA,
     agentKeyRegistrySchema, INTEGRITY_SNAPSHOT_SCHEMA, OPERATOR_ACTIONS_SCHEMA,
     INTEGRITY_JOB_CURSOR_SCHEMA, INTEGRITY_ROOM_STATE_SCHEMA, INTEGRITY_SWEEP_COLUMN,
     ROOM_SCHEMA_STAMP_SCHEMA, LOOKUP_INDEXES, MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA,
@@ -1100,8 +1103,6 @@ export class RoomStore {
     this.invites = new AgentInvites(this);
     this.referralInvites = new ReferralInvites(this);
     this.referrals = new Referrals(this);
-    this.emissaryGraph = new EmissaryGraph(this); // Emissary slice 1a: external identity graph (tracking only).
-    this.emissaryReceipts = new EmissaryReceipts(this); // Emissary slice 1a: external receipt index.
     this.accountLogins = new AccountLoginMethods(this);
     this.reminders = new Reminders(this);
     this.notifications = new Notifications(this);
@@ -1285,9 +1286,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       ${accountLoginMethodsSchema}
       ${agentInviteSchema}
       ${referralInviteSchema}
-      ${referralSchema}
-      ${emissaryGraphSchema}
-      ${emissaryReceiptSchema}`);
+      ${referralSchema}`);
       this.storagePlatform.setVersion(this.db, 4);
     }
     if (version > 0 && version < 26 && (
@@ -1352,14 +1351,6 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // Applied here (not only where the registry is instantiated) so upgrades,
       // store-only fixtures, and the recovery audit see the tables.
       this.db.exec(RETIRED_BOARD_V2_SCHEMA);
-      // Emissary Slice 2 (RC-2026-09-28-2873): lure-generation ledgers
-      // (emissary_drops, emissary_invite_attribution, emissary_idempotency,
-      // emissary_journal) — purely additive, IF NOT EXISTS is idempotent, no
-      // schema version bump, intentionally outside the writer fence (see
-      // unfencedAdditiveTables). Applied here so upgrades, store-only
-      // fixtures, and the recovery audit see the tables; the module also
-      // ensures its schema lazily on first use.
-      this.db.exec(EMISSARY_LURE_SCHEMA);
       // RC-2026-09-23-106: agent browser sessions record the identity secret
       // hash at creation time. If the secret is rotated or revoked, sessions
       // minted with the old secret are rejected at authenticate() time.
@@ -1410,11 +1401,6 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // no migration, no fence impact; referrals are only written by the join
       // paths, and the table holds no credential data.
       this.db.exec(referralSchema);
-      // Emissary slice 1a (RC-2026-09-27-2860): external identity graph +
-      // receipt index — purely additive, IF NOT EXISTS is idempotent, no
-      // schema version bump. Tracking only: no capabilities, no money.
-      this.db.exec(emissaryGraphSchema);
-      this.db.exec(emissaryReceiptSchema);
       // Wake queue rows are purely additive (no data migration, no fence
       // impact), so no schema version bump: IF NOT EXISTS is idempotent here.
       this.db.exec(wakeQueueSchema);
@@ -1425,6 +1411,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // RC-2026-09-25-911: next-action dismissals/suppressions are purely
       // additive as well: IF NOT EXISTS is idempotent, no schema version bump.
       this.db.exec(nextActionsSchema);
+      // Updates marks are purely additive: IF NOT EXISTS, no schema version bump.
+      this.db.exec(updatesSchema);
       this.workClaims.verifySchema({ allowAbsent: true });
       this.db.exec(workClaimSchema);
       this.workClaims.verifySchema();
@@ -1549,6 +1537,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // same-schema packaged fallbacks that predate it still verify.
       this.db.exec(inboxReadSchema);
       this.db.exec(moderationSchema); // Message reports (issue #6 E4): purely additive, same pattern.
+      // LEGAL: terms acceptance, public abuse reports, operator unpublish. Additive, unfenced.
+      this.db.exec(accountTermsSchema);
+      this.db.exec(publicAbuseSchema);
+      this.db.exec(publicUnpublishSchema);
       // Escrowed bounties (agent work exchange, slice 1): purely additive,
       // intentionally outside the writer fence (see unfencedAdditiveTables in
       // server/writer-fence.mjs) so same-schema packaged fallbacks that
@@ -1603,6 +1595,17 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // have no code path to them, and method rows are always scoped to an
       // existing account.
       this.db.exec(accountLoginMethodsSchema);
+      // ID-SEC: verified email, the password-reset banner, and the security
+      // event journal. Additive and unfenced, same as the login-method tables.
+      ensureVerifiedEmailSchema(this.db);
+      {
+        const keyCols = new Set(this.db.prepare("PRAGMA table_info(agent_api_keys)").all().map(column => column.name));
+        if (keyCols.size > 0 && !keyCols.has("last_used_ua")) this.db.exec("ALTER TABLE agent_api_keys ADD COLUMN last_used_ua TEXT");
+        const identityCols = new Set(this.db.prepare("PRAGMA table_info(agent_identities)").all().map(column => column.name));
+        if (identityCols.size > 0 && !identityCols.has("last_used_at")) this.db.exec("ALTER TABLE agent_identities ADD COLUMN last_used_at INTEGER");
+        if (identityCols.size > 0 && !identityCols.has("last_used_ua")) this.db.exec("ALTER TABLE agent_identities ADD COLUMN last_used_ua TEXT");
+        if (identityCols.size > 0 && !identityCols.has("mcp_legacy_uses")) this.db.exec("ALTER TABLE agent_identities ADD COLUMN mcp_legacy_uses INTEGER NOT NULL DEFAULT 0");
+      }
       // Existing v35 databases predate persistent OAuth state. Converge this
       // unfenced additive table on every open, not only invitation migration.
       this.db.exec(oauthPendingSchema);
@@ -1731,8 +1734,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       () => verifyRoomLifecycle(this),
       () => { if (!this.readOnly) this.identities.expireInactive(); },
       () => this.backfillReferralDepth(500),
-      // MSG-2: server/jobs.mjs has not landed. Replay message events here,
-      // one budgeted batch per visit, then check one caught-up room.
+      // MSG-2: replay message events here, one budgeted batch per visit,
+      // then check one caught-up room. This batch runs as the "integrity"
+      // job in server/jobs.mjs, so the backfill inherits that job's cadence,
+      // budget and runtimes without a second registry entry.
       () => this.backfillMessages({ deadline }),
       () => this.checkMessagesParity()
     ];
@@ -2294,6 +2299,20 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.replayProvenance(rooms, { upgradeV1: false });
     });
   }
+  // --- PRIV-2 history visibility ---
+  // null when the member reads the whole history, else { sequence, at } of
+  // their join event. Callers already hold a transaction.
+  // Reads only the authority and history fields, not the full projection, so
+  // event polling stays cheap.
+  historyFloor(roomId, memberId, headSequence = null) {
+    const { sequence, ownerId, members } = this.roomAuthority(roomId);
+    const row = this.db.prepare("SELECT json_extract(projection,'$.room.historyVisibility') AS visibility, json_extract(projection,'$.room.historyDefaultsVersion') AS defaults FROM rooms WHERE id=?").get(roomId);
+    let visibility = null;
+    try { visibility = row?.visibility ? JSON.parse(row.visibility) : null; } catch { visibility = null; }
+    const state = { room: { ownerId, historyVisibility: visibility, historyDefaultsVersion: row?.defaults ?? null }, members };
+    return readHistoryFloor(this.db, state, roomId, memberId, headSequence ?? sequence);
+  }
+  // --- end PRIV-2 ---
   ensureEventTypeIndex() {
     // Additive. Expression indexes do not fire writer triggers. Durable Object
     // SQL rejects SAVEPOINT, so this runs inside the open transaction itself.
@@ -2537,6 +2556,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // New accounts start un-onboarded (onboarded=0) so they land on the
       // first-run onboarding step (RC-2026-09-19-078).
       this.db.prepare("INSERT INTO accounts(id,active,revision,auth_epoch,origin,created_at,onboarded) VALUES(?,1,0,0,?,?,0)").run(accountId, origin.trim(), this.now());
+      recordSignupTerms(this.db, accountId, origin.trim(), this.now());
       return this.account(accountId);
     });
   }
@@ -2600,6 +2620,26 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.db.prepare("UPDATE account_credentials SET revoked=1 WHERE account_id=?").run(accountId);
       this.db.prepare("UPDATE account_session_slots SET revision=revision+1,account_id=NULL,account_auth_epoch=NULL,parent_credential_hash=NULL,authenticated_until=NULL WHERE account_id=?").run(accountId);
       return this.insertAccountCredential(accountId, this.now() + lifetimeMs);
+    });
+  }
+  // Drop other browser sessions and room keys after an unverified password
+  // is removed. The in-flight sign-in slot is left intact so that login can
+  // finish on it.
+  revokeUnverifiedPasswordSessions(accountId, preserveSlotToken = null) {
+    return this.transaction(() => {
+      this.account(accountId);
+      this.db.prepare("UPDATE account_credentials SET revoked=1 WHERE account_id=?").run(accountId);
+      this.db.prepare(`UPDATE credentials SET revoked=1 WHERE account_id=? OR EXISTS
+        (SELECT 1 FROM member_accounts m WHERE m.account_id=? AND m.room_id=credentials.room_id AND m.member_id=credentials.member_id)`)
+        .run(accountId, accountId);
+      const preserve = typeof preserveSlotToken === "string" && tokenPattern.test(preserveSlotToken) ? hash(preserveSlotToken) : null;
+      if (preserve) {
+        this.db.prepare(`UPDATE account_session_slots SET revision=revision+1,account_id=NULL,account_auth_epoch=NULL,
+          parent_credential_hash=NULL,authenticated_until=NULL WHERE account_id=? AND hash != ?`).run(accountId, preserve);
+      } else {
+        this.db.prepare(`UPDATE account_session_slots SET revision=revision+1,account_id=NULL,account_auth_epoch=NULL,
+          parent_credential_hash=NULL,authenticated_until=NULL WHERE account_id=?`).run(accountId);
+      }
     });
   }
   invalidateHumanAccountCredentials(accountId) {
@@ -2975,6 +3015,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // #643: the room owner issues on any credential; anyone else needs an
       // account session with manage_members, as before.
       const issuer = this.authenticateInvitationAdmin(accountSessionToken, roomId, expectedSessionBinding ?? null);
+      if (issuer.account) this.accountLogins.assertEmailVerified(issuer.account.id);
       if (issuer.account && typeof expectedSessionBinding !== "string") fail(422, "invalid_session_binding", "Current account session binding required");
       if (!issuer.member.permissions.includes("manage_members")) fail(403, "access_denied", "Current membership administration grant required");
       // Idempotency scope follows the issuer identity: account-scoped for
@@ -3292,6 +3333,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     if (isApiKeyToken(token)) {
       const record = this.agentPlugin.verifyPresentedApiKey(token);
       if (!record) fail(401, "unauthenticated", "Unknown, revoked, or expired API key");
+      const roomScopes = record.scopes.filter(scope => scope.startsWith("mcp:room:"));
+      if (roomScopes.length > 0 && !roomScopes.includes(`mcp:room:${roomId}`)) {
+        fail(403, "insufficient_scope", "This key is limited to its room");
+      }
       const resolved = roomId ? this.identities.resolveIdentityLink(record.identityId, roomId) : null;
       if (!resolved) fail(401, "unauthenticated", "API key identity has no access to this room");
       return {
@@ -3850,11 +3895,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       const { members } = this.roomAuthority(roomId);
       const room = this.room(roomId);
+      // PRIV-2: a since_join reader sees no thread rooted before their join.
+      const floor = this.historyFloor(roomId, auth.member.id);
       const root = room.state.messages.find(m => m.id === messageId);
-      if (!root) fail(404, "message_not_found", "Message not found");
+      if (!root || !messageInHistory(root, floor)) fail(404, "message_not_found", "Message not found");
       const byParent = new Map();
       for (const m of room.state.messages) {
-        if (!m.replyToId) continue;
+        if (!m.replyToId || !messageInHistory(m, floor)) continue;
         if (!byParent.has(m.replyToId)) byParent.set(m.replyToId, []);
         byParent.get(m.replyToId).push(m);
       }
@@ -3880,9 +3927,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const room = this.room(roomId);
       const needle = query.trim().toLowerCase();
       const result = { roomId, query: query.trim(), messages: [], workItems: [] };
+      const floor = this.historyFloor(roomId, auth.member.id); // PRIV-2
       if (kind === "all" || kind === "messages" || kind === "pinned") {
         for (const m of room.state.messages ?? []) {
           if (m.body == null) continue; // tombstone
+          if (!messageInHistory(m, floor)) continue; // PRIV-2: before the reader joined
           if (kind === "pinned" && !isPinned(room.state, m.id)) continue;
           if (mutedEvent(room.state, auth.member?.id, { actorId: m.authorId })) continue; // muted author (E4), every kind
           if (m.body.toLowerCase().includes(needle)) {
@@ -4055,8 +4104,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const viewerId = auth.member.id;
       const identityId = this.bonds.identityForMember(roomId, viewerId);
       const isOwner = viewerId === authority.ownerId;
-      const visible = events.filter(({ event }) => targetedEventVisible(event, viewerId)
-        && peerEventVisible(event, { memberId: viewerId, identityId, isOwner }));
+      // PRIV-2: since_join readers page past events from before their join.
+      const floor = this.historyFloor(roomId, viewerId, sequence);
+      const floorMessages = floor ? indexHistoryMessages(this.room(roomId).state.messages) : null;
+      const visible = events.filter(row => rowInHistory(row, floor, floorMessages) && targetedEventVisible(row.event, viewerId)
+        && peerEventVisible(row.event, { memberId: viewerId, identityId, isOwner }));
       // #658: mention chips ride on message views. One batched query for
       // the whole page (no N+1); only members who can read the room see it.
       const messageIds = visible.filter(({ event }) => event?.type === T.MESSAGE_POSTED).map(({ event }) => event.id);
@@ -4229,8 +4281,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const isOwner = auth.member.id === room.state.room.ownerId;
       // Derive continuation from scanned rows before removing private events:
       // an invisible page must still progress within its frozen horizon.
-      brief.history.items = brief.history.items.filter(({ event }) => targetedEventVisible(event, auth.member.id)
-        && peerEventVisible(event, { memberId: auth.member.id, identityId, isOwner }));
+      const floor = this.historyFloor(roomId, auth.member.id, room.sequence); // PRIV-2
+      const floorMessages = floor ? indexHistoryMessages(room.state.messages) : null;
+      brief.history.items = brief.history.items.filter(row => rowInHistory(row, floor, floorMessages) && targetedEventVisible(row.event, auth.member.id)
+        && peerEventVisible(row.event, { memberId: auth.member.id, identityId, isOwner }));
       return { roomId, viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null, ...brief };
     });
   }
@@ -4458,10 +4512,26 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         if (bondEffect?.dm) this.bonds.sealDm(bondEffect.dm, incoming.id);
         this.db.prepare("INSERT INTO commands VALUES(?,?,?,?,?)").run(roomId, auth.member.id, command.id, fingerprint, sequence);
         this.db.prepare("UPDATE rooms SET sequence=?,projection=?,archived_at=? WHERE id=?").run(sequence, projection, archivedAtOf(state), roomId);
+        // Board is the claim authority the MCP tools share with /work-claims.
+        // Same transaction as the projection event: a handoff or supersede
+        // leaves a successor card, and a failed board write rolls the command back.
+        if (["claim.acquired", "claim.released", "claim.renewed", "work.handoff_recorded", "work.superseded"].includes(incoming.type)) {
+          mirrorProjectionClaim(this, roomId, auth.member.id, incoming);
+        }
         // MSG-1: double-write the messages table in this same transaction.
         // A throw here rolls the event back with the row. No read path uses
         // the table yet. Older events wait for the MSG-2 backfill.
         syncMessageRows(this.db, { roomId, sequence, event: incoming, state });
+        // --- PRIV-1 message redaction ---
+        // The returned sequence stays this delete. Later events in the same
+        // transaction rewrite the log and advance the room sequence.
+        if (command.type === T.MESSAGE_DELETED && typeof command.data?.messageId === "string") {
+          const redacted = commitMessageRedaction(this.db, {
+            roomId, state, actorId: incoming.actorId, at: incoming.at, messageId: command.data.messageId
+          });
+          state = redacted.state;
+        }
+        // --- end PRIV-1 message redaction ---
         logSpan.setAttribute(ATTR.OUTCOME, "ok");
         logSpan.setStatusOk();
       } catch (error) {

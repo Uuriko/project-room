@@ -4,7 +4,7 @@
 // gate for every route that shares it. Asset bytes are cached for the life
 // of this isolate; a deploy starts a new one.
 import { publicAssetPaths } from '../deploy/public-assets.mjs';
-import { acceptPrefersHtml, publicHtmlNotFoundPath, publicSearchAssets, publicSearchCanonical, publicSearchMarketingPolicy, PUBLIC_NOT_FOUND_HTML, PUBLIC_SEARCH_CSP, reviewedPublicSearchPaths } from '../deploy/public-search.mjs';
+import { acceptPrefersHtml, publicHtmlNotFoundPath, publicSearchAssets, publicSearchCanonical, publicSearchMarketingPolicy, publicPageCsp, PUBLIC_NOT_FOUND_HTML, PUBLIC_SEARCH_CSP, reviewedPublicSearchPaths } from '../deploy/public-search.mjs';
 import { discoveryDoc, EDGE_DOOR_HOSTS, ROOM_ORIGIN, SKILLS_CATALOG_PATH } from '../deploy/agent-discovery.mjs';
 import { buildOpenApiJson } from '../server/discoverability.mjs';
 import { MCP_SERVER_CARD_PATH, MCP_DISCOVERY_CACHE_CONTROL, MCP_SERVER_CARD_CORS } from '../src/mcp-server-card.mjs';
@@ -184,7 +184,7 @@ async function assetResponse(request, env, url) {
   headers.set('Link', canonicalTarget ? `${discoveryLinks(url)}, <${ROOM_ORIGIN}${canonicalTarget}>; rel="canonical"` : discoveryLinks(url));
   // About and compare pages have no scripts. The app shell and offers page keep
   // the room policy from baseHeaders so their modules load.
-  if (canonical && publicSearchMarketingPolicy(canonical)) headers.set('Content-Security-Policy', PUBLIC_SEARCH_CSP);
+  if (canonical && publicSearchMarketingPolicy(canonical)) headers.set('Content-Security-Policy', publicPageCsp(url.origin, PUBLIC_SEARCH_CSP));
   if (canonical && !url.search && canonical !== servedPath) {
     headers.set('Location', canonical);
     return new Response(null, { status: 301, headers });

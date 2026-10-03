@@ -26,12 +26,15 @@ on:
 permissions:
   contents: read
 
-# One in-flight run per pull request and per ref. A newer push cancels
-# superseded queued and in-progress runs in that group; the newest run stays.
-# workflow_dispatch is keyed by run id so a manual run stays independent.
+# Pull requests each have their own group (workflow name plus ref) and cancel
+# their own older runs. Pushes to main share that same ref key, because every
+# main push uses refs/heads/main, and do not cancel the run already in
+# progress. The running main SHA can finish, and only the newest pending main
+# run stays queued. workflow_dispatch is keyed by run id so a manual run stays
+# independent.
 concurrency:
   group: ${{ github.event_name == 'workflow_dispatch' && format('{0}-dispatch-{1}', github.workflow, github.run_id) || format('{0}-{1}', github.workflow, github.ref) }}
-  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+  cancel-in-progress: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main') && github.event_name != 'workflow_dispatch' }}
 
 jobs:
   schema-gate:

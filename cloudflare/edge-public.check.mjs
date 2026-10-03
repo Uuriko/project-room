@@ -92,7 +92,8 @@ test('static assets and discovery documents do not enter the Durable Object', as
     assert.equal(about.headers.get('x-robots-tag'), 'all');
     assert.match(about.headers.get('content-security-policy'), /default-src 'none'/);
     assert.match(about.headers.get('content-security-policy'), /script-src https:\/\/static\.cloudflareinsights\.com/);
-    assert.match(about.headers.get('content-security-policy'), /connect-src https:\/\/cloudflareinsights\.com/);
+    assert.equal(about.headers.get('content-security-policy').split('; ').find(d => d.startsWith('connect-src ')), `connect-src https://cloudflareinsights.com ${origin}/cdn-cgi/rum`);
+    assert.doesNotMatch(about.headers.get('content-security-policy'), /connect-src 'self'|script-src 'self'|\*/);
     assert.match(about.headers.get('content-security-policy'), /style-src 'unsafe-inline'/);
     assert.equal(await about.text(), 'about-page');
     const alias = await call('/about.html');

@@ -1,5 +1,5 @@
 {
-  "note": "Legacy routes still served outside server/routes/table.mjs. baseline is the RT-0 set plus routes main added after that cut. This batch does not add legacy routes. routes is the set still in the legacy chain and only shrinks as groups move into the table.",
+  "note": "Legacy routes still served outside server/routes/table.mjs. baseline is the RT-0 set plus routes main added after that cut, including the legal API routes and /security.txt. routes is the set still in the legacy chain and only shrinks as groups move into the table.",
   "baseline": [
     {
       "method": "GET",
@@ -214,6 +214,10 @@
       "path": "/api/account/retention"
     },
     {
+      "method": "POST",
+      "path": "/api/account/terms"
+    },
+    {
       "method": "GET",
       "path": "/api/agent-directory"
     },
@@ -372,6 +376,10 @@
     {
       "method": "POST",
       "path": "/api/auth/agent/session"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/email/verify"
     },
     {
       "method": "GET",
@@ -774,6 +782,10 @@
       "path": "/api/oauth/sessions/revoke-all"
     },
     {
+      "method": "POST",
+      "path": "/api/operator/unpublish"
+    },
+    {
       "method": "GET",
       "path": "/api/operator/export"
     },
@@ -956,6 +968,14 @@
     {
       "method": "POST",
       "path": "/api/referral-invites/redeem"
+    },
+    {
+      "method": "POST",
+      "path": "/api/reports/public"
+    },
+    {
+      "method": "GET",
+      "path": "/api/reports/public/challenge"
     },
     {
       "method": "GET",
@@ -2451,6 +2471,54 @@
     },
     {
       "method": "GET",
+      "path": "/api/rooms/{id}/updates"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/updates"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/updates"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/updates/{id}/clear"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/updates/{id}/clear"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/updates/{id}/clear"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/updates/{id}/done"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/updates/{id}/done"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/updates/{id}/done"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/updates/{id}/read"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/updates/{id}/read"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/updates/{id}/read"
+    },
+    {
+      "method": "GET",
       "path": "/api/rooms/{id}/usage"
     },
     {
@@ -2559,6 +2627,18 @@
     },
     {
       "method": "GET",
+      "path": "/api/rooms/{id}/work-claims/config"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/work-claims/config"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/work-claims/config"
+    },
+    {
+      "method": "GET",
       "path": "/api/rooms/{id}/work-claims/duplicates"
     },
     {
@@ -2628,6 +2708,14 @@
     {
       "method": "POST",
       "path": "/api/share-links/preview"
+    },
+    {
+      "method": "GET",
+      "path": "/api/updates"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/updates"
     },
     {
       "method": "GET",
@@ -3456,6 +3544,14 @@
     {
       "method": "HEAD",
       "path": "/room/tools.txt"
+    },
+    {
+      "method": "GET",
+      "path": "/security.txt"
+    },
+    {
+      "method": "HEAD",
+      "path": "/security.txt"
     },
     {
       "method": "GET",
@@ -3728,6 +3824,10 @@
       "path": "/api/account/retention"
     },
     {
+      "method": "POST",
+      "path": "/api/account/terms"
+    },
+    {
       "method": "GET",
       "path": "/api/agent-directory"
     },
@@ -3888,6 +3988,10 @@
       "path": "/api/auth/agent/session"
     },
     {
+      "method": "POST",
+      "path": "/api/auth/email/verify"
+    },
+    {
       "method": "GET",
       "path": "/api/auth/github/callback"
     },
@@ -3916,14 +4020,6 @@
       "path": "/api/auth/google/start"
     },
     {
-      "method": "POST",
-      "path": "/api/auth/magic/consume"
-    },
-    {
-      "method": "POST",
-      "path": "/api/auth/magic/request"
-    },
-    {
       "method": "GET",
       "path": "/api/auth/methods"
     },
@@ -3941,43 +4037,7 @@
     },
     {
       "method": "POST",
-      "path": "/api/auth/passkey/authenticate/finish"
-    },
-    {
-      "method": "POST",
-      "path": "/api/auth/passkey/authenticate/options"
-    },
-    {
-      "method": "POST",
-      "path": "/api/auth/passkey/register/finish"
-    },
-    {
-      "method": "POST",
-      "path": "/api/auth/passkey/register/options"
-    },
-    {
-      "method": "POST",
-      "path": "/api/auth/password/change"
-    },
-    {
-      "method": "POST",
-      "path": "/api/auth/password/login"
-    },
-    {
-      "method": "POST",
-      "path": "/api/auth/password/reset/consume"
-    },
-    {
-      "method": "POST",
-      "path": "/api/auth/password/reset/request"
-    },
-    {
-      "method": "POST",
       "path": "/api/auth/password/set"
-    },
-    {
-      "method": "POST",
-      "path": "/api/auth/password/signup"
     },
     {
       "method": "POST",
@@ -4102,6 +4162,10 @@
     {
       "method": "POST",
       "path": "/api/oauth/sessions/revoke-all"
+    },
+    {
+      "method": "POST",
+      "path": "/api/operator/unpublish"
     },
     {
       "method": "GET",
@@ -4286,6 +4350,14 @@
     {
       "method": "POST",
       "path": "/api/referral-invites/redeem"
+    },
+    {
+      "method": "POST",
+      "path": "/api/reports/public"
+    },
+    {
+      "method": "GET",
+      "path": "/api/reports/public/challenge"
     },
     {
       "method": "GET",
@@ -5781,6 +5853,54 @@
     },
     {
       "method": "GET",
+      "path": "/api/rooms/{id}/updates"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/updates"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/updates"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/updates/{id}/clear"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/updates/{id}/clear"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/updates/{id}/clear"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/updates/{id}/done"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/updates/{id}/done"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/updates/{id}/done"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/updates/{id}/read"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/updates/{id}/read"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/updates/{id}/read"
+    },
+    {
+      "method": "GET",
       "path": "/api/rooms/{id}/usage"
     },
     {
@@ -5889,6 +6009,18 @@
     },
     {
       "method": "GET",
+      "path": "/api/rooms/{id}/work-claims/config"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/work-claims/config"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/work-claims/config"
+    },
+    {
+      "method": "GET",
       "path": "/api/rooms/{id}/work-claims/duplicates"
     },
     {
@@ -5958,6 +6090,14 @@
     {
       "method": "POST",
       "path": "/api/share-links/preview"
+    },
+    {
+      "method": "GET",
+      "path": "/api/updates"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/updates"
     },
     {
       "method": "GET",
@@ -6786,6 +6926,14 @@
     {
       "method": "HEAD",
       "path": "/room/tools.txt"
+    },
+    {
+      "method": "GET",
+      "path": "/security.txt"
+    },
+    {
+      "method": "HEAD",
+      "path": "/security.txt"
     },
     {
       "method": "GET",

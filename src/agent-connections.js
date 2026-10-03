@@ -8,7 +8,7 @@ const statuses = { key_issued: "Access ready · setup not verified", access_chan
 
 export function installAgentConnections({ client, getState }) {
   const dialog = $("#agent-connect-dialog"), form = $("#agent-connect-form"), list = $("#agent-connect-list");
-  let owner = null, generation = null, ownerRevision = null, pending = null, setup = null, setupMeta = null, expiryTimer = null, busy = false, copying = false, listVersion = 0, flow = 0, rosterId = null;
+  let owner = null, generation = null, ownerRevision = null, pending = null, setup = null, setupMeta = null, mcpCredential = null, expiryTimer = null, busy = false, copying = false, listVersion = 0, flow = 0, rosterId = null;
   const member = () => getState()?.members[client.session?.member?.id];
   const allowed = () => client.ownsAccountSession() && client.session?.account && member()?.active !== false
     && getState()?.room.id === client.session.roomId
@@ -16,7 +16,11 @@ export function installAgentConnections({ client, getState }) {
   const owns = () => allowed() && owner === client.session && generation === client.generation && ownerRevision === member()?.revision;
   const status = text => { $("#agent-connect-status").textContent = text; };
   function conceal() { $("#agent-private-details").open = false; $("#agent-private-config").value = ""; }
-  function forget() { setup = null; setupMeta = null; clearTimeout(expiryTimer); expiryTimer = null; conceal(); }
+  function forget() { setup = null; setupMeta = null; mcpCredential = null; clearTimeout(expiryTimer); expiryTimer = null; conceal(); }
+  function privateSetupText() {
+    if (!setup) return "";
+    return mcpCredential ? `${JSON.stringify(setup)}\nMCP authorization: Bearer ${mcpCredential}` : JSON.stringify(setup);
+  }
   function checkExpiry() {
     if (setup && setupMeta.expiresAt <= Date.now()) { forget(); status("This key expired. Replace it to reconnect."); return false; }
     return Boolean(setup);
@@ -48,6 +52,12 @@ export function installAgentConnections({ client, getState }) {
       li.textContent = text;
       return li;
     }));
+  }
+  function describeName() {
+    const warning = $("#agent-name-warning");
+    const taken = rosterNameTaken(getState()?.members, $("#agent-connect-name").value);
+    warning.hidden = !taken;
+    warning.textContent = taken ? "A member with this name already exists. Create access only if you want a second identity." : "";
   }
   function describeAccess() {
     if ($("#agent-access-hint")) $("#agent-access-hint").textContent = ACCESS_HINT[$("#agent-connect-access").value] ?? ACCESS_HINT.chat;
@@ -87,6 +97,7 @@ export function installAgentConnections({ client, getState }) {
       if ($("#agent-mcp-json")) $("#agent-mcp-json").textContent = "";
       if ($("#agent-mcp-cli")) $("#agent-mcp-cli").textContent = "";
     }
+    describeName();
     describeAccess();
     describeImport();
   }
@@ -160,7 +171,10 @@ export function installAgentConnections({ client, getState }) {
           hostTools: null,
           pending: row.status === "key_issued" && !row.firstActionAt,
         });
-        text.textContent = `${standing.compact} · ${new Date(row.expiresAt).toLocaleString()}`;
+        const usedAt = row.keyLastUsedAt ?? row.identityLastUsedAt;
+        const usedUa = row.keyLastUsedUa ?? row.identityLastUsedUa;
+        const used = usedAt ? ` · Last used ${new Date(usedAt).toLocaleString()}${usedUa ? ` · ${usedUa}` : ""}` : "";
+        text.textContent = `${standing.compact} · ${new Date(row.expiresAt).toLocaleString()}${used}`;
         const detail = document.createElement("details");
         const summary = document.createElement("summary");
         summary.textContent = "Permission detail";
@@ -226,12 +240,15 @@ export function installAgentConnections({ client, getState }) {
       if (!matches(result, operation.request)) throw new Error("unknown receipt");
       pending = null;
       const usable = operation.token && result.connection.generation === result.receipt.generation && result.connection.status === "key_issued";
+      mcpCredential = typeof result.mcpToken?.credential === "string" && result.mcpToken.credential.startsWith("rak_") ? result.mcpToken.credential : null;
       setup = usable ? { version: 1, origin: location.origin, roomId: owner.roomId, memberId: operation.request.memberId, token: operation.token } : null;
       setupMeta = usable ? { generation: result.receipt.generation, memberRevision: result.connection.memberRevision, expiresAt: result.receipt.expiresAt,
         sequence: result.receipt.membershipSequence ?? client.sequence } : null;
       armExpiry();
       status(usable ? "Access ready. Setup does not start an AI." : operation.request.action === "disconnect" ? "Room access ended." : "Original request confirmed. That key is no longer active.");
-      conceal(); render(); void load(); void client.refresh().catch(() => {});
+      conceal(); render();
+      if (setup && dialog.open) $("#agent-setup-title").focus();
+      void load(); void client.refresh().catch(() => {});
     } catch (error) {
       if (!owns() || pending !== operation) return;
       if (accessDenied(error)) { reset(); client.handleFailure(error); return; }
@@ -265,9 +282,8 @@ export function installAgentConnections({ client, getState }) {
     note.id = "growth-connection-invite";
     note.className = "definition";
     note.textContent = "Your invite link admits a person or an agent. Copy it from Invite. Agents read the same link from GET /api/rooms/{roomId}/referrals.";
-    const header = dialog.querySelector(".panel-header");
-    if (header) header.after(note);
-    else dialog.prepend(note);
+    // Optional invite/API detail should not precede the first host choice.
+    $("#agent-connect-advanced").append(note);
   }
   $("#connect-agent-button").addEventListener("click", () => {
     if (!allowed()) return;
@@ -275,11 +291,13 @@ export function installAgentConnections({ client, getState }) {
     if (!owns()) { reset(); return; }
     checkExpiry(); conceal(); describeRoute(); render(); dialog.showModal(); void load();
     if (pending) status("Change not confirmed. Retry the original.");
-    if (!setup && !pending) $("#agent-connect-name").focus();
+    if (setup) $("#agent-setup-title").focus();
+    else if (!pending) (rosterId ? $("#agent-connect-name") : catalogButtons()[0])?.focus();
   });
   $("#agent-connect-close").addEventListener("click", () => dialog.close());
   dialog.addEventListener("close", conceal);
   form.addEventListener("submit", event => { event.preventDefault(); if (pending) void submit(); else void prepare("create"); });
+  $("#agent-connect-name").addEventListener("input", describeName);
   $("#agent-connect-access")?.addEventListener("change", describeAccess);
   $("#agent-connect-route")?.addEventListener("change", describeRoute);
   $("#agent-retry").addEventListener("click", () => { void submit(); });
@@ -288,7 +306,7 @@ export function installAgentConnections({ client, getState }) {
       forget(); form.reset(); rosterId = null;
       if ($("#agent-roster-hint")) $("#agent-roster-hint").textContent = "";
       if ($("#agent-import-route")) $("#agent-import-route").textContent = "";
-      describeRoute(); status(""); render();
+      describeRoute(); status(""); render(); catalogButtons()[0]?.focus();
     }
   });
   function applyCatalogChoice(id) {
@@ -301,11 +319,8 @@ export function installAgentConnections({ client, getState }) {
     rosterId = row.agentType || id;
     describeRoute();
     if ($("#agent-roster-hint")) {
-      const taken = rosterNameTaken(getState()?.members, row.name)
-        ? ` A member with this name already exists. Create access only if you want a second identity.`
-        : "";
       const best = row.bestFor ? `${row.bestFor}. ` : "";
-      $("#agent-roster-hint").textContent = `${best}${row.hint}${taken}`;
+      $("#agent-roster-hint").textContent = `${best}${row.hint}`;
     }
   }
   for (const button of catalogButtons()) {
@@ -314,7 +329,7 @@ export function installAgentConnections({ client, getState }) {
     });
   }
   $("#agent-private-details").addEventListener("toggle", () => {
-    $("#agent-private-config").value = $("#agent-private-details").open && owns() && checkExpiry() ? JSON.stringify(setup) : "";
+    $("#agent-private-config").value = $("#agent-private-details").open && owns() && checkExpiry() ? privateSetupText() : "";
   });
   $("#agent-create-later")?.addEventListener("click", () => { if (!busy && !pending && !setup) $("#agent-create").click(); });
   $("#agent-copy-checklist")?.addEventListener("click", () => {
@@ -328,7 +343,7 @@ export function installAgentConnections({ client, getState }) {
   $("#agent-private-copy").addEventListener("click", async () => {
     if (!owns() || !checkExpiry() || copying || !$("#agent-private-details").open) return;
     const current = setup; copying = true; render();
-    try { await navigator.clipboard.writeText(JSON.stringify(current)); if (owns() && setup === current && dialog.open) status("Private setup copied. Clear your clipboard after importing."); }
+    try { await navigator.clipboard.writeText(privateSetupText()); if (owns() && setup === current && dialog.open) status("Private setup copied. Clear your clipboard after importing."); }
     catch { if (owns() && setup === current && dialog.open) status("Select and copy the private setup below."); }
     finally { copying = false; render(); }
   });

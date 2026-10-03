@@ -1,0 +1,37 @@
+[
+  {
+    "name": "Cloudflare, Inc.",
+    "purpose": "Hosts the service on Workers and Durable Objects, and serves cookieless Web Analytics.",
+    "region": "United States; processing also runs on Cloudflare's global edge"
+  },
+  {
+    "name": "Resend, Inc.",
+    "purpose": "Sends magic-link and password-reset email when email delivery is configured.",
+    "region": "United States"
+  },
+  {
+    "name": "Google LLC",
+    "purpose": "Google sign-in, and Gmail access when a member connects a mailbox.",
+    "region": "United States"
+  },
+  {
+    "name": "GitHub, Inc.",
+    "purpose": "GitHub sign-in when that method is configured, and pull-request status for work claims.",
+    "region": "United States"
+  },
+  {
+    "name": "Microsoft Corporation",
+    "purpose": "Microsoft Graph for a mailbox a member connects.",
+    "region": "United States"
+  },
+  {
+    "name": "Firecrawl (Mendable, Inc.)",
+    "purpose": "Fetches pages for web research when that provider is configured.",
+    "region": "United States"
+  },
+  {
+    "name": "Telegram FZ-LLC",
+    "purpose": "Delivers Telegram bot messages when a room connects a bot.",
+    "region": "United Arab Emirates; delivery uses Telegram's global network"
+  }
+]

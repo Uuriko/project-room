@@ -22,6 +22,32 @@ import { agentErrorAx } from "../src/agent-error.mjs";
 const route = (path, methods, auth, summary, operationId, extra = {}) =>
   Object.freeze({ path, methods: Object.freeze(methods), auth, summary, operationId, ...extra });
 
+// Request bodies for the enrollment POSTs (RC-2026-09-27, Lazarus round-1
+// finding): the generator emits these as the JSON requestBody on the route's
+// POST operations. Field truth lives in the handlers (server/http.mjs) and
+// docs/openapi.yaml; keep all three in agreement.
+// POST /api/agent-identities: exact(data, ["displayName"]) or
+// exact(data, ["displayName", "recoverable"]) with recoverable === true.
+const IDENTITY_MINT_BODY = Object.freeze({ required: true, content: { "application/json": { schema: {
+  type: "object", additionalProperties: false, required: ["displayName"], properties: {
+    displayName: { type: "string", maxLength: 80, description: "Agent display name. C0 control characters are rejected (422 invalid_identity)." },
+    recoverable: { type: "boolean", const: true, description: "Optional. true makes registration retryable; send your saved pri_ registration credential as Authorization: Bearer (401 without it)." },
+  },
+} } } });
+// POST /api/access-requests: diagnoseArguments in http.mjs
+// (required/optional set aligns with server/access-requests.mjs).
+const ACCESS_REQUEST_BODY = Object.freeze({ required: true, content: { "application/json": { schema: {
+  type: "object", additionalProperties: false, required: ["roomId", "identityId", "displayName", "requestedPermissions"], properties: {
+    roomId: { type: "string", description: "Room id or code you want to join." },
+    identityId: { type: "string", description: "Your minted identity id (POST /api/agent-identities)." },
+    displayName: { type: "string", maxLength: 80 },
+    requestedPermissions: { type: "array", items: { type: "string" }, description: "Permissions you ask the owner for." },
+    note: { type: ["string", "null"], maxLength: 500, description: "Optional note to the room owner about what you want to work on." },
+    referredBy: { type: "string", maxLength: 80, description: "Optional 'who referred you?' free text, matched against member display names at approval." },
+    requestId: { type: "string", maxLength: 64, description: "Optional idempotency key; the server mints one when omitted. Reuse it when retrying." },
+  },
+} } } });
+
 export const DISCOVERABILITY_ROUTES = Object.freeze([
   // Public discovery documents (no credential).
   route("/llms.txt", ["GET"], "none", "Short agent packet: enrollment, first tools, routes.", "getLlmsTxt"),
@@ -38,8 +64,10 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/openapi.json", ["GET"], "none", "This document: generated OpenAPI 3.1 route inventory.", "getOpenApi"),
   route("/api/health", ["GET"], "none", "Liveness and deployed revision.", "getHealth"),
   // Onboarding.
-  route("/api/agent-identities", ["POST"], "open", "Mint an agent identity; the secret is shown once.", "mintAgentIdentity"),
-  route("/api/identity-create", ["POST"], "open", "Alias of POST /api/agent-identities.", "mintIdentityAlias"),
+  route("/api/agent-identities", ["POST"], "open", "Mint an agent identity; the secret is shown once.", "mintAgentIdentity",
+    { requestBodies: { POST: IDENTITY_MINT_BODY } }),
+  route("/api/identity-create", ["POST"], "open", "Alias of POST /api/agent-identities.", "mintIdentityAlias",
+    { requestBodies: { POST: IDENTITY_MINT_BODY } }),
   route("/api/agent-identities/{identityId}/rotate", ["POST"], "identity-secret", "Rotate your own identity secret; the new secret is shown once.", "rotateIdentitySecret"),
   route("/api/agent-identities/{identityId}/revoke", ["POST"], "identity-secret", "Revoke your own identity secret; final, audited.", "revokeIdentitySecret"),
   route("/api/agent-rooms", ["GET", "POST"], "identity-secret", "List rooms owned by the calling identity (GET) or create a room owned by it (POST).", "createAgentRoom",
@@ -64,7 +92,8 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
           properties: { inviteId: { type: "string", pattern: "^[a-f0-9]{8}$" } },
         } } } },
       } }),
-  route("/api/access-requests", ["POST"], "open", "Request access to a room (owner decides).", "requestAccess"),
+  route("/api/access-requests", ["POST"], "open", "Request access to a room (owner decides).", "requestAccess",
+    { requestBodies: { POST: ACCESS_REQUEST_BODY } }),
   route("/api/access-requests/{requestId}", ["GET"], "identity-scoped", "Poll your own access request status.", "getAccessRequest"),
   route("/api/share-links/join-agent", ["POST"], "identity-secret", "Guest-link redemption: join with a guest pass.", "joinAgentViaShareLink"),
   route("/api/needs-me", ["GET"], "identity-secret", "What needs you, across every room.", "getNeedsMe"),
@@ -333,10 +362,14 @@ export function buildOpenApiJson({ origin }) {
       const documentedBody = entry.requestBodies?.[method];
       if (documentedBody) {
         op.requestBody = documentedBody;
-        const invalid = method === "DELETE"
-          ? "invalid_invite. inviteId is the 8-hex handle from list or create."
-          : "invalid_invite or invalid_invite_scope. Profile is chat, contribute, review, or collaborate.";
-        op.responses = { ...op.responses, "422": { description: invalid } };
+        // Invite-specific 422 guidance stays on the invites route only; other
+        // routes keep the canonical 422 from operationResponses.
+        if (entry.operationId === "agentRoomInvites") {
+          const invalid = method === "DELETE"
+            ? "invalid_invite. inviteId is the 8-hex handle from list or create."
+            : "invalid_invite or invalid_invite_scope. Profile is chat, contribute, review, or collaborate.";
+          op.responses = { ...op.responses, "422": { description: invalid } };
+        }
       }
       item[method.toLowerCase()] = op;
     }
