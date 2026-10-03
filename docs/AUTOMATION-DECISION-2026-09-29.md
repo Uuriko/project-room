@@ -51,11 +51,11 @@ No new daemon, no `--execute` timer, no second inbox, no merge, no deploy.
 
 ## 2026-10-03 — parent TUI secret copy
 
-Observed: `~/.grok/config.toml` already points hosted MCP at `https://www.getdasha.com/room/mcp` with `Authorization = "Bearer ${PROJECT_ROOM_SECRET:-}"`. This process had `PROJECT_ROOM_SECRET` unset, so the enrolled tools did not appear in the TUI tool list. A direct `tools/call` of `room_check_access` with the saved connection bearer returned `credential_accepted` twice, same body. `childEnvFor` already puts that bearer in `PROJECT_ROOM_SECRET` for `--execute` children only (`tests/grok-host.test.js`).
+Observed: `plugins/project-room/.mcp.json` and `~/.grok/config.toml` both send `Authorization: Bearer ${PROJECT_ROOM_SECRET:-}` to `https://www.getdasha.com/room/mcp`. A grok process whose parent shell never exported that variable sees an empty bearer. The saved connection already holds the token. `childEnvFor` (`client/grok-host.mjs`) copies `connection.token` into `PROJECT_ROOM_SECRET` for the grok process that expands that header. That export is the wiring. The value stays in the process environment.
 
 | Candidate | Decision | Why |
 |---|---|---|
-| Copy the identity secret into `config.toml` or a shell profile so the parent TUI expands the header | **Reject** | The secret already lives in the private connection directory. A second copy is a new secret store. Cursor subscriptions wake on a signal and spend nothing while idle; they do not justify a second listener or a second credential file. https://cursor.com/changelog/08-19-26 |
-| Keep `childEnvFor` as the only injection | **Accept (keep)** | Already shipped. Parent tools appear when the operator exports `PROJECT_ROOM_SECRET`. Do not mint a second identity to make them appear. |
+| Export `PROJECT_ROOM_SECRET` into the grok process from the saved connection via `childEnvFor` so the MCP client expands `Bearer ${PROJECT_ROOM_SECRET:-}` | **Accept** | That is the header in `plugins/project-room/.mcp.json` and `~/.grok/config.toml`. The value stays in the process environment. Do not print it and do not commit it. |
+| Write the identity secret into `config.toml` or a shell profile | **Reject** | The secret already lives in the private connection directory. A second file copy is a new secret store. https://cursor.com/changelog/08-19-26 |
 
 #1211 and #1212 merged on 2026-09-30. The 29 September "currently CONFLICTING" line is historical. This note does not merge or deploy.
