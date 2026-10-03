@@ -4302,7 +4302,7 @@ paths:
         '422': { description: invalid_claim_input }
   /api/rooms/{roomId}/work-claims/{claimId}/update:
     post:
-      summary: Update claimed work
+      summary: Update claimed work or append a PR link
       description: |
         Owner-only state transitions and notes (`403 work_not_owner`
         otherwise). The `done` transition accepts `deliveryMode` (how the
@@ -4321,6 +4321,23 @@ paths:
         qualify. Rejection is 403 work_review_rejected. This manual gate
         does not bind artifact bytes or change automatic PR/land/deploy
         settlement. API keys need `rooms:write`.
+        Alternatively send only appendPullRequest, expectedClaimedAt and
+        expectedHistoryLength from a fresh item read. This owner-only append
+        requires active unsuperseded work with a live or authorized non-expiring
+        lease. manage_claims does not override ownership. Archived rooms refuse
+        this operation. URL-only canonical HTTPS GitHub PR input, maximum300
+        characters, no credentials, non-default port, query or fragment;
+        trailing slash normalized. At most16 ordered unique links. Existing
+        polling/terminal observations, owner, state, claimedAt, leaseStartAt,
+        leaseExpiresAt, files, fileBlocks, dependsOn, repo, branch, revision and
+        deliveryMode are preserved. A true addition clears ci and attestations,
+        retains historical reviews/bases, and appends one history record and
+        one work_claim.updated/state_changed event. A fresh duplicate returns
+        the exact item without another write/event; a stale duplicate conflicts.
+        No worker, GitHub fetch, publication, merge or deployment is started.
+        After an unknown response or conflict, GET the item and reconcile the
+        same owner/round and URL. Never release/reclaim to bypass refusal.
+        Automatic all-linked-PR settlement remains separate from manual review.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: claimId
@@ -4332,30 +4349,53 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              properties:
-                state:
-                  type: string
-                  enum: [claimed, in_progress, blocked, done, unclaimed]
-                  description: unclaimed = release the claim
-                note: { type: string }
-                deliveryMode:
-                  type: string
-                  enum: [result, merged, production]
-                  description: Only on the done transition
-                reviewedBy:
-                  type: string
-                  description: Reviewing member id; only on the done transition. Non-self policies require this current authorized member's latest explicit approve via /review with a matching current basis
-                tags:
-                  type: array
-                  items: { type: string, pattern: '[A-Za-z0-9_-]{1,32}' }
-                  maxItems: 10
-                  description: Free-form receipt labels; only on the done transition
-                blobs:
-                  type: array
-                  items: { type: string, pattern: '^sha256:[0-9a-f]{64}$' }
-                  maxItems: 10
-                  description: sha256 evidence pointers; only on the done transition
+              oneOf:
+                - type: object
+                  additionalProperties: false
+                  anyOf:
+                    - required: [state]
+                    - required: [note]
+                  properties:
+                    state:
+                      type: string
+                      enum: [claimed, in_progress, blocked, done, unclaimed]
+                      description: unclaimed = release the claim
+                    note: { type: string }
+                    deliveryMode:
+                      type: string
+                      enum: [result, merged, production]
+                      description: Only on the done transition
+                    reviewedBy:
+                      type: string
+                      description: Reviewing member id; only on the done transition. Non-self policies require this current authorized member's latest explicit approve via /review with a matching current basis
+                    tags:
+                      type: array
+                      items: { type: string, pattern: '[A-Za-z0-9_-]{1,32}' }
+                      maxItems: 10
+                      description: Free-form receipt labels; only on the done transition
+                    blobs:
+                      type: array
+                      items: { type: string, pattern: '^sha256:[0-9a-f]{64}$' }
+                      maxItems: 10
+                      description: sha256 evidence pointers; only on the done transition
+                - type: object
+                  additionalProperties: false
+                  required: [appendPullRequest, expectedClaimedAt, expectedHistoryLength]
+                  properties:
+                    appendPullRequest:
+                      type: string
+                      maxLength: 300
+                      format: uri
+                      description: Canonical HTTPS GitHub PR URL only; no caller-supplied outcome, CI or polling metadata
+                    expectedClaimedAt:
+                      type: string
+                      format: date-time
+                      maxLength: 100
+                      description: Exact claimedAt from the current item; binds the ownership round
+                    expectedHistoryLength:
+                      type: integer
+                      minimum: 0
+                      description: Exact history.length from the same read; detects concurrent changes and same-millisecond reclaim
       responses:
         '200':
           description: The updated item
@@ -4364,9 +4404,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/WorkClaim'
         '401': { description: unauthenticated }
-        '403': { description: work_not_owner or work_review_rejected }
+        '403': { description: work_not_owner, work_claims_not_permitted, work_review_rejected, insufficient_scope, or existing membership/autonomy refusal }
         '404': { description: work_claim_not_found }
-        '422': { description: invalid_claim_input }
+        '409':
+          description: Append refused with work_claim_conflict for stale basis or inactive/superseded work, claim_lease_lapsed for an expired lease, or room_archived. Read the current item before deciding whether a fresh same-round request is appropriate
+        '422': { description: invalid_claim_input, including mixed append/state bodies, non-string PR input, malformed preconditions, or a seventeenth distinct URL }
   /api/rooms/{roomId}/work-claims/{claimId}/review:
     post:
       summary: Record a review

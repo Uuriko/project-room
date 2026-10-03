@@ -219,7 +219,7 @@ function viewerOf(state, session) {
   const id = session?.member?.id ?? null;
   const member = id ? state?.members?.[id] : null;
   const manage = Boolean(id && (state?.room?.ownerId === id || (member?.permissions ?? []).includes("manage_claims")));
-  return { id, manage, owner: Boolean(id && state?.room?.ownerId === id) };
+  return { id, manage, owner: Boolean(id && state?.room?.ownerId === id), write: canWriteClaims(state, session) };
 }
 
 function workLink(item, workItems, key, label) {
@@ -231,6 +231,21 @@ function claimReference(id, byId, workItems, key) {
   const target = byId.get(id);
   const label = target?.title ? `${target.title} (#${id})` : `#${id}`;
   return workLink(target, workItems, key, label);
+}
+
+function canLinkPullRequest(item, viewer, now) {
+  return viewer.write && viewer.id === item.owner && !item.supersededBy
+    && ["claimed", "in_progress", "blocked"].includes(item.state)
+    && (!item.leaseExpiresAt || Date.parse(item.leaseExpiresAt) > now);
+}
+
+function reviewLabel(review, item) {
+  if (review.verdict !== "approve") return String(review.verdict ?? "").replaceAll("_", " ");
+  const basis = review.basis;
+  const current = basis?.version === 1 && basis.owner === item.owner && basis.claimedAt === item.claimedAt
+    && basis.revision === (item.revision ?? null) && basis.headSha === (item.ci?.headSha ?? null);
+  const attested = (item.attestations ?? []).some(entry => entry.memberId === review.memberId && entry.at === review.at);
+  return current && attested ? "approve" : "previous approval · does not qualify for current work";
 }
 
 function cardHtml(item, viewer, members, now, workItems, byId) {
@@ -257,7 +272,7 @@ function cardHtml(item, viewer, members, now, workItems, byId) {
   const chain = Array.isArray(item.chain) ? item.chain : [];
   const links = chain.map((link, index) => `<li>${escapeHtml(link.kind)} → ${claimReference(link.targetId, byId, workItems, `claim-chain:${item.id}:${index}`)}${link.note ? ` · ${escapeHtml(link.note)}` : ""}</li>`).join("");
   const reviews = Array.isArray(item.reviews) && item.reviews.length
-    ? `<ul class="claim-reviews">${item.reviews.map(review => `<li>${escapeHtml(memberName(members, review.memberId) || review.memberId)} ${escapeHtml(String(review.verdict ?? "").replaceAll("_", " "))}</li>`).join("")}</ul>`
+    ? `<ul class="claim-reviews">${item.reviews.map(review => `<li>${escapeHtml(memberName(members, review.memberId) || review.memberId)} ${escapeHtml(reviewLabel(review, item))}</li>`).join("")}</ul>`
     : "";
   const dependencies = Array.isArray(item.dependsOn) ? item.dependsOn : [];
   const remaining = dependencies.filter(id => byId.get(id)?.state !== "done");
@@ -274,6 +289,9 @@ function cardHtml(item, viewer, members, now, workItems, byId) {
   }).join("");
   const button = (action, label, tone) => `<button type="button" class="button ${tone}" data-claim-action="${action}" data-claim-id="${escapeHtml(item.id)}" data-focus-key="${action}:${escapeHtml(item.id)}">${label}</button>`;
   const actions = [];
+  if (canLinkPullRequest(item, viewer, now)) {
+    actions.push(`<form class="board-new" data-claim-link-pr="${escapeHtml(item.id)}"><label>Pull request URL <input name="pullRequest" type="url" size="1" maxlength="300" required autocomplete="off" placeholder="https://github.com/…/pull/…" aria-label="Pull request URL for ${escapeHtml(item.title || item.id)}" data-focus-key="link-pr:${escapeHtml(item.id)}"></label><button type="submit" class="button secondary">Link PR</button></form>`);
+  }
   if (item.state === "unclaimed" && !item.owner && !waiting) actions.push(button("claim", "Claim", "primary"));
   if (mine && ["claimed", "in_progress", "blocked"].includes(item.state)) actions.push(button("renew", "Renew", "secondary"));
   if (mine && (item.state === "claimed" || item.state === "blocked")) actions.push(button("progress", "Mark in progress", "secondary"));
@@ -442,14 +460,16 @@ export function installWorkBoard({ client, getState, getSession }) {
       loadedRoom = session.roomId;
       seen = mark;
       paint();
+      return true;
     } catch {
       if (mine === operation && context() === owned) note("Could not load the board.");
+      return false;
     } finally {
       if (readFlight === pending) readFlight = null;
     }
   }
 
-  async function act(run, focus) {
+  async function act(run, focus, reconcile = null) {
     const owned = context();
     if (!owned || loadedContext !== owned || mutating) return;
     const mine = ++operation;
@@ -458,18 +478,30 @@ export function installWorkBoard({ client, getState, getSession }) {
     readFlight = null;
     if (focus) { pendingFocus = { key: focus.key ?? null, id: focus.id ?? null }; pendingStatus = focus.status ?? ""; }
     mutating = true;
+    if (focus?.pending) note(focus.pending);
     let pending = null;
     try {
       pending = run(); actionFlight = pending;
       await pending;
       if (mine !== operation || context() !== owned) return;
       // Keep duplicate mutations excluded until their new state is visible.
-      await load({ force: true });
+      const refreshed = await load({ force: true });
+      if (reconcile && actionFlight === pending && context() === owned) {
+        note(refreshed ? reconcile(null) : "Could not confirm the PR link. Refresh the board before trying again.");
+      }
     } catch (error) {
       if (mine !== operation || context() !== owned) return;
-      pendingFocus = null;
-      pendingStatus = "";
-      note(error?.message || "Could not update the claim.");
+      if (reconcile) {
+        note("Checking the current claim…");
+        const refreshed = await load({ force: true });
+        if (actionFlight === pending && context() === owned) {
+          note(refreshed ? reconcile(error) : "Could not confirm the PR link. Refresh the board before trying again.");
+        }
+      } else {
+        pendingFocus = null;
+        pendingStatus = "";
+        note(error?.message || "Could not update the claim.");
+      }
     } finally {
       if (actionFlight === pending) { actionFlight = null; mutating = false; }
     }
@@ -495,6 +527,46 @@ export function installWorkBoard({ client, getState, getSession }) {
     }
   });
   root.addEventListener("submit", event => {
+    const linkForm = event.target.closest("[data-claim-link-pr]");
+    if (linkForm && root.contains(linkForm)) {
+      event.preventDefault();
+      if (mutating) return;
+      const id = linkForm.dataset.claimLinkPr;
+      const item = items.find(entry => entry.id === id);
+      if (!item || !canLinkPullRequest(item, viewerOf(getState(), getSession()), Date.now())) return;
+      const pullRequest = String(new FormData(linkForm).get("pullRequest") ?? "").trim();
+      if (!pullRequest) return;
+      let canonicalUrl;
+      try { canonicalUrl = new URL(pullRequest).href.replace(/\/$/, ""); }
+      catch { note("Enter a GitHub pull request URL."); return; }
+      const data = { appendPullRequest: pullRequest, expectedClaimedAt: item.claimedAt, expectedHistoryLength: item.history.length };
+      const reconcile = error => {
+        const current = items.find(entry => entry.id === id);
+        const history = current?.history ?? [];
+        const changedRound = history.length < item.history.length || history.slice(item.history.length)
+          .some(entry => /^(claimed$|state:unclaimed$|lease_expired$|reassigned:)/.test(entry.action));
+        const sameClaim = current?.owner === item.owner && current?.claimedAt === item.claimedAt && !changedRound;
+        const linked = sameClaim && (current.pullRequests ?? [current.pullRequest]).some(pull => pull?.url === canonicalUrl);
+        if (error?.code === "room_archived") return error.message || "This room is archived; no PR link was recorded.";
+        if (error?.status === 409) return linked
+          ? "Claim changed. This PR is already linked; the board is refreshed."
+          : "Claim changed. The board is refreshed; check its current owner and claim before trying again.";
+        if (linked) return `PR linked to '${item.title || id}'`;
+        return error?.message || "Could not confirm the PR link. Check the refreshed claim before trying again.";
+      };
+      void act(() => {
+        linkForm.setAttribute("aria-busy", "true");
+        linkForm.querySelector("input").readOnly = true;
+        linkForm.querySelector("button").disabled = true;
+        return client.request(client.path(`/work-claims/${encodeURIComponent(id)}/update`), { method: "POST", data });
+      }, { id, key: `link-pr:${id}`, pending: "Linking PR and checking the current claim…" }, reconcile).finally(() => {
+        if (!root.contains(linkForm)) return;
+        linkForm.removeAttribute("aria-busy");
+        linkForm.querySelector("input").readOnly = false;
+        linkForm.querySelector("button").disabled = false;
+      });
+      return;
+    }
     const created = event.target.closest("#board-new-item");
     if (created && root.contains(created)) {
       event.preventDefault();

@@ -472,6 +472,35 @@ export function renewWork(work, agentId, { note, leaseHours, room, now } = {}) {
   return withHistory(renewed, atMs, agent, "renewed",
     note ?? (effective === null ? "lease removed" : `lease: ${effective}h`));
 }
+// Append one URL to the current claim round without replacing its lease or
+// evidence. A fresh duplicate is a byte-identical no-op; stale replay must
+// read back before deciding whether the link was already recorded.
+export function appendWorkPullRequest(work, agentId, { pullRequest, expectedClaimedAt, expectedHistoryLength, now } = {}) {
+  const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
+  check(typeof pullRequest === "string" && pullRequest.length <= 300, "pullRequest must be a URL string of at most 300 characters");
+  const parsed = parsePullRequestUrl(pullRequest);
+  check(parsed && !new URL(pullRequest.trim()).port, "pullRequest must be a canonical https://github.com/{owner}/{repo}/pull/{number} URL");
+  check(typeof expectedClaimedAt === "string" && expectedClaimedAt.length <= 100 && Number.isFinite(Date.parse(expectedClaimedAt)), "expectedClaimedAt must be the current claim timestamp");
+  check(Number.isSafeInteger(expectedHistoryLength) && expectedHistoryLength >= 0, "expectedHistoryLength must be a non-negative integer");
+  if (!ACTIVE_CLAIM_STATES.includes(item.state) || !item.owner || item.supersededBy) {
+    fail("work_claim_conflict", "Only an active, unsuperseded claim can receive a PR link");
+  }
+  if (item.owner !== agent) fail("work_not_owner", "Only the current claim owner can link a PR");
+  if (isLeaseExpired(item, atMs)) fail("claim_lease_lapsed", "The current claim lease has lapsed");
+  if (item.claimedAt !== expectedClaimedAt || item.history.length !== expectedHistoryLength) {
+    fail("work_claim_conflict", "The claim changed since it was read");
+  }
+  if (item.pullRequests.some(pull => pull.url === parsed.url)) return work;
+  check(item.pullRequests.length < MAX_PULLS, `pullRequests must list at most ${MAX_PULLS} pull requests`);
+  // Keep the existing observations verbatim; only the server's poller may
+  // fill in the new link's outcome, polling metadata, or CI.
+  const prior = Array.isArray(work.pullRequests) && work.pullRequests.length ? work.pullRequests
+    : (work.pullRequest ? [work.pullRequest] : []);
+  const links = Object.freeze([...prior, pullRequestOf(parsed.url)]);
+  return withHistory({ ...work, pullRequests: links,
+    pullRequest: links.find(pull => !pull.outcome) ?? links[links.length - 1],
+    ci: null, attestations: Object.freeze([]) }, atMs, agent, "pr_linked", `Linked pull request ${parsed.url}`);
+}
 // Update claimed work: move state or add a note. Only the owner may update.
 // The done transition accepts deliveryMode (how the work was delivered),
 // reviewedBy (the attesting member, per the item's review policy), tags

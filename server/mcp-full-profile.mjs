@@ -13,6 +13,7 @@ import { canonicalLane, normalizeActor } from "./bounty-escrow.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { publishBountyEvent } from "./bounty-escrow-routes.mjs";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
+import { linkWorkClaimPullRequest } from "./work-claim-routes.mjs";
 
 import { prepareWork } from "../client/work-preparation.mjs";
 import { beginSelectedWork, findBeginReceipt } from "../client/begin-work.mjs";
@@ -184,6 +185,25 @@ export async function callHostedStdioTool(store, secret, name, args) {
       }
     });
     return { value, isError: value.stopped === "unknown" || value.stopped === "disconnected" };
+  }
+  if (name === "room_link_work_claim_pr") {
+    try {
+      const value = linkWorkClaimPullRequest({ store, roomId, auth, claimId: rest.claimId,
+        data: { appendPullRequest: rest.pullRequest, expectedClaimedAt: rest.expectedClaimedAt,
+          expectedHistoryLength: rest.expectedHistoryLength },
+        reauthorize: () => {
+          const current = store.authenticate(secret, roomId, auth.sessionBinding);
+          enforceHostedStdioCallVisibility(store, secret, current.member.id, name);
+          return current;
+        }
+      });
+      return { value, isError: false };
+    } catch (error) {
+      if (!Number.isInteger(error?.status) || typeof error.code !== "string") throw error;
+      return { value: { status: error.status, code: error.code, message: error.message,
+        ...(error.body?.hint ? { hint: error.body.hint } : {}),
+        ...(error.body?.next ? { next: error.body.next } : {}) }, isError: true };
+    }
   }
   if (name === "room_set_member_claim_cap") {
     const authority = store.roomAuthority(roomId);

@@ -701,6 +701,10 @@ export class RoomAgentClient {
         ...(reviewedBy === undefined ? {} : { reviewedBy }),
         ...(tags === undefined ? {} : { tags }), ...(blobs === undefined ? {} : { blobs }) }, signal);
   }
+  linkWorkItemPullRequest(id, { pullRequest, expectedClaimedAt, expectedHistoryLength, signal } = {}) {
+    return this.#request(`/work-claims/${encodeURIComponent(id)}/update`,
+      { appendPullRequest: pullRequest, expectedClaimedAt, expectedHistoryLength }, signal);
+  }
   reviewWorkItem(id, { note, verdict, summary, url, signal } = {}) {
     return this.#request(`/work-claims/${encodeURIComponent(id)}/review`,
       { ...(note === undefined ? {} : { note }), ...(verdict === undefined ? {} : { verdict }),

@@ -81,7 +81,7 @@ test("stdio version negotiation, discovery fallback, tools and notification sile
   await h.ready();
   const tools = (await h.rpc("tools/list")).result.tools;
   assert.deepEqual(tools.filter(tool => tool.name.includes("outside_agent")).map(tool => tool.name), ["room_list_outside_agents", "room_introduce_outside_agent"]);
-  assert.equal(tools.length, 40); assert.ok(tools.every(tool => tool.inputSchema.additionalProperties === false));
+  assert.equal(tools.length, 41); assert.ok(tools.every(tool => tool.inputSchema.additionalProperties === false));
   assert.equal((await h.rpc("tools/call", { name: "room_check_access", arguments: {} }, "typed-id")).result.structuredContent.status, "credential_accepted");
   const count = h.replies.length; h.send({ method: "unknown-notification" }); await tick(); assert.equal(h.replies.length, count);
   assert.equal((await h.rpc("tools/call", { name: "room_read_work", arguments: { workItemId: "work", token: "not-allowed" } })).error.code, -32602);
@@ -231,4 +231,55 @@ test("4000-unit MCP draft reaches the real Room proposal store intact", async t 
   assert.equal(rejected.error.code, -32602);
   assert.match(rejected.error.message, /body.*4000.*UTF-16/i);
   assert.equal(calls, 1);
+});
+
+// This JSON-RPC boundary owns the new tool's advertised schema, rejection before
+// dispatch, unchanged argument forwarding, cancellation signal and error copy.
+test("MCP claim PR links validate URL-only arguments and forward the complete claim basis", async t => {
+  const seen = [], saved = { id: "_claim", state: "claimed", pullRequests: [{ url: "https://github.com/Uuriko/project-room/pull/18" }] };
+  const h = harness(t, { linkWorkItemPullRequest: async (id, options) => { seen.push({ id, options }); return saved; } });
+  await h.ready();
+  const definition = (await h.rpc("tools/list")).result.tools.find(tool => tool.name === "room_link_work_claim_pr");
+  assert.equal(definition.annotations.readOnlyHint, false);
+  assert.equal(definition.annotations.destructiveHint, false);
+  assert.equal(definition.annotations.idempotentHint, true);
+  assert.equal(definition.inputSchema.properties.pullRequest.type, "string");
+  assert.equal(definition.inputSchema.properties.pullRequest.maxLength, 300);
+  const args = { claimId: "_claim", pullRequest: saved.pullRequests[0].url + "/",
+    expectedClaimedAt: "2026-10-03T13:00:00.000Z", expectedHistoryLength: 2 };
+  for (const invalid of [
+    { ...args, pullRequest: { url: args.pullRequest, outcome: "merged" } },
+    { ...args, pullRequest: "https://github.com/Uuriko/project-room/pull/18?fake=1" },
+    { ...args, pullRequest: "https://github.com:444/Uuriko/project-room/pull/18" },
+    { ...args, expectedHistoryLength: "2" }, { ...args, expectedHistoryLength: -1 },
+    { ...args, expectedClaimedAt: null }, { ...args, expectedClaimedAt: "not-a-date" },
+    { ...args, state: "done" }, { ...args, claimId: "claim.with.dots" },
+    Object.fromEntries(Object.entries(args).filter(([key]) => key !== "expectedHistoryLength"))
+  ]) {
+    assert.equal((await h.rpc("tools/call", { name: definition.name, arguments: invalid })).error.code, -32602);
+  }
+  assert.equal(seen.length, 0);
+  const result = (await h.rpc("tools/call", { name: definition.name, arguments: args })).result;
+  assert.deepEqual(result.structuredContent, saved);
+  assert.equal(result.isError, undefined);
+  assert.equal(seen.length, 1);
+  const { signal, ...sent } = seen[0].options;
+  assert.ok(signal instanceof AbortSignal);
+  assert.deepEqual({ claimId: seen[0].id, ...sent }, args);
+});
+
+test("MCP claim PR refusals preserve specific codes and reconcile unknown writes without leaking diagnostics", async t => {
+  const args = { claimId: "claim", pullRequest: "https://github.com/Uuriko/project-room/pull/18",
+    expectedClaimedAt: "2026-10-03T13:00:00.000Z", expectedHistoryLength: 2 };
+  for (const [status, code] of [[409, "work_claim_conflict"], [403, "work_not_owner"], [409, "claim_lease_lapsed"], [503, "internal"]]) {
+    const h = harness(t, { linkWorkItemPullRequest: async () => { throw new RoomClientError(status, code, "PRIVATE SECRET"); } });
+    await h.ready();
+    const result = (await h.rpc("tools/call", { name: "room_link_work_claim_pr", arguments: args })).result;
+    assert.equal(result.isError, true);
+    assert.equal(result.structuredContent.code, status === 503 ? "service_unavailable" : code);
+    assert.equal(result.structuredContent.outcome, status === 503 ? "not_confirmed" : "this_attempt_refused");
+    assert.deepEqual(result.structuredContent.next, [{ path: "/api/rooms/commons/work-claims/claim" }]);
+    assert.match(result.structuredContent.hint, /never reacquire automatically/);
+    assert.equal(JSON.stringify(result).includes("PRIVATE SECRET"), false);
+  }
 });
