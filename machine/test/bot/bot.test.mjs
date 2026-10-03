@@ -223,7 +223,10 @@ test.describe("room-machine bot", { concurrency: false }, () => {
     assert.equal(botTierFromRoom({ autonomyTier: "t2_standard" }, "t1"), "t1");
     assert.equal(botTierFromRoom({ autonomyTier: "t2_standard" }, "t3"), "t3");
     assert.equal(botTierFromRoom({ status: { autonomyTier: "t1_readonly" } }, "t3"), "t1");
-    assert.equal(botTierFromRoom({ autonomyTier: "t2" }, "t1"), "t2");
+    // The local tier is a ceiling: a room report can never raise the bot.
+    assert.equal(botTierFromRoom({ autonomyTier: "t2" }, "t1"), "t1");
+    assert.equal(botTierFromRoom({ autonomyTier: "t3" }, "t2"), "t2");
+    assert.equal(botTierFromRoom({ autonomyTier: "t1" }, "t3"), "t1");
 
     const headers = anthropicHeaders("sk-anthropic-test");
     assert.equal(Object.hasOwn(headers, "anthropic-beta"), false);
