@@ -1,4 +1,5 @@
 import { ANTHROPIC_URL, anthropicBody, anthropicHeaders } from "./schemas.mjs";
+import { estimateCostUsd } from "./cost.mjs";
 
 const ACTIONS = Object.freeze({
   screenshot: "desktop.screenshot",
@@ -63,7 +64,7 @@ export function createAnthropicProvider({ key, model, fetchImpl }) {
         }
       }
       messages.push({ role: "assistant", content: value?.content ?? [] });
-      return { requestBody: body, actions, text, costUsd: 0 };
+      return { requestBody: body, actions, text, costUsd: estimateCostUsd("anthropic", value?.usage) };
     },
   };
 }

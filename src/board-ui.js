@@ -34,6 +34,14 @@ function pullNumber(url) {
   return match ? match[1] : "";
 }
 
+// Protocol/host allowlist for claim PR links: only canonical
+// https://github.com/{owner}/{repo}/pull/{number} URLs become anchors.
+// The server write path already canonicalizes to this shape, so this is
+// defense in depth against any render path that never crossed the server.
+function safePrUrl(url) {
+  return /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/pull\/[1-9]\d{0,9}$/.test(String(url ?? "")) ? url : null;
+}
+
 function dependenciesMet(item, byId) {
   const deps = Array.isArray(item?.dependsOn) ? item.dependsOn : [];
   return deps.every(id => byId.get(id)?.state === "done");
@@ -249,9 +257,11 @@ function cardHtml(item, viewer, members, now, workItems, byId) {
     const number = pullNumber(pull.url);
     const outcome = pull.outcome ? ` · ${pull.outcome}` : "";
     const ci = index === 0 && item.ci?.state ? ` <span class="ci-badge ci-${escapeHtml(item.ci.state)}">${escapeHtml(item.ci.state)}</span>` : "";
-    return `<p class="claim-pr"><a href="${escapeHtml(pull.url)}">PR ${number ? `#${escapeHtml(number)}` : "link"}</a>${escapeHtml(outcome)}${ci}</p>`;
-  }).join("");
-  const place = item.repo || item.branch
+    const link = safePrUrl(pull.url)
+      ? `<a href="${escapeHtml(pull.url)}">PR ${number ? `#${escapeHtml(number)}` : "link"}</a>`
+      : `<span>PR ${number ? `#${escapeHtml(number)}` : escapeHtml(String(pull.url ?? "link"))}</span>`;
+    return `<p class="claim-pr">${link}${escapeHtml(outcome)}${ci}</p>`;
+  }).join("");  const place = item.repo || item.branch
     ? `<p class="claim-repo">${escapeHtml([item.repo, item.branch].filter(Boolean).join("@"))}</p>`
     : "";
   const chain = Array.isArray(item.chain) ? item.chain : [];

@@ -24,14 +24,16 @@ test.after(async () => {
   await Promise.all([on?.dispose(), off?.dispose()]);
 });
 
-test("healthz stays off until passthrough is set and names missing secrets", async () => {
+test("healthz is liveness-only and leaks no config (L1)", async () => {
   const bare = await startRelay({ secrets: false, passthrough: false });
   try {
     const live = await readBody(await relayFetch(bare, "/healthz"));
     assert.equal(live.status, 200);
     assert.equal(live.body.status, "ok");
-    assert.equal(live.body.phase0Passthrough, false);
-    assert.deepEqual(live.body.missing, ["RELAY_ADMIN_TOKEN", "RELAY_LINK_SECRET", "ROOM_RESOURCE_LEASE_PUBLIC_JWK"]);
+    // L1: unauthenticated health reveals no passthrough state and no missing
+    // secrets — recon stays behind admin auth.
+    assert.equal("phase0Passthrough" in live.body, false);
+    assert.equal("missing" in live.body, false);
     assert.equal(JSON.stringify(live.body).includes("adm_"), false);
     const head = await relayFetch(bare, "/healthz", { method: "HEAD" });
     assert.equal(head.status, 200);
@@ -42,14 +44,15 @@ test("healthz stays off until passthrough is set and names missing secrets", asy
 
   const enabled = await readBody(await relayFetch(on, "/healthz"));
   const disabled = await readBody(await relayFetch(off, "/healthz"));
-  assert.equal(enabled.body.phase0Passthrough, true);
-  assert.equal(disabled.body.phase0Passthrough, false);
-  assert.deepEqual(disabled.body.missing, []);
+  assert.equal("phase0Passthrough" in enabled.body, false);
+  assert.equal("phase0Passthrough" in disabled.body, false);
+  assert.equal("missing" in disabled.body, false);
 });
 
 test("an enroll code works once, expires, and stays bound to its room", async () => {
   const minted = await mint(on, {
     label: "Ada's desk", roomId: "room_alpha", ownerMemberId: "mem_ada", inviteCode: "RM-0123456789ABCDEF", displayName: "Ada desk",
+    passthroughOptIn: true, passthroughCaps: ["desktop.screenshot"],
   });
   assert.equal(minted.status, 201);
   assert.equal(minted.body.inviteCode, "RM-0123456789ABCDEF");
@@ -182,7 +185,7 @@ test("phase 0 passthrough gives the earliest live work claim the slot", async ()
   on.room.person({ token: ada, memberId: "mem_ada", identityId: "idn_ada", handle: "Ada", rooms: ["room_alpha"] });
   on.room.person({ token: bea, memberId: "mem_bea", identityId: "idn_bea", handle: "Bea", rooms: ["room_alpha"] });
   on.room.person({ token: cam, memberId: "mem_cam", identityId: "idn_cam", handle: "Cam", rooms: ["room_other"] });
-  const machine = await enrolledMachine(on, { rooms: ["room_alpha"], ownerMemberId: "mem_ada" });
+  const machine = await enrolledMachine(on, { rooms: ["room_alpha"], ownerMemberId: "mem_ada", passthroughOptIn: true, passthroughCaps: ["desktop.screenshot", "desktop.click", "shell.vm", "files.get"] });
   const now = Date.now();
   const claims = [
     claimOnSlot({ id: "claim_land", owner: "mem_bea", machineId: machine.machineId, slot: "desk", at: now - 3 * HOUR, leaseHours: 5, kind: "land" }),
@@ -423,6 +426,8 @@ async function enrolledMachine(ctx, fields = {}) {
     ownerMemberId: fields.ownerMemberId ?? "mem_ada",
     inviteCode: fields.inviteCode ?? "RM-0123456789ABCDEF",
     ...(fields.displayName ? { displayName: fields.displayName } : {}),
+    ...(fields.passthroughOptIn ? { passthroughOptIn: true } : {}),
+    ...(fields.passthroughCaps ? { passthroughCaps: fields.passthroughCaps } : {}),
   });
   assert.equal(minted.status, 201, JSON.stringify(minted.body));
   const issued = await enroll(ctx, minted.body.code);

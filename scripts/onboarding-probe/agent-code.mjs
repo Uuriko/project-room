@@ -3,7 +3,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { cookieJar, elapsed, emptyCreated, executeCurl, extractCurls, probeFetch, qaStamp, writeJson } from "./lib.mjs";
+import { cookieJar, elapsed, emptyCreated, executeCurl, extractCurls, probeFetch, probePassword, qaStamp, writeJson } from "./lib.mjs";
 
 function accountHeaders(origin, session, json = true) {
   return {
@@ -25,7 +25,7 @@ async function openAccount(origin, stamp) {
     headers: { origin, "content-type": "application/json" },
     body: JSON.stringify({
       email: `${stamp}@example.com`,
-      password: "qa-probe-pw",
+      password: probePassword(),
       sessionRevision: first.json?.sessionRevision,
       sessionToken: jar.get("account_session"),
     }),

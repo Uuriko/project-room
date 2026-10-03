@@ -77,11 +77,18 @@ export function doctorText(facts) {
   ].join("\n");
 }
 
+function parseHostAddresses(output) {
+  return [...output.matchAll(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g)].map(match => match[0])
+    .filter(ip => ip !== "127.0.0.1");
+}
+
 export async function hostAddresses() {
   const result = await text("hostname", ["-I"]) ?? await text("ip", ["-4", "-o", "addr", "show"]);
-  if (!result) return [];
-  return [...result.matchAll(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g)].map(match => match[0])
-    .filter(ip => ip !== "127.0.0.1");
+  if (result) return parseHostAddresses(result);
+  // macOS has neither hostname -I nor ip: parse ifconfig instead.
+  const ifconfig = await text("ifconfig", ["-a"]);
+  if (!ifconfig) return [];
+  return parseHostAddresses(ifconfig);
 }
 
 export async function gatewayAddress() {

@@ -3,7 +3,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { cookieJar, elapsed, emptyCreated, klmEst, probeFetch, qaStamp, writeJson } from "./lib.mjs";
+import { cookieJar, elapsed, emptyCreated, klmEst, probeFetch, probePassword, qaStamp, writeJson } from "./lib.mjs";
 
 function accountHeaders(origin, session) {
   return {
@@ -20,7 +20,7 @@ async function owner(origin, stamp) {
     method: "POST",
     headers: { origin, "content-type": "application/json" },
     body: JSON.stringify({
-      email: `${stamp}@example.com`, password: "qa-probe-pw",
+      email: `${stamp}@example.com`, password: probePassword(),
       sessionRevision: first.json?.sessionRevision, sessionToken: jar.get("account_session"),
     }),
   });
