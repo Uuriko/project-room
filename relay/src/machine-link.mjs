@@ -57,6 +57,11 @@ export class MachineLink extends DurableObject {
     this.dirty = false;
     this.tail = Promise.resolve();
     this.live = null;
+    // Replay cache for signed control-plane messages (M1): key = the
+    // presented signature, value = expiry ms. A captured halt/pause/bye
+    // replayed inside the HMAC skew window is rejected with 409 instead of
+    // re-triggering the control action.
+    this.seenControlSigs = new Map();
   }
 
   async fetch(request) {
@@ -397,6 +402,21 @@ export class MachineLink extends DurableObject {
     return pending;
   }
 
+  // M1: reject a signed control message whose exact signature was already
+  // honored. Signatures embed a per-second timestamp, so a legit repeat
+  // (new timestamp, new signature) is never a replay.
+  rejectReplayedControl(request) {
+    const sig = (request.headers.get("x-relay-signature") ?? "").toLowerCase();
+    const now = Date.now();
+    for (const [key, expiry] of this.seenControlSigs) {
+      if (expiry <= now) this.seenControlSigs.delete(key);
+    }
+    if (this.seenControlSigs.has(sig)) {
+      throw relayError(409, "replay_detected", "This signed control message was already processed");
+    }
+    this.seenControlSigs.set(sig, now + 600_000);
+  }
+
   async halt(request) {
     const { value, raw } = await readJson(request, MAX_SMALL_BYTES, "Request body");
     let cancels = [];
@@ -405,6 +425,7 @@ export class MachineLink extends DurableObject {
     await this.exclusive(async () => {
       if (!this.state) throw relayError(404, "machine_unknown", "No such machine");
       await verifyLinkSignature(this.env.RELAY_LINK_SECRET, request, raw, Math.floor(Date.now() / 1000));
+      this.rejectReplayedControl(request);
       const nextEpoch = nextHaltEpoch(value, this.state);
       this.applyControl(value);
       this.state.haltEpoch = nextEpoch;
@@ -433,6 +454,7 @@ export class MachineLink extends DurableObject {
     await this.exclusive(async () => {
       if (!this.state) throw relayError(404, "machine_unknown", "No such machine");
       await verifyLinkSignature(this.env.RELAY_LINK_SECRET, request, raw, Math.floor(Date.now() / 1000));
+      this.rejectReplayedControl(request);
       this.applyControl(value);
       this.state.halted = false;
       this.state.pausedUntil = null;
@@ -451,6 +473,7 @@ export class MachineLink extends DurableObject {
     await this.exclusive(async () => {
       if (!this.state) throw relayError(404, "machine_unknown", "No such machine");
       await verifyLinkSignature(this.env.RELAY_LINK_SECRET, request, raw, Math.floor(Date.now() / 1000));
+      this.rejectReplayedControl(request);
       if (!Number.isSafeInteger(value.minutes) || value.minutes < 0 || value.minutes > 10_080) {
         throw relayError(422, "invalid_pause", "minutes must be an integer from 0 to 10080");
       }
@@ -471,6 +494,7 @@ export class MachineLink extends DurableObject {
     await this.exclusive(async () => {
       if (!this.state) throw relayError(404, "machine_unknown", "No such machine");
       await verifyLinkSignature(this.env.RELAY_LINK_SECRET, request, raw, Math.floor(Date.now() / 1000));
+      this.rejectReplayedControl(request);
       this.dirty = true;
       cancels = [...this.pending.values()];
       this.pending.clear();
