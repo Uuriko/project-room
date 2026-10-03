@@ -41,11 +41,15 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
   const dialog = document.createElement("dialog");
   dialog.id = "updates-dialog";
   dialog.setAttribute("aria-labelledby", "updates-title");
-  dialog.innerHTML = `<div class="dialog-head"><h2 id="updates-title">Updates</h2><button id="updates-close" class="button ghost" type="button">Close</button></div><div class="updates-filters" role="tablist" aria-label="Update filters"></div><ol class="updates-list"></ol><p id="updates-status" class="form-hint" role="status"></p>`;
+  dialog.innerHTML = `<div class="dialog-head"><h2 id="updates-title">Updates</h2><button id="updates-close" class="button ghost" type="button">Close</button></div><div class="updates-filters" role="tablist" aria-label="Update filters"></div><ol class="updates-list"></ol><div id="updates-summary-status" role="status" aria-live="polite" aria-atomic="true"><span id="updates-page-announcement" class="sr-only"></span><p id="updates-summary" class="form-hint"></p><p id="updates-partial" class="form-hint"></p></div><button id="updates-load-more" class="button secondary" type="button" hidden>Load more</button><p id="updates-status" class="form-hint" role="status"></p>`;
   (host ?? document.body).append(dialog);
   const tabs = dialog.querySelector(".updates-filters");
   const list = dialog.querySelector(".updates-list");
   const status = dialog.querySelector("#updates-status");
+  const summary = dialog.querySelector("#updates-summary");
+  const partial = dialog.querySelector("#updates-partial");
+  const pageAnnouncement = dialog.querySelector("#updates-page-announcement");
+  const loadMore = dialog.querySelector("#updates-load-more");
   for (const filter of FILTERS) {
     const button = document.createElement("button");
     button.type = "button";
@@ -59,6 +63,9 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
   let filter = "needs";
   let items = [];
   let actionable = 0;
+  let cursor = null, hasMore = false, loadedPages = 0, incomplete = false;
+  let visitedCursors = new Set();
+  let badgeMore = false, badgeIncomplete = false, loading = false;
   let ticket = 0;
   let interaction = 0;
   let owner = null;
@@ -69,37 +76,59 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
   const owns = value => value !== null && value === context();
   function reset() {
     ticket++; interaction++; owner = null; items = []; actionable = 0; filter = "needs"; operations.clear();
+    cursor = null; hasMore = false; loadedPages = 0; incomplete = false; visitedCursors = new Set();
+    badgeMore = false; badgeIncomplete = false; loading = false;
     if (dialog.open) dialog.close();
-    list.replaceChildren(); status.textContent = ""; paintBadge();
+    list.replaceChildren(); status.textContent = ""; summary.textContent = ""; partial.textContent = "";
+    paintBadge(); paintPaging();
   }
   function currentContext() {
     const value = context();
     if (owner !== value) { reset(); owner = value; }
     return value;
   }
-  function cancelPending() { interaction++; ticket++; }
+  function cancelPending() { interaction++; ticket++; loading = false; paintOperations(); paintPaging(); }
   function capture(itemId, action = "open") {
-    return { filter, itemId, action, scrollTop: dialog.scrollTop, listScrollTop: list.scrollTop };
+    return { filter, itemId, action, pageBudget: Math.max(1, loadedPages), scrollTop: dialog.scrollTop, listScrollTop: list.scrollTop };
   }
   async function restore(saved) {
     if (!currentContext()) return false;
     const mine = ++interaction, owned = owner;
     if (!dialog.open) dialog.showModal();
-    await load(saved.filter);
-    if (mine !== interaction || !owns(owned) || !dialog.open) return false;
+    const restored = await load(saved.filter, { budget: Math.max(1, saved.pageBudget || 1) });
+    if (!restored || mine !== interaction || !owns(owned) || !dialog.open) return false;
     dialog.scrollTop = saved.scrollTop; list.scrollTop = saved.listScrollTop;
     const row = [...list.children].find(node => node.dataset.updateId === saved.itemId);
     const target = row?.querySelector(`[data-update-action="${saved.action}"]`)
       ?? tabs.querySelector(`[data-update-filter="${filter}"]`);
     target?.focus({ preventScroll: true });
-    if (!row) target?.scrollIntoView({ block: "nearest", behavior: "instant" });
+    if (!row) {
+      target?.scrollIntoView({ block: "nearest", behavior: "instant" });
+      const fallback = hasMore ? "That update is outside the loaded window. Load more to continue."
+        : incomplete ? "Some sources are unavailable. That update could not be restored."
+          : "That update is no longer in this filter.";
+      status.textContent = [status.textContent, fallback].filter(Boolean).join(" ");
+    }
     return true;
   }
 
   function paintBadge() {
-    badge.textContent = actionable ? String(actionable) : "";
-    badge.hidden = actionable === 0;
-    entry.setAttribute("aria-label", actionable ? `Updates, ${actionable} need you` : "Updates");
+    badge.textContent = badgeIncomplete ? "?" : actionable ? `${actionable}${badgeMore ? "+" : ""}` : "";
+    badge.hidden = !badgeIncomplete && actionable === 0;
+    entry.setAttribute("aria-label", badgeIncomplete ? "Updates, some sources are unavailable"
+      : actionable ? `Updates, ${badgeMore ? "at least " : ""}${actionable} loaded updates need you${badgeMore ? ", more available" : ""}` : "Updates");
+  }
+  function paintPaging() {
+    const pageCopy = loadedPages ? `Page ${loadedPages} loaded. ` : "";
+    if (pageAnnouncement.textContent !== pageCopy) pageAnnouncement.textContent = pageCopy;
+    const summaryCopy = `${visible(items, filter).length} loaded${hasMore ? " · More available" : ""}${filter === "saved" ? ` · ${items.length} checked` : ""}`;
+    const partialCopy = incomplete ? "Some update sources are unavailable. This list may be incomplete." : "";
+    if (summary.textContent !== summaryCopy) summary.textContent = summaryCopy;
+    if (partial.textContent !== partialCopy) partial.textContent = partialCopy;
+    loadMore.hidden = !hasMore && !incomplete;
+    loadMore.disabled = loading;
+    loadMore.textContent = hasMore && cursor ? "Load more" : "Refresh updates";
+    list.setAttribute("aria-busy", loading ? "true" : "false");
   }
   function paintOperations() {
     for (const row of list.querySelectorAll("[data-update-id]")) {
@@ -109,7 +138,7 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
         const label = `${operation?.action === action ? (operation.busy ? "Checking " : "Retry ") : ""}${ACTION_LABELS[action]}`;
         button.textContent = label;
         button.setAttribute("aria-label", `${label} ${items.find(item => item.id === row.dataset.updateId)?.title || "update"}`);
-        button.disabled = !!operation && (operation.action !== action || (operation.busy && action !== "open"));
+        button.disabled = loading || (!!operation && (operation.action !== action || (operation.busy && action !== "open")));
       }
     }
   }
@@ -129,8 +158,10 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
     if (!rows.length) {
       const empty = document.createElement("li");
       empty.className = "empty-note";
-      empty.textContent = filter === "needs" ? "Nothing needs you." : "Nothing in this filter.";
-      list.append(empty);
+      empty.textContent = incomplete ? "No matching updates are loaded yet. Some sources are unavailable."
+        : hasMore ? "No matching updates in the loaded pages yet."
+          : filter === "needs" ? "Nothing needs you." : "Nothing in this filter.";
+      list.append(empty); paintPaging();
       return;
     }
     for (const item of rows) {
@@ -158,29 +189,70 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
       row.append(copy, actions);
       list.append(row);
     }
-    paintOperations();
+    paintOperations(); paintPaging();
   }
-  async function load(next = filter) {
+  async function load(next = filter, { append = false, budget = next === filter ? Math.max(1, loadedPages) : 1, notice = "" } = {}) {
     const owned = currentContext();
-    if (!owned) return;
-    filter = next;
+    if (!owned || (append && (loading || !hasMore || !cursor))) return false;
     const mine = ++ticket;
-    status.textContent = "Loading updates…";
+    const current = () => mine === ticket && owns(owned);
+    const pageBudget = Number.isSafeInteger(budget) && budget > 0 ? budget : 1;
+    const startCursor = append ? cursor : null;
+    const priorItems = append ? items : [];
+    loading = true; paintOperations(); paintPaging(); status.textContent = "Loading updates…";
+    const partialSources = page => Object.values(page?.incompleteSources ?? {}).some(Boolean);
+    const readWindow = async () => {
+      const merged = new Map(priorItems.map(item => [item.id, item]));
+      const seen = append ? new Set(visitedCursors) : new Set();
+      let after = startCursor, more = false, unavailable = append && incomplete;
+      let pages = append ? loadedPages : 0, stalled = false;
+      // Explicit append reads one page. A return/refresh may replay only the
+      // already browsed budget, never crawl until an old item count is filled.
+      for (let step = 0; step < (append ? 1 : pageBudget); step++) {
+        const page = await client.roomRead(`/updates?${queryFor(next)}&limit=50${after ? `&cursor=${encodeURIComponent(after)}` : ""}`);
+        if (!page || !current()) return null;
+        if (!Array.isArray(page.items)) throw new Error("Could not read this Updates page.");
+        for (const item of page.items) {
+          if (!item || typeof item.id !== "string") throw new Error("Could not read this Updates page.");
+          merged.set(item.id, item);
+        }
+        // Cursor progress, not visible/unique row count, advances a page.
+        // Sparse filtered pages still consume this finite replay budget.
+        pages++; unavailable ||= partialSources(page); more = page.hasMore === true;
+        const following = typeof page.cursor === "string" && page.cursor ? page.cursor : null;
+        if (more && (!following || seen.has(following))) {
+          after = null; stalled = true; break;
+        }
+        after = more ? following : null;
+        if (!more) break;
+        seen.add(after);
+      }
+      return { items: [...merged.values()], cursor: after, hasMore: more, incomplete: unavailable, pages, stalled, seen };
+    };
     try {
-      const [page, needs] = await Promise.all([
-        client.roomRead(`/updates?${queryFor(filter)}&limit=50`),
-        filter === "needs" ? null : client.roomRead("/updates?state=actionable&limit=100")
+      const [window, needs] = await Promise.all([
+        readWindow(), next === "needs" ? null : client.roomRead("/updates?state=actionable&limit=100")
       ]);
-      if (mine !== ticket || !owns(owned) || !page) return;
-      items = page.items ?? [];
-      const counted = filter === "needs" ? page : needs;
-      actionable = (counted?.items ?? []).filter(item => item.state === "unread" || item.state === "read").length;
-      paintBadge();
-      paint();
-      status.textContent = "";
+      if (!window || !current() || (next !== "needs" && !needs)) return false;
+      filter = next; items = window.items; cursor = window.cursor; hasMore = window.hasMore;
+      loadedPages = window.pages; incomplete = window.incomplete; visitedCursors = window.seen;
+      const counted = next === "needs" ? window : needs;
+      actionable = (counted.items ?? []).filter(item => item.state === "unread" || item.state === "read").length;
+      badgeMore = counted.hasMore === true;
+      badgeIncomplete = next === "needs" ? incomplete : partialSources(counted);
+      loading = false; paintBadge(); paint();
+      status.textContent = window.stalled ? "Loading stopped because the page did not advance. Refresh updates to continue." : notice;
+      return true;
     } catch (error) {
-      if (mine !== ticket || !owns(owned)) return;
-      status.textContent = error?.message || "Could not load updates.";
+      if (!current()) return false;
+      if (error?.code === "cursor_stale" && (append || pageBudget > 1)) {
+        // One fresh first-page restart, not an unbounded replay of changed pages.
+        return load(next, { budget: 1, notice: "The list changed. Showing the newest updates; load more to continue." });
+      }
+      status.textContent = error?.message || "Could not load updates. Try again.";
+      return false;
+    } finally {
+      if (current()) { loading = false; paintOperations(); paintPaging(); }
     }
   }
   async function mark(item, action) {
@@ -269,6 +341,31 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
     tab?.focus();
     void load(next);
   }
+  loadMore.addEventListener("click", async event => {
+    if (loading) return;
+    cancelPending();
+    const owned = owner, mine = interaction;
+    const previous = new Set(visible(items, filter).map(item => item.id));
+    let retainFocus = event.detail === 0 && document.activeElement === loadMore;
+    const movedFocus = event => { if (event.target !== loadMore) retainFocus = false; };
+    const movedPointer = () => { retainFocus = false; };
+    document.addEventListener("focusin", movedFocus);
+    document.addEventListener("pointerdown", movedPointer);
+    try {
+      const loaded = await load(filter, hasMore && cursor ? { append: true } : { budget: 1 });
+      if (!retainFocus || mine !== interaction || !owns(owned) || !dialog.open) return;
+      // Disabling the pending control can drop keyboard focus. On failure,
+      // return to the same enabled retry control without moving into old rows.
+      const added = new Set(loaded ? visible(items, filter).filter(item => !previous.has(item.id)).map(item => item.id) : []);
+      const firstNewAction = [...list.children].filter(row => added.has(row.dataset.updateId))
+        .map(row => row.querySelector("[data-update-action]:enabled")).find(Boolean);
+      const continuation = !loadMore.hidden && !loadMore.disabled ? loadMore : null;
+      (firstNewAction ?? continuation ?? tabs.querySelector('[aria-selected="true"]'))?.focus();
+    } finally {
+      document.removeEventListener("focusin", movedFocus);
+      document.removeEventListener("pointerdown", movedPointer);
+    }
+  });
   entry.addEventListener("click", () => open(filter));
   dialog.querySelector("#updates-close").addEventListener("click", () => { cancelPending(); dialog.close(); });
   dialog.addEventListener("cancel", cancelPending);

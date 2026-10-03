@@ -1,7 +1,7 @@
 // Updates HTTP/SQLite journeys: revision-bound marks, exact retries and retired navigation.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium } from "playwright";
@@ -16,9 +16,20 @@ import { hashPassword } from "../src/password-auth.mjs";
 
 const command = (type, data, id = crypto.randomUUID()) => ({ id, type, data });
 
-async function setup(t) {
+function seedWithFloodWait(store, token, event, advanceClock) {
+  try { return store.command(token, "commons", event); }
+  catch (error) {
+    // Exercise the ordinary flood guard. Its real retry delay advances only
+    // this fixture's clock; retry the same uncommitted command without sleeps.
+    if (error?.code !== "rate_limited" || !Number.isFinite(error.retryAfterMs) || error.retryAfterMs <= 0) throw error;
+    advanceClock(Math.ceil(error.retryAfterMs));
+    return store.command(token, "commons", event);
+  }
+}
+
+async function setup(t, storeOptions = {}) {
   const directory = mkdtempSync(join(tmpdir(), "room-updates-browser-"));
-  const store = new RoomStore(join(directory, "room.sqlite"));
+  const store = new RoomStore(join(directory, "room.sqlite"), storeOptions);
   store.initialize(initialRoom());
   const owner = store.issueAccessKey("commons", "owner");
   store.command(owner, "commons", command(T.MEMBER_ADDED, {
@@ -62,7 +73,8 @@ async function setup(t) {
 }
 
 test("Updates navigation keeps review, draft and return context at 1280px and 390px", { timeout: 120000 }, async t => {
-  const { store, owner, agent, origin, page, errors, selectUpdatesFilter } = await setup(t);
+  let time = Date.now();
+  const { store, owner, agent, origin, page, errors, selectUpdatesFilter } = await setup(t, { now: () => ++time });
   const messageId = "updates-message-only", threadId = "updates-thread-root";
   store.command(owner, "commons", command(T.MESSAGE_POSTED, { messageId: threadId, body: "Starting review discussion." }));
   store.command(agent, "commons", command(T.MESSAGE_POSTED, {
@@ -119,7 +131,7 @@ test("Updates navigation keeps review, draft and return context at 1280px and 39
 
   // Genuine review updates are projected from completed work, not injected rows.
   const signEvidence = makeTestSigner(store);
-  const send = (key, type, data) => store.command(key, "commons", command(type, data));
+  const send = (key, type, data) => seedWithFloodWait(store, key, command(type, data), delay => { time += delay; });
   const reviewIds = ["review:current", "review:next"];
   for (const [index, workItemId] of reviewIds.entries()) {
     send(owner, T.WORK_PROPOSED, { workItemId, title: `Review exact result ${index + 1}`,
@@ -254,6 +266,12 @@ test("Updates navigation keeps review, draft and return context at 1280px and 39
   await assertNestedTask(reviewIds[0], "Back to conversation");
   const sameTargetHistoryLength = await page.evaluate(() => history.length);
   await page.locator("#topbar-updates").click();
+  await page.waitForFunction(id => {
+    const row = [...document.querySelectorAll(".updates-row")].find(node => node.dataset.updateId === id);
+    return document.querySelector('[data-update-filter="all"]')?.getAttribute("aria-selected") === "true"
+      && document.querySelector("#updates-status")?.textContent === ""
+      && row?.querySelector('[data-update-action="open"]')?.disabled === false;
+  }, review.id);
   await openReview(review.id).press("Enter");
   await page.locator("#updates-dialog").waitFor({ state: "hidden" });
   await page.waitForFunction(id => document.activeElement?.dataset.workRecordId === id, reviewIds[0]);
@@ -465,6 +483,60 @@ test("Updates navigation keeps review, draft and return context at 1280px and 39
   assert.equal(store.db.prepare("SELECT COUNT(*) AS count FROM private_update_marks WHERE member_id=?").get("reader-b").count, 0);
   assert.equal(store.db.prepare("SELECT action FROM private_update_marks WHERE room_id=? AND member_id=? AND item_id=?").get("commons", "reader-a", oldUpdateId).action, "read");
   assert.equal(JSON.stringify([store.room("commons"), store.room("updates-other")]), lifecycleBefore, "stale callbacks cannot mutate either room's shared state");
+
+  // Reuse the real account/Rooms lifecycle with a held second page, whose
+  // authorized contents must never enter the replacement reader's window.
+  for (let index = 0; index < 70; index++) send(agent, T.MESSAGE_POSTED, {
+    messageId: `reader-a-page-${index}`, body: `Reader A pagination ${index}`, toMemberId: "reader-a"
+  });
+  const pagingMarksBefore = store.db.prepare("SELECT COUNT(*) AS count FROM private_update_commands").get().count;
+  for (const boundary of ["room", "account", "authority"]) {
+    if (await page.locator("#updates-dialog").isVisible()) await page.locator("#updates-close").click();
+    await page.locator("#message-input").fill("");
+    await clickChrome(page, "#signout-button");
+    await loginAccount("navigation-account-a", "Reader A");
+    await page.locator("#topbar-updates").click();
+    await selectUpdatesFilter("Needs me", "needs");
+    assert.equal(await page.locator(".updates-row").count(), 50);
+    const delayedPage = await holdUpdatesPage(page, "actionable");
+    await page.locator("#updates-load-more").click();
+    const oldPage = await delayedPage.entered;
+    assert.equal(oldPage.viewerId, "reader-a");
+    assert.equal(oldPage.items.length, 21);
+    if (boundary === "authority") {
+      const member = store.room("commons").state.members["reader-a"];
+      send(owner, T.MEMBER_ACCESS_CHANGED, { memberId: member.id, expectedMemberRevision: member.revision,
+        permissions: member.permissions, active: false });
+      await page.locator("#main").waitFor({ state: "hidden" });
+    } else {
+      await page.locator("#updates-close").click();
+      if (boundary === "room") await openAccountRoom("updates-other");
+      else {
+        await clickChrome(page, "#signout-button");
+        await loginAccount("navigation-account-b", "Reader B");
+      }
+      await page.locator("#message-input").fill(`Keep ${boundary} replacement draft`);
+      await showOnlyUpdate(boundary === "room" ? "Private update in the other room" : "Private update for Reader B");
+    }
+    const destination = page.url();
+    await delayedPage.finish();
+    assert.equal(await page.evaluate(() => performance.timeOrigin), oldDocument, "the old page callback survives in the same document");
+    assert.equal(page.url(), destination);
+    for (const item of oldPage.items) assert.equal(await row(item.id).count(), 0, `${boundary} retires every old-reader page row`);
+    if (boundary === "authority") {
+      assert.equal(await page.locator(".updates-row").count(), 0);
+      assert.equal(await page.locator("#updates-dialog").isVisible(), false);
+      assert.equal(await page.locator("#updates-count").textContent(), "");
+      assert.equal(await page.locator("#work-navigation-return").isVisible(), false);
+    } else {
+      assert.equal(await page.locator(".updates-row").count(), 1);
+      assert.match(await page.locator("#updates-summary").textContent(), /\b1 loaded\b/);
+      assert.equal(await page.locator("#message-input").inputValue(), `Keep ${boundary} replacement draft`);
+      assert.doesNotMatch(await page.locator("#updates-dialog").innerText(), /Reader A pagination/);
+    }
+    assert.equal(store.db.prepare("SELECT COUNT(*) AS count FROM private_update_commands").get().count, pagingMarksBefore,
+      "retired page reads do not invent or retry private marks");
+  }
   assert.deepEqual(errors, []);
 });
 
@@ -778,5 +850,677 @@ test("Updates retain a neutral retry when a lost Done or Clear removes the sourc
     await page.locator("#updates-close").click();
     await page.unroute(routeUrl, interceptor);
   }
+  assert.deepEqual(f.errors, []);
+});
+
+// Authoring gate: HTTP tests own cursor authorization and projection. These
+// journeys own browser-only failures: stopping at page one, implying a total
+// from a prefix, losing an older return position, and accepting a retired page.
+// Fixture items, cursors, source revisions and marks all come from real HTTP
+// and SQLite. Delivery routes below only hold, lose, or corrupt a real reply;
+// they never implement paging, authorization, source projection or receipts.
+// Keyboard append owns focus recovery after disabling its control, including
+// a lost transport reply, but must yield to later focus/filter/navigation.
+// Existing HTTP coverage cannot exercise native focus and disabled controls;
+// these cases extend the real browser journey without a production test seam.
+async function pagingJourney(t) {
+  let time = Date.now();
+  const f = revisionJourney(await setup(t, { now: () => ++time }));
+  const { store, owner, agent, origin, page } = f;
+  const post = (id, recipient = "owner") => seedWithFloodWait(store, agent, command(T.MESSAGE_POSTED, {
+    messageId: id, body: `Synthetic paging note ${id}`, toMemberId: recipient
+  }), delay => { time += delay; });
+  for (let index = 0; index < 30; index++) post(`older-${String(index).padStart(3, "0")}`);
+  const review = await f.makeReview("older-paged-review");
+  for (let index = 0; index < 95; index++) post(`newer-${String(index).padStart(3, "0")}`);
+  store.command(owner, "commons", command(T.MESSAGE_POSTED, {
+    messageId: "other-reader-only", body: "OTHER-READER-PAGING-SENTINEL", toMemberId: "agent"
+  }));
+  await page.waitForFunction(sequence => document.querySelector("#event-count")?.textContent === String(sequence), store.room("commons").sequence);
+  // An independent HTTP client represents another session of this reader.
+  const readPage = async (state = "all", cursor = null) => {
+    const query = new URLSearchParams({ state, limit: "50" });
+    if (cursor) query.set("cursor", cursor);
+    const response = await fetch(`${origin}/api/rooms/commons/updates?${query}`, { headers: { Authorization: `Bearer ${owner}` } });
+    assert.equal(response.status, 200, await response.clone().text());
+    return response.json();
+  };
+  const readPages = async (state = "all") => {
+    const pages = [];
+    let cursor = null;
+    do {
+      const value = await readPage(state, cursor);
+      pages.push(value);
+      assert.ok(pages.length <= 4, "this disposable fixture has at most four pages");
+      cursor = value.hasMore ? value.cursor : null;
+    } while (cursor);
+    return pages;
+  };
+  const markOutside = async (item, action) => {
+    const response = await fetch(`${origin}/api/rooms/commons/updates/${encodeURIComponent(item.id)}/${action}`, {
+      method: "POST", headers: { Authorization: `Bearer ${owner}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ requestId: crypto.randomUUID(), expectedBasis: item.basisToken })
+    });
+    assert.equal(response.status, 200, await response.clone().text());
+    return response.json();
+  };
+  const requests = [];
+  page.on("request", request => {
+    const url = new URL(request.url());
+    if (request.method() === "GET" && url.pathname === "/api/rooms/commons/updates" && url.searchParams.get("limit") === "50") {
+      requests.push({ state: url.searchParams.get("state"), cursor: url.searchParams.get("cursor") });
+    }
+  });
+  const ids = () => page.locator(".updates-row").evaluateAll(rows => rows.map(row => row.dataset.updateId));
+  const waitRows = async (expected, { status = "" } = {}) => {
+    await page.waitForFunction(({ count, status }) => document.querySelectorAll(".updates-row").length === count
+      && (status === null || document.querySelector("#updates-status")?.textContent === status), { count: expected.length, status });
+    assert.deepEqual(await ids(), expected.map(item => typeof item === "string" ? item : item.id));
+    assert.equal(new Set(await ids()).size, expected.length, "one authorized row per Update id");
+    assert.doesNotMatch(await page.locator("#updates-dialog").innerText(), /OTHER-READER-PAGING-SENTINEL/);
+  };
+  const more = page.locator("#updates-load-more");
+  const announced = async (count, { partial = false, pageNumber = null } = {}) => {
+    const region = page.locator("#updates-summary-status");
+    assert.equal(await region.getAttribute("role"), "status");
+    assert.equal(await region.getAttribute("aria-live"), "polite");
+    assert.equal(await region.getAttribute("aria-atomic"), "true", "the loaded count and source uncertainty are announced together");
+    const summaryText = await page.locator("#updates-summary").textContent();
+    assert.ok(summaryText.startsWith(`${count} loaded`));
+    assert.ok((await region.innerText()).includes(summaryText));
+    if (pageNumber !== null) assert.equal((await region.locator("#updates-page-announcement").textContent()).trim(), `Page ${pageNumber} loaded.`);
+    if (partial) assert.match(await region.innerText(), /partial|unavailable|incomplete|unknown/i);
+  };
+  const loadMore = async (expected, { keyboard = false } = {}) => {
+    const before = new Set(await ids());
+    if (keyboard) { await more.focus(); await page.keyboard.press("Enter"); }
+    else await more.click();
+    await waitRows(expected);
+    if (!keyboard) return;
+    const firstNew = expected.map(item => typeof item === "string" ? item : item.id).find(id => !before.has(id));
+    if (firstNew) {
+      await page.waitForFunction(id => document.activeElement?.dataset.updateAction === "open"
+        && document.activeElement?.closest("[data-update-id]")?.dataset.updateId === id, firstNew);
+      assert.equal(await f.action(firstNew, "open").isDisabled(), false);
+    } else if (await more.isVisible() && !await more.isDisabled()) {
+      await page.waitForFunction(() => document.activeElement?.id === "updates-load-more");
+    } else {
+      await page.waitForFunction(() => document.activeElement?.matches('#updates-dialog [role="tab"][aria-selected="true"]'));
+    }
+    await announced(expected.length);
+  };
+  const openUpdates = async (filter = "all") => {
+    await page.locator("#topbar-updates").click();
+    await page.locator("#updates-dialog").waitFor({ state: "visible" });
+    // A fresh filter intentionally starts a new prefix. Reopening the same
+    // filter is allowed to retain its already-browsed window.
+    await f.selectUpdatesFilter("Mentions", "mentions");
+    await f.selectUpdatesFilter(filter === "needs" ? "Needs me" : "All activity", filter);
+  };
+  const pages = await readPages();
+  assert.deepEqual(pages.map(value => value.items.length), [50, 50, 26]);
+  assert.equal(pages[0].items.some(item => item.id === review.id), false);
+  assert.equal(pages[1].items.some(item => item.id === review.id), true, "the review is genuinely older than page one");
+  return { ...f, review, post, readPage, readPages, markOutside, requests, ids, waitRows, more, loadMore, announced, openUpdates, pages };
+}
+
+async function holdUpdatesPage(page, state = "all") {
+  let enter, release, heldUrl;
+  const entered = new Promise(resolve => { enter = resolve; });
+  const delivery = new Promise(resolve => { release = resolve; });
+  const pattern = /\/api\/rooms\/[^/]+\/updates\?/;
+  const interceptor = async route => {
+    const url = new URL(route.request().url());
+    if (heldUrl || !url.searchParams.has("cursor") || url.searchParams.get("state") !== state) return route.continue();
+    heldUrl = url.href;
+    const response = await route.fetch();
+    assert.equal(response.status(), 200, await response.text());
+    enter(await response.json());
+    await delivery;
+    await route.fulfill({ response });
+  };
+  await page.route(pattern, interceptor);
+  return { entered, async finish() {
+    const finished = page.waitForEvent("requestfinished", request => request.url() === heldUrl);
+    release();
+    await finished;
+    await page.unroute(pattern, interceptor);
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  } };
+}
+
+test("Updates page older authorized work, keep honest counts and restore the captured page budget at 1280px and 390px", { timeout: 120000 }, async t => {
+  const f = await pagingJourney(t);
+  const { page, store, review, pages, requests } = f;
+  await f.markOutside(review, "read");
+  const sharedBefore = JSON.stringify(store.room("commons"));
+  const commandsBefore = f.countCommands();
+  await f.openUpdates("needs");
+  await f.waitRows(pages[0].items);
+  assert.equal(await page.locator("#updates-count").textContent(), "50+");
+  assert.match(await page.locator("#updates-summary").textContent(), /\b50 loaded\b/);
+  assert.equal(await f.more.isVisible(), true);
+  assert.equal(requests.some(value => value.cursor), false, "opening never crawls the remaining pages");
+  await f.selectUpdatesFilter("All activity", "all");
+  await f.waitRows(pages[0].items);
+  assert.equal(await page.locator("#updates-count").textContent(), "100+", "the separate bounded badge fetch is also visibly truncated");
+  assert.doesNotMatch(await page.locator("#topbar-updates").getAttribute("aria-label"), /100 need you$/);
+  await f.selectUpdatesFilter("Saved", "saved");
+  await f.waitRows([]);
+  assert.doesNotMatch(await page.locator(".updates-list").innerText(), /Nothing in this filter|Nothing needs you/,
+    "zero read rows in the first prefix says nothing about later pages");
+  assert.match(await page.locator("#updates-summary").textContent(), /\b0 loaded\b.*\b50 checked\b/);
+  await f.loadMore([review], { keyboard: true });
+  assert.match(await f.row(review.id).innerText(), / · read/);
+  assert.match(await page.locator("#updates-summary").textContent(), /\b1 loaded\b.*\b100 checked\b/);
+  await f.loadMore([review], { keyboard: true });
+  assert.equal(await page.evaluate(() => document.activeElement?.dataset.updateFilter), "saved",
+    "an exhausted Saved page with no new matching row returns keyboard focus to its selected tab");
+  assert.match(await page.locator("#updates-summary").textContent(), /\b1 loaded\b.*\b126 checked\b/);
+  assert.equal(f.countCommands(), commandsBefore, "Saved remains the read-state alias and creates no save operation");
+  assert.equal(JSON.stringify(store.room("commons")), sharedBefore);
+  await page.locator("#updates-close").click();
+
+  for (const [index, width] of [1280, 390].entries()) {
+    await page.setViewportSize({ width, height: 844 });
+    await f.openUpdates();
+    let currentPages = await f.readPages();
+    const firstTwo = currentPages.slice(0, 2).flatMap(value => value.items);
+    await f.loadMore(firstTwo, { keyboard: true });
+    await f.action(review.id, "open").scrollIntoViewIfNeeded();
+    await f.action(review.id, "open").focus();
+    const scroll = await page.locator("#updates-dialog").evaluate(node => node.scrollTop);
+    assert.ok(scroll > 0);
+    await page.keyboard.press("Enter");
+    await page.locator("#updates-dialog").waitFor({ state: "hidden" });
+    await page.waitForFunction(id => document.activeElement?.dataset.workRecordId === id, review.sourceRef.workItemId);
+    assert.equal(await page.locator("#work-navigation-return").textContent(), "Back to Updates");
+    assert.doesNotMatch(await page.evaluate(() => JSON.stringify(history.state)), /pageBudget|basisToken|cursor|Synthetic paging/,
+      "private pagination context stays out of persistent browser history");
+    // New activity changes the first-page anchor while the task is open. The
+    // return must obtain fresh cursors, rather than reuse the captured cursor.
+    f.post(`arrived-during-return-${index}`);
+    currentPages = await f.readPages();
+    assert.notEqual(currentPages[0].cursor, pages[0].cursor);
+    const beforeReturn = requests.length;
+    if (width === 390) await page.goBack();
+    else await page.locator("#work-navigation-return").press("Enter");
+    await page.locator("#updates-dialog").waitFor({ state: "visible" });
+    await f.waitRows(currentPages.slice(0, 2).flatMap(value => value.items));
+    await page.waitForFunction(id => document.activeElement?.closest("[data-update-id]")?.dataset.updateId === id, review.id);
+    assert.equal(await f.action(review.id, "open").evaluate(node => node === document.activeElement), true);
+    assert.equal(await page.getByRole("tab", { name: "All activity" }).getAttribute("aria-selected"), "true");
+    assert.ok(Math.abs(await page.locator("#updates-dialog").evaluate(node => node.scrollTop) - scroll) <= 2);
+    assert.deepEqual(requests.slice(beforeReturn), [
+      { state: "all", cursor: null }, { state: "all", cursor: currentPages[0].cursor }
+    ], "return refetches exactly the two captured pages, starting with a fresh cursor chain");
+    assert.equal(await f.more.isVisible(), true, "the uncaptured third page still needs an explicit click");
+    assert.equal(await page.locator("#updates-dialog").evaluate(node => node.scrollWidth <= node.clientWidth + 1), true);
+    assert.ok((await page.locator("#updates-dialog").boundingBox()).width <= width);
+    mkdirSync("test-results", { recursive: true });
+    await page.locator("#updates-summary").scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `test-results/updates-pagination-return-${width}.png`, animations: "disabled" });
+    await page.locator("#updates-close").click();
+  }
+
+  // The destination remains current while Updates is opened on top of it.
+  // Choosing that same target with a larger window replaces its return origin.
+  await f.openUpdates();
+  let currentPages = await f.readPages();
+  await f.loadMore(currentPages.slice(0, 2).flatMap(value => value.items));
+  await f.action(review.id, "open").click();
+  await page.locator("#updates-dialog").waitFor({ state: "hidden" });
+  await page.waitForFunction(id => document.activeElement?.dataset.workRecordId === id, review.sourceRef.workItemId);
+  const historyLength = await page.evaluate(() => history.length);
+  await f.openUpdates();
+  await f.loadMore(currentPages.slice(0, 2).flatMap(value => value.items));
+  await f.loadMore(currentPages.flatMap(value => value.items), { keyboard: true });
+  await f.action(review.id, "open").scrollIntoViewIfNeeded();
+  const largerScroll = await page.locator("#updates-dialog").evaluate(node => node.scrollTop);
+  await f.action(review.id, "open").click();
+  await page.locator("#updates-dialog").waitFor({ state: "hidden" });
+  assert.equal(await page.evaluate(() => history.length), historyLength, "same-target reopening adds no duplicate destination");
+  const beforeLargerReturn = requests.length;
+  await page.locator("#work-navigation-return").click();
+  await page.locator("#updates-dialog").waitFor({ state: "visible" });
+  await f.waitRows(currentPages.flatMap(value => value.items));
+  await page.waitForFunction(id => document.activeElement?.closest("[data-update-id]")?.dataset.updateId === id, review.id);
+  assert.deepEqual(requests.slice(beforeLargerReturn), currentPages.map((_, index) => ({ state: "all", cursor: index ? currentPages[index - 1].cursor : null })));
+  assert.ok(Math.abs(await page.locator("#updates-dialog").evaluate(node => node.scrollTop) - largerScroll) <= 2);
+  assert.equal(await f.more.isVisible() && !await f.more.isDisabled(), false, "hasMore=false exposes no enabled continuation");
+  assert.equal(await page.locator("#updates-count").textContent(), "100+", "the last activity page is never mistaken for the actionable total");
+
+  // An older Saved target can disappear while away, without replacing Saved
+  // with another filter or treating the first two pages as the whole list.
+  await f.selectUpdatesFilter("Saved", "saved");
+  await f.loadMore([review]);
+  await f.action(review.id, "open").click();
+  await page.locator("#updates-dialog").waitFor({ state: "hidden" });
+  await f.markOutside(review, "done");
+  const beforeMissingReturn = requests.length;
+  await page.locator("#work-navigation-return").click();
+  await page.locator("#updates-dialog").waitFor({ state: "visible" });
+  await page.waitForFunction(() => document.activeElement?.dataset.updateFilter === "saved");
+  assert.equal(await f.row(review.id).count(), 0);
+  assert.equal(await page.getByRole("tab", { name: "Saved" }).getAttribute("aria-selected"), "true");
+  assert.equal(requests.length - beforeMissingReturn, 2);
+  assert.doesNotMatch(await page.locator(".updates-list").innerText(), /Nothing in this filter|Nothing needs you/);
+
+  await f.selectUpdatesFilter("All activity", "all");
+  currentPages = await f.readPages();
+  await f.loadMore(currentPages.slice(0, 2).flatMap(value => value.items));
+  await f.action(review.id, "open").click();
+  await page.locator("#updates-dialog").waitFor({ state: "hidden" });
+  for (let index = 0; index < 10; index++) f.post(`moved-target-${index}`);
+  currentPages = await f.readPages();
+  assert.equal(currentPages.slice(0, 2).flatMap(value => value.items).some(item => item.id === review.id), false);
+  const beforeDisplacedReturn = requests.length;
+  await page.locator("#work-navigation-return").click();
+  await page.locator("#updates-dialog").waitFor({ state: "visible" });
+  await page.waitForFunction(() => document.activeElement?.dataset.updateFilter === "all");
+  await f.waitRows(currentPages.slice(0, 2).flatMap(value => value.items), { status: null });
+  assert.equal(requests.length - beforeDisplacedReturn, 2);
+  assert.match(await page.locator("#updates-status").textContent(), /outside.*loaded|load more/i);
+  assert.doesNotMatch(await page.locator("#updates-status").textContent(), /no longer|unavailable|not found/i,
+    "a target beyond the captured prefix is not declared missing");
+  assert.equal(await f.row(review.id).count(), 0, "return never restores cached source text outside its fresh window");
+  await f.loadMore(currentPages.flatMap(value => value.items));
+  assert.equal(await f.row(review.id).count(), 1, "the displaced source is still reachable with explicit Load more");
+  assert.deepEqual(f.errors, []);
+});
+
+test("Updates restart a real stale cursor once, retain the window on transport retry and stop nonprogressing pages", { timeout: 120000 }, async t => {
+  const f = await pagingJourney(t);
+  const { page, origin, pages, requests, store } = f;
+  await f.openUpdates("needs");
+  await f.waitRows(pages[0].items);
+  const anchor = pages[0].items.at(-1);
+  const sharedBefore = JSON.stringify(store.room("commons"));
+  await f.markOutside(anchor, "done");
+  const freshFirst = await f.readPage("actionable");
+  assert.notEqual(freshFirst.cursor, pages[0].cursor);
+  const beforeStale = requests.length;
+  const rejected = page.waitForResponse(response => new URL(response.url()).pathname === "/api/rooms/commons/updates"
+    && new URL(response.url()).searchParams.has("cursor") && response.status() === 409);
+  await f.more.click();
+  assert.equal((await (await rejected).json()).error.code, "cursor_stale", "the server, not a route stub, rejects the removed anchor");
+  await page.waitForFunction(() => /changed/i.test(document.querySelector("#updates-status")?.textContent ?? ""));
+  await f.waitRows(freshFirst.items, { status: null });
+  assert.deepEqual(requests.slice(beforeStale), [
+    { state: "actionable", cursor: pages[0].cursor }, { state: "actionable", cursor: null }
+  ], "one stale page causes one bounded restart and never an automatic page crawl");
+  assert.equal(await f.row(anchor.id).count(), 0);
+  assert.match(await page.locator("#updates-summary").textContent(), /\b50 loaded\b/);
+  assert.equal(JSON.stringify(store.room("commons")), sharedBefore, "the other client's private mark does not mutate shared work");
+
+  // Losing delivery of a real page keeps every displayed row and the exact
+  // continuation. A retry is user-driven and appends that page just once.
+  await f.selectUpdatesFilter("All activity", "all");
+  await f.loadMore(pages.slice(0, 2).flatMap(value => value.items));
+  const beforeFailure = requests.length;
+  const cursorUrl = `${origin}/api/rooms/commons/updates?state=all&limit=50&cursor=${encodeURIComponent(pages[1].cursor)}`;
+  let deliveries = 0;
+  const unavailable = async route => {
+    const response = await route.fetch();
+    assert.equal(response.status(), 200);
+    return ++deliveries === 1 ? route.fulfill({ response, status: 503 }) : route.fulfill({ response });
+  };
+  // Match the public query semantically; argument order is not part of the API.
+  const thirdPage = url => url.pathname === "/api/rooms/commons/updates"
+    && url.searchParams.get("cursor") === new URL(cursorUrl).searchParams.get("cursor") && url.searchParams.get("state") === "all";
+  await page.route(thirdPage, unavailable);
+  await f.more.click();
+  await page.waitForFunction(() => Boolean(document.querySelector("#updates-status")?.textContent)
+    && !document.querySelector("#updates-load-more")?.disabled);
+  await f.waitRows(pages.slice(0, 2).flatMap(value => value.items), { status: null });
+  assert.match(await page.locator("#updates-summary").textContent(), /\b100 loaded\b/);
+  assert.equal(deliveries, 1);
+  await f.loadMore(pages.flatMap(value => value.items));
+  assert.equal(deliveries, 2);
+  assert.deepEqual(requests.slice(beforeFailure), [
+    { state: "all", cursor: pages[1].cursor }, { state: "all", cursor: pages[1].cursor }
+  ]);
+  assert.equal(await f.more.isVisible() && !await f.more.isDisabled(), false);
+  await page.unroute(thirdPage, unavailable);
+  await page.locator("#updates-close").click();
+
+  // Corrupt only continuation metadata on a genuine server response. This
+  // guards the client's termination contract, not server cursor generation.
+  for (const fault of ["repeated cursor", "missing required cursor"]) {
+    await f.openUpdates();
+    const beforeFault = requests.length;
+    let deliveries = 0;
+    const broken = async route => {
+      const url = new URL(route.request().url());
+      if (!url.searchParams.has("cursor")) return route.continue();
+      const response = await route.fetch();
+      assert.equal(response.status(), 200);
+      const body = await response.json();
+      deliveries++;
+      if (fault === "repeated cursor") body.cursor = url.searchParams.get("cursor");
+      else body.cursor = null;
+      await route.fulfill({ response, json: body });
+    };
+    const routePattern = /\/api\/rooms\/commons\/updates\?/;
+    await page.route(routePattern, broken);
+    await f.more.click();
+    await page.waitForFunction(() => {
+      const button = document.querySelector("#updates-load-more");
+      // The terminal notice starts with "Loading stopped". It must not be
+      // mistaken for the pending "Loading updates…" state.
+      return button && !button.hidden && !button.disabled && /Refresh/i.test(button.textContent)
+        && /page did not advance/i.test(document.querySelector("#updates-status")?.textContent ?? "");
+    });
+    await f.settled();
+    const ids = await f.ids();
+    assert.equal(new Set(ids).size, ids.length);
+    assert.equal(deliveries, 1, `${fault} must not cause an automatic continuation loop`);
+    assert.equal(requests.length - beforeFault, 1);
+    assert.match(await page.locator("#updates-dialog").innerText(), /refresh|changed|could not|couldn.t|stopped/i,
+      "a broken continuation has an explicit recovery cue");
+    await page.unroute(routePattern, broken);
+    const beforeRestart = requests.length;
+    await f.more.click();
+    await f.waitRows(pages[0].items);
+    assert.deepEqual(requests.slice(beforeRestart), [{ state: "all", cursor: null }],
+      `${fault} recovery explicitly restarts one first page instead of retrying the broken continuation`);
+    assert.equal(await f.more.textContent(), "Load more");
+    assert.equal(await f.more.isDisabled(), false);
+    await page.locator("#updates-close").click();
+  }
+  assert.deepEqual(f.errors, []);
+});
+
+test("Updates replace duplicate ids with fresh authorized bases and show source incompleteness separately from page counts", { timeout: 120000 }, async t => {
+  const f = await pagingJourney(t);
+  const { page, review, pages, store } = f;
+  await f.openUpdates();
+  await f.loadMore(pages.slice(0, 2).flatMap(value => value.items));
+  const current = await f.revise(review.sourceRef.workItemId);
+  assert.notEqual(current.basisToken, review.basisToken);
+  const pattern = /\/api\/rooms\/commons\/updates\?/;
+  const overlap = async route => {
+    const url = new URL(route.request().url());
+    if (!url.searchParams.has("cursor")) return route.continue();
+    const response = await route.fetch();
+    assert.equal(response.status(), 200);
+    const body = await response.json();
+    // A transport overlap contains a real freshly authorized revision of an
+    // already rendered id, not a fabricated item or a test-only source seam.
+    body.items.unshift(current);
+    await route.fulfill({ response, json: body });
+  };
+  await page.route(pattern, overlap);
+  await f.more.click();
+  await page.waitForFunction(() => /\b126 loaded\b/.test(document.querySelector("#updates-summary")?.textContent ?? ""));
+  const ids = await f.ids();
+  assert.equal(ids.length, 126);
+  assert.equal(new Set(ids).size, 126);
+  assert.equal(ids.filter(id => id === review.id).length, 1);
+  await page.unroute(pattern, overlap);
+  const changedAction = f.responseFor(review.id, "done");
+  await f.action(review.id, "done").click();
+  assert.equal((await changedAction).status(), 200);
+  assert.equal(f.attempts.at(-1).body.expectedBasis, current.basisToken, "the single row acts on the fresh duplicate's basis");
+  await page.waitForFunction(id => [...document.querySelectorAll(".updates-row")].find(row => row.dataset.updateId === id)
+    ?.querySelector(".updates-copy p")?.textContent.endsWith(" · handled"), review.id);
+  await page.locator("#updates-close").click();
+
+  // The real projection reports an absent optional source as unknown. That
+  // uncertainty must remain visible even after every known page is loaded.
+  store.db.exec("ALTER TABLE wake_queue RENAME TO paging_unavailable_wakes");
+  const partial = await f.readPage();
+  assert.equal(partial.incompleteSources.wakes, true);
+  await f.openUpdates();
+  assert.match(await page.locator("#updates-partial").textContent(), /partial|unavailable|incomplete|unknown/i);
+  assert.match(await page.locator("#updates-count").textContent(), /\?/);
+  assert.match(await page.locator("#updates-summary").textContent(), /\b50 loaded\b/);
+  assert.doesNotMatch(await page.locator("#updates-summary").textContent(), /126 total|of 126/);
+  await f.announced(50, { partial: true });
+  const currentPages = await f.readPages();
+  await f.loadMore(currentPages.slice(0, 2).flatMap(value => value.items));
+  await f.loadMore(currentPages.flatMap(value => value.items));
+  assert.match(await page.locator("#updates-summary").textContent(), /\b126 loaded\b/);
+  assert.match(await page.locator("#updates-partial").textContent(), /partial|unavailable|incomplete|unknown/i);
+  assert.match(await page.locator("#updates-count").textContent(), /\?/);
+  await f.announced(126, { partial: true });
+  assert.doesNotMatch(await page.locator(".updates-list").innerText(), /Nothing needs you/);
+  store.db.exec("ALTER TABLE paging_unavailable_wakes RENAME TO wake_queue");
+  assert.deepEqual(f.errors, []);
+});
+
+test("Updates fence repeated Load more and held real pages across filter, Close, Escape and newer navigation", { timeout: 120000 }, async t => {
+  const f = await pagingJourney(t);
+  const { page, review, pages, requests, store } = f;
+  const sharedBefore = JSON.stringify(store.room("commons"));
+  const commandsBefore = f.countCommands();
+  await f.openUpdates();
+  const pagePattern = /\/api\/rooms\/commons\/updates\?/;
+  const losePage = async route => {
+    const url = new URL(route.request().url());
+    if (!url.searchParams.has("cursor") || url.searchParams.get("state") !== "all") return route.continue();
+    const response = await route.fetch();
+    assert.equal(response.status(), 200);
+    await route.abort("failed");
+  };
+  await page.route(pagePattern, losePage);
+  const summaryChanges = await page.locator("#updates-summary-status").evaluateHandle(node => {
+    const observed = { count: 0 };
+    const observer = new MutationObserver(changes => { observed.count += changes.length; });
+    observer.observe(node, { childList: true, subtree: true, characterData: true });
+    return { observed, disconnect: () => observer.disconnect() };
+  });
+  await f.more.focus();
+  await page.keyboard.press("Enter");
+  await page.waitForFunction(() => {
+    const message = document.querySelector("#updates-status")?.textContent;
+    return message && message !== "Loading updates…" && document.querySelector("#updates-load-more")?.disabled === false;
+  });
+  await f.waitRows(pages[0].items, { status: null });
+  await page.waitForFunction(() => document.activeElement?.id === "updates-load-more");
+  assert.equal(await summaryChanges.evaluate(({ observed, disconnect }) => { disconnect(); return observed.count; }), 0,
+    "a failed page does not reinsert unchanged summary text into its live region");
+  await summaryChanges.dispose();
+  await page.unroute(pagePattern, losePage);
+  await f.loadMore(pages.slice(0, 2).flatMap(value => value.items), { keyboard: true });
+  await page.locator("#updates-close").click();
+  await f.openUpdates();
+  const focusMoved = await holdUpdatesPage(page);
+  await f.more.focus();
+  await page.keyboard.press("Enter");
+  await focusMoved.entered;
+  await page.locator("#updates-close").focus();
+  await focusMoved.finish();
+  await f.waitRows(pages.slice(0, 2).flatMap(value => value.items));
+  assert.equal(await page.evaluate(() => document.activeElement?.id), "updates-close",
+    "an append must not steal focus after the reader moves it while the page is pending");
+  await f.announced(100);
+  await page.locator("#updates-close").click();
+  for (const transition of ["filter", "Close", "Escape", "newer navigation"]) {
+    await f.openUpdates();
+    await f.waitRows(pages[0].items);
+    const before = requests.length;
+    const delayed = await holdUpdatesPage(page);
+    await f.more.focus();
+    await page.keyboard.press("Enter");
+    const held = await delayed.entered;
+    assert.equal(held.items.length, 50);
+    assert.equal(await f.more.isDisabled(), true);
+    await f.more.evaluate(button => { button.click(); button.click(); });
+    assert.equal(requests.length, before + 1, "repeated activation admits one request for this cursor");
+    assert.equal(await f.action(pages[0].items[0].id, "open").isDisabled(), true,
+      "a page transition cannot launch a row action from its older list");
+    if (transition === "filter") {
+      await f.selectUpdatesFilter("Saved", "saved");
+      await f.waitRows([]);
+    } else {
+      if (transition === "Escape") await page.keyboard.press("Escape");
+      else await page.locator("#updates-close").click();
+      await page.locator("#updates-dialog").waitFor({ state: "hidden" });
+      if (transition === "newer navigation") {
+        await openSearch(page);
+        await page.locator("#message-search").fill("Review older-paged-review");
+        await page.locator('#search-list [data-open-work="older-paged-review"]').click();
+        await page.waitForFunction(id => document.activeElement?.dataset.workRecordId === id, review.sourceRef.workItemId);
+      } else {
+        await f.openUpdates();
+        await f.waitRows(pages[0].items);
+      }
+    }
+    const destination = page.url();
+    const focusDestination = await page.evaluate(() => ({ id: document.activeElement?.id,
+      filter: document.activeElement?.dataset.updateFilter, work: document.activeElement?.dataset.workRecordId }));
+    await delayed.finish();
+    assert.equal(page.url(), destination, `${transition} retires the old continuation's navigation ownership`);
+    assert.deepEqual(await page.evaluate(() => ({ id: document.activeElement?.id,
+      filter: document.activeElement?.dataset.updateFilter, work: document.activeElement?.dataset.workRecordId })), focusDestination,
+    `${transition} retires keyboard focus ownership of the pending page`);
+    if (transition === "newer navigation") {
+      assert.equal(await page.locator("#updates-dialog").isVisible(), false);
+      assert.equal(await page.evaluate(() => document.activeElement?.dataset.workRecordId), review.sourceRef.workItemId);
+    } else {
+      await f.waitRows(transition === "filter" ? [] : pages[0].items);
+      assert.equal(await page.getByRole("tab", { name: transition === "filter" ? "Saved" : "All activity" }).getAttribute("aria-selected"), "true");
+      assert.match(await page.locator("#updates-summary").textContent(), transition === "filter" ? /\b0 loaded\b.*\b50 checked\b/ : /\b50 loaded\b/);
+      await page.locator("#updates-close").click();
+    }
+  }
+  assert.equal(f.countCommands(), commandsBefore, "paging and canceled page deliveries create no private marks");
+  assert.equal(JSON.stringify(store.room("commons")), sharedBefore);
+  assert.deepEqual(f.errors, []);
+});
+
+test("Updates accept advancing opaque cursors even when a page adds no new rows", { timeout: 120000 }, async t => {
+  const f = await pagingJourney(t);
+  const { page, pages, requests } = f;
+  for (const contents of ["empty", "duplicates"]) {
+    await f.openUpdates();
+    const before = requests.length;
+    let deliveries = 0;
+    const pattern = /\/api\/rooms\/commons\/updates\?/;
+    const advancing = async route => {
+      const url = new URL(route.request().url());
+      if (url.searchParams.get("cursor") !== pages[0].cursor) return route.continue();
+      const response = await route.fetch();
+      assert.equal(response.status(), 200);
+      const body = await response.json();
+      assert.equal(body.cursor, pages[1].cursor);
+      body.items = contents === "empty" ? [] : pages[0].items;
+      deliveries++;
+      await route.fulfill({ response, json: body });
+    };
+    await page.route(pattern, advancing);
+    const continuation = page.waitForResponse(response => new URL(response.url()).searchParams.get("cursor") === pages[0].cursor);
+    await f.more.focus();
+    await page.keyboard.press("Enter");
+    await continuation;
+    await f.waitRows(pages[0].items);
+    await page.waitForFunction(() => document.activeElement?.id === "updates-load-more");
+    await f.announced(50, { pageNumber: 2 });
+    assert.equal(await f.more.textContent(), "Load more", "an advancing cursor is usable even when no new row is visible");
+    assert.equal(await f.more.isDisabled(), false);
+    assert.equal(deliveries, 1);
+    assert.equal(requests.length - before, 1, "an empty page consumes one explicit click, not an automatic crawl");
+    await f.loadMore([...pages[0].items, ...pages[2].items], { keyboard: true });
+    assert.deepEqual(requests.slice(before), [
+      { state: "all", cursor: pages[0].cursor }, { state: "all", cursor: pages[1].cursor }
+    ]);
+    assert.match(await page.locator("#updates-summary").textContent(), /\b76 loaded\b/);
+    await f.announced(76, { pageNumber: 3 });
+    assert.equal(await f.more.isVisible() && !await f.more.isDisabled(), false);
+    await page.unroute(pattern, advancing);
+    await page.locator("#updates-close").click();
+  }
+  assert.deepEqual(f.errors, []);
+});
+
+test("Updates preserve the exact uncertain operation and neutral recovery across older-page loading", { timeout: 120000 }, async t => {
+  const f = await pagingJourney(t);
+  const { page, origin, review, pages, store } = f;
+  await f.openUpdates();
+  await f.loadMore(pages.slice(0, 2).flatMap(value => value.items));
+  const commandsBefore = f.countCommands();
+  const readUrl = origin + f.path(review.id, "open");
+  let enter, release, deliveries = 0;
+  const entered = new Promise(resolve => { enter = resolve; });
+  const held = new Promise(resolve => { release = resolve; });
+  const readReceipts = [];
+  const holdRead = async route => {
+    const response = await route.fetch();
+    assert.equal(response.status(), 200);
+    readReceipts.push(await response.json());
+    if (++deliveries === 1) { enter(); await held; }
+    await route.fulfill({ response });
+  };
+  await page.route(readUrl, holdRead);
+  await f.action(review.id, "open").click();
+  await entered;
+  const original = f.attempts.at(-1);
+  const committed = f.mark(review.id);
+  assert.equal(original.body.expectedBasis, review.basisToken);
+  assert.equal(f.countCommands(), commandsBefore + 1);
+  const destination = page.url();
+  await f.loadMore(pages.flatMap(value => value.items));
+  const finishedRead = page.waitForEvent("requestfinished", request => request.url() === readUrl);
+  release();
+  await finishedRead;
+  await f.waitRetry(review.id, "open");
+  assert.equal(page.url(), destination, "Load more retires the pending Open without discarding its operation");
+  assert.equal(f.attempts.length, 1, "paging never automatically repeats a private mark");
+  const current = await f.revise(review.sourceRef.workItemId);
+  await f.selectUpdatesFilter("All activity", "all");
+  await f.waitRetry(review.id, "open");
+  assert.match(await f.row(review.id).locator(".updates-copy p").textContent(), / · unread$/);
+  const exactRetry = f.responseFor(review.id, "open");
+  await f.action(review.id, "open").click();
+  assert.equal((await exactRetry).status(), 200);
+  await f.waitChanged();
+  assert.deepEqual(f.attempts.at(-1), original, "page refresh cannot advance the uncertain request id or displayed basis");
+  assert.equal(readReceipts[1].duplicate, true);
+  assert.equal(readReceipts[1].item.basisToken, review.basisToken);
+  assert.equal(f.countCommands(), commandsBefore + 1);
+  assert.deepEqual(f.mark(review.id), committed);
+  assert.equal(page.url(), destination, "historical success cannot navigate using the fresh page's revision");
+  await page.unroute(readUrl, holdRead);
+
+  await f.selectUpdatesFilter("Needs me", "needs");
+  const needs = await f.readPages("actionable");
+  await f.loadMore(needs.slice(0, 2).flatMap(value => value.items));
+  const doneUrl = origin + f.path(current.id, "done");
+  let doneDeliveries = 0;
+  const loseDone = async route => {
+    const response = await route.fetch();
+    assert.equal(response.status(), 200);
+    return ++doneDeliveries === 1 ? route.abort("failed") : route.fulfill({ response });
+  };
+  await page.route(doneUrl, loseDone);
+  await f.action(current.id, "done").click();
+  await f.waitRetry(current.id, "done");
+  const doneAttempt = f.attempts.at(-1), doneMark = f.mark(current.id);
+  assert.equal(doneAttempt.body.expectedBasis, current.basisToken);
+  assert.notEqual(doneAttempt.body.requestId, original.body.requestId);
+  await f.selectUpdatesFilter("Needs me", "needs");
+  await f.waitRetry(current.id, "done");
+  assert.equal(await f.row(current.id).locator(".updates-copy strong").textContent(), "Earlier update action");
+  assert.doesNotMatch(await f.row(current.id).innerText(), /Review older-paged-review/);
+  assert.match(await page.locator("#updates-summary").textContent(), /\b100 loaded\b/);
+  assert.equal(await page.locator(".updates-row").count(), 101, "the neutral recovery control is excluded from the loaded count");
+  await f.more.click();
+  await page.waitForFunction(() => /\b125 loaded\b/.test(document.querySelector("#updates-summary")?.textContent ?? ""));
+  await f.waitRetry(current.id, "done");
+  assert.equal(await f.row(current.id).locator(".updates-copy strong").textContent(), "Earlier update action");
+  assert.equal(f.attempts.length, 3, "neither refresh nor Load more retries the uncertain Done");
+  const sharedBeforeRetry = JSON.stringify(store.room("commons"));
+  const confirmed = f.responseFor(current.id, "done");
+  await f.action(current.id, "done").click();
+  const response = await confirmed;
+  assert.equal(response.status(), 200);
+  assert.equal((await response.json()).duplicate, true);
+  await f.row(current.id).waitFor({ state: "detached" });
+  assert.deepEqual(f.attempts.at(-1), doneAttempt);
+  assert.equal(f.countCommands(), commandsBefore + 2);
+  assert.deepEqual(f.mark(current.id), doneMark);
+  assert.equal(JSON.stringify(store.room("commons")), sharedBeforeRetry);
+  await page.unroute(doneUrl, loseDone);
   assert.deepEqual(f.errors, []);
 });

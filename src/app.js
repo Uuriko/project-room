@@ -2784,7 +2784,10 @@ function captureWorkOrigin(extra = {}) {
 function sameWorkOrigin(a, b) {
   if (a.type !== b.type || a.channelId !== b.channelId || a.threadId !== b.threadId
     || JSON.stringify(a.mode ?? null) !== JSON.stringify(b.mode ?? null)) return false;
-  if (a.type === "updates") return a.updates?.itemId === b.updates?.itemId && a.updates?.filter === b.updates?.filter;
+  // JDOT-COH-UPDATES-PAGE begin
+  if (a.type === "updates") return ["itemId", "filter", "pageBudget", "scrollTop", "listScrollTop"]
+    .every(key => a.updates?.[key] === b.updates?.[key]);
+  // JDOT-COH-UPDATES-PAGE end
   if (a.type === "board") return a.claimId === b.claimId;
   const key = value => value.focusKey || value.searchWorkId || (value.messageId && `${value.messageId}|${value.messageWorkId}`);
   return key(a) ? key(a) === key(b) : a.focus === b.focus;
