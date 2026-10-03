@@ -1347,6 +1347,40 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const verified = store.accountLogins.consumeEmailVerifyCode({ accountId: session.account.id, code: data.code.trim() });
         return json(res, 200, { status: "verified", email: verified.email });
       }
+      if (url.pathname === "/api/auth/email/verify/resend") {
+        if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
+        checkOrigin(req, true);
+        const slotToken = cookie(req, accountCookieName);
+        if (!slotToken) reject(401, "account_session_required", "Sign in before verifying your email");
+        let session;
+        try { session = store.authenticateAccountSession(slotToken); }
+        catch (error) {
+          if (error.status !== 401) throw error;
+          reject(401, "invalid_session", "That session is no longer valid; sign in again");
+        }
+        if (!session.account) reject(401, "account_session_required", "Sign in before verifying your email");
+        protectWrite(req, session, false);
+        // Tight per-account budget: a resend mints a fresh code, so this is
+        // not a free oracle for someone else's inbox.
+        rate(`email-verify-resend:${session.account.id}`, 5);
+        const emailRow = store.db.prepare(`SELECT email FROM account_login_methods
+          WHERE account_id=? AND type='password' AND disabled=0 AND email IS NOT NULL LIMIT 1`)
+          .get(session.account.id);
+        const normalized = emailRow ? normalizeEmail(emailRow.email) : null;
+        if (!normalized) reject(422, "invalid_email", "This account has no email to verify");
+        const pending = store.db.prepare(`SELECT 1 FROM account_login_methods
+          WHERE account_id=? AND email_hash=? AND disabled=0 AND verified_at IS NULL LIMIT 1`)
+          .get(session.account.id, emailLookupHash(normalized));
+        if (!pending) return json(res, 200, { status: "already_verified", email: normalized });
+        if (!magicMailer.isConfigured()) {
+          reject(503, "mail_not_configured", "Email delivery is not configured; contact the operator to verify this address");
+        }
+        const issued = store.accountLogins.issueEmailVerifyCode({ accountId: session.account.id, email: normalized });
+        await deliverSignupMail(() => magicMailer.sendMagicLink({
+          to: normalized, code: issued.code, expiresAt: issued.expiresAt, purpose: "email-verify"
+        }));
+        return json(res, 200, { status: "resent", email: normalized, expiresAt: issued.expiresAt });
+      }
       // ---- end ID-SEC auth ----
       if (url.pathname === "/api/auth/password/login") {
         if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
