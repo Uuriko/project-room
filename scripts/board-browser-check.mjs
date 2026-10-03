@@ -390,6 +390,145 @@ function seedClaim(store, item) {
   });
 }
 
+// Rendering, dependency navigation and readiness are the UI boundary here.
+// The projection matrix separately owns classification/old-completion filtering.
+test("waiting prerequisites stay visible, link by keyboard, and become claimable only when ready", { timeout: 120000 }, async t => {
+  mkdirSync("test-results", { recursive: true });
+  const fixture = createAcceptanceFixture();
+  const server = createRoomServer({ store: fixture.store, streamInterval: 40, fetchPullRequest: github() });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const errors = [];
+  t.after(async () => {
+    server.closeStreams(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    fixture.store.close();
+    rmSync(fixture.directory, { recursive: true, force: true });
+    assert.deepEqual(errors, []);
+  });
+  const workId = "waiting:prerequisite", missingId = `unavailable-${"prerequisite-".repeat(7)}`;
+  fixture.store.command(fixture.keys.owner, "commons", {
+    id: crypto.randomUUID(), type: "work.proposed",
+    data: { workItemId: workId, title: "Prepare the handoff", definitionOfDone: "Record the prerequisite result.",
+      accountableMemberId: "owner", independentVerificationRequired: false, ownerDecisionRequired: false }
+  });
+  const updatedAt = new Date().toISOString();
+  // Mirrored/legacy claim links are persisted through the existing registry;
+  // the browser still consumes the real HTTP list response and navigation.
+  for (const item of [
+    { id: "prerequisite", title: "Prepare the handoff", workItemId: workId },
+    { id: "dependent", title: "Continue after the handoff", dependsOn: ["old-completion", "prerequisite"],
+      chain: [{ kind: "handoff", targetId: "prerequisite", at: updatedAt, actorId: "owner" }] },
+    { id: "unknown", title: "Find the missing prerequisite", dependsOn: [missingId] },
+    { id: "available", title: "Unrelated ready task" },
+    { id: "old-completion", title: "Earlier completed prerequisite", state: "done", owner: "owner",
+      updatedAt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString() }
+  ]) seedClaim(fixture.store, { state: "unclaimed", updatedAt, ...item });
+  const browser = await chromium.launch({ headless: true });
+  t.after(async () => { await browser.close(); });
+  const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const page = await context.newPage();
+  page.setDefaultTimeout(8000);
+  page.on("pageerror", error => errors.push(error.message));
+  await page.goto(origin);
+  await signInFixture(page, fixture.keys.owner);
+  await page.locator("#main").waitFor({ state: "visible" });
+  const snapshot = () => ({
+    sequence: fixture.store.room("commons").sequence,
+    workItems: structuredClone(fixture.store.room("commons").state.workItems),
+    claims: fixture.store.db.prepare("SELECT claim_id, item_json, updated_at FROM work_claims WHERE room_id=? ORDER BY claim_id").all("commons")
+  });
+  const beforeNavigation = snapshot();
+  const dialog = page.locator("#board-dialog");
+  const openBoard = async () => {
+    await page.keyboard.press("Control+k");
+    await page.locator("#room-actions-query").waitFor({ state: "visible" });
+    await page.locator("#room-actions-query").fill("board");
+    await page.keyboard.press("Enter");
+    await dialog.waitFor({ state: "visible" });
+  };
+  const dependent = page.locator("article[data-claim-id='dependent']");
+  const unknown = page.locator("article[data-claim-id='unknown']");
+  const link = dependent.locator(".claim-deps [data-open-work]");
+  const boardIds = () => page.locator("#work-board article").evaluateAll(nodes => nodes.map(node => node.dataset.claimId).sort());
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 800 });
+    await openBoard();
+    await dependent.waitFor({ state: "visible" });
+    assert.equal(await dependent.evaluate(node => node.parentElement.getAttribute("aria-labelledby")), "board-col-blocked");
+    assert.equal(await page.locator("#board-col-blocked").innerText(), "Blocked · 2 waiting");
+    assert.match(await dependent.innerText(), /Waiting for 1 prerequisite before claiming/);
+    assert.match(await dependent.innerText(), /Earlier completed prerequisite.*Completed/);
+    assert.match(await dependent.innerText(), /Prepare the handoff.*Unclaimed; needs an owner/);
+    assert.equal(await dependent.locator("[data-claim-action='claim']").count(), 0);
+    assert.match(await unknown.innerText(), /Not loaded or unavailable; status unknown/);
+    assert.equal(await unknown.locator("a, [data-claim-action='claim']").count(), 0);
+    assert.deepEqual(await boardIds(), ["available", "dependent", "prerequisite", "unknown"]);
+    assert.equal(await link.getAttribute("href"), `#pr-record/work/${encodeURIComponent(workId)}`);
+    assert.equal(await dependent.locator(".claim-chain [data-open-work]").getAttribute("href"), await link.getAttribute("href"));
+    await page.locator("#board-close").focus();
+    for (let step = 0; step < 80; step += 1) {
+      if (await link.evaluate(node => node === document.activeElement)) break;
+      await page.keyboard.press("Tab");
+    }
+    assert.equal(await link.evaluate(node => node === document.activeElement), true, `${width}px prerequisite is keyboard reachable`);
+    const scrollTop = await dialog.evaluate(node => node.scrollTop);
+    await page.keyboard.press("Enter");
+    await page.locator(`[data-work-record-id='${workId}']`).waitFor({ state: "visible" });
+    assert.equal(await dialog.evaluate(node => node.open), false);
+    await page.locator("#work-navigation-return").press("Enter");
+    await dialog.waitFor({ state: "visible" });
+    await page.waitForFunction(() => document.activeElement?.dataset.focusKey === "claim-dependency:dependent:1");
+    assert.ok(Math.abs(await dialog.evaluate(node => node.scrollTop) - scrollTop) <= 1);
+
+    // Same claim and target, different control: preserve the most recent
+    // dependency/chain link and Board scroll without another history entry.
+    await page.keyboard.press("Enter");
+    await dialog.waitFor({ state: "hidden" });
+    const targetUrl = page.url();
+    const historyLength = await page.evaluate(() => history.length);
+    await openBoard();
+    await dialog.waitFor({ state: "visible" });
+    const chainLink = dependent.locator(".claim-chain [data-open-work]");
+    await chainLink.focus();
+    const latestScroll = await dialog.evaluate(node => {
+      const maximum = node.scrollHeight - node.clientHeight;
+      node.scrollTop = node.scrollTop > maximum / 2 ? 0 : maximum;
+      return node.scrollTop;
+    });
+    await page.keyboard.press("Enter");
+    await dialog.waitFor({ state: "hidden" });
+    assert.equal(page.url(), targetUrl);
+    assert.equal(await page.evaluate(() => history.length), historyLength);
+    await page.locator("#work-navigation-return").press("Enter");
+    await dialog.waitFor({ state: "visible" });
+    await page.waitForFunction(() => document.activeElement?.dataset.focusKey === "claim-chain:dependent:0");
+    assert.ok(Math.abs(await dialog.evaluate(node => node.scrollTop) - latestScroll) <= 1, "same-target return keeps the latest Board scroll");
+    assert.deepEqual(snapshot(), beforeNavigation, "reading and following prerequisites writes no work, claim or Room event");
+    assert.equal(await dialog.evaluate(node => node.scrollWidth <= node.clientWidth + 1), true);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), true);
+    await dependent.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `test-results/board-waiting-${width}.png` });
+    await axe(page);
+    await page.locator("#board-close").click();
+  }
+  await openBoard();
+  await post(page, origin, "/work-claims/prerequisite/claim", {});
+  await post(page, origin, "/work-claims/prerequisite/update", { state: "in_progress" });
+  await post(page, origin, "/work-claims/prerequisite/update", { state: "done" });
+  await page.locator("[aria-labelledby='board-col-ready'] article[data-claim-id='dependent']").waitFor();
+  assert.equal(await dependent.locator(".claim-waiting").count(), 0);
+  assert.equal(await page.locator("#board-col-blocked").innerText(), "Blocked · 1 waiting");
+  assert.deepEqual(await boardIds(), ["available", "dependent", "prerequisite", "unknown"]);
+  const claim = dependent.locator("[data-claim-action='claim']");
+  await claim.focus();
+  await page.keyboard.press("Enter");
+  await page.locator("[aria-labelledby='board-col-claimed'] article[data-claim-id='dependent']").waitFor();
+  assert.equal(fixture.store.workClaims.get("commons", "dependent").owner, "owner");
+  assert.equal(fixture.store.workClaims.get("commons", "unknown").owner, null);
+  assert.equal(await unknown.locator("[data-claim-action='claim']").count(), 0);
+});
+
 test("first board open requests at most two list pages when most claims are old", { timeout: 60000 }, async t => {
   const fixture = createAcceptanceFixture();
   const server = createRoomServer({ store: fixture.store, streamInterval: 40, fetchPullRequest: github() });
