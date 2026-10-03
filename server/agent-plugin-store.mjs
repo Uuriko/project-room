@@ -368,7 +368,7 @@ export class AgentPluginStore {
     const host = typeof label === "string" && label.trim() ? label.trim().slice(0, 80) : "MCP client";
     const issued = this.issueApiKey({
       identityId,
-      scopes: [`mcp:room:${roomId}`, "rooms:read", "rooms:write"],
+      scopes: [`mcp:room:${roomId}`, "rooms:read", "rooms:write", "mcp:inbox", "mcp:wake"],
       expiresAt: this.store.now() + 30 * 86400000,
       label: host
     });
