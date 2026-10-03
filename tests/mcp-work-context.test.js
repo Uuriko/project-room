@@ -11,7 +11,7 @@ import { openMcpTestClient } from "../scripts/mcp-test-client.mjs";
 
 test("hosted and bound stdio selected-work hints and briefs expose callable participant reply pointers", async t => {
   const directory = mkdtempSync(join(tmpdir(), "room-work-replies-")), store = new RoomStore(join(directory, "room.sqlite"));
-  const identity = store.identities.create("Owner");
+  const identity = store.identities.create("Owen");
   new AgentRooms(store).create(identity.secret, { roomId: "test-room", title: "Test", purpose: "Selected replies", kind: "personal", displayName: "Owner" });
   const server = createRoomServer({ store }); await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`, config = join(directory, "agent");

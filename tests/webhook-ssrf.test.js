@@ -17,48 +17,48 @@ const rejectsCode = (promise, code) => assert.rejects(promise, error => error in
 
 test("SSRF: QA-report fuzzed cases are rejected", () => {
   // The exact cases from the QA report (R2-004).
-  throwsCode(() => validateWebhookUrl("https://169.254.169.254/"), "invalid_webhook"); // cloud metadata
-  throwsCode(() => validateWebhookUrl("https://localhost/hook"), "invalid_webhook");
-  throwsCode(() => validateWebhookUrl("https://127.0.0.1/hook"), "invalid_webhook");
-  throwsCode(() => validateWebhookUrl("https://[::1]/hook"), "invalid_webhook");
-  throwsCode(() => validateWebhookUrl("https://10.0.0.5/hook"), "invalid_webhook");
-  throwsCode(() => validateWebhookUrl("https://192.168.1.1/hook"), "invalid_webhook");
+  throwsCode(() => validateWebhookUrl("https://169.254.169.254/"), "webhook_url_not_public"); // cloud metadata
+  throwsCode(() => validateWebhookUrl("https://localhost/hook"), "webhook_url_not_public");
+  throwsCode(() => validateWebhookUrl("https://127.0.0.1/hook"), "webhook_url_not_public");
+  throwsCode(() => validateWebhookUrl("https://[::1]/hook"), "webhook_url_not_public");
+  throwsCode(() => validateWebhookUrl("https://10.0.0.5/hook"), "webhook_url_not_public");
+  throwsCode(() => validateWebhookUrl("https://192.168.1.1/hook"), "webhook_url_not_public");
 });
 
 test("SSRF: localhost disguises are rejected", () => {
-  throwsCode(() => validateWebhookUrl("https://LOCALHOST/hook"), "invalid_webhook");
-  throwsCode(() => validateWebhookUrl("https://localhost./hook"), "invalid_webhook");
-  throwsCode(() => validateWebhookUrl("https://localhost:8443/hook"), "invalid_webhook");
-  throwsCode(() => validateWebhookUrl("https://foo.localhost/hook"), "invalid_webhook");
-  throwsCode(() => validateWebhookUrl("https://db.internal/hook"), "invalid_webhook");
-  throwsCode(() => validateWebhookUrl("https://printer.local/hook"), "invalid_webhook");
-  throwsCode(() => validateWebhookUrl("https://api.svc/hook"), "invalid_webhook");
-  throwsCode(() => validateWebhookUrl("https://name.namespace.svc.cluster.local/hook"), "invalid_webhook");
-  throwsCode(() => validateWebhookUrl("https://hooks.example.com:4443/hook"), "invalid_webhook");
+  throwsCode(() => validateWebhookUrl("https://LOCALHOST/hook"), "webhook_url_not_public");
+  throwsCode(() => validateWebhookUrl("https://localhost./hook"), "webhook_url_not_public");
+  throwsCode(() => validateWebhookUrl("https://localhost:8443/hook"), "webhook_url_not_public");
+  throwsCode(() => validateWebhookUrl("https://foo.localhost/hook"), "webhook_url_not_public");
+  throwsCode(() => validateWebhookUrl("https://db.internal/hook"), "webhook_url_not_public");
+  throwsCode(() => validateWebhookUrl("https://printer.local/hook"), "webhook_url_not_public");
+  throwsCode(() => validateWebhookUrl("https://api.svc/hook"), "webhook_url_not_public");
+  throwsCode(() => validateWebhookUrl("https://name.namespace.svc.cluster.local/hook"), "webhook_url_not_public");
+  throwsCode(() => validateWebhookUrl("https://hooks.example.com:4443/hook"), "webhook_url_not_public");
 });
 
 test("SSRF: IPv4 literal disguises are rejected", () => {
-  throwsCode(() => validateWebhookUrl("https://2130706433/hook"), "invalid_webhook"); // 127.0.0.1 decimal
-  throwsCode(() => validateWebhookUrl("https://0x7f.0.0.1/hook"), "invalid_webhook"); // hex
-  throwsCode(() => validateWebhookUrl("https://0177.0.0.1/hook"), "invalid_webhook"); // octal
-  throwsCode(() => validateWebhookUrl("https://127.1/hook"), "invalid_webhook"); // short form
-  throwsCode(() => validateWebhookUrl("https://0.0.0.0/hook"), "invalid_webhook");
-  throwsCode(() => validateWebhookUrl("https://example.com@127.0.0.1/hook"), "invalid_webhook"); // userinfo trick
-  throwsCode(() => validateWebhookUrl("https://172.16.0.9/hook"), "invalid_webhook");
-  throwsCode(() => validateWebhookUrl("https://172.31.255.255/hook"), "invalid_webhook");
-  throwsCode(() => validateWebhookUrl("https://100.64.0.1/hook"), "invalid_webhook"); // CGNAT
-  throwsCode(() => validateWebhookUrl("https://224.0.0.1/hook"), "invalid_webhook"); // multicast
-  throwsCode(() => validateWebhookUrl("https://169.254.169.254/latest/meta-data/iam/security-credentials/"), "invalid_webhook");
+  throwsCode(() => validateWebhookUrl("https://2130706433/hook"), "webhook_url_not_public"); // 127.0.0.1 decimal
+  throwsCode(() => validateWebhookUrl("https://0x7f.0.0.1/hook"), "webhook_url_not_public"); // hex
+  throwsCode(() => validateWebhookUrl("https://0177.0.0.1/hook"), "webhook_url_not_public"); // octal
+  throwsCode(() => validateWebhookUrl("https://127.1/hook"), "webhook_url_not_public"); // short form
+  throwsCode(() => validateWebhookUrl("https://0.0.0.0/hook"), "webhook_url_not_public");
+  throwsCode(() => validateWebhookUrl("https://example.com@127.0.0.1/hook"), "webhook_url_not_public"); // userinfo trick
+  throwsCode(() => validateWebhookUrl("https://172.16.0.9/hook"), "webhook_url_not_public");
+  throwsCode(() => validateWebhookUrl("https://172.31.255.255/hook"), "webhook_url_not_public");
+  throwsCode(() => validateWebhookUrl("https://100.64.0.1/hook"), "webhook_url_not_public"); // CGNAT
+  throwsCode(() => validateWebhookUrl("https://224.0.0.1/hook"), "webhook_url_not_public"); // multicast
+  throwsCode(() => validateWebhookUrl("https://169.254.169.254/latest/meta-data/iam/security-credentials/"), "webhook_url_not_public");
 });
 
 test("SSRF: IPv6 literals to internal space are rejected", () => {
-  throwsCode(() => validateWebhookUrl("https://[0:0:0:0:0:0:0:1]/hook"), "invalid_webhook");
-  throwsCode(() => validateWebhookUrl("https://[::ffff:127.0.0.1]/hook"), "invalid_webhook"); // mapped loopback
-  throwsCode(() => validateWebhookUrl("https://[::ffff:10.0.0.5]/hook"), "invalid_webhook"); // mapped RFC1918
-  throwsCode(() => validateWebhookUrl("https://[fe80::1]/hook"), "invalid_webhook"); // link-local
-  throwsCode(() => validateWebhookUrl("https://[fc00::1]/hook"), "invalid_webhook"); // ULA
-  throwsCode(() => validateWebhookUrl("https://[fd12:3456::1]/hook"), "invalid_webhook"); // ULA
-  throwsCode(() => validateWebhookUrl("https://[ff02::1]/hook"), "invalid_webhook"); // multicast
+  throwsCode(() => validateWebhookUrl("https://[0:0:0:0:0:0:0:1]/hook"), "webhook_url_not_public");
+  throwsCode(() => validateWebhookUrl("https://[::ffff:127.0.0.1]/hook"), "webhook_url_not_public"); // mapped loopback
+  throwsCode(() => validateWebhookUrl("https://[::ffff:10.0.0.5]/hook"), "webhook_url_not_public"); // mapped RFC1918
+  throwsCode(() => validateWebhookUrl("https://[fe80::1]/hook"), "webhook_url_not_public"); // link-local
+  throwsCode(() => validateWebhookUrl("https://[fc00::1]/hook"), "webhook_url_not_public"); // ULA
+  throwsCode(() => validateWebhookUrl("https://[fd12:3456::1]/hook"), "webhook_url_not_public"); // ULA
+  throwsCode(() => validateWebhookUrl("https://[ff02::1]/hook"), "webhook_url_not_public"); // multicast
 });
 
 test("SSRF: public targets still pass", () => {
@@ -73,7 +73,7 @@ test("SSRF: public targets still pass", () => {
 
 test("SSRF: register() inherits the guard", () => {
   const hooks = createWebhooks();
-  throwsCode(() => hooks.register({ webhookId: "evil", url: "https://169.254.169.254/", events: ["*"] }), "invalid_webhook");
+  throwsCode(() => hooks.register({ webhookId: "evil", url: "https://169.254.169.254/", events: ["*"] }), "webhook_url_not_public");
   assert.equal(hooks.size(), 0); // nothing stored
   const ok = hooks.register({ webhookId: "w1", url: "https://hooks.example.com/hook", events: ["*"] });
   assert.equal(ok.url, "https://hooks.example.com/hook");
@@ -107,7 +107,7 @@ test("DNS rebinding check: public resolutions pass, literals skip DNS", async ()
   const bomb = { resolve4: async () => { throw new Error("must not resolve"); }, resolve6: async () => { throw new Error("must not resolve"); } };
   assert.equal(await assertWebhookHostDnsPublic("https://8.8.8.8/hook", bomb), "https://8.8.8.8/hook");
   // A sync-rejected URL stays rejected through the async path too.
-  await rejectsCode(assertWebhookHostDnsPublic("https://127.0.0.1/hook", pub), "invalid_webhook");
+  await rejectsCode(assertWebhookHostDnsPublic("https://127.0.0.1/hook", pub), "webhook_url_not_public");
 });
 
 test("SSRF: v4-embedded IPv6 bypass vectors are rejected (H-1, RC-2026-09-25)", async () => {
@@ -128,7 +128,7 @@ test("SSRF: v4-embedded IPv6 bypass vectors are rejected (H-1, RC-2026-09-25)", 
     "https://[::10.0.0.1]/hook", // v4-compatible for 10.0.0.1
     "https://[64:ff9b:1::1]/hook", // local-use NAT64 (RFC 8215)
   ];
-  for (const url of bypasses) throwsCode(() => validateWebhookUrl(url), "invalid_webhook");
+  for (const url of bypasses) throwsCode(() => validateWebhookUrl(url), "webhook_url_not_public");
   // And through the DNS path: a name resolving to any of these is rejected.
   for (const answer of ["64:ff9b::a9fe:a9fe", "2002:a9fe:a9fe::", "2001:0:4136:e378:8000:63bf:3fff:fdd2", "::a9fe:a9fe"]) {
     const resolvers = { resolve4: async () => [], resolve6: async () => [answer] };

@@ -2,7 +2,7 @@
 // A guest payload must carry untrusted:true or contentTrust on every
 // agent-facing read. Surfaces that already stamp stay required. Surfaces
 // that still omit the marker are expectedFail until their fix merges: the
-// event tail and SSE frames (SEC-2b) and webhook payloads (Q3-D). Board
+// event tail and SSE frames (SEC-2b). Webhook payloads are fenced (Q3-D). Board
 // lists are stamped (SEC-2). A guest cannot add a Board review note, so a
 // review-profile member writes the Board marker.
 // Usage: node scripts/qa3/content-trust.mjs --origin http://127.0.0.1:4173 --db room.sqlite
@@ -177,7 +177,7 @@ try {
     payload = readPayload(roomId);
     if (!payload.includes(marker)) await new Promise(resolve => setTimeout(resolve, 200));
   }
-  judge("webhook stored payload", payload, { payload: true, expectedFail: "F9 Q3-D" });
+  judge("webhook stored payload", payload, { payload: true, expectedFail: null });
   judge("sse frame", frames.map(frame => frame.text).join("\n"), { payload: true, expectedFail: "F9 SEC-2b" });
 
   exit(report.finish());

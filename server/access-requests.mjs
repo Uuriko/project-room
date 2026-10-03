@@ -38,7 +38,7 @@ import { createRateLimiter } from "./identity-ratelimit.mjs";
 // scripts/runtime-package.mjs).
 import { event, EVENT_TYPES as T, isRoomArchived, memberCan } from "../src/events.js";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
-import { assertMemberDisplayNameAvailable, checkAgentDisplayName } from "./display-name-guard.mjs";
+import { assertAdmissibleMemberName, assertMemberDisplayNameAvailable, checkAgentDisplayName } from "./display-name-guard.mjs";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 
 // Local ServiceError (mirrors server/store.mjs). We avoid importing from
@@ -264,7 +264,9 @@ export class AccessRequests {
       // An upgrade cannot rename or impersonate another member. Use the
       // linked member's current name, rather than checking it against itself.
       const requestName = member ? member.displayName : name;
-      if (!member) assertMemberDisplayNameAvailable(requestName, room.state.members);
+      if (!member) {
+        assertAdmissibleMemberName(requestName, room.state.members); // Q3-D: roster check plus role names
+      }
       const now = this.store.now();
       const storedPermissions = member ? { version: 1, kind: "permission-upgrade",
         permissions: requestedPermissions, memberId: member.id, memberRevision: member.revision } : requestedPermissions;

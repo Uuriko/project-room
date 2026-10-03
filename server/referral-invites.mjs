@@ -36,7 +36,7 @@
 
 import { createHash, createPrivateKey, createPublicKey, randomUUID, sign as edSign, verify as edVerify } from "node:crypto";
 import { ServiceError } from "./store.mjs";
-import { assertMemberDisplayNameAvailable } from "./display-name-guard.mjs";
+import { assertAdmissibleMemberName } from "./display-name-guard.mjs";
 import { generateKeyPair } from "./agent-card-signing.mjs";
 import { refuseArchivedWrite } from "./room-lifecycle.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
@@ -412,7 +412,7 @@ export class ReferralInvites {
       }
       // Mint copies this string onto the new member. Refuse it before the
       // identity row exists.
-      assertMemberDisplayNameAvailable(name, room.state.members);
+      assertAdmissibleMemberName(name, room.state.members); // Q3-D: roster check plus role names
       const identity = attached
         ? { identityId: attached.identityId, secret: null }
         : this.store.identities.create(name, {
