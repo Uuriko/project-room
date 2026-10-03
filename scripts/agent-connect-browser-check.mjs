@@ -164,7 +164,10 @@ test("agent type catalog renders and click fills the same join path", { timeout:
   assert.equal(await f.page.locator("#agent-connect-name").inputValue(), "Claude Code");
   assert.equal(await f.page.locator("#agent-connect-access").inputValue(), "contribute");
   assert.equal(await f.page.locator("#agent-connect-route").inputValue(), "mcp");
+  assert.equal(await f.page.locator("#agent-roster-hint").isVisible(), false, "technical host guidance starts collapsed");
+  await f.page.locator("#agent-connect-advanced > summary").click();
   assert.match(await f.page.locator("#agent-roster-hint").innerText(), /room_check_access/);
+  await f.page.locator("#agent-connect-advanced > summary").click();
   assert.equal(await f.page.locator("#agent-create").isHidden(), false);
   const requests = [];
   f.page.on("request", request => { if (request.url().endsWith("/agent-connections") && request.method() === "POST") requests.push(request.postDataJSON()); });
