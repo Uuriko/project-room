@@ -23,7 +23,8 @@ const EMPTY_UNTIL_CRON = new Set([
   "public_rooms",
   "public_read_model_backfill",
   "private_update_marks",
-  "private_update_commands"
+  "private_update_commands",
+  "messages_backfill_cursor"
 ]);
 
 const EVENTS = 200_000;
