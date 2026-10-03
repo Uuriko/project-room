@@ -160,7 +160,7 @@ test("agent type catalog renders and click fills the same join path", { timeout:
   const catalogText = await catalog.innerText();
   assert.match(catalogText, /Best for local coding sessions/, 'the agent catalog keeps the shortened agent-type copy');
   assert.doesNotMatch(catalogText, /with MCP tools/, 'the old verbose agent-type suffix is gone');
-  await f.page.locator('[data-agent-type="claude-code"]').click();
+  await f.page.locator('#agent-type-catalog button[data-agent-type="claude-code"]').click();
   assert.equal(await f.page.locator("#agent-connect-name").inputValue(), "Claude Code");
   assert.equal(await f.page.locator("#agent-connect-access").inputValue(), "contribute");
   assert.equal(await f.page.locator("#agent-connect-route").inputValue(), "mcp");
@@ -183,7 +183,7 @@ test("agent type catalog renders and click fills the same join path", { timeout:
   // Keep duplicate identity caution visible even with technical guidance closed.
   await f.page.waitForFunction(() => document.querySelector("#presence-list").textContent.includes("Claude Code"));
   await f.page.locator("#agent-connect-done").click();
-  await f.page.locator('[data-agent-type="claude-code"]').click();
+  await f.page.locator('#agent-type-catalog button[data-agent-type="claude-code"]').click();
   assert.equal(await f.page.locator("#agent-connect-advanced").evaluate(node => node.open), false);
   assert.equal(await f.page.locator("#agent-name-warning").isVisible(), true);
   assert.match(await f.page.locator("#agent-name-warning").innerText(), /second identity/);
