@@ -577,6 +577,37 @@ test("version and ready are served for the inventoried methods", { timeout: 3000
   }
 });
 
+// Served methods read from server/http.mjs: POST signs in with an access key;
+// a later exact /api/session match serves GET and DELETE and rejects the rest.
+const SESSION_INVENTORY = {
+  "/api/session": ["POST", "GET", "DELETE"],
+};
+
+test("openapi inventory lists served session methods", () => {
+  const doc = buildOpenApiJson({ origin: "https://room.example" });
+  for (const [path, methods] of Object.entries(SESSION_INVENTORY)) {
+    const entry = DISCOVERABILITY_ROUTES.find(item => item.path === path);
+    assert.ok(entry, `route table lists ${path}`);
+    assert.deepEqual([...entry.methods].sort(), [...methods].sort(), path);
+    for (const method of methods) {
+      assert.equal(typeof doc.paths[path]?.[method.toLowerCase()]?.operationId, "string", `${method} ${path}`);
+    }
+  }
+});
+
+test("session routes are served for the inventoried methods", { timeout: 30000 }, async t => {
+  const { origin } = await serve(t);
+  for (const method of SESSION_INVENTORY["/api/session"]) {
+    const res = await fetch(`${origin}/api/session`, {
+      method,
+      headers: { "Content-Type": "application/json", Origin: origin },
+      body: method === "POST" ? "{}" : undefined,
+    });
+    await res.arrayBuffer();
+    assert.ok(![404, 405].includes(res.status), `${method} /api/session served, got ${res.status}`);
+  }
+});
+
 test("openapi inventory lists served work-claims methods", () => {
   const doc = buildOpenApiJson({ origin: "https://room.example" });
   for (const [path, methods] of Object.entries(WORK_CLAIM_INVENTORY)) {

@@ -40,6 +40,14 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
     { operationIds: { GET: "getVersion", HEAD: "headVersion" } }),
   route("/api/ready", ["GET", "HEAD"], "none", "Readiness: 200 once the store answers, 503 otherwise.", "getReady",
     { operationIds: { GET: "getReady", HEAD: "headReady" } }),
+  // http.mjs: POST creates a browser session from a room access key; GET and
+  // DELETE read or end that session (cookie or bearer). Other methods 405.
+  route("/api/session", ["POST", "GET", "DELETE"], "room-member", "Sign in with a room access key, or read or end that browser session.", "createSession",
+    { operationIds: { POST: "createSession", GET: "getSession", DELETE: "deleteSession" } }),
+  // http.mjs: GET starts or reads an account browser slot (no cookie required);
+  // POST signs that slot in; DELETE signs it out. Other methods 405.
+  route("/api/account-session", ["GET", "POST", "DELETE"], "open", "Start or read an account browser slot, or sign that slot in or out.", "getAccountSession",
+    { operationIds: { GET: "getAccountSession", POST: "loginAccountSession", DELETE: "logoutAccountSession" } }),
   // Onboarding.
   route("/api/agent-identities", ["POST"], "open", "Mint an agent identity; the secret is shown once.", "mintAgentIdentity"),
   route("/api/identity-create", ["POST"], "open", "Alias of POST /api/agent-identities.", "mintIdentityAlias"),
