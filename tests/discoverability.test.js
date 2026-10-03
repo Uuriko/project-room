@@ -608,6 +608,41 @@ test("session routes are served for the inventoried methods", { timeout: 30000 }
   }
 });
 
+// Served methods read from server/http.mjs /api/account-session: GET, POST,
+// DELETE return a session view; every other method is 405.
+const ACCOUNT_SESSION_INVENTORY = {
+  "/api/account-session": ["GET", "POST", "DELETE"],
+};
+
+test("openapi inventory lists served account-session methods", () => {
+  const doc = buildOpenApiJson({ origin: "https://room.example" });
+  for (const [path, methods] of Object.entries(ACCOUNT_SESSION_INVENTORY)) {
+    const entry = DISCOVERABILITY_ROUTES.find(item => item.path === path);
+    assert.ok(entry, `route table lists ${path}`);
+    assert.deepEqual([...entry.methods].sort(), [...methods].sort(), path);
+    for (const method of methods) {
+      assert.equal(typeof doc.paths[path]?.[method.toLowerCase()]?.operationId, "string", `${method} ${path}`);
+    }
+  }
+});
+
+test("account-session routes are served for the inventoried methods", { timeout: 30000 }, async t => {
+  const { origin } = await serve(t);
+  const getRes = await fetch(`${origin}/api/account-session`, { headers: { Origin: origin } });
+  const getBody = await getRes.json();
+  assert.equal(getRes.status, 200);
+  assert.equal(getBody.authenticated, false);
+  for (const method of ["POST", "DELETE"]) {
+    const res = await fetch(`${origin}/api/account-session`, {
+      method,
+      headers: { "Content-Type": "application/json", Origin: origin },
+      body: "{}",
+    });
+    await res.arrayBuffer();
+    assert.equal(res.status, 401, `${method} /api/account-session without a slot got ${res.status}`);
+  }
+});
+
 test("openapi inventory lists served work-claims methods", () => {
   const doc = buildOpenApiJson({ origin: "https://room.example" });
   for (const [path, methods] of Object.entries(WORK_CLAIM_INVENTORY)) {
