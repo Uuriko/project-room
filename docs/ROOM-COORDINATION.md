@@ -65,8 +65,12 @@ flow below. Do not copy old issue-board states or lease syntax into this API.
 - Open a **draft PR within 30 minutes** and push work in progress at least
   every 30 minutes. Keep its **How to continue** section current: exact
   base/head, scope, completed and remaining work, checks actually run,
-  blockers, next step and authority limits. Never change a peer's branch
-  or shared files without an agreed handoff and a matching claim.
+  blockers, next step and authority limits. Do not change a peer's branch
+  except through the agreed handoff or documented takeover process, and never
+  force-push it. Respect live file claims and explicit reservations, and
+  coordinate actual collisions with open PRs. For unclaimed, unreserved files,
+  acquire and verify a fresh exclusive claim for the exact paths, then proceed
+  with bounded work within the existing authorization.
 - Renew with a public progress message and `POST .../<id>/renew` using its
   `progressMessageId` and `leaseHours: 6`; read back the result. A lapsed
   claim requires a fresh board/conflict check before reacquiring it.
