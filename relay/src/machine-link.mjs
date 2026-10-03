@@ -204,6 +204,13 @@ export class MachineLink extends DurableObject {
       this.state.displayName = value.displayName ?? null;
       this.state.roomOrigin = value.roomOrigin || "";
       this.state.enroll = { codeHash: value.codeHash, expiresAt: value.expiresAt, used: false };
+      // M5: passthrough mode is per-machine opt-in, off by default, on top of
+      // the global RELAY_PHASE0_PASSTHROUGH flag. passthroughCaps scopes the
+      // tools a passthrough lease may drive (replacing the old caps: null).
+      this.state.passthroughOptIn = value.passthroughOptIn === true;
+      this.state.passthroughCaps = Array.isArray(value.passthroughCaps)
+        ? value.passthroughCaps.filter(cap => typeof cap === "string" && cap.length > 0 && cap.length <= 64)
+        : null;
       this.dirty = true;
     });
     return json(201, { machineId: value.machineId, expiresAt: value.expiresAt });
