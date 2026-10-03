@@ -425,7 +425,10 @@ export class MachineBot {
   }
 
   async continueActive() {
-    while (this.active && !this.stopped && !this.isHalted()) {
+    // A persisted task loaded while already halted must be stopped and
+    // cleared via stopEarly — not silently left active by the loop guard.
+    if (this.isHalted()) return this.stopEarly("Halted by the operator. I stopped before the next step.");
+    while (this.active && !this.stopped) {
       if (this.isHalted()) return this.stopEarly("Halted by the operator. I stopped before the next step.");
       if (await this.isPaused(this.active.roomId)) return this.stopEarly("Paused. I stopped before the next step.");
       const before = this.budgetReason();
