@@ -9,6 +9,11 @@ export function sha256(bytes) {
 }
 
 function claimDir(home, claimId) {
+  // L10: claim IDs reach the filesystem — a Room-issued claimId with path
+  // separators would escape the recordings dir. Enforce the tight shape.
+  if (typeof claimId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(claimId)) {
+    throw new Error("claimId must be 1-128 chars of [A-Za-z0-9_-]");
+  }
   return join(home, "recordings", claimId);
 }
 

@@ -31,9 +31,11 @@ export function approvalClass({ tool, slot, args }) {
 }
 
 export async function requestApproval({ home = configHome(), origin, roomId, secret, ownerMemberId, className, detail, now = Date.now() }) {
-  const code = randomBytes(3).toString("hex");
+  // L9: 128-bit codes — a 24-bit code could collide with a historical
+  // approval and let an old owner reply satisfy a new request.
+  const code = randomBytes(16).toString("hex");
   const pending = load(home);
-  pending[code] = { className, ownerMemberId, expiresAt: now + APPROVAL_TTL_MS, used: false };
+  pending[code] = { className, ownerMemberId, expiresAt: now + APPROVAL_TTL_MS, createdAt: now, used: false };
   save(home, pending);
   const posted = await postMessage(origin, roomId, secret, `approve ${code} to let ${detail}`);
   return { ok: posted.ok, code, expiresAt: pending[code].expiresAt };
