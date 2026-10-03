@@ -35,7 +35,7 @@
 import {
   createWork, claimWork, updateWork, appendWorkPullRequest, attestWork, recordReview, reassignWork, releaseExpired, canCloseWork,
   renewWork, roomWorkClaimConfig, closeWhenLive, isReceiptTag, ClaimError, REVIEW_POLICIES, CLAIM_KINDS,
-  claimUpdatedAt, ACTIVE_CLAIM_STATES, MAX_LEASE_HOURS,
+  claimUpdatedAt, ACTIVE_CLAIM_STATES, MAX_LEASE_HOURS, STATES, summarizeClaimHistory,
 } from "./work-claims.mjs";
 import { findDuplicates, DuplicateError } from "./work-duplicates.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
@@ -44,7 +44,12 @@ import { findClaimCollisions } from "./claim-collisions.mjs";
 import { emitWorkClaimEvent, enqueueClaimWake } from "./work-claim-events.mjs";
 import { ROOM_GUIDE_ID } from "./room-guide.mjs";
 import { fileLeaseConflictBody, fileLeaseConflicts, holdForRateLimit, readyClaims } from "./claim-coordination.mjs";
-import { collectPullRequestLookups, commitPullRequestLookup, readClaimPullBudget, readRoomDeployStatus, writeClaimPullBudget } from "./claim-pr-sync.mjs";
+import { collectPullRequestLookups, commitPullRequestLookup, readClaimPullBudget, writeClaimPullBudget } from "./claim-pr-sync.mjs";
+import {
+  assertBoardEventBudget, assertBoardLeaseHours, assertDependsOnKnown, boardText, boardTextFields, clientPullRequestInput,
+  readBoardDeployStatus, roomEventsRemaining, DONE_WINDOW_MS, LIST_HISTORY_ENTRIES,
+} from "./work-claim-integrity.mjs";
+import { stampClaim, stampClaimPage, stampReceipts, withContentTrust } from "./content-trust.mjs";
 import { agentErrorBody } from "../src/agent-error.mjs";
 import { SOURCE_REVISION } from "./version.mjs";
 import { ServiceError } from "./service-error.mjs";
@@ -128,7 +133,7 @@ const WORK_CLAIM_PROFILES = Object.freeze({
 });
 const BOARD_LIMIT_DEFAULT = 50;
 const BOARD_LIMIT_MAX = 200;
-const BOARD_QUERY = new Set(["queue", "auth", "limit", "cursor"]);
+const BOARD_QUERY = new Set(["queue", "auth", "limit", "cursor", "state"]);
 
 function resolveWorkClaimAccess(store, roomId, auth) {
   let authority = null;
@@ -186,6 +191,39 @@ function mayManageAnyClaim(access) {
 function mayOptOutOfLease(access) {
   return mayManageAnyClaim(access);
 }
+
+// SEC-2: a review note (attestation) comes from the claim's reviewers: the
+// room owner, members holding verify (the review profile), or manage_claims
+// holders. A note never approves work; verdict reviews keep their own rule.
+function mayAttestWorkClaims(access) {
+  const member = access.member;
+  if (!member || member.active === false) return false;
+  if (access.ownerId && member.id === access.ownerId) return true;
+  const permissions = member.permissions ?? [];
+  return permissions.includes("verify") || permissions.includes("manage_claims");
+}
+
+// SEC-2: a sweep polls GitHub and releases lapsed leases. Board writers,
+// manage_claims holders and the room owner may trigger it; the scheduled
+// job runs the same lookup without a member.
+function maySweepWorkClaims(access) {
+  return mayWriteWorkClaims(access) || mayManageAnyClaim(access);
+}
+
+function refuseBoardAction(message, hint) {
+  const error = new Error(message);
+  error.status = 403;
+  error.code = "work_claims_not_permitted";
+  error.body = { error: { code: "work_claims_not_permitted", message }, hint, next: [{ command: hint }] };
+  throw error;
+}
+
+const refuseAttest = () => refuseBoardAction(
+  "Review notes on a claim come from the room owner, a member with the review profile, or a claim manager.",
+  "Post your note in the room instead, or ask the room owner for a review invite.");
+const refuseSweep = () => refuseBoardAction(
+  "Sweeping the Board needs a contribute, review, or collaborate profile, claim management, or the room owner.",
+  "Ask the room owner or a claim manager to sweep the Board.");
 
 function refuseWorkClaims() {
   const message = "Creating, claiming, renewing, or updating work claims needs a contribute, review, or collaborate profile.";
@@ -278,7 +316,11 @@ function pageReady(items, limit, cursor) {
 // (owner cleared, history stamped by releaseExpired). Returns the ids that
 // were released by this sweep.
 function sweepRoom(registry, roomId, nowMs, onRelease = () => {}) {
-  const entry = registry.list(roomId);
+  // SEC-2: only claims whose lease has already lapsed go through the state
+  // machine; reading a large Board must not re-validate every done claim.
+  const entry = registry.list(roomId).filter(item => ACTIVE_CLAIM_STATES.includes(item.state)
+    && typeof item.leaseExpiresAt === "string" && Date.parse(item.leaseExpiresAt) <= nowMs);
+  if (entry.length === 0) return [];
   const swept = releaseExpired(entry, nowMs);
   const released = [];
   // releaseExpired returns a normalized copy of every item, expired or not,
@@ -390,6 +432,7 @@ export function linkWorkClaimPullRequest({ store, roomId, auth, claimId, data, r
     enforceAutonomyTierForAction({ db: store.db, roomId, state: { room: { ownerId: access.ownerId } },
       actor: access.member, action: "POST work-claim update", fail: reject });
     if (isRoomArchived(store.room(roomId).state)) reject(409, "room_archived", "This room is archived; no PR link was recorded");
+    assertBoardEventBudget(access.authority?.sequence, { privileged: mayManageAnyClaim(access) });
     claimIdOf(reject, claimId);
     refuseRoomGuideOffStarter(registry, roomId, current, claimId, "POST", reject);
     if (!shape(data, { required: ["appendPullRequest", "expectedClaimedAt", "expectedHistoryLength"] })) {
@@ -451,11 +494,21 @@ export async function handleWorkClaims(options) {
     const credential = options.githubToken !== undefined
       ? options.githubToken
       : (process.env.GITHUB_TOKEN || process.env.GH_TOKEN || null);
-    deployStatus = await readRoomDeployStatus(options.store, {
+    // SEC-2 / Q3-A: every member reads the shared cached status; only a
+    // Board writer's ?refresh=1 skips the 60 s cache.
+    const access = resolveWorkClaimAccess(options.store, options.roomId, options.auth);
+    const force = options.url?.searchParams?.get("refresh") === "1" && maySweepWorkClaims(access);
+    deployStatus = await readBoardDeployStatus(options.store, {
       fetchImpl: options.fetchPullRequest ?? fetch,
       token: credential || null,
       nowMs: Date.now(),
+      force,
     });
+  }
+  if (options.workClaimRoute === "sweep" && req.method === "POST"
+    && !maySweepWorkClaims(resolveWorkClaimAccess(options.store, options.roomId, reauthorize ? reauthorize() : options.auth))) {
+    // Refuse before any GitHub lookup; the transaction checks again.
+    try { refuseSweep(); } catch (error) { return helpers.json(res, error.status, error.body); }
   }
   if (options.workClaimRoute === "sweep") {
     const nowMs = Date.now();
@@ -501,8 +554,23 @@ function refuseRoomGuideOffStarter(registry, roomId, auth, workClaimId, method, 
   }
 }
 
-function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRoute, workClaimId, helpers, registry, pullBatch = { results: [], rateLimitedUntil: null, skipped: false }, deployStatus = null }) {
+// One decoded room list per request: the sweep, live-claim closing and the
+// list page share it until a write invalidates it.
+function memoizeList(registry) {
+  const cache = new Map();
+  return Object.assign(Object.create(registry), {
+    list(roomId) {
+      if (!cache.has(roomId)) cache.set(roomId, registry.list(roomId));
+      return cache.get(roomId);
+    },
+    set(roomId, item) { cache.delete(roomId); return registry.set(roomId, item); },
+    delete(roomId, id) { cache.delete(roomId); return registry.delete(roomId, id); },
+  });
+}
+
+function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRoute, workClaimId, helpers, registry: sourceRegistry, pullBatch = { results: [], rateLimitedUntil: null, skipped: false }, deployStatus = null }) {
   const { json, reject, body } = helpers;
+  const registry = memoizeList(sourceRegistry);
   if (req.method !== "GET" && req.method !== "HEAD") enforceAutonomyTierForAction({
     db: store.db, roomId, state: { room: { ownerId: store.roomAuthority?.(roomId)?.ownerId } },
     actor: auth.member, action: `${req.method} work-claim ${workClaimRoute}`, fail: reject });
@@ -529,7 +597,8 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       ciState: extra.ciState,
       verdict: extra.verdict,
       attention: extra.attention,
-      attentionMemberId: extra.attentionMemberId
+      attentionMemberId: extra.attentionMemberId,
+      coalesce: extra.coalesce === true
     });
     if (extra.wakeMemberId && extra.wakeReason) {
       const stamp = extra.wakeStamp ?? receipt?.sequence ?? nowMs;
@@ -542,6 +611,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   const closeLiveClaims = () => {
     const closed = [];
     for (const item of registry.list(roomId)) {
+      if ((item.kind !== "land" && item.kind !== "deploy") || item.state === "done") continue;
       const next = closeWhenLive(item, SOURCE_REVISION, nowMs);
       if (!next) continue;
       commit(next, "state_changed");
@@ -565,6 +635,10 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   const roomLike = { workClaims: registry.rawConfig(roomId) };
   const access = resolveWorkClaimAccess(store, roomId, auth);
   const requireWriter = () => { if (!mayWriteWorkClaims(access)) refuseWorkClaims(); };
+  // Q3-A: with under 10% of the room's event budget left, Board writes from
+  // members without claim authority get 409 room_event_budget_low.
+  const requireEventBudget = () => assertBoardEventBudget(access.authority?.sequence, { privileged: mayManageAnyClaim(access) });
+  const text = (field, value, options) => boardText(reject, field, value, options);
   const assertLeaseChoice = data => {
     if (!data || !("leaseHours" in data) || data.leaseHours !== null || mayOptOutOfLease(access)) return;
     invalidInput(reject, `leaseHours greater than 0 and at most ${MAX_LEASE_HOURS}; null is only for the room owner or manage_claims`);
@@ -587,27 +661,49 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   if (workClaimRoute === "status" && req.method === "GET") {
     closeLiveClaims();
     const status = deployStatus ?? { live: SOURCE_REVISION, main: null, behind: null, checkedAt: null };
-    return json(res, 200, { live: status.live, main: status.main, behind: status.behind, checkedAt: status.checkedAt });
+    return json(res, 200, { live: status.live, main: status.main, behind: status.behind, checkedAt: status.checkedAt,
+      stale: status.stale === true, ...(status.heldUntil ? { heldUntil: status.heldUntil } : {}),
+      eventsRemaining: roomEventsRemaining(access.authority?.sequence) });
   }
   if (workClaimRoute === "list" && req.method === "GET") {
     closeLiveClaims();
     const params = url?.searchParams ?? new URLSearchParams();
     for (const key of params.keys()) {
       if (!BOARD_QUERY.has(key) || params.getAll(key).length !== 1) {
-        invalidInput(reject, "a single queue, limit, or cursor query parameter");
+        invalidInput(reject, "a single queue, state, limit, or cursor query parameter");
       }
     }
     const limit = boardLimitOf(reject, params.get("limit"));
     const cursor = params.has("cursor") ? boardCursorOf(reject, params.get("cursor")) : null;
+    // SEC-2: list pages carry each claim's newest history entries, with the
+    // rest counted in historyOmitted; the single-claim read has the stored
+    // history. Member-authored text is marked untrusted for the reader.
+    const present = page => stampClaimPage({ ...page, claims: page.claims.map(item => summarizeClaimHistory(item, LIST_HISTORY_ENTRIES)) }, caller);
     if (params.has("queue")) {
       if (params.get("queue") !== "ready") invalidInput(reject, "queue=ready");
+      if (params.has("state")) invalidInput(reject, "either queue=ready or state, not both");
       if (cursor && cursor.q !== "ready") invalidInput(reject, "a cursor from a queue=ready page");
       const page = pageReady(readyClaims(registry.list(roomId)), limit, cursor);
-      return json(res, 200, { roomId, queue: "ready", swept: sweptIds, ...page });
+      return json(res, 200, { roomId, queue: "ready", swept: sweptIds, ...present(page) });
     }
     if (cursor?.q === "ready") invalidInput(reject, "a cursor from a work-claims page");
-    const page = pageBoard(registry.list(roomId), limit, cursor);
-    return json(res, 200, { roomId, swept: sweptIds, ...page });
+    const items = registry.list(roomId);
+    if (params.has("state")) {
+      const state = params.get("state");
+      if (!STATES.includes(state)) invalidInput(reject, `state one of ${STATES.join(", ")}`);
+      const page = pageBoard(items.filter(item => item.state === state), limit, cursor);
+      return json(res, 200, { roomId, state, swept: sweptIds, ...present(page) });
+    }
+    // SEC-2: the default list shows done claims from the last 7 days (the
+    // Landed column) and any done claim an open claim depends on. Older done
+    // claims page through ?state=done.
+    const since = nowMs - DONE_WINDOW_MS;
+    const needed = new Set(items.filter(item => item.state !== "done").flatMap(item => item.dependsOn ?? []));
+    const recent = item => item.state !== "done" || needed.has(item.id) || Date.parse(claimUpdatedAt(item)) >= since;
+    const visible = items.filter(recent);
+    const olderDone = items.length - visible.length;
+    const page = pageBoard(visible, limit, cursor);
+    return json(res, 200, { roomId, swept: sweptIds, ...present(page), ...(olderDone > 0 ? { olderDone, olderDoneQuery: "state=done" } : {}) });
   }
   if (workClaimRoute === "receipts" && req.method === "GET") {
     // RC-2026-09-24-205: receipts search. The room block already rejected
@@ -637,12 +733,13 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       .sort((a, b) => doneAtMsOf(b) - doneAtMsOf(a) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
     const page = ranked.slice(offset, offset + limit);
     const nextOffset = offset + limit;
-    return json(res, 200, {
+    return json(res, 200, stampReceipts({
       receipts: page.map(receiptOf),
       nextCursor: nextOffset < ranked.length ? cursorEncode(nextOffset) : null,
-    });
+    }, caller));
   }
   if (workClaimRoute === "sweep" && req.method === "POST") {
+    if (!maySweepWorkClaims(access)) refuseSweep();
     const data = body(req);
     if (!shape(data, {})) invalidInput(reject, "an empty JSON object");
     let updated = 0;
@@ -696,10 +793,13 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     return json(res, 200, { roomId, query: q, duplicates });
   }
   if (workClaimRoute === "create" && req.method === "POST") {
-    const data = body(req);
-    if (!shape(data, { required: ["id"], optional: ["title", "reviewPolicy", "note", "tags", "files", "dependsOn", "pullRequest", "pullRequests", "repo", "branch", "kind", "revision", "assignee"] })) invalidInput(reject, "{id, title?, reviewPolicy?, note?, tags?, files?, dependsOn?, pullRequest?, pullRequests?, repo?, branch?, kind?, revision?, assignee?}");
+    const raw = body(req);
+    if (!shape(raw, { required: ["id"], optional: ["title", "reviewPolicy", "note", "tags", "files", "dependsOn", "pullRequest", "pullRequests", "repo", "branch", "kind", "revision", "assignee"] })) invalidInput(reject, "{id, title?, reviewPolicy?, note?, tags?, files?, dependsOn?, pullRequest?, pullRequests?, repo?, branch?, kind?, revision?, assignee?}");
     requireWriter();
-    const id = claimIdOf(reject, data.id);
+    requireEventBudget();
+    const id = claimIdOf(reject, raw.id);
+    const data = clientPullRequestInput(reject, boardTextFields(reject, raw, { title: {}, note: { multiline: true } }));
+    assertDependsOnKnown(reject, data, { selfId: id, has: other => registry.has(roomId, other) });
     if (registry.has(roomId, id)) reject(409, "work_claim_exists", `Work claim "${id}" already exists in this room`);
     const open = registry.list(roomId).filter(item => item.state !== "done").length;
     if (open >= config.maxOpenClaims) {
@@ -740,7 +840,8 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   }
   if (workClaimRoute === "read" && req.method === "GET") {
     closeLiveClaims();
-    return json(res, 200, load(claimIdOf(reject, workClaimId)));
+    // SEC-2: member-authored text is marked untrusted for the reader.
+    return json(res, 200, withContentTrust(stampClaim(load(claimIdOf(reject, workClaimId)), caller)));
   }
   if (workClaimRoute === "claim" && req.method === "POST") {
     const data = body(req);
@@ -749,7 +850,11 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     const item = load(claimIdOf(reject, workClaimId));
     if (item.state !== "unclaimed") reject(409, "work_claim_conflict", `Work "${item.id}" is already ${item.state} — release it first`);
     requireWriter();
+    requireEventBudget();
     assertLeaseChoice(data);
+    assertBoardLeaseHours(reject, data);
+    assertDependsOnKnown(reject, data, { selfId: item.id, has: other => registry.has(roomId, other) });
+    Object.assign(data, clientPullRequestInput(reject, boardTextFields(reject, data, { note: { multiline: true } })));
     const held = registry.list(roomId).filter(entry => entry.owner === caller && ACTIVE_CLAIM_STATES.includes(entry.state)).length;
     if (held >= config.maxMemberOpenClaims) {
       refuseCap("too_many_open_claims",
@@ -786,6 +891,8 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     const item = load(claimIdOf(reject, workClaimId));
     if (item.owner !== caller) reject(403, "work_not_owner", `Work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can change it`);
     requireWriter();
+    requireEventBudget();
+    if (Object.hasOwn(data, "note")) data.note = text("note", data.note, { multiline: true });
     if (data.state === "done") {
       // QA-Sec 2026-09-19: the reviewer must be authenticated. For
       // self_attested the reviewer is the owner (the caller). For the
@@ -847,7 +954,8 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
           escalate: receiptDecision.escalate, signals: receiptDecision.signals, at: nowMs });
       } catch { /* shadow-only: never break the done transition */ }
     }
-    commit(updated, "state_changed");
+    // Q3-A: a note-only update coalesces with this claim's last room event.
+    commit(updated, "state_changed", { coalesce: data.state === undefined || data.state === item.state });
     return json(res, 200, updated);
   }
   if (workClaimRoute === "review" && req.method === "POST") {
@@ -859,6 +967,8 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     if (verdictReview) {
       if (!shape(data, { required: ["verdict", "summary"], optional: ["url"] })) invalidInput(reject, "{verdict, summary, url?}");
       if (!mayReviewWorkClaims(access)) refuseWorkClaims();
+      requireEventBudget();
+      data.summary = text("summary", data.summary, { multiline: true });
       const item = load(claimIdOf(reject, workClaimId));
       if (item.owner === caller) reject(403, "work_review_rejected", "The owner cannot review their own claim");
       const reviewed = runPure(reject, () => recordReview(item, caller, { verdict: data.verdict, summary: data.summary, url: data.url, now: nowMs }));
@@ -870,18 +980,31 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       return json(res, 200, duplicate ? item : reviewed);
     }
     if (!shape(data, { optional: ["note"] })) invalidInput(reject, "{note?} or {verdict, summary, url?}");
+    if (!mayAttestWorkClaims(access)) refuseAttest();
+    requireEventBudget();
+    const note = text("note", data.note, { multiline: true });
     const item = load(claimIdOf(reject, workClaimId));
-    const attested = runPure(reject, () => attestWork(item, caller, { note: data.note, now: nowMs }));
-    const duplicate = attested.history === item.history;
-    if (!duplicate) commit(attested, "reviewed");
-    return json(res, 200, duplicate ? item : attested);
+    const attested = runPure(reject, () => attestWork(item, caller, { note, now: nowMs }));
+    if (attested.history !== item.history) {
+      // A new attestation: one history entry, and at most one room event per
+      // claim per 60 s for review notes.
+      commit(attested, "reviewed", { coalesce: true });
+      return json(res, 200, attested);
+    }
+    const before = item.attestations.find(entry => entry.memberId === caller);
+    const after = attested.attestations.find(entry => entry.memberId === caller);
+    // SEC-2: a repeat note from this reviewer on the same claim round and
+    // revision replaces the stored note without a history entry or event.
+    if (before?.note !== after?.note) { registry.set(roomId, attested); return json(res, 200, attested); }
+    return json(res, 200, item);
   }
   if (workClaimRoute === "release" && req.method === "POST") {
     const data = body(req);
     if (!shape(data, { optional: ["note", "reason"] })) invalidInput(reject, "{reason?, note?}");
     let item = load(claimIdOf(reject, workClaimId));
     const authority = authorityOver(item);
-    const reason = data.reason ?? data.note;
+    requireEventBudget();
+    const reason = text(Object.hasOwn(data, "reason") ? "reason" : "note", data.reason ?? data.note, { multiline: true });
     // W2 (QA 2026-09-28): /release used to 422 on in_progress claims with no
     // recovery path. The pure machine's release path is claimed -> unclaimed,
     // so route an active claim through the pause transition internally —
@@ -910,8 +1033,10 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       reject(422, "work_reassign_unknown_member",
         `newOwner "${typeof target === "string" ? target : "?"}" is not an active member of this room — reassign names a current memberId`);
     }
+    requireEventBudget();
     const previousOwnerId = item.owner;
-    const reassigned = runPure(reject, () => reassignWork(item, caller, target, { note: data.note, now: nowMs, authority }));
+    const note = text("note", data.note, { multiline: true });
+    const reassigned = runPure(reject, () => reassignWork(item, caller, target, { note, now: nowMs, authority }));
     commit(reassigned, "reassigned", {
       previousOwnerId,
       attention: "assigned", attentionMemberId: target,
@@ -939,7 +1064,10 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     }
     if (item.owner !== caller) reject(403, "work_not_owner", `Work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can change it`);
     requireWriter();
+    requireEventBudget();
     assertLeaseChoice(data);
+    assertBoardLeaseHours(reject, data);
+    if (Object.hasOwn(data, "note")) data.note = text("note", data.note, { multiline: true });
     const progressId = data.progressMessageId;
     if (progressId !== undefined && (typeof progressId !== "string" || !progressId.trim())) invalidInput(reject, "progressMessageId as a message id when citing evidence");
     const messages = progressId ? (store.room(roomId).state.messages ?? []) : [];
@@ -965,7 +1093,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     }
     const renewed = runPure(reject, () => renewWork(item, caller,
       { note: data.note, leaseHours: leaseHoursOfBody(data), room: roomLike, now: nowMs }));
-    commit(renewed, "renewed");
+    commit(renewed, "renewed", { coalesce: true });
     return json(res, 200, renewed);
   }
   if (workClaimRoute === "config" && (req.method === "GET" || req.method === "POST")) {

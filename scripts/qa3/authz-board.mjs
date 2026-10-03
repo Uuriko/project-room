@@ -31,26 +31,16 @@ const POLICY = {
   "renew held claim": { allow: WRITERS },
   "release claim": { allow: ["owner", "contribute", "review", "manage_claims"] },
   "reassign claim": { allow: ["owner", "contribute", "review", "manage_claims"] },
-  "attestation note": {
-    allow: ["owner", "review", "manage_claims"],
-    expectedFail: { contribute: "F4 SEC-2", chat: "F4 SEC-2", write_external: "F4 SEC-2", linkguest: "F4 SEC-2" },
-  },
+  "attestation note": { allow: ["owner", "review", "manage_claims"] },
   "verdict review": { allow: ["owner", "review"] },
-  "sweep": {
-    allow: ["owner", "contribute", "review", "manage_claims"],
-    expectedFail: { chat: "F6 SEC-2", write_external: "F6 SEC-2", linkguest: "F6 SEC-2" },
-  },
+  "sweep": { allow: ["owner", "contribute", "review", "manage_claims"] },
   "board status": { allow: MEMBERS },
   "referral mint": { allow: ["owner"] },
   "referral redeem": { allow: ROLES },
   "receipts opt-in": { allow: ["owner"], denyAs422: true },
   "pause own wakes": { allow: MEMBERS },
   "pause another member": { allow: ["owner"] },
-  "forged merged pull request": {
-    allow: [],
-    refused: WRITERS,
-    expectedFail: { owner: "F1 SEC-2", contribute: "F1 SEC-2", review: "F1 SEC-2" },
-  },
+  "forged merged pull request": { allow: [], refused: WRITERS },
 };
 
 const client = createQaClient({ origin, userAgent: "project-room-qa3-authz/1" });

@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 // A guest payload must carry untrusted:true or contentTrust on every
 // agent-facing read. Surfaces that already stamp stay required. Surfaces
-// that still omit the marker are expectedFail until SEC-2 (reads and SSE)
-// or Q3-D (webhook payloads) merges.
+// that still omit the marker are expectedFail until their fix merges: the
+// event tail and SSE frames (SEC-2b) and webhook payloads (Q3-D). Board
+// lists are stamped (SEC-2). A guest cannot add a Board review note, so a
+// review-profile member writes the Board marker.
 // Usage: node scripts/qa3/content-trust.mjs --origin http://127.0.0.1:4173 --db room.sqlite
 import { argv, exit } from "node:process";
 import { randomBytes, randomUUID } from "node:crypto";
@@ -104,6 +106,15 @@ try {
     token: guest.secret,
     body: { linkToken, displayName: `Qa3Guest${stamp}` },
   }), "join guest");
+  const reviewer = must(await client.request("POST", "/api/agent-identities", { body: { displayName: `Qa3Rev${stamp}` } }), "mint reviewer");
+  const reviewInvite = must(await client.request("POST", `${roomPath}/agent-invites`, {
+    token: owner.secret,
+    body: { profile: "review", displayName: `Qa3Rev${stamp}` },
+  }), "invite reviewer");
+  must(await client.request("POST", "/api/agent-invites/redeem", {
+    token: reviewer.secret,
+    body: { code: reviewInvite.code, displayName: `Qa3Rev${stamp}` },
+  }), "redeem reviewer");
   must(await client.request("POST", "/api/agent-webhooks", {
     token: owner.secret,
     body: { url: "https://example.com/qa3-content-trust", events: ["message.posted"] },
@@ -132,10 +143,15 @@ try {
     token: guest.secret,
     body: cmd("message.posted", { messageId: randomUUID(), body: `@${ownerName} ${marker}` }),
   }), "guest message");
-  must(await client.request("POST", `${roomPath}/work-claims/trust-claim/review`, {
+  const guestNote = await client.request("POST", `${roomPath}/work-claims/trust-claim/review`, {
     token: guest.secret,
     body: { note: marker },
-  }), "guest review note");
+  });
+  if (guestNote.status !== 403) throw new Error(`guest review note: expected 403, got HTTP ${guestNote.status}`);
+  must(await client.request("POST", `${roomPath}/work-claims/trust-claim/review`, {
+    token: reviewer.secret,
+    body: { note: marker },
+  }), "reviewer review note");
 
   const frames = await framesPromise;
   streamAbort.abort();
@@ -146,7 +162,7 @@ try {
 
   const events = await client.request("GET", `${roomPath}/events?limit=100`, { token: owner.secret });
   if (events.status !== 200) throw new Error(`events: HTTP ${events.status}`);
-  judge("http /events", events.text, { payload: true, expectedFail: "F9 SEC-2" });
+  judge("http /events", events.text, { payload: true, expectedFail: "F9 SEC-2b" });
 
   const needs = await client.request("GET", "/api/needs-me", { token: owner.secret });
   if (needs.status !== 200) throw new Error(`needs-me: HTTP ${needs.status}`);
@@ -154,7 +170,7 @@ try {
 
   const claims = await client.request("GET", `${roomPath}/work-claims?limit=20`, { token: owner.secret });
   if (claims.status !== 200) throw new Error(`work-claims: HTTP ${claims.status}`);
-  judge("http work-claims list", claims.text, { payload: true, expectedFail: "F9 SEC-2" });
+  judge("http work-claims list", claims.text, { payload: true, expectedFail: null });
 
   let payload = "";
   for (let attempt = 0; attempt < 5 && !payload.includes(marker); attempt++) {
@@ -162,7 +178,7 @@ try {
     if (!payload.includes(marker)) await new Promise(resolve => setTimeout(resolve, 200));
   }
   judge("webhook stored payload", payload, { payload: true, expectedFail: "F9 Q3-D" });
-  judge("sse frame", frames.map(frame => frame.text).join("\n"), { payload: true, expectedFail: "F9 SEC-2" });
+  judge("sse frame", frames.map(frame => frame.text).join("\n"), { payload: true, expectedFail: "F9 SEC-2b" });
 
   exit(report.finish());
 } catch (error) {
