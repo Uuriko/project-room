@@ -6,6 +6,8 @@ import { RoomAgentClient } from '../client/room-agent.mjs';
 import { RoomStore } from '../server/store.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { createRoomServer } from '../server/http.mjs';
+// SEC-2: claim reads carry content-trust markers; compare the claim itself.
+const stripTrust = value => JSON.parse(JSON.stringify(value, (key, entry) => (key === 'untrusted' || key === 'contentTrust' ? undefined : entry)));
 
 async function fixture(t, { reviewerPermissions = [] } = {}) {
   const store = new RoomStore(':memory:');
@@ -109,10 +111,10 @@ test('SDK preserves legacy notes and requires an explicit approval for reviewed 
   const { owner, peer } = await fixture(t, { reviewerPermissions: ['verify'] });
   await owner.workClaim('reviewed', { reviewPolicy: 'distinct_member' });
   await owner.updateWorkItem('reviewed', { state: 'in_progress' });
-  const before = await owner.workClaimGet('reviewed');
+  const before = stripTrust(await owner.workClaimGet('reviewed'));
   await assert.rejects(owner.workComplete('reviewed', { reviewedBy: 'reviewer' }),
     error => error.status === 403 && error.code === 'work_review_rejected');
-  assert.deepEqual(await owner.workClaimGet('reviewed'), before);
+  assert.deepEqual(stripTrust(await owner.workClaimGet('reviewed')), before);
   const reviewed = await peer.reviewWorkItem('reviewed', { note: 'Checked the result' });
   assert.equal(reviewed.attestations.length, 1);
   assert.equal(reviewed.attestations[0].memberId, 'reviewer');
@@ -122,25 +124,25 @@ test('SDK preserves legacy notes and requires an explicit approval for reviewed 
     error => error.status === 403 && error.code === 'work_review_rejected');
   await assert.rejects(peer.workComplete('reviewed', { reviewedBy: 'reviewer' }),
     error => error.status === 403 && error.code === 'work_not_owner');
-  assert.deepEqual(await owner.workClaimGet('reviewed'), reviewed);
+  assert.deepEqual(stripTrust(await owner.workClaimGet('reviewed')), reviewed);
   for (const verdict of ['comment', 'changes_requested']) {
     const negative = await peer.reviewWorkItem('reviewed', { verdict, summary: `Feedback: ${verdict}` });
     assert.equal(negative.reviews[0].verdict, verdict);
     assert.equal(negative.reviews[0].memberId, 'reviewer');
     await assert.rejects(owner.workComplete('reviewed', { reviewedBy: 'reviewer' }),
       error => error.status === 403 && error.code === 'work_review_rejected');
-    assert.deepEqual(await owner.workClaimGet('reviewed'), negative);
+    assert.deepEqual(stripTrust(await owner.workClaimGet('reviewed')), negative);
   }
   const approval = { verdict: 'approve', summary: 'Explicitly approved the current result', url: 'https://example.com/review/result' };
   const approved = await peer.reviewWorkItem('reviewed', approval);
   assert.equal(approved.reviews[0].memberId, 'reviewer');
   for (const [field, value] of Object.entries(approval)) assert.equal(approved.reviews[0][field], value);
-  assert.deepEqual((await owner.workClaimGet('reviewed')).reviews, approved.reviews);
+  assert.deepEqual(stripTrust((await owner.workClaimGet('reviewed')).reviews), approved.reviews);
   const done = await owner.workComplete('reviewed', { reviewedBy: 'reviewer' });
   assert.equal(done.state, 'done');
   assert.equal(done.reviewedBy, 'reviewer');
   await assert.rejects(peer.reviewWorkItem('reviewed', { note: 'Too late' }), invalid);
-  assert.deepEqual(await owner.workClaimGet('reviewed'), done);
+  assert.deepEqual(stripTrust(await owner.workClaimGet('reviewed')), done);
 });
 
 test('SDK lease renewal needs the owner and a fresh public progress message', async t => {
@@ -151,14 +153,14 @@ test('SDK lease renewal needs the owner and a fresh public progress message', as
   const progress = (await owner.say('Implemented the client boundary')).event.data.messageId;
   const foreign = (await peer.say('Someone else checked in')).event.data.messageId;
   const privateProgress = (await owner.say('Private update', { toMemberId: 'reviewer' })).event.data.messageId;
-  const before = await owner.workClaimGet('renewed');
+  const before = stripTrust(await owner.workClaimGet('renewed'));
   await assert.rejects(peer.renewWorkItem('renewed', { progressMessageId: foreign }),
     error => error.status === 403 && error.code === 'work_not_owner');
-  assert.deepEqual(await owner.workClaimGet('renewed'), before);
+  assert.deepEqual(stripTrust(await owner.workClaimGet('renewed')), before);
   for (const [progressMessageId, code] of [[foreign, 'claim_renewal_source_foreign'],
     [privateProgress, 'claim_renewal_source_required'], ['missing', 'claim_renewal_source_required']]) {
     await assert.rejects(owner.renewWorkItem('renewed', { progressMessageId }), error => error.code === code);
-    assert.deepEqual(await owner.workClaimGet('renewed'), before);
+    assert.deepEqual(stripTrust(await owner.workClaimGet('renewed')), before);
   }
   const renewed = await owner.renewWorkItem('renewed', {
     progressMessageId: progress, leaseHours: 2, note: 'Continue the verified scope'
@@ -167,7 +169,7 @@ test('SDK lease renewal needs the owner and a fresh public progress message', as
   assert.equal(renewed.history.at(-1).note, 'Continue the verified scope');
   await assert.rejects(owner.renewWorkItem('renewed', { progressMessageId: progress }),
     error => error.status === 422 && error.code === 'claim_renewal_source_stale');
-  assert.deepEqual(await owner.workClaimGet('renewed'), renewed);
+  assert.deepEqual(stripTrust(await owner.workClaimGet('renewed')), renewed);
 });
 
 // Transport owner: neither a pure transition nor a handler fixture catches the
@@ -179,7 +181,7 @@ test('SDK links a later PR with both preconditions and preserves HTTP refusals',
     expectedClaimedAt: claimed.claimedAt, expectedHistoryLength: claimed.history.length };
   const linked = await owner.linkWorkItemPullRequest(claimed.id, args);
   assert.equal(linked.pullRequests[0].url, args.pullRequest.slice(0, -1));
-  assert.deepEqual(await owner.workClaimGet(claimed.id), linked);
+  assert.deepEqual(stripTrust(await owner.workClaimGet(claimed.id)), linked);
   await assert.rejects(owner.linkWorkItemPullRequest(claimed.id, args), error => {
     assert.equal(error.status, 409);
     assert.equal(error.code, 'work_claim_conflict');
@@ -192,5 +194,5 @@ test('SDK links a later PR with both preconditions and preserves HTTP refusals',
     { expectedClaimedAt: null }, { pullRequest: { url: args.pullRequest, outcome: 'merged' } }]) {
     await assert.rejects(owner.linkWorkItemPullRequest(claimed.id, { ...fresh, ...fields }), invalid);
   }
-  assert.deepEqual(await owner.workClaimGet(claimed.id), linked);
+  assert.deepEqual(stripTrust(await owner.workClaimGet(claimed.id)), linked);
 });
