@@ -4,6 +4,7 @@
 // row. Unmatched paths fall through. Batch C fills `capability`. SPLIT reads
 // `scope`. Both columns are required now.
 
+import { AUTH_ROUTES } from "./auth.mjs";
 import { INBOX_ROUTES } from "./inbox.mjs";
 import { MEMBER_PERMISSION_ROUTES } from "./member-permissions.mjs";
 
@@ -12,7 +13,7 @@ export const ROUTE_SCOPES = Object.freeze(["worker", "public", "directory", "roo
 export const ROUTE_METHODS = Object.freeze(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]);
 
 // Rows land here as groups leave the legacy chain. Do not push; replace the array.
-export const ROUTES = Object.freeze([...INBOX_ROUTES, ...MEMBER_PERMISSION_ROUTES]);
+export const ROUTES = Object.freeze([...AUTH_ROUTES, ...INBOX_ROUTES, ...MEMBER_PERMISSION_ROUTES]);
 
 export function assertRouteRow(row) {
   const problems = [];
