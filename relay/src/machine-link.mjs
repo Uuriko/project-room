@@ -73,8 +73,9 @@ export class MachineLink extends DurableObject {
     // Replay cache for signed control-plane messages (M1): key = the
     // presented signature, value = expiry ms. A captured halt/pause/bye
     // replayed inside the HMAC skew window is rejected with 409 instead of
-    // re-triggering the control action.
-    this.seenControlSigs = new Map();
+    // re-triggering the control action. Persisted to DO storage so a
+    // restart/eviction cannot reopen the replay window.
+    this.seenControlSigs = null; // lazy: Map loaded from storage on first use
   }
 
   async fetch(request) {

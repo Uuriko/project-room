@@ -519,6 +519,11 @@ export class MachineBot {
     // M2: never stomp a slot another lease holds. The daemon's own call()
     // path rejects foreign claimIds with SLOT_HELD; the bot must apply the
     // same rule before writing instead of blindly overwriting.
+    // Known limit: a relay lease minted but not yet used through the daemon
+    // is not in state.slots until its first call. The window is narrow (the
+    // lease must arrive between the bot's check and its first write), and
+    // the daemon still rejects the late arrival with SLOT_HELD rather than
+    // interleaving work.
     const held = state.slots[this.active.slot];
     if (held && held.claimId !== this.active.leaseId) {
       throw new Error(`Slot ${this.active.slot} is held by another lease; the bot refused to seize it.`);
