@@ -34,7 +34,7 @@ import { ensureGrantsSchema } from "./grants.mjs";
 import { canonicalInvitationData, invitationJournalEntry, invitationJournalSchema, replayInvitationJournal } from "./invitation-journal.mjs";
 import { invitationJoinedEvent, assertInvitationMembershipEvidence } from "./invitation-evidence.mjs";
 import { STORE_SCHEMA_VERSION, fenceDefinitions, registerWriter, installWriterFence, verifyWriterFence } from "./writer-fence.mjs";
-import { MESSAGES_SCHEMA, syncMessageRows } from "./messages-store.mjs";
+import { MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, syncMessageRows, runMessagesBackfill, checkMessagesParity as verifyMessagesParity } from "./messages-store.mjs";
 import { commitMessageRedaction } from "./message-redaction.mjs";
 import { historyFloor as readHistoryFloor, messageInHistory, rowInHistory, indexMessages as indexHistoryMessages } from "./history-visibility.mjs"; // PRIV-2
 import { migrateRoomLifecycleV28, verifyRoomLifecycle, refuseArchivedWrite, createAccountRoom, accountRoomEntry, ACCOUNT_ROOM_SELECT, archivedAtOf } from "./room-lifecycle.mjs";
@@ -985,7 +985,7 @@ function roomSchemaStamp() {
     directSendSchema, inboxStitchSchema, RETIRED_BOARD_V2_SCHEMA,
     agentKeyRegistrySchema, INTEGRITY_SNAPSHOT_SCHEMA, OPERATOR_ACTIONS_SCHEMA,
     INTEGRITY_JOB_CURSOR_SCHEMA, INTEGRITY_ROOM_STATE_SCHEMA, INTEGRITY_SWEEP_COLUMN,
-    ROOM_SCHEMA_STAMP_SCHEMA, LOOKUP_INDEXES, MESSAGES_SCHEMA,
+    ROOM_SCHEMA_STAMP_SCHEMA, LOOKUP_INDEXES, MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA,
     PUBLIC_READ_MODEL_SCHEMA
   ];
   for (const part of parts) hash.update("\0").update(part ?? "");
@@ -1625,6 +1625,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // before installWriterFence attaches the v37 triggers. IF NOT EXISTS
       // is idempotent. A warm wake whose stamp matches skips this block.
       this.db.exec(MESSAGES_SCHEMA);
+      // MSG-2: replay cursor. Unfenced. The integrity cron fills it. A warm
+      // wake whose stamp matches skips this block; the stamp includes this DDL.
+      this.db.exec(MESSAGES_BACKFILL_CURSOR_SCHEMA);
       // Idempotent: recreates fences for tables the additive schemas just
       // (re)created, and refuses a file whose existing triggers drifted.
       phase("fence");
@@ -1690,6 +1693,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       .run(STORE_SCHEMA_VERSION, roomSchemaStamp());
   }
 
+  // MSG-2: replay events into messages. Idempotent. A mid-batch stop keeps
+  // the committed prefix on messages_backfill_cursor.
+  backfillMessages(options = {}) {
+    return runMessagesBackfill(this, options);
+  }
+  checkMessagesParity() {
+    return verifyMessagesParity(this);
+  }
   // At most `limit` chain members whose cap was never copied off the invite.
   // The mint path refuses a NULL cap, so a tick that stops early fails closed.
   backfillReferralDepth(limit = 500) {
@@ -1722,7 +1733,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       () => this.quarantineSplits.verify(),
       () => verifyRoomLifecycle(this),
       () => { if (!this.readOnly) this.identities.expireInactive(); },
-      () => this.backfillReferralDepth(500)
+      () => this.backfillReferralDepth(500),
+      // MSG-2: replay message events here, one budgeted batch per visit,
+      // then check one caught-up room. This batch runs as the "integrity"
+      // job in server/jobs.mjs, so the backfill inherits that job's cadence,
+      // budget and runtimes without a second registry entry.
+      () => this.backfillMessages({ deadline }),
+      () => this.checkMessagesParity()
     ];
     let step = this.transaction(() => this.db.prepare("SELECT step FROM integrity_job_cursor WHERE singleton=1").get()?.step ?? 0);
     if (!Number.isInteger(step) || step < 0 || step >= steps.length) step = 0;
