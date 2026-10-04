@@ -97,7 +97,7 @@ test("native review shows exact text and leaves human approval pending", { timeo
 // this task independently. Use the real local result/command routes and the
 // existing fixture; no production seam, model, real device or AT claim.
 for (const theme of ["dark", "light"]) test(`native result 320px ${theme}: read, review and return to the same result`, { timeout: 30000 }, async t => {
-  const body = "A quiet room\n\nCheck this exact reference: " + "result-reference-".repeat(12) + "\nKeep the next step with the same work.";
+  const body = "A quiet room\n\nCheck this exact reference: " + "resultreference".repeat(12) + "\nKeep the next step with the same work.";
   const f = await setup(t, { review: true, viewport: { width: 320, height: 900 }, body });
   const { page } = f, receipt = structuredClone(f.item().receipt), reads = [], evidence = [];
   const card = page.locator(`[data-work-record-id="${f.workItemId}"]`);
