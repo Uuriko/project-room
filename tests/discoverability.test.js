@@ -2689,6 +2689,37 @@ test("project offer publish is served for the inventoried method", { timeout: 30
   assert.equal(body.error.code, "unauthenticated");
 });
 
+// server/http.mjs /api/rooms/{roomId}/project-offers/{offerId}/withdraw: POST only. Missing credential is 401.
+const PROJECT_OFFER_WITHDRAW_INVENTORY = {
+  "/api/rooms/{roomId}/project-offers/{offerId}/withdraw": ["POST"],
+};
+
+test("openapi inventory lists served project-offer withdraw methods", () => {
+  const doc = buildOpenApiJson({ origin: "https://room.example" });
+  for (const [path, methods] of Object.entries(PROJECT_OFFER_WITHDRAW_INVENTORY)) {
+    const entry = DISCOVERABILITY_ROUTES.find(item => item.path === path);
+    assert.ok(entry, `route table lists ${path}`);
+    assert.deepEqual([...entry.methods].sort(), [...methods].sort(), path);
+    const op = doc.paths[path]?.post;
+    assert.equal(op?.operationId, "withdrawProjectOffer");
+    assert.match(op.summary, /rooms:write/);
+    assert.match(op.description, /room credential/i);
+    assert.doesNotMatch(op.description, /no credential required/i);
+  }
+});
+
+test("project offer withdraw is served for the inventoried method", { timeout: 30000 }, async t => {
+  const { origin } = await serve(t);
+  const res = await fetch(`${origin}/api/rooms/commons/project-offers/probe-offer/withdraw`, {
+    method: "POST",
+    headers: { Origin: origin, "Content-Type": "application/json" },
+    body: "{}",
+  });
+  const body = await res.json();
+  assert.equal(res.status, 401);
+  assert.equal(body.error.code, "unauthenticated");
+});
+
 test("openapi inventory lists served work-claims methods", () => {
   const doc = buildOpenApiJson({ origin: "https://room.example" });
   for (const [path, methods] of Object.entries(WORK_CLAIM_INVENTORY)) {
