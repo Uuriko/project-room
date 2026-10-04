@@ -19,12 +19,34 @@ if [ "${ROOM_MACHINE_ENABLED:-}" != "1" ]; then
   exit 0
 fi
 
+# M-2 (L11 residual): never resolve the node interpreter from the invoking
+# user's PATH — a planted `node` earlier in PATH would execute `apply-system`
+# as root through the sudo invocation below. Bare names are resolved from
+# fixed system directories only; an explicit path (ROOM_MACHINE_NODE
+# containing a slash) is the operator's deliberate choice and used verbatim.
+# ROOM_MACHINE_NODE_DIRS overrides the directory list (tests).
+SYSTEM_NODE_DIRS="${ROOM_MACHINE_NODE_DIRS:-/opt/homebrew/bin /usr/local/bin /usr/bin /bin}"
+resolve_system_node() {
+  local name="$1" dir cand
+  for dir in $SYSTEM_NODE_DIRS; do
+    cand="$dir/$name"
+    if [ -x "$cand" ] && [ ! -d "$cand" ]; then
+      printf '%s' "$cand"
+      return 0
+    fi
+  done
+  return 1
+}
 NODE="${ROOM_MACHINE_NODE:-node}"
-if ! command -v "$NODE" >/dev/null 2>&1; then
-  echo "Node.js 24.19 or newer is required."
-  exit 1
-fi
-NODE_BIN=$(command -v "$NODE")
+case "$NODE" in
+  */*) NODE_BIN="$NODE" ;;
+  *)
+    if ! NODE_BIN=$(resolve_system_node "$NODE"); then
+      echo "Node.js 24.19 or newer is required (no '$NODE' in system directories: $SYSTEM_NODE_DIRS)."
+      exit 1
+    fi
+    ;;
+esac
 NODE_MAJOR=$("$NODE_BIN" -p "Number(process.versions.node.split('.')[0])")
 NODE_MINOR=$("$NODE_BIN" -p "Number(process.versions.node.split('.')[1])")
 if [ "$NODE_MAJOR" -lt 24 ] || { [ "$NODE_MAJOR" -eq 24 ] && [ "$NODE_MINOR" -lt 19 ]; }; then
@@ -98,7 +120,8 @@ fi
 
 # L11: never inherit the user's PATH into the root invocation — a planted
 # binary earlier in PATH would run as root. System tools live in the fixed
-# set below.
+# set below. M-2: the node interpreter itself is resolved from fixed system
+# directories above, never from the user's PATH, for the same reason.
 sudo env ROOM_MACHINE_ENABLED=1 ROOM_MACHINE_HOME="$ROOM_MACHINE_HOME" PATH="/usr/bin:/bin:/usr/sbin:/sbin" "$NODE_BIN" "$BIN" apply-system
 
 if [ "$(uname)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then

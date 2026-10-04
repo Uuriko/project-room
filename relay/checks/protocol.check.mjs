@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
-  claimOnSlot, control, enroll, expireCode, linkDaemon, mint, postCall, postRpc, readBody, relayFetch, secret, startRelay,
+  claimOnSlot, control, enroll, expireCode, linkDaemon, mint, postCall, postRpc, readBody, relayFetch, secret, signControl, startRelay,
 } from "./harness.mjs";
 
 function wireContract() {
@@ -153,6 +153,50 @@ test("enroll and the machine socket match machine/PROTOCOL.md", async () => {
     });
     assert.deepEqual(listed.body.result.tools.map(tool => tool.name), contract.allow);
     assert.equal(contract.allow.includes("shell.host"), false);
+  } finally {
+    await ctx.dispose();
+  }
+});
+
+// M-1: the control signature binds the action path, so a signed message
+// captured for one control endpoint cannot be replayed verbatim to another.
+test("a control signature minted for one endpoint is refused on another", async () => {
+  const ctx = await startRelay({ passthrough: true, lockCacheMs: "0" });
+  try {
+    const minted = await mint(ctx, {
+      label: "spare", roomId: "commons", ownerMemberId: "owner", inviteCode: "RM-3456789ABCDEFGHJ",
+    });
+    assert.equal(minted.status, 201);
+    const issued = await enroll(ctx, minted.body.code);
+    assert.equal(issued.status, 200);
+    const haltPath = `/v0/machines/${issued.body.machineId}/halt`;
+    const byePath = `/v0/machines/${issued.body.machineId}/bye`;
+
+    async function postSigned(path, signed) {
+      return readBody(await relayFetch(ctx, path, {
+        method: "POST",
+        raw: signed.raw,
+        headers: {
+          "x-relay-timestamp": signed.timestamp,
+          "x-relay-signature": signed.signature,
+        },
+      }));
+    }
+
+    // A halt signature replayed verbatim to /bye must not verify.
+    const crossToBye = await postSigned(byePath, signControl(ctx, haltPath, {}));
+    assert.equal(crossToBye.status, 401);
+    assert.equal(crossToBye.body.error.code, "unauthenticated");
+
+    // A bye signature replayed verbatim to /halt must not verify.
+    const crossToHalt = await postSigned(haltPath, signControl(ctx, byePath, {}));
+    assert.equal(crossToHalt.status, 401);
+    assert.equal(crossToHalt.body.error.code, "unauthenticated");
+
+    // The same signature still verifies on the endpoint it was minted for.
+    const ownBye = await postSigned(byePath, signControl(ctx, byePath, {}));
+    assert.equal(ownBye.status, 200);
+    assert.equal(ownBye.body.bye, true);
   } finally {
     await ctx.dispose();
   }

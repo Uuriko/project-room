@@ -25,6 +25,10 @@ export async function verifyLinkSignature(secret, request, rawBody, nowSec) {
   if (Math.abs(nowSec - stamp) > HMAC_SKEW_SEC) {
     throw relayError(401, "unauthenticated", "The link signature was refused");
   }
-  const expected = await hmacHex(secret, `${timestamp}.${rawBody}`);
+  // M-1: the action path is bound into the signed material. A signature minted
+  // for one control endpoint (e.g. /halt) does not verify on another (e.g.
+  // /bye), so a captured signed message cannot be replayed cross-endpoint.
+  const path = new URL(request.url).pathname;
+  const expected = await hmacHex(secret, `${timestamp}.${path}.${rawBody}`);
   if (!timingEqual(expected, signature)) throw relayError(401, "unauthenticated", "The link signature was refused");
 }

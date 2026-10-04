@@ -423,9 +423,10 @@ export class MachineLink extends DurableObject {
 
   // M1: reject a signed control message whose exact signature was already
   // honored. Signatures embed a per-second timestamp, so a legit repeat
-  // (new timestamp, new signature) is never a replay. The key includes the
-  // action path: different actions (e.g. resume vs bye) can share an empty
-  // payload, and same-second calls would otherwise collide.
+  // (new timestamp, new signature) is never a replay. The signature also
+  // binds the action path (see verifyLinkSignature), so a captured message
+  // cannot move cross-endpoint; the per-action namespace below stays as
+  // defense in depth.
   async rejectReplayedControl(request) {
     const sig = (request.headers.get("x-relay-signature") ?? "").toLowerCase();
     const action = new URL(request.url).pathname;

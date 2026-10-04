@@ -526,4 +526,46 @@ test.describe("room-machine", { concurrency: false }, () => {
     rmSync(home, { recursive: true, force: true });
     rmSync(dir, { recursive: true, force: true });
   });
+
+  test("M-2: the installer never resolves the root node binary from the user's PATH", () => {
+    // Slice install.sh: keep everything through the node version check, then
+    // print the resolved NODE_BIN instead of continuing the install. The
+    // interpreter that the sudo invocation would execute as root must come
+    // from a fixed system directory even when a planted `node` sits earlier
+    // in the user's PATH.
+    const script = readFileSync(join(repo, "machine/install.sh"), "utf8");
+    const cutAt = script.indexOf("sha256_file()");
+    assert.notEqual(cutAt, -1);
+    const probe = script.slice(0, cutAt) + 'printf "RESOLVED_NODE_BIN=%s\\n" "$NODE_BIN"\n';
+    const probeFile = join(tmpdir(), `room-machine-node-probe-${randomUUID()}.sh`);
+    writeFileSync(probeFile, probe);
+
+    const evilDir = mkdtempSync(join(tmpdir(), "room-machine-evil-"));
+    const sysDir = mkdtempSync(join(tmpdir(), "room-machine-sysbin-"));
+    const home = homeDir();
+    // Planted node first in PATH: transparent wrapper, must never be selected.
+    writeFileSync(join(evilDir, "node"), `#!/bin/sh\nexec "${process.execPath}" "$@"\n`, { mode: 0o755 });
+    // Trusted node in a fixed system directory.
+    writeFileSync(join(sysDir, "node"), `#!/bin/sh\nexec "${process.execPath}" "$@"\n`, { mode: 0o755 });
+
+    const ran = spawnSync("bash", [probeFile], {
+      env: {
+        PATH: `${evilDir}:${sysDir}:/usr/bin:/bin`,
+        HOME: home,
+        TMPDIR: home,
+        ROOM_MACHINE_ENABLED: "1",
+        ROOM_MACHINE_HOME: home,
+        ROOM_MACHINE_NODE_DIRS: sysDir,
+      },
+      encoding: "utf8",
+    });
+    assert.equal(ran.status, 0, ran.stderr);
+    const escaped = sysDir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    assert.match(ran.stdout, new RegExp(`^RESOLVED_NODE_BIN=${escaped}/node$`, "m"));
+    assert.doesNotMatch(ran.stdout, /evil/);
+    rmSync(probeFile, { force: true });
+    rmSync(evilDir, { recursive: true, force: true });
+    rmSync(sysDir, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  });
 });
