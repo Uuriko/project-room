@@ -65,7 +65,7 @@ const deferred = () => { let resolve; const promise = new Promise(done => { reso
 
 for (const schedule of ["initial-handover", "connected-refresh"]) {
   test(`snapshot-to-stream ${schedule} converges to admitted message identities and content`, { timeout: 30000 }, async t => {
-    const f = createAcceptanceFixture(), held = deferred(), release = deferred(), frameArrived = deferred();
+    const f = createAcceptanceFixture(), held = deferred(), release = deferred(), frameArrived = deferred(), startupRead = deferred();
     const trace = [], snapshots = [], frames = [], errors = [], admissions = [];
     const record = (kind, value = {}) => trace.push({ order: trace.length, kind, ...value });
     const admit = (id, type, data) => {
@@ -77,7 +77,8 @@ for (const schedule of ["initial-handover", "connected-refresh"]) {
     if (schedule === "initial-handover") first = admit("nrc1-seed-command", "message.posted", { messageId: "nrc1-seed", body: "Before handover" });
     const server = createRoomServer({ store: f.store, streamInterval: 50 });
     let browser, page, cdp, armed = false, captured = false, heldSequence, targetSequence;
-    let finalView, oracleControls = [], journal;
+    let finalView, journal;
+    const oracleControls = [];
     t.after(async () => {
       release.resolve();
       mkdirSync("test-results", { recursive: true });
@@ -107,25 +108,33 @@ for (const schedule of ["initial-handover", "connected-refresh"]) {
       if (receipt.sequence === targetSequence) frameArrived.resolve();
     });
     await page.goto(`http://127.0.0.1:${server.address().port}`);
-    if (schedule === "connected-refresh") {
-      await signInFixture(page, f.keys.owner);
-      await page.waitForFunction(() => document.querySelector("#connection-status").textContent.startsWith("Connected"));
-      await page.locator('[data-message-record-id="test-welcome"]').waitFor();
-    }
     await page.route(/\/api\/rooms\/commons(?:\?.*)?$/, async route => {
       if (route.request().method() !== "GET") { await route.continue(); return; }
+      const requestOrder = trace.length;
+      record("snapshot-request");
+      const afterStreamOpen = trace.some(entry => entry.kind === "stream-request");
       const response = await route.fetch();
       const snapshot = await response.json();
       const selected = { sequence: snapshot.sequence,
         messages: messageView((snapshot.state?.messages ?? []).filter(message => message.id.startsWith("nrc1-"))) };
       snapshots.push(selected); record("snapshot-captured", selected);
       if (armed && !captured) {
-        captured = true; heldSequence = snapshot.sequence; record("snapshot-held", { sequence: heldSequence }); held.resolve();
+        captured = true; heldSequence = snapshot.sequence; record("snapshot-held", { sequence: heldSequence, requestOrder }); held.resolve();
         await release.promise; record("snapshot-released", { sequence: heldSequence });
       }
       await route.fulfill({ response });
       record("snapshot-delivered", { sequence: snapshot.sequence });
+      if (!armed && afterStreamOpen) startupRead.resolve();
     });
+    if (schedule === "connected-refresh") {
+      await signInFixture(page, f.keys.owner);
+      // Connected is announced before the on-open GET; await its actual
+      // completion so startup traffic cannot steal the scheduled held read.
+      await startupRead.promise;
+      await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      record("startup-read-settled");
+    }
+    const establishedStreams = trace.filter(entry => entry.kind === "stream-request").length;
     armed = true;
     // Initial startup awaits this snapshot before constructing EventSource.
     // The other schedule keeps its established stream open during the read.
@@ -165,8 +174,12 @@ for (const schedule of ["initial-handover", "connected-refresh"]) {
     const releasedAt = trace.findIndex(entry => entry.kind === "snapshot-released");
     const frameAt = trace.findIndex(entry => entry.kind === "native-frame" && entry.sequence === latest.sequence);
     assert.ok(heldAt < releasedAt);
-    if (schedule === "connected-refresh") assert.ok(heldAt < frameAt && frameAt < releasedAt, "held GET → actual native v2 frame → release stale GET");
-    else {
+    if (schedule === "connected-refresh") {
+      const seedFrameAt = trace.findIndex(entry => entry.kind === "native-frame" && entry.id === first.event.id);
+      assert.ok(seedFrameAt >= 0 && seedFrameAt < trace[heldAt].requestOrder, "native seed notification owns the held GET");
+      assert.ok(heldAt < frameAt && frameAt < releasedAt, "held GET → actual native v2 frame → release stale GET");
+      assert.equal(trace.filter(entry => entry.kind === "stream-request").length, establishedStreams, "no reconnect may mask a dropped refresh hint");
+    } else {
       const connectedAt = trace.findIndex(entry => entry.kind === "stream-request");
       assert.ok(releasedAt < connectedAt && connectedAt < frameAt, "initial snapshot release → native stream → replay");
       assert.equal(trace[connectedAt].after, first.sequence);
