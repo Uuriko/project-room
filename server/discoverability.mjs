@@ -214,6 +214,12 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   }),
   // http.mjs: POST cancels one invitation link. Same bearer gate as share-links.
   route("/api/rooms/{roomId}/share-links-cancel", ["POST"], "room-invite-admin", "Cancel one invitation link for this room.", "cancelRoomShareLink"),
+  // http.mjs: GET lists the caller's DM consent pairs; POST requests one.
+  // Other methods are not these ifs. API keys need rooms:read or rooms:write.
+  route("/api/rooms/{roomId}/dm-consents", ["GET", "POST"], "room-member", "List this member's DM consent pairs. The owner also sees pair metadata. API keys need the rooms:read scope.", "listRoomDmConsents", {
+    operationIds: { GET: "listRoomDmConsents", POST: "requestRoomDmConsent" },
+    summaryByMethod: { POST: "Request a DM consent pair in this room. API keys need the rooms:write scope." },
+  }),
   route("/api/share-links/join-agent", ["POST"], "identity-secret", "Guest-link redemption: join with a guest pass.", "joinAgentViaShareLink"),
   // http.mjs: GET and HEAD both collect cross-room attention. HEAD strips the body.
   // Other methods reject 405. Allow lists GET only; the serving if is the inventory.
