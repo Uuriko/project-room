@@ -40,7 +40,7 @@ async function post(page, origin, path, data, status = 200) {
 // removing interception; the cleanup must retain the original test failure.
 async function drainBoardRoutes(page, ...releases) {
   for (const release of releases) release.resolve();
-  await page.unrouteAll();
+  await page.unrouteAll({ behavior: "wait" });
 }
 
 // Authoring gate: a real Playwright callback must finish before fixture cleanup
@@ -368,10 +368,10 @@ test("board columns, keyboard claim, linked work returns, chat line, 390px, and 
     const arrived = Promise.withResolvers(), release = Promise.withResolvers();
     t.after(() => release.resolve());
     const listPattern = "**/api/rooms/commons/work-claims?*";
-    let captured = false;
+    let captured = null;
     const holdList = async route => {
       if (captured || route.request().method() !== "GET") return route.continue();
-      captured = true;
+      captured = route.request();
       const response = await route.fetch();
       assert.equal(response.status(), 200);
       arrived.resolve();
@@ -393,8 +393,7 @@ test("board columns, keyboard claim, linked work returns, chat line, 390px, and 
       const reopenedUrl = page.url();
       const reopenedScroll = await dialog.evaluate(node => node.scrollTop);
       assert.ok(Math.abs(reopenedScroll - abandonedScroll) > 1, `${dismiss}: the new opening has its own scroll position`);
-      const delivered = page.waitForResponse(response => response.request().method() === "GET"
-        && new URL(response.url()).pathname === "/api/rooms/commons/work-claims");
+      const delivered = page.waitForResponse(response => response.request() === captured);
       release.resolve();
       await (await delivered).finished();
       // This new, persisted claim proves the unmodified held response painted.
@@ -407,8 +406,7 @@ test("board columns, keyboard claim, linked work returns, chat line, 390px, and 
       assert.ok(Math.abs(await dialog.evaluate(node => node.scrollTop) - reopenedScroll) <= 1, `${dismiss}: an abandoned return cannot restore its old scroll`);
       assert.deepEqual(navigationState(), beforeDelayedReturn, `${dismiss}: returning and reopening change no Room state`);
     } finally {
-      release.resolve();
-      await page.unroute(listPattern, holdList);
+      await drainBoardRoutes(page, release);
     }
   }
 
@@ -701,9 +699,7 @@ test("waiting prerequisites stay visible, link by keyboard, and become claimable
     console.error("Board Claim diagnostic:", JSON.stringify(diagnostic));
     throw error;
   } finally {
-    releaseRead.resolve(); releaseAction.resolve(); releaseReconcile.resolve();
-    await page.unroute(listPattern, holdRead);
-    await page.unroute(claimPattern, holdAction);
+    await drainBoardRoutes(page, releaseRead, releaseAction, releaseReconcile);
   }
 });
 
@@ -823,17 +819,16 @@ test("owners link a draft PR, reconcile held responses, and refresh a changed cl
       await axe(page);
     }
   } finally {
-    release.resolve(); releaseRead.resolve();
-    await page.unroute(pattern, holdWrite); await page.unroute(listPattern, holdRead);
+    await drainBoardRoutes(page, release, releaseRead);
   }
 
   // Keep the old form visible while a real release/reclaim changes its round.
   // A 409 must refresh the card and explain the change, never resend the URL.
   const refreshArrived = Promise.withResolvers(), refreshRelease = Promise.withResolvers();
-  let heldRefresh = false;
+  let heldRefresh = null;
   const holdRefresh = async route => {
     if (heldRefresh) return route.continue();
-    heldRefresh = true;
+    heldRefresh = route.request();
     const response = await route.fetch();
     assert.equal(response.status(), 200);
     refreshArrived.resolve();
@@ -856,8 +851,7 @@ test("owners link a draft PR, reconcile held responses, and refresh a changed cl
     await page.waitForFunction(() => document.querySelector("#board-status")?.textContent.startsWith("Claim changed. The board is refreshed"));
     assert.equal(await input.evaluate(node => node === document.activeElement), true);
     await page.locator("#board-close").focus();
-    const delivered = page.waitForResponse(response => response.request().method() === "GET"
-      && new URL(response.url()).pathname === "/api/rooms/commons/work-claims");
+    const delivered = page.waitForResponse(response => response.request() === heldRefresh);
     refreshRelease.resolve();
     await (await delivered).finished();
     await page.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)));
@@ -1005,8 +999,7 @@ test("held Board reads and mutations retire on room switch and sign-out", { time
       }
       assert.deepEqual(errors, []);
     } finally {
-      release.resolve();
-      await page.unroute(pattern, hold);
+      await drainBoardRoutes(page, release);
       await context.close();
     }
   }
