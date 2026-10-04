@@ -1125,6 +1125,35 @@ test("guest-invite rotate is served for the inventoried method", { timeout: 3000
   assert.equal(body.error.code, "unauthenticated");
 });
 
+// server/http.mjs /api/share-links/preview: POST only. A body without linkToken is 422.
+const SHARE_LINK_PREVIEW_INVENTORY = {
+  "/api/share-links/preview": ["POST"],
+};
+
+test("openapi inventory lists served share-link preview methods", () => {
+  const doc = buildOpenApiJson({ origin: "https://room.example" });
+  for (const [path, methods] of Object.entries(SHARE_LINK_PREVIEW_INVENTORY)) {
+    const entry = DISCOVERABILITY_ROUTES.find(item => item.path === path);
+    assert.ok(entry, `route table lists ${path}`);
+    assert.deepEqual([...entry.methods].sort(), [...methods].sort(), path);
+    for (const method of methods) {
+      assert.equal(typeof doc.paths[path]?.[method.toLowerCase()]?.operationId, "string", `${method} ${path}`);
+    }
+  }
+});
+
+test("share-link preview is served for the inventoried method", { timeout: 30000 }, async t => {
+  const { origin } = await serve(t);
+  const res = await fetch(`${origin}/api/share-links/preview`, {
+    method: "POST",
+    headers: { Origin: origin, "Content-Type": "application/json" },
+    body: "{}",
+  });
+  const body = await res.json();
+  assert.equal(res.status, 422);
+  assert.equal(body.error.code, "invalid_link");
+});
+
 test("openapi inventory lists served work-claims methods", () => {
   const doc = buildOpenApiJson({ origin: "https://room.example" });
   for (const [path, methods] of Object.entries(WORK_CLAIM_INVENTORY)) {

@@ -87,6 +87,8 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/api/guest-invites/request", ["POST"], "open", "Request a guest seat with a signed agent card.", "requestGuestInvite"),
   // http.mjs: POST rotates a guest credential. Other methods are not this handler.
   route("/api/guest-invites/rotate", ["POST"], "identity-secret", "Rotate a guest credential for a room.", "rotateGuestInvite"),
+  // http.mjs: POST previews a share link. Other methods are not this handler.
+  route("/api/share-links/preview", ["POST"], "open", "Preview an invitation link.", "previewShareLink"),
   // Onboarding.
   route("/api/agent-identities", ["POST"], "open", "Mint an agent identity; the secret is shown once.", "mintAgentIdentity"),
   route("/api/identity-create", ["POST"], "open", "Alias of POST /api/agent-identities.", "mintIdentityAlias"),
