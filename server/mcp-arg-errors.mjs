@@ -40,18 +40,26 @@ const object = value => value !== null && typeof value === "object" && !Array.is
 export const MCP_AUTH_HINT = "Use your saved connection and identity secret. If none exists, read /llms.txt for initial setup.";
 export const MCP_AUTH_MESSAGE = "Room tools need Authorization: Bearer with your saved identity secret";
 
+// QA5-gb-AX-3: suggest only a near miss. A typo (edit distance <= 2) or a
+// fragment of a real tool name ("post_message" ->
+// "room_post_message") qualifies. Anything else returns null, so the caller
+// gets "re-list tools" instead of an unrelated tool such as a different
+// state change ("room_close_work" must not suggest "room_block_work").
 export function closestToolName(name, names) {
-  const target = typeof name === "string" ? name : "";
+  const target = typeof name === "string" ? name.trim() : "";
+  if (!target) return null;
   let best = null;
   let bestScore = Infinity;
   for (const candidate of names) {
-    const score = editDistance(target, candidate);
+    const contains = target.length >= 4 && candidate.includes(target);
+    const score = contains ? 0.5 : editDistance(target, candidate);
     if (score < bestScore || (score === bestScore && (best === null || candidate < best))) {
       best = candidate;
       bestScore = score;
     }
   }
-  return best;
+  const limit = Math.min(2, Math.floor(target.length / 3));
+  return bestScore <= Math.max(limit, 0.5) ? best : null;
 }
 
 function editDistance(left, right) {
@@ -177,7 +185,7 @@ export function mcpCallError(id, { reason, tool, suggestion = null, missing = []
             category: "not_found",
             hint: suggestion
               ? `Did you mean "${suggestion}"? Re-list tools with tools/list and use the exact snake_case name.`
-              : "Re-list tools with tools/list and use an exact snake_case name.",
+              : "No tool has a name close to that. Re-list tools with tools/list and use an exact snake_case name.",
             next: [
               Object.freeze({ command: "tools/list" }),
               Object.freeze({ tool: "room_check_access" }),
