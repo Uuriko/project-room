@@ -228,16 +228,17 @@ export async function postRpc(ctx, machineId, message, headers = {}) {
   return readBody(response);
 }
 
-export function signControl(ctx, payload) {
+export function signControl(ctx, path, payload) {
   const raw = JSON.stringify(payload);
   const timestamp = String(Math.floor(Date.now() / 1000));
-  const signature = createHmac("sha256", ctx.linkSecret).update(`${timestamp}.${raw}`).digest("hex");
+  const signature = createHmac("sha256", ctx.linkSecret).update(`${timestamp}.${path}.${raw}`).digest("hex");
   return { raw, timestamp, signature };
 }
 
 export async function control(ctx, machineId, action, payload) {
-  const signed = signControl(ctx, payload);
-  const response = await relayFetch(ctx, `/v0/machines/${machineId}/${action}`, {
+  const path = `/v0/machines/${machineId}/${action}`;
+  const signed = signControl(ctx, path, payload);
+  const response = await relayFetch(ctx, path, {
     method: "POST",
     raw: signed.raw,
     headers: {

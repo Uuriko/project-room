@@ -140,7 +140,10 @@ test("enroll and the machine socket match machine/PROTOCOL.md", async () => {
     assert.equal(paused.status, 409);
     assert.equal(paused.body.error.code, "paused");
     assert.equal(seen.length, 1);
-    await control(ctx, issued.body.machineId, "resume", {});
+    // A signed control request is single-use inside the skew window: a
+    // byte-identical retry in the same second is indistinguishable from a
+    // replay, so the second resume carries a distinct body.
+    await control(ctx, issued.body.machineId, "resume", { after: "pause" });
     await daemon.expectFrame("resume");
 
     await control(ctx, issued.body.machineId, "bye", {});
