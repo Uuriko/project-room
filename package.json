@@ -19,6 +19,7 @@
     "github-app:check": "node scripts/github-app-check.mjs",
     "analytics:backfill": "node scripts/analytics-backfill.mjs",
     "analytics:bond-shadow": "node scripts/claim-bond-shadow.mjs",
+    "analytics:funnel": "node scripts/an-funnel-1.mjs",
     "provision": "node scripts/provision.mjs",
     "audit:invitations": "node scripts/audit-invitations.mjs",
     "test:handoff": "node --test tests/agent-handoff.test.js",
