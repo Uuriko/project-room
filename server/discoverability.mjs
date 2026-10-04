@@ -199,6 +199,8 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   // agent-plugin-routes.mjs: POST drains the caller's webhook backlog. Other methods are not this handler.
   route("/api/agent-webhooks/process", ["POST"], "agent-credential", "Drain the calling identity's webhook delivery backlog.", "processAgentWebhooks"),
   route("/api/agent-webhooks/deliveries/{deliveryId}/redrive", ["POST"], "agent-credential", "Redrive one dead-letter delivery.", "redriveWebhookDelivery"),
+  // next-actions-routes.mjs: GET lists ranked next actions. Other methods are not this handler.
+  route("/api/rooms/{roomId}/next-actions", ["GET"], "room-member", "List ranked next actions for the calling room member.", "listRoomNextActions"),
   // Wake control.
   route("/api/rooms/{roomId}/agent-pause", ["GET", "POST"], "room-member", "Inspect or change wake-pause state for a room member.", "agentPause",
     { operationIds: { GET: "inspectAgentPause", POST: "setAgentPause" } }),
