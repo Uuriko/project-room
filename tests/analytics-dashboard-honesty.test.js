@@ -197,6 +197,19 @@ test("dashboardHonestyReport composes lane, settled, and falsifier sections", ()
   db.close();
 });
 
+test("lane split counts the tail's sampling weights from analytics_events", () => {
+  // Regression: loadNormalizedEvents dropped the weight column, so every
+  // event counted 1 and retention-sampled events were undercounted versus
+  // weeklyProductiveRooms, which the module claims comparability with.
+  const db = memoryDb();
+  db.prepare("INSERT INTO analytics_events (name, at, room_id, actor_kind, actor_id, props, weight) VALUES (?,?,?,?,?,?,?)")
+    .run("claim_claimed", AT, "alpha", "agent", "lane7", "{}", 3);
+  const report = dashboardHonestyReport({ db, now: FIXED_MS, env: { ANALYTICS_LANE_ACTOR_IDS: "lane7" } });
+  const week = report.laneActivity.find(row => row.week === WEEK_ISO);
+  assert.equal(week.laneActivityTesting, 3);
+  db.close();
+});
+
 test("the backfill dashboard output carries the honesty section", async t => {
   const { file } = openRoom(t);
   const { report } = await backfillFile(file, { now: FIXED_MS });

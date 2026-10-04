@@ -59,13 +59,17 @@ function normalizeEvent(row) {
     roomId: row.room_id ?? row.roomId ?? null,
     actorKind: row.actor_kind ?? row.actorKind ?? null,
     actorId: row.actor_id ?? row.actorId ?? null,
+    // The tail writes sampling weights > 1 (server/analytics/tail.mjs); the
+    // lane split must count them like weeklyProductiveRooms does, or sampled
+    // events are silently undercounted.
+    weight: row.weight ?? 1,
     props
   };
 }
 
 function loadNormalizedEvents(db) {
   if (!tableExists(db, "analytics_events")) return [];
-  return db.prepare("SELECT name, at, room_id, actor_kind, actor_id, props FROM analytics_events")
+  return db.prepare("SELECT name, at, room_id, actor_kind, actor_id, weight, props FROM analytics_events")
     .all()
     .map(normalizeEvent)
     .filter(event => Number.isFinite(event.at));
