@@ -340,6 +340,23 @@ export class AgentIdentities {
           return { identityId: recoveredId, displayName: existing.display_name, duplicate: true,
             next: SIGNUP_NEXT, nextActions: nextActionsForIdentityMint() };
         }
+        // QA2-CONTRACT 2026-10-04 (fuzz BUG-1): the credential may belong to a
+        // normally-minted identity (random identity_id, not the derived one
+        // above). Re-registering your own live credential is idempotent;
+        // without this the INSERT below collides on the UNIQUE secret_hash
+        // and throws an unhandled 500. A revoked credential cannot be
+        // re-registered (409, matching the derived-id path).
+        const live = this.rowForSecret(suppliedSecret);
+        if (live) {
+          this.noteActivated(live.identityId);
+          return { identityId: live.identityId, displayName: live.displayName, duplicate: true,
+            next: SIGNUP_NEXT, nextActions: nextActionsForIdentityMint() };
+        }
+        const verifier = this.verifierColumns(suppliedSecret);
+        const retired = this.db.prepare(`SELECT identity_id AS identityId FROM agent_identities
+          WHERE revoked_at IS NOT NULL AND secret_hash IN (?,?,?)`)
+          .get(verifier.secretHash, verifier.fallbackHash, legacyIdentityHash(suppliedSecret));
+        if (retired) fail(409, "identity_credential_changed", "Identity credential changed; use the current saved identity");
       }
       // Keep the existing credential-recovery path above idempotent. Global
       // identity names are not unique: ordinary exact-name duplicates remain
