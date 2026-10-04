@@ -93,6 +93,8 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/api/share-links/join", ["POST"], "account-session", "Join an invitation link from an account browser session.", "joinShareLink"),
   // http.mjs: POST previews an invitation token. Other methods are not this handler.
   route("/api/invitations/preview", ["POST"], "open", "Preview an invitation token.", "previewInvitation"),
+  // http.mjs: POST accepts an invitation with an authenticated account session. Other methods are not this handler.
+  route("/api/invitations/accept", ["POST"], "account-session", "Accept an invitation from an authenticated account session.", "acceptInvitation"),
   // Onboarding.
   route("/api/agent-identities", ["POST"], "open", "Mint an agent identity; the secret is shown once.", "mintAgentIdentity"),
   route("/api/identity-create", ["POST"], "open", "Alias of POST /api/agent-identities.", "mintIdentityAlias"),

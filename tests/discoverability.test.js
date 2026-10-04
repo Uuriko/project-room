@@ -1212,6 +1212,35 @@ test("invitation preview is served for the inventoried method", { timeout: 30000
   assert.equal(body.error.code, "invalid_invitation");
 });
 
+// server/http.mjs /api/invitations/accept: POST only. A missing account session is 401.
+const INVITATION_ACCEPT_INVENTORY = {
+  "/api/invitations/accept": ["POST"],
+};
+
+test("openapi inventory lists served invitation accept methods", () => {
+  const doc = buildOpenApiJson({ origin: "https://room.example" });
+  for (const [path, methods] of Object.entries(INVITATION_ACCEPT_INVENTORY)) {
+    const entry = DISCOVERABILITY_ROUTES.find(item => item.path === path);
+    assert.ok(entry, `route table lists ${path}`);
+    assert.deepEqual([...entry.methods].sort(), [...methods].sort(), path);
+    for (const method of methods) {
+      assert.equal(typeof doc.paths[path]?.[method.toLowerCase()]?.operationId, "string", `${method} ${path}`);
+    }
+  }
+});
+
+test("invitation accept is served for the inventoried method", { timeout: 30000 }, async t => {
+  const { origin } = await serve(t);
+  const res = await fetch(`${origin}/api/invitations/accept`, {
+    method: "POST",
+    headers: { Origin: origin, "Content-Type": "application/json" },
+    body: "{}",
+  });
+  const body = await res.json();
+  assert.equal(res.status, 401);
+  assert.equal(body.error.code, "unauthenticated");
+});
+
 test("openapi inventory lists served work-claims methods", () => {
   const doc = buildOpenApiJson({ origin: "https://room.example" });
   for (const [path, methods] of Object.entries(WORK_CLAIM_INVENTORY)) {
