@@ -205,3 +205,26 @@ test("revoked_at column is backfilled on pre-existing identity tables", async t 
   assert.doesNotThrow(() => ensureIdentitySecretSchema(f.store.db));
   f.store.close();
 });
+
+test("mcp join file-body cap honors any casing of the bearer scheme (bughunt 2026-10-03)", async t => {
+  // #1418 made bearer() case-insensitive, but the MCP-join attachment cap
+  // gate (server/http.mjs fileBody) still required capital-B "Bearer " —
+  // lowercase "bearer <pri_cred>" got the 16KB JSON cap and 413'd on file
+  // staging. Regression: fails pre-fix with 413, passes after.
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f);
+  const agent = f.store.identities.create("File-cap case agent");
+  const priSecret = f.store.identities.rotate(agent.identityId, agent.secret).secret;
+  assert.ok(priSecret.startsWith("pri_"));
+  // Over the 16KB JSON cap, well under the ~1.4MB attachment cap.
+  const bigBody = JSON.stringify({ jsonrpc: "2.0", id: "1", method: "tools/list", params: { pad: "x".repeat(20 * 1024) } });
+  for (const scheme of ["Bearer", "bearer", "BEARER"]) {
+    const res = await fetch(`${origin}/mcp`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `${scheme} ${priSecret}` },
+      body: bigBody,
+    });
+    assert.notEqual(res.status, 413, `scheme "${scheme}" must get the attachment cap, not 413`);
+    await res.text();
+  }
+});
