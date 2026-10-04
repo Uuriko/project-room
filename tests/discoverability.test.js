@@ -2840,6 +2840,38 @@ test("owner delegates list is served for the inventoried method", { timeout: 300
   assert.equal(body.error.code, "unauthenticated");
 });
 
+// server/http.mjs /api/rooms/{roomId}/owner-delegates/grant: POST only. Missing credential is 401.
+const OWNER_DELEGATE_GRANT_INVENTORY = {
+  "/api/rooms/{roomId}/owner-delegates/grant": ["POST"],
+};
+
+test("openapi inventory lists served owner-delegate grant methods", () => {
+  const doc = buildOpenApiJson({ origin: "https://room.example" });
+  for (const [path, methods] of Object.entries(OWNER_DELEGATE_GRANT_INVENTORY)) {
+    const entry = DISCOVERABILITY_ROUTES.find(item => item.path === path);
+    assert.ok(entry, `route table lists ${path}`);
+    assert.deepEqual([...entry.methods].sort(), [...methods].sort(), path);
+    const op = doc.paths[path]?.post;
+    assert.equal(op?.operationId, "grantOwnerDelegate");
+    assert.match(op.summary, /owner-only/i);
+    assert.match(op.summary, /rooms:write/);
+    assert.match(op.description, /room credential/i);
+    assert.doesNotMatch(op.description, /no credential required/i);
+  }
+});
+
+test("owner delegate grant is served for the inventoried method", { timeout: 30000 }, async t => {
+  const { origin } = await serve(t);
+  const res = await fetch(`${origin}/api/rooms/commons/owner-delegates/grant`, {
+    method: "POST",
+    headers: { Origin: origin, "Content-Type": "application/json" },
+    body: "{}",
+  });
+  const body = await res.json();
+  assert.equal(res.status, 401);
+  assert.equal(body.error.code, "unauthenticated");
+});
+
 test("openapi inventory lists served work-claims methods", () => {
   const doc = buildOpenApiJson({ origin: "https://room.example" });
   for (const [path, methods] of Object.entries(WORK_CLAIM_INVENTORY)) {
