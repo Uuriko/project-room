@@ -75,6 +75,7 @@ import { createNextActionsRoutes } from "./next-actions-routes.mjs"; // RC-2026-
 import { readSpendAllowance, setSpendAllowance } from "./spend-allowance.mjs";
 import { getAgentAutonomyTier, setAgentAutonomyTier } from "./autonomy-tiers.mjs";
 import { listAgentGrants, getAgentCapabilities, issueAgentGrant, revokeAgentGrant } from "./grants.mjs";
+import { issueSpendGrantRoute, revokeSpendGrantRoute, readSpendGrantRoute } from "./spend-grants.mjs";
 import { listPins, setPin } from "./pins.mjs";
 import { renderReceiptsHtml, renderReceiptDetailHtml, receiptsListJson, receiptJson, RECEIPTS_PAGE_CSP } from "./receipts-page.mjs";
 import { queryPublicReceipts, publicReceiptById, listPublicReceiptSitemap, PUBLIC_RECEIPT_ID } from "./receipts-live.mjs";
@@ -3171,6 +3172,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const agentGrantsMatch = /^\/api\/rooms\/([^/]{1,384})\/agent-grants$/.exec(url.pathname);
       const agentGrantDeleteMatch = /^\/api\/rooms\/([^/]{1,384})\/agent-grants\/([^/]{1,64})\/([^/]{1,128})$/.exec(url.pathname);
       const agentCapabilitiesMatch = /^\/api\/rooms\/([^/]{1,384})\/agent-capabilities$/.exec(url.pathname);
+      // Spend-primitive MVP (qa4-spend-mvp-jill): per-agent spend grants.
+      // Management is owner-or-delegate; agents read their own summary.
+      const spendGrantsMatch = /^\/api\/rooms\/([^/]{1,384})\/spend-grants$/.exec(url.pathname);
+      const spendGrantDeleteMatch = /^\/api\/rooms\/([^/]{1,384})\/spend-grants\/([^/]{1,64})$/.exec(url.pathname);
+      const spendGrantReadMatch = /^\/api\/rooms\/([^/]{1,384})\/spend-grant$/.exec(url.pathname);
       // #658: mention lifecycle. The ack template names the message event;
       // settings is a literal segment and is tested first so it is never
       // mistaken for a message event id.
@@ -3346,6 +3352,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         : peerDmThreadMatch ? "peer-dm-thread" : operatorAgentMatch ? "operator-agent"
         : agentGrantsMatch ? "agent-grants" : agentGrantDeleteMatch ? "agent-grant-delete"
         : agentCapabilitiesMatch ? "agent-capabilities"
+        : spendGrantsMatch ? "spend-grants" : spendGrantDeleteMatch ? "spend-grant-delete"
+        : spendGrantReadMatch ? "spend-grant-read"
         : mentionAckMatch ? "mention-ack" : mentionSettingsMatch ? "mention-settings" : savedDeleteMatch ? "saved-delete"
         : memberDeactivateMatch ? "member-deactivate"
         : "ownership-transfer";      const selected = roomCredentials(req, url);
@@ -3980,6 +3988,24 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // grant edges resolved per request at this trust boundary, so an edge
         // issued mid-serve shows up without a restart. Guest denials applied.
         return json(res, 200, getAgentCapabilities(store, selected.token, roomId, fence));
+      }
+      if (route === "spend-grants" && req.method === "POST") {
+        // Spend-primitive MVP: issue a per-agent spend grant. Owner or
+        // grants:issue delegate; tier-gated and guest-denied inside. Agents
+        // request spend; they never self-issue.
+        const result = issueSpendGrantRoute(store, selected.token, roomId, await body(req), fence);
+        return json(res, 201, result);
+      }
+      if (route === "spend-grant-delete" && req.method === "DELETE") {
+        // Spend-primitive MVP: revoke a spend grant (stamps revoked_at).
+        // Idempotent.
+        return json(res, 200, revokeSpendGrantRoute(store, selected.token, roomId,
+          pathId(spendGrantDeleteMatch[2]), fence));
+      }
+      if (route === "spend-grant-read" && req.method === "GET") {
+        // Spend-primitive MVP: the caller's own spend summary. Withhold,
+        // never refuse: guests and grant-less members get { spend: null }.
+        return json(res, 200, readSpendGrantRoute(store, selected.token, roomId, fence));
       }
       if (route === "work-discussion" && req.method === "GET") {
         const params = url.searchParams;
