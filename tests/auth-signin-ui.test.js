@@ -268,3 +268,26 @@ test('late reset response cannot fence a replacement account', async () => {
   release({ status: 'password_reset', signInRequired: true }); await submission;
   assert.equal(client.session, replacement); assert.equal(completed, 0); assert.equal(fenced, 0);
 });
+
+test("duplicate signup on a mail-unconfigured room does not promise a sign-in link", async () => {
+  // Uniform 202 for an already-registered email restores to unauthenticated.
+  // The UI must not tell the user to check email for a link that will never arrive.
+  const client = stubClient({ "/api/auth/password/signup": { status: "check_email", mailConfigured: false } });
+  client.restore = async () => ({ authenticated: false });
+  const ui = createAuthSigninUI({ accountClient: client, ensureAccountSession: async () => {}, onSignedIn: () => { throw new Error("must not sign in"); } });
+  const container = fakeContainer(); ui.mount(container);
+  await container.listeners.click[0](clickOnDataset("password-mode", { passwordMode: "signup" }));
+  await container.listeners.submit[0](submitForm("password", { email: "dup@example.invalid", password: "synthetic-password-1" }));
+  assert.doesNotMatch(container.status.textContent, /check your email/i);
+  assert.match(container.status.textContent, /isn.t configured/i);
+});
+
+test("duplicate signup on a mail-configured room still promises the sign-in link", async () => {
+  const client = stubClient({ "/api/auth/password/signup": { status: "check_email", mailConfigured: true } });
+  client.restore = async () => ({ authenticated: false });
+  const ui = createAuthSigninUI({ accountClient: client, ensureAccountSession: async () => {}, onSignedIn: () => { throw new Error("must not sign in"); } });
+  const container = fakeContainer(); ui.mount(container);
+  await container.listeners.click[0](clickOnDataset("password-mode", { passwordMode: "signup" }));
+  await container.listeners.submit[0](submitForm("password", { email: "dup@example.invalid", password: "synthetic-password-1" }));
+  assert.match(container.status.textContent, /check your email for a sign-in link/i);
+});
