@@ -91,7 +91,9 @@ say ""
 CONN_DIR="${ROOM_AGENT_CONFIG:-}"
 if [ -z "$CONN_DIR" ]; then
   printf 'Connection directory (the folder holding connection.json): '
-  read -r CONN_DIR
+  # A closed stdin (EOF) must not trip `set -e`: an empty answer falls
+  # through to the "enroll first" error below, which names the fix.
+  read -r CONN_DIR || true
 fi
 if [ ! -f "$CONN_DIR/connection.json" ]; then
   say "no connection.json in $CONN_DIR. Enroll first (see above), then re-run."
@@ -118,7 +120,8 @@ if have tailscale && tailscale status >/dev/null 2>&1; then
   say "tailscale already up"
 else
   printf 'Install/enable Tailscale so you can reach this box securely? [y/N] '
-  read -r ans
+  # Closed stdin (EOF) means "no" — never let it trip `set -e`.
+  read -r ans || true
   case "$ans" in [Yy]*) NEED_TS=1 ;; *) say "skipping tailscale (you can add it later: https://tailscale.com/download)" ;; esac
 fi
 if [ "$NEED_TS" = 1 ]; then
