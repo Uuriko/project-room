@@ -105,7 +105,8 @@ export function handleMcpJoinRpc(message, { mcpUrl } = {}) {
 }
 
 export function legacyMcpHeaders(authorization) {
-  const token = typeof authorization === "string" && authorization.startsWith("Bearer ") ? authorization.slice("Bearer ".length) : "";
+  // RFC 7235: auth scheme is case-insensitive ("bearer"/"BEARER" accepted).
+  const token = typeof authorization === "string" && /^bearer /i.test(authorization) ? authorization.slice("Bearer ".length) : "";
   if (!token.startsWith("pri_")) return {};
   return { Deprecation: "@1798761600", Link: '</llms.txt>; rel="deprecation"' };
 }

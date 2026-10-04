@@ -671,7 +671,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     // RC-2026-09-18-012: rak_ presented API-key credentials ("rak_"+secret)
     // authenticate as the bound agent identity with its stored scopes; the
     // keyId form (shorter) never verifies and reads as 401 downstream.
-    const match = /^Bearer ([A-Za-z0-9_-]{43}|ga1\.[A-Za-z0-9_-]{43}|pri_[A-Za-z0-9_-]{43,128}|rak_[A-Za-z0-9_-]{16,128})$/.exec(req.headers.authorization);
+    // QA 2026-10-03 (P1-3): RFC 7235 — the auth scheme is case-insensitive,
+    // so "bearer"/"BEARER" must work like "Bearer". Token shape unchanged.
+    const match = /^[Bb][Ee][Aa][Rr][Ee][Rr] ([A-Za-z0-9_-]{43}|ga1\.[A-Za-z0-9_-]{43}|pri_[A-Za-z0-9_-]{43,128}|rak_[A-Za-z0-9_-]{16,128})$/.exec(req.headers.authorization);
     if (!match) reject(401, "unauthenticated", "Invalid Authorization header");
     return match[1];
   }
@@ -740,7 +742,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // identity via the store); a forged or missing Origin on a bearer request
   // buys an attacker nothing.
   function carriesBearer(req) {
-    return typeof req.headers.authorization === "string" && req.headers.authorization.startsWith("Bearer ");
+    return typeof req.headers.authorization === "string" && /^bearer /i.test(req.headers.authorization);
   }
   function protectWrite(req, auth, isBearer) {
     checkOrigin(req, !isBearer);
