@@ -183,6 +183,8 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   // http.mjs: POST mints a room-scoped guest invite. Other methods are not this if.
   // Distinct from public /api/guest-invites. API keys need rooms:write.
   route("/api/rooms/{roomId}/guest-invites", ["POST"], "room-member", "Mint a guest invite for this room. API keys need the rooms:write scope.", "mintRoomGuestInvite"),
+  // http.mjs: POST lists guest invites. The method is POST, so the funnel requires rooms:write.
+  route("/api/rooms/{roomId}/guest-invites-list", ["POST"], "room-member", "List guest invites for this room. The method is POST, so API keys need the rooms:write scope.", "listRoomGuestInvites"),
   route("/api/share-links/join-agent", ["POST"], "identity-secret", "Guest-link redemption: join with a guest pass.", "joinAgentViaShareLink"),
   // http.mjs: GET and HEAD both collect cross-room attention. HEAD strips the body.
   // Other methods reject 405. Allow lists GET only; the serving if is the inventory.
