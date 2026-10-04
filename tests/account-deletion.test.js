@@ -198,3 +198,41 @@ test("M-1: deletion plan covers the connected-data tables the executor purges", 
     assert.equal(store.db.prepare(`SELECT count(*) AS n FROM ${table} WHERE account_id=?`).get(account.id).n, 0, `${table} purged`);
   }
 });
+
+// QA2-SECREG: the account_terms row survived self-serve account deletion —
+// it was in neither the inventory nor the executors. Like M-1, the table
+// must be represented in the signed plan (inventory + RETENTION_POLICY)
+// and purged by execution. Regression: fails pre-fix (no terms step, row
+// survives), passes after.
+test("QA2-SECREG: deletion plan covers account_terms and execution purges it", async t => {
+  const { mkdtempSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { RoomStore } = await import("../server/store.mjs");
+  const { planAccountDeletion, executeAccountDeletion, RETENTION_POLICY } = await import("../server/account-deletion.mjs");
+  const directory = mkdtempSync(join(tmpdir(), "account-deletion-terms-"));
+  t.after(() => { try { store.close(); } catch {} });
+  const store = new RoomStore(join(directory, "room.sqlite"));
+  const account = store.createAccount("acct-terms", "test");
+  store.db.prepare("INSERT INTO account_terms(account_id,terms_version,accepted_at) VALUES(?,?,?)")
+    .run(account.id, "2026-01-01", Date.now());
+  // Safety records must NOT be purged by account deletion.
+  store.db.prepare("INSERT INTO public_unpublish(kind,target,at,by_account) VALUES(?,?,?,?)")
+    .run("post", "post-1", Date.now(), account.id);
+  store.db.prepare("INSERT INTO public_abuse_reports(id,kind,target,body,email,ip_hash,created_at,status) VALUES(?,?,?,?,?,?,?,?)")
+    .run("abr-1", "spam", "post-1", "x", "a@example.com", "h", Date.now(), "open");
+  const { plan, summary } = planAccountDeletion(store, account.id);
+  const step = plan.steps.find(s => s.category === "terms");
+  assert.ok(step, "plan has a terms step for account_terms");
+  assert.equal(step.action, "purge");
+  assert.equal(step.itemCount, 1, "the terms row is counted in the plan digest input");
+  assert.ok(RETENTION_POLICY.purged.some(e => e.category === "terms"), "retention policy discloses the purge");
+  assert.ok(summary.text.includes("terms"), "confirmation summary names the category");
+  executeAccountDeletion(store, plan);
+  assert.equal(store.db.prepare("SELECT count(*) AS n FROM account_terms WHERE account_id=?").get(account.id).n,
+    0, "account_terms purged");
+  assert.equal(store.db.prepare("SELECT count(*) AS n FROM public_unpublish WHERE by_account=?").get(account.id).n,
+    1, "public_unpublish retained: deleting it would re-expose content");
+  assert.equal(store.db.prepare("SELECT count(*) AS n FROM public_abuse_reports WHERE id=?").get("abr-1").n,
+    1, "public_abuse_reports retained as safety evidence");
+});
