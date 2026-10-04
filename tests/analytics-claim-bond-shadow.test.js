@@ -227,3 +227,33 @@ test("shadowReport says dispersed when flakes are ambient", () => {
   assert.equal(report.verdict, "dispersed");
   db.close();
 });
+
+test("openBonds counts a claim that was released and re-claimed as open", () => {
+  // Regression: the EXCEPT form compared whole claim_id sets, so a claim in
+  // both the locked and the released sets (re-claimed after done) was dropped
+  // entirely and openBonds reported 0 while the bond was actually open.
+  const db = seedDb();
+  let seq = 0;
+  insertEvent(db, ++seq, "c1", "claimed", { ownerId: "lane-a" });
+  insertEvent(db, ++seq, "c1", "state_changed", { claimState: "done" });
+  insertEvent(db, ++seq, "c1", "claimed", { ownerId: "lane-b" });
+  syncShadowJournal(db);
+  const report = shadowReport(db);
+  assert.equal(report.locked, 2);
+  assert.equal(report.released, 1);
+  assert.equal(report.openBonds, 1);
+  db.close();
+});
+
+test("openBonds is 0 when every bond closed and counts a carried bond as open", () => {
+  const db = seedDb();
+  let seq = 0;
+  insertEvent(db, ++seq, "c1", "claimed", { ownerId: "lane-a" });
+  insertEvent(db, ++seq, "c1", "state_changed", { claimState: "done" });
+  insertEvent(db, ++seq, "c2", "claimed", { ownerId: "lane-a" });
+  insertEvent(db, ++seq, "c2", "reassigned", { ownerId: "lane-b", previousOwnerId: "lane-a" });
+  syncShadowJournal(db);
+  const report = shadowReport(db);
+  assert.equal(report.openBonds, 1, "c1 closed, c2 carried and still open");
+  db.close();
+});
