@@ -2489,6 +2489,39 @@ test("add land item is served for the inventoried method", { timeout: 30000 }, a
   assert.equal(body.error.code, "unauthenticated");
 });
 
+// server/http.mjs /api/rooms/{roomId}/list_land_queue: GET and HEAD. Missing credential is 401.
+const LIST_LAND_QUEUE_INVENTORY = {
+  "/api/rooms/{roomId}/list_land_queue": ["GET", "HEAD"],
+};
+
+test("openapi inventory lists served list-land-queue methods", () => {
+  const doc = buildOpenApiJson({ origin: "https://room.example" });
+  for (const [path, methods] of Object.entries(LIST_LAND_QUEUE_INVENTORY)) {
+    const entry = DISCOVERABILITY_ROUTES.find(item => item.path === path);
+    assert.ok(entry, `route table lists ${path}`);
+    assert.deepEqual([...entry.methods].sort(), [...methods].sort(), path);
+    assert.equal(doc.paths[path]?.get?.operationId, "listLandQueue");
+    assert.equal(doc.paths[path]?.head?.operationId, "headLandQueue");
+    for (const method of methods) {
+      const op = doc.paths[path][method.toLowerCase()];
+      assert.equal(typeof op?.operationId, "string", `${method} ${path}`);
+      assert.match(op.summary, /rooms:read/);
+      assert.match(op.description, /room credential/i);
+    }
+  }
+});
+
+test("list land queue is served for the inventoried methods", { timeout: 30000 }, async t => {
+  const { origin } = await serve(t);
+  const getRes = await fetch(`${origin}/api/rooms/commons/list_land_queue`, { headers: { Origin: origin } });
+  const body = await getRes.json();
+  assert.equal(getRes.status, 401);
+  assert.equal(body.error.code, "unauthenticated");
+  const headRes = await fetch(`${origin}/api/rooms/commons/list_land_queue`, { method: "HEAD", headers: { Origin: origin } });
+  assert.equal(headRes.status, 401);
+  assert.equal(await headRes.text(), "");
+});
+
 test("openapi inventory lists served work-claims methods", () => {
   const doc = buildOpenApiJson({ origin: "https://room.example" });
   for (const [path, methods] of Object.entries(WORK_CLAIM_INVENTORY)) {

@@ -140,6 +140,9 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   // http.mjs land queue: POST add_land_item. Other methods on this path are 405.
   // Missing credential is 401 before the body. API keys need rooms:write.
   route("/api/rooms/{roomId}/add_land_item", ["POST"], "room-member", "Add a pull request to the room land queue. API keys need the rooms:write scope.", "addLandItem"),
+  // http.mjs: GET and HEAD list the land queue. Other methods are 405. Allow lists GET; the serving if includes HEAD.
+  route("/api/rooms/{roomId}/list_land_queue", ["GET", "HEAD"], "room-member", "List the room land queue. API keys need the rooms:read scope.", "listLandQueue",
+    { operationIds: { GET: "listLandQueue", HEAD: "headLandQueue" } }),
   route("/api/share-links/join-agent", ["POST"], "identity-secret", "Guest-link redemption: join with a guest pass.", "joinAgentViaShareLink"),
   // http.mjs: GET and HEAD both collect cross-room attention. HEAD strips the body.
   // Other methods reject 405. Allow lists GET only; the serving if is the inventory.
