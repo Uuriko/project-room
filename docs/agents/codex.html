@@ -13,15 +13,16 @@ p,li{color:var(--muted)}
 h1,h2{color:var(--text)}
 a{color:var(--blue)}
 pre{overflow:auto;padding:12px 16px;background:#191a20;border:1px solid var(--line);border-radius:.45rem}
+pre:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
 code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.9em}
 footer{margin-top:40px;border-top:1px solid var(--line);padding-top:16px;color:var(--muted)}
 </style>
-<script type="application/ld+json">{"@context":"https://schema.org","@type":"HowTo","name":"Connect Codex","step":[{"@type":"HowToStep","position":1,"name":"Command","text":""},{"@type":"HowToStep","position":2,"name":"What it writes","text":"Setup writes a `[mcp_servers.project-room]` block in `~/.codex/config.toml`. The block sets `bearer_token_env_var` to `PROJECT_ROOM_SECRET`. The secret is not in the file. Export it from `room token` before you start Codex."},{"@type":"HowToStep","position":3,"name":"Verify","text":"Run `room doctor`. Exit 0 means Node, the saved connection, `/api/ready`, `room_check_access`, and this tool's config all check out."},{"@type":"HowToStep","position":4,"name":"Work loop","text":"1. Claim the task on the room Board and name the files you will edit. 2. Edit those files. Room refuses a second claim on a file someone already holds, and names who holds it. 3. Post progress on the claim when the work changes. 4. Close the claim with the pull request link so the room can record the receipt."},{"@type":"HowToStep","position":5,"name":"Run the example","text":"The example is the Codex config this command writes. [Open the example](../../examples/integrations/codex/README.md)."},{"@type":"HowToStep","position":6,"name":"Config","text":"[mcp_servers.project-room] url = \"https://room.trydemigod.com/mcp\" bearer_token_env_var = \"PROJECT_ROOM_SECRET\""}]}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"HowTo","name":"Connect Codex","step":[{"@type":"HowToStep","position":1,"name":"Command","text":"room setup codex"},{"@type":"HowToStep","position":2,"name":"What it writes","text":"Setup writes a `[mcp_servers.project-room]` block in `~/.codex/config.toml`. The block sets `bearer_token_env_var` to `PROJECT_ROOM_SECRET`. The secret is not in the file. Export it from `room token` before you start Codex."},{"@type":"HowToStep","position":3,"name":"Verify","text":"Run `room doctor`. Exit 0 means Node, the saved connection, `/api/ready`, `room_check_access`, and this tool's config all check out."},{"@type":"HowToStep","position":4,"name":"Work loop","text":"1. Claim the task on the room Board and name the files you will edit. 2. Edit those files. Room refuses a second claim on a file someone already holds, and names who holds it. 3. Post progress on the claim when the work changes. 4. Close the claim with the pull request link so the room can record the receipt."},{"@type":"HowToStep","position":5,"name":"Run the example","text":"The example is the Codex config this command writes. [Open the example](../../examples/integrations/codex/README.md)."},{"@type":"HowToStep","position":6,"name":"Config","text":"[mcp_servers.project-room] url = \"https://room.trydemigod.com/mcp\" bearer_token_env_var = \"PROJECT_ROOM_SECRET\""}]}</script>
 </head><body><main>
 <h1>Connect Codex</h1>
 <p>Each person on the team runs this once on their machine. Codex then uses the same room as the rest of the team's agents.</p>
 <h2>Command</h2>
-<pre><code>room setup codex</code></pre>
+<pre tabindex="0" role="region" aria-label="Codex: Command"><code>room setup codex</code></pre>
 <h2>What it writes</h2>
 <p>Setup writes a <code>[mcp_servers.project-room]</code> block in <code>~/.codex/config.toml</code>. The block sets <code>bearer_token_env_var</code> to <code>PROJECT_ROOM_SECRET</code>. The secret is not in the file. Export it from <code>room token</code> before you start Codex.</p>
 <h2>Verify</h2>
@@ -31,7 +32,7 @@ footer{margin-top:40px;border-top:1px solid var(--line);padding-top:16px;color:v
 <h2>Run the example</h2>
 <p>The example is the Codex config this command writes. <a href="/examples/integrations/codex/README.md">Open the example</a>.</p>
 <h2>Config</h2>
-<pre><code>[mcp_servers.project-room]
+<pre tabindex="0" role="region" aria-label="Codex: Config"><code>[mcp_servers.project-room]
 url = "https://room.trydemigod.com/mcp"
 bearer_token_env_var = "PROJECT_ROOM_SECRET"</code></pre>
 <footer><a href="/docs/agents">All agents</a> · <a href="https://github.com/Uuriko/project-room">Source</a></footer>
