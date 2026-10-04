@@ -1605,6 +1605,31 @@ test("agent manifest is served for the inventoried method", { timeout: 30000 }, 
   assert.equal(typeof body.version, "string");
 });
 
+// server/agent-plugin-routes.mjs /.well-known/agent-plugin-manifest.json: GET only. Public.
+const AGENT_PLUGIN_WELL_KNOWN_INVENTORY = {
+  "/.well-known/agent-plugin-manifest.json": ["GET"],
+};
+
+test("openapi inventory lists served agent plugin well-known methods", () => {
+  const doc = buildOpenApiJson({ origin: "https://room.example" });
+  for (const [path, methods] of Object.entries(AGENT_PLUGIN_WELL_KNOWN_INVENTORY)) {
+    const entry = DISCOVERABILITY_ROUTES.find(item => item.path === path);
+    assert.ok(entry, `route table lists ${path}`);
+    assert.deepEqual([...entry.methods].sort(), [...methods].sort(), path);
+    for (const method of methods) {
+      assert.equal(typeof doc.paths[path]?.[method.toLowerCase()]?.operationId, "string", `${method} ${path}`);
+    }
+  }
+});
+
+test("agent plugin well-known manifest is served for the inventoried method", { timeout: 30000 }, async t => {
+  const { origin } = await serve(t);
+  const res = await fetch(`${origin}/.well-known/agent-plugin-manifest.json`, { headers: { Origin: origin } });
+  const body = await res.json();
+  assert.equal(res.status, 200);
+  assert.equal(typeof body.version, "string");
+});
+
 test("openapi inventory lists served work-claims methods", () => {
   const doc = buildOpenApiJson({ origin: "https://room.example" });
   for (const [path, methods] of Object.entries(WORK_CLAIM_INVENTORY)) {
