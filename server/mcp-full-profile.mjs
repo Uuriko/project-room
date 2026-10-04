@@ -13,7 +13,7 @@ import { canonicalLane, normalizeActor } from "./bounty-escrow.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { publishBountyEvent } from "./bounty-escrow-routes.mjs";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
-import { linkWorkClaimPullRequest } from "./work-claim-routes.mjs";
+import { buildWorkClaimPage, linkWorkClaimPullRequest } from "./work-claim-routes.mjs";
 
 import { prepareWork } from "../client/work-preparation.mjs";
 import { beginSelectedWork, findBeginReceipt } from "../client/begin-work.mjs";
@@ -228,8 +228,11 @@ export async function callHostedStdioTool(store, secret, name, args) {
   }
   if (name === "room_read_board") {
     const snapshot = store.snapshot(secret, roomId);
+    const now = typeof store.now === "function" ? store.now() : Date.now();
+    const { claims, ...claimsPage } = buildWorkClaimPage(store.workClaims.list(roomId), roomId,
+      auth.member.id, new URLSearchParams(rest), now);
     return { value: stampBoard({ ...projectBoard(snapshot.state, Date.now()), roomId: snapshot.roomId,
-      evaluatedThrough: snapshot.sequence, evaluatedAt: new Date().toISOString() }), isError: false };
+      evaluatedThrough: snapshot.sequence, evaluatedAt: new Date().toISOString(), claims, claimsPage }), isError: false };
   }
   if (name === "room_read_work") {
     const options = { includeSource: rest.includeSource ?? false, includeOffers: rest.includeOffers ?? false };

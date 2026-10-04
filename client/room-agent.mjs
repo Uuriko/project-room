@@ -1090,10 +1090,23 @@ export class RoomAgentClient {
   helpAction(name, args, options = {}) {
     return submitHelpAction(this, { roomId: this.#roomId, memberId: this.#memberId }, name, args, options);
   }
-  async board({ signal } = {}) {
+  async board({ queue, state, limit, cursor, signal } = {}) {
     const snapshot = await this.snapshot({ signal });
-    return stampBoard({ ...projectBoard(snapshot.state, Date.now()), roomId: snapshot.roomId,
+    const board = stampBoard({ ...projectBoard(snapshot.state, Date.now()), roomId: snapshot.roomId,
       evaluatedThrough: snapshot.sequence, evaluatedAt: new Date().toISOString() });
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries({ queue, state, limit, cursor })) {
+      if (value !== undefined) params.set(key, String(value));
+    }
+    // One independently evaluated claim page. Never auto-walk or fall back to
+    // /work-claims: that older route performs lifecycle housekeeping.
+    const page = await this.#request(`/work-claims-read${params.size ? `?${params}` : ""}`, undefined, signal);
+    if (page?.roomId !== this.#roomId || !Array.isArray(page.claims)
+      || typeof page.hasMore !== "boolean" || !(page.nextCursor === null || typeof page.nextCursor === "string")) {
+      throw new RoomClientError(200, "invalid_response", "Room returned an invalid claim page");
+    }
+    const { claims, swept: _swept, ...claimsPage } = page;
+    return { ...board, claims, claimsPage };
   }
   async orient({ signal, focus = "all", query } = {}) {
     if (!["all", "needs_me", "help_wanted", "results"].includes(focus)) throw new RoomClientError(0, "invalid_focus", "Choose all work, work needing you, help invitations, or results");
