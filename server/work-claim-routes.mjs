@@ -42,6 +42,7 @@ import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { evaluateReceipt } from "./jev-receipts.mjs";
 import { findClaimCollisions } from "./claim-collisions.mjs";
 import { emitWorkClaimEvent, enqueueClaimWake } from "./work-claim-events.mjs";
+import { noteReadyWork } from "./work-wants.mjs"; // BOARD-WAKE-2
 import { ROOM_GUIDE_ID } from "./room-guide.mjs";
 import { fileLeaseConflictBody, fileLeaseConflicts, holdForRateLimit, readyClaims } from "./claim-coordination.mjs";
 import { collectPullRequestLookups, commitPullRequestLookup, readClaimPullBudget, writeClaimPullBudget } from "./claim-pr-sync.mjs";
@@ -606,6 +607,9 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
         `work-claim:${item.id}:${extra.wakeReason}:${stamp}`,
         { reason: extra.wakeReason, actorId: extra.actorId ?? caller });
     }
+    // BOARD-WAKE-2: an unassigned create or a release is new ready work for
+    // agents that opted in (server/work-wants.mjs). Default off; never throws.
+    if (action === "created" || action === "released") noteReadyWork(store, roomId, item, { actorId: extra.actorId ?? caller, now: nowMs });
     return item;
   };
   const closeLiveClaims = () => {

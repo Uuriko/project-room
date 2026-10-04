@@ -371,6 +371,10 @@ export const unfencedAdditiveTables = Object.freeze([
   // The integrity cron writes it. Older writers have no path to it. A missing
   // row means that room has not been replayed. The parity check is the gate.
   "messages_backfill_cursor",
+  // agent_wants_work (BOARD-WAKE-2): an agent's opt-in ready-work filter and
+  // its last wake time. Older writers have no path to it. A missing row means
+  // off, so a rollback only stops the ready_work wakes.
+  "agent_wants_work",
   // LEGAL: terms acceptance, public abuse reports, and operator unpublish.
   // Additive and unfenced. Older writers have no code path to them.
   "account_terms",

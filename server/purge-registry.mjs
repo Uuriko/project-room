@@ -892,6 +892,16 @@ const ROWS = [
     }
   },
   {
+    "table": "agent_wants_work",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
     "table": "messages_backfill_cursor",
     "key": "room_id",
     "action": "delete",

@@ -8,13 +8,14 @@ import { AUTH_ROUTES } from "./auth.mjs";
 import { INBOX_ROUTES } from "./inbox.mjs";
 import { MEMBER_PERMISSION_ROUTES } from "./member-permissions.mjs";
 import { AGENT_FLEET_ROUTES } from "./agents.mjs";
+import { WANTS_WORK_ROUTES } from "./wants-work.mjs"; // BOARD-WAKE-2
 
 export const AUTH_CLASSES = Object.freeze(["none", "room", "account", "bearer", "roomToken", "door", "mcp"]);
 export const ROUTE_SCOPES = Object.freeze(["worker", "public", "directory", "room"]);
 export const ROUTE_METHODS = Object.freeze(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]);
 
 // Rows land here as groups leave the legacy chain. Do not push; replace the array.
-export const ROUTES = Object.freeze([...AUTH_ROUTES, ...INBOX_ROUTES, ...MEMBER_PERMISSION_ROUTES, ...AGENT_FLEET_ROUTES]);
+export const ROUTES = Object.freeze([...AUTH_ROUTES, ...INBOX_ROUTES, ...MEMBER_PERMISSION_ROUTES, ...AGENT_FLEET_ROUTES, ...WANTS_WORK_ROUTES]);
 
 export function assertRouteRow(row) {
   const problems = [];
