@@ -132,6 +132,25 @@ test("a browser asking for an unknown page gets the HTML 404 and API clients kee
   }
 });
 
+// QA 2026-10-04 (group QA wave): GET // reached new URL with an unparseable
+// target and fell through to a 500 internal_error on production. A malformed
+// request line is a client error, never a server error.
+test("an unparseable request target is a 400, never a 500", async t => {
+  const origin = await serve(t);
+  const { port } = new URL(origin);
+  const answer = await new Promise((resolve, reject) => {
+    const req = httpRequest({ host: "127.0.0.1", port: Number(port), path: "//", method: "GET" }, res => {
+      let body = "";
+      res.on("data", chunk => { body += chunk; });
+      res.on("end", () => resolve({ status: res.statusCode, body }));
+    });
+    req.on("error", reject);
+    req.end();
+  });
+  assert.equal(answer.status, 400);
+  assert.equal(JSON.parse(answer.body).error.code, "invalid_request");
+});
+
 test("failed public asset cannot become indexable or enter sitemap", async t => {
   const origin = await serve(t, { loadAsset: async () => { throw new Error("synthetic missing asset"); } });
   const response = await fetch(origin + "/about");
