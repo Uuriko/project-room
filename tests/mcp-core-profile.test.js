@@ -394,6 +394,10 @@ const stripTrust = ({ contentTrust, ...rest }) => rest;
 // independent API-key scope, argument validation and saved-record parity.
 test("hosted claim PR tool preserves API-key scope and current-owner authorization", async t => {
   const { origin, store, owner, writer, roomId, client, claimed, args } = await claimLinkFixture(t);
+  const catalog = await (await rpc(origin, "tools/list", { profile: "full" }, writer.secret)).json();
+  const definition = catalog.result.tools.find(tool => tool.name === "room_link_work_claim_pr");
+  assert.match(definition.description, /historyOmitted/);
+  assert.match(definition.inputSchema.properties.expectedHistoryLength.description, /historyOmitted/);
   const issue = scopes => API_KEY_PREFIX + store.agentPlugin.issueApiKey({ identityId: writer.identityId, scopes }).secret;
   for (const [secret, code] of [[issue(["rooms:read"]), "insufficient_scope"],
     [issue(["rooms:write", "mcp:room:another-room"]), "insufficient_scope"], [owner.secret, "work_not_owner"]]) {

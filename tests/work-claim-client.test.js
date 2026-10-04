@@ -6,6 +6,9 @@ import { RoomAgentClient } from '../client/room-agent.mjs';
 import { RoomStore } from '../server/store.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { createRoomServer } from '../server/http.mjs';
+import { createWork, claimWork, updateWork } from '../server/work-claims.mjs';
+import { readFileSync } from 'node:fs';
+import { parse } from 'yaml';
 // SEC-2: claim reads carry content-trust markers; compare the claim itself.
 const stripTrust = value => JSON.parse(JSON.stringify(value, (key, entry) => (key === 'untrusted' || key === 'contentTrust' ? undefined : entry)));
 
@@ -24,7 +27,7 @@ async function fixture(t, { reviewerPermissions = [] } = {}) {
     store.close();
   });
   const origin = `http://127.0.0.1:${server.address().port}`;
-  return { owner: new RoomAgentClient({ origin, roomId: 'commons', token }),
+  return { store, owner: new RoomAgentClient({ origin, roomId: 'commons', token }),
     peer: new RoomAgentClient({ origin, roomId: 'commons', token: peerToken }) };
 }
 
@@ -195,4 +198,69 @@ test('SDK links a later PR with both preconditions and preserves HTTP refusals',
     await assert.rejects(owner.linkWorkItemPullRequest(claimed.id, { ...fresh, ...fields }), invalid);
   }
   assert.deepEqual(stripTrust(await owner.workClaimGet(claimed.id)), linked);
+});
+
+// Transport regression: handler coverage cannot see a state option dropped by
+// the SDK, including when the SDK follows the server's opaque nextCursor.
+test('SDK state filters retrieve older done claims through explicit and automatic pages', async t => {
+  const { owner, store } = await fixture(t);
+  const old = Date.now() - 30 * 86_400_000;
+  const ids = Array.from({ length: 51 }, (_, index) => `older-${String(index).padStart(2, '0')}`);
+  for (const id of ids) {
+    let item = createWork({ id }, { agentId: 'owner', now: old });
+    item = claimWork(item, 'owner', { now: old, leaseHours: 1 });
+    item = updateWork(item, 'owner', { state: 'in_progress', now: old });
+    item = updateWork(item, 'owner', { state: 'done', now: old });
+    store.workClaims.set('commons', item);
+  }
+  await owner.workClaimCreate({ id: 'still-open' });
+  const normal = await owner.workClaims();
+  assert.deepEqual(normal.claims.map(item => item.id), ['still-open']);
+  assert.equal(normal.olderDone, 51);
+  assert.equal(normal.olderDoneQuery, 'state=done');
+  const first = await owner.workClaims({ state: 'done', limit: 2 });
+  assert.equal(first.state, 'done');
+  assert.deepEqual(first.claims.map(item => item.id), ids.slice(0, 2));
+  assert.equal(first.hasMore, true);
+  const second = await owner.workClaims({ state: 'done', limit: 2, cursor: first.nextCursor });
+  assert.deepEqual(second.claims.map(item => item.id), ids.slice(2, 4));
+  const all = await owner.workClaims({ state: 'done' });
+  assert.deepEqual(all.claims.map(item => item.id), ids);
+  assert.equal(all.hasMore, false);
+  assert.equal(all.nextCursor, null);
+  assert.ok(all.claims.every(item => item.state === 'done'));
+  await assert.rejects(owner.workClaims({ state: 'bogus' }), invalid);
+  await assert.rejects(owner.workClaims({ state: '' }), invalid);
+  await assert.rejects(owner.workClaims({ queue: 'ready', state: 'done' }), invalid);
+});
+
+// The published OpenAPI example is client input, not an expected value derived
+// from the implementation. Exercise it against a real capped stored history.
+test('the documented capped-history PR basis succeeds through the SDK', async t => {
+  const api = parse(readFileSync(new URL('../docs/openapi.yaml', import.meta.url), 'utf8'));
+  const schemas = api.paths['/api/rooms/{roomId}/work-claims/{claimId}/update'].post
+    .requestBody.content['application/json'].schema.oneOf;
+  const basis = schemas.find(schema => schema.required?.includes('appendPullRequest')).properties.expectedHistoryLength;
+  assert.match(basis.description, /historyOmitted/);
+  assert.equal(basis.example, 203);
+  const { owner, store } = await fixture(t);
+  await owner.workClaimCreate({ id: 'capped-sdk-pr', files: ['src/capped.js'] });
+  let item = await owner.claimWorkItem('capped-sdk-pr', { leaseHours: 6 });
+  const additions = 203 - item.history.length;
+  for (let index = 0; index < additions; index++) item = updateWork(item, 'owner', { note: `Progress ${index}` });
+  store.workClaims.set('commons', item);
+  const read = await owner.workClaimGet(item.id);
+  assert.equal(read.history.length, 200);
+  assert.equal(read.historyOmitted, 3);
+  const input = { pullRequest: 'https://github.com/Uuriko/project-room/pull/18', expectedClaimedAt: read.claimedAt };
+  await assert.rejects(owner.linkWorkItemPullRequest(item.id, { ...input, expectedHistoryLength: 200 }),
+    error => error.status === 409 && error.code === 'work_claim_conflict');
+  assert.deepEqual(await owner.workClaimGet(item.id), read);
+  const linked = await owner.linkWorkItemPullRequest(item.id, { ...input, expectedHistoryLength: basis.example });
+  assert.equal(linked.pullRequests[0].url, input.pullRequest);
+  assert.equal(linked.history.length, 200);
+  assert.equal(linked.historyOmitted, 4);
+  for (const key of ['owner', 'state', 'claimedAt', 'leaseStartAt', 'leaseExpiresAt', 'files']) {
+    assert.deepEqual(linked[key], read[key]);
+  }
 });

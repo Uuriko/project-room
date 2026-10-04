@@ -4574,7 +4574,9 @@ paths:
         does not bind artifact bytes or change automatic PR/land/deploy
         settlement. API keys need `rooms:write`.
         Alternatively send only appendPullRequest, expectedClaimedAt and
-        expectedHistoryLength from a fresh item read. This owner-only append
+        expectedHistoryLength from a fresh item read. The history count is
+        history.length + (historyOmitted ?? 0), including entries no longer
+        retained in the response. This owner-only append
         requires active unsuperseded work with a live or authorized non-expiring
         lease. manage_claims does not override ownership. Archived rooms refuse
         this operation. URL-only canonical HTTPS GitHub PR input, maximum300
@@ -4647,7 +4649,8 @@ paths:
                     expectedHistoryLength:
                       type: integer
                       minimum: 0
-                      description: Exact history.length from the same read; detects concurrent changes and same-millisecond reclaim
+                      description: Exact history.length + (historyOmitted ?? 0) from the same read; absent historyOmitted counts as zero. For 200 retained entries and 3 omitted entries, send 203. Detects concurrent changes and same-millisecond reclaim
+                      example: 203
       responses:
         '200':
           description: The updated item

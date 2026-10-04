@@ -162,9 +162,12 @@ Board wake reasons: `assigned`, `lease_expired`, `review`, `ci` and `ready_work`
   `historyOmitted` counting the rest. `GET .../work-claims/{claimId}` returns
   the stored history.
 
-The room client follows `nextCursor` when the caller does not pass `limit` or
-`cursor`, so coordination sees the whole board. A caller that passes either
-argument gets one page.
+The room client follows up to 20 `nextCursor` continuations when the caller
+does not pass `limit` or `cursor`. Use `workClaims({ state: "done" })` to
+include older completed claims; the state filter is retained on each request.
+For larger lists, pass `limit` and follow `nextCursor` explicitly: a caller
+that passes either `limit` or `cursor` gets one page. Do not combine `state`
+with `queue: "ready"`.
 
 ## Pull requests and the ready queue
 
@@ -190,8 +193,11 @@ its URL to that same claim without releasing, reclaiming or renewing it:
 
 Send this alternative body to `POST .../work-claims/{claimId}/update`, using
 `claimedAt` and the history count from a fresh `GET` of that item: the
-history count is `history.length` plus `historyOmitted` when the claim has it. Do not mix
-it with state, note, completion, lease or other update fields. Both
+history count is `history.length + (historyOmitted ?? 0)`. For a read with
+200 retained history entries and `historyOmitted: 3`, send
+`expectedHistoryLength: 203`; sending 200 conflicts. When `historyOmitted`
+is absent, count it as zero. Do not mix the append with state, note,
+completion, lease or other update fields. Both
 preconditions are required: the claim timestamp identifies the ownership
 round and history length catches concurrent edits, even a release/reclaim
 within the same millisecond. A renewal can therefore require a fresh read.

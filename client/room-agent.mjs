@@ -651,11 +651,13 @@ export class RoomAgentClient {
   // delivery modes and review policies. Creating, claiming, renewing, and
   // updating need a contribute, review, or collaborate profile (or the room
   // owner, or a human with contribute rights). Reads need room membership.
-  // A call without limit or cursor follows nextCursor so coordination sees
-  // the whole board; pass either to take a single page.
-  async workClaims({ queue, limit, cursor, signal } = {}) {
+  // Without limit or cursor, follow up to 20 nextCursor continuations.
+  // Pass either for single-page reads and explicit pagination of larger lists.
+  // state=done includes older completed claims hidden by the default list.
+  async workClaims({ queue, state, limit, cursor, signal } = {}) {
     const params = new URLSearchParams();
     if (queue) params.set("queue", queue);
+    if (state !== undefined) params.set("state", state);
     if (limit !== undefined) params.set("limit", String(limit));
     if (cursor) params.set("cursor", cursor);
     const path = params.size ? `/work-claims?${params}` : "/work-claims";
