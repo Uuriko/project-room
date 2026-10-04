@@ -43,6 +43,7 @@ import { evaluateReceipt } from "./jev-receipts.mjs";
 import { findClaimCollisions } from "./claim-collisions.mjs";
 import { emitWorkClaimEvent, enqueueClaimWake } from "./work-claim-events.mjs";
 import { noteReadyWork } from "./work-wants.mjs"; // BOARD-WAKE-2
+import { isFirstContribution, retentionAck } from "./retention-response.mjs";
 import { ROOM_GUIDE_ID } from "./room-guide.mjs";
 import { fileLeaseConflictBody, fileLeaseConflicts, holdForRateLimit, readyClaims } from "./claim-coordination.mjs";
 import { collectPullRequestLookups, commitPullRequestLookup, readClaimPullBudget, writeClaimPullBudget } from "./claim-pr-sync.mjs";
@@ -833,11 +834,17 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       item = runPure(reject, () => claimWork(item, assignee, {
         note: data.note ?? `assigned by ${caller}`, room: roomLike, now: nowMs
       }));
-      commit(item, "claimed", {
+      // Retention ack (research brief 2026-09-28, mechanic #2): every claim
+      // gets the bot's immediate structured receipt, so no contribution sits
+      // at zero replies from t=0. First-time contributors carry the 24h
+      // verdict SLA in the ack note. One commit, one room event.
+      const firstAssignee = isFirstContribution(registry.list(roomId), assignee);
+      const ackedAssignee = retentionAck(item, { now: nowMs, first: firstAssignee, agentId: assignee });
+      commit(ackedAssignee, "claimed", {
         attention: "assigned", attentionMemberId: assignee,
         wakeMemberId: assignee, wakeReason: "assigned"
       });
-      return json(res, 201, item);
+      return json(res, 201, ackedAssignee);
     }
     commit(item, "created");
     return json(res, 201, item);
@@ -885,8 +892,15 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       error.body = body;
       throw error;
     }
-    commit(claimed, "claimed");
-    return json(res, 200, { ...claimed, fileWarnings: data.advisory === true ? fileWarningsFor(registry.list(roomId), claimed) : [] });
+    // Retention ack (research brief 2026-09-28, mechanic #2): every claim gets
+    // the bot's immediate structured receipt, so no contribution sits at zero
+    // replies from t=0. First-time contributors carry the 24h verdict SLA in
+    // the ack note. Firstness is read from the pre-claim registry state; the
+    // ack rides the same commit, so this stays one room event.
+    const first = isFirstContribution(registry.list(roomId), caller);
+    const acked = retentionAck(claimed, { now: nowMs, first, agentId: caller });
+    commit(acked, "claimed");
+    return json(res, 200, { ...acked, fileWarnings: data.advisory === true ? fileWarningsFor(registry.list(roomId), acked) : [] });
   }
   if (workClaimRoute === "update" && req.method === "POST") {
     const data = body(req);
