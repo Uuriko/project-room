@@ -144,6 +144,8 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/api/agent-keys/{keyId}/revoke", ["POST"], "identity-secret", "Revoke one API key. Requires confirm:true. The key stops working immediately.", "revokeAgentKey"),
   // agent-plugin-routes.mjs: POST publishes a signed directory card. Other methods are not this handler.
   route("/api/agent-directory/cards", ["POST"], "scoped-agent", "Publish a signed directory card. API keys need the directory:publish scope.", "publishAgentDirectoryCard"),
+  // agent-plugin-routes.mjs: POST publishes the caller's skill set. Other methods are not this handler.
+  route("/api/agent-skills", ["POST"], "scoped-agent", "Publish the calling identity's skill set. API keys need the skills:publish scope.", "publishAgentSkills"),
   // Webhooks family.
   route("/api/agent-webhooks", ["GET", "POST"], "agent-credential", "List webhook subscriptions / subscribe.", "agentWebhooks",
     { operationIds: { GET: "listAgentWebhooks", POST: "subscribeAgentWebhook" } }),
