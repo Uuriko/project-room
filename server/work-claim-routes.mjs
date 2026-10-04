@@ -895,9 +895,12 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // Retention ack (research brief 2026-09-28, mechanic #2): every claim gets
     // the bot's immediate structured receipt, so no contribution sits at zero
     // replies from t=0. First-time contributors carry the 24h verdict SLA in
-    // the ack note. Firstness is read from the pre-claim registry state; the
-    // ack rides the same commit, so this stays one room event.
-    const first = isFirstContribution(registry.list(roomId), caller);
+    // the ack note. Firstness is read from the pre-claim registry state
+    // excluding the item being claimed: a member who creates an item and
+    // claims it in the same flow is still a first-time contributor — the
+    // created stamp is not a prior contribution. The ack rides the same
+    // commit, so this stays one room event.
+    const first = isFirstContribution(registry.list(roomId).filter(entry => entry.id !== item.id), caller);
     const acked = retentionAck(claimed, { now: nowMs, first, agentId: caller });
     commit(acked, "claimed");
     return json(res, 200, { ...acked, fileWarnings: data.advisory === true ? fileWarningsFor(registry.list(roomId), acked) : [] });

@@ -21,6 +21,7 @@ import { createRateLimiter } from "./identity-ratelimit.mjs";
 import { nextActionsForRoomCreate } from "./discoverability.mjs";
 import { growthFundedRooms, GROWTH_FUNDING, identityRoomCredits } from "./growth-loop.mjs";
 import { claimWork, createWork } from "./work-claims.mjs";
+import { isFirstContribution, retentionAck } from "./retention-response.mjs";
 import { emitWorkClaimEvent } from "./work-claim-events.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
@@ -80,6 +81,15 @@ function ensureAgentStarter(store, roomId, memberId) {
   store.workClaims.set(roomId, item);
   emitWorkClaimEvent(store, roomId, { actorId: memberId, item, action: "created", atMs: now });
   item = claimWork(item, memberId, { leaseHours: 2, now });
+  // Retention ack (research brief 2026-09-28, mechanic #2): the starter is
+  // the member's first contribution, so it carries the bot's immediate
+  // receipt with the 24h verdict SLA — no contribution sits at zero replies
+  // from t=0, including the room's very first. Firstness is read from the
+  // room's other claims; the starter's own created stamp is not a prior
+  // contribution. The ack rides the same "claimed" commit, one room event.
+  const first = isFirstContribution(
+    store.workClaims.list(roomId).filter(entry => entry.id !== AGENT_STARTER_ID), memberId);
+  item = retentionAck(item, { now, first, agentId: memberId });
   store.workClaims.set(roomId, item);
   emitWorkClaimEvent(store, roomId, { actorId: memberId, item, action: "claimed", atMs: now });
   return { claimId: AGENT_STARTER_ID, state: item.state };

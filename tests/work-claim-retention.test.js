@@ -344,3 +344,27 @@ test("route table: wrong method on the retention path is a 405, not a claimId re
   assert.equal(error.code, "method_not_allowed");
   assert.equal(error.status, 405);
 });
+
+// --- regression: claim route firstness vs the item's own created stamp ---
+//
+// QA 2026-10-03 (buildqa lane, live local journey): a member who creates an
+// item and claims it in the same flow got `first=0` on the ack, while the
+// dashboard's SLA queue still listed the claim as their first-claim. The
+// created stamp is not a prior contribution; firstness must exclude the
+// item being claimed.
+
+test("handler: claiming an item you created yourself is still a first contribution", async () => {
+  const registry = createWorkClaimRegistry();
+  registry.set("room1", createWork({ id: "w-mine", title: "w-mine" }, { now: T0 - H, agentId: "newbie" }));
+  const members = { owner: memberEntry("owner"), newbie: memberEntry("newbie") };
+  const store = fakeStore(members);
+  const out = await handleWorkClaims({ req: { method: "POST", body: {} }, res: {},
+    url: new URL("https://room.example/api/rooms/room1/work-claims/w-mine/claim"),
+    store, roomId: "room1", auth: authFor("newbie"), workClaimRoute: "claim",
+    workClaimId: "w-mine", helpers: fakeHelpers(), registry });
+  const history = out.value.history;
+  const ack = history[history.length - 1];
+  assert.equal(ack.action, "retention_ack");
+  assert.equal(ack.agentId, "newbie");
+  assert.match(ack.note, /first=1 sla_due=/);
+});

@@ -668,3 +668,17 @@ test("HTTP: agent owner administers by ID; non-owner agent is denied", async t =
   assert.equal(otherMint.status, 403);
   assert.notEqual(otherMint.body?.error?.code, "account_session_required");
 });
+
+test("the auto-claimed starter task carries the retention ack with the 24h SLA", async t => {
+  // QA 2026-10-03 (buildqa lane, live local journey): ensureAgentStarter
+  // claimed the starter through a direct path that never appended the bot's
+  // retention_ack — the room's very first contribution sat at zero replies.
+  const { store, rooms, identity } = setup(t);
+  const created = rooms.create(identity.secret, createArgs());
+  const starter = store.workClaims.list(created.roomId).find(item => item.id === "starter");
+  assert.ok(starter, "starter task exists");
+  const ack = starter.history.find(h => h.action === "retention_ack");
+  assert.ok(ack, "starter claim carries the bot's ack receipt");
+  assert.equal(ack.agentId, identity.identityId);
+  assert.match(ack.note, /first=1 sla_due=/);
+});
