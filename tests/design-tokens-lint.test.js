@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import {
   hexHits,
   rawFontSizeValue,
+  rawFontShorthandValue,
   scanTree,
   loadBaseline,
   diffAgainstBaseline,
@@ -40,10 +41,40 @@ test("rawFontSizeValue flags literal sizes, allows the token path", () => {
   assert.equal(rawFontSizeValue("  font-size: var(--text-sm, 14px);"), null);
 });
 
+test("hexHits flags =-prefixed hexes in data URIs", () => {
+  assert.deepEqual(
+    hexHits('  background: url("data:image/svg+xml,<svg fill=#ff0000></svg>");'),
+    ["#ff0000"]
+  );
+});
+
+test("rawFontSizeValue is case-insensitive (CSS property names are)", () => {
+  assert.equal(rawFontSizeValue("  FONT-SIZE: 16px;"), "16px");
+  assert.equal(rawFontSizeValue(".x { Font-Size: .875rem; }"), ".875rem");
+});
 test("rawFontSizeValue ignores custom properties and lookalikes", () => {
   assert.equal(rawFontSizeValue("  --font-size: 16px;"), null);
   assert.equal(rawFontSizeValue("  font-size-adjust: .5;"), null);
   assert.equal(rawFontSizeValue("  line-height: 1.5;"), null);
+});
+
+test("rawFontShorthandValue flags raw sizes in the font: shorthand", () => {
+  assert.equal(rawFontShorthandValue("  font: 16px/1.5 sans-serif;"), "16px");
+  assert.equal(
+    rawFontShorthandValue("  font: italic bold .875rem/1.4 system-ui;"),
+    ".875rem"
+  );
+  assert.equal(rawFontShorthandValue("  FONT: 12pt serif;"), "12pt");
+  assert.equal(rawFontShorthandValue("  font: small serif;"), "small");
+});
+
+test("rawFontShorthandValue allows inherit, system fonts, and tokens", () => {
+  assert.equal(rawFontShorthandValue("  font: inherit;"), null);
+  assert.equal(rawFontShorthandValue("  font: var(--font-sans);"), null);
+  assert.equal(rawFontShorthandValue("  font: caption;"), null);
+  assert.equal(rawFontShorthandValue("  font: small-caps serif;"), null);
+  assert.equal(rawFontShorthandValue("  font-size: 16px;"), null);
+  assert.equal(rawFontShorthandValue("  font-family: serif;"), null);
 });
 
 test("diffAgainstBaseline reports new violations and stale entries", () => {

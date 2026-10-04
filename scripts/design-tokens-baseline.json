@@ -1,6 +1,7 @@
 {
   "_comment": "D-fo-6 step 1 ratchet baseline. NEVER add NEW entries here — new raw hex colors or font-size declarations must use design tokens instead. Remove entries only when the corresponding violation is fixed out of the CSS tree.",
   "entries": {
+    "src/operator.css ::: body { margin: 0; font: 15px/1.5 system-ui, -apple-system, \"Segoe UI\", sans-serif; color: var(--op-fg); background: var(--op-bg); }": 1,
     "src/operator.css ::: h1 { font-size: 1.5rem; margin: 0 0 4px; }": 1,
     "src/operator.css ::: h2 { font-size: 1.15rem; margin: 24px 0 8px; border-top: 1px solid var(--op-line); padding-top: 16px; }": 1,
     "src/project-offers.css ::: .match-scope { font-size:.9rem; }": 1,
@@ -22,6 +23,7 @@
     "src/project-offers.css ::: font-size:32px": 1,
     "src/project-offers.css ::: font-size:clamp(28px,3.2vw,42px);": 1,
     "src/project-offers.css ::: font-size:clamp(46px,6.5vw,82px);": 1,
+    "src/project-offers.css ::: font:16px/1.5 var(--font-sans)": 1,
     "src/public-a11y.css ::: .auth-panel .view-title { margin: 0.67em 0 1.5rem; overflow-wrap: anywhere; font-size: clamp(1.7rem, 4vw, 1.9rem); line-height: 1.2; text-wrap: balance; font-weight: 700; }": 1,
     "src/public-a11y.css ::: .inbox-sidebar .view-title { font-size: 1.25rem; margin: 0; font-weight: 700; }": 1,
     "src/public-a11y.css ::: .join-card h2 { font-size: 1.35rem; margin: 0 0 .5rem; font-weight: 650; }": 1,
@@ -76,6 +78,7 @@
     "src/styles.css ::: .agent-type-chip { display: inline-block; margin-left: .35rem; padding: 0 .35rem; font-size: .7rem; line-height: 1.4; color: var(--room-quiet); border: 1px solid var(--room-rule); border-radius: .3rem; }": 1,
     "src/styles.css ::: .agent-type-copy span { font-size: .75rem; line-height: 1.35; color: var(--room-quiet); }": 1,
     "src/styles.css ::: .agent-type-copy strong { font-size: .9rem; line-height: 1.25; }": 1,
+    "src/styles.css ::: .agent-type-icon { flex: 0 0 1.75rem; height: 1.75rem; font: 650 .7rem/1.75rem ui-monospace, SFMono-Regular, Menlo, monospace; text-align: center; border-radius: .35rem; background: color-mix(in srgb, var(--room-ink) 8%, var(--room-paper)); }": 1,
     "src/styles.css ::: .attention-detail { margin: .25rem 0 0; color: var(--muted); font-size: .88rem; overflow-wrap: anywhere; }": 1,
     "src/styles.css ::: .attention-header h3 { margin: 0; font-size: 1rem; display: flex; align-items: center; gap: .5rem; min-width: 0; }": 1,
     "src/styles.css ::: .attention-hint { color: var(--muted); font-size: .85rem; }": 1,

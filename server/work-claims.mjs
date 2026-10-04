@@ -429,6 +429,10 @@ export function createWork({ id, title, reviewPolicy, note, tags, files, depends
   const atMs = nowMsOf(now);
   idOf(id, "work id", 256);
   if (title !== undefined) check(typeof title === "string" && title.length > 0 && title.length <= 512, "title must be 1..512 characters");
+  // SEC2: the create note is stored on the "created" history stamp and served
+  // on every board list — without a bound, a direct API caller can stash an
+  // arbitrarily large string. 4000 matches the New-item form's maxlength.
+  if (note !== undefined && note !== null) check(typeof note === "string" && note.length <= 4000, "note must be a string of at most 4000 characters");
   if (reviewPolicy !== undefined && reviewPolicy !== null) check(REVIEW_POLICIES.includes(reviewPolicy), `reviewPolicy must be one of ${REVIEW_POLICIES.join(", ")}`);
   const claimKind = kindOf(kind);
   const claimRevision = revisionOf(revision);
