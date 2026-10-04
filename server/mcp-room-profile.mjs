@@ -23,6 +23,7 @@ import { randomUUID } from "node:crypto";
 import { validId, ROOM_KINDS, MAX_MESSAGE_BODY_CHARS } from "../src/events.js";
 import { nextWorkStep } from "../src/workflow.js";
 import { completedResults, searchWork } from "../src/work-selectors.js";
+import { sortWorkByCuriosity, viewerHistory } from "../src/curiosity-rank.mjs";
 import { workHelpContext } from "../src/work-help.js";
 import { HOSTED_ROOM_MCP_TOOLS, HOSTED_MCP_FOLLOW_UPS, ROOM_MCP_SERVER_NAME, ROOM_MCP_SERVER_VERSION, canonicalMcpToolName } from "../src/room-mcp-join.js";
 import { MCP_JOIN_TOOLS, MCP_AUTH_REQUIRED, handleMcpJoinRpc } from "./mcp-http.mjs";
@@ -165,7 +166,8 @@ function validRoomArgs(name, args) {
   }
   if (name === "room_list_work") {
     const queryOk = args.query === undefined || typeof args.query === "string" && args.query.length <= 200 && args.query.trim().length > 0;
-    return (args.focus === undefined || ["all", "needs_me", "help_wanted", "results"].includes(args.focus)) && queryOk;
+    const sortOk = args.sort === undefined || args.sort === "curiosity";
+    return (args.focus === undefined || ["all", "needs_me", "help_wanted", "results"].includes(args.focus)) && queryOk && sortOk;
   }
   if (name === "bond_propose") {
     const noteOk = args.note === undefined || typeof args.note === "string" && args.note.length <= 500;
@@ -315,10 +317,25 @@ function listWork(store, secret, args) {
     members: snapshot.state.members,
     workItems: Object.fromEntries(candidates.map(item => [item.id, item]))
   }, args.query);
-  const work = (matches?.work ?? candidates.map(item => ({ item }))).map(({ item, excerpt }) => ({
+  let work = (matches?.work ?? candidates.map(item => ({ item }))).map(({ item, excerpt }) => ({
     ...workRecord(item, now),
     ...(excerpt === undefined ? {} : { excerpt })
   }));
+  let sort = null;
+  if (args.sort === "curiosity") {
+    // Curiosity ranking: the calling member's own completed work (receipt
+    // producerId) is the familiarity baseline; listed items rank
+    // unfamiliar-but-learnable first.
+    const history = viewerHistory(snapshot.state, snapshot.viewerId);
+    const rawById = new Map(candidates.map(item => [item.id, item]));
+    const order = new Map(sortWorkByCuriosity(
+      work.map(entry => rawById.get(entry.id)).filter(Boolean), history)
+      .map(({ item, curiosity }, index) => [item.id, { index, curiosity }]));
+    work = work
+      .map(entry => ({ ...entry, curiosity: order.get(entry.id)?.curiosity ?? null }))
+      .sort((a, b) => (order.get(a.id)?.index ?? 0) - (order.get(b.id)?.index ?? 0));
+    sort = "curiosity";
+  }
   const replyListing = focus === "needs_me" ? store.replyRequests.list(secret, args.roomId, { direction: "incoming", status: "open" }) : null;
   const replyRequests = replyListing?.requests.map(request => ({
     id: request.id, requesterId: request.requesterId, workItemId: request.workItemId, revision: request.revision,
@@ -329,6 +346,7 @@ function listWork(store, secret, args) {
     member: member ? { id: member.id, kind: member.kind, permissions: [...member.permissions] } : null,
     charter: snapshot.charter ?? null,
     ...(matches ? { selection: { query: args.query.trim(), matches: matches.total, shown: work.length } } : {}),
+    ...(sort ? { sort } : {}),
     work, ...(focus === "needs_me" ? { replyRequests, replyRequestsEvaluatedThrough: replyListing.evaluatedThrough } : {})
   });
 }
