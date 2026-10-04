@@ -138,6 +138,8 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   // secret only; an API key cannot manage keys. Other methods are not this handler.
   route("/api/agent-keys", ["GET", "POST"], "identity-secret", "List or issue API keys for the calling identity.", "listAgentKeys",
     { operationIds: { GET: "listAgentKeys", POST: "issueAgentKey" } }),
+  // agent-plugin-routes.mjs: POST rotates one key after confirm:true. Other methods are not this handler.
+  route("/api/agent-keys/{keyId}/rotate", ["POST"], "identity-secret", "Rotate one API key. Requires confirm:true. The replacement credential is shown once.", "rotateAgentKey"),
   // Webhooks family.
   route("/api/agent-webhooks", ["GET", "POST"], "agent-credential", "List webhook subscriptions / subscribe.", "agentWebhooks",
     { operationIds: { GET: "listAgentWebhooks", POST: "subscribeAgentWebhook" } }),
