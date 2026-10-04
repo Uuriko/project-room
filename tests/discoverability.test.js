@@ -2936,6 +2936,45 @@ test("ownership transfer is served for the inventoried method", { timeout: 30000
   assert.equal(body.error.code, "unauthenticated");
 });
 
+// server/http.mjs /api/rooms/{roomId}/agent-connections: GET lists, POST applies. Missing credential is 401.
+const AGENT_CONNECTIONS_INVENTORY = {
+  "/api/rooms/{roomId}/agent-connections": ["GET", "POST"],
+};
+
+test("openapi inventory lists served agent-connections methods", () => {
+  const doc = buildOpenApiJson({ origin: "https://room.example" });
+  for (const [path, methods] of Object.entries(AGENT_CONNECTIONS_INVENTORY)) {
+    const entry = DISCOVERABILITY_ROUTES.find(item => item.path === path);
+    assert.ok(entry, `route table lists ${path}`);
+    assert.deepEqual([...entry.methods].sort(), [...methods].sort(), path);
+    assert.equal(doc.paths[path]?.get?.operationId, "listAgentConnections");
+    assert.equal(doc.paths[path]?.post?.operationId, "applyAgentConnection");
+    assert.match(doc.paths[path].get.summary, /rooms:read/);
+    assert.match(doc.paths[path].post.summary, /rooms:write/);
+    for (const method of methods) {
+      const op = doc.paths[path][method.toLowerCase()];
+      assert.match(op.description, /room credential/i);
+      assert.doesNotMatch(op.description, /no credential required/i);
+    }
+  }
+});
+
+test("agent connections are served for the inventoried methods", { timeout: 30000 }, async t => {
+  const { origin } = await serve(t);
+  const getRes = await fetch(`${origin}/api/rooms/commons/agent-connections`, { headers: { Origin: origin } });
+  const listed = await getRes.json();
+  assert.equal(getRes.status, 401);
+  assert.equal(listed.error.code, "unauthenticated");
+  const postRes = await fetch(`${origin}/api/rooms/commons/agent-connections`, {
+    method: "POST",
+    headers: { Origin: origin, "Content-Type": "application/json" },
+    body: "{}",
+  });
+  const posted = await postRes.json();
+  assert.equal(postRes.status, 401);
+  assert.equal(posted.error.code, "unauthenticated");
+});
+
 test("openapi inventory lists served work-claims methods", () => {
   const doc = buildOpenApiJson({ origin: "https://room.example" });
   for (const [path, methods] of Object.entries(WORK_CLAIM_INVENTORY)) {
