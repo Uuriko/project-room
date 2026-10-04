@@ -1183,6 +1183,35 @@ test("share-link join is served for the inventoried method", { timeout: 30000 },
   assert.equal(body.error.code, "unauthenticated");
 });
 
+// server/http.mjs /api/invitations/preview: POST only. A body without invitationToken is 422.
+const INVITATION_PREVIEW_INVENTORY = {
+  "/api/invitations/preview": ["POST"],
+};
+
+test("openapi inventory lists served invitation preview methods", () => {
+  const doc = buildOpenApiJson({ origin: "https://room.example" });
+  for (const [path, methods] of Object.entries(INVITATION_PREVIEW_INVENTORY)) {
+    const entry = DISCOVERABILITY_ROUTES.find(item => item.path === path);
+    assert.ok(entry, `route table lists ${path}`);
+    assert.deepEqual([...entry.methods].sort(), [...methods].sort(), path);
+    for (const method of methods) {
+      assert.equal(typeof doc.paths[path]?.[method.toLowerCase()]?.operationId, "string", `${method} ${path}`);
+    }
+  }
+});
+
+test("invitation preview is served for the inventoried method", { timeout: 30000 }, async t => {
+  const { origin } = await serve(t);
+  const res = await fetch(`${origin}/api/invitations/preview`, {
+    method: "POST",
+    headers: { Origin: origin, "Content-Type": "application/json" },
+    body: "{}",
+  });
+  const body = await res.json();
+  assert.equal(res.status, 422);
+  assert.equal(body.error.code, "invalid_invitation");
+});
+
 test("openapi inventory lists served work-claims methods", () => {
   const doc = buildOpenApiJson({ origin: "https://room.example" });
   for (const [path, methods] of Object.entries(WORK_CLAIM_INVENTORY)) {
