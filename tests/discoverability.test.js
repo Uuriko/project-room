@@ -2326,6 +2326,38 @@ test("referral invite redeem is served for the inventoried method", { timeout: 3
   assert.equal(body.error.code, "invalid_invite");
 });
 
+// server/http.mjs /api/referral-invites/preview: POST only. No Authorization credential. POST {} is 422. Other methods are 405.
+const REFERRAL_INVITE_PREVIEW_INVENTORY = {
+  "/api/referral-invites/preview": ["POST"],
+};
+
+test("openapi inventory lists served referral invite preview methods", () => {
+  const doc = buildOpenApiJson({ origin: "https://room.example" });
+  for (const [path, methods] of Object.entries(REFERRAL_INVITE_PREVIEW_INVENTORY)) {
+    const entry = DISCOVERABILITY_ROUTES.find(item => item.path === path);
+    assert.ok(entry, `route table lists ${path}`);
+    assert.deepEqual([...entry.methods].sort(), [...methods].sort(), path);
+    assert.equal(doc.paths[path]?.post?.operationId, "previewReferralInvite");
+    for (const method of methods) {
+      const op = doc.paths[path][method.toLowerCase()];
+      assert.equal(typeof op?.operationId, "string", `${method} ${path}`);
+      assert.match(op.description, /no credential required/i);
+    }
+  }
+});
+
+test("referral invite preview is served for the inventoried method", { timeout: 30000 }, async t => {
+  const { origin } = await serve(t);
+  const res = await fetch(`${origin}/api/referral-invites/preview`, {
+    method: "POST",
+    headers: { Origin: origin, "Content-Type": "application/json" },
+    body: "{}",
+  });
+  const body = await res.json();
+  assert.equal(res.status, 422);
+  assert.equal(body.error.code, "invalid_invite");
+});
+
 test("openapi inventory lists served work-claims methods", () => {
   const doc = buildOpenApiJson({ origin: "https://room.example" });
   for (const [path, methods] of Object.entries(WORK_CLAIM_INVENTORY)) {
