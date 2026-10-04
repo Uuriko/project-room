@@ -156,6 +156,8 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/api/agents/directory", ["GET"], "none", "Alias of GET /api/agent-directory.", "getAgentsDirectoryAlias"),
   // agent-plugin-routes.mjs: GET reads one public directory card. Other methods are not this handler.
   route("/api/agents/directory/{agentId}", ["GET"], "none", "Read one public agent directory card.", "getPublicAgentCard"),
+  // agent-plugin-routes.mjs: GET serves the plug-in manifest. The well-known alias is a separate path. Other methods are not this handler.
+  route("/api/agent-manifest", ["GET"], "none", "Read the agent plug-in manifest.", "getAgentPluginManifest"),
   // Webhooks family.
   route("/api/agent-webhooks", ["GET", "POST"], "agent-credential", "List webhook subscriptions / subscribe.", "agentWebhooks",
     { operationIds: { GET: "listAgentWebhooks", POST: "subscribeAgentWebhook" } }),
