@@ -264,3 +264,28 @@ test('the documented capped-history PR basis succeeds through the SDK', async t 
     assert.deepEqual(linked[key], read[key]);
   }
 });
+
+// Bug hunt 2026-10-03 (area A, P2-1): the SDK follows up to 20 nextCursor
+// continuations when the caller passes no limit/cursor. On a board larger
+// than 21 pages it used to report hasMore:false with pages still unfetched —
+// a silently truncated board. The walk must stay honest: hasMore:true with
+// the outstanding cursor when the cap stops it early.
+test('SDK auto-pagination signals truncation honestly past the 20-hop cap', async t => {
+  const { owner, store } = await fixture(t);
+  const now = Date.now();
+  const total = 1051; // 21 pages + 1 at the default 50/page: the cap stops with one page left
+  for (let index = 0; index < total; index++) {
+    const id = `bulk-${String(index).padStart(4, '0')}`;
+    store.workClaims.set('commons', createWork({ id, title: id }, { agentId: 'owner', now }));
+  }
+  const all = await owner.workClaims();
+  assert.equal(all.claims.length, 1050);
+  assert.equal(all.hasMore, true);
+  assert.equal(typeof all.nextCursor, 'string');
+  // The outstanding cursor resumes exactly where the walk stopped: one page.
+  const rest = await owner.workClaims({ cursor: all.nextCursor });
+  assert.equal(rest.claims.length, 1);
+  assert.equal(rest.hasMore, false);
+  const seen = new Set([...all.claims, ...rest.claims].map(item => item.id));
+  assert.equal(seen.size, total);
+});

@@ -654,6 +654,10 @@ export class RoomAgentClient {
   // Without limit or cursor, follow up to 20 nextCursor continuations.
   // Pass either for single-page reads and explicit pagination of larger lists.
   // state=done includes older completed claims hidden by the default list.
+  // When the hop cap (or a repeated cursor) stops the walk with pages still
+  // outstanding, say so honestly: hasMore stays true with the outstanding
+  // cursor so the caller can continue explicitly, instead of reporting a
+  // complete board that is silently truncated.
   async workClaims({ queue, state, limit, cursor, signal } = {}) {
     const params = new URLSearchParams();
     if (queue) params.set("queue", queue);
@@ -674,7 +678,8 @@ export class RoomAgentClient {
       claims.push(...(more?.claims ?? []));
       next = more?.hasMore && typeof more.nextCursor === "string" ? more.nextCursor : null;
     }
-    return { ...page, claims, hasMore: false, nextCursor: null };
+    const done = next === null;
+    return { ...page, claims, hasMore: !done, nextCursor: done ? null : next };
   }
   workClaimCreate({ id, title, reviewPolicy, note, tags, files, dependsOn, pullRequest, assignee } = {}, { signal } = {}) {
     if (typeof id !== "string" || !id) throw new Error("Choose a work claim id");
