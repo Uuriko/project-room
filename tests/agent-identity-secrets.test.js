@@ -174,6 +174,27 @@ test("rotate/revoke require authentication", async t => {
   assert.equal(await errorCode(await post(origin, `/api/agent-identities/${agent.identityId}/rotate`, { confirm: true }, "pri_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")), "unauthenticated");
 });
 
+test("authorization scheme is case-insensitive per RFC 7235 (QA 2026-10-03 P1-3)", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f);
+  const agent = f.store.identities.create("Scheme-case agent");
+  const path = `/api/agent-identities/${agent.identityId}/rotate`;
+  const postWithScheme = (scheme, secret) => fetch(`${origin}${path}`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `${scheme} ${secret}` },
+    body: JSON.stringify({ confirm: true }),
+  });
+  // Any casing of the Bearer scheme authenticates against the real server.
+  let secret = agent.secret;
+  for (const scheme of ["Bearer", "bearer", "BEARER", "bEaReR"]) {
+    const res = await postWithScheme(scheme, secret);
+    assert.equal(res.status, 200, `scheme "${scheme}" must authenticate`);
+    secret = (await res.json()).secret; // rotation consumed it; use the fresh one
+  }
+  // A non-bearer scheme still 401s.
+  assert.equal(await errorCode(await postWithScheme("Basic", "abc")), "unauthenticated");
+});
+
 test("revoked_at column is backfilled on pre-existing identity tables", async t => {
   const f = createAcceptanceFixture();
   // The fixture's AgentIdentities constructor ran ensureIdentitySecretSchema.
