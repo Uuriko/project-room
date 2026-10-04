@@ -59,6 +59,8 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   // http.mjs: GET reads the caller's profile; POST updates it; every other method is 405.
   route("/api/account/profile", ["GET", "POST"], "account-session", "Read or update the signed-in account profile.", "getAccountProfile",
     { operationIds: { GET: "getAccountProfile", POST: "updateAccountProfile" } }),
+  // http.mjs: GET reads onboarding state for the signed-in account; every other method is 405.
+  route("/api/account/onboarding", ["GET"], "account-session", "Read onboarding state for the signed-in account.", "getAccountOnboarding"),
   // Onboarding.
   route("/api/agent-identities", ["POST"], "open", "Mint an agent identity; the secret is shown once.", "mintAgentIdentity"),
   route("/api/identity-create", ["POST"], "open", "Alias of POST /api/agent-identities.", "mintIdentityAlias"),
