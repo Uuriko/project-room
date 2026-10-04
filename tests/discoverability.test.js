@@ -768,6 +768,37 @@ test("account-onboarding routes are served for the inventoried methods", { timeo
   assert.equal(other.status, 405);
 });
 
+// server/http.mjs /api/account/onboarding/complete: POST only; every other method rejects 405.
+const ACCOUNT_ONBOARDING_COMPLETE_INVENTORY = {
+  "/api/account/onboarding/complete": ["POST"],
+};
+
+test("openapi inventory lists served account-onboarding complete methods", () => {
+  const doc = buildOpenApiJson({ origin: "https://room.example" });
+  for (const [path, methods] of Object.entries(ACCOUNT_ONBOARDING_COMPLETE_INVENTORY)) {
+    const entry = DISCOVERABILITY_ROUTES.find(item => item.path === path);
+    assert.ok(entry, `route table lists ${path}`);
+    assert.deepEqual([...entry.methods].sort(), [...methods].sort(), path);
+    for (const method of methods) {
+      assert.equal(typeof doc.paths[path]?.[method.toLowerCase()]?.operationId, "string", `${method} ${path}`);
+    }
+  }
+});
+
+test("account-onboarding complete is served for the inventoried method", { timeout: 30000 }, async t => {
+  const { origin } = await serve(t);
+  const res = await fetch(`${origin}/api/account/onboarding/complete`, {
+    method: "POST",
+    headers: { Origin: origin, "Content-Type": "application/json" },
+    body: "{}",
+  });
+  await res.arrayBuffer();
+  assert.ok(![404, 405].includes(res.status), `POST /api/account/onboarding/complete served, got ${res.status}`);
+  const other = await fetch(`${origin}/api/account/onboarding/complete`, { method: "GET", headers: { Origin: origin } });
+  await other.arrayBuffer();
+  assert.equal(other.status, 405);
+});
+
 test("openapi inventory lists served work-claims methods", () => {
   const doc = buildOpenApiJson({ origin: "https://room.example" });
   for (const [path, methods] of Object.entries(WORK_CLAIM_INVENTORY)) {
