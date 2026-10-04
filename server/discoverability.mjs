@@ -217,6 +217,8 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/api/claims/validate", ["POST"], "open", "Validate a room-claim block before posting it. No credential.", "validateRoomClaim"),
   // http.mjs: POST mints a referral invite. Missing bearer is 401. Other methods are 405.
   route("/api/referral-invites/mint", ["POST"], "room-member", "Mint a referral invite. Requires an active room key or agent identity secret.", "mintReferralInvite"),
+  // http.mjs: POST redeems a referral token. No Authorization credential. Other methods are 405.
+  route("/api/referral-invites/redeem", ["POST"], "open", "Redeem a referral invite token. No Authorization credential; the token is in the body.", "redeemReferralInvite"),
   // Wake control.
   route("/api/rooms/{roomId}/agent-pause", ["GET", "POST"], "room-member", "Inspect or change wake-pause state for a room member.", "agentPause",
     { operationIds: { GET: "inspectAgentPause", POST: "setAgentPause" } }),
