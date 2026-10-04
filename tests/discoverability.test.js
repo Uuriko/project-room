@@ -1299,6 +1299,39 @@ test("agent auth session is served for the inventoried method", { timeout: 30000
   assert.equal(body.error.code, "invalid_login");
 });
 
+// server/agent-plugin-routes.mjs /api/agent-keys: GET and POST. Missing bearer is 401 before the body.
+const AGENT_KEYS_INVENTORY = {
+  "/api/agent-keys": ["GET", "POST"],
+};
+
+test("openapi inventory lists served agent key methods", () => {
+  const doc = buildOpenApiJson({ origin: "https://room.example" });
+  for (const [path, methods] of Object.entries(AGENT_KEYS_INVENTORY)) {
+    const entry = DISCOVERABILITY_ROUTES.find(item => item.path === path);
+    assert.ok(entry, `route table lists ${path}`);
+    assert.deepEqual([...entry.methods].sort(), [...methods].sort(), path);
+    for (const method of methods) {
+      assert.equal(typeof doc.paths[path]?.[method.toLowerCase()]?.operationId, "string", `${method} ${path}`);
+    }
+  }
+});
+
+test("agent keys are served for the inventoried methods", { timeout: 30000 }, async t => {
+  const { origin } = await serve(t);
+  const getRes = await fetch(`${origin}/api/agent-keys`, { headers: { Origin: origin } });
+  const getBody = await getRes.json();
+  assert.equal(getRes.status, 401);
+  assert.equal(getBody.error.code, "unauthenticated");
+  const postRes = await fetch(`${origin}/api/agent-keys`, {
+    method: "POST",
+    headers: { Origin: origin, "Content-Type": "application/json" },
+    body: "{}",
+  });
+  const postBody = await postRes.json();
+  assert.equal(postRes.status, 401);
+  assert.equal(postBody.error.code, "unauthenticated");
+});
+
 test("openapi inventory lists served work-claims methods", () => {
   const doc = buildOpenApiJson({ origin: "https://room.example" });
   for (const [path, methods] of Object.entries(WORK_CLAIM_INVENTORY)) {

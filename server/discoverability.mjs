@@ -134,6 +134,10 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
     { operationIds: { GET: "getMcpJoinDoc", POST: "postMcp" } }),
   route("/room/mcp", ["GET", "POST"], "mcp", "Hosted MCP endpoint on the www door: GET serves the public join document; POST is JSON-RPC tools/list + tools/call.", "postRoomMcp",
     { operationIds: { GET: "getRoomMcpJoinDoc", POST: "postRoomMcp" } }),
+  // agent-plugin-routes.mjs: GET lists keys and POST issues one. Owner identity
+  // secret only; an API key cannot manage keys. Other methods are not this handler.
+  route("/api/agent-keys", ["GET", "POST"], "identity-secret", "List or issue API keys for the calling identity.", "listAgentKeys",
+    { operationIds: { GET: "listAgentKeys", POST: "issueAgentKey" } }),
   // Webhooks family.
   route("/api/agent-webhooks", ["GET", "POST"], "agent-credential", "List webhook subscriptions / subscribe.", "agentWebhooks",
     { operationIds: { GET: "listAgentWebhooks", POST: "subscribeAgentWebhook" } }),
