@@ -48,10 +48,13 @@ const startsWithWord = (value, word) => value === word
 // way the roster check does and refuse when any word inside one is a reserved
 // role word. The identity-mint path only runs this function, so the peel
 // must live here and not only in the member roster check.
+// The trailing-decoration peel also strips CJK bracket pairs (〈〉「」『』【】
+// 〔〕〖〗): without them "Bob〈owner〉" / "Bob「admin」" read as role labels
+// but evade the ASCII-only peel (QA2-SECREG followup).
 function hasReservedDecoration(skeleton) {
   let value = skeleton;
   for (;;) {
-    const match = /^(.*?)\s*[(\[]([^)\]]+)[)\]]$/.exec(value);
+    const match = /^(.*?)\s*[(\[〈「『【〔〖]([^)\]〉」』】〕〗]+)[)\]〉」』】〕〗]$/.exec(value);
     if (!match) return false;
     const words = match[2].toLowerCase().split(/[^a-z0-9]+/u);
     if (words.some(word => word && RESERVED_ROLE_PREFIXES.some(prefix => startsWithWord(word, prefix)))) return true;
