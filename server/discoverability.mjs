@@ -166,6 +166,8 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/api/agent-webhooks/{subscriptionId}", ["GET", "DELETE"], "agent-credential", "Read or delete one webhook subscription.", "agentWebhookById",
     { operationIds: { GET: "getAgentWebhook", DELETE: "deleteAgentWebhook" } }),
   route("/api/agent-webhooks/{subscriptionId}/deliveries", ["GET"], "agent-credential", "Delivery journal for one subscription.", "agentWebhookDeliveries"),
+  // agent-plugin-routes.mjs: POST verifies one signed delivery. Other methods are not this handler.
+  route("/api/agent-webhooks/{subscriptionId}/verify-delivery", ["POST"], "agent-credential", "Verify a signed webhook delivery for one subscription.", "verifyAgentWebhookDelivery"),
   route("/api/agent-webhooks/deliveries/{deliveryId}/redrive", ["POST"], "agent-credential", "Redrive one dead-letter delivery.", "redriveWebhookDelivery"),
   // Wake control.
   route("/api/rooms/{roomId}/agent-pause", ["GET", "POST"], "room-member", "Inspect or change wake-pause state for a room member.", "agentPause",

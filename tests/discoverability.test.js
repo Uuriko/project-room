@@ -1630,6 +1630,35 @@ test("agent plugin well-known manifest is served for the inventoried method", { 
   assert.equal(typeof body.version, "string");
 });
 
+// server/agent-plugin-routes.mjs /api/agent-webhooks/{subscriptionId}/verify-delivery: POST only. Missing bearer is 401.
+const AGENT_WEBHOOK_VERIFY_INVENTORY = {
+  "/api/agent-webhooks/{subscriptionId}/verify-delivery": ["POST"],
+};
+
+test("openapi inventory lists served webhook verify-delivery methods", () => {
+  const doc = buildOpenApiJson({ origin: "https://room.example" });
+  for (const [path, methods] of Object.entries(AGENT_WEBHOOK_VERIFY_INVENTORY)) {
+    const entry = DISCOVERABILITY_ROUTES.find(item => item.path === path);
+    assert.ok(entry, `route table lists ${path}`);
+    assert.deepEqual([...entry.methods].sort(), [...methods].sort(), path);
+    for (const method of methods) {
+      assert.equal(typeof doc.paths[path]?.[method.toLowerCase()]?.operationId, "string", `${method} ${path}`);
+    }
+  }
+});
+
+test("webhook verify-delivery is served for the inventoried method", { timeout: 30000 }, async t => {
+  const { origin } = await serve(t);
+  const res = await fetch(`${origin}/api/agent-webhooks/sub_probe/verify-delivery`, {
+    method: "POST",
+    headers: { Origin: origin, "Content-Type": "application/json" },
+    body: "{}",
+  });
+  const body = await res.json();
+  assert.equal(res.status, 401);
+  assert.equal(body.error.code, "unauthenticated");
+});
+
 test("openapi inventory lists served work-claims methods", () => {
   const doc = buildOpenApiJson({ origin: "https://room.example" });
   for (const [path, methods] of Object.entries(WORK_CLAIM_INVENTORY)) {
