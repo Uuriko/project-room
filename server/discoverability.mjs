@@ -130,7 +130,13 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
     { operationIds: { GET: "listAgentRooms", POST: "createAgentRoom" } }),
   route("/api/agent-invites/redeem", ["POST"], "invite-code", "Redeem a one-time invite code for room membership.", "redeemInvite"),
   route("/api/access-requests", ["POST"], "open", "Request access to a room (owner decides).", "requestAccess"),
-  route("/api/access-requests/{requestId}", ["GET"], "identity-scoped", "Poll your own access request status.", "getAccessRequest"),
+  // http.mjs: GET polls with identityId and no bearer. POST cancels and requires
+  // the requesting identity's current secret. Auth and summary differ by method.
+  route("/api/access-requests/{requestId}", ["GET", "POST"], "identity-scoped", "Poll your own access request status.", "getAccessRequest", {
+    operationIds: { GET: "getAccessRequest", POST: "cancelAccessRequest" },
+    authByMethod: { POST: "identity-secret" },
+    summaryByMethod: { POST: "Cancel your own pending access request. The requesting identity's current bearer secret is required." },
+  }),
   route("/api/share-links/join-agent", ["POST"], "identity-secret", "Guest-link redemption: join with a guest pass.", "joinAgentViaShareLink"),
   // http.mjs: GET and HEAD both collect cross-room attention. HEAD strips the body.
   // Other methods reject 405. Allow lists GET only; the serving if is the inventory.
@@ -444,8 +450,8 @@ export function buildOpenApiJson({ origin }) {
         // fallback. operationIds MUST be unique across the whole document
         // (tests/discoverability.test.js pins this).
         operationId: entry.operationIds?.[method] ?? entry.operationId,
-        summary: entry.summary,
-        description: AUTH_DESCRIPTION[entry.auth] ?? "",
+        summary: entry.summaryByMethod?.[method] ?? entry.summary,
+        description: AUTH_DESCRIPTION[entry.authByMethod?.[method] ?? entry.auth] ?? "",
         responses: operationResponses(entry, method),
       };
       if (entry.path.includes("{")) {

@@ -2417,6 +2417,46 @@ test("needs-me HEAD is served for the inventoried method", { timeout: 30000 }, a
   assert.equal(text, "");
 });
 
+// server/http.mjs /api/access-requests/{requestId}: GET polls without a bearer. POST cancel requires the identity secret.
+const ACCESS_REQUEST_STATUS_INVENTORY = {
+  "/api/access-requests/{requestId}": ["GET", "POST"],
+};
+
+test("openapi inventory lists served access-request status methods", () => {
+  const doc = buildOpenApiJson({ origin: "https://room.example" });
+  for (const [path, methods] of Object.entries(ACCESS_REQUEST_STATUS_INVENTORY)) {
+    const entry = DISCOVERABILITY_ROUTES.find(item => item.path === path);
+    assert.ok(entry, `route table lists ${path}`);
+    assert.deepEqual([...entry.methods].sort(), [...methods].sort(), path);
+    const getOp = doc.paths[path]?.get;
+    const postOp = doc.paths[path]?.post;
+    assert.equal(getOp?.operationId, "getAccessRequest");
+    assert.equal(postOp?.operationId, "cancelAccessRequest");
+    assert.match(getOp.summary, /poll/i);
+    assert.match(getOp.description, /identityId that filed the request/i);
+    assert.doesNotMatch(getOp.description, /Bearer/);
+    assert.match(postOp.summary, /cancel/i);
+    assert.match(postOp.summary, /bearer secret/i);
+    assert.match(postOp.description, /identity secret/i);
+    assert.doesNotMatch(postOp.description, /no credential required/i);
+    for (const method of methods) {
+      assert.equal(typeof doc.paths[path][method.toLowerCase()]?.operationId, "string", `${method} ${path}`);
+    }
+  }
+});
+
+test("access-request cancel is served for the inventoried method", { timeout: 30000 }, async t => {
+  const { origin } = await serve(t);
+  const res = await fetch(`${origin}/api/access-requests/probe-request`, {
+    method: "POST",
+    headers: { Origin: origin, "Content-Type": "application/json" },
+    body: "{}",
+  });
+  const body = await res.json();
+  assert.equal(res.status, 401);
+  assert.equal(body.error.code, "unauthenticated");
+});
+
 test("openapi inventory lists served work-claims methods", () => {
   const doc = buildOpenApiJson({ origin: "https://room.example" });
   for (const [path, methods] of Object.entries(WORK_CLAIM_INVENTORY)) {
