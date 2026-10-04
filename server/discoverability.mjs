@@ -257,6 +257,9 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   // since_version is the only context query parameter. Distinct from work-context.
   // API keys need rooms:read.
   route("/api/rooms/{roomId}/context", ["GET"], "room-member", "Read this room's context. API keys need the rooms:read scope.", "getRoomContext"),
+  // http.mjs: GET lists this member's bonds. Other methods are not this if.
+  // Distinct from GET /api/rooms/{roomId}/peer-dms. API keys need rooms:read.
+  route("/api/rooms/{roomId}/bonds", ["GET"], "room-member", "List this member's bonds in the room. API keys need the rooms:read scope.", "getRoomBonds"),
   route("/api/share-links/join-agent", ["POST"], "identity-secret", "Guest-link redemption: join with a guest pass.", "joinAgentViaShareLink"),
   // http.mjs: GET and HEAD both collect cross-room attention. HEAD strips the body.
   // Other methods reject 405. Allow lists GET only; the serving if is the inventory.

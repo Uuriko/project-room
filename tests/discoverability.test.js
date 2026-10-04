@@ -3716,6 +3716,38 @@ test("room context is served for the inventoried method", { timeout: 30000 }, as
   assert.equal(body.error.code, "unauthenticated");
 });
 
+// server/http.mjs /api/rooms/{roomId}/bonds: GET only. Missing credential is 401.
+const ROOM_BONDS_INVENTORY = {
+  "/api/rooms/{roomId}/bonds": ["GET"],
+};
+
+test("openapi inventory lists served room bonds", () => {
+  const doc = buildOpenApiJson({ origin: "https://room.example" });
+  for (const [path, methods] of Object.entries(ROOM_BONDS_INVENTORY)) {
+    const entry = DISCOVERABILITY_ROUTES.find(item => item.path === path);
+    assert.ok(entry, `route table lists ${path}`);
+    assert.equal(entry.auth, "room-member");
+    assert.deepEqual([...entry.methods].sort(), [...methods].sort(), path);
+    const getOp = doc.paths[path]?.get;
+    assert.equal(getOp?.operationId, "getRoomBonds");
+    assert.match(getOp.summary, /rooms:read/);
+    assert.match(getOp.description, /room credential/i);
+    assert.doesNotMatch(getOp.description, /no credential required/i);
+    assert.equal(doc.paths[path]?.post, undefined);
+  }
+});
+
+test("room bonds are served for the inventoried method", { timeout: 30000 }, async t => {
+  const { origin } = await serve(t);
+  const res = await fetch(`${origin}/api/rooms/commons/bonds`, {
+    method: "GET",
+    headers: { Origin: origin },
+  });
+  const body = await res.json();
+  assert.equal(res.status, 401);
+  assert.equal(body.error.code, "unauthenticated");
+});
+
 test("openapi inventory lists served work-claims methods", () => {
   const doc = buildOpenApiJson({ origin: "https://room.example" });
   for (const [path, methods] of Object.entries(WORK_CLAIM_INVENTORY)) {
