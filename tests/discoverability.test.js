@@ -1805,6 +1805,31 @@ test("agent identity unverify is served for the inventoried method", { timeout: 
   assert.equal(body.error.code, "unauthenticated");
 });
 
+// server/agent-plugin-routes.mjs /api/agent-identities/{identityId}/verification: GET only. Public.
+const AGENT_IDENTITY_VERIFICATION_INVENTORY = {
+  "/api/agent-identities/{identityId}/verification": ["GET"],
+};
+
+test("openapi inventory lists served agent identity verification methods", () => {
+  const doc = buildOpenApiJson({ origin: "https://room.example" });
+  for (const [path, methods] of Object.entries(AGENT_IDENTITY_VERIFICATION_INVENTORY)) {
+    const entry = DISCOVERABILITY_ROUTES.find(item => item.path === path);
+    assert.ok(entry, `route table lists ${path}`);
+    assert.deepEqual([...entry.methods].sort(), [...methods].sort(), path);
+    for (const method of methods) {
+      assert.equal(typeof doc.paths[path]?.[method.toLowerCase()]?.operationId, "string", `${method} ${path}`);
+    }
+  }
+});
+
+test("agent identity verification is served for the inventoried method", { timeout: 30000 }, async t => {
+  const { origin } = await serve(t);
+  const res = await fetch(`${origin}/api/agent-identities/ai_probe/verification`, { headers: { Origin: origin } });
+  const body = await res.json();
+  assert.equal(res.status, 200);
+  assert.equal(body.level, "unverified");
+});
+
 test("openapi inventory lists served work-claims methods", () => {
   const doc = buildOpenApiJson({ origin: "https://room.example" });
   for (const [path, methods] of Object.entries(WORK_CLAIM_INVENTORY)) {

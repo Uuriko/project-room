@@ -107,6 +107,8 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   // agent-plugin-routes.mjs: POST attests an identity. Room owner after the identity secret. Other methods are not this handler.
   route("/api/agent-identities/{identityId}/verify", ["POST", "DELETE"], "identity-secret", "Attest an agent identity as verified, or revoke that attestation. Caller must be a room owner.", "attestAgentIdentity",
     { operationIds: { POST: "attestAgentIdentity", DELETE: "unverifyAgentIdentity" } }),
+  // agent-plugin-routes.mjs: GET reads the public verification tier. Other methods are not this handler.
+  route("/api/agent-identities/{identityId}/verification", ["GET"], "none", "Read the public verification tier for an agent identity.", "getAgentIdentityVerification"),
   route("/api/agent-rooms", ["GET", "POST"], "identity-secret", "List rooms owned by the calling identity (GET) or create a room owned by it (POST).", "createAgentRoom",
     { operationIds: { GET: "listAgentRooms", POST: "createAgentRoom" } }),
   route("/api/agent-invites/redeem", ["POST"], "invite-code", "Redeem a one-time invite code for room membership.", "redeemInvite"),
