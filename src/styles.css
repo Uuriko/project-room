@@ -118,7 +118,7 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
   display: block; position: absolute; left: 0; top: .15rem; width: 2rem; color: var(--muted); font-size: .55rem; line-height: 1.2; text-align: right;
 }
 .message.mentioned { border-radius: .4rem; background: rgb(173 140 255 / 10%); }
-.chat-divider { grid-column: 1 / -1; margin: .55rem 0 .2rem; color: #8b97a8; font-size: .68rem; font-weight: 700; letter-spacing: .06em; text-align: center; text-transform: uppercase; }
+.chat-divider { grid-column: 1 / -1; margin: .55rem 0 .2rem; color: var(--muted); font-size: .68rem; font-weight: 700; letter-spacing: .06em; text-align: center; text-transform: uppercase; }
 .chat-divider.unread { color: var(--amber); }
 .message-avatar { display: grid; place-items: center; width: 2rem; height: 2rem; border-radius: 50%; background: #3d465f; color: white; font-size: .65rem; font-weight: 650; }
 .message-avatar.agent { border-radius: .45rem; background: #3a2c57; color: #e7ddff; }
@@ -746,6 +746,14 @@ button:disabled { cursor: wait; opacity: .6; }
 .icon-button:hover { color: var(--text); background: rgb(255 255 255 / 6%); }
 @media (pointer: coarse) { .icon-button { min-width: 44px; min-height: 44px; width: 44px; height: 44px; } }
 @media (pointer: coarse) { .button, .topbar-button, .people-actions .button, .search-row .button { min-height: 44px; } }
+/* QA2-A11Y (D-fo-3): form controls under 16px trigger iOS auto-zoom on focus.
+   Coarse pointers get the 16px floor and the 44px touch target. Specific
+   checkbox/radio sizes win by specificity where they are intentional. */
+@media (pointer: coarse) {
+  select, input, textarea { min-height: 44px; }
+  .composer-toolbar select, .inbox-filters select, .inbox-quarantine-header select,
+  .inbox-connection-form input, .inbox-connection-form select { font-size: 1rem; }
+}
 #conversation-title, #return-brief-panel { scroll-margin-top: 1rem; }
 @media (max-width: 1020px) {
   #return-brief-panel, #conversation-title, #people-panel { scroll-margin-top: 3.5rem; }
