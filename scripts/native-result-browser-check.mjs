@@ -1,7 +1,7 @@
 // Simulated human interaction in disposable local rooms, never a user study.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
@@ -9,8 +9,8 @@ import { EVENT_TYPES as T } from "../src/events.js";
 import { textVersion } from "../server/text-results.mjs";
 import { signInFixture } from "./auth-signin.mjs";
 
-async function setup(t, { mobile = false, review = false } = {}) {
-  const f = createAcceptanceFixture(), workItemId = "native-human", body = "  A quiet room\n\nCafé 🪷 — one clear next step.  \n";
+async function setup(t, { mobile = false, review = false, viewport = null, body = "  A quiet room\n\nCafé 🪷 — one clear next step.  \n" } = {}) {
+  const f = createAcceptanceFixture(), workItemId = "native-human";
   const send = (type, data, actor = "owner") => f.store.command(f.keys[actor], "commons", { id: crypto.randomUUID(), type, data });
   send(T.MEMBER_ADDED, { memberId: "human-checker", displayName: "Test checker", kind: "human", permissions: ["verify"] });
   f.keys["human-checker"] = f.store.issueAccessKey("commons", "human-checker");
@@ -29,7 +29,7 @@ async function setup(t, { mobile = false, review = false } = {}) {
   const server = createRoomServer({ store: f.store, streamInterval: 40 }); await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`, browser = await chromium.launch({ headless: true });
   t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
-  const page = await browser.newPage({ viewport: mobile ? { width: 390, height: 844 } : { width: 1440, height: 1000 }, isMobile: mobile, hasTouch: mobile, reducedMotion: "reduce" });
+  const page = await browser.newPage({ viewport: viewport ?? (mobile ? { width: 390, height: 844 } : { width: 1440, height: 1000 }), isMobile: mobile, hasTouch: mobile, reducedMotion: "reduce" });
   const errors = [], outside = []; page.on("pageerror", e => errors.push(e.message)); page.setDefaultTimeout(8000);
   await page.route("**/*", route => { if (new URL(route.request().url()).origin !== origin) { outside.push(route.request().url()); return route.abort(); } return route.continue(); });
   await page.goto(origin); await signInFixture(page, f.keys[review ? "human-checker" : "owner"]); await page.locator("#main").waitFor({ state: "visible" });
@@ -89,6 +89,97 @@ test("native review shows exact text and leaves human approval pending", { timeo
   assert.equal(await f.page.locator("#action-dialog").evaluate(el => el.scrollWidth <= el.clientWidth), true); await f.capture("review");
   await f.save.click(); await f.page.locator("#action-dialog").waitFor({ state: "hidden" });
   assert.equal(f.item().verification.result, "pass"); assert.equal(f.item().verification.independenceConfirmed, true); assert.equal(f.item().decision, null);
+});
+
+// NR-B reflow owner: existing 320px composer/layout tests never open the
+// native reader and review form, and this file's prior review ran at 1440px.
+// A dialog min-width, unbroken result token, or lost return target can break
+// this task independently. Use the real local result/command routes and the
+// existing fixture; no production seam, model, real device or AT claim.
+for (const theme of ["dark", "light"]) test(`native result 320px ${theme}: read, review and return to the same result`, { timeout: 30000 }, async t => {
+  const body = "A quiet room\n\nCheck this exact reference: " + "result-reference-".repeat(12) + "\nKeep the next step with the same work.";
+  const f = await setup(t, { review: true, viewport: { width: 320, height: 900 }, body });
+  const { page } = f, receipt = structuredClone(f.item().receipt), reads = [], evidence = [];
+  const card = page.locator(`[data-work-record-id="${f.workItemId}"]`);
+  const read = card.locator("[data-read-result]"), verify = card.locator('[data-action="verify"]');
+  const initialUrl = page.url();
+  mkdirSync("test-results/native-reflow", { recursive: true });
+  t.after(() => writeFileSync(`test-results/native-reflow/${theme}.json`, JSON.stringify({
+    theme, simulatedHuman: true, realDevice: false, assistiveTechnology: false,
+    workItemId: f.workItemId, completionEventId: receipt.eventId, evidenceVersion: receipt.evidenceVersion,
+    producerId: receipt.producerId, reviewerId: "human-checker", reads, evidence,
+  }, null, 2) + "\n"));
+  page.on("request", request => {
+    const url = new URL(request.url());
+    if (url.pathname.endsWith("/work-result")) reads.push({ path: url.pathname, workItemId: url.searchParams.get("workItemId"), completionEventId: url.searchParams.get("completionEventId") });
+  });
+  await page.evaluate(mode => { document.documentElement.dataset.theme = mode; }, theme);
+  await page.locator("#message-input").fill("Keep this reviewer's conversation draft.");
+  const measure = async (stage, panelSelector = null, textSelector = null) => {
+    const value = await page.evaluate(({ panelSelector, textSelector }) => {
+      const panel = panelSelector && document.querySelector(panelSelector), text = textSelector && document.querySelector(textSelector);
+      const active = document.activeElement, box = active.getBoundingClientRect(), style = getComputedStyle(active);
+      const x = (Math.max(0, box.left) + Math.min(innerWidth, box.right)) / 2;
+      const y = (Math.max(0, box.top) + Math.min(innerHeight, box.bottom)) / 2;
+      const hit = document.elementFromPoint(x, y);
+      return { width: innerWidth, height: innerHeight, documentWidth: document.documentElement.scrollWidth,
+        theme: document.documentElement.dataset.theme,
+        panel: panel && { scrollWidth: panel.scrollWidth, clientWidth: panel.clientWidth },
+        text: text && { scrollWidth: text.scrollWidth, clientWidth: text.clientWidth },
+        focus: { id: active.id, name: active.getAttribute("name"), workItemId: active.closest("[data-work-record-id]")?.dataset.workRecordId,
+          x: box.x, y: box.y, width: box.width, height: box.height, outline: style.outline, boxShadow: style.boxShadow,
+          unobscured: hit === active || active.contains(hit) } };
+    }, { panelSelector, textSelector });
+    evidence.push({ stage, url: page.url(), ...value });
+    await page.screenshot({ path: `test-results/native-reflow/${theme}-${stage}.png` });
+    assert.equal(value.width, 320, "actual layout width, not a resized screenshot");
+    assert.equal(value.theme, theme);
+    assert.ok(value.documentWidth <= value.width + 1, `${stage}: document reflows`);
+    for (const [name, size] of [["panel", value.panel], ["text", value.text]]) if (size) {
+      assert.ok(size.scrollWidth <= size.clientWidth + 1, `${stage}: ${name} needs no horizontal scrolling`);
+    }
+    const focus = value.focus;
+    assert.ok(focus.width > 0 && focus.height > 0 && focus.x >= 0 && focus.x + focus.width <= 321, `${stage}: focus is horizontally available`);
+    assert.ok(focus.y < value.height && focus.y + focus.height > 0 && focus.unobscured, `${stage}: focus is visible and unobscured`);
+    if (panelSelector) assert.ok(focus.y >= 0 && focus.y + focus.height <= value.height + 1, `${stage}: focused core control fits the viewport`);
+  };
+  const readExact = async stage => {
+    await read.focus(); await page.keyboard.press("Enter");
+    await page.waitForFunction(body => document.querySelector("#result-body").textContent === body, f.body);
+    assert.equal(await page.locator("#result-title").textContent(), "A quiet room");
+    assert.match(await page.locator("#result-status").textContent(), /Submitted by Room owner.*exact stored text/);
+    assert.equal(await page.locator("#close-result").evaluate(node => node === document.activeElement), true);
+    await measure(stage, "#result-dialog", "#result-body");
+    await page.keyboard.press("Escape"); await page.locator("#result-dialog").waitFor({ state: "hidden" });
+    assert.equal(await read.evaluate(node => node === document.activeElement), true, "reader returns to this work's result control");
+    assert.equal(page.url(), initialUrl);
+  };
+  await readExact("reader-before");
+  await measure("reader-return");
+  await verify.focus(); await page.keyboard.press("Enter"); await f.textReady();
+  const verdict = page.locator("#action-fields [name=result]"), notes = page.locator("#action-fields [name=summary]");
+  await verdict.focus(); await verdict.selectOption("pass");
+  await measure("review-verdict", "#action-dialog", "#action-text-body");
+  await page.keyboard.press("Tab"); assert.equal(await notes.evaluate(node => node === document.activeElement), true);
+  await notes.fill("Checked this exact stored reference and next step");
+  await measure("review-notes", "#action-dialog", "#action-text-body");
+  await page.keyboard.press("Tab"); assert.equal(await page.locator("#cancel-action").evaluate(node => node === document.activeElement), true);
+  await page.keyboard.press("Tab"); assert.equal(await f.save.evaluate(node => node === document.activeElement), true);
+  await measure("review-save", "#action-dialog", "#action-text-body");
+  await page.keyboard.press("Enter"); await page.locator("#action-dialog").waitFor({ state: "hidden" });
+  await page.waitForFunction(id => document.activeElement?.closest("[data-work-record-id]")?.dataset.workRecordId === id, f.workItemId);
+  assert.equal(f.item().verification.verifierId, "human-checker");
+  assert.equal(f.item().verification.result, "pass");
+  assert.equal(f.item().verification.independenceConfirmed, true);
+  assert.equal(f.item().verification.completionEventId, receipt.eventId);
+  assert.equal(f.item().verification.evidenceVersion, receipt.evidenceVersion);
+  assert.deepEqual(f.item().receipt, receipt, "review never substitutes a result or producer");
+  assert.equal(f.item().decision, null, "the owner's decision is still separate");
+  await measure("review-return");
+  await readExact("reader-after");
+  assert.equal(await page.locator("#message-input").inputValue(), "Keep this reviewer's conversation draft.");
+  assert.ok(reads.length > 0, "the real result route was exercised");
+  assert.ok(reads.every(value => value.workItemId === f.workItemId && value.completionEventId === receipt.eventId));
 });
 
 test("native review refuses self-consistent text from a different pinned evidence version", { timeout: 25000 }, async t => {
