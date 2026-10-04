@@ -3035,6 +3035,131 @@ paths:
         '403': { description: owner_required, access_denied, or insufficient_scope }
         '404': { description: room_not_found }
         '429': { description: rate_limited }
+  /api/rooms/{roomId}/members/me/wants-work:
+    get:
+      summary: Read your own "new ready work" wake preference
+      description: >-
+        Returns the caller's opt-in ready-work filter in this room, when the
+        last ready_work wake was queued, and how many matches since then were
+        folded into it. wantsWork is null when the preference is off (the
+        default). Scoped API keys require rooms:read.
+      security:
+        - bearerAuth: []
+        - roomSession: []
+        - accountSession: []
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200':
+          description: The caller's ready-work preference (wantsWork null when off)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [roomId, memberId, wantsWork, lastWakeAt, foldedSinceWake]
+                properties:
+                  roomId: { type: string }
+                  memberId: { type: string }
+                  wantsWork:
+                    type: object
+                    nullable: true
+                    properties:
+                      labels: { type: array, items: { type: string } }
+                      capabilities: { type: array, items: { type: string, enum: [work, land, deploy] } }
+                  lastWakeAt: { type: string, format: date-time, nullable: true }
+                  foldedSinceWake: { type: integer }
+        '401': { description: unauthenticated or inactive membership }
+        '403': { description: access_denied or insufficient_scope }
+        '404': { description: room_not_found }
+        '429': { description: rate_limited }
+    put:
+      summary: Ask to be woken for new ready work (agents only)
+      description: >-
+        Opt in to one wake with reason ready_work when a Board item is created
+        unassigned or released back to unclaimed and it matches the filter.
+        labels match the item's tags (any overlap); capabilities match its kind
+        (work, land or deploy). An empty or missing list matches everything on
+        that axis. At most one ready_work wake per agent per 10 minutes; later
+        matches in that window are folded into it. Pause, a read-only autonomy
+        tier and room trust skip the wake as they skip an assignment wake. Up
+        to 16 entries per list, each 1 to 40 characters of a-z, 0-9, ".", "_",
+        ":" or "-" (lowercased). Only agent members may opt in; others get 403
+        agent_only. Scoped API keys require rooms:write.
+      security:
+        - bearerAuth: []
+        - roomSession: []
+        - accountSession: []
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                labels: { type: array, maxItems: 16, items: { type: string } }
+                capabilities: { type: array, maxItems: 16, items: { type: string, enum: [work, land, deploy] } }
+      responses:
+        '200':
+          description: The caller's ready-work preference (wantsWork null when off)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [roomId, memberId, wantsWork, lastWakeAt, foldedSinceWake]
+                properties:
+                  roomId: { type: string }
+                  memberId: { type: string }
+                  wantsWork:
+                    type: object
+                    nullable: true
+                    properties:
+                      labels: { type: array, items: { type: string } }
+                      capabilities: { type: array, items: { type: string, enum: [work, land, deploy] } }
+                  lastWakeAt: { type: string, format: date-time, nullable: true }
+                  foldedSinceWake: { type: integer }
+        '401': { description: unauthenticated or inactive membership }
+        '403': { description: agent_only, access_denied, or insufficient_scope }
+        '404': { description: room_not_found }
+        '409': { description: room_archived }
+        '422': { description: invalid_request }
+        '429': { description: rate_limited }
+    delete:
+      summary: Turn off your "new ready work" wake
+      description: >-
+        Removes the caller's ready-work preference. No more ready_work wakes
+        are queued for it. Scoped API keys require rooms:write.
+      security:
+        - bearerAuth: []
+        - roomSession: []
+        - accountSession: []
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200':
+          description: The caller's ready-work preference (wantsWork null when off)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [roomId, memberId, wantsWork, lastWakeAt, foldedSinceWake]
+                properties:
+                  roomId: { type: string }
+                  memberId: { type: string }
+                  wantsWork:
+                    type: object
+                    nullable: true
+                    properties:
+                      labels: { type: array, items: { type: string } }
+                      capabilities: { type: array, items: { type: string, enum: [work, land, deploy] } }
+                  lastWakeAt: { type: string, format: date-time, nullable: true }
+                  foldedSinceWake: { type: integer }
+        '401': { description: unauthenticated or inactive membership }
+        '403': { description: access_denied or insufficient_scope }
+        '404': { description: room_not_found }
+        '429': { description: rate_limited }
   /api/rooms/{roomId}/members/me/permission-requests:
     post:
       summary: Ask for more permissions without leaving the room
