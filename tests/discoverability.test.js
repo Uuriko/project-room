@@ -1096,6 +1096,35 @@ test("guest-invite request is served for the inventoried method", { timeout: 300
   assert.equal(body.error.code, "card_invalid");
 });
 
+// server/http.mjs /api/guest-invites/rotate: POST only. Missing bearer is 401.
+const GUEST_INVITE_ROTATE_INVENTORY = {
+  "/api/guest-invites/rotate": ["POST"],
+};
+
+test("openapi inventory lists served guest-invite rotate methods", () => {
+  const doc = buildOpenApiJson({ origin: "https://room.example" });
+  for (const [path, methods] of Object.entries(GUEST_INVITE_ROTATE_INVENTORY)) {
+    const entry = DISCOVERABILITY_ROUTES.find(item => item.path === path);
+    assert.ok(entry, `route table lists ${path}`);
+    assert.deepEqual([...entry.methods].sort(), [...methods].sort(), path);
+    for (const method of methods) {
+      assert.equal(typeof doc.paths[path]?.[method.toLowerCase()]?.operationId, "string", `${method} ${path}`);
+    }
+  }
+});
+
+test("guest-invite rotate is served for the inventoried method", { timeout: 30000 }, async t => {
+  const { origin } = await serve(t);
+  const res = await fetch(`${origin}/api/guest-invites/rotate`, {
+    method: "POST",
+    headers: { Origin: origin, "Content-Type": "application/json" },
+    body: "{}",
+  });
+  const body = await res.json();
+  assert.equal(res.status, 401);
+  assert.equal(body.error.code, "unauthenticated");
+});
+
 test("openapi inventory lists served work-claims methods", () => {
   const doc = buildOpenApiJson({ origin: "https://room.example" });
   for (const [path, methods] of Object.entries(WORK_CLAIM_INVENTORY)) {
