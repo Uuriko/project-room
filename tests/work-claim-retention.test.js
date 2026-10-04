@@ -74,19 +74,24 @@ test("isFirstContribution: true on an empty room, false after any trace", () => 
 test("retentionAck appends the bot's structured receipt", () => {
   const item = claimedItem("w1", "newbie", T0);
   const before = item.history.length;
-  const acked = retentionAck(item, { now: T0, first: true });
+  // The receipt carries the actor's id (not "system") so content-trust marks
+  // it like the claim stamp it rides with; the SLA/watchdog exclude it by
+  // action, so it never answers itself.
+  const acked = retentionAck(item, { now: T0, first: true, agentId: "newbie" });
   assert.equal(acked.history.length, before + 1);
   const ack = acked.history[acked.history.length - 1];
-  assert.equal(ack.agentId, "system");
+  assert.equal(ack.agentId, "newbie");
   assert.equal(ack.action, "retention_ack");
   assert.equal(ack.at, iso(T0));
   assert.match(ack.note, /^retention-ack seen=1 first=1 sla_due=2026-10-02T00:00:00\.000Z$/);
   assert.ok(Object.isFrozen(acked) && Object.isFrozen(acked.history) && Object.isFrozen(ack));
+  assert.throws(() => retentionAck(item, { now: T0 }), /agentId/);
+  assert.throws(() => retentionAck(item, { now: T0, agentId: "system" }), /agentId/);
   // Non-first claims get seen-but-no-SLA.
-  const acked2 = retentionAck(item, { now: T0 });
+  const acked2 = retentionAck(item, { now: T0, agentId: "newbie" });
   assert.match(acked2.history[acked2.history.length - 1].note, /^retention-ack seen=1 first=0$/);
   assert.throws(() => retentionAck(null), /needs a work-claim item/);
-  assert.throws(() => retentionAck({ id: "w1" }, { now: "not-a-time" }), /ms epoch/);
+  assert.throws(() => retentionAck({ id: "w1" }, { now: "not-a-time", agentId: "newbie" }), /ms epoch/);
 });
 
 // --- assessFirstContributionSla ---
@@ -133,8 +138,12 @@ test("SLA: completion inside the window answers it; completion after does not er
 
 test("SLA: the author's own stamps and system stamps never answer it", () => {
   const self = withStamps(claimedItem("w1", "newbie", T0), stamp(T0 + 2 * H, "newbie", "reviewed", "self note"));
-  const sys = withStamps(claimedItem("w2", "newbie", T0), stamp(T0 + 2 * H, "system", "retention_ack", "seen"));
-  const out = assessFirstContributionSla([self, sys], { now: T0 + 30 * H });
+  const sys = withStamps(claimedItem("w2", "newbie", T0), stamp(T0 + 2 * H, "system", "note", "system note"));
+  // The bot's receipt carries the actor's id but is excluded by action: the
+  // receipt itself never answers the SLA (regression: content-trust parity
+  // needs the member id on the stamp, mcp-core-profile.test.js).
+  const acked = withStamps(claimedItem("w3", "newbie", T0), stamp(T0 + 2 * H, "newbie", "retention_ack", "seen"));
+  const out = assessFirstContributionSla([self, sys, acked], { now: T0 + 30 * H });
   assert.ok(out.entries.every(e => e.status === "breached"));
 });
 
@@ -150,7 +159,7 @@ test("SLA: first receipt is answered at once by the room's receipt machinery", (
 // --- assessZeroReply ---
 
 test("watchdog: acked-but-unanswered claims are watched; unacked claims alert", () => {
-  const acked = withStamps(claimedItem("w1", "quill", T0), stamp(T0, "system", "retention_ack", "seen"));
+  const acked = withStamps(claimedItem("w1", "quill", T0), stamp(T0, "quill", "retention_ack", "seen"));
   const naked = claimedItem("w2", "quill", T0); // bot failure: no ack at all
   const fresh = claimedItem("w3", "quill", T0 + 47 * H); // inside the window
   const answeredItem = withStamps(claimedItem("w4", "quill", T0),
@@ -246,7 +255,7 @@ test("handler: claiming posts the ack; first-timers carry the SLA", async () => 
   const first = await claim("w-first", "newbie");
   const ack = first.history[first.history.length - 1];
   assert.equal(ack.action, "retention_ack");
-  assert.equal(ack.agentId, "system");
+  assert.equal(ack.agentId, "newbie");
   assert.match(ack.note, /first=1 sla_due=/);
   // The stored item carries the ack too — the watch sees it, not a zero reply.
   const stored = registry.get("room1", "w-first");
@@ -257,25 +266,81 @@ test("handler: claiming posts the ack; first-timers carry the SLA", async () => 
   assert.ok(!/sla_due/.test(second.history[second.history.length - 1].note));
 });
 
-test("handler: retention GET serves the dashboard; non-members get 403", async () => {
+// --- route-table wiring (server/routes/work-claims.mjs) ---
+//
+// Importing the dispatcher runs assertRouteTable(ROUTES) at module load: a
+// malformed row fails the import itself.
+import { dispatchRoute } from "../server/routes/dispatch.mjs";
+import { getRetentionDashboard } from "../server/routes/work-claims.mjs";
+
+const tableCtx = ({ memberId = "newbie", members, registry, authKind = "session", scopes = null } = {}) => {
+  const captured = {};
+  const reject = (status, code, message) => {
+    const error = new Error(message);
+    error.status = status; error.code = code;
+    throw error;
+  };
+  return { captured,
+    ctx: {
+      params: { roomId: "room1" },
+      req: { method: "GET", headers: {} },
+      url: new URL("https://room.example/api/rooms/room1/work-claims/retention"),
+      res: { headers: {}, setHeader(name, value) { this.headers[name] = value; } },
+      store: {
+        now: () => T0,
+        roomAuthority: () => ({ members }),
+        workClaims: registry,
+      },
+      roomCredentials: () => ({ mode: "room", bearer: authKind === "api-key" }),
+      expectedBinding: () => ({}),
+      accountBinding: () => ({}),
+      roomAuth: () => ({ kind: authKind, member: { id: memberId }, credentialHash: "h",
+        credentialScope: "room", ...(scopes ? { apiKeyScopes: scopes } : {}) }),
+      rate: () => {},
+      reject,
+      json: (res, status, value) => { captured.status = status; captured.value = value; return captured; },
+    } };
+};
+
+test("route table: GET /api/rooms/{roomId}/work-claims/retention serves the dashboard; non-members get 403", async () => {
   const registry = createWorkClaimRegistry();
   registry.set("room1", claimedItem("w1", "newbie", T0 - 50 * H)); // breached, unacked
   const members = { owner: memberEntry("owner"), newbie: memberEntry("newbie") };
-  const store = fakeStore(members);
-  const helpers = fakeHelpers();
-  const out = await handleWorkClaims({ req: { method: "GET" }, res: {},
-    url: new URL("https://room.example/api/rooms/room1/work-claims/retention"),
-    store, roomId: "room1", auth: authFor("newbie"), workClaimRoute: "retention",
-    workClaimId: null, helpers, registry });
-  assert.equal(out.status, 200);
-  assert.equal(out.value.sla.breached, 1);
-  assert.equal(out.value.sla.queue[0].memberId, "newbie");
-  assert.equal(out.value.zeroReply.unacked, 1);
-  assert.equal(out.value.zeroReply.alert, true);
-  const denied = await handleWorkClaims({ req: { method: "GET" }, res: {},
-    url: new URL("https://room.example/api/rooms/room1/work-claims/retention"),
-    store, roomId: "room1", auth: authFor("stranger"), workClaimRoute: "retention",
-    workClaimId: null, helpers: fakeHelpers(), registry }).catch(error => error);
-  assert.equal(denied.code, "not_member");
-  assert.equal(denied.status, 403);
+  const { ctx, captured } = tableCtx({ members, registry });
+  const handled = await dispatchRoute(ctx);
+  assert.equal(handled, true);
+  assert.equal(ctx.route.handler, getRetentionDashboard);
+  assert.equal(captured.status, 200);
+  assert.equal(captured.value.sla.breached, 1);
+  assert.equal(captured.value.sla.queue[0].memberId, "newbie");
+  assert.equal(captured.value.zeroReply.unacked, 1);
+  assert.equal(captured.value.zeroReply.alert, true);
+  const denied = tableCtx({ memberId: "stranger", members, registry });
+  const error = await dispatchRoute(denied.ctx).catch(e => e);
+  assert.equal(error.code, "not_member");
+  assert.equal(error.status, 403);
+});
+
+test("route table: unauthenticated callers get 401; scoped API keys are honored", async () => {
+  const registry = createWorkClaimRegistry();
+  const members = { newbie: memberEntry("newbie") };
+  const anon = tableCtx({ members, registry, authKind: "account" });
+  const anonError = await dispatchRoute(anon.ctx).catch(e => e);
+  assert.equal(anonError.status, 401);
+  const scoped = tableCtx({ members, registry, authKind: "api-key", scopes: ["rooms:read"] });
+  const ok = await dispatchRoute(scoped.ctx);
+  assert.equal(ok, true);
+  assert.equal(scoped.captured.status, 200);
+  const unscoped = tableCtx({ members, registry, authKind: "api-key", scopes: ["inbox:read"] });
+  const scopeError = await dispatchRoute(unscoped.ctx).catch(e => e);
+  assert.equal(scopeError.code, "insufficient_scope");
+  assert.equal(scopeError.status, 403);
+});
+
+test("route table: wrong method on the retention path is a 405, not a claimId read", async () => {
+  const { ctx } = tableCtx({ members: { newbie: memberEntry("newbie") }, registry: createWorkClaimRegistry() });
+  ctx.req.method = "POST";
+  const error = await dispatchRoute(ctx).catch(e => e);
+  assert.equal(error.code, "method_not_allowed");
+  assert.equal(error.status, 405);
 });

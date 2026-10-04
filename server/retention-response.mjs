@@ -66,12 +66,15 @@ const receiptEventOf = item => {
 
 // Member responses to one contribution: later history entries by a different
 // member. verdictOnly keeps the "reviewed" stamps (recordReview verdicts and
-// attestWork notes) — the machine-readable verdict class.
+// attestWork notes) — the machine-readable verdict class. The bot's own
+// retention_ack receipt never counts, even though it carries the actor's id
+// (it must, so content-trust treats it like the claim stamp it rides with).
 const responsesTo = (item, authorId, afterAt, { verdictOnly = false } = {}) => {
   const after = Date.parse(afterAt);
   return historyOf(item)
     .filter(entry => entry && typeof entry.at === "string" && Number.isFinite(Date.parse(entry.at)))
     .filter(entry => Date.parse(entry.at) > after)
+    .filter(entry => entry.action !== ACK_ACTION)
     .filter(entry => !isSystem(entry.agentId) && entry.agentId !== authorId)
     .filter(entry => !verdictOnly || entry.action === REVIEWED_ACTION)
     .sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
@@ -100,14 +103,22 @@ export function isFirstContribution(items, memberId) {
 // The bot's immediate structured receipt, appended to a freshly claimed item.
 // first marks the member's first contribution: the note carries the 24h
 // verdict SLA deadline. Machine-readable key=value note, plain ASCII.
-export function retentionAck(item, { now = undefined, first = false } = {}) {
+// The receipt carries the actor's (claimant/assignee) agent id — not
+// "system" — so the room's content-trust marking treats it exactly like the
+// claim stamp it rides with: the actor's own viewers see it unmarked,
+// everyone else sees member-authored data. responsesTo() excludes it by
+// action, so the receipt itself never answers the SLA or the watchdog.
+export function retentionAck(item, { now = undefined, first = false, agentId = undefined } = {}) {
   if (!item || typeof item.id !== "string") throw new TypeError("retentionAck needs a work-claim item with an id");
+  if (typeof agentId !== "string" || agentId.length === 0 || isSystem(agentId)) {
+    throw new TypeError("retentionAck needs the actor's member agentId");
+  }
   const atMs = nowMsOf(now);
   const dueIso = isoOf(atMs + FIRST_RESPONSE_SLA_HOURS * 3600 * 1000);
   const note = first
     ? `retention-ack seen=1 first=1 sla_due=${dueIso}`
     : `retention-ack seen=1 first=0`;
-  const stamp = Object.freeze({ at: isoOf(atMs), agentId: SYSTEM, action: ACK_ACTION, note });
+  const stamp = Object.freeze({ at: isoOf(atMs), agentId, action: ACK_ACTION, note });
   return Object.freeze({ ...item, history: Object.freeze([...historyOf(item), stamp]) });
 }
 

@@ -163,7 +163,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/public-rooms.mjs'); // GR2 public room, template, and agent pages (imported by server/http.mjs)
   paths.add('server/capability-visibility.mjs'); // RC-2026-09-27-2731: withhold-never-refused catalog predicate (imported by server/mcp-discovery.mjs and server/mcp-room-profile.mjs)
   paths.add('server/conversation-sync.mjs'); // bounded viewer-scoped conversation reads (imported by server/http.mjs)
-  paths.add('server/routes/dispatch.mjs'); paths.add('server/routes/table.mjs'); paths.add('server/routes/inbox.mjs'); paths.add('server/routes/auth.mjs'); // batch RT: route table (imported by server/http.mjs)
+  paths.add('server/routes/dispatch.mjs'); paths.add('server/routes/table.mjs'); paths.add('server/routes/inbox.mjs'); paths.add('server/routes/auth.mjs'); paths.add('server/routes/work-claims.mjs'); // batch RT: route table (imported by server/http.mjs)
   paths.add('server/oauth-provider-store.mjs'); // durable OAuth grants (imported by cloudflare/room.mjs and server/writer-fence.mjs)
   paths.add('server/redact-read.mjs'); // read-time message tombstone (imported by server/http.mjs)
   paths.add('server/message-redaction.mjs'); // PRIV-1: rewrite deleted message text (imported by server/store.mjs and server/account-deletion.mjs)
