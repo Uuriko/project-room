@@ -1270,6 +1270,35 @@ test("agent auth rooms is served for the inventoried method", { timeout: 30000 }
   assert.equal(body.error.code, "invalid_login");
 });
 
+// server/http.mjs /api/auth/agent/session: POST only. A body without identityId and roomId is 422.
+const AGENT_AUTH_SESSION_INVENTORY = {
+  "/api/auth/agent/session": ["POST"],
+};
+
+test("openapi inventory lists served agent auth session methods", () => {
+  const doc = buildOpenApiJson({ origin: "https://room.example" });
+  for (const [path, methods] of Object.entries(AGENT_AUTH_SESSION_INVENTORY)) {
+    const entry = DISCOVERABILITY_ROUTES.find(item => item.path === path);
+    assert.ok(entry, `route table lists ${path}`);
+    assert.deepEqual([...entry.methods].sort(), [...methods].sort(), path);
+    for (const method of methods) {
+      assert.equal(typeof doc.paths[path]?.[method.toLowerCase()]?.operationId, "string", `${method} ${path}`);
+    }
+  }
+});
+
+test("agent auth session is served for the inventoried method", { timeout: 30000 }, async t => {
+  const { origin } = await serve(t);
+  const res = await fetch(`${origin}/api/auth/agent/session`, {
+    method: "POST",
+    headers: { Origin: origin, "Content-Type": "application/json" },
+    body: "{}",
+  });
+  const body = await res.json();
+  assert.equal(res.status, 422);
+  assert.equal(body.error.code, "invalid_login");
+});
+
 test("openapi inventory lists served work-claims methods", () => {
   const doc = buildOpenApiJson({ origin: "https://room.example" });
   for (const [path, methods] of Object.entries(WORK_CLAIM_INVENTORY)) {

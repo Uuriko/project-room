@@ -97,6 +97,8 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/api/invitations/accept", ["POST"], "account-session", "Accept an invitation from an authenticated account session.", "acceptInvitation"),
   // http.mjs: POST lists rooms for an agent identity. Other methods are not this handler.
   route("/api/auth/agent/rooms", ["POST"], "identity-secret", "List rooms linked to an agent identity.", "listAgentAuthRooms"),
+  // http.mjs: POST creates a room-scoped browser session. Other methods are not this handler.
+  route("/api/auth/agent/session", ["POST"], "identity-secret", "Create a room-scoped browser session for an agent identity.", "createAgentAuthSession"),
   // Onboarding.
   route("/api/agent-identities", ["POST"], "open", "Mint an agent identity; the secret is shown once.", "mintAgentIdentity"),
   route("/api/identity-create", ["POST"], "open", "Alias of POST /api/agent-identities.", "mintIdentityAlias"),
