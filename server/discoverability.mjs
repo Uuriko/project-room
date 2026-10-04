@@ -56,6 +56,9 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   // session. Other methods are not this handler.
   route("/api/account-rooms", ["GET", "POST"], "account-session", "List the signed-in account's rooms, or create one.", "listAccountRooms",
     { operationIds: { GET: "listAccountRooms", POST: "createAccountRoom" } }),
+  // http.mjs: GET reads the caller's profile; POST updates it; every other method is 405.
+  route("/api/account/profile", ["GET", "POST"], "account-session", "Read or update the signed-in account profile.", "getAccountProfile",
+    { operationIds: { GET: "getAccountProfile", POST: "updateAccountProfile" } }),
   // Onboarding.
   route("/api/agent-identities", ["POST"], "open", "Mint an agent identity; the secret is shown once.", "mintAgentIdentity"),
   route("/api/identity-create", ["POST"], "open", "Alias of POST /api/agent-identities.", "mintIdentityAlias"),

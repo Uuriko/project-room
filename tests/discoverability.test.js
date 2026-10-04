@@ -708,6 +708,39 @@ test("account-rooms routes are served for the inventoried methods", { timeout: 3
   }
 });
 
+// server/http.mjs /api/account/profile: GET and POST; every other method rejects 405.
+const ACCOUNT_PROFILE_INVENTORY = {
+  "/api/account/profile": ["GET", "POST"],
+};
+
+test("openapi inventory lists served account-profile methods", () => {
+  const doc = buildOpenApiJson({ origin: "https://room.example" });
+  for (const [path, methods] of Object.entries(ACCOUNT_PROFILE_INVENTORY)) {
+    const entry = DISCOVERABILITY_ROUTES.find(item => item.path === path);
+    assert.ok(entry, `route table lists ${path}`);
+    assert.deepEqual([...entry.methods].sort(), [...methods].sort(), path);
+    for (const method of methods) {
+      assert.equal(typeof doc.paths[path]?.[method.toLowerCase()]?.operationId, "string", `${method} ${path}`);
+    }
+  }
+});
+
+test("account-profile routes are served for the inventoried methods", { timeout: 30000 }, async t => {
+  const { origin } = await serve(t);
+  for (const method of ACCOUNT_PROFILE_INVENTORY["/api/account/profile"]) {
+    const res = await fetch(`${origin}/api/account/profile`, {
+      method,
+      headers: { "Content-Type": "application/json", Origin: origin },
+      body: method === "POST" ? "{}" : undefined,
+    });
+    await res.arrayBuffer();
+    assert.ok(![404, 405].includes(res.status), `${method} /api/account/profile served, got ${res.status}`);
+  }
+  const other = await fetch(`${origin}/api/account/profile`, { method: "DELETE", headers: { Origin: origin } });
+  await other.arrayBuffer();
+  assert.equal(other.status, 405);
+});
+
 test("openapi inventory lists served work-claims methods", () => {
   const doc = buildOpenApiJson({ origin: "https://room.example" });
   for (const [path, methods] of Object.entries(WORK_CLAIM_INVENTORY)) {
