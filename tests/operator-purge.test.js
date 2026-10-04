@@ -457,6 +457,19 @@ describe("operator follow-ups (CP-ADMIN-0c)", { concurrency: false }, () => {
     const audit = store.db.prepare("SELECT * FROM operator_actions WHERE action='find'").all();
     assert.equal(JSON.stringify(audit).includes("@"), false);
   });
+
+  test("find by account email flags truncation past the find limit", async t => {
+    const { store, call } = await serve(t);
+    for (let i = 0; i < 55; i++) {
+      const id = `acct-trunc-${String(i).padStart(2, "0")}`;
+      store.createAccount(id);
+      store.accountLogins.linkMagicMethod(id, { email: "shared-trunc@example.com" });
+    }
+    const found = await call("/api/operator/purge/find", { method: "POST", data: { accountEmail: "shared-trunc@example.com" } });
+    assert.equal(found.status, 200, JSON.stringify(found.body));
+    assert.equal(found.body.accounts.length, 50);
+    assert.equal(found.body.truncated, true);
+  });
 });
 
 // Frozen on-disk format from 00e800eb, before the feature was removed. It

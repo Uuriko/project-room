@@ -311,17 +311,19 @@ export function createOperatorPurge(store) {
         const accounts = [];
         if (accountEmail) {
           const rows = store.db.prepare(`SELECT DISTINCT a.id AS id, a.display_name AS displayName FROM account_login_methods m
-            JOIN accounts a ON a.id = m.account_id WHERE m.email_hash = ? ORDER BY a.id LIMIT ?`).all(emailLookupHash(accountEmail), FIND_LIMIT);
-          for (const row of rows) accounts.push({ id: row.id, displayName: typeof row.displayName === "string" ? row.displayName : null });
+            JOIN accounts a ON a.id = m.account_id WHERE m.email_hash = ? ORDER BY a.id LIMIT ?`).all(emailLookupHash(accountEmail), FIND_LIMIT + 1);
+          for (const row of rows.slice(0, FIND_LIMIT)) accounts.push({ id: row.id, displayName: typeof row.displayName === "string" ? row.displayName : null });
+          if (rows.length > FIND_LIMIT) accounts.truncated = true;
         }
         const result = {
           rooms,
           identities,
           ...(accountEmail ? { accounts } : {}),
-          ...(rooms.truncated || identities.truncated ? { truncated: true } : {})
+          ...(rooms.truncated || identities.truncated || accounts.truncated ? { truncated: true } : {})
         };
         delete rooms.truncated;
         delete identities.truncated;
+        delete accounts.truncated;
         audit(store, { ...base, result: "ok", counts: { rooms: rooms.length, identities: identities.length, ...(accountEmail ? { accounts: accounts.length } : {}) } });
         return result;
       } catch (error) {
