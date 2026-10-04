@@ -162,6 +162,8 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/api/rooms/{roomId}/membership-delegation", ["GET"], "room-member", "Owner-only list of membership-delegation grants. API keys need the rooms:read scope.", "listMembershipDelegations"),
   // http.mjs: POST grants membership delegation. Other methods are not this if. API keys need rooms:write.
   route("/api/rooms/{roomId}/membership-delegation/grant", ["POST"], "room-member", "Owner-only grant of membership-delegation authority. API keys need the rooms:write scope.", "grantMembershipDelegation"),
+  // http.mjs: POST revokes membership delegation. Other methods are not this if. API keys need rooms:write.
+  route("/api/rooms/{roomId}/membership-delegation/revoke", ["POST"], "room-member", "Owner-only revoke of membership-delegation authority. API keys need the rooms:write scope.", "revokeMembershipDelegation"),
   route("/api/share-links/join-agent", ["POST"], "identity-secret", "Guest-link redemption: join with a guest pass.", "joinAgentViaShareLink"),
   // http.mjs: GET and HEAD both collect cross-room attention. HEAD strips the body.
   // Other methods reject 405. Allow lists GET only; the serving if is the inventory.
