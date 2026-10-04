@@ -31,23 +31,55 @@ export const RESERVED_ROLE_PREFIXES = Object.freeze([
 // "Room machine" are the names the CLI and the machine enrolment give an
 // agent by default, so "room" followed by an ordinary word stays available.
 const ROOM_ROLE_WORDS = Object.freeze([...RESERVED_ROLE_PREFIXES, "guide"]);
+// Flattened forms: "ProjectRoom" and "Roomadmin" read exactly like the
+// reserved phrases, so the separator-stripped skeleton is compared too.
+// "Systematic Sam" and "Roomba Helper" stay available: the flat check only
+// fires on an exact flattened phrase or a room+role compound.
+const FLAT_RESERVED = new Set(RESERVED_ROLE_PREFIXES.map(word => word.replace(/\s+/gu, "")));
+const FLAT_ROOM_COMPOUNDS = new Set(ROOM_ROLE_WORDS.map(word => `room${word.replace(/\s+/gu, "")}`));
 const OPENERS = "[({<\u3010\u300c\u300e\uff3b\uff08";
 const CLOSERS = "])}>\u3011\u300d\u300f\uff3d\uff09";
 const wordChar = /[\p{L}\p{N}]/u;
 const startsWithWord = (value, word) => value === word
   || (value.startsWith(word) && !wordChar.test(value[word.length]));
 
+// A trailing "(role)" / "[role]" decoration reads as a role even when the
+// words in front of it do not ("Bob (owner)"). Peel trailing decorations the
+// way the roster check does and refuse when any word inside one is a reserved
+// role word. The identity-mint path only runs this function, so the peel
+// must live here and not only in the member roster check.
+function hasReservedDecoration(skeleton) {
+  let value = skeleton;
+  for (;;) {
+    const match = /^(.*?)\s*[(\[]([^)\]]+)[)\]]$/.exec(value);
+    if (!match) return false;
+    const words = match[2].toLowerCase().split(/[^a-z0-9]+/u);
+    if (words.some(word => word && RESERVED_ROLE_PREFIXES.some(prefix => startsWithWord(word, prefix)))) return true;
+    const core = match[1].trim();
+    if (!core || core === value) return false;
+    value = core;
+  }
+}
+
 export function isReservedRoleName(name) {
   if (typeof name !== "string") return false;
   const trimmed = name.normalize("NFKC").trim();
   if (!trimmed) return false;
   if (OPENERS.includes(trimmed[0]) && CLOSERS.includes(trimmed.at(-1))) return true;
+  // An unbalanced leading bracket still reads as a label when the rest is
+  // role-like ("(Admin"). The recursion terminates: the string shrinks.
+  if (OPENERS.includes(trimmed[0]) && !CLOSERS.includes(trimmed.at(-1)) && isReservedRoleName(trimmed.slice(1))) return true;
   if (/[:\uff1a]$/u.test(trimmed)) return true;
   const skeleton = (displayNameSkeleton(trimmed) ?? "").replace(/^[@#\s]+/u, "");
   if (RESERVED_ROLE_PREFIXES.some(word => startsWithWord(skeleton, word))) return true;
   if (skeleton === "room") return true;
   const afterRoom = /^room[^\p{L}\p{N}]+(.*)$/u.exec(skeleton)?.[1];
-  return afterRoom !== undefined && ROOM_ROLE_WORDS.some(word => startsWithWord(afterRoom, word));
+  if (afterRoom !== undefined && ROOM_ROLE_WORDS.some(word => startsWithWord(afterRoom, word))) return true;
+  if (hasReservedDecoration(skeleton)) return true;
+  const flat = skeleton.replace(/[^\p{L}\p{N}]/gu, "");
+  if (FLAT_RESERVED.has(flat)) return true;
+  if (flat.startsWith("room") && FLAT_ROOM_COMPOUNDS.has(flat)) return true;
+  return false;
 }
 
 // A suggestion the admission rules accept: "Member", then "Member 2" and up.
