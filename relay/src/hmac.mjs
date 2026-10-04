@@ -25,6 +25,10 @@ export async function verifyLinkSignature(secret, request, rawBody, nowSec) {
   if (Math.abs(nowSec - stamp) > HMAC_SKEW_SEC) {
     throw relayError(401, "unauthenticated", "The link signature was refused");
   }
-  const expected = await hmacHex(secret, `${timestamp}.${rawBody}`);
+  // The path is part of the signed material: without it a signature cut
+  // for /resume is equally valid for /halt (same timestamp, same body),
+  // so a captured resume could halt the machine and vice versa.
+  const path = new URL(request.url).pathname;
+  const expected = await hmacHex(secret, `${timestamp}.${path}.${rawBody}`);
   if (!timingEqual(expected, signature)) throw relayError(401, "unauthenticated", "The link signature was refused");
 }

@@ -4,7 +4,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import {
   claimOnSlot, control, createRoom, enroll, expireCode, finishClaim, leaseToken,
-  linkDaemon, machineStatus, mint, postCall, postRpc, readBody, relayFetch, secret, startRelay,
+  linkDaemon, machineStatus, mint, postCall, postRpc, readBody, relayFetch, secret, signControl, startRelay,
 } from "./harness.mjs";
 
 const HOUR = 60 * 60 * 1000;
@@ -173,6 +173,62 @@ test("halt reaches the daemon within 2 seconds and cancels the in-flight call", 
   const after = await machineStatus(off, machine.machineId);
   assert.equal(after.body.halted, false);
   assert.equal(after.body.haltEpoch, frame.epoch);
+  daemon.ws.close();
+});
+
+// A signed control request stays valid for the whole HMAC skew window, so
+// a captured resume replayed inside the window would unhalt the machine.
+// The relay must refuse a signature it already honored.
+test("a captured resume cannot be replayed inside the skew window", async () => {
+  const machine = await enrolledMachine(off);
+  const daemon = await linkDaemon(off, machine.machineId, machine.machineToken, { answer: () => null });
+  const signed = signControl(off, `/v0/machines/${machine.machineId}/resume`, {});
+  const send = () => relayFetch(off, `/v0/machines/${machine.machineId}/resume`, {
+    method: "POST",
+    raw: signed.raw,
+    headers: {
+      "x-relay-timestamp": signed.timestamp,
+      "x-relay-signature": signed.signature,
+    },
+  });
+  const first = await readBody(await send());
+  assert.equal(first.status, 200, JSON.stringify(first.body));
+  assert.equal(first.body.halted, false);
+  // Identical bytes, identical headers: the replay must die.
+  const replay = await readBody(await send());
+  assert.equal(replay.status, 409);
+  assert.equal(replay.body.error.code, "replay_rejected");
+  // A freshly signed resume still works, so the guard is replay-scoped,
+  // not a blanket resume block. (A byte-identical retry in the same
+  // second is indistinguishable from a replay by design: the signature
+  // covers timestamp + body, so a client retry must use a fresh
+  // timestamp or a distinct body. The 409 code tells it the request
+  // was already honored.)
+  const again = await control(off, machine.machineId, "resume", { retried: true });
+  assert.equal(again.status, 200);
+  assert.equal(again.body.halted, false);
+  daemon.ws.close();
+});
+
+// The signature binds the action path: a signature cut for /resume must
+// not verify as /halt, even with identical timestamp and body.
+test("a captured resume signature is not valid for halt", async () => {
+  const machine = await enrolledMachine(off);
+  const daemon = await linkDaemon(off, machine.machineId, machine.machineToken, { answer: () => null });
+  const signed = signControl(off, `/v0/machines/${machine.machineId}/resume`, {});
+  const forged = await readBody(await relayFetch(off, `/v0/machines/${machine.machineId}/halt`, {
+    method: "POST",
+    raw: signed.raw,
+    headers: {
+      "x-relay-timestamp": signed.timestamp,
+      "x-relay-signature": signed.signature,
+    },
+  }));
+  assert.equal(forged.status, 401);
+  assert.equal(forged.body.error.code, "unauthenticated");
+  const status = await machineStatus(off, machine.machineId);
+  assert.equal(status.body.halted, false);
+  daemon.ws.close();
 });
 
 test("phase 0 passthrough gives the earliest live work claim the slot", async () => {
