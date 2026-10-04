@@ -8,7 +8,9 @@
 # this script against substitution. Verify this script out-of-band before
 # running it (see machine/README.md). When this script runs from a file and
 # ROOM_MACHINE_INSTALL_SHA256 is set, it verifies its own bytes first and
-# refuses to run on mismatch.
+# refuses to run on mismatch. In piped (curl|bash) mode there is no script
+# file to check, so a warning is printed and the self-check is skipped —
+# download and verify first for any real install.
 set -euo pipefail
 
 PAYLOAD_SHA256="142480181f4188eebc1b2af7d076d91e7cad0c54539af235431c527b733aa78e"
@@ -17,6 +19,21 @@ PAYLOAD_B64="H4sIAAAAAAAAA+xc63IbN5bObz4FzGxNkRWyeRElWfIlJcua2DOW5JKcpHZdLhHsRpM
 if [ "${ROOM_MACHINE_ENABLED:-}" != "1" ]; then
   echo "room-machine is off. Set ROOM_MACHINE_ENABLED=1 to install."
   exit 0
+fi
+
+# M7: the self-check below needs a real script file. In piped/stdin mode
+# (curl|bash) there is nothing to check against, so warn loudly instead of
+# skipping silently. ROOM_MACHINE_INSTALL_SHA256 is ignored in this mode.
+if [ -z "${BASH_SOURCE[0]:-}" ] || [ ! -f "${BASH_SOURCE[0]}" ]; then
+  printf '%s\n' \
+    "======================================================================" \
+    "WARNING: install.sh is running from a pipe, not from a file." \
+    "Substitution protection is SKIPPED: this script cannot verify its own" \
+    "bytes here, and ROOM_MACHINE_INSTALL_SHA256 (if set) is ignored." \
+    "To install safely: download the script, verify it out-of-band (see" \
+    "machine/README.md \"Verify before you run\"), then run the downloaded" \
+    "file with ROOM_MACHINE_INSTALL_SHA256 exported." \
+    "======================================================================" >&2
 fi
 
 NODE="${ROOM_MACHINE_NODE:-node}"
@@ -46,9 +63,9 @@ if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
 fi
 
 # M7: optional out-of-band authentication of this script. Set
-# ROOM_MACHINE_INSTALL_SHA256 to the expected sha256 of install.sh (taken
-# from the release notes, not from the script itself) before running from a
-# downloaded file. Refuses to run on mismatch.
+# ROOM_MACHINE_INSTALL_SHA256 to the expected sha256 of install.sh (from your
+# independent verification — see machine/README.md — never from the script
+# itself) before running from a downloaded file. Refuses to run on mismatch.
 if [ -n "${ROOM_MACHINE_INSTALL_SHA256:-}" ] && [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
   actual="$(sha256_file "${BASH_SOURCE[0]}")"
   if [ "$actual" != "$ROOM_MACHINE_INSTALL_SHA256" ]; then

@@ -16,13 +16,29 @@ ROOM_MACHINE_ENABLED=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.
 
 `<commit>` is the commit that contains this installer. The script checks the flag first and exits 0 when the flag is off, without `sudo` and without downloading anything.
 
-Verify before you run (M7): the hash embedded in the script guards the payload against truncation only — it cannot authenticate the script itself. Download the script, compare its sha256 against the value published in the release notes (never against a value inside the script), then run the downloaded file with the expected hash exported:
+Note: the one-command form runs the script from a pipe, so the out-of-band self-check described below cannot apply — there is no script file to verify, and the installer prints a warning saying so. If you want substitution protection, use the verify flow instead of the one-liner.
+
+Verify before you run (M7): the hash embedded in the script guards the payload against truncation only — it cannot authenticate the script itself. There is no separately published hash to check against, so verify by fetching the script twice — over two independent connections — and comparing the bytes before you run anything:
 
 ```bash
-curl -fsSL -o install.sh https://raw.githubusercontent.com/Uuriko/project-room/<commit>/machine/install.sh
-echo "<sha256 from the release notes>  install.sh" | shasum -a 256 -c -
-ROOM_MACHINE_ENABLED=1 ROOM_MACHINE_INSTALL_SHA256=<sha256 from the release notes> bash install.sh -- --enroll <ONE-TIME-CODE>
+C=<commit>  # the commit whose installer you intend to run
+curl -fsSL -o install.sh https://raw.githubusercontent.com/Uuriko/project-room/$C/machine/install.sh
+curl -fsSL "https://api.github.com/repos/Uuriko/project-room/contents/machine/install.sh?ref=$C" \
+  | node -e 'let s="";for await(const c of process.stdin)s+=c;process.stdout.write(Buffer.from(JSON.parse(s).content,"base64"))' \
+  > install.sh.check
+cmp install.sh install.sh.check && echo "MATCH: both fetches agree"
 ```
+
+`cmp` staying silent means the two fetches delivered identical bytes. Then bind the file you run to the bytes you verified — the exported hash makes the script verify its own bytes before doing anything, and refuse on mismatch (which also catches a swap between verification and execution):
+
+```bash
+export ROOM_MACHINE_INSTALL_SHA256=$(shasum -a 256 install.sh | awk '{print $1}')
+ROOM_MACHINE_ENABLED=1 bash install.sh -- --enroll <ONE-TIME-CODE>
+```
+
+What this defends against: a tampered download on one of the two paths (compromised mirror, poisoned cache, an attacker intercepting one connection). What it does not defend against: an attacker who controls both of your connections (for example a TLS-intercepting corporate proxy), or the GitHub repo itself. If either is in your threat model, do not use the one-command install — clone the repo over a connection you trust and run `machine/install.sh` from the checkout.
+
+Longer term (not yet implemented): detached signatures (e.g. minisign) verified against a public key pinned in this repo, which would remove the need to compare fetches by hand.
 
 What the owner does on the Mac:
 

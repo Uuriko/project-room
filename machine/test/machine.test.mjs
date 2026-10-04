@@ -526,4 +526,89 @@ test.describe("room-machine", { concurrency: false }, () => {
     rmSync(home, { recursive: true, force: true });
     rmSync(dir, { recursive: true, force: true });
   });
+
+  test("installer out-of-band self-check: mismatch refuses, match proceeds, piped mode warns", () => {
+    const installSh = readFileSync(join(repo, "machine/install.sh"), "utf8");
+    // The 64KB script copy lives in the repo-local .tmp (gitignored): the
+    // shared /tmp is a near-full tmpfs and cannot be relied on.
+    const scratch = join(repo, ".tmp", `installer-auth-${randomUUID()}`);
+    mkdirSync(scratch, { recursive: true });
+    try {
+      const file = join(scratch, "install.sh");
+      writeFileSync(file, installSh);
+
+      // 1. Wrong ROOM_MACHINE_INSTALL_SHA256: refuse before doing anything.
+      {
+        const home = homeDir();
+        const r = spawnSync("bash", [file], {
+          env: {
+            ...process.env,
+            HOME: home,
+            TMPDIR: home,
+            PATH: `${fakes}:/usr/bin:/bin`,
+            ROOM_MACHINE_ENABLED: "1",
+            ROOM_MACHINE_HOME: home,
+            ROOM_MACHINE_PREFIX: join(home, "app"),
+            ROOM_MACHINE_INSTALL_SHA256: "0".repeat(64),
+          },
+          encoding: "utf8",
+        });
+        const output = `${r.stdout}\n${r.stderr}`;
+        assert.notEqual(r.status, 0);
+        assert.match(output, /failed its out-of-band integrity check/);
+        assert.equal(existsSync(join(home, "app")), false, "refused before extracting the payload");
+        rmSync(home, { recursive: true, force: true });
+      }
+
+      // 2. Matching ROOM_MACHINE_INSTALL_SHA256: proceed past the self-check.
+      {
+        const home = homeDir();
+        const hash = createHash("sha256").update(installSh, "utf8").digest("hex");
+        const r = spawnSync("bash", [file], {
+          env: {
+            ...process.env,
+            HOME: home,
+            TMPDIR: home,
+            PATH: `${fakes}:${process.env.PATH}`,
+            ROOM_MACHINE_ENABLED: "1",
+            ROOM_MACHINE_HOME: home,
+            ROOM_MACHINE_PREFIX: join(home, "app"),
+            ROOM_MACHINE_INSTALL_SHA256: hash,
+          },
+          encoding: "utf8",
+        });
+        const output = `${r.stdout}\n${r.stderr}`;
+        assert.doesNotMatch(output, /failed its out-of-band integrity check/);
+        assert.equal(
+          existsSync(join(home, "app", "machine", "bin", "room-machine.mjs")),
+          true,
+          "matching hash proceeds to payload extraction"
+        );
+        rmSync(home, { recursive: true, force: true });
+      }
+
+      // 3. Piped mode (bash -c, no script file): loud warning, no silent skip.
+      {
+        const home = homeDir();
+        const r = spawnSync("bash", ["-c", installSh], {
+          env: {
+            ...process.env,
+            HOME: home,
+            TMPDIR: home,
+            PATH: `${fakes}:/usr/bin:/bin`,
+            ROOM_MACHINE_ENABLED: "1",
+            ROOM_MACHINE_HOME: home,
+            ROOM_MACHINE_NODE: "definitely-not-a-node-binary",
+          },
+          encoding: "utf8",
+        });
+        const output = `${r.stdout}\n${r.stderr}`;
+        assert.match(output, /running from a pipe, not from a file/);
+        assert.match(output, /Substitution protection is SKIPPED/);
+        rmSync(home, { recursive: true, force: true });
+      }
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
+    }
+  });
 });
