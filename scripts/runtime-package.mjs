@@ -201,6 +201,7 @@ optional.push("server/feedback-store.mjs"); // RC-2026-09-27-2745: pure /feedbac
 optional.push("server/feedback-scrub.mjs"); // RC-2026-09-27-2745: secret scrubbing at feedback intake (imported by server/feedback-store.mjs; pure, no imports)
 optional.push("server/feedback-routes.mjs"); // RC-2026-09-27-2745: /feedback HTTP routes (imported by server/http.mjs)
 optional.push("server/work-duplicates.mjs"); // jill 2026-09-24: pure work-claim duplicate detection (imported by server/work-claim-routes.mjs; pure, no imports)
+optional.push("server/retention-response.mjs"); // jill 2026-10-03: first-contribution response SLA + no-zero-reply watchdog (imported by server/work-claim-routes.mjs; pure, no imports)
 optional.push("server/bounty-escrow.mjs"); // agent work exchange slice 1: escrowed-bounty ledger + lifecycle (imported by server/bounty-escrow-routes.mjs)
 optional.push("server/bounty-escrow-routes.mjs"); // agent work exchange slice 1: bounty/credit HTTP routes (imported by server/http.mjs)
 optional.push("server/bounty-disputes.mjs"); // agent work exchange slice 1: dispute state machine (imported by server/bounty-escrow.mjs)

@@ -43,6 +43,7 @@ import { evaluateReceipt } from "./jev-receipts.mjs";
 import { findClaimCollisions } from "./claim-collisions.mjs";
 import { emitWorkClaimEvent, enqueueClaimWake } from "./work-claim-events.mjs";
 import { noteReadyWork } from "./work-wants.mjs"; // BOARD-WAKE-2
+import { isFirstContribution, retentionAck, retentionReport } from "./retention-response.mjs";
 import { ROOM_GUIDE_ID } from "./room-guide.mjs";
 import { fileLeaseConflictBody, fileLeaseConflicts, holdForRateLimit, readyClaims } from "./claim-coordination.mjs";
 import { collectPullRequestLookups, commitPullRequestLookup, readClaimPullBudget, writeClaimPullBudget } from "./claim-pr-sync.mjs";
@@ -833,11 +834,17 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       item = runPure(reject, () => claimWork(item, assignee, {
         note: data.note ?? `assigned by ${caller}`, room: roomLike, now: nowMs
       }));
-      commit(item, "claimed", {
+      // Retention ack (research brief 2026-09-28, mechanic #2): every claim
+      // gets the bot's immediate structured receipt, so no contribution sits
+      // at zero replies from t=0. First-time contributors carry the 24h
+      // verdict SLA in the ack note. One commit, one room event.
+      const firstAssignee = isFirstContribution(registry.list(roomId), assignee);
+      const ackedAssignee = retentionAck(item, { now: nowMs, first: firstAssignee });
+      commit(ackedAssignee, "claimed", {
         attention: "assigned", attentionMemberId: assignee,
         wakeMemberId: assignee, wakeReason: "assigned"
       });
-      return json(res, 201, item);
+      return json(res, 201, ackedAssignee);
     }
     commit(item, "created");
     return json(res, 201, item);
@@ -885,8 +892,28 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       error.body = body;
       throw error;
     }
-    commit(claimed, "claimed");
-    return json(res, 200, { ...claimed, fileWarnings: data.advisory === true ? fileWarningsFor(registry.list(roomId), claimed) : [] });
+    // Retention ack (research brief 2026-09-28, mechanic #2): every claim gets
+    // the bot's immediate structured receipt, so no contribution sits at zero
+    // replies from t=0. First-time contributors carry the 24h verdict SLA in
+    // the ack note. Firstness is read from the pre-claim registry state; the
+    // ack rides the same commit, so this stays one room event.
+    const first = isFirstContribution(registry.list(roomId), caller);
+    const acked = retentionAck(claimed, { now: nowMs, first });
+    commit(acked, "claimed");
+    return json(res, 200, { ...acked, fileWarnings: data.advisory === true ? fileWarningsFor(registry.list(roomId), acked) : [] });
+  }
+  if (workClaimRoute === "retention" && req.method === "GET") {
+    // Retention dashboard (research brief 2026-09-28, agent-retention
+    // mechanics #1 and #2): the first-contribution response SLA queue, the
+    // no-zero-reply watchdog, and first-response latency. Read-only, open to
+    // every member like the other GETs on this family. Deliberately
+    // non-punitive: queues for reviewers, never sanctions.
+    const members = store.roomAuthority(roomId).members ?? {};
+    const member = members[caller];
+    if (!member || member.active === false) {
+      reject(403, "not_member", `Member "${caller}" is not a member of room "${roomId}"`);
+    }
+    return json(res, 200, retentionReport(registry.list(roomId), { now: nowMs }));
   }
   if (workClaimRoute === "update" && req.method === "POST") {
     const data = body(req);
@@ -1118,7 +1145,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   const WORK_CLAIM_METHODS = {
     list: "GET", receipts: "GET", sweep: "POST", duplicates: "GET", status: "GET", config: "GET, POST", create: "POST",
     read: "GET", claim: "POST", update: "POST", review: "POST", release: "POST",
-    reassign: "POST", renew: "POST",
+    reassign: "POST", renew: "POST", retention: "GET",
   };
   const allowedMethod = WORK_CLAIM_METHODS[workClaimRoute];
   reject(405, "method_not_allowed", "Method not allowed",
