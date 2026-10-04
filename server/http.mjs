@@ -3331,13 +3331,15 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         && !dmConsentDecideMatch && !dmConsentBlockMatch && !dmConsentRevokeMatch && !dmConsentUnblockMatch && !publicFaceRotateMatch
         && !peerDmThreadMatch && !operatorAgentMatch
         && !mentionAckMatch && !mentionSettingsMatch && !savedDeleteMatch && !memberDeactivateMatch
-        && !agentGrantsMatch && !agentGrantDeleteMatch && !agentCapabilitiesMatch) reject(404, "not_found", "Not found");
+        && !agentGrantsMatch && !agentGrantDeleteMatch && !agentCapabilitiesMatch
+        && !spendGrantsMatch && !spendGrantDeleteMatch && !spendGrantReadMatch) reject(404, "not_found", "Not found");
       const roomId = pathId((publicWorkRoomReviewMatch ?? projectOfferActionMatch ?? match ?? revokeMatch ?? threadMatch ?? accessDecideMatch ?? delegationGrantMatch ?? delegationRevokeMatch ?? delegationListMatch ?? ownerDelegateGrantMatch ?? ownerDelegateRevokeMatch ?? ownerDelegateListMatch ?? ownershipTransferMatch ?? collabMatch ?? workClaimMatch
         ?? feedbackMatch ?? bountyMatch ?? creditsMatch ?? boardV2Match
         ?? dmConsentDecideMatch ?? dmConsentBlockMatch ?? dmConsentRevokeMatch ?? dmConsentUnblockMatch ?? publicFaceRotateMatch
         ?? peerDmThreadMatch ?? operatorAgentMatch
         ?? mentionAckMatch ?? mentionSettingsMatch ?? savedDeleteMatch ?? memberDeactivateMatch
-        ?? agentGrantsMatch ?? agentGrantDeleteMatch ?? agentCapabilitiesMatch)[1]);
+        ?? agentGrantsMatch ?? agentGrantDeleteMatch ?? agentCapabilitiesMatch
+        ?? spendGrantsMatch ?? spendGrantDeleteMatch ?? spendGrantReadMatch)[1]);
       const invitationId = revokeMatch ? pathId(revokeMatch[2]) : null;
       const threadMessageId = threadMatch ? pathId(threadMatch[2]) : null;
       const accessRequestId = accessDecideMatch ? pathId(accessDecideMatch[2]) : null;

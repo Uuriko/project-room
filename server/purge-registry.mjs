@@ -182,6 +182,26 @@ const ROWS = [
     }
   },
   {
+    "table": "spend_grant_terms",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
+    "table": "spend_authorizations",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
     "table": "agent_connection_operations",
     "key": "room_id",
     "action": "delete",
