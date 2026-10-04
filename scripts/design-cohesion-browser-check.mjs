@@ -156,6 +156,10 @@ test("message, pinned and work-fact text stays readable through light/dark chang
   send("reviewer", T.MESSAGE_POSTED, { messageId: "contrast-deleted", body: "Synthetic message removed from the conversation." });
   send("owner", T.MESSAGE_DELETED, { messageId: "contrast-deleted", expectedMessageRevision: 0, reason: "Synthetic cleanup" });
   send("owner", T.MESSAGE_PINNED, { messageId: "contrast-plain" });
+  send("guest", T.MESSAGE_POSTED, { messageId: "contrast-muted", body: "Synthetic message hidden by the viewer's mute preference." });
+  send("owner", T.MEMBER_MUTE_SET, { memberId: "guest", muted: true });
+  send("owner", T.MESSAGE_POSTED, { messageId: "contrast-draft", body: "Synthetic draft for review.",
+    workItemId: "test-handoff", packetId: "contrast-packet", basisRevision: 0 });
   await page.goto(origin + "/");
   await signInFixture(page, key);
   const row = id => page.locator(`#message-list [data-message-record-id="${id}"]`);
@@ -176,6 +180,8 @@ test("message, pinned and work-fact text stays readable through light/dark chang
     ["grouped", row("contrast-grouped").locator(".message-body")],
     ["mentioned", row("contrast-mention").locator(".message-body")],
     ["deleted", row("contrast-deleted").locator(".message-tombstone")],
+    ["muted", row("contrast-muted").locator(".message-muted")],
+    ["draft-metadata", row("contrast-draft").locator(".draft-feedback > .form-hint")],
     ["pinned", page.locator("#pinned-list .pinned-body").first()],
     ["work-fact", card.locator(".work-details > .work-facts dd").first()],
   ];
@@ -199,6 +205,8 @@ test("message, pinned and work-fact text stays readable through light/dark chang
       }
       await row("contrast-plain").scrollIntoViewIfNeeded();
       await page.screenshot({ path: `${shots}/contrast-${pass}-${theme}-${width}-messages.png` });
+      await row("contrast-draft").scrollIntoViewIfNeeded();
+      await page.screenshot({ path: `${shots}/contrast-${pass}-${theme}-${width}-metadata.png` });
       await card.scrollIntoViewIfNeeded();
       await page.screenshot({ path: `${shots}/contrast-${pass}-${theme}-${width}-work.png` });
       await page.locator("#pinned-panel").scrollIntoViewIfNeeded();
@@ -211,8 +219,8 @@ test("message, pinned and work-fact text stays readable through light/dark chang
   for (const sample of evidence.filter(sample => sample.theme === "dark")) {
     assert.equal(sample.foreground, sample.name === "work-fact" ? "rgb(216, 222, 232)" : "rgb(223, 229, 237)", "Existing dark message/value palette is unchanged");
   }
-  for (const sample of evidence.filter(sample => sample.theme === "light" && sample.name === "deleted")) {
-    assert.equal(sample.foreground, "rgb(92, 91, 106)", "Deleted message retains the light muted hierarchy");
+  for (const sample of evidence.filter(sample => sample.theme === "light" && ["deleted", "muted", "draft-metadata"].includes(sample.name))) {
+    assert.equal(sample.foreground, "rgb(92, 91, 106)", "Secondary message state retains the light muted hierarchy");
   }
   const axe = await new AxeBuilder({ page })
     .include("#pinned-list .pinned-body")
