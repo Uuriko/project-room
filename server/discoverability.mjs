@@ -152,6 +152,8 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
     operationIds: { GET: "listRoomFiles", HEAD: "headRoomFiles", POST: "stageRoomFile" },
     summaryByMethod: { POST: "Stage a room file. API keys need the rooms:write scope." },
   }),
+  // http.mjs: POST commits a staged file onto a message. Other methods are 405.
+  route("/api/rooms/{roomId}/files/{fileId}/commit", ["POST"], "room-member", "Commit a staged room file onto a message. API keys need the rooms:write scope.", "commitRoomFile"),
   route("/api/share-links/join-agent", ["POST"], "identity-secret", "Guest-link redemption: join with a guest pass.", "joinAgentViaShareLink"),
   // http.mjs: GET and HEAD both collect cross-room attention. HEAD strips the body.
   // Other methods reject 405. Allow lists GET only; the serving if is the inventory.
