@@ -17,6 +17,16 @@
   --bg:#f4f3f8;--panel:#fffbff;--panel-raised:#e8e7ef;--panel-hover:#dddce6;--line:#c9c8d4;--line-soft:#dddce6;--text:#1c1b22;--muted:#5c5b6a;--blue:#33339a;--blue-strong:#3f3fad;--blue-strong-hover:#33338f;--on-accent:#ffffff;--amber:#8a4b00;--green:#0f6b45;--red:#a32020;--violet:#5b3d99;--card:#fffbff;--border:#c9c8d4;--shadow:0 16px 40px rgb(28 27 34 / 12%);
 }
 
+/* Ordinary light-surface content uses the matching light foreground. Keep
+   fixed-dark nested cards and the established dark palette unchanged. */
+:root[data-theme="light"] .message-content > .message-body:not(.message-muted):not(.message-tombstone),
+:root[data-theme="light"] .pinned-item .pinned-body,
+:root[data-theme="light"] .work-details > .work-facts dd { color: var(--text); }
+/* These paragraph states are secondary, even under .message-content p. */
+:root[data-theme="light"] .message-content > .message-muted,
+:root[data-theme="light"] .message-content > .message-tombstone,
+:root[data-theme="light"] .draft-feedback > .form-hint { color: var(--muted); }
+
 * { box-sizing: border-box; }
 html { background: var(--bg); scroll-behavior: smooth; }
 body { margin: 0; background: var(--bg); color: var(--text); }
