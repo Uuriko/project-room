@@ -3,12 +3,15 @@
 // AN-1b schedules this shape of run; this script is the one-shot form.
 import { DatabaseSync } from "node:sqlite";
 import { pathToFileURL } from "node:url";
-import { baselineReport, ensureAnalyticsSchema, runAnalyticsTail } from "../server/analytics/index.mjs";
+import { baselineReport, dashboardHonestyReport, ensureAnalyticsSchema, runAnalyticsTail } from "../server/analytics/index.mjs";
 
 const TABLES = [
   "rooms", "events", "accounts", "member_accounts", "share_links", "guest_invites",
   "agent_invite_codes", "referral_invites", "membership_invitations", "agent_wake_signals",
-  "wake_queue", "agent_work_wakes", "public_work_receipts", "referrals"
+  "wake_queue", "agent_work_wakes", "public_work_receipts", "referrals",
+  // Dashboard honesty pass (opps #24/#27/#28): the honesty section reads the
+  // escrow journal/records for the settled-per-week and bond falsifiers.
+  "bounty_journal", "bounty_records"
 ];
 
 function copyTable(source, scratch, name) {
@@ -44,6 +47,10 @@ export async function backfillFile(dbPath, { now = Date.now() } = {}) {
   } while (!tail.done && guard < 10000);
   if (!tail.done) throw new Error("analytics backfill did not finish");
   const report = baselineReport(scratch, { now });
+  // Additive dashboard-honesty section (opps #24/#27/#28): falsifier rows,
+  // lane-vs-organic activity labels, non-John-funded settled/week. The
+  // existing report shape is untouched.
+  report.honesty = dashboardHonestyReport({ db: scratch, now });
   scratch.close();
   return { report, tail };
 }
