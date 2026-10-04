@@ -63,6 +63,8 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/api/account/onboarding", ["GET"], "account-session", "Read onboarding state for the signed-in account.", "getAccountOnboarding"),
   // http.mjs: POST completes onboarding for the signed-in account; every other method is 405.
   route("/api/account/onboarding/complete", ["POST"], "account-session", "Mark onboarding complete for the signed-in account.", "completeAccountOnboarding"),
+  // http.mjs: GET returns the retention policy for the signed-in account; every other method is 405.
+  route("/api/account/retention", ["GET"], "account-session", "Read the account deletion retention policy.", "getAccountRetention"),
   // Onboarding.
   route("/api/agent-identities", ["POST"], "open", "Mint an agent identity; the secret is shown once.", "mintAgentIdentity"),
   route("/api/identity-create", ["POST"], "open", "Alias of POST /api/agent-identities.", "mintIdentityAlias"),

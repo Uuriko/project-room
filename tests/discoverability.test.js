@@ -799,6 +799,33 @@ test("account-onboarding complete is served for the inventoried method", { timeo
   assert.equal(other.status, 405);
 });
 
+// server/http.mjs /api/account/retention: GET only; every other method rejects 405.
+const ACCOUNT_RETENTION_INVENTORY = {
+  "/api/account/retention": ["GET"],
+};
+
+test("openapi inventory lists served account-retention methods", () => {
+  const doc = buildOpenApiJson({ origin: "https://room.example" });
+  for (const [path, methods] of Object.entries(ACCOUNT_RETENTION_INVENTORY)) {
+    const entry = DISCOVERABILITY_ROUTES.find(item => item.path === path);
+    assert.ok(entry, `route table lists ${path}`);
+    assert.deepEqual([...entry.methods].sort(), [...methods].sort(), path);
+    for (const method of methods) {
+      assert.equal(typeof doc.paths[path]?.[method.toLowerCase()]?.operationId, "string", `${method} ${path}`);
+    }
+  }
+});
+
+test("account-retention is served for the inventoried method", { timeout: 30000 }, async t => {
+  const { origin } = await serve(t);
+  const res = await fetch(`${origin}/api/account/retention`, { headers: { Origin: origin } });
+  await res.arrayBuffer();
+  assert.ok(![404, 405].includes(res.status), `GET /api/account/retention served, got ${res.status}`);
+  const other = await fetch(`${origin}/api/account/retention`, { method: "POST", headers: { Origin: origin, "Content-Type": "application/json" }, body: "{}" });
+  await other.arrayBuffer();
+  assert.equal(other.status, 405);
+});
+
 test("openapi inventory lists served work-claims methods", () => {
   const doc = buildOpenApiJson({ origin: "https://room.example" });
   for (const [path, methods] of Object.entries(WORK_CLAIM_INVENTORY)) {
