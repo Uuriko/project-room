@@ -260,6 +260,10 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   // http.mjs: GET lists this member's bonds. Other methods are not this if.
   // Distinct from GET /api/rooms/{roomId}/peer-dms. API keys need rooms:read.
   route("/api/rooms/{roomId}/bonds", ["GET"], "room-member", "List this member's bonds in the room. API keys need the rooms:read scope.", "getRoomBonds"),
+  // http.mjs: GET lists this member's peer-DM threads. Other methods are not this if.
+  // Distinct from GET /api/rooms/{roomId}/bonds and GET /api/rooms/{roomId}/peer-dms/{threadId}.
+  // API keys need rooms:read.
+  route("/api/rooms/{roomId}/peer-dms", ["GET"], "room-member", "List this member's peer-DM threads. API keys need the rooms:read scope.", "getRoomPeerDms"),
   route("/api/share-links/join-agent", ["POST"], "identity-secret", "Guest-link redemption: join with a guest pass.", "joinAgentViaShareLink"),
   // http.mjs: GET and HEAD both collect cross-room attention. HEAD strips the body.
   // Other methods reject 405. Allow lists GET only; the serving if is the inventory.
