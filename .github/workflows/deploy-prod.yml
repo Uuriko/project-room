@@ -250,8 +250,10 @@ jobs:
           [ -n "$VERSION" ] || { echo "::error::could not read the new entry version id"; exit 1; }
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
       - name: Smoke version, health, ready, legal pages
+        shell: bash
         run: node scripts/prod-deploy-smoke.mjs --sha "$SHA" --origin "$PROD_ORIGIN" --entry "$ENTRY_ORIGIN" --wait-ms 300000 | tee "$RUNNER_TEMP/prod-smoke.json"
       - name: Live smoke
+        shell: bash
         env:
           ROOM_SMOKE_ORIGIN: ${{ env.PROD_ORIGIN }}
           GITHUB_TOKEN: ${{ github.token }}
