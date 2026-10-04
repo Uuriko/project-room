@@ -54,6 +54,25 @@ export function messageInHistory(message, floor) {
   return createdAt > floor.at || !floor.sameInstant?.has(message.id);
 }
 
+// QA4 Q4-SEC-1: one predicate for summary surfaces (orient, activation pack)
+// that read projection messages directly instead of through the store's
+// filtered reads. A targeted message (data.toMemberId, a DM) is visible only to
+// its author and its addressee; the room owner is not exempt (RC-2026-09-19-070).
+// The PRIV-2 floor applies on top. `floor` comes from store.historyFloor().
+export function messageVisibleToViewer(message, viewerId, floor) {
+  if (!message || message.body == null || message.deletedAt) return false;
+  if (message.toMemberId && message.authorId !== viewerId && message.toMemberId !== viewerId) return false;
+  return messageInHistory(message, floor);
+}
+
+// The floor for a summary read. Fails closed: if the floor cannot be read,
+// the viewer sees no message text rather than all of it.
+export function summaryHistoryFloor(store, roomId, viewerId, headSequence = null) {
+  if (typeof store?.historyFloor !== "function") return null;
+  try { return store.historyFloor(roomId, viewerId, headSequence); }
+  catch { return { sequence: Number.MAX_SAFE_INTEGER, at: "9999-12-31T23:59:59.999Z", sameInstant: new Set() }; }
+}
+
 // Later events can carry an earlier message's text or reference it (edits,
 // reactions, pins). They follow the message: hidden when it is hidden.
 function targetsHiddenMessage(event, floor, messagesById) {
