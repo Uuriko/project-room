@@ -89,7 +89,7 @@ jobs:
       - if: steps.gate.outputs.ready == 'true'
         run: npx playwright install --with-deps chromium
       - if: steps.gate.outputs.ready == 'true'
-        run: npm i --no-save @axe-core/playwright@4
+        run: npm i --no-save @axe-core/playwright@4.13.0
       - name: Smoke and browser checks
         if: steps.gate.outputs.ready == 'true'
         env:
