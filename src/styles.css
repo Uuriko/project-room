@@ -548,6 +548,9 @@ label, input, textarea, select { font-size: 1rem; }
 .member-profile-body details p { font-size: .875rem; line-height: 1.5; }
 .receipt code, .event-list code { display: block; overflow-wrap: anywhere; max-width: 100%; }
 dialog { width: min(38rem, calc(100vw - 1.5rem)); max-height: calc(100dvh - 2rem); overflow: auto; border: 1px solid var(--line); border-radius: .85rem; padding: clamp(1rem, 4vw, 2rem); background: var(--panel); color: var(--text); box-shadow: var(--shadow); }
+/* NR-B: when the browser scrolls a focused control into view inside the
+   action dialog, keep the focus outline clear of the dialog's bottom edge. */
+#action-dialog { scroll-padding-bottom: 0.75rem; }
 dialog::backdrop { background: rgb(0 0 0 / 72%); }
 dialog h2 { margin: 0; }
 dialog p { margin: 0; color: var(--muted); }
