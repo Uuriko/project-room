@@ -8,7 +8,7 @@ import { MCP_VERSION, MCP_SUPPORTED_VERSIONS } from "../client/mcp-stdio.mjs";
 import { llmsTxt, kitsTxt, joinPrompt } from "../deploy/agent-discovery.mjs";
 import {
   isRoomMcpPath, roomMcpUrlForHost, roomMcpJoinText, roomMcpJoinJson, roomMcpSnippets, ROOM_MCP_SERVER_NAME,
-  ROOM_MCP_SERVER_VERSION, HOSTED_ROOM_MCP_TOOLS, isHostedMcpToolName
+  ROOM_MCP_SERVER_VERSION, HOSTED_ROOM_MCP_TOOLS, PUBLIC_WORK_MCP_TOOLS, isHostedMcpToolName
 } from "../src/room-mcp-join.js";
 import { closestToolName, diagnoseArguments, mcpCallError, mcpTransportError } from "./mcp-arg-errors.mjs";
 import { livePublicMcpTools } from "./mcp-discovery.mjs";
@@ -86,7 +86,8 @@ export function handleMcpJoinRpc(message, { mcpUrl } = {}) {
   if (message.method === "tools/call") {
     const name = message.params?.name;
     const args = message.params?.arguments ?? {};
-    const known = [...MCP_JOIN_TOOLS.map(tool => tool.name), ...HOSTED_ROOM_MCP_TOOLS];
+    // Public-work tools are callable here without a room, so a typo of one must suggest it (QA5R-AX-1).
+    const known = [...MCP_JOIN_TOOLS.map(tool => tool.name), ...PUBLIC_WORK_MCP_TOOLS, ...HOSTED_ROOM_MCP_TOOLS];
     if (isHostedMcpToolName(name)) return mcpCallError(requestId, { reason: "auth_required", tool: name });
     const selected = MCP_JOIN_TOOLS.find(tool => tool.name === name);
     if (!selected) return mcpCallError(requestId, { reason: "unknown_tool", tool: name, suggestion: closestToolName(name, known) });
