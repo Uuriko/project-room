@@ -186,6 +186,24 @@ test("watchdog: zero-reply rate runs over the trailing 30 days", () => {
   assert.deepEqual(out2.watch, []);
 });
 
+test("watchdog: done claims are excluded from the watch and the rate", () => {
+  // Completion closes the loop (same contract as the SLA's "answeredBy:
+  // completion"): a claim finished past the reply window with no member
+  // response is not a zero-reply contribution.
+  const done = doneItem("w-done", "quill", T0, T0 + 60 * H);
+  const open = claimedItem("w-open", "quill", T0);
+  const out = assessZeroReply([done, open], { now: T0 + ZERO_REPLY_WINDOW_HOURS * H + H });
+  assert.deepEqual(out.watch.map(w => w.itemId), ["w-open"]);
+  assert.equal(out.contributions, 1);
+  assert.equal(out.unanswered, 1);
+  assert.equal(out.zeroReplyRate, 1);
+  const onlyDone = assessZeroReply([done], { now: T0 + ZERO_REPLY_WINDOW_HOURS * H + H });
+  assert.deepEqual(onlyDone.watch, []);
+  assert.equal(onlyDone.contributions, 0);
+  assert.equal(onlyDone.zeroReplyRate, 0);
+  assert.equal(onlyDone.alert, false);
+});
+
 // --- firstResponseLatency ---
 
 test("latency: median over responded claims in the window", () => {
