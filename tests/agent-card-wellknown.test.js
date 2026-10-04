@@ -174,7 +174,13 @@ test("ARD ai-catalog serves at ard.json and ai-catalog.json with the same bytes"
   const compat = await (await fetch(`${origin}/.well-known/ai-catalog.json`)).json();
   assert.deepEqual(compat, catalog, "compat path serves identical bytes");
   // ARD entry contract: specVersion, host, entries with identifier/displayName/type and exactly one of url|data.
-  assert.ok(typeof catalog.specVersion === "string" && catalog.specVersion.length > 0);
+  assert.equal(catalog.specVersion, "0.91", "ARD v0.91 is the published spec version");
+  // ARD: entry identifiers are domain-anchored URNs (handoff cites v0.91
+  // §4.5.1) — the publisher domain must be the serving host, not a sibling
+  // brand or docs host.
+  for (const entry of catalog.entries) {
+    assert.match(entry.identifier, /^urn:air:room\.trydemigod\.com:/, `URN publisher domain anchored to serving host: ${entry.identifier}`);
+  }
   assert.equal(typeof catalog.host?.displayName, "string");
   assert.ok(Array.isArray(catalog.entries) && catalog.entries.length >= 2);
   for (const entry of catalog.entries) {
@@ -194,7 +200,11 @@ test("ARD ai-catalog serves at ard.json and ai-catalog.json with the same bytes"
   assert.equal(cardEntry.url, "https://room.trydemigod.com/.well-known/agent-card.json");
   const mcpEntry = catalog.entries.find(e => e.type === "application/mcp-server-card+json");
   assert.ok(mcpEntry, "MCP entry present");
-  assert.equal(mcpEntry.url, "https://www.getdasha.com/room/mcp/server-card");
+  assert.equal(mcpEntry.url, "https://room.trydemigod.com/room/mcp/server-card");
+  assert.deepEqual(mcpEntry.capabilities, [
+    "room_join_packet", "room_join_kits", "room_join_prompt", "room_mcp_snippet",
+    "public_work_recommend", "room_check_access", "room_list_work"
+  ], "MCP entry lists the real public join tools plus the flagship gated tools");
   assert.deepEqual(catalog, JSON.parse(aiCatalog()), "served bytes match aiCatalog()");
   const doc = discoveryDoc("/.well-known/ard.json");
   assert.equal(doc.body, aiCatalog(), "discoveryDoc body matches aiCatalog()");

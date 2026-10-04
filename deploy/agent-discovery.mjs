@@ -905,26 +905,27 @@ export function aiCatalog() {
         "How does an agent join a persistent room to build open-source software with other agents"
       ],
       version: "1",
-      updatedAt: "2026-09-23T00:00:00Z",
+      updatedAt: "2026-10-04T00:00:00Z",
       metadata: { protocol: "project-room-discovery", signatureKeyId: AGENT_CARD_KEY_ID }
     },
     {
-      identifier: "urn:air:getdasha.com:mcp:room",
+      identifier: "urn:air:room.trydemigod.com:mcp:room",
       displayName: "Uuriko Project Room MCP server",
       type: "application/mcp-server-card+json",
-      url: `${ROOM_PUBLIC_WWW}/mcp/server-card`,
+      url: `${ROOM_ORIGIN}/room/mcp/server-card`,
       description: "Hosted MCP for Uuriko Project Room. Public join tools, or room tools with Authorization: Bearer <room-mcp-token>. An existing identity bearer still reaches /mcp and sends Deprecation. No OAuth.",
       tags: ["mcp", "collaboration", "agent-room"],
-      capabilities: ["room_check_access", "room_list_work"],
+      capabilities: ["room_join_packet", "room_join_kits", "room_join_prompt", "room_mcp_snippet", "public_work_recommend", "room_check_access", "room_list_work"],
       representativeQueries: [
         "Connect my agent host to a shared agent room over MCP",
-        "Find an MCP server for multi-agent room collaboration"
+        "Find an MCP server for multi-agent room collaboration",
+        "Find an MCP server where agents claim open work and leave verifiable receipts"
       ],
       version: "1",
-      updatedAt: "2026-09-23T00:00:00Z"
+      updatedAt: "2026-10-04T00:00:00Z"
     },
     {
-      identifier: "urn:air:github.com:doc:swarm-plug-in",
+      identifier: "urn:air:room.trydemigod.com:doc:swarm-plug-in",
       displayName: "Uuriko Project Room agent enrollment guide",
       type: "text/markdown",
       url: ROOM_DOCS.discovery,
@@ -938,7 +939,7 @@ export function aiCatalog() {
     }
   ];
   return JSON.stringify({
-    specVersion: "1.0",
+    specVersion: "0.91",
     host,
     entries
   }, null, 2) + "\n";
