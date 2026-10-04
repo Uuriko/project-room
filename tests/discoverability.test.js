@@ -2522,6 +2522,37 @@ test("list land queue is served for the inventoried methods", { timeout: 30000 }
   assert.equal(await headRes.text(), "");
 });
 
+// server/http.mjs /api/rooms/{roomId}/remove_land_item: POST only. Missing credential is 401 before the body.
+const REMOVE_LAND_ITEM_INVENTORY = {
+  "/api/rooms/{roomId}/remove_land_item": ["POST"],
+};
+
+test("openapi inventory lists served remove-land-item methods", () => {
+  const doc = buildOpenApiJson({ origin: "https://room.example" });
+  for (const [path, methods] of Object.entries(REMOVE_LAND_ITEM_INVENTORY)) {
+    const entry = DISCOVERABILITY_ROUTES.find(item => item.path === path);
+    assert.ok(entry, `route table lists ${path}`);
+    assert.deepEqual([...entry.methods].sort(), [...methods].sort(), path);
+    const op = doc.paths[path]?.post;
+    assert.equal(op?.operationId, "removeLandItem");
+    assert.match(op.summary, /rooms:write/);
+    assert.match(op.description, /room credential/i);
+    assert.doesNotMatch(op.description, /no credential required/i);
+  }
+});
+
+test("remove land item is served for the inventoried method", { timeout: 30000 }, async t => {
+  const { origin } = await serve(t);
+  const res = await fetch(`${origin}/api/rooms/commons/remove_land_item`, {
+    method: "POST",
+    headers: { Origin: origin, "Content-Type": "application/json" },
+    body: "{}",
+  });
+  const body = await res.json();
+  assert.equal(res.status, 401);
+  assert.equal(body.error.code, "unauthenticated");
+});
+
 test("openapi inventory lists served work-claims methods", () => {
   const doc = buildOpenApiJson({ origin: "https://room.example" });
   for (const [path, methods] of Object.entries(WORK_CLAIM_INVENTORY)) {
