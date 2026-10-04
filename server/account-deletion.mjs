@@ -32,11 +32,12 @@ const fail = (status, code, message) => { throw new ServiceError(status, code, m
 // What deletion removes vs retains, and why. Served verbatim at
 // GET /api/account/retention and attached to every deletion plan.
 export const RETENTION_POLICY = Object.freeze({
-  version: "1.2.0",
+  version: "1.3.0",
   summary: "Account deletion purges the account's sign-in credentials, "
     + "sessions, room memberships, connected Gmail data, account setup answers, "
-    + "and profile data. Personal rooms this account solely owns are archived "
-    + "and their messages and files are purged. Security audit rows and "
+    + "terms-of-service acceptance, and profile data. Personal rooms this account solely owns are archived "
+    + "and their messages and files are purged. Security audit rows, abuse "
+    + "reports, operator unpublish records, and "
     + "the deactivated account tombstone are retained under legal hold; "
     + "room history already shared with other members is room-owned and is "
     + "not rewritten. A shared room with other members and no other owner "
@@ -49,10 +50,13 @@ export const RETENTION_POLICY = Object.freeze({
     Object.freeze({ category: "passkeys", description: "All registered passkey credentials are deleted." }),
     Object.freeze({ category: "memberships", description: "Room membership bindings (member_accounts) are deleted; the account leaves every room." }),
     Object.freeze({ category: "connected_data", description: "Connected Gmail data (gmail_mailboxes, gmail_linked_mailboxes, gmail_pending, gmail_operations) and account setup answers (account_setup) are permanently deleted." }),
+    Object.freeze({ category: "terms", description: "The terms-of-service acceptance record (account_terms) is deleted." }),
     Object.freeze({ category: "profile", description: "The account row is deactivated (active=0), its auth epoch is rotated so no residual credential can authenticate, and display name / avatar are scrubbed." }),
   ]),
   retained: Object.freeze([
     Object.freeze({ category: "audit", reason: "account_access_events rows are retained for security auditing, fraud prevention, and dispute resolution." }),
+    Object.freeze({ category: "abuse_reports", reason: "public_abuse_reports rows are retained as safety evidence under the same legal hold; deleting them would destroy abuse investigations." }),
+    Object.freeze({ category: "unpublish_records", reason: "public_unpublish rows are the live unpublish state consulted by the public read model; deleting them would re-expose unpublished content." }),
     Object.freeze({ category: "profile_tombstone", reason: "The account id remains as a deactivated tombstone (active=0, profile scrubbed) so retained audit rows stay attributable. It can never sign in again." }),
     Object.freeze({ category: "room_history", reason: "Room events already shared with other members (messages, work history) are room-owned history and are not rewritten when another owner remains; only the member binding is removed. Sole ownership of a shared room blocks deletion until that ownership is transferred." }),
   ]),
@@ -274,6 +278,11 @@ export function inventoryFromStore(store, accountId, rooms = null) {
       itemCount: ["gmail_mailboxes", "gmail_linked_mailboxes", "gmail_pending", "gmail_operations", "account_setup"]
         .reduce((sum, table) => sum + countWhere(store, table, accountId), 0),
     },
+    // QA2-SECREG: the terms acceptance row is per-account data and must be
+    // disclosed in the signed plan like every other purged category (M-1).
+    terms: {
+      itemCount: countWhere(store, "account_terms", accountId),
+    },
   };
   if (roomWork) inventory.owned_rooms = { itemCount: owned.archive.length + owned.transfer.length, dependsOn: [] };
   return inventory;
@@ -324,6 +333,12 @@ const EXECUTORS = {
     }
     return removed;
   },
+  // QA2-SECREG: account_terms was missing from self-serve deletion — the
+  // terms acceptance row survived account deletion. Purged like every
+  // other per-account row. public_unpublish and public_abuse_reports stay
+  // retained (see RETENTION_POLICY): they are safety records, not account data.
+  terms: (store, accountId) =>
+    store.db.prepare("DELETE FROM account_terms WHERE account_id=?").run(accountId).changes,
   profile: (store, accountId) => {
     return store.db.prepare(`UPDATE accounts SET active=0, auth_epoch=auth_epoch+1,
       display_name=NULL, avatar_url=NULL, onboarded=1 WHERE id=?`).run(accountId).changes;
