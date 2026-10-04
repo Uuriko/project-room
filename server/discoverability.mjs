@@ -172,6 +172,8 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/api/agent-webhooks/deliveries", ["GET"], "agent-credential", "List signed webhook deliveries for the calling identity.", "listWebhookDeliveryLog"),
   // agent-plugin-routes.mjs: GET lists exhausted deliveries. Other methods are not this handler.
   route("/api/agent-webhooks/dead-letter", ["GET"], "agent-credential", "List webhook deliveries that exhausted retries.", "listWebhookDeadLetters"),
+  // agent-plugin-routes.mjs: GET reads delivery metrics. Other methods are not this handler.
+  route("/api/agent-webhooks/metrics", ["GET"], "agent-credential", "Read webhook delivery metrics for the calling identity.", "getWebhookDeliveryMetrics"),
   route("/api/agent-webhooks/deliveries/{deliveryId}/redrive", ["POST"], "agent-credential", "Redrive one dead-letter delivery.", "redriveWebhookDelivery"),
   // Wake control.
   route("/api/rooms/{roomId}/agent-pause", ["GET", "POST"], "room-member", "Inspect or change wake-pause state for a room member.", "agentPause",
