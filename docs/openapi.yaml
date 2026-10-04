@@ -2998,6 +2998,43 @@ paths:
                         description: { type: string }
         '403': { description: access_denied or insufficient_scope }
         '422': { description: invalid_request (unsupported status) }
+  /api/rooms/{roomId}/agents/overview:
+    get:
+      summary: Agent fleet overview (read-only)
+      description: >-
+        One row per agent member: sponsor, profile, autonomy tier,
+        permissions, one primary state (removed, halted, read_only, paused,
+        working or idle), badges, the current Board claim, the last event the
+        agent appended, wake pause and queue, 7-day spend from its work
+        sessions, and 30-day outcomes. The room owner and delegated admins
+        see every agent; a human member sees the agents they sponsor; anyone
+        else gets 403 owner_required. receiving, budget and lastProgress are
+        null until the evidence they need is stored. Claim titles are
+        untrusted text. Scoped API keys require rooms:read.
+      security:
+        - bearerAuth: []
+        - roomSession: []
+        - accountSession: []
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200':
+          description: Agent rows the caller may read
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [roomId, evaluatedThrough, scope, agents]
+                properties:
+                  roomId: { type: string }
+                  evaluatedThrough: { type: integer }
+                  scope: { type: string, enum: [room, sponsored] }
+                  agents: { type: array, items: { type: object } }
+                  generatedAt: { type: string, format: date-time }
+        '401': { description: unauthenticated or inactive membership }
+        '403': { description: owner_required, access_denied, or insufficient_scope }
+        '404': { description: room_not_found }
+        '429': { description: rate_limited }
   /api/rooms/{roomId}/members/me/permission-requests:
     post:
       summary: Ask for more permissions without leaving the room

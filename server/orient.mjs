@@ -18,6 +18,7 @@ import { pinnedMessages, roomKind, WORK_STATES } from "../src/events.js";
 import { charterContext } from "../src/room-charter.js";
 import { annotateOrientation, claimNote, withContentTrust } from "./content-trust.mjs";
 import { orientSections } from "./updates.mjs";
+import { fleetSelf } from "./agent-fleet.mjs";
 import { ServiceError } from "./store.mjs";
 
 // Work states that count as open; completed and superseded work is history,
@@ -117,6 +118,13 @@ function rankLines(lines, query, maxTokens) {
   return { lines: kept, tokens: used };
 }
 
+function fleetSelfOrNull(store, roomSlug, room, viewerId) {
+  try {
+    const self = fleetSelf(store, roomSlug, room, viewerId);
+    return self ? self : {};
+  } catch { return {}; }
+}
+
 export function buildOrient(store, roomSlug, viewerId, options = {}) {
   // Unknown rooms fail here with the store's 404 (room_not_found).
   const { sequence, state } = store.room(roomSlug);
@@ -174,7 +182,9 @@ export function buildOrient(store, roomSlug, viewerId, options = {}) {
     you: {
       member: memberOf(member),
       profile: { displayName: member.displayName, kind: member.kind, identityId: member.identityId ?? null },
-      capabilities
+      capabilities,
+      // CP-AGENTS-1: the calling agent's own fleet state (agents only).
+      ...(member.kind === "agent" ? fleetSelfOrNull(store, roomSlug, { sequence, state }, viewerId) : {})
     },
     instructions: { charter: charterContext(state.room), pinned },
     focus: query.focus,
