@@ -3100,6 +3100,37 @@ test("room guest invite revoke is served for the inventoried method", { timeout:
   assert.equal(body.error.code, "unauthenticated");
 });
 
+// server/http.mjs /api/rooms/{roomId}/guest-invites-disconnect: POST only. Missing credential is 401.
+const ROOM_GUEST_INVITES_DISCONNECT_INVENTORY = {
+  "/api/rooms/{roomId}/guest-invites-disconnect": ["POST"],
+};
+
+test("openapi inventory lists served room guest-invite disconnect methods", () => {
+  const doc = buildOpenApiJson({ origin: "https://room.example" });
+  for (const [path, methods] of Object.entries(ROOM_GUEST_INVITES_DISCONNECT_INVENTORY)) {
+    const entry = DISCOVERABILITY_ROUTES.find(item => item.path === path);
+    assert.ok(entry, `route table lists ${path}`);
+    assert.deepEqual([...entry.methods].sort(), [...methods].sort(), path);
+    const op = doc.paths[path]?.post;
+    assert.equal(op?.operationId, "disconnectRoomGuestMember");
+    assert.match(op.summary, /rooms:write/);
+    assert.match(op.description, /room credential/i);
+    assert.doesNotMatch(op.description, /no credential required/i);
+  }
+});
+
+test("room guest invite disconnect is served for the inventoried method", { timeout: 30000 }, async t => {
+  const { origin } = await serve(t);
+  const res = await fetch(`${origin}/api/rooms/commons/guest-invites-disconnect`, {
+    method: "POST",
+    headers: { Origin: origin, "Content-Type": "application/json" },
+    body: "{}",
+  });
+  const body = await res.json();
+  assert.equal(res.status, 401);
+  assert.equal(body.error.code, "unauthenticated");
+});
+
 test("openapi inventory lists served work-claims methods", () => {
   const doc = buildOpenApiJson({ origin: "https://room.example" });
   for (const [path, methods] of Object.entries(WORK_CLAIM_INVENTORY)) {
