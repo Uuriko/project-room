@@ -1,8 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { parse } from "yaml";
 
 const script = fileURLToPath(new URL("../scripts/prod-deploy-smoke.mjs", import.meta.url));
 const revision = "a".repeat(40);
@@ -39,19 +43,23 @@ async function door(t, prefix, failure) {
   return { url: `http://127.0.0.1:${server.address().port}${prefix}`, prefix, requests };
 }
 
-async function runSmoke(origin, entry, withSha) {
-  const args = [script, "--origin", `${origin.url}/`, "--entry", `${entry.url}/`];
-  if (withSha) args.push("--sha", revision, "--wait-ms", "0");
+function runReport(command, args, options = {}) {
   return new Promise((resolve, reject) => {
-    execFile(process.execPath, args, { timeout: 15000 }, (error, stdout, stderr) => {
+    execFile(command, args, { timeout: 15000, ...options }, (error, stdout, stderr) => {
       if (error && typeof error.code !== "number") return reject(error);
       try {
-        resolve({ code: error?.code ?? 0, report: JSON.parse(stdout), stderr });
+        resolve({ code: error?.code ?? 0, report: JSON.parse(stdout), stdout, stderr });
       } catch (parseError) {
         reject(parseError);
       }
     });
   });
+}
+
+function runSmoke(origin, entry, withSha) {
+  const args = [script, "--origin", `${origin.url}/`, "--entry", `${entry.url}/`];
+  if (withSha) args.push("--sha", revision, "--wait-ms", "0");
+  return runReport(process.execPath, args);
 }
 
 for (const withSha of [false, true]) {
@@ -96,6 +104,42 @@ for (const withSha of [false, true]) {
         assert.equal(failed[0].status, failure.status);
       });
     }
+  }
+}
+
+// This boundary is distinct from CLI exit behavior: Actions must preserve a
+// failed command's exit through tee. Run the actual workflow commands under
+// GitHub's documented Linux shell invocation, with both CLIs using local HTTP.
+// https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idstepsshell
+for (const filename of ["prod-deploy-smoke.mjs", "live-smoke.mjs"]) {
+  for (const healthy of filename === "prod-deploy-smoke.mjs" ? [false, true] : [false]) {
+    test(`workflow pipeline ${filename}: preserves ${healthy ? "success" : "failure"} and tee output`, async t => {
+      const workflow = parse(readFileSync(new URL("../.github/workflows/deploy-prod.yml", import.meta.url), "utf8"));
+      const job = workflow.jobs.deploy;
+      const step = job.steps.find(item => item.run?.includes(`node scripts/${filename}`));
+      assert.ok(step, `deployment runs ${filename}`);
+      const shell = step.shell ?? job.defaults?.run?.shell ?? workflow.defaults?.run?.shell;
+      assert.ok(shell === undefined || shell === "bash", "exercise the workflow's Linux Bash shell");
+      const flags = shell === "bash" ? ["--noprofile", "--norc", "-e", "-o", "pipefail"] : ["-e"];
+      const directory = mkdtempSync(join(tmpdir(), "prod-smoke-pipeline-"));
+      t.after(() => rmSync(directory, { recursive: true, force: true }));
+      const stepFile = join(directory, "step.sh");
+      writeFileSync(stepFile, step.run);
+      const origin = await door(t, "");
+      const entry = await door(t, "/room", healthy ? null : { path: "/api/ready", status: 503, body: { status: "not_ready" } });
+      const result = await runReport("bash", [...flags, stepFile], {
+        cwd: fileURLToPath(new URL("../", import.meta.url)),
+        env: { ...process.env, SHA: revision, PROD_ORIGIN: origin.url, ENTRY_ORIGIN: entry.url,
+          ROOM_SMOKE_ORIGIN: origin.url, ROOM_SMOKE_GITHUB_API: origin.url,
+          RUNNER_TEMP: directory, GITHUB_TOKEN: "", GITHUB_STEP_SUMMARY: "" },
+      });
+      // The sparse fixture intentionally fails live-smoke's discovery checks.
+      assert.equal(result.report.ok, healthy, result.stdout);
+      const logs = readdirSync(directory).filter(name => name.endsWith(".json"));
+      assert.equal(logs.length, 1, "tee retains one JSON report");
+      assert.equal(readFileSync(join(directory, logs[0]), "utf8"), result.stdout);
+      assert.equal(result.code, healthy ? 0 : 1, "the workflow must preserve the smoke exit status through tee");
+    });
   }
 }
 
