@@ -5725,6 +5725,15 @@ function loadActionText(item, action) {
     $("#action-text-origin").textContent = `Posted by ${memberLabel(entry.text.postedById)}${proposal ? ` · draft based on revision ${proposal.basisRevision} · authorship unverified` : ""}`;
     if (value.current.workRevision !== entry.revision) { entry.needsReview = true; entry.error = "Work changed. Review current work before saving."; }
     syncActionForm();
+    // NR-B: the exact text lands asynchronously and can push the focused
+    // control below the dialog's visible edge after the browser's focus
+    // scroll already ran. Re-assert the focused control fully into view.
+    if ($("#action-dialog").open) {
+      const focused = document.activeElement;
+      if (focused && focused !== document.body && $("#action-dialog").contains(focused)) {
+        focused.scrollIntoView({ block: "nearest" });
+      }
+    }
   }).catch(() => {
     if (!owns()) return;
     entry.needsReview = true; entry.error = "Exact text unavailable. Review current work to try again.";
