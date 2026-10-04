@@ -16,7 +16,6 @@ const GRANDFATHERED = [
   "inbox-collab-routes.mjs",
   "inbox-collab-store.mjs",
   "ip-blocklist.mjs",
-  "mcp-arg-errors.mjs",
   "members-directory.mjs",
   "quarantine-thread-splits.mjs",
   "sla-breach-journal.mjs",
