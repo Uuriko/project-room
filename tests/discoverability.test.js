@@ -2137,6 +2137,32 @@ test("room next-actions suppressions are served for the inventoried methods", { 
   assert.equal(putBody.error.code, "unauthenticated");
 });
 
+// server/next-actions-routes.mjs /api/rooms/{roomId}/next-actions-dismissals: GET only. Missing credential is 401.
+const ROOM_NEXT_ACTIONS_DISMISSALS_INVENTORY = {
+  "/api/rooms/{roomId}/next-actions-dismissals": ["GET"],
+};
+
+test("openapi inventory lists served room next-actions dismissals methods", () => {
+  const doc = buildOpenApiJson({ origin: "https://room.example" });
+  for (const [path, methods] of Object.entries(ROOM_NEXT_ACTIONS_DISMISSALS_INVENTORY)) {
+    const entry = DISCOVERABILITY_ROUTES.find(item => item.path === path);
+    assert.ok(entry, `route table lists ${path}`);
+    assert.deepEqual([...entry.methods].sort(), [...methods].sort(), path);
+    assert.equal(doc.paths[path]?.get?.operationId, "listRoomNextActionDismissals");
+    for (const method of methods) {
+      assert.equal(typeof doc.paths[path]?.[method.toLowerCase()]?.operationId, "string", `${method} ${path}`);
+    }
+  }
+});
+
+test("room next-actions dismissals are served for the inventoried method", { timeout: 30000 }, async t => {
+  const { origin } = await serve(t);
+  const res = await fetch(`${origin}/api/rooms/no-such-room/next-actions-dismissals`, { headers: { Origin: origin } });
+  const body = await res.json();
+  assert.equal(res.status, 401);
+  assert.equal(body.error.code, "unauthenticated");
+});
+
 test("openapi inventory lists served work-claims methods", () => {
   const doc = buildOpenApiJson({ origin: "https://room.example" });
   for (const [path, methods] of Object.entries(WORK_CLAIM_INVENTORY)) {

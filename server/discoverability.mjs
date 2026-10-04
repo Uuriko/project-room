@@ -206,6 +206,8 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   // next-actions-routes.mjs: GET reads suppressions; PUT replaces them. Other methods are not this handler.
   route("/api/rooms/{roomId}/next-actions-suppressions", ["GET", "PUT"], "room-member", "Read or replace next-action suppressions for the calling room member.", "listRoomNextActionSuppressions",
     { operationIds: { GET: "listRoomNextActionSuppressions", PUT: "replaceRoomNextActionSuppressions" } }),
+  // next-actions-routes.mjs: GET reads dismissals, including lapsed rows. Other methods are not this handler.
+  route("/api/rooms/{roomId}/next-actions-dismissals", ["GET"], "room-member", "Read next-action dismissals for the calling room member, including lapsed rows.", "listRoomNextActionDismissals"),
   // Wake control.
   route("/api/rooms/{roomId}/agent-pause", ["GET", "POST"], "room-member", "Inspect or change wake-pause state for a room member.", "agentPause",
     { operationIds: { GET: "inspectAgentPause", POST: "setAgentPause" } }),
