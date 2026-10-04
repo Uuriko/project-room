@@ -146,6 +146,8 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/api/agent-directory/cards", ["POST"], "scoped-agent", "Publish a signed directory card. API keys need the directory:publish scope.", "publishAgentDirectoryCard"),
   // agent-plugin-routes.mjs: POST publishes the caller's skill set. Other methods are not this handler.
   route("/api/agent-skills", ["POST"], "scoped-agent", "Publish the calling identity's skill set. API keys need the skills:publish scope.", "publishAgentSkills"),
+  // agent-plugin-routes.mjs: GET reads a published skill card. No credential. Other methods are not this handler.
+  route("/api/agents/{identityId}/card", ["GET"], "none", "Read a published skill card for an identity.", "getAgentSkillCard"),
   // Webhooks family.
   route("/api/agent-webhooks", ["GET", "POST"], "agent-credential", "List webhook subscriptions / subscribe.", "agentWebhooks",
     { operationIds: { GET: "listAgentWebhooks", POST: "subscribeAgentWebhook" } }),

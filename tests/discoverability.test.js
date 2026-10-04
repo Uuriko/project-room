@@ -1451,6 +1451,31 @@ test("agent skills are served for the inventoried method", { timeout: 30000 }, a
   assert.equal(body.error.code, "unauthenticated");
 });
 
+// server/agent-plugin-routes.mjs /api/agents/{identityId}/card: GET only. Unknown identity is 404.
+const AGENT_SKILL_CARD_INVENTORY = {
+  "/api/agents/{identityId}/card": ["GET"],
+};
+
+test("openapi inventory lists served agent skill card methods", () => {
+  const doc = buildOpenApiJson({ origin: "https://room.example" });
+  for (const [path, methods] of Object.entries(AGENT_SKILL_CARD_INVENTORY)) {
+    const entry = DISCOVERABILITY_ROUTES.find(item => item.path === path);
+    assert.ok(entry, `route table lists ${path}`);
+    assert.deepEqual([...entry.methods].sort(), [...methods].sort(), path);
+    for (const method of methods) {
+      assert.equal(typeof doc.paths[path]?.[method.toLowerCase()]?.operationId, "string", `${method} ${path}`);
+    }
+  }
+});
+
+test("agent skill card is served for the inventoried method", { timeout: 30000 }, async t => {
+  const { origin } = await serve(t);
+  const res = await fetch(`${origin}/api/agents/ai_probe/card`, { headers: { Origin: origin } });
+  const body = await res.json();
+  assert.equal(res.status, 404);
+  assert.equal(body.error.code, "unknown_skill_card");
+});
+
 test("openapi inventory lists served work-claims methods", () => {
   const doc = buildOpenApiJson({ origin: "https://room.example" });
   for (const [path, methods] of Object.entries(WORK_CLAIM_INVENTORY)) {
