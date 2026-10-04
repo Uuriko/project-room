@@ -20,18 +20,51 @@ const accountSession = (id, sessionRevision, suffix = sessionRevision) => ({
 
 test("account confirmation preserves ownership on a matching read and invalidates a changed account", async () => {
   const original = accountSession("personal", 2); let remote = original;
-  const client = new AccountClient({ fetcher: async () => response(remote) }); client.session = original;
+  const client = new AccountClient({ fetcher: async (path, options) => {
+    assert.equal(path, "/api/account-session");
+    assert.equal(options.headers["X-Session-Binding"], original.sessionBinding, "confirmation names the session it is checking");
+    return response(remote);
+  } }); client.session = original;
   assert.equal(await client.confirm(), true); assert.equal(client.session, original); assert.equal(client.generation, 0);
   remote = accountSession("replacement", 3);
   assert.equal(await client.confirm(), false); assert.equal(client.session, null); assert.equal(client.generation, 1);
 });
-test("late account confirmation cannot invalidate a replacement; network failure is not logout", async () => {
+test("late account confirmation cannot invalidate a replacement", async () => {
   const pending = deferred(), client = new AccountClient({ fetcher: () => pending.promise });
   client.session = accountSession("old", 1); const checking = client.confirm();
   const replacement = accountSession("new", 2); client.generation++; client.session = replacement;
   pending.resolve(response(accountSession(null, 3))); assert.equal(await checking, null); assert.equal(client.session, replacement);
-  client.fetcher = async () => { throw new Error("Offline"); };
-  await assert.rejects(client.confirm(), /Offline/); assert.equal(client.session, replacement);
+});
+test("account confirmation retires denied ownership, preserves uncertain failures, and ignores obsolete failures", async () => {
+  for (const failure of [
+    { status: 401, code: "unauthenticated", ended: true },
+    { status: 403, code: "access_denied", ended: true },
+    { status: 409, code: "session_binding_changed", ended: true },
+    { status: 500, code: "internal_error", ended: false },
+    { status: null, code: "offline", ended: false }
+  ]) {
+    const original = accountSession("personal", 2);
+    const fail = () => {
+      if (failure.status === null) throw new Error("Offline");
+      return response({ error: { code: failure.code, message: "Confirmation failed" } }, failure.status);
+    };
+    const client = new AccountClient({ fetcher: async () => fail() }); client.session = original;
+    if (failure.ended) {
+      assert.equal(await client.confirm(), false, failure.code);
+      assert.equal(client.session, null); assert.equal(client.generation, 1);
+    } else {
+      await assert.rejects(client.confirm());
+      assert.equal(client.session, original); assert.equal(client.generation, 0);
+    }
+    const pending = deferred();
+    client.session = original; client.fetcher = () => pending.promise;
+    const checking = client.confirm(), replacement = accountSession("replacement", 3);
+    client.generation++; client.session = replacement;
+    if (failure.status === null) pending.resolve(Promise.reject(new Error("Offline")));
+    else pending.resolve(fail());
+    assert.equal(await checking, null, `obsolete ${failure.code} cannot retire the replacement`);
+    assert.equal(client.session, replacement);
+  }
 });
 test("room discovery pins the account and rejects malformed or nonprogressing pages", async () => {
   const original = accountSession("personal", 1), calls = [];
