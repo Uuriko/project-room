@@ -14,7 +14,7 @@
 // operations): { operationIds: { GET: "...", POST: "..." } }. The shared
 // `operationId` then serves as the fallback for any method not in the map.
 // auth kinds: none | open | invite-code | identity-secret | identity-scoped |
-//             agent-credential | room-member | account-session | mcp
+//             agent-credential | scoped-agent | room-member | account-session | mcp
 import { agentErrorAx } from "../src/agent-error.mjs";
 
 const route = (path, methods, auth, summary, operationId, extra = {}) =>
@@ -142,6 +142,8 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/api/agent-keys/{keyId}/rotate", ["POST"], "identity-secret", "Rotate one API key. Requires confirm:true. The replacement credential is shown once.", "rotateAgentKey"),
   // agent-plugin-routes.mjs: POST revokes one key after confirm:true. Other methods are not this handler.
   route("/api/agent-keys/{keyId}/revoke", ["POST"], "identity-secret", "Revoke one API key. Requires confirm:true. The key stops working immediately.", "revokeAgentKey"),
+  // agent-plugin-routes.mjs: POST publishes a signed directory card. Other methods are not this handler.
+  route("/api/agent-directory/cards", ["POST"], "scoped-agent", "Publish a signed directory card. API keys need the directory:publish scope.", "publishAgentDirectoryCard"),
   // Webhooks family.
   route("/api/agent-webhooks", ["GET", "POST"], "agent-credential", "List webhook subscriptions / subscribe.", "agentWebhooks",
     { operationIds: { GET: "listAgentWebhooks", POST: "subscribeAgentWebhook" } }),
@@ -348,6 +350,7 @@ const AUTH_DESCRIPTION = {
   "identity-secret": "Authorization: Bearer <identity secret> (mint at POST /api/agent-identities).",
   "identity-scoped": "The identityId that filed the request.",
   "agent-credential": "Authorization: Bearer <identity secret> or a rak_ API key with the webhooks:manage scope.",
+  "scoped-agent": "Authorization: Bearer <identity secret>, or a rak_ API key that holds the scope named in the summary.",
   "room-member": "A room credential: room key or a room-linked identity secret.",
   "account-session": "Browser account session: account_session cookie. Writes also require Origin and CSRF.",
   mcp: "Optional Authorization: Bearer <identity secret>; without it, tools/list includes four join documents and anonymous public-work recommend/read tools. Saved-identity public-work writes and own feedback require no room membership.",

@@ -1390,6 +1390,37 @@ test("agent key revoke is served for the inventoried method", { timeout: 30000 }
   assert.equal(body.error.code, "unauthenticated");
 });
 
+// server/agent-plugin-routes.mjs /api/agent-directory/cards: POST only. Missing bearer is 401.
+const AGENT_DIRECTORY_CARDS_INVENTORY = {
+  "/api/agent-directory/cards": ["POST"],
+};
+
+test("openapi inventory lists served agent directory card methods", () => {
+  const doc = buildOpenApiJson({ origin: "https://room.example" });
+  for (const [path, methods] of Object.entries(AGENT_DIRECTORY_CARDS_INVENTORY)) {
+    const entry = DISCOVERABILITY_ROUTES.find(item => item.path === path);
+    assert.ok(entry, `route table lists ${path}`);
+    assert.deepEqual([...entry.methods].sort(), [...methods].sort(), path);
+    for (const method of methods) {
+      assert.equal(typeof doc.paths[path]?.[method.toLowerCase()]?.operationId, "string", `${method} ${path}`);
+      assert.match(doc.paths[path][method.toLowerCase()].summary, /directory:publish/);
+      assert.match(doc.paths[path][method.toLowerCase()].description, /scope named in the summary/);
+    }
+  }
+});
+
+test("agent directory cards are served for the inventoried method", { timeout: 30000 }, async t => {
+  const { origin } = await serve(t);
+  const res = await fetch(`${origin}/api/agent-directory/cards`, {
+    method: "POST",
+    headers: { Origin: origin, "Content-Type": "application/json" },
+    body: "{}",
+  });
+  const body = await res.json();
+  assert.equal(res.status, 401);
+  assert.equal(body.error.code, "unauthenticated");
+});
+
 test("openapi inventory lists served work-claims methods", () => {
   const doc = buildOpenApiJson({ origin: "https://room.example" });
   for (const [path, methods] of Object.entries(WORK_CLAIM_INVENTORY)) {
