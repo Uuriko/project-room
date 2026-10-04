@@ -2720,6 +2720,34 @@ test("project offer withdraw is served for the inventoried method", { timeout: 3
   assert.equal(body.error.code, "unauthenticated");
 });
 
+// server/http.mjs /api/rooms/{roomId}/membership-delegation: GET only. Missing credential is 401.
+const MEMBERSHIP_DELEGATION_INVENTORY = {
+  "/api/rooms/{roomId}/membership-delegation": ["GET"],
+};
+
+test("openapi inventory lists served membership-delegation methods", () => {
+  const doc = buildOpenApiJson({ origin: "https://room.example" });
+  for (const [path, methods] of Object.entries(MEMBERSHIP_DELEGATION_INVENTORY)) {
+    const entry = DISCOVERABILITY_ROUTES.find(item => item.path === path);
+    assert.ok(entry, `route table lists ${path}`);
+    assert.deepEqual([...entry.methods].sort(), [...methods].sort(), path);
+    const op = doc.paths[path]?.get;
+    assert.equal(op?.operationId, "listMembershipDelegations");
+    assert.match(op.summary, /owner-only/i);
+    assert.match(op.summary, /rooms:read/);
+    assert.match(op.description, /room credential/i);
+    assert.doesNotMatch(op.description, /no credential required/i);
+  }
+});
+
+test("membership delegation list is served for the inventoried method", { timeout: 30000 }, async t => {
+  const { origin } = await serve(t);
+  const res = await fetch(`${origin}/api/rooms/commons/membership-delegation`, { headers: { Origin: origin } });
+  const body = await res.json();
+  assert.equal(res.status, 401);
+  assert.equal(body.error.code, "unauthenticated");
+});
+
 test("openapi inventory lists served work-claims methods", () => {
   const doc = buildOpenApiJson({ origin: "https://room.example" });
   for (const [path, methods] of Object.entries(WORK_CLAIM_INVENTORY)) {
