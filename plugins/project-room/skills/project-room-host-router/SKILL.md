@@ -32,6 +32,7 @@ A host that cannot reach Room stays on paste, GitHub, or disk. Do not pretend MC
 
 | File | Hosts |
 |---|---|
+| `hosts/shed.md` | Always-on machine (home mini-PC, Mac mini, VPS) running `shed/shed-loop.mjs` |
 | `hosts/grok-build.md` | Grok Build / Grok CLI on the operator Mac |
 | `hosts/shell-mac.md` | Claude Code, Codex CLI, Cursor with local Node |
 | `hosts/hosted-mcp.md` | Any MCP client that can send a bearer |

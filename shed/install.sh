@@ -66,7 +66,11 @@ STATE_DIR="$SHED_DIR/state"
 # 2. Repo
 if [ -d "$REPO_DIR/.git" ]; then
   say "repo already present at $REPO_DIR"
-  run "git -C '$REPO_DIR' pull --ff-only -q || true"
+  if [ "$DRY_RUN" = 1 ]; then
+    say "[dry-run] git -C '$REPO_DIR' pull --ff-only"
+  elif ! git -C "$REPO_DIR" pull --ff-only -q; then
+    say "warning: git pull --ff-only failed in $REPO_DIR (diverged or offline). Continuing with the existing checkout; update it by hand if you need the latest shed."
+  fi
 else
   if ! have git; then say "git not found; install git, then re-run."; exit 1; fi
   say "cloning $REPO_URL -> $REPO_DIR"
@@ -128,10 +132,15 @@ if [ "$NEED_TS" = 1 ]; then
 fi
 
 # 5. Config + service
-mkdir -p "$STATE_DIR"
-chmod 700 "$SHED_DIR" "$STATE_DIR" 2>/dev/null || true
+if [ "$DRY_RUN" = 1 ]; then
+  say "[dry-run] mkdir -p $STATE_DIR && chmod 700"
+else
+  mkdir -p "$STATE_DIR"
+  chmod 700 "$SHED_DIR" "$STATE_DIR" 2>/dev/null || true
+fi
 POLL_SECS="${SHED_POLL_SECS:-60}"
 AGENT_CMD="${SHED_AGENT_CMD:-}"
+EXEC_TIMEOUT_SECS="${SHED_EXEC_TIMEOUT_SECS:-600}"
 if [ ! -f "$ENV_FILE" ] || [ "$DRY_RUN" = 1 ]; then
   say "writing $ENV_FILE"
   if [ "$DRY_RUN" = 1 ]; then say "[dry-run] write shed.env"; else
@@ -143,12 +152,39 @@ SHED_POLL_SECS=$POLL_SECS
 # Set SHED_AGENT_CMD to let the shed hand work to your own model CLI, e.g.:
 # SHED_AGENT_CMD=claude -p --output-format json
 SHED_AGENT_CMD=$AGENT_CMD
+# Max seconds per agent handoff before the shed kills it.
+SHED_EXEC_TIMEOUT_SECS=$EXEC_TIMEOUT_SECS
 EOF
     chmod 600 "$ENV_FILE"
   fi
 else
   say "keeping existing $ENV_FILE"
+  # Re-read the tunables from the kept file so a re-run picks up hand edits.
+  # launchd (macOS) cannot read shed.env itself, so the plist re-render below
+  # needs the file's values, not just this shell's environment.
+  # Values are stored unquoted (see the generated file); strip one layer of
+  # matching quotes defensively in case a hand edit added them.
+  POLL_SECS="$(sed -n 's/^SHED_POLL_SECS=//p' "$ENV_FILE" | tail -1)"
+  AGENT_CMD="$(sed -n 's/^SHED_AGENT_CMD=//p' "$ENV_FILE" | tail -1)"
+  EXEC_TIMEOUT_SECS="$(sed -n 's/^SHED_EXEC_TIMEOUT_SECS=//p' "$ENV_FILE" | tail -1)"
+  strip_quotes() {
+    local v="$1"
+    case "$v" in
+      \"*\") v="${v#\"}"; v="${v%\"}" ;;
+      \'*\') v="${v#\'}"; v="${v%\'}" ;;
+    esac
+    printf '%s' "$v"
+  }
+  POLL_SECS="$(strip_quotes "$POLL_SECS")"
+  AGENT_CMD="$(strip_quotes "$AGENT_CMD")"
+  EXEC_TIMEOUT_SECS="$(strip_quotes "$EXEC_TIMEOUT_SECS")"
+  POLL_SECS="${POLL_SECS:-60}"
+  EXEC_TIMEOUT_SECS="${EXEC_TIMEOUT_SECS:-600}"
 fi
+
+# Template values may contain sed-special chars (&, |, \): escape them before
+# substituting into the systemd unit or the launchd plist.
+sed_escape() { printf '%s' "$1" | sed 's/[&|\\]/\\&/g'; }
 
 if [ "$INIT" = "systemd" ]; then
   UNIT_DIR="$HOME/.config/systemd/user"
@@ -156,7 +192,7 @@ if [ "$INIT" = "systemd" ]; then
   run "mkdir -p '$UNIT_DIR'"
   say "installing user systemd unit $UNIT_FILE"
   if [ "$DRY_RUN" = 1 ]; then say "[dry-run] render unit from template"; else
-    sed -e "s|@ENV_FILE@|$ENV_FILE|" -e "s|@REPO_DIR@|$REPO_DIR|" \
+    sed -e "s|@ENV_FILE@|$(sed_escape "$ENV_FILE")|" -e "s|@REPO_DIR@|$(sed_escape "$REPO_DIR")|" \
       "$REPO_DIR/shed/project-room-shed.service" > "$UNIT_FILE"
   fi
   run "systemctl --user daemon-reload"
@@ -170,8 +206,15 @@ else
   run "mkdir -p '$HOME/Library/LaunchAgents'"
   say "installing launchd agent $PLIST"
   if [ "$DRY_RUN" = 1 ]; then say "[dry-run] render plist from template"; else
-    sed -e "s|@NODE@|$(command -v node)|" -e "s|@LOOP@|$REPO_DIR/shed/shed-loop.mjs|" \
-        -e "s|@CONN_DIR@|$CONN_DIR|" -e "s|@STATE_DIR@|$STATE_DIR|" -e "s|@POLL@|$POLL_SECS|" \
+    # Plist values are XML text: escape & < > so odd paths/commands cannot
+    # break the file. xml_escape runs before sed_escape (the & in &amp; must
+    # not be re-expanded by sed).
+    xml_escape() { printf '%s' "$1" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g'; }
+    plist_val() { sed_escape "$(xml_escape "$1")"; }
+    sed -e "s|@NODE@|$(plist_val "$(command -v node)")|" -e "s|@LOOP@|$(plist_val "$REPO_DIR/shed/shed-loop.mjs")|" \
+        -e "s|@CONN_DIR@|$(plist_val "$CONN_DIR")|" -e "s|@STATE_DIR@|$(plist_val "$STATE_DIR")|" \
+        -e "s|@POLL@|$(plist_val "$POLL_SECS")|" \
+        -e "s|@AGENT_CMD@|$(plist_val "$AGENT_CMD")|" -e "s|@EXEC_TIMEOUT@|$(plist_val "$EXEC_TIMEOUT_SECS")|" \
         "$REPO_DIR/shed/com.project-room.shed.plist" > "$PLIST"
   fi
   run "launchctl unload '$PLIST' 2>/dev/null || true"

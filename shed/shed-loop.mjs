@@ -86,9 +86,22 @@ process.on("SIGTERM", () => { stopped = true; });
 
 async function tick(client, config) {
   const { origin, roomId } = config;
-  const result = await currentAttention({ client, origin, roomId, directory: config.directory, signal: AbortSignal.timeout(30000) });
+  // The watch journal needs its own private directory. The connection config
+  // carries no directory field (it is just the five credential fields), so
+  // the loop uses its own 0700 state dir — passing config.directory here used
+  // to be undefined, which made every tick fail closed with
+  // "private_state_required" and journaled nothing.
+  const result = await currentAttention({ client, origin, roomId, directory: stateDir, signal: AbortSignal.timeout(30000) });
   const items = Array.isArray(result.items) ? result.items : [];
   const handed = readJson(handedPath, {});
+  // Bound the dedup map: drop entries older than 30 days so handed.json cannot
+  // grow without limit on an always-on box. Attention notices are transient;
+  // a 30-day-old notice will not reappear to be double-handed.
+  const cutoff = Date.now() - 30 * 24 * 3600 * 1000;
+  for (const key of Object.keys(handed)) {
+    const ts = Date.parse(handed[key] && handed[key].ts);
+    if (!Number.isFinite(ts) || ts < cutoff) delete handed[key];
+  }
   let handedCount = 0;
   for (const item of items) {
     const summary = summarize(item);
@@ -108,9 +121,10 @@ async function tick(client, config) {
 }
 
 async function main() {
-  let config;
+  let config, client;
   try {
     config = agentConnectionFromEnvironment();
+    client = new RoomAgentClient(config);
   } catch (error) {
     const code = error instanceof ConnectionError ? error.code : "config_error";
     log({ event: "fatal", code });
@@ -118,7 +132,6 @@ async function main() {
     process.exitCode = 1;
     return;
   }
-  const client = new RoomAgentClient(config);
   try {
     await client.checkConnection();
   } catch (error) {

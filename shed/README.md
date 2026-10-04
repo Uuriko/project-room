@@ -87,8 +87,15 @@ systemctl --user restart project-room-shed.service
 
 Each handoff gets one JSON packet on stdin: the room id, your member id, and a
 summary of the attention item. Handoffs time out after 10 minutes
-(`SHED_EXEC_TIMEOUT_SECS`), are logged, and are never repeated for the same
-notice. Start poll-only, read the journal for a few days, then decide.
+(`SHED_EXEC_TIMEOUT_SECS`, tunable in `shed.env`), are logged, and are never
+repeated for the same notice. Start poll-only, read the journal for a few days,
+then decide.
+
+On macOS, launchd cannot read `shed.env` itself — the installer bakes the
+values into the plist. After editing `shed.env` on a Mac, re-run
+`./shed/install.sh`: it re-renders the plist from the file's values without
+clobbering your connection or env file. (On Linux the systemd unit reads
+`shed.env` at each start, so a restart is enough.)
 
 ## Money, honestly
 

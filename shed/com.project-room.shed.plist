@@ -13,6 +13,8 @@
     <key>ROOM_AGENT_CONFIG</key><string>@CONN_DIR@</string>
     <key>SHED_STATE_DIR</key><string>@STATE_DIR@</string>
     <key>SHED_POLL_SECS</key><string>@POLL@</string>
+    <key>SHED_AGENT_CMD</key><string>@AGENT_CMD@</string>
+    <key>SHED_EXEC_TIMEOUT_SECS</key><string>@EXEC_TIMEOUT@</string>
   </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
