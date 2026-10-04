@@ -1,6 +1,7 @@
 // Design-token ratchet lint (D-fo-6 step 1).
-// Fails CI when a NEW raw hex color literal or a NEW raw `font-size:`
-// declaration appears in the CSS tree. Everything that exists today is
+// Fails CI when a NEW raw hex color literal, a NEW raw `font-size:`
+// declaration, or a NEW raw size smuggled through the `font:` shorthand
+// appears in the CSS tree. Everything that exists today is
 // grandfathered in scripts/design-tokens-baseline.json; that file only
 // shrinks over time — never add NEW entries to it.
 //
@@ -17,16 +18,31 @@ const root = join(fileURLToPath(new URL(".", import.meta.url)), "..");
 const BASELINE_PATH = join(root, "scripts", "design-tokens-baseline.json");
 
 // A raw hex color literal in a declaration-value position: preceded by a
-// colon, paren, comma, whitespace, or line start. This deliberately does
-// NOT match ID selectors (e.g. `#action-dialog`) which have no value
-// context — and the tree contains none that are hex-shaped anyway.
-const HEX_RE = /(^|[:\s,(])#[0-9a-fA-F]{3,8}\b/g;
+// colon, paren, comma, whitespace, `=` (data-URI `fill=#ff0000`), or line
+// start. This deliberately does NOT match ID selectors (e.g. `#action-dialog`)
+// which have no value context — and the tree contains none that are hex-shaped
+// anyway. SEC2: `=` added 2026-10-04 after a second-pass showed
+// `fill=#ff0000` inside url("data:...") slipped the value-context class.
+const HEX_RE = /(^|[:\s,(=])#[0-9a-fA-F]{3,8}\b/g;
 // A raw `font-size:` declaration: the value is a literal (16px, .875rem)
 // rather than a design token. `font-size: var(--text-sm)` is the sanctioned
 // token path and is NOT a violation. Custom property definitions
 // (`--font-size:`) are the token mechanism itself and are excluded, as is
-// `font-size-adjust:`.
-const FONT_SIZE_RE = /(^|[\s{;])font-size\s*:\s*([^;}{]+)/;
+// `font-size-adjust:`. SEC2: the `i` flag added 2026-10-04 — CSS property
+// names are case-insensitive, so `FONT-SIZE: 16px` evaded the ratchet.
+const FONT_SIZE_RE = /(^|[\s{;])font-size\s*:\s*([^;}{]+)/i;
+// A raw size smuggled through the `font:` shorthand
+// (e.g. `font: 16px/1.5 sans-serif` sets a font-size with no `font-size:`
+// declaration). SEC2: added 2026-10-04 after a second-pass showed the
+// shorthand bypassed the ratchet entirely.
+const FONT_SHORTHAND_RE = /(^|[\s{;])font\s*:\s*([^;}{]+)/i;
+// Any dimension token (length or percentage) — the signature of a raw size.
+const DIMENSION_RE = /\d*\.?\d+(px|rem|em|ex|ch|lh|vw|vh|vmin|vmax|vb|vi|svw|svh|lvw|lvh|dvw|dvh|cqw|cqh|cqi|cqb|cqmin|cqmax|pt|pc|in|cm|mm|q|%)/i;
+// Absolute-size keywords also set a raw size (the `font-size:` path already
+// flags any non-var() value, keywords included). Hyphen-aware boundaries so
+// `small-caps` (a font-variant, not a size) does not match.
+const ABSOLUTE_SIZE_RE =
+  /(?<![\w-])(xx-small|x-small|small|medium|large|x-large|xx-large|xxx-large|smaller|larger)(?![\w-])/i;
 
 export function hexHits(line) {
   // Custom property definitions (`--brand: #123456`) are the sanctioned
@@ -54,6 +70,20 @@ export function rawFontSizeValue(line) {
   return value;
 }
 
+// A raw size set through the `font:` shorthand. `font: inherit` and the
+// system-font keywords (caption, icon, menu, ...) carry no size and are not
+// violations; `var(--...)` is the token path.
+export function rawFontShorthandValue(line) {
+  const m = FONT_SHORTHAND_RE.exec(line);
+  if (!m) return null;
+  const value = m[2].trim();
+  if (/^var\(/i.test(value)) return null;
+  if (/^(inherit|initial|unset|revert|revert-layer)$/i.test(value)) return null;
+  if (/^(caption|icon|menu|message-box|small-caption|status-bar)$/i.test(value)) return null;
+  const sized = DIMENSION_RE.exec(value) ?? ABSOLUTE_SIZE_RE.exec(value);
+  return sized ? sized[0] : null;
+}
+
 // One violation per offending construct, keyed by file + trimmed line so
 // the baseline survives line-number shifts. Returns Map<key, count>.
 export function scanTree(cssRoot = join(root, "src")) {
@@ -72,7 +102,8 @@ export function scanTree(cssRoot = join(root, "src")) {
       for (const rawLine of lines) {
         const line = rawLine.trim();
         if (!line || line.startsWith("/*") || line.startsWith("//")) continue;
-        const n = hexHits(rawLine).length + (rawFontSizeValue(rawLine) !== null ? 1 : 0);
+        const n = hexHits(rawLine).length + (rawFontSizeValue(rawLine) !== null ? 1 : 0)
+          + (rawFontShorthandValue(rawLine) !== null ? 1 : 0);
         if (n > 0) {
           const key = `${rel} ::: ${line}`;
           counts.set(key, (counts.get(key) ?? 0) + n);
