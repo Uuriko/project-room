@@ -132,7 +132,10 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/api/access-requests", ["POST"], "open", "Request access to a room (owner decides).", "requestAccess"),
   route("/api/access-requests/{requestId}", ["GET"], "identity-scoped", "Poll your own access request status.", "getAccessRequest"),
   route("/api/share-links/join-agent", ["POST"], "identity-secret", "Guest-link redemption: join with a guest pass.", "joinAgentViaShareLink"),
-  route("/api/needs-me", ["GET"], "identity-secret", "What needs you, across every room.", "getNeedsMe"),
+  // http.mjs: GET and HEAD both collect cross-room attention. HEAD strips the body.
+  // Other methods reject 405. Allow lists GET only; the serving if is the inventory.
+  route("/api/needs-me", ["GET", "HEAD"], "identity-secret", "What needs you, across every room.", "getNeedsMe",
+    { operationIds: { GET: "getNeedsMe", HEAD: "headNeedsMe" } }),
   // Public contribution work: owner consent, outside claims and immutable evidence.
   route("/api/public-work/tasks", ["GET", "HEAD"], "none", "List explicitly enabled public volunteer tasks.", "listPublicWorkTasks",
     { operationIds: { HEAD: "headPublicWorkTasks" }, publicWork: "list" }),

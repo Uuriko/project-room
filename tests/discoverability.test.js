@@ -2386,6 +2386,37 @@ test("agent invite preview is served for the inventoried method", { timeout: 300
   assert.equal(body.error.code, "invalid_invite");
 });
 
+// server/http.mjs /api/needs-me: GET and HEAD. Identity secret required. Unauthenticated HEAD is 401 with an empty body.
+const NEEDS_ME_INVENTORY = {
+  "/api/needs-me": ["GET", "HEAD"],
+};
+
+test("openapi inventory lists served needs-me methods", () => {
+  const doc = buildOpenApiJson({ origin: "https://room.example" });
+  for (const [path, methods] of Object.entries(NEEDS_ME_INVENTORY)) {
+    const entry = DISCOVERABILITY_ROUTES.find(item => item.path === path);
+    assert.ok(entry, `route table lists ${path}`);
+    assert.deepEqual([...entry.methods].sort(), [...methods].sort(), path);
+    assert.equal(doc.paths[path]?.get?.operationId, "getNeedsMe");
+    assert.equal(doc.paths[path]?.head?.operationId, "headNeedsMe");
+    for (const method of methods) {
+      const op = doc.paths[path][method.toLowerCase()];
+      assert.equal(typeof op?.operationId, "string", `${method} ${path}`);
+      assert.match(op.summary, /needs you/i);
+      assert.match(op.description, /identity secret/i);
+      assert.doesNotMatch(op.description, /no credential required/i);
+    }
+  }
+});
+
+test("needs-me HEAD is served for the inventoried method", { timeout: 30000 }, async t => {
+  const { origin } = await serve(t);
+  const res = await fetch(`${origin}/api/needs-me`, { method: "HEAD", headers: { Origin: origin } });
+  assert.equal(res.status, 401);
+  const text = await res.text();
+  assert.equal(text, "");
+});
+
 test("openapi inventory lists served work-claims methods", () => {
   const doc = buildOpenApiJson({ origin: "https://room.example" });
   for (const [path, methods] of Object.entries(WORK_CLAIM_INVENTORY)) {
