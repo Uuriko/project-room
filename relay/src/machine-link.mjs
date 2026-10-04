@@ -11,8 +11,9 @@ import { verifyLinkSignature } from "./hmac.mjs";
 import { errorResponse, json, readJson } from "./http.mjs";
 import { initializeResult, parseRpc, requireToolName, rpcError, rpcResult, toolEnvelope } from "./mcp.mjs";
 import { redact } from "./redact.mjs";
+import { assertFreshControlSignature } from "./replay-guard.mjs";
 import {
-  CALL_TIMEOUT_MS, HEARTBEAT_MS, MAX_CALL_BYTES, MAX_RESULT_BYTES, MAX_SMALL_BYTES, PROTOCOL_VERSION,
+  CALL_TIMEOUT_MS, HEARTBEAT_MS, HMAC_SKEW_SEC, MAX_CALL_BYTES, MAX_RESULT_BYTES, MAX_SMALL_BYTES, PROTOCOL_VERSION,
   isResourceId, isSlot, listedTools, toolAllowed,
 } from "./protocol.mjs";
 
@@ -43,6 +44,10 @@ function emptyState(machineId) {
     revoked: [],
     identityCache: [],
     decisionCache: [],
+    // Signatures of honored control requests (halt/resume/pause/bye),
+    // pruned past the HMAC skew window + margin. A captured signed
+    // request cannot be replayed inside the window.
+    replayedControls: [],
   };
 }
 
@@ -397,6 +402,16 @@ export class MachineLink extends DurableObject {
     return pending;
   }
 
+  // A captured signed control request verifies again until its timestamp
+  // ages out of the HMAC skew window. Refuse a signature this machine
+  // already honored. Runs inside exclusive(), so check-and-mark is atomic.
+  rejectReplayedControl(request, nowSec) {
+    const signature = (request.headers.get("x-relay-signature") ?? "").toLowerCase();
+    this.state.replayedControls = assertFreshControlSignature(
+      this.state.replayedControls, signature, nowSec, HMAC_SKEW_SEC + 60);
+    this.dirty = true;
+  }
+
   async halt(request) {
     const { value, raw } = await readJson(request, MAX_SMALL_BYTES, "Request body");
     let cancels = [];
@@ -405,6 +420,7 @@ export class MachineLink extends DurableObject {
     await this.exclusive(async () => {
       if (!this.state) throw relayError(404, "machine_unknown", "No such machine");
       await verifyLinkSignature(this.env.RELAY_LINK_SECRET, request, raw, Math.floor(Date.now() / 1000));
+      this.rejectReplayedControl(request, Math.floor(Date.now() / 1000));
       const nextEpoch = nextHaltEpoch(value, this.state);
       this.applyControl(value);
       this.state.haltEpoch = nextEpoch;
@@ -433,6 +449,7 @@ export class MachineLink extends DurableObject {
     await this.exclusive(async () => {
       if (!this.state) throw relayError(404, "machine_unknown", "No such machine");
       await verifyLinkSignature(this.env.RELAY_LINK_SECRET, request, raw, Math.floor(Date.now() / 1000));
+      this.rejectReplayedControl(request, Math.floor(Date.now() / 1000));
       this.applyControl(value);
       this.state.halted = false;
       this.state.pausedUntil = null;
@@ -451,6 +468,7 @@ export class MachineLink extends DurableObject {
     await this.exclusive(async () => {
       if (!this.state) throw relayError(404, "machine_unknown", "No such machine");
       await verifyLinkSignature(this.env.RELAY_LINK_SECRET, request, raw, Math.floor(Date.now() / 1000));
+      this.rejectReplayedControl(request, Math.floor(Date.now() / 1000));
       if (!Number.isSafeInteger(value.minutes) || value.minutes < 0 || value.minutes > 10_080) {
         throw relayError(422, "invalid_pause", "minutes must be an integer from 0 to 10080");
       }
@@ -471,6 +489,7 @@ export class MachineLink extends DurableObject {
     await this.exclusive(async () => {
       if (!this.state) throw relayError(404, "machine_unknown", "No such machine");
       await verifyLinkSignature(this.env.RELAY_LINK_SECRET, request, raw, Math.floor(Date.now() / 1000));
+      this.rejectReplayedControl(request, Math.floor(Date.now() / 1000));
       this.dirty = true;
       cancels = [...this.pending.values()];
       this.pending.clear();
