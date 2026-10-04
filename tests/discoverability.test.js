@@ -1555,6 +1555,31 @@ test("agent directory withdraw is served for the inventoried method", { timeout:
   assert.equal(body.error.code, "unauthenticated");
 });
 
+// server/agent-plugin-routes.mjs /api/agents/directory/{agentId}: GET only. Unknown agent is 404.
+const PUBLIC_AGENT_CARD_INVENTORY = {
+  "/api/agents/directory/{agentId}": ["GET"],
+};
+
+test("openapi inventory lists served public agent card methods", () => {
+  const doc = buildOpenApiJson({ origin: "https://room.example" });
+  for (const [path, methods] of Object.entries(PUBLIC_AGENT_CARD_INVENTORY)) {
+    const entry = DISCOVERABILITY_ROUTES.find(item => item.path === path);
+    assert.ok(entry, `route table lists ${path}`);
+    assert.deepEqual([...entry.methods].sort(), [...methods].sort(), path);
+    for (const method of methods) {
+      assert.equal(typeof doc.paths[path]?.[method.toLowerCase()]?.operationId, "string", `${method} ${path}`);
+    }
+  }
+});
+
+test("public agent card is served for the inventoried method", { timeout: 30000 }, async t => {
+  const { origin } = await serve(t);
+  const res = await fetch(`${origin}/api/agents/directory/probe-agent`, { headers: { Origin: origin } });
+  const body = await res.json();
+  assert.equal(res.status, 404);
+  assert.equal(body.error.code, "unknown_card");
+});
+
 test("openapi inventory lists served work-claims methods", () => {
   const doc = buildOpenApiJson({ origin: "https://room.example" });
   for (const [path, methods] of Object.entries(WORK_CLAIM_INVENTORY)) {
