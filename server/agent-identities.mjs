@@ -340,6 +340,24 @@ export class AgentIdentities {
           return { identityId: recoveredId, displayName: existing.display_name, duplicate: true,
             next: SIGNUP_NEXT, nextActions: nextActionsForIdentityMint() };
         }
+        // The first registration minted with a random identity id, so the
+        // legacy-hash id above misses even though the credential is live.
+        // If some live row owns this secret, this is a retry of that
+        // registration: return it instead of INSERTing a second row, which
+        // would 500 on the secret_hash UNIQUE constraint.
+        const owned = this.rowForSecret(suppliedSecret);
+        if (owned) {
+          this.noteActivated(owned.identityId);
+          return { identityId: owned.identityId, displayName: owned.displayName, duplicate: true,
+            next: SIGNUP_NEXT, nextActions: nextActionsForIdentityMint() };
+        }
+        // A revoked row still holds its verifier: fail 409 like the branch
+        // above instead of letting the INSERT 500 on the UNIQUE constraint.
+        const verifier = this.verifierColumns(suppliedSecret);
+        const taken = this.db.prepare("SELECT identity_id FROM agent_identities WHERE secret_hash=? OR fallback_secret_hash=? LIMIT 1")
+          .get(verifier.secretHash, verifier.fallbackHash);
+        if (taken)
+          fail(409, "identity_credential_changed", "Identity credential changed; use the current saved identity");
       }
       // Keep the existing credential-recovery path above idempotent. Global
       // identity names are not unique: ordinary exact-name duplicates remain

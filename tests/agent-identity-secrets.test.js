@@ -228,3 +228,47 @@ test("mcp join file-body cap honors any casing of the bearer scheme (bughunt 202
     await res.text();
   }
 });
+
+// QA2-SECREG: recoverable re-registration after a normal mint. The first
+// mint uses a random identity id, so the legacy-hash recovery id misses;
+// without the fix the retry INSERTs a second row and 500s on the
+// secret_hash UNIQUE constraint. Regression: fails pre-fix with 500,
+// passes after (201, same identity, duplicate: true, no second secret).
+test("recoverable retry of a normal mint returns the same identity instead of 500", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f);
+
+  const minted = await post(origin, "/api/agent-identities", { displayName: "Recoverable agent" });
+  assert.equal(minted.status, 201);
+  const first = await minted.json();
+  assert.ok(typeof first.secret === "string" && first.secret.startsWith("pri_"));
+
+  const retry = await post(origin, "/api/agent-identities",
+    { displayName: "Recoverable agent", recoverable: true }, first.secret);
+  assert.equal(retry.status, 201);
+  const second = await retry.json();
+  assert.equal(second.identityId, first.identityId);
+  assert.equal(second.duplicate, true);
+  assert.equal(second.displayName, first.displayName);
+  // The secret is shown once: the retry must not leak it again.
+  assert.ok(!Object.hasOwn(second, "secret"));
+  assert.ok(!JSON.stringify(second).includes(first.secret));
+});
+
+// QA2-SECREG: a recoverable retry with a revoked credential must 409, not 500.
+test("recoverable retry with a revoked credential is 409 identity_credential_changed", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f);
+
+  const minted = await post(origin, "/api/agent-identities", { displayName: "Revoked recoverable" });
+  assert.equal(minted.status, 201);
+  const first = await minted.json();
+
+  const revoked = await post(origin, `/api/agent-identities/${first.identityId}/revoke`, { confirm: true }, first.secret);
+  assert.equal(revoked.status, 200);
+
+  const retry = await post(origin, "/api/agent-identities",
+    { displayName: "Revoked recoverable", recoverable: true }, first.secret);
+  assert.equal(retry.status, 409);
+  assert.equal(await errorCode(retry), "identity_credential_changed");
+});
