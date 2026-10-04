@@ -7,7 +7,7 @@ import { readFileSync } from "node:fs";
 
 const css = readFileSync(new URL("../src/board.css", import.meta.url), "utf8");
 const rule = selector => {
-  const match = css.match(new RegExp(`(?:^|\\n)${selector.replace(/[#:]/g, m => `\\${m}`)}\\s*\\{([^}]*)\\}`));
+  const match = css.match(new RegExp(`(?:^|\\n)${selector.replace(/[#:[\]]/g, m => `\\${m}`)}\\s*\\{([^}]*)\\}`));
   return match ? match[1] : null;
 };
 
@@ -19,4 +19,11 @@ test("the sidebar Board entry is styled as a nav row, not a default button", () 
   assert.match(base, /border:\s*0/);
   assert.match(base, /min-height:\s*44px/, "touch target stays 44px");
   assert.ok(rule("#tasks-board-open:hover"), "hover state exists");
+});
+
+test("the owner Save cap button is styled, not a default button", () => {
+  const base = rule("[data-claim-cap] button");
+  assert.ok(base, "[data-claim-cap] button has a rule");
+  assert.match(base, /background:\s*var\(--panel-raised\)/);
+  assert.match(base, /color:\s*var\(--text\)/);
 });

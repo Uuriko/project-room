@@ -5,6 +5,10 @@
 #tasks-board-open { display: block; width: 100%; min-height: 44px; padding: .45rem .6rem; border: 0; border-radius: .5rem; background: transparent; color: var(--text); font-size: .88rem; font-weight: 600; text-align: left; cursor: pointer; }
 #tasks-board-open:hover { background: rgb(255 255 255 / 4%); }
 :root[data-theme="light"] #tasks-board-open:hover { background: rgb(0 0 0 / 5%); }
+/* The owner-only "Save cap" submit has no .button class (markup in board-ui.js);
+   give it the secondary button look instead of the browser default. */
+[data-claim-cap] button { padding: .58rem .85rem; border: 1px solid var(--line); border-radius: .42rem; background: var(--panel-raised); color: var(--text); font-size: .78rem; font-weight: 600; }
+[data-claim-cap] button:hover { background: var(--panel-hover); }
 .board-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); margin-bottom: var(--space-3); }
 .live-chip { margin: 0; padding: .2rem .55rem; border: 1px solid var(--line); border-radius: 99px; color: var(--text); font-size: var(--text-sm); }
 .board-empty { margin: 0; max-width: 36rem; }
