@@ -52,6 +52,9 @@ export const MESSAGE_BODY_READS = Object.freeze([
   Object.freeze({ id: "activity", group: "room", method: "GET", path: "/api/rooms/{roomId}/activity" }),
   Object.freeze({ id: "mentions", group: "room", method: "GET", path: "/api/rooms/{roomId}/mentions" }),
   Object.freeze({ id: "pins", group: "room", method: "GET", path: "/api/rooms/{roomId}/pins" }),
+  // QA4 Q4-SEC-1: summary reads that carry pinned or recent message bodies.
+  Object.freeze({ id: "activation-pack", group: "room", method: "GET", path: "/api/rooms/{roomId}/activation-pack" }),
+  Object.freeze({ id: "orient-search", group: "room", method: "GET", path: "/api/rooms/{roomId}/orient?q={needle}" }),
   Object.freeze({ id: "stream", group: "room", method: "GET", path: "/api/rooms/{roomId}/stream?after=0", stream: true }),
   Object.freeze({ id: "agent-inbox", group: "room", method: "GET", path: "/api/rooms/{roomId}/agent-inbox", auth: "agent" }),
   Object.freeze({ id: "work-result", group: "receipt", method: "GET", path: "/api/rooms/{roomId}/work-result?workItemId={workItemId}" }),
