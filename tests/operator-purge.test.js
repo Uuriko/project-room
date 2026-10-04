@@ -13,7 +13,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { PURGE_TABLES } from "../server/purge-registry.mjs";
 import { countPurge, createOperatorPurge } from "../server/operator-purge.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
-import { collectLargestTables } from "../server/operator-status.mjs";
+import { collectLargestTables, revisionDrift } from "../server/operator-status.mjs";
 import { event, EVENT_TYPES as T, PERMISSIONS } from "../src/events.js";
 
 const TOKEN = "operator-test-token-0123456789abcdef";
@@ -398,6 +398,64 @@ describe("operator purge and status", { concurrency: false }, () => {
     assert.equal(invalid.body.error.code, "invalid_revision");
     const cut = collectLargestTables(store.db, { deadlineMs: 0 });
     assert.equal(cut.partial, true);
+  });
+});
+
+describe("operator follow-ups (CP-ADMIN-0c)", { concurrency: false }, () => {
+  before(() => { process.env.ROOM_OPERATOR_TOKEN_SHA256 = HASH; });
+  after(() => { delete process.env.ROOM_OPERATOR_TOKEN_SHA256; });
+
+  test("status leaves out platform _cf_ tables and skips a table that refuses a count instead of failing", async t => {
+    const { store, call } = await serve(t);
+    store.initialize(createdRoom("commons", "Commons"));
+    store.db.exec("CREATE TABLE IF NOT EXISTS _cf_KV (key TEXT PRIMARY KEY, value BLOB)");
+    const status = await call("/api/operator/status");
+    assert.equal(status.status, 200, JSON.stringify(status.body));
+    assert.equal(status.body.tables.some(row => row.table.startsWith("_cf_")), false);
+    const refusing = {
+      prepare(sql) {
+        if (/FROM rooms$/.test(sql)) throw new Error("not authorized");
+        return store.db.prepare(sql);
+      }
+    };
+    const cut = collectLargestTables(refusing, { deadlineMs: 60_000 });
+    assert.deepEqual(cut.skipped, ["rooms"]);
+    assert.equal(cut.partial, false);
+    assert.ok(cut.tables.length > 0);
+  });
+
+  test("drift accepts a short SHA as a prefix of the deployed commit", () => {
+    const full = "0123456789abcdef0123456789abcdef01234567";
+    assert.equal(revisionDrift(full, "0123456").match, true);
+    assert.equal(revisionDrift(full, "0123456789ABCDEF").match, true);
+    assert.equal(revisionDrift(full, full).match, true);
+    assert.equal(revisionDrift(full, "0123457").match, false);
+    assert.equal(revisionDrift("unstamped", "0123456").match, false);
+    assert.equal(revisionDrift("unstamped", "unstamped").match, true);
+  });
+
+  test("find by account email returns account ids and names, never the address, and deletes nothing", async t => {
+    const { store, call } = await serve(t);
+    store.createAccount("acct-qa-growth");
+    store.accountLogins.linkMagicMethod("acct-qa-growth", { email: "qa-growth2-probe@example.com" });
+    store.createAccount("acct-other");
+    store.accountLogins.linkMagicMethod("acct-other", { email: "someone-else@example.com" });
+    const countsBefore = tableCounts(store.db);
+    const found = await call("/api/operator/purge/find", { method: "POST", data: { accountEmail: "  QA-Growth2-Probe@Example.com " } });
+    assert.equal(found.status, 200, JSON.stringify(found.body));
+    assert.deepEqual(found.body.accounts.map(row => row.id), ["acct-qa-growth"]);
+    assert.equal(JSON.stringify(found.body).includes("@"), false);
+    const none = await call("/api/operator/purge/find", { method: "POST", data: { accountEmail: "nobody@example.com" } });
+    assert.deepEqual(none.body.accounts, []);
+    const bad = await call("/api/operator/purge/find", { method: "POST", data: { accountEmail: "not an address" } });
+    assert.equal(bad.status, 422);
+    const countsAfter = tableCounts(store.db);
+    assert.equal(countsAfter.operator_actions, countsBefore.operator_actions + 3);
+    delete countsBefore.operator_actions;
+    delete countsAfter.operator_actions;
+    assert.deepEqual(countsAfter, countsBefore);
+    const audit = store.db.prepare("SELECT * FROM operator_actions WHERE action='find'").all();
+    assert.equal(JSON.stringify(audit).includes("@"), false);
   });
 });
 
