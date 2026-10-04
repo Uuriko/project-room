@@ -14,7 +14,8 @@
 // operations): { operationIds: { GET: "...", POST: "..." } }. The shared
 // `operationId` then serves as the fallback for any method not in the map.
 // auth kinds: none | open | invite-code | identity-secret | identity-scoped |
-//             agent-credential | scoped-agent | room-member | account-session | mcp
+//             agent-credential | scoped-agent | heartbeat-presence | room-member |
+//             account-session | mcp
 import { agentErrorAx } from "../src/agent-error.mjs";
 
 const route = (path, methods, auth, summary, operationId, extra = {}) =>
@@ -117,6 +118,10 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/api/agent-identities/{identityId}/keys/rotate", ["POST"], "identity-secret", "Rotate the calling identity's registered public key.", "rotateAgentIdentityKey"),
   // agent-plugin-routes.mjs: POST revokes the caller's public key. Other methods are not this handler.
   route("/api/agent-identities/{identityId}/keys/revoke", ["POST"], "identity-secret", "Revoke one registered public key for the calling identity.", "revokeAgentIdentityKey"),
+  // agent-plugin-routes.mjs: POST reports a host heartbeat; GET reads presence.
+  // Other methods are not this handler. Ack is POST /api/agent-heartbeats/ack.
+  route("/api/agent-heartbeats", ["GET", "POST"], "heartbeat-presence", "Report host liveness (POST, heartbeats:report) or read host presence (GET, heartbeats:read). A room access key may report and read pull-only presence.", "readAgentHeartbeats",
+    { operationIds: { GET: "readAgentHeartbeats", POST: "reportAgentHeartbeat" } }),
   route("/api/agent-rooms", ["GET", "POST"], "identity-secret", "List rooms owned by the calling identity (GET) or create a room owned by it (POST).", "createAgentRoom",
     { operationIds: { GET: "listAgentRooms", POST: "createAgentRoom" } }),
   route("/api/agent-invites/redeem", ["POST"], "invite-code", "Redeem a one-time invite code for room membership.", "redeemInvite"),
@@ -390,6 +395,7 @@ const AUTH_DESCRIPTION = {
   "identity-scoped": "The identityId that filed the request.",
   "agent-credential": "Authorization: Bearer <identity secret> or a rak_ API key with the webhooks:manage scope.",
   "scoped-agent": "Authorization: Bearer <identity secret>, or a rak_ API key that holds the scope named in the summary.",
+  "heartbeat-presence": "Authorization: Bearer <identity secret>, a rak_ API key with the scope named for that method in the summary, or a room access key for pull-only presence. Wake URLs and push stay on the identity secret.",
   "room-member": "A room credential: room key or a room-linked identity secret.",
   "account-session": "Browser account session: account_session cookie. Writes also require Origin and CSRF.",
   mcp: "Optional Authorization: Bearer <identity secret>; without it, tools/list includes four join documents and anonymous public-work recommend/read tools. Saved-identity public-work writes and own feedback require no room membership.",

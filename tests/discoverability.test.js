@@ -1942,6 +1942,46 @@ test("agent identity key revoke is served for the inventoried method", { timeout
   assert.equal(body.error.code, "unauthenticated");
 });
 
+// server/agent-plugin-routes.mjs /api/agent-heartbeats: GET and POST. Missing bearer is 401.
+const AGENT_HEARTBEATS_INVENTORY = {
+  "/api/agent-heartbeats": ["GET", "POST"],
+};
+
+test("openapi inventory lists served agent heartbeat methods", () => {
+  const doc = buildOpenApiJson({ origin: "https://room.example" });
+  for (const [path, methods] of Object.entries(AGENT_HEARTBEATS_INVENTORY)) {
+    const entry = DISCOVERABILITY_ROUTES.find(item => item.path === path);
+    assert.ok(entry, `route table lists ${path}`);
+    assert.deepEqual([...entry.methods].sort(), [...methods].sort(), path);
+    assert.equal(doc.paths[path]?.get?.operationId, "readAgentHeartbeats");
+    assert.equal(doc.paths[path]?.post?.operationId, "reportAgentHeartbeat");
+    for (const method of methods) {
+      const op = doc.paths[path][method.toLowerCase()];
+      assert.equal(typeof op?.operationId, "string", `${method} ${path}`);
+      assert.match(op.summary, /heartbeats:report/);
+      assert.match(op.summary, /heartbeats:read/);
+      assert.match(op.description, /room access key/);
+      assert.match(op.description, /identity secret/);
+    }
+  }
+});
+
+test("agent heartbeats are served for the inventoried methods", { timeout: 30000 }, async t => {
+  const { origin } = await serve(t);
+  const getRes = await fetch(`${origin}/api/agent-heartbeats`, { headers: { Origin: origin } });
+  const getBody = await getRes.json();
+  assert.equal(getRes.status, 401);
+  assert.equal(getBody.error.code, "unauthenticated");
+  const postRes = await fetch(`${origin}/api/agent-heartbeats`, {
+    method: "POST",
+    headers: { Origin: origin, "Content-Type": "application/json" },
+    body: "{}",
+  });
+  const postBody = await postRes.json();
+  assert.equal(postRes.status, 401);
+  assert.equal(postBody.error.code, "unauthenticated");
+});
+
 test("openapi inventory lists served work-claims methods", () => {
   const doc = buildOpenApiJson({ origin: "https://room.example" });
   for (const [path, methods] of Object.entries(WORK_CLAIM_INVENTORY)) {
