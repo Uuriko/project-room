@@ -77,6 +77,26 @@ test("join page route boundaries", async t => {
   assert.match(joinHtml, /id="join-form"/);
 });
 
+test("D-c: malformed invite codes render the join page with the sign-in fallback, not a bare 404", async t => {
+  // Remedy validated by Scribble, room seq 2207. Before the fix, codes that
+  // fail the [A-Za-z0-9_-]{1,64} shape fell through to the generic 404 page
+  // (no sign-in link, no invite context) — a dead end. The join page's
+  // client-side boot() rejects the malformed code and shows the error screen,
+  // which carries the "Back to sign-in" fallback.
+  const { origin } = await serve(t);
+  for (const path of ["/join/!!!", "/join/" + "A".repeat(65), "/join/" + "A".repeat(128), "/room/join/!!!", "/room/join/" + "A".repeat(65)]) {
+    const response = await fetch(`${origin}${path}`);
+    assert.equal(response.status, 200, path);
+    assert.match(response.headers.get("content-type"), /text\/html/);
+    const html = await response.text();
+    assert.match(html, /id="join-error"/, `${path} has the error screen`);
+    assert.match(html, /id="join-home-link"/, `${path} error screen links back to sign-in`);
+  }
+  // Multi-segment paths still 404.
+  const extra = await fetch(`${origin}/join/!!!/extra`);
+  assert.equal(extra.status, 404);
+});
+
 test("full self-serve flow: mint invite, preview the consent screen, join by code", async t => {
   const { origin, ownerKey } = await serve(t);
   const roomId = "commons";
