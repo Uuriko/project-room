@@ -2559,7 +2559,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // stateless by design, like POST /join: the page previews the invite
       // and joins through the existing rate-limited API routes. Outside the
       // /api/ inventory by design, like the discovery packets.
-      const joinPageMatch = /^\/(?:room\/)?join(?:\/([A-Za-z0-9_-]{1,64}))?\/?$/.exec(url.pathname);
+      // D-c: the code segment is deliberately permissive (any single path
+      // segment, up to 128 chars). Malformed codes must render this page so
+      // the client-side boot() shows the error screen with the "Back to
+      // sign-in" fallback; narrowing it here strands the user on the generic
+      // 404 page. The client still validates the code shape before calling
+      // the preview API.
+      const joinPageMatch = /^\/(?:room\/)?join(?:\/([^/]{1,128}))?\/?$/.exec(url.pathname);
       if (joinPageMatch) {
         if (req.method !== "GET") reject(405, "method_not_allowed", "Method not allowed");
         const assetBase = url.pathname.startsWith("/room/") ? "/room" : "";
