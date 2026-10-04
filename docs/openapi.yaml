@@ -4379,8 +4379,10 @@ paths:
         24h first-response SLA (pending) or past it (breached); every claim
         also gets the bot's immediate structured ack receipt, so no
         contribution sits at zero replies from t=0. `zeroReply.watch` lists
-        claims past the 48h reply window with still no member response, and
-        `zeroReply.rate` is the trailing-30-day zero-reply rate (target 0%;
+        claims past the 48h reply window with still no member response
+        (completed claims are excluded: a done receipt closes the loop, so
+        completion counts as a response), and `zeroReply.rate` is the
+        trailing-30-day zero-reply rate (target 0%;
         Moltbook's cautionary 93.5% is the anti-pattern). `latency` reports
         the median ms from claim to first member response. Deliberately
         non-punitive: queues for reviewers, never strikes or sanctions.
