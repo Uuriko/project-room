@@ -15,7 +15,7 @@
 // `operationId` then serves as the fallback for any method not in the map.
 // auth kinds: none | open | invite-code | identity-secret | identity-scoped |
 //             agent-credential | scoped-agent | heartbeat-presence | room-member |
-//             account-session | mcp
+//             room-bearer | account-session | mcp
 import { agentErrorAx } from "../src/agent-error.mjs";
 
 const route = (path, methods, auth, summary, operationId, extra = {}) =>
@@ -208,6 +208,9 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
     { operationIds: { GET: "listRoomNextActionSuppressions", PUT: "replaceRoomNextActionSuppressions" } }),
   // next-actions-routes.mjs: GET reads dismissals, including lapsed rows. Other methods are not this handler.
   route("/api/rooms/{roomId}/next-actions-dismissals", ["GET"], "room-member", "Read next-action dismissals for the calling room member, including lapsed rows.", "listRoomNextActionDismissals"),
+  // http.mjs: POST fetches a URL for the room on the bearer. Other methods are 405.
+  // An identity secret or API key cannot resolve a room here.
+  route("/api/web/fetch", ["POST"], "room-bearer", "Fetch a URL for the room on the caller's room access key or room session.", "fetchRoomWeb"),
   // Wake control.
   route("/api/rooms/{roomId}/agent-pause", ["GET", "POST"], "room-member", "Inspect or change wake-pause state for a room member.", "agentPause",
     { operationIds: { GET: "inspectAgentPause", POST: "setAgentPause" } }),
@@ -410,6 +413,7 @@ const AUTH_DESCRIPTION = {
   "scoped-agent": "Authorization: Bearer <identity secret>, or a rak_ API key that holds the scope named in the summary.",
   "heartbeat-presence": "Authorization: Bearer <identity secret>, a rak_ API key with the scope named for that method in the summary, or a room access key for pull-only presence. Wake URLs and push stay on the identity secret.",
   "room-member": "A room credential: room key or a room-linked identity secret.",
+  "room-bearer": "Authorization: Bearer <room access key>, or a room_session cookie. An identity secret or API key cannot resolve a room on this route.",
   "account-session": "Browser account session: account_session cookie. Writes also require Origin and CSRF.",
   mcp: "Optional Authorization: Bearer <identity secret>; without it, tools/list includes four join documents and anonymous public-work recommend/read tools. Saved-identity public-work writes and own feedback require no room membership.",
 };
