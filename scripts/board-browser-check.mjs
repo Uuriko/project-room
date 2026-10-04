@@ -2,6 +2,7 @@
 // The room page and the work-claim HTTP API are the boundary. No test doubles.
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createServer } from "node:http";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { chromium } from "playwright";
 import AxeBuilder from "@axe-core/playwright";
@@ -34,6 +35,78 @@ async function post(page, origin, path, data, status = 200) {
   });
   assert.equal(response.status(), status, await response.text());
 }
+
+// Each caller owns all routes on its page. Always open its gates before
+// removing interception; the cleanup must retain the original test failure.
+async function drainBoardRoutes(page, ...releases) {
+  for (const release of releases) release.resolve();
+  await page.unrouteAll();
+}
+
+// Authoring gate: a real Playwright callback must finish before fixture cleanup
+// returns, including after an assertion fails. Existing happy-path journeys
+// release their responses before cleanup and cannot establish this ordering.
+// This uses a real local HTTP response, with no product export or fetch double.
+test("Board route cleanup drains a held callback and preserves the original failure", { timeout: 20000 }, async t => {
+  const server = createServer((request, response) => {
+    response.writeHead(200, { "Content-Type": "text/html" });
+    response.end(request.url === "/held" ? "held response" : "fixture");
+  });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => {
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+  });
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  await page.goto(origin);
+  const arrived = Promise.withResolvers(), release = Promise.withResolvers();
+  const resumed = Promise.withResolvers(), finish = Promise.withResolvers();
+  let callbackFinished = false, cleanupFinished = false;
+  await page.route(`${origin}/held`, async route => {
+    const response = await route.fetch();
+    assert.equal(response.status(), 200);
+    arrived.resolve();
+    await release.promise;
+    resumed.resolve();
+    await finish.promise;
+    await route.fulfill({ response });
+    callbackFinished = true;
+  });
+  await page.evaluate(() => {
+    window.heldResponse = fetch("/held").then(response => response.text());
+  });
+  await arrived.promise;
+  const sentinel = new Error("original Board assertion failure");
+  const journey = (async () => {
+    try {
+      throw sentinel;
+    } finally {
+      await drainBoardRoutes(page, release);
+      cleanupFinished = true;
+    }
+  })();
+  // Observe rather than discard the rejection so the identical original error
+  // can be asserted after cleanup, without an unhandled rejection in this test.
+  const outcome = journey.then(() => ({ fulfilled: true }), error => ({ error }));
+  try {
+    await resumed.promise;
+    // A same-page protocol/HTTP round trip orders this check after cleanup
+    // started, while the first callback remains explicitly held by finish.
+    assert.equal(await page.evaluate(() => fetch("/probe").then(response => response.text())), "fixture");
+    assert.equal(callbackFinished, false);
+    assert.equal(cleanupFinished, false, "cleanup must remain pending until the held callback ends");
+  } finally {
+    finish.resolve();
+    await outcome;
+  }
+  assert.equal(await page.evaluate(() => window.heldResponse), "held response");
+  assert.equal(callbackFinished, true);
+  assert.equal(cleanupFinished, true);
+  assert.equal((await outcome).error, sentinel, "cleanup preserves the original assertion failure");
+});
 
 async function axe(page) {
   const result = await new AxeBuilder({ page })
@@ -793,7 +866,7 @@ test("owners link a draft PR, reconcile held responses, and refresh a changed cl
     assert.equal(fixture.store.workClaims.get("commons", "link-draft").pullRequests.some(pull => pull.url === secondPull), false);
     assert.equal(await form.count(), 1, "the retired unclaimed response cannot replace the fresh held claim");
   } finally {
-    refreshRelease.resolve(); await page.unroute(listPattern, holdRefresh);
+    await drainBoardRoutes(page, refreshRelease);
   }
 });
 
