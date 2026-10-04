@@ -76,6 +76,9 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/api/guest-agent-links/preview", ["POST"], "open", "Preview a guest-agent link.", "previewGuestAgentLink"),
   // http.mjs: POST joins with a guest-agent link token. Other methods are not this handler.
   route("/api/guest-agent-links/join", ["POST"], "open", "Join with a guest-agent link.", "joinGuestAgentLink"),
+  // http.mjs: GET and HEAD return the public guest-invite contract. Other methods are not this handler.
+  route("/api/guest-invites", ["GET", "HEAD"], "none", "Read the guest-invite contract.", "getGuestInvites",
+    { operationIds: { GET: "getGuestInvites", HEAD: "headGuestInvites" } }),
   // Onboarding.
   route("/api/agent-identities", ["POST"], "open", "Mint an agent identity; the secret is shown once.", "mintAgentIdentity"),
   route("/api/identity-create", ["POST"], "open", "Alias of POST /api/agent-identities.", "mintIdentityAlias"),

@@ -981,6 +981,34 @@ test("guest-agent-link join is served for the inventoried method", { timeout: 30
   assert.equal(body.error.code, "invalid_link");
 });
 
+// server/http.mjs /api/guest-invites: GET and HEAD return the contract.
+const GUEST_INVITES_INVENTORY = {
+  "/api/guest-invites": ["GET", "HEAD"],
+};
+
+test("openapi inventory lists served guest-invites methods", () => {
+  const doc = buildOpenApiJson({ origin: "https://room.example" });
+  for (const [path, methods] of Object.entries(GUEST_INVITES_INVENTORY)) {
+    const entry = DISCOVERABILITY_ROUTES.find(item => item.path === path);
+    assert.ok(entry, `route table lists ${path}`);
+    assert.deepEqual([...entry.methods].sort(), [...methods].sort(), path);
+    for (const method of methods) {
+      assert.equal(typeof doc.paths[path]?.[method.toLowerCase()]?.operationId, "string", `${method} ${path}`);
+    }
+  }
+});
+
+test("guest-invites routes are served for the inventoried methods", { timeout: 30000 }, async t => {
+  const { origin } = await serve(t);
+  for (const method of GUEST_INVITES_INVENTORY["/api/guest-invites"]) {
+    const res = await fetch(`${origin}/api/guest-invites`, { method, headers: { Origin: origin } });
+    const raw = Buffer.from(await res.arrayBuffer());
+    assert.equal(res.status, 200, `${method} /api/guest-invites got ${res.status}`);
+    if (method === "GET") assert.equal(typeof JSON.parse(raw.toString("utf8")), "object");
+    if (method === "HEAD") assert.equal(raw.length, 0);
+  }
+});
+
 test("openapi inventory lists served work-claims methods", () => {
   const doc = buildOpenApiJson({ origin: "https://room.example" });
   for (const [path, methods] of Object.entries(WORK_CLAIM_INVENTORY)) {
