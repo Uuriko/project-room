@@ -19,7 +19,8 @@
 //
 // Production uses the store-owned SQLite registry. The in-memory registry
 // remains a pure-test fixture only. Lease expiry is evaluated
-// on every request, so reads never show stale claims and expired claims
+// on ordinary work-claims requests; the explicit work-claims-read projection
+// preserves stored lease state without housekeeping. Expired claims ordinarily
 // auto-release with a stamped history entry even if nobody calls /sweep.
 // Per-room lease/policy defaults are configured through the registry
 // (configureRoom); the documented config hook is roomWorkClaimConfig in
@@ -278,7 +279,7 @@ function compareBoard(a, b) {
   return 0;
 }
 
-function pageBoard(items, limit, cursor) {
+function pageBoard(items, limit, cursor, state = null) {
   const sorted = [...items].sort(compareBoard);
   let start = 0;
   if (cursor) {
@@ -294,7 +295,7 @@ function pageBoard(items, limit, cursor) {
   return {
     claims,
     hasMore,
-    nextCursor: hasMore && last ? boardCursorEncode({ u: claimUpdatedAt(last), i: last.id }) : null,
+    nextCursor: hasMore && last ? boardCursorEncode({ u: claimUpdatedAt(last), i: last.id, s: state }) : null,
   };
 }
 
@@ -312,6 +313,48 @@ function pageReady(items, limit, cursor) {
     hasMore,
     nextCursor: hasMore && last ? boardCursorEncode({ q: "ready", i: last.id }) : null,
   };
+}
+
+// Shared stored-state projection. No registry/store access or lifecycle effects:
+// ordinary GET calls this after housekeeping; derived reads call it directly.
+// Pages are live, not a snapshot fenced by the legacy room event sequence.
+export function buildWorkClaimPage(items, roomId, viewerId, query = new URLSearchParams(), nowMs = Date.now()) {
+  const reject = (status, code, message) => { throw new ServiceError(status, code, message); };
+  const params = query ?? new URLSearchParams();
+  for (const key of params.keys()) {
+    if (!BOARD_QUERY.has(key) || params.getAll(key).length !== 1) {
+      invalidInput(reject, "a single queue, state, limit, or cursor query parameter");
+    }
+  }
+  const limit = boardLimitOf(reject, params.get("limit"));
+  const cursor = params.has("cursor") ? boardCursorOf(reject, params.get("cursor")) : null;
+  const metadata = { roomId, source: "work-claims", evaluatedAt: new Date(nowMs).toISOString(),
+    consistency: "live", limit, historyLimit: LIST_HISTORY_ENTRIES };
+  const present = page => stampClaimPage({ ...metadata, ...page,
+    claims: page.claims.map(item => summarizeClaimHistory(item, LIST_HISTORY_ENTRIES)) }, viewerId);
+  if (params.has("queue")) {
+    if (params.get("queue") !== "ready") invalidInput(reject, "queue=ready");
+    if (params.has("state")) invalidInput(reject, "either queue=ready or state, not both");
+    if (cursor && (cursor.q !== "ready" || cursor.s !== undefined)) invalidInput(reject, "a cursor from a queue=ready page");
+    return present({ ...pageReady(readyClaims(items), limit, cursor), queue: "ready", historyScope: "ready" });
+  }
+  if (cursor?.q === "ready") invalidInput(reject, "a cursor from a work-claims page");
+  const state = params.has("state") ? params.get("state") : null;
+  if (state !== null && !STATES.includes(state)) invalidInput(reject, `state one of ${STATES.join(", ")}`);
+  // New cursors bind the state filter. Legacy cursors lacked that marker;
+  // preserve their existing unbound continuation semantics during upgrades.
+  if (cursor && Object.hasOwn(cursor, "s") && cursor.s !== state) invalidInput(reject, "a cursor from a page with the same state filter");
+  if (state !== null) {
+    return present({ ...pageBoard(items.filter(item => item.state === state), limit, cursor, state),
+      state, historyScope: "state" });
+  }
+  // Keep the canonical seven-day done window and open dependency exception.
+  const since = nowMs - DONE_WINDOW_MS;
+  const needed = new Set(items.filter(item => item.state !== "done").flatMap(item => item.dependsOn ?? []));
+  const visible = items.filter(item => item.state !== "done" || needed.has(item.id) || Date.parse(claimUpdatedAt(item)) >= since);
+  const olderDone = items.length - visible.length;
+  return present({ ...pageBoard(visible, limit, cursor), historyScope: "recent_done_and_dependencies",
+    ...(olderDone > 0 ? { olderDone, olderDoneQuery: "state=done" } : {}) });
 }
 
 // Evaluate lease expiry across the room's items; expired claims auto-release
@@ -672,43 +715,8 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   }
   if (workClaimRoute === "list" && req.method === "GET") {
     closeLiveClaims();
-    const params = url?.searchParams ?? new URLSearchParams();
-    for (const key of params.keys()) {
-      if (!BOARD_QUERY.has(key) || params.getAll(key).length !== 1) {
-        invalidInput(reject, "a single queue, state, limit, or cursor query parameter");
-      }
-    }
-    const limit = boardLimitOf(reject, params.get("limit"));
-    const cursor = params.has("cursor") ? boardCursorOf(reject, params.get("cursor")) : null;
-    // SEC-2: list pages carry each claim's newest history entries, with the
-    // rest counted in historyOmitted; the single-claim read has the stored
-    // history. Member-authored text is marked untrusted for the reader.
-    const present = page => stampClaimPage({ ...page, claims: page.claims.map(item => summarizeClaimHistory(item, LIST_HISTORY_ENTRIES)) }, caller);
-    if (params.has("queue")) {
-      if (params.get("queue") !== "ready") invalidInput(reject, "queue=ready");
-      if (params.has("state")) invalidInput(reject, "either queue=ready or state, not both");
-      if (cursor && cursor.q !== "ready") invalidInput(reject, "a cursor from a queue=ready page");
-      const page = pageReady(readyClaims(registry.list(roomId)), limit, cursor);
-      return json(res, 200, { roomId, queue: "ready", swept: sweptIds, ...present(page) });
-    }
-    if (cursor?.q === "ready") invalidInput(reject, "a cursor from a work-claims page");
-    const items = registry.list(roomId);
-    if (params.has("state")) {
-      const state = params.get("state");
-      if (!STATES.includes(state)) invalidInput(reject, `state one of ${STATES.join(", ")}`);
-      const page = pageBoard(items.filter(item => item.state === state), limit, cursor);
-      return json(res, 200, { roomId, state, swept: sweptIds, ...present(page) });
-    }
-    // SEC-2: the default list shows done claims from the last 7 days (the
-    // Landed column) and any done claim an open claim depends on. Older done
-    // claims page through ?state=done.
-    const since = nowMs - DONE_WINDOW_MS;
-    const needed = new Set(items.filter(item => item.state !== "done").flatMap(item => item.dependsOn ?? []));
-    const recent = item => item.state !== "done" || needed.has(item.id) || Date.parse(claimUpdatedAt(item)) >= since;
-    const visible = items.filter(recent);
-    const olderDone = items.length - visible.length;
-    const page = pageBoard(visible, limit, cursor);
-    return json(res, 200, { roomId, swept: sweptIds, ...present(page), ...(olderDone > 0 ? { olderDone, olderDoneQuery: "state=done" } : {}) });
+    return json(res, 200, { ...buildWorkClaimPage(registry.list(roomId), roomId, caller,
+      url?.searchParams, nowMs), swept: sweptIds });
   }
   if (workClaimRoute === "receipts" && req.method === "GET") {
     // RC-2026-09-24-205: receipts search. The room block already rejected
