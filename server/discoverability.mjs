@@ -203,6 +203,9 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/api/rooms/{roomId}/next-actions", ["GET"], "room-member", "List ranked next actions for the calling room member.", "listRoomNextActions"),
   // next-actions-routes.mjs: POST dismisses one ranked action. Other methods are not this handler.
   route("/api/rooms/{roomId}/next-actions-dismiss", ["POST"], "room-member", "Dismiss one ranked next action for the calling room member.", "dismissRoomNextAction"),
+  // next-actions-routes.mjs: GET reads suppressions; PUT replaces them. Other methods are not this handler.
+  route("/api/rooms/{roomId}/next-actions-suppressions", ["GET", "PUT"], "room-member", "Read or replace next-action suppressions for the calling room member.", "listRoomNextActionSuppressions",
+    { operationIds: { GET: "listRoomNextActionSuppressions", PUT: "replaceRoomNextActionSuppressions" } }),
   // Wake control.
   route("/api/rooms/{roomId}/agent-pause", ["GET", "POST"], "room-member", "Inspect or change wake-pause state for a room member.", "agentPause",
     { operationIds: { GET: "inspectAgentPause", POST: "setAgentPause" } }),
