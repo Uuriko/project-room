@@ -120,3 +120,39 @@ test('QA2-SECREG: Latin-script homoglyphs of reserved role words are refused', (
   assert.equal(displayNameSkeleton('ᴀʙᴄ'), 'abc');
   assert.equal(displayNameSkeleton('ıɪᴉ'), 'iii');
 });
+
+test('QA2-SECREG followup: diacritics, combining marks, CJK brackets, and hook/stroke letters do not spoof reserved roles', () => {
+  // The child's 7,908-test confusable sweep found these residual mint-safe
+  // spoofs on top of the small-capital fix. Each must read as reserved.
+  // Fails pre-fix (mint-safe impostors).
+  const impostors = [
+    'àdmin', 'ädmin',          // precomposed diacritics (NFKD + mark strip)
+    'sécurity', 'modérator', 'suppört',
+    'ádmin',                  // a + U+0301 combining acute
+    'Bob〈owner〉', 'Bob「admin」', 'Bob〔owner〕', // CJK bracket decorations
+    'ađmin', 'aðmin',         // stroke letters
+    'øwner', 'møderator',
+    'officiał', 'admiŋ',
+    'ßystem', 'oƒficial', 'adminisŧrator', 'suþport',
+    'adɱin', 'ɱoderator',      // hook letters
+    'suƥport', 'aɖmin', 'aɗmin', 'admiɳ', 'securɨty',
+  ];
+  for (const name of impostors) {
+    assert.equal(isReservedRoleName(name), true, name + ' must read as reserved');
+    assert.throws(() => assertNotReservedRoleName(name),
+      error => error.code === 'display_name_unavailable' && error.reason === 'reserved',
+      name + ' must not mint');
+  }
+  // The skeleton folds diacritics to their ASCII base ...
+  assert.equal(displayNameSkeleton('àdmin'), 'admin');
+  assert.equal(displayNameSkeleton('Ångström'), 'angstrom');
+  assert.equal(displayNameSkeleton('ádmin'), 'admin');
+  // ... and the dead lowercase lookalike entries (skeleton lowercases before
+  // lookup, so these capitals' small forms were never mapped).
+  assert.equal(displayNameSkeleton('ζ'), 'z');
+  assert.equal(displayNameSkeleton('ν'), 'n');
+  assert.equal(displayNameSkeleton('н'), 'h');
+  // Legitimate accented names still skeletonize sanely and stay available.
+  assert.equal(isReservedRoleName('José'), false);
+  assert.equal(isReservedRoleName('Zoë'), false);
+});
