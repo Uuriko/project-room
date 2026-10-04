@@ -221,6 +221,8 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/api/referral-invites/redeem", ["POST"], "open", "Redeem a referral invite token. No Authorization credential; the token is in the body.", "redeemReferralInvite"),
   // http.mjs: POST previews a referral token. No Authorization credential. Other methods are 405.
   route("/api/referral-invites/preview", ["POST"], "open", "Preview a referral invite token. No Authorization credential; the token is in the body.", "previewReferralInvite"),
+  // http.mjs: GET previews an agent invite code. No credential. Other methods are not this handler.
+  route("/api/agent-invites/preview", ["GET"], "open", "Preview an agent invite code. No credential; pass code as a query parameter.", "previewAgentInvite"),
   // Wake control.
   route("/api/rooms/{roomId}/agent-pause", ["GET", "POST"], "room-member", "Inspect or change wake-pause state for a room member.", "agentPause",
     { operationIds: { GET: "inspectAgentPause", POST: "setAgentPause" } }),
