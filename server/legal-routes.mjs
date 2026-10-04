@@ -6,6 +6,7 @@ import {
 import {
   LEGAL_CACHE_CONTROL, LEGAL_PAGE_CSP, LEGAL_SITEMAP_PATHS, REPORT_PAGE_CSP, legalPageHtml, reportPageHtml,
 } from "./legal-pages.mjs";
+import { ROOM_ORIGIN } from "../deploy/agent-discovery.mjs";
 
 const PAGE_PATHS = new Set(LEGAL_SITEMAP_PATHS);
 const REPORT_FIELDS = ["kind", "target", "body", "bucket", "nonce"];
@@ -16,8 +17,17 @@ function send(res, status, body, type, head) {
   res.end(head ? undefined : bytes);
 }
 
+// QA4 Q4-H-1: the www.getdasha.com/room door keeps the /room prefix, so its
+// relative legal links reached /room/terms etc. and 404'd. Those exact paths
+// redirect to the one canonical copy on the room host.
+function roomPrefixedLegalPath(pathname) {
+  if (typeof pathname !== "string" || !pathname.startsWith("/room/")) return null;
+  const rest = pathname.slice("/room".length);
+  return PAGE_PATHS.has(rest) || rest === "/report" ? rest : null;
+}
+
 export function isLegalPath(pathname) {
-  return PAGE_PATHS.has(pathname) || pathname === "/report"
+  return Boolean(roomPrefixedLegalPath(pathname)) || PAGE_PATHS.has(pathname) || pathname === "/report"
     || pathname === "/api/reports/public/challenge" || pathname === "/api/reports/public"
     || pathname === "/api/account/terms" || pathname === "/api/operator/unpublish"
     || pathname === "/api/health/jobs";
@@ -29,12 +39,22 @@ export async function handleLegalRequest({ req, res, url, store, rate, remoteAdd
   const head = req.method === "HEAD";
   const read = req.method === "GET" || head;
 
+  const alias = roomPrefixedLegalPath(pathname);
+  if (alias) {
+    if (!read) reject(405, "method_not_allowed", "Method not allowed");
+    res.writeHead(301, { Location: `${ROOM_ORIGIN}${alias}${url.search}`, "Cache-Control": "public, max-age=3600" });
+    res.end();
+    return true;
+  }
+
   if (PAGE_PATHS.has(pathname)) {
     if (!read) reject(405, "method_not_allowed", "Method not allowed");
     const html = legalPageHtml(pathname);
     if (!html) reject(404, "not_found", "Not found");
     res.setHeader("Cache-Control", LEGAL_CACHE_CONTROL);
     res.setHeader("X-Robots-Tag", "all");
+    // QA4 Q4-H-3: one canonical URL per legal page, whichever door served it.
+    res.setHeader("Link", `<${ROOM_ORIGIN}${pathname}>; rel="canonical"`);
     res.setHeader("Content-Security-Policy", LEGAL_PAGE_CSP);
     send(res, 200, html, "text/html; charset=utf-8", head);
     return true;
