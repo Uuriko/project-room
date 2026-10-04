@@ -1765,7 +1765,7 @@ test("webhook process is served for the inventoried method", { timeout: 30000 },
 
 // server/agent-plugin-routes.mjs /api/agent-identities/{identityId}/verify: POST only. Missing bearer is 401.
 const AGENT_IDENTITY_VERIFY_INVENTORY = {
-  "/api/agent-identities/{identityId}/verify": ["POST"],
+  "/api/agent-identities/{identityId}/verify": ["POST", "DELETE"],
 };
 
 test("openapi inventory lists served agent identity verify methods", () => {
@@ -1786,6 +1786,19 @@ test("agent identity verify is served for the inventoried method", { timeout: 30
     method: "POST",
     headers: { Origin: origin, "Content-Type": "application/json" },
     body: "{}",
+  });
+  const body = await res.json();
+  assert.equal(res.status, 401);
+  assert.equal(body.error.code, "unauthenticated");
+});
+
+test("agent identity unverify is served for the inventoried method", { timeout: 30000 }, async t => {
+  const doc = buildOpenApiJson({ origin: "https://room.example" });
+  assert.equal(typeof doc.paths["/api/agent-identities/{identityId}/verify"]?.delete?.operationId, "string");
+  const { origin } = await serve(t);
+  const res = await fetch(`${origin}/api/agent-identities/ai_probe/verify`, {
+    method: "DELETE",
+    headers: { Origin: origin },
   });
   const body = await res.json();
   assert.equal(res.status, 401);
