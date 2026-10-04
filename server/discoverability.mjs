@@ -267,6 +267,9 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   // http.mjs: GET reads one peer-DM thread. Other methods are not this if.
   // Distinct from GET /api/rooms/{roomId}/peer-dms. API keys need rooms:read.
   route("/api/rooms/{roomId}/peer-dms/{threadId}", ["GET"], "room-member", "Read one peer-DM thread. API keys need the rooms:read scope.", "getRoomPeerDmThread"),
+  // http.mjs: GET reads the room event log. Other methods are not this if.
+  // Query after is the cursor; afterSequence is refused. API keys need rooms:read.
+  route("/api/rooms/{roomId}/events", ["GET"], "room-member", "Read this room's event log. API keys need the rooms:read scope.", "getRoomEvents"),
   route("/api/share-links/join-agent", ["POST"], "identity-secret", "Guest-link redemption: join with a guest pass.", "joinAgentViaShareLink"),
   // http.mjs: GET and HEAD both collect cross-room attention. HEAD strips the body.
   // Other methods reject 405. Allow lists GET only; the serving if is the inventory.
