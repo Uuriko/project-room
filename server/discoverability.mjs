@@ -211,6 +211,8 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   // http.mjs: POST fetches a URL for the room on the bearer. Other methods are 405.
   // An identity secret or API key cannot resolve a room here.
   route("/api/web/fetch", ["POST"], "room-bearer", "Fetch a URL for the room on the caller's room access key or room session.", "fetchRoomWeb"),
+  // http.mjs: POST plans or runs room research. Other methods are 405. Same room-bearer posture as web fetch.
+  route("/api/web/research", ["POST"], "room-bearer", "Plan or run a room research question for the caller's room access key or room session.", "researchRoomWeb"),
   // Wake control.
   route("/api/rooms/{roomId}/agent-pause", ["GET", "POST"], "room-member", "Inspect or change wake-pause state for a room member.", "agentPause",
     { operationIds: { GET: "inspectAgentPause", POST: "setAgentPause" } }),

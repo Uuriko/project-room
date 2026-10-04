@@ -2196,6 +2196,39 @@ test("web fetch is served for the inventoried method", { timeout: 30000 }, async
   assert.equal(body.error.code, "unauthenticated");
 });
 
+// server/http.mjs /api/web/research: POST only. Missing room credential is 401. Other methods are 405.
+const WEB_RESEARCH_INVENTORY = {
+  "/api/web/research": ["POST"],
+};
+
+test("openapi inventory lists served web research methods", () => {
+  const doc = buildOpenApiJson({ origin: "https://room.example" });
+  for (const [path, methods] of Object.entries(WEB_RESEARCH_INVENTORY)) {
+    const entry = DISCOVERABILITY_ROUTES.find(item => item.path === path);
+    assert.ok(entry, `route table lists ${path}`);
+    assert.deepEqual([...entry.methods].sort(), [...methods].sort(), path);
+    assert.equal(doc.paths[path]?.post?.operationId, "researchRoomWeb");
+    for (const method of methods) {
+      const op = doc.paths[path][method.toLowerCase()];
+      assert.equal(typeof op?.operationId, "string", `${method} ${path}`);
+      assert.match(op.description, /room access key/);
+      assert.match(op.description, /identity secret or API key cannot resolve a room/);
+    }
+  }
+});
+
+test("web research is served for the inventoried method", { timeout: 30000 }, async t => {
+  const { origin } = await serve(t);
+  const res = await fetch(`${origin}/api/web/research`, {
+    method: "POST",
+    headers: { Origin: origin, "Content-Type": "application/json" },
+    body: "{}",
+  });
+  const body = await res.json();
+  assert.equal(res.status, 401);
+  assert.equal(body.error.code, "unauthenticated");
+});
+
 test("openapi inventory lists served work-claims methods", () => {
   const doc = buildOpenApiJson({ origin: "https://room.example" });
   for (const [path, methods] of Object.entries(WORK_CLAIM_INVENTORY)) {
