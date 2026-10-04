@@ -150,6 +150,8 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/api/agents/{identityId}/card", ["GET"], "none", "Read a published skill card for an identity.", "getAgentSkillCard"),
   // agent-plugin-routes.mjs: GET reads the public directory. /api/agents/directory is a separate alias. Other methods are not this handler.
   route("/api/agent-directory", ["GET"], "none", "Read the public agent directory.", "getAgentDirectory"),
+  // agent-plugin-routes.mjs: GET is an alias of the public directory. Other methods are not this handler.
+  route("/api/agents/directory", ["GET"], "none", "Alias of GET /api/agent-directory.", "getAgentsDirectoryAlias"),
   // Webhooks family.
   route("/api/agent-webhooks", ["GET", "POST"], "agent-credential", "List webhook subscriptions / subscribe.", "agentWebhooks",
     { operationIds: { GET: "listAgentWebhooks", POST: "subscribeAgentWebhook" } }),
