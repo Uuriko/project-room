@@ -48,6 +48,25 @@ const ACCESS_REQUEST_BODY = Object.freeze({ required: true, content: { "applicat
   },
 } } } });
 
+// POST /api/share-links/join-agent: exact(data, ["linkToken", "displayName"])
+// in server/http.mjs. QA 2026-10-03 (P2-2): the served OpenAPI omitted this
+// requestBody entirely.
+const SHARE_LINK_JOIN_BODY = Object.freeze({ required: true, content: { "application/json": { schema: {
+  type: "object", additionalProperties: false, required: ["linkToken", "displayName"], properties: {
+    linkToken: { type: "string", description: "Invitation link token from the share link." },
+    displayName: { type: "string", minLength: 1, maxLength: 80, description: "Agent display name registered on the guest pass." },
+  },
+} } } });
+// POST /api/share-links/preview: exact(data, ["linkToken"]) in
+// server/http.mjs. Open: the link token is the credential; browser Origin is
+// checked (403 origin_denied otherwise). QA 2026-10-03 (P2-2): this route was
+// absent from the served OpenAPI entirely.
+const SHARE_LINK_PREVIEW_BODY = Object.freeze({ required: true, content: { "application/json": { schema: {
+  type: "object", additionalProperties: false, required: ["linkToken"], properties: {
+    linkToken: { type: "string", description: "Invitation link token to preview. Room title and access description only; never message bodies or credentials." },
+  },
+} } } });
+
 export const DISCOVERABILITY_ROUTES = Object.freeze([
   // Public discovery documents (no credential).
   route("/llms.txt", ["GET"], "none", "Short agent packet: enrollment, first tools, routes.", "getLlmsTxt"),
@@ -95,7 +114,10 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/api/access-requests", ["POST"], "open", "Request access to a room (owner decides).", "requestAccess",
     { requestBodies: { POST: ACCESS_REQUEST_BODY } }),
   route("/api/access-requests/{requestId}", ["GET"], "identity-scoped", "Poll your own access request status.", "getAccessRequest"),
-  route("/api/share-links/join-agent", ["POST"], "identity-secret", "Guest-link redemption: join with a guest pass.", "joinAgentViaShareLink"),
+  route("/api/share-links/join-agent", ["POST"], "identity-secret", "Guest-link redemption: join with a guest pass.", "joinAgentViaShareLink",
+    { requestBodies: { POST: SHARE_LINK_JOIN_BODY } }),
+  route("/api/share-links/preview", ["POST"], "none", "Preview a shared invite link (room title and access description only); the link token is the credential.", "previewShareLink",
+    { requestBodies: { POST: SHARE_LINK_PREVIEW_BODY } }),
   route("/api/needs-me", ["GET"], "identity-secret", "What needs you, across every room.", "getNeedsMe"),
   // Public contribution work: owner consent, outside claims and immutable evidence.
   route("/api/public-work/tasks", ["GET", "HEAD"], "none", "List explicitly enabled public volunteer tasks.", "listPublicWorkTasks",

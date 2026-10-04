@@ -74,7 +74,8 @@ function failureValue(error) {
 }
 
 export function identityBearer(authorization) {
-  if (typeof authorization !== "string" || !authorization.startsWith("Bearer ")) {
+  // RFC 7235: auth scheme is case-insensitive ("bearer"/"BEARER" accepted).
+  if (typeof authorization !== "string" || !/^bearer /i.test(authorization)) {
     return { error: "Hosted room tools require Authorization: Bearer and a live identity or room token" };
   }
   const token = authorization.slice("Bearer ".length);
