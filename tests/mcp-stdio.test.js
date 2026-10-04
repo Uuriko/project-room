@@ -245,6 +245,8 @@ test("MCP claim PR links validate URL-only arguments and forward the complete cl
   assert.equal(definition.annotations.idempotentHint, true);
   assert.equal(definition.inputSchema.properties.pullRequest.type, "string");
   assert.equal(definition.inputSchema.properties.pullRequest.maxLength, 300);
+  assert.match(definition.description, /historyOmitted/);
+  assert.match(definition.inputSchema.properties.expectedHistoryLength.description, /historyOmitted/);
   const args = { claimId: "_claim", pullRequest: saved.pullRequests[0].url + "/",
     expectedClaimedAt: "2026-10-03T13:00:00.000Z", expectedHistoryLength: 2 };
   for (const invalid of [
