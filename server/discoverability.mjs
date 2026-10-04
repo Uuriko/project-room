@@ -15,7 +15,7 @@
 // `operationId` then serves as the fallback for any method not in the map.
 // auth kinds: none | open | invite-code | identity-secret | identity-scoped |
 //             agent-credential | scoped-agent | heartbeat-presence | room-member |
-//             room-bearer | account-session | mcp
+//             room-bearer | room-invite-admin | account-session | mcp
 import { agentErrorAx } from "../src/agent-error.mjs";
 
 const route = (path, methods, auth, summary, operationId, extra = {}) =>
@@ -203,6 +203,14 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/api/rooms/{roomId}/reports", ["GET", "POST"], "room-member", "List moderation reports in this room. Owner-only. API keys need the rooms:read scope.", "listRoomReports", {
     operationIds: { GET: "listRoomReports", POST: "reportRoomMessage" },
     summaryByMethod: { POST: "File a moderation report in this room. API keys need the rooms:write scope." },
+  }),
+  // http.mjs: GET lists invitation links; POST creates one. Other methods are not these ifs.
+  // After room auth, a bearer is rejected unless it is an owner identity or a delegated
+  // admin with manage_members. Room keys presented as bearers stay excluded.
+  // Distinct from public /api/share-links. API keys are bearers and do not pass this gate.
+  route("/api/rooms/{roomId}/share-links", ["GET", "POST"], "room-invite-admin", "List invitation links for this room.", "listRoomShareLinks", {
+    operationIds: { GET: "listRoomShareLinks", POST: "createRoomShareLink" },
+    summaryByMethod: { POST: "Create an invitation link for this room." },
   }),
   route("/api/share-links/join-agent", ["POST"], "identity-secret", "Guest-link redemption: join with a guest pass.", "joinAgentViaShareLink"),
   // http.mjs: GET and HEAD both collect cross-room attention. HEAD strips the body.
@@ -502,6 +510,7 @@ const AUTH_DESCRIPTION = {
   "heartbeat-presence": "Authorization: Bearer <identity secret>, a rak_ API key with the scope named for that method in the summary, or a room access key for pull-only presence. Wake URLs and push stay on the identity secret.",
   "room-member": "A room credential: room key or a room-linked identity secret.",
   "room-bearer": "Authorization: Bearer <room access key>, or a room_session cookie. An identity secret or API key cannot resolve a room on this route.",
+  "room-invite-admin": "A signed-in browser session, an owner identity bearer, or a delegated admin identity bearer with manage_members. A room key presented as a bearer is excluded.",
   "account-session": "Browser account session: account_session cookie. Writes also require Origin and CSRF.",
   mcp: "Optional Authorization: Bearer <identity secret>; without it, tools/list includes four join documents and anonymous public-work recommend/read tools. Saved-identity public-work writes and own feedback require no room membership.",
 };

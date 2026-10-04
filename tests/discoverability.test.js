@@ -3263,6 +3263,62 @@ test("room reports are served for the inventoried methods", { timeout: 30000 }, 
   }
 });
 
+// server/http.mjs /api/rooms/{roomId}/share-links: GET lists, POST creates.
+// Missing credential is 401. A room key bearer is excluded (403) unless the
+// bearer is an owner identity or a delegated admin with manage_members.
+const ROOM_SHARE_LINKS_INVENTORY = {
+  "/api/rooms/{roomId}/share-links": ["GET", "POST"],
+};
+
+test("openapi inventory lists served room share-link methods", () => {
+  const doc = buildOpenApiJson({ origin: "https://room.example" });
+  for (const [path, methods] of Object.entries(ROOM_SHARE_LINKS_INVENTORY)) {
+    const entry = DISCOVERABILITY_ROUTES.find(item => item.path === path);
+    assert.ok(entry, `route table lists ${path}`);
+    assert.equal(entry.auth, "room-invite-admin");
+    assert.deepEqual([...entry.methods].sort(), [...methods].sort(), path);
+    const getOp = doc.paths[path]?.get;
+    const postOp = doc.paths[path]?.post;
+    assert.equal(getOp?.operationId, "listRoomShareLinks");
+    assert.equal(postOp?.operationId, "createRoomShareLink");
+    for (const op of [getOp, postOp]) {
+      assert.match(op.description, /owner identity/i);
+      assert.match(op.description, /delegated admin/i);
+      assert.match(op.description, /manage_members/);
+      assert.match(op.description, /room key presented as a bearer is excluded/i);
+      assert.doesNotMatch(op.description, /no credential required/i);
+      assert.doesNotMatch(op.description, /room key or a room-linked identity secret/i);
+    }
+  }
+});
+
+test("room share links are served for the inventoried methods", { timeout: 30000 }, async t => {
+  const { origin, store } = await serve(t);
+  const roomKey = store.issueAccessKey("commons", "owner");
+  for (const method of ["GET", "POST"]) {
+    const missing = await fetch(`${origin}/api/rooms/commons/share-links`, {
+      method,
+      headers: { Origin: origin, ...(method === "POST" ? { "Content-Type": "application/json" } : {}) },
+      ...(method === "POST" ? { body: "{}" } : {}),
+    });
+    const missingBody = await missing.json();
+    assert.equal(missing.status, 401, method);
+    assert.equal(missingBody.error.code, "unauthenticated", method);
+    const bearer = await fetch(`${origin}/api/rooms/commons/share-links`, {
+      method,
+      headers: {
+        Origin: origin,
+        Authorization: `Bearer ${roomKey}`,
+        ...(method === "POST" ? { "Content-Type": "application/json" } : {}),
+      },
+      ...(method === "POST" ? { body: "{}" } : {}),
+    });
+    const bearerBody = await bearer.json();
+    assert.equal(bearer.status, 403, method);
+    assert.equal(bearerBody.error.code, "access_denied", method);
+  }
+});
+
 test("openapi inventory lists served work-claims methods", () => {
   const doc = buildOpenApiJson({ origin: "https://room.example" });
   for (const [path, methods] of Object.entries(WORK_CLAIM_INVENTORY)) {
