@@ -4059,6 +4059,52 @@ test("room invitations are served for the inventoried methods", { timeout: 30000
   assert.equal(ownerGet.status, 200);
 });
 
+// server/http.mjs /api/rooms/{roomId}/invitations/{invitationId}/revoke: POST only. Missing credential is 401.
+const ROOM_INVITATION_REVOKE_INVENTORY = {
+  "/api/rooms/{roomId}/invitations/{invitationId}/revoke": ["POST"],
+};
+
+test("openapi inventory lists served room invitation revoke", () => {
+  const doc = buildOpenApiJson({ origin: "https://room.example" });
+  for (const [path, methods] of Object.entries(ROOM_INVITATION_REVOKE_INVENTORY)) {
+    const entry = DISCOVERABILITY_ROUTES.find(item => item.path === path);
+    assert.ok(entry, `route table lists ${path}`);
+    assert.equal(entry.auth, "room-invitation-admin");
+    assert.deepEqual([...entry.methods].sort(), [...methods].sort(), path);
+    const postOp = doc.paths[path]?.post;
+    assert.equal(postOp?.operationId, "revokeRoomInvitation");
+    assert.match(postOp.summary, /rooms:write/);
+    assert.match(postOp.summary, /Owner on any credential/);
+    assert.match(postOp.description, /room owner/i);
+    assert.match(postOp.description, /account browser session/i);
+    assert.match(postOp.description, /non-owner bearer is excluded/i);
+    assert.doesNotMatch(postOp.description, /manage_members/);
+    assert.doesNotMatch(postOp.description, /no credential required/i);
+    assert.equal(doc.paths[path]?.get, undefined);
+  }
+});
+
+test("room invitation revoke is served for the inventoried method", { timeout: 30000 }, async t => {
+  const { origin, store } = await serve(t);
+  const roomKey = store.issueAccessKey("commons", "owner");
+  const missing = await fetch(`${origin}/api/rooms/commons/invitations/probe-invite/revoke`, {
+    method: "POST",
+    headers: { Origin: origin, "Content-Type": "application/json" },
+    body: "{}",
+  });
+  const missingBody = await missing.json();
+  assert.equal(missing.status, 401);
+  assert.equal(missingBody.error.code, "unauthenticated");
+  const owner = await fetch(`${origin}/api/rooms/commons/invitations/probe-invite/revoke`, {
+    method: "POST",
+    headers: { Origin: origin, "Content-Type": "application/json", Authorization: `Bearer ${roomKey}` },
+    body: "{}",
+  });
+  const ownerBody = await owner.json();
+  assert.equal(owner.status, 422);
+  assert.equal(ownerBody.error.code, "invalid_invitation_change");
+});
+
 test("openapi inventory lists served work-claims methods", () => {
   const doc = buildOpenApiJson({ origin: "https://room.example" });
   for (const [path, methods] of Object.entries(WORK_CLAIM_INVENTORY)) {
