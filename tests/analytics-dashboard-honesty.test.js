@@ -183,6 +183,20 @@ test("barrel exports resolve to the new functions", () => {
   assert.deepEqual([...barrel.johnActorIdsFromEnv({})], []);
 });
 
+test("dashboardHonestyReport composes lane, settled, and falsifier sections", () => {
+  const db = memoryDb();
+  db.prepare("INSERT INTO analytics_events (name, at, room_id, actor_kind, actor_id, props, weight) VALUES (?,?,?,?,?,?,?)")
+    .run("claim_claimed", AT, "alpha", "agent", "lane7", "{}", 1);
+  const report = dashboardHonestyReport({ db, now: FIXED_MS, env: { ANALYTICS_LANE_ACTOR_IDS: "lane7" } });
+  assert.match(report.label, /honesty pass/);
+  const week = report.laneActivity.find(row => row.week === WEEK_ISO);
+  assert.equal(week.laneActivityTesting, 1);
+  assert.equal(week.laneAttribution, "configured");
+  assert.equal(report.settledPerWeek.length, 12);
+  assert.equal(report.falsifiers.length, 9);
+  db.close();
+});
+
 test("the backfill dashboard output carries the honesty section", async t => {
   const { file } = openRoom(t);
   const { report } = await backfillFile(file, { now: FIXED_MS });
