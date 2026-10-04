@@ -84,7 +84,11 @@ export function workerRouteTemplates(source) {
   return [...routes].sort();
 }
 
-export function routeDocsDrift({ http, pluginRoutes, nextActionsRoutes, worker, openapi }) {
+// The full set of /api route templates the server can match, keyed by the
+// {}-normalized template. Shared by the docs gate (routeDocsDrift) and the
+// served-spec coverage gate (tests/openapi-served-coverage.test.js) so a new
+// route source can never be visible to one gate and invisible to the other.
+export function servedRouteTemplates({ http, pluginRoutes, nextActionsRoutes, worker }) {
   const served = new Map();
   // server/http.mjs also names "/api/rooms/:roomId" as a diagnostics label; it folds into the {roomId} template.
   for (const template of routeCandidates(http)) if (!served.has(templateKey(template)) || !template.includes(":")) served.set(templateKey(template), template);
@@ -93,7 +97,7 @@ export function routeDocsDrift({ http, pluginRoutes, nextActionsRoutes, worker, 
   // route was "documented but not served" - which is how the test beside this
   // drifted into failing on a dozen phantom routes while the gate itself was
   // green. An omission should be an error, not a wrong answer.
-  if (typeof pluginRoutes !== "string") throw new Error("routeDocsDrift needs server/agent-plugin-routes.mjs; routes are served from two files");
+  if (typeof pluginRoutes !== "string") throw new Error("servedRouteTemplates needs server/agent-plugin-routes.mjs; routes are served from two files");
   {
     for (const template of pluginRouteTemplates(pluginRoutes)) {
       const key = templateKey(template);
@@ -101,7 +105,7 @@ export function routeDocsDrift({ http, pluginRoutes, nextActionsRoutes, worker, 
     }
   }
   // RC-2026-09-25-911: the next-actions surface is a third route source.
-  if (typeof nextActionsRoutes !== "string") throw new Error("routeDocsDrift needs server/next-actions-routes.mjs; routes are served from three files");
+  if (typeof nextActionsRoutes !== "string") throw new Error("servedRouteTemplates needs server/next-actions-routes.mjs; routes are served from three files");
   {
     for (const template of nextActionsRouteTemplates(nextActionsRoutes)) {
       const key = templateKey(template);
@@ -111,7 +115,7 @@ export function routeDocsDrift({ http, pluginRoutes, nextActionsRoutes, worker, 
   // RC-2026-09-26-002: the Worker surface (cloudflare/room.mjs) is the
   // fourth route source - routes answered before or instead of the Durable
   // Object were invisible to this gate (/api/health/jobs until now).
-  if (typeof worker !== "string") throw new Error("routeDocsDrift needs cloudflare/room.mjs; routes are served from four files");
+  if (typeof worker !== "string") throw new Error("servedRouteTemplates needs cloudflare/room.mjs; routes are served from four files");
   {
     for (const template of workerRouteTemplates(worker)) {
       const key = templateKey(template);
@@ -123,6 +127,12 @@ export function routeDocsDrift({ http, pluginRoutes, nextActionsRoutes, worker, 
     const key = templateKey(row.path);
     if (!served.has(key)) served.set(key, row.path);
   }
+  if (served.size < 50 || !served.has("/api/health") || !served.has("/api/rooms/{}/commands") || !served.has("/api/health/jobs")) throw new Error("server route extraction sanity failed");
+  return served;
+}
+
+export function routeDocsDrift({ http, pluginRoutes, nextActionsRoutes, worker, openapi }) {
+  const served = servedRouteTemplates({ http, pluginRoutes, nextActionsRoutes, worker });
   const operations = openapiOperations(openapi);
   const documented = new Map();
   // /api templates are the gate. Hosted MCP (/mcp, /room/mcp) is documented
@@ -131,7 +141,6 @@ export function routeDocsDrift({ http, pluginRoutes, nextActionsRoutes, worker, 
     if (!path.startsWith("/api/")) continue;
     if (!documented.has(templateKey(path))) documented.set(templateKey(path), path);
   }
-  if (served.size < 50 || !served.has("/api/health") || !served.has("/api/rooms/{}/commands") || !served.has("/api/health/jobs")) throw new Error("server route extraction sanity failed");
   if (documented.size < 20 || !documented.has("/api/rooms/{}/commands")) throw new Error("docs/openapi.yaml parse sanity failed");
   const failures = [];
   for (const [key, template] of served) if (!documented.has(key)) failures.push(`served but not documented in docs/openapi.yaml: ${template}`);
