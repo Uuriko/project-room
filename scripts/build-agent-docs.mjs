@@ -28,8 +28,20 @@ function inline(text) {
   return parts.join("");
 }
 
-export function renderMarkdown(markdown) {
+function plainLabel(text) {
+  return String(text).replace(/[`*_]/g, "").replace(/\[([^\]]+)\]\([^)]*\)/g, "$1").replace(/\s+/g, " ").trim();
+}
+
+// QA5-gb-A11Y-1 (WCAG 2.1.1): an overflowing <pre> must be reachable by keyboard so it can be
+// scrolled. A named, focusable region also tells screen-reader users what the block is.
+export function codeBlock(text, label) {
+  return `<pre tabindex="0" role="region" aria-label="${escape(plainLabel(label) || "Code example").replaceAll('"', "&quot;")}"><code>${escape(text)}</code></pre>`;
+}
+
+export function renderMarkdown(markdown, { labelPrefix = "" } = {}) {
   const blocks = [];
+  let lastHeading = "";
+  let codeCount = 0;
   const lines = markdown.replace(/\r\n/g, "\n").split("\n");
   let i = 0;
   const paragraph = [];
@@ -45,7 +57,8 @@ export function renderMarkdown(markdown) {
       const body = [];
       i += 1;
       while (i < lines.length && !lines[i].startsWith("```")) { body.push(lines[i]); i += 1; }
-      blocks.push(`<pre><code>${escape(body.join("\n"))}</code></pre>`);
+      codeCount += 1;
+      blocks.push(codeBlock(body.join("\n"), [labelPrefix, lastHeading || `code example ${codeCount}`].filter(Boolean).join(": ")));
       i += 1;
       continue;
     }
@@ -53,6 +66,7 @@ export function renderMarkdown(markdown) {
     if (heading) {
       flush();
       const level = heading[1].length;
+      lastHeading = heading[2];
       blocks.push(`<h${level}>${inline(heading[2])}</h${level}>`);
       i += 1;
       continue;
@@ -84,7 +98,11 @@ function sections(markdown) {
   const chunks = markdown.split(/^## /m).slice(1);
   for (const chunk of chunks) {
     const [title, ...rest] = chunk.split("\n");
-    found.push({ title: title.trim(), text: rest.join("\n").replace(/```[\s\S]*?```/g, " ").replace(/\s+/g, " ").trim() });
+    const body = rest.join("\n");
+    const prose = body.replace(/```[\s\S]*?```/g, " ").replace(/\s+/g, " ").trim();
+    // A HowTo step needs text. A code-only section uses its code as the step text.
+    const code = [...body.matchAll(/```[^\n]*\n([\s\S]*?)```/g)].map(match => match[1]).join(" ").replace(/\s+/g, " ").trim();
+    found.push({ title: title.trim(), text: prose || code || title.trim() });
   }
   return found;
 }
@@ -107,6 +125,7 @@ p,li{color:var(--muted)}
 h1,h2{color:var(--text)}
 a{color:var(--blue)}
 pre{overflow:auto;padding:12px 16px;background:#191a20;border:1px solid var(--line);border-radius:.45rem}
+pre:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
 code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.9em}
 footer{margin-top:40px;border-top:1px solid var(--line);padding-top:16px;color:var(--muted)}
 `;
@@ -137,7 +156,7 @@ export function agentPages(dir = join(root, "docs", "agents")) {
     if (!markdown.includes(tool.command)) throw new Error(tool.id + " page does not include its command");
     const snippet = renderedSnippet(tool, HOSTED_MCP_URL);
     if (/pri_[A-Za-z0-9_-]{8,}/.test(snippet) || /pri_[A-Za-z0-9_-]{8,}/.test(markdown)) throw new Error(tool.id + " snippet contains a secret");
-    const body = renderMarkdown(markdown) + `\n<h2>Config</h2>\n<pre><code>${escape(snippet.trimEnd())}</code></pre>`;
+    const body = renderMarkdown(markdown, { labelPrefix: tool.label }) + `\n<h2>Config</h2>\n${codeBlock(snippet.trimEnd(), `${tool.label}: Config`)}`;
     const steps = sections(markdown);
     steps.push({ title: "Config", text: snippet.replace(/\s+/g, " ").trim() });
     pages.set(tool.htmlFile, page({
