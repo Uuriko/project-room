@@ -15,7 +15,7 @@
 // `operationId` then serves as the fallback for any method not in the map.
 // auth kinds: none | open | invite-code | identity-secret | identity-scoped |
 //             agent-credential | scoped-agent | heartbeat-presence | room-member |
-//             room-bearer | room-invite-admin | account-session | mcp
+//             room-bearer | room-invite-admin | room-invitation-admin | account-session | mcp
 import { agentErrorAx } from "../src/agent-error.mjs";
 
 const route = (path, methods, auth, summary, operationId, extra = {}) =>
@@ -285,6 +285,14 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   // http.mjs: POST marks the caller caught up at sequence. Other methods are not this if.
   // Body field is sequence only, enforced after auth. API keys need rooms:write.
   route("/api/rooms/{roomId}/cursor", ["POST"], "room-member", "Mark this member caught up at a sequence. API keys need the rooms:write scope.", "postRoomCursor"),
+  // http.mjs: GET reads invitation stats; POST issues an invitation. Other methods are not these ifs.
+  // After roomAuth, the owner acts on any credential; everyone else needs an account browser session.
+  // Distinct from POST /api/invitations/preview and POST /api/invitations/accept.
+  // API keys need rooms:read or rooms:write, then the same owner-or-browser gate.
+  route("/api/rooms/{roomId}/invitations", ["GET", "POST"], "room-invitation-admin", "Read this room's invitation stats. Owner on any credential, or an account browser session. API keys need the rooms:read scope.", "getRoomInvitations", {
+    operationIds: { GET: "getRoomInvitations", POST: "issueRoomInvitation" },
+    summaryByMethod: { POST: "Issue an invitation for this room. Owner on any credential, or an account browser session. API keys need the rooms:write scope." },
+  }),
   route("/api/share-links/join-agent", ["POST"], "identity-secret", "Guest-link redemption: join with a guest pass.", "joinAgentViaShareLink"),
   // http.mjs: GET and HEAD both collect cross-room attention. HEAD strips the body.
   // Other methods reject 405. Allow lists GET only; the serving if is the inventory.
@@ -584,6 +592,7 @@ const AUTH_DESCRIPTION = {
   "room-member": "A room credential: room key or a room-linked identity secret.",
   "room-bearer": "Authorization: Bearer <room access key>, or a room_session cookie. An identity secret or API key cannot resolve a room on this route.",
   "room-invite-admin": "A signed-in browser session, an owner identity bearer, or a delegated admin identity bearer with manage_members. A room key presented as a bearer is excluded.",
+  "room-invitation-admin": "The room owner on any room credential, or a signed-in account browser session. A non-owner bearer is excluded.",
   "account-session": "Browser account session: account_session cookie. Writes also require Origin and CSRF.",
   mcp: "Optional Authorization: Bearer <identity secret>; without it, tools/list includes four join documents and anonymous public-work recommend/read tools. Saved-identity public-work writes and own feedback require no room membership.",
 };

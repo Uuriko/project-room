@@ -4009,6 +4009,56 @@ test("room cursor is served for the inventoried method", { timeout: 30000 }, asy
   assert.equal(body.error.code, "unauthenticated");
 });
 
+// server/http.mjs /api/rooms/{roomId}/invitations: GET stats, POST issues. Missing credential is 401.
+const ROOM_INVITATIONS_INVENTORY = {
+  "/api/rooms/{roomId}/invitations": ["GET", "POST"],
+};
+
+test("openapi inventory lists served room invitations", () => {
+  const doc = buildOpenApiJson({ origin: "https://room.example" });
+  for (const [path, methods] of Object.entries(ROOM_INVITATIONS_INVENTORY)) {
+    const entry = DISCOVERABILITY_ROUTES.find(item => item.path === path);
+    assert.ok(entry, `route table lists ${path}`);
+    assert.equal(entry.auth, "room-invitation-admin");
+    assert.deepEqual([...entry.methods].sort(), [...methods].sort(), path);
+    const getOp = doc.paths[path]?.get;
+    const postOp = doc.paths[path]?.post;
+    assert.equal(getOp?.operationId, "getRoomInvitations");
+    assert.equal(postOp?.operationId, "issueRoomInvitation");
+    assert.match(getOp.summary, /rooms:read/);
+    assert.match(postOp.summary, /rooms:write/);
+    for (const op of [getOp, postOp]) {
+      assert.match(op.description, /room owner/i);
+      assert.match(op.description, /account browser session/i);
+      assert.match(op.description, /non-owner bearer is excluded/i);
+      assert.doesNotMatch(op.description, /manage_members/);
+      assert.doesNotMatch(op.description, /no credential required/i);
+      assert.doesNotMatch(op.description, /room key or a room-linked identity secret/i);
+    }
+  }
+});
+
+test("room invitations are served for the inventoried methods", { timeout: 30000 }, async t => {
+  const { origin, store } = await serve(t);
+  const roomKey = store.issueAccessKey("commons", "owner");
+  for (const method of ["GET", "POST"]) {
+    const missing = await fetch(`${origin}/api/rooms/commons/invitations`, {
+      method,
+      headers: { Origin: origin, ...(method === "POST" ? { "Content-Type": "application/json" } : {}) },
+      ...(method === "POST" ? { body: "{}" } : {}),
+    });
+    const missingBody = await missing.json();
+    assert.equal(missing.status, 401, method);
+    assert.equal(missingBody.error.code, "unauthenticated", method);
+  }
+  const ownerGet = await fetch(`${origin}/api/rooms/commons/invitations`, {
+    method: "GET",
+    headers: { Origin: origin, Authorization: `Bearer ${roomKey}` },
+  });
+  await ownerGet.json();
+  assert.equal(ownerGet.status, 200);
+});
+
 test("openapi inventory lists served work-claims methods", () => {
   const doc = buildOpenApiJson({ origin: "https://room.example" });
   for (const [path, methods] of Object.entries(WORK_CLAIM_INVENTORY)) {
