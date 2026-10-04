@@ -205,10 +205,13 @@ test("message, pinned and work-fact text stays readable through light/dark chang
       }
       await row("contrast-plain").scrollIntoViewIfNeeded();
       await page.screenshot({ path: `${shots}/contrast-${pass}-${theme}-${width}-messages.png` });
-      await row("contrast-draft").scrollIntoViewIfNeeded();
+      await row("contrast-draft").locator(".draft-feedback").scrollIntoViewIfNeeded();
       await page.screenshot({ path: `${shots}/contrast-${pass}-${theme}-${width}-metadata.png` });
-      await card.scrollIntoViewIfNeeded();
+      const facts = card.locator(".work-details > .work-facts");
+      await facts.scrollIntoViewIfNeeded();
       await page.screenshot({ path: `${shots}/contrast-${pass}-${theme}-${width}-work.png` });
+      await facts.screenshot({ path: `${shots}/contrast-${pass}-${theme}-${width}-work-facts.png` });
+      await row("contrast-draft").locator(".draft-feedback").screenshot({ path: `${shots}/contrast-${pass}-${theme}-${width}-draft-metadata.png` });
       await page.locator("#pinned-panel").scrollIntoViewIfNeeded();
       await page.locator("#pinned-panel").screenshot({ path: `${shots}/contrast-${pass}-${theme}-${width}-pinned.png` });
     }
