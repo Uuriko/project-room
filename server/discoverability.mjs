@@ -145,6 +145,8 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
     { operationIds: { GET: "listLandQueue", HEAD: "headLandQueue" } }),
   // http.mjs: POST remove_land_item. Other methods are 405. API keys need rooms:write.
   route("/api/rooms/{roomId}/remove_land_item", ["POST"], "room-member", "Remove an item from the room land queue. API keys need the rooms:write scope.", "removeLandItem"),
+  // http.mjs: POST report_tip. Other methods are 405. API keys need rooms:write.
+  route("/api/rooms/{roomId}/report_tip", ["POST"], "room-member", "Report the landed tip for a land-queue item. API keys need the rooms:write scope.", "reportLandTip"),
   route("/api/share-links/join-agent", ["POST"], "identity-secret", "Guest-link redemption: join with a guest pass.", "joinAgentViaShareLink"),
   // http.mjs: GET and HEAD both collect cross-room attention. HEAD strips the body.
   // Other methods reject 405. Allow lists GET only; the serving if is the inventory.
