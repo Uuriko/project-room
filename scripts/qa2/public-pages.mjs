@@ -68,6 +68,14 @@ for (const path of pages) {
     rec.consoleErrors = consoleErrors; rec.failedRequests = [...new Set(failedRequests)];
     if (rec.failedRequests.length) rec.warnings.push(`same-origin 4xx/5xx subresources: ${rec.failedRequests.join(", ")}`);
     const axe = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa", "best-practice"]).analyze();
+    // QA2-A11Y: the gate is meaningless if the axe build predates the WCAG 2.2
+    // target-size rule. Fail loudly when the rule is not in the loaded set
+    // instead of silently passing on an old engine.
+    const axeRules = new Set([...axe.violations, ...axe.passes, ...axe.incomplete, ...axe.inapplicable].map(r => r.id));
+    rec.axeVersion = axe.testEngine?.version ?? null;
+    rec.targetSizeLoaded = axeRules.has("target-size");
+    if (!rec.targetSizeLoaded) rec.problems.push("axe target-size rule not loaded (stale axe-core?)");
+    if (!/^4\./.test(rec.axeVersion ?? "")) rec.problems.push(`axe-core ${rec.axeVersion} is not the pinned 4.x line`);
     rec.axe = axe.violations.map(v => ({ id: v.id, impact: v.impact, nodes: v.nodes.length, targets: v.nodes.slice(0, 3).map(n => n.target.join(" ")) }));
     for (const v of rec.axe) if (["serious", "critical"].includes(v.impact)) rec.problems.push(`axe ${v.impact} ${v.id} x${v.nodes} (${v.targets.join(" | ")})`);
     for (const vp of [{ name: "desktop", w: 1280, h: 900 }, { name: "mobile", w: 390, h: 844 }]) {

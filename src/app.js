@@ -3343,7 +3343,7 @@ $("#invitation-signin-back").addEventListener("click", () => {
 });
 $("#invitation-dismiss").addEventListener("click", () => closeInvitation());
 $("#invitation-retry").addEventListener("click", () => { if (invitation.phase === "preview-failed") previewCurrentInvitation(); });
-for (const id of ["invitation-dialog", "work-dialog", "action-dialog", "result-dialog", "room-actions-dialog", "decision-dialog"]) $(`#${id}`).addEventListener("keydown", e => {
+for (const id of ["invitation-dialog", "work-dialog", "action-dialog", "result-dialog", "room-actions-dialog", "decision-dialog", "board-dialog", "catchup-dialog", "settings-dialog"]) $(`#${id}`).addEventListener("keydown", e => {
   if (e.key !== "Tab") return;
   const controls = [...e.currentTarget.querySelectorAll("button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, a[href], [tabindex]:not([tabindex='-1'])")]
     .filter(element => element.getClientRects().length > 0);
@@ -5725,6 +5725,15 @@ function loadActionText(item, action) {
     $("#action-text-origin").textContent = `Posted by ${memberLabel(entry.text.postedById)}${proposal ? ` · draft based on revision ${proposal.basisRevision} · authorship unverified` : ""}`;
     if (value.current.workRevision !== entry.revision) { entry.needsReview = true; entry.error = "Work changed. Review current work before saving."; }
     syncActionForm();
+    // NR-B: the exact text lands asynchronously and can push the focused
+    // control below the dialog's visible edge after the browser's focus
+    // scroll already ran. Re-assert the focused control fully into view.
+    if ($("#action-dialog").open) {
+      const focused = document.activeElement;
+      if (focused && focused !== document.body && $("#action-dialog").contains(focused)) {
+        focused.scrollIntoView({ block: "nearest" });
+      }
+    }
   }).catch(() => {
     if (!owns()) return;
     entry.needsReview = true; entry.error = "Exact text unavailable. Review current work to try again.";

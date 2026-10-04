@@ -79,26 +79,50 @@ jobs:
           if [ -n "$ENTRY_ID" ]; then
             pnpm exec wrangler rollback "$ENTRY_ID" --message "rollback-prod run $GITHUB_RUN_ID: ${REASON:0:150}" --yes
           fi
-      - name: Smoke health, ready, legal pages
+      - name: Read back restored versions and both doors
+        id: readback
+        shell: bash
+        working-directory: cloudflare
         run: |
+          set -euo pipefail
           sleep 15
+          prod_status="$(pnpm exec wrangler deployments status --env production --json)"
+          entry_status=null
+          if [ -n "$ENTRY_ID" ]; then
+            entry_status="$(pnpm exec wrangler deployments status --json)"
+          fi
+          printf '{"prod":%s,"entry":%s}\n' "$prod_status" "$entry_status" |
+            node ../scripts/rollback-readback.mjs --prod-id "$PROD_ID" --entry-id "$ENTRY_ID" --origin "$PROD_ORIGIN" --entry "$ENTRY_ORIGIN" |
+            tee "$RUNNER_TEMP/rollback-readback.json"
+      - name: Smoke health, ready, legal pages
+        shell: bash
+        run: |
+          set -euo pipefail
           node scripts/prod-deploy-smoke.mjs --origin "$PROD_ORIGIN" --entry "$ENTRY_ORIGIN"
-          curl -fsS -A 'Mozilla/5.0 project-room-rollback' "$PROD_ORIGIN/api/version"
       - name: Receipt to muse-room
         if: always()
         continue-on-error: true
         env:
           ROOM_RECEIPT_TOKEN: ${{ secrets.ROOM_RECEIPT_TOKEN }}
           OUTCOME: ${{ job.status }}
+          READBACK_OUTCOME: ${{ steps.readback.outcome }}
           PROD_WAS: ${{ steps.pre.outputs.prod }}
           ENTRY_WAS: ${{ steps.pre.outputs.entry }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           if [ -z "$ROOM_RECEIPT_TOKEN" ]; then echo "ROOM_RECEIPT_TOKEN not set; no receipt posted."; exit 0; fi
           node --input-type=module -e '
+            import { readFileSync } from "node:fs";
             const e = process.env, s = v => (v || "?").slice(0, 8);
+            let readback = "readback not verified";
+            if (e.READBACK_OUTCOME === "success") {
+              try {
+                const report = JSON.parse(readFileSync(`${e.RUNNER_TEMP}/rollback-readback.json`, "utf8"));
+                if (report.ok === true) readback = `verified readback ${JSON.stringify(report)}`;
+              } catch {}
+            }
             const entry = e.ENTRY_ID ? `entry ${s(e.ENTRY_ID)} (was ${s(e.ENTRY_WAS)})` : "entry unchanged";
-            const body = `PROD ROLLBACK · prod ${s(e.PROD_ID)} (was ${s(e.PROD_WAS)}) · ${entry} · smoke ${e.OUTCOME === "success" ? "ok" : e.OUTCOME} · ${e.REASON.slice(0, 200)} · ${e.RUN_URL}`;
+            const body = `PROD ROLLBACK · prod ${s(e.PROD_ID)} (was ${s(e.PROD_WAS)}) · ${entry} · smoke ${e.OUTCOME === "success" ? "ok" : e.OUTCOME} · ${readback} · ${e.REASON.slice(0, 200)} · ${e.RUN_URL}`;
             const command = { id: crypto.randomUUID(), type: "message.posted", data: { messageId: crypto.randomUUID(), body } };
             const res = await fetch(`${e.PROD_ORIGIN}/api/rooms/${e.RECEIPT_ROOM}/commands`, {
               method: "POST",

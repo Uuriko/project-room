@@ -255,7 +255,11 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
             await onSignedIn?.(restored);
             setStatus(reply.mailConfigured ? "Check your email for a verification code." : "Email delivery isn’t configured, so this account stays unverified.");
           } else {
-            setStatus("Check your email for a sign-in link.");
+            // Unauthenticated after a uniform 202 means the email was already
+            // registered. Never promise a sign-in link when mail is off.
+            setStatus(reply.mailConfigured
+              ? "Check your email for a sign-in link."
+              : "Email delivery isn’t configured on this Room, so no sign-in link was sent. If this email is already registered, sign in instead.");
           }
           return;
         }

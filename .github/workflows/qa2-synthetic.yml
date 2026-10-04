@@ -31,7 +31,7 @@ jobs:
           node-version: 24
       - run: npm ci
       - run: npx playwright install --with-deps chromium
-      - run: npm i --no-save @axe-core/playwright@4
+      - run: npm i --no-save @axe-core/playwright@4.13.0
       - name: Stall probe
         run: node scripts/stall-probe.mjs --url https://room.trydemigod.com --path /api/ready --seconds 120 --max-ms 3000 > stall.json
       - name: Public pages gate

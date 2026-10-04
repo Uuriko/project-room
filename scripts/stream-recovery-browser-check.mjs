@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { rmSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { signInFixture } from "./auth-signin.mjs";
@@ -54,3 +54,157 @@ test("native EventSource reconnects after temporary storage failure without losi
   assert.equal(f.store.room("commons").state.messages.some(message => message.body === draft), false);
   assert.deepEqual(errors, []);
 });
+
+// NR-C1 authoring gate: existing client tests own sequence/read coalescing and
+// service tests own cursor replay. These real-browser compositions protect the
+// distinct final message-ID/content contract across held HTTP and native SSE.
+// Expected values are fixture intent, never a production reducer or renderer.
+const messageView = messages => messages.map(({ id, body }) => ({ id, body })).sort((a, b) => a.id.localeCompare(b.id));
+const assertMessageView = (actual, expected) => assert.deepEqual(messageView(actual), messageView(expected));
+const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
+
+for (const schedule of ["initial-handover", "connected-refresh"]) {
+  test(`snapshot-to-stream ${schedule} converges to admitted message identities and content`, { timeout: 30000 }, async t => {
+    const f = createAcceptanceFixture(), held = deferred(), release = deferred(), frameArrived = deferred(), startupRead = deferred();
+    const trace = [], snapshots = [], frames = [], errors = [], admissions = [];
+    const record = (kind, value = {}) => trace.push({ order: trace.length, kind, ...value });
+    const admit = (id, type, data) => {
+      const receipt = f.store.command(f.keys.owner, "commons", { id, type, data });
+      admissions.push({ id: receipt.event.id, sequence: receipt.sequence, type, messageId: data.messageId });
+      record("admitted", admissions.at(-1)); return receipt;
+    };
+    let first;
+    if (schedule === "initial-handover") first = admit("nrc1-seed-command", "message.posted", { messageId: "nrc1-seed", body: "Before handover" });
+    const server = createRoomServer({ store: f.store, streamInterval: 50 });
+    let browser, page, cdp, armed = false, captured = false, heldSequence, targetSequence;
+    let finalView, journal;
+    const oracleControls = [];
+    t.after(async () => {
+      release.resolve();
+      mkdirSync("test-results", { recursive: true });
+      writeFileSync(`test-results/stream-${schedule}.json`, JSON.stringify({ schedule,
+        revision: process.env.GITHUB_SHA ?? "local", trace, snapshots, frames, admissions, journal,
+        finalView, oracleControls, errors }, null, 2) + "\n");
+      await cdp?.detach().catch(() => {}); await browser?.close();
+      server.closeStreams(); server.closeAllConnections();
+      if (server.listening) await new Promise(resolve => server.close(resolve));
+      f.store.close(); rmSync(f.directory, { recursive: true, force: true });
+    });
+    await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+    browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
+    page = await browser.newPage({ viewport: { width: 1280, height: 900 } }); page.setDefaultTimeout(8000);
+    page.on("pageerror", error => errors.push(error.message));
+    page.on("request", request => {
+      const url = new URL(request.url());
+      if (url.pathname === "/api/rooms/commons/stream") record("stream-request", { after: Number(url.searchParams.get("after")) });
+    });
+    // Observe native frames without replacing EventSource or synthesizing data.
+    cdp = await page.context().newCDPSession(page); await cdp.send("Network.enable");
+    cdp.on("Network.eventSourceMessageReceived", frame => {
+      if (frame.eventName !== "room-event") return;
+      const receipt = JSON.parse(frame.data);
+      frames.push({ sequence: receipt.sequence, id: receipt.event.id });
+      record("native-frame", frames.at(-1));
+      if (receipt.sequence === targetSequence) frameArrived.resolve();
+    });
+    await page.goto(`http://127.0.0.1:${server.address().port}`);
+    await page.route(/\/api\/rooms\/commons(?:\?.*)?$/, async route => {
+      if (route.request().method() !== "GET") { await route.continue(); return; }
+      const requestOrder = trace.length;
+      record("snapshot-request");
+      const afterStreamOpen = trace.some(entry => entry.kind === "stream-request");
+      const response = await route.fetch();
+      const snapshot = await response.json();
+      const selected = { sequence: snapshot.sequence,
+        messages: messageView((snapshot.state?.messages ?? []).filter(message => message.id.startsWith("nrc1-"))) };
+      snapshots.push(selected); record("snapshot-captured", selected);
+      if (armed && !captured) {
+        captured = true; heldSequence = snapshot.sequence; record("snapshot-held", { sequence: heldSequence, requestOrder }); held.resolve();
+        await release.promise; record("snapshot-released", { sequence: heldSequence });
+      }
+      await route.fulfill({ response });
+      record("snapshot-delivered", { sequence: snapshot.sequence });
+      if (!armed && afterStreamOpen) startupRead.resolve();
+    });
+    if (schedule === "connected-refresh") {
+      await signInFixture(page, f.keys.owner);
+      // Connected is announced before the on-open GET; await its actual
+      // completion so startup traffic cannot steal the scheduled held read.
+      await startupRead.promise;
+      await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      record("startup-read-settled");
+    }
+    const establishedStreams = trace.filter(entry => entry.kind === "stream-request").length;
+    armed = true;
+    // Initial startup awaits this snapshot before constructing EventSource.
+    // The other schedule keeps its established stream open during the read.
+    const started = schedule === "initial-handover" ? signInFixture(page, f.keys.owner) : Promise.resolve();
+    if (schedule === "connected-refresh") first = admit("nrc1-seed-command", "message.posted", { messageId: "nrc1-seed", body: "Before handover" });
+    await held.promise;
+    assert.equal(heldSequence, first.sequence);
+    if (schedule === "initial-handover") assert.equal(trace.some(entry => entry.kind === "stream-request"), false);
+    admit("nrc1-edit-command", "message.edited", { messageId: "nrc1-seed", body: "Newer admitted content", expectedMessageRevision: 0 });
+    const latest = admit("nrc1-add-command", "message.posted", { messageId: "nrc1-added", body: "Admitted during handover" });
+    targetSequence = latest.sequence;
+    if (schedule === "connected-refresh") {
+      // Native transport must actually deliver the newer hint before release.
+      await frameArrived.promise;
+      await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      assert.equal(await page.locator('[data-message-record-id="nrc1-added"]').count(), 0, "the held read has not caught up yet");
+    }
+    release.resolve(); await started;
+    await frameArrived.promise;
+    await page.waitForFunction(horizon => {
+      const match = document.querySelector("#cursor-label")?.textContent.match(/room event (\d+)/);
+      return Number(match?.[1]) >= horizon;
+    }, latest.sequence);
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    finalView = await page.locator('#message-list [data-message-record-id^="nrc1-"]').evaluateAll(rows => rows.map(row => ({
+      id: row.dataset.messageRecordId, body: row.querySelector(".message-body").textContent
+    })));
+    const expected = [
+      { id: "nrc1-seed", body: "Newer admitted content" },
+      { id: "nrc1-added", body: "Admitted during handover" }
+    ];
+    assertMessageView(finalView, expected);
+    const caughtUp = snapshots.filter(snapshot => snapshot.sequence >= latest.sequence);
+    assert.ok(caughtUp.length > 0, "automatic catch-up fetch reached the admitted horizon");
+    for (const snapshot of caughtUp) assertMessageView(snapshot.messages, expected);
+    const heldAt = trace.findIndex(entry => entry.kind === "snapshot-held");
+    const releasedAt = trace.findIndex(entry => entry.kind === "snapshot-released");
+    const frameAt = trace.findIndex(entry => entry.kind === "native-frame" && entry.sequence === latest.sequence);
+    assert.ok(heldAt < releasedAt);
+    if (schedule === "connected-refresh") {
+      const seedFrameAt = trace.findIndex(entry => entry.kind === "native-frame" && entry.id === first.event.id);
+      assert.ok(seedFrameAt >= 0 && seedFrameAt < trace[heldAt].requestOrder, "native seed notification owns the held GET");
+      assert.ok(heldAt < frameAt && frameAt < releasedAt, "held GET → actual native v2 frame → release stale GET");
+      assert.equal(trace.filter(entry => entry.kind === "stream-request").length, establishedStreams, "no reconnect may mask a dropped refresh hint");
+    } else {
+      const connectedAt = trace.findIndex(entry => entry.kind === "stream-request");
+      assert.ok(releasedAt < connectedAt && connectedAt < frameAt, "initial snapshot release → native stream → replay");
+      assert.equal(trace[connectedAt].after, first.sequence);
+    }
+    // Read only the synthetic fixture's admitted journal IDs, not application
+    // projections. Event identity is distinct from rendered message identity.
+    journal = f.store.db.prepare("SELECT sequence, body FROM events WHERE id IN (?, ?, ?) ORDER BY sequence")
+      .all(...admissions.map(item => item.id)).map(row => ({ sequence: row.sequence, event: JSON.parse(row.body) }));
+    assert.deepEqual(journal.map(row => ({ id: row.event.id, sequence: row.sequence, type: row.event.type, messageId: row.event.data.messageId })), admissions);
+    assert.deepEqual(journal.map(row => [row.event.type, row.event.data.messageId]), [
+      ["message.posted", "nrc1-seed"], ["message.edited", "nrc1-seed"], ["message.posted", "nrc1-added"]
+    ]);
+    // Deliberately corrupt observed copies to prove this independent oracle
+    // rejects loss, duplicate identity and stale content. These are oracle
+    // controls, not evidence of a baseline product bug or weakened assertions.
+    for (const [name, corrupt] of [
+      ["dropped identity", finalView.slice(1)],
+      ["duplicate identity", [...finalView, finalView[0]]],
+      ["stale content", finalView.map(row => row.id === "nrc1-seed" ? { ...row, body: "Before handover" } : row)]
+    ]) {
+      assert.throws(() => assertMessageView(corrupt, expected), { code: "ERR_ASSERTION" });
+      oracleControls.push(name);
+    }
+    assert.deepEqual(errors, []);
+    record("caught-up", { sequence: latest.sequence, messages: messageView(finalView) });
+    t.diagnostic(`${schedule}: held ${heldSequence}; native ${latest.sequence}; exact final identities/content; three oracle controls rejected`);
+  });
+}

@@ -19,20 +19,40 @@ const spaces = /\p{White_Space}+/gu;
 // complete Unicode security implementation. NFKC handles width/style forms.
 const lookalikes = new Map(Object.entries({
   А:'a', В:'b', С:'c', Е:'e', Н:'h', І:'i', Ј:'j', К:'k', М:'m', О:'o', Р:'p', Ѕ:'s', Т:'t', Х:'x', У:'y',
-  а:'a', в:'b', с:'c', е:'e', һ:'h', і:'i', ј:'j', к:'k', м:'m', о:'o', р:'p', ѕ:'s', т:'t', х:'x', у:'y',
+  а:'a', в:'b', с:'c', е:'e', н:'h', һ:'h', і:'i', ј:'j', к:'k', м:'m', о:'o', р:'p', ѕ:'s', т:'t', х:'x', у:'y',
   Α:'a', Β:'b', Ε:'e', Ζ:'z', Η:'h', Ι:'i', Κ:'k', Μ:'m', Ν:'n', Ο:'o', Ρ:'p', Τ:'t', Υ:'y', Χ:'x',
-  α:'a', β:'b', ε:'e', ι:'i', κ:'k', ο:'o', ρ:'p', τ:'t', υ:'y', χ:'x',
+  α:'a', β:'b', ε:'e', ζ:'z', η:'h', ι:'i', κ:'k', μ:'m', ν:'n', ο:'o', ρ:'p', τ:'t', υ:'y', χ:'x',
   // Single-script confusables the Q3-D role guard also folds. These pass the
   // mint mixed-script check (it only counts Latin/Greek/Cyrillic), so without
   // a mapping "ɑdmin" / "օwner" defeat the role-name rule on every path.
   // Note: NFKC folds U+03F2 (lunate sigma) to U+03C2, so the map carries the
   // folded final sigma.
   ɑ:'a', օ:'o', ʏ:'y', ς:'c', ɡ:'g', ӏ:'l',
+  // Latin-script small capitals and the dotless i: NFKC leaves them
+  // alone and the mixed-script check only counts Latin/Greek/Cyrillic,
+  // so without a mapping "ᴀdmin" / "ᴏwner"-style spellings defeat the
+  // role-name rule on every path (QA2-SECREG).
+  ı:'i', ᴉ:'i', ə:'e', ɐ:'a',
+  // Latin-script stroke/hook letters: NFKD leaves them whole and they are
+  // single-script, so "ađmin" / "øwner" / "suþport"-style spellings defeat
+  // the role-name rule on every path (QA2-SECREG followup).
+  đ:'d', ð:'d', ł:'l', ŋ:'n', ø:'o', ß:'s', ƒ:'f', ŧ:'t', þ:'p',
+  // Latin-script hook letters: atomic (NFKD-stable) but read as their base,
+  // so "aɱin" / "suƥport"-style spellings defeat the rule (QA2-SECREG followup).
+  ɱ:'m', ƥ:'p', ɖ:'d', ɗ:'d', ɲ:'n', ɳ:'n', ɨ:'i', ɠ:'g', ƈ:'c',
+  ᴀ:'a', ʙ:'b', ᴄ:'c', ᴅ:'d', ᴇ:'e', ꜰ:'f', ɢ:'g', ʜ:'h',
+  ɪ:'i', ᴊ:'j', ᴋ:'k', ʟ:'l', ᴍ:'m', ɴ:'n', ᴏ:'o', ᴘ:'p',
+  ʀ:'r', ꜱ:'s', ᴛ:'t', ᴜ:'u', ᴠ:'v', ᴡ:'w', ᴢ:'z',
 }));
 
 export function displayNameSkeleton(value) {
   if (typeof value !== 'string') return null;
-  const canonical = value.normalize('NFKC').trim().replace(spaces, ' ').toLowerCase();
+  // NFKD (not NFKC): compatibility folding plus canonical decomposition, so
+  // precomposed accented letters split into base + combining mark; stripping
+  // \p{M} then folds them to the ASCII base. Without this, "àdmin" reads as
+  // "admin" but never matches the reserved-word list (QA2-SECREG followup:
+  // 527 admitted diacritic variants, plus combining-mark sequences).
+  const canonical = value.normalize('NFKD').replace(/\p{M}/gu, '').trim().replace(spaces, ' ').toLowerCase();
   return [...canonical].map(char => lookalikes.get(char) ?? char).join('');
 }
 

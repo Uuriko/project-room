@@ -15,6 +15,11 @@ test("isolated staging owns its Durable Object and does not take production rout
   assert.equal(release.env.production.vars.ROOM_ORIGIN, "https://room.trydemigod.com");
   assert.equal(release.env.production.vars.ROOM_DEPLOYMENT, "production");
   assert.equal(release.env.production.limits.cpu_ms, 30000);
+  // The top-level Worker is the public entry door (www.getdasha.com/room). It
+  // serves production traffic against the production Durable Object, so its
+  // own health, ready and version/worker answers must say production too.
+  assert.equal(release.vars.ROOM_DEPLOYMENT, "production");
+  assert.equal(release.vars.ROOM_SERVICE_MODE, "cloudflare-production");
   const staging = release.env.staging;
   assert.equal(staging.name, "project-room-stage");
   assert.equal(staging.workers_dev, true);

@@ -294,3 +294,87 @@ test("board, settings, and join error have no serious axe findings; pages do not
   await seriousAxe(page, "main");
   assert.deepEqual(csp, []);
 });
+
+test("board dialog traps Tab in both directions (QA2-A11Y focus trap)", { timeout: 90000 }, async t => {
+  const fixture = createAcceptanceFixture();
+  const account = fixture.store.accountForMember("commons", "owner");
+  const accountKey = fixture.store.issueAccountAccessKey(account.id);
+  const server = createRoomServer({ store: fixture.store, streamInterval: 60 });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
+  t.after(async () => {
+    await browser.close(); server.closeStreams(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve)); fixture.store.close();
+    rmSync(fixture.directory, { recursive: true, force: true });
+  });
+  const page = await (await browser.newContext({ viewport: { width: 1280, height: 900 } })).newPage();
+  await page.goto(origin + "/?account=1");
+  await signInFixture(page, accountKey);
+  await page.goto(origin + "/?room=commons");
+  await page.locator("#main").waitFor({ state: "visible" });
+  await page.locator("#tasks-board-open").click();
+  await page.locator("#board-dialog").waitFor({ state: "visible" });
+  const focusEdge = async edge => page.evaluate(which => {
+    const dialog = document.getElementById("board-dialog");
+    const controls = [...dialog.querySelectorAll("button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, a[href], [tabindex]:not([tabindex='-1'])")]
+      .filter(element => element.getClientRects().length > 0);
+    (which === "last" ? controls.at(-1) : controls[0]).focus();
+  }, edge);
+  await focusEdge("last");
+  await page.keyboard.press("Tab");
+  assert.ok(await page.evaluate(() => document.getElementById("board-dialog").contains(document.activeElement)),
+    "Tab from the last control stays inside the board dialog");
+  await focusEdge("first");
+  await page.keyboard.press("Shift+Tab");
+  assert.ok(await page.evaluate(() => document.getElementById("board-dialog").contains(document.activeElement)),
+    "Shift+Tab from the first control stays inside the board dialog");
+});
+
+test("light-theme chat divider keeps 4.5:1 and coarse pointers get 16px/44px controls (QA2-A11Y D-fo-2, D-fo-3)", { timeout: 90000 }, async t => {
+  const fixture = createAcceptanceFixture();
+  const account = fixture.store.accountForMember("commons", "owner");
+  const accountKey = fixture.store.issueAccountAccessKey(account.id);
+  const server = createRoomServer({ store: fixture.store, streamInterval: 60 });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
+  t.after(async () => {
+    await browser.close(); server.closeStreams(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve)); fixture.store.close();
+    rmSync(fixture.directory, { recursive: true, force: true });
+  });
+  const page = await (await browser.newContext({ viewport: { width: 1280, height: 900 } })).newPage();
+  await page.goto(origin + "/?account=1");
+  await signInFixture(page, accountKey);
+  await page.goto(origin + "/?room=commons");
+  await page.locator("#main").waitFor({ state: "visible" });
+  const dividerRatio = await page.evaluate(() => {
+    document.documentElement.setAttribute("data-theme", "light");
+    let el = document.querySelector(".chat-divider:not(.unread)");
+    if (!el) {
+      el = document.createElement("div");
+      el.className = "chat-divider";
+      el.textContent = "Today";
+      (document.querySelector("#messages") ?? document.body).appendChild(el);
+    }
+    const channel = v => { const c = v / 255; return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; };
+    const luminance = rgb => { const [r, g, b] = rgb.match(/[\d.]+/g).slice(0, 3).map(Number).map(channel); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+    const style = getComputedStyle(el);
+    const background = getComputedStyle(el.parentElement).backgroundColor;
+    const [a, b] = [luminance(style.color), luminance(background)].sort((x, y) => y - x);
+    return (a + 0.05) / (b + 0.05);
+  });
+  assert.ok(dividerRatio >= 4.5, `light-theme chat divider contrast ${dividerRatio.toFixed(2)}:1 meets 4.5:1`);
+  const coarse = await (await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })).newPage();
+  await coarse.goto(origin + "/");
+  await coarse.locator("#auth-panel").waitFor({ state: "visible" });
+  const control = await coarse.evaluate(() => {
+    const el = document.querySelector('#auth-signin-ui input[name="email"]') ?? document.querySelector("input");
+    const style = getComputedStyle(el);
+    return { fontPx: parseFloat(style.fontSize), minHeightPx: parseFloat(style.minHeight) };
+  });
+  assert.ok(control.fontPx >= 16, `coarse-pointer input font-size ${control.fontPx}px does not trigger iOS zoom`);
+  assert.ok(control.minHeightPx >= 44, `coarse-pointer input min-height ${control.minHeightPx}px meets the 44px target`);
+  await coarse.close();
+});

@@ -17,6 +17,16 @@
   --bg:#f4f3f8;--panel:#fffbff;--panel-raised:#e8e7ef;--panel-hover:#dddce6;--line:#c9c8d4;--line-soft:#dddce6;--text:#1c1b22;--muted:#5c5b6a;--blue:#33339a;--blue-strong:#3f3fad;--blue-strong-hover:#33338f;--on-accent:#ffffff;--amber:#8a4b00;--green:#0f6b45;--red:#a32020;--violet:#5b3d99;--card:#fffbff;--border:#c9c8d4;--shadow:0 16px 40px rgb(28 27 34 / 12%);
 }
 
+/* Ordinary light-surface content uses the matching light foreground. Keep
+   fixed-dark nested cards and the established dark palette unchanged. */
+:root[data-theme="light"] .message-content > .message-body:not(.message-muted):not(.message-tombstone),
+:root[data-theme="light"] .pinned-item .pinned-body,
+:root[data-theme="light"] .work-details > .work-facts dd { color: var(--text); }
+/* These paragraph states are secondary, even under .message-content p. */
+:root[data-theme="light"] .message-content > .message-muted,
+:root[data-theme="light"] .message-content > .message-tombstone,
+:root[data-theme="light"] .draft-feedback > .form-hint { color: var(--muted); }
+
 * { box-sizing: border-box; }
 html { background: var(--bg); scroll-behavior: smooth; }
 body { margin: 0; background: var(--bg); color: var(--text); }
@@ -108,7 +118,7 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
   display: block; position: absolute; left: 0; top: .15rem; width: 2rem; color: var(--muted); font-size: .55rem; line-height: 1.2; text-align: right;
 }
 .message.mentioned { border-radius: .4rem; background: rgb(173 140 255 / 10%); }
-.chat-divider { grid-column: 1 / -1; margin: .55rem 0 .2rem; color: #8b97a8; font-size: .68rem; font-weight: 700; letter-spacing: .06em; text-align: center; text-transform: uppercase; }
+.chat-divider { grid-column: 1 / -1; margin: .55rem 0 .2rem; color: var(--muted); font-size: .68rem; font-weight: 700; letter-spacing: .06em; text-align: center; text-transform: uppercase; }
 .chat-divider.unread { color: var(--amber); }
 .message-avatar { display: grid; place-items: center; width: 2rem; height: 2rem; border-radius: 50%; background: #3d465f; color: white; font-size: .65rem; font-weight: 650; }
 .message-avatar.agent { border-radius: .45rem; background: #3a2c57; color: #e7ddff; }
@@ -538,6 +548,9 @@ label, input, textarea, select { font-size: 1rem; }
 .member-profile-body details p { font-size: .875rem; line-height: 1.5; }
 .receipt code, .event-list code { display: block; overflow-wrap: anywhere; max-width: 100%; }
 dialog { width: min(38rem, calc(100vw - 1.5rem)); max-height: calc(100dvh - 2rem); overflow: auto; border: 1px solid var(--line); border-radius: .85rem; padding: clamp(1rem, 4vw, 2rem); background: var(--panel); color: var(--text); box-shadow: var(--shadow); }
+/* NR-B: when the browser scrolls a focused control into view inside the
+   action dialog, keep the focus outline clear of the dialog's bottom edge. */
+#action-dialog { scroll-padding-bottom: 0.75rem; }
 dialog::backdrop { background: rgb(0 0 0 / 72%); }
 dialog h2 { margin: 0; }
 dialog p { margin: 0; color: var(--muted); }
@@ -736,6 +749,14 @@ button:disabled { cursor: wait; opacity: .6; }
 .icon-button:hover { color: var(--text); background: rgb(255 255 255 / 6%); }
 @media (pointer: coarse) { .icon-button { min-width: 44px; min-height: 44px; width: 44px; height: 44px; } }
 @media (pointer: coarse) { .button, .topbar-button, .people-actions .button, .search-row .button { min-height: 44px; } }
+/* QA2-A11Y (D-fo-3): form controls under 16px trigger iOS auto-zoom on focus.
+   Coarse pointers get the 16px floor and the 44px touch target. Specific
+   checkbox/radio sizes win by specificity where they are intentional. */
+@media (pointer: coarse) {
+  select, input, textarea { min-height: 44px; }
+  .composer-toolbar select, .inbox-filters select, .inbox-quarantine-header select,
+  .inbox-connection-form input, .inbox-connection-form select { font-size: 1rem; }
+}
 #conversation-title, #return-brief-panel { scroll-margin-top: 1rem; }
 @media (max-width: 1020px) {
   #return-brief-panel, #conversation-title, #people-panel { scroll-margin-top: 3.5rem; }
