@@ -270,6 +270,9 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   // http.mjs: GET reads the room event log. Other methods are not this if.
   // Query after is the cursor; afterSequence is refused. API keys need rooms:read.
   route("/api/rooms/{roomId}/events", ["GET"], "room-member", "Read this room's event log. API keys need the rooms:read scope.", "getRoomEvents"),
+  // http.mjs: GET reads the agent inbox. Other methods are not this if.
+  // The room funnel skips rooms:read here; API keys need inbox:read. Agent members only.
+  route("/api/rooms/{roomId}/agent-inbox", ["GET"], "room-member", "Read this room's agent inbox. Agent members only. API keys need the inbox:read scope.", "getRoomAgentInbox"),
   route("/api/share-links/join-agent", ["POST"], "identity-secret", "Guest-link redemption: join with a guest pass.", "joinAgentViaShareLink"),
   // http.mjs: GET and HEAD both collect cross-room attention. HEAD strips the body.
   // Other methods reject 405. Allow lists GET only; the serving if is the inventory.
