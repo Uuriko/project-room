@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { checkAgentDisplayName, displayNameSkeleton } from '../server/display-name-guard.mjs';
+import { isReservedRoleName, assertNotReservedRoleName } from '../server/display-name-guard.mjs';
 
 const check = (name, activeNames = []) => checkAgentDisplayName(name, { activeNames });
 
@@ -90,4 +91,32 @@ test('integration: identity mint and room link enforce names at the write bounda
   });
   assert.equal(linked.identityId, second.identityId);
   assert.equal(store.room('commons').state.members[linked.memberId].displayName, 'Helpful Agent');
+});
+
+
+test('QA2-SECREG: Latin-script homoglyphs of reserved role words are refused', () => {
+  // Small capitals, dotless/turned i, and schwa are Latin script and NFKC-stable,
+  // so they pass the mixed-script check; the skeleton must fold them or names
+  // like "admın" read as "admin" on every path. Fails pre-fix (mint-safe).
+  const impostors = [
+    'admın',        // U+0131 dotless i
+    'ᴀdmin',        // U+1D00 small capital A
+    'ᴏwner',        // U+1D0F small capital O
+    'sᴜpport',      // U+1D1C small capital U
+    'secᴜrɪty',     // U+1D1C + U+026A small capital I
+    'ꜱystem',       // U+A731 small capital S
+    'ɐdmin',        // U+0250 turned a
+    'səcurity',     // U+0259 schwa
+  ];
+  for (const name of impostors) {
+    assert.equal(isReservedRoleName(name), true, name + ' must read as reserved');
+    // The mint path refuses reserved names via assertNotReservedRoleName (the
+    // mixed-script rule in checkAgentDisplayName only counts Latin/Greek/Cyrillic).
+    assert.throws(() => assertNotReservedRoleName(name),
+      error => error.code === 'display_name_unavailable' && error.reason === 'reserved',
+      name + ' must not mint');
+  }
+  // The skeleton folds the whole small-capital series.
+  assert.equal(displayNameSkeleton('ᴀʙᴄ'), 'abc');
+  assert.equal(displayNameSkeleton('ıɪᴉ'), 'iii');
 });

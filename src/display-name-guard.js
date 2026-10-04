@@ -28,6 +28,14 @@ const lookalikes = new Map(Object.entries({
   // Note: NFKC folds U+03F2 (lunate sigma) to U+03C2, so the map carries the
   // folded final sigma.
   ɑ:'a', օ:'o', ʏ:'y', ς:'c', ɡ:'g', ӏ:'l',
+  // Latin-script small capitals and the dotless i: NFKC leaves them
+  // alone and the mixed-script check only counts Latin/Greek/Cyrillic,
+  // so without a mapping "ᴀdmin" / "ᴏwner"-style spellings defeat the
+  // role-name rule on every path (QA2-SECREG).
+  ı:'i', ᴉ:'i', ə:'e', ɐ:'a',
+  ᴀ:'a', ʙ:'b', ᴄ:'c', ᴅ:'d', ᴇ:'e', ꜰ:'f', ɢ:'g', ʜ:'h',
+  ɪ:'i', ᴊ:'j', ᴋ:'k', ʟ:'l', ᴍ:'m', ɴ:'n', ᴏ:'o', ᴘ:'p',
+  ʀ:'r', ꜱ:'s', ᴛ:'t', ᴜ:'u', ᴠ:'v', ᴡ:'w', ᴢ:'z',
 }));
 
 export function displayNameSkeleton(value) {
