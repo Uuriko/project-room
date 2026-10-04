@@ -31,3 +31,7 @@ export {
   analyticsHealth, baselineReport, isoWeekStart, loadMessages, referralK, roomFunnel,
   signupsByWeek, weekLabel, weeklyProductiveRooms
 } from "./metrics.mjs";
+export {
+  dashboardHonestyReport, falsifierRows, johnActorIdsFromEnv, laneActivitySplit,
+  laneActorIdsFromEnv, nonJohnFundedSettledPerWeek
+} from "./dashboard-honesty.mjs";
