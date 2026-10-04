@@ -9,9 +9,11 @@
 // Waits until /api/version and /api/version/worker report --sha on both the
 // canonical host and the public entry (edge propagation takes a few seconds),
 // then requires /api/health status "ok", /api/ready status "ready", and HTTP
-// 200 for /terms and /privacy. Prints one JSON report; exits 1 on any failure.
+// 200 for /terms, /privacy and / on both doors. Prints one JSON report;
+// exits 1 on any failure.
 // Without --sha it skips the revision wait (used after a rollback, where the
-// old revision is the expected one and is checked by the caller).
+// old revision is the expected one and is checked by the caller), but still
+// checks health, readiness and pages on both doors.
 const args = process.argv.slice(2);
 const opt = (name, fallback = "") => {
   const i = args.indexOf(`--${name}`);
@@ -61,13 +63,15 @@ if (sha) {
   for (const d of doors) record(`version ${d}`, last[d] === sha, { got: last[d] });
 }
 
-const health = await get(`${origin}/api/health`);
-record("health", health.status === 200 && health.json?.status === "ok", { status: health.status, body: health.json?.status ?? null });
-const ready = await get(`${origin}/api/ready`);
-record("ready", ready.status === 200 && ready.json?.status === "ready", { status: ready.status, body: ready.json?.status ?? null });
-for (const page of ["/terms", "/privacy", "/"]) {
-  const r = await get(`${origin}${page}`, "text/html");
-  record(`page ${page}`, r.status === 200, { status: r.status });
+for (const door of [origin, entry]) {
+  const health = await get(`${door}/api/health`);
+  record(`health ${door}/api/health`, health.status === 200 && health.json?.status === "ok", { status: health.status, body: health.json?.status ?? null });
+  const ready = await get(`${door}/api/ready`);
+  record(`ready ${door}/api/ready`, ready.status === 200 && ready.json?.status === "ready", { status: ready.status, body: ready.json?.status ?? null });
+  for (const page of ["/terms", "/privacy", "/"]) {
+    const r = await get(`${door}${page}`, "text/html");
+    record(`page ${door}${page}`, r.status === 200, { status: r.status });
+  }
 }
 
 console.log(JSON.stringify(report, null, 2));
