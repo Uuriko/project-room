@@ -22,6 +22,12 @@ const lookalikes = new Map(Object.entries({
   а:'a', в:'b', с:'c', е:'e', һ:'h', і:'i', ј:'j', к:'k', м:'m', о:'o', р:'p', ѕ:'s', т:'t', х:'x', у:'y',
   Α:'a', Β:'b', Ε:'e', Ζ:'z', Η:'h', Ι:'i', Κ:'k', Μ:'m', Ν:'n', Ο:'o', Ρ:'p', Τ:'t', Υ:'y', Χ:'x',
   α:'a', β:'b', ε:'e', ι:'i', κ:'k', ο:'o', ρ:'p', τ:'t', υ:'y', χ:'x',
+  // Single-script confusables the Q3-D role guard also folds. These pass the
+  // mint mixed-script check (it only counts Latin/Greek/Cyrillic), so without
+  // a mapping "ɑdmin" / "օwner" defeat the role-name rule on every path.
+  // Note: NFKC folds U+03F2 (lunate sigma) to U+03C2, so the map carries the
+  // folded final sigma.
+  ɑ:'a', օ:'o', ʏ:'y', ς:'c', ɡ:'g', ӏ:'l',
 }));
 
 export function displayNameSkeleton(value) {
