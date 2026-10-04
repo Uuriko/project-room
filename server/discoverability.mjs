@@ -229,6 +229,13 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/api/rooms/{roomId}/dm-consents/revoke", ["POST"], "room-member", "Revoke a DM consent in this room. API keys need the rooms:write scope.", "revokeRoomDmConsent"),
   // http.mjs: POST unblocks a DM peer. Other methods are not this if. API keys need rooms:write.
   route("/api/rooms/{roomId}/dm-consents/unblock", ["POST"], "room-member", "Unblock a DM peer in this room. API keys need the rooms:write scope.", "unblockRoomDmConsent"),
+  // http.mjs: GET reads directory status; POST sets discoverable. Other methods are not these ifs.
+  // Owner-only is enforced in the module. API keys need rooms:read or rooms:write.
+  // Distinct from public GET /api/public/rooms/directory.
+  route("/api/rooms/{roomId}/directory", ["GET", "POST"], "room-member", "Read this room's public-directory status. Owner-only. API keys need the rooms:read scope.", "getRoomDirectory", {
+    operationIds: { GET: "getRoomDirectory", POST: "setRoomDirectory" },
+    summaryByMethod: { POST: "Set whether this room is publicly discoverable. Owner-only. API keys need the rooms:write scope." },
+  }),
   route("/api/share-links/join-agent", ["POST"], "identity-secret", "Guest-link redemption: join with a guest pass.", "joinAgentViaShareLink"),
   // http.mjs: GET and HEAD both collect cross-room attention. HEAD strips the body.
   // Other methods reject 405. Allow lists GET only; the serving if is the inventory.

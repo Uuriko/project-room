@@ -3530,6 +3530,46 @@ test("room dm consent unblock is served for the inventoried method", { timeout: 
   assert.equal(body.error.code, "unauthenticated");
 });
 
+// server/http.mjs /api/rooms/{roomId}/directory: GET reads status, POST sets discoverable. Missing credential is 401.
+const ROOM_DIRECTORY_INVENTORY = {
+  "/api/rooms/{roomId}/directory": ["GET", "POST"],
+};
+
+test("openapi inventory lists served room directory methods", () => {
+  const doc = buildOpenApiJson({ origin: "https://room.example" });
+  for (const [path, methods] of Object.entries(ROOM_DIRECTORY_INVENTORY)) {
+    const entry = DISCOVERABILITY_ROUTES.find(item => item.path === path);
+    assert.ok(entry, `route table lists ${path}`);
+    assert.equal(entry.auth, "room-member");
+    assert.deepEqual([...entry.methods].sort(), [...methods].sort(), path);
+    const getOp = doc.paths[path]?.get;
+    const postOp = doc.paths[path]?.post;
+    assert.equal(getOp?.operationId, "getRoomDirectory");
+    assert.equal(postOp?.operationId, "setRoomDirectory");
+    assert.match(getOp.summary, /rooms:read/);
+    assert.match(getOp.summary, /Owner-only/);
+    assert.match(postOp.summary, /rooms:write/);
+    assert.match(postOp.summary, /Owner-only/);
+    assert.match(getOp.description, /room credential/i);
+    assert.match(postOp.description, /room credential/i);
+    assert.doesNotMatch(getOp.description, /no credential required/i);
+  }
+});
+
+test("room directory is served for the inventoried methods", { timeout: 30000 }, async t => {
+  const { origin } = await serve(t);
+  for (const method of ["GET", "POST"]) {
+    const res = await fetch(`${origin}/api/rooms/commons/directory`, {
+      method,
+      headers: { Origin: origin, ...(method === "POST" ? { "Content-Type": "application/json" } : {}) },
+      ...(method === "POST" ? { body: "{}" } : {}),
+    });
+    const body = await res.json();
+    assert.equal(res.status, 401, method);
+    assert.equal(body.error.code, "unauthenticated", method);
+  }
+});
+
 test("openapi inventory lists served work-claims methods", () => {
   const doc = buildOpenApiJson({ origin: "https://room.example" });
   for (const [path, methods] of Object.entries(WORK_CLAIM_INVENTORY)) {
