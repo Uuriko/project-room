@@ -140,6 +140,8 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
     { operationIds: { GET: "listAgentKeys", POST: "issueAgentKey" } }),
   // agent-plugin-routes.mjs: POST rotates one key after confirm:true. Other methods are not this handler.
   route("/api/agent-keys/{keyId}/rotate", ["POST"], "identity-secret", "Rotate one API key. Requires confirm:true. The replacement credential is shown once.", "rotateAgentKey"),
+  // agent-plugin-routes.mjs: POST revokes one key after confirm:true. Other methods are not this handler.
+  route("/api/agent-keys/{keyId}/revoke", ["POST"], "identity-secret", "Revoke one API key. Requires confirm:true. The key stops working immediately.", "revokeAgentKey"),
   // Webhooks family.
   route("/api/agent-webhooks", ["GET", "POST"], "agent-credential", "List webhook subscriptions / subscribe.", "agentWebhooks",
     { operationIds: { GET: "listAgentWebhooks", POST: "subscribeAgentWebhook" } }),

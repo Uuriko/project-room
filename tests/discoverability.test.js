@@ -1361,6 +1361,35 @@ test("agent key rotate is served for the inventoried method", { timeout: 30000 }
   assert.equal(body.error.code, "unauthenticated");
 });
 
+// server/agent-plugin-routes.mjs /api/agent-keys/{keyId}/revoke: POST only. Missing bearer is 401.
+const AGENT_KEY_REVOKE_INVENTORY = {
+  "/api/agent-keys/{keyId}/revoke": ["POST"],
+};
+
+test("openapi inventory lists served agent key revoke methods", () => {
+  const doc = buildOpenApiJson({ origin: "https://room.example" });
+  for (const [path, methods] of Object.entries(AGENT_KEY_REVOKE_INVENTORY)) {
+    const entry = DISCOVERABILITY_ROUTES.find(item => item.path === path);
+    assert.ok(entry, `route table lists ${path}`);
+    assert.deepEqual([...entry.methods].sort(), [...methods].sort(), path);
+    for (const method of methods) {
+      assert.equal(typeof doc.paths[path]?.[method.toLowerCase()]?.operationId, "string", `${method} ${path}`);
+    }
+  }
+});
+
+test("agent key revoke is served for the inventoried method", { timeout: 30000 }, async t => {
+  const { origin } = await serve(t);
+  const res = await fetch(`${origin}/api/agent-keys/rak_probe/revoke`, {
+    method: "POST",
+    headers: { Origin: origin, "Content-Type": "application/json" },
+    body: "{}",
+  });
+  const body = await res.json();
+  assert.equal(res.status, 401);
+  assert.equal(body.error.code, "unauthenticated");
+});
+
 test("openapi inventory lists served work-claims methods", () => {
   const doc = buildOpenApiJson({ origin: "https://room.example" });
   for (const [path, methods] of Object.entries(WORK_CLAIM_INVENTORY)) {
