@@ -199,6 +199,11 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/api/rooms/{roomId}/guest-invites-upgrade", ["POST"], "room-member", "Upgrade a guest member in this room. API keys need the rooms:write scope.", "upgradeRoomGuestMember"),
   // http.mjs: POST mutates reminders. Other methods are not this if. API keys need rooms:write.
   route("/api/rooms/{roomId}/reminders", ["POST"], "room-member", "Create or update a reminder in this room. API keys need the rooms:write scope.", "mutateRoomReminder"),
+  // http.mjs: GET lists reports (owner alone); POST files one. Other methods are not these ifs.
+  route("/api/rooms/{roomId}/reports", ["GET", "POST"], "room-member", "List moderation reports in this room. Owner-only. API keys need the rooms:read scope.", "listRoomReports", {
+    operationIds: { GET: "listRoomReports", POST: "reportRoomMessage" },
+    summaryByMethod: { POST: "File a moderation report in this room. API keys need the rooms:write scope." },
+  }),
   route("/api/share-links/join-agent", ["POST"], "identity-secret", "Guest-link redemption: join with a guest pass.", "joinAgentViaShareLink"),
   // http.mjs: GET and HEAD both collect cross-room attention. HEAD strips the body.
   // Other methods reject 405. Allow lists GET only; the serving if is the inventory.
