@@ -249,6 +249,10 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
     operationIds: { GET: "getRoomPublicFace", POST: "setRoomPublicFace" },
     summaryByMethod: { POST: "Enable or disable this room's public face. Owner-only. API keys need the rooms:write scope." },
   }),
+  // http.mjs: POST rotates the public-face code. Other methods are not this if.
+  // Distinct from GET/POST /api/rooms/{roomId}/public-face. Public reads the face at /p/{code}.
+  // Owner-only is enforced in the module. API keys need rooms:write.
+  route("/api/rooms/{roomId}/public-face/rotate", ["POST"], "room-member", "Rotate this room's public-face code. Owner-only. API keys need the rooms:write scope.", "rotateRoomPublicFace"),
   route("/api/share-links/join-agent", ["POST"], "identity-secret", "Guest-link redemption: join with a guest pass.", "joinAgentViaShareLink"),
   // http.mjs: GET and HEAD both collect cross-room attention. HEAD strips the body.
   // Other methods reject 405. Allow lists GET only; the serving if is the inventory.
