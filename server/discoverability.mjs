@@ -220,6 +220,9 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
     operationIds: { GET: "listRoomDmConsents", POST: "requestRoomDmConsent" },
     summaryByMethod: { POST: "Request a DM consent pair in this room. API keys need the rooms:write scope." },
   }),
+  // http.mjs: POST decides a DM consent request. Other methods are not this if.
+  // The method is POST, so API keys need rooms:write.
+  route("/api/rooms/{roomId}/dm-consents/{requesterId}/decide", ["POST"], "room-member", "Decide a DM consent request. API keys need the rooms:write scope.", "decideRoomDmConsent"),
   route("/api/share-links/join-agent", ["POST"], "identity-secret", "Guest-link redemption: join with a guest pass.", "joinAgentViaShareLink"),
   // http.mjs: GET and HEAD both collect cross-room attention. HEAD strips the body.
   // Other methods reject 405. Allow lists GET only; the serving if is the inventory.
