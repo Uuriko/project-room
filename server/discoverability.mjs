@@ -191,6 +191,9 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   // http.mjs: POST disconnects one guest member by memberId. Other methods are not this if.
   // API keys need rooms:write.
   route("/api/rooms/{roomId}/guest-invites-disconnect", ["POST"], "room-member", "Disconnect a guest member from this room. API keys need the rooms:write scope.", "disconnectRoomGuestMember"),
+  // http.mjs: POST revokes every guest invite in the room. Other methods are not this if.
+  // API keys need rooms:write.
+  route("/api/rooms/{roomId}/guest-invites-revoke-all", ["POST"], "room-member", "Revoke every guest invite in this room. API keys need the rooms:write scope.", "revokeAllRoomGuestInvites"),
   route("/api/share-links/join-agent", ["POST"], "identity-secret", "Guest-link redemption: join with a guest pass.", "joinAgentViaShareLink"),
   // http.mjs: GET and HEAD both collect cross-room attention. HEAD strips the body.
   // Other methods reject 405. Allow lists GET only; the serving if is the inventory.
