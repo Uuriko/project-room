@@ -122,6 +122,8 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   // Other methods are not this handler. Ack is POST /api/agent-heartbeats/ack.
   route("/api/agent-heartbeats", ["GET", "POST"], "heartbeat-presence", "Report host liveness (POST, heartbeats:report) or read host presence (GET, heartbeats:read). A room access key may report and read pull-only presence.", "readAgentHeartbeats",
     { operationIds: { GET: "readAgentHeartbeats", POST: "reportAgentHeartbeat" } }),
+  // agent-plugin-routes.mjs: POST acknowledges queued wake signals. Other methods are not this handler.
+  route("/api/agent-heartbeats/ack", ["POST"], "heartbeat-presence", "Acknowledge queued wake signals. API keys need the heartbeats:report scope. A room access key acknowledges only its own room.", "ackAgentHeartbeats"),
   route("/api/agent-rooms", ["GET", "POST"], "identity-secret", "List rooms owned by the calling identity (GET) or create a room owned by it (POST).", "createAgentRoom",
     { operationIds: { GET: "listAgentRooms", POST: "createAgentRoom" } }),
   route("/api/agent-invites/redeem", ["POST"], "invite-code", "Redeem a one-time invite code for room membership.", "redeemInvite"),

@@ -1982,6 +1982,40 @@ test("agent heartbeats are served for the inventoried methods", { timeout: 30000
   assert.equal(postBody.error.code, "unauthenticated");
 });
 
+// server/agent-plugin-routes.mjs /api/agent-heartbeats/ack: POST only. Missing bearer is 401.
+const AGENT_HEARTBEAT_ACK_INVENTORY = {
+  "/api/agent-heartbeats/ack": ["POST"],
+};
+
+test("openapi inventory lists served agent heartbeat ack methods", () => {
+  const doc = buildOpenApiJson({ origin: "https://room.example" });
+  for (const [path, methods] of Object.entries(AGENT_HEARTBEAT_ACK_INVENTORY)) {
+    const entry = DISCOVERABILITY_ROUTES.find(item => item.path === path);
+    assert.ok(entry, `route table lists ${path}`);
+    assert.deepEqual([...entry.methods].sort(), [...methods].sort(), path);
+    assert.equal(doc.paths[path]?.post?.operationId, "ackAgentHeartbeats");
+    for (const method of methods) {
+      const op = doc.paths[path][method.toLowerCase()];
+      assert.equal(typeof op?.operationId, "string", `${method} ${path}`);
+      assert.match(op.summary, /heartbeats:report/);
+      assert.match(op.description, /room access key/);
+      assert.match(op.description, /identity secret/);
+    }
+  }
+});
+
+test("agent heartbeat ack is served for the inventoried method", { timeout: 30000 }, async t => {
+  const { origin } = await serve(t);
+  const res = await fetch(`${origin}/api/agent-heartbeats/ack`, {
+    method: "POST",
+    headers: { Origin: origin, "Content-Type": "application/json" },
+    body: "{}",
+  });
+  const body = await res.json();
+  assert.equal(res.status, 401);
+  assert.equal(body.error.code, "unauthenticated");
+});
+
 test("openapi inventory lists served work-claims methods", () => {
   const doc = buildOpenApiJson({ origin: "https://room.example" });
   for (const [path, methods] of Object.entries(WORK_CLAIM_INVENTORY)) {
