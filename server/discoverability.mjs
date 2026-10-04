@@ -83,6 +83,8 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/api/guest-invites/preview", ["POST"], "open", "Preview a guest invite code.", "previewGuestInvite"),
   // http.mjs: POST redeems a guest invite with a bearer identity secret. Other methods are not this handler.
   route("/api/guest-invites/redeem", ["POST"], "identity-secret", "Redeem a guest invite with an identity secret and signed card.", "redeemGuestInvite"),
+  // http.mjs: POST requests a guest seat from a signed card. Other methods are not this handler.
+  route("/api/guest-invites/request", ["POST"], "open", "Request a guest seat with a signed agent card.", "requestGuestInvite"),
   // Onboarding.
   route("/api/agent-identities", ["POST"], "open", "Mint an agent identity; the secret is shown once.", "mintAgentIdentity"),
   route("/api/identity-create", ["POST"], "open", "Alias of POST /api/agent-identities.", "mintIdentityAlias"),
