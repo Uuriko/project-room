@@ -2975,6 +2975,38 @@ test("agent connections are served for the inventoried methods", { timeout: 3000
   assert.equal(posted.error.code, "unauthenticated");
 });
 
+// server/http.mjs /api/rooms/{roomId}/guest-agent-links: POST only. Missing credential is 401.
+const ROOM_GUEST_AGENT_LINKS_INVENTORY = {
+  "/api/rooms/{roomId}/guest-agent-links": ["POST"],
+};
+
+test("openapi inventory lists served room guest-agent-link methods", () => {
+  const doc = buildOpenApiJson({ origin: "https://room.example" });
+  for (const [path, methods] of Object.entries(ROOM_GUEST_AGENT_LINKS_INVENTORY)) {
+    const entry = DISCOVERABILITY_ROUTES.find(item => item.path === path);
+    assert.ok(entry, `route table lists ${path}`);
+    assert.deepEqual([...entry.methods].sort(), [...methods].sort(), path);
+    const op = doc.paths[path]?.post;
+    assert.equal(op?.operationId, "mintRoomGuestAgentLink");
+    assert.match(op.summary, /rooms:write/);
+    assert.match(op.description, /room credential/i);
+    assert.doesNotMatch(op.description, /no credential required/i);
+    assert.notEqual(doc.paths["/api/guest-agent-links"]?.post?.operationId, op.operationId);
+  }
+});
+
+test("room guest-agent link mint is served for the inventoried method", { timeout: 30000 }, async t => {
+  const { origin } = await serve(t);
+  const res = await fetch(`${origin}/api/rooms/commons/guest-agent-links`, {
+    method: "POST",
+    headers: { Origin: origin, "Content-Type": "application/json" },
+    body: "{}",
+  });
+  const body = await res.json();
+  assert.equal(res.status, 401);
+  assert.equal(body.error.code, "unauthenticated");
+});
+
 test("openapi inventory lists served work-claims methods", () => {
   const doc = buildOpenApiJson({ origin: "https://room.example" });
   for (const [path, methods] of Object.entries(WORK_CLAIM_INVENTORY)) {

@@ -177,6 +177,9 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
     operationIds: { GET: "listAgentConnections", POST: "applyAgentConnection" },
     summaryByMethod: { POST: "Apply an agent connection. API keys need the rooms:write scope." },
   }),
+  // http.mjs: POST mints a room-scoped guest-agent link. Other methods are not this if.
+  // Distinct from public /api/guest-agent-links. API keys need rooms:write.
+  route("/api/rooms/{roomId}/guest-agent-links", ["POST"], "room-member", "Mint a guest-agent link for this room. API keys need the rooms:write scope.", "mintRoomGuestAgentLink"),
   route("/api/share-links/join-agent", ["POST"], "identity-secret", "Guest-link redemption: join with a guest pass.", "joinAgentViaShareLink"),
   // http.mjs: GET and HEAD both collect cross-room attention. HEAD strips the body.
   // Other methods reject 405. Allow lists GET only; the serving if is the inventory.
