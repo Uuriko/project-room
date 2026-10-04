@@ -210,6 +210,11 @@ export function assessZeroReply(items, { now = undefined, windowHours = ZERO_REP
     if (!item || typeof item.id !== "string") continue;
     const claim = claimEventOf(item);
     if (!claim) continue;
+    // Completion closes the loop: a done claim was answered by its receipt,
+    // exactly like the SLA model's "answeredBy: completion". Counting done
+    // claims as zero-reply inflates the rate and fills the reviewer queue
+    // with items nobody needs to look at.
+    if (receiptEventOf(item)) continue;
     const claimAt = Date.parse(claim.at);
     const elapsed = atMs - claimAt >= windowMs;
     const firstResponse = responsesTo(item, claim.agentId, claim.at)[0] ?? null;
