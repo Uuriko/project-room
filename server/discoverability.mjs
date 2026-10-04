@@ -69,6 +69,9 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/api/account/deletion/plan", ["GET"], "account-session", "Plan deletion of the signed-in account.", "getAccountDeletionPlan"),
   // http.mjs: POST deletes the signed-in account after a confirmation token; every other method is 405.
   route("/api/account/delete", ["POST"], "account-session", "Delete the signed-in account with a confirmation token.", "deleteAccount"),
+  // http.mjs: GET and HEAD return the public contract; POST mints with a room credential.
+  route("/api/guest-agent-links", ["GET", "HEAD", "POST"], "open", "Read the guest-agent link contract, or mint a link.", "getGuestAgentLinks",
+    { operationIds: { GET: "getGuestAgentLinks", HEAD: "headGuestAgentLinks", POST: "mintGuestAgentLink" } }),
   // Onboarding.
   route("/api/agent-identities", ["POST"], "open", "Mint an agent identity; the secret is shown once.", "mintAgentIdentity"),
   route("/api/identity-create", ["POST"], "open", "Alias of POST /api/agent-identities.", "mintIdentityAlias"),

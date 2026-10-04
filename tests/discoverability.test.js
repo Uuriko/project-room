@@ -884,6 +884,45 @@ test("account-delete is served for the inventoried method", { timeout: 30000 }, 
   assert.equal(other.status, 405);
 });
 
+// server/http.mjs /api/guest-agent-links: GET and HEAD return the contract;
+// POST mints. Other methods are not this handler.
+const GUEST_AGENT_LINKS_INVENTORY = {
+  "/api/guest-agent-links": ["GET", "HEAD", "POST"],
+};
+
+test("openapi inventory lists served guest-agent-links methods", () => {
+  const doc = buildOpenApiJson({ origin: "https://room.example" });
+  for (const [path, methods] of Object.entries(GUEST_AGENT_LINKS_INVENTORY)) {
+    const entry = DISCOVERABILITY_ROUTES.find(item => item.path === path);
+    assert.ok(entry, `route table lists ${path}`);
+    assert.deepEqual([...entry.methods].sort(), [...methods].sort(), path);
+    for (const method of methods) {
+      assert.equal(typeof doc.paths[path]?.[method.toLowerCase()]?.operationId, "string", `${method} ${path}`);
+    }
+  }
+});
+
+test("guest-agent-links routes are served for the inventoried methods", { timeout: 30000 }, async t => {
+  const { origin } = await serve(t);
+  for (const method of GUEST_AGENT_LINKS_INVENTORY["/api/guest-agent-links"]) {
+    const res = await fetch(`${origin}/api/guest-agent-links`, {
+      method,
+      headers: { Origin: origin, "Content-Type": "application/json" },
+      body: method === "POST" ? "{}" : undefined,
+    });
+    const raw = Buffer.from(await res.arrayBuffer());
+    assert.ok(![404, 405].includes(res.status), `${method} /api/guest-agent-links served, got ${res.status}`);
+    if (method === "GET") {
+      assert.equal(res.status, 200);
+      assert.equal(typeof JSON.parse(raw.toString("utf8")), "object");
+    }
+    if (method === "HEAD") {
+      assert.equal(res.status, 200);
+      assert.equal(raw.length, 0);
+    }
+  }
+});
+
 test("openapi inventory lists served work-claims methods", () => {
   const doc = buildOpenApiJson({ origin: "https://room.example" });
   for (const [path, methods] of Object.entries(WORK_CLAIM_INVENTORY)) {
