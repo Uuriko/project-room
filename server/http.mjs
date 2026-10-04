@@ -926,7 +926,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           // Join traffic stays on the small JSON cap. A live identity secret
           // may stage one room file (base64, at most attachmentLimits.fileBytes).
           const fileBody = typeof req.headers.authorization === "string"
-            && (req.headers.authorization.startsWith("Bearer pri_") || req.headers.authorization.startsWith("Bearer rak_"));
+            // RFC 7235: auth scheme is case-insensitive ("bearer"/"BEARER"
+            // accepted), matching bearer()/carriesBearer() above.
+            && /^bearer (?:pri_|rak_)/i.test(req.headers.authorization);
           const text = await readText(req, fileBody ? mcpAttachmentBodyBytes : JSON_BODY_BYTES, () => new ServiceError(413, "too_large", "Request is too large"));
           return writeRoomMcpNode(req, res, url, { bodyText: text, roomMcp: hostedRoomMcp });
         }
