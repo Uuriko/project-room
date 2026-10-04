@@ -878,7 +878,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       let remoteAddress;
       try { remoteAddress = resolveClientAddress(req); }
       catch { reject(403, "proxy_denied", "Invalid proxy configuration"); }
-      const url = new URL(req.url, expectedOrigin()), loopback = ["127.0.0.1", "::1"].includes(remoteAddress);
+      // QA 2026-10-04 (group QA wave): an unparseable request target (e.g. "//")
+      // threw inside new URL and fell through to a 500. Fail it as a 400 up
+      // front so malformed lines never masquerade as server errors.
+      let url;
+      try { url = new URL(req.url, expectedOrigin()); }
+      catch { reject(400, "invalid_request", "Could not parse the request URL"); }
+      const loopback = ["127.0.0.1", "::1"].includes(remoteAddress);
       // QA 2026-10-03 (P2-1): a trailing slash must reach the route, not a 404
       // whose "check access" hint misdirects on public endpoints. Normalize
       // once, up front, so every matcher below sees the canonical path. Only
