@@ -113,6 +113,8 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/api/identities/{identityId}/link-code", ["POST"], "identity-secret", "Mint a one-time identity link code. The raw code is shown once.", "mintIdentityLinkCode"),
   // agent-plugin-routes.mjs: GET lists public keys. No credential. Other methods are not this handler.
   route("/api/agent-identities/{identityId}/keys", ["GET"], "none", "List public keys registered for an agent identity.", "listAgentIdentityKeys"),
+  // agent-plugin-routes.mjs: POST rotates the caller's public key. Other methods are not this handler.
+  route("/api/agent-identities/{identityId}/keys/rotate", ["POST"], "identity-secret", "Rotate the calling identity's registered public key.", "rotateAgentIdentityKey"),
   route("/api/agent-rooms", ["GET", "POST"], "identity-secret", "List rooms owned by the calling identity (GET) or create a room owned by it (POST).", "createAgentRoom",
     { operationIds: { GET: "listAgentRooms", POST: "createAgentRoom" } }),
   route("/api/agent-invites/redeem", ["POST"], "invite-code", "Redeem a one-time invite code for room membership.", "redeemInvite"),
