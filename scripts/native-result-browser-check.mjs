@@ -119,8 +119,21 @@ for (const theme of ["dark", "light"]) test(`native result 320px ${theme}: read,
     const value = await page.evaluate(({ panelSelector, textSelector }) => {
       const panel = panelSelector && document.querySelector(panelSelector), text = textSelector && document.querySelector(textSelector);
       const active = document.activeElement, box = active.getBoundingClientRect(), style = getComputedStyle(active);
-      const x = (Math.max(0, box.left) + Math.min(innerWidth, box.right)) / 2;
-      const y = (Math.max(0, box.top) + Math.min(innerHeight, box.bottom)) / 2;
+      // A viewport-contained control can still be cut off by a scrolling
+      // dialog. Measure every clipping ancestor without scrolling it for the test.
+      const clip = { left: 0, top: 0, right: innerWidth, bottom: innerHeight }, clippingAncestors = [];
+      for (let node = active.parentElement; node; node = node.parentElement) {
+        const css = getComputedStyle(node), rect = node.getBoundingClientRect();
+        const clipsX = /^(auto|scroll|hidden|clip)$/.test(css.overflowX), clipsY = /^(auto|scroll|hidden|clip)$/.test(css.overflowY);
+        if (!clipsX && !clipsY) continue;
+        const bounds = { left: rect.left + node.clientLeft, top: rect.top + node.clientTop,
+          right: rect.left + node.clientLeft + node.clientWidth, bottom: rect.top + node.clientTop + node.clientHeight };
+        if (clipsX) { clip.left = Math.max(clip.left, bounds.left); clip.right = Math.min(clip.right, bounds.right); }
+        if (clipsY) { clip.top = Math.max(clip.top, bounds.top); clip.bottom = Math.min(clip.bottom, bounds.bottom); }
+        clippingAncestors.push({ id: node.id, clipsX, clipsY, ...bounds });
+      }
+      const x = (Math.max(clip.left, box.left) + Math.min(clip.right, box.right)) / 2;
+      const y = (Math.max(clip.top, box.top) + Math.min(clip.bottom, box.bottom)) / 2;
       const hit = document.elementFromPoint(x, y);
       return { width: innerWidth, height: innerHeight, documentWidth: document.documentElement.scrollWidth,
         theme: document.documentElement.dataset.theme,
@@ -128,7 +141,8 @@ for (const theme of ["dark", "light"]) test(`native result 320px ${theme}: read,
         text: text && { scrollWidth: text.scrollWidth, clientWidth: text.clientWidth },
         focus: { id: active.id, name: active.getAttribute("name"), workItemId: active.closest("[data-work-record-id]")?.dataset.workRecordId,
           x: box.x, y: box.y, width: box.width, height: box.height, outline: style.outline, boxShadow: style.boxShadow,
-          unobscured: hit === active || active.contains(hit) } };
+          unobscured: hit === active || active.contains(hit), clip, clippingAncestors,
+          fullyVisible: box.left >= clip.left - 1 && box.right <= clip.right + 1 && box.top >= clip.top - 1 && box.bottom <= clip.bottom + 1 } };
     }, { panelSelector, textSelector });
     evidence.push({ stage, url: page.url(), ...value });
     await page.screenshot({ path: `test-results/native-reflow/${theme}-${stage}.png` });
@@ -180,6 +194,11 @@ for (const theme of ["dark", "light"]) test(`native result 320px ${theme}: read,
   assert.equal(await page.locator("#message-input").inputValue(), "Keep this reviewer's conversation draft.");
   assert.ok(reads.length > 0, "the real result route was exercised");
   assert.ok(reads.every(value => value.workItemId === f.workItemId && value.completionEventId === receipt.eventId));
+  // Full core-control visibility is the product requirement for this task;
+  // it is stricter than WCAG 2.4.11's not-entirely-obscured minimum. Preserve
+  // every journey screenshot before reporting a clipping failure.
+  assert.deepEqual(evidence.filter(value => value.panel && !value.focus.fullyVisible)
+    .map(value => ({ stage: value.stage, focus: value.focus })), [], "focused modal controls fit inside all clipping ancestors");
 });
 
 test("native review refuses self-consistent text from a different pinned evidence version", { timeout: 25000 }, async t => {
