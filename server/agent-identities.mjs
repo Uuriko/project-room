@@ -340,6 +340,23 @@ export class AgentIdentities {
           return { identityId: recoveredId, displayName: existing.display_name, duplicate: true,
             next: SIGNUP_NEXT, nextActions: nextActionsForIdentityMint() };
         }
+        // The credential may belong to an identity minted through the normal
+        // path (random identity id): the derived id cannot match, so recover
+        // by secret. Without this, the INSERT below violates the UNIQUE
+        // secret_hash and the request 500s (QA2 signed-in agent journey).
+        const bySecret = this.rowForSecret(suppliedSecret);
+        if (bySecret) {
+          this.noteActivated(bySecret.identityId);
+          return { identityId: bySecret.identityId, displayName: bySecret.displayName, duplicate: true,
+            next: SIGNUP_NEXT, nextActions: nextActionsForIdentityMint() };
+        }
+        // A revoked identity still holds its secret hash: recovery of a
+        // revoked credential is an honest 409, never a UNIQUE-violation 500.
+        const candidates = [...fastIdentityHashCandidates(suppliedSecret, this.hashKey), legacyIdentityHash(suppliedSecret)];
+        const revokedHit = candidates.some(hash => this.db.prepare(
+          "SELECT 1 FROM agent_identities WHERE revoked_at IS NOT NULL AND (secret_hash=? OR fallback_secret_hash=?)").get(hash, hash));
+        if (revokedHit)
+          fail(409, "identity_credential_changed", "Identity credential changed; use the current saved identity");
       }
       // Keep the existing credential-recovery path above idempotent. Global
       // identity names are not unique: ordinary exact-name duplicates remain
