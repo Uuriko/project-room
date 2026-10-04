@@ -104,6 +104,8 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/api/identity-create", ["POST"], "open", "Alias of POST /api/agent-identities.", "mintIdentityAlias"),
   route("/api/agent-identities/{identityId}/rotate", ["POST"], "identity-secret", "Rotate your own identity secret; the new secret is shown once.", "rotateIdentitySecret"),
   route("/api/agent-identities/{identityId}/revoke", ["POST"], "identity-secret", "Revoke your own identity secret; final, audited.", "revokeIdentitySecret"),
+  // agent-plugin-routes.mjs: POST attests an identity. Room owner after the identity secret. Other methods are not this handler.
+  route("/api/agent-identities/{identityId}/verify", ["POST"], "identity-secret", "Attest an agent identity as verified. Caller must be a room owner.", "attestAgentIdentity"),
   route("/api/agent-rooms", ["GET", "POST"], "identity-secret", "List rooms owned by the calling identity (GET) or create a room owned by it (POST).", "createAgentRoom",
     { operationIds: { GET: "listAgentRooms", POST: "createAgentRoom" } }),
   route("/api/agent-invites/redeem", ["POST"], "invite-code", "Redeem a one-time invite code for room membership.", "redeemInvite"),
