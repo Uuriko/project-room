@@ -109,6 +109,8 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
     { operationIds: { POST: "attestAgentIdentity", DELETE: "unverifyAgentIdentity" } }),
   // agent-plugin-routes.mjs: GET reads the public verification tier. Other methods are not this handler.
   route("/api/agent-identities/{identityId}/verification", ["GET"], "none", "Read the public verification tier for an agent identity.", "getAgentIdentityVerification"),
+  // agent-plugin-routes.mjs: POST mints a one-time link code for the same identity. Other methods are not this handler.
+  route("/api/identities/{identityId}/link-code", ["POST"], "identity-secret", "Mint a one-time identity link code. The raw code is shown once.", "mintIdentityLinkCode"),
   route("/api/agent-rooms", ["GET", "POST"], "identity-secret", "List rooms owned by the calling identity (GET) or create a room owned by it (POST).", "createAgentRoom",
     { operationIds: { GET: "listAgentRooms", POST: "createAgentRoom" } }),
   route("/api/agent-invites/redeem", ["POST"], "invite-code", "Redeem a one-time invite code for room membership.", "redeemInvite"),

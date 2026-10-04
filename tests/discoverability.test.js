@@ -1830,6 +1830,35 @@ test("agent identity verification is served for the inventoried method", { timeo
   assert.equal(body.level, "unverified");
 });
 
+// server/agent-plugin-routes.mjs /api/identities/{identityId}/link-code: POST only. Missing bearer is 401.
+const IDENTITY_LINK_CODE_INVENTORY = {
+  "/api/identities/{identityId}/link-code": ["POST"],
+};
+
+test("openapi inventory lists served identity link-code methods", () => {
+  const doc = buildOpenApiJson({ origin: "https://room.example" });
+  for (const [path, methods] of Object.entries(IDENTITY_LINK_CODE_INVENTORY)) {
+    const entry = DISCOVERABILITY_ROUTES.find(item => item.path === path);
+    assert.ok(entry, `route table lists ${path}`);
+    assert.deepEqual([...entry.methods].sort(), [...methods].sort(), path);
+    for (const method of methods) {
+      assert.equal(typeof doc.paths[path]?.[method.toLowerCase()]?.operationId, "string", `${method} ${path}`);
+    }
+  }
+});
+
+test("identity link-code is served for the inventoried method", { timeout: 30000 }, async t => {
+  const { origin } = await serve(t);
+  const res = await fetch(`${origin}/api/identities/ai_probe/link-code`, {
+    method: "POST",
+    headers: { Origin: origin, "Content-Type": "application/json" },
+    body: "{}",
+  });
+  const body = await res.json();
+  assert.equal(res.status, 401);
+  assert.equal(body.error.code, "unauthenticated");
+});
+
 test("openapi inventory lists served work-claims methods", () => {
   const doc = buildOpenApiJson({ origin: "https://room.example" });
   for (const [path, methods] of Object.entries(WORK_CLAIM_INVENTORY)) {
