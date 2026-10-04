@@ -32,6 +32,11 @@ test("GET /api/version returns the release receipt metadata without authenticati
   assert.equal(head.status, 200);
   assert.equal(await head.text(), "");
   assert.equal((await fetch(`${origin}/api/version`, { method: "POST" })).status, 404);
+  // QA 2026-10-03 P2-1: a trailing slash must hit the route, not a 404 whose
+  // "check access" hint misdirects on a public endpoint.
+  const slashed = await fetch(`${origin}/api/version/`);
+  assert.equal(slashed.status, 200);
+  assert.deepEqual(await slashed.json(), body);
 });
 
 test("stamp-version writes immutable revision/build metadata and re-import verifies", t => {

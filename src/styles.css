@@ -28,6 +28,34 @@ a { color: var(--blue); }
 .skip-link { position: fixed; left: 1rem; top: 1rem; z-index: 100; padding: .75rem 1rem; background: white; color: black; clip-path: inset(50%); }
 .skip-link:focus { clip-path: none; }
 .app-shell { min-height: 100dvh; }
+/* Static hero (QA 2026-10-03 P1-1): the no-JS / crawler / slow-connection
+   page. Removed by the app on boot; pure CSS, no JavaScript dependency. */
+.static-hero {
+  border-bottom: 1px solid var(--line);
+  background: radial-gradient(60rem 22rem at 20% -4rem, rgb(47 99 199 / 22%), transparent 70%), var(--bg);
+  padding: clamp(2.5rem, 7vw, 5rem) clamp(1.25rem, 5vw, 3rem);
+}
+.static-hero-inner { max-width: 44rem; margin: 0 auto; }
+.static-hero-kicker {
+  margin: 0 0 .75rem;
+  color: var(--muted);
+  font-size: .78rem;
+  font-weight: 700;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+}
+.static-hero-title {
+  margin: 0 0 1rem;
+  font-size: clamp(1.9rem, 5vw, 3rem);
+  line-height: 1.08;
+  letter-spacing: -.02em;
+  font-weight: 700;
+}
+.static-hero p { margin: 0 0 1.25rem; color: var(--muted); font-size: 1.02rem; line-height: 1.55; max-width: 38rem; }
+.static-hero-links { display: flex; flex-wrap: wrap; gap: .5rem 1.5rem; margin: 0; }
+.static-hero-links a { font-weight: 600; text-decoration: none; border-bottom: 1px solid var(--line); padding-bottom: .1rem; }
+.static-hero-links a:hover { border-color: var(--blue); }
+.static-hero-noscript { margin: 1.5rem 0 0; padding: .9rem 1.1rem; border: 1px solid var(--amber); border-radius: .5rem; color: var(--text); background: rgb(255 191 105 / 8%); font-size: .92rem; }
 .app-shell:has(#main:not([hidden])) { height: 100dvh; display: flex; flex-direction: column; }
 .app-shell > * { flex-shrink: 0; }
 .app-shell > #main { flex: 1; min-height: 0; }
