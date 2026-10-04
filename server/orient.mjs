@@ -20,6 +20,7 @@ import { annotateOrientation, claimNote, withContentTrust } from "./content-trus
 import { orientSections } from "./updates.mjs";
 import { fleetSelf } from "./agent-fleet.mjs";
 import { ServiceError } from "./store.mjs";
+import { messageVisibleToViewer, summaryHistoryFloor } from "./history-visibility.mjs"; // QA4 Q4-SEC-1
 
 // Work states that count as open; completed and superseded work is history,
 // not something an arriving agent should pick up.
@@ -155,13 +156,17 @@ export function buildOrient(store, roomSlug, viewerId, options = {}) {
       }));
     } catch { nextActions = []; }
   }
-  const pinned = pinnedMessages(state).map(pin => ({
+  // QA4 Q4-SEC-1: pins and the ?q= search corpus only carry messages this
+  // viewer may read (no other members' DMs, nothing before a since_join floor).
+  const floor = summaryHistoryFloor(store, roomSlug, viewerId, sequence);
+  const visible = message => messageVisibleToViewer(message, viewerId, floor);
+  const pinned = pinnedMessages(state).filter(pin => visible(pin.message)).map(pin => ({
     messageId: pin.messageId, pinnedAt: pin.pinnedAt, authorId: pin.message.authorId,
     ...(query.text ? { text: pin.message.body, untrusted: true } : {})
   }));
   const lines = [
     ...pinned.filter(pin => pin.text).map(pin => ({ id: pin.messageId, source: "pinned", text: pin.text })),
-    ...[...state.messages ?? []].slice(-40).map(message => ({ id: message.id, source: "message", text: message.body })),
+    ...(state.messages ?? []).filter(visible).slice(-40).map(message => ({ id: message.id, source: "message", text: message.body })),
     ...claims.map(item => ({ id: item.id, source: "claim", text: item.title }))
   ];
   // A member with no published directory card is still orientable. Missing
