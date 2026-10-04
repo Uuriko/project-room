@@ -124,6 +124,8 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
     { operationIds: { GET: "readAgentHeartbeats", POST: "reportAgentHeartbeat" } }),
   // agent-plugin-routes.mjs: POST acknowledges queued wake signals. Other methods are not this handler.
   route("/api/agent-heartbeats/ack", ["POST"], "heartbeat-presence", "Acknowledge queued wake signals. API keys need the heartbeats:report scope. A room access key acknowledges only its own room.", "ackAgentHeartbeats"),
+  // agent-plugin-routes.mjs: GET waits for queued wake signals. Other methods are not this handler.
+  route("/api/agent-wakes/poll", ["GET"], "heartbeat-presence", "Wait for queued wake signals for one host. API keys need the heartbeats:read scope. A room access key waits on its own room.", "pollAgentWakes"),
   route("/api/agent-rooms", ["GET", "POST"], "identity-secret", "List rooms owned by the calling identity (GET) or create a room owned by it (POST).", "createAgentRoom",
     { operationIds: { GET: "listAgentRooms", POST: "createAgentRoom" } }),
   route("/api/agent-invites/redeem", ["POST"], "invite-code", "Redeem a one-time invite code for room membership.", "redeemInvite"),
