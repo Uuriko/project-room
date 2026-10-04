@@ -2584,6 +2584,49 @@ test("report land tip is served for the inventoried method", { timeout: 30000 },
   assert.equal(body.error.code, "unauthenticated");
 });
 
+// server/http.mjs /api/rooms/{roomId}/files: GET and HEAD list; POST stages. Missing credential is 401.
+const ROOM_FILES_INVENTORY = {
+  "/api/rooms/{roomId}/files": ["GET", "HEAD", "POST"],
+};
+
+test("openapi inventory lists served room-files methods", () => {
+  const doc = buildOpenApiJson({ origin: "https://room.example" });
+  for (const [path, methods] of Object.entries(ROOM_FILES_INVENTORY)) {
+    const entry = DISCOVERABILITY_ROUTES.find(item => item.path === path);
+    assert.ok(entry, `route table lists ${path}`);
+    assert.deepEqual([...entry.methods].sort(), [...methods].sort(), path);
+    assert.equal(doc.paths[path]?.get?.operationId, "listRoomFiles");
+    assert.equal(doc.paths[path]?.head?.operationId, "headRoomFiles");
+    assert.equal(doc.paths[path]?.post?.operationId, "stageRoomFile");
+    assert.match(doc.paths[path].get.summary, /rooms:read/);
+    assert.match(doc.paths[path].head.summary, /rooms:read/);
+    assert.match(doc.paths[path].post.summary, /rooms:write/);
+    for (const method of methods) {
+      const op = doc.paths[path][method.toLowerCase()];
+      assert.match(op.description, /room credential/i);
+      assert.doesNotMatch(op.description, /no credential required/i);
+    }
+  }
+});
+
+test("room files are served for the inventoried methods", { timeout: 30000 }, async t => {
+  const { origin } = await serve(t);
+  const getRes = await fetch(`${origin}/api/rooms/commons/files`, { headers: { Origin: origin } });
+  const body = await getRes.json();
+  assert.equal(getRes.status, 401);
+  assert.equal(body.error.code, "unauthenticated");
+  const headRes = await fetch(`${origin}/api/rooms/commons/files`, { method: "HEAD", headers: { Origin: origin } });
+  assert.equal(headRes.status, 401);
+  const postRes = await fetch(`${origin}/api/rooms/commons/files`, {
+    method: "POST",
+    headers: { Origin: origin, "Content-Type": "application/json" },
+    body: "{}",
+  });
+  const posted = await postRes.json();
+  assert.equal(postRes.status, 401);
+  assert.equal(posted.error.code, "unauthenticated");
+});
+
 test("openapi inventory lists served work-claims methods", () => {
   const doc = buildOpenApiJson({ origin: "https://room.example" });
   for (const [path, methods] of Object.entries(WORK_CLAIM_INVENTORY)) {
