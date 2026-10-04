@@ -401,7 +401,24 @@ const RETIRED_EMISSARY_TABLES = Object.freeze([
   "emissary_idempotency",
   "emissary_journal",
 ]);
-export const lazyAdditiveTables = Object.freeze([...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES, ...RETIRED_EMISSARY_TABLES]);
+// Analytics tables (server/analytics/schema.mjs) + the claim-bond P0 shadow
+// journal (server/analytics/claim-bond-shadow.mjs): created on demand by
+// analytics tooling (the tail, the backfill script, claim-bond-shadow --sync)
+// directly in the room database, never by the store constructor. They stay
+// in the recovery audit's allowed set so backupRoom/room-export keep passing
+// on databases where the tooling ran (auditRecovery gates both), while a
+// database that never ran the tooling simply does not have them — allowed,
+// never required.
+const ANALYTICS_ADDITIVE_TABLES = Object.freeze([
+  "analytics_events",
+  "analytics_room_cursor",
+  "analytics_table_cursor",
+  "analytics_firsts",
+  "analytics_daily",
+  "analytics_ctx",
+  "claim_bond_shadow",
+]);
+export const lazyAdditiveTables = Object.freeze([...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES, ...RETIRED_EMISSARY_TABLES, ...ANALYTICS_ADDITIVE_TABLES]);
 // messages (MSG-1) is fenced at v37 only. v34–v36 files do not have the
 // table or its triggers; verifyWriterFence(36) must not require them.
 const v34FencedTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables])]);

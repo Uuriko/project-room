@@ -28,8 +28,10 @@
 // ADDITIVE ONLY: this module never imports or calls server/work-claims.mjs
 // or server/work-claim-routes.mjs (owned by the #1303 author). It reads the
 // durable `events` table and writes only its own `claim_bond_shadow` table,
-// which lives outside the writer fence like the other analytics tables
-// (see server/analytics/schema.mjs).
+// which is registered in server/writer-fence.mjs (lazyAdditiveTables) so the
+// recovery audit keeps passing on room databases where --sync ran — allowed,
+// never required. Same standing as the other analytics tables
+// (server/analytics/schema.mjs).
 
 export const SHADOW_BOND_MILLIS = 1000; // nominal; mirrors the live anti-flake CLAIM_BOND_MILLIS. P0 moves nothing.
 
@@ -258,14 +260,19 @@ export function shadowReport(db, { roomId = null } = {}) {
   const verdict = flakes < CONCENTRATION_MIN_FLAKES
     ? "insufficient_data"
     : top3Share >= CONCENTRATION_SHARE ? "concentrated" : "dispersed";
+  // A claim is open when its LATEST bond-movement entry is a lock or a
+  // carry. The earlier EXCEPT form compared whole claim_id sets and missed
+  // claims that were released and then re-claimed (a claim in both the
+  // locked and the released sets was dropped entirely).
+  const bondKinds = "('bond-locked','bond-carried','bond-released','bond-forfeited')";
   const openBonds = db.prepare(
-    `SELECT COUNT(*) AS c FROM (
-       SELECT claim_id FROM claim_bond_shadow WHERE kind='bond-locked' ${roomFilter}
-       EXCEPT
-       SELECT claim_id FROM claim_bond_shadow
-       WHERE kind IN ('bond-released','bond-forfeited') ${roomFilter}
+    `SELECT COUNT(*) AS c FROM claim_bond_shadow j
+     WHERE j.kind IN ('bond-locked','bond-carried') ${roomId ? "AND j.room_id=?" : ""}
+     AND j.room_seq = (
+       SELECT MAX(j2.room_seq) FROM claim_bond_shadow j2
+       WHERE j2.claim_id = j.claim_id AND j2.kind IN ${bondKinds} ${roomId ? "AND j2.room_id=?" : ""}
      )`
-  ).get(...args).c;
+  ).get(...args, ...args).c;
   return {
     locked,
     released,
