@@ -9,8 +9,17 @@ export const MAX_RESULT_BYTES = 4_194_304;
 export const MAX_SMALL_BYTES = 65_536;
 export const ENROLL_TTL_MS = 15 * 60 * 1000;
 export const LEASE_TOKEN_TTL_MS = 15 * 60 * 1000;
-export const IDENTITY_CACHE_MS = 5 * 60 * 1000;
+// L-6: the passthrough identity cache used to live 5 minutes — a removed
+// member's cached identity stayed usable for the full window. One minute
+// keeps the per-call fetch savings while bounding the revocation window.
+// The board-decision cache stays at most 30 s (LOCK_CACHE_MAX_MS).
+export const IDENTITY_CACHE_MS = 60 * 1000;
 export const LOCK_CACHE_MAX_MS = 30 * 1000;
+// L-4: the halt `revoke` list had no length cap — repeated halts with large
+// arrays grew Durable Object storage without bound (pruned only by expiry).
+// Cap intake per call and the stored total.
+export const REVOKE_PER_CALL_MAX = 64;
+export const REVOKE_TOTAL_MAX = 512;
 export const CALL_TIMEOUT_MS = 30_000;
 export const HEARTBEAT_MS = 30_000;
 export const HMAC_SKEW_SEC = 300;
@@ -63,6 +72,28 @@ export function lockCacheMs(env) {
   const value = Number(raw);
   if (!Number.isSafeInteger(value)) return LOCK_CACHE_MAX_MS;
   return Math.min(LOCK_CACHE_MAX_MS, value);
+}
+
+// L-4: merge halt `revoke` entries into the stored revocation list with
+// per-call and total caps, pruning expired entries. Re-listing a jti moves
+// it to the end with the new expiry (same semantics as the old inline loop).
+// Pure — unit-testable without the Durable Object.
+export function mergeRevoked(existing, items, nowSec) {
+  const live = (Array.isArray(existing) ? existing : []).filter(
+    row => row && typeof row.jti === "string" && Number.isFinite(row.exp) && row.exp > nowSec
+  );
+  const fresh = [];
+  const freshJtis = new Set();
+  for (const item of Array.isArray(items) ? items : []) {
+    if (fresh.length >= REVOKE_PER_CALL_MAX) break;
+    if (!item || typeof item.jti !== "string" || item.jti.length < 1 || item.jti.length > 128) continue;
+    if (freshJtis.has(item.jti)) continue;
+    freshJtis.add(item.jti);
+    const exp = Number.isFinite(item.exp) ? item.exp : nowSec + 15 * 60;
+    fresh.push({ jti: item.jti, exp });
+  }
+  const merged = [...live.filter(row => !freshJtis.has(row.jti)), ...fresh];
+  return merged.slice(-REVOKE_TOTAL_MAX);
 }
 
 export function isMachineId(value) {

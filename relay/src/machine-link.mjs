@@ -13,7 +13,7 @@ import { initializeResult, parseRpc, requireToolName, rpcError, rpcResult, toolE
 import { redact } from "./redact.mjs";
 import {
   CALL_TIMEOUT_MS, HEARTBEAT_MS, MAX_CALL_BYTES, MAX_RESULT_BYTES, MAX_SMALL_BYTES, PROTOCOL_VERSION,
-  isResourceId, isSlot, listedTools, toolAllowed,
+  isResourceId, isSlot, listedTools, mergeRevoked, toolAllowed,
 } from "./protocol.mjs";
 
 // L4: no wildcard CORS with Authorization allowed. The request origin is
@@ -426,10 +426,12 @@ export class MachineLink extends DurableObject {
   // (new timestamp, new signature) is never a replay. The key includes the
   // action path: different actions (e.g. resume vs bye) can share an empty
   // payload, and same-second calls would otherwise collide.
-  async rejectReplayedControl(request) {
-    const sig = (request.headers.get("x-relay-signature") ?? "").toLowerCase();
-    const action = new URL(request.url).pathname;
-    const key = `${action}:${sig}`;
+  //
+  // L-2: the guard is split in two. checkReplayedControl() runs before
+  // validation; recordControlSignature() runs only after the control is
+  // accepted, so a control that fails validation stays retryable instead of
+  // 409ing on the operator's same-second retry.
+  async loadControlSigs() {
     const now = Date.now();
     if (!this.seenControlSigs) {
       const stored = await this.ctx.storage.get("seenControlSigs");
@@ -438,10 +440,24 @@ export class MachineLink extends DurableObject {
     for (const [k, expiry] of this.seenControlSigs) {
       if (expiry <= now) this.seenControlSigs.delete(k);
     }
-    if (this.seenControlSigs.has(key)) {
+  }
+
+  controlSigKey(request) {
+    const sig = (request.headers.get("x-relay-signature") ?? "").toLowerCase();
+    const action = new URL(request.url).pathname;
+    return `${action}:${sig}`;
+  }
+
+  async checkReplayedControl(request) {
+    await this.loadControlSigs();
+    if (this.seenControlSigs.has(this.controlSigKey(request))) {
       throw relayError(409, "replay_detected", "This signed control message was already processed");
     }
-    this.seenControlSigs.set(key, now + 600_000);
+  }
+
+  async recordControlSignature(request) {
+    await this.loadControlSigs();
+    this.seenControlSigs.set(this.controlSigKey(request), Date.now() + 600_000);
     await this.ctx.storage.put("seenControlSigs", Object.fromEntries(this.seenControlSigs));
   }
 
@@ -451,9 +467,14 @@ export class MachineLink extends DurableObject {
     let socket = null;
     let notice = null;
     await this.exclusive(async () => {
-      if (!this.state) throw relayError(404, "machine_unknown", "No such machine");
+      // L-1: verify the signature before the machine-exists check, so an
+      // unauthenticated caller cannot distinguish existing machines (401)
+      // from missing ones (404).
       await verifyLinkSignature(this.env.RELAY_LINK_SECRET, request, raw, Math.floor(Date.now() / 1000));
-      await this.rejectReplayedControl(request);
+      // L-2: check for replay now, but record the signature only after the
+      // control below is accepted — a rejected control stays retryable.
+      await this.checkReplayedControl(request);
+      if (!this.state) throw relayError(404, "machine_unknown", "No such machine");
       const nextEpoch = nextHaltEpoch(value, this.state);
       this.applyControl(value);
       this.state.haltEpoch = nextEpoch;
@@ -461,6 +482,7 @@ export class MachineLink extends DurableObject {
       this.state.pausedUntil = null;
       this.state.activeLease = null;
       this.state.leases = {};
+      await this.recordControlSignature(request);
       this.dirty = true;
       cancels = [...this.pending.values()];
       this.pending.clear();
@@ -480,8 +502,9 @@ export class MachineLink extends DurableObject {
     let socket = null;
     let notice = null;
     await this.exclusive(async () => {
-      if (!this.state) throw relayError(404, "machine_unknown", "No such machine");
+      // L-1: signature before existence check — no existence oracle.
       await verifyLinkSignature(this.env.RELAY_LINK_SECRET, request, raw, Math.floor(Date.now() / 1000));
+      if (!this.state) throw relayError(404, "machine_unknown", "No such machine");
       // M1: resume is idempotent — replaying it is harmless, and legitimate
       // rapid resumes (e.g. after halt then after pause) would false-positive
       // on the same-second signature. Only halt/pause/bye get replay protection.
@@ -501,13 +524,16 @@ export class MachineLink extends DurableObject {
     let socket = null;
     let notice = null;
     await this.exclusive(async () => {
-      if (!this.state) throw relayError(404, "machine_unknown", "No such machine");
+      // L-1: signature before existence check — no existence oracle.
       await verifyLinkSignature(this.env.RELAY_LINK_SECRET, request, raw, Math.floor(Date.now() / 1000));
-      await this.rejectReplayedControl(request);
+      // L-2: check for replay now, record only after the pause is accepted.
+      await this.checkReplayedControl(request);
+      if (!this.state) throw relayError(404, "machine_unknown", "No such machine");
       if (!Number.isSafeInteger(value.minutes) || value.minutes < 0 || value.minutes > 10_080) {
         throw relayError(422, "invalid_pause", "minutes must be an integer from 0 to 10080");
       }
       this.state.pausedUntil = Date.now() + value.minutes * 60 * 1000;
+      await this.recordControlSignature(request);
       this.dirty = true;
       socket = this.daemon();
       if (socket) notice = { type: "pause", minutes: value.minutes };
@@ -522,9 +548,12 @@ export class MachineLink extends DurableObject {
     let notice = null;
     let cancels = [];
     await this.exclusive(async () => {
-      if (!this.state) throw relayError(404, "machine_unknown", "No such machine");
+      // L-1: signature before existence check — no existence oracle.
       await verifyLinkSignature(this.env.RELAY_LINK_SECRET, request, raw, Math.floor(Date.now() / 1000));
-      await this.rejectReplayedControl(request);
+      // L-2: check for replay now, record only after the bye is accepted.
+      await this.checkReplayedControl(request);
+      if (!this.state) throw relayError(404, "machine_unknown", "No such machine");
+      await this.recordControlSignature(request);
       this.dirty = true;
       cancels = [...this.pending.values()];
       this.pending.clear();
@@ -548,11 +577,8 @@ export class MachineLink extends DurableObject {
       this.state.resourceId = value.resourceId;
     }
     const nowSec = Math.floor(Date.now() / 1000);
-    for (const item of Array.isArray(value.revoke) ? value.revoke : []) {
-      if (!item || typeof item.jti !== "string" || item.jti.length < 1 || item.jti.length > 128) continue;
-      const exp = Number.isFinite(item.exp) ? item.exp : nowSec + 15 * 60;
-      this.state.revoked = [...(this.state.revoked ?? []).filter(row => row.jti !== item.jti), { jti: item.jti, exp }];
-    }
+    // L-4: bounded merge — per-call and total caps, expired entries pruned.
+    this.state.revoked = mergeRevoked(this.state.revoked, value.revoke, nowSec);
   }
 
   async status(request) {

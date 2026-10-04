@@ -9,7 +9,8 @@ import { fileURLToPath } from "node:url";
 import { RoomStore } from "../../server/store.mjs";
 import { createRoomServer } from "../../server/http.mjs";
 import { initialRoom } from "../../server/bootstrap.mjs";
-import { spawnContext } from "../lib/spawn.mjs";
+import { spawnContext, runCommand } from "../lib/spawn.mjs";
+import { isSafeFileName } from "../lib/tools.mjs";
 import { saveConfig, defaultConfig } from "../lib/config.mjs";
 import { readSecret } from "../lib/secrets.mjs";
 import { MachineDaemon } from "../lib/daemon.mjs";
@@ -526,4 +527,39 @@ test.describe("room-machine", { concurrency: false }, () => {
     rmSync(home, { recursive: true, force: true });
     rmSync(dir, { recursive: true, force: true });
   });
+});
+
+// L-3: files.put/files.get names must reject "." / ".." and leading-dot
+// segments explicitly, not rely on the guest shell failing closed.
+test("L-3: isSafeFileName rejects dot segments", () => {
+  assert.equal(isSafeFileName("notes.txt"), true);
+  assert.equal(isSafeFileName("a-b_c.d"), true);
+  assert.equal(isSafeFileName("x".repeat(128)), true);
+  assert.equal(isSafeFileName("."), false);
+  assert.equal(isSafeFileName(".."), false);
+  assert.equal(isSafeFileName(".hidden"), false);
+  assert.equal(isSafeFileName(""), false);
+  assert.equal(isSafeFileName("x".repeat(129)), false);
+  assert.equal(isSafeFileName("../x"), false);
+  assert.equal(isSafeFileName(null), false);
+  assert.equal(isSafeFileName(42), false);
+});
+
+// L-5: runCommand must cap stderr the same way it caps stdout — a noisy
+// child must not grow memory without bound over the timeout window.
+test("L-5: runCommand caps stderr and marks the run capped", async () => {
+  const maxBytes = 64 * 1024;
+  const ran = await runCommand(process.execPath,
+    ["-e", `process.stderr.write("e".repeat(${4 * maxBytes}))`],
+    { maxBytes, timeoutMs: 10_000 });
+  assert.equal(ran.capped, true);
+  assert.ok(ran.stderr.length <= maxBytes,
+    `stderr ${ran.stderr.length} bytes exceeds the ${maxBytes} cap`);
+});
+
+test("L-5: runCommand still resolves quiet commands uncapped", async () => {
+  const ran = await runCommand(process.execPath, ["-e", "console.log('hi')"], { maxBytes: 1024 });
+  assert.equal(ran.capped, false);
+  assert.equal(ran.code, 0);
+  assert.match(ran.stdout.toString("utf8"), /hi/);
 });

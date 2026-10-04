@@ -57,6 +57,8 @@ Room mints Ed25519 compact JWS lease tokens. The relay verifies them with `ROOM_
 
 Phase 0 passthrough does not use these tokens. The caller sends a Room identity secret or agent API key, and the relay reads the board. A call is forwarded with `caller.verified: true` only after that check succeeds. Until `ROOM_RESOURCE_LEASE_PUBLIC_JWK` is set, lease-token calls stay `503 lease_verifier_unconfigured`.
 
+The fetched identity is cached up to 60 seconds and the board decision up to 30 seconds (per-machine opt-in only): a member removed from the room, or a claim change, can take up to those windows to take effect on passthrough calls.
+
 ## Slots
 
 A board file `resource/<machineId>/<slot>` is one slot. `slot` is `desk` or `scratch`. Of the active, unexpired claims of `kind: "work"` on that path, the earliest `claimedAt` holds it. `done`, `unclaimed`, a lapsed `leaseExpiresAt`, another kind, and the other slot do not.
@@ -66,3 +68,5 @@ The daemon itself accepts only `desk` and `scratch`. The relay still forwards th
 ## Control plane
 
 Room pushes control to `POST /v0/machines/<machineId>/halt`, `/pause`, `/resume`, and `/bye`. Those requests carry `X-Relay-Timestamp` (unix seconds) and `X-Relay-Signature` (hex HMAC-SHA256 of `<timestamp>.<raw body>` under `RELAY_LINK_SECRET`). Skew over 300 seconds is refused. Halt may include `epoch`, `resourceId`, and `revoke: [{ "jti", "exp" }]`. Pause requires `minutes`, an integer from 0 through 10080.
+
+Control endpoints verify the signature before checking that the machine exists: an unauthenticated caller gets 401 whether or not the machine exists (no existence oracle). The `revoke` list is capped at 64 entries per halt and 512 stored; expired entries are pruned.

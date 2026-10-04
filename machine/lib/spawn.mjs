@@ -50,6 +50,7 @@ export function runCommand(command, args, {
     const out = [];
     const err = [];
     let outLen = 0;
+    let errLen = 0;
     let capped = false;
     let timedOut = false;
     const timer = setTimeout(() => { timedOut = true; killGroup(child); }, timeoutMs);
@@ -58,7 +59,13 @@ export function runCommand(command, args, {
       if (outLen > maxBytes) { capped = true; killGroup(child); return; }
       out.push(chunk);
     });
-    child.stderr.on("data", chunk => { err.push(chunk); });
+    // L-5: stderr used to accumulate without bound — a noisy child could grow
+    // memory without limit over the timeout window. Same cap as stdout.
+    child.stderr.on("data", chunk => {
+      errLen += chunk.length;
+      if (errLen > maxBytes) { capped = true; killGroup(child); return; }
+      err.push(chunk);
+    });
     child.on("error", error => {
       clearTimeout(timer);
       resolve({ code: null, stdout: Buffer.concat(out), stderr: Buffer.concat(err), timedOut, capped, error: error.message });

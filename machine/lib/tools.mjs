@@ -5,6 +5,14 @@ import { startGuest, guestName, snapshotDesk, createScratch } from "./vms.mjs";
 
 const SAFE_NAME = /^[A-Za-z0-9._-]{1,128}$/;
 
+// L-3: the SAFE_NAME pattern admits the literal names "." and ".." (and
+// other leading-dot segments). They fail closed today — the guest-side
+// `cat > .../..` targets a directory and shell metacharacters are excluded —
+// but reject them explicitly rather than relying on that.
+export function isSafeFileName(name) {
+  return typeof name === "string" && SAFE_NAME.test(name) && name !== "." && name !== ".." && !name.startsWith(".");
+}
+
 function fail(code, message) {
   return { ok: false, error: { code, message } };
 }
@@ -87,7 +95,7 @@ export async function dispatchTool({ tool, args = {}, slot, claimId, state, home
   }
   if (tool === "files.put" || tool === "files.get") {
     const name = args.name;
-    if (typeof name !== "string" || !SAFE_NAME.test(name)) return fail(ERROR.INVALID, "name must be a single path segment");
+    if (!isSafeFileName(name)) return fail(ERROR.INVALID, "name must be a single path segment");
     const vm = slot === "scratch" ? guestName("scratch", claimId) : "desk";
     const started = await ensureSlot(state, slot, claimId, home);
     if (!started.ok) return fail(started.code, started.message);
