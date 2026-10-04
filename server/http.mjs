@@ -879,6 +879,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       try { remoteAddress = resolveClientAddress(req); }
       catch { reject(403, "proxy_denied", "Invalid proxy configuration"); }
       const url = new URL(req.url, expectedOrigin()), loopback = ["127.0.0.1", "::1"].includes(remoteAddress);
+      // QA 2026-10-03 (P2-1): a trailing slash must reach the route, not a 404
+      // whose "check access" hint misdirects on public endpoints. Normalize
+      // once, up front, so every matcher below sees the canonical path. Only
+      // the URL object is rewritten — req.url stays untouched for diagnostics.
+      if (url.pathname.length > 1 && url.pathname.endsWith("/")) url.pathname = url.pathname.replace(/\/+$/, "");
       if (url.pathname === "/.well-known/security.txt" || url.pathname === "/security.txt" || url.pathname === "/room/.well-known/security.txt") {
         return writeSecurityTxt(req, res);
       }

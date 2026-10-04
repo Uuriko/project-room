@@ -48,6 +48,10 @@ const accountSettingsButton = $("#account-settings-button");
 if (accountSettingsButton) accountSettingsButton.textContent = "Account";
 const accountSettingsSummary = document.querySelector("#account-settings > summary");
 if (accountSettingsSummary) accountSettingsSummary.textContent = "Account";
+// The static hero is the whole page for no-JS strangers and crawlers (QA
+// 2026-10-03 P1-1). It comes down the moment the app boots so it never
+// double-renders with the live UI. Module top level: runs before any render.
+$("#static-hero")?.remove();
 $("#skip-link").addEventListener("click", event => {
   event.preventDefault();
   const target = !$("#inbox-panel").hidden ? "#inbox-heading"
