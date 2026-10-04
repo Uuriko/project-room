@@ -3976,6 +3976,39 @@ test("room return brief is served for the inventoried method", { timeout: 30000 
   assert.equal(body.error.code, "unauthenticated");
 });
 
+// server/http.mjs /api/rooms/{roomId}/cursor: POST only. Missing credential is 401.
+const ROOM_CURSOR_INVENTORY = {
+  "/api/rooms/{roomId}/cursor": ["POST"],
+};
+
+test("openapi inventory lists served room cursor", () => {
+  const doc = buildOpenApiJson({ origin: "https://room.example" });
+  for (const [path, methods] of Object.entries(ROOM_CURSOR_INVENTORY)) {
+    const entry = DISCOVERABILITY_ROUTES.find(item => item.path === path);
+    assert.ok(entry, `route table lists ${path}`);
+    assert.equal(entry.auth, "room-member");
+    assert.deepEqual([...entry.methods].sort(), [...methods].sort(), path);
+    const postOp = doc.paths[path]?.post;
+    assert.equal(postOp?.operationId, "postRoomCursor");
+    assert.match(postOp.summary, /rooms:write/);
+    assert.match(postOp.description, /room credential/i);
+    assert.doesNotMatch(postOp.description, /no credential required/i);
+    assert.equal(doc.paths[path]?.get, undefined);
+  }
+});
+
+test("room cursor is served for the inventoried method", { timeout: 30000 }, async t => {
+  const { origin } = await serve(t);
+  const res = await fetch(`${origin}/api/rooms/commons/cursor`, {
+    method: "POST",
+    headers: { Origin: origin, "Content-Type": "application/json" },
+    body: "{}",
+  });
+  const body = await res.json();
+  assert.equal(res.status, 401);
+  assert.equal(body.error.code, "unauthenticated");
+});
+
 test("openapi inventory lists served work-claims methods", () => {
   const doc = buildOpenApiJson({ origin: "https://room.example" });
   for (const [path, methods] of Object.entries(WORK_CLAIM_INVENTORY)) {
