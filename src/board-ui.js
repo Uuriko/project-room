@@ -186,7 +186,14 @@ export function boardToolNames(capabilities) {
   return names;
 }
 
-export function emptyBoardCopy(capabilities) {
+export function emptyBoardCopy(capabilities, { canWrite = true, signedIn = false } = {}) {
+  // S1: a non-writer used to see the same "Claim work here" line with no form
+  // and no next step. Give them their actual options instead.
+  if (!canWrite) {
+    return signedIn
+      ? "No work posted yet. You can browse the board, but you don't have posting rights here — ask the room owner for access to post work."
+      : "No work posted yet. You can browse the board — sign in to post work here.";
+  }
   const tools = boardToolNames(capabilities);
   const line = "Claim work here so people and agents don't collide.";
   return tools.length ? `${line} Agents can use ${tools.join(", ")}.` : line;
@@ -307,7 +314,20 @@ function cardHtml(item, viewer, members, now, workItems, byId) {
 }
 
 function newItemForm() {
-  return `<form id="board-new-item" class="board-new"><h3>New item</h3><label>Title <input name="title" maxlength="200" required autocomplete="off"></label><label>Files <input name="files" maxlength="4000" autocomplete="off" placeholder="Optional, comma-separated"></label><button type="submit" class="button primary">Add item</button></form>`;
+  return `<form id="board-new-item" class="board-new"><h3>New item</h3><label>Title <input name="title" maxlength="200" required autocomplete="off"></label><label>Note <input name="note" maxlength="4000" autocomplete="off" placeholder="Optional, context for whoever picks this up"></label><label>Files <input name="files" maxlength="4000" autocomplete="off" placeholder="Optional, comma-separated"></label><button type="submit" class="button primary">Add item</button></form>`;
+}
+
+// S3: the create API accepts a note, but the form never sent one (F-parity-1).
+// Pure body builder so the note wiring is unit-testable at this boundary.
+export function newItemCreateBody(data) {
+  const title = String(data?.get("title") ?? "").trim();
+  if (!title) return null;
+  const body = { id: claimIdFromTitle(title), title };
+  const note = String(data?.get("note") ?? "").trim();
+  if (note) body.note = note;
+  const files = filesFromField(data?.get("files"));
+  if (files.length) body.files = files;
+  return body;
 }
 
 function boardHtml(items, status, viewer, members, now, { older = false, canWrite = false, capabilities = [], cap = 20, workItems = {} } = {}) {
@@ -320,7 +340,7 @@ function boardHtml(items, status, viewer, members, now, { older = false, canWrit
   const hint = older ? `<p class="form-hint board-older">Older landed work is in the API</p>` : "";
   const body = items.length
     ? `${hint}<div class="board-columns">${COLUMNS.map(([id, label]) => `<section aria-labelledby="board-col-${id}"><h3 id="board-col-${id}">${label}${id === "blocked" && waitingCount ? ` · ${waitingCount} waiting` : ""}</h3>${columns[id].map(item => cardHtml(item, viewer, members, now, workItems, byId)).join("") || `<p class="form-hint">Nothing here.</p>`}</section>`).join("")}</div>`
-    : `<p class="board-empty">${escapeHtml(emptyBoardCopy(capabilities))}</p>${hint}`;
+    : `<p class="board-empty">${escapeHtml(emptyBoardCopy(capabilities, { canWrite, signedIn: Boolean(viewer?.id) }))}</p>${hint}`;
   return `${form}<div class="board-head"><p class="live-chip">${escapeHtml(liveLabel(status))}</p>${sweep}${capForm}</div><p id="board-status" class="form-hint" role="status"></p>${body}`;
 }
 
@@ -576,12 +596,10 @@ export function installWorkBoard({ client, getState, getSession }) {
     if (created && root.contains(created)) {
       event.preventDefault();
       const data = new FormData(created);
-      const title = String(data.get("title") ?? "").trim();
-      if (!title) return;
-      const id = claimIdFromTitle(title);
-      const files = filesFromField(data.get("files"));
-      const body = files.length ? { id, title, files } : { id, title };
-      void act(() => client.request(client.path("/work-claims"), { method: "POST", data: body }), { id, status: `Opened '${title}'` });
+      const body = newItemCreateBody(data);
+      if (!body) return;
+      const title = body.title;
+      void act(() => client.request(client.path("/work-claims"), { method: "POST", data: body }), { id: body.id, status: `Opened '${title}'` });
       return;
     }
     const form = event.target.closest("[data-claim-reassign]");
