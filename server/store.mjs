@@ -618,8 +618,12 @@ const nodeStorage = {
   hasSchema: db => Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' LIMIT 1").get()),
   changes: db => db.prepare("SELECT total_changes() AS n").get().n,
   configure(db, readOnly) {
+    // busy_timeout goes first: journal_mode changes and WAL recovery take
+    // locks, and with the timeout still at zero a contended concurrent open
+    // throws SQLITE_BUSY immediately instead of waiting (QA slice D: 1/120
+    // concurrent opens failed on the old order).
     db.exec(readOnly ? "PRAGMA foreign_keys=ON; PRAGMA busy_timeout=3000;"
-      : "PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=3000;");
+      : "PRAGMA foreign_keys=ON; PRAGMA busy_timeout=3000; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;");
   },
   registerWriter, installWriterFence, verifyWriterFence,
   transaction(db, fn, readOnly) {
