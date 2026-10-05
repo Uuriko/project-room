@@ -162,6 +162,18 @@ export class MembershipDelegation {
   // membership administrators — otherwise the grant would be transitive
   // (delegate approves/link with manage_members, the new member administers
   // membership, the delegation boundary collapses).
+  // #1520: the join-approval and link paths follow the same rule as the
+  // permission-upgrade review (member-permission-requests.mjs): anyone but
+  // the room owner may confer only permissions they hold themselves. A
+  // grant-only delegate with work permissions cannot mint decide, verify,
+  // manage_claims or invite_member for someone else.
+  unheldPermissions(authority, auth, permissions) {
+    if (!Array.isArray(permissions) || auth?.member?.id === authority?.ownerId) return [];
+    const held = authority?.members?.[auth?.member?.id]?.permissions;
+    const own = new Set(Array.isArray(held) ? held : []);
+    return [...new Set(permissions)].filter(permission => !own.has(permission));
+  }
+
   mayConferManageMembers(authority, auth) {
     if (auth?.member?.id === authority?.ownerId) return true;
     return memberCan(authority, auth?.member?.id, "manage_members");
