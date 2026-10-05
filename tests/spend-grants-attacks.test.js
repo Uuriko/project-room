@@ -32,7 +32,6 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { AgentRooms, agentRoomSchema } from "../server/agent-rooms.mjs";
 import { createRateLimiter } from "../server/identity-ratelimit.mjs";
 import { createHostedRoomMcp } from "../server/mcp-room-profile.mjs";
-import { EVENT_TYPES as T } from "../src/events.js";
 import { setTier } from "../server/autonomy-tiers.mjs";
 import { schemaErrors } from "../server/routes/dispatch.mjs";
 import { SPEND_GRANT_ROUTES } from "../server/routes/spend-grants.mjs";
@@ -175,7 +174,7 @@ test("the same nonce raced from two connections authorizes exactly once",
 // --- Boundary exactness ---
 
 test("price boundaries: 0 and negative refused, exactly cap allowed, cap+1 refused", t => {
-  const { dbFile, open } = attackDb(t);
+  const { open } = attackDb(t);
   const db = open();
   t.after(() => db.close());
   issueAttackGrant(db, { capCents: "10", perTxCapCents: "10" });
