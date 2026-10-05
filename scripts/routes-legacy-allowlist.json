@@ -1,5 +1,5 @@
 {
-  "note": "Legacy routes still served outside server/routes/table.mjs. baseline is the RT-0 set plus routes main added after that cut, including the legal API routes and /security.txt. routes is the set still in the legacy chain and only shrinks as groups move into the table.",
+  "note": "Legacy routes still served outside server/routes/table.mjs. baseline is the RT-0 set plus routes main added after that cut, including the legal API routes, /security.txt, and /SKILL.md. routes is the set still in the legacy chain and only shrinks as groups move into the table.",
   "baseline": [
     {
       "method": "GET",
@@ -3608,6 +3608,30 @@
     {
       "method": "HEAD",
       "path": "/tools.txt"
+    },
+    {
+      "method": "GET",
+      "path": "/SKILL.md"
+    },
+    {
+      "method": "HEAD",
+      "path": "/SKILL.md"
+    },
+    {
+      "method": "GET",
+      "path": "/room/SKILL.md"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/SKILL.md"
+    },
+    {
+      "method": "GET",
+      "path": "/project-room/SKILL.md"
+    },
+    {
+      "method": "HEAD",
+      "path": "/project-room/SKILL.md"
     }
   ],
   "routes": [
@@ -6990,6 +7014,30 @@
     {
       "method": "HEAD",
       "path": "/tools.txt"
+    },
+    {
+      "method": "GET",
+      "path": "/SKILL.md"
+    },
+    {
+      "method": "HEAD",
+      "path": "/SKILL.md"
+    },
+    {
+      "method": "GET",
+      "path": "/room/SKILL.md"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/SKILL.md"
+    },
+    {
+      "method": "GET",
+      "path": "/project-room/SKILL.md"
+    },
+    {
+      "method": "HEAD",
+      "path": "/project-room/SKILL.md"
     }
   ]
 }
