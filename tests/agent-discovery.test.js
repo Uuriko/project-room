@@ -557,3 +557,15 @@ test("anonymous MCP catalog is six tools (four join + two public-work); copy nev
   assert.ok(!/four-tool catalog/i.test(text), "llms.txt must not call the anonymous catalog four-tool");
   assert.ok(!/tools\/list is the four( public join)? tools/i.test(text), "llms.txt must not say no-credential tools/list is only four tools");
 });
+test("llms.txt follows the llmstxt.org header: H1, summary blockquote, Start here links", () => {
+  const text = llmsTxt();
+  // llmstxt.org: H1, then a blockquote summary, before anything else.
+  assert.ok(text.startsWith("# Uuriko Project Room\n\n> "), "llms.txt opens with H1 then a blockquote summary");
+  const summary = text.split("\n").find(line => line.startsWith("> "));
+  assert.ok(summary && summary.length > 20, "summary blockquote names what the room is");
+  // Then a Start here link list pointing at the entry points.
+  assert.match(text, /^## Start here$/m);
+  const startHere = text.slice(text.indexOf("## Start here"));
+  assert.match(startHere, /\[.*\]\(https:\/\/room\.trydemigod\.com\/llms-full\.txt\)/);
+  assert.match(startHere, /\[.*\]\(https:\/\/www\.getdasha\.com\/room\/mcp\)/);
+});
