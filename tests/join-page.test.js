@@ -29,9 +29,8 @@ test("join page is public: GET /join and /join/:code serve the page without auth
     assert.match(html, /id="join-form"/, `${path} has the join form`);
     assert.match(html, /id="join-consent"/, `${path} has the consent screen`);
     assert.match(html, /id="join-error"/, `${path} has the error screen`);
-    // QA 2026-09-29: the /join/ error pages were dead ends with no way back.
     assert.match(html, /id="join-home-link" href="\/(room\/)?"/, `${path} error screen links back to sign-in`);
-    assert.match(html, /href="https:\/\/www\.getdasha\.com\/room"/, `${path} error screen links to the marketing page`);
+    assert.match(html, /href="\/(room\/)?room"/, `${path} error screen links to Project Room on this host`);
     assert.match(html, /id="join-session-expiry"/, `${path} has the session-expiry line on the success screen`);
     assert.match(html, /src="[^"]*\/src\/join\.js"/, `${path} loads the join script`);
     assert.ok(!html.includes("{{ASSET_BASE}}"), `${path} substitutes the asset base`);
@@ -42,8 +41,6 @@ test("join page asset base follows the door", async t => {
   const { origin } = await serve(t);
   const root = await (await fetch(`${origin}/join/RM-EXAMPLE`)).text();
   assert.match(root, /src="\/src\/join\.js"/);
-  // B1 regression: the stylesheet href must point at the served asset path,
-  // not the unserved /styles.css (404 on both doors pre-fix).
   assert.match(root, /href="\/src\/styles\.css"/);
   const door = await (await fetch(`${origin}/room/join/RM-EXAMPLE`)).text();
   assert.match(door, /src="\/room\/src\/join\.js"/);
@@ -52,9 +49,6 @@ test("join page asset base follows the door", async t => {
 
 test("join page assets resolve on both doors (B1+B2)", async t => {
   const { origin } = await serve(t);
-  // The exact URLs the rendered join page references must serve 200 with
-  // correct content types — through the /room/src/* edge rewrite on the
-  // www door twin. Pre-fix: /room/src/join.js 404'd and boot() never ran.
   for (const [path, type] of [
     ["/src/styles.css", /text\/css/],
     ["/src/join.js", /javascript/],
@@ -78,11 +72,6 @@ test("join page route boundaries", async t => {
 });
 
 test("D-c: malformed invite codes render the join page with the sign-in fallback, not a bare 404", async t => {
-  // Remedy validated by Scribble, room seq 2207. Before the fix, codes that
-  // fail the [A-Za-z0-9_-]{1,64} shape fell through to the generic 404 page
-  // (no sign-in link, no invite context) — a dead end. The join page's
-  // client-side boot() rejects the malformed code and shows the error screen,
-  // which carries the "Back to sign-in" fallback.
   const { origin } = await serve(t);
   for (const path of ["/join/!!!", "/join/" + "A".repeat(65), "/join/" + "A".repeat(128), "/room/join/!!!", "/room/join/" + "A".repeat(65)]) {
     const response = await fetch(`${origin}${path}`);
@@ -92,7 +81,6 @@ test("D-c: malformed invite codes render the join page with the sign-in fallback
     assert.match(html, /id="join-error"/, `${path} has the error screen`);
     assert.match(html, /id="join-home-link"/, `${path} error screen links back to sign-in`);
   }
-  // Multi-segment paths still 404.
   const extra = await fetch(`${origin}/join/!!!/extra`);
   assert.equal(extra.status, 404);
 });
@@ -121,11 +109,9 @@ test("full self-serve flow: mint invite, preview the consent screen, join by cod
   assert.equal(joined.via, "invite");
   assert.equal(typeof joined.identitySecret, "string");
 
-  // The code is single-use: the join page's consent screen now reports it dead.
   const previewAgain = await fetch(`${origin}/api/agent-invites/preview?code=${minted.code}`);
   assert.equal(previewAgain.status, 409);
 
-  // Raw-code CLI redemption still works on a fresh invite.
   const minted2 = await (await fetch(`${origin}/api/rooms/${roomId}/agent-invites`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${ownerKey}` },
@@ -145,7 +131,7 @@ test("join by invite sets a working browser session cookie for the new member", 
   const minted = await (await fetch(`${origin}/api/rooms/${roomId}/agent-invites`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${ownerKey}` },
-    body: JSON.stringify({ profile: "contribute" }),
+    body: JSON.stringify({ displayName: "Session Agent", inviteCode: minted.code }),
   })).json();
   const response = await fetch(`${origin}/api/join`, {
     method: "POST",
@@ -155,8 +141,6 @@ test("join by invite sets a working browser session cookie for the new member", 
   assert.equal(response.status, 201);
   const joined = await response.json();
   assert.equal(joined.session, true);
-  // The join response carries the session row's genuine expiry (8h TTL):
-  // the welcome screen renders it as a real date/time, never a guess.
   const eightHours = 8 * 3600 * 1000;
   assert.ok(Number.isSafeInteger(joined.sessionExpiresAt), "join returns sessionExpiresAt");
   assert.ok(joined.sessionExpiresAt > Date.now(), "expiry is in the future");
@@ -165,15 +149,11 @@ test("join by invite sets a working browser session cookie for the new member", 
   assert.ok(setCookie, "join sets a session cookie");
   assert.match(setCookie, /room_session=[^;]+;.*HttpOnly/);
   const cookie = setCookie.split(";")[0];
-  // The cookie authenticates the new member: the room snapshot loads as them.
   const snapshot = await (await fetch(`${origin}/api/rooms/${roomId}`, { headers: { Cookie: cookie } })).json();
   assert.equal(snapshot.viewerId, joined.memberId);
   assert.equal(snapshot.state.members[joined.memberId].displayName, "Session Agent");
-  // And they can participate: the app fetches its CSRF token from /api/session,
-  // then posting a message works through the session like any browser client.
   const sessionView = await (await fetch(`${origin}/api/session`, { headers: { Cookie: cookie } })).json();
   assert.equal(typeof sessionView.csrf, "string");
-  // The expiry the join response reported is the session's real expiry.
   assert.equal(sessionView.expiresAt, joined.sessionExpiresAt);
   const posted = await fetch(`${origin}/api/rooms/${roomId}/commands`, {
     method: "POST",
@@ -193,8 +173,6 @@ test("first-room join also signs the browser in", async t => {
   assert.equal(response.status, 201);
   const joined = await response.json();
   assert.equal(joined.session, true);
-  // First-room joins mint the same 8h browser session: the response carries
-  // its genuine expiry for the welcome screen.
   assert.ok(Number.isSafeInteger(joined.sessionExpiresAt), "first-room join returns sessionExpiresAt");
   assert.ok(joined.sessionExpiresAt > Date.now(), "expiry is in the future");
   assert.ok(joined.sessionExpiresAt <= Date.now() + 8 * 3600 * 1000 + 60_000, "expiry matches the 8h session TTL");
@@ -204,10 +182,6 @@ test("first-room join also signs the browser in", async t => {
 });
 
 test("join page no-JS fallback gives working, host-correct agent instructions", async t => {
-  // Slice E stranger QA: the noscript fallback named a fictional endpoint
-  // (POST /api/agents/enroll exists nowhere in the codebase) and hardcoded
-  // the production origin + muse-room, so a no-JS stranger on a self-hosted
-  // server was instructed to enroll into the wrong server via a 404 route.
   const { origin } = await serve(t);
   const html = await (await fetch(`${origin}/join/RM-EXAMPLE`)).text();
   const noscript = html.match(/<noscript>[\s\S]*?<\/noscript>/);
