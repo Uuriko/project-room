@@ -276,6 +276,44 @@ test("duplicate terminals after a close stay silent (settled is not a re-open)",
   assert.equal(signalsFor(rows, "claim_completed").length, 1);
 });
 
+// --- terminal-before-first-claim residual (RC-2026-10-05-156) ----------------
+// A terminal event (done/released) seen before the observer's first claim
+// event marks the claim observed but not settled, so a later claimed or
+// reassigned event for the same ID stays blocked. The terminal closes a
+// lifecycle the observer never saw open — it must mark settled so the next
+// claim opens a fresh position. (muse-room seq 3319.)
+
+test("done seen before the first claim does not block the later claim", () => {
+  const rows = [
+    row(1, "c1", "state_changed", { claimState: "done", ownerId: "lane-a" }),
+    row(2, "c1", "claimed", { ownerId: "lane-a" }),
+    row(3, "c1", "state_changed", { claimState: "done", ownerId: "lane-a" })
+  ];
+  const completed = signalsFor(rows, "claim_completed");
+  assert.equal(completed.length, 2);
+  assert.deepEqual(completed.map(s => s.seq), [1, 3]);
+});
+
+test("released seen before the first claim does not block the later claim", () => {
+  const rows = [
+    row(1, "c1", "released", { claimState: "unclaimed", ownerId: "lane-a" }),
+    row(2, "c1", "claimed", { ownerId: "lane-a" }),
+    row(3, "c1", "state_changed", { claimState: "done", ownerId: "lane-a" })
+  ];
+  assert.equal(signalsFor(rows, "claim_released").length, 1);
+  const completed = signalsFor(rows, "claim_completed");
+  assert.equal(completed.length, 1);
+  assert.equal(completed[0].seq, 3);
+});
+
+test("duplicate terminals after a mid-history terminal stay silent", () => {
+  const rows = [
+    row(1, "c1", "state_changed", { claimState: "done", ownerId: "lane-a" }),
+    row(2, "c1", "state_changed", { claimState: "done", ownerId: "lane-a" })
+  ];
+  assert.equal(signalsFor(rows, "claim_completed").length, 1);
+});
+
 // --- replay / determinism ---------------------------------------------------
 
 test("replaying the same events yields byte-identical signals", () => {
