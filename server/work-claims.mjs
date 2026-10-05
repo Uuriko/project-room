@@ -461,6 +461,10 @@ export function createWork({ id, title, reviewPolicy, note, tags, files, depends
 export function claimWork(work, agentId, { note, leaseHours, files, dependsOn, pullRequest, pullRequests, repo, branch, fileBlocks, room, now } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
   check(item.state === "unclaimed", `work "${item.id}" is already ${item.state} — release it first`);
+  // QA D-1: the 4000-char bound applies to every note stored on a history
+  // stamp, not just create — an unbounded claim note is the same
+  // storage/amplification vector the SEC2 create cap closed.
+  if (note !== undefined && note !== null) check(typeof note === "string" && note.length <= 4000, "note must be a string of at most 4000 characters");
   const wanted = leaseHoursOf(leaseHours);
   const effective = wanted === null ? null : wanted ?? roomWorkClaimConfig(room).defaultLeaseHours;
   const declared = files === undefined || files === null ? null : claimedFilesOf(files);
@@ -494,6 +498,8 @@ export function renewWork(work, agentId, { note, leaseHours, room, now } = {}) {
   check(ACTIVE_CLAIM_STATES.includes(item.state), `work "${item.id}" is ${item.state} — only active claims can be renewed`);
   check(item.leaseExpiresAt !== null, `work "${item.id}" has no lease — nothing to renew`);
   check(Date.parse(item.leaseExpiresAt) > atMs, `work "${item.id}" lease already lapsed — claim it again instead`);
+  // QA D-1: same 4000-char bound as create — see claimWork.
+  if (note !== undefined && note !== null) check(typeof note === "string" && note.length <= 4000, "note must be a string of at most 4000 characters");
   const wanted = leaseHoursOf(leaseHours);
   // Explicit null opts out of leases, exactly like claimWork: the renewed
   // claim carries no lease window (it previously fell through to the room
@@ -568,6 +574,8 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
     check(state === "done", "blobs are only recorded on the done transition");
     blobsOf(blobs);
   }
+  // QA D-1: same 4000-char bound as create — see claimWork.
+  if (note !== undefined && note !== null) check(typeof note === "string" && note.length <= 4000, "note must be a string of at most 4000 characters");
   const released = state === "unclaimed";
   const next = state === undefined ? item : { ...item, state,
     owner: released ? null : item.owner,
