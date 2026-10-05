@@ -1,1 +1,1 @@
-$file:/tmp/mcp-room-profile-fixed.mjs
+@file:///tmp/mcp-room-profile-fixed.mjs
