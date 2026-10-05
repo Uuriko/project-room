@@ -96,11 +96,11 @@ db.close();
 parentPort.postMessage(out);
 `;
 
-function runWorkers(t, directory, workerData, workerCount) {
+function runWorkers(t, directory, baseData, workerCount) {
   const workerFile = join(directory, `attack-worker-${randomUUID()}.mjs`);
   writeFileSync(workerFile, WORKER_SOURCE(pathToFileURL(join(repoRoot, "server", "spend-grants.mjs")).href));
   const workers = Array.from({ length: workerCount }, (_, i) =>
-    new Worker(workerFile, { workerData: { ...workerData, workerIndex: i } }));
+    new Worker(workerFile, { workerData: { ...baseData, workerIndex: i } }));
   t.after(() => { for (const w of workers) w.terminate(); });
   return Promise.all(workers.map(w => new Promise((resolve, reject) => {
     w.once("message", resolve);
