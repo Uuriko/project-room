@@ -155,9 +155,11 @@ test("a batch stays claimed until every linked pull is merged or closed", async 
   const closedFetch = githubFetch({ merged: false, state: "closed" });
   await call("sweep", null, {}, { fetchImpl: closedFetch.fetchImpl });
   const settled = store.workClaims.get("commons", "batch");
-  assert.equal(settled.state, "unclaimed");
+  // #1518: a merged link is authoritative evidence of done — the closed
+  // link cannot veto it, so the batch settles pr_merged, not pr_closed.
+  assert.equal(settled.state, "done");
   assert.equal(settled.pullRequests.every(pull => pull.outcome), true);
-  assert.equal(claimEvents(store).some(event => event.data.action === "pr_closed"), true);
+  assert.equal(claimEvents(store).some(event => event.data.action === "pr_merged"), true);
 });
 
 test("an explicit release settles a batch while a linked pull is still open", async t => {

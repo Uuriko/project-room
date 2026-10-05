@@ -257,7 +257,7 @@ export function pullsReadyToSettle(item) {
   return links.length > 0 && links.every(pull => pull.outcome === "merged" || pull.outcome === "closed");
 }
 export function batchPullOutcome(item) {
-  return pullLinks(item).every(pull => pull.outcome === "merged") ? "merged" : "closed";
+  return pullLinks(item).some(pull => pull.outcome === "merged") ? "merged" : "closed";
 }
 export function fileLeaseConflicts(items, claimed) {
   const wanted = fileSlots(claimed);
