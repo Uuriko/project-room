@@ -1852,6 +1852,15 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           return sendPage(200, page.html, null, "/agents");
         }
         const page = publicRoomView(store, roomPage[1], { ref });
+        // A browser opening /r/<slug> for a room that is unknown or not
+        // published gets the same styled 404 as any other public path, not
+        // the JSON API envelope; /r/<slug>.json and non-HTML clients keep JSON.
+        if (!page && !roomPage[2] && acceptPrefersHtml(req.headers.accept)) {
+          const body = Buffer.from(PUBLIC_NOT_FOUND_HTML);
+          res.setHeader("X-Robots-Tag", "noindex");
+          res.writeHead(404, { "Content-Type": "text/html; charset=utf-8", "Content-Length": body.length });
+          return res.end(req.method === "HEAD" ? undefined : body);
+        }
         if (!page) reject(404, "not_found", "Not found");
         return sendPage(200, page.html, roomPage[2] ? page.document : null, `/r/${roomPage[1]}`);
       }
