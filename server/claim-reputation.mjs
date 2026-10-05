@@ -110,6 +110,9 @@ function foldClaims(rows) {
   const signals = [];
   const open = new Map();    // claimId -> ownerId (observed open positions)
   const seen = new Map();    // claimId -> true (ever observed, for mid-history terminals)
+  const settled = new Map(); // claimId -> true (a full lifecycle closed; a later
+                             //  claim action re-opens a fresh lifecycle instead
+                             //  of staying invisible behind `seen`)
   const laneOpen = new Map(); // agentId -> open-claim count at the fold frontier
   const inc = agent => laneOpen.set(agent, (laneOpen.get(agent) ?? 0) + 1);
   const dec = agent => {
@@ -121,6 +124,12 @@ function foldClaims(rows) {
     const agent = open.get(claimId);
     if (agent !== undefined) dec(agent);
     open.delete(claimId);
+    // The closed lifecycle must not shadow a later re-claim of the same id:
+    // `seen` stays (duplicate terminals stay silent) but the settled mark
+    // lets the next claim action open a fresh position. Marked even with no
+    // open position so a phantom lease-expiry on an unseen claim cannot block
+    // its first real claim either.
+    settled.set(claimId, true);
     return agent ?? null;
   };
   const emit = (claimId, row, agent, type) => {
@@ -143,12 +152,15 @@ function foldClaims(rows) {
     switch (action) {
       case "claimed": {
         // A mid-history fold may re-observe an open claim; only first sight opens.
+        // A re-claim after a closed lifecycle opens a fresh position instead of
+        // staying invisible behind the ever-observed mark (re-claim gap).
         const agent = laneOf(data.ownerId);
-        if (!position && agent && !observed) {
+        if (!position && agent && (!observed || settled.has(claimId))) {
           // Hoarding surcharge, posted at claim time: cost, not prohibition.
           if ((laneOpen.get(agent) ?? 0) >= HOARDING_CAP) emit(claimId, row, agent, "claim_hoarded");
           openPosition(claimId, agent);
           seen.set(claimId, true);
+          settled.delete(claimId);
         }
         break;
       }
@@ -184,7 +196,9 @@ function foldClaims(rows) {
       case "reassigned": {
         const next = laneOf(data.ownerId);
         if (position && next && next !== position) { dec(position); openPosition(claimId, next); }
-        else if (!position && next && !observed) { openPosition(claimId, next); seen.set(claimId, true); }
+        else if (!position && next && (!observed || settled.has(claimId))) {
+          openPosition(claimId, next); seen.set(claimId, true); settled.delete(claimId);
+        }
         break;
       }
       case "lease_expired": {
