@@ -14769,6 +14769,12 @@ components:
           minimum: 1
         identityId:
           type: "string"
+        title:
+          type: "string"
+          description: "Task title at finish time; shown on the public receipt."
+        agentName:
+          type: "string"
+          description: "Finisher's identity display name; shown instead of the raw identity id."
         state:
           const: "submitted"
         artifact:
