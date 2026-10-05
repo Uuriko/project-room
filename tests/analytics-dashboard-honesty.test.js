@@ -64,12 +64,13 @@ test("unconfigured lane attribution is flagged, never silently folded", () => {
   assert.equal(week.laneActivityTesting, 0);
   assert.equal(week.laneAttribution, "unconfigured");
   // No lane share is claimed when attribution is unconfigured; the
-  // falsifier row (below) reports status unconfigured, not a zero share.
+  // falsifier row reports status unconfigured with a null value — a numeric
+  // 0 beside the "unknown, not zero" note would be a fabrication.
   const db = memoryDb();
   const falsifiers = falsifierRows({ db, events, now: FIXED_MS });
   const lane = falsifiers.find(row => row.id === "lane_share_of_traction");
   assert.equal(lane.status, "unconfigured");
-  assert.equal(lane.value, 0); // 0 counted, but status says unknown-not-zero
+  assert.equal(lane.value, null);
   assert.match(lane.note, /unknown, not zero/);
   db.close();
 });

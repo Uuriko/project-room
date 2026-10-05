@@ -186,7 +186,14 @@ export function nonJohnFundedSettledPerWeek({ db, now = Date.now(), weeks = 12, 
 export function falsifierRows({ db, events = [], now = Date.now(), laneActorIds = new Set(), johnActorIds = new Set() } = {}) {
   const split = laneActivitySplit({ events, now, weeks: 12, laneActorIds });
   const settled = nonJohnFundedSettledPerWeek({ db, now, weeks: 12, johnActorIds });
-  const laneShares = split.map(row => row.laneShareOfAgentActivity).filter(value => value != null);
+  // A lane share is only a claim when lane attribution is configured. An
+  // unconfigured split counts every agent event as organic (lane = 0), so
+  // taking the latest numeric share here would publish value 0 beside a note
+  // saying "unknown, not zero" — a fabrication. Null stays null.
+  const laneShares = split
+    .filter(row => row.laneAttribution === "configured")
+    .map(row => row.laneShareOfAgentActivity)
+    .filter(value => value != null);
   const latestLaneShare = laneShares.length ? laneShares[laneShares.length - 1] : null;
   const signups = events.filter(event => event.name === "signup" && Number.isFinite(event.at) && event.at >= now - 28 * DAY).length;
 
