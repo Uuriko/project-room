@@ -28,8 +28,14 @@
 //   - fresh resolution per request: no cached caps; revocation bites on the
 //     agent's next call
 //   - SQLite-transaction serialization of check+reserve: cap races fail
-//     closed even across processes
-//   - replay-safe nonces: one (grant, nonce) authorizes at most once
+//     closed even across processes; the room allowance is enforced
+//     cumulatively the same way (in-flight room reservations narrow the
+//     projection snapshot inside the same BEGIN IMMEDIATE)
+//   - single-use grants admit at most one in-flight authorization: the
+//     one-shot slot is claimed atomically in authorizeSpend
+//   - replay-safe nonces: a re-presented (grant, nonce) never charges
+//     twice — 'settled' returns its receipt, 'reserved' returns the live
+//     authorization, only 'voided' stays consumed
 //
 // Money is integer cents as TEXT (string-decimal, no floats, D12). Only the
 // "credits" denomination exists in v1; "usdc" issuance is refused fail-closed.
@@ -93,6 +99,22 @@ CREATE TABLE IF NOT EXISTS spend_authorizations (
 );
 CREATE INDEX IF NOT EXISTS idx_spend_authorizations_agent
   ON spend_authorizations (room_id, agent_id, status);
+-- Room-allowance reservations: the cumulative enforcement backstop for the
+-- room-level spend allowance. authorizeSpend inserts one row per priced
+-- call inside the same BEGIN IMMEDIATE as the grant reservation and
+-- releases it on settle/void, so concurrent calls serialize against the
+-- allowance instead of racing a static projection snapshot.
+CREATE TABLE IF NOT EXISTS spend_room_reservations (
+  room_id TEXT NOT NULL,
+  agent_id TEXT NOT NULL,
+  nonce TEXT NOT NULL,
+  amount_cents TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active',
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (room_id, nonce)
+);
+CREATE INDEX IF NOT EXISTS idx_spend_room_reservations_active
+  ON spend_room_reservations (room_id, status);
 `;
 
 export function ensureSpendGrantsSchema(db) {
@@ -291,7 +313,21 @@ function paymentRefusal({ roomId, agentId, toolName, priceCents, reason, extra =
 // settle()/void(); the caller settles after the tool succeeds and voids on
 // any failure. Throws SpendGrantError (402/403/409) — the tool is never
 // invoked when this throws.
-export function authorizeSpend(db, { roomId, agentId, toolName, priceCents, nonce, roomHeadroomCents = null, nowMs = Date.now() } = {}) {
+//
+// Concurrency properties (qaD-fix-spend-race):
+// - the room allowance is enforced cumulatively: roomAllowanceCents /
+//   roomCommittedCents (the projection snapshot) form the base and every
+//   in-flight row in spend_room_reservations narrows it, all inside the
+//   same BEGIN IMMEDIATE as the grant reservation. roomHeadroomCents is
+//   the legacy static-snapshot fallback.
+// - single-use grants admit at most one in-flight authorization: the slot
+//   is claimed here, atomically, not in settle() after the tool ran.
+// - replay: a re-presented nonce never creates a second charge. 'settled'
+//   returns its receipt (exactly-once), 'reserved' returns the live
+//   authorization (crash recovery: the caller may still settle or void
+//   it); only 'voided' stays consumed (409).
+export function authorizeSpend(db, { roomId, agentId, toolName, priceCents, nonce,
+  roomHeadroomCents = null, roomAllowanceCents = null, roomCommittedCents = null, nowMs = Date.now() } = {}) {
   if (!db || typeof roomId !== "string") refuse(422, "invalid_spend_grant", "roomId must be a string");
   if (!validMemberId(agentId)) refuse(422, "invalid_spend_grant", "agentId must be a room member id");
   if (priceForTool(toolName) === null) refuse(422, "invalid_spend_grant", `${toolName} is not a priced tool`);
@@ -304,16 +340,25 @@ export function authorizeSpend(db, { roomId, agentId, toolName, priceCents, nonc
   if (tierOf(db, roomId, agentId) === "t1_readonly")
     refuse(403, "spend_grant_denied", "t1_readonly agents cannot hold spend grants");
 
-  const { remainingAfter } = transact(db, () => {
-    // Replay first: the same (grant, nonce) is never authorized twice, no
-    // matter the cap state. The UNIQUE constraint on the INSERT below is
-    // the race backstop; this read makes the 409 deterministic.
-    const existing = db.prepare(`SELECT status FROM spend_authorizations
+  const outcome = transact(db, () => {
+    // Replay first: a re-presented nonce never authorizes twice, no matter
+    // the cap state. 'settled' returns its receipt (exactly-once charging
+    // for completed-request replay, no fresh headroom needed); 'reserved'
+    // returns the live authorization (crash recovery); 'voided' stays
+    // consumed. The UNIQUE constraint on the INSERT below is the race
+    // backstop for two first-time presenters; this read makes the replay
+    // path deterministic.
+    const existing = db.prepare(`SELECT status, price_cents, tool_name FROM spend_authorizations
       WHERE room_id = ? AND agent_id = ? AND nonce = ?`).get(roomId, agentId, nonce);
-    if (existing)
-      refuse(409, "duplicate_nonce", "This spend authorization was already recorded; no double charge", {
+    if (existing) {
+      if (existing.status === "settled")
+        return { replay: "settled", priceCents: Number(existing.price_cents), toolName: existing.tool_name };
+      if (existing.status === "reserved")
+        return { replay: "reserved", priceCents: Number(existing.price_cents), toolName: existing.tool_name };
+      refuse(409, "duplicate_nonce", "This spend authorization was already recorded and voided; a new attempt needs a fresh nonce", {
         tool: toolName, priceCents, denomination: SPEND_DENOMINATION, agentId, roomId, nonce,
       });
+    }
     const grant = resolveSpendGrant(db, roomId, agentId, { nowMs, includeInactive: true });
     if (!grant) paymentRefusal({ roomId, agentId, toolName, priceCents, reason: "no_spend_grant" });
     if (grant.edge.revokedAt !== null)
@@ -328,16 +373,49 @@ export function authorizeSpend(db, { roomId, agentId, toolName, priceCents, nonc
     const perTx = centsToInt(terms.perTxCapCents);
     if (priceCents > perTx)
       paymentRefusal({ roomId, agentId, toolName, priceCents, reason: "per_tx_cap_exceeded", extra: { perTxCapCents: terms.perTxCapCents } });
+    // Single-use admission: at most one in-flight authorization per grant,
+    // decided atomically here. Revoking in settle() is too late — two
+    // overlapping calls with different nonces would both authorize.
+    // A voided attempt frees the slot; the call never happened.
+    if (terms.singleUse) {
+      const inFlight = db.prepare(`SELECT COUNT(*) AS n FROM spend_authorizations
+        WHERE room_id = ? AND agent_id = ? AND status = 'reserved'`).get(roomId, agentId).n;
+      if (Number(inFlight) > 0)
+        refuse(409, "single_use_in_flight",
+          "This single-use spend grant already has an in-flight authorization; overlapping calls are refused, no call was made and nothing was charged", {
+            tool: toolName, priceCents, denomination: SPEND_DENOMINATION, agentId, roomId,
+          });
+    }
     const remaining = Math.max(0, centsToInt(terms.capCents) - authorizationsTotal(db, roomId, agentId));
     if (priceCents > remaining)
       paymentRefusal({ roomId, agentId, toolName, priceCents, reason: "cap_exceeded", extra: { remainingCents: intToCents(remaining) } });
-    if (roomHeadroomCents !== null && Number.isSafeInteger(roomHeadroomCents) && priceCents > roomHeadroomCents)
+    // Room allowance, enforced cumulatively inside this transaction: the
+    // projection snapshot (allowance minus committed) is the base, and
+    // every in-flight room reservation narrows it, so two concurrent
+    // calls serialize against the allowance instead of racing a static
+    // headroom number.
+    let roomReserved = 0;
+    if (roomAllowanceCents !== null && Number.isSafeInteger(roomAllowanceCents)) {
+      const committed = Number.isSafeInteger(roomCommittedCents) ? roomCommittedCents : 0;
+      const inFlightRoom = db.prepare(`SELECT COALESCE(SUM(CAST(amount_cents AS INTEGER)), 0) AS total
+        FROM spend_room_reservations WHERE room_id = ? AND status = 'active'`).get(roomId).total;
+      const headroom = roomAllowanceCents - committed - Number(inFlightRoom);
+      if (priceCents > headroom)
+        paymentRefusal({ roomId, agentId, toolName, priceCents, reason: "room_allowance_exceeded",
+          extra: { roomHeadroomCents: intToCents(Math.max(0, headroom)) } });
+      roomReserved = priceCents;
+    } else if (roomHeadroomCents !== null && Number.isSafeInteger(roomHeadroomCents) && priceCents > roomHeadroomCents)
       paymentRefusal({ roomId, agentId, toolName, priceCents, reason: "room_allowance_exceeded", extra: { roomHeadroomCents: intToCents(roomHeadroomCents) } });
     try {
       db.prepare(`INSERT INTO spend_authorizations
           (room_id, agent_id, nonce, tool_name, price_cents, status, created_at)
           VALUES (?, ?, ?, ?, ?, 'reserved', ?)`)
         .run(roomId, agentId, nonce, toolName, intToCents(priceCents), nowMs);
+      if (roomReserved > 0)
+        db.prepare(`INSERT INTO spend_room_reservations
+            (room_id, agent_id, nonce, amount_cents, status, created_at)
+            VALUES (?, ?, ?, ?, 'active', ?)`)
+          .run(roomId, agentId, nonce, intToCents(roomReserved), nowMs);
     } catch (error) {
       if (String(error?.code).includes("SQLITE_CONSTRAINT"))
         refuse(409, "duplicate_nonce", "This spend authorization was already recorded; no double charge", {
@@ -354,13 +432,35 @@ export function authorizeSpend(db, { roomId, agentId, toolName, priceCents, nonc
       .run(to, settledAt, roomId, agentId, nonce);
     return info.changes > 0;
   };
+  const releaseRoomReservation = () => releaseRoomReservationRow(db, roomId, nonce);
+  const remainingNowCents = () => {
+    const grant = resolveSpendGrant(db, roomId, agentId, { nowMs: Date.now() });
+    if (!grant) return "0";
+    return intToCents(Math.max(0, centsToInt(grant.terms.capCents) - authorizationsTotal(db, roomId, agentId)));
+  };
+  if (outcome.replay === "settled") {
+    // Exactly-once: the receipt already exists. Return it without charging
+    // again and without demanding fresh headroom — the money moved already.
+    return Object.freeze({
+      nonce,
+      toolName: outcome.toolName,
+      priceCents: outcome.priceCents,
+      remainingAfterCents: remainingNowCents(),
+      replayed: "settled",
+      settle() { releaseRoomReservation(); return true; },
+      void() { return false; },
+    });
+  }
+  const replayedReserved = outcome.replay === "reserved";
   return Object.freeze({
     nonce,
-    toolName,
-    priceCents,
-    remainingAfterCents: intToCents(remainingAfter),
+    toolName: replayedReserved ? outcome.toolName : toolName,
+    priceCents: replayedReserved ? outcome.priceCents : priceCents,
+    remainingAfterCents: replayedReserved ? remainingNowCents() : intToCents(outcome.remainingAfter),
+    ...(replayedReserved ? { replayed: "reserved" } : {}),
     settle() {
       const moved = transition("settled", Date.now());
+      releaseRoomReservation();
       // Single-use grants are consumed by their first settled call.
       if (moved) {
         const terms = rowToTerms(db.prepare(
@@ -369,14 +469,22 @@ export function authorizeSpend(db, { roomId, agentId, toolName, priceCents, nonc
       }
       return moved;
     },
-    void() { return transition("voided", null); },
+    void() { const moved = transition("voided", null); releaseRoomReservation(); return moved; },
   });
+}
+
+// Room-allowance reservations are released on settle AND on void: the
+// allowance is only consumed by settled charges. Idempotent.
+function releaseRoomReservationRow(db, roomId, nonce) {
+  db.prepare(`UPDATE spend_room_reservations SET status = 'released'
+    WHERE room_id = ? AND nonce = ? AND status = 'active'`).run(roomId, nonce);
 }
 
 export function settleSpend(db, { roomId, agentId, nonce } = {}) {
   const info = db.prepare(`UPDATE spend_authorizations SET status = 'settled', settled_at = ?
     WHERE room_id = ? AND agent_id = ? AND nonce = ? AND status = 'reserved'`)
     .run(Date.now(), roomId, agentId, nonce);
+  if (info.changes > 0) releaseRoomReservationRow(db, roomId, nonce);
   return info.changes > 0;
 }
 
@@ -384,6 +492,7 @@ export function voidSpend(db, { roomId, agentId, nonce } = {}) {
   const info = db.prepare(`UPDATE spend_authorizations SET status = 'voided'
     WHERE room_id = ? AND agent_id = ? AND nonce = ? AND status = 'reserved'`)
     .run(roomId, agentId, nonce);
+  if (info.changes > 0) releaseRoomReservationRow(db, roomId, nonce);
   return info.changes > 0;
 }
 
@@ -403,14 +512,18 @@ export function chargeSpendBeforeCall(store, secret, name, args) {
   const room = store.room(roomId);
   if (member.id === room.state.room.ownerId) return null; // ownership implies full authority
   const nowMs = store.now();
-  const { headroomCents } = spendAllowanceReport(room.state, nowMs);
+  const report = spendAllowanceReport(room.state, nowMs);
   return authorizeSpend(store.db, {
     roomId,
     agentId: member.id,
     toolName: name,
     priceCents,
     nonce: randomUUID(),
-    roomHeadroomCents: headroomCents,
+    // Cumulative enforcement: the projection snapshot is the base and
+    // authorizeSpend serializes every in-flight room reservation against
+    // it in the same transaction as the grant reservation.
+    roomAllowanceCents: report.allowance ? report.allowance.allowanceCents : null,
+    roomCommittedCents: report.committedCents,
     nowMs,
   });
 }
