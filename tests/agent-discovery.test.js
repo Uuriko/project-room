@@ -539,3 +539,21 @@ test("A2A agent card declares the work-receipt extension (docs/a2a-receipt-exten
   assert.equal(ext.params.schema_version, "project-room-receipt/1");
   assert.match(ext.params.spec_url, /a2a-receipt-extension\.md$/);
 });
+
+test("anonymous MCP catalog is six tools (four join + two public-work); copy never says four", async () => {
+  const { livePublicMcpTools } = await import("../server/mcp-discovery.mjs");
+  const { MCP_JOIN_TOOLS } = await import("../server/mcp-http.mjs");
+  const { anonymousPublicWorkMcpTools } = await import("../server/mcp-public-work.mjs");
+  const tools = livePublicMcpTools();
+  assert.equal(MCP_JOIN_TOOLS.length, 4);
+  assert.equal(anonymousPublicWorkMcpTools.length, 2);
+  assert.equal(tools.length, 6);
+  assert.deepEqual(tools.map(t => t.name).sort(), [
+    ...MCP_JOIN_TOOLS.map(t => t.name),
+    "public_work_read_task", "public_work_recommend",
+  ].sort());
+  // QA5-gb: the packet once called this anonymous catalog "four tools".
+  const text = llmsTxt();
+  assert.ok(!/four-tool catalog/i.test(text), "llms.txt must not call the anonymous catalog four-tool");
+  assert.ok(!/tools\/list is the four( public join)? tools/i.test(text), "llms.txt must not say no-credential tools/list is only four tools");
+});
