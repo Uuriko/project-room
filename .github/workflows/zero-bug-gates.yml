@@ -54,6 +54,9 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0 # the diff needs the PR base commit present
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24 # pin: the script relies on builtinModules content
       # Zero-dep script (node: builtins only): no `npm ci` needed, keeps the
       # job fast. Scans added lines only, so history never blocks a new PR.
       # Patterns are conservative (provider-prefixed: AWS, GitHub, Slack,
@@ -69,6 +72,9 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24 # pin: builtinModules must include node:test / node:sqlite
       # Zero-dep script (node: builtins only): no `npm ci` needed. (1) Every
       # registry dependency declared in package.json (root + relay/ +
       # cloudflare/) must resolve on the npm registry — a hallucinated package
