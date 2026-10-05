@@ -21,7 +21,7 @@
 
 import { randomBytes, randomUUID } from "node:crypto";
 import { ServiceError } from "./service-error.mjs";
-import { event, EVENT_TYPES, applyEvent, validId } from "../src/events.js";
+import { event, EVENT_TYPES, applyEvent, isRoomArchived, validId } from "../src/events.js";
 import { claimWork, createWork } from "./work-claims.mjs";
 
 export const LAND_CHECKS = Object.freeze(["pending", "green", "red"]);
@@ -607,8 +607,18 @@ export class LandQueue {
     const row = this.#row(roomId, itemId);
     if (!row) fail(404, "land_item_not_found", "Land queue item was not found");
     this.store.transaction(() => {
+      const claim = typeof this.store.workClaims?.get === "function"
+        ? this.store.workClaims.get(roomId, itemId)
+        : null;
+      const dependents = claim ? this.#dependentsOf(roomId, itemId) : [];
       this.db.prepare("DELETE FROM land_queue WHERE room_id=? AND item_id=?").run(roomId, itemId);
-      if (typeof this.store.workClaims.delete === "function") this.store.workClaims.delete(roomId, itemId);
+      if (typeof this.store.workClaims.delete === "function") {
+        this.store.workClaims.delete(roomId, itemId);
+        // Issue #1527: the mirrored claim is gone, so any claim that depended
+        // on it is stranded. Emit the deletion receipt (fail-safe: the receipt
+        // must never roll back the delete).
+        if (claim) this.#receiptClaimDeleted(roomId, { actorId: memberId, claim, dependents });
+      }
     });
     return { roomId, itemId, removed: true };
   }
@@ -732,8 +742,16 @@ export class LandQueue {
       }
       if (error?.code === "pr_not_found" && !duplicate) {
         this.store.transaction(() => {
+          const claim = typeof this.store.workClaims?.get === "function"
+            ? this.store.workClaims.get(item.roomId, item.itemId)
+            : null;
+          const dependents = claim ? this.#dependentsOf(item.roomId, item.itemId) : [];
           this.db.prepare("DELETE FROM land_queue WHERE room_id=? AND item_id=?").run(item.roomId, item.itemId);
-          if (typeof this.store.workClaims?.delete === "function") this.store.workClaims.delete(item.roomId, item.itemId);
+          if (typeof this.store.workClaims?.delete === "function") {
+            this.store.workClaims.delete(item.roomId, item.itemId);
+            // Issue #1527: same stranded-dependent receipt as remove().
+            if (claim) this.#receiptClaimDeleted(item.roomId, { actorId: item.claimantMemberId, claim, dependents });
+          }
         });
       } else if (error?.code === "github_unconfigured" || error?.code === "github_unavailable") {
         const backoff = nextPollBackoff(row?.backoff_ms);
@@ -782,6 +800,75 @@ export class LandQueue {
     return { item: saved, duplicate, changed };
   }
 
+  // Claims whose dependsOn names a land-mirrored claim that is about to be
+  // deleted. The ready-queue half of issue #1527 leaves these stranded; the
+  // deletion receipt below names them so the stranding is visible.
+  #dependentsOf(roomId, deletedId) {
+    if (typeof this.store.workClaims?.list !== "function") return [];
+    return this.store.workClaims.list(roomId)
+      .filter(entry => entry && entry.id !== deletedId
+        && Array.isArray(entry.dependsOn) && entry.dependsOn.includes(deletedId))
+      .map(entry => entry.id);
+  }
+
+  // Fail-safe wrapper: a deletion receipt must never roll back the delete.
+  #receiptClaimDeleted(roomId, { actorId, claim, dependents }) {
+    try {
+      this.#emitClaimDeleted(roomId, { actorId, claim, dependents });
+    } catch (error) {
+      console.error("land queue delete receipt failed:", error?.message ?? error);
+    }
+  }
+
+  // Issue #1527 (land-queue.mjs half): when a land queue delete removes the
+  // mirrored work claim, append a work_claim.updated receipt with action
+  // "deleted" naming the deleted claim and its dependsOn dependents, so the
+  // stranding is visible and recoverable. Same append path as #emit: the
+  // event row and the projection update commit inside the caller's delete
+  // transaction.
+  #emitClaimDeleted(roomId, { actorId, claim, dependents }) {
+    if (!this.store?.db || typeof this.store.room !== "function") return null;
+    const room = this.store.room(roomId);
+    if (isRoomArchived(room.state)) return null;
+    const member = room.state.members?.[actorId];
+    const incoming = event({
+      id: randomUUID(),
+      idempotencyKey: randomUUID(),
+      type: EVENT_TYPES.WORK_CLAIM_UPDATED,
+      actorId: member && member.active !== false ? actorId : room.state.room.ownerId,
+      roomId,
+      at: new Date(this.store.now()).toISOString(),
+      data: {
+        workClaim: claim.id,
+        action: "deleted",
+        claimState: ["unclaimed", "claimed", "in_progress", "blocked", "done"].includes(claim.state)
+          ? claim.state
+          : "unclaimed",
+        ownerId: claim.owner ?? null,
+        leaseExpiresAt: claim.leaseExpiresAt ?? null,
+        title: typeof claim.title === "string" && claim.title.trim() ? claim.title : claim.id,
+        paths: Array.isArray(claim.files) ? [...claim.files] : [],
+        dependents: [...dependents]
+      }
+    });
+    return this.#appendRoomEvent(roomId, incoming);
+  }
+
+  #appendRoomEvent(roomId, incoming) {
+    const room = this.store.room(roomId);
+    const state = applyEvent(room.state, incoming);
+    const sequence = room.sequence + 1;
+    this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
+    const compact = { ...state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
+    this.db.prepare("UPDATE rooms SET sequence=?, projection=? WHERE id=?").run(sequence, JSON.stringify(compact), roomId);
+    try {
+      if (this.store.agentPlugin) this.store.agentPlugin.fanoutRoomEvent({ roomId, event: incoming });
+    } catch (error) {
+      console.error("land queue fan-out failed:", error?.message ?? error);
+    }
+    return incoming;
+  }
+
   #emit(roomId, item, changed) {
     const payload = landWakePayload(item, changed);
     const room = this.store.room(roomId);
@@ -801,16 +888,7 @@ export class LandQueue {
         ...payload
       }
     });
-    const state = applyEvent(room.state, incoming);
-    const sequence = room.sequence + 1;
-    this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
-    const compact = { ...state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
-    this.db.prepare("UPDATE rooms SET sequence=?, projection=? WHERE id=?").run(sequence, JSON.stringify(compact), roomId);
-    try {
-      if (this.store.agentPlugin) this.store.agentPlugin.fanoutRoomEvent({ roomId, event: incoming });
-    } catch (error) {
-      console.error("land queue fan-out failed:", error?.message ?? error);
-    }
+    this.#appendRoomEvent(roomId, incoming);
     try { this.wakeClaimant(roomId, item.claimantMemberId, incoming, payload); }
     catch (error) { console.error("land queue wake failed:", error?.message ?? error); }
     return incoming;
