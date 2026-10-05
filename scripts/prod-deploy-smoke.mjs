@@ -4,7 +4,15 @@
 //
 //   node scripts/prod-deploy-smoke.mjs --sha <40-hex> \
 //     [--origin https://room.trydemigod.com] [--entry https://www.getdasha.com/room] \
-//     [--wait-ms 300000]
+//     [--wait-ms 300000] \
+//     [--agent-card-public-key <base64>] [--agent-card-key-id <id>] \
+//     [--agent-card-agent-id <id>] [--agent-card-fetches 10]
+//
+// Test-only knobs (env fallbacks SMOKE_AGENT_CARD_PUBLIC_KEY,
+// SMOKE_AGENT_CARD_KEY_ID, SMOKE_AGENT_CARD_AGENT_ID, SMOKE_AGENT_CARD_FETCHES):
+// let the test suite inject its own signing key and shrink the repeated card
+// fetches. The deploy pipeline never sets them, so production always pins the
+// real key and runs the full fetch count.
 //
 // Waits until /api/version and /api/version/worker report --sha on both the
 // canonical host and the public entry (edge propagation takes a few seconds),
@@ -40,6 +48,17 @@ const sha = opt("sha");
 const origin = opt("origin", "https://room.trydemigod.com").replace(/\/$/, "");
 const entry = opt("entry", "https://www.getdasha.com/room").replace(/\/$/, "");
 const waitMs = Number(opt("wait-ms", "300000"));
+// Test seams (#1524): the deploy pipeline never sets these, so production
+// always verifies against the pinned key with the full fetch count. Tests
+// inject their own keypair through these knobs — they cannot sign for the
+// production pinned key — and shrink the fetch count so the CLI finishes
+// inside the test timeout. Flags win; env vars are the fallback the
+// workflow-pipeline test uses (it runs the literal deploy step, so it can
+// only inject through the environment).
+const agentCardPublicKey = opt("agent-card-public-key", process.env.SMOKE_AGENT_CARD_PUBLIC_KEY || AGENT_CARD_PUBLIC_KEY);
+const agentCardKeyId = opt("agent-card-key-id", process.env.SMOKE_AGENT_CARD_KEY_ID || AGENT_CARD_KEY_ID);
+const agentCardAgentId = opt("agent-card-agent-id", process.env.SMOKE_AGENT_CARD_AGENT_ID || AGENT_CARD_AGENT_ID);
+const agentCardFetches = Math.max(1, Number(opt("agent-card-fetches", process.env.SMOKE_AGENT_CARD_FETCHES || "10")) || 10);
 if (sha && !/^[0-9a-f]{40}$/.test(sha)) {
   console.error("prod-deploy-smoke: --sha must be a full 40-character lowercase hex commit");
   process.exit(2);
@@ -173,12 +192,20 @@ async function main() {
 
   // #1524: repeated signed-card assertion on both doors. The entry door is
   // the /room-prefixed public door, so its A2A card twin resolves at the
-  // same relative path.
+  // same relative path. Key and fetch count come from the test seams above;
+  // production always uses the pinned key and the full fetch count.
   for (const door of [origin, entry]) {
     const cardUrl = `${door}/.well-known/agent-card.json`;
-    const failures = await checkAgentCardDoor({ url: cardUrl, expectedRevision: sha || null });
+    const failures = await checkAgentCardDoor({
+      url: cardUrl,
+      expectedRevision: sha || null,
+      fetches: agentCardFetches,
+      publicKey: agentCardPublicKey,
+      keyId: agentCardKeyId,
+      agentId: agentCardAgentId,
+    });
     record(`agent-card ${cardUrl}`, failures.length === 0, {
-      fetches: 10,
+      fetches: agentCardFetches,
       failures: failures.slice(0, 8),
       failureCount: failures.length,
     });
