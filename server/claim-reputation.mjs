@@ -205,7 +205,12 @@ function foldClaims(rows) {
           const who = laneOf(data.ownerId) ?? position;
           if (who) emit(claimId, row, who, "claim_judged_bad");
           else seen.set(claimId, true);
-          closePosition(claimId);
+          // The position stays OPEN: the P1 spec counts positions open until
+          // done/released/expired, and server/work-claims.mjs keeps a claim
+          // active after a review (review only records an attestation). A
+          // lane that reworks and marks done after a changes_requested
+          // review earns the +3 completion, and its open-claim count keeps
+          // counting the claim while it is being reworked.
         }
         // Any other verdict leaves the position open; a note is not a verdict.
         break;

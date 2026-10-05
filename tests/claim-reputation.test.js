@@ -113,7 +113,13 @@ test("lease expiry on an unobserved claim still emits the flake", () => {
   assert.equal(got[0].agent, "lane-a");
 });
 
-test("reviewed changes_requested posts claim_judged_bad and closes the position", () => {
+test("reviewed changes_requested posts claim_judged_bad and keeps the position open", () => {
+  // QA 2026-10-05: the P1 spec's signal table pins "positions counted open
+  // until done/released/expired", and server/work-claims.mjs keeps a claim
+  // active after a review (review only records an attestation). Closing the
+  // position on changes_requested meant a lane that reworked and marked done
+  // after a review got judged_bad (-10) but never the +3 completion, and its
+  // open-claim count undercounted during rework.
   const rows = [
     row(1, "c1", "claimed"),
     row(2, "c1", "reviewed", { verdict: "changes_requested" })
@@ -122,9 +128,12 @@ test("reviewed changes_requested posts claim_judged_bad and closes the position"
   assert.equal(got.length, 1);
   assert.equal(got[0].agent, "lane-a");
   assert.equal(got[0].weight, -10);
-  // The position is closed: a later done emits nothing.
+  // The position stays open: a later done still pays claim_completed.
   const done = signalsFor([...rows, row(3, "c1", "state_changed", { claimState: "done" })], "claim_completed");
-  assert.equal(done.length, 0);
+  assert.equal(done.length, 1, "done after changes_requested still completes");
+  assert.equal(done[0].weight, 3, "the completion pays the spec's +3");
+  const { openClaims } = projectClaimReputation(rows, { nowMs: T0 + 4 * 60_000 });
+  assert.equal(openClaims.get("lane-a") ?? 0, 1, "judged-bad claim still counts as open");
 });
 
 test("other review verdicts are not judged bad", () => {
