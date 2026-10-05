@@ -7,8 +7,10 @@
 //   the mechanism; single-connection tests cannot interleave, so only worker
 //   threads with separate connections exercise it)
 // - concurrent nonce replay: the same nonce raced from two connections
-//   authorizes exactly once (UNIQUE constraint backstop, not just the
-//   sequential read check)
+//   creates exactly one authorization row; every racer gets the same live
+//   handle and settle() is idempotent, so the call charges exactly once
+//   (qaD-fix-spend-race: reserved nonces re-present the live authorization
+//   for idempotent retry / crash recovery; only voided nonces 409)
 // - boundary exactness: price 0/negative refused, price == cap allowed,
 //   price == cap+1 refused with cap_exceeded
 // - charge-then-forward failure path at the tools/call boundary: a tool that
@@ -151,24 +153,37 @@ test("the same nonce raced from two connections authorizes exactly once",
       issueAttackGrant(db, { capCents: "1000", perTxCapCents: "1000" });
       db.close();
     }
+    const shared = `race-${randomUUID()}`;
     const results = await runWorkers(t, directory, {
       dbFile, roomId: "attack-room", agentId: "peer1",
       toolName: "room_put_file", priceCents: 5, calls: 1,
-      sharedNonce: true, noncePrefix: `race-${randomUUID()}`,
+      sharedNonce: true, noncePrefix: shared,
     }, 4);
     const total = results.reduce((acc, r) => ({
       ok: acc.ok + r.ok, dup409: acc.dup409 + r.dup409, other: [...acc.other, ...r.other],
     }), { ok: 0, dup409: 0, other: [] });
     assert.deepEqual(total.other, [], `unexpected worker errors: ${JSON.stringify(total.other).slice(0, 500)}`);
-    // Regression: without the UNIQUE backstop, a raced replay double-charges.
-    assert.equal(total.ok, 1, `exactly one racer may win, got ${total.ok}`);
-    assert.equal(total.dup409, 3, "every loser gets 409 duplicate_nonce");
+    // qaD-fix-spend-race: a re-presented reserved nonce returns the live
+    // authorization instead of 409 (idempotent retry / crash recovery).
+    // Every racer holds a handle to the SAME authorization row.
+    assert.equal(total.ok, 4, `every racer gets the live authorization, got ${total.ok}`);
+    assert.equal(total.dup409, 0);
     const db = open();
+    t.after(() => db.close());
     const rows = db.prepare(
       `SELECT COUNT(*) AS n FROM spend_authorizations
        WHERE room_id = 'attack-room' AND agent_id = 'peer1'`).get().n;
-    db.close();
+    // Regression: without the serialization backstop, a raced replay
+    // double-charges (two rows, two charges).
     assert.equal(rows, 1, "exactly one authorization row exists");
+    const nowMs = Date.now();
+    const replayed = authorizeSpend(db, { roomId: "attack-room", agentId: "peer1",
+      toolName: "room_put_file", priceCents: 5, nonce: shared, nowMs });
+    assert.equal(replayed.replayed, "reserved", "re-presented reserved nonce returns the live handle");
+    assert.equal(replayed.settle(), true, "first settle charges once");
+    assert.equal(replayed.settle(), false, "second settle is a no-op");
+    assert.equal(spendGrantSummary(db, "attack-room", "peer1", { nowMs }).remainingCents, "995",
+      "exactly one 5c charge against the 1000c cap");
   });
 
 // --- Boundary exactness ---
