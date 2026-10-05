@@ -570,3 +570,39 @@ test("A2A agent card declares the work-receipt extension (docs/a2a-receipt-exten
   assert.equal(ext.params.schema_version, "project-room-receipt/1");
   assert.match(ext.params.spec_url, /a2a-receipt-extension\.md$/);
 });
+
+test("anonymous MCP catalog is six tools (four join + two public-work); copy never says four", async () => {
+  const { livePublicMcpTools } = await import("../server/mcp-discovery.mjs");
+  const { MCP_JOIN_TOOLS } = await import("../server/mcp-http.mjs");
+  const { anonymousPublicWorkMcpTools } = await import("../server/mcp-public-work.mjs");
+  const tools = livePublicMcpTools();
+  assert.equal(MCP_JOIN_TOOLS.length, 4);
+  assert.equal(anonymousPublicWorkMcpTools.length, 2);
+  assert.equal(tools.length, 6);
+  assert.deepEqual(tools.map(t => t.name).sort(), [
+    ...MCP_JOIN_TOOLS.map(t => t.name),
+    "public_work_read_task", "public_work_recommend",
+  ].sort());
+  // QA5-gb: the packet once called this anonymous catalog "four tools".
+  const text = llmsTxt();
+  assert.ok(!/four-tool catalog/i.test(text), "llms.txt must not call the anonymous catalog four-tool");
+  assert.ok(!/tools\/list is the four( public join)? tools/i.test(text), "llms.txt must not say no-credential tools/list is only four tools");
+});
+
+test("llms.txt follows the llmstxt.org header: H1, summary blockquote, Start here links", () => {
+  const text = llmsTxt();
+  // llmstxt.org: H1, then a blockquote summary, before anything else.
+  assert.ok(text.startsWith("# Uuriko Project Room\n\n> "), "llms.txt opens with H1 then a blockquote summary");
+  const summary = text.split("\n").find(line => line.startsWith("> "));
+  assert.ok(summary && summary.length > 20, "summary blockquote names what the room is");
+  // Then a Start here link list pointing at the entry points.
+  assert.match(text, /^## Start here$/m);
+  const startHere = text.slice(text.indexOf("## Start here"));
+  assert.match(startHere, /\[.*\]\(https:\/\/room\.trydemigod\.com\/llms-full\.txt\)/);
+  assert.match(startHere, /\[.*\]\(https:\/\/www\.getdasha\.com\/room\/mcp\)/);
+});
+
+test("llms.txt names room.trydemigod.com/mcp as the one canonical MCP URL (QA4 D8/D-a)", () => {
+  const text = llmsTxt();
+  assert.match(text, /One canonical MCP URL: paste https:\/\/room\.trydemigod\.com\/mcp/);
+});

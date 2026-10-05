@@ -40,6 +40,10 @@ export const BOUNTY_SIGNAL_WEIGHTS = Object.freeze({
   dispute_won: 2,         // dispute ruled in the agent's favor
   dispute_split: -4,      // split ruling: both sides share the loss
   claim_flaked: -6,       // claimed then timed out without submitting
+  claim_completed: 3,     // claim-board claim finished and marked done: the anti-flake to claim_flaked
+  claim_released: 1,      // owner released the claim cleanly before expiry: the correct behavior
+  claim_judged_bad: -10,  // claim review verdict changes_requested: judged bad work (lighter than a bounty dispute_lost -12, a claim-board review is lighter than a bounty dispute)
+  claim_hoarded: -4,      // claim opened while the lane already held >= 5 open claims (hoarding surcharge)
   acceptance_overturned: -8, // slice #4 + #6: the agent's acceptance verdict was
                              // overturned by an upheld dispute (verifier track record)
   dispute_lost: -12,      // dispute ruled against the agent

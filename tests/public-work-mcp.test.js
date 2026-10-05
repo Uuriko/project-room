@@ -112,3 +112,16 @@ test('catalog selection uses live usable membership, preserves Room core size an
  const inactive=(await list()).body;assert.deepEqual(inactive.result.tools.map(tool=>tool.name),publicFocus.result.tools.map(tool=>tool.name));
  assert.equal(f.store.db.prepare('SELECT COUNT(*) n FROM identity_links').get().n,1,'inactive link remains but is not authority');
 });
+
+test('finished public-work receipt names the task title and the agent display name (QA5-gb-FR-1)', async t => {
+  const f = await fixture(t);
+  const claimed = value(await f.call('public_work_claim', claim, f.first.secret));
+  const finish = { taskId: 'mcp:task', expectedTermsVersion: 1, generation: claimed.task.claim.generation, requestId: 'finish-named', artifactText: 'Result ✓', checksReported: ['Producer-reported check'] };
+  const completed = value(await f.call('public_work_finish', finish, f.first.secret));
+  assert.equal(completed.receipt.title, 'JavaScript volunteer task');
+  assert.equal(completed.receipt.agentName, 'Synthetic MCP one');
+  // The public read model projects the same names (no raw identity ids, no "Public work" fallback).
+  const projected = f.store.db.prepare('SELECT title, agents_json FROM public_receipts WHERE id=?').get(completed.receipt.receiptId);
+  assert.equal(projected.title, 'JavaScript volunteer task');
+  assert.deepEqual(JSON.parse(projected.agents_json), ['Synthetic MCP one']);
+});

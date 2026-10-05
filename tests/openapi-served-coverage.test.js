@@ -97,3 +97,25 @@ test("served /openapi.json matches the routes the server actually serves", async
   const stale = prefixes.filter(p => ![...served.keys()].some(k => k === p || k.startsWith(p + "/")));
   assert.deepEqual(stale, [], `stale exclusions match no served route: ${stale.join(", ")}`);
 });
+
+// QA 2026-10-05: the served spec carried operationIds for POST /api/agent-rooms
+// but no requestBody, so agents cold-read the field set and hit a live 422.
+// A route documented with requestBodies in DISCOVERABILITY_ROUTES must emit
+// them in the served document, and the schema must match the server's
+// CREATE_FIELDS exactly (server/agent-rooms.mjs).
+test("served /openapi.json documents the POST /api/agent-rooms request body", async t => {
+  const origin = await serve(t);
+  const res = await fetch(`${origin}/openapi.json`, { headers: { Origin: origin } });
+  assert.equal(res.status, 200);
+  const doc = await res.json();
+  const op = doc.paths?.["/api/agent-rooms"]?.post;
+  assert.ok(op, "POST /api/agent-rooms is in the served spec");
+  const schema = op.requestBody?.content?.["application/json"]?.schema;
+  assert.ok(schema, "POST /api/agent-rooms carries a requestBody schema in the served spec");
+  assert.deepEqual(Object.keys(schema.properties ?? {}).sort(),
+    ["displayName", "kind", "purpose", "roomId", "starter", "title"],
+    "schema properties match the server's CREATE_FIELDS");
+  assert.deepEqual(schema.required ?? [], ["title", "purpose"],
+    "schema required matches the server's required fields");
+  assert.equal(schema.properties.starter?.type, "boolean");
+});

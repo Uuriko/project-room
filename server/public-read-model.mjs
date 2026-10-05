@@ -412,7 +412,8 @@ export function projectPublicWorkReceipt(store, body, artifactSha256 = null) {
     originRoomId: roomId,
     roomId,
     roomTitle,
-    agents: typeof body.identityId === "string" && body.identityId ? [body.identityId] : [],
+    agents: typeof body.agentName === "string" && body.agentName ? [body.agentName]
+      : typeof body.identityId === "string" && body.identityId ? [body.identityId] : [],
     humans: [],
     pullRequest: null,
     mergedAt: null,
