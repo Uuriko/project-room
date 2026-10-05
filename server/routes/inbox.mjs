@@ -416,8 +416,14 @@ export const INBOX_ROUTES = Object.freeze([
   inboxRoute({ id: "inbox.connections.list", method: "GET", path: "/api/inbox/connections", auth: "account" }),
   inboxRoute({ id: "inbox.connections.read", method: "GET", path: "/api/inbox/connections/{id}", auth: "account", schema: { params: { type: "object" } } }),
   inboxRoute({ id: "inbox.connections.commands", method: "POST", path: "/api/inbox/connections/commands", auth: "account", schema: { body: { type: "object", required: ["action", "connectionId"] } } }),
-  inboxRoute({ id: "inbox.connections.reconnect", method: "POST", path: "/api/inbox/connections/{id}/reconnect", auth: "account", schema: { params: { type: "object" }, body: { type: "object", required: ["requestId"], additionalProperties: false } } }),
-  inboxRoute({ id: "inbox.connections.sync", method: "POST", path: "/api/inbox/connections/{id}/sync", auth: "account", schema: { params: { type: "object" }, body: { type: "object", required: ["requestId", "updates"], additionalProperties: false } } }),
+  inboxRoute({ id: "inbox.connections.reconnect", method: "POST", path: "/api/inbox/connections/{id}/reconnect", auth: "account", schema: { params: { type: "object" }, body: { type: "object", required: ["requestId"], additionalProperties: false, properties: {
+    // The handler demands exactly { requestId: validId string <= 100 }.
+    requestId: { type: "string" },
+  } } } }),
+  inboxRoute({ id: "inbox.connections.sync", method: "POST", path: "/api/inbox/connections/{id}/sync", auth: "account", schema: { params: { type: "object" }, body: { type: "object", required: ["requestId", "updates"], additionalProperties: false, properties: {
+    // The handler accepts updates === null (full sync) or an array of updates.
+    requestId: { type: "string" }, updates: { type: ["array", "null"] },
+  } } } }),
   inboxRoute({ id: "inbox.sources.read", method: "GET", path: "/api/inbox/sources/{sourceId}", auth: "account", schema: { params: { type: "object" }, query: { type: "object" } } }),
   inboxRoute({ id: "inbox.sources.attachments", method: "GET", path: "/api/inbox/sources/{sourceId}/attachments", auth: "account", schema: { params: { type: "object" } } }),
   inboxRoute({ id: "inbox.sources.attachment", method: "GET", path: "/api/inbox/sources/{sourceId}/attachments/{attachmentId}", auth: "account", schema: { params: { type: "object" } } }),
@@ -428,6 +434,9 @@ export const INBOX_ROUTES = Object.freeze([
   inboxRoute({ id: "inbox.sources.shareContext", method: "GET", path: "/api/inbox/sources/{sourceId}/share-context", auth: "account", schema: { params: { type: "object" }, query: { type: "object" } } }),
   inboxRoute({ id: "inbox.commands", method: "POST", path: "/api/inbox/commands", auth: "account", schema: { body: { type: "object" } } }),
   inboxRoute({ id: "inbox.channelSends", method: "POST", path: "/api/inbox/channel-sends", auth: "account", schema: { body: { type: "object" } } }),
-  inboxRoute({ id: "inbox.simulation", method: "POST", path: "/api/inbox/simulation", auth: "account", schema: { body: { type: "object", required: ["action", "sourceId", "sendId"], additionalProperties: false } } }),
+  inboxRoute({ id: "inbox.simulation", method: "POST", path: "/api/inbox/simulation", auth: "account", schema: { body: { type: "object", required: ["action", "sourceId", "sendId"], additionalProperties: false, properties: {
+    // The handler demands exactly { action: dispatch|reconcile, sourceId, sendId } as valid ids.
+    action: { type: "string", enum: ["dispatch", "reconcile"] }, sourceId: { type: "string" }, sendId: { type: "string" },
+  } } } }),
   inboxRoute({ id: "inbox.webhook", method: "POST", path: "/api/inbox/webhooks/{connectionId}", auth: "none", schema: { params: { type: "object" }, body: { type: "object" } } }),
 ]);
