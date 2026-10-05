@@ -414,7 +414,8 @@ const RETIRED_EMISSARY_TABLES = Object.freeze([
   "emissary_journal",
 ]);
 // Analytics tables (server/analytics/schema.mjs) + the claim-bond P0 shadow
-// journal (server/analytics/claim-bond-shadow.mjs): created on demand by
+// journal (server/analytics/claim-bond-shadow.mjs) + the P1 claim-reputation
+// signal journal (server/claim-reputation.mjs): created on demand by
 // analytics tooling (the tail, the backfill script, claim-bond-shadow --sync)
 // directly in the room database, never by the store constructor. They stay
 // in the recovery audit's allowed set so backupRoom/room-export keep passing
@@ -429,6 +430,7 @@ const ANALYTICS_ADDITIVE_TABLES = Object.freeze([
   "analytics_daily",
   "analytics_ctx",
   "claim_bond_shadow",
+  "claim_reputation_signals",
 ]);
 export const lazyAdditiveTables = Object.freeze([...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES, ...RETIRED_EMISSARY_TABLES, ...ANALYTICS_ADDITIVE_TABLES]);
 // messages (MSG-1) is fenced at v37 only. v34–v36 files do not have the

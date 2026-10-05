@@ -69,6 +69,9 @@ export const ALLOWLIST = [
   /GSM7_BASIC\s*=\s*".*/, // GSM-7 SMS alphabet constant (server/sms-outbound.mjs) — character set for segmentation accounting, not a secret.
     // Anchored to the assignment and spanning the value: the charset splits into several high-entropy tokens.
   /github\.com\/Uuriko\/[A-Za-z0-9_.-]+\/(pull|issues)\/\d+/, // repo PR/issue URLs (evidence links)
+  /hidden_files\/claimbond-shadow\/BASELINE-2026-10-05\.md/, // server/claim-reputation.mjs:4 —
+    // relative path to the P0 shadow-mode baseline doc, in a header comment. A file path,
+    // not a credential; the high-entropy detector joins the path's tokens into a match.
   /\/blob\/main\/docs\//, // docs URLs in discovery configs
   /^\s*secret:\s*<redacted>\s*$/, // literally redacted values
   /\$SCRIPT_DIR/, // shell script variable references
