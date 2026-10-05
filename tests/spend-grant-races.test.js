@@ -30,7 +30,6 @@ import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { AgentRooms, agentRoomSchema } from "../server/agent-rooms.mjs";
 import { createRateLimiter } from "../server/identity-ratelimit.mjs";
-import { EVENT_TYPES as T } from "../src/events.js";
 import { setTier } from "../server/autonomy-tiers.mjs";
 import { setSpendAllowance } from "../server/spend-allowance.mjs";
 import {
