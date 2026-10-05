@@ -68,7 +68,7 @@ function pageHtml({ title, main }) {
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${escapeHtml(title)}</title>
-<style>body{font:1rem/1.5 system-ui,sans-serif;max-width:40rem;margin:2rem auto;padding:0 1rem;color:#1c1b22}a{color:#33339a}footer{margin-top:2rem;font-size:.875rem}</style>
+<style>body{font:1rem/1.5 system-ui,sans-serif;max-width:40rem;margin:2rem auto;padding:0 1rem;color:#1c1b22}a{color:#33339a}code{overflow-wrap:anywhere}footer{margin-top:2rem;font-size:.875rem}</style>
 </head><body>
 <main>${main}</main>
 <footer>${LEGAL_FOOTER_LINKS}</footer>

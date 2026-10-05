@@ -97,6 +97,9 @@ test("legal pages are cacheable, indexed, and listed in the sitemap", async t =>
   assert.match(privacy.text, /scrypt/);
   assert.match(privacy.text, /account_session/);
   assert.match(privacy.text, /cookieless/);
+  // Long inline code (env names like ROOM_RETENTION_ALLOW_DELETION=0) must wrap
+  // on a 320px phone instead of widening the page into horizontal scroll.
+  assert.match(privacy.text, /code\{overflow-wrap:anywhere\}/);
   const subprocessors = await raw(origin, "/subprocessors");
   for (const name of ["Cloudflare, Inc.", "Resend, Inc.", "Google LLC", "GitHub, Inc.", "Microsoft Corporation", "Firecrawl", "Telegram FZ-LLC"]) {
     assert.match(subprocessors.text, new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));

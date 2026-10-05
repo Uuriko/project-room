@@ -71,6 +71,14 @@ test("default tools/list is the short core profile and every listed name is lega
   assert.equal(names.includes("room_read_board"), false);
   assert.equal(body.result.tools.every(tool => tool.aliases === undefined), true);
   assert.equal(body.result.tools.find(tool => tool.name === "room_needs_me").description, CORE_MCP_BLURBS.room_needs_me);
+  // The core blurb must match the read contract: oldest first from `after`
+  // (default 0), not "recent". A cold agent trusting "recent" reads the room's
+  // first page and misses the current conversation.
+  const readMessages = body.result.tools.find(tool => tool.name === "room_read_messages");
+  assert.equal(readMessages.description, CORE_MCP_BLURBS.room_read_messages);
+  assert.match(readMessages.description, /oldest first/);
+  assert.doesNotMatch(readMessages.description, /\brecent\b/i);
+  assert.equal(readMessages.inputSchema.properties.after.default, 0);
   const coreBytes = Buffer.byteLength(JSON.stringify(body));
   const coreResultBytes = Buffer.byteLength(JSON.stringify(body.result));
   console.log(`core tools/list JSON-RPC bytes=${coreBytes} result bytes=${coreResultBytes}`);
