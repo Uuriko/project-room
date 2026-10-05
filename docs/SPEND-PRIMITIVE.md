@@ -3,6 +3,9 @@
 **Status:** MVP, credits only, fully reversible. Design doc:
 `~/workspace/research_notes/spend-primitive-design-2026-10-04.md`.
 
+**Money honesty:** room credits are valueless ledger units — no cash-out, no
+on-chain touch, no real money moves. Priced tools cost credits, never dollars.
+
 ## What it is
 
 Three MCP tools carry a per-call price in **room credits** (integer cents —

@@ -61,13 +61,16 @@ const grantBody = Object.freeze({
 const response = Object.freeze({ type: "object" });
 
 export const SPEND_GRANT_ROUTES = Object.freeze([
+  // capability is null like every other route row: the dispatcher never reads
+  // it, and the real gate is requireGrantManagement inside each handler.
+  // A non-null value here would imply an enforcement that does not exist.
   Object.freeze({ id: "issue-spend-grant", method: "POST", path: "/api/rooms/{roomId}/spend-grants",
-    auth: "room", capability: "spend", scope: "room", handler: issueSpendGrant,
+    auth: "room", capability: null, scope: "room", handler: issueSpendGrant,
     schema: { params: roomIdParam, body: grantBody, response }, events: [] }),
   Object.freeze({ id: "revoke-spend-grant", method: "DELETE", path: "/api/rooms/{roomId}/spend-grants/{agentId}",
-    auth: "room", capability: "spend", scope: "room", handler: revokeSpendGrant,
+    auth: "room", capability: null, scope: "room", handler: revokeSpendGrant,
     schema: { params: agentIdParam, response }, events: [] }),
   Object.freeze({ id: "read-own-spend-grant", method: "GET", path: "/api/rooms/{roomId}/spend-grant",
-    auth: "room", capability: "spend", scope: "room", handler: readOwnSpendGrant,
+    auth: "room", capability: null, scope: "room", handler: readOwnSpendGrant,
     schema: { params: roomIdParam, response }, events: [] }),
 ]);
