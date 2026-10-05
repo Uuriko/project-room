@@ -84,6 +84,36 @@ Delete the three entries from `PRICED_MCP_TOOLS` in
 boundary returns null for every tool, no grants are consulted, no rows are
 written.
 
+## Emergency lever: the spend-pricing kill switch
+
+The priced-tool gate has an owner-only runtime kill switch, separate from
+grant issuance. The owner records `{ enabled: boolean }` as a room event
+(`room.spend_pricing_set`); the projection carries it and the default is
+**enabled** (absent state = current behaviour, so existing rooms change
+nothing).
+
+While pricing is **disabled**, `priceForTool(name, state)` returns null for
+every tool at the charge boundary — the room behaves exactly as before the
+gate existed: priced tools forward free, no grants are consulted, no
+`spend_authorizations` rows are written, and already-issued grants sit idle.
+Re-enabling restores exact current behaviour. The switch is access-preserving:
+it touches only the pricing gate, never tool permissions, and it cannot deny
+normal agent tools or receipt recovery (unlike zeroing the room allowance).
+
+```
+POST   /api/rooms/:roomId/spend-pricing   → 201 { roomId, enabled, revision, setById, setAt }
+  { enabled: boolean, requestId? }   (owner only — 403 owner_required for everyone else,
+                                      checked before the body shape is parsed)
+GET    /api/rooms/:roomId/spend-pricing   → 200 { roomId, enabled, revision, setById, setAt }
+  (every member may read it)
+```
+
+When to pull it: any suspected accounting defect in the charge path — the
+switch guarantees no charge can occur while the defect is investigated, with
+no revert or deploy needed. Pulling it is a room event, so the decision is
+auditable in the event log. (Promised to Dot's QA lane, room seq 2748, after
+the 2026-10-04 spend-race review.)
+
 ## The paid-call signal: detecting the first unprompted paid call
 
 The MVP's success signal is the first **settled** spend authorization from

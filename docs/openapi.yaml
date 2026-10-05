@@ -2650,6 +2650,74 @@ paths:
         '409':
           $ref: '#/components/responses/Conflict'
         '422': { description: invalid_spend_allowance }
+  /api/rooms/{roomId}/spend-pricing:
+    get:
+      summary: Read the room's spend-pricing state
+      description: >-
+        Spend-pricing kill switch. Every member can read it: the enabled flag
+        is a room-level setting members already see reflected in tool
+        behaviour (priced tools either charge or forward free). Takes no
+        query parameters.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200':
+          description: Pricing state
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  enabled: { type: boolean }
+                  revision: { type: integer }
+                  setById: { type: ['string', 'null'] }
+                  setAt: { type: ['string', 'null'] }
+    post:
+      summary: Enable or disable spend pricing for the room
+      description: >-
+        Spend-pricing kill switch. Owner only; every other member receives
+        403 owner_required before any command is built. Records
+        room.spend_pricing_set with enabled (boolean). While disabled,
+        priceForTool returns null for every tool at the charge boundary:
+        priced tools forward free, no grants are consulted, no
+        spend_authorizations rows are written — the room behaves exactly as
+        before the gate existed. Re-enabling restores current behaviour.
+        requestId is an optional idempotency key: the same id with the same
+        input returns the original receipt (200), with different input 409
+        idempotency_conflict.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled]
+              additionalProperties: false
+              properties:
+                enabled: { type: boolean }
+                requestId: { type: string }
+      responses:
+        '401': { description: unauthenticated }
+        '201':
+          description: Committed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommandReceipt'
+        '200':
+          description: Idempotent duplicate
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommandReceipt'
+        '403': { description: owner_required }
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422': { description: invalid_spend_pricing }
   /api/rooms/{roomId}/spend-grants:
     post:
       summary: Issue a per-agent spend grant
