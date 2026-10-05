@@ -27,6 +27,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { AgentRooms, agentRoomSchema } from "../server/agent-rooms.mjs";
 import { createRateLimiter } from "../server/identity-ratelimit.mjs";
 import { createHostedRoomMcp } from "../server/mcp-room-profile.mjs";
+import { SPEND_GRANT_ROUTES } from "../server/routes/spend-grants.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { setTier } from "../server/autonomy-tiers.mjs";
 import { hostedMcpToolDefs } from "../server/mcp-hosted-tools.mjs";
@@ -355,4 +356,22 @@ test("every priced tool advertises its price in its description", async t => {
   }
   assert.equal(priceForTool("room_list_files"), null, "unpriced tools stay free");
   assert.equal(priceForTool("no_such_tool"), null);
+});
+
+test("route table: the three spend-grant routes are registered with room auth", () => {
+  // Regression: the RT allowlist gate rejects new legacy-chain routes, so
+  // these must live in server/routes/table.mjs via SPEND_GRANT_ROUTES.
+  const byId = Object.fromEntries(SPEND_GRANT_ROUTES.map(r => [r.id, r]));
+  assert.equal(SPEND_GRANT_ROUTES.length, 3);
+  assert.deepEqual(
+    SPEND_GRANT_ROUTES.map(r => `${r.method} ${r.path}`),
+    ["POST /api/rooms/{roomId}/spend-grants",
+     "DELETE /api/rooms/{roomId}/spend-grants/{agentId}",
+     "GET /api/rooms/{roomId}/spend-grant"]);
+  for (const route of SPEND_GRANT_ROUTES) {
+    assert.equal(route.auth, "room");
+    assert.equal(route.scope, "room");
+    assert.equal(typeof route.handler, "function");
+  }
+  assert.equal(typeof byId["issue-spend-grant"].handler, "function");
 });
