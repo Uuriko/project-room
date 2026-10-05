@@ -35,7 +35,17 @@
 //     one-shot slot is claimed atomically in authorizeSpend
 //   - replay-safe nonces: a re-presented (grant, nonce) never charges
 //     twice — 'settled' returns its receipt, 'reserved' returns the live
-//     authorization, only 'voided' stays consumed
+//     authorization (crash recovery within the lease), only 'voided' stays
+//     consumed; a re-presented nonce whose reservation was reaped past
+//     its lease must retry with a fresh nonce (409 duplicate_nonce)
+//   - reserves carry a lease: expires_at = created_at + RESERVE_LEASE_MS.
+//     A process crash between reserve and settle/void can no longer
+//     permanently consume grant cap or room allowance —
+//     reapExpiredSpendAuthorizations voids authorizations orphaned past
+//     the lease and releases their room reservations. It runs
+//     opportunistically at the top of authorizeSpend's transaction, so
+//     the cap math always sees live reservations; no separate reaper
+//     process is needed (#1525).
 //
 // Money is integer cents as TEXT (string-decimal, no floats, D12). Only the
 // "credits" denomination exists in v1; "usdc" issuance is refused fail-closed.
@@ -102,6 +112,12 @@ CREATE TABLE IF NOT EXISTS spend_authorizations (
   status TEXT NOT NULL DEFAULT 'reserved',
   created_at INTEGER NOT NULL,
   settled_at INTEGER NULL,
+  -- #1525: lease expiry on reserves. A reservation that is still
+  -- 'reserved' past expires_at belongs to a caller that is gone
+  -- (crashed between reserve and settle/void) and is voided by the
+  -- reaper. Rows written before this fix backfill NULL; the reaper
+  -- computes their deadline from created_at instead.
+  expires_at INTEGER NULL,
   PRIMARY KEY (room_id, agent_id, nonce)
 );
 CREATE INDEX IF NOT EXISTS idx_spend_authorizations_agent
@@ -126,7 +142,19 @@ CREATE INDEX IF NOT EXISTS idx_spend_room_reservations_active
 
 export function ensureSpendGrantsSchema(db) {
   db.exec(SPEND_GRANTS_SCHEMA);
+  // #1525: lease expiry on reserves — additive column, following the
+  // codebase's column-migration pattern (agent-identities, credentials):
+  // existing databases converge via ALTER TABLE, rows written before the
+  // fix backfill NULL and the reaper reads their deadline from created_at.
+  if (!db.prepare(`SELECT 1 FROM pragma_table_info('spend_authorizations') WHERE name='expires_at'`).get())
+    db.exec("ALTER TABLE spend_authorizations ADD COLUMN expires_at INTEGER");
 }
+
+// #1525: the reservation lease. Ten minutes is comfortably longer than
+// any priced MCP tool call in PRICED_MCP_TOOLS (a 1 MiB file stage, a
+// bounty post, a GitHub read) and bounded, so a crashed caller's cap is
+// released automatically by the reaper instead of held forever.
+export const RESERVE_LEASE_MS = 10 * 60 * 1000;
 
 export class SpendGrantError extends Error {
   constructor(status, code, message, detail = null) {
@@ -348,6 +376,12 @@ export function authorizeSpend(db, { roomId, agentId, toolName, priceCents, nonc
     refuse(403, "spend_grant_denied", "t1_readonly agents cannot hold spend grants");
 
   const outcome = transact(db, () => {
+    // #1525: crash recovery. Void reservations orphaned past their lease
+    // (a caller crashed between reserve and settle/void) BEFORE the cap
+    // math below, so they can never permanently consume grant cap or room
+    // allowance. Runs on every authorization — the next priced call after
+    // a crash reaps what the crashed one left behind.
+    reapExpiredSpendAuthorizations(db, { roomId, nowMs });
     // Replay first: a re-presented nonce never authorizes twice, no matter
     // the cap state. 'settled' returns its receipt (exactly-once charging
     // for completed-request replay, no fresh headroom needed); 'reserved'
@@ -415,9 +449,9 @@ export function authorizeSpend(db, { roomId, agentId, toolName, priceCents, nonc
       paymentRefusal({ roomId, agentId, toolName, priceCents, reason: "room_allowance_exceeded", extra: { roomHeadroomCents: intToCents(roomHeadroomCents) } });
     try {
       db.prepare(`INSERT INTO spend_authorizations
-          (room_id, agent_id, nonce, tool_name, price_cents, status, created_at)
-          VALUES (?, ?, ?, ?, ?, 'reserved', ?)`)
-        .run(roomId, agentId, nonce, toolName, intToCents(priceCents), nowMs);
+          (room_id, agent_id, nonce, tool_name, price_cents, status, created_at, expires_at)
+          VALUES (?, ?, ?, ?, ?, 'reserved', ?, ?)`)
+        .run(roomId, agentId, nonce, toolName, intToCents(priceCents), nowMs, nowMs + RESERVE_LEASE_MS);
       if (roomReserved > 0)
         db.prepare(`INSERT INTO spend_room_reservations
             (room_id, agent_id, nonce, amount_cents, status, created_at)
@@ -487,6 +521,34 @@ function releaseRoomReservationRow(db, roomId, nonce) {
     WHERE room_id = ? AND nonce = ? AND status = 'active'`).run(roomId, nonce);
 }
 
+// #1525: the reaper. A reservation that is still 'reserved' past its lease
+// (COALESCE to created_at + lease for rows written before the fix)
+// belongs to a caller that is gone — a process crash between reserve and
+// settle/void. Leaving it would permanently consume grant cap (the
+// authorizationsTotal query counts 'reserved' rows) and room allowance
+// (the 'active' room reservation row), so void it and release the room
+// reservation, atomically. Orphaned rows are 'voided', never 'settled':
+// the crashed call's tool never confirmed, so no charge is recorded, and
+// a late re-presentation of the nonce hits the 409 duplicate_nonce path
+// and must retry with a fresh nonce. Idempotent; returns the count voided.
+export function reapExpiredSpendAuthorizations(db, { roomId, nowMs = Date.now() } = {}) {
+  if (!db || typeof roomId !== "string" || !Number.isSafeInteger(nowMs)) return 0;
+  return transact(db, () => {
+    const expired = db.prepare(
+      `SELECT room_id, agent_id, nonce FROM spend_authorizations
+       WHERE room_id = ? AND status = 'reserved'
+         AND COALESCE(expires_at, created_at + ?) <= ?`)
+      .all(roomId, RESERVE_LEASE_MS, nowMs);
+    for (const row of expired) {
+      db.prepare(`UPDATE spend_authorizations SET status = 'voided'
+        WHERE room_id = ? AND agent_id = ? AND nonce = ? AND status = 'reserved'`)
+        .run(row.room_id, row.agent_id, row.nonce);
+      releaseRoomReservationRow(db, row.room_id, row.nonce);
+    }
+    return expired.length;
+  });
+}
+
 export function settleSpend(db, { roomId, agentId, nonce } = {}) {
   const info = db.prepare(`UPDATE spend_authorizations SET status = 'settled', settled_at = ?
     WHERE room_id = ? AND agent_id = ? AND nonce = ? AND status = 'reserved'`)
@@ -552,7 +614,8 @@ export function chargeSpendBeforeCall(store, secret, name, args) {
 // POST /api/rooms/:roomId/spend-grants — body { agentId, capCents,
 // perTxCapCents, allowlist?, singleUse?, expiresAt? }. Owner or
 // grants:issue delegate (tier-gated, guest-denied). Agents request spend;
-// they never self-issue.
+// a grants:issue delegate can never self-issue (403); the room owner holds
+// full authority and may.
 export function issueSpendGrantRoute(store, token, roomId, request, expectedSessionBinding = null) {
   if (!request || Array.isArray(request) || typeof request !== "object")
     refuse(422, "invalid_spend_grant", "Supply { agentId, capCents, perTxCapCents, allowlist?, singleUse?, expiresAt? }");
@@ -563,6 +626,18 @@ export function issueSpendGrantRoute(store, token, roomId, request, expectedSess
     const nowMs = store.now();
     requireGrantManagement({ db: store.db, roomId, state: room.state, actor: auth.member, nowMs });
     if (!room.state.members?.[agentId]) refuse(404, "member_not_found", `No member ${agentId} in this room`);
+    // #1521: this call mints money — a grants:issue delegate cannot issue
+    // a spend grant to themselves (a reproduced 1,000,000-cent self-issued
+    // grant row was the proof). The room owner is full authority
+    // (chargeSpendBeforeCall and requireGrantManagement treat ownership
+    // the same way) and may self-issue; everyone else must be issued by
+    // someone else.
+    const isOwner = auth.member.id === room.state?.room?.ownerId;
+    if (!isOwner && agentId === auth.member.id)
+      refuse(403, "spend_grant_self_issue_forbidden",
+        "grants:issue delegates cannot issue spend grants to themselves; ask the room owner", {
+          agentId, roomId,
+        });
     const summary = issueSpendGrant(store.db, roomId, agentId, {
       grantedBy: auth.member.id, capCents, perTxCapCents, allowlist,
       singleUse: singleUse === true, expiresAt, nowMs,
