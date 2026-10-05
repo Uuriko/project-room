@@ -199,7 +199,7 @@ export const ROOM_ENTRY_HTML = `<!doctype html>
 :root{color-scheme:dark;--bg:#202127;--panel:#191a20;--panel-raised:#292b33;--panel-hover:#34363f;--line:#393b45;--line-soft:#30323a;--text:#eeedf1;--muted:#aaaab7;--blue:#a9b9ff;--blue-strong:#5555bd;--blue-strong-hover:#6a6ad4;--on-accent:#ffffff;--amber:#ffbf69;--green:#4fd09b;--red:#ff7b7b;--violet:#ad8cff;--card:#191a20;--border:#393b45;--shadow:0 20px 70px rgb(0 0 0 / 32%);--radius-sm:.35rem;--radius-md:.45rem;--radius-lg:.85rem;--radius-xl:1rem;--space-1:.25rem;--space-2:.5rem;--space-3:.75rem;--space-4:1rem;--space-5:1.5rem;--space-6:2rem;--text-xs:.75rem;--text-sm:.875rem;--text-md:1rem;--text-lg:1.25rem;--font-sans:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--ink:var(--bg);--bone:var(--text);--clay:var(--blue);--mute:var(--muted)}
 [data-theme="light"]{color-scheme:light;--bg:#f4f3f8;--panel:#fffbff;--panel-raised:#e8e7ef;--panel-hover:#dddce6;--line:#c9c8d4;--line-soft:#dddce6;--text:#1c1b22;--muted:#5c5b6a;--blue:#33339a;--blue-strong:#3f3fad;--blue-strong-hover:#33338f;--on-accent:#ffffff;--amber:#8a4b00;--green:#0f6b45;--red:#a32020;--violet:#5b3d99;--card:#fffbff;--border:#c9c8d4;--shadow:0 16px 40px rgb(28 27 34 / 12%)}
 *{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--text)}
-body{min-height:100vh;font:18px/1.55 var(--font-sans);display:flex;flex-direction:column}
+.skip{position:absolute;left:-9999px;top:0;background:var(--blue-strong);color:#fff;padding:.5rem 1rem;z-index:100;border-radius:0 0 .45rem 0}.skip:focus{left:0}body{min-height:100vh;font:18px/1.55 var(--font-sans);display:flex;flex-direction:column}
 main{width:min(40rem,calc(100% - 2.5rem));margin:0 auto;padding:18vh 0 3rem;flex:1}
 .brand{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--mute)}
 h1{font-family:inherit;font-size:clamp(2.4rem,8vw,3.8rem);line-height:1.05;letter-spacing:-.04em;margin:18px 0 14px;font-weight:600}
@@ -241,7 +241,8 @@ footer{width:min(40rem,calc(100% - 2.5rem));margin:0 auto;padding:0 0 2.5rem;fon
 footer a{color:var(--clay);text-decoration:none}
 a:focus-visible{outline:1px solid var(--clay);outline-offset:3px}
 </style></head><body>
-<main>
+<a class="skip" href="#main">Skip to content</a>
+<main id="main">
   <div class="brand"><a href="/" style="color:inherit;text-decoration:none">Demigod</a></div>
   <h1>Project Room</h1>
   <p>Talk with people here. Plug AI agents into the same conversation.</p>
@@ -285,12 +286,12 @@ a:focus-visible{outline:1px solid var(--clay);outline-offset:3px}
 // Black / paper / acid. No keys, no people-data. One hash-forward script.
 export const PUBLIC_ROOM_DOOR_HTML = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="robots" content="noindex,nofollow"><link rel="canonical" href="https://room.trydemigod.com/room"><meta property="og:url" content="https://room.trydemigod.com/room"><title>Project Room</title>
+<meta name="robots" content="index,follow"><link rel="canonical" href="https://room.trydemigod.com/room"><meta property="og:url" content="https://room.trydemigod.com/room"><title>Project Room</title>
 <style>
 :root{color-scheme:dark;--bg:#202127;--panel:#191a20;--panel-raised:#292b33;--panel-hover:#34363f;--line:#393b45;--line-soft:#30323a;--text:#eeedf1;--muted:#aaaab7;--blue:#a9b9ff;--blue-strong:#5555bd;--blue-strong-hover:#6a6ad4;--on-accent:#ffffff;--amber:#ffbf69;--green:#4fd09b;--red:#ff7b7b;--violet:#ad8cff;--card:#191a20;--border:#393b45;--shadow:0 20px 70px rgb(0 0 0 / 32%);--radius-sm:.35rem;--radius-md:.45rem;--radius-lg:.85rem;--radius-xl:1rem;--space-1:.25rem;--space-2:.5rem;--space-3:.75rem;--space-4:1rem;--space-5:1.5rem;--space-6:2rem;--text-xs:.75rem;--text-sm:.875rem;--text-md:1rem;--text-lg:1.25rem;--font-sans:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--ink:var(--bg);--paper:var(--text);--acid:var(--blue);--mute:var(--muted)}
 [data-theme="light"]{color-scheme:light;--bg:#f4f3f8;--panel:#fffbff;--panel-raised:#e8e7ef;--panel-hover:#dddce6;--line:#c9c8d4;--line-soft:#dddce6;--text:#1c1b22;--muted:#5c5b6a;--blue:#33339a;--blue-strong:#3f3fad;--blue-strong-hover:#33338f;--on-accent:#ffffff;--amber:#8a4b00;--green:#0f6b45;--red:#a32020;--violet:#5b3d99;--card:#fffbff;--border:#c9c8d4;--shadow:0 16px 40px rgb(28 27 34 / 12%)}
 *{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--text)}
-body{min-height:100vh;font:18px/1.55 var(--font-sans);display:flex;flex-direction:column}
+.skip{position:absolute;left:-9999px;top:0;background:var(--blue-strong);color:#fff;padding:.5rem 1rem;z-index:100;border-radius:0 0 .45rem 0}.skip:focus{left:0}body{min-height:100vh;font:18px/1.55 var(--font-sans);display:flex;flex-direction:column}
 main{width:min(40rem,calc(100% - 2.5rem));margin:0 auto;padding:18vh 0 3rem;flex:1}
 h1{font-size:clamp(2.4rem,8vw,3.8rem);line-height:1.05;letter-spacing:-.04em;margin:0 0 14px;font-weight:600}
 .lead{margin:0 0 1.4rem;color:var(--muted);max-width:34em}
@@ -356,7 +357,8 @@ h1{font-size:clamp(2.4rem,8vw,3.8rem);line-height:1.05;letter-spacing:-.04em;mar
 .join-empty-recover a{color:var(--acid);text-decoration:none}
 a:focus-visible{outline:2px solid var(--acid);outline-offset:3px}
 </style></head><body>
-<main>
+<a class="skip" href="#main">Skip to content</a>
+<main id="main">
   <h1>Project Room</h1>
   <p class="lead">A shared place for people and AI agents to build together.</p>
   <p class="spine">Conversations, shared work, and a private Inbox.</p>

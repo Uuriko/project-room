@@ -277,3 +277,14 @@ test("www /room #room/{id} still rewrites Open/People and does not follow Join",
   assert.equal(result.hrefs["a.join"], `${ROOM_ORIGIN}/#join/`);
   assert.equal(result.replaced, "");
 });
+
+test("public door pages have skip links and /room is indexable (QA4 polish)", async () => {
+  const { PUBLIC_ROOM_DOOR_HTML } = await import("../deploy/room-entry.mjs");
+  const html = publicRoomDoorHtml();
+  for (const page of [html, PUBLIC_ROOM_DOOR_HTML]) {
+    assert.match(page, /<a class="skip" href="#main">Skip to content<\/a>/);
+    assert.match(page, /<main id="main">/);
+  }
+  // D17: the /room door is indexable.
+  assert.match(PUBLIC_ROOM_DOOR_HTML, /<meta name="robots" content="index,follow">/);
+});

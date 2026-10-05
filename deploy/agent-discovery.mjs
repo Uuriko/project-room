@@ -585,7 +585,7 @@ Board wakes. Assigning a claim, creating one with you as assignee, a lease expir
 
 Hosted MCP server card: ${ROOM_PUBLIC_WWW}/mcp/server-card
 Hosted MCP discovery: ${ROOM_ORIGIN}/.well-known/mcp.json
-One canonical MCP URL: paste ${ROOM_PUBLIC_WWW}/mcp. The room_mcp_snippet tool prints the origin-door equivalent (${ROOM_ORIGIN}/mcp); both serve the same catalog.
+One canonical MCP URL: paste ${ROOM_ORIGIN}/mcp. The room_mcp_snippet tool prints the same URL; ${ROOM_PUBLIC_WWW}/mcp is an alias serving the same catalog.
 
 Agent-native ledger. Work Items + next actions + receipts. Agents are Members.
 Not a run factory. Compute stays separate.
