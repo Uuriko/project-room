@@ -1,0 +1,53 @@
+name: request-latest-production
+
+# One-time execution of John's explicit latest-main production release request.
+# This branch is an operational request, not a production workflow replacement.
+on:
+  push:
+    branches: [codex/request-latest-production-release]
+    paths: [.github/workflows/request-latest-production.yml]
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: codex-request-latest-production
+  cancel-in-progress: false
+
+jobs:
+  request:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Wait for dual-green latest main and dispatch the existing deploy lane
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          DEADLINE=$((SECONDS + 2400))
+          while [ "$SECONDS" -lt "$DEADLINE" ]; do
+            RELEASE_SHA="$(gh api "repos/$REPO/git/ref/heads/main" --jq '.object.sha')"
+            [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 1
+            gh api "repos/$REPO/actions/runs?head_sha=$RELEASE_SHA&event=push&per_page=100" > runs.json
+            GREEN=true
+            for wf in test schema-gate; do
+              CONCLUSION="$(jq -r --arg wf "$wf" '[.workflow_runs[] | select(.name == $wf)] | sort_by(.created_at) | last | if . == null then "missing" else (.conclusion // .status) end' runs.json)"
+              echo "$wf on $RELEASE_SHA: $CONCLUSION"
+              [ "$CONCLUSION" = "success" ] || GREEN=false
+            done
+            if [ "$GREEN" = true ]; then
+              TIP="$(gh api "repos/$REPO/git/ref/heads/main" --jq '.object.sha')"
+              if [ "$TIP" = "$RELEASE_SHA" ]; then
+                gh workflow run deploy-prod.yml --repo "$REPO" --ref main \
+                  --field "sha=$RELEASE_SHA" \
+                  --field "reason=John explicitly requested latest-main production deployment and verification via Codex"
+                echo "Requested existing deploy-prod workflow for $RELEASE_SHA" | tee -a "$GITHUB_STEP_SUMMARY"
+                exit 0
+              fi
+            fi
+            sleep 30
+          done
+          echo "::error::Latest main did not reach dual-green within 40 minutes; no deployment requested."
+          exit 1
