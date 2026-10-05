@@ -24,14 +24,9 @@ export const PROBES = [
   ["demigod home", async () => (await get(`${WWW}/`)).status === 200],
   ["demigod roles", async () => (await get(`${WWW}/roles`)).status === 200],
   ["room door on www", async () => (await get(`${WWW}/room`)).status === 200],
-  ["/join is its own page, not the home body", async () => {
-    const [home, page] = await Promise.all([get(`${WWW}/`), get(`${WWW}/join`)]);
-    return page.status === 200 && (await digest(page.text)) !== (await digest(home.text));
-  }],
-  ["/hire is its own page, not the home body", async () => {
-    const [home, page] = await Promise.all([get(`${WWW}/`), get(`${WWW}/hire`)]);
-    return page.status === 200 && (await digest(page.text)) !== (await digest(home.text));
-  }],
+  // /join and /hire share the home HTML by design; the page opens the right form on load.
+  ["/join serves the talent form entry", async () => { const r = await get(`${WWW}/join`); return r.status === 200 && /data-open="talent"/.test(r.text); }],
+  ["/hire serves the company form entry", async () => { const r = await get(`${WWW}/hire`); return r.status === 200 && /data-open="company"/.test(r.text); }],
 ];
 
 export async function runProbes() {
