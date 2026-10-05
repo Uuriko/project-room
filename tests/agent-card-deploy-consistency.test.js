@@ -95,6 +95,27 @@ test("checkAgentCard rejects a card verified against the wrong pinned key", () =
   assert.ok(failures.some(f => f.includes("pinned key")), `got: ${failures.join("; ")}`);
 });
 
+test("checkAgentCard rejects a broken second JWS even when the first verifies (room seq 3239, TB-14 carry-over)", () => {
+  const card = buildSignedCard();
+  // Prod cards carry two JWS entries (house + JWS both verify, 50/50 fetches
+  // seen at 0172ecd5). The JWS payload drops `signatures`, so a second entry
+  // minted over the same card verifies independently.
+  const second = signCardJws({ card, privateKey: keyPair.privateKey, keyId: KEY_ID, jku: JKU });
+  card.signatures = [card.signatures[0], second];
+  // Sanity: both valid entries pass — the loop must not flag a good second.
+  assert.deepEqual(checkAgentCard({ card, ...opts }), []);
+  // Break only the second entry. The pre-fix check verified signatures[0]
+  // alone, so this passed silently; every entry must be verified.
+  const sig = second.signature;
+  const broken = { ...second, signature: sig.slice(0, -1) + (sig.endsWith("A") ? "B" : "A") };
+  card.signatures = [card.signatures[0], broken];
+  const failures = checkAgentCard({ card, ...opts });
+  assert.ok(
+    failures.some(f => f.includes("signatures[1]") && f.includes("does not verify")),
+    `got: ${failures.join("; ")}`,
+  );
+});
+
 test("checkAgentCardDoor passes when every fetch is signed and verifying", async () => {
   const body = JSON.stringify(buildSignedCard());
   const get = async () => ({ status: 200, json: JSON.parse(body), ms: 1 });

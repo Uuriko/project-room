@@ -63,8 +63,9 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 // Deploy-time consistency check for one served agent card (#1524). Returns
 // the list of failures; an empty list means the card is signed, binds the
-// expected revision (when given), and both signatures verify against the
-// pinned key. Pure: no I/O, safe to unit test.
+// expected revision (when given), and the house signature plus EVERY JWS
+// entry in card.signatures verify against the pinned key. Pure: no I/O,
+// safe to unit test.
 export function checkAgentCard({ card, expectedRevision = null, publicKey = AGENT_CARD_PUBLIC_KEY, keyId = AGENT_CARD_KEY_ID, agentId = AGENT_CARD_AGENT_ID }) {
   const failures = [];
   if (card === null || typeof card !== "object" || Array.isArray(card)) {
@@ -98,8 +99,13 @@ export function checkAgentCard({ card, expectedRevision = null, publicKey = AGEN
     if (!houseOk) failures.push("house cardSignature does not verify against the pinned key");
   }
   if (Array.isArray(card.signatures) && card.signatures.length > 0) {
-    const jwsOk = verifyCardJws({ card, publicKey, jws: card.signatures[0] });
-    if (!jwsOk) failures.push("A2A JWS signature does not verify against the pinned key");
+    // Prod cards carry more than one JWS entry (house + JWS both verify), so
+    // verify EVERY entry, not just signatures[0]: a broken second signature
+    // must not pass silently (room seq 3239, carried over from TB-14).
+    card.signatures.forEach((jws, i) => {
+      const jwsOk = verifyCardJws({ card, publicKey, jws });
+      if (!jwsOk) failures.push(`A2A JWS signatures[${i}] does not verify against the pinned key`);
+    });
   }
   return failures;
 }
