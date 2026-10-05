@@ -13491,7 +13491,11 @@ paths:
               schema:
                 $ref: "#/components/schemas/JsonRpcError"
         '401':
-          description: Authorization was present but was not a live identity secret. Body is JsonRpcError.
+          description: "Authorization was present but was not a live identity secret. Body is JsonRpcError. The response carries a WWW-Authenticate: Bearer header (RFC 7235); error data sets retryable: false."
+          headers:
+            WWW-Authenticate:
+              description: 'Bearer realm="project-room", charset="UTF-8"'
+              schema: { type: string }
           content:
             application/json:
               schema:
@@ -13591,7 +13595,11 @@ paths:
               schema:
                 $ref: "#/components/schemas/JsonRpcError"
         '401':
-          description: Authorization was present but was not a live identity secret. Body is JsonRpcError (error.code integer). The join tool list is not returned.
+          description: "Authorization was present but was not a live identity secret. Body is JsonRpcError (error.code integer). The join tool list is not returned. The response carries a WWW-Authenticate: Bearer header (RFC 7235), and the error data sets retryable: false."
+          headers:
+            WWW-Authenticate:
+              description: 'Bearer realm="project-room", charset="UTF-8"'
+              schema: { type: string }
           content:
             application/json:
               schema:

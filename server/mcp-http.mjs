@@ -128,7 +128,7 @@ export async function dispatchRoomMcp(message, { mcpUrl, authorization, roomMcp,
     const id = object(message) && Object.hasOwn(message, "id")
       && (typeof requestId === "string" && requestId.length <= 128 || Number.isSafeInteger(requestId))
       ? requestId : null;
-    return { jsonrpc: "2.0", id, error: { code: MCP_AUTH_REQUIRED, message: "Authenticated room tools require the Room service" } };
+    return { jsonrpc: "2.0", id, error: { code: MCP_AUTH_REQUIRED, message: "Authenticated room tools require the Room service", data: { retryable: false, hint: "Send Authorization: Bearer <redacted> your saved identity secret; retrying without a valid credential will fail the same way." } } };
   }
   return roomMcp(message, { authorization, mcpUrl, searchParams, userAgent });
 }
@@ -136,6 +136,12 @@ export async function dispatchRoomMcp(message, { mcpUrl, authorization, roomMcp,
 export function mcpRpcStatus(reply) {
   if (!reply) return 202;
   return reply.error?.code === MCP_AUTH_REQUIRED ? 401 : 200;
+}
+
+// RFC 7235: a 401 response MUST carry WWW-Authenticate. QA5-gb-AX-4.
+export function mcpAuthHeaders(reply) {
+  if (mcpRpcStatus(reply) !== 401) return {};
+  return { "WWW-Authenticate": "Bearer realm=\"project-room\", charset=\"UTF-8\"" };
 }
 
 export function mcpJoinCorsHeaders() {
@@ -229,7 +235,7 @@ export async function roomMcpFetchPost(request, options = {}) {
     });
   }
   if (!reply) return new Response(null, { status: 202, headers });
-  return new Response(JSON.stringify(reply), { status: mcpRpcStatus(reply), headers: { ...headers, ...legacyMcpHeaders(request.headers.get("authorization")) } });
+  return new Response(JSON.stringify(reply), { status: mcpRpcStatus(reply), headers: { ...headers, ...mcpAuthHeaders(reply), ...legacyMcpHeaders(request.headers.get("authorization")) } });
 }
 
 export async function writeRoomMcpNode(req, res, url, { bodyText, accept, roomMcp } = {}) {
@@ -296,6 +302,7 @@ export async function writeRoomMcpNode(req, res, url, { bodyText, accept, roomMc
   const bytes = Buffer.from(JSON.stringify(reply));
   res.writeHead(mcpRpcStatus(reply), {
     ...cors,
+    ...mcpAuthHeaders(reply),
     ...legacyMcpHeaders(req.headers.authorization),
     "Content-Type": "application/json; charset=utf-8",
     "Content-Length": bytes.length,
