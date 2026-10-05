@@ -2722,9 +2722,9 @@ paths:
     post:
       summary: Issue a per-agent spend grant
       description: >-
-        Spend-primitive MVP. Owner or grants:issue delegate only; agents
-        request spend, they never self-issue (grantedBy is the caller, never
-        the agent). Issues or replaces the capability="spend" grant edge for
+        Spend-primitive MVP. Owner or grants:issue delegate only; a delegate
+        can never self-issue (403 spend_grant_self_issue_forbidden) while the
+        owner keeps full authority. Issues or replaces the capability="spend" grant edge for
         one agent member: capCents (integer cents as a string, the grant's
         lifetime ceiling), perTxCapCents (per-call ceiling), optional
         expiresAt (epoch ms). t1_readonly and guest agents cannot hold spend
