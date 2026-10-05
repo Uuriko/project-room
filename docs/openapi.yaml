@@ -1661,6 +1661,33 @@ paths:
           description: File or request exceeds the room attachment limit
         '422':
           description: Attachment was rejected
+  /api/rooms/{roomId}/files/{id}:
+    get:
+      summary: Read one room file with its bytes
+      description: |
+        REST parity with the MCP room_get_file tool. Members read one staged
+        or committed room file. The response carries the bytes as base64.
+        A file the caller cannot see returns 404.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Room file with base64 bytes
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          description: Authentication required
+        '404':
+          description: File not found or not visible
+        '410':
+          description: File bytes are no longer available
   /api/rooms/{roomId}/files/{id}/commit:
     post:
       summary: Commit a staged room file onto a message

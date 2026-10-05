@@ -1983,6 +1983,14 @@
     },
     {
       "method": "GET",
+      "path": "/api/rooms/{id}/files/{id}"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/files/{id}"
+    },
+    {
+      "method": "GET",
       "path": "/api/rooms/{id}/files/{id}/commit"
     },
     {

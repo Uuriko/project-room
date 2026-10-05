@@ -3109,9 +3109,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // Stage bytes, list them, then commit a staged file onto a message.
       const roomFilesMatch = /^\/api\/rooms\/([^/]{1,384})\/files$/.exec(url.pathname);
       const roomFileCommitMatch = /^\/api\/rooms\/([^/]{1,384})\/files\/([^/]{1,384})\/commit$/.exec(url.pathname);
-      if (roomFilesMatch || roomFileCommitMatch) {
-        const roomId = pathId((roomFilesMatch || roomFileCommitMatch)[1]);
+      // Parity with MCP room_get_file: read one file's bytes over REST.
+      const roomFileGetMatch = roomFileCommitMatch ? null : /^\/api\/rooms\/([^/]{1,384})\/files\/([^/]{1,384})$/.exec(url.pathname);
+      if (roomFilesMatch || roomFileCommitMatch || roomFileGetMatch) {
+        const roomId = pathId((roomFilesMatch || roomFileCommitMatch || roomFileGetMatch)[1]);
         const fileId = roomFileCommitMatch ? pathId(roomFileCommitMatch[2]) : null;
+        const readFileId = roomFileGetMatch ? pathId(roomFileGetMatch[2]) : null;
         const writing = req.method === "POST";
         const selected = roomCredentials(req, url);
         const fence = selected.mode === "account" ? accountBinding(req, null) : expectedBinding(req);
@@ -3123,6 +3126,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           const granted = (auth.apiKeyScopes ?? []).some(scope =>
             scope === requiredScope || (scope.endsWith(":*") && requiredScope.startsWith(scope.slice(0, -1))));
           if (!granted) reject(403, "insufficient_scope", `API key lacks the ${requiredScope} scope`);
+        }
+        if (readFileId) {
+          if (!["GET", "HEAD"].includes(req.method)) reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET" });
+          rate(`read:${auth.credentialHash}`, 600);
+          return json(res, 200, store.roomAttachments.get(selected.token, roomId, readFileId), req.method === "HEAD");
         }
         if (!writing) {
           if (!["GET", "HEAD"].includes(req.method) || fileId) reject(405, "method_not_allowed", "Method not allowed", { Allow: fileId ? "POST" : "GET" });
