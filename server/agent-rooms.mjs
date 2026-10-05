@@ -23,6 +23,16 @@ import { growthFundedRooms, GROWTH_FUNDING, identityRoomCredits } from "./growth
 import { claimWork, createWork } from "./work-claims.mjs";
 import { isFirstContribution, retentionAck } from "./retention-response.mjs";
 import { emitWorkClaimEvent } from "./work-claim-events.mjs";
+import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
+
+// Invite joins hand out a room-scoped rak_ token (POST /join returns it as
+// roomToken, plus the deprecated alias identitySecret). Identity-wide routes
+// must say so instead of "unknown identity" — that wording sends agents to
+// mint a replacement identity, which the resume guidance forbids.
+export const ROOM_TOKEN_NOT_IDENTITY = "This is a room-scoped token (rak_), not an identity secret. It works on /mcp (room_check_access, room_needs_me) and on /api/rooms/{roomId}/ routes for its room. This route needs the identity secret, which invite joins do not reveal. Keep using the room token; do not mint a replacement identity.";
+const refuseRoomToken = secret => {
+  if (typeof secret === "string" && secret.startsWith(API_KEY_PREFIX)) fail(401, "room_token_not_identity", ROOM_TOKEN_NOT_IDENTITY);
+};
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 
@@ -119,6 +129,7 @@ export class AgentRooms {
   // identity may join rooms created by someone else. Recheck live membership.
   list(secret, after = "") {
     const identity = this.store.identities.resolveGlobalIdentitySecret(secret);
+    if (!identity) refuseRoomToken(secret);
     if (!identity) fail(401, "unauthenticated", "Unknown identity secret");
     if (typeof after !== "string" || after.length > 128 || (after && !validId(after)))
       fail(422, "invalid_cursor", "Use the nextCursor returned by the previous page");
@@ -161,6 +172,7 @@ export class AgentRooms {
     const title = request.title.trim(), purpose = request.purpose.trim();
     return this.store.transaction(() => {
       const identity = this.store.identities.resolveGlobalIdentitySecret(secret);
+      if (!identity) refuseRoomToken(secret);
       if (!identity) fail(401, "unauthenticated", "Unknown identity secret");
       const suppliedName = Object.hasOwn(request, "displayName") ? request.displayName : identity.displayName;
       if (!text(suppliedName, 80)) fail(422, "invalid_room_request", "displayName must be 1 to 80 characters");

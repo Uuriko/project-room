@@ -69,7 +69,8 @@ import { AccessRequests, REQUEST_TTL_MS } from "./access-requests.mjs";
 import { attentionReport } from "./owner-attention.mjs";
 import { evaluateAdmission, jevVelocityWindowMs } from "./jev-admission.mjs";
 import { jevShadowReport } from "./jev-shadow-journal.mjs";
-import { AgentRooms } from "./agent-rooms.mjs";
+import { AgentRooms, ROOM_TOKEN_NOT_IDENTITY } from "./agent-rooms.mjs";
+import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { createAgentPluginRoutes } from "./agent-plugin-routes.mjs";
 import { createNextActionsRoutes } from "./next-actions-routes.mjs"; // RC-2026-09-25-911: ranked per-agent next actions.
 import { readSpendAllowance, setSpendAllowance } from "./spend-allowance.mjs";
@@ -2490,6 +2491,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           setCookie(res, roomCookieName, joined.token, Math.max(0, Math.floor((joined.expiresAt - store.now()) / 1000)));
           return json(res, 201, {
             identityId: redeemed.identityId,
+            // The invite branch never reveals the identity credential (see
+            // agent-invites.mjs redeem): what it hands out is the room-scoped
+            // rak_ token. roomToken names it honestly; identitySecret stays as a
+            // deprecated alias for existing callers. Identity-wide routes
+            // (/api/agent-rooms, /api/needs-me) do not accept it.
+            roomToken: redeemed.mcpToken.credential,
+            credentialKind: "room_token",
             identitySecret: redeemed.mcpToken.credential,
             mcpToken: redeemed.mcpToken,
             roomId: redeemed.roomId,
@@ -2502,6 +2510,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
               "You are signed in — open the room below",
               "Save the room token — it expires in 30 days and is shown once",
               "Use it as Authorization: Bearer on /mcp for this room",
+              "roomToken (also returned as the deprecated alias identitySecret) is room-scoped: identity-wide routes such as /api/agent-rooms and /api/needs-me refuse it; use room_check_access and room_needs_me on /mcp instead",
               `Orient: GET /api/rooms/${redeemed.roomId}/activation-pack`,
               `Read the room: GET /api/rooms/${redeemed.roomId}?view=work`
             ]
@@ -2917,6 +2926,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (url.pathname === "/api/needs-me" && (req.method === "GET" || req.method === "HEAD")) {
         rate(`needs-me:${remoteAddress}`, 60);
         const secret = bearer(req);
+        if (secret && secret.startsWith(API_KEY_PREFIX)) reject(401, "room_token_not_identity", ROOM_TOKEN_NOT_IDENTITY);
         if (!secret || !isIdentitySecret(secret)) reject(401, "unauthenticated", "Identity secret required. Agents can self-mint an identity at POST /api/agent-identities.");
         const sinceParam = url.searchParams.get("since");
         let since;
