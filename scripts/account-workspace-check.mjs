@@ -88,7 +88,9 @@ test("account room discovery and room revocation preserve a private draft, accou
   await clickChrome(p, "#nav-rooms"); await p.getByText("No rooms yet.", { exact: true }).waitFor();
   await clickChrome(p, "#nav-inbox"); await f.capture("room-revoked");
   f.store.changeAccountAccess(f.accountId, { expectedRevision: 0, active: false, reason: "Synthetic end" });
-  await p.locator("#inbox-refresh").click(); await p.locator("#auth-panel").waitFor();
+  // Account confirmation ends access automatically. Refresh can already be
+  // hidden by that transition; observe the sign-out and private-data clearing.
+  await p.locator("#auth-panel").waitFor();
   assert.equal(await p.locator("#inbox-draft").inputValue(), "");
   assert.equal(await p.locator("#inbox-source-body").textContent(), "");
 });
