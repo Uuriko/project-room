@@ -102,3 +102,43 @@ test('conversation payload stays bounded and malformed selections cannot widen i
     assert.equal((await f.get(query)).status, 422);
   t.diagnostic(`full snapshot ${JSON.stringify(full.value).length} bytes; bounded response ${JSON.stringify(page.value).length} bytes`);
 });
+
+// Authoring gate: extend the real HTTP/SQLite owner for channel selection,
+// pre-limit DM exclusion and credential/channel-bound continuations. Existing
+// cases cannot select a channel. No production seam or duplicate fixture.
+test('channel conversation pages isolate public history and bind continuations to the channel', async t => {
+  const f = await setup(t);
+  f.command(f.owner, 'channel.created', { channelId: 'design', name: 'design' });
+  for (let i = 0; i < 5; i++) {
+    f.post(`general-${i}`, `general ${i}`);
+    f.post(`design-${i}`, `design ${i}`, { channelId: 'design' });
+  }
+  f.post('design-reply', 'reply in design', { replyToId: 'design-0' });
+  // Even the addressed viewer must not get a DM mixed into a public channel.
+  for (let i = 0; i < 3; i++) f.post(`dm-${i}`, `private ${i}`, { channelId: 'design', toMemberId: 'bob' }, f.alice);
+  const first = await f.get({ channelId: 'design', limit: 2 }, f.bob);
+  assert.equal(first.status, 200, JSON.stringify(first.value));
+  assert.equal(first.value.channelId, 'design');
+  assert.deepEqual(first.value.messages.map(m => m.id), ['design-4', 'design-reply']);
+  const next = await f.get({ channelId: 'design', limit: 2, cursor: first.value.nextCursor }, f.bob);
+  assert.deepEqual(next.value.messages.map(m => m.id), ['design-2', 'design-3']);
+  const last = await f.get({ channelId: 'design', limit: 2, cursor: next.value.nextCursor }, f.bob);
+  assert.deepEqual(last.value.messages.map(m => m.id), ['design-0', 'design-1']);
+  assert.equal(last.value.nextCursor, null);
+  assert.equal((await f.get({ channelId: 'design', limit: 2, since: first.value.checkpoint }, f.bob)).value.mode, 'not_modified');
+  for (const channelId of ['general', undefined]) {
+    const selection = channelId ? { channelId } : {};
+    assert.equal((await f.get({ ...selection, limit: 2, cursor: first.value.nextCursor }, f.bob)).value.mode, 'reset');
+    assert.equal((await f.get({ ...selection, limit: 2, since: first.value.checkpoint }, f.bob)).value.mode, 'reset');
+  }
+  assert.equal((await f.get({ channelId: 'design', messageId: 'general-0' })).status, 404);
+  assert.equal((await f.get({ channelId: 'design', messageId: 'dm-0' }, f.bob)).status, 404);
+  assert.equal((await f.get({ channelId: 'design', messageId: 'design-reply' })).value.messages[0].replyToId, 'design-0');
+  assert.equal((await f.get({ messageId: 'dm-0' }, f.bob)).value.messages[0].body, 'private 0', 'unscoped viewer read retains its DM contract');
+  assert.equal((await f.get({ channelId: 'missing' })).status, 404);
+  for (const channelId of ['', 'bad/channel', 'x'.repeat(201)]) assert.equal((await f.get({ channelId })).status, 422);
+  const repeated = await f.get(new URLSearchParams([['channelId', 'design'], ['channelId', 'general']]));
+  assert.equal(repeated.status, 422);
+  f.command(f.owner, 'channel.archived', { channelId: 'design' });
+  assert.equal((await f.get({ channelId: 'design', messageId: 'design-0' })).value.messages[0].body, 'design 0', 'archiving does not erase history');
+});

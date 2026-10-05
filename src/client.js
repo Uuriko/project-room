@@ -471,19 +471,20 @@ export class RoomClient {
       throw error;
     }
   }
-  async conversation({ limit = 50, cursor = null, since = null, messageId = null } = {}) {
+  async conversation({ limit = 50, cursor = null, since = null, messageId = null, channelId = null } = {}) {
     const session = this.session, generation = this.generation;
     if (!session || !this.ownsAccountSession()) throw new Error("Sign in again to read this conversation");
     const query = new URLSearchParams({ limit: String(limit) });
-    for (const [key, value] of Object.entries({ cursor, since, messageId })) if (value !== null) query.set(key, value);
+    for (const [key, value] of Object.entries({ cursor, since, messageId, channelId })) if (value !== null) query.set(key, value);
     const result = await this.request(this.path(`/conversation?${query}`));
     if (generation !== this.generation || this.session !== session || !this.ownsAccountSession()) throw new Error("Room identity changed");
     if (!this.ownsResponse(result, session)) { this.endAccess(); throw new Error("Room identity changed"); }
     if (result.conversationVersion !== 1 || !["replace", "not_modified", "reset"].includes(result.mode)
-      || result.limit !== limit || result.messageId !== messageId || !Number.isSafeInteger(result.sequence)
+      || result.limit !== limit || result.messageId !== messageId || (result.channelId ?? null) !== channelId || !Number.isSafeInteger(result.sequence)
       || ![result.nextCursor, result.checkpoint].every(value => value === null || typeof value === "string")
       || result.mode !== "not_modified" && (!Array.isArray(result.messages) || result.messages.length > limit
-        || result.messages.some(message => !message || typeof message.id !== "string" || messageId !== null && message.id !== messageId)))
+        || result.messages.some(message => !message || typeof message.id !== "string" || messageId !== null && message.id !== messageId
+          || channelId !== null && (message.toMemberId || (message.channelId || "general") !== channelId))))
       throw new Error("Conversation response could not be confirmed");
     // Callers replace their window and discard older cached pages on `replace`;
     // `reset` requires a fresh latest-page read. Neither is event-log replay.

@@ -1,6 +1,6 @@
 import { createHash, createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { ServiceError } from "./store.mjs";
-import { validId } from "../src/events.js";
+import { validId, DEFAULT_CHANNEL_ID } from "../src/events.js";
 import { markIfOther, withContentTrust } from "./content-trust.mjs";
 import { messageInHistory } from "./history-visibility.mjs";
 
@@ -36,21 +36,27 @@ function signer(store) {
 // Current records, never raw event replay: edits, reactions and deletion
 // tombstones arrive together. SQLite filters DMs before paging; JS only parses
 // bounded selected rows. SQLite still scans the room's projection JSON.
-export function readConversation(store, token, roomId, { limit = 50, cursor = null, since = null, messageId = null,
+export function readConversation(store, token, roomId, { limit = 50, cursor = null, since = null, messageId = null, channelId = null,
   expectedSessionBinding = null } = {}) {
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100
     || [cursor, since, messageId].filter(value => value !== null).length > 1
-    || messageId !== null && !validId(messageId)) fail(422, "invalid_conversation_selection", "Choose a bounded conversation page or one message");
+    || messageId !== null && !validId(messageId)
+    || channelId !== null && !validId(channelId)) fail(422, "invalid_conversation_selection", "Choose a bounded conversation page or one message");
   return store.readTransaction(() => {
     const auth = store.authenticate(token, roomId, expectedSessionBinding);
+    // Channel history is public-room conversation, never an addressed DM.
+    // Archived channels retain readable history. Authenticate before lookup.
+    if (channelId !== null && !store.db.prepare(`SELECT 1 FROM rooms r, json_each(r.projection, '$.channels') c
+      WHERE r.id=? AND c.key=?`).get(roomId, channelId)) fail(404, "channel_not_found", "Channel not found");
     const head = store.db.prepare("SELECT sequence FROM rooms WHERE id=?").get(roomId);
     const anchor = store.db.prepare("SELECT id FROM events WHERE room_id=? AND sequence=?").get(roomId, head.sequence)?.id ?? null;
     const identity = { roomId, viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null,
       viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding,
       viewerSessionRevision: auth.sessionRevision ?? null };
-    const scope = digest([identity, auth.credentialHash, limit]);
+    const scope = digest([identity, auth.credentialHash, limit, channelId]);
     const signed = signer(store), saved = cursor !== null || since !== null ? signed.decode(cursor ?? since) : null;
-    const base = { ...identity, conversationVersion: 1, sequence: head.sequence, limit, messageId };
+    const base = { ...identity, conversationVersion: 1, sequence: head.sequence, limit, messageId,
+      ...(channelId !== null ? { channelId } : {}) };
     const reset = () => ({ ...base, mode: "reset", messages: [], nextCursor: null, checkpoint: null });
     if ((cursor !== null || since !== null) && (!saved || saved.scope !== scope || saved.kind !== (cursor !== null ? "page" : "checkpoint"))) return reset();
     if (cursor !== null && (saved.sequence !== head.sequence || saved.anchor !== anchor || !Number.isSafeInteger(saved.before) || saved.before < 0)) return reset();
@@ -62,10 +68,14 @@ export function readConversation(store, token, roomId, { limit = 50, cursor = nu
       WHERE r.id=? AND CAST(m.key AS INTEGER)<?
         AND (json_extract(m.value,'$.toMemberId') IS NULL OR json_extract(m.value,'$.toMemberId')=''
           OR json_extract(m.value,'$.authorId')=? OR json_extract(m.value,'$.toMemberId')=?)
+        AND (? IS NULL OR (
+          COALESCE(NULLIF(json_extract(m.value,'$.channelId'),''),?)=?
+          AND (json_extract(m.value,'$.toMemberId') IS NULL OR json_extract(m.value,'$.toMemberId')='')))
         AND (? IS NULL OR json_extract(m.value,'$.id')=?)
         AND (? IS NULL OR json_extract(m.value,'$.createdAt')>=?)
       ORDER BY CAST(m.key AS INTEGER) DESC LIMIT ?`)
-      .all(roomId, before, auth.member.id, auth.member.id, messageId, messageId, floor?.at ?? null, floor?.at ?? null, messageId === null ? limit + 1 : 1)
+      .all(roomId, before, auth.member.id, auth.member.id, channelId, DEFAULT_CHANNEL_ID, channelId,
+        messageId, messageId, floor?.at ?? null, floor?.at ?? null, messageId === null ? limit + 1 : 1)
       .filter(row => !floor || messageInHistory(JSON.parse(row.body), floor));
     if (messageId !== null && !rows.length) fail(404, "message_not_found", "Message not found");
     const selected = [];

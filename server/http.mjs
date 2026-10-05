@@ -3628,11 +3628,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (route === "conversation" && req.method === "GET") {
         const params = url.searchParams;
-        if ([...params.keys()].some(key => !["limit", "cursor", "since", "messageId", "auth"].includes(key) || params.getAll(key).length !== 1)
+        if ([...params.keys()].some(key => !["limit", "cursor", "since", "messageId", "channelId", "auth"].includes(key) || params.getAll(key).length !== 1)
           || params.has("limit") && !/^[1-9]\d*$/.test(params.get("limit"))) reject(422, "invalid_conversation_selection", "Choose a bounded conversation page or one message");
         return json(res, 200, readConversation(store, selected.token, roomId, {
           ...(params.has("limit") ? { limit: Number(params.get("limit")) } : {}),
-          cursor: params.get("cursor"), since: params.get("since"), messageId: params.get("messageId"), expectedSessionBinding: fence
+          cursor: params.get("cursor"), since: params.get("since"), messageId: params.get("messageId"), channelId: params.get("channelId"), expectedSessionBinding: fence
         }));
       }
       if (route === "thread" && req.method === "GET") {

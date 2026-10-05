@@ -997,18 +997,26 @@ paths:
         Reply root IDs remain intact; retrieve an older root explicitly by messageId.
         Authentication and scope checks run on every read, including conditional reads.
         This additive API does not change the legacy full room snapshot.
+        Optional `channelId` selects public messages in that channel (including replies),
+        before pagination. DMs are excluded even for their participants. Legacy messages
+        without a channel belong to general; archived channel history remains readable.
+        Scoped responses include channelId, and continuations bind that selection:
+        changing or removing it yields mode=reset. Without channelId, the existing
+        viewer-scoped room/DM selection is unchanged. Storage still reads the projection;
+        this selector does not complete the indexed-message migration.
       parameters:
         - { name: roomId, in: path, required: true, schema: { type: string } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
         - { name: cursor, in: query, schema: { type: string } }
         - { name: since, in: query, schema: { type: string } }
         - { name: messageId, in: query, schema: { type: string } }
+        - { name: channelId, in: query, schema: { type: string }, description: Public channel selection; excludes DMs and binds continuations }
       responses:
         '200':
           description: Viewer-bound version 1 response with mode, sequence, messages, nextCursor and checkpoint; not_modified omits messages
         '401': { description: Credential expired or revoked }
         '403': { description: Current membership or rooms read scope required }
-        '404': { description: Requested message absent or not visible }
+        '404': { description: Channel absent, or requested message absent or not visible in the selected scope }
         '413': { description: One current message exceeds the bounded read byte limit }
         '422': { description: Invalid selection }
   /api/inbox/setup:
