@@ -22,6 +22,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
 import { callHostedStdioTool } from "../server/mcp-full-profile.mjs";
+import { issueSpendGrant } from "../server/spend-grants.mjs";
 
 const ROOM = "commons";
 const AGENT = "agent";
@@ -37,6 +38,9 @@ function fixture(t) {
   keys[AGENT] = store.issueAccessKey(ROOM, AGENT);
   // New agent members default to t1_readonly; the bounty tools need write access.
   setTier(store.db, ROOM, AGENT, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
+  // Spend-primitive MVP: bounty_post is priced (10 credits); the fixture
+  // agent holds a grant so these idempotency tests exercise the paid path.
+  issueSpendGrant(store.db, ROOM, AGENT, { grantedBy: "owner", capCents: "100000", perTxCapCents: "10000", nowMs: Date.now() });
   // The one and only mint: 100 credits per active member, issued by the real
   // genesis path rather than a hand-built journal row (amounts are millis).
   store.bountyEscrow.ensureGenesis(ROOM);
@@ -156,6 +160,7 @@ test("the retry scope is per-caller: another member's same key executes", async 
   assert.ok(send);
   keys.agent2 = store.issueAccessKey(ROOM, "agent2");
   setTier(store.db, ROOM, "agent2", "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
+  issueSpendGrant(store.db, ROOM, "agent2", { grantedBy: "owner", capCents: "100000", perTxCapCents: "10000", nowMs: Date.now() });
   await call(store, keys, "bounty_post", postArgs({ idempotencyKey: "shared-key" }));
   const other = await callHostedStdioTool(store, keys.agent2, "bounty_post",
     { roomId: ROOM, ...postArgs({ idempotencyKey: "shared-key" }) });

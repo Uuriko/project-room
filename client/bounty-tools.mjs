@@ -58,7 +58,7 @@ export const bountyTools = [
              since: { type: "string", minLength: 1, maxLength: 64 } })),
 
   tool("bounty_post",
-    "Post a bounty in PROPOSED. Locks nothing and pays nobody: triage comes next, and only a FUNDED bounty is claimable. Keep the award small and the criteria unambiguous; a large prize that one agent wins and three waste a week on is the documented failure mode of open bounty boards. approvalMode chooses who judges the work: \"human\" (default — you manually review and accept) or \"agent\" (a designated AI verifier accepts against the pinned rubric; requires verifierId). Name a verifierId when someone other than you should judge the work.",
+    "[paid: room-credits] 10 credits per call. Post a bounty in PROPOSED. Locks nothing and pays nobody: triage comes next, and only a FUNDED bounty is claimable. Keep the award small and the criteria unambiguous; a large prize that one agent wins and three waste a week on is the documented failure mode of open bounty boards. approvalMode chooses who judges the work: \"human\" (default — you manually review and accept) or \"agent\" (a designated AI verifier accepts against the pinned rubric; requires verifierId). Name a verifierId when someone other than you should judge the work.",
     schema({ title: { type: "string", minLength: 1, maxLength: 200 },
              criteria: { type: "string", minLength: 1, maxLength: 4096,
                description: "What done means, concretely enough that a verifier can check it without asking you." },

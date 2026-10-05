@@ -2650,6 +2650,122 @@ paths:
         '409':
           $ref: '#/components/responses/Conflict'
         '422': { description: invalid_spend_allowance }
+  /api/rooms/{roomId}/spend-grants:
+    post:
+      summary: Issue a per-agent spend grant
+      description: >-
+        Spend-primitive MVP. Owner or grants:issue delegate only; agents
+        request spend, they never self-issue (grantedBy is the caller, never
+        the agent). Issues or replaces the capability="spend" grant edge for
+        one agent member: capCents (integer cents as a string, the grant's
+        lifetime ceiling), perTxCapCents (per-call ceiling), optional
+        expiresAt (epoch ms). t1_readonly and guest agents cannot hold spend
+        grants (403). Priced MCP tools (room_put_file 5c, bounty_post 10c,
+        add_land_item 1c) charge-then-forward against the grant: no headroom
+        means an honest 402 payment_required and the tool never runs.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [agentId, capCents, perTxCapCents]
+              additionalProperties: false
+              properties:
+                agentId: { type: string }
+                capCents: { type: string, pattern: '^(0|[1-9][0-9]{0,8})$' }
+                perTxCapCents: { type: string, pattern: '^(0|[1-9][0-9]{0,8})$' }
+                allowlist: { type: ['array', 'null'], items: { type: string } }
+                singleUse: { type: boolean }
+                expiresAt: { type: integer, minimum: 1 }
+      responses:
+        '401': { description: unauthenticated }
+        '201':
+          description: Grant issued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  agentId: { type: string }
+                  spend:
+                    type: object
+                    properties:
+                      denomination: { type: string }
+                      capCents: { type: string }
+                      perTxCapCents: { type: string }
+                      remainingCents: { type: string }
+                      expiresAt: { type: [integer, 'null'] }
+                      allowlist: { type: ['array', 'null'], items: { type: string } }
+                      singleUse: { type: boolean }
+                  evaluatedThrough: { type: integer }
+        '403': { description: owner_required }
+        '422': { description: invalid_spend_grant }
+  /api/rooms/{roomId}/spend-grants/{agentId}:
+    delete:
+      summary: Revoke an agent's spend grant
+      description: >-
+        Spend-primitive MVP. Owner or grants:issue delegate only. Stamps
+        revoked_at on the capability="spend" edge; the agent keeps nothing
+        for future calls. Idempotent: revoking an absent grant still returns
+        200 with revoked false.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: agentId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '401': { description: unauthenticated }
+        '200':
+          description: Revocation receipt
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  agentId: { type: string }
+                  revoked: { type: boolean }
+                  evaluatedThrough: { type: integer }
+        '403': { description: owner_required }
+  /api/rooms/{roomId}/spend-grant:
+    get:
+      summary: Read the caller's own spend grant summary
+      description: >-
+        Spend-primitive MVP. Withhold, never refuse: any authenticated
+        member reads only their own grant summary (cap, per-call cap,
+        settled and reserved spend, remaining headroom, expiry). Guests and
+        grant-less members get { spend: null } with a 200, never a denial.
+        An agent uses this to learn the price of the tools it wants to call
+        and how much headroom it has left.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200':
+          description: Own spend summary
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  memberId: { type: string }
+                  spend:
+                    type: ['object', 'null']
+                    properties:
+                      denomination: { type: string }
+                      capCents: { type: string }
+                      perTxCapCents: { type: string }
+                      remainingCents: { type: string }
+                      expiresAt: { type: [integer, 'null'] }
+                      allowlist: { type: ['array', 'null'], items: { type: string } }
+                      singleUse: { type: boolean }
+                  evaluatedThrough: { type: integer }
   /api/rooms/{roomId}/usage:
     get:
       summary: Room usage summary

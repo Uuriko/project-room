@@ -32,6 +32,7 @@ import { isHostedStdioTool, validHostedStdioArgs, callHostedStdioTool } from "./
 import { friendBondCommand } from "../src/friend-bond.js";
 import { validAttachmentData } from "./room-attachment-bytes.mjs";
 import { closestToolName, diagnoseArguments, mcpCallError } from "./mcp-arg-errors.mjs";
+import { chargeSpendBeforeCall } from "./spend-grants.mjs";
 import {
   hostedRoomTools as ROOM_TOOLS,
   hostedInboxTools as INBOX_TOOLS,
@@ -67,7 +68,11 @@ function failureValue(error) {
   if (error instanceof ServiceError || (error && Number.isInteger(error.status) && typeof error.code === "string")) {
     return {
       status: error.status, code: error.code, message: error.message,
-      ...(error.item ? { item: error.item } : {})
+      ...(error.item ? { item: error.item } : {}),
+      // Spend-grant refusals carry machine-readable detail (price, reason,
+      // remaining cap) alongside the human text — the x402 PaymentRequired
+      // shape: structuredContent AND content[0].text both name the price.
+      ...(error.detail ? { detail: error.detail } : {})
     };
   }
   return { status: 500, code: "internal", message: "Request could not be completed" };
@@ -355,8 +360,31 @@ async function callLandTool(store, secret, name, args) {
   });
 }
 
+// Spend-primitive MVP (charge-then-forward): the tool is never invoked until
+// payment has settled against the agent's spend grant. Unpriced tools,
+// humans, and the room owner pass through untouched. A SpendGrantError means
+// refusal — the tool must not run. settle() after success, void() on any
+// failure; an idempotent duplicate retry is voided (the original call
+// already paid).
 function callRoomTool(store, secret, identity, name, args, agentRooms) {
   enforceMcpCallVisibility(store, identity, name);
+  const spend = chargeSpendBeforeCall(store, secret, name, args);
+  if (!spend) return dispatchRoomToolCall(store, secret, identity, name, args, agentRooms);
+  let result;
+  try {
+    result = dispatchRoomToolCall(store, secret, identity, name, args, agentRooms);
+  } catch (error) { spend.void(); throw error; }
+  return Promise.resolve(result).then(
+    value => {
+      if (value && typeof value === "object" && value.duplicate === true) spend.void();
+      else spend.settle();
+      return value;
+    },
+    error => { spend.void(); throw error; }
+  );
+}
+
+function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
   if (name === "room_needs_me") return collectNeedsMe(store, secret, { since: args.since });
   if (name === "room_create") {
     const request = {};

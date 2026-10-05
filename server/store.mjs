@@ -31,6 +31,7 @@ import { enforceSpendAllowance } from "./spend-allowance.mjs";
 import { ensureAutonomyTiersSchema, enforceAutonomyTiers } from "./autonomy-tiers.mjs";
 import { ensureOperatorActionsSchema, OPERATOR_ACTIONS_SCHEMA } from "./operator-actions.mjs"; // CP-ADMIN-0: append-only operator audit.
 import { ensureGrantsSchema } from "./grants.mjs";
+import { ensureSpendGrantsSchema } from "./spend-grants.mjs";
 import { canonicalInvitationData, invitationJournalEntry, invitationJournalSchema, replayInvitationJournal } from "./invitation-journal.mjs";
 import { invitationJoinedEvent, assertInvitationMembershipEvidence } from "./invitation-evidence.mjs";
 import { STORE_SCHEMA_VERSION, fenceDefinitions, registerWriter, installWriterFence, verifyWriterFence } from "./writer-fence.mjs";
@@ -1337,6 +1338,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // edges — purely additive table, IF NOT EXISTS is idempotent, no
       // schema version bump.
       ensureGrantsSchema(this.db);
+      // Spend-primitive MVP (qa4-spend-mvp-jill): per-agent spend grant
+      // terms + the charge ledger — purely additive tables, IF NOT EXISTS
+      // is idempotent, no schema version bump.
+      ensureSpendGrantsSchema(this.db);
       // RC-2026-09-19-078: account profile (display_name/avatar_url) and
       // onboarding flag converge the same additive way; no version bump.
       ensureAccountProfileSchema(this.db);
