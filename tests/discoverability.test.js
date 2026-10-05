@@ -623,8 +623,7 @@ test("inventory method accuracy: served methods match the route table", { timeou
   }
 });
 
-test("cold walkthrough stranger surface: every documented no-credential endpoint is auth none (qa5-p4-grokbot)", async () => {
-  const { DISCOVERABILITY_ROUTES } = await import("../server/discoverability.mjs");
+test("cold walkthrough stranger surface: every documented no-credential endpoint is auth none (qa5-p4-grokbot)", () => {
   const byPath = new Map(DISCOVERABILITY_ROUTES.map(r => [r.path, r]));
   const stranger = [
     "/llms.txt", "/llms-full.txt", "/kits.txt", "/skills", "/join.txt",
