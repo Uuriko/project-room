@@ -101,7 +101,7 @@ it touches only the pricing gate, never tool permissions, and it cannot deny
 normal agent tools or receipt recovery (unlike zeroing the room allowance).
 
 ```
-POST   /api/rooms/:roomId/spend-pricing   → 201 { roomId, enabled, revision, setById, setAt }
+POST   /api/rooms/:roomId/spend-pricing   → 201 CommandReceipt { sequence, event, duplicate }
   { enabled: boolean, requestId? }   (owner only — 403 owner_required for everyone else,
                                       checked before the body shape is parsed)
 GET    /api/rooms/:roomId/spend-pricing   → 200 { roomId, enabled, revision, setById, setAt }
