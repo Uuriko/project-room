@@ -32,13 +32,13 @@ const fail = (status, code, message) => { throw new ServiceError(status, code, m
 // What deletion removes vs retains, and why. Served verbatim at
 // GET /api/account/retention and attached to every deletion plan.
 export const RETENTION_POLICY = Object.freeze({
-  version: "1.4.0",
+  version: "1.5.0",
   summary: "Account deletion purges the account's sign-in credentials, "
     + "sessions, room memberships, connected Gmail data, private inbox content "
     + "(imported messages, drafts, read state), connected email data, derived "
-    + "stitch data, account setup answers, "
+    + "stitch data, inbox handoff packets, SLA breach alerts, channel update journals, account setup answers, "
     + "terms-of-service acceptance, and profile data. Guest invites, share links, "
-    + "and membership invitations issued by the account are revoked, and agent "
+    + "membership invitations, and agent and referral invites issued by the account are revoked, and agent "
     + "connections the account sponsored are disconnected. Personal rooms this account solely owns are archived "
     + "and their messages and files are purged. Security audit rows, inbox/email "
     + "command receipts, abuse "
@@ -58,6 +58,8 @@ export const RETENTION_POLICY = Object.freeze({
     Object.freeze({ category: "private_inbox", description: "Private inbox content is permanently deleted: imported message versions (private_inbox_versions), drafts (private_inbox_drafts), sources (private_inbox_sources), and read state (private_inbox_reads)." }),
     Object.freeze({ category: "private_email", description: "Connected email data is permanently deleted: connections (private_email_connections) and folders (private_email_folders)." }),
     Object.freeze({ category: "stitch", description: "Derived cross-channel stitch data (stitch_identities, stitch_links, stitch_suggestions, stitch_receipts, stitch_revocations) is permanently deleted." }),
+    Object.freeze({ category: "derived_inbox", description: "Account-keyed inbox and channel rows are permanently deleted: handoff packets (inbox_handoffs), SLA breach alerts (sla_breach_alerts), the channel update journal (pending_channel_updates), and channel live status (telegram_live_status)." }),
+    Object.freeze({ category: "member_issued_invites", description: "Unredeemed agent invites (agent_invite_codes) and referral invites (referral_invites) minted by the account's room members are revoked before the account leaves its rooms; their history stays for audit." }),
     Object.freeze({ category: "issued_access", description: "Access granted by the account is revoked: active guest invites (guest_invites), share links (share_links), and pending membership invitations it issued or that were issued to it." }),
     Object.freeze({ category: "sponsored_agents", description: "Agent connections sponsored by the account are disconnected: their room credentials are revoked (agentConnections.revokeAccount), the same revocation a deactivation performs." }),
     Object.freeze({ category: "terms", description: "The terms-of-service acceptance record (account_terms) is deleted." }),
@@ -78,6 +80,37 @@ const countWhere = (store, table, accountId) =>
 
 const countWhereColumn = (store, table, column, accountId) =>
   store.db.prepare(`SELECT count(*) AS n FROM ${table} WHERE ${column}=?`).get(accountId)?.n ?? 0;
+
+const tableExists = (db, name) =>
+  Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name));
+
+// SEC-04: account-keyed inbox/channel tables outside the private_inbox set.
+const DERIVED_INBOX_TABLES = Object.freeze(["inbox_handoffs", "sla_breach_alerts", "pending_channel_updates", "telegram_live_status"]);
+
+const countDerivedInbox = (store, accountId) => DERIVED_INBOX_TABLES
+  .filter(table => tableExists(store.db, table))
+  .reduce((sum, table) => sum + countWhere(store, table, accountId), 0);
+
+// SEC-04: invites are keyed by (room, member), not account. member_accounts
+// maps the account to its member id in each room.
+const memberBindings = (store, accountId) =>
+  store.db.prepare("SELECT room_id, member_id FROM member_accounts WHERE account_id=?").all(accountId);
+
+const countMemberIssuedInvites = (store, accountId) => {
+  const db = store.db;
+  const agent = tableExists(db, "agent_invite_codes")
+    ? db.prepare("SELECT count(*) AS n FROM agent_invite_codes WHERE room_id=? AND created_by=? AND redeemed_at IS NULL AND revoked_at IS NULL")
+    : null;
+  const referral = tableExists(db, "referral_invites")
+    ? db.prepare("SELECT count(*) AS n FROM referral_invites WHERE room_id=? AND inviter_member_id=? AND status='minted'")
+    : null;
+  let n = 0;
+  for (const { room_id: roomId, member_id: memberId } of memberBindings(store, accountId)) {
+    if (agent) n += agent.get(roomId, memberId)?.n ?? 0;
+    if (referral) n += referral.get(roomId, memberId)?.n ?? 0;
+  }
+  return n;
+};
 
 // Access grants issued by (or pending for) the account that revocation must retire.
 const countIssuedAccess = (store, accountId) => {
@@ -339,6 +372,15 @@ export function inventoryFromStore(store, accountId, rooms = null) {
     sponsored_agents: {
       itemCount: countWhereColumn(store, "agent_connections", "sponsor_account_id", accountId),
     },
+    // SEC-04: handoff packets, SLA alerts, and channel journals carry private
+    // thread content and metadata keyed by account.
+    derived_inbox: {
+      itemCount: countDerivedInbox(store, accountId),
+    },
+    // SEC-04: agent and referral invites minted by the account's members.
+    member_issued_invites: {
+      itemCount: countMemberIssuedInvites(store, accountId),
+    },
   };
   if (roomWork) inventory.owned_rooms = { itemCount: owned.archive.length + owned.transfer.length, dependsOn: [] };
   return inventory;
@@ -430,6 +472,34 @@ const EXECUTORS = {
       removed += db.prepare(`DELETE FROM ${table} WHERE account_id=?`).run(accountId).changes;
     }
     return removed;
+  },
+  // SEC-04: delete account-keyed inbox and channel rows. Tables are created
+  // by their own modules, so skip any table this store does not have.
+  derived_inbox: (store, accountId) => {
+    const db = store.db;
+    let removed = 0;
+    for (const table of DERIVED_INBOX_TABLES) {
+      if (tableExists(db, table)) removed += db.prepare(`DELETE FROM ${table} WHERE account_id=?`).run(accountId).changes;
+    }
+    return removed;
+  },
+  // SEC-04: revoke, never delete. Runs before memberships (priority 47 < 50)
+  // so the member bindings still exist.
+  member_issued_invites: (store, accountId) => {
+    const db = store.db;
+    const now = typeof store.now === "function" ? store.now() : Date.now();
+    const agent = tableExists(db, "agent_invite_codes")
+      ? db.prepare("UPDATE agent_invite_codes SET revoked_at=? WHERE room_id=? AND created_by=? AND redeemed_at IS NULL AND revoked_at IS NULL")
+      : null;
+    const referral = tableExists(db, "referral_invites")
+      ? db.prepare("UPDATE referral_invites SET status='rejected', rejected_at=?, reject_reason='inviter_account_deleted' WHERE room_id=? AND inviter_member_id=? AND status='minted'")
+      : null;
+    let revoked = 0;
+    for (const { room_id: roomId, member_id: memberId } of memberBindings(store, accountId)) {
+      if (agent) revoked += agent.run(now, roomId, memberId).changes;
+      if (referral) revoked += referral.run(now, roomId, memberId).changes;
+    }
+    return revoked;
   },
   // Revoke, never delete: invite/link history stays for audit, but nothing
   // issued by a deleted account may still grant access.
