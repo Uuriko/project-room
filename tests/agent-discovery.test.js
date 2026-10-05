@@ -267,6 +267,37 @@ test("conventional skill/agent filenames serve the same short packet as /llms.tx
   }
 });
 
+test("uppercase /SKILL.md serves the agent skill, distinct from the llms.txt packet", async t => {
+  // Contract: /SKILL.md is the Omnara-style self-onboarding skill. Lowercase
+  // /skill.md stays the llms.txt alias (SHORT_PACKET_FILES). A regression
+  // that folds /SKILL.md into the alias list would silently replace the skill
+  // with the packet — this test fails on exactly that.
+  const origin = await serve(t);
+  const skill = discoveryDoc("/SKILL.md");
+  const packet = discoveryDoc("/llms.txt");
+  assert.ok(skill, "/SKILL.md is served");
+  assert.notEqual(skill.body, packet.body, "/SKILL.md is not the llms.txt packet");
+  assert.match(skill.type, /text\/markdown/, "served as markdown");
+  assert.ok(skill.body.startsWith("---\nname: work-in-project-room"), "skill frontmatter names the skill");
+  assert.ok(skill.body.includes("## Step 1"), "skill walks setup steps");
+  assert.ok(skill.body.includes("/api/public-work/match"), "skill covers finding work");
+  assert.ok(skill.body.includes("/api/project-offers"), "skill covers paid bounties");
+  assert.ok(skill.body.includes("Money honesty"), "skill carries the money-honesty section");
+  assert.ok(!FORBIDDEN.test(skill.body), "skill stays secret-free");
+  for (const path of ["/room/SKILL.md", "/project-room/SKILL.md"]) {
+    assert.ok(DISCOVERY_PATHS.includes(path), path);
+    assert.equal(discoveryDoc(path).body, skill.body, `${path} serves identical bytes`);
+    const get = await fetch(origin + path);
+    assert.equal(get.status, 200, path);
+    assert.equal(await get.text(), skill.body);
+  }
+  const get = await fetch(origin + "/SKILL.md");
+  assert.equal(get.status, 200, "/SKILL.md");
+  assert.equal(await get.text(), skill.body);
+  // The lowercase alias is untouched: still the short packet.
+  assert.equal(discoveryDoc("/skill.md").body, packet.body, "lowercase /skill.md still aliases llms.txt");
+});
+
 test("www leftover synonyms serve the short packet or agent card, not 404", async t => {
   assert.deepEqual([...SHORT_PACKET_SYNONYMS], [
     "/room/skill", "/room/agents", "/room/llms",
