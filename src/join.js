@@ -226,7 +226,9 @@ async function boot() {
       else if (statusEl) statusEl.textContent = mapped.message;
       return;
     }
-    const { identitySecret, roomId, displayName, sessionExpiresAt } = joined.body ?? {};
+    // roomToken is the honest name for the room-scoped credential; identitySecret is its deprecated alias.
+    const { roomId, displayName, sessionExpiresAt } = joined.body ?? {};
+    const identitySecret = joined.body?.roomToken ?? joined.body?.identitySecret;
     if (typeof identitySecret !== "string" || typeof roomId !== "string") {
       if (button) button.disabled = false;
       if (statusEl) statusEl.textContent = "The room answered oddly. Try again.";

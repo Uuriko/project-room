@@ -120,6 +120,29 @@ test("full self-serve flow: mint invite, preview the consent screen, join by cod
   assert.equal(joined.roomId, roomId);
   assert.equal(joined.via, "invite");
   assert.equal(typeof joined.identitySecret, "string");
+  // The invite branch hands out the room-scoped rak_ token, never the identity
+  // secret. It is named honestly as roomToken; identitySecret is the alias.
+  assert.equal(joined.credentialKind, "room_token");
+  assert.match(joined.roomToken, /^rak_/);
+  assert.equal(joined.identitySecret, joined.roomToken);
+  assert.equal(joined.roomToken, joined.mcpToken.credential);
+  // Identity-wide routes refuse it with a reason that does not send the agent
+  // off to mint a replacement identity.
+  for (const path of ["/api/agent-rooms", "/api/needs-me"]) {
+    const refused = await fetch(`${origin}${path}`, { headers: { Authorization: `Bearer ${joined.roomToken}` } });
+    assert.equal(refused.status, 401, path);
+    const refusal = await refused.json();
+    assert.equal(refusal.error.code, "room_token_not_identity", path);
+    assert.match(refusal.error.message, /room-scoped token/, path);
+    assert.doesNotMatch(refusal.error.message, /self-mint/, path);
+  }
+  const created = await fetch(`${origin}/api/agent-rooms`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${joined.roomToken}` },
+    body: JSON.stringify({ title: "Second room", purpose: "should be refused" }),
+  });
+  assert.equal(created.status, 401);
+  assert.equal((await created.json()).error.code, "room_token_not_identity");
 
   // The code is single-use: the join page's consent screen now reports it dead.
   const previewAgain = await fetch(`${origin}/api/agent-invites/preview?code=${minted.code}`);
