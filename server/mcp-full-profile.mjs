@@ -149,7 +149,8 @@ export async function callHostedStdioTool(store, secret, name, args) {
   // agents keep their established denial codes; the spend check only sees
   // agents the catalog already admits. Settle on success; void on error,
   // throw, or unconfirmed outcome (never charge for a call whose outcome is
-  // unknown); void an idempotent duplicate (the original call already paid).
+  // unknown); void an idempotent duplicate or idempotent replay (the
+  // original call already paid).
   {
     const { roomId } = args;
     const auth = store.authenticate(secret, roomId);
@@ -170,7 +171,7 @@ export async function callHostedStdioTool(store, secret, name, args) {
   } catch (error) { spend.void(); throw error; }
   const value = outcome?.value;
   if (outcome?.isError === true) spend.void();
-  else if (value && typeof value === "object" && value.duplicate === true) spend.void();
+  else if (value && typeof value === "object" && (value.duplicate === true || value.idempotentReplay === true)) spend.void();
   else spend.settle();
   return outcome;
 }
