@@ -284,7 +284,9 @@ const INSERT_SIGNAL = `INSERT OR IGNORE INTO claim_reputation_signals
   (id, claim_id, kind, agent_id, weight, at, room_id, room_seq)
   VALUES (?,?,?,?,?,?,?,?)`;
 
-const signalId = (claimId, type, roomSeq) => `claimrep:${claimId}:${type}:${roomSeq}`;
+// Event sequences and claim IDs are only unique within a room, so the room
+// is part of the signal identity.
+const signalId = (roomId, claimId, type, roomSeq) => `claimrep:${roomId ?? ""}:${claimId}:${type}:${roomSeq}`;
 
 function parseEventRow(row) {
   try {
@@ -302,8 +304,19 @@ function parseEventRow(row) {
 // them into the claim-reputation signal journal. Idempotent: re-running
 // changes nothing. The journal is the analytics surface the P1 measurement
 // section names (weekly diff against the 2026-10-05 baseline).
-export function syncClaimReputationJournal(db, { roomId = null } = {}) {
+export function syncClaimReputationJournal(db, { roomId: requestedRoomId = null } = {}) {
   ensureClaimReputationSchema(db);
+  // The journal is derived from the durable events, so legacy-format rows
+  // (id = claimrep:{claim}:{kind}:{seq}, no room in the ID) are rebuilt, not
+  // converted. The old mixed-room fold may have stamped them with the wrong
+  // room, and a wrong-room row cannot be told apart from a right one, so ANY
+  // legacy row forces a full rebuild: every legacy row is deleted and every
+  // room is re-folded, even when a single room was requested. Once none
+  // remain, scoped syncs behave normally.
+  const legacyWhere = "id = 'claimrep:' || claim_id || ':' || kind || ':' || room_seq";
+  const legacyRowsRemoved = db.prepare(`DELETE FROM claim_reputation_signals WHERE ${legacyWhere}`).run().changes;
+  const roomId = legacyRowsRemoved > 0 ? null : requestedRoomId;
+  const widenedToAllRooms = Boolean(requestedRoomId) && roomId === null;
   const rows = db.prepare(
     `SELECT room_id, sequence, body FROM events
      WHERE json_extract(body,'$.type')='work_claim.updated'
@@ -315,20 +328,29 @@ export function syncClaimReputationJournal(db, { roomId = null } = {}) {
     const event = parseEventRow(row);
     if (event) parsed.push(event);
   }
-  const { signals } = foldClaims(parsed);
-  const roomBySeq = new Map(parsed.map(r => [r.seq, r.roomId]));
+  // Fold each room on its own: claim state is keyed by (roomId, claimId),
+  // so the same claimId in two rooms never shares a position or a cap count.
+  const byRoom = new Map();
+  for (const event of parsed) {
+    if (!byRoom.has(event.roomId)) byRoom.set(event.roomId, []);
+    byRoom.get(event.roomId).push(event);
+  }
+  const signals = [];
+  for (const [signalRoomId, roomRows] of byRoom) {
+    for (const s of foldClaims(roomRows).signals) signals.push({ ...s, roomId: signalRoomId });
+  }
   const insert = db.prepare(INSERT_SIGNAL);
   let written = 0;
   const insertOne = s => {
     written += insert.run(
-      signalId(s.claimId, s.type, s.seq),
+      signalId(s.roomId, s.claimId, s.type, s.seq),
       s.claimId, s.type, s.agent, s.weight, s.at,
-      roomBySeq.get(s.seq) ?? null, s.seq
+      s.roomId ?? null, s.seq
     ).changes;
   };
   const write = db.transaction
     ? db.transaction(list => { for (const s of list) insertOne(s); })
     : (list => { for (const s of list) insertOne(s); });
   write(signals);
-  return { eventsRead: parsed.length, signalsDerived: signals.length, signalsWritten: written };
+  return { eventsRead: parsed.length, signalsDerived: signals.length, signalsWritten: written, legacyRowsRemoved, widenedToAllRooms };
 }

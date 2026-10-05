@@ -327,3 +327,90 @@ test("syncClaimReputationJournal scopes by room and ignores other event types", 
   assert.equal(res.eventsRead, 2);
   assert.equal(res.signalsWritten, 1);
 });
+
+test("syncClaimReputationJournal keeps the same claimId in two rooms separate (all-room sync)", () => {
+  const db = eventDb();
+  // Same claimId and same seq numbers in two rooms, different owners.
+  for (const [room, lane] of [["room-a", "lane-a"], ["room-b", "lane-b"]]) {
+    insertEvent(db, room, 1, "work_claim.updated", { workClaim: "c1", action: "claimed", claimState: "claimed", ownerId: lane }, T0);
+    insertEvent(db, room, 2, "work_claim.updated", { workClaim: "c1", action: "state_changed", claimState: "done", ownerId: lane }, T0 + 60_000);
+  }
+  const res = syncClaimReputationJournal(db, {});
+  assert.equal(res.signalsDerived, 2);
+  assert.equal(res.signalsWritten, 2, "both rooms keep their own completion signal");
+  const rows = db.prepare("SELECT room_id AS roomId, agent_id AS agentId, id FROM claim_reputation_signals ORDER BY room_id").all();
+  assert.deepEqual(rows.map(r => [r.roomId, r.agentId]), [["room-a", "lane-a"], ["room-b", "lane-b"]]);
+  assert.notEqual(rows[0].id, rows[1].id, "signal IDs differ across rooms");
+  assert.equal(syncClaimReputationJournal(db, {}).signalsWritten, 0, "re-sync is idempotent");
+});
+
+test("syncClaimReputationJournal rebuilds legacy-format rows, including misattributed ones", () => {
+  const db = eventDb();
+  // Same claim/type/seq in two rooms: the old mixed fold stamped both with one room.
+  for (const [room, lane] of [["room-a", "lane-a"], ["room-b", "lane-b"]]) {
+    insertEvent(db, room, 1, "work_claim.updated", { workClaim: "c1", action: "claimed", claimState: "claimed", ownerId: lane }, T0);
+    insertEvent(db, room, 2, "work_claim.updated", { workClaim: "c1", action: "state_changed", claimState: "done", ownerId: lane }, T0 + 60_000);
+  }
+  ensureClaimReputationSchema(db);
+  // Old-code output: one legacy row (room-b's signal stamped room-a, lane-b).
+  db.prepare("INSERT INTO claim_reputation_signals (id, claim_id, kind, agent_id, weight, at, room_id, room_seq) VALUES (?,?,?,?,?,?,?,?)")
+    .run("claimrep:c1:claim_completed:2", "c1", "claim_completed", "lane-b", 3, T0 + 60_000, "room-a", 2);
+  const res = syncClaimReputationJournal(db, {});
+  assert.equal(res.legacyRowsRemoved, 1);
+  assert.equal(res.signalsWritten, 2);
+  const rows = db.prepare("SELECT id, room_id AS roomId, agent_id AS agentId FROM claim_reputation_signals ORDER BY room_id").all();
+  assert.deepEqual(rows.map(r => [r.id, r.roomId, r.agentId]), [
+    ["claimrep:room-a:c1:claim_completed:2", "room-a", "lane-a"],
+    ["claimrep:room-b:c1:claim_completed:2", "room-b", "lane-b"]
+  ], "misattributed legacy row is gone; each room has its own correct row");
+  const again = syncClaimReputationJournal(db, {});
+  assert.equal(again.signalsWritten, 0);
+  assert.equal(again.legacyRowsRemoved, 0);
+});
+
+test("scoped sync with any legacy row (even one stamped to a different room) forces a full rebuild", () => {
+  const db = eventDb();
+  for (const [room, lane] of [["room-a", "lane-a"], ["room-b", "lane-b"]]) {
+    insertEvent(db, room, 1, "work_claim.updated", { workClaim: "c1", action: "claimed", claimState: "claimed", ownerId: lane }, T0);
+    insertEvent(db, room, 2, "work_claim.updated", { workClaim: "c1", action: "state_changed", claimState: "done", ownerId: lane }, T0 + 60_000);
+  }
+  ensureClaimReputationSchema(db);
+  // Old-code row stamped to a non-null room (room-b) that is NOT the room
+  // being synced (room-a); a v3 scoped sync would have left it behind.
+  db.prepare("INSERT INTO claim_reputation_signals (id, claim_id, kind, agent_id, weight, at, room_id, room_seq) VALUES (?,?,?,?,?,?,?,?)")
+    .run("claimrep:c1:claim_completed:2", "c1", "claim_completed", "lane-b", 3, T0 + 60_000, "room-b", 2);
+  const res = syncClaimReputationJournal(db, { roomId: "room-a" });
+  assert.equal(res.legacyRowsRemoved, 1);
+  assert.equal(res.widenedToAllRooms, true);
+  const rows = db.prepare("SELECT id, room_id AS roomId, agent_id AS agentId FROM claim_reputation_signals ORDER BY room_id").all();
+  assert.deepEqual(rows.map(r => [r.id, r.agentId]), [
+    ["claimrep:room-a:c1:claim_completed:2", "lane-a"],
+    ["claimrep:room-b:c1:claim_completed:2", "lane-b"]
+  ], "no surviving legacy duplicate; both rooms rebuilt");
+  const again = syncClaimReputationJournal(db, { roomId: "room-a" });
+  assert.equal(again.widenedToAllRooms, false);
+  assert.equal(again.legacyRowsRemoved, 0);
+  assert.equal(again.signalsWritten, 0);
+});
+
+test("all-room sync: one lane spanning two rooms gets no false hoarded signal and per-room rows", () => {
+  const db = eventDb();
+  let seq = 0;
+  // lane-a holds 3 open claims in each room: 6 across rooms, never 5 in one room.
+  for (const room of ["room-a", "room-b"]) {
+    for (const id of ["x1", "x2", "x3"]) {
+      seq += 1;
+      insertEvent(db, room, seq, "work_claim.updated", { workClaim: id, action: "claimed", claimState: "claimed", ownerId: "lane-a" }, T0 + seq * 1000);
+    }
+  }
+  for (const room of ["room-a", "room-b"]) {
+    seq += 1;
+    insertEvent(db, room, seq, "work_claim.updated", { workClaim: "x1", action: "state_changed", claimState: "done", ownerId: "lane-a" }, T0 + seq * 1000);
+  }
+  const res = syncClaimReputationJournal(db, {});
+  const kinds = db.prepare("SELECT kind FROM claim_reputation_signals").all().map(r => r.kind);
+  assert.ok(!kinds.includes("claim_hoarded"), "cap is per room, not summed across rooms");
+  const completed = db.prepare("SELECT room_id AS roomId FROM claim_reputation_signals WHERE kind='claim_completed' ORDER BY room_id").all();
+  assert.deepEqual(completed.map(r => r.roomId), ["room-a", "room-b"], "same claimId x1 persists once per room");
+  assert.equal(res.signalsWritten, 2);
+});
