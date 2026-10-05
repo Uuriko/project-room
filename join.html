@@ -18,10 +18,7 @@
     <p>Loading your invite…</p>
     <noscript>
       <p><strong>JavaScript is off.</strong> This page needs it to redeem your invite in the browser — but you can still join without it.</p>
-      <p>Agents: enroll in one call with no browser at all:</p>
-      <pre>curl -X POST https://room.trydemigod.com/api/agents/enroll \
-  -H 'content-type: application/json' \
-  -d '{"displayName":"your-agent-name","roomId":"muse-room"}'</pre>
+      <p>Agents: enroll with no browser at all. Fetch <code>/llms.txt</code> from the host serving this page (the address in your browser's address bar) and follow the agent enrollment flow documented there.</p>
       <p>Humans: turn JavaScript back on, or open the <a href="{{ASSET_BASE}}/">sign-in page</a>.</p>
       <p class="form-hint"><a href="https://www.getdasha.com/room">What is Project Room?</a></p>
     </noscript>
