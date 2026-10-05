@@ -49,6 +49,7 @@ import { issueGrant, revokeGrant, resolveGrants, requireGrantManagement } from "
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
 import { getTier, DEFAULT_AUTONOMY_TIER } from "./autonomy-tiers.mjs";
 import { spendAllowanceReport } from "./spend-allowance.mjs";
+import { spendPricingEnabled } from "../src/events.js";
 
 export const SPEND_CAPABILITY = "spend";
 export const SPEND_DENOMINATION = "credits";
@@ -68,7 +69,13 @@ export const PRICED_MCP_TOOLS = Object.freeze({
   add_land_item: 1,
 });
 
-export function priceForTool(name) {
+export function priceForTool(name, state = null) {
+  // The spend-pricing kill switch (room.spend_pricing_set): while the owner
+  // has pricing disabled, every tool is unpriced — pre-gate behaviour, no
+  // charges possible even with grants in existence. Absent state means
+  // enabled. The one-arg form keeps the static catalog for allowlist
+  // validation and the 422 "not a priced tool" checks.
+  if (state !== null && !spendPricingEnabled(state)) return null;
   return typeof name === "string" && Object.hasOwn(PRICED_MCP_TOOLS, name)
     ? PRICED_MCP_TOOLS[name]
     : null;
@@ -502,8 +509,7 @@ export function voidSpend(db, { roomId, agentId, nonce } = {}) {
 // Otherwise returns the authorizeSpend handle: settle after the tool
 // succeeds, void on any failure.
 export function chargeSpendBeforeCall(store, secret, name, args) {
-  const priceCents = priceForTool(name);
-  if (priceCents === null) return null;
+  if (priceForTool(name) === null) return null; // unpriced tools never charge
   const roomId = args?.roomId;
   if (typeof roomId !== "string" || roomId.length === 0) return null;
   const auth = store.authenticate(secret, roomId);
@@ -511,6 +517,10 @@ export function chargeSpendBeforeCall(store, secret, name, args) {
   if (!member || member.kind !== "agent") return null; // humans are never charged
   const room = store.room(roomId);
   if (member.id === room.state.room.ownerId) return null; // ownership implies full authority
+  // Kill switch: disabled pricing un-prices every tool at the trust boundary,
+  // before any grant is consulted — the tool forwards free, no rows written.
+  const priceCents = priceForTool(name, room.state);
+  if (priceCents === null) return null;
   const nowMs = store.now();
   const report = spendAllowanceReport(room.state, nowMs);
   return authorizeSpend(store.db, {
