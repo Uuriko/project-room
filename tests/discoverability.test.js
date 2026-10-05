@@ -622,3 +622,22 @@ test("inventory method accuracy: served methods match the route table", { timeou
     assert.ok(doc.paths[path]?.get, `openapi.json documents GET ${path}`);
   }
 });
+
+test("cold walkthrough stranger surface: every documented no-credential endpoint is auth none (qa5-p4-grokbot)", () => {
+  const byPath = new Map(DISCOVERABILITY_ROUTES.map(r => [r.path, r]));
+  const stranger = [
+    "/llms.txt", "/llms-full.txt", "/kits.txt", "/skills", "/join.txt",
+    "/.well-known/agent.json", "/.well-known/agent-card.json",
+    "/.well-known/mcp.json", "/.well-known/governance.json",
+    "/openapi.json", "/api/health",
+    "/api/public-work/tasks", "/api/public-work/tasks/{taskId}",
+    "/api/public-work/match",
+    "/api/public-work/receipts/{receiptId}", "/api/public-work/receipts/{receiptId}/artifact",
+    "/api/share-links/preview",
+  ];
+  for (const path of stranger) {
+    const route = byPath.get(path);
+    assert.ok(route, `stranger endpoint documented: ${path}`);
+    assert.equal(route.auth, "none", `${path} needs no credential`);
+  }
+});
