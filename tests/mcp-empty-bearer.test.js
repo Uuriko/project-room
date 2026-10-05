@@ -5,7 +5,7 @@
 // room profile.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { dispatchRoomMcp } from "../server/mcp-http.mjs";
+import { dispatchRoomMcp, mcpRpcStatus, mcpAuthHeaders, MCP_AUTH_REQUIRED } from "../server/mcp-http.mjs";
 
 const list = { jsonrpc: "2.0", id: 1, method: "tools/list" };
 
@@ -25,8 +25,6 @@ test("a presented token still goes to the room profile", async () => {
 });
 
 test("auth-required 401 carries WWW-Authenticate and a retryable:false envelope (QA5-gb-AX-4)", async () => {
-  const { dispatchRoomMcp, mcpRpcStatus, mcpAuthHeaders } = await import("../server/mcp-http.mjs");
-  const { MCP_AUTH_REQUIRED } = await import("../server/mcp-http.mjs");
   const reply = await dispatchRoomMcp(
     { jsonrpc: "2.0", id: 1, method: "tools/list" },
     { mcpUrl: "https://room.example/mcp", authorization: "Bearer <redacted>" }
