@@ -126,6 +126,29 @@ export const hostedRoomTools = [
     id: { ...idField, description: "Staged attachment id from room_put_file." },
     messageId: { ...idField, description: "Chat message id this identity posted." }
   }, ["roomId", "id", "messageId"]), false),
+  tool("room_list_access_requests", "List access requests for a room. Same read as GET /api/rooms/:roomId/access-requests. The room owner or a membership-administration delegate can read. status defaults to pending. Each request carries requestId, identityId, displayName, requestedPermissions, and note. Use room_decide_access_request to approve or deny. Reading does not change any request.", schema({
+    roomId: roomIdField,
+    status: { type: "string", enum: ["pending", "approved", "denied", "expired", "cancelled"], description: "Filter. Defaults to pending." }
+  }, ["roomId"])),
+  tool("room_decide_access_request", "Approve or deny one access request. Same write as POST /api/rooms/:roomId/access-requests/:requestId/decide. The room owner or a membership-administration delegate can decide. decision is approve or deny. permissions optionally narrows what an approval grants. note is optional. The read-only autonomy tier refuses this call.", schema({
+    roomId: roomIdField,
+    requestId: { ...idField, maxLength: 64, description: "requestId from room_list_access_requests." },
+    decision: { type: "string", enum: ["approve", "deny"] },
+    permissions: { type: "array", maxItems: 32, items: { type: "string", minLength: 1, maxLength: 64 }, description: "Optional room permissions to grant on approve." },
+    note: { type: "string", maxLength: 500 }
+  }, ["roomId", "requestId", "decision"]), false),
+  tool("room_create_agent_invite", "Mint a one-time agent invite code for a room. Same write as POST /api/rooms/:roomId/agent-invites. Needs an invite grant. Pass profile (chat, contribute, review, collaborate) or explicit permissions. The raw code is returned once and is never stored; share it only with the agent you invite. The read-only autonomy tier refuses this call.", schema({
+    roomId: roomIdField,
+    profile: { type: "string", enum: ["chat", "contribute", "review", "collaborate"] },
+    permissions: { type: "array", maxItems: 32, items: { type: "string", minLength: 1, maxLength: 64 } },
+    expiresInMinutes: { type: "integer", minimum: 1, maximum: 43200 },
+    displayName: { type: "string", minLength: 1, maxLength: 80 }
+  }, ["roomId"]), false),
+  tool("room_list_agent_invites", "List agent invite codes for a room. Same read as GET /api/rooms/:roomId/agent-invites. Needs the manage_members grant. Rows carry the inviteId handle, never the raw code.", schema({ roomId: roomIdField }, ["roomId"])),
+  tool("room_revoke_agent_invite", "Revoke one unused agent invite code. Same write as DELETE /api/rooms/:roomId/agent-invites. Needs the manage_members grant. Redeemed and already revoked codes return invite_unavailable.", schema({
+    roomId: roomIdField,
+    inviteId: { type: "string", minLength: 1, maxLength: 64, description: "inviteId from room_list_agent_invites." }
+  }, ["roomId", "inviteId"]), false),
   tool("add_land_item", "[paid: room-credits] 1 credit per call. Add a pull request to this room's land queue. Same call as POST /api/rooms/:roomId/add_land_item. repo is owner/name and prNumber is the pull request number. claimantMemberId defaults to the caller and must be an active member. Any member can add. The server reads head, mergeable, behind-main, and the required-check rollup. A missing GitHub token that the read requires returns github_unconfigured. This does not merge the pull request.", schema({
     roomId: roomIdField,
     repo: { type: "string", minLength: 3, maxLength: 200, description: "GitHub repository as owner/name." },
