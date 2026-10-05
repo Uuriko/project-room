@@ -32,11 +32,16 @@ const fail = (status, code, message) => { throw new ServiceError(status, code, m
 // What deletion removes vs retains, and why. Served verbatim at
 // GET /api/account/retention and attached to every deletion plan.
 export const RETENTION_POLICY = Object.freeze({
-  version: "1.3.0",
+  version: "1.4.0",
   summary: "Account deletion purges the account's sign-in credentials, "
-    + "sessions, room memberships, connected Gmail data, account setup answers, "
-    + "terms-of-service acceptance, and profile data. Personal rooms this account solely owns are archived "
-    + "and their messages and files are purged. Security audit rows, abuse "
+    + "sessions, room memberships, connected Gmail data, private inbox content "
+    + "(imported messages, drafts, read state), connected email data, derived "
+    + "stitch data, account setup answers, "
+    + "terms-of-service acceptance, and profile data. Guest invites, share links, "
+    + "and membership invitations issued by the account are revoked, and agent "
+    + "connections the account sponsored are disconnected. Personal rooms this account solely owns are archived "
+    + "and their messages and files are purged. Security audit rows, inbox/email "
+    + "command receipts, abuse "
     + "reports, operator unpublish records, and "
     + "the deactivated account tombstone are retained under legal hold; "
     + "room history already shared with other members is room-owned and is "
@@ -50,11 +55,17 @@ export const RETENTION_POLICY = Object.freeze({
     Object.freeze({ category: "passkeys", description: "All registered passkey credentials are deleted." }),
     Object.freeze({ category: "memberships", description: "Room membership bindings (member_accounts) are deleted; the account leaves every room." }),
     Object.freeze({ category: "connected_data", description: "Connected Gmail data (gmail_mailboxes, gmail_linked_mailboxes, gmail_pending, gmail_operations) and account setup answers (account_setup) are permanently deleted." }),
+    Object.freeze({ category: "private_inbox", description: "Private inbox content is permanently deleted: imported message versions (private_inbox_versions), drafts (private_inbox_drafts), sources (private_inbox_sources), and read state (private_inbox_reads)." }),
+    Object.freeze({ category: "private_email", description: "Connected email data is permanently deleted: connections (private_email_connections) and folders (private_email_folders)." }),
+    Object.freeze({ category: "stitch", description: "Derived cross-channel stitch data (stitch_identities, stitch_links, stitch_suggestions, stitch_receipts, stitch_revocations) is permanently deleted." }),
+    Object.freeze({ category: "issued_access", description: "Access granted by the account is revoked: active guest invites (guest_invites), share links (share_links), and pending membership invitations it issued or that were issued to it." }),
+    Object.freeze({ category: "sponsored_agents", description: "Agent connections sponsored by the account are disconnected: their room credentials are revoked (agentConnections.revokeAccount), the same revocation a deactivation performs." }),
     Object.freeze({ category: "terms", description: "The terms-of-service acceptance record (account_terms) is deleted." }),
     Object.freeze({ category: "profile", description: "The account row is deactivated (active=0), its auth epoch is rotated so no residual credential can authenticate, and display name / avatar are scrubbed." }),
   ]),
   retained: Object.freeze([
     Object.freeze({ category: "audit", reason: "account_access_events rows are retained for security auditing, fraud prevention, and dispute resolution." }),
+    Object.freeze({ category: "inbox_receipts", reason: "private_inbox_commands and private_email_commands rows are tamper-evident command receipts retained for dispute resolution, like security audit rows; their triggers forbid deletion." }),
     Object.freeze({ category: "abuse_reports", reason: "public_abuse_reports rows are retained as safety evidence under the same legal hold; deleting them would destroy abuse investigations." }),
     Object.freeze({ category: "unpublish_records", reason: "public_unpublish rows are the live unpublish state consulted by the public read model; deleting them would re-expose unpublished content." }),
     Object.freeze({ category: "profile_tombstone", reason: "The account id remains as a deactivated tombstone (active=0, profile scrubbed) so retained audit rows stay attributable. It can never sign in again." }),
@@ -64,6 +75,19 @@ export const RETENTION_POLICY = Object.freeze({
 
 const countWhere = (store, table, accountId) =>
   store.db.prepare(`SELECT count(*) AS n FROM ${table} WHERE account_id=?`).get(accountId)?.n ?? 0;
+
+const countWhereColumn = (store, table, column, accountId) =>
+  store.db.prepare(`SELECT count(*) AS n FROM ${table} WHERE ${column}=?`).get(accountId)?.n ?? 0;
+
+// Access grants issued by (or pending for) the account that revocation must retire.
+const countIssuedAccess = (store, accountId) => {
+  const db = store.db;
+  const guests = db.prepare("SELECT count(*) AS n FROM guest_invites WHERE minted_by_account_id=? AND status='active'").get(accountId)?.n ?? 0;
+  const links = db.prepare("SELECT count(*) AS n FROM share_links WHERE issuer_account_id=? AND revoked_at IS NULL").get(accountId)?.n ?? 0;
+  const issued = db.prepare("SELECT count(*) AS n FROM membership_invitations WHERE issuer_account_id=? AND status='pending'").get(accountId)?.n ?? 0;
+  const intended = db.prepare("SELECT count(*) AS n FROM membership_invitations WHERE intended_account_id=? AND status='pending'").get(accountId)?.n ?? 0;
+  return guests + links + issued + intended;
+};
 
 
 const byId = (a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
@@ -283,6 +307,38 @@ export function inventoryFromStore(store, accountId, rooms = null) {
     terms: {
       itemCount: countWhere(store, "account_terms", accountId),
     },
+    // QA slice D (2026-10-04): the private inbox, connected email data, and
+    // derived stitch rows are account-owned personal data and must purge.
+    private_inbox: {
+      itemCount: ["private_inbox_sources", "private_inbox_versions", "private_inbox_drafts", "private_inbox_reads"]
+        .reduce((sum, table) => sum + countWhere(store, table, accountId), 0),
+    },
+    private_email: {
+      itemCount: ["private_email_connections", "private_email_folders"]
+        .reduce((sum, table) => sum + countWhere(store, table, accountId), 0),
+    },
+    stitch: {
+      itemCount: ["stitch_identities", "stitch_links", "stitch_suggestions", "stitch_receipts", "stitch_revocations"]
+        .reduce((sum, table) => sum + countWhere(store, table, accountId), 0),
+    },
+    // Command journals are tamper-evident receipts: retained under legal
+    // hold like security audit rows, disclosed in the confirmation summary.
+    inbox_receipts: {
+      itemCount: ["private_inbox_commands", "private_email_commands"]
+        .reduce((sum, table) => sum + countWhere(store, table, accountId), 0),
+      legalHold: true,
+      legalHoldReason: "Inbox and email command journals are tamper-evident receipts retained for dispute resolution, like security audit rows.",
+    },
+    // Access the account granted must not outlive it: revoke invites, share
+    // links, and pending invitations instead of deleting their history.
+    issued_access: {
+      itemCount: countIssuedAccess(store, accountId),
+    },
+    // Agents the account sponsored lose their room credentials on deletion,
+    // mirroring changeAccountAccess (the deactivation path).
+    sponsored_agents: {
+      itemCount: countWhereColumn(store, "agent_connections", "sponsor_account_id", accountId),
+    },
   };
   if (roomWork) inventory.owned_rooms = { itemCount: owned.archive.length + owned.transfer.length, dependsOn: [] };
   return inventory;
@@ -339,6 +395,63 @@ const EXECUTORS = {
   // retained (see RETENTION_POLICY): they are safety records, not account data.
   terms: (store, accountId) =>
     store.db.prepare("DELETE FROM account_terms WHERE account_id=?").run(accountId).changes,
+  // QA slice D (2026-10-04): private inbox content survived account deletion.
+  // private_inbox_versions carries no-delete/no-update triggers (immutability
+  // for the sync protocol); account deletion is the one sanctioned exception,
+  // so the triggers are dropped and recreated inside this transaction.
+  private_inbox: (store, accountId) => {
+    const db = store.db;
+    let removed = 0;
+    removed += db.prepare("DELETE FROM private_inbox_drafts WHERE account_id=?").run(accountId).changes;
+    removed += db.prepare("DELETE FROM private_inbox_reads WHERE account_id=?").run(accountId).changes;
+    const triggers = ["private_inbox_versions_no_delete", "private_inbox_versions_no_update"]
+      .filter(name => db.prepare("SELECT 1 FROM sqlite_master WHERE type='trigger' AND name=?").get(name));
+    for (const name of triggers) db.exec(`DROP TRIGGER ${name}`);
+    try {
+      removed += db.prepare("DELETE FROM private_inbox_versions WHERE account_id=?").run(accountId).changes;
+      removed += db.prepare("DELETE FROM private_inbox_sources WHERE account_id=?").run(accountId).changes;
+    } finally {
+      if (triggers.includes("private_inbox_versions_no_update")) db.exec("CREATE TRIGGER private_inbox_versions_no_update BEFORE UPDATE ON private_inbox_versions BEGIN SELECT RAISE(ABORT,'source versions are immutable'); END");
+      if (triggers.includes("private_inbox_versions_no_delete")) db.exec("CREATE TRIGGER private_inbox_versions_no_delete BEFORE DELETE ON private_inbox_versions BEGIN SELECT RAISE(ABORT,'source versions are retained'); END");
+    }
+    return removed;
+  },
+  private_email: (store, accountId) => {
+    const db = store.db;
+    let removed = 0;
+    removed += db.prepare("DELETE FROM private_email_folders WHERE account_id=?").run(accountId).changes;
+    removed += db.prepare("DELETE FROM private_email_connections WHERE account_id=?").run(accountId).changes;
+    return removed;
+  },
+  stitch: (store, accountId) => {
+    const db = store.db;
+    let removed = 0;
+    for (const table of ["stitch_revocations", "stitch_receipts", "stitch_suggestions", "stitch_links", "stitch_identities"]) {
+      removed += db.prepare(`DELETE FROM ${table} WHERE account_id=?`).run(accountId).changes;
+    }
+    return removed;
+  },
+  // Revoke, never delete: invite/link history stays for audit, but nothing
+  // issued by a deleted account may still grant access.
+  issued_access: (store, accountId) => {
+    const db = store.db;
+    const now = typeof store.now === "function" ? store.now() : Date.now();
+    let revoked = 0;
+    revoked += db.prepare("UPDATE guest_invites SET status='revoked' WHERE minted_by_account_id=? AND status='active'").run(accountId).changes;
+    // share_link_scope_immutable forbids touching scope columns; revoked_at /
+    // revoked_by_member_id are outside it. Self-revocation attribution.
+    revoked += db.prepare("UPDATE share_links SET revoked_at=?, revoked_by_member_id=issuer_member_id WHERE issuer_account_id=? AND revoked_at IS NULL").run(now, accountId).changes;
+    revoked += db.prepare("UPDATE membership_invitations SET status='revoked' WHERE issuer_account_id=? AND status='pending'").run(accountId).changes;
+    revoked += db.prepare("UPDATE membership_invitations SET status='revoked' WHERE intended_account_id=? AND status='pending'").run(accountId).changes;
+    return revoked;
+  },
+  sponsored_agents: (store, accountId) => {
+    // revokeAccount returns nothing; count the live credentials it retires.
+    const db = store.db;
+    const live = db.prepare("SELECT count(*) AS n FROM credentials WHERE revoked=0 AND hash IN (SELECT credential_hash FROM agent_connections WHERE sponsor_account_id=?)").get(accountId)?.n ?? 0;
+    store.agentConnections.revokeAccount(accountId);
+    return live;
+  },
   profile: (store, accountId) => {
     return store.db.prepare(`UPDATE accounts SET active=0, auth_epoch=auth_epoch+1,
       display_name=NULL, avatar_url=NULL, onboarded=1 WHERE id=?`).run(accountId).changes;

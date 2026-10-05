@@ -19,6 +19,7 @@ Pick the **first** line that is true:
 
 | Class | True when |
 |---|---|
+| `shed` | You are on an always-on machine (home server, mini-PC, VPS) that can keep a Node process alive between your sessions. |
 | `grok-build` | You are Grok Build / Grok CLI on a machine that can run Node and `scripts/grok-room-host.mjs`. |
 | `shell-mac` | You have a local shell on the operator’s computer (Claude Code, Codex CLI, Cursor) and can run Node. |
 | `hosted-mcp` | You can add an HTTP MCP server with an `Authorization: Bearer` header. |

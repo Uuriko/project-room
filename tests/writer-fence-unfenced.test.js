@@ -11,14 +11,23 @@ import { applicationTables, lazyAdditiveTables, unfencedAdditiveTables } from ".
 const SERVER_DIR = new URL("../server/", import.meta.url).pathname;
 
 test("all CREATE TABLE tables in server modules are registered application tables", () => {
+  // Recursive: server/analytics/claim-bond-shadow.mjs created claim_bond_shadow
+  // unregistered (PR #1466) and the top-level-only scan missed it. The match
+  // requires the opening paren so comment lines like "CREATE TABLE IF NOT
+  // EXISTS only." do not register phantom tables.
   const created = new Set();
-  for (const file of readdirSync(SERVER_DIR)) {
-    if (!file.endsWith(".mjs")) continue;
-    const src = readFileSync(join(SERVER_DIR, file), "utf8");
-    for (const match of src.matchAll(/CREATE TABLE IF NOT EXISTS\s+([a-z_][a-z0-9_]*)/gi)) {
-      created.add(match[1].toLowerCase());
+  const walk = dir => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) { walk(full); continue; }
+      if (!entry.name.endsWith(".mjs")) continue;
+      const src = readFileSync(full, "utf8");
+      for (const match of src.matchAll(/CREATE TABLE IF NOT EXISTS\s+([a-z_][a-z0-9_]*)\s*\(/gi)) {
+        created.add(match[1].toLowerCase());
+      }
     }
-  }
+  };
+  walk(SERVER_DIR);
   // writer-fence owns the canonical DDL; only additive module tables are in scope here.
   const registered = new Set([...applicationTables, ...lazyAdditiveTables]);
   const unregistered = [...created].filter(t => !registered.has(t));

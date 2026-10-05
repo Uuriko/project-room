@@ -267,6 +267,37 @@ test("conventional skill/agent filenames serve the same short packet as /llms.tx
   }
 });
 
+test("uppercase /SKILL.md serves the agent skill, distinct from the llms.txt packet", async t => {
+  // Contract: /SKILL.md is the Omnara-style self-onboarding skill. Lowercase
+  // /skill.md stays the llms.txt alias (SHORT_PACKET_FILES). A regression
+  // that folds /SKILL.md into the alias list would silently replace the skill
+  // with the packet — this test fails on exactly that.
+  const origin = await serve(t);
+  const skill = discoveryDoc("/SKILL.md");
+  const packet = discoveryDoc("/llms.txt");
+  assert.ok(skill, "/SKILL.md is served");
+  assert.notEqual(skill.body, packet.body, "/SKILL.md is not the llms.txt packet");
+  assert.match(skill.type, /text\/markdown/, "served as markdown");
+  assert.ok(skill.body.startsWith("---\nname: work-in-project-room"), "skill frontmatter names the skill");
+  assert.ok(skill.body.includes("## Step 1"), "skill walks setup steps");
+  assert.ok(skill.body.includes("/api/public-work/match"), "skill covers finding work");
+  assert.ok(skill.body.includes("/api/project-offers"), "skill covers paid bounties");
+  assert.ok(skill.body.includes("Money honesty"), "skill carries the money-honesty section");
+  assert.ok(!FORBIDDEN.test(skill.body), "skill stays secret-free");
+  for (const path of ["/room/SKILL.md", "/project-room/SKILL.md"]) {
+    assert.ok(DISCOVERY_PATHS.includes(path), path);
+    assert.equal(discoveryDoc(path).body, skill.body, `${path} serves identical bytes`);
+    const get = await fetch(origin + path);
+    assert.equal(get.status, 200, path);
+    assert.equal(await get.text(), skill.body);
+  }
+  const get = await fetch(origin + "/SKILL.md");
+  assert.equal(get.status, 200, "/SKILL.md");
+  assert.equal(await get.text(), skill.body);
+  // The lowercase alias is untouched: still the short packet.
+  assert.equal(discoveryDoc("/skill.md").body, packet.body, "lowercase /skill.md still aliases llms.txt");
+});
+
 test("www leftover synonyms serve the short packet or agent card, not 404", async t => {
   assert.deepEqual([...SHORT_PACKET_SYNONYMS], [
     "/room/skill", "/room/agents", "/room/llms",
@@ -538,4 +569,40 @@ test("A2A agent card declares the work-receipt extension (docs/a2a-receipt-exten
   assert.equal(ext.required, false, "extension is declarative, never a gate");
   assert.equal(ext.params.schema_version, "project-room-receipt/1");
   assert.match(ext.params.spec_url, /a2a-receipt-extension\.md$/);
+});
+
+test("anonymous MCP catalog is six tools (four join + two public-work); copy never says four", async () => {
+  const { livePublicMcpTools } = await import("../server/mcp-discovery.mjs");
+  const { MCP_JOIN_TOOLS } = await import("../server/mcp-http.mjs");
+  const { anonymousPublicWorkMcpTools } = await import("../server/mcp-public-work.mjs");
+  const tools = livePublicMcpTools();
+  assert.equal(MCP_JOIN_TOOLS.length, 4);
+  assert.equal(anonymousPublicWorkMcpTools.length, 2);
+  assert.equal(tools.length, 6);
+  assert.deepEqual(tools.map(t => t.name).sort(), [
+    ...MCP_JOIN_TOOLS.map(t => t.name),
+    "public_work_read_task", "public_work_recommend",
+  ].sort());
+  // QA5-gb: the packet once called this anonymous catalog "four tools".
+  const text = llmsTxt();
+  assert.ok(!/four-tool catalog/i.test(text), "llms.txt must not call the anonymous catalog four-tool");
+  assert.ok(!/tools\/list is the four( public join)? tools/i.test(text), "llms.txt must not say no-credential tools/list is only four tools");
+});
+
+test("llms.txt follows the llmstxt.org header: H1, summary blockquote, Start here links", () => {
+  const text = llmsTxt();
+  // llmstxt.org: H1, then a blockquote summary, before anything else.
+  assert.ok(text.startsWith("# Uuriko Project Room\n\n> "), "llms.txt opens with H1 then a blockquote summary");
+  const summary = text.split("\n").find(line => line.startsWith("> "));
+  assert.ok(summary && summary.length > 20, "summary blockquote names what the room is");
+  // Then a Start here link list pointing at the entry points.
+  assert.match(text, /^## Start here$/m);
+  const startHere = text.slice(text.indexOf("## Start here"));
+  assert.match(startHere, /\[.*\]\(https:\/\/room\.trydemigod\.com\/llms-full\.txt\)/);
+  assert.match(startHere, /\[.*\]\(https:\/\/www\.getdasha\.com\/room\/mcp\)/);
+});
+
+test("llms.txt names room.trydemigod.com/mcp as the one canonical MCP URL (QA4 D8/D-a)", () => {
+  const text = llmsTxt();
+  assert.match(text, /One canonical MCP URL: paste https:\/\/room\.trydemigod\.com\/mcp/);
 });

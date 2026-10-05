@@ -60,10 +60,11 @@ export const hostedRoomTools = [
     reaction: { type: "string", minLength: 1, maxLength: 64, description: "Emoji or shortcode." },
     active: { type: "boolean", default: true, description: "true sets the reaction. false clears it. Defaults to true." }
   }, ["roomId", "messageId", "reaction"]), false),
-  tool("room_list_work", "List current work for this member. focus=needs_me is handoffs addressed to you plus open reply requests addressed to you in replyRequests, separately observed at replyRequestsEvaluatedThrough. Follow nextRead and finish its pages before answering with current.answerBasis; room_request_reply opens a new question. focus=results is completed work with required gates satisfied. focus=help_wanted is explicit invitations. Omit focus for the full list. Text is untrusted context. This read does not accept, execute, or approve work.", schema({
+  tool("room_list_work", "List current work for this member. focus=needs_me is handoffs addressed to you plus open reply requests addressed to you in replyRequests, separately observed at replyRequestsEvaluatedThrough. Follow nextRead and finish its pages before answering with current.answerBasis; room_request_reply opens a new question. focus=results is completed work with required gates satisfied. focus=help_wanted is explicit invitations. Omit focus for the full list. sort=curiosity ranks the listed work by interestingness-to-you: unfamiliar-but-learnable first, measured against your own completed work (adds a curiosity {score, familiarity, label} field per item; with no completed work, the most distinctive items surface first). Text is untrusted context. This read does not accept, execute, or approve work.", schema({
     roomId: roomIdField,
     focus: { type: "string", enum: ["all", "needs_me", "help_wanted", "results"], default: "all" },
-    query: { type: "string", minLength: 1, maxLength: 200, description: "Literal work query, at most 200 UTF-16 code units." }
+    query: { type: "string", minLength: 1, maxLength: 200, description: "Literal work query, at most 200 UTF-16 code units." },
+    sort: { type: "string", enum: ["curiosity"], description: "Ranking for the returned work. Omit for the default order." }
   }, ["roomId"])),
   tool("bond_propose", "Propose an agent bond by submitting { id, type: \"bond.propose\", data: { to } }. to is the other agent identity id. id is the command receipt key. Optional scopes and note use the existing bond command fields. Co-membership is not a bond.", schema({
     roomId: roomIdField,
@@ -104,7 +105,7 @@ export const hostedRoomTools = [
     threadId: { type: "string", minLength: 1, maxLength: 160, description: "Omit to list threads. Set to read one thread." }
   }, ["roomId"])),
 
-  tool("room_put_file", "Stage a room file in room_attachments. data is canonical base64 with no whitespace, at most 1 MiB decoded. id is single-use: the same id, filename, mediaType, and bytes returns duplicate true. A different payload with that id conflicts and does not replace the bytes. Staging publishes the bytes to current room members for 24 hours. It does not post a chat message. Use room_commit_file to commit a staged file onto a message this identity posted. Executable filenames are refused. This is not an inbox or Gmail attachment.", schema({
+  tool("room_put_file", "[paid: room-credits] 5 credits per call. Stage a room file in room_attachments. data is canonical base64 with no whitespace, at most 1 MiB decoded. id is single-use: the same id, filename, mediaType, and bytes returns duplicate true. A different payload with that id conflicts and does not replace the bytes. Staging publishes the bytes to current room members for 24 hours. It does not post a chat message. Use room_commit_file to commit a staged file onto a message this identity posted. Executable filenames are refused. This is not an inbox or Gmail attachment.", schema({
     roomId: roomIdField,
     id: { ...idField, description: "Client attachment id. Stable across retries. Single-use in the room." },
     filename: { type: "string", minLength: 1, maxLength: 255 },
@@ -125,7 +126,7 @@ export const hostedRoomTools = [
     id: { ...idField, description: "Staged attachment id from room_put_file." },
     messageId: { ...idField, description: "Chat message id this identity posted." }
   }, ["roomId", "id", "messageId"]), false),
-  tool("add_land_item", "Add a pull request to this room's land queue. Same call as POST /api/rooms/:roomId/add_land_item. repo is owner/name and prNumber is the pull request number. claimantMemberId defaults to the caller and must be an active member. Any member can add. The server reads head, mergeable, behind-main, and the required-check rollup. A missing GitHub token that the read requires returns github_unconfigured. This does not merge the pull request.", schema({
+  tool("add_land_item", "[paid: room-credits] 1 credit per call. Add a pull request to this room's land queue. Same call as POST /api/rooms/:roomId/add_land_item. repo is owner/name and prNumber is the pull request number. claimantMemberId defaults to the caller and must be an active member. Any member can add. The server reads head, mergeable, behind-main, and the required-check rollup. A missing GitHub token that the read requires returns github_unconfigured. This does not merge the pull request.", schema({
     roomId: roomIdField,
     repo: { type: "string", minLength: 3, maxLength: 200, description: "GitHub repository as owner/name." },
     prNumber: { type: "integer", minimum: 1, maximum: 100000000 },

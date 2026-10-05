@@ -10,13 +10,35 @@ import { MEMBER_PERMISSION_ROUTES } from "./member-permissions.mjs";
 import { AGENT_FLEET_ROUTES } from "./agents.mjs";
 import { WANTS_WORK_ROUTES } from "./wants-work.mjs"; // BOARD-WAKE-2
 import { WORK_CLAIM_ROUTES } from "./work-claims.mjs";
+import { SPEND_GRANT_ROUTES } from "./spend-grants.mjs"; // spend-primitive MVP
+import { SPEND_PRICING_ROUTES } from "./spend-pricing.mjs"; // spend-pricing kill switch
 
 export const AUTH_CLASSES = Object.freeze(["none", "room", "account", "bearer", "roomToken", "door", "mcp"]);
 export const ROUTE_SCOPES = Object.freeze(["worker", "public", "directory", "room"]);
 export const ROUTE_METHODS = Object.freeze(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]);
 
+// Every `type` name the route-table schema validator (schemaErrors in
+// dispatch.mjs) can enforce. An unknown name never matches any value, so a
+// typo here silently 422s every request (2026-10-04 bughunt: type:"integer"
+// rejected every number until the validator learned it). Fail closed at
+// table-assertion time instead.
+const KNOWN_SCHEMA_TYPES = new Set(["string", "number", "integer", "boolean", "object", "array", "null"]);
+
+function unknownSchemaTypes(schema, out) {
+  if (!schema || typeof schema !== "object") return out;
+  if (schema.type !== undefined) {
+    const types = Array.isArray(schema.type) ? schema.type : [schema.type];
+    for (const t of types) if (!KNOWN_SCHEMA_TYPES.has(t)) out.push(t);
+  }
+  if (schema.properties && typeof schema.properties === "object") {
+    for (const key of Object.keys(schema.properties)) unknownSchemaTypes(schema.properties[key], out);
+  }
+  if (schema.items) unknownSchemaTypes(schema.items, out);
+  return out;
+}
+
 // Rows land here as groups leave the legacy chain. Do not push; replace the array.
-export const ROUTES = Object.freeze([...AUTH_ROUTES, ...INBOX_ROUTES, ...MEMBER_PERMISSION_ROUTES, ...AGENT_FLEET_ROUTES, ...WANTS_WORK_ROUTES, ...WORK_CLAIM_ROUTES]);
+export const ROUTES = Object.freeze([...AUTH_ROUTES, ...INBOX_ROUTES, ...MEMBER_PERMISSION_ROUTES, ...AGENT_FLEET_ROUTES, ...WANTS_WORK_ROUTES, ...WORK_CLAIM_ROUTES, ...SPEND_GRANT_ROUTES, ...SPEND_PRICING_ROUTES]);
 
 export function assertRouteRow(row) {
   const problems = [];
@@ -29,6 +51,11 @@ export function assertRouteRow(row) {
   if (typeof row.handler !== "function") problems.push("handler");
   if (!row.schema || typeof row.schema !== "object" || Array.isArray(row.schema)) problems.push("schema");
   else if (!["params", "query", "body", "response"].some(key => row.schema[key] && typeof row.schema[key] === "object")) problems.push("schema");
+  else {
+    const unknown = [];
+    for (const key of ["params", "query", "body", "response"]) unknownSchemaTypes(row.schema[key], unknown);
+    if (unknown.length) problems.push(`schema: unknown type(s) ${[...new Set(unknown)].join(",")}`);
+  }
   if (!Array.isArray(row.events)) problems.push("events");
   if (!ROUTE_SCOPES.includes(row.scope)) problems.push("scope");
   if (row.rate !== undefined && (typeof row.rate !== "object" || typeof row.rate.key !== "string" || !Number.isInteger(row.rate.max))) problems.push("rate");

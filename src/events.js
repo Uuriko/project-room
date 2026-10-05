@@ -19,6 +19,8 @@ export const EVENT_TYPES = Object.freeze({
   ROOM_CHARTER_UPDATED: CHARTER_TYPE,
   ROOM_POLICY_SET: "room.policy_set",
   ROOM_SPEND_ALLOWANCE_SET: "room.spend_allowance_set",
+  // Owner kill-switch for the priced-tool gate. Default enabled when absent.
+  ROOM_SPEND_PRICING_SET: "room.spend_pricing_set",
   // One owner kill-switch for cross-owner assign and wake. Default open.
   ROOM_TRUST_SET: "room.trust_set",
   // Owner opt-in for the public receipts page. Default off when absent.
@@ -360,6 +362,33 @@ function setSpendAllowance(state, incoming) {
 }
 
 export const PERMISSIONS = Object.freeze(["steer", "decide", "manage_members", "manage_claims", "accept_work", "complete_work", "verify", "write_external", "invite_member"]);
+
+// Spend-pricing kill switch: the owner can disable the priced-tool gate for
+// the room (room.spend_pricing_set). Event-sourced and carried on the
+// projection; server/spend-grants.mjs prices nothing while disabled. Absent
+// state means enabled — the pre-switch behaviour. Unlike the allowance, this
+// is a boolean lever, not a budget: disabled restores the room to exactly its
+// pre-gate behaviour (tools forward free, no charges, no rows written).
+export function spendPricingEnabled(state) {
+  const stored = state?.room?.spendPricing;
+  if (!stored) return true;
+  return stored.enabled !== false;
+}
+
+function setSpendPricing(state, incoming) {
+  const actor = requireMember(state, incoming.actorId);
+  if (actor.id !== state.room.ownerId) throw new Error("Only the Room owner may set spend pricing");
+  const { enabled } = incoming.data ?? {};
+  if (typeof enabled !== "boolean") throw new Error("enabled must be a boolean");
+  if (Object.keys(incoming.data ?? {}).some(key => key !== "enabled")) throw new Error("spend pricing takes only enabled");
+  const previous = state.room.spendPricing ?? null;
+  state.room.spendPricing = {
+    enabled,
+    revision: (previous?.revision ?? 0) + 1,
+    setById: incoming.actorId,
+    setAt: incoming.at
+  };
+}
 // Default autonomy for collaborating agents: they can steer, take work,
 // complete it, and verify. Attenuated: no manage_members / decide /
 // write_external / invite_member (those stay owner or explicit identity-link).
@@ -479,6 +508,7 @@ export function applyEvent(current, incoming) {
     [EVENT_TYPES.ROOM_CHARTER_UPDATED]: updateCharter,
     [EVENT_TYPES.ROOM_POLICY_SET]: setRoomPolicy,
     [EVENT_TYPES.ROOM_SPEND_ALLOWANCE_SET]: setSpendAllowance,
+    [EVENT_TYPES.ROOM_SPEND_PRICING_SET]: setSpendPricing,
     [EVENT_TYPES.ROOM_TRUST_SET]: setRoomTrust,
     [EVENT_TYPES.ROOM_PUBLIC_RECEIPTS_SET]: setPublicReceipts,
     // --- GR2 ---

@@ -16,12 +16,14 @@ import { HeartbeatError } from "./agent-heartbeats.mjs";
 import { AgentPluginError } from "./agent-plugin-store.mjs";
 import { EVENT_CATALOG, WebhookSubscriptionError } from "./agent-webhook-subscriptions.mjs";
 import { BOND_SCOPES } from "./bonds.mjs";
+import { EscrowError } from "./bounty-escrow.mjs";
 import { buildActivationPack } from "./room-activation-pack.mjs";
 import { buildOrient } from "./orient.mjs";
 import { randomUUID } from "node:crypto";
 import { validId, ROOM_KINDS, MAX_MESSAGE_BODY_CHARS } from "../src/events.js";
 import { nextWorkStep } from "../src/workflow.js";
 import { completedResults, searchWork } from "../src/work-selectors.js";
+import { sortWorkByCuriosity, viewerHistory } from "../src/curiosity-rank.mjs";
 import { workHelpContext } from "../src/work-help.js";
 import { HOSTED_ROOM_MCP_TOOLS, HOSTED_MCP_FOLLOW_UPS, ROOM_MCP_SERVER_NAME, ROOM_MCP_SERVER_VERSION, canonicalMcpToolName } from "../src/room-mcp-join.js";
 import { MCP_JOIN_TOOLS, MCP_AUTH_REQUIRED, handleMcpJoinRpc } from "./mcp-http.mjs";
@@ -32,6 +34,7 @@ import { isHostedStdioTool, validHostedStdioArgs, callHostedStdioTool } from "./
 import { friendBondCommand } from "../src/friend-bond.js";
 import { validAttachmentData } from "./room-attachment-bytes.mjs";
 import { closestToolName, diagnoseArguments, mcpCallError } from "./mcp-arg-errors.mjs";
+import { chargeSpendBeforeCall } from "./spend-grants.mjs";
 import {
   hostedRoomTools as ROOM_TOOLS,
   hostedInboxTools as INBOX_TOOLS,
@@ -67,8 +70,25 @@ function failureValue(error) {
   if (error instanceof ServiceError || (error && Number.isInteger(error.status) && typeof error.code === "string")) {
     return {
       status: error.status, code: error.code, message: error.message,
-      ...(error.item ? { item: error.item } : {})
+      ...(error.item ? { item: error.item } : {}),
+      // Spend-grant refusals carry machine-readable detail (price, reason,
+      // remaining cap) alongside the human text — the x402 PaymentRequired
+      // shape: structuredContent AND content[0].text both name the price.
+      ...(error.detail ? { detail: error.detail } : {})
     };
+  }
+  // qa4-fix-mcp-escrow500: the escrow module throws EscrowError (code, no
+  // HTTP status). Map it exactly like the HTTP routes do
+  // (server/bounty-escrow-routes.mjs runPure) so MCP callers get the same
+  // structured codes instead of an opaque 500.
+  if (error instanceof EscrowError) {
+    const code = error.code;
+    const status = code === "unknown_bounty" || code === "unknown_flag" ? 404
+      : code === "not_authorized" ? 403
+      : code === "already_claimed" || code === "dispute_exists"
+        || code === "idempotency_actor_mismatch" || code === "idempotency_key_reused" ? 409
+      : 422;
+    return { status, code, message: error.message };
   }
   return { status: 500, code: "internal", message: "Request could not be completed" };
 }
@@ -146,7 +166,8 @@ function validRoomArgs(name, args) {
   }
   if (name === "room_list_work") {
     const queryOk = args.query === undefined || typeof args.query === "string" && args.query.length <= 200 && args.query.trim().length > 0;
-    return (args.focus === undefined || ["all", "needs_me", "help_wanted", "results"].includes(args.focus)) && queryOk;
+    const sortOk = args.sort === undefined || args.sort === "curiosity";
+    return (args.focus === undefined || ["all", "needs_me", "help_wanted", "results"].includes(args.focus)) && queryOk && sortOk;
   }
   if (name === "bond_propose") {
     const noteOk = args.note === undefined || typeof args.note === "string" && args.note.length <= 500;
@@ -296,10 +317,25 @@ function listWork(store, secret, args) {
     members: snapshot.state.members,
     workItems: Object.fromEntries(candidates.map(item => [item.id, item]))
   }, args.query);
-  const work = (matches?.work ?? candidates.map(item => ({ item }))).map(({ item, excerpt }) => ({
+  let work = (matches?.work ?? candidates.map(item => ({ item }))).map(({ item, excerpt }) => ({
     ...workRecord(item, now),
     ...(excerpt === undefined ? {} : { excerpt })
   }));
+  let sort = null;
+  if (args.sort === "curiosity") {
+    // Curiosity ranking: the calling member's own completed work (receipt
+    // producerId) is the familiarity baseline; listed items rank
+    // unfamiliar-but-learnable first.
+    const history = viewerHistory(snapshot.state, snapshot.viewerId);
+    const rawById = new Map(candidates.map(item => [item.id, item]));
+    const order = new Map(sortWorkByCuriosity(
+      work.map(entry => rawById.get(entry.id)).filter(Boolean), history)
+      .map(({ item, curiosity }, index) => [item.id, { index, curiosity }]));
+    work = work
+      .map(entry => ({ ...entry, curiosity: order.get(entry.id)?.curiosity ?? null }))
+      .sort((a, b) => (order.get(a.id)?.index ?? 0) - (order.get(b.id)?.index ?? 0));
+    sort = "curiosity";
+  }
   const replyListing = focus === "needs_me" ? store.replyRequests.list(secret, args.roomId, { direction: "incoming", status: "open" }) : null;
   const replyRequests = replyListing?.requests.map(request => ({
     id: request.id, requesterId: request.requesterId, workItemId: request.workItemId, revision: request.revision,
@@ -310,6 +346,7 @@ function listWork(store, secret, args) {
     member: member ? { id: member.id, kind: member.kind, permissions: [...member.permissions] } : null,
     charter: snapshot.charter ?? null,
     ...(matches ? { selection: { query: args.query.trim(), matches: matches.total, shown: work.length } } : {}),
+    ...(sort ? { sort } : {}),
     work, ...(focus === "needs_me" ? { replyRequests, replyRequestsEvaluatedThrough: replyListing.evaluatedThrough } : {})
   });
 }
@@ -355,8 +392,31 @@ async function callLandTool(store, secret, name, args) {
   });
 }
 
+// Spend-primitive MVP (charge-then-forward): the tool is never invoked until
+// payment has settled against the agent's spend grant. Unpriced tools,
+// humans, and the room owner pass through untouched. A SpendGrantError means
+// refusal — the tool must not run. settle() after success, void() on any
+// failure; an idempotent duplicate retry is voided (the original call
+// already paid).
 function callRoomTool(store, secret, identity, name, args, agentRooms) {
   enforceMcpCallVisibility(store, identity, name);
+  const spend = chargeSpendBeforeCall(store, secret, name, args);
+  if (!spend) return dispatchRoomToolCall(store, secret, identity, name, args, agentRooms);
+  let result;
+  try {
+    result = dispatchRoomToolCall(store, secret, identity, name, args, agentRooms);
+  } catch (error) { spend.void(); throw error; }
+  return Promise.resolve(result).then(
+    value => {
+      if (value && typeof value === "object" && value.duplicate === true) spend.void();
+      else spend.settle();
+      return value;
+    },
+    error => { spend.void(); throw error; }
+  );
+}
+
+function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
   if (name === "room_needs_me") return collectNeedsMe(store, secret, { since: args.since });
   if (name === "room_create") {
     const request = {};
