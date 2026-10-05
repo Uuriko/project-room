@@ -381,9 +381,9 @@ test("route table: the three spend-grant routes are registered with room auth", 
   // method coverage, so this guards the schema contract at its owner.
   const issueBody = byId["issue-spend-grant"].schema.body;
   assert.deepEqual(issueBody.required, ["agentId", "capCents", "perTxCapCents"]);
-  // The runtime validator (schemaErrors typeOf) only knows "number" — it has
-  // no "integer" branch, so "integer" rejects every numeric value. The schema
-  // must say "number" for epoch-ms expiresAt to validate. (QA D-2: the merged
-  // "integer" typing kept expiry-bearing grants unissuable over HTTP.)
-  assert.equal(issueBody.properties.expiresAt.type, "number");
+  // The runtime validator (schemaErrors) learned "integer" in the 2026-10-04
+  // bughunt fix; before that it had no integer branch, so "integer" rejected
+  // every numeric value. "integer" matches docs/openapi.yaml and the
+  // issueSpendGrant safe-integer gate as closely as the validator expresses.
+  assert.equal(issueBody.properties.expiresAt.type, "integer");
 });

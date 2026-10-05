@@ -109,14 +109,27 @@ function typeOf(value) {
   return typeof value;
 }
 
+// "integer" is a first-class JSON-Schema type that the old typeOf never
+// produced, so any schema declaring it rejected every value with a 422
+// (2026-10-04 bughunt: sessionRevision on five auth routes, step on
+// inbox.setup.write, expiresAt on the spend-grant issue route). A schema may
+// also name a list of acceptable types, e.g. { type: ["array", "null"] }.
+function typeMatches(schemaType, value) {
+  const types = Array.isArray(schemaType) ? schemaType : [schemaType];
+  return types.some(t =>
+    t === "integer"
+      ? typeof value === "number" && Number.isInteger(value)
+      : typeOf(value) === t);
+}
+
 // The subset the handlers actually enforce: type, enum, required,
 // additionalProperties, properties, minProperties, maxProperties.
 export function schemaErrors(schema, value, path = "") {
   if (!schema || typeof schema !== "object") return [];
   const errors = [];
   const here = path || "(root)";
-  if (schema.type && typeOf(value) !== schema.type) {
-    errors.push(`${here} should be ${schema.type}`);
+  if (schema.type && !typeMatches(schema.type, value)) {
+    errors.push(`${here} should be ${Array.isArray(schema.type) ? schema.type.join(" or ") : schema.type}`);
     return errors;
   }
   if (Array.isArray(schema.enum) && !schema.enum.includes(value)) errors.push(`${here} is not an allowed value`);

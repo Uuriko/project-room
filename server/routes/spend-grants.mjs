@@ -54,7 +54,10 @@ const grantBody = Object.freeze({
     perTxCapCents: { type: "string" },
     allowlist: { type: "array", items: { type: "string" } },
     singleUse: { type: "boolean" },
-    expiresAt: { type: "number" },
+    // integer: the runtime gate (issueSpendGrant) requires a safe-integer
+    // unix-ms timestamp. schemaErrors learned "integer" in the 2026-10-04
+    // bughunt fix; "number" was only ever a workaround for the missing type.
+    expiresAt: { type: "integer" },
   },
 });
 
