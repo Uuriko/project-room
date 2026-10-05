@@ -405,10 +405,14 @@ export class MachineLink extends DurableObject {
   // A captured signed control request verifies again until its timestamp
   // ages out of the HMAC skew window. Refuse a signature this machine
   // already honored. Runs inside exclusive(), so check-and-mark is atomic.
+  // The replay memory is anchored on the request's own timestamp (already
+  // format-checked by verifyLinkSignature above): pruning on receipt time
+  // would forget a future-dated signature while it still verifies.
   rejectReplayedControl(request, nowSec) {
     const signature = (request.headers.get("x-relay-signature") ?? "").toLowerCase();
+    const stampSec = Number(request.headers.get("x-relay-timestamp") ?? "");
     this.state.replayedControls = assertFreshControlSignature(
-      this.state.replayedControls, signature, nowSec, HMAC_SKEW_SEC + 60);
+      this.state.replayedControls, signature, nowSec, HMAC_SKEW_SEC + 60, stampSec);
     this.dirty = true;
   }
 

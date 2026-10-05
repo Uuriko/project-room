@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { checkAgentDisplayName, displayNameSkeleton } from '../server/display-name-guard.mjs';
+import { checkAgentDisplayName, assessMemberDisplayName, displayNameSkeleton } from '../server/display-name-guard.mjs';
 import { isReservedRoleName, assertNotReservedRoleName } from '../server/display-name-guard.mjs';
 
 const check = (name, activeNames = []) => checkAgentDisplayName(name, { activeNames });
@@ -155,4 +155,35 @@ test('QA2-SECREG followup: diacritics, combining marks, CJK brackets, and hook/s
   // Legitimate accented names still skeletonize sanely and stay available.
   assert.equal(isReservedRoleName('José'), false);
   assert.equal(isReservedRoleName('Zoë'), false);
+});
+
+test('QA slice D: Latin Extended-B hook letters do not spoof reserved roles or agent names', () => {
+  // Residual class past the #1451 hook-letter batch (which covered ɱ ƥ ɖ ɗ
+  // ɲ ɳ ɨ ɠ ƈ): Ɩ Ƴ Ƙ Ƭ Ǥ Ȥ Ɓ read as their ASCII base, are Latin script,
+  // and NFKD leaves them whole, so 'admƖn' reads as 'admin' while the role
+  // rule and the confusable check both stayed silent. Fails pre-fix
+  // (mint-safe impostors).
+  const impostors = [
+    ['admƖn', 'admin'],      // U+0196 -> U+0269 reads as i
+    ['sƴstem', 'system'],    // U+01B3 -> U+01B4 reads as y
+    ['Ƙevin', 'kevin'],      // U+0198 -> U+0199 reads as k
+    ['Ƭom', 'tom'],          // U+01AC -> U+01AD reads as t
+    ['Ǥreg', 'greg'],        // U+01E4 -> U+01E5 reads as g
+    ['Ȥed', 'zed'],          // U+0224 -> U+0225 reads as z
+    ['Ɓob', 'bob'],          // U+0181 -> U+0253 reads as b
+  ];
+  for (const [name, readsAs] of impostors) {
+    assert.equal(displayNameSkeleton(name), readsAs, name + ' skeleton must fold');
+    if (['admin', 'system'].includes(readsAs)) {
+      assert.equal(isReservedRoleName(name), true, name + ' must read as reserved');
+      assert.throws(() => assertNotReservedRoleName(name),
+        error => error.code === 'display_name_unavailable' && error.reason === 'reserved',
+        name + ' must not mint');
+    }
+  }
+  // Agent-name impersonation: 'Ƙevin' must collide with member 'Kevin' on
+  // both the mint path and the room roster path.
+  const members = [{ displayName: 'Kevin', identityId: 'ai_kevin' }];
+  assert.equal(checkAgentDisplayName('Ƙevin', { activeNames: members }).reason, 'name_collision');
+  assert.equal(assessMemberDisplayName('Ƙevin', members).reason, 'confusable');
 });

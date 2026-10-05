@@ -2650,6 +2650,190 @@ paths:
         '409':
           $ref: '#/components/responses/Conflict'
         '422': { description: invalid_spend_allowance }
+  /api/rooms/{roomId}/spend-pricing:
+    get:
+      summary: Read the room's spend-pricing state
+      description: >-
+        Spend-pricing kill switch. Every member can read it: the enabled flag
+        is a room-level setting members already see reflected in tool
+        behaviour (priced tools either charge or forward free). Takes no
+        query parameters.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200':
+          description: Pricing state
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  enabled: { type: boolean }
+                  revision: { type: integer }
+                  setById: { type: ['string', 'null'] }
+                  setAt: { type: ['string', 'null'] }
+    post:
+      summary: Enable or disable spend pricing for the room
+      description: >-
+        Spend-pricing kill switch. Owner only; every other member receives
+        403 owner_required before any command is built. Records
+        room.spend_pricing_set with enabled (boolean). While disabled,
+        priceForTool returns null for every tool at the charge boundary:
+        priced tools forward free, no grants are consulted, no
+        spend_authorizations rows are written — the room behaves exactly as
+        before the gate existed. Re-enabling restores current behaviour.
+        requestId is an optional idempotency key: the same id with the same
+        input returns the original receipt (200), with different input 409
+        idempotency_conflict.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled]
+              additionalProperties: false
+              properties:
+                enabled: { type: boolean }
+                requestId: { type: string }
+      responses:
+        '401': { description: unauthenticated }
+        '201':
+          description: Committed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommandReceipt'
+        '200':
+          description: Idempotent duplicate
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommandReceipt'
+        '403': { description: owner_required }
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422': { description: invalid_spend_pricing }
+  /api/rooms/{roomId}/spend-grants:
+    post:
+      summary: Issue a per-agent spend grant
+      description: >-
+        Spend-primitive MVP. Owner or grants:issue delegate only; agents
+        request spend, they never self-issue (grantedBy is the caller, never
+        the agent). Issues or replaces the capability="spend" grant edge for
+        one agent member: capCents (integer cents as a string, the grant's
+        lifetime ceiling), perTxCapCents (per-call ceiling), optional
+        expiresAt (epoch ms). t1_readonly and guest agents cannot hold spend
+        grants (403). Priced MCP tools (room_put_file 5c, bounty_post 10c,
+        add_land_item 1c) charge-then-forward against the grant: no headroom
+        means an honest 402 payment_required and the tool never runs.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [agentId, capCents, perTxCapCents]
+              additionalProperties: false
+              properties:
+                agentId: { type: string }
+                capCents: { type: string, pattern: '^(0|[1-9][0-9]{0,8})$' }
+                perTxCapCents: { type: string, pattern: '^(0|[1-9][0-9]{0,8})$' }
+                allowlist: { type: ['array', 'null'], items: { type: string } }
+                singleUse: { type: boolean }
+                expiresAt: { type: integer, minimum: 1 }
+      responses:
+        '401': { description: unauthenticated }
+        '201':
+          description: Grant issued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  agentId: { type: string }
+                  spend:
+                    type: object
+                    properties:
+                      denomination: { type: string }
+                      capCents: { type: string }
+                      perTxCapCents: { type: string }
+                      remainingCents: { type: string }
+                      expiresAt: { type: [integer, 'null'] }
+                      allowlist: { type: ['array', 'null'], items: { type: string } }
+                      singleUse: { type: boolean }
+                  evaluatedThrough: { type: integer }
+        '403': { description: owner_required }
+        '422': { description: invalid_spend_grant }
+  /api/rooms/{roomId}/spend-grants/{agentId}:
+    delete:
+      summary: Revoke an agent's spend grant
+      description: >-
+        Spend-primitive MVP. Owner or grants:issue delegate only. Stamps
+        revoked_at on the capability="spend" edge; the agent keeps nothing
+        for future calls. Idempotent: revoking an absent grant still returns
+        200 with revoked false.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: agentId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '401': { description: unauthenticated }
+        '200':
+          description: Revocation receipt
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  agentId: { type: string }
+                  revoked: { type: boolean }
+                  evaluatedThrough: { type: integer }
+        '403': { description: owner_required }
+  /api/rooms/{roomId}/spend-grant:
+    get:
+      summary: Read the caller's own spend grant summary
+      description: >-
+        Spend-primitive MVP. Withhold, never refuse: any authenticated
+        member reads only their own grant summary (cap, per-call cap,
+        settled and reserved spend, remaining headroom, expiry). Guests and
+        grant-less members get { spend: null } with a 200, never a denial.
+        An agent uses this to learn the price of the tools it wants to call
+        and how much headroom it has left.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200':
+          description: Own spend summary
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  memberId: { type: string }
+                  spend:
+                    type: ['object', 'null']
+                    properties:
+                      denomination: { type: string }
+                      capCents: { type: string }
+                      perTxCapCents: { type: string }
+                      remainingCents: { type: string }
+                      expiresAt: { type: [integer, 'null'] }
+                      allowlist: { type: ['array', 'null'], items: { type: string } }
+                      singleUse: { type: boolean }
+                  evaluatedThrough: { type: integer }
   /api/rooms/{roomId}/usage:
     get:
       summary: Room usage summary
@@ -8506,6 +8690,7 @@ paths:
                 purpose: { type: string, maxLength: 1000 }
                 kind: { type: string, enum: [personal, organization], default: personal, description: "Optional. Defaults to personal." }
                 displayName: { type: string, maxLength: 80, description: "Optional. Defaults to the identity display name." }
+                starter: { type: boolean, default: true, description: "Optional. Whether to seed the room's starter work-claim task. Defaults to true." }
 
       responses:
         '201': { description: "{ roomId, ownerMemberId, identityId, duplicate: false, next, nextActions }. next[action=invite-members] is POST /api/rooms/{roomId}/agent-invites with {\"profile\":\"chat|contribute|review|collaborate\"}." }
@@ -13306,7 +13491,11 @@ paths:
               schema:
                 $ref: "#/components/schemas/JsonRpcError"
         '401':
-          description: Authorization was present but was not a live identity secret. Body is JsonRpcError.
+          description: "Authorization was present but was not a live identity secret. Body is JsonRpcError. The response carries a WWW-Authenticate: Bearer header (RFC 7235); error data sets retryable: false."
+          headers:
+            WWW-Authenticate:
+              description: 'Bearer realm="project-room", charset="UTF-8"'
+              schema: { type: string }
           content:
             application/json:
               schema:
@@ -13406,7 +13595,11 @@ paths:
               schema:
                 $ref: "#/components/schemas/JsonRpcError"
         '401':
-          description: Authorization was present but was not a live identity secret. Body is JsonRpcError (error.code integer). The join tool list is not returned.
+          description: "Authorization was present but was not a live identity secret. Body is JsonRpcError (error.code integer). The join tool list is not returned. The response carries a WWW-Authenticate: Bearer header (RFC 7235), and the error data sets retryable: false."
+          headers:
+            WWW-Authenticate:
+              description: 'Bearer realm="project-room", charset="UTF-8"'
+              schema: { type: string }
           content:
             application/json:
               schema:
@@ -14584,6 +14777,12 @@ components:
           minimum: 1
         identityId:
           type: "string"
+        title:
+          type: "string"
+          description: "Task title at finish time; shown on the public receipt."
+        agentName:
+          type: "string"
+          description: "Finisher's identity display name; shown instead of the raw identity id."
         state:
           const: "submitted"
         artifact:

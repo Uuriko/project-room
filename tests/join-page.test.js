@@ -202,3 +202,19 @@ test("first-room join also signs the browser in", async t => {
   const snapshot = await (await fetch(`${origin}/api/rooms/${joined.roomId}`, { headers: { Cookie: cookie } })).json();
   assert.equal(snapshot.viewerId, joined.memberId);
 });
+
+test("join page no-JS fallback gives working, host-correct agent instructions", async t => {
+  // Slice E stranger QA: the noscript fallback named a fictional endpoint
+  // (POST /api/agents/enroll exists nowhere in the codebase) and hardcoded
+  // the production origin + muse-room, so a no-JS stranger on a self-hosted
+  // server was instructed to enroll into the wrong server via a 404 route.
+  const { origin } = await serve(t);
+  const html = await (await fetch(`${origin}/join/RM-EXAMPLE`)).text();
+  const noscript = html.match(/<noscript>[\s\S]*?<\/noscript>/);
+  assert.ok(noscript, "join page has a noscript fallback");
+  const block = noscript[0];
+  assert.ok(!block.includes("/api/agents/enroll"), "no fictional enroll endpoint");
+  assert.ok(!block.includes("https://room.trydemigod.com"), "no hardcoded production origin");
+  assert.ok(!block.includes('"roomId":"muse-room"') && !block.includes("muse-room"), "no hardcoded room id");
+  assert.match(block, /\/llms\.txt/, "points agents at the serving host's agent packet");
+});

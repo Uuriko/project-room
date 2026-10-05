@@ -9,6 +9,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { AgentRooms } from "../server/agent-rooms.mjs";
 import { attachmentLimits } from "../server/attachment-schema.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
+import { issueSpendGrant } from "../server/spend-grants.mjs";
 import { mcpAttachmentBodyBytes } from "../server/room-attachment-bytes.mjs";
 
 const JOIN_TOOLS = ["room_join_packet", "room_join_kits", "room_join_prompt", "room_mcp_snippet"];
@@ -176,6 +177,11 @@ test("an enrolled uploader commits a staged file onto a message they posted", as
   });
   // #953: new agent members default to t1_readonly; peer needs write access for message.posted
   setTier(store.db, created.roomId, peer.identityId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
+  // Spend-primitive MVP: room_put_file is priced (5 credits); the peer holds
+  // a grant so this file flow exercises the paid path.
+  issueSpendGrant(store.db, created.roomId, peer.identityId, {
+    grantedBy: created.ownerMemberId ?? owner.identityId, capCents: "100000", perTxCapCents: "10000", nowMs: Date.now(),
+  });
   const names = (await (await rpc(origin, "tools/list", undefined, owner.secret)).json()).result.tools.map(tool => tool.name);
   assert.equal(names.includes("room_commit_file"), true);
   const posted = await call(origin, "room_post_message", {

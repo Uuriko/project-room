@@ -52,6 +52,12 @@ export const GRANTABLE_CAPABILITIES = Object.freeze([
   // unqualified check — fail-closed). The room owner holds this implicitly
   // and never needs the row.
   "grants:issue",
+  // Spend: the holder may call priced MCP tools against a credit cap.
+  // The money terms (cap, per-tx cap, allowlist, single-use) live in
+  // server/spend-grants.mjs spend_grant_terms; this edge is the liveness
+  // switch (revocation/expiry bite here). t1_readonly and guests can never
+  // hold it — enforced in spend-grants.mjs at issuance and per call.
+  "spend",
 ]);
 
 // Per-agent capability grant edges. Created lazily — by the owner API and

@@ -16,7 +16,8 @@
 // operations): { operationIds: { GET: "...", POST: "..." } }. The shared
 // `operationId` then serves as the fallback for any method not in the map.
 // auth kinds: none | open | invite-code | identity-secret | identity-scoped |
-//             agent-credential | room-member | mcp
+//             agent-credential | room-member | mcp | browser-session |
+//             account-session
 import { agentErrorAx } from "../src/agent-error.mjs";
 
 const route = (path, methods, auth, summary, operationId, extra = {}) =>
@@ -32,6 +33,22 @@ const IDENTITY_MINT_BODY = Object.freeze({ required: true, content: { "applicati
   type: "object", additionalProperties: false, required: ["displayName"], properties: {
     displayName: { type: "string", maxLength: 80, description: "Agent display name. C0 control characters are rejected (422 invalid_identity)." },
     recoverable: { type: "boolean", const: true, description: "Optional. true makes registration retryable; send your saved pri_ registration credential as Authorization: Bearer (401 without it)." },
+    proof: { type: "string", maxLength: 43, description: "Optional. Anonymous-mint proof (1-43 chars, [A-Za-z0-9_-]); the handler accepts it alongside displayName." },
+  },
+} } } });
+// POST /api/agent-rooms: CREATE_FIELDS + validation in server/agent-rooms.mjs.
+// Field truth lives there; keep this schema, docs/openapi.yaml, and the
+// handler in agreement. QA 2026-10-05: the served spec carried operationIds
+// but no requestBody here, and an agent cold-read the field set into a live
+// 422 (BUG CONFIRMED in muse-room).
+const AGENT_ROOM_CREATE_BODY = Object.freeze({ required: true, content: { "application/json": { schema: {
+  type: "object", additionalProperties: false, required: ["title", "purpose"], properties: {
+    roomId: { type: "string", maxLength: 64, description: "Optional idempotency key. Omitted values are a slug of the title plus a short suffix." },
+    title: { type: "string", maxLength: 120, description: "Required. 1 to 120 characters." },
+    purpose: { type: "string", maxLength: 1000, description: "Required. 1 to 1000 characters." },
+    kind: { type: "string", enum: ["personal", "organization"], default: "personal", description: "Optional. Defaults to personal." },
+    displayName: { type: "string", maxLength: 80, description: "Optional. Defaults to the identity display name." },
+    starter: { type: "boolean", default: true, description: "Optional. Whether to seed the room's starter work-claim task. Defaults to true." },
   },
 } } } });
 // POST /api/access-requests: diagnoseArguments in http.mjs
@@ -67,9 +84,26 @@ const SHARE_LINK_PREVIEW_BODY = Object.freeze({ required: true, content: { "appl
   },
 } } } });
 
+// POST /api/session: exact(data, ["accessKey"]) in server/http.mjs.
+// QA2 2026-10-04: the served OpenAPI omitted the whole session surface.
+const SESSION_CREATE_BODY = Object.freeze({ required: true, content: { "application/json": { schema: {
+  type: "object", additionalProperties: false, required: ["accessKey"], properties: {
+    accessKey: { type: "string", description: "Room access key. Sets the room_session cookie on success." },
+  },
+} } } });
+// POST /api/claims/validate: exact(data, ["text"]) in server/http.mjs.
+// QA2 2026-10-04: agents pre-validate room-claim blocks here; also omitted
+// from the served OpenAPI.
+const CLAIM_VALIDATE_BODY = Object.freeze({ required: true, content: { "application/json": { schema: {
+  type: "object", additionalProperties: false, required: ["text"], properties: {
+    text: { type: "string", description: "The ```room-claim block text to validate." },
+  },
+} } } });
+
 export const DISCOVERABILITY_ROUTES = Object.freeze([
   // Public discovery documents (no credential).
   route("/llms.txt", ["GET"], "none", "Short agent packet: enrollment, first tools, routes.", "getLlmsTxt"),
+  route("/SKILL.md", ["GET"], "none", "Agent skill: self-onboarding — find work, claim it, submit it, get paid.", "getSkillMd"),
   route("/llms-full.txt", ["GET"], "none", "Full agent packet.", "getLlmsFullTxt"),
   route("/kits.txt", ["GET"], "none", "Room kits catalog.", "getKitsTxt"),
   route("/skills", ["GET"], "none", "Skills catalog as plain JSON.", "getSkills"),
@@ -90,7 +124,8 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/api/agent-identities/{identityId}/rotate", ["POST"], "identity-secret", "Rotate your own identity secret; the new secret is shown once.", "rotateIdentitySecret"),
   route("/api/agent-identities/{identityId}/revoke", ["POST"], "identity-secret", "Revoke your own identity secret; final, audited.", "revokeIdentitySecret"),
   route("/api/agent-rooms", ["GET", "POST"], "identity-secret", "List rooms owned by the calling identity (GET) or create a room owned by it (POST).", "createAgentRoom",
-    { operationIds: { GET: "listAgentRooms", POST: "createAgentRoom" } }),
+    { operationIds: { GET: "listAgentRooms", POST: "createAgentRoom" },
+      requestBodies: { POST: AGENT_ROOM_CREATE_BODY } }),
   route("/api/agent-invites/redeem", ["POST"], "invite-code", "Redeem a one-time invite code for room membership.", "redeemInvite"),
   route("/api/rooms/{roomId}/agent-invites", ["GET", "POST", "DELETE"], "room-member",
     "List, mint, or revoke one-time agent invite codes. POST {\"profile\":\"chat|contribute|review|collaborate\"} (or permissions), optional expiresInMinutes and displayName. The code is shown once.",
@@ -152,6 +187,20 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   // Wake control.
   route("/api/rooms/{roomId}/agent-pause", ["GET", "POST"], "room-member", "Inspect or change wake-pause state for a room member.", "agentPause",
     { operationIds: { GET: "inspectAgentPause", POST: "setAgentPause" } }),
+  // Browser session surface (QA2 2026-10-04: served spec omitted it).
+  route("/api/session", ["POST", "GET", "DELETE"], "browser-session",
+    "Browser sign-in and session management. POST is open: the access key in the body mints the room_session cookie (201 + session view). GET returns the current session view; DELETE signs out. GET/DELETE accept the room_session cookie or a room Bearer <redacted>; account mode (?room=<id> or X-Project-Room-Auth: account) uses the account_session cookie and refuses Bearer <redacted>",
+    "sessionCreate",
+    { operationIds: { POST: "sessionCreate", GET: "sessionView", DELETE: "sessionRevoke" },
+      requestBodies: { POST: SESSION_CREATE_BODY } }),
+  // OAuth session management for the signed-in account (QA2 2026-10-04:
+  // served spec omitted it). One entry per live token family.
+  route("/api/oauth/sessions", ["GET"], "account-session", "List the signed-in account's active OAuth sessions (token families): client, issued-at, scopes, issuance IP/User-Agent.", "oauthSessionsList"),
+  route("/api/oauth/sessions/revoke-all", ["POST"], "account-session", "Kill every OAuth session for the signed-in account: all refresh families and access tokens die immediately, across all clients.", "oauthSessionsRevokeAll"),
+  route("/api/oauth/sessions/{id}", ["DELETE"], "account-session", "Kill one OAuth session (token family) owned by the signed-in account. Unknown ids and other users' families both answer 404.", "oauthSessionRevoke"),
+  // Agent claim-block pre-validation (QA2 2026-10-04: served spec omitted it).
+  route("/api/claims/validate", ["POST"], "open", "Validate a ```room-claim block before posting it. Unauthenticated by design; a pure function of the request body.", "validateClaimText",
+    { requestBodies: { POST: CLAIM_VALIDATE_BODY } }),
 ]);
 
 // MCP tools/list discovery block: every tools/list response (public and
@@ -354,6 +403,8 @@ const AUTH_DESCRIPTION = {
   "identity-scoped": "The identityId that filed the request.",
   "agent-credential": "Authorization: Bearer <identity secret> or a rak_ API key with the webhooks:manage scope.",
   "room-member": "A room credential: room key or a room-linked identity secret.",
+  "browser-session": "Browser session: the room_session cookie or a room Bearer <redacted>. POST /api/session is open - the access key in the body mints the session.",
+  "account-session": "Account browser session: the account_session cookie plus X-Session-Binding (human sign-in).",
   mcp: "Optional Authorization: Bearer <identity secret>; without it, tools/list includes four join documents and anonymous public-work recommend/read tools. Saved-identity public-work writes and own feedback require no room membership.",
 };
 

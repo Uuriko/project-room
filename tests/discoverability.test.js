@@ -490,6 +490,17 @@ test("onboarding: success bodies name the next step", { timeout: 30000 }, async 
   assert.ok(actions.includes("list-tools"), "mint points at tools-list");
   const mintActions = minted.nextActions.map(s => s.action);
   assert.deepEqual(mintActions, ["create-room", "list-tools"], "mint nextActions is the canonical verb list");
+  // QA 2026-10-05: #1492 fixed the six-tool catalog count in seven copy
+  // spots but missed the mint response's list-tools pointer, which still
+  // claimed "four public join tools". The pointer must name the two
+  // public-work tools the catalog actually carries.
+  const listTools = minted.next.find(s => s.action === "list-tools");
+  assert.ok(listTools, "mint has a list-tools step");
+  assert.ok(listTools.description.includes("public_work_recommend"),
+    "list-tools pointer names public_work_recommend");
+  assert.ok(listTools.description.includes("public_work_read_task"),
+    "list-tools pointer names public_work_read_task");
+  assert.ok(listTools.description.includes("six"), "list-tools pointer states the six-tool count");
   for (const step of minted.nextActions) {
     assert.equal(typeof step.transport, "string", "nextActions names the transport");
     assert.ok(step.method || step.tool, "nextActions names the method or tool");
@@ -620,5 +631,24 @@ test("inventory method accuracy: served methods match the route table", { timeou
   const doc = await (await get(origin, "/openapi.json")).json();
   for (const path of Object.keys(INVENTORY_METHOD_CONTRACT)) {
     assert.ok(doc.paths[path]?.get, `openapi.json documents GET ${path}`);
+  }
+});
+
+test("cold walkthrough stranger surface: every documented no-credential endpoint is auth none (qa5-p4-grokbot)", () => {
+  const byPath = new Map(DISCOVERABILITY_ROUTES.map(r => [r.path, r]));
+  const stranger = [
+    "/llms.txt", "/llms-full.txt", "/kits.txt", "/skills", "/join.txt",
+    "/.well-known/agent.json", "/.well-known/agent-card.json",
+    "/.well-known/mcp.json", "/.well-known/governance.json",
+    "/openapi.json", "/api/health",
+    "/api/public-work/tasks", "/api/public-work/tasks/{taskId}",
+    "/api/public-work/match",
+    "/api/public-work/receipts/{receiptId}", "/api/public-work/receipts/{receiptId}/artifact",
+    "/api/share-links/preview",
+  ];
+  for (const path of stranger) {
+    const route = byPath.get(path);
+    assert.ok(route, `stranger endpoint documented: ${path}`);
+    assert.equal(route.auth, "none", `${path} needs no credential`);
   }
 });

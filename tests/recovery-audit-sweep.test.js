@@ -73,6 +73,8 @@ function sweep() {
   step(T.ROOM_CHARTER_UPDATED, "owner", () => ({ expectedRevision: state().room.charter?.revision ?? 0, purpose: "Coordinate the pilot.", outputs: "An agenda.", boundaries: "No spend.", escalation: "Ask the owner." }));
   step(T.ROOM_POLICY_SET, "owner", { requireIndependentReview: true, requireOwnerDecision: true });
   step(T.ROOM_SPEND_ALLOWANCE_SET, "owner", { allowanceCents: 10000, periodDays: 30 });
+  step(T.ROOM_SPEND_PRICING_SET, "owner", { enabled: false });
+  step(T.ROOM_SPEND_PRICING_SET, "owner", { enabled: true });
   step(T.ROOM_TRUST_SET, "owner", { enabled: false });
   step(T.ROOM_PUBLIC_RECEIPTS_SET, "owner", { enabled: true });
   // --- PRIV-2: history setting (restored to "all" for the rest of the sweep) and export audit. ---
@@ -336,6 +338,6 @@ test("the event surface has not grown without this sweep noticing", () => {
   // land.updated is exercised above via report_tip (it is not a command).
   // work_claim.updated is exercised above via emitWorkClaimEvent (it is not a command).
   // room.starter_seeded is exercised above via seedStarter (it is not a command).
-  assert.equal(Object.values(T).length, 64,
+  assert.equal(Object.values(T).length, 65,
     "EVENT_TYPES changed: add the new type to this sweep, then update this count");
 });

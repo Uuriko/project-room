@@ -31,6 +31,7 @@ import { enforceSpendAllowance } from "./spend-allowance.mjs";
 import { ensureAutonomyTiersSchema, enforceAutonomyTiers } from "./autonomy-tiers.mjs";
 import { ensureOperatorActionsSchema, OPERATOR_ACTIONS_SCHEMA } from "./operator-actions.mjs"; // CP-ADMIN-0: append-only operator audit.
 import { ensureGrantsSchema } from "./grants.mjs";
+import { ensureSpendGrantsSchema } from "./spend-grants.mjs";
 import { canonicalInvitationData, invitationJournalEntry, invitationJournalSchema, replayInvitationJournal } from "./invitation-journal.mjs";
 import { invitationJoinedEvent, assertInvitationMembershipEvidence } from "./invitation-evidence.mjs";
 import { STORE_SCHEMA_VERSION, fenceDefinitions, registerWriter, installWriterFence, verifyWriterFence } from "./writer-fence.mjs";
@@ -617,8 +618,12 @@ const nodeStorage = {
   hasSchema: db => Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' LIMIT 1").get()),
   changes: db => db.prepare("SELECT total_changes() AS n").get().n,
   configure(db, readOnly) {
+    // busy_timeout goes first: journal_mode changes and WAL recovery take
+    // locks, and with the timeout still at zero a contended concurrent open
+    // throws SQLITE_BUSY immediately instead of waiting (QA slice D: 1/120
+    // concurrent opens failed on the old order).
     db.exec(readOnly ? "PRAGMA foreign_keys=ON; PRAGMA busy_timeout=3000;"
-      : "PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=3000;");
+      : "PRAGMA foreign_keys=ON; PRAGMA busy_timeout=3000; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;");
   },
   registerWriter, installWriterFence, verifyWriterFence,
   transaction(db, fn, readOnly) {
@@ -646,6 +651,7 @@ const shapes = {
   [T.ROOM_CHARTER_UPDATED]: "expectedRevision purpose outputs boundaries escalation",
   [T.ROOM_POLICY_SET]: ROOM_POLICY_FIELDS.join(" "),
   [T.ROOM_SPEND_ALLOWANCE_SET]: "allowanceCents periodDays",
+  [T.ROOM_SPEND_PRICING_SET]: "enabled",
   [T.ROOM_TRUST_SET]: "enabled",
   [T.ROOM_PUBLIC_RECEIPTS_SET]: "enabled",
   // --- PRIV-2: owner-only history setting and the export audit record. ---
@@ -1337,6 +1343,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // edges — purely additive table, IF NOT EXISTS is idempotent, no
       // schema version bump.
       ensureGrantsSchema(this.db);
+      // Spend-primitive MVP (qa4-spend-mvp-jill): per-agent spend grant
+      // terms + the charge ledger — purely additive tables, IF NOT EXISTS
+      // is idempotent, no schema version bump.
+      ensureSpendGrantsSchema(this.db);
       // RC-2026-09-19-078: account profile (display_name/avatar_url) and
       // onboarding flag converge the same additive way; no version bump.
       ensureAccountProfileSchema(this.db);

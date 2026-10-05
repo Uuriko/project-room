@@ -1,0 +1,14 @@
+[Unit]
+Description=Project Room shed — always-on agent presence loop
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=@ENV_FILE@
+ExecStart=/usr/bin/env node @REPO_DIR@/shed/shed-loop.mjs
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

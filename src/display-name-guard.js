@@ -40,6 +40,11 @@ const lookalikes = new Map(Object.entries({
   // Latin-script hook letters: atomic (NFKD-stable) but read as their base,
   // so "aɱin" / "suƥport"-style spellings defeat the rule (QA2-SECREG followup).
   ɱ:'m', ƥ:'p', ɖ:'d', ɗ:'d', ɲ:'n', ɳ:'n', ɨ:'i', ɠ:'g', ƈ:'c',
+  // Latin Extended-B hook/stroke letters the followup batch missed: NFKD
+  // leaves them whole and they read as their ASCII base, so "admƖn" /
+  // "sƴstem"-style spellings defeat the role rule and "Ƙevin" reads as
+  // "Kevin" without tripping the confusable check (QA slice D).
+  ɩ:'i', ƴ:'y', ƙ:'k', ƭ:'t', ǥ:'g', ȥ:'z', ɓ:'b',
   ᴀ:'a', ʙ:'b', ᴄ:'c', ᴅ:'d', ᴇ:'e', ꜰ:'f', ɢ:'g', ʜ:'h',
   ɪ:'i', ᴊ:'j', ᴋ:'k', ʟ:'l', ᴍ:'m', ɴ:'n', ᴏ:'o', ᴘ:'p',
   ʀ:'r', ꜱ:'s', ᴛ:'t', ᴜ:'u', ᴠ:'v', ᴡ:'w', ᴢ:'z',

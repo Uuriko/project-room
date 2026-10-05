@@ -313,6 +313,18 @@ export const unfencedAdditiveTables = Object.freeze([
   // Purely additive and intentionally NOT fenced — older writers have no
   // code path to it, and server/grants.mjs verifies its own schema on open.
   "agent_capability_grants",
+  // spend_grant_terms + spend_authorizations + spend_room_reservations
+  // (spend-primitive MVP, qa4-spend-mvp-jill; reservations added by
+  // qaD-fix-spend-race for cumulative room-allowance enforcement):
+  // per-agent spend caps, the charge-then-forward ledger, and the
+  // in-flight room-allowance reservations. Purely additive and
+  // intentionally NOT fenced — older writers have no code path to them,
+  // and server/spend-grants.mjs verifies its own schema on open. Rows
+  // never grant permission by themselves; the capability edge in
+  // agent_capability_grants is the liveness switch.
+  "spend_grant_terms",
+  "spend_authorizations",
+  "spend_room_reservations",
   // referral_invite_keys + referral_invites + referral_chain_members
   // (signed agent-carried referral invites): per-room Ed25519 signing keys
   // (private half never leaves the database), the private mint/redeem/
@@ -401,7 +413,26 @@ const RETIRED_EMISSARY_TABLES = Object.freeze([
   "emissary_idempotency",
   "emissary_journal",
 ]);
-export const lazyAdditiveTables = Object.freeze([...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES, ...RETIRED_EMISSARY_TABLES]);
+// Analytics tables (server/analytics/schema.mjs) + the claim-bond P0 shadow
+// journal (server/analytics/claim-bond-shadow.mjs) + the P1 claim-reputation
+// signal journal (server/claim-reputation.mjs): created on demand by
+// analytics tooling (the tail, the backfill script, claim-bond-shadow --sync)
+// directly in the room database, never by the store constructor. They stay
+// in the recovery audit's allowed set so backupRoom/room-export keep passing
+// on databases where the tooling ran (auditRecovery gates both), while a
+// database that never ran the tooling simply does not have them — allowed,
+// never required.
+const ANALYTICS_ADDITIVE_TABLES = Object.freeze([
+  "analytics_events",
+  "analytics_room_cursor",
+  "analytics_table_cursor",
+  "analytics_firsts",
+  "analytics_daily",
+  "analytics_ctx",
+  "claim_bond_shadow",
+  "claim_reputation_signals",
+]);
+export const lazyAdditiveTables = Object.freeze([...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES, ...RETIRED_EMISSARY_TABLES, ...ANALYTICS_ADDITIVE_TABLES]);
 // messages (MSG-1) is fenced at v37 only. v34–v36 files do not have the
 // table or its triggers; verifyWriterFence(36) must not require them.
 const v34FencedTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables])]);

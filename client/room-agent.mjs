@@ -14,6 +14,7 @@ import { charterContext, validateCharterContext, validateCharterRead } from "../
 import { workHelpContext } from "../src/work-help.js";
 import { workOffersContext, MAX_HELP_OFFERS, MAX_PENDING_HELP_OFFERS } from "../src/help-offers.js";
 import { AGENT_ERRORS, resolveAgentErrorAx } from "../src/agent-error.mjs";
+import { sortWorkByCuriosity, viewerHistory } from "../src/curiosity-rank.mjs";
 import { edgeDoorApiPath } from "../deploy/agent-discovery.mjs";
 import { assembleOutsideAgents, planOutsideAgentRecord } from "../src/outside-agents.mjs";
 import { CONTENT_TRUST, markIfOther, stampBoard, stampWorkListing, withContentTrust } from "../server/content-trust.mjs";
@@ -1095,9 +1096,10 @@ export class RoomAgentClient {
     return stampBoard({ ...projectBoard(snapshot.state, Date.now()), roomId: snapshot.roomId,
       evaluatedThrough: snapshot.sequence, evaluatedAt: new Date().toISOString() });
   }
-  async orient({ signal, focus = "all", query } = {}) {
+  async orient({ signal, focus = "all", query, sort } = {}) {
     if (!["all", "needs_me", "help_wanted", "results"].includes(focus)) throw new RoomClientError(0, "invalid_focus", "Choose all work, work needing you, help invitations, or results");
     if (query !== undefined && !validWorkSearchQuery(query)) throw new RoomClientError(0, "invalid_query", "Use a nonblank work query of at most 200 UTF-16 code units");
+    if (sort !== undefined && sort !== "curiosity") throw new RoomClientError(0, "invalid_sort", "Sort is omitted or curiosity");
     const snapshot = focus !== "all" || query !== undefined
       ? checkedWorkSnapshot(await this.#request("?view=work", undefined, signal, focus === "help_wanted"), this.#roomId)
       : await this.snapshot({ signal });
@@ -1122,7 +1124,8 @@ export class RoomAgentClient {
         id: request.id, requesterId: request.requesterId, workItemId: request.workItemId, revision: request.revision,
         nextRead: { tool: "room_read_request", arguments: { requestMessageId: request.id } }
       })) ?? null;
-      const work = (matches?.work ?? candidates.map(item => ({ item }))).map(({ item, excerpt }) => {
+      const listed = matches?.work ?? candidates.map(item => ({ item }));
+      let work = listed.map(({ item, excerpt }) => {
         return { id: item.id, title: item.title, state: item.state, revision: item.revision, mode: item.mode, next: nextWorkStep(item, now),
           ...(excerpt === undefined ? {} : { excerpt }),
           ...(focus === "help_wanted" ? { help: helpFor(item) } : {}),
@@ -1131,9 +1134,19 @@ export class RoomAgentClient {
           availableRoomActions: workActions(item, member, now).map(([action, label]) => ({ action, label })),
           nextRead: { tool: "room_read_work", arguments: { workItemId: item.id, ...(focus === "help_wanted" ? { includeOffers: true } : {}) } } };
       });
+      if (sort === "curiosity") {
+        const history = viewerHistory(snapshot.state, snapshot.viewerId);
+        const rawById = new Map(listed.map(({ item }) => [item.id, item]));
+        const order = new Map(sortWorkByCuriosity(work.map(entry => rawById.get(entry.id)).filter(Boolean), history)
+          .map(({ item, curiosity }, index) => [item.id, { index, curiosity }]));
+        work = work
+          .map(entry => ({ ...entry, curiosity: order.get(entry.id)?.curiosity ?? null }))
+          .sort((a, b) => (order.get(a.id)?.index ?? 0) - (order.get(b.id)?.index ?? 0));
+      }
       return stampWorkListing({ contractVersion: 1, roomId: snapshot.roomId, evaluatedThrough: snapshot.sequence,
         evaluatedAt: new Date(now).toISOString(), clockSource: focus === "help_wanted" ? "service" : "client", focus, charter, member,
         errors: AGENT_ERRORS,
+        ...(sort ? { sort } : {}),
         scope: { kind: "room", permissions: member.permissions, externalExecution: false },
         selection: matches ? { totalWork: items.length, eligibleWork: candidates.length, query: query.trim(),
           matches: matches.total, shown: work.length, limit: 25, hasMore: matches.total > work.length,
@@ -1148,15 +1161,20 @@ export class RoomAgentClient {
           guidance: "Current next steps addressed to you, including those missing a Room permission, plus open reply requests addressed to you in replyRequests. Not all your ongoing work. Follow nextRead and finish every conversation page before answering with current.answerBasis. room_request_reply opens a new question, not an answer. Reply requests are a separate read at replyRequestsEvaluatedThrough. Empty work and empty reply requests do not mean the room is done." },
         work, ...(focus === "needs_me" ? { replyRequests: openReplies, replyRequestsEvaluatedThrough: replyListing.evaluatedThrough } : {}) });
     }
+    const rankedItems = sort === "curiosity"
+      ? sortWorkByCuriosity(items, viewerHistory(snapshot.state, snapshot.viewerId))
+      : items.map(item => ({ item, curiosity: null }));
     return stampWorkListing({
       contractVersion: 1, roomId: snapshot.roomId, evaluatedThrough: snapshot.sequence,
       charter,
       errors: AGENT_ERRORS,
+      ...(sort ? { sort } : {}),
       member, scope: { kind: "room", permissions: member.permissions, externalExecution: false },
-      work: items.map(item => ({
+      work: rankedItems.map(({ item, curiosity }) => ({
         id: item.id, title: item.title, definitionOfDone: item.definitionOfDone, sourceMessageId: item.sourceMessageId,
         state: item.state, revision: item.revision, mode: item.mode, claim: item.claim, next: nextWorkStep(item, now),
         receipt: item.receipt, verification: item.verification, decision: item.decision, blocker: item.blocker,
+        ...(curiosity ? { curiosity } : {}),
         ...(item.handoff ? { handoff: item.handoff, handoffHistory: item.handoffHistory ?? [] } : {})
       }))
     });
