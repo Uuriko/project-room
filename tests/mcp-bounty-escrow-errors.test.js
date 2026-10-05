@@ -99,7 +99,7 @@ test("bounty_claim on an already-claimed bounty surfaces already_claimed/409, no
   assert.equal(first.result?.isError, undefined, `first claim failed: ${JSON.stringify(first).slice(0, 200)}`);
   const peer2 = f.store.identities.create("Peer two");
   const invite = f.store.invites.create(f.owner.secret, f.roomId, { profile: "chat", displayName: "Peer two" }, null);
-  const joined = f.store.invites.redeem(invite.code, { displayName: "Peer two", identitySecret: peer2.secret });
+  f.store.invites.redeem(invite.code, { displayName: "Peer two", identitySecret: peer2.secret });
   const second = await tool(f.call, peer2.secret, "bounty_claim", { roomId: f.roomId, bountyId, idempotencyKey: `claim2-${randomUUID()}` });
   assert.equal(second.result?.isError, true, "expected an error result");
   const value = structured(second);
