@@ -16,6 +16,7 @@ import { HeartbeatError } from "./agent-heartbeats.mjs";
 import { AgentPluginError } from "./agent-plugin-store.mjs";
 import { EVENT_CATALOG, WebhookSubscriptionError } from "./agent-webhook-subscriptions.mjs";
 import { BOND_SCOPES } from "./bonds.mjs";
+import { EscrowError } from "./bounty-escrow.mjs";
 import { buildActivationPack } from "./room-activation-pack.mjs";
 import { buildOrient } from "./orient.mjs";
 import { randomUUID } from "node:crypto";
@@ -74,6 +75,19 @@ function failureValue(error) {
       // shape: structuredContent AND content[0].text both name the price.
       ...(error.detail ? { detail: error.detail } : {})
     };
+  }
+  // qa4-fix-mcp-escrow500: the escrow module throws EscrowError (code, no
+  // HTTP status). Map it exactly like the HTTP routes do
+  // (server/bounty-escrow-routes.mjs runPure) so MCP callers get the same
+  // structured codes instead of an opaque 500.
+  if (error instanceof EscrowError) {
+    const code = error.code;
+    const status = code === "unknown_bounty" || code === "unknown_flag" ? 404
+      : code === "not_authorized" ? 403
+      : code === "already_claimed" || code === "dispute_exists"
+        || code === "idempotency_actor_mismatch" || code === "idempotency_key_reused" ? 409
+      : 422;
+    return { status, code, message: error.message };
   }
   return { status: 500, code: "internal", message: "Request could not be completed" };
 }
