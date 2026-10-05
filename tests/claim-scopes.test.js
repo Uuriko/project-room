@@ -204,6 +204,79 @@ test('projection acquire, heartbeat, handoff, and supersede show up on the work-
   assert.deepEqual(f.store.workClaims.get('commons', 'lane-b').dependsOn, ['lane']);
 });
 
+test('a handoff from a member without the board profile is refused and writes no board cards', t => {
+  const f = fixture(t);
+  f.store.command(f.keys.owner, 'commons', command(T.MEMBER_ADDED, {
+    memberId: 'narrow', displayName: 'narrow', kind: 'agent', accountableHumanId: 'owner', permissions: ['accept_work', 'write_external'],
+  }));
+  setTier(f.store.db, 'commons', 'narrow', 't2_standard', { updatedBy: 'owner', nowMs: Date.now() });
+  f.keys.narrow = f.store.issueAccessKey('commons', 'narrow');
+  const narrowKey = f.keys.narrow;
+  f.propose('job', 'narrow', 'read');
+  f.store.command(narrowKey, 'commons', command(T.WORK_STARTED, { workItemId: 'job', expectedRevision: 1 }));
+  const sequence = f.store.room('commons').sequence;
+  // write_external does not admit a claim write, even though the reducer only
+  // asks the accountable member for accept_work.
+  assert.throws(
+    () => f.store.command(narrowKey, 'commons', command(T.WORK_HANDOFF_RECORDED, {
+      workItemId: 'job', expectedRevision: 2, doneSummary: 'Half', nextAction: 'Finish it', limitReason: 'Out of time',
+    })),
+    { status: 403, code: 'work_claims_not_permitted' });
+  assert.equal(f.store.workClaims.get('commons', 'job'), null, 'no source card is mirrored');
+  assert.equal(f.store.workClaims.get('commons', 'job-next'), null, 'no successor card is mirrored');
+  assert.equal(f.store.room('commons').sequence, sequence, 'a refused handoff adds no event');
+});
+
+test('a supersede from a member without the board profile is refused and writes no board cards', t => {
+  const f = fixture(t);
+  f.store.command(f.keys.owner, 'commons', command(T.MEMBER_ADDED, {
+    memberId: 'steerer', displayName: 'steerer', kind: 'agent', accountableHumanId: 'owner', permissions: ['steer'],
+  }));
+  setTier(f.store.db, 'commons', 'steerer', 't2_standard', { updatedBy: 'owner', nowMs: Date.now() });
+  f.keys.steerer = f.store.issueAccessKey('commons', 'steerer');
+  const steererKey = f.keys.steerer;
+  f.propose('old', 'a', 'read');
+  f.propose('new', 'a', 'read');
+  const sequence = f.store.room('commons').sequence;
+  assert.throws(
+    () => f.store.command(steererKey, 'commons', command(T.WORK_SUPERSEDED, {
+      workItemId: 'old', expectedRevision: f.item('old').revision, supersededByWorkItemId: 'new', reason: 'Better',
+    })),
+    { status: 403, code: 'work_claims_not_permitted' });
+  assert.equal(f.store.workClaims.get('commons', 'old'), null, 'no source card is mirrored');
+  assert.equal(f.store.workClaims.get('commons', 'new'), null, 'no successor card is mirrored');
+  assert.equal(f.store.room('commons').sequence, sequence, 'a refused supersede adds no event');
+});
+
+test('an ownerless room refuses a handoff without a claim profile but admits a board writer', t => {
+  const f = fixture(t);
+  f.store.command(f.keys.owner, 'commons', command(T.MEMBER_ADDED, {
+    memberId: 'narrow', displayName: 'narrow', kind: 'agent', accountableHumanId: 'owner', permissions: ['accept_work', 'write_external'],
+  }));
+  setTier(f.store.db, 'commons', 'narrow', 't2_standard', { updatedBy: 'owner', nowMs: Date.now() });
+  f.keys.narrow = f.store.issueAccessKey('commons', 'narrow');
+  const narrowKey = f.keys.narrow;
+  const row = f.store.db.prepare('SELECT projection FROM rooms WHERE id=?').get('commons');
+  const projection = JSON.parse(row.projection);
+  projection.room.ownerId = '';
+  f.store.db.prepare('UPDATE rooms SET projection=? WHERE id=?').run(JSON.stringify(projection), 'commons');
+  f.propose('job', 'narrow', 'read');
+  f.store.command(narrowKey, 'commons', command(T.WORK_STARTED, { workItemId: 'job', expectedRevision: 1 }));
+  assert.throws(
+    () => f.store.command(narrowKey, 'commons', command(T.WORK_HANDOFF_RECORDED, {
+      workItemId: 'job', expectedRevision: 2, doneSummary: 'Half', nextAction: 'Finish it', limitReason: 'Out of time',
+    })),
+    { status: 403, code: 'work_claims_not_permitted' });
+  assert.equal(f.store.workClaims.get('commons', 'job-next'), null);
+  // A contribute-profile member still records the handoff in the ownerless room.
+  f.propose('lane', 'a', 'read');
+  f.store.command(f.keys.a, 'commons', command(T.WORK_STARTED, { workItemId: 'lane', expectedRevision: 1 }));
+  f.store.command(f.keys.a, 'commons', command(T.WORK_HANDOFF_RECORDED, {
+    workItemId: 'lane', expectedRevision: 2, doneSummary: 'Half', nextAction: 'Finish it', limitReason: 'Out of time',
+  }));
+  assert.equal(f.store.workClaims.get('commons', 'lane-next').dependsOn[0], 'lane');
+});
+
 test('historical overlapping reservations still initialize, replay and reopen unchanged', t => {
   const f = fixture(t);
   const roomId = 'legacy';
