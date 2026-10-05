@@ -523,7 +523,16 @@ export function chargeSpendBeforeCall(store, secret, name, args) {
   if (priceCents === null) return null;
   const nowMs = store.now();
   const report = spendAllowanceReport(room.state, nowMs);
-  return authorizeSpend(store.db, {
+  // The check+reserve MUST run inside the store's platform transaction.
+  // authorizeSpend's module-local transact() issues raw BEGIN IMMEDIATE /
+  // COMMIT / ROLLBACK, which node:sqlite accepts but the Durable Object
+  // wrapper (cloudflare/storage.mjs DurableDatabase) cannot execute — on
+  // the DO the BEGIN throws a non-ServiceError, so every priced-tool call
+  // by a non-owner 500s instead of 402ing (qa4-fix-spend-do-txn-jill,
+  // live-verified 2026-10-05). store.transaction() routes through the
+  // platform abstraction on every runtime; transact() then nests safely
+  // via db.isTransaction and issues no raw SQL of its own.
+  return store.transaction(() => authorizeSpend(store.db, {
     roomId,
     agentId: member.id,
     toolName: name,
@@ -535,7 +544,7 @@ export function chargeSpendBeforeCall(store, secret, name, args) {
     roomAllowanceCents: report.allowance ? report.allowance.allowanceCents : null,
     roomCommittedCents: report.committedCents,
     nowMs,
-  });
+  }));
 }
 
 // --- HTTP management routes (mirroring server/grants.mjs) ---

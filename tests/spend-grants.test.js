@@ -274,6 +274,26 @@ test("chargeSpendBeforeCall passes through unpriced tools, humans, and the owner
     "the room owner is never charged");
 });
 
+test("chargeSpendBeforeCall routes the check+reserve through store.transaction (DO parity)", async t => {
+  // Regression for qa4-fix-spend-do-txn-jill: the module-local transact()
+  // issued raw BEGIN IMMEDIATE / COMMIT / ROLLBACK, which node:sqlite
+  // accepts but the Durable Object wrapper (cloudflare/storage.mjs
+  // DurableDatabase) cannot execute — on the DO every priced-tool call by
+  // a non-owner 500d instead of 402ing. The store platform transaction is
+  // the only portable boundary; this test fails on the pre-fix code
+  // because the platform transaction is never entered.
+  const f = roomWithPeer(t);
+  let platformTxCalls = 0;
+  const origTransaction = f.store.transaction.bind(f.store);
+  f.store.transaction = fn => { platformTxCalls++; return origTransaction(fn); };
+  const error = capture(() => chargeSpendBeforeCall(f.store, f.peer.secret, "room_put_file", { roomId: f.roomId }));
+  assert.ok(error instanceof SpendGrantError, `expected SpendGrantError, got ${error}`);
+  assert.equal(error.status, 402);
+  assert.equal(error.code, "payment_required");
+  assert.equal(platformTxCalls, 1,
+    "the spend check+reserve must run inside the store platform transaction, never raw SQL");
+});
+
 // --- End-to-end through tools/call ---
 
 const fileArgs = roomId => ({
