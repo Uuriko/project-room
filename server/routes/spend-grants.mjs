@@ -54,7 +54,7 @@ const grantBody = Object.freeze({
     perTxCapCents: { type: "string" },
     allowlist: { type: "array", items: { type: "string" } },
     singleUse: { type: "boolean" },
-    expiresAt: { type: "integer" },
+    expiresAt: { type: "number" },
   },
 });
 
