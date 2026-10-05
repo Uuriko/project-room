@@ -1,1 +1,1 @@
-PLACEHOLDER
+file:///tmp/join-page-door.js
