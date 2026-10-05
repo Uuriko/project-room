@@ -1,0 +1,79 @@
+# Zero-bug gates (workstream 2a): agent-proof CI checks that BLOCK the PR.
+#
+# Three jobs, each fails the workflow on findings:
+#   sast    — eslint-plugin-security, high-signal blocking ruleset only
+#   secrets — scans the PR diff for committed secrets (conservative patterns)
+#   deps    — every declared dep must exist on the npm registry, and every
+#             bare import must be a declared dep, a Node builtin, or relative
+#             (slopsquatting / dependency-confusion defense)
+#
+# This workflow deliberately does NOT touch .github/workflows/test.yml
+# (owned by another workstream). It runs on pull_request only: these gates
+# exist to block bad code before merge, not to re-verify main.
+
+name: zero-bug-gates
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ format('{0}-{1}', github.workflow, github.ref) }}
+  cancel-in-progress: true
+
+jobs:
+  sast:
+    name: SAST (eslint-plugin-security)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci # eslint + eslint-plugin-security are devDependencies
+      # Blocking ruleset is high-signal-only (see eslint.security.config.mjs):
+      # the full plugin set is too noisy on day one (detect-object-injection
+      # alone fires 2022x, nearly all false positives; non-literal-fs-filename
+      # 1122x; non-literal-regexp 139x; unsafe-regex 55x). Every rule kept is
+      # zero-noise on the current tree, so this job fails only on real issues:
+      # eval() injection, child-process execution, Math.random() for crypto
+      # material, unsafe Buffer use, mustache XSS, CSRF method-override, and
+      # trojan-source bidi characters. Excluded rules stay candidates for a
+      # future warn+triage lane.
+      - run: npx eslint --config eslint.security.config.mjs .
+
+  secrets:
+    name: secret scanning (PR diff)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0 # the diff needs the PR base commit present
+      # Zero-dep script (node: builtins only): no `npm ci` needed, keeps the
+      # job fast. Scans added lines only, so history never blocks a new PR.
+      # Patterns are conservative (provider-prefixed: AWS, GitHub, Slack,
+      # Stripe, OpenAI, npm, PEM keys, Bearer tokens); documented placeholders
+      # escape via a `secrets-allowlist` comment on the line.
+      - run: node scripts/scan-secrets.mjs --base "$BASE_SHA"
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+
+  deps:
+    name: dependency existence (slopsquatting defense)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      # Zero-dep script (node: builtins only): no `npm ci` needed. (1) Every
+      # registry dependency declared in package.json (root + relay/ +
+      # cloudflare/) must resolve on the npm registry — a hallucinated package
+      # name fails here. Local specs (file:, git+, github:, ...) are skipped.
+      # (2) Every bare import in scanned source must be a declared dependency
+      # of an enclosing package.json, a Node builtin, a workerd
+      # (`cloudflare:`) virtual module, or a relative path.
+      - run: node scripts/check-deps-exist.mjs
