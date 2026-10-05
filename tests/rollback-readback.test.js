@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse } from "yaml";
+import { generateKeyPair, signCard, signCardJws } from "../server/agent-card-signing.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const script = join(root, "scripts/rollback-readback.mjs");
@@ -16,6 +17,25 @@ const otherId = "33333333-3333-3333-3333-333333333333";
 const revision = "a".repeat(40);
 const status = (id, percentage = 100) => ({ id: "deployment", source: "rollback", versions: [{ version_id: id, percentage }] });
 const statuses = () => ({ prod: status(prodId), entry: status(entryId) });
+// The rollback workflow's post-rollback shell runs the real
+// prod-deploy-smoke.mjs, which now asserts the agent card on both doors.
+// The fixture serves a signed card and the workflow env injects the matching
+// test key through the smoke's SMOKE_AGENT_CARD_* seams (the suite cannot
+// sign for the production pinned key).
+const cardKeyPair = generateKeyPair();
+const cardKeyId = "test-card-key-rollback";
+const cardAgentId = "project-room";
+const buildFixtureCard = () => {
+  const card = { name: "Test Room", description: "rollback-readback fixture", url: null,
+    capabilities: { streaming: false }, skills: [], version: "1" };
+  const signature = signCard({ agentId: cardAgentId, card, privateKey: cardKeyPair.privateKey });
+  const withEnvelope = { ...card, keyId: cardKeyId, signatureAgentId: cardAgentId,
+    publicKey: cardKeyPair.publicKey, cardSignature: signature, signedRevision: revision };
+  withEnvelope.signatures = [signCardJws({ card: withEnvelope, privateKey: cardKeyPair.privateKey,
+    keyId: cardKeyId, jku: "https://example.test/.well-known/jwks.json" })];
+  return withEnvelope;
+};
+const fixtureCard = buildFixtureCard();
 function directory(t) {
   const path = mkdtempSync(join(tmpdir(), "rollback-readback-"));
   t.after(() => rmSync(path, { recursive: true, force: true }));
@@ -32,8 +52,13 @@ async function doors(t, failure) {
       res.writeHead(200, { "content-type": "application/json" }).end("{}");
       return;
     }
-    const match = req.url.match(/^\/(canonical|room)(\/api\/(version|health|ready)|\/terms|\/privacy|\/)$/);
+    const match = req.url.match(/^\/(canonical|room)(\/api\/(version|health|ready)|\/terms|\/privacy|\/|\/\.well-known\/agent-card\.json)$/);
     if (req.method !== "GET" || !match) return res.writeHead(404).end("Unexpected request");
+    if (match[2] === "/.well-known/agent-card.json") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify(fixtureCard));
+      return;
+    }
     let body = { sourceRevision: revision }, code = 200;
     if (match[3] === "health") body = { status: "ok" };
     if (match[3] === "ready") body = { status: "ready" };
@@ -150,7 +175,14 @@ console.log(JSON.stringify(same(production) ? recorded.prod : recorded.entry));
   const env = { ...process.env, PATH: `${work}:${process.env.PATH}`, RUNNER_TEMP: work,
     PROD_ID: prodId, ENTRY_ID: withoutEntry ? "" : entryId, PROD_ORIGIN: http.origin, ENTRY_ORIGIN: http.entry,
     RECORDED_STATUS: JSON.stringify(recorded), COMMAND_FAILURE: String(commandFailure), GITHUB_STEP_SUMMARY: join(work, "summary"),
-    CLOUDFLARE_API_TOKEN: "", CLOUDFLARE_ACCOUNT_ID: "" };
+    CLOUDFLARE_API_TOKEN: "", CLOUDFLARE_ACCOUNT_ID: "",
+    // The rollback shell runs the literal prod-deploy-smoke step, so the
+    // card-check test seams arrive through the env fallbacks. One fetch per
+    // door keeps the smoke inside this suite's 20s CLI timeout.
+    SMOKE_AGENT_CARD_PUBLIC_KEY: cardKeyPair.publicKey,
+    SMOKE_AGENT_CARD_KEY_ID: cardKeyId,
+    SMOKE_AGENT_CARD_AGENT_ID: cardAgentId,
+    SMOKE_AGENT_CARD_FETCHES: "1" };
   const job = parse(readFileSync(join(root, ".github/workflows/rollback-prod.yml"), "utf8")).jobs.rollback;
   const start = job.steps.findIndex(step => step.name === "Roll back") + 1;
   const end = job.steps.findIndex(step => step.name === "Receipt to muse-room");
