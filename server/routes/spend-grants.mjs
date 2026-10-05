@@ -1,8 +1,11 @@
 // Spend-primitive MVP (qa4-spend-mvp-jill): per-agent spend grants.
 // POST issues a grant (owner or grants:issue delegate; tier-gated and
-// guest-denied inside). DELETE revokes (idempotent). GET reads the caller's
+// guest-denied inside; delegates never self-issue — 403
+// spend_grant_self_issue_forbidden — while the owner keeps full
+// authority). DELETE revokes (idempotent). GET reads the caller's
 // own spend summary — withhold, never refuse: guests and grant-less members
-// get { spend: null }. Agents request spend; they never self-issue.
+// get { spend: null }. Delegates request spend for other agents, never for
+// themselves; the owner keeps full authority.
 
 import { issueSpendGrantRoute, revokeSpendGrantRoute, readSpendGrantRoute } from "../spend-grants.mjs";
 
