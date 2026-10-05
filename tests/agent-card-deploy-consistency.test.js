@@ -104,10 +104,13 @@ test("checkAgentCard rejects a broken second JWS even when the first verifies (r
   card.signatures = [card.signatures[0], second];
   // Sanity: both valid entries pass — the loop must not flag a good second.
   assert.deepEqual(checkAgentCard({ card, ...opts }), []);
-  // Break only the second entry. The pre-fix check verified signatures[0]
-  // alone, so this passed silently; every entry must be verified.
+  // Break only the second entry. The corruption flips the FIRST base64url
+  // character (it encodes six full data bits, so the decoded bytes are
+  // guaranteed to differ — flipping the last character is not enough, its
+  // low bits are padding). The pre-fix check verified signatures[0] alone,
+  // so this passed silently; every entry must be verified.
   const sig = second.signature;
-  const broken = { ...second, signature: sig.slice(0, -1) + (sig.endsWith("A") ? "B" : "A") };
+  const broken = { ...second, signature: (sig[0] === "A" ? "B" : "A") + sig.slice(1) };
   card.signatures = [card.signatures[0], broken];
   const failures = checkAgentCard({ card, ...opts });
   assert.ok(
