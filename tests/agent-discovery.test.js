@@ -557,6 +557,7 @@ test("anonymous MCP catalog is six tools (four join + two public-work); copy nev
   assert.ok(!/four-tool catalog/i.test(text), "llms.txt must not call the anonymous catalog four-tool");
   assert.ok(!/tools\/list is the four( public join)? tools/i.test(text), "llms.txt must not say no-credential tools/list is only four tools");
 });
+
 test("llms.txt follows the llmstxt.org header: H1, summary blockquote, Start here links", () => {
   const text = llmsTxt();
   // llmstxt.org: H1, then a blockquote summary, before anything else.
@@ -568,4 +569,9 @@ test("llms.txt follows the llmstxt.org header: H1, summary blockquote, Start her
   const startHere = text.slice(text.indexOf("## Start here"));
   assert.match(startHere, /\[.*\]\(https:\/\/room\.trydemigod\.com\/llms-full\.txt\)/);
   assert.match(startHere, /\[.*\]\(https:\/\/www\.getdasha\.com\/room\/mcp\)/);
+});
+
+test("llms.txt names room.trydemigod.com/mcp as the one canonical MCP URL (QA4 D8/D-a)", () => {
+  const text = llmsTxt();
+  assert.match(text, /One canonical MCP URL: paste https:\/\/room\.trydemigod\.com\/mcp/);
 });
