@@ -276,6 +276,7 @@ test("void releases the reservation; settle/void are idempotent", async t => {
   const handle2 = authorizeSpend(f.store.db, { roomId, agentId, toolName: "room_put_file", priceCents: 5, nonce: "v2", nowMs: now });
   assert.equal(handle2.settle(), true);
   assert.equal(handle2.settle(), false, "second settle is a no-op");
+  assert.equal(voidSpend(f.store.db, { roomId, agentId, nonce: "v2" }), false, "settled rows cannot be voided");
   assert.equal(settleSpend(f.store.db, { roomId, agentId, nonce: "v1" }), false, "voided rows cannot be settled");
 });
 
