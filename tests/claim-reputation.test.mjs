@@ -273,6 +273,13 @@ test("laneClaimBondVisibility reports the band and score decayed to now", () => 
 
 // --- journal sync ------------------------------------------------------------
 
+test("ensureClaimReputationSchema creates the journal table", () => {
+  const db = new DatabaseSync(":memory:");
+  ensureClaimReputationSchema(db);
+  const cols = db.prepare("PRAGMA table_info(claim_reputation_signals)").all().map(c => c.name);
+  assert.deepEqual(cols, ["id", "claim_id", "kind", "agent_id", "weight", "at", "room_id", "room_seq"]);
+});
+
 function eventDb() {
   const db = new DatabaseSync(":memory:");
   db.exec("CREATE TABLE events (room_id TEXT, sequence INTEGER, id TEXT, body TEXT)");
