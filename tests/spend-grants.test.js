@@ -374,4 +374,12 @@ test("route table: the three spend-grant routes are registered with room auth", 
     assert.equal(typeof route.handler, "function");
   }
   assert.equal(typeof byId["issue-spend-grant"].handler, "function");
+  // Regression (buildqa 2026-10-04): the RT row schema drifted from
+  // docs/openapi.yaml and the handler — expiresAt was typed "string" while
+  // both the public spec and issueSpendGrant take epoch-ms integers, and the
+  // required fields the spec lists were missing. The openapi gate only checks
+  // method coverage, so this guards the schema contract at its owner.
+  const issueBody = byId["issue-spend-grant"].schema.body;
+  assert.deepEqual(issueBody.required, ["agentId", "capCents", "perTxCapCents"]);
+  assert.equal(issueBody.properties.expiresAt.type, "integer");
 });
