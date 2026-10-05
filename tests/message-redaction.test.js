@@ -111,6 +111,8 @@ test("deleting a message removes its text from storage and every listed read", a
   store.roomAttachments.commit(ownerKey, "commons", { id: "secret-file", messageId: "edited" });
   cmd(T.MESSAGE_EDITED, { messageId: "edited", body: EDITED[1], expectedMessageRevision: 0 });
   cmd(T.MESSAGE_EDITED, { messageId: "edited", body: EDITED[2], expectedMessageRevision: 1 });
+  while (!store.backfillMessages({ limit: 400 }).done) { /* populate persisted replay state before deletion */ }
+  assert.ok(databaseText(store.db).includes(EDITED[2]), 'positive control: replay cache contains the live text');
   cmd(T.MESSAGE_DELETED, { messageId: "edited", expectedMessageRevision: 2, reason: "remove" });
   cmd(T.MESSAGE_POSTED, { messageId: "root", body: "visible-root" });
   cmd(T.MESSAGE_POSTED, { messageId: "thread", body: THREAD, replyToId: "root", alsoSendToChannel: true });

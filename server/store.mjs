@@ -1636,9 +1636,17 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // before installWriterFence attaches the v37 triggers. IF NOT EXISTS
       // is idempotent. A warm wake whose stamp matches skips this block.
       this.db.exec(MESSAGES_SCHEMA);
+      // v38 preserves complete current message records. Existing rows remain
+      // null until the budgeted replay fills them; never scan history on open.
+      if (!this.db.prepare("SELECT 1 FROM pragma_table_info('messages') WHERE name='record_json'").get()) {
+        this.db.exec("ALTER TABLE messages ADD COLUMN record_json TEXT");
+      }
       // MSG-2: replay cursor. Unfenced. The integrity cron fills it. A warm
       // wake whose stamp matches skips this block; the stamp includes this DDL.
       this.db.exec(MESSAGES_BACKFILL_CURSOR_SCHEMA);
+      if (version > 0 && version < 38) {
+        this.db.prepare("DELETE FROM messages_backfill_cursor").run();
+      }
       // BOARD-WAKE-2: opt-in ready-work preference. Unfenced, empty until an
       // agent opts in. The stamp includes this DDL.
       this.db.exec(WANTS_WORK_SCHEMA);
@@ -3889,6 +3897,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.db.prepare("DELETE FROM membership_invitations WHERE room_id=?").run(roomId);
       // Reader cursors point into the old history; reset them.
       this.db.prepare("DELETE FROM cursors WHERE room_id=?").run(roomId);
+      // Replacing history may preserve the head id and sequence. Invalidate
+      // message replay snapshots and full-record certification explicitly.
+      this.db.prepare("DELETE FROM messages_backfill_cursor WHERE room_id=?").run(roomId);
       // The projection checkpoint is a replay accelerator over the old
       // history — a stale checkpoint would corrupt rebuildProjection, so
       // replace it with one taken from the imported state.

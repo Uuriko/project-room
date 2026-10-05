@@ -3,6 +3,7 @@
 // makes the old text unreadable in storage.
 
 import { applyEvent, event, EVENT_TYPES, isRoomArchived } from "../src/events.js";
+import { syncMessageRows } from "./messages-store.mjs";
 
 const compact = state => ({ ...state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} });
 
@@ -98,12 +99,20 @@ export function commitMessageRedaction(db, { roomId, state, actorId, at, message
       next = applyEvent(next, incoming);
       sequence += 1;
       insert.run(roomId, sequence, incoming.id, JSON.stringify(incoming));
+      syncMessageRows(db, { roomId, sequence, event: incoming, state: next });
     }
   }
 
   const ids = messageId.endsWith(":channel") ? [messageId] : [messageId, `${messageId}:channel`];
   try {
     db.prepare(`UPDATE messages SET body=NULL, deleted_at=COALESCE(deleted_at, ?) WHERE room_id=? AND message_id IN (${ids.map(() => "?").join(",")})`).run(at, roomId, ...ids);
+    if (isRoomArchived(state)) {
+      db.prepare(`UPDATE messages SET record_json=NULL WHERE room_id=? AND message_id IN (${ids.map(() => "?").join(",")})`).run(roomId, ...ids);
+    }
+    // A replay snapshot may retain old edit text and attachment metadata.
+    // Clear it in the same deletion transaction; the next backfill reconstructs
+    // its prefix from the already-redacted log instead of resurrecting text.
+    db.prepare("UPDATE messages_backfill_cursor SET state_json=NULL, state_seq=0, parity_at_seq=NULL WHERE room_id=?").run(roomId);
   } catch (error) {
     if (!/no such table/i.test(error?.message ?? "")) throw error;
   }
