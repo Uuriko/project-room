@@ -30,6 +30,15 @@ Deploy only a commit that is on `main` and whose `test` and `schema-gate` push r
 
 When the repository variable `ROOM_AUTO_DEPLOY` is `1`, `deploy-prod` also runs after `test` or `schema-gate` completes on `main`. It deploys only the current main tip, only when both gates are green, and only if production does not already report that commit. The variable is unset by default.
 
+### Deploy through an explicitly marked commit
+
+If an authorized GitHub connection can merge code but cannot dispatch Actions,
+start the merged commit title with `[deploy-production]`. The existing
+`workflow_run` trigger then requests this commit's release after `test` or
+`schema-gate` completes. Both gates must still pass. The commit must remain
+the current main tip. Signing, smoke, serialized uploads, and rollback stay
+unchanged. Ordinary commits do not opt in when `ROOM_AUTO_DEPLOY` is unset.
+
 ### Optional onboarding gate
 
 When the repository variable `ROOM_ONBOARDING_GATE` is `1`, a `probe` job runs between the green-sha check and the deploy. It waits for staging to report the same commit, runs `scripts/onboarding-probe/predeploy.mjs`, and blocks the deploy on a regression (see [ONBOARDING-PROBE.md](ONBOARDING-PROBE.md#pre-deploy-gate)). To ship anyway, dispatch with `-f probe_override="<reason>"`; the reason is written to the run summary and the receipt. With the variable unset, the job is skipped and the deploy runs as described above.
