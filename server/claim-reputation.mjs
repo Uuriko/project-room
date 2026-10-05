@@ -108,24 +108,30 @@ const laneOf = value => typeof value === "string" && value.length > 0 ? value : 
 // previousOwnerId, verdict, ...).
 function foldClaims(rows) {
   const signals = [];
-  const open = new Map();    // claimId -> ownerId (observed open positions)
-  const seen = new Map();    // claimId -> true (ever observed, for mid-history terminals)
+  // Positions are keyed by (roomId, claimId): claim slugs are only unique
+  // within a room, and the events table carries every room's claims, so a
+  // claimId-only key mixes positions across rooms (wrong hoarding counts,
+  // wrong attribution, dropped signals).
+  const posKey = (roomId, claimId) => `${roomId}\0${claimId}`;
+  const open = new Map();    // posKey -> ownerId (observed open positions)
+  const seen = new Map();    // posKey -> true (ever observed, for mid-history terminals)
   const laneOpen = new Map(); // agentId -> open-claim count at the fold frontier
   const inc = agent => laneOpen.set(agent, (laneOpen.get(agent) ?? 0) + 1);
   const dec = agent => {
     const n = (laneOpen.get(agent) ?? 0) - 1;
     if (n <= 0) laneOpen.delete(agent); else laneOpen.set(agent, n);
   };
-  const openPosition = (claimId, agent) => { open.set(claimId, agent); inc(agent); };
-  const closePosition = claimId => {
-    const agent = open.get(claimId);
+  const openPosition = (key, agent) => { open.set(key, agent); inc(agent); };
+  const closePosition = key => {
+    const agent = open.get(key);
     if (agent !== undefined) dec(agent);
-    open.delete(claimId);
+    open.delete(key);
     return agent ?? null;
   };
-  const emit = (claimId, row, agent, type) => {
-    seen.set(claimId, true);
+  const emit = (key, claimId, row, agent, type) => {
+    seen.set(key, true);
     signals.push(Object.freeze({
+      roomId: typeof row?.roomId === "string" ? row.roomId : null,
       claimId, seq: row.seq, at: row.atMs, agent, type,
       weight: BOUNTY_SIGNAL_WEIGHTS[type]
     }));
@@ -137,8 +143,10 @@ function foldClaims(rows) {
     const claimId = typeof data.workClaim === "string" ? data.workClaim : null;
     const action = typeof data.action === "string" ? data.action : null;
     if (!claimId || !action) continue;
-    const position = open.get(claimId) ?? null;
-    const observed = seen.has(claimId);
+    const roomId = typeof row?.roomId === "string" ? row.roomId : "";
+    const key = posKey(roomId, claimId);
+    const position = open.get(key) ?? null;
+    const observed = seen.has(key);
 
     switch (action) {
       case "claimed": {
@@ -146,45 +154,45 @@ function foldClaims(rows) {
         const agent = laneOf(data.ownerId);
         if (!position && agent && !observed) {
           // Hoarding surcharge, posted at claim time: cost, not prohibition.
-          if ((laneOpen.get(agent) ?? 0) >= HOARDING_CAP) emit(claimId, row, agent, "claim_hoarded");
-          openPosition(claimId, agent);
-          seen.set(claimId, true);
+          if ((laneOpen.get(agent) ?? 0) >= HOARDING_CAP) emit(key, claimId, row, agent, "claim_hoarded");
+          openPosition(key, agent);
+          seen.set(key, true);
         }
         break;
       }
       case "state_changed": {
         const state = data.claimState;
         if (state === "done") {
-          if (position) { emit(claimId, row, position, "claim_completed"); closePosition(claimId); }
+          if (position) { emit(key, claimId, row, position, "claim_completed"); closePosition(key); }
           else if (!observed) {
             // Mid-history completion: the lane did real work we never saw
             // claimed; price it once, then mark seen so repeats stay silent.
             const who = laneOf(data.ownerId);
-            if (who) emit(claimId, row, who, "claim_completed");
-            else seen.set(claimId, true);
+            if (who) emit(key, claimId, row, who, "claim_completed");
+            else seen.set(key, true);
           }
           // done on a seen-but-closed claim: duplicate terminal, silent.
         } else if ((state === "claimed" || state === "in_progress") && !position && !observed) {
           // The observer started mid-history: an owned, unfinished claim is
           // treated as open from first sight (same shape as the P0 shadow).
           const agent = laneOf(data.ownerId);
-          if (agent) { openPosition(claimId, agent); seen.set(claimId, true); }
+          if (agent) { openPosition(key, agent); seen.set(key, true); }
         }
         break;
       }
       case "released": {
-        if (position) { emit(claimId, row, position, "claim_released"); closePosition(claimId); }
+        if (position) { emit(key, claimId, row, position, "claim_released"); closePosition(key); }
         else if (!observed) {
           const who = laneOf(data.ownerId);
-          if (who) emit(claimId, row, who, "claim_released");
-          else seen.set(claimId, true);
+          if (who) emit(key, claimId, row, who, "claim_released");
+          else seen.set(key, true);
         }
         break;
       }
       case "reassigned": {
         const next = laneOf(data.ownerId);
-        if (position && next && next !== position) { dec(position); openPosition(claimId, next); }
-        else if (!position && next && !observed) { openPosition(claimId, next); seen.set(claimId, true); }
+        if (position && next && next !== position) { dec(position); openPosition(key, next); }
+        else if (!position && next && !observed) { openPosition(key, next); seen.set(key, true); }
         break;
       }
       case "lease_expired": {
@@ -194,17 +202,17 @@ function foldClaims(rows) {
         // tell "worked off-board" from "abandoned".
         if (position || !observed) {
           const who = laneOf(data.previousOwnerId) ?? position ?? laneOf(data.ownerId);
-          if (who) emit(claimId, row, who, "claim_flaked");
-          else seen.set(claimId, true);
+          if (who) emit(key, claimId, row, who, "claim_flaked");
+          else seen.set(key, true);
         }
-        closePosition(claimId);
+        closePosition(key);
         break;
       }
       case "reviewed": {
         if (data.verdict === "changes_requested" && (position || !observed)) {
           const who = laneOf(data.ownerId) ?? position;
-          if (who) emit(claimId, row, who, "claim_judged_bad");
-          else seen.set(claimId, true);
+          if (who) emit(key, claimId, row, who, "claim_judged_bad");
+          else seen.set(key, true);
           // The position stays OPEN: the P1 spec counts positions open until
           // done/released/expired, and server/work-claims.mjs keeps a claim
           // active after a review (review only records an attestation). A
@@ -284,7 +292,10 @@ const INSERT_SIGNAL = `INSERT OR IGNORE INTO claim_reputation_signals
   (id, claim_id, kind, agent_id, weight, at, room_id, room_seq)
   VALUES (?,?,?,?,?,?,?,?)`;
 
-const signalId = (claimId, type, roomSeq) => `claimrep:${claimId}:${type}:${roomSeq}`;
+// Signal IDs carry the room: claim slugs are only unique within a room and
+// per-room sequences restart at 1, so a room-less id collides across rooms
+// and INSERT OR IGNORE silently drops the second room's signal.
+const signalId = (roomId, claimId, type, roomSeq) => `claimrep:${roomId}:${claimId}:${type}:${roomSeq}`;
 
 function parseEventRow(row) {
   try {
@@ -304,6 +315,17 @@ function parseEventRow(row) {
 // section names (weekly diff against the 2026-10-05 baseline).
 export function syncClaimReputationJournal(db, { roomId = null } = {}) {
   ensureClaimReputationSchema(db);
+  // One-time format migration: pre-fix signal ids were
+  // claimrep:{claimId}:{type}:{seq} with no room, so two rooms sharing a
+  // claim slug collide. The journal is a pure fold of the events table, so
+  // stale-format rows are purged and re-derived below — no data loss, no
+  // double count. New ids always start with `claimrep:{room_id}:`.
+  const purge = db.prepare(`DELETE FROM claim_reputation_signals WHERE id = ?`);
+  for (const stale of db.prepare(`SELECT id, room_id FROM claim_reputation_signals`).all()) {
+    if (typeof stale.room_id !== "string" || !stale.id.startsWith(`claimrep:${stale.room_id}:`)) {
+      purge.run(stale.id);
+    }
+  }
   const rows = db.prepare(
     `SELECT room_id, sequence, body FROM events
      WHERE json_extract(body,'$.type')='work_claim.updated'
@@ -316,14 +338,13 @@ export function syncClaimReputationJournal(db, { roomId = null } = {}) {
     if (event) parsed.push(event);
   }
   const { signals } = foldClaims(parsed);
-  const roomBySeq = new Map(parsed.map(r => [r.seq, r.roomId]));
   const insert = db.prepare(INSERT_SIGNAL);
   let written = 0;
   const insertOne = s => {
     written += insert.run(
-      signalId(s.claimId, s.type, s.seq),
+      signalId(s.roomId, s.claimId, s.type, s.seq),
       s.claimId, s.type, s.agent, s.weight, s.at,
-      roomBySeq.get(s.seq) ?? null, s.seq
+      s.roomId, s.seq
     ).changes;
   };
   const write = db.transaction

@@ -327,3 +327,43 @@ test("syncClaimReputationJournal scopes by room and ignores other event types", 
   assert.equal(res.eventsRead, 2);
   assert.equal(res.signalsWritten, 1);
 });
+
+// --- cross-room isolation ----------------------------------------------------
+
+test("cross-room: same claim slug in two rooms folds and syncs independently", () => {
+  const db = eventDb();
+  insertEvent(db, "room-a", 1, "work_claim.updated", { workClaim: "dup", action: "claimed", claimState: "claimed", ownerId: "lane-a" }, T0);
+  insertEvent(db, "room-b", 1, "work_claim.updated", { workClaim: "dup", action: "claimed", claimState: "claimed", ownerId: "lane-b" }, T0);
+  insertEvent(db, "room-a", 2, "work_claim.updated", { workClaim: "dup", action: "state_changed", claimState: "done", ownerId: "lane-a" }, T0 + 60_000);
+  insertEvent(db, "room-b", 2, "work_claim.updated", { workClaim: "dup", action: "state_changed", claimState: "done", ownerId: "lane-b" }, T0 + 60_000);
+  const res = syncClaimReputationJournal(db); // broad sync, no room filter
+  assert.equal(res.signalsWritten, 2, "both rooms' signals land — no INSERT OR IGNORE collision");
+  const rows = db.prepare("SELECT agent_id AS agentId, room_id AS roomId FROM claim_reputation_signals ORDER BY room_id").all();
+  assert.deepEqual(rows.map(r => [r.roomId, r.agentId]), [["room-a", "lane-a"], ["room-b", "lane-b"]]);
+  const again = syncClaimReputationJournal(db);
+  assert.equal(again.signalsWritten, 0, "re-sync changes nothing");
+});
+
+test("cross-room: stale single-room signal IDs are purged on sync", () => {
+  const db = eventDb();
+  ensureClaimReputationSchema(db);
+  db.prepare("INSERT INTO claim_reputation_signals (id, claim_id, kind, agent_id, weight, at, room_id, room_seq) VALUES (?,?,?,?,?,?,?,?)")
+    .run("claimrep:dup:claim_completed:2", "dup", "claim_completed", "lane-a", 3, T0, "room-a", 2);
+  insertEvent(db, "room-a", 1, "work_claim.updated", { workClaim: "dup", action: "claimed", claimState: "claimed", ownerId: "lane-a" }, T0);
+  insertEvent(db, "room-a", 2, "work_claim.updated", { workClaim: "dup", action: "state_changed", claimState: "done", ownerId: "lane-a" }, T0 + 60_000);
+  const res = syncClaimReputationJournal(db, { roomId: "room-a" });
+  assert.equal(res.signalsWritten, 1);
+  const rows = db.prepare("SELECT id FROM claim_reputation_signals").all();
+  assert.equal(rows.length, 1, "no duplicate: stale row purged, fresh row inserted");
+  assert.ok(rows[0].id.startsWith("claimrep:room-a:"), `id carries the room: ${rows[0].id}`);
+});
+
+test("cross-room: fold tracks same-slug positions separately per room", () => {
+  const rows = [
+    { roomId: "room-a", seq: 1, atMs: T0, data: { workClaim: "dup", action: "claimed", claimState: "claimed", ownerId: "lane-a" } },
+    { roomId: "room-b", seq: 1, atMs: T0, data: { workClaim: "dup", action: "claimed", claimState: "claimed", ownerId: "lane-b" } }
+  ];
+  const p = projectClaimReputation(rows, { nowMs: T0 });
+  assert.equal(p.openClaims.get("lane-a"), 1);
+  assert.equal(p.openClaims.get("lane-b"), 1, "room-b's claim opens its own position");
+});
