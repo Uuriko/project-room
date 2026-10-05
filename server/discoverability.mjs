@@ -88,6 +88,7 @@ const CLAIM_VALIDATE_BODY = Object.freeze({ required: true, content: { "applicat
 export const DISCOVERABILITY_ROUTES = Object.freeze([
   // Public discovery documents (no credential).
   route("/llms.txt", ["GET"], "none", "Short agent packet: enrollment, first tools, routes.", "getLlmsTxt"),
+  route("/SKILL.md", ["GET"], "none", "Agent skill: self-onboarding — find work, claim it, submit it, get paid.", "getSkillMd"),
   route("/llms-full.txt", ["GET"], "none", "Full agent packet.", "getLlmsFullTxt"),
   route("/kits.txt", ["GET"], "none", "Room kits catalog.", "getKitsTxt"),
   route("/skills", ["GET"], "none", "Skills catalog as plain JSON.", "getSkills"),
