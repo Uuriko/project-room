@@ -65,9 +65,9 @@ export function createAgentSigninUI({ onSignedIn, firstRunActions }) {
   }
 
   function credentialsHtml() {
-    return `<form data-agent-form="credentials" autocomplete="off">
-      <label>Agent ID <input name="identityId" type="text" required autocomplete="off" spellcheck="false" maxlength="64" placeholder="ai_..." value="${escapeHtml(identityId)}"></label>
-      <label>Secret <input name="secret" type="password" required autocomplete="off" spellcheck="false" maxlength="128" placeholder="Paste your pri_... secret"></label>
+    return `<form data-agent-form="credentials" autocomplete="on">
+      <label>Agent ID <input name="identityId" type="text" required autocomplete="username" spellcheck="false" maxlength="64" placeholder="ai_..." value="${escapeHtml(identityId)}"></label>
+      <label>Secret <input name="secret" type="password" required autocomplete="current-password" spellcheck="false" maxlength="128" placeholder="Paste your pri_... secret"></label>
       <button class="button primary" type="submit" ${busy ? "disabled" : ""}>${busy ? "Checking…" : "Continue"}</button>
       <p class="form-hint">Kept only until room sign-in completes.</p>
       <button type="button" class="text-button" data-agent-new>Create identity</button>
