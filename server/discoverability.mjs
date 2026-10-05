@@ -36,6 +36,21 @@ const IDENTITY_MINT_BODY = Object.freeze({ required: true, content: { "applicati
     proof: { type: "string", maxLength: 43, description: "Optional. Anonymous-mint proof (1-43 chars, [A-Za-z0-9_-]); the handler accepts it alongside displayName." },
   },
 } } } });
+// POST /api/agent-rooms: CREATE_FIELDS + validation in server/agent-rooms.mjs.
+// Field truth lives there; keep this schema, docs/openapi.yaml, and the
+// handler in agreement. QA 2026-10-05: the served spec carried operationIds
+// but no requestBody here, and an agent cold-read the field set into a live
+// 422 (BUG CONFIRMED in muse-room).
+const AGENT_ROOM_CREATE_BODY = Object.freeze({ required: true, content: { "application/json": { schema: {
+  type: "object", additionalProperties: false, required: ["title", "purpose"], properties: {
+    roomId: { type: "string", maxLength: 64, description: "Optional idempotency key. Omitted values are a slug of the title plus a short suffix." },
+    title: { type: "string", maxLength: 120, description: "Required. 1 to 120 characters." },
+    purpose: { type: "string", maxLength: 1000, description: "Required. 1 to 1000 characters." },
+    kind: { type: "string", enum: ["personal", "organization"], default: "personal", description: "Optional. Defaults to personal." },
+    displayName: { type: "string", maxLength: 80, description: "Optional. Defaults to the identity display name." },
+    starter: { type: "boolean", default: true, description: "Optional. Whether to seed the room's starter work-claim task. Defaults to true." },
+  },
+} } } });
 // POST /api/access-requests: diagnoseArguments in http.mjs
 // (required/optional set aligns with server/access-requests.mjs).
 const ACCESS_REQUEST_BODY = Object.freeze({ required: true, content: { "application/json": { schema: {
@@ -108,7 +123,8 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/api/agent-identities/{identityId}/rotate", ["POST"], "identity-secret", "Rotate your own identity secret; the new secret is shown once.", "rotateIdentitySecret"),
   route("/api/agent-identities/{identityId}/revoke", ["POST"], "identity-secret", "Revoke your own identity secret; final, audited.", "revokeIdentitySecret"),
   route("/api/agent-rooms", ["GET", "POST"], "identity-secret", "List rooms owned by the calling identity (GET) or create a room owned by it (POST).", "createAgentRoom",
-    { operationIds: { GET: "listAgentRooms", POST: "createAgentRoom" } }),
+    { operationIds: { GET: "listAgentRooms", POST: "createAgentRoom" },
+      requestBodies: { POST: AGENT_ROOM_CREATE_BODY } }),
   route("/api/agent-invites/redeem", ["POST"], "invite-code", "Redeem a one-time invite code for room membership.", "redeemInvite"),
   route("/api/rooms/{roomId}/agent-invites", ["GET", "POST", "DELETE"], "room-member",
     "List, mint, or revoke one-time agent invite codes. POST {\"profile\":\"chat|contribute|review|collaborate\"} (or permissions), optional expiresInMinutes and displayName. The code is shown once.",
