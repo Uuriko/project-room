@@ -10,6 +10,7 @@
   --room-rule: var(--line);
   --room-dark: var(--panel);
   --room-green: var(--green);
+  --room-red: var(--red);
   font-family: var(--font-sans), "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", emoji;
 }
 [data-theme="light"] {
@@ -357,13 +358,13 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 .presence-working { background: var(--room-green); box-shadow: 0 0 0 2px color-mix(in srgb, var(--green) 35%, transparent); }
 .presence-listening { background: var(--room-green); }
 .presence-idle { background: var(--room-quiet); }
-.presence-unreachable { background: var(--room-red, #ef4444); }
+.presence-unreachable { background: var(--room-red); }
 .member-state-chip { display: inline-block; margin-left: .35rem; padding: .05rem .4rem; border-radius: 999px; font-size: .68rem; font-weight: 700; letter-spacing: .02em; background: rgb(255 255 255 / 6%); color: var(--muted); vertical-align: middle; }
 .member-state-chip[data-state="working"] { background: color-mix(in srgb, var(--green) 15%, transparent); color: var(--room-green); }
-.member-state-chip[data-state="unreachable"] { background: rgb(239 68 68 / 15%); color: var(--room-red, #ef4444); }
+.member-state-chip[data-state="unreachable"] { background: color-mix(in srgb, var(--red) 15%, transparent); color: var(--room-red); }
 .member-working-on { display: block; font-size: .78rem; color: var(--muted); font-style: italic; }
 .member-owned-by { display: block; font-size: .75rem; color: var(--room-quiet); }
-.owner-chip { display: inline-block; margin-left: .35rem; padding: .05rem .4rem; border-radius: 999px; font-size: .68rem; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; background: rgb(250 204 21 / 15%); color: #facc15; vertical-align: middle; }
+.owner-chip { display: inline-block; margin-left: .35rem; padding: .05rem .4rem; border-radius: 999px; font-size: .68rem; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; background: color-mix(in srgb, var(--amber) 15%, transparent); color: var(--amber); vertical-align: middle; }
 /* Round-2 #117: done chip — marks terminally finished work at a glance.
    UI calming #10: consolidated here (was defined twice; the later rule won). */
 .done-chip { flex: 0 0 auto; display: inline-grid; place-items: center; gap: .25rem; min-height: 1.15rem; padding: .05rem .38rem; border: 1px solid var(--room-rule); border-radius: 99px; background: color-mix(in srgb, var(--room-green) 16%, var(--room-dark)); color: var(--room-green); font-size: .58rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; }
