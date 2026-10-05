@@ -46,6 +46,7 @@ const agentIdParam = Object.freeze({
 
 const grantBody = Object.freeze({
   type: "object",
+  required: ["agentId", "capCents", "perTxCapCents"],
   additionalProperties: false,
   properties: {
     agentId: { type: "string" },
@@ -53,7 +54,7 @@ const grantBody = Object.freeze({
     perTxCapCents: { type: "string" },
     allowlist: { type: "array", items: { type: "string" } },
     singleUse: { type: "boolean" },
-    expiresAt: { type: "string" },
+    expiresAt: { type: "integer" },
   },
 });
 
