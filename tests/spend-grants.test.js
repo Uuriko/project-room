@@ -214,10 +214,18 @@ test("cap, per-tx cap, allowlist, and nonce replay are enforced", async t => {
   assert.equal(perTx.detail.reason, "per_tx_cap_exceeded");
   // Allowlist: a priced tool outside it is denied, not charged.
   spendError(() => authz("add_land_item", 1, "n4"), { status: 403, code: "spend_tool_not_allowlisted" });
-  // Nonce replay: the same (grant, nonce) never authorizes twice.
-  const once = authz("room_put_file", 4, "n5");
-  spendError(() => authz("room_put_file", 4, "n5"), { status: 409, code: "duplicate_nonce" });
-  once.settle();
+  // Nonce replay: the same (grant, nonce) never authorizes twice. A
+  // re-presented reserved nonce returns the live authorization (crash
+  // recovery); a settled one returns its receipt (exactly-once); only a
+  // voided nonce stays consumed.
+  const first = authz("room_put_file", 4, "n5");
+  assert.ok(first && !first.replayed, "first presentation authorizes");
+  const again = authz("room_put_file", 4, "n5");
+  assert.equal(again.replayed, "reserved", "reserved nonce re-presents the live authorization");
+  assert.equal(again.settle(), true, "settling through the replayed handle settles once");
+  const receipt = authz("room_put_file", 4, "n5");
+  assert.equal(receipt.replayed, "settled", "settled nonce re-presents its receipt");
+  assert.equal(receipt.settle(), true, "re-settling the receipt is idempotent");
   assert.equal(spendGrantSummary(f.store.db, roomId, agentId, { nowMs: now }).remainingCents, "0");
 });
 
@@ -230,6 +238,8 @@ test("void releases the reservation; settle/void are idempotent", async t => {
   assert.equal(spendGrantSummary(f.store.db, roomId, agentId, { nowMs: now }).remainingCents, "5");
   assert.equal(handle.void(), true);
   assert.equal(handle.void(), false, "second void is a no-op");
+  spendError(() => authorizeSpend(f.store.db, { roomId, agentId, toolName: "room_put_file", priceCents: 5, nonce: "v1", nowMs: now }),
+    { status: 409, code: "duplicate_nonce" });
   assert.equal(spendGrantSummary(f.store.db, roomId, agentId, { nowMs: now }).remainingCents, "10");
   const handle2 = authorizeSpend(f.store.db, { roomId, agentId, toolName: "room_put_file", priceCents: 5, nonce: "v2", nowMs: now });
   assert.equal(handle2.settle(), true);

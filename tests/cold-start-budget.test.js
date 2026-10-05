@@ -28,7 +28,8 @@ const EMPTY_UNTIL_CRON = new Set([
   "agent_wants_work",
   // Spend grants and authorizations exist only after an owner issues a grant.
   "spend_grant_terms",
-  "spend_authorizations"
+  "spend_authorizations",
+  "spend_room_reservations"
 ]);
 
 const EVENTS = 200_000;

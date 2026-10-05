@@ -313,14 +313,18 @@ export const unfencedAdditiveTables = Object.freeze([
   // Purely additive and intentionally NOT fenced — older writers have no
   // code path to it, and server/grants.mjs verifies its own schema on open.
   "agent_capability_grants",
-  // spend_grant_terms + spend_authorizations (spend-primitive MVP,
-  // qa4-spend-mvp-jill): per-agent spend caps and the charge-then-forward
-  // ledger. Purely additive and intentionally NOT fenced — older writers
-  // have no code path to them, and server/spend-grants.mjs verifies its own
-  // schema on open. Rows never grant permission by themselves; the
-  // capability edge in agent_capability_grants is the liveness switch.
+  // spend_grant_terms + spend_authorizations + spend_room_reservations
+  // (spend-primitive MVP, qa4-spend-mvp-jill; reservations added by
+  // qaD-fix-spend-race for cumulative room-allowance enforcement):
+  // per-agent spend caps, the charge-then-forward ledger, and the
+  // in-flight room-allowance reservations. Purely additive and
+  // intentionally NOT fenced — older writers have no code path to them,
+  // and server/spend-grants.mjs verifies its own schema on open. Rows
+  // never grant permission by themselves; the capability edge in
+  // agent_capability_grants is the liveness switch.
   "spend_grant_terms",
   "spend_authorizations",
+  "spend_room_reservations",
   // referral_invite_keys + referral_invites + referral_chain_members
   // (signed agent-carried referral invites): per-room Ed25519 signing keys
   // (private half never leaves the database), the private mint/redeem/
