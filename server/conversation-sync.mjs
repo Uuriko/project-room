@@ -73,18 +73,20 @@ export function readConversation(store, token, roomId, { limit = 50, cursor = nu
     const before = cursor !== null ? saved.before : Number.MAX_SAFE_INTEGER;
     // PRIV-2: a since_join reader pages only messages from their join onward.
     const floor = store.historyFloor(roomId, auth.member.id);
-    const exclusions = [...(floor?.sameInstant ?? [])];
+    // One JSON parameter keeps complete same-instant exclusions within Worker
+    // SQLite's bind limit even for large imported equal-timestamp histories.
+    const exclusions = JSON.stringify([...(floor?.sameInstant ?? [])]);
     const rows = (indexed ? store.db.prepare(`SELECT seq AS position, message_id AS messageId, record_json AS body
       FROM messages WHERE room_id=? AND (seq<? OR (seq=? AND message_id<?))
         AND (to_member_id IS NULL OR to_member_id='' OR author_id=? OR to_member_id=?)
         AND (? IS NULL OR (COALESCE(NULLIF(channel_id,''),?)=? AND (to_member_id IS NULL OR to_member_id='')))
         AND (? IS NULL OR message_id=?)
         AND (? IS NULL OR created_at>=?)
-        ${exclusions.length ? `AND (created_at>? OR message_id NOT IN (${exclusions.map(() => "?").join(",")}))` : ""}
+        AND (? IS NULL OR created_at>? OR message_id NOT IN (SELECT value FROM json_each(?)))
       ORDER BY seq DESC, message_id DESC LIMIT ?`)
       .all(roomId, before, before, cursor !== null ? saved.beforeId : "", auth.member.id, auth.member.id,
         channelId, DEFAULT_CHANNEL_ID, channelId, messageId, messageId, floor?.at ?? null, floor?.at ?? null,
-        ...(exclusions.length ? [floor.at, ...exclusions] : []), messageId === null ? limit + 1 : 1)
+        floor?.at ?? null, floor?.at ?? null, exclusions, messageId === null ? limit + 1 : 1)
       : store.db.prepare(`SELECT CAST(m.key AS INTEGER) AS position, json_remove(m.value, '$.editHistory') AS body
       FROM rooms r, json_each(r.projection, '$.messages') m
       WHERE r.id=? AND CAST(m.key AS INTEGER)<?
@@ -95,9 +97,12 @@ export function readConversation(store, token, roomId, { limit = 50, cursor = nu
           AND (json_extract(m.value,'$.toMemberId') IS NULL OR json_extract(m.value,'$.toMemberId')='')))
         AND (? IS NULL OR json_extract(m.value,'$.id')=?)
         AND (? IS NULL OR json_extract(m.value,'$.createdAt')>=?)
+        AND (? IS NULL OR json_extract(m.value,'$.createdAt')>?
+          OR json_extract(m.value,'$.id') NOT IN (SELECT value FROM json_each(?)))
       ORDER BY CAST(m.key AS INTEGER) DESC LIMIT ?`)
       .all(roomId, before, auth.member.id, auth.member.id, channelId, DEFAULT_CHANNEL_ID, channelId,
-        messageId, messageId, floor?.at ?? null, floor?.at ?? null, messageId === null ? limit + 1 : 1))
+        messageId, messageId, floor?.at ?? null, floor?.at ?? null,
+        floor?.at ?? null, floor?.at ?? null, exclusions, messageId === null ? limit + 1 : 1))
       .filter(row => !floor || messageInHistory(JSON.parse(row.body), floor));
     if (messageId !== null && !rows.length) fail(404, "message_not_found", "Message not found");
     const selected = [];

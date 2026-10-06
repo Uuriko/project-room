@@ -54,6 +54,17 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     assert.deepEqual(olderPage.messages.map(message => message.id), ['older']);
     assert.equal(olderPage.nextCursor, null);
     assert.equal((await json(await call('/api/rooms/returning-agent/conversation?limit=1&channelId=general&since=' + encodeURIComponent(conversation.checkpoint), { headers: identityHeaders }))).mode, 'not_modified');
+    // Distinct platform risk: a complete equal-time exclusion set exceeds
+    // Worker's SQLite placeholder budget unless encoded as bounded bindings.
+    const history = await json(await call('/__test-conversation-history-provision'));
+    const historyHeaders = { Authorization: `Bearer ${history.readerKey}` };
+    for (const certified of [false, true]) {
+      if (certified) await json(await call('/__test-conversation-certify'));
+      const visible = await json(await call(`/api/rooms/${history.roomId}/conversation?limit=2`, { headers: historyHeaders }));
+      assert.deepEqual(visible.messages.map(message => message.id), ['public-after']);
+      assert.equal(visible.nextCursor, null);
+      await json(await call(`/api/rooms/${history.roomId}/conversation?messageId=private-before`, { headers: historyHeaders }), 404);
+    }
     assert.equal((await call('/api/agent-rooms')).status, 401);
     assert.equal((await call('/api/agent-rooms', { headers: { Authorization: `Bearer ${ownerKey}` } })).status, 401);
 

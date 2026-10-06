@@ -220,3 +220,28 @@ test('certified conversation applies the same-instant history floor before pagin
   assert.equal(page.value.nextCursor, null);
   assert.equal((await f.get({ messageId: 'before' }, late)).status, 404);
 });
+
+// Authoring gate: excluded records cannot truncate an otherwise visible page.
+// Clock rollback/imported timestamps can put visible rows behind excluded ones;
+// existing monotonic histories cannot expose this post-LIMIT regression.
+test('history exclusions precede LIMIT for fallback and certified nonmonotonic history', async t => {
+  const f = await setup(t);
+  const at = Date.now();
+  f.store.now = () => at + 1000;
+  f.post('future-time-earlier-position', 'visible under the existing timestamp policy');
+  f.store.now = () => at;
+  for (let i = 0; i < 4; i++) f.post(`prejoin-${i}`, 'hidden before join');
+  f.command(f.owner, 'room.history_visibility_set', { historyVisibility: 'since_join' });
+  f.command(f.owner, 'member.added', { memberId: 'late', displayName: 'Late', kind: 'agent', permissions: [] });
+  const late = f.store.issueAccessKey('commons', 'late');
+  f.post('after', 'after join');
+  for (const indexed of [false, true]) {
+    if (indexed) {
+      while (!f.store.backfillMessages({ limit: 1000 }).done) {}
+      f.store.checkMessagesParity();
+    }
+    const page = await f.get({ limit: 2 }, late);
+    assert.deepEqual(page.value.messages.map(m => m.id), ['future-time-earlier-position', 'after']);
+    assert.equal(page.value.nextCursor, null);
+  }
+});

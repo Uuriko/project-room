@@ -8,6 +8,26 @@ import { seedRecordedReply } from '../scripts/reply-review-fixture.mjs';
 export class HttpTestRoom extends ProjectRoom {
   async fetch(request) {
     const url = new URL(request.url);
+    if (url.pathname === '/__test-conversation-history-provision') {
+      const store = this.store, roomId = 'history-platform';
+      store.initialize(initialRoom(roomId));
+      const owner = store.issueAccessKey(roomId, 'owner');
+      const oldNow = store.now;
+      const frozen = Date.now();
+      store.now = () => frozen;
+      const command = (type, data) => store.command(owner, roomId, { id: crypto.randomUUID(), type, data });
+      try {
+        command('message.posted', { messageId: 'private-before', body: 'hidden prejoin text' });
+        // Non-chat writes avoid the real flood guard while testing a long
+        // equal-timestamp import-shaped history and a large exclusion set.
+        for (let i = 0; i < 501; i++) command('channel.renamed', { channelId: 'general', name: `general-${i}` });
+        command('room.history_visibility_set', { historyVisibility: 'since_join' });
+        command('member.added', { memberId: 'late', displayName: 'Late', kind: 'agent', permissions: [] });
+        const readerKey = store.issueAccessKey(roomId, 'late');
+        command('message.posted', { messageId: 'public-after', body: 'visible postjoin text' });
+        return Response.json({ roomId, readerKey });
+      } finally { store.now = oldNow; }
+    }
     if (url.pathname === '/__test-conversation-certify') {
       while (!this.store.backfillMessages({ limit: 1000 }).done) {}
       // Sweep all synthetic rooms; certification is deliberately separate from

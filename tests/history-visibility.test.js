@@ -48,7 +48,7 @@ async function mcp(origin, name, args, secret) {
   return { status: response.status, text: JSON.stringify(await response.json()) };
 }
 
-async function setup(t) {
+async function setup(t, { preJoinEvents = 0 } = {}) {
   const directory = mkdtempSync(join(tmpdir(), "history-visibility-"));
   const store = new RoomStore(join(directory, "room.sqlite"));
   store.initialize(initialRoom());
@@ -63,6 +63,7 @@ async function setup(t) {
   cmd(T.MESSAGE_POSTED, { messageId: "before-reply", body: `${BEFORE} reply`, replyToId: "before-root" });
   cmd(T.MESSAGE_PINNED, { messageId: "before-root" });
   cmd(T.MESSAGE_POSTED, { messageId: "before-question", body: `${BEFORE} open question?` });
+  for (let i = 0; i < preJoinEvents; i++) cmd(T.CHANNEL_RENAMED, { channelId: "general", name: `general-${i}` });
   cmd(T.ROOM_HISTORY_VISIBILITY_SET, { historyVisibility: "since_join" });
   cmd(T.MEMBER_ADDED, { memberId: "late-agent", displayName: "Late agent", kind: "agent", permissions: [], accountableHumanId: "owner" });
   const lateKey = store.issueAccessKey("commons", "late-agent");
@@ -197,4 +198,21 @@ test("the join point is exact: same-millisecond entries before the join stay hid
   assert.equal(rowInHistory(edit("m-new"), floor, messages), true);
   assert.equal(rowInHistory({ sequence: 9, event: { type: T.MESSAGE_POSTED, at } }, floor, messages), false);
   assert.equal(eventInHistory(edit("m-old").event, floor, messages), false);
+});
+
+// Authoring gate: the shared since_join privacy contract has no500-event
+// exception. Existing same-millisecond examples never cross that boundary.
+// Real HTTP/SQLite positive and negative controls, no production test seam.
+test("same-millisecond prejoin history stays private beyond500 intervening events", async t => {
+  const f = await setup(t, { preJoinEvents: 501 });
+  const snapshot = await (await f.get("/api/rooms/commons", f.lateKey)).json();
+  assert.deepEqual(snapshot.state.messages.map(m => m.id), ["after-root"]);
+  assert.equal((await f.get("/api/rooms/commons/conversation?messageId=before-root", f.lateKey)).status, 404);
+  const visible = await (await f.get("/api/rooms/commons/conversation?limit=2", f.lateKey)).json();
+  assert.deepEqual(visible.messages.map(m => m.id), ["after-root"]);
+  while (!f.store.backfillMessages({ limit: 1000 }).done) {}
+  f.store.checkMessagesParity();
+  const indexed = await (await f.get("/api/rooms/commons/conversation?limit=2", f.lateKey)).json();
+  assert.deepEqual(indexed.messages.map(m => m.id), ["after-root"]);
+  assert.equal((await f.get("/api/rooms/commons/conversation?messageId=before-root", f.lateKey)).status, 404);
 });
