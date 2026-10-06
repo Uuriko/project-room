@@ -970,10 +970,22 @@ function agentWakeTargetIds(state, senderMemberId, data) {
 // ensure*Schema helpers the full schema pass runs (ALTER-based convergence
 // has no DDL constant to hash, so the function source stands in for it).
 // tests/schema-stamp-coverage.test.js fails if the pass calls one not listed.
-const ADDITIVE_SCHEMA_ENSURES = [
-  ensureIdentitySecretSchema, ensureIdentityCapacitySchema, ensureIdentityLinkCodeSchema,
-  ensureAutonomyTiersSchema, ensureOperatorActionsSchema, ensureGrantsSchema, ensureSpendGrantsSchema,
-  ensureAccountProfileSchema, ensureVerifiedEmailSchema, ensureAttachmentSchema
+// Each entry is hashed by its "name@revision" label, never by fn.toString():
+// the Workers bundle rewrites function source, so a source hash gave the
+// Worker and Node different stamps for the same code (cloudflare CI, #1627).
+// tests/schema-stamp-coverage.test.js pins a digest of each helper's source
+// to its label, so changing a helper without bumping its revision fails CI.
+export const ADDITIVE_SCHEMA_ENSURES = [
+  [ensureIdentitySecretSchema, "ensureIdentitySecretSchema@1"],
+  [ensureIdentityCapacitySchema, "ensureIdentityCapacitySchema@1"],
+  [ensureIdentityLinkCodeSchema, "ensureIdentityLinkCodeSchema@1"],
+  [ensureAutonomyTiersSchema, "ensureAutonomyTiersSchema@1"],
+  [ensureOperatorActionsSchema, "ensureOperatorActionsSchema@1"],
+  [ensureGrantsSchema, "ensureGrantsSchema@1"],
+  [ensureSpendGrantsSchema, "ensureSpendGrantsSchema@1"],
+  [ensureAccountProfileSchema, "ensureAccountProfileSchema@1"],
+  [ensureVerifiedEmailSchema, "ensureVerifiedEmailSchema@1"],
+  [ensureAttachmentSchema, "ensureAttachmentSchema@1"]
 ];
 
 // Hash of the DDL this process knows how to apply. A stored match means
@@ -1011,7 +1023,7 @@ function roomSchemaStamp() {
     updatesSchema, GRANTS_SCHEMA, SPEND_GRANTS_SCHEMA, AUTONOMY_TIERS_SCHEMA, identityLinkCodeSchema
   ];
   for (const part of parts) hash.update("\0").update(part ?? "");
-  for (const ensure of ADDITIVE_SCHEMA_ENSURES) hash.update("\0").update(ensure.toString());
+  for (const [, label] of ADDITIVE_SCHEMA_ENSURES) hash.update("\0").update(label);
   for (const def of fenceDefinitions(STORE_SCHEMA_VERSION)) hash.update("\0").update(def.name).update(def.sql);
   return hash.digest("hex");
 }
