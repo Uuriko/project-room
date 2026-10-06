@@ -209,7 +209,7 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
       reason: reasonCode === "owner_required" ? "owner_required" : "access_denied",
       hint: reasonCode === "owner_required"
         ? "Only the room owner can mint a guest invite or Add agent."
-        : "This credential cannot do that. Check access; ask the owner if needed.",
+        : "This credential cannot do that. Run room_check_access to see what this identity can do, then ask the owner for the missing permission.",
       next: [tool("room_check_access"), path("/api/session"), command("Ask the owner to mint a guest invite or Add agent")]
     };
   }
@@ -429,7 +429,7 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
     const workRead = httpStatus !== 422 && ["invalid_work_action", "work_action_too_large", "work_input_refused"].includes(reasonCode);
     return {
       status: "action_required", reason: "input_refused",
-      hint: "Fix the refused fields. Keep any earlier uncertain requestId.",
+      hint: "Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.",
       next: workRead
         ? [readWork, command("Correct input; keep any earlier uncertain requestId")]
         : [command("Correct the named fields and resend. Keep any earlier uncertain requestId.")]
@@ -483,14 +483,14 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
   if (reasonCode === "idempotency_conflict") {
     return {
       status: "action_required", reason: "idempotency_conflict",
-      hint: "This requestId belongs to different input. Recover the original.",
-      next: [readWork, command("Recover the original requestId; do not replace it")]
+      hint: "This requestId already carried different input. Read current work for its original outcome; never send new input under this requestId.",
+      next: [readWork, command("Read current work for the original requestId's outcome; do not send new input under this requestId")]
     };
   }
   if (httpStatus === 429 || reasonCode === "rate_limited") {
     return {
       status: "action_required", reason: "rate_limited",
-      hint: "Wait, then retry the same request.",
+      hint: "Wait for the Retry-After interval, then retry the same request unchanged.",
       next: [command("Retry after Retry-After")]
     };
   }
@@ -518,11 +518,15 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
       next: [tool("room_check_access"), command("Retry the exact same command after checking access")]
     };
   }
+  // Unmapped code: name the code and the recovery (report code + message
+  // to the room owner) instead of a bare "check access" pointer — the old
+  // generic hint stranded every caller on a code with no known recovery.
+  const unknownCode = String(reasonCode).slice(0, 32);
   return {
     status: httpStatus >= 500 ? "failed" : "action_required",
     reason: reasonCode,
-    hint: "Check access and current work.",
-    next: [tool("room_check_access"), tool("room_list_work")]
+    hint: `Unknown error '${unknownCode}'. Re-check access and current work; if it repeats, report the code and full message to the room owner.`,
+    next: [tool("room_check_access"), tool("room_list_work"), command(`If it repeats, report error.code '${reasonCode}' with the full message to the room owner — this code has no known recovery.`)]
   };
 }
 
