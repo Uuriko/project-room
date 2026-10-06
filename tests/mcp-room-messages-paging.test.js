@@ -12,7 +12,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
-import { RoomAgentClient } from "../client/room-agent.mjs";
+import { RoomAgentClient, paginateRoomMessages } from "../client/room-agent.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { callHostedStdioTool } from "../server/mcp-full-profile.mjs";
 import { readConversation } from "../server/conversation-sync.mjs";
@@ -123,5 +123,40 @@ test("default mode still pages dense history oldest-first with after/next", asyn
       after = page.next;
     }
     assert.deepEqual(seen, ["dense-0", "dense-1", "dense-2", "dense-3", "dense-4", "dense-5"]);
+  }
+});
+
+// Instinct-3 VERDICTS 40 on #1610: adjacent backward windows excluded their
+// shared boundary on both sides, so every window edge dropped one sequence.
+// Dense 301-message log, latest limit 100, end 302: must be exactly 202..301.
+const denseLog = n => async (cursor, pageLimit) => {
+  const events = [];
+  for (let s = cursor + 1; s <= Math.min(n, cursor + pageLimit); s++) events.push({ sequence: s, event: { type: "message.posted" } });
+  return { events, next: cursor + events.length, hasMore: cursor + events.length < n };
+};
+test("latest:true backward windows tile with no boundary gaps (unit, dense 301)", async () => {
+  const fetchPage = denseLog(301);
+  const seqs = async (limit) => (await paginateRoomMessages(fetchPage, { latest: true, limit, end: 302 })).messages.map(m => m.sequence);
+  const range = (a, b) => Array.from({ length: b - a + 1 }, (_, i) => a + i);
+  assert.deepEqual(await seqs(100), range(202, 301));
+  assert.deepEqual(await seqs(250), range(52, 301), "spans three windows");
+  const all = await paginateRoomMessages(fetchPage, { latest: true, limit: 500, end: 302 });
+  assert.deepEqual(all.messages.map(m => m.sequence), range(1, 301), "every sequence once, oldest first");
+  assert.equal(all.hasMore, false);
+  const bounded = await paginateRoomMessages(fetchPage, { after: 150, latest: true, limit: 500, end: 302 });
+  assert.deepEqual(bounded.messages.map(m => m.sequence), range(151, 301), "the after bound is exclusive and respected");
+});
+
+test("latest:true over several scan windows returns the newest N with none skipped (hosted)", async t => {
+  const f = fixture(t);
+  await f.ready;
+  // 25 messages, each followed by 9 reactions: 250 events, so the backward
+  // scan crosses three windows, and with the old bound a window edge landed
+  // on a message (head - 99 = an earlier message) and dropped it.
+  const ids = Array.from({ length: 25 }, (_, i) => `w${i}`);
+  for (const id of ids) { f.post(id, id); f.react(id, 9); }
+  for (const limit of [12, 25]) {
+    const page = await f.hosted({ latest: true, limit });
+    assert.deepEqual(page.messages.map(m => m.messageId), ids.slice(-limit), `latest ${limit}`);
   }
 });

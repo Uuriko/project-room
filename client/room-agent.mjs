@@ -74,24 +74,27 @@ async function scanForward(fetchPage, after, limit, latest) {
 async function scanBackward(fetchPage, after, end, limit) {
   // Walk 100-event windows from `end` (exclusive) down toward `after`,
   // newest windows first. Stops after `limit` messages or when the `after`
-  // bound is reached. Windows tile (after, end] with no gaps: each window is
-  // (lo, bound) with lo >= bound - 100, so fetchPage(lo, 100) covers it.
+  // bound is reached. fetchPage(lo, 100) returns sequences lo+1..lo+100, so a
+  // window is (lo, bound) = lo+1..bound-1, and the next window's exclusive
+  // bound is lo + 1 so it still covers lo itself. (Instinct-3 VERDICTS 40 on
+  // #1610: using bound = lo dropped every window's boundary sequence, e.g.
+  // end 302 / limit 100 returned 203..301 + 201 and skipped 202.)
   const collected = [];
   let bound = end, pages = 0;
-  while (collected.length < limit && bound > after && pages < MESSAGE_SCAN_PAGES) {
-    const lo = Math.max(after, bound - MESSAGE_SCAN_PAGE);
+  while (collected.length < limit && bound - 1 > after && pages < MESSAGE_SCAN_PAGES) {
+    const lo = Math.max(after, bound - 1 - MESSAGE_SCAN_PAGE);
     const page = await fetchPage(lo, MESSAGE_SCAN_PAGE);
     pages += 1;
     const window = [];
     for (const item of page?.events ?? []) {
       if (!item || !Number.isSafeInteger(item.sequence)) continue;
-      if (item.sequence <= after || item.sequence >= bound) continue;
+      if (item.sequence <= lo || item.sequence >= bound) continue;
       if (isPostedMessage(item)) window.push(item);
     }
     collected.unshift(...window);
-    bound = lo;
+    bound = lo + 1;
   }
-  return { collected, reachedStart: bound <= after, capped: pages >= MESSAGE_SCAN_PAGES && bound > after };
+  return { collected, reachedStart: bound - 1 <= after, capped: pages >= MESSAGE_SCAN_PAGES && bound - 1 > after };
 }
 
 export async function paginateRoomMessages(fetchPage, { after = 0, limit = 50, latest = false, end = null, mapMessage } = {}) {
