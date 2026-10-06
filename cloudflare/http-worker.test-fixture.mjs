@@ -8,6 +8,14 @@ import { seedRecordedReply } from '../scripts/reply-review-fixture.mjs';
 export class HttpTestRoom extends ProjectRoom {
   async fetch(request) {
     const url = new URL(request.url);
+    if (url.pathname === '/__test-conversation-certify') {
+      while (!this.store.backfillMessages({ limit: 1000 }).done) {}
+      // Sweep all synthetic rooms; certification is deliberately separate from
+      // the public read request, exactly as the maintenance owner performs it.
+      const rooms = this.store.db.prepare('SELECT COUNT(*) AS n FROM rooms').get().n;
+      for (let i = 0; i < rooms; i++) this.store.checkMessagesParity();
+      return Response.json({ ok: true });
+    }
     if (url.pathname === '/__test-password-reset-provision') {
       const originalPassword = crypto.randomUUID();
       this.store.createAccount('worker-reset-owner');

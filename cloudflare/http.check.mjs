@@ -39,13 +39,14 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     assert.equal(memberships.identityId, identity.identityId);
     assert.deepEqual(memberships.rooms.map(room => room.roomId), ['returning-agent']);
     assert.equal(memberships.nextCursor, null);
-    // Actual Worker SQLite must support bounded current-record projection and
+    // Actual Worker SQLite must support certified indexed current records and
     // signed continuation paging and channel SQL bindings; Node SQLite cannot
     // prove this adapter path. Public-selection/privacy semantics live in the
     // HTTP owner tests, rather than being duplicated here.
     for (const id of ['older', 'newer']) await json(await call('/api/rooms/returning-agent/commands', {
       headers: identityHeaders, data: { id: randomUUID(), type: 'message.posted', data: { messageId: id, body: id } }
     }), 201);
+    await json(await call('/__test-conversation-certify'));
     const conversation = await json(await call('/api/rooms/returning-agent/conversation?limit=1&channelId=general', { headers: identityHeaders }));
     assert.equal(conversation.channelId, 'general');
     assert.deepEqual(conversation.messages.map(message => message.id), ['newer']);

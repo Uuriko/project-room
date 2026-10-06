@@ -35,7 +35,8 @@ function signer(store) {
 
 // Current records, never raw event replay: edits, reactions and deletion
 // tombstones arrive together. SQLite filters DMs before paging; JS only parses
-// bounded selected rows. SQLite still scans the room's projection JSON.
+// bounded selected rows. Certified rooms use indexed records; rooms still
+// replaying (or changed since certification) retain the projection fallback.
 export function readConversation(store, token, roomId, { limit = 50, cursor = null, since = null, messageId = null, channelId = null,
   expectedSessionBinding = null } = {}) {
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100
@@ -60,10 +61,31 @@ export function readConversation(store, token, roomId, { limit = 50, cursor = nu
     const reset = () => ({ ...base, mode: "reset", messages: [], nextCursor: null, checkpoint: null });
     if ((cursor !== null || since !== null) && (!saved || saved.scope !== scope || saved.kind !== (cursor !== null ? "page" : "checkpoint"))) return reset();
     if (cursor !== null && (saved.sequence !== head.sequence || saved.anchor !== anchor || !Number.isSafeInteger(saved.before) || saved.before < 0)) return reset();
+    // Certification covers the full record and query columns at this exact
+    // head. Never replay or perform a full parity scan on a read request.
+    const indexed = Boolean(store.db.prepare(`SELECT 1 FROM messages_backfill_cursor
+      WHERE room_id=? AND applied_seq=? AND parity_at_seq=? AND applied_event_id=?`)
+      .get(roomId, head.sequence, head.sequence, anchor ?? ""));
+    // Array offsets and posting sequences are distinct opaque cursor domains.
+    // Reset when a replay/certification switches the domain without a mutation.
+    if (cursor !== null && (Boolean(saved.indexed) !== indexed
+      || indexed && typeof saved.beforeId !== "string")) return reset();
     const before = cursor !== null ? saved.before : Number.MAX_SAFE_INTEGER;
     // PRIV-2: a since_join reader pages only messages from their join onward.
     const floor = store.historyFloor(roomId, auth.member.id);
-    const rows = store.db.prepare(`SELECT CAST(m.key AS INTEGER) AS position, json_remove(m.value, '$.editHistory') AS body
+    const exclusions = [...(floor?.sameInstant ?? [])];
+    const rows = (indexed ? store.db.prepare(`SELECT seq AS position, message_id AS messageId, record_json AS body
+      FROM messages WHERE room_id=? AND (seq<? OR (seq=? AND message_id<?))
+        AND (to_member_id IS NULL OR to_member_id='' OR author_id=? OR to_member_id=?)
+        AND (? IS NULL OR (COALESCE(NULLIF(channel_id,''),?)=? AND (to_member_id IS NULL OR to_member_id='')))
+        AND (? IS NULL OR message_id=?)
+        AND (? IS NULL OR created_at>=?)
+        ${exclusions.length ? `AND (created_at>? OR message_id NOT IN (${exclusions.map(() => "?").join(",")}))` : ""}
+      ORDER BY seq DESC, message_id DESC LIMIT ?`)
+      .all(roomId, before, before, cursor !== null ? saved.beforeId : "", auth.member.id, auth.member.id,
+        channelId, DEFAULT_CHANNEL_ID, channelId, messageId, messageId, floor?.at ?? null, floor?.at ?? null,
+        ...(exclusions.length ? [floor.at, ...exclusions] : []), messageId === null ? limit + 1 : 1)
+      : store.db.prepare(`SELECT CAST(m.key AS INTEGER) AS position, json_remove(m.value, '$.editHistory') AS body
       FROM rooms r, json_each(r.projection, '$.messages') m
       WHERE r.id=? AND CAST(m.key AS INTEGER)<?
         AND (json_extract(m.value,'$.toMemberId') IS NULL OR json_extract(m.value,'$.toMemberId')=''
@@ -75,7 +97,7 @@ export function readConversation(store, token, roomId, { limit = 50, cursor = nu
         AND (? IS NULL OR json_extract(m.value,'$.createdAt')>=?)
       ORDER BY CAST(m.key AS INTEGER) DESC LIMIT ?`)
       .all(roomId, before, auth.member.id, auth.member.id, channelId, DEFAULT_CHANNEL_ID, channelId,
-        messageId, messageId, floor?.at ?? null, floor?.at ?? null, messageId === null ? limit + 1 : 1)
+        messageId, messageId, floor?.at ?? null, floor?.at ?? null, messageId === null ? limit + 1 : 1))
       .filter(row => !floor || messageInHistory(JSON.parse(row.body), floor));
     if (messageId !== null && !rows.length) fail(404, "message_not_found", "Message not found");
     const selected = [];
@@ -90,7 +112,7 @@ export function readConversation(store, token, roomId, { limit = 50, cursor = nu
     }
     const messages = selected.map(row => JSON.parse(row.body)).reverse();
     const nextCursor = rows.length > selected.length ? signed.encode({ kind: "page", scope, sequence: head.sequence, anchor,
-      before: selected.at(-1).position }) : null;
+      before: selected.at(-1).position, indexed, ...(indexed ? { beforeId: selected.at(-1).messageId } : {}) }) : null;
     // Include sequence/anchor: any intervening room mutation invalidates older
     // cached pages, even if the changed message is outside this latest window.
     const version = digest([head.sequence, anchor, messages]);

@@ -10,9 +10,10 @@ import { join } from 'node:path';
 import { RoomStore } from '../server/store.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
+import { constants as sqlite } from 'node:sqlite';
 import { setTier } from '../server/autonomy-tiers.mjs';
 
-async function setup(t) {
+async function setup(t, indexed = false) {
   const directory = mkdtempSync(join(tmpdir(), 'conversation-sync-'));
   let store = new RoomStore(join(directory, 'room.sqlite'));
   store.initialize(initialRoom('commons'));
@@ -28,9 +29,13 @@ async function setup(t) {
   const stop = async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); };
   await start();
   t.after(async () => { await stop(); rmSync(directory, { recursive: true, force: true }); });
-  return { owner, alice, bob, command,
+  return { owner, alice, bob, command, get store() { return store; },
     post: (id, body, extra = {}, token = owner) => command(token, 'message.posted', { messageId: id, body, ...extra }),
     get: async (query = {}, token = owner, path = '/conversation') => {
+      if (indexed) {
+        while (!store.backfillMessages({ limit: 1000 }).done) { /* budgeted test replay */ }
+        store.checkMessagesParity();
+      }
       const response = await fetch(`${origin}/api/rooms/commons${path}?${new URLSearchParams(query)}`, { headers: { Authorization: `Bearer ${token}` } });
       return { status: response.status, value: await response.json() };
     },
@@ -38,8 +43,9 @@ async function setup(t) {
   };
 }
 
-test('bounded HTTP conversation filters before paging and resets instead of mixing stale current records', async t => {
-  const f = await setup(t);
+for (const indexed of [false, true]) {
+test(`${indexed ? 'certified index' : 'projection fallback'}: bounded HTTP conversation filters before paging and resets instead of mixing stale current records`, async t => {
+  const f = await setup(t, indexed);
   for (let i = 0; i < 7; i++) f.post(`public-${i}`, `text ${i}`, i === 6 ? { replyToId: 'public-0' } : {});
   for (let i = 0; i < 5; i++) f.post(`private-${i}`, `secret ${i}`, { toMemberId: 'bob' }, f.alice);
   const first = await f.get({ limit: 3 });
@@ -80,8 +86,8 @@ test('bounded HTTP conversation filters before paging and resets instead of mixi
   assert.equal((await f.get({ since: bobCheckpoint }, f.bob)).status, 401, 'conditional reads reauthorize revoked credentials');
 });
 
-test('conversation payload stays bounded and malformed selections cannot widen it', async t => {
-  const f = await setup(t);
+test(`${indexed ? 'certified index' : 'projection fallback'}: conversation payload stays bounded and malformed selections cannot widen it`, async t => {
+  const f = await setup(t, indexed);
   for (let i = 0; i < 24; i++) f.post(`large-${i}`, 'x'.repeat(60000));
   const full = await f.get({}, f.owner, '');
   const page = await f.get({ limit: 100 });
@@ -106,8 +112,8 @@ test('conversation payload stays bounded and malformed selections cannot widen i
 // Authoring gate: extend the real HTTP/SQLite owner for channel selection,
 // pre-limit DM exclusion and credential/channel-bound continuations. Existing
 // cases cannot select a channel. No production seam or duplicate fixture.
-test('channel conversation pages isolate public history and bind continuations to the channel', async t => {
-  const f = await setup(t);
+test(`${indexed ? 'certified index' : 'projection fallback'}: channel conversation pages isolate public history and bind continuations to the channel`, async t => {
+  const f = await setup(t, indexed);
   f.command(f.owner, 'channel.created', { channelId: 'design', name: 'design' });
   for (let i = 0; i < 5; i++) {
     f.post(`general-${i}`, `general ${i}`);
@@ -141,4 +147,76 @@ test('channel conversation pages isolate public history and bind continuations t
   assert.equal(repeated.status, 422);
   f.command(f.owner, 'channel.archived', { channelId: 'design' });
   assert.equal((await f.get({ channelId: 'design', messageId: 'design-0' })).value.messages[0].body, 'design 0', 'archiving does not erase history');
+});
+
+}
+
+// Authoring gate: storage-read architecture contract at real HTTP/SQLite.
+// Counts observer-visible table reads rather than matching SQL source. Existing
+// response assertions cannot distinguish a JSON scan from indexed records.
+// Losing the cutover, or using uncertified/stale records, fails this owner.
+// Native SQLite authorization observation introduces no production seam.
+test('conversation uses only exact-head certified rows and resets on cursor domain changes', async t => {
+  const f = await setup(t);
+  f.post('root', 'root');
+  f.post('reply', 'reply', { replyToId: 'root', alsoSendToChannel: true });
+  const reads = new Set();
+  f.store.db.setAuthorizer((operation, table) => {
+    if (operation === sqlite.SQLITE_READ) reads.add(table);
+    return sqlite.SQLITE_OK;
+  });
+  const before = await f.get({ limit: 1 });
+  assert.equal(reads.has('messages'), false, 'uncertified rows must not serve reads');
+  while (!f.store.backfillMessages({ limit: 1000 }).done) {}
+  f.store.checkMessagesParity();
+  reads.clear();
+  const indexed = await f.get({ limit: 1 });
+  assert.equal(reads.has('messages'), true, 'certified HTTP reads must reach the indexed records');
+  assert.equal((await f.get({ limit: 1, cursor: before.value.nextCursor })).value.mode, 'reset');
+  assert.equal(indexed.value.messages[0].id, 'reply:channel');
+  const older = await f.get({ limit: 1, cursor: indexed.value.nextCursor });
+  assert.equal(older.value.messages[0].id, 'reply', 'same-event channel copy keeps projection order');
+  f.command(f.owner, 'message.edited', { messageId: 'root', body: 'changed', expectedMessageRevision: 0 });
+  reads.clear();
+  assert.equal((await f.get({ messageId: 'root' })).value.messages[0].body, 'changed');
+  assert.equal(reads.has('messages'), false, 'a changed head falls back without synchronous replay');
+  while (!f.store.backfillMessages({ limit: 1000 }).done) {}
+  f.store.checkMessagesParity();
+  f.command(f.owner, 'message.deleted', { messageId: 'root', expectedMessageRevision: 1 });
+  reads.clear();
+  assert.equal((await f.get({ messageId: 'root' })).value.messages[0].body, null);
+  assert.equal(reads.has('messages'), false, 'redaction invalidates certification');
+  f.store.db.setAuthorizer(null);
+  while (!f.store.backfillMessages({ limit: 1000 }).done) {}
+  f.store.checkMessagesParity();
+  const replacement = [...f.store.exportEvents(f.owner, 'commons')].map(line => {
+    const event = line.event;
+    if (event.type === 'message.posted' && event.data.messageId === 'reply') event.data.body = 'import replacement';
+    return { ...line, event };
+  });
+  f.store.importEvents(f.owner, 'commons', replacement);
+  reads.clear();
+  f.store.db.setAuthorizer((operation, table) => {
+    if (operation === sqlite.SQLITE_READ) reads.add(table);
+    return sqlite.SQLITE_OK;
+  });
+  assert.equal((await f.get({ messageId: 'reply' })).value.messages[0].body, 'import replacement');
+  assert.equal(reads.has('messages'), false, 'replacement invalidates certified records even with the same head');
+  f.store.db.setAuthorizer(null);
+});
+
+// Distinct indexed-query risk: same-millisecond exclusion must run before
+// LIMIT so hidden pre-join records do not consume a bounded visible page.
+test('certified conversation applies the same-instant history floor before paging', async t => {
+  const f = await setup(t, true);
+  f.store.now = () => Date.parse('2026-10-05T12:00:00.000Z');
+  f.post('before', 'hidden before join');
+  f.command(f.owner, 'room.history_visibility_set', { historyVisibility: 'since_join' });
+  f.command(f.owner, 'member.added', { memberId: 'late', displayName: 'Late', kind: 'agent', permissions: [] });
+  const late = f.store.issueAccessKey('commons', 'late');
+  f.post('after', 'visible after join');
+  const page = await f.get({ limit: 1 }, late);
+  assert.deepEqual(page.value.messages.map(m => m.id), ['after']);
+  assert.equal(page.value.nextCursor, null);
+  assert.equal((await f.get({ messageId: 'before' }, late)).status, 404);
 });
