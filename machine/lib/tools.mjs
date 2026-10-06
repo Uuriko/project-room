@@ -41,6 +41,12 @@ export async function dispatchTool({ tool, args = {}, slot, claimId, state, home
       slots: state.slots,
     } };
   }
+  // Kill-switch gates, mirroring daemon.call(): the autonomous bot reaches
+  // dispatchTool directly, so halt/pause/deadman must be enforced here too —
+  // otherwise a halted machine's bot keeps acting and re-boots stopped guests.
+  if (state?.halted === true) return fail(ERROR.HALTED, "This machine is halted");
+  if (state?.pausedUntil && Date.now() < state.pausedUntil) return fail(ERROR.PAUSED, "This machine is paused");
+  if (state?.deadman === true) return fail(ERROR.DEADMAN, "Relay link exceeded the dead-man window");
   if (tool === "machine.release") return { ok: true, result: { release: true, claimId, slot } };
   if (tool.startsWith("desktop.")) {
     const driverName = DRIVER_TOOL[tool];

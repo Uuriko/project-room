@@ -150,7 +150,7 @@ async function enrolled(t, { roomId = "commons" } = {}) {
   });
   const env = machineEnv(home, { ROOM_MACHINE_RELAY_URL: relay.http, ROOM_ORIGIN: served.origin });
   const result = await spawnContext.run({ env }, () => enroll({
-    code: "bot-code", home, env, relayHttp: relay.http,
+    code: "bot-code", home, env, relayHttp: relay.http, insecure: true, // local fake relay
   }));
   assert.equal(result.ok, true, JSON.stringify(result));
   return { ...served, home, env, relay, identityId: result.identityId };
@@ -223,7 +223,10 @@ test.describe("room-machine bot", { concurrency: false }, () => {
     assert.equal(botTierFromRoom({ autonomyTier: "t2_standard" }, "t1"), "t1");
     assert.equal(botTierFromRoom({ autonomyTier: "t2_standard" }, "t3"), "t3");
     assert.equal(botTierFromRoom({ status: { autonomyTier: "t1_readonly" } }, "t3"), "t1");
-    assert.equal(botTierFromRoom({ autonomyTier: "t2" }, "t1"), "t2");
+    // The local tier is a ceiling: a room report can never raise the bot.
+    assert.equal(botTierFromRoom({ autonomyTier: "t2" }, "t1"), "t1");
+    assert.equal(botTierFromRoom({ autonomyTier: "t3" }, "t2"), "t2");
+    assert.equal(botTierFromRoom({ autonomyTier: "t1" }, "t3"), "t1");
 
     const headers = anthropicHeaders("sk-anthropic-test");
     assert.equal(Object.hasOwn(headers, "anthropic-beta"), false);
@@ -653,7 +656,7 @@ test.describe("room-machine bot", { concurrency: false }, () => {
     let firstCode = null;
     await waitFor(async () => {
       const said = await bodies(room.origin, "commons", secret);
-      const line = said.find(body => /^approve [0-9a-f]{6} to let /.test(body));
+      const line = said.find(body => /^approve [0-9a-f]{32} to let /.test(body));
       if (!line) return false;
       firstCode = line.split(" ")[1];
       return true;
@@ -676,7 +679,7 @@ test.describe("room-machine bot", { concurrency: false }, () => {
     let secondCode = null;
     await waitFor(async () => {
       const said = await bodies(room.origin, "commons", secret);
-      const line = said.find(body => /^approve [0-9a-f]{6} to let /.test(body) && !body.includes(firstCode));
+      const line = said.find(body => /^approve [0-9a-f]{32} to let /.test(body) && !body.includes(firstCode));
       if (!line) return false;
       secondCode = line.split(" ")[1];
       return true;

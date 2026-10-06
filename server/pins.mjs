@@ -23,8 +23,9 @@ function pinView({ messageId, pinnedById, pinnedAt, message }) {
 // Pin visibility follows message visibility (server/activity.mjs): a room
 // message is visible to every member, but a DM is visible only to its author
 // and its recipient. Filtering here (not just in the HTTP route wrapper)
-// protects every caller of the pin library.
-function pinVisibleToViewer(message, viewerId) {
+// protects every caller of the pin library. Exported for the activation
+// pack, which otherwise leaks pinned DM bodies to the whole room.
+export function pinVisibleToViewer(message, viewerId) {
   return !message.toMemberId || message.authorId === viewerId || message.toMemberId === viewerId;
 }
 

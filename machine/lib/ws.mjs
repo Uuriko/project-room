@@ -132,6 +132,11 @@ export function connectSocket(url, { headers = {}, onText, onClose, onOpen }) {
       const head = handshake.subarray(0, end).toString("utf8");
       const rest = handshake.subarray(end + 4);
       if (!head.startsWith("HTTP/1.1 101")) { socket.destroy(); onClose?.(); return; }
+      // L7: validate the server's accept key against our nonce — a proxy
+      // that answers 101 without completing the WebSocket handshake is not
+      // a WebSocket peer.
+      const accept = /^sec-websocket-accept:\s*(\S+)/im.exec(head)?.[1] ?? "";
+      if (accept !== acceptKey(key)) { socket.destroy(); onClose?.(); return; }
       opened = true;
       onOpen?.();
       if (rest.length) parser(rest);

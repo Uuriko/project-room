@@ -31,9 +31,11 @@ export function approvalClass({ tool, slot, args }) {
 }
 
 export async function requestApproval({ home = configHome(), origin, roomId, secret, ownerMemberId, className, detail, now = Date.now() }) {
-  const code = randomBytes(3).toString("hex");
+  // L9: 128-bit codes — a 24-bit code could collide with a historical
+  // approval and let an old owner reply satisfy a new request.
+  const code = randomBytes(16).toString("hex");
   const pending = load(home);
-  pending[code] = { className, ownerMemberId, expiresAt: now + APPROVAL_TTL_MS, used: false };
+  pending[code] = { className, ownerMemberId, expiresAt: now + APPROVAL_TTL_MS, createdAt: now, used: false };
   save(home, pending);
   const posted = await postMessage(origin, roomId, secret, `approve ${code} to let ${detail}`);
   return { ok: posted.ok, code, expiresAt: pending[code].expiresAt };
@@ -49,15 +51,26 @@ export async function takeApproval({ home = configHome(), origin, roomId, secret
     save(home, pending);
     return { ok: false, reason: "approval_denied" };
   }
-  const page = await listEvents(origin, roomId, secret, 0);
-  if (!page.ok) return { ok: false, reason: "approval_required" };
-  const reply = page.events.find(entry => {
+  const matches = entry => {
     const event = entry.event ?? entry;
     return event.type === "message.posted"
       && event.actorId === row.ownerMemberId
       && String(event.data?.body ?? "").trim() === `approve ${code}`;
-  });
-  if (!reply) return { ok: false, reason: "approval_required" };
+  };
+  // M4: page through the room's events instead of reading only the first
+  // 100. Stop at the first page containing the approval reply; the code is
+  // unique, so an older page can never hold it. Cap the scan to bound the
+  // loop against pathological rooms.
+  let after = 0;
+  let found = false;
+  for (let pages = 0; pages < 100 && !found; pages += 1) {
+    const page = await listEvents(origin, roomId, secret, after);
+    if (!page.ok) return { ok: false, reason: "approval_required" };
+    found = page.events.some(matches);
+    if (!found && (!page.events.length || page.next <= after)) return { ok: false, reason: "approval_required" };
+    after = page.next;
+  }
+  if (!found) return { ok: false, reason: "approval_required" };
   row.used = true;
   pending[code] = row;
   save(home, pending);

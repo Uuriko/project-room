@@ -23,7 +23,7 @@ test("the room-machine daemon enrolls and says hello against the relay", async (
   try {
     const home = tempHome(homes);
     const env = machineEnv(home, bridge.origin, room.origin);
-    const bogus = await enroll({ code: "bogus", home, env, relayHttp: bridge.origin });
+    const bogus = await enroll({ code: "bogus", home, env, relayHttp: bridge.origin, insecure: true });
     assert.equal(bogus.ok, false);
     assert.equal(bogus.error, "enroll_rejected");
     assert.equal(bogus.status, 401);
@@ -35,9 +35,11 @@ test("the room-machine daemon enrolls and says hello against the relay", async (
       inviteCode: INVITE,
       roomOrigin: room.origin,
       displayName: "Mac bot (contract)",
+      passthroughOptIn: true,
+      passthroughCaps: ["machine.status"],
     });
     assert.equal(minted.status, 201, JSON.stringify(minted.body));
-    const enrolled = await enroll({ code: minted.body.code, home, env, relayHttp: bridge.origin });
+    const enrolled = await enroll({ code: minted.body.code, home, env, relayHttp: bridge.origin, insecure: true });
     assert.equal(enrolled.ok, true, JSON.stringify(enrolled));
     assert.equal(enrolled.roomId, "room_alpha");
     assert.equal(enrolled.machineId, minted.body.machineId);
@@ -49,7 +51,7 @@ test("the room-machine daemon enrolls and says hello against the relay", async (
 
     const usedHome = tempHome(homes);
     const used = await enroll({
-      code: minted.body.code, home: usedHome, env: machineEnv(usedHome, bridge.origin, room.origin), relayHttp: bridge.origin,
+      code: minted.body.code, home: usedHome, env: machineEnv(usedHome, bridge.origin, room.origin), relayHttp: bridge.origin, insecure: true,
     });
     assert.equal(used.ok, false);
     assert.equal(used.error, "code_used");
@@ -59,7 +61,7 @@ test("the room-machine daemon enrolls and says hello against the relay", async (
     });
     assert.equal((await expireCode(ctx, expiring.body.machineId)).status, 200);
     const late = await enroll({
-      code: expiring.body.code, home: tempHome(homes), env, relayHttp: bridge.origin,
+      code: expiring.body.code, home: tempHome(homes), env, relayHttp: bridge.origin, insecure: true,
     });
     assert.equal(late.ok, false);
     assert.equal(late.error, "code_expired");

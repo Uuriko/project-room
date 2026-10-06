@@ -54,12 +54,18 @@ export function disableBot(bot) {
 // default for every agent, so it does not raise the bot above its local
 // tier. AX has not given the member a t1/t2/t3 read yet. An explicit t1,
 // t2, t3, or t1_readonly on a report the bot could actually read wins.
+// Local config is the ceiling: the room's tier report can only LOWER the
+// bot's tier, never raise it. An operator who enables the bot at t1 must
+// not be silently upgraded to t3 by whoever controls the room's report.
+const TIER_ORDER = Object.freeze({ t1: 0, t2: 1, t3: 2 });
 export function botTierFromRoom(report, configured = "t1") {
   const raw = report?.status?.autonomyTier ?? report?.autonomyTier ?? null;
-  if (raw === "t1" || raw === "t1_readonly") return "t1";
-  if (raw === "t2") return "t2";
-  if (raw === "t3") return "t3";
-  return configured === "t2" || configured === "t3" ? configured : "t1";
+  const roomTier = raw === "t1" || raw === "t1_readonly" ? "t1"
+    : raw === "t2" ? "t2"
+    : raw === "t3" ? "t3" : null;
+  const localTier = TIER_ORDER[configured] === undefined ? "t1" : configured;
+  if (!roomTier) return localTier;
+  return TIER_ORDER[roomTier] <= TIER_ORDER[localTier] ? roomTier : localTier;
 }
 
 export function isDesktopTask(text) {

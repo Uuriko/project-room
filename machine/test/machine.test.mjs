@@ -295,19 +295,46 @@ test.describe("room-machine", { concurrency: false }, () => {
 
   test("uninstall reverts pmset, the pf anchor, and the local-network defaults", async () => {
     const home = homeDir();
-    const env = machineEnv(home);
+    // Disposable pf.conf: never touch the host's real /etc/pf.conf.
+    const pfConf = join(home, "pf.conf");
+    writeFileSync(pfConf, "scrub-anchor \"com.apple/*\"\n");
+    const env = machineEnv(home, { ROOM_MACHINE_PF_CONF: pfConf });
     await spawnContext.run({ env }, async () => {
       const applied = await applySystemChanges(home);
       assert.equal(applied.ok, true);
+      // The anchor reference was appended and the main ruleset reloaded.
+      assert.match(readFileSync(pfConf, "utf8"), /^anchor "room\.machine"$/m);
       const reverted = await revertSystemChanges(home);
       assert.equal(reverted.ok, true);
+      // The revert removed the reference again.
+      assert.doesNotMatch(readFileSync(pfConf, "utf8"), /^anchor "room\.machine"$/m);
     });
     const log = readFileSync(join(home, "argv-log"), "utf8");
     assert.match(log, /pmset "-a" "disablesleep" "0"/);
     assert.match(log, /pmset "-a" "autorestart" "0"/);
-    assert.match(log, /pfctl "-a" "room.machine" "-F" "all"/);
+    // W5-H2: the main ruleset is reloaded after the pf.conf edit, and the
+    // revert reloads it again after removing the reference.
+    assert.match(log, new RegExp(`pfctl "-f" ${JSON.stringify(pfConf).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+    assert.match(log, /pfctl "-a" "room\.machine" "-F" "all"/);
     assert.match(log, /defaults "delete" "com.apple.network.local-network" "AllowedEthernetLocalNetworkAddresses"/);
     assert.match(log, /defaults "delete" "com.apple.network.local-network" "AllowedWiFiLocalNetworkAddresses"/);
+    rmSync(home, { recursive: true, force: true });
+  });
+
+  test("a failed pfctl -f reload rolls the pf.conf edit back", async () => {
+    const home = homeDir();
+    const pfConf = join(home, "pf.conf");
+    const before = "scrub-anchor \"com.apple/*\"\n";
+    writeFileSync(pfConf, before);
+    writeFileSync(join(home, "pfctl-fail-f"), "");
+    const env = machineEnv(home, { ROOM_MACHINE_PF_CONF: pfConf });
+    await spawnContext.run({ env }, async () => {
+      const applied = await applySystemChanges(home);
+      assert.equal(applied.ok, false);
+      assert.match(applied.error, /anchor reference not activated/);
+      // No partial change left behind.
+      assert.equal(readFileSync(pfConf, "utf8"), before);
+    });
     rmSync(home, { recursive: true, force: true });
   });
 
@@ -366,6 +393,7 @@ test.describe("room-machine", { concurrency: false }, () => {
       home,
       env: { ...env, ROOM_MACHINE_RELAY_URL: relay.http },
       relayHttp: relay.http,
+      insecure: true, // local fake relay over plain http
     }));
     assert.equal(enrolled.ok, true, JSON.stringify(enrolled));
     const secret = await spawnContext.run({ env }, () => readSecret("identity", home));
@@ -419,7 +447,7 @@ test.describe("room-machine", { concurrency: false }, () => {
       ROOM_MACHINE_DEADMAN_SECONDS: "30",
       ROOM_ORIGIN: origin,
     });
-    const enrolled = await spawnContext.run({ env }, () => enroll({ code: "desk-code", home, env, relayHttp: relay.http }));
+    const enrolled = await spawnContext.run({ env }, () => enroll({ code: "desk-code", home, env, relayHttp: relay.http, insecure: true }));
     assert.equal(enrolled.ok, true, JSON.stringify(enrolled));
     const secret = await spawnContext.run({ env }, () => readSecret("identity", home));
     const presence = await get(origin, "/api/agent-heartbeats", secret);

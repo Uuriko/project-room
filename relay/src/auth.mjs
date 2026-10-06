@@ -74,6 +74,10 @@ async function authorizeLease(env, state, token, { needLease, slotHint, tool, no
 }
 
 async function authorizePassthrough(env, state, request, bearer, { needLease, slotHint, tool, now }) {
+  // M5: passthrough needs the per-machine opt-in, not just the global flag.
+  if (state.passthroughOptIn !== true) {
+    throw relayError(403, "passthrough_not_enabled", "Passthrough mode is not enabled for this machine");
+  }
   const roomId = request.headers.get("x-room-id") || (state.rooms.length === 1 ? state.rooms[0] : "");
   if (!roomId) throw relayError(422, "room_required", "Name the room in X-Room-Id");
   if (!isRoomId(roomId) || !state.rooms.includes(roomId)) {
@@ -130,8 +134,13 @@ async function authorizePassthrough(env, state, request, bearer, { needLease, sl
     holderName: winner.holderName,
     roomId,
     expiresAt: winner.expiresAt,
-    caps: null,
+    // M5: carry the machine's passthrough caps instead of null, and enforce
+    // them on the tool below. Machines without configured caps get none.
+    caps: Array.isArray(state.passthroughCaps) ? state.passthroughCaps : [],
   };
+  if (tool && !capsCover(lease.caps, tool)) {
+    throw relayError(403, "capability_denied", `The passthrough lease does not cover ${tool}`);
+  }
   rememberLease(state, lease);
   return { identity, lease: publicLease(lease) };
 }

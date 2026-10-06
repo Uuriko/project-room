@@ -812,9 +812,18 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
         return { jsonrpc: "2.0", id: requestId, result: toolResult(outcome.value, outcome.isError) };
       }
       if (INBOX_TOOLS.some(entry => entry.name === name)) {
+        // Scoped API keys need the mcp:inbox scope: inbox tools reach the
+        // identity's whole inbox, which room scopes never cover.
+        if (!mcpKeyGrantsScope(store, secret, MCP_INBOX_SCOPE)) {
+          return mcpCallError(requestId, { reason: "insufficient_scope", tool: name, hint: `API key lacks the ${MCP_INBOX_SCOPE} scope` });
+        }
         return { jsonrpc: "2.0", id: requestId, result: toolResult(callInboxTool(store, identity, name, args)) };
       }
       if (WAKE_TOOLS.some(entry => entry.name === name)) {
+        // Same for wake tools: wake_register sets push URLs for the identity.
+        if (!mcpKeyGrantsScope(store, secret, MCP_WAKE_SCOPE)) {
+          return mcpCallError(requestId, { reason: "insufficient_scope", tool: name, hint: `API key lacks the ${MCP_WAKE_SCOPE} scope` });
+        }
         return { jsonrpc: "2.0", id: requestId, result: toolResult(await callWakeTool(store, secret, identity, name, args)) };
       }
       return { jsonrpc: "2.0", id: requestId, result: toolResult(await callRoomTool(store, secret, identity, name, args, agentRooms)) };
@@ -829,8 +838,21 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
   return { jsonrpc: "2.0", id: requestId, error: { code: -32601, message: "Method not found" } };
 }
 
-function mcpRoomAllowlist(store, secret) {
-  if (typeof secret !== "string" || !secret.startsWith(API_KEY_PREFIX)) return null;
+// API keys are scoped; the owner identity secret is not. A scoped key must
+// carry the matching scope to reach the identity-wide inbox/wake tools:
+// room scopes (mcp:room:*) never imply them. Mirrors the exact-or-prefix:*
+ // wildcard rule in agent-plugin-routes.mjs.
+const MCP_INBOX_SCOPE = "mcp:inbox";
+const MCP_WAKE_SCOPE = "mcp:wake";
+function mcpKeyGrantsScope(store, secret, requiredScope) {
+  if (typeof secret !== "string" || !secret.startsWith(API_KEY_PREFIX)) return true;
+  const record = store.agentPlugin.verifyPresentedApiKey(secret);
+  if (!record) return false;
+  return (record.scopes ?? []).some(scope =>
+    scope === requiredScope || (scope.endsWith(":*") && requiredScope.startsWith(scope.slice(0, -1))));
+}
+
+function mcpRoomAllowlist(store, secret) {  if (typeof secret !== "string" || !secret.startsWith(API_KEY_PREFIX)) return null;
   const record = store.agentPlugin.verifyPresentedApiKey(secret);
   if (!record) return [];
   const rooms = record.scopes.filter(scope => scope.startsWith("mcp:room:")).map(scope => scope.slice("mcp:room:".length));

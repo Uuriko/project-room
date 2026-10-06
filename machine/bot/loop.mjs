@@ -304,6 +304,7 @@ export class MachineBot {
   async tryGo() {
     const pending = this.pending;
     if (!pending) return;
+    if (this.isHalted()) return; // never start new work while halted
     const page = await this.api.conversation(pending.roomId, { limit: 40 });
     if (!page.ok) return;
     const allowed = new Set([this.config.ownerMemberId, ...this.bot.goMembers].filter(id => typeof id === "string" && id));
@@ -411,8 +412,24 @@ export class MachineBot {
     return Boolean(view.value?.pause);
   }
 
+  isHalted() {
+    return this.daemon?.state?.halted === true;
+  }
+
+  // Called by the daemon when a relay halt arrives: release the active claim
+  // and stop before the next step. The halted state persists across restarts
+  // until the operator resumes, so the bot must not pick the work back up.
+  async haltActive() {
+    if (!this.active) return { stopped: true };
+    return this.stopEarly("Halted by the operator. I stopped before the next step.");
+  }
+
   async continueActive() {
+    // A persisted task loaded while already halted must be stopped and
+    // cleared via stopEarly — not silently left active by the loop guard.
+    if (this.isHalted()) return this.stopEarly("Halted by the operator. I stopped before the next step.");
     while (this.active && !this.stopped) {
+      if (this.isHalted()) return this.stopEarly("Halted by the operator. I stopped before the next step.");
       if (await this.isPaused(this.active.roomId)) return this.stopEarly("Paused. I stopped before the next step.");
       const before = this.budgetReason();
       if (before) return this.stopEarly(before);
@@ -427,6 +444,7 @@ export class MachineBot {
       if (!(turn.actions ?? []).length) return this.finish(turn.text || "Done.");
       for (const action of turn.actions) {
         if (this.stopped) return { stopped: true };
+        if (this.isHalted()) return this.stopEarly("Halted by the operator. I stopped before the next step.");
         if (await this.isPaused(this.active.roomId)) return this.stopEarly("Paused. I stopped before the next step.");
         const reason = this.budgetReason();
         if (reason) return this.stopEarly(reason);
@@ -456,7 +474,12 @@ export class MachineBot {
       const approved = await this.approve(className, tool);
       if (!approved.ok) return approved;
     }
-    const state = this.toolState();
+    let state;
+    try {
+      state = this.toolState();
+    } catch (error) {
+      return { ok: false, message: error.message };
+    }
     const dispatched = await this.dispatch({
       tool, args, slot: this.active.slot, claimId: this.active.leaseId, state, home: this.home,
     });
@@ -493,6 +516,18 @@ export class MachineBot {
     const state = this.daemon?.state ?? (this.toolRuntime ??= {
       running: {}, slots: { desk: null, scratch: null }, halted: false, snapshots: {},
     });
+    // M2: never stomp a slot another lease holds. The daemon's own call()
+    // path rejects foreign claimIds with SLOT_HELD; the bot must apply the
+    // same rule before writing instead of blindly overwriting.
+    // Known limit: a relay lease minted but not yet used through the daemon
+    // is not in state.slots until its first call. The window is narrow (the
+    // lease must arrive between the bot's check and its first write), and
+    // the daemon still rejects the late arrival with SLOT_HELD rather than
+    // interleaving work.
+    const held = state.slots[this.active.slot];
+    if (held && held.claimId !== this.active.leaseId) {
+      throw new Error(`Slot ${this.active.slot} is held by another lease; the bot refused to seize it.`);
+    }
     state.slots[this.active.slot] = {
       claimId: this.active.leaseId,
       identityId: this.memberIds.get(this.active.roomId) ?? "bot",
@@ -580,6 +615,7 @@ export class MachineBot {
 
 export function attachBot(daemon) {
   const bot = new MachineBot({ home: daemon.home, env: daemon.env, daemon });
+  daemon.botLoop = bot; // let the daemon halt the bot's active execution
   if (!bot.isEnabled()) return async () => {};
   const done = bot.run();
   return async () => {

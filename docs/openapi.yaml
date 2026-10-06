@@ -8404,6 +8404,26 @@ paths:
         '403': { description: origin_denied or csrf_denied }
         '422': { description: invalid_email_code }
         '429': { description: rate_limited }
+  /api/auth/email/verify/resend:
+    post:
+      summary: Re-issue the email verification code
+      description: >-
+        Requires the account session, Origin, and CSRF. Mints a fresh
+        6-digit verification code for the account's password-login email,
+        invalidating the previous code. Answers already_verified when the
+        address is already verified; 422 when the account has no email;
+        503 when mail delivery is not configured. Tight per-account budget
+        (5) so the endpoint is not a free oracle for someone else's inbox.
+      security:
+        - accountSession: []
+      responses:
+        '200': { description: "{status: resent|already_verified, email, expiresAt?}" }
+        '401': { description: account_session_required or invalid_session }
+        '403': { description: origin_denied or csrf_denied }
+        '405': { description: method_not_allowed }
+        '422': { description: invalid_email }
+        '429': { description: rate_limited }
+        '503': { description: mail_not_configured }
   /api/auth/password/login:
     post:
       summary: Sign a session slot in with email+password (slice 2)

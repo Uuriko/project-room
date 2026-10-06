@@ -8,7 +8,7 @@
 // Writes: one room named qa2-journey-* (archived at the end) and 2 identities (revoked at the end).
 import { argv, exit } from "node:process";
 import { randomUUID } from "node:crypto";
-import { writeFileSync, rmSync } from "node:fs";
+import { writeFileSync, rmSync, renameSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createQaClient } from "./lib/client.mjs";
@@ -35,7 +35,11 @@ async function runTrial(trial) {
   const tasks = [];
   const S = {}; // state shared across tasks
   const recovery = join(tmpdir(), `qa2-journey-${stamp}.json`);
-  const save = () => writeFileSync(recovery, JSON.stringify({ origin, room: S.room, ids: [S.a, S.b].filter(Boolean).map(x => ({ identityId: x.identityId, secret: x.secret })) }), { mode: 0o600 });
+  // W3-F9: atomic write — a torn file defeats the recovery purpose.
+  const save = () => {
+    writeFileSync(`${recovery}.tmp`, JSON.stringify({ origin, room: S.room, ids: [S.a, S.b].filter(Boolean).map(x => ({ identityId: x.identityId, secret: x.secret })) }), { mode: 0o600 });
+    renameSync(`${recovery}.tmp`, recovery);
+  };
   async function task(id, title, fn) {
     const before = calls, t0 = performance.now();
     const rec = { id, title, pass: false, discoverable: null, notes: [] };
