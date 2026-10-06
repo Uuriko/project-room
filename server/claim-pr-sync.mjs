@@ -15,7 +15,7 @@
 //     the in-flight request at the sooner of 5s and the time remaining
 // The token (GITHUB_TOKEN or GH_TOKEN) is never logged or stored. Public
 // repositories still answer when it is absent.
-import { emitWorkClaimEvent, enqueueClaimWake } from "./work-claim-events.mjs";
+import { emitWorkClaimEvent, enqueueClaimWake, wakeNamedReviewers } from "./work-claim-events.mjs";
 import { closeWhenLive, notePullMerged, recordCi } from "./work-claims.mjs";
 import { SOURCE_REVISION } from "./version.mjs";
 import {
@@ -341,6 +341,7 @@ export function commitPullRequestLookup(store, registry, roomId, item, result, n
       if (result.ci.state === "success" || result.ci.state === "failure") {
         enqueueClaimWake(store, roomId, item.owner, `work-claim:${item.id}:ci:${result.ci.state}:${result.ci.headSha ?? "none"}`);
       }
+      wakeNamedReviewers(store, roomId, stored);
     }
     return changed;
   }
