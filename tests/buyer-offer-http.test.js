@@ -45,7 +45,6 @@ const seedOffer = call => call(`${base}/project-offers`, {
 test('offer profile lifecycle over HTTP: create, document, present, accept', async t => {
   const { call,store } = await fixture(t);
   addRailMember(store,'worker');
-  const workerKey=store.issueAccessKey('commons','worker');
   await json(await seedOffer(call), 201);
   const profile = await json(await call(`${base}/demigod-offers`, {
     requestId: 'p1', profileId: 'http-1', offerRef: 'seed-1', demigodReqId: 'req-1', buyerId: 'owner',
