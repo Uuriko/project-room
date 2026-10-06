@@ -889,7 +889,12 @@
   "tests/audit2-light-theme-surfaces.test.js": 103,
   "tests/public-receipts-toggle.test.js": 665,
   "tests/invite-redeem-422.test.js": 516,
-  "tests/account-deletion-residual-sec04.test.js": 307
+  "tests/account-deletion-residual-sec04.test.js": 307,
+  "tests/demo-room.test.js": 396.901,
+  "tests/human-push-preferences.test.js": 529.707,
+  "tests/read-cursor-unify.test.js": 65.47,
+  "tests/squads-ui.test.js": 68.693,
+  "tests/squads.test.js": 602.751
  },
  "_note": "Per-file wall-clock ms of `node --test <file>` measured 2026-10-06 on a 2-CPU host with 16-way parallelism (values are contention-inflated; used only as relative weights for shard balancing, never for membership). Files hitting the 300s measurement timeout are capped at 300000."
 }
