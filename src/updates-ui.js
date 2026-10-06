@@ -10,16 +10,16 @@ const FILTERS = [
   { id: "saved", label: "Saved" }
 ];
 const ACTION_LABELS = { open: "Open", done: "Handled for me", clear: "Clear" };
-const validBasis = value => typeof value === "string" && /^ub1_[a-f0-9]{64}$/.test(value);
+export const validBasis = value => typeof value === "string" && /^ub1_[a-f0-9]{64}$/.test(value);
 const PALETTE = { "catch-up": "needs", activity: "all", mentions: "mentions", later: "saved" };
 
-function queryFor(filter) {
+export function queryFor(filter) {
   if (filter === "mentions") return "state=actionable&kinds=mention";
   if (filter === "all" || filter === "saved") return "state=all";
   return "state=actionable";
 }
 
-function visible(items, filter) {
+export function visible(items, filter) {
   if (filter === "saved") return items.filter(item => item.state === "read");
   return items;
 }
