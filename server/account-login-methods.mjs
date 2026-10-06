@@ -663,7 +663,13 @@ export class AccountLoginMethods {
       fail(401, "invalid_magic_code", "That code is not valid");
     }
     return this.store.transaction(() => {
-      this.db.prepare("UPDATE account_magic_codes SET consumed_at=? WHERE code_hash=?").run(now, match.code_hash);
+      // SEC-14: claim the row atomically. The SELECT above runs outside this
+      // transaction, so re-check single use and expiry here and fail closed
+      // when another consumer won first (same guard as the verify and reset
+      // paths).
+      const changed = this.db.prepare("UPDATE account_magic_codes SET consumed_at=? WHERE code_hash=? AND consumed_at IS NULL AND expires_at>?")
+        .run(now, match.code_hash, now).changes;
+      if (changed !== 1) fail(401, "invalid_magic_code", "That code is not valid");
       this.db.prepare("DELETE FROM account_magic_codes WHERE email_hash=? AND code_hash != ?")
         .run(emailLookupHash(normalized), match.code_hash);
       return { accountId: match.account_id, email: match.email };
