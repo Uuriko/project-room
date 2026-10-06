@@ -31,7 +31,13 @@ test("join page is public: GET /join and /join/:code serve the page without auth
     assert.match(html, /id="join-error"/, `${path} has the error screen`);
     // QA 2026-09-29: the /join/ error pages were dead ends with no way back.
     assert.match(html, /id="join-home-link" href="\/(room\/)?"/, `${path} error screen links back to sign-in`);
-    assert.match(html, /href="https:\/\/www\.getdasha\.com\/room"/, `${path} error screen links to the marketing page`);
+    // 2026-10-06: the marketing link must be door-relative /room (200 on
+    // both doors); the old {{ASSET_BASE}}/room rendered /room/room on the
+    // www door and 404'd, and the hidden legacy duplicate is gone.
+    assert.match(html, /<a href="\/room">What is Project Room\?<\/a>/, `${path} error screen links to the marketing page at /room`);
+    assert.ok(!html.includes("/room/room"), `${path} has no /room/room 404 link`);
+    const marketing = await fetch(`${origin}/room`);
+    assert.equal(marketing.status, 200, `${path} marketing target resolves`);
     assert.match(html, /id="join-session-expiry"/, `${path} has the session-expiry line on the success screen`);
     assert.match(html, /src="[^"]*\/src\/join\.js"/, `${path} loads the join script`);
     assert.ok(!html.includes("{{ASSET_BASE}}"), `${path} substitutes the asset base`);

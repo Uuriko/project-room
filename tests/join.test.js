@@ -84,6 +84,14 @@ test("join errors name the problem and the next step", () => {
   const preview = joinErrorMessage({ status: 404, code: "invite_unavailable", action: "preview" });
   assert.equal(preview.retry, false);
   assert.match(joinErrorMessage({ status: 500 }).message, /hiccup|try again/i);
+  // 2026-10-06: re-clicking an invite link after joining must speak browser,
+  // not "saved connection" agent jargon — and must name the visible exit.
+  const relink = joinErrorMessage({ status: 409, code: "identity_already_linked", action: "join" });
+  assert.equal(relink.title, "Already joined");
+  assert.equal(relink.retry, false);
+  assert.match(relink.message, /This browser is already a member/);
+  assert.match(relink.message, /Back to sign-in|back to sign-in/i);
+  assert.doesNotMatch(relink.message, /saved connection/i);
 });
 
 test("join names are 1–80 characters", () => {

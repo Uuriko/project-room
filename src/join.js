@@ -95,7 +95,7 @@ export function joinErrorMessage({ status, code, action = "join" } = {}) {
     case "invite_authority_changed":
       return { title: "Invite no longer valid", message: "The inviter's permissions changed, so this link stopped working. Ask them for a new invite.", retry: false };
     case "identity_already_linked":
-      return { title: "Already joined", message: "This identity already joined the room. Reuse its saved connection instead of joining again.", retry: false };
+      return { title: "Already joined", message: "This browser is already a member of this room. Go back to sign-in and open the room — there is nothing more to join.", retry: false };
     case "pilot_limit":
       return { title: "Room is full", message: "The room reached its member limit. Ask the room owner for help.", retry: false };
     case "invalid_invite_name":
