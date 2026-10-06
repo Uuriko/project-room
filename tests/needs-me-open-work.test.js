@@ -138,7 +138,7 @@ test('hard work (tag hard / hard-problem) ranks first and says how to close it',
 test('a named reviewer (tag rev-<memberId>) sees a review ask until reviewing the current head', t => {
   const { store, ada, rex, owner, put } = setup(t);
   const memberOf = identity => store.db.prepare('SELECT member_id AS m FROM identity_links WHERE identity_id=? AND room_id=?').get(identity.identityId, 'board').m;
-  const adaId = memberOf(ada), rexId = memberOf(rex), ownerId = memberOf(owner);
+  const adaId = memberOf(ada), ownerId = memberOf(owner);
   const now = Date.parse('2026-10-01T01:00:00Z');
   const tags = ['hard', 'H2', `rev-${adaId}`];
   put('waiting', 0, { tags });
@@ -198,4 +198,39 @@ test('rev- tags only reach active room members: an outside id gets no wake, a ha
   store.workClaims.set('board', slugged);
   assert.deepEqual(collectNeedsMe(store, ada.secret, {}).reviewAsks?.[0].top.map(row => row.id), ['slugged'], 'rev-ada resolves to the member named Ada');
   assert.equal(wakeNamedReviewers(store, 'board', slugged).filter(result => result?.enqueued).length, 1);
+});
+
+test('myWork carries the caller\'s own held claims that need attention: lease expiring, idle; never the cursor', t => {
+  const { store, ada, rex, owner } = setup(t);
+  const now = Date.now();
+  const first = collectNeedsMe(store, ada.secret, {});
+  assert.equal(first.myWork, undefined, 'no duties, no field');
+  const members = Object.values(store.roomAuthority('board').members);
+  const adaId = members.find(m => m.identityId === ada.identityId)?.id;
+  const ownerMember = members.find(m => m.identityId === owner.identityId)?.id;
+  assert.ok(adaId && ownerMember);
+  // Ada holds a claim whose 6h lease ends in 30 minutes.
+  let soon = createWork({ id: 'soon', title: 'Lease soon' }, { now: now - 6 * 3600000, agentId: ownerMember });
+  soon = claimWork(soon, adaId, { now: now - 5.5 * 3600000, leaseHours: 6 });
+  store.workClaims.set('board', soon);
+  // Ada holds a claim untouched for 3h with a long lease.
+  let quiet = createWork({ id: 'quiet', title: 'Quiet claim' }, { now: now - 4 * 3600000, agentId: ownerMember });
+  quiet = claimWork(quiet, adaId, { now: now - 3 * 3600000, leaseHours: 24 });
+  store.workClaims.set('board', quiet);
+  // A fresh claim of Ada's needs nothing.
+  let fresh = createWork({ id: 'fresh', title: 'Fresh claim' }, { now: now - 600000, agentId: ownerMember });
+  fresh = claimWork(fresh, adaId, { now: now - 500000, leaseHours: 24 });
+  store.workClaims.set('board', fresh);
+  const page = collectNeedsMe(store, ada.secret, { since: first.cursor });
+  assert.equal(page.myWork?.length, 1);
+  const mine = page.myWork[0];
+  assert.equal(mine.roomId, 'board');
+  assert.deepEqual(mine.top.map(row => [row.id, row.why]), [['soon', 'lease_expiring'], ['quiet', 'claim_idle']]);
+  assert.ok(mine.top[0].minutesLeft > 0 && mine.top[0].minutesLeft <= 30);
+  assert.ok(mine.top[1].idleMinutes >= 179);
+  assert.deepEqual(page.cursor, collectNeedsMe(store, ada.secret, { since: first.cursor }).cursor, 'myWork never moves the cursor');
+  // A renewal clears idle; others never see Ada's duties.
+  store.workClaims.set('board', updateWork(quiet, adaId, { state: 'in_progress', now: now - 1000 }));
+  assert.deepEqual(collectNeedsMe(store, ada.secret, {}).myWork[0].top.map(row => row.id), ['soon']);
+  assert.equal(collectNeedsMe(store, rex.secret, {}).myWork, undefined);
 });
