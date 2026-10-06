@@ -287,3 +287,49 @@ export async function handleMergeQueue({
     throw error;
   }
 }
+
+// Approval gate (John's Tab and Fo, #1615 review 4371): the queue merges only
+// a PR whose Board claim carries an independent approval of the exact head it
+// was enqueued at. Without this, any member could enqueue any PR and the tick
+// merged it unless someone had already posted CHANGES_REQUESTED on GitHub.
+// Pure: the worker reads the claim and passes it in.
+//   - latest review per reviewer counts (a later review supersedes an earlier one)
+//   - any current changes_requested blocks
+//   - an approve counts only from a member other than the claim owner, bound
+//     to the head: basis.headSha matches, or the summary names the head (7+ hex)
+const shortSha = sha => String(sha ?? "").slice(0, 7);
+const ownerOf = claim => (typeof claim?.owner === "object" ? claim?.owner?.memberId ?? claim?.owner?.id : claim?.owner) ?? null;
+const headsIn = text => (String(text ?? "").match(/\b[0-9a-f]{7,40}\b/gi) ?? []).map(sha => sha.toLowerCase());
+const sameSha = (a, b) => !!a && !!b && a.length >= 7 && b.length >= 7 && (a.startsWith(b) || b.startsWith(a));
+
+export function approvalGate({ claim, headSha }) {
+  const head = String(headSha ?? "").toLowerCase();
+  if (!claim || !Array.isArray(claim.reviews)) return { ok: false, reason: `no Board claim with reviews to check; an independent reviewer must approve ${shortSha(head)} on the claim` };
+  if (head.length < 7) return { ok: false, reason: "no enqueued head to bind an approval to" };
+  const latest = new Map();
+  for (const review of [...claim.reviews].sort((a, b) => Date.parse(a.at ?? 0) - Date.parse(b.at ?? 0))) {
+    if (review?.memberId) latest.set(review.memberId, review);
+  }
+  const current = [...latest.values()];
+  const blocking = current.find(review => review.verdict === "changes_requested");
+  if (blocking) return { ok: false, reason: `changes requested on the claim by ${blocking.memberId}; merge waits for that reviewer's approve` };
+  const owner = ownerOf(claim) ?? claim.reviews.find(review => review?.basis?.owner)?.basis?.owner ?? null;
+  const approvals = current.filter(review => review.verdict === "approve" && review.memberId !== owner
+    && (sameSha(String(review.basis?.headSha ?? "").toLowerCase(), head) || headsIn(review.summary).some(sha => sameSha(sha, head))));
+  if (!approvals.length) return { ok: false, reason: `no independent approve bound to head ${shortSha(head)} on claim ${claim.id ?? "?"}: a reviewer other than the owner must approve this exact head (name it in the review)` };
+  return { ok: true, approvedBy: approvals.map(review => review.memberId) };
+}
+
+// Second blocker from review 4404/4506: after its own rebase the worker must
+// prove it is merging what was approved. The cumulative patch-id of the PR
+// before the rebase (merge-base..enqueued head) must equal the one after it
+// (main..rebased head); a rebase that drops or changes hunks refuses. Git is
+// injected as runGit(args, stdin) so this stays testable without the worker.
+export function patchUnchanged(runGit, { oldBase, oldHead, newBase, newHead }) {
+  const id = (base, head) => {
+    const diff = runGit(["diff", "--no-color", "--no-ext-diff", base, head]);
+    return diff.trim() ? String(runGit(["patch-id", "--stable"], diff)).trim().split(/\s+/)[0] : "";
+  };
+  const before = id(oldBase, oldHead), after = id(newBase, newHead);
+  return { ok: before !== "" && before === after, before, after };
+}

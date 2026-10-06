@@ -30,6 +30,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import https from "node:https";
 import { randomUUID } from "node:crypto";
+import { approvalGate, patchUnchanged } from "../server/merge-queue.mjs";
 
 const ORIGIN = "https://room.trydemigod.com";
 const REPO = "Uuriko/project-room";
@@ -138,6 +139,17 @@ async function cmdSweep() {
 
 // Eject the active slot: release it and tell the room why. The lane fixes
 // the problem and re-enqueues; the queue keeps moving.
+// The Board claim is the review record the room uses (reviews[].basis, see
+// docs/WORK-CLAIMS.md); a missing or unreadable claim refuses, never passes.
+async function claimGate(claimId, headSha) {
+  try {
+    const data = await roomApi("GET", `/api/rooms/${ROOM}/work-claims/${encodeURIComponent(claimId)}`);
+    return approvalGate({ claim: data?.claim ?? data, headSha });
+  } catch (err) {
+    return { ok: false, reason: `could not read Board claim ${claimId} to check approvals: ${err.message}` };
+  }
+}
+
 async function eject(claimId, reason, pr) {
   await roomApi("POST", `/api/rooms/${ROOM}/merge-queue/release`, { claimId });
   const note = `merge-queue: ejected PR #${pr} (claim ${claimId}) — ${reason}. Lane: fix and re-enqueue; the slot is free.`;
@@ -193,7 +205,9 @@ async function cmdTick() {
     const info = ghJson(["pr", "view", String(pr), "--json", "number,state,headRefOid,headRefName,baseRefName,mergeable,url"]);
     console.log(`dry-run: slot for PR #${pr} ${headSha.slice(0, 7)} (claim ${claimId}) is held; verifying (reads only).`);
     console.log(`  PR state=${info.state} base=${info.baseRefName} head=${info.headRefOid.slice(0, 7)} mergeable=${info.mergeable} url=${info.url}`);
-    if (info.state === "OPEN" && info.headRefOid === headSha && info.baseRefName === BASE) {
+    const gate = await claimGate(claimId, headSha);
+    console.log(`  approval gate: ${gate.ok ? `ok (approved by ${gate.approvedBy.join(", ")})` : `REFUSED: ${gate.reason}`}`);
+    if (gate.ok && info.state === "OPEN" && info.headRefOid === headSha && info.baseRefName === BASE) {
       console.log(`dry-run plan for PR #${pr}:`);
       console.log(`  1. adopt the slot, heartbeat the lease`);
       console.log(`  2. rebase ${info.headRefName} onto origin/${BASE}`);
@@ -202,7 +216,7 @@ async function cmdTick() {
       console.log(`  5. gh pr merge --squash`);
       console.log(`  6. release the slot, post DONE to the room`);
     } else {
-      console.log("dry-run: PR would be ejected (not open / head moved / wrong base).");
+      console.log("dry-run: PR would be ejected (no bound approval / not open / head moved / wrong base).");
     }
     console.log("dry-run: no writes performed. Re-run with --live to execute.");
     return;
@@ -247,6 +261,9 @@ async function cmdTick() {
       await eject(claimId, "open CHANGES_REQUESTED review (lander rule: merge only after rev-reviewer APPROVE on the exact head)", pr);
       return;
     }
+    const gate = await claimGate(claimId, headSha);
+    if (!gate.ok) { await eject(claimId, gate.reason, pr); return; }
+    console.log(`approval gate: approved on ${headSha.slice(0, 7)} by ${gate.approvedBy.join(", ")}`);
     if (info.mergeable === "CONFLICTING") {
       // CONFLICTING at enqueue-time head vs main: the rebase below resolves
       // it; only unresolvable conflicts eject (caught at rebase).
@@ -258,6 +275,7 @@ async function cmdTick() {
     await heartbeat();
     const branch = `mq/work-pr-${pr}`;
     sh("git", ["checkout", "-B", branch, `origin/${info.headRefName}`], { cwd: WORKER_DIR });
+    const oldBase = sh("git", ["merge-base", `origin/${info.headRefName}`, `origin/${BASE}`], { cwd: WORKER_DIR });
     try {
       sh("git", ["rebase", `origin/${BASE}`], { cwd: WORKER_DIR });
     } catch {
@@ -266,6 +284,12 @@ async function cmdTick() {
       return;
     }
     const newHead = sh("git", ["rev-parse", "HEAD"], { cwd: WORKER_DIR });
+    const runGit = (args, input) => execFileSync("git", args, { cwd: WORKER_DIR, encoding: "utf8", input, maxBuffer: 64 * 1024 * 1024 });
+    const same = patchUnchanged(runGit, { oldBase, oldHead: headSha, newBase: `origin/${BASE}`, newHead });
+    if (!same.ok) {
+      await eject(claimId, `the rebase changed the approved patch (patch-id ${same.before.slice(0, 12) || "empty"} -> ${same.after.slice(0, 12) || "empty"}): re-review the rebased head before merging`, pr);
+      return;
+    }
     await heartbeat();
     try {
       sh("git", ["push", "--force-with-lease", "origin", `${branch}:${info.headRefName}`], { cwd: WORKER_DIR });

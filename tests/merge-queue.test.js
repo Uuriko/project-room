@@ -220,3 +220,56 @@ test("HTTP handler: try-mode refusal surfaces 409 with machine-readable position
   assert.equal(refused.code, "merge_queue_busy");
   assert.equal(refused.extra.position, 1);
 });
+
+// #1615 review 4371 (John's Tab, Fo concurring): the queue needs an approval
+// gate. These are the cases the tick must refuse or pass.
+import { approvalGate, patchUnchanged } from "../server/merge-queue.mjs";
+import { execFileSync as runSync } from "node:child_process";
+import { mkdtempSync as mkTemp, rmSync as rmTemp, writeFileSync as writeTemp } from "node:fs";
+import { join as joinPath } from "node:path";
+import { tmpdir as tmpDir } from "node:os";
+const HEAD = "6c7c792b0a1b2c3d4e5f60718293a4b5c6d7e8f9";
+const rev = (memberId, verdict, at, extra = {}) => ({ memberId, verdict, at, summary: "", basis: { version: 1, owner: "lane", headSha: null }, ...extra });
+const claimWith = reviews => ({ id: "orch-x", owner: "lane", reviews });
+
+test("approval gate: an unreviewed PR is refused, which is the #1615 gap", () => {
+  assert.equal(approvalGate({ claim: claimWith([]), headSha: HEAD }).ok, false);
+  assert.equal(approvalGate({ claim: null, headSha: HEAD }).ok, false);
+  assert.match(approvalGate({ claim: claimWith([]), headSha: HEAD }).reason, /no independent approve bound to head 6c7c792/);
+});
+
+test("approval gate: an approve counts only from a non-owner, bound to the enqueued head", () => {
+  const ok = approvalGate({ claim: claimWith([rev("fo", "approve", "2026-10-06T08:00:00Z", { summary: "APPROVE @6c7c792b, 12/12" })]), headSha: HEAD });
+  assert.deepEqual(ok, { ok: true, approvedBy: ["fo"] });
+  assert.equal(approvalGate({ claim: claimWith([rev("fo", "approve", "2026-10-06T08:00:00Z", { basis: { headSha: HEAD } })]), headSha: HEAD }).ok, true, "basis.headSha binds too");
+  assert.equal(approvalGate({ claim: claimWith([rev("lane", "approve", "2026-10-06T08:00:00Z", { summary: "self 6c7c792b" })]), headSha: HEAD }).ok, false, "owner self-approval");
+  assert.equal(approvalGate({ claim: claimWith([rev("fo", "approve", "2026-10-06T08:00:00Z", { summary: "looks good" })]), headSha: HEAD }).ok, false, "no head named");
+  assert.equal(approvalGate({ claim: claimWith([rev("fo", "approve", "2026-10-06T08:00:00Z", { summary: "APPROVE @1ac2d27c" })]), headSha: HEAD }).ok, false, "a different head");
+});
+
+test("approval gate: the latest review per reviewer wins; any current changes_requested blocks", () => {
+  const approve = rev("fo", "approve", "2026-10-06T08:00:00Z", { summary: "@6c7c792b ok" });
+  assert.equal(approvalGate({ claim: claimWith([approve, rev("inst", "changes_requested", "2026-10-06T08:05:00Z")]), headSha: HEAD }).ok, false);
+  assert.equal(approvalGate({ claim: claimWith([approve, rev("fo", "changes_requested", "2026-10-06T08:05:00Z")]), headSha: HEAD }).ok, false, "a later CHANGES supersedes the reviewer's approve");
+  assert.equal(approvalGate({ claim: claimWith([rev("fo", "changes_requested", "2026-10-06T07:00:00Z"), approve]), headSha: HEAD }).ok, true, "a later approve clears the reviewer's earlier CHANGES");
+});
+
+test("patch-id after the worker's rebase: same patch passes, a dropped or changed hunk refuses", t => {
+  const dir = mkTemp(joinPath(tmpDir(), "mq-pid-"));
+  t.after(() => rmTemp(dir, { recursive: true, force: true }));
+  const g = (args, input) => runSync("git", ["-C", dir, "-c", "user.name=t", "-c", "user.email=t@t", ...args], { encoding: "utf8", input }).trim();
+  g(["init", "-q", "-b", "main"]);
+  writeTemp(joinPath(dir, "a.txt"), "1\n2\n3\n"); writeTemp(joinPath(dir, "b.txt"), "x\n"); g(["add", "."]); g(["commit", "-qm", "base"]);
+  const oldBase = g(["rev-parse", "HEAD"]);
+  g(["checkout", "-qb", "pr"]); writeTemp(joinPath(dir, "a.txt"), "1\nTWO\n3\n"); writeTemp(joinPath(dir, "c.txt"), "new\n"); g(["add", "."]); g(["commit", "-qm", "pr"]);
+  const oldHead = g(["rev-parse", "HEAD"]);
+  g(["checkout", "-q", "main"]); writeTemp(joinPath(dir, "b.txt"), "y\n"); g(["commit", "-qam", "main moves"]);
+  g(["checkout", "-qb", "clean", oldHead]); g(["rebase", "-q", "main"]);
+  assert.equal(patchUnchanged(g, { oldBase, oldHead, newBase: "main", newHead: g(["rev-parse", "HEAD"]) }).ok, true, "a clean rebase keeps the patch");
+  g(["checkout", "-q", "main"]); writeTemp(joinPath(dir, "c.txt"), "new\n"); g(["add", "."]); g(["commit", "-qm", "main already has c.txt"]);
+  g(["checkout", "-qb", "dropped", oldHead]); g(["rebase", "-q", "main"]);
+  const dropped = patchUnchanged(g, { oldBase, oldHead, newBase: "main", newHead: g(["rev-parse", "HEAD"]) });
+  assert.equal(dropped.ok, false, "main already carrying part of the patch changes what would merge");
+  assert.notEqual(dropped.before, dropped.after);
+  assert.equal(patchUnchanged(g, { oldBase, oldHead: oldBase, newBase: "main", newHead: "main" }).ok, false, "an empty patch never passes");
+});
