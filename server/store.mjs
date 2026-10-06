@@ -1138,7 +1138,7 @@ class ProjectionCache {
 
 export class RoomStore {
   constructor(filename, { now = () => Date.now(), readOnly = false, database, storagePlatform = nodeStorage, storageFailureThreshold = STORAGE_FAILURE_THRESHOLD, stitch = null, identityHashKey = undefined, integrity = "eager",
-    bodiesAtRest = globalThis.process?.env?.ROOM_BODIES_AT_REST === "1" } = {}) {
+    bodiesAtRest = globalThis.process?.env?.["ROOM_BODIES_AT_REST"] === "1" } = {}) {
     // Phase 1a: store large message bodies outside rooms.projection.
     this.bodiesAtRest = bodiesAtRest === true;
     const coldStart = startColdStart();
