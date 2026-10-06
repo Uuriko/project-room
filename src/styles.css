@@ -1620,3 +1620,7 @@ summary { overflow-wrap: anywhere; }
   .updates-actions { width: 100%; }
   .updates-actions button { flex: 1 1 auto; }
 }
+
+/* Revoked memberships remain inspectable separately from active agents. */
+.removed-agents { margin-top: .75rem; color: var(--muted); }
+.removed-agents > summary { min-height: 44px; padding: .65rem 0; font-size: var(--text-sm); cursor: pointer; }

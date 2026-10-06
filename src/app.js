@@ -1868,7 +1868,7 @@ function render() {
   const presenceRow = m => {
     // #660: prefer the server-derived presence entry when we have one; it
     // carries the authoritative working state plus owner/scope projection.
-    const serverPresence = presenceStates.get(m.id);
+    const serverPresence = m.active === false ? null : presenceStates.get(m.id);
     const merged = serverPresence ? { ...m, ...serverPresence } : m;
     const presence = memberPresence(merged, railCtx);
     // Keep names readable; duplicate names retain their IDs and every exact
@@ -1949,8 +1949,13 @@ function render() {
   };
   const byPresence = (a, b) => (a.active === false) - (b.active === false) || a.displayName.localeCompare(b.displayName);
   const people = members.filter(m => m.kind !== "agent").sort(byPresence);
-  const agents = members.filter(m => m.kind === "agent").sort(byPresence);
-  renderContent("#presence-list", `${dmRequestInbox()}${people.length ? `<p class="presence-heading">People</p>${people.map(presenceRow).join("")}` : ""}${agents.length ? `<p class="presence-heading">Agents</p>${agents.map(presenceRow).join("")}` : ""}`);
+  const agents = members.filter(m => m.kind === "agent" && m.active !== false).sort(byPresence);
+  const removedAgents = members.filter(m => m.kind === "agent" && m.active === false).sort(byPresence);
+  // Membership revocation is different from idle presence. Keep active agents
+  // visible and historical identities inspectable without crowding the rail.
+  const removedAgentsHtml = removedAgents.length
+    ? `<details class="removed-agents"><summary data-focus-key="removed-agents">Removed agents (${removedAgents.length})</summary>${removedAgents.map(presenceRow).join("")}</details>` : "";
+  renderContent("#presence-list", `${dmRequestInbox()}${people.length ? `<p class="presence-heading">People</p>${people.map(presenceRow).join("")}` : ""}${agents.length ? `<p class="presence-heading">Agents</p>${agents.map(presenceRow).join("")}` : ""}${removedAgentsHtml}`);
   // JDOT-MEMBER-PERMS-UI begin
   memberPermissionsUI.sync();
   ownerAttentionCard.sync();

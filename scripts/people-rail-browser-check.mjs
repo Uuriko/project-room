@@ -160,5 +160,40 @@ test("People rail shows presence, what they're on, loud @handles, and Done chips
   await page.locator("#people-panel").evaluate(node => { node.open = true; node.scrollIntoView({ block: "start" }); });
   await codex.waitFor();
   await page.screenshot({ path: "test-results/people-rail-mobile.png" });
+  // Gate: the existing rail owner now distinguishes membership removal from
+  // idle presence. A flat rail or age-based hiding fails this user contract.
+  const instinctKey = store.issueAccessKey("commons", "instinct");
+  store.command(instinctKey, "commons", command(T.MESSAGE_POSTED, { messageId: "old-agent-note", body: "A historical contribution from Instinct" }));
+  store.command(owner, "commons", command(T.MEMBER_ACCESS_CHANGED, { memberId: "instinct", expectedMemberRevision: 0, permissions: [], active: false }));
+  const removed = page.locator('#presence-list .removed-agents');
+  await removed.waitFor();
+  assert.equal(await removed.locator(':scope > summary').textContent(), 'Removed agents (1)');
+  assert.equal(await removed.evaluate(node => node.open), false);
+  assert.equal(await instinct.isVisible(), false, 'revoked agents leave the normal visible rail');
+  assert.equal(await codex.isVisible(), true, 'an active idle agent remains in the normal rail');
+  await removed.locator(':scope > summary').focus(); await page.keyboard.press('Enter');
+  assert.equal(await instinct.isVisible(), true);
+  const removedProfile = instinct.locator('.member-profile');
+  await removedProfile.locator(':scope > summary').click();
+  assert.equal(await instinct.locator('.member-status').textContent(), 'access revoked');
+  assert.equal(await instinct.locator('[data-member-remove], [data-member-pause]').count(), 0);
+  store.command(owner, 'commons', command(T.MEMBER_ADDED, { memberId: 'new-agent', displayName: 'New agent', kind: 'agent', permissions: [] }));
+  await page.locator('[data-member-record-id="new-agent"]').waitFor();
+  assert.equal(await removed.evaluate(node => node.open), true);
+  assert.equal(await removedProfile.evaluate(node => node.open), true);
+  assert.equal(await removedProfile.locator(':scope > summary').evaluate(node => node === document.activeElement), true, 'profile focus survives the updated rail');
+  assert.equal(await page.locator('[data-message-record-id="old-agent-note"] .message-meta strong').textContent(), 'Instinct', 'past attribution remains visible');
+  assert.ok((await removed.locator(':scope > summary').boundingBox()).height >= 44);
+  for (const width of [1440, 390]) for (const theme of ['dark', 'light']) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.evaluate(mode => { document.documentElement.dataset.theme = mode; }, theme);
+    await removed.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `test-results/removed-agents-${width}-${theme}.png` });
+  }
+  store.command(owner, 'commons', command(T.MEMBER_ACCESS_CHANGED, { memberId: 'instinct', expectedMemberRevision: 1, permissions: [], active: true }));
+  await removed.waitFor({ state: 'detached' });
+  assert.equal(await instinct.isVisible(), true, 'restored membership returns to the regular rail');
+  assert.equal(await instinct.locator('.member-profile').evaluate(node => node.open), true);
+  assert.equal(await instinct.locator('.member-profile > summary').evaluate(node => node === document.activeElement), true);
   assert.equal(errors.join("\n"), "");
 });
