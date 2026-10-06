@@ -2,9 +2,11 @@
 // Guards the decision tree in docs/GUEST-AGENT-LINKS.md ("Session died
 // mid-task: recovery") and its pointer in docs/JOINING.md against the
 // server constants, route surface, and lifecycle semantics they describe:
-// v0 TTL is fixed at 2h with no refresh route; v1 codes are single-use
-// (burned at redemption) so re-redeem needs a fresh live code and reuses
-// the same seat; rotate keeps the same expiry (leak response only).
+// v0 TTL is fixed at 2h with a self-service refresh route (#1563: an
+// expired v0 credential refreshes to a fresh one for the same seat, no
+// owner round-trip); v1 codes are single-use (burned at redemption) so
+// re-redeem needs a fresh live code and reuses the same seat; rotate keeps
+// the same expiry (leak response only).
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -51,17 +53,23 @@ test("recovery section names both invite kinds and their dead-end error codes", 
   assert.ok(v1Src.includes('fail(410, "invite_unavailable"'), "v1 code must throw 410 invite_unavailable");
 });
 
-test("v0: documented fixed 2h TTL matches code, and no refresh route exists", () => {
+test("v0: documented fixed 2h TTL matches code, and the refresh route exists", () => {
   assert.ok(/fixed 2 hours/.test(recovery), "recovery must say the v0 TTL is fixed at 2 hours");
   assert.equal(exportedMs(v0Src, "GUEST_AGENT_TTL_MS"), 2 * 60 * 60 * 1000);
-  assert.ok(recovery.includes("no refresh"), "recovery must say no v0 refresh exists");
+  // #1563: v0 gained a self-service refresh for expired credentials — the
+  // recovery docs must name the endpoint and its same-seat semantics.
+  assert.ok(recovery.includes("/api/guest-agent-links/refresh"), "recovery must document the v0 refresh endpoint");
   const v0Routes = httpSrc.match(/\/api\/guest-agent-links[^\s"']*/g) ?? [];
   const refreshish = v0Routes.filter(r => /refresh|rotate|extend|renew/i.test(r));
-  assert.deepEqual(refreshish, [], `v0 must expose no refresh-like route (found: ${refreshish})`);
-  // v0 refresh-less recovery: a fresh mint creates a NEW member because the
+  assert.deepEqual(refreshish, ["/api/guest-agent-links/refresh"],
+    `v0 must expose exactly the refresh route (found: ${refreshish})`);
+  assert.ok(/same member/.test(recovery), "recovery must say refresh keeps the same member");
+  // The refresh revokes the old credential row: burned codes never resurrect.
+  assert.ok(/UPDATE credentials SET revoked=1/.test(v0Src), "refresh must revoke the old credential row");
+  // v0 refresh-less fallback: a fresh mint creates a NEW member because the
   // member id derives from account+requestId; reusing the requestId is a 409.
   assert.ok(recovery.includes("new member"), "recovery must say a fresh v0 invite creates a new member");
-  assert.ok(v0Src.includes("membership_ended"), "code must reject re-minting an ended v0 membership");
+  assert.ok(v0Src.includes("membership_ended"), "code must reject refreshing an ended v0 membership");
 });
 
 test("v1: codes are single-use — the burned code cannot re-redeem", () => {
