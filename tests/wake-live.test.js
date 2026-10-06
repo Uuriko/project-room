@@ -2,9 +2,12 @@
 // - lastPolledAt recorded durably per agent on poll AND heartbeat activity.
 // - wakeable = polled/heartbeated within 24h (WAKEABLE_WINDOW_MS), a
 //   deliberately wider window than the 180s host-presence window.
-// - GET /api/wake-status exposes the wakeable list and the not-wakeable
-//   list; ?agentId= checks one agent (data side for the COMMS-02
-//   mention-target-warning surface).
+// - GET /api/wake-status answers "who is actually listening", scoped to the
+//   caller and their rooms: no params returns your own wakeability;
+//   ?roomId= returns that room's wakeable / not-wakeable member lists
+//   (membership required — Instinct-3 review: no global agent list). The
+//   exact server-side methods remain the data side for the COMMS-02
+//   mention-target-warning surface.
 //
 // Authoring gate (repo test-audit):
 // 1. lastPolledAt recording — contract: notePoll()/heartbeat() durably
@@ -23,9 +26,13 @@
 // 4. list partition — contract: wakeStatusList splits every registered
 //    agent into wakeable / notWakeable. Regression: the endpoint
 //    returning only one side, or dropping agents.
-// 5. HTTP surface — contract: GET /api/wake-status returns the lists
-//    with windowMs; ?agentId= returns one status; unauthenticated is 401.
-//    Regression: route miswiring or scope drift on the new path.
+// 5. HTTP surface — contract: GET /api/wake-status returns the caller's
+//    own { agentId, wakeable, windowMs }; ?roomId= returns that room's
+//    { roomId, windowMs, asOf, wakeable, notWakeable } (member-only; a
+//    non-member gets 403); unauthenticated is 401; exact poll timestamps
+//    are never served. Regression: route miswiring, scope drift on the
+//    new path, or a global agent list leaking presence to any
+//    heartbeats:read credential.
 //
 // Synthetic fixtures only — loopback HTTP, no external calls or real credentials.
 import test from "node:test";
@@ -180,13 +187,46 @@ async function keyedAgent(f, origin, name) {
   return { identity, credential: scoped.credential };
 }
 
-test("GET /api/wake-status exposes the wakeable and not-wakeable lists", async t => {
+test("GET /api/wake-status returns the caller's own wakeability", async t => {
+  const f = createAcceptanceFixture();
+  let at = Date.now();
+  f.store.now = () => at;
+  const origin = await startServer(t, f);
+  const live = await keyedAgent(f, origin, "wake-live-agent");
+
+  await post(origin, "/api/agent-heartbeats", { hostId: "h" }, live.credential);
+  await get(origin, "/api/agent-wakes/poll?hostId=h&waitMs=0", live.credential);
+
+  const doc = await (await get(origin, "/api/wake-status", live.credential)).json();
+  assert.equal(doc.agentId, live.identity.identityId);
+  assert.equal(doc.wakeable, true);
+  assert.equal(doc.windowMs, WAKEABLE_WINDOW_MS);
+  assert.ok(!("lastPolledAt" in doc), "no exact poll timestamp is served");
+
+  // The poll goes stale: caller-only mode reads not-wakeable with no timestamp.
+  at += WAKEABLE_WINDOW_MS + 1000;
+  const stale = await (await get(origin, "/api/wake-status", live.credential)).json();
+  assert.equal(stale.wakeable, false);
+  assert.ok(!("lastPolledAt" in stale));
+
+  assert.equal((await get(origin, "/api/wake-status")).status, 401, "unauthenticated is refused");
+});
+
+test("GET /api/wake-status?roomId= lists the room's wakeable and not-wakeable members", async t => {
   const f = createAcceptanceFixture();
   let at = Date.now();
   f.store.now = () => at;
   const origin = await startServer(t, f);
   const live = await keyedAgent(f, origin, "wake-live-agent");
   const idle = await keyedAgent(f, origin, "wake-idle-agent");
+  const never = await keyedAgent(f, origin, "wake-never-agent");
+  const outsider = await keyedAgent(f, origin, "wake-outsider-agent");
+  for (const [i, a] of [live, idle, never].entries()) {
+    f.store.identities.link(f.keys.owner, "commons", {
+      identityId: a.identity.identityId, memberId: a.identity.identityId,
+      displayName: `wake test ${i}`, permissions: ["write_external"],
+    });
+  }
 
   await post(origin, "/api/agent-heartbeats", { hostId: "h" }, idle.credential);
   await get(origin, "/api/agent-wakes/poll?hostId=h&waitMs=0", idle.credential);
@@ -195,10 +235,15 @@ test("GET /api/wake-status exposes the wakeable and not-wakeable lists", async t
   await post(origin, "/api/agent-heartbeats", { hostId: "h" }, live.credential);
   await get(origin, "/api/agent-wakes/poll?hostId=h&waitMs=0", live.credential);
 
-  const doc = await (await get(origin, "/api/wake-status", live.credential)).json();
+  const doc = await (await get(origin, "/api/wake-status?roomId=commons", live.credential)).json();
+  assert.equal(doc.roomId, "commons");
   assert.equal(doc.windowMs, WAKEABLE_WINDOW_MS);
   assert.ok(doc.wakeable.some(e => e.agentId === live.identity.identityId), "live agent is wakeable");
   assert.ok(doc.notWakeable.some(e => e.agentId === idle.identity.identityId), "idle agent is not wakeable");
+  assert.ok(doc.notWakeable.some(e => e.agentId === never.identity.identityId),
+    "a member who never registered a host is not wakeable either");
+  assert.ok(![...doc.wakeable, ...doc.notWakeable].some(e => e.agentId === outsider.identity.identityId),
+    "non-members never appear");
   // Instinct-3 review (PR #1565): the HTTP surface coarsens — exact poll
   // timestamps never leave the server (activity fingerprinting).
   for (const e of [...doc.wakeable, ...doc.notWakeable]) {
@@ -206,11 +251,8 @@ test("GET /api/wake-status exposes the wakeable and not-wakeable lists", async t
     assert.equal(typeof e.wakeable, "boolean");
   }
 
-  // Single-agent lookup: the consumption point for the COMMS-02 warning.
-  const one = await (await get(origin, `/api/wake-status?agentId=${idle.identity.identityId}`, live.credential)).json();
-  assert.equal(one.agentId, idle.identity.identityId);
-  assert.equal(one.wakeable, false);
-  assert.ok(!("lastPolledAt" in one), "single lookup is coarsened too");
-
-  assert.equal((await get(origin, "/api/wake-status")).status, 401, "unauthenticated is refused");
+  // Room-scoped, membership-required: an outsider cannot read the list.
+  assert.equal(
+    (await get(origin, "/api/wake-status?roomId=commons", outsider.credential)).status, 403,
+    "non-member is refused");
 });
