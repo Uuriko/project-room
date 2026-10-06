@@ -52,3 +52,20 @@ test("unregistered non-public /api/* 404 keeps the machine-readable agent shape"
   assert.ok(body.next.some(step => step.tool === "room_check_access"),
     "agent 404 contract unchanged");
 });
+
+// #1603 (Instinct-3 review): the registered public receipt routes are
+// human-facing too — a missing receipt must not name agent tools.
+test("missing public-work receipt 404 is human-readable, with no agent-tool references", async t => {
+  const { request } = await live(t);
+  for (const path of ["/api/public-work/receipts/no-such-receipt", "/api/public-work/receipts/no-such-receipt/artifact"]) {
+    const res = await request(path);
+    assert.equal(res.status, 404, path);
+    const body = await res.json();
+    assert.equal(body.error.code, "public_receipt_not_found", path);
+    assert.equal(typeof body.hint, "string", path);
+    assert.ok(body.hint.length > 0, `hint present for ${path}`);
+    const blob = JSON.stringify(body);
+    assert.ok(!blob.includes("\"tool\""), `no tool entries in the 404 body for ${path}: ${blob}`);
+    assert.ok(body.next.some(step => step.path === "/api/public-work/tasks"), `human next for ${path}`);
+  }
+});

@@ -618,6 +618,14 @@ export function discoverabilityErrorOverride({ pathname, httpStatus, code }) {
   } else if (httpStatus === 404 && scope.auth === "none" && scope.path.startsWith("/.well-known/")) {
     hint = "That discovery path is not published. Start at GET / and follow its Link headers, or fetch /openapi.json for the machine-readable route inventory.";
     next = [{ path: "/" }, { path: "/openapi.json" }];
+  } else if (httpStatus === 404 && code === "public_receipt_not_found"
+      && (scope.publicWork === "receipt" || scope.publicWork === "artifact")) {
+    // #1603 (Instinct-3 review): public receipt reads are human-facing —
+    // immutable submitted receipts for independent hash verification. A
+    // missing receipt answers in plain language, never with agent tool
+    // names. Other 404s on these routes are untouched.
+    hint = "That receipt does not exist.";
+    next = [{ path: "/api/public-work/tasks" }];
   }
   if (!hint && !next) return null;
   return {
