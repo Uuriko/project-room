@@ -230,3 +230,37 @@ test("checkAgentCardDoor fails at once when the target build serves an unsigned 
   assert.equal(seq.count(), 1);
   assert.ok(failures.some(f => f.includes("signed:false")), `got: ${failures.join("; ")}`);
 });
+
+test("checkAgentCardDoor fails a slow-but-good door whose streak completes after the window closes", async () => {
+  // Every fetch passes, but each fetch takes 40s: the streak of 3 completes
+  // at t=120s, past the 90s window. A bounded door check must not go green
+  // on a post-deadline streak — the deploy gate would pass silently.
+  const fresh = JSON.stringify(buildSignedCard(REVISION, { deployed: true }));
+  const clock = fakeClock();
+  const get = async () => {
+    await clock.sleep(40000);
+    return { status: 200, json: JSON.parse(fresh), ms: 40000 };
+  };
+  const stats = {};
+  const failures = await checkAgentCardDoor({
+    url: doorUrl, fetches: 3, gapMs: 0, waitMs: 90000, get, ...clock, ...opts, stats,
+  });
+  assert.ok(failures.length > 0, "a streak completed after the deadline must not converge");
+  assert.ok(failures.at(-1).startsWith("not converged"), `got: ${failures.at(-1)}`);
+  assert.equal(stats.converged, false);
+});
+
+test("checkAgentCardDoor rejects a streak completed after the window via fetch gaps", async () => {
+  // gapMs 40s with 4 required fetches: the streak completes at t=120s, past
+  // the 90s window, with zero failing fetches in between.
+  const fresh = JSON.stringify(buildSignedCard(REVISION, { deployed: true }));
+  const seq = sequence(() => fresh);
+  const clock = fakeClock();
+  const stats = {};
+  const failures = await checkAgentCardDoor({
+    url: doorUrl, fetches: 4, gapMs: 40000, waitMs: 90000, get: seq.get, ...clock, ...opts, stats,
+  });
+  assert.ok(failures.length > 0, "expected the post-deadline streak to fail");
+  assert.ok(failures.at(-1).startsWith("not converged"), `got: ${failures.at(-1)}`);
+  assert.equal(stats.converged, false);
+});
