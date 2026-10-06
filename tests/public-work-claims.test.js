@@ -213,3 +213,46 @@ test('equally relevant recommendations prefer oldest work within the scanned pag
   const f = fixture(t); f.enable('z-older', ['old']); f.tick(1000); f.enable('a-newer', ['new']);
   assert.deepEqual(f.service().match(null, {}).recommendations.map(entry => entry.task.taskId), ['z-older', 'a-newer']);
 });
+
+// G4 (usage-burn): a raced claim's 409 must name who holds the claim and
+// when the lease expires — "Task already claimed" teaches nothing.
+test('claim conflict names the holder identity and lease expiry', t => {
+  const f = fixture(t), [a, b] = f.identities; f.enable('conflict-task');
+  const claimed = f.service().act('conflict-task', a.secret, 'claim', claim('first-claim'));
+  let err = null;
+  try { f.service().act('conflict-task', b.secret, 'claim', claim('second-claim')); } catch (e) { err = e; }
+  assert.ok(err, 'raced claim throws');
+  assert.equal(err.code, 'public_work_claim_conflict');
+  assert.equal(err.status, 409);
+  assert.ok(err.message.includes(a.identityId), 'holder identity is named: ' + err.message);
+  assert.ok(err.message.includes(claimed.task.claim.leaseExpiresAt), 'lease expiry is named: ' + err.message);
+});
+
+// G5 (usage-burn): finish with a stale generation must say whether the
+// generation changed or the lease expired. The rejected artifact bytes are
+// never stored, so the agent must re-submit them after re-claiming.
+test('stale claim distinguishes changed generation from expired lease', t => {
+  const f = fixture(t), [a] = f.identities;
+  f.enable('changed-task');
+  f.service().act('changed-task', a.secret, 'claim', claim('first'));
+  f.service().act('changed-task', a.secret, 'release', owned('release', 1));
+  f.service().act('changed-task', a.secret, 'claim', claim('second')); // generation 2
+  let changed = null;
+  try { f.service().act('changed-task', a.secret, 'finish', owned('old-finish', 1, { artifactText: 'Old result', checksReported: [] })); } catch (e) { changed = e; }
+  assert.ok(changed, 'finish with old generation throws');
+  assert.equal(changed.code, 'stale_public_claim');
+  assert.equal(changed.status, 409);
+  assert.ok(/changed/i.test(changed.message) && !/expired/i.test(changed.message),
+    'says the generation changed (not ambiguously "expired or changed"): ' + changed.message);
+  assert.equal(f.store.db.prepare('SELECT count(*) AS n FROM public_work_receipts').get().n, 0, 'rejected artifact bytes are not stored');
+  f.enable('lapsed-task', ['lapsed.js']);
+  f.service().act('lapsed-task', a.secret, 'claim', claim('hold', { leaseHours: 1 }));
+  f.tick(3600001);
+  let expired = null;
+  try { f.service().act('lapsed-task', a.secret, 'finish', owned('late-finish', 1, { artifactText: 'Late result', checksReported: [] })); } catch (e) { expired = e; }
+  assert.ok(expired, 'finish after lease lapse throws');
+  assert.equal(expired.code, 'stale_public_claim');
+  assert.equal(expired.status, 409);
+  assert.ok(/expired|lapsed/i.test(expired.message) && !/changed/i.test(expired.message),
+    'says the lease expired (not ambiguously "expired or changed"): ' + expired.message);
+});

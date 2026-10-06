@@ -195,6 +195,53 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
       next: [tool("room_check_access"), path("/api/session"), command("Ask the owner to mint a guest invite or Add agent")]
     };
   }
+  // G4 (usage-burn): a raced public-work claim names its holder and lease
+  // expiry in the message — turn them into the hint/next the taxonomy
+  // promises, the way session_claimed names its holder.
+  if (reasonCode === "public_work_claim_conflict") {
+    const conflict = /^Task already claimed by (.+?) \(lease expires ([^)]+)\)$/.exec(String(message || ""));
+    const holder = conflict?.[1], expiry = conflict?.[2], self = holder === "you";
+    const hint = holder
+      ? self
+        ? `You already hold this claim until ${expiry}. Renew to extend the lease instead of claiming again.`
+        : `Held by ${holder} until ${expiry}. Wait for release or lease expiry, then claim again.`
+      : "This task is already claimed. Re-read the task, wait for release, or pick another task.";
+    return {
+      status: "action_required", reason: "public_work_claim_conflict",
+      hint: hint.length < 160 ? hint : "This task is already claimed. Re-read the task, wait for release, or pick another task.",
+      next: [
+        path("/api/public-work/tasks"),
+        command(self
+          ? "Renew your claim to extend the lease instead of claiming again."
+          : holder
+            ? `Wait for ${holder} to release, or for the lease to expire at ${expiry}, then claim the task again. Or claim a different task.`
+            : "Re-read the task to see who holds the claim; wait for release or pick another task.")
+      ]
+    };
+  }
+  // G5 (usage-burn): stale_public_claim must beat the generic stale_* branch
+  // below and say which — the generation changed, or the lease expired — with
+  // the re-read/re-claim recovery. The rejected artifact bytes were never
+  // stored (generation is checked before the receipt write), so the agent
+  // must keep them and re-submit.
+  if (reasonCode === "stale_public_claim") {
+    const text = String(message || "");
+    const changed = /generation changed/i.test(text);
+    const submitted = /submitted (\d+)/.exec(text)?.[1], current = /current (\d+)/.exec(text)?.[1];
+    const hint = changed
+      ? `The task moved to generation ${current ?? "?"} (you sent ${submitted ?? "?"}). Re-read the task and claim it again with the current generation.`
+      : "Your claim expired — the lease lapsed or it was released. Re-read the task and claim it again.";
+    return {
+      status: "action_required", reason: "stale_public_claim",
+      hint: hint.length < 160 ? hint : "Re-read the task and claim it again with the current generation.",
+      next: [
+        path("/api/public-work/tasks"),
+        command(changed
+          ? "Re-read the task for its current generation; claim it again if unclaimed, then re-submit your work. Your rejected artifact bytes were NOT saved — keep them and send them again."
+          : "Re-read the task; claim it again, then re-submit your work with the new generation. Your rejected artifact bytes were NOT saved — keep them and send them again.")
+      ]
+    };
+  }
   if (stale(reasonCode, message)) {
     return {
       status: "action_required", reason: "stale_revision",

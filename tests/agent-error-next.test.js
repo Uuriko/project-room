@@ -111,6 +111,38 @@ test("shared mapper keeps error.code/message and adds status/reason/hint/next", 
   assert.doesNotMatch(JSON.stringify(leaky), /PRIVATE_DETAIL|do not paste|plugin\.jup\.ag/);
 });
 
+test("public-work 409s teach: conflict names holder+lease expiry, stale says changed-vs-expired", () => {
+  // G4: a raced claim's 409 names who holds the claim and when the lease ends.
+  const conflict = agentErrorAx({ httpStatus: 409, code: "public_work_claim_conflict",
+    message: "Task already claimed by ai_holder (lease expires 2026-10-06T07:13:14.000Z)" });
+  assertAx(conflict, { reason: "public_work_claim_conflict" });
+  assert.match(conflict.hint, /ai_holder/);
+  assert.match(conflict.hint, /2026-10-06T07:13:14\.000Z/);
+  assert.ok(conflict.next.some(step => step.command?.includes("ai_holder")));
+  assert.ok(conflict.next.some(step => step.path === "/api/public-work/tasks"));
+  const selfClaim = agentErrorAx({ httpStatus: 409, code: "public_work_claim_conflict",
+    message: "Task already claimed by you (lease expires 2026-10-06T07:13:14.000Z)" });
+  assertAx(selfClaim, { reason: "public_work_claim_conflict" });
+  assert.match(selfClaim.hint, /already hold/);
+  assert.ok(selfClaim.next.some(step => step.command?.includes("Renew")));
+  // G5: changed vs expired, with the re-read/re-claim recovery and the
+  // artifact-survival answer in the next step.
+  const changed = agentErrorAx({ httpStatus: 409, code: "stale_public_claim",
+    message: "Claim generation changed (submitted 1, current 2)" });
+  assertAx(changed, { reason: "stale_public_claim" });
+  assert.match(changed.hint, /generation 2/);
+  assert.match(changed.hint, /Re-read/);
+  assert.doesNotMatch(changed.hint, /expired/i);
+  const changedNext = JSON.stringify(changed.next);
+  assert.match(changedNext, /re-read/i);
+  assert.match(changedNext, /NOT saved/);
+  const expired = agentErrorAx({ httpStatus: 409, code: "stale_public_claim",
+    message: "Claim expired: the lease lapsed or the claim was released (generation 1 is no longer held)" });
+  assertAx(expired, { reason: "stale_public_claim" });
+  assert.match(expired.hint, /expired/i);
+  assert.match(JSON.stringify(expired.next), /NOT saved/);
+});
+
 test("live 401/403/stale-revision/unknown-work/input-refused return next agents can follow", async t => {
   const f = await live(t);
   const unauth = await f.request("/api/rooms/commons/work-context?workItemId=test-handoff");
