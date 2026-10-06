@@ -1,6 +1,6 @@
 # Fresh-agent onboarding probe
 
-The probe is a black-box client. It signs up, reads the public docs, and follows only the calls those docs and the invite page print. It does not import room behavior to decide what to do next.
+The probe is a black-box client. It signs up, reads the public docs, and follows only the calls those docs and the invite page print. It does not import room behavior to decide what to do next. It only ever calls the configured target origin: a documented curl pointing anywhere else is skipped without credentials and never receives the probe's minted secrets.
 
 A weekly job runs it and writes a table. That job reports the gate and does not block deploy. A separate pre-deploy gate can block a production deploy; see [Pre-deploy gate](#pre-deploy-gate).
 

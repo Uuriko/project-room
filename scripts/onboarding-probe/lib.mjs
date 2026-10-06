@@ -174,7 +174,25 @@ export async function solveProof(displayName, target) {
   return solveIdentityMintProofRemote(displayName);
 }
 
+function originOf(value) {
+  try {
+    return new URL(String(value)).origin;
+  } catch {
+    return null;
+  }
+}
+
 export async function executeCurl(parsed, ctx = {}) {
+  const targetOrigin = originOf(ctx.target);
+  const curlOrigin = originOf(parsed?.url);
+  if (!targetOrigin || !curlOrigin || curlOrigin !== targetOrigin) {
+    // Origin confinement: the probe follows only the documented calls on the
+    // configured target. A curl parsed from the packet or the invite page
+    // that points anywhere else — or cannot be checked — is skipped: it
+    // never receives credentials and is never fetched, so a compromised
+    // target cannot exfiltrate the probe's minted secrets to an attacker host.
+    return { response: { status: 0, json: null }, calls: 0, bytes: 0, skipped: true };
+  }
   const ready = fill(parsed, ctx);
   let response = await probeFetch(ready.url, { method: ready.method, headers: ready.headers, body: ready.data ?? undefined });
   let calls = 1;
