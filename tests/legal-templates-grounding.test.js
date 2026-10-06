@@ -74,7 +74,7 @@ const EVIDENCE = [
     ["docs/ROUTE-AUTH-TABLE.md", /the one-time identity secret is returned once/],
   ]],
   [PRIVACY, "single-use", [
-    ["server/agent-invites.mjs", /the code burns on redeem/],
+    ["docs/ROUTE-AUTH-TABLE.md", /burns the code on success/],
   ]],
   [PRIVACY, "invite emails", [
     ["docs/FAQ.md", /I didn't receive an invite email/],
