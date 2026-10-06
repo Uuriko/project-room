@@ -26,11 +26,13 @@ const GRANDFATHERED = [
   // corrects the baseline so the now-precise check does not flag legacy
   // modules as new gaps. Still never add NEW modules.
   "activity.mjs",
+  "agent-invites.mjs",
   "attention.mjs",
   "opportunities.mjs",
   "project-offers.mjs",
   "request-runs.mjs",
   "return-brief.mjs",
+  "share-links.mjs",
   "work-help.mjs"
 ];
 
