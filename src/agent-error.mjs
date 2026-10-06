@@ -445,7 +445,9 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
 }
 
 // T179 (johnstab-mcp-500-trace): quotable 5xx trace. Every server 500
-// response body carries errorId (unique per occurrence, stable err_ format)
+// response body carries errorId (unique per occurrence, stable eid_ format —
+// NOT err_: the storage-failure tests assert /ERR_/i never reaches the
+// client, so err_ would trip the no-driver-text guard case-insensitively)
 // and fingerprint (stable per underlying failure, so retries of the same
 // failure collapse to one id). The errorId is also emitted on one bounded
 // console.warn line, so an id pasted into a bug report is greppable in
@@ -465,7 +467,7 @@ export function errorTrace({ httpStatus = 0, code = "request_failed", message = 
       "utf8",
     )
     .digest("hex");
-  return { errorId: `err_${randomBytes(9).toString("base64url")}`, fingerprint };
+  return { errorId: `eid_${randomBytes(9).toString("base64url")}`, fingerprint };
 }
 
 export function agentErrorBody({ httpStatus, code, message, roomId, workItemId } = {}) {

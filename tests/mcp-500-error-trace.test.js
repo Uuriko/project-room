@@ -7,7 +7,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { agentErrorBody, errorTrace } from "../src/agent-error.mjs";
 
-const ERROR_ID_RE = /^err_[A-Za-z0-9_-]{12}$/;
+const ERROR_ID_RE = /^eid_[A-Za-z0-9_-]{12}$/;
 const FINGERPRINT_RE = /^[0-9a-f]{64}$/;
 
 function fiveHundred(overrides = {}) {
@@ -21,7 +21,7 @@ function fiveHundred(overrides = {}) {
 
 test("5xx envelope carries a stable-format quotable errorId and fingerprint", () => {
   const body = fiveHundred();
-  assert.match(body.errorId, ERROR_ID_RE, "errorId has the stable err_ format");
+  assert.match(body.errorId, ERROR_ID_RE, "errorId has the stable eid_ format");
   assert.match(body.fingerprint, FINGERPRINT_RE, "fingerprint is quotable hex");
 });
 
