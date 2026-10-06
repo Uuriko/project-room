@@ -226,7 +226,7 @@ test("an exact replay remains a no-write receipt after expiry and inviter author
   const moderator = accountSession(f.store, "account-moderator");
   const moderatorOffer = invitation(f, {
     requestId: "invite-moderator", intendedAccountId: "account-moderator",
-    intendedMemberId: "moderator-member", displayName: "Moderator", role: "moderator"
+    intendedMemberId: "moderator-member", displayName: "Morgan", role: "moderator"
   });
   f.store.acceptInvitation(moderator.token, moderatorOffer.rawToken, {
     redemptionId: redemption(), expectedRevision: 0, expectedSessionBinding: moderator.session.sessionBinding
