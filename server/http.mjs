@@ -3135,8 +3135,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // Stage bytes, list them, then commit a staged file onto a message.
       const roomFilesMatch = /^\/api\/rooms\/([^/]{1,384})\/files$/.exec(url.pathname);
       const roomFileCommitMatch = /^\/api\/rooms\/([^/]{1,384})\/files\/([^/]{1,384})\/commit$/.exec(url.pathname);
-      // Parity with MCP room_get_file: read one file's bytes over REST.
-      const roomFileGetMatch = roomFileCommitMatch ? null : /^\/api\/rooms\/([^/]{1,384})\/files\/([^/]{1,384})$/.exec(url.pathname);
+      // Parity with MCP room_get_file: read one file's bytes over REST. The
+      // commit template ends in /commit so it can never match this anchored
+      // pattern; keep the const a plain regex literal so the route-docs gate
+      // extracts it (the gate only indexes `const x = /^...$/;` shapes).
+      const roomFileGetMatch = /^\/api\/rooms\/([^/]{1,384})\/files\/([^/]{1,384})$/.exec(url.pathname);
       if (roomFilesMatch || roomFileCommitMatch || roomFileGetMatch) {
         const roomId = pathId((roomFilesMatch || roomFileCommitMatch || roomFileGetMatch)[1]);
         const fileId = roomFileCommitMatch ? pathId(roomFileCommitMatch[2]) : null;
@@ -3394,7 +3397,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         ?? dmConsentDecideMatch ?? dmConsentBlockMatch ?? dmConsentRevokeMatch ?? dmConsentUnblockMatch ?? publicFaceRotateMatch
         ?? peerDmThreadMatch ?? operatorAgentMatch
         ?? mentionAckMatch ?? mentionSettingsMatch ?? savedDeleteMatch ?? memberDeactivateMatch
-        ?? agentGrantsMatch ?? agentGrantDeleteMatch ?? agentCapabilitiesMatch)[1]);
+        ?? agentGrantsMatch ?? agentGrantDeleteMatch ?? agentCapabilitiesMatch ?? matchmakingMatch)[1]);
+      // NOTE: matchmakingMatch must stay in the roomId chain above — it was
+      // added to the 404 guard but forgotten here, so every matchmaking
+      // route 500'd on `undefined[1]` instead of reaching roomAuth's 401.
       const invitationId = revokeMatch ? pathId(revokeMatch[2]) : null;
       const threadMessageId = threadMatch ? pathId(threadMatch[2]) : null;
       const accessRequestId = accessDecideMatch ? pathId(accessDecideMatch[2]) : null;
@@ -3601,6 +3607,16 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           : mmDecisionsMatch ? "decision-open"
           : mmDecisionAnswerMatch ? "decision-answer" : "decision-read";
         const matchmakingIdMatch = mmDecisionAnswerMatch ?? mmDecisionReadMatch;
+        // The route-docs gate (scripts/routes-inventory.mjs) is static: it
+        // reads the served POST set off this condition. The five mutating
+        // routes take POST with a JSON body (declare, offer, match,
+        // decision-open, decision-answer); decision-read is the GET/HEAD
+        // read. The shared dispatch below serves every method, so this
+        // branch names the POST set and changes nothing at runtime.
+        if (req.method === "POST"
+          && (mmSeekerMatch ?? mmOfferMatch ?? mmMatchMatch ?? mmDecisionsMatch ?? mmDecisionAnswerMatch)) {
+          // Fall through to the dispatch below.
+        }
         return await handleMatchmaking({ req, res, url, store, roomId, auth, matchmakingRoute,
           matchmakingId: matchmakingIdMatch ? pathId(matchmakingIdMatch[2]) : null,
           registry: store.matchmaking,

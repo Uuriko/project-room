@@ -3708,6 +3708,14 @@
     {
       "method": "POST",
       "path": "/api/rooms/{id}/matchmaking/decisions/{id}/answer"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/files/{id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/matchmaking/decisions/{id}"
     }
   ],
   "routes": [
@@ -7186,6 +7194,18 @@
     {
       "method": "GET",
       "path": "/api/rooms/{id}/files/{id}"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/files/{id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/files/{id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/matchmaking/decisions/{id}"
     }
   ]
 }
