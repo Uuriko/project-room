@@ -9,6 +9,7 @@
   "description": "Executable v0 contract for a shared human and agent project room",
   "scripts": {
     "start": "node server.mjs",
+    "pretest": "node scripts/check-deps.mjs",
     "test": "node --test",
     "test:relay": "npm --prefix relay test",
     "test:refine": "node --test scripts/refine-draft-browser-check.mjs",
