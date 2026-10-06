@@ -27,7 +27,7 @@ function runSoak(name, extraEnv, durationS) {
   let status = null;
   let stderr = "";
   try {
-    execFileSync(process.execPath, [join(root, "scripts", "soak-test.mjs")], {
+    execFileSync(process.execPath, [join(root, "scripts", "soak-run.mjs")], {
       cwd: root,
       timeout: (durationS + 150) * 1000,
       stdio: ["ignore", "pipe", "pipe"],
