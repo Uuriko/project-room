@@ -30,9 +30,10 @@ authentication, authorization, and data protection.
 ## Data protection
 
 - Secrets never in the repo. Use `wrangler secret put` or the dashboard.
-- PII minimized. Secret redaction is built into data export (`src/data-export.mjs`
-  redacts secret-shaped values and PEM private keys at any depth); message
-  redaction in the room UI is not yet implemented.
+- PII minimized. Message redaction rewrites a message out of the room's event
+  log, projection, and messages table (`server/message-redaction.mjs`,
+  the `message.redacted` event); read surfaces mask deleted and edited
+  bodies at read time (`server/redact-read.mjs`).
 - All errors use the shape in `docs/ERROR-TAXONOMY.md` — no stack traces or
   secrets leak through error responses.
 
@@ -41,4 +42,6 @@ authentication, authorization, and data protection.
 - Claim before editing shared code.
 - Never commit credentials, tokens, or keys.
 - Validate all input; throw typed errors, don't fail silently.
-- Report security issues in #266 immediately — do not exploit them.
+- Report security issues privately via [SECURITY.md](../SECURITY.md) — do not
+  exploit them. (Issues #11, #1160, and #266 are frozen; they are not
+  security-report mailboxes.)
