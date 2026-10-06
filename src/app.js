@@ -5,7 +5,7 @@ import { EVENT_TYPES as T, MAX_MESSAGE_BODY_CHARS, WORK_STATES as S, roomPolicy,
 import { AccountClient, RoomClient, draftCommand, retryUnconfirmed } from "./client.js";
 import { ReturnBrief, groupBriefHistory } from "./return-brief.js";
 import { attentionPreview, needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult, roomOrientation } from "./work-selectors.js";
-import { conversationIndex, searchMessages, ConversationDrafts, DraftRecovery, draftRecoveryScope, shouldPreserveDrafts, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, mentionHtml, kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery, reactionPills } from "./conversation.js";
+import { conversationIndex, searchMessages, ConversationDrafts, channelDraftKey, DraftRecovery, draftRecoveryScope, shouldPreserveDrafts, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, mentionHtml, kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery, reactionPills } from "./conversation.js";
 import { canonicalReaction, clipGraphemes, emojiCatalog, emojiMatches, emojiName, emojiQuery, foldedReactionMap, frequentEmoji, insertEmoji, renderEmojiShortcodes } from "./emoji.js";
 import { nextWorkStep, workStatus, workActions, renderWorkActions, activeClaim, terminalWork, doneChip, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, matchesReceipt, producerKnown as hasReportedProducer, changeDescription, diffResultLines, diffResultSummary, workRecipeOptions } from "./workflow.js";
 import { coordinationLoops } from "./work-loops.js";
@@ -247,7 +247,8 @@ let offerContextVersion = null;
 let currentThreadId = null, conversation = null, drafts = new ConversationDrafts();
 let requestRuns = {}, requestRunsReading = false, requestRunsReadKey = "";
 let requestMode = null, requestReading = false, requestEpoch = 0;
-const composerKey = () => replyDraftKey(requestMode, currentThreadId);
+const composerKey = () => requestMode ? replyDraftKey(requestMode, currentThreadId) : currentThreadId ?? channelDraftKey(activeChannelId);
+const conversationViewKey = () => currentThreadId ? `thread:${currentThreadId}` : `room:${activeChannelId}`;
 const viewPositions = new Map(), pendingReactions = new Map(), pendingPins = new Set(), locallyOwnedMessageIds = new Set();
 let newVisibleMessages = 0, unreadAnchorId = null, mentionIndex = 0, emojiIndex = 0;
 let mutedThreads = new Set(), threadMuteBusy = false;
@@ -348,6 +349,8 @@ const client = new RoomClient({
       const saved = recovery.read(draftScope(identity), state);
       if (saved) {
         drafts = saved.drafts; currentThreadId = saved.threadId;
+        if (state.channels?.[saved.channelId] && !state.channels[saved.channelId].archivedAt) activeChannelId = saved.channelId;
+        syncChannelChrome();
         const draft = drafts.get(saved.activeKey);
         requestMode = draft.mode ?? null;
         restoreComposer(draft);
@@ -1998,14 +2001,21 @@ function restoreActiveChannel() {
 }
 function activeChannel() { return state?.channels?.[activeChannelId] ?? null; }
 function setActiveChannel(id) {
-  if (!state) return;
+  if (!state || busy || requestReading || composerFiles.some(file => file.status === "uploading")) return;
   const next = state.channels[id] && !state.channels[id].archivedAt ? id : DEFAULT_CHANNEL_ID;
+  if (next === activeChannelId && !currentThreadId && !requestMode) return;
+  saveComposer();
+  viewPositions.set(conversationViewKey(), $("#message-list").scrollTop);
+  requestEpoch++; requestReading = false; requestMode = null;
+  currentThreadId = null;
   activeChannelId = next;
   try { localStorage.setItem(channelStorageKey(), activeChannelId); } catch { /* private mode */ }
-  syncChannelChrome();
-  renderMessages();
-  $("#message-list")?.scrollTo({ top: 0 });
+  restoreComposer(drafts.get(composerKey()));
+  $("#also-send-to-channel").checked = false;
+  syncChannelChrome(); updateReply(); syncRequestComposer(); renderComposerError();
+  renderMessages(); persistDrafts();
 }
+
 function syncChannelChrome() {
   // If the active channel was archived elsewhere, fall back to the main channel.
   if (state && activeChannelId !== DEFAULT_CHANNEL_ID && state.channels[activeChannelId]?.archivedAt) {
@@ -2446,11 +2456,12 @@ function renderSearch(now = Date.now()) {
   if (focused) ([...list.querySelectorAll("[data-search-key]")].find(e => e.dataset.searchKey === focused) || $("#message-search")).focus({ preventScroll: true });
 }
 function saveComposer() {
-  drafts.save(composerKey(), { body: $("#message-input").value, toMemberId: $("#message-to-select").value, replyToId, channelId: pendingMessage ? pendingMessage.command.data.channelId : activeChannelId, pending: pendingMessage,
+  drafts.save(composerKey(), { body: $("#message-input").value, toMemberId: $("#message-to-select").value, replyToId, channelId: pendingMessage ? pendingMessage.command.data.channelId : activeChannelId, pending: pendingMessage, files: composerFiles,
     ...(requestMode ? { mode: requestMode, threadId: currentThreadId } : {}) });
   persistDrafts();
 }
 function restoreComposer(draft) {
+  composerFiles = draft.files ?? []; renderComposerFiles();
   $("#message-input").value = draft.body;
   const select = $("#message-to-select");
   if (draft.toMemberId && ![...select.options].some(option => option.value === draft.toMemberId)) {
@@ -2654,20 +2665,13 @@ function persistDrafts() {
   recovery.write(draftScope(session), drafts, currentThreadId, composerKey());
 }
 function switchThread(threadId, focusComposer = false) {
-  if (!state || busy || (threadId && !conversation.threads.has(threadId))) return;
+  if (!state || busy || composerFiles.some(file => file.status === "uploading") || (threadId && !conversation.threads.has(threadId))) return;
   const leavingResultQuestion = Boolean(requestMode?.resultEventId);
   requestEpoch++; requestReading = false;
   if (threadId !== currentThreadId || requestMode) {
-    saveComposer(); viewPositions.set(currentThreadId ? `thread:${currentThreadId}` : "room", $("#message-list").scrollTop);
+    saveComposer(); viewPositions.set(conversationViewKey(), $("#message-list").scrollTop);
     currentThreadId = threadId; requestMode = null;
-    const draft = drafts.get(threadId);
-    $("#message-input").value = draft.body;
-    const select = $("#message-to-select");
-    if (draft.toMemberId && ![...select.options].some(o => o.value === draft.toMemberId)) {
-      select.add(new Option("Previous recipient unavailable — choose again", draft.toMemberId));
-      select.options[select.options.length - 1].disabled = true;
-    }
-    select.value = draft.toMemberId; replyToId = draft.replyToId; pendingMessage = draft.pending;
+    restoreComposer(drafts.get(composerKey()));
     // "Also send to channel" is per-send, off by default in every thread.
     $("#also-send-to-channel").checked = false;
   }
@@ -3713,7 +3717,7 @@ $("#message-form").addEventListener("submit", e => {
   const data = unchanged ? previous : { messageId: crypto.randomUUID(), ...content };
   pendingMessage = draftCommand(pendingMessage, T.MESSAGE_POSTED, data);
   saveComposer();
-  const generation = client.generation, threadId = currentThreadId;
+  const generation = client.generation, draftKey = composerKey();
   submit(e.currentTarget, async () => {
     // Ownership must outlive pendingMessage: the command can commit while its immediate
     // snapshot fails, then first appear on a later refresh after the draft was cleared.
@@ -3727,7 +3731,7 @@ $("#message-form").addEventListener("submit", e => {
     if (generation !== client.generation || !state) return;
     await commitComposerFiles(data.messageId);
     if (generation !== client.generation || !state) return;
-    drafts.clear(threadId);
+    drafts.clear(draftKey);
     $("#message-input").value = ""; pendingMessage = null; clearReply();
     $("#also-send-to-channel").checked = false;
     persistDrafts();
@@ -3858,7 +3862,7 @@ function submitRequest(form) {
       if (!await confirmsReplyCommand(receipt, command, identity.roomId, identity.member.id)) throw new Error("Save not confirmed");
       if (generation !== client.generation || session !== identity || !state) return;
       drafts.clear(key); requestMode = null; requestEpoch++;
-      restoreComposer(drafts.get(currentThreadId)); updateReply(); persistDrafts();
+      restoreComposer(drafts.get(composerKey())); updateReply(); persistDrafts();
       if (mode.resultEventId) renderReturnBrief();
       notice(mode.kind === "request" ? "Request saved." : mode.kind === "cancelled" ? "Request cancelled." : "Reply saved.");
     } catch (error) {

@@ -368,10 +368,19 @@ export function shouldPreserveDrafts({ leavingPage, pendingSignout, endedContext
 // In-memory only: every thread has its own text, recipient, reply target, retry ID,
 // and submission error. Moving between discussions must not leak local composer state.
 // The containing session discards the entire instance on sign-out or revoked access.
+// JSON keys cannot collide with canonical thread message IDs. Retain the
+// historical null key for #general so existing tab drafts remain recoverable.
+export function channelDraftKey(channelId = "general") {
+  return channelId === "general" ? null : JSON.stringify(["channel", channelId]);
+}
+function isChannelDraftKey(key) {
+  try { const value = JSON.parse(key); return Array.isArray(value) && value.length === 2 && value[0] === "channel" && typeof value[1] === "string"; }
+  catch { return false; }
+}
 export class ConversationDrafts {
   constructor() { this.entries = new Map(); }
   get(threadId = null) {
-    if (!this.entries.has(threadId)) this.entries.set(threadId, { body: "", toMemberId: "", replyToId: threadId, pending: null, error: "" });
+    if (!this.entries.has(threadId)) this.entries.set(threadId, { body: "", toMemberId: "", replyToId: isChannelDraftKey(threadId) ? null : threadId, pending: null, error: "" });
     return this.entries.get(threadId);
   }
   save(threadId, values) { Object.assign(this.get(threadId), values); }
@@ -416,7 +425,7 @@ export class DraftRecovery {
       if (raw.length > 500000) throw new Error("size");
       const saved = JSON.parse(raw);
       if (saved.scope !== scope || !Number.isFinite(saved.expires) || saved.expires <= this.now() || saved.expires > this.now() + 12 * 60 * 60 * 1000 || !Array.isArray(saved.entries) || saved.entries.length > 50) throw new Error("scope or expiry");
-      const index = conversationIndex(state.messages), drafts = new ConversationDrafts();
+      const index = conversationIndex(state.messages), drafts = new ConversationDrafts(), restoredKeys = new Map();
       for (const [id, d] of saved.entries) {
         let channelId = typeof d?.channelId === "string" ? d.channelId : undefined;
         // The old writer saved channel only inside the pending command. Recover
@@ -452,10 +461,15 @@ export class DraftRecovery {
             mode: d.mode, threadId: d.threadId, channelId, pending });
           continue;
         }
-        if (id !== null && !index.threads.has(id)) continue;
+        const channelRoot = id === null || isChannelDraftKey(id);
+        const draftId = channelRoot ? channelDraftKey(channelId ?? "general") : id;
+        if (isChannelDraftKey(id) && id !== draftId) continue;
+        if (channelId && channelId !== "general" && !state.channels?.[channelId]) continue;
+        if (!channelRoot && !index.threads.has(id)) continue;
         if (typeof d.body !== "string" || typeof d.toMemberId !== "string") continue;
         if (d.toMemberId && (!state.members[d.toMemberId] || state.members[d.toMemberId].active === false)) continue;
-        if (d.replyToId !== null && (!index.byId.has(d.replyToId) || index.rootById.get(d.replyToId) !== id)) continue;
+        if (d.replyToId !== null && (!index.byId.has(d.replyToId) || !channelRoot && index.rootById.get(d.replyToId) !== id
+          || channelRoot && (index.byId.get(d.replyToId).channelId ?? "general") !== (channelId ?? "general"))) continue;
         // The current client has separate command and message identities. Preserve
         // both, then recompute the entire permitted payload before accepting a retry.
         // Older saved commands without a messageId keep their original payload.
@@ -466,10 +480,16 @@ export class DraftRecovery {
         const contents = JSON.stringify({ type: "message.posted", data, causationId: null });
         const pending = messageIdValid && d.pending?.contents === contents && typeof d.pending.id === "string" && /^[a-zA-Z0-9-]{1,100}$/.test(d.pending.id)
           ? { contents, command: { id: d.pending.id, type: "message.posted", data } } : null;
-        drafts.save(id, { ...data, body: d.body, toMemberId: d.toMemberId, pending });
+        drafts.save(draftId, { ...data, body: d.body, toMemberId: d.toMemberId, pending });
+        restoredKeys.set(id, draftId);
       }
-      const activeKey = drafts.entries.has(saved.activeKey) ? saved.activeKey : drafts.entries.has(saved.threadId) ? saved.threadId : null;
-      return { drafts, activeKey, threadId: drafts.entries.get(activeKey)?.mode ? drafts.entries.get(activeKey).threadId : activeKey };
+      let activeKey = restoredKeys.has(saved.activeKey) ? restoredKeys.get(saved.activeKey)
+        : drafts.entries.has(saved.activeKey) ? saved.activeKey : drafts.entries.has(saved.threadId) ? saved.threadId : null;
+      const active = drafts.entries.get(activeKey);
+      if (active?.channelId && state.channels?.[active.channelId]?.archivedAt) activeKey = null;
+      const selected = drafts.entries.get(activeKey);
+      return { drafts, activeKey, channelId: selected?.channelId ?? "general",
+        threadId: selected?.mode ? selected.threadId : isChannelDraftKey(activeKey) ? null : activeKey };
     } catch { this.clear(); return null; }
   }
 }

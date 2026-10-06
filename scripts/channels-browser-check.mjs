@@ -12,6 +12,8 @@ import { signInFixture } from "./auth-signin.mjs";
 
 async function setup(t, viewport = { width: 1440, height: 1000 }) {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
+  for (let i = 0; i < 18; i++) f.store.command(f.keys.owner, "commons", { id: crypto.randomUUID(), type: "message.posted",
+    data: { messageId: `channel-history-${i}`, body: `Earlier conversation ${i}: keep the reader's place while switching destinations.\nA second line provides realistic message height.` } });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
   const browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
@@ -85,6 +87,34 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     assert.equal(await page.locator("#message-list .message-body", { hasText: "hello main" }).count(), 0,
       "the main-channel message is not in the design timeline");
     assert.equal(await page.locator("#message-list .message-body", { hasText: "design mockup v2" }).count(), 1);
+
+    // Navigation must not carry unsent text into a different channel. The
+    // channel journey owns this real composer + tab-recovery contract.
+    await page.locator("#message-input").fill("Unsent design notes");
+    await ensureSidebar();
+    await page.locator("#channel-list [data-channel]").filter({ hasText: "general" }).click();
+    assert.equal(await page.locator("#message-input").inputValue(), "", "new channel has its own draft");
+    await page.locator("#message-input").fill("Unsent general notes");
+    await ensureSidebar();
+    await page.locator("#channel-list [data-channel]").filter({ hasText: "design" }).click();
+    assert.equal(await page.locator("#message-input").inputValue(), "Unsent design notes");
+    await page.reload();
+    await page.locator("#main").waitFor({ state: "visible" });
+    assert.equal(await page.locator("#message-input").inputValue(), "Unsent design notes", "selected channel draft survives reload");
+    await f.post("design draft sent after reload");
+    await ensureSidebar();
+    await page.locator("#channel-list [data-channel]").filter({ hasText: "general" }).click();
+    assert.equal(await page.locator("#message-input").inputValue(), "Unsent general notes", "sending clears only its destination draft");
+    const readerPosition = label === "desktop" ? await page.locator("#message-list").evaluate(list => { list.scrollTop = 420; return list.scrollTop; }) : null;
+    await ensureSidebar();
+    await page.locator("#channel-list [data-channel]").filter({ hasText: "design" }).click();
+    assert.equal(await page.locator("#message-input").inputValue(), "");
+    if (readerPosition !== null) {
+      await page.locator("#channel-list [data-channel]").filter({ hasText: "general" }).click();
+      const returned = await page.locator("#message-list").evaluate(list => list.scrollTop);
+      assert.ok(readerPosition > 0 && Math.abs(returned - readerPosition) < 3, "return to the same reading position");
+      await page.locator("#channel-list [data-channel]").filter({ hasText: "design" }).click();
+    }
 
     // Rename through the manage control.
     await ensureSidebar();
