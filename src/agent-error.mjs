@@ -1,4 +1,5 @@
 // AX next-step for agents. Existing { error.code, error.message } stays.
+import { createHash, randomBytes } from "node:crypto";
 export const AGENT_ERRORS = "code/message + status/reason/hint/next";
 
 const tool = (name, args) => args ? { tool: name, arguments: args } : { tool: name };
@@ -443,9 +444,62 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
   };
 }
 
+// T179 (johnstab-mcp-500-trace): quotable 5xx trace. Every server 500
+// response body built by agentErrorBody carries errorId (unique per
+// occurrence, stable eid_ format — NOT err_: the storage-failure tests assert
+// /ERR_/i never reaches the client, so err_ would trip the no-driver-text
+// guard case-insensitively) and fingerprint (stable per underlying failure
+// within this process, so retries of the same failure collapse to one id).
+// The fingerprint is salted with a per-process secret: it is deterministic
+// for identical failures (the bug-report use case) but not offline-guessable
+// and not correlatable across restarts. The errorId is also emitted on one
+// bounded console.warn line, so an id pasted into a bug report is greppable
+// in operator logs. Additive only: non-5xx envelopes are untouched.
+//
+// Scope note: this covers every 5xx that flows through the central HTTP
+// catch (server/http.mjs always takes the agentErrorBody branch for 5xx —
+// discoverabilityErrorOverride only fires for 401/403/404). Deterministic
+// config-state 503s written directly in server/http.mjs (Fo's file) and the
+// MCP -32603 JSON-RPC envelopes (Claude's lane's files) are out of reach by
+// file-claim ownership; errorTrace() is exported for those owners to reuse.
+// The salt is minted lazily on first use, never at module top level: workerd
+// forbids random-value generation in global scope, and this module also
+// ships in the Worker bundle.
+let fingerprintSalt = null;
+function salt() {
+  if (!fingerprintSalt) fingerprintSalt = randomBytes(16).toString("hex");
+  return fingerprintSalt;
+}
+
+function normalizeForFingerprint(value) {
+  // Bounded first: the regexes below must never run on an unbounded message.
+  return String(value ?? "").slice(0, 512)
+    .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, "#")
+    .replace(/\b0x[0-9a-f]+\b/gi, "#")
+    .replace(/\b\d[\d.,_-]*\b/g, "#");
+}
+
+export function errorTrace({ httpStatus = 0, code = "request_failed", message = "", roomId = "", workItemId = "" } = {}) {
+  if (!(httpStatus >= 500)) return null;
+  const fingerprint = createHash("sha256")
+    .update(
+      [salt(), httpStatus, publicCode(code), normalizeForFingerprint(message), roomId || "", workItemId || ""].join("\0"),
+      "utf8",
+    )
+    .digest("hex");
+  return { errorId: `eid_${randomBytes(9).toString("base64url")}`, fingerprint };
+}
+
 export function agentErrorBody({ httpStatus, code, message, roomId, workItemId } = {}) {
   const ax = agentErrorAx({ httpStatus, code, message, roomId, workItemId });
-  return { error: { code, message }, status: ax.status, reason: ax.reason, hint: ax.hint, next: ax.next };
+  const body = { error: { code, message }, status: ax.status, reason: ax.reason, hint: ax.hint, next: ax.next };
+  const trace = errorTrace({ httpStatus, code, message, roomId, workItemId });
+  if (trace) {
+    body.errorId = trace.errorId;
+    body.fingerprint = trace.fingerprint;
+    console.warn(`error-trace ${trace.errorId} fp=${trace.fingerprint.slice(0, 16)} status=${httpStatus} code=${publicCode(code)}`);
+  }
+  return body;
 }
 
 export function validAgentNext(next) {
