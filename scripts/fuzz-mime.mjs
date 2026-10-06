@@ -239,18 +239,38 @@ export function runFuzz({
 }
 
 const BOOLEAN_FLAGS = new Set(["skipCorpus", "quiet"]);
+// Numeric options must be validated: an unvalidated --iterations=abc becomes
+// NaN, the random loop runs zero cases, and the harness exits 0 claiming
+// success -- a false green for a continuous fuzz gate. Same for NaN/negative
+// budgets and max-ms (the slow guard would silently disable itself).
+const NUMERIC_SPECS = {
+  seed: { flag: "--seed", integer: true, min: 0 },
+  iterations: { flag: "--iterations", integer: true, min: 0 },
+  budgetMs: { flag: "--budget-ms", integer: false, min: 0, exclusive: true },
+  maxMs: { flag: "--max-ms", integer: false, min: 0, exclusive: true },
+};
 function parseArgs(argv) {
   const out = {};
   for (let i = 0; i < argv.length; i++) {
     const m = /^--([a-z-]+)(?:=(.*))?$/.exec(argv[i]);
-    if (!m) { console.error(`unknown arg: ${argv[i]}`); process.exit(2); }
+    if (!m) { console.error(`fuzz-mime: unknown arg: ${argv[i]}`); process.exit(2); }
     const key = m[1].replace(/-([a-z])/g, (_, c) => c.toUpperCase());
     if (BOOLEAN_FLAGS.has(key)) { out[key] = m[2] === undefined ? true : m[2] !== "false"; continue; }
     if (m[2] !== undefined) { out[key] = m[2]; continue; }
-    if (i + 1 >= argv.length || argv[i + 1].startsWith("--")) { console.error(`missing value for --${m[1]}`); process.exit(2); }
+    if (i + 1 >= argv.length || argv[i + 1].startsWith("--")) { console.error(`fuzz-mime: missing value for --${m[1]}`); process.exit(2); }
     out[key] = argv[++i];
   }
-  for (const k of ["seed", "iterations", "budgetMs", "maxMs"]) if (out[k] !== undefined) out[k] = Number(out[k]);
+  for (const [key, spec] of Object.entries(NUMERIC_SPECS)) {
+    if (out[key] === undefined) continue;
+    const raw = out[key], v = Number(raw);
+    const inRange = spec.exclusive ? v > spec.min : v >= spec.min;
+    if (!Number.isFinite(v) || (spec.integer && !Number.isInteger(v)) || !inRange) {
+      const what = spec.integer ? `a non-negative integer` : `a number greater than ${spec.min}`;
+      console.error(`fuzz-mime: ${spec.flag} must be ${what}, got ${JSON.stringify(raw)}`);
+      process.exit(2);
+    }
+    out[key] = v;
+  }
   return out;
 }
 

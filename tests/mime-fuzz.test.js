@@ -21,6 +21,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { execFileSync } from "node:child_process";
 import { loadCorpus, checkCorpusEntry, runFuzz } from "../scripts/fuzz-mime.mjs";
 
 const CORPUS_MAX_MS = 10000; // corpus fixtures are large; generous vs ~30ms observed
@@ -32,6 +34,26 @@ test("mime fuzz corpus: pathological inputs parse or raise the pinned MimeError"
     if (problem) failures.push(`${entry.file}: ${problem}`);
   }
   assert.equal(failures.length, 0, `corpus invariant failures:\n${failures.join("\n")}`);
+});
+
+// Regression for Instinct-3's review finding on PR #1642 (seq 4716): the
+// CLI's numeric options were unvalidated, so --iterations=abc (NaN) ran zero
+// random cases and exited 0 -- a false green for a continuous fuzz gate.
+// The contract: invalid numerics exit nonzero with the bad option named.
+// This test fails on the pre-fix harness (it exits 0) and passes after.
+test("mime fuzz CLI rejects invalid numeric options instead of false-greening", { timeout: 120000 }, () => {
+  const script = fileURLToPath(new URL("../scripts/fuzz-mime.mjs", import.meta.url));
+  const bad = [["--iterations=abc"], ["--iterations=-3"], ["--max-ms=NaN"], ["--max-ms=0"], ["--budget-ms=0"], ["--seed=1.5"]];
+  for (const args of bad) {
+    let exit = null, stderr = "";
+    try {
+      execFileSync(process.execPath, [script, ...args, "--report", join(tmpdir(), `mime-fuzz-cli-${process.pid}`)],
+        { stdio: "pipe", timeout: 60000, encoding: "utf8" });
+      exit = 0;
+    } catch (e) { exit = e.status ?? 1; stderr = String(e.stderr ?? ""); }
+    assert.notEqual(exit, 0, `fuzz-mime ${args.join(" ")} must exit nonzero, exited ${exit}`);
+    assert.match(stderr, /must be/, `stderr names the bad option for ${args.join(" ")}: ${stderr.slice(0, 120)}`);
+  }
 });
 
 test("mime fuzz: bounded deterministic random sweep holds the invariant", { timeout: 120000 }, () => {
