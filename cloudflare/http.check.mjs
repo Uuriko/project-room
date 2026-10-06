@@ -520,7 +520,13 @@ test('Workers password reset commits failed attempts, consumes once and requires
       'failed proof counter survives the actual Durable Object writer transaction');
     assert.deepEqual(await json(await call('/api/auth/password/reset/consume', body, slot.headers)),
       { status: 'password_reset', signInRequired: true });
-    assert.equal((await json(await call('/api/account-session', null, slot.headers))).authenticated, false);
+    // Bound confirmation of the reset slot: the read names its session and
+    // must not mint a recovery slot or rotate the cookie. The anonymous
+    // slot answers 401 unauthenticated instead of a fresh anonymous view.
+    const resetView = await call('/api/account-session', null, slot.headers);
+    assert.equal(resetView.status, 401);
+    assert.equal(resetView.headers.get('set-cookie'), null);
+    assert.equal((await resetView.json()).error.code, 'unauthenticated');
     assert.equal((await json(await call('/api/auth/password/reset/consume', body, slot.headers), 401)).error.code, 'invalid_password_reset');
     const loginSlot = await freshSlot();
     const loginBody = { email: proof.email, password: proof.originalPassword, sessionRevision: loginSlot.view.sessionRevision };

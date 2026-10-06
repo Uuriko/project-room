@@ -7867,10 +7867,19 @@ paths:
         and `{ authenticated: false, account: null, csrf, sessionBinding }`.
         The slot grants nothing until `POST` signs in with an account access
         key; `POST` (sign in) and `DELETE` (sign out) below require the slot
-        cookie plus CSRF.
+        cookie plus CSRF. A `GET` carrying `X-Session-Binding` is a bound
+        confirmation of the named session: it never mints a slot, sets a
+        cookie, or replaces a newer sign-in. A matching binding returns the
+        session view; a rotated binding answers `409 session_binding_changed`;
+        a dead, anonymous, expired, or revoked session answers `401
+        unauthenticated`; a malformed binding answers `422
+        invalid_session_binding`.
       security: []
       responses:
         '200': { description: Account session view; never account data for an anonymous caller }
+        '401': { description: unauthenticated }
+        '409': { description: session_binding_changed }
+        '422': { description: invalid_session_binding }
         '429': { description: rate_limited }
     post:
       summary: Sign an account browser slot in
