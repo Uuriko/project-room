@@ -1,0 +1,34 @@
+name: pr-diff-size
+
+# Smaller-PR discipline: diffs over ~300 changed lines must carry an explicit
+# "Large diff justification:" section in the PR body. Smaller diffs mean fewer
+# rebase conflicts and faster reviews. Split when you can; justify when you
+# cannot.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  diff-size:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0 # Three-dot diff against the PR base needs history on both sides.
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - name: check diff size
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: node scripts/pr-diff-size-check.mjs

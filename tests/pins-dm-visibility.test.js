@@ -15,7 +15,7 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
-import { EVENT_TYPES as T } from "../src/events.js";
+import { EVENT_TYPES as T, event, applyEvent, PIN_DM_PARTY_POLICY_VERSION } from "../src/events.js";
 import { listPins, setPin } from "../server/pins.mjs";
 import { buildActivationPack } from "../server/room-activation-pack.mjs";
 
@@ -107,4 +107,51 @@ test("a non-party cannot pin another pair's DM at the event layer", () => {
     /not a party/,
     "pinning a DM you cannot read must be refused by the reducer",
   );
+});
+
+test("a pre-policy pin of a DM by a non-party still replays (history grandfathering)", () => {
+  const { aliceKey, cmd } = storeFixture();
+  const dmId = cmd(aliceKey, T.MESSAGE_POSTED, {
+    messageId: randomUUID(), body: "secret DM body", toMemberId: "bob",
+  }).event.data.messageId;
+  // Old pin event: no pinDmPartyPolicyVersion stamp (the pre-F-1 shape),
+  // actor is a non-party. Replay must accept it — the read paths still
+  // filter it per viewer.
+  const oldPin = event({
+    id: randomUUID(), idempotencyKey: randomUUID(), roomId: "commons",
+    actorId: "mallory", type: T.MESSAGE_PINNED, at: new Date().toISOString(),
+    data: { messageId: dmId },
+  });
+  const next = applyEvent(store.room("commons").state, oldPin);
+  assert.ok(next.pins.some(pin => pin.messageId === dmId),
+    "a pre-policy pin must apply on replay instead of throwing");
+});
+
+test("a stamped pin of a DM by a non-party is refused at the reducer", () => {
+  const { aliceKey, cmd } = storeFixture();
+  const dmId = cmd(aliceKey, T.MESSAGE_POSTED, {
+    messageId: randomUUID(), body: "secret DM body", toMemberId: "bob",
+  }).event.data.messageId;
+  const stampedPin = event({
+    id: randomUUID(), idempotencyKey: randomUUID(), roomId: "commons",
+    actorId: "mallory", type: T.MESSAGE_PINNED, at: new Date().toISOString(),
+    data: { messageId: dmId, pinDmPartyPolicyVersion: PIN_DM_PARTY_POLICY_VERSION },
+  });
+  assert.throws(
+    () => applyEvent(store.room("commons").state, stampedPin),
+    /not a party/,
+    "a new (stamped) non-party DM pin must be refused",
+  );
+});
+
+test("live pin commands are stamped with the DM-party policy version", () => {
+  const { aliceKey, cmd } = storeFixture();
+  const dmId = cmd(aliceKey, T.MESSAGE_POSTED, {
+    messageId: randomUUID(), body: "secret DM body", toMemberId: "bob",
+  }).event.data.messageId;
+  // A party pin is allowed; the stored event must carry the stamp so the
+  // reducer check applies to every new pin (pins route and direct /commands).
+  const receipt = cmd(aliceKey, T.MESSAGE_PINNED, { messageId: dmId });
+  assert.equal(receipt.event.data.pinDmPartyPolicyVersion, PIN_DM_PARTY_POLICY_VERSION,
+    "store.command must stamp new pins at live admission");
 });

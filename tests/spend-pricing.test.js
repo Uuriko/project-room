@@ -200,3 +200,35 @@ test("route table: the two spend-pricing routes are registered with room auth", 
   assert.deepEqual(postBody.required, ["enabled"]);
   assert.equal(postBody.properties.enabled.type, "boolean");
 });
+
+// SEC-10 (Dot's acceptance, room seq 2807): the switch is admission-only.
+// Regression caught: a future change that cancels in-flight work on disable
+// (or one that lets disable block new grant issuance) would silently change
+// the documented contract in docs/SPEND-PRIMITIVE.md.
+test("admission-only: a call admitted before disable still settles; disable does not stop grant issuance", async t => {
+  const f = roomWithPeer(t);
+  issueSpendGrant(f.store.db, f.roomId, f.peerMemberId, {
+    grantedBy: f.ownerMemberId, capCents: "100", perTxCapCents: "10", nowMs: Date.now(),
+  });
+  // Admitted while enabled: a reservation exists before the switch moves.
+  const admitted = chargeSpendBeforeCall(f.store, f.peerSecret, "room_put_file", { roomId: f.roomId });
+  assert.ok(admitted && typeof admitted.settle === "function");
+  const price = PRICED_MCP_TOOLS.room_put_file;
+  f.store.command(f.ownerSecret, f.roomId, { id: randomUUID(), type: T.ROOM_SPEND_PRICING_SET, data: { enabled: false } });
+  assert.equal(spendPricingEnabled(stateOf(f)), false);
+  // The in-flight call still settles after disable: the charge lands.
+  assert.equal(admitted.settle(), true, "work admitted before disable settles afterwards");
+  assert.equal(
+    spendGrantSummary(f.store.db, f.roomId, f.peerMemberId, { nowMs: Date.now() }).remainingCents,
+    String(100 - price), "the pre-disable charge is recorded against the grant");
+  // New admissions while disabled are free and write nothing.
+  assert.equal(chargeSpendBeforeCall(f.store, f.peerSecret, "room_put_file", { roomId: f.roomId }), null);
+  assert.equal(
+    spendGrantSummary(f.store.db, f.roomId, f.peerMemberId, { nowMs: Date.now() }).remainingCents,
+    String(100 - price), "no new reservation while disabled");
+  // Grant issuance is not frozen by the switch.
+  const reissued = issueSpendGrant(f.store.db, f.roomId, f.peerMemberId, {
+    grantedBy: f.ownerMemberId, capCents: "200", perTxCapCents: "10", nowMs: Date.now(),
+  });
+  assert.ok(reissued, "owner can still issue or replace a grant while pricing is disabled");
+});
