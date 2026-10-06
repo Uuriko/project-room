@@ -37,6 +37,7 @@ import { invitationJoinedEvent, assertInvitationMembershipEvidence } from "./inv
 import { STORE_SCHEMA_VERSION, fenceDefinitions, registerWriter, installWriterFence, verifyWriterFence } from "./writer-fence.mjs";
 import { WANTS_WORK_SCHEMA } from "./work-wants.mjs"; // BOARD-WAKE-2
 import { CODE_DROPS_SCHEMA, CodeDrops } from "./code-drops.mjs"; // room-native patch exchange
+import { PROJECTION_BODIES_SCHEMA, storedProjection, hydrateProjection } from "./projection-at-rest.mjs"; // Phase 1a
 import { MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, syncMessageRows, runMessagesBackfill, checkMessagesParity as verifyMessagesParity } from "./messages-store.mjs";
 import { commitMessageRedaction } from "./message-redaction.mjs";
 import { historyFloor as readHistoryFloor, messageInHistory, rowInHistory, indexMessages as indexHistoryMessages } from "./history-visibility.mjs"; // PRIV-2
@@ -1044,7 +1045,7 @@ function roomSchemaStamp() {
     directSendSchema, inboxStitchSchema, RETIRED_BOARD_V2_SCHEMA,
     agentKeyRegistrySchema, INTEGRITY_SNAPSHOT_SCHEMA, OPERATOR_ACTIONS_SCHEMA,
     INTEGRITY_JOB_CURSOR_SCHEMA, INTEGRITY_ROOM_STATE_SCHEMA, INTEGRITY_SWEEP_COLUMN,
-    ROOM_SCHEMA_STAMP_SCHEMA, LOOKUP_INDEXES, MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, WANTS_WORK_SCHEMA, CODE_DROPS_SCHEMA,
+    ROOM_SCHEMA_STAMP_SCHEMA, LOOKUP_INDEXES, MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, WANTS_WORK_SCHEMA, CODE_DROPS_SCHEMA, PROJECTION_BODIES_SCHEMA,
     PUBLIC_READ_MODEL_SCHEMA,
     // Additive tables converged outside the version bump. A warm wake whose
     // stamp matches skips the whole schema pass, so any DDL the pass applies
@@ -1136,7 +1137,10 @@ class ProjectionCache {
 }
 
 export class RoomStore {
-  constructor(filename, { now = () => Date.now(), readOnly = false, database, storagePlatform = nodeStorage, storageFailureThreshold = STORAGE_FAILURE_THRESHOLD, stitch = null, identityHashKey = undefined, integrity = "eager" } = {}) {
+  constructor(filename, { now = () => Date.now(), readOnly = false, database, storagePlatform = nodeStorage, storageFailureThreshold = STORAGE_FAILURE_THRESHOLD, stitch = null, identityHashKey = undefined, integrity = "eager",
+    bodiesAtRest = globalThis.process?.env?.ROOM_BODIES_AT_REST === "1" } = {}) {
+    // Phase 1a: store large message bodies outside rooms.projection.
+    this.bodiesAtRest = bodiesAtRest === true;
     const coldStart = startColdStart();
     if (integrity !== "eager" && integrity !== "deferred") throw new Error("integrity must be eager or deferred");
     if (readOnly && integrity === "deferred") throw new Error("Read-only integrity checks stay eager");
@@ -1718,6 +1722,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // Code drops: patch metadata and review checks. Unfenced and additive;
       // the bytes stay in room_attachments. The stamp includes this DDL.
       this.db.exec(CODE_DROPS_SCHEMA);
+      // Phase 1a: message bodies at rest, content-addressed, released by a
+      // trigger when the projection stops referencing them. The stamp
+      // includes this DDL.
+      this.db.exec(PROJECTION_BODIES_SCHEMA);
       // Idempotent: recreates fences for tables the additive schemas just
       // (re)created, and refuses a file whose existing triggers drifted.
       phase("fence");
@@ -2450,7 +2458,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (skipIds.has(row.id)) continue;
       const state = JSON.parse(row.projection);
       if (!ensureDefaultChannelState(state)) continue;
-      update.run(JSON.stringify(state), row.id);
+      update.run(this.storedProjection(row.id, state), row.id);
     }
     const linked = this.db.prepare(`
       SELECT rooms.id AS id, json_extract(rooms.projection, '$.workItems') AS workItems
@@ -2465,7 +2473,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (skipIds.has(row.id)) continue;
       if (!repairInvalidSupersessions({ workItems: parseStoredJson(row.workItems, {}) })) continue;
       const state = JSON.parse(this.db.prepare("SELECT projection FROM rooms WHERE id=?").get(row.id).projection);
-      if (repairInvalidSupersessions(state)) update.run(JSON.stringify(state), row.id);
+      if (repairInvalidSupersessions(state)) update.run(this.storedProjection(row.id, state), row.id);
     }
   }
   replayProvenance(rooms, { upgradeV1 }) {
@@ -2479,8 +2487,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (upgradeV1) {
         const state = JSON.parse(room.projection);
         const changed = applyProvenanceRepair(state, events);
-        if (changed) update.run(JSON.stringify(state), room.id);
-        saveCheckpoint.run(room.id, room.sequence, JSON.stringify(state));
+        if (changed) update.run(this.storedProjection(room.id, state), room.id);
+        // Checkpoints keep full bodies (replay applies edits to them).
+        saveCheckpoint.run(room.id, room.sequence, JSON.stringify(hydrateProjection(this.db, room.id, state).state));
         continue;
       }
       const slices = slicesOf.get(room.id);
@@ -2491,7 +2500,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       };
       if (!applyProvenanceRepair(partial, events)) continue;
       const state = JSON.parse(this.db.prepare("SELECT projection FROM rooms WHERE id=?").get(room.id).projection);
-      if (applyProvenanceRepair(state, events)) update.run(JSON.stringify(state), room.id);
+      if (applyProvenanceRepair(state, events)) update.run(this.storedProjection(room.id, state), room.id);
     }
   }
   close() { this._projectionCache?.clear(); this.db.close(); }
@@ -2577,10 +2586,33 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     if (hit) return hit;
     const row = (this._roomProjectionStmt ??= this.db.prepare("SELECT projection FROM rooms WHERE id=?")).get(roomId);
     if (!row) fail(404, "room_not_found", "Room not found");
-    const state = deepFreeze(JSON.parse(row.projection));
+    const { state: parsed, missing } = hydrateProjection(this.db, roomId, JSON.parse(row.projection));
+    if (missing.length) this._restoreBodiesFromLog(roomId, meta.sequence, parsed, missing);
+    const state = deepFreeze(parsed);
     const value = Object.freeze({ sequence: meta.sequence, state });
-    cache.insert(roomId, meta.sequence, value, Buffer.byteLength(row.projection));
+    cache.insert(roomId, meta.sequence, value, Buffer.byteLength(row.projection) + (state.messages ?? []).reduce((n, m) => n + (m?.body?.length ?? 0), 0));
     return value;
+  }
+  // Phase 1a: the one serializer for rooms.projection. Every writer uses it.
+  storedProjection(roomId, state) {
+    return storedProjection(this.db, roomId, state, { enabled: this.bodiesAtRest });
+  }
+  // A body row can only go missing through a write outside storedProjection.
+  // The event log is still the source of truth: replay it and refill.
+  _restoreBodiesFromLog(roomId, sequence, state, missing) {
+    console.error(`projection bodies missing for ${roomId}: ${missing.length}; replaying the event log`);
+    const rebuilt = this._replayRoom(roomId, sequence).state;
+    const byId = new Map((rebuilt.messages ?? []).map(message => [message.id, message]));
+    state.messages = state.messages.map(message => {
+      if (!message || !missing.includes(message.id)) return message;
+      const source = byId.get(message.id);
+      if (!source || typeof source.body !== "string") fail(500, "projection_corrupt", "A stored message body could not be restored");
+      const out = {};
+      for (const [key, value] of Object.entries(message)) {
+        if (key === "bodyRef") out.body = source.body; else out[key] = value;
+      }
+      return out;
+    });
   }
   roomAuthority(roomId) {
     // Fresh storage read, not an authorization cache. Keep membership provenance
@@ -2594,8 +2626,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     return { sequence: row.sequence, ownerId, members };
   }
   rebuildProjection(roomId, through = null) {
-    const room = this.room(roomId);
-    through ??= room.sequence;
+    return this._replayRoom(roomId, through ?? this.room(roomId).sequence);
+  }
+  _replayRoom(roomId, through) {
+    const head = this.db.prepare("SELECT sequence FROM rooms WHERE id=?").get(roomId);
+    if (!head) fail(404, "room_not_found", "Room not found");
+    const room = { sequence: head.sequence };
     if (!Number.isSafeInteger(through) || through < 0 || through > room.sequence) throw new Error("Invalid historical room boundary");
     const checkpoint = this.db.prepare("SELECT sequence,projection FROM projection_checkpoints WHERE room_id=?").get(roomId);
     let state = checkpoint ? JSON.parse(checkpoint.projection) : emptyRoomState();
@@ -2621,7 +2657,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     return this.transaction(() => {
       const state = events.reduce(applyEvent, emptyRoomState());
       const stored = compact(state);
-      this.db.prepare("INSERT INTO rooms(id,sequence,projection,archived_at) VALUES(?,?,?,?)").run(state.room.id, events.length, JSON.stringify(stored), archivedAtOf(stored));
+      this.db.prepare("INSERT INTO rooms(id,sequence,projection,archived_at) VALUES(?,?,?,?)").run(state.room.id, events.length, this.storedProjection(state.room.id, stored), archivedAtOf(stored));
       const insert = this.db.prepare("INSERT INTO events VALUES(?,?,?,?)");
       events.forEach((e, i) => insert.run(state.room.id, i + 1, e.id, JSON.stringify(e)));
       syncRoomPublication(this, { roomId: state.room.id, state: stored, previous: null, auth: null });
@@ -3314,7 +3350,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       let state;
       try { state = compact(applyEventWithGrowth(room.state, incoming, growthCollector).state); }
       catch (error) { fail(409, "invitation_rejected", error.message); }
-      const projection = JSON.stringify(state);
+      const projection = this.storedProjection(row.room_id, state);
       if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed");
       const sequence = room.sequence + 1;
       this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(row.room_id, sequence, incoming.id, JSON.stringify(incoming));
@@ -3979,7 +4015,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.db.prepare("DELETE FROM events WHERE room_id=?").run(roomId);
       const insert = this.db.prepare("INSERT INTO events VALUES(?,?,?,?)");
       events.forEach((e, i) => insert.run(roomId, i + 1, e.id, JSON.stringify(e)));
-      this.db.prepare("UPDATE rooms SET sequence=?,projection=?,archived_at=? WHERE id=?").run(events.length, JSON.stringify(state), archivedAtOf(state), roomId);
+      this.db.prepare("UPDATE rooms SET sequence=?,projection=?,archived_at=? WHERE id=?").run(events.length, this.storedProjection(roomId, state), archivedAtOf(state), roomId);
       this.db.prepare("INSERT INTO projection_checkpoints(room_id,sequence,projection) VALUES(?,?,?)").run(roomId, events.length, JSON.stringify(state));
       syncRoomPublication(this, { roomId, state, previous, auth: null });
       return { imported: events.length, sequence: events.length };
@@ -4596,7 +4632,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         const conflict = conflictingClaim(room.state.workItems, state.workItems[incoming.data.workItemId], Date.parse(incoming.at));
         if (conflict) fail(409, "claim_conflict", `Scope is reserved by work ${conflict.id}. Coordinate or release that reservation first; no new claim was saved.`);
       }
-      const projection = JSON.stringify(state);
+      const projection = this.storedProjection(roomId, state);
       if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes && !cleanup) fail(409, "pilot_limit", "Room projection limit reached; no data was changed");
       const sequence = room.sequence + 1;
       // R1 delivery-path tracing (RC-2026-09-26-966): delivery.log spans the
@@ -4626,7 +4662,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         // transaction rewrite the log and advance the room sequence.
         if (command.type === T.MESSAGE_DELETED && typeof command.data?.messageId === "string") {
           const redacted = commitMessageRedaction(this.db, {
-            roomId, state, actorId: incoming.actorId, at: incoming.at, messageId: command.data.messageId
+            roomId, state, actorId: incoming.actorId, at: incoming.at, messageId: command.data.messageId, bodiesAtRest: this.bodiesAtRest
           });
           state = redacted.state;
         }
@@ -4813,14 +4849,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       let resumed;
       try { resumed = compact(applyEvent(next, incoming)); }
       catch { continue; }
-      const projection = JSON.stringify(resumed);
+      const projection = this.storedProjection(roomId, resumed);
       if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) continue;
       seq += 1;
       this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, seq, incoming.id, JSON.stringify(incoming));
       next = resumed;
     }
     if (seq !== sequence) {
-      this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(seq, JSON.stringify(next), roomId);
+      this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(seq, this.storedProjection(roomId, next), roomId);
     }
     return next;
   }

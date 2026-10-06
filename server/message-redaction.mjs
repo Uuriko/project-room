@@ -2,6 +2,7 @@
 // table in one transaction. Read-time masking stays; this is the write that
 // makes the old text unreadable in storage.
 
+import { storedProjection } from "./projection-at-rest.mjs"; // Phase 1a
 import { applyEvent, event, EVENT_TYPES, isRoomArchived } from "../src/events.js";
 import { syncMessageRows } from "./messages-store.mjs";
 
@@ -39,7 +40,7 @@ function receiptCites(state, messageId) {
 // Already-redacted messages are left as they are. Returns the compact state
 // the rooms row now stores. `sequence` on the command that triggered this
 // stays the delete event; the room sequence advances past the new events.
-export function commitMessageRedaction(db, { roomId, state, actorId, at, messageId }) {
+export function commitMessageRedaction(db, { roomId, state, actorId, at, messageId, bodiesAtRest = false }) {
   if (typeof roomId !== "string" || typeof messageId !== "string" || !messageId) {
     return { state, sequence: null, rewritten: 0 };
   }
@@ -139,7 +140,7 @@ export function commitMessageRedaction(db, { roomId, state, actorId, at, message
 
   const stored = compact(next);
   if (!isRoomArchived(state)) {
-    db.prepare("UPDATE rooms SET sequence=?, projection=? WHERE id=?").run(sequence, JSON.stringify(stored), roomId);
+    db.prepare("UPDATE rooms SET sequence=?, projection=? WHERE id=?").run(sequence, storedProjection(db, roomId, stored, { enabled: bodiesAtRest }), roomId);
   }
   return { state: stored, sequence, rewritten };
 }

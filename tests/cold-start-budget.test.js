@@ -31,6 +31,8 @@ const EMPTY_UNTIL_CRON = new Set([
   "room_code_checks",
   // Link access rows exist only once an owner mints a member or co-admin link.
   "share_link_access",
+  // Phase 1a: rows exist only once a room stores a large body at rest.
+  "projection_bodies",
   // Spend grants and authorizations exist only after an owner issues a grant.
   "spend_grant_terms",
   "spend_authorizations",

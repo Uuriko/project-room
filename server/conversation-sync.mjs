@@ -1,4 +1,5 @@
 import { createHash, createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import { hydrateRecordText } from "./projection-at-rest.mjs"; // Phase 1a
 import { ServiceError } from "./store.mjs";
 import { validId, DEFAULT_CHANNEL_ID } from "../src/events.js";
 import { markIfOther, withContentTrust } from "./content-trust.mjs";
@@ -103,6 +104,7 @@ export function readConversation(store, token, roomId, { limit = 50, cursor = nu
       .all(roomId, before, auth.member.id, auth.member.id, channelId, DEFAULT_CHANNEL_ID, channelId,
         messageId, messageId, floor?.at ?? null, floor?.at ?? null,
         floor?.at ?? null, floor?.at ?? null, exclusions, messageId === null ? limit + 1 : 1))
+      .map(row => indexed ? row : { ...row, body: hydrateRecordText(store.db, roomId, row.body) })
       .filter(row => !floor || messageInHistory(JSON.parse(row.body), floor));
     if (messageId !== null && !rows.length) fail(404, "message_not_found", "Message not found");
     const selected = [];
