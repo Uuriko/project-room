@@ -210,7 +210,8 @@ export async function collectPullRequestLookups(items, { fetchImpl = fetch, toke
     const url = item.pullRequest.url;
     const prior = seen.get(url);
     if (prior) {
-      results.push({ ...prior, claimId: item.id });
+      // Room-scoped: the result is re-attributed to this item's room.
+      results.push({ ...prior, claimId: item.id, roomId: item.roomId });
       continue;
     }
     if (budget.remaining <= 0 || rateLimitedUntil) break;
@@ -242,7 +243,7 @@ export async function collectPullRequestLookups(items, { fetchImpl = fetch, toke
       }
       if (signals.budget) {
         const result = {
-          claimId: item.id, url,
+          claimId: item.id, roomId: item.roomId, url,
           delayMs: looked.ciCursor && looked.ciCursor !== "done" ? 0 : delayFor(item, looked.kind, token),
           ...looked
         };
@@ -253,6 +254,7 @@ export async function collectPullRequestLookups(items, { fetchImpl = fetch, toke
     }
     const result = {
       claimId: item.id,
+      roomId: item.roomId,
       url,
       delayMs: looked.ciCursor && looked.ciCursor !== "done" ? 0 : delayFor(item, looked.kind, token),
       ...looked
@@ -428,17 +430,23 @@ export async function syncClaimPullRequests(store, { env = null, fetchImpl = fet
   if (readClaimPullBudget(store) > nowMs) return { checked: 0, updated: 0, rateLimited: true };
   const due = loadDueClaims(store, nowMs);
   if (due.length === 0) return { checked: 0, updated: 0 };
-  const batch = await collectPullRequestLookups(due.map(entry => entry.item), {
+  // Claim ids are room-scoped, so lookup results carry their room and the
+  // room map is keyed by (roomId, claimId): the same claimId can be due in
+  // two rooms in one tick, and a bare-claimId key would settle one room's
+  // result against the wrong room's claim (where the PR URL matches no open
+  // link, so the result is silently dropped and the claim starves).
+  const roomKey = (roomId, claimId) => `${roomId}:${claimId}`;
+  const batch = await collectPullRequestLookups(due.map(entry => ({ ...entry.item, roomId: entry.roomId })), {
     fetchImpl, token: access, nowMs, deadline, yieldBetween
   });
-  const roomOf = new Map(due.map(entry => [entry.item.id, entry.roomId]));
+  const roomOf = new Map(due.map(entry => [roomKey(entry.roomId, entry.item.id), entry.roomId]));
   let checked = 0;
   let updated = 0;
   const rateLimited = batch.rateLimitedUntil != null;
   store.workClaims.transaction(() => {
     for (const result of batch.results) {
       if (result.kind === "rateLimited") continue;
-      const roomId = roomOf.get(result.claimId);
+      const roomId = roomOf.get(roomKey(result.roomId, result.claimId));
       const current = store.workClaims.get(roomId, result.claimId);
       checked += 1;
       if (commitPullRequestLookup(store, store.workClaims, roomId, current, result, nowMs)) updated += 1;

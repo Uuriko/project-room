@@ -36,7 +36,9 @@ test("MCP tools/call names unknown_tool, auth_required, and invalid_arguments", 
   assert.equal(unknown.error.code, -32602);
   assert.equal(unknown.error.message, "unknown_tool");
   assert.equal(unknown.error.data.reason, "unknown_tool");
-  assert.equal(unknown.error.data.suggestion, "room_post_message");
+  // #1528 (least exposure): an anonymous caller's typo of a hosted tool gets
+  // no suggestion at all, never the hosted tool's name.
+  assert.equal(unknown.error.data.suggestion, null);
 
   const auth = handleMcpJoinRpc(rpc("tools/call", { name: "room_post_message", arguments: { roomId: "commons", body: "hi" } }));
   assert.equal(auth.error.code, -32001);

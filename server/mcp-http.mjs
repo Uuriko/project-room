@@ -96,7 +96,14 @@ export function handleMcpJoinRpc(message, { mcpUrl } = {}) {
     const known = [...MCP_JOIN_TOOLS.map(tool => tool.name), ...PUBLIC_WORK_MCP_TOOLS, ...HOSTED_ROOM_MCP_TOOLS];
     if (isHostedMcpToolName(name)) return mcpCallError(requestId, { reason: "auth_required", tool: name });
     const selected = MCP_JOIN_TOOLS.find(tool => tool.name === name);
-    if (!selected) return mcpCallError(requestId, { reason: "unknown_tool", tool: name, suggestion: closestToolName(name, known) });
+    if (!selected) {
+      // #1528 least exposure: the join path is always anonymous, and hosted
+      // tool names are not its catalog to give. When the closest match is a
+      // hosted tool, return no suggestion at all rather than falling back to a
+      // reduced list (decision posted to the room at seq 3218).
+      const suggestion = closestToolName(name, known);
+      return mcpCallError(requestId, { reason: "unknown_tool", tool: name, suggestion: isHostedMcpToolName(suggestion) ? null : suggestion });
+    }
     const problems = diagnoseArguments(selected.inputSchema, args);
     if (problems) return mcpCallError(requestId, { reason: "invalid_arguments", tool: name, ...problems });
     const value = selected.name === "room_join_packet" ? llmsTxt()

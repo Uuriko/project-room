@@ -169,7 +169,10 @@ test("separate MCP processes serialize overlapping claims, hand off, and never r
 
 test("authorized coordinator proposes and supersedes work without transferring a claim or approval", { timeout: 30000 }, async t => {
   const f = await fixture(t), memberId = "coordinator";
-  f.send(T.MEMBER_ADDED, { memberId, displayName: "Synthetic coordinator", kind: "agent", accountableHumanId: "owner", permissions: ["steer"] });
+  // #1530: supersede writes board cards, so the coordinator needs the board
+  // writer rule (not just steer). The test still proves no claim transfer or
+  // approval is needed — the coordinator holds no claim on the work.
+  f.send(T.MEMBER_ADDED, { memberId, displayName: "Synthetic coordinator", kind: "agent", accountableHumanId: "owner", permissions: ["steer", "accept_work", "complete_work"] });
   // Graduated autonomy tiers: the coordinator is operator-promoted so the MCP
   // test exercises it as a working agent.
   setTier(f.store.db, "commons", memberId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });

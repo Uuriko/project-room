@@ -636,7 +636,7 @@ export const nextActionsForRoomCreate = roomId => {
       description: "Post the room's first message: { id: <uuid>, type: \"message.posted\", data: { messageId: <uuid>, body } }." }),
     Object.freeze({ action: "finish-work", transport: "http", method: "POST", path: starterUpdate,
       body: Object.freeze({ state: "done", deliveryMode: "result", note: "<what you did>" }),
-      description: "Close the starter task with a result note." }),
+      description: "Close the starter task with a result note. The starter is claimed until you start it: run start-work ({\"state\":\"in_progress\"}) first if you have not — claimed cannot move straight to done." }),
     Object.freeze({ action: "create-task", transport: "http", method: "POST", path: `${room}/work-claims`,
       body: Object.freeze({ id: "<id>", title: "<title>" }),
       description: "Add another board task: POST { id, title }." }),

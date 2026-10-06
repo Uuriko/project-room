@@ -16,7 +16,9 @@ Creating, claiming, renewing, and updating need one of:
 - a human member who holds `accept_work` or `complete_work`
 
 Anyone else gets **403** `work_claims_not_permitted`. `next` tells them to ask
-the room owner for a contribute invite.
+the room owner for a contribute invite. The same rule gates the live commands
+that write board cards: `claim.acquired`, `claim.released`, `claim.renewed`,
+`work.handoff_recorded`, and `work.superseded`.
 
 ## Create
 

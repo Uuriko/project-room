@@ -4412,8 +4412,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       enforceAutonomyTiers({ db: this.db, roomId, state: room.state, command, actor: auth.member, nowMs: this.now(), fail });
       // Projection claims follow the board writer rule. Live only: an exact
       // command retry returned above, and replay of an older event never
-      // reaches this line. write_external does not admit a claim.
-      if ([T.CLAIM_ACQUIRED, T.CLAIM_RELEASED, T.CLAIM_RENEWED].includes(command.type)) {
+      // reaches this line. write_external does not admit a claim. Handoffs and
+      // supersessions write board cards through the same mirror, so they use
+      // the same rule: recording scope is a board write whoever performs it.
+      if ([T.CLAIM_ACQUIRED, T.CLAIM_RELEASED, T.CLAIM_RENEWED, T.WORK_HANDOFF_RECORDED, T.WORK_SUPERSEDED].includes(command.type)) {
         const actor = room.state.members?.[auth.member.id];
         if (!mayWriteBoardClaims(actor, room.state.room?.ownerId)) {
           fail(403, "work_claims_not_permitted", "Creating, claiming, renewing, or updating work claims needs a contribute, review, or collaborate profile.");
