@@ -77,11 +77,27 @@ function mentionCandidates(members, identityNames) {
   return candidates;
 }
 
+function uniqueTargets(candidates, senderMemberId) {
+  if (!candidates.length) return [];
+  const rank = Math.min(...candidates.map(c => c.rank));
+  const tier = candidates.filter(c => c.rank === rank);
+  // The sender in the best tier (a self-mention, or a tie with the sender)
+  // resolves to nobody, exactly as before G16b.
+  if (tier.some(c => c.memberId === senderMemberId)) return [];
+  const ids = new Set(tier.map(c => c.memberId));
+  if (ids.size === 1) return [[...ids][0]];
+  // AUX-21 / G16b: legacy duplicate display names in the room (e.g. multiple Instinct members).
+  // When an exact display name match (rank 1) has multiple active non-sender candidates,
+  // notify all matching candidates so no active agent misses the wake.
+  if (ids.size > 1 && rank === 1) {
+    return [...ids];
+  }
+  return [];
+}
+
 function uniqueTarget(candidates, senderMemberId) {
-  if (!candidates.length) return null;
-  const rank = Math.min(...candidates.map(candidate => candidate.rank));
-  const ids = new Set(candidates.filter(candidate => candidate.rank === rank).map(candidate => candidate.memberId));
-  return ids.size === 1 && !ids.has(senderMemberId) ? [...ids][0] : null;
+  const targets = uniqueTargets(candidates, senderMemberId);
+  return targets.length ? targets[0] : null;
 }
 
 export function resolveMentionTarget(members, identityNames, name, senderMemberId) {
@@ -130,8 +146,10 @@ export function resolveMentionTargetsInText(members, identityNames, text, sender
       if (candidate.lower.length > longest) { matches = []; longest = candidate.lower.length; }
       if (candidate.lower.length === longest) matches.push(candidate);
     }
-    const target = uniqueTarget(matches, senderMemberId);
-    if (target && !found.includes(target)) found.push(target);
+    const targets = uniqueTargets(matches, senderMemberId);
+    for (const target of targets) {
+      if (!found.includes(target)) found.push(target);
+    }
   }
   return found;
 }
