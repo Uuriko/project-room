@@ -161,7 +161,9 @@ export function cardServedByRevision(card, expectedRevision) {
 // (#1524, run 37392991641), and the deploy must not go green until the door
 // has converged. Failing fetches from a previous build (propagation) reset
 // the streak and are retried until the window closes; a failing card served
-// by the target build fails at once. Without expectedRevision (post-rollback
+// by the target build fails at once. The streak must also COMPLETE inside
+// the window: a slow door whose consecutive passes finish after the deadline
+// fails rather than going green. Without expectedRevision (post-rollback
 // mode) every failure is treated as not-yet-converged until the window
 // closes. Returns the failure list (empty = converged); when `stats` is
 // given it is filled with attempt counts for the report.
@@ -202,7 +204,17 @@ export async function checkAgentCardDoor({
     }
     if (failures.length === 0) {
       streak += 1;
-      if (streak >= fetches) return done([], true);
+      if (streak >= fetches) {
+        // The streak only counts inside the window: a slow door that finally
+        // converges after the deadline must fail, not go green.
+        if (now() >= deadline) {
+          return done(
+            [...pending.slice(-8), `not converged: ${fetches} consecutive passing fetches completed after the ${waitMs}ms window closed (${attempt} fetches, ${staleFetches} stale)`],
+            false,
+          );
+        }
+        return done([], true);
+      }
     } else {
       const labelled = failures.map(f => `fetch #${attempt}: ${f}`);
       // The target build itself served a bad card: no amount of waiting fixes it.
