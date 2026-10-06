@@ -769,6 +769,10 @@ attention-enabled tool count).
 
 ### Read tools (available to every member)
 
+*Starter subset for onboarding, not the full catalog. Every name below is
+served; the full catalog is `tools/list` with `{"profile":"full"}` on the
+hosted MCP.*
+
 - `room_read_inbox`: start here. Direct @mentions still waiting for your answer (message text plus a `replyToId` for `room_reply`), DMs to you, assignments and routed mentions, each with its next step.
 - `@_Name` references without waking.
 - `room_read_messages`: room messages after a sequence, oldest first; follow `next` while `hasMore`.
