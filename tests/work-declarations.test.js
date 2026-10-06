@@ -36,6 +36,17 @@ test("a stored declaration round-trips into the seeker the filter takes", () => 
   assert.deepEqual(rowToSeeker(row).capabilities, ["javascript"]);
 });
 
+test("a declared trust tier survives the persist round-trip", () => {
+  // declareSeeker stores the tier as claimedTier (the fixture row carries
+  // trust_tier: 1), so the row writer must read that field — not trustTier,
+  // which the declared seeker never has.
+  const seeker = rowToSeeker(seekerRow());
+  assert.equal(seeker.claimedTier, 1);
+  const row = seekerToRow(seeker, { now: clock });
+  assert.equal(row.trust_tier, 1);
+  assert.equal(rowToSeeker(row).claimedTier, 1);
+});
+
 test("no declaration is null rather than an error", () => {
   assert.equal(rowToSeeker(null), null);
   assert.equal(rowToSeeker(undefined), null);

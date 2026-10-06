@@ -73,7 +73,10 @@ export function seekerToRow(seeker, { now }) {
     motives: JSON.stringify(seeker.motives),
     capabilities: JSON.stringify(seeker.capabilities),
     appetite_minutes: seeker.appetiteMinutes,
-    trust_tier: seeker.trustTier,
+    // declareSeeker emits claimedTier (a claim, not authority — trust comes
+    // from receipts). Reading trustTier here dropped the declaration: the
+    // declared seeker never has that field, so tier 1-3 persisted as NULL.
+    trust_tier: seeker.claimedTier ?? MIN_TIER,
     created_at: at,
     updated_at: at,
   });
