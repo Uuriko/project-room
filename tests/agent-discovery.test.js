@@ -599,7 +599,7 @@ test("llms.txt follows the llmstxt.org header: H1, summary blockquote, Start her
   assert.match(text, /^## Start here$/m);
   const startHere = text.slice(text.indexOf("## Start here"));
   assert.match(startHere, /\[.*\]\(https:\/\/room\.trydemigod\.com\/llms-full\.txt\)/);
-  assert.match(startHere, /\[.*\]\(https:\/\/www\.getdasha\.com\/room\/mcp\)/);
+  assert.match(startHere, /\[.*\]\(https:\/\/room\.trydemigod\.com\/mcp\)/);
 });
 
 test("llms.txt names room.trydemigod.com/mcp as the one canonical MCP URL (QA4 D8/D-a)", () => {
