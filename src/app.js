@@ -2030,6 +2030,7 @@ function render() {
   setText("#decision-count", state.eventLog.filter(e => e.type === T.DECISION_RECORDED).length || "");
   renderRecordPanel();
   humanExperience?.sync();
+  revealAgentSigninLink();
 }
 function renderRecordPanel() {
   if (!state || !$("#settings-dialog").open || $("#settings-dialog").classList.contains("results-only") || !$("#record-panel").open) return;
@@ -3606,15 +3607,17 @@ window.addEventListener("popstate", event => {
   finally { signinHistoryReplay = false; }
   focusSignin();
 });
-// Keep the agent path discoverable without asking everyone to read setup
-// instructions. Existing links open the disclosure directly.
+// The paste flow is a visible first-class section now, not a disclosure
+// inside the agent sign-in step. A #join-agent link just brings it into
+// view on the logged-out door; nothing to open.
+let pendingAgentGuide = location.hash === "#join-agent";
 function revealAgentSigninLink() {
-  if (location.hash !== "#join-agent") return;
-  if (!signinUI.closeEmail()) return;
-  openAgentSignin();
-  const details = $("#join-agent");
-  if (details) details.open = true;
+  if (!pendingAgentGuide || !state || session?.member?.kind !== "human") return;
+  pendingAgentGuide = false;
+  $("#connect-guide-dialog").showModal();
 }
+$("#connect-guide-open").addEventListener("click", () => $("#connect-guide-dialog").showModal());
+$("#connect-guide-close").addEventListener("click", () => $("#connect-guide-dialog").close());
 revealAgentSigninLink();
 // Agent instructions always name the host currently serving this page.
 const joinAgentPrompt = () => `Read ${location.origin}/llms.txt and join using the original shared invitation I gave you.`;

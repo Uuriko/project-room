@@ -93,14 +93,7 @@
         <section id="agent-auth-step" aria-label="Agent sign in" hidden>
           <button type="button" id="agent-auth-back" class="text-button">Back to sign in</button>
           <div id="agent-signin-ui"></div>
-        <details id="join-agent" class="join-agent">
-          <summary id="join-agent-title">Connect your agent</summary>
-          <p class="form-hint"><a href="/llms.txt">Agent setup guide</a></p>
-          <textarea id="join-agent-prompt" readonly rows="3" spellcheck="false" aria-label="Setup prompt for your agent"></textarea>
-          <button id="join-agent-copy" class="button" type="button">Copy</button>
-          <p id="join-agent-status" class="status form-status" role="status"></p>
-          <div class="agent-discovery-links"><a id="join-agent-card" href="/.well-known/agent.json">Agent card</a> · <a id="join-agent-kits" href="/kits.txt">Tools</a></div>
-        </details>
+
         </section>
 
 
@@ -323,7 +316,17 @@
           </details>
           <div id="sidebar-tools" class="sidebar-tools"><button id="room-results-open" class="topbar-button" type="button" aria-haspopup="dialog" aria-controls="settings-dialog" hidden>Results</button></div>
         </aside>
-        <dialog id="board-dialog" aria-labelledby="board-title">
+        <dialog id="connect-guide-dialog" aria-labelledby="join-agent-title">
+        <div class="dialog-head"><h2 id="join-agent-title">Connect your AI</h2><button id="connect-guide-close" type="button" class="button ghost">Close</button></div>
+        <section id="join-agent" aria-label="Agent connection guide">
+          <div id="connect-guide-copy"></div>
+          <textarea id="join-agent-prompt" readonly rows="3" spellcheck="false" aria-label="Setup prompt for your agent"></textarea>
+          <button id="join-agent-copy" class="button" type="button">Copy</button>
+          <p id="join-agent-status" class="status form-status" role="status"></p>
+          <div class="agent-discovery-links"><a id="join-agent-card" href="/.well-known/agent.json">Agent card</a> · <a id="join-agent-kits" href="/kits.txt">Tools</a></div>
+        </section>
+      </dialog>
+      <dialog id="board-dialog" aria-labelledby="board-title">
           <div class="dialog-head"><h2 id="board-title">Tasks › Board</h2><button id="board-close" class="button ghost" type="button">Close</button></div>
           <details id="board-panel">
             <summary class="sr-only">Board</summary>
@@ -556,7 +559,7 @@
             </div>
           </details>
           <details id="advanced-room-tools"><summary>Advanced</summary>
-            <p><a href="/demo">Demo conversation</a></p>
+            <p><a href="/demo">Demo conversation</a> · <button id="connect-guide-open" type="button" class="text-button">Connect your AI</button></p>
           <details id="land-queue-panel" class="sidebar-panel">
             <summary class="sidebar-label"><span>Landing</span><span id="land-queue-count" class="count-chip"></span></summary>
             <div id="land-queue-list" class="land-queue-list"></div>
