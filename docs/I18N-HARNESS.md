@@ -41,11 +41,14 @@ records the exact set of scanned files. `--check` runs fail-closed gates:
    current scan (hand-edited or narrowed manifests fail). Adding files is free
    — the ratchet counts their strings. Regenerate both files with `--baseline`
    when files are legitimately added or removed.
-2. **Independent scope pin** — against the base ref's manifest, files removed
-   from the manifest must be genuinely gone from the tree. This defeats the
-   paired evasion (narrow the scan globs *and* regenerate manifest+baseline
-   with `--baseline`): the shrunken manifest fails because the files still
-   exist. Legitimate deletions pass; the deletion itself is visible in the PR
+2. **Independent scope pin** — the manifest is self-generated, so it is pinned
+   against the actual tree (`git ls-files` with hardcoded surface rules that
+   do not derive from the mutable scan config): every tracked file in the
+   scan surface must be in the manifest. This defeats the paired evasion
+   (narrow the scan globs *and* regenerate manifest+baseline with
+   `--baseline`) on every PR including the bootstrap, with no silent skip —
+   `git ls-files` either returns the tree or the check fails closed.
+   Legitimate deletions pass; the deletion itself is visible in the PR
    diff for review.
 2. **Baseline integrity** — a new or modified baseline must *exactly* match a
    fresh scan of the current tree. This closes the bootstrap gap: with no

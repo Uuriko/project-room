@@ -73,25 +73,34 @@ export function checkScopeConsistency(manifest, scanned) {
   };
 }
 
-// Paired-regeneration evasion: narrowing the scan globs AND regenerating the
-// manifest/baseline with --baseline would otherwise pass --check on a shrunken
-// scope. The independent pin: files removed from the manifest versus the base
-// ref must genuinely no longer exist in the tree. Shrinking the manifest while
-// the files are still there fails.
-export function findEvasionDrops(baseManifest, manifest, exists) {
-  const manifestSet = new Set(manifest);
-  return baseManifest.filter((f) => !manifestSet.has(f) && exists(f));
+// Independent scope pin. The manifest is self-generated (via --baseline), so
+// comparing it only against the base ref's manifest silently skips on the
+// bootstrap PR and can be defeated by paired regeneration (narrow the globs,
+// regenerate). The pin instead enumerates the ACTUAL tree with `git ls-files`
+// and hardcoded surface rules that do not derive from the mutable scan
+// config: every tracked file in the scan surface must be in the manifest.
+// This cannot silently skip -- git ls-files either returns the tree or the
+// check fails closed.
+function expectedTrackedFiles() {
+  const out = gitOk(["ls-files", "-z"]);
+  if (out === null) return null;
+  return out
+    .split("\0")
+    .filter(Boolean)
+    .filter(
+      (f) =>
+        (f.startsWith("src/") && (f.endsWith(".js") || f.endsWith(".mjs"))) ||
+        (f.endsWith(".html") && !f.includes("/")) ||
+        f === "server/notify-email.mjs" ||
+        f === "server/email-envelope.mjs"
+    )
+    .filter(isScannableRel)
+    .sort();
 }
 
-function manifestAtRef(ref) {
-  const out = gitOk(["show", `${ref}:strings/i18n-scope.json`]);
-  if (out === null) return null;
-  try {
-    const parsed = JSON.parse(out);
-    return Array.isArray(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
+export function findUnpinnedFiles(expected, manifest) {
+  const manifestSet = new Set(manifest);
+  return expected.filter((f) => !manifestSet.has(f));
 }
 
 // Files the harness READS but never modifies; everything else lives in
@@ -360,15 +369,19 @@ if (mode === "--extract") {
     console.error(`i18n-harness FAIL: scope manifest modified but does not match the current scan (${extra.length} unscanned additions, ${dropped.length} drops). Regenerate with --baseline; hand-edited manifests fail.`);
     failed = true;
   }
-  // Independent scope pin: against the base ref's manifest, files dropped
-  // from the manifest must be genuinely gone from the tree. This defeats the
-  // paired evasion (narrow globs + regenerate manifest/baseline with --baseline).
-  const baseManifest = manifestAtRef(baseRef());
-  if (baseManifest) {
-    const exists = (f) => existsSync(join(root, f));
-    const evasion = findEvasionDrops(baseManifest, manifest, exists);
-    if (evasion.length > 0) {
-      console.error(`i18n-harness FAIL: scope manifest dropped ${evasion.length} file(s) that still exist in the tree (showing 5): ${evasion.slice(0, 5).join(", ")}. The manifest may only shrink by files deleted from the repo.`);
+  // Independent scope pin: every tracked file in the scan surface must be in
+  // the manifest. Defeats paired regeneration (narrow globs + --baseline):
+  // the shrunken manifest fails because the tree still lists the files.
+  // Never silently skips -- git ls-files either returns the tree or this
+  // fails closed.
+  const expected = expectedTrackedFiles();
+  if (expected === null) {
+    console.error("i18n-harness FAIL: cannot enumerate tracked files (git ls-files failed)");
+    failed = true;
+  } else {
+    const unpinned = findUnpinnedFiles(expected, manifest);
+    if (unpinned.length > 0) {
+      console.error(`i18n-harness FAIL: ${unpinned.length} tracked file(s) in the scan surface are not in strings/i18n-scope.json (showing 5): ${unpinned.slice(0, 5).join(", ")}. Run \`node scripts/i18n-harness.mjs --baseline\`.`);
       failed = true;
     }
   }

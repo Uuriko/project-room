@@ -28,7 +28,7 @@ import {
   summarize,
   scannableRels,
   checkScopeConsistency,
-  findEvasionDrops,
+  findUnpinnedFiles,
   RULES,
 } from "../scripts/i18n-harness.mjs";
 
@@ -165,25 +165,25 @@ test("--check ratchets in steady state: fails when counts grow past an untouched
   assert.equal(r2.status, 0, `--check should exit 0 within baseline; stderr: ${r2.stderr}`);
 });
 
-test("findEvasionDrops flags manifest shrinkage while files still exist", () => {
-  const exists = (f) => f !== "gone.js";
-  assert.deepEqual(findEvasionDrops(["a.js", "b.js", "gone.js"], ["a.js"], exists), ["b.js"]);
-  assert.deepEqual(findEvasionDrops(["a.js"], ["a.js", "b.js"], exists), []);
+test("findUnpinnedFiles flags tracked surface files missing from the manifest", () => {
+  assert.deepEqual(findUnpinnedFiles(["a.js", "b.js"], ["a.js", "b.js", "c.js"]), []);
+  assert.deepEqual(findUnpinnedFiles(["a.js", "b.js"], ["a.js"]), ["b.js"]);
 });
 
-test("--check defeats paired evasion: narrowed manifest + regenerated baseline still fails", () => {
-  // Simulates: attacker narrows UI_GLOBS and regenerates manifest+baseline
-  // with --baseline. I18N_BASE_REF=HEAD pins the base manifest independently.
+test("--check defeats paired evasion without any base ref (bootstrap path)", () => {
+  // Simulates the full paired evasion on the bootstrap PR itself: narrow the
+  // globs AND regenerate manifest+baseline with --baseline. No I18N_BASE_REF
+  // is set, so the old base-manifest comparison would silently skip -- the
+  // independent tree pin must still fail.
   const scopePath = join(root, "strings", "i18n-scope.json");
   const hadScope = readFileSync(scopePath, "utf8");
   const hadBaseline = readFileSync(baselinePath, "utf8");
-  const env = { ...process.env, I18N_BASE_REF: "HEAD" };
   try {
     const manifest = JSON.parse(hadScope);
     writeFileSync(scopePath, JSON.stringify(manifest.slice(0, 5), null, 2));
-    const r = spawnSync(process.execPath, [harness, "--check"], { encoding: "utf8", env });
+    const r = spawnSync(process.execPath, [harness, "--check"], { encoding: "utf8" });
     assert.equal(r.status, 1, `--check should exit 1 on paired evasion; stderr: ${r.stderr}`);
-    assert.match(r.stderr, /dropped \d+ file\(s\) that still exist/);
+    assert.match(r.stderr, /not in strings\/i18n-scope\.json/);
   } finally {
     writeFileSync(scopePath, hadScope);
     writeFileSync(baselinePath, hadBaseline);
