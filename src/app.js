@@ -4431,18 +4431,41 @@ function closeRoomActions(restore = true) {
     if (context.selection && context.opener.value === context.value) context.opener.setSelectionRange(...context.selection);
   }
 }
-const ROOM_CHANNEL_RESULT_LIMIT = 20;
+const ROOM_CHANNEL_RESULT_LIMIT = 20, ROOM_TASK_RESULT_LIMIT = 20;
+// Match the timeline's newest loaded proposal without rendering work cards.
+function roomTaskEntries() {
+  const sources = new Map();
+  for (let index = state.messages.length - 1; index >= 0; index--) {
+    const message = state.messages[index];
+    if (message.workItemId && message.proposal && !sources.has(message.workItemId)) sources.set(message.workItemId, messageChannelId(message));
+  }
+  return Object.values(state.workItems).map(item => ({ item, channelId: sources.get(item.id) ?? DEFAULT_CHANNEL_ID }))
+    .filter(({ item, channelId }) => state.workItems[item.id] === item && state.channels?.[channelId] && !state.channels[channelId].archivedAt);
+}
+function roomDestinationBlockedReason() {
+  return busy ? "Wait for the current send to finish, then try again."
+    : composerFiles.some(file => file.status === "uploading") ? "Wait for the file upload to finish, then try again."
+    : requestReading ? "Wait for the request to finish loading, then try again." : "";
+}
+function refuseRoomDestination(message) {
+  $("#room-actions-status").textContent = message; $("#room-actions-status").scrollIntoView({ block: "nearest" });
+}
 function renderRoomActions() {
   if (!roomActionsContext || !ownsRoomActions()) { closeRoomActions(false); return; }
   const raw = $("#room-actions-query").value.toLowerCase().trim();
-  const channelsOnly = raw.startsWith("#"), query = (channelsOnly ? raw.slice(1) : raw).trim();
+  const channelsOnly = raw.startsWith("#"), tasksOnly = raw.startsWith(">");
+  const query = (channelsOnly || tasksOnly ? raw.slice(1) : raw).trim();
   const terms = query.split(/\s+/).filter(Boolean);
-  const channels = channelList(state).filter(channel => !channel.archivedAt && terms.every(term => channel.name.toLowerCase().includes(term)));
+  const channels = tasksOnly ? [] : channelList(state).filter(channel => !channel.archivedAt && terms.every(term => channel.name.toLowerCase().includes(term)));
   const rank = channel => !query ? channel.id === activeChannelId ? -1 : 0
     : channel.name.toLowerCase() === query ? 0 : channel.name.toLowerCase().startsWith(query) ? 1 : 2;
   channels.sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name, "en") || a.id.localeCompare(b.id, "en"));
   const shown = channels.slice(0, ROOM_CHANNEL_RESULT_LIMIT);
-  const entries = channelsOnly ? [] : roomActionEntries().filter(entry => terms.every(term => `${entry.label} ${entry.words}`.toLowerCase().includes(term)));
+  const tasks = channelsOnly ? [] : roomTaskEntries().filter(({ item }) => terms.every(term => item.title.toLowerCase().includes(term)));
+  const taskRank = ({ item }) => item.title.toLowerCase() === query ? 0 : item.title.toLowerCase().startsWith(query) ? 1 : 2;
+  tasks.sort((a, b) => taskRank(a) - taskRank(b) || a.item.title.localeCompare(b.item.title, "en") || a.item.id.localeCompare(b.item.id, "en"));
+  const shownTasks = tasks.slice(0, ROOM_TASK_RESULT_LIMIT);
+  const entries = channelsOnly || tasksOnly ? [] : roomActionEntries().filter(entry => terms.every(term => `${entry.label} ${entry.words}`.toLowerCase().includes(term)));
   const group = (name, buttons) => {
     const section = document.createElement("section"), heading = document.createElement("h3");
     heading.id = `room-finder-${name.toLowerCase()}`; heading.textContent = name;
@@ -4453,13 +4476,21 @@ function renderRoomActions() {
     const button = document.createElement("button"); button.type = "button"; button.dataset.roomChannel = channel.id;
     button.textContent = `# ${channel.name}${channel.id === activeChannelId ? " · Current" : ""}`; return button;
   })));
+  if (shownTasks.length) groups.push(group("Tasks", shownTasks.map(({ item, channelId }) => {
+    const button = document.createElement("button"), title = document.createElement("span"), context = document.createElement("small");
+    button.type = "button"; button.dataset.roomTask = item.id;
+    title.textContent = item.title;
+    context.textContent = `${workStatus(item, Date.now()).label} · #${state.channels[channelId].name} · ${item.id}`;
+    button.append(title, context); return button;
+  })));
   if (entries.length) groups.push(group("Actions", entries.map(entry => {
     const button = document.createElement("button"); button.type = "button"; button.dataset.roomAction = entry.id;
     button.textContent = entry.label; return button;
   })));
   $("#room-actions-list").replaceChildren(...groups);
-  $("#room-actions-count").textContent = `Showing ${shown.length} of ${channels.length} channels.${channels.length > shown.length ? " Type more to refine the list." : ""}`;
-  $("#room-actions-empty").hidden = shown.length + entries.length > 0;
+  const counts = [!tasksOnly ? `${shown.length} of ${channels.length} channels` : "", !channelsOnly ? `${shownTasks.length} of ${tasks.length} tasks` : ""].filter(Boolean);
+  $("#room-actions-count").textContent = `Showing ${counts.join("; ")}. Loaded in this room.${channels.length > shown.length || tasks.length > shownTasks.length ? " Type more to refine the list." : ""}`;
+  $("#room-actions-empty").hidden = shown.length + shownTasks.length + entries.length > 0;
   $("#room-actions-status").textContent = "";
 }
 function chooseRoomChannel(id) {
@@ -4469,17 +4500,43 @@ function chooseRoomChannel(id) {
     renderRoomActions(); $("#room-actions-status").textContent = "That channel is unavailable. Choose another channel.";
     $("#room-actions-query").focus(); return;
   }
-  const blocked = busy ? "Wait for the current send to finish, then try again."
-    : composerFiles.some(file => file.status === "uploading") ? "Wait for the file upload to finish, then try again."
-    : requestReading ? "Wait for the request to finish loading, then try again." : "";
-  if (blocked) { $("#room-actions-status").textContent = blocked; $("#room-actions-status").scrollIntoView({ block: "nearest" }); return; }
+  const blocked = roomDestinationBlockedReason();
+  if (blocked) { refuseRoomDestination(blocked); return; }
   setActiveChannel(id); closeRoomActions(false);
   $("#main").classList.remove("sidebar-open"); $("#sidebar-toggle").setAttribute("aria-expanded", "false");
   $("#conversation-title").focus({ preventScroll: true });
 }
+function chooseRoomTask(id) {
+  if (!roomActionsContext || !ownsRoomActions()) { closeRoomActions(false); return; }
+  const destination = roomTaskEntries().find(({ item }) => item.id === id);
+  if (!destination) {
+    renderRoomActions(); refuseRoomDestination("That task is unavailable in the loaded conversation. Choose another destination.");
+    $("#room-actions-query").focus(); return;
+  }
+  const blocked = roomDestinationBlockedReason();
+  if (blocked) { refuseRoomDestination(blocked); return; }
+  const origin = currentWorkOrigin(), target = recordHref("work", id);
+  const repeatInspection = roomActionsContext.opener?.closest?.("[data-work-record-id]")?.dataset.workRecordId === id
+    && activeWorkNavigationId === id && origin?.target === target && location.hash === target
+    && history.state?.roomWorkTarget === activeWorkNavigation;
+  const focusKey = roomActionsContext.opener?.dataset?.focusKey;
+  closeRoomActions(true);
+  const usable = node => node?.isConnected && node !== document.body && !node.closest("[hidden], #room-actions-dialog") && node.getClientRects().length > 0;
+  if (!usable(document.activeElement)) {
+    const keyed = focusKey ? [...document.querySelectorAll("[data-focus-key]")].find(node => node.dataset.focusKey === focusKey && usable(node)) : null;
+    (keyed ?? $("#conversation-title")).focus({ preventScroll: true });
+  }
+  if (repeatInspection) {
+    // The inspected card is the same destination, not a new return surface.
+    workNavigationOrigins.set(activeWorkNavigation, { ...origin, presentation: "details" });
+    workHistoryReplayKey = null; showWorkDestination("work", id);
+  } else if (!navigateWorkRecord("work", id)) { notice("That task could not open. Try again from the finder.", true); return; }
+  $("#main").classList.remove("sidebar-open"); $("#sidebar-toggle").setAttribute("aria-expanded", "false");
+}
 function chooseRoomChoice(button) {
   if (!roomActionsContext || !ownsRoomActions()) { closeRoomActions(false); return; }
   if (button?.dataset.roomChannel) chooseRoomChannel(button.dataset.roomChannel);
+  else if (button?.dataset.roomTask) chooseRoomTask(button.dataset.roomTask);
   else if (button?.dataset.roomAction) chooseRoomAction(button.dataset.roomAction);
 }
 function openRoomActions() {
@@ -4541,7 +4598,7 @@ $("#room-actions-open").addEventListener("click", openRoomActions);
 $("#room-actions-close").addEventListener("click", () => closeRoomActions());
 $("#room-actions-dialog").addEventListener("cancel", event => { event.preventDefault(); closeRoomActions(); });
 $("#room-actions-query").addEventListener("input", renderRoomActions);
-$("#room-actions-list").addEventListener("click", event => chooseRoomChoice(event.target.closest("[data-room-channel], [data-room-action]")));
+$("#room-actions-list").addEventListener("click", event => chooseRoomChoice(event.target.closest("[data-room-channel], [data-room-task], [data-room-action]")));
 $("#room-actions-dialog").addEventListener("keydown", event => {
   if (event.isComposing || event.keyCode === 229) { if (event.key === "Enter") event.preventDefault(); return; }
   if (event.altKey || event.ctrlKey || event.metaKey) return;

@@ -712,13 +712,14 @@
       </main>
     </div>
     <dialog id="room-actions-dialog" aria-labelledby="room-actions-title">
-      <div class="panel-header"><h2 id="room-actions-title">Channels + Actions</h2><button id="room-actions-close" class="button ghost" type="button">Close</button></div>
-      <label class="sr-only" for="room-actions-query">Find a channel or action</label>
-      <input id="room-actions-query" type="search" placeholder="Find a channel or action…" autocomplete="off" maxlength="100" aria-controls="room-actions-list" autofocus>
+      <div class="panel-header"><h2 id="room-actions-title">Channels, Tasks + Actions</h2><button id="room-actions-close" class="button ghost" type="button">Close</button></div>
+      <label class="sr-only" for="room-actions-query">Find a channel, task or action</label>
+      <input id="room-actions-query" type="search" placeholder="Find a channel, task or action…" autocomplete="off" maxlength="100" aria-controls="room-actions-list" autofocus>
+      <p class="form-hint">Use # for channels or &gt; for tasks.</p>
       <p id="room-actions-count" class="form-hint" role="status"></p>
       <p id="room-actions-status" class="form-hint" role="status"></p>
-      <div id="room-actions-list" aria-label="Available channels and actions"></div>
-      <p id="room-actions-empty" class="form-hint" hidden>No matching channels or actions.</p>
+      <div id="room-actions-list" aria-label="Available channels, tasks and actions"></div>
+      <p id="room-actions-empty" class="form-hint" hidden>No matching channels, tasks or actions.</p>
     </dialog>
     <dialog id="room-instructions-dialog" aria-labelledby="room-instructions-title">
       <h2 id="room-instructions-title">Room instructions</h2>
