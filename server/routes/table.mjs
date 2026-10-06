@@ -4,6 +4,8 @@
 // row. Unmatched paths fall through. Batch C fills `capability`. SPLIT reads
 // `scope`. Both columns are required now.
 
+import { HUMAN_PUSH_ROUTES } from "./human-push.mjs";
+import { DEMO_ROUTES } from "./demo.mjs";
 import { ROOM_ASSISTANT_ROUTES } from "./room-assistant.mjs";
 import { DESKTOP_AUTH_ROUTES } from "./desktop-auth.mjs";
 import { AUTH_ROUTES } from "./auth.mjs";
@@ -18,6 +20,7 @@ import { WAKE_STATUS_ROUTES } from "./wake-status.mjs"; // plan-wake-live: wakea
 import { SPEND_GRANT_ROUTES } from "./spend-grants.mjs"; // spend-primitive MVP
 import { SPEND_PRICING_ROUTES } from "./spend-pricing.mjs"; // spend-pricing kill switch
 import { CODE_DROP_ROUTES } from "./code-drops.mjs"; // room-native patch exchange
+import { SQUAD_ROUTES } from "./squads.mjs"; // plan-squads
 
 export const AUTH_CLASSES = Object.freeze(["none", "room", "account", "bearer", "roomToken", "door", "mcp"]);
 export const ROUTE_SCOPES = Object.freeze(["worker", "public", "directory", "room"]);
@@ -44,7 +47,7 @@ function unknownSchemaTypes(schema, out) {
 }
 
 // Rows land here as groups leave the legacy chain. Do not push; replace the array.
-export const ROUTES = Object.freeze([...AUTH_ROUTES, ...ROOM_ASSISTANT_ROUTES,
+export const ROUTES = Object.freeze([...DEMO_ROUTES, ...HUMAN_PUSH_ROUTES, ...SQUAD_ROUTES, ...AUTH_ROUTES, ...ROOM_ASSISTANT_ROUTES,
   ...DESKTOP_AUTH_ROUTES, ...INBOX_ROUTES, ...MEMBER_PERMISSION_ROUTES, ...AGENT_FLEET_ROUTES, ...WANTS_WORK_ROUTES, ...WORK_CLAIM_ROUTES, ...SPEND_GRANT_ROUTES, ...SPEND_PRICING_ROUTES, ...TYPING_ROUTES, ...CODE_DROP_ROUTES, ...WAKE_STATUS_ROUTES, ...PR_WEBHOOK_ROUTES]);
 
 export function assertRouteRow(row) {

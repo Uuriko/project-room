@@ -354,6 +354,11 @@ export const unfencedAdditiveTables = Object.freeze([
   // — older writers have no code path to it. Rows are a delivery address,
   // never room content and never a grant.
   "human_push_subscriptions",
+  // human_push_preferences (wave-2 #1601: per-member push-channel switches,
+  // one row per member in a room). Same rationale as subscriptions: purely
+  // additive, older writers have no code path to it, and the row only gates
+  // delivery — it never grants anything.
+  "human_push_preferences",
   // board_vtwo_* (BOARD-v2 SQLite persistence, PR #1144): board_vtwo_claims,
   // board_vtwo_events, board_vtwo_mirror, board_vtwo_idempotency. Purely additive
   // and intentionally NOT fenced — older writers have no code path to them,
@@ -410,7 +415,12 @@ export const unfencedAdditiveTables = Object.freeze([
   // operator_actions (CP-ADMIN-0): append-only operator audit. Purely additive
   // and intentionally NOT fenced — older writers have no path to it. The
   // append-only triggers are the integrity gate.
-  "operator_actions"
+  "operator_actions",
+  // squads (plan-squads): named groups with goal, roster, and thread channel.
+  // Purely additive and intentionally NOT fenced — older writers have no code
+  // path to it; the owner-managed roster rules in server/squads.mjs are the
+  // integrity gate.
+  "squads"
 ]);
 // Created on first use, not in the constructor. A database that has never
 // issued an OAuth grant or persisted an abuse rate bucket does not have

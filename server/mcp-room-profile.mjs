@@ -48,6 +48,7 @@ import { listedMcpTools, MCP_TOOL_FOCUSES } from "./mcp-discovery.mjs";
 import { stampEvents, stampWorkListing } from "./content-trust.mjs";
 import { redactEventPage } from "./redact-read.mjs";
 import { resolveCatalogAgent, catalogCallDenial } from "./capability-visibility.mjs";
+import { listSquads, getSquad, createSquad, updateSquadMembers, disbandSquad } from "./squads.mjs"; // plan-squads: squad roster
 
 const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
 
@@ -134,6 +135,12 @@ function validRoomArgs(name, args) {
   if (args.roomId !== undefined && !validId(args.roomId)) return false;
   if (name === "room_check_access" || name === "room_activation_pack") return true;
   if (name === "room_member_card") return validId(args.memberId);
+  if (name === "squads_list") return true;
+  if (name === "squads_get") return typeof args.squadId === "string" && args.squadId.length >= 1 && args.squadId.length <= 128;
+  if (name === "squads_create") return typeof args.name === "string" && args.name.length >= 1 && args.name.length <= 64;
+  if (name === "squads_update_members" || name === "squads_disband") {
+    return typeof args.squadId === "string" && args.squadId.length >= 1 && args.squadId.length <= 128;
+  }
   if (name === "room_needs_me") {
     if (args.since === undefined) return true;
     if (Number.isSafeInteger(args.since) && args.since >= 0) return true;
@@ -494,6 +501,19 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
     if (!doc) throw Object.assign(new Error("No directory card for this member"), { status: 404, code: "unknown_card" });
     return doc;
   }
+  if (name === "squads_list") return listSquads(store, secret, roomId);
+  if (name === "squads_get") return getSquad(store, secret, roomId, args.squadId);
+  if (name === "squads_create") {
+    const data = { name: args.name };
+    if (args.goal !== undefined) data.goal = args.goal;
+    if (args.channelMessageId !== undefined) data.channelMessageId = args.channelMessageId;
+    if (args.memberIds !== undefined) data.memberIds = args.memberIds;
+    return createSquad(store, secret, roomId, data);
+  }
+  if (name === "squads_update_members") {
+    return updateSquadMembers(store, secret, roomId, args.squadId, { add: args.add, remove: args.remove });
+  }
+  if (name === "squads_disband") return disbandSquad(store, secret, roomId, args.squadId);
   if (name === "get_room_context") {
     const context = store.roomContext(secret, roomId, {
       sinceVersion: args.since_version === undefined ? null : args.since_version

@@ -1207,11 +1207,6 @@ summary { overflow-wrap: anywhere; }
    the bottom of them. The prompt shows in full - a reader who cannot see what
    they are about to paste into their agent has no reason to trust it, and the
    clipboard fallback needs visible text to select. */
-.join-agent { margin: .25rem 0 0; }
-.join-agent textarea { margin: .5rem 0 .6rem; overflow-wrap: anywhere; }
-.join-agent details { margin-top: .75rem; }
-.join-agent ul { margin: .5rem 0 0; padding-left: 1.1rem; color: var(--muted); font-size: .82rem; }
-.join-agent li { margin: .2rem 0; }
 
 /* Room orientation reuses existing content rather than another work model. */
 .room-overview-open { width: 100%; text-align: left; margin: 0; }
@@ -1564,8 +1559,6 @@ summary { overflow-wrap: anywhere; }
 #email-auth-step #email-auth-panel { margin-top: 0; }
 [data-signin-back] { display: inline-flex; align-items: center; gap: .35rem; min-width: 44px; min-height: 44px; margin: 0 0 .5rem; padding: .6rem 0; box-sizing: border-box; }
 #auth-panel > .invite-help { margin-top: 1.25rem; }
-.join-agent > summary { cursor: pointer; font-size: .9rem; color: var(--muted); min-height: 44px; padding: .7rem 0; }
-.join-agent[open] > summary { margin-bottom: .75rem; }
 
 .auth-panel .auth-email-title { display: flex; align-items: center; min-height: 44px; margin: 0 0 0 3.25rem; font-size: 1.15rem; }
 
@@ -1702,3 +1695,10 @@ summary { overflow-wrap: anywhere; }
 
 .app-shell:has(#auth-panel:not([hidden])) ~ .site-footer { display: none; }
 body:has(#auth-panel:not([hidden])) .site-footer { display: none; }
+
+.join-agent { margin: 1.25rem 0 0; padding: 1rem 1.1rem; border: 1px solid var(--line); border-radius: .85rem; background: var(--panel-raised); }
+.join-agent h2 { margin: 0 0 .35rem; font-size: var(--text-md); }
+.join-agent textarea { margin: .5rem 0 .6rem; overflow-wrap: anywhere; }
+.join-agent .connect-steps { margin: .5rem 0 0; padding-left: 1.25rem; color: var(--muted); font-size: var(--text-sm); }
+.join-agent .connect-steps li { margin: .35rem 0; }
+.join-agent .connect-steps strong { color: var(--text); }

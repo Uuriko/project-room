@@ -1,3 +1,4 @@
+import { uiText } from "./strings.js";
 import { installOwnerProjectOffers } from "./owner-project-offers-ui.js";
 import { createMemberDisplayNames } from "./member-display-names.js";
 import { installRoomLayout, syncSidebarSections } from "./room-layout.js";
@@ -1138,7 +1139,7 @@ const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({ "&": "&amp
 // owns[] and reach{} are host-supplied from live data (never fabricated);
 // provenance tells a seeded placeholder from a self-published card.
 function renderDirectoryCard(card) {
-  if (!card || typeof card !== "object") return `<p class="form-hint">No directory card available.</p>`;
+  if (!card || typeof card !== "object") return uiText("directory.card.copy.001");
   const reach = card.reach && typeof card.reach === "object" ? card.reach : null;
   const reachLine = reach
     ? `Wake ${reach.wakeMode ?? "unknown"}`
@@ -1146,12 +1147,12 @@ function renderDirectoryCard(card) {
       + ` · ${reach.pendingUnacked ?? 0} unacked`
       + ` · bonds ${reach.bondStatus ?? "unknown"}`
       + `${reach.host ? ` · host ${reach.host}` : ""}`
-    : "No live wake/bond data";
+    : uiText("directory.card.copy.002");
   const owns = Array.isArray(card.owns) && card.owns.length ? card.owns.join(", ") : "—";
   const provenance = card.provenance === "seeded"
     ? `<span class="card-provenance card-provenance-seeded" title="Seeded by the room owner from live room data; the agent has not published a card yet">Seeded</span>`
     : `<span class="card-provenance card-provenance-self">Self-published</span>`;
-  return `<div class="member-card-badges">${provenance}<span class="card-visibility">${esc(card.visibility)}</span></div>`
+  return ["<div class=\"member-card-badges\">", provenance, "<span class=\"card-visibility\">", esc(card.visibility), "</span></div>"].join('')
     + `<p><strong>${esc(card.name)}</strong></p>`
     + (card.description ? `<p class="form-hint">${esc(card.description)}</p>` : "")
     + `<p>Capabilities: ${esc((card.capabilities ?? []).join(", ") || "—")}</p>`
@@ -1159,7 +1160,7 @@ function renderDirectoryCard(card) {
     + `<p class="form-hint">${esc(reachLine)}</p>`;
 }
 const humanize = value => String(value).replaceAll("_", " ").replaceAll(".", " ");
-const memberLabel = id => id == null ? "Unassigned" : state.members[id] ? `${state.members[id].displayName} (${id})` : `Unknown member (${id})`;
+const memberLabel = id => id == null ? "Unassigned" : state.members[id] ? ["", state.members[id].displayName, " (", id, ")"].join('') : `Unknown member (${id})`;
 // Keep ordinary conversation readable; exact IDs remain in details and decision
 // controls. Duplicate names retain the full ID so attribution stays unambiguous.
 let displayNames = createMemberDisplayNames({});
@@ -2062,6 +2063,7 @@ function render() {
   setText("#decision-count", state.eventLog.filter(e => e.type === T.DECISION_RECORDED).length || "");
   renderRecordPanel();
   humanExperience?.sync();
+  revealAgentSigninLink();
 }
 function renderRecordPanel() {
   if (!state || !$("#settings-dialog").open || $("#settings-dialog").classList.contains("results-only") || !$("#record-panel").open) return;
@@ -3638,15 +3640,17 @@ window.addEventListener("popstate", event => {
   finally { signinHistoryReplay = false; }
   focusSignin();
 });
-// Keep the agent path discoverable without asking everyone to read setup
-// instructions. Existing links open the disclosure directly.
+// Preserve guide deep links through sign-in, then open the Advanced guide.
+$("#connect-guide-copy").innerHTML = uiText("guide.instructions");
+let pendingAgentGuide = location.hash === "#join-agent";
 function revealAgentSigninLink() {
-  if (location.hash !== "#join-agent") return;
-  if (!signinUI.closeEmail()) return;
-  openAgentSignin();
-  const details = $("#join-agent");
-  if (details) details.open = true;
+  if (!pendingAgentGuide || !state || session?.member?.kind !== "human") return;
+  pendingAgentGuide = false;
+  $("#connect-guide-dialog").showModal();
 }
+$("#connect-guide-open").addEventListener("click", () => $("#connect-guide-dialog").showModal());
+$("#connect-guide-close").addEventListener("click", () => $("#connect-guide-dialog").close());
+$("#signout-button").addEventListener("click", () => $("#connect-guide-dialog").close(), true);
 revealAgentSigninLink();
 // Agent instructions always name the host currently serving this page.
 const joinAgentPrompt = () => `Read ${location.origin}/llms.txt and join using the original shared invitation I gave you.`;
@@ -6306,6 +6310,11 @@ humanPushUi = installHumanPush({
   client,
   button: $("#human-push-button"),
   note: $("#human-push-note"),
+  prefs: {
+    box: $("#human-push-prefs"),
+    mention: $("#human-push-pref-mention"),
+    dm: $("#human-push-pref-dm")
+  },
   eligible: () => Boolean(state) && ownsNotifications(notificationOwner) && client.session?.member?.kind !== "agent"
 });
 // Tag acknowledgment (2026-09-23): one tap on a pending mention sends the
@@ -7529,5 +7538,22 @@ if (initialInvitationFragment && !initialPasswordReset) openInvitation(initialIn
   render = () => { if (!state) { board.reset(); return; } priorRender(); board.sync(); };
   const priorMessages = renderMessages;
   renderMessages = () => { priorMessages(); paintChat(); };
+}
+// --- plan-squads: Squads panel. Read-only roster UI, lazy-loaded. ---
+{
+  const squadsPanel = lazyDisclosure({ panel: $("#squads-dialog"),
+    load: () => import("./squads-ui.js"),
+    install: module => module.installSquadsPanel({ client, getState: () => state, getSession: () => session }),
+    onError: () => notice("Could not load squads. Close and reopen to retry.", true) });
+  const openSquads = () => {
+    const dialog = $("#squads-dialog");
+    if (!dialog.open) dialog.showModal();
+    squadsPanel.sync();
+  };
+  $("#squads-open").addEventListener("click", openSquads);
+  $("#squads-close").addEventListener("click", () => { $("#squads-dialog").close(); });
+  $("#signout-button").addEventListener("click", () => { $("#squads-dialog").close(); squadsPanel.reset(); }, true);
+  const priorSquadsRender = render;
+  render = () => { if (!state) { squadsPanel.reset(); return; } priorSquadsRender(); squadsPanel.sync(); };
 }
 // --- end W board ---

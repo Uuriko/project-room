@@ -718,6 +718,12 @@ const ROWS = [
     }
   },
   {
+    "table": "human_push_preferences",
+    "key": "room_id",
+    "action": "delete",
+    "match": { "room": ["room_id"] }
+  },
+  {
     "table": "human_push_subscriptions",
     "key": "room_id",
     "action": "delete",
@@ -1522,6 +1528,23 @@ const ROWS = [
     "match": {
       "account": [
         "account_id"
+      ]
+    }
+  },
+  {
+    // plan-squads: room purge deletes the room's squads; identity purge
+    // deletes squads owned by the identity. Member ids inside members_json
+    // are filtered to active members at fanout time, so a purged member's
+    // id lingering in the JSON never resolves.
+    "table": "squads",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ],
+      "identity": [
+        "owner_id"
       ]
     }
   },

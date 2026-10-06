@@ -1,3 +1,4 @@
+import { uiText } from './strings.js';
 // Tasks › Board › "What needs me": the viewer's own slice of the Board, computed
 // from the claims the Board already loaded (no extra request, no polling).
 // One object (a claim with an owner, a partner and a lease), one inbox:
@@ -91,20 +92,20 @@ export function needsMeHtml(items, viewer, members = {}, now = Date.now()) {
   const work = myBoardWork(items, viewer.id, members, now);
   const canWrite = viewer.write !== false;
   const claimButton = (action, label, item) => canWrite
-    ? `<button type="button" class="button secondary needs-me-act" data-claim-action="${action}" data-claim-id="${esc(item.id)}" data-focus-key="needs-me-${action}:${esc(item.id)}">${label}</button>` : "";
-  const openButton = (label, item) => `<button type="button" class="button secondary needs-me-act" data-needs-me-open="${esc(item.id)}">${label}</button>`;
+    ? ["<button type=\"button\" class=\"button secondary needs-me-act\" data-claim-action=\"", action, "\" data-claim-id=\"", esc(item.id), "\" data-focus-key=\"needs-me-", action, ":", esc(item.id), "\">", label, "</button>"].join('') : "";
+  const openButton = (label, item) => ["<button type=\"button\" class=\"button secondary needs-me-act\" data-needs-me-open=\"", esc(item.id), "\">", label, "</button>"].join('');
   const urgent = [
-    ...work.expiring.map(({ item, left }) => ({ item, note: left <= 0 ? "Your lease ended" : `Your lease ends in ${span(left)}`, act: claimButton("renew", "Renew", item) })),
-    ...work.reviews.map(({ item }) => ({ item, note: `You are tagged to review · ${nameOf(members, item.owner)}`, act: openButton("Review", item) })),
-    ...work.quiet.map(({ item, quietFor }) => ({ item, note: `No update for ${span(quietFor)}`, act: claimButton("release", "Hand off", item) }))
+    ...work.expiring.map(({ item, left }) => ({ item, note: left <= 0 ? uiText("board.mine.copy.001") : uiText("board.mine.copy.002", { fragmentA: span(left) }), act: claimButton("renew", "Renew", item) })),
+    ...work.reviews.map(({ item }) => ({ item, note: uiText("board.mine.copy.003", { fragmentA: nameOf(members, item.owner) }), act: openButton("Review", item) })),
+    ...work.quiet.map(({ item, quietFor }) => ({ item, note: uiText("board.mine.copy.004", { fragmentA: span(quietFor) }), act: claimButton("release", "Hand off", item) }))
   ];
   const shown = urgent.slice(0, NEEDS_ME_LIMIT), waiting = urgent.slice(NEEDS_ME_LIMIT);
   const rest = [...waiting.map(({ item, note }) => [note, item]), ...work.owned.map(({ item }) => ["Yours", item]), ...work.partnered.map(({ item }) => ["Partner", item])];
   if (!shown.length && !rest.length) return "";
-  const row = ({ item, note, act }) => `<li class="needs-me-row"><button type="button" class="needs-me-open" data-needs-me-open="${esc(item.id)}"><span class="needs-me-title">${esc(item.title || item.id)}</span><span class="needs-me-note">${esc(note)}</span></button>${act}</li>`;
+  const row = ({ item, note, act }) => ["<li class=\"needs-me-row\"><button type=\"button\" class=\"needs-me-open\" data-needs-me-open=\"", esc(item.id), "\"><span class=\"needs-me-title\">", esc(item.title || item.id), "</span><span class=\"needs-me-note\">", esc(note), "</span></button>", act, "</li>"].join('');
   const more = rest.length
-    ? `<details class="needs-me-more"><summary>More · ${rest.length}</summary><ul>${rest.map(([note, item]) => `<li><button type="button" class="needs-me-open" data-needs-me-open="${esc(item.id)}"><span class="needs-me-title">${esc(item.title || item.id)}</span><span class="needs-me-note">${esc(note)}</span></button></li>`).join("")}</ul></details>`
+    ? ["<details class=\"needs-me-more\"><summary>More · ", rest.length, "</summary><ul>", rest.map(([note, item]) => ["<li><button type=\"button\" class=\"needs-me-open\" data-needs-me-open=\"", esc(item.id), "\"><span class=\"needs-me-title\">", esc(item.title || item.id), "</span><span class=\"needs-me-note\">", esc(note), "</span></button></li>"].join('')).join(""), "</ul></details>"].join('')
     : "";
-  const heading = shown.length ? `${urgent.length} need${urgent.length === 1 ? "s" : ""} you` : "Nothing needs you";
-  return `<section class="needs-me" aria-labelledby="needs-me-heading"><h3 id="needs-me-heading">${heading}</h3>${shown.length ? `<ul class="needs-me-list">${shown.map(row).join("")}</ul>` : ""}${more}</section>`;
+  const heading = shown.length ? ["", urgent.length, " need", urgent.length === 1 ? "s" : "", " you"].join('') : uiText("board.mine.copy.005");
+  return ["<section class=\"needs-me\" aria-labelledby=\"needs-me-heading\"><h3 id=\"needs-me-heading\">", heading, "</h3>", shown.length ? `<ul class="needs-me-list">${shown.map(row).join("")}</ul>` : "", "", more, "</section>"].join('');
 }

@@ -1,5 +1,5 @@
 {
-  "note": "Legacy routes still served outside server/routes/table.mjs. baseline is the RT-0 set plus routes main added after that cut, including the legal API routes, /security.txt, and /SKILL.md, and /procedures. routes is the set still in the legacy chain and only shrinks as groups move into the table.",
+  "note": "Legacy routes still served outside server/routes/table.mjs. baseline is the RT-0 set plus routes main added after that cut. This batch does not add legacy routes. routes is the set still in the legacy chain and only shrinks as groups move into the table.",
   "baseline": [
     {
       "method": "GET",
@@ -4320,16 +4320,16 @@
       "path": "/api/oauth/sessions/revoke-all"
     },
     {
-      "method": "POST",
-      "path": "/api/operator/unpublish"
-    },
-    {
       "method": "GET",
       "path": "/api/operator/export"
     },
     {
       "method": "HEAD",
       "path": "/api/operator/export"
+    },
+    {
+      "method": "POST",
+      "path": "/api/operator/unpublish"
     },
     {
       "method": "GET",
@@ -5392,6 +5392,10 @@
       "path": "/api/rooms/{id}/directory"
     },
     {
+      "method": "POST",
+      "path": "/api/rooms/{id}/directory/seed"
+    },
+    {
       "method": "GET",
       "path": "/api/rooms/{id}/dm-consents"
     },
@@ -5521,6 +5525,18 @@
     },
     {
       "method": "GET",
+      "path": "/api/rooms/{id}/files/{id}"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/files/{id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/files/{id}"
+    },
+    {
+      "method": "GET",
       "path": "/api/rooms/{id}/files/{id}/commit"
     },
     {
@@ -5558,18 +5574,6 @@
     {
       "method": "POST",
       "path": "/api/rooms/{id}/guest-invites-upgrade"
-    },
-    {
-      "method": "DELETE",
-      "path": "/api/rooms/{id}/human-push"
-    },
-    {
-      "method": "GET",
-      "path": "/api/rooms/{id}/human-push"
-    },
-    {
-      "method": "POST",
-      "path": "/api/rooms/{id}/human-push"
     },
     {
       "method": "DELETE",
@@ -5616,8 +5620,84 @@
       "path": "/api/rooms/{id}/list_land_queue"
     },
     {
+      "method": "GET",
+      "path": "/api/rooms/{id}/matchmaking/decisions"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/matchmaking/decisions"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/matchmaking/decisions"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/matchmaking/decisions/{id}"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/matchmaking/decisions/{id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/matchmaking/decisions/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/matchmaking/decisions/{id}/answer"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/matchmaking/decisions/{id}/answer"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/matchmaking/decisions/{id}/answer"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/matchmaking/match"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/matchmaking/match"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/matchmaking/match"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/matchmaking/openings"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/matchmaking/openings"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/matchmaking/openings"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/matchmaking/seeker"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/matchmaking/seeker"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/matchmaking/seeker"
+    },
+    {
       "method": "DELETE",
       "path": "/api/rooms/{id}/members/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/members/{id}/card"
     },
     {
       "method": "GET",
@@ -6505,6 +6585,14 @@
     },
     {
       "method": "GET",
+      "path": "/procedures"
+    },
+    {
+      "method": "HEAD",
+      "path": "/procedures"
+    },
+    {
+      "method": "GET",
       "path": "/project-room/.well-known/agent-card.json"
     },
     {
@@ -6598,6 +6686,22 @@
     {
       "method": "HEAD",
       "path": "/project-room/mcp/server-card"
+    },
+    {
+      "method": "GET",
+      "path": "/project-room/procedures"
+    },
+    {
+      "method": "HEAD",
+      "path": "/project-room/procedures"
+    },
+    {
+      "method": "GET",
+      "path": "/project-room/SKILL.md"
+    },
+    {
+      "method": "HEAD",
+      "path": "/project-room/SKILL.md"
     },
     {
       "method": "GET",
@@ -7021,6 +7125,14 @@
     },
     {
       "method": "GET",
+      "path": "/room/procedures"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/procedures"
+    },
+    {
+      "method": "GET",
       "path": "/room/readme.md"
     },
     {
@@ -7050,6 +7162,14 @@
     {
       "method": "HEAD",
       "path": "/room/skill.md"
+    },
+    {
+      "method": "GET",
+      "path": "/room/SKILL.md"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/SKILL.md"
     },
     {
       "method": "GET",
@@ -7109,6 +7229,14 @@
     },
     {
       "method": "GET",
+      "path": "/SKILL.md"
+    },
+    {
+      "method": "HEAD",
+      "path": "/SKILL.md"
+    },
+    {
+      "method": "GET",
       "path": "/skills"
     },
     {
@@ -7146,146 +7274,6 @@
     {
       "method": "HEAD",
       "path": "/tools.txt"
-    },
-    {
-      "method": "GET",
-      "path": "/SKILL.md"
-    },
-    {
-      "method": "HEAD",
-      "path": "/SKILL.md"
-    },
-    {
-      "method": "GET",
-      "path": "/room/SKILL.md"
-    },
-    {
-      "method": "HEAD",
-      "path": "/room/SKILL.md"
-    },
-    {
-      "method": "GET",
-      "path": "/project-room/SKILL.md"
-    },
-    {
-      "method": "HEAD",
-      "path": "/project-room/SKILL.md"
-    },
-    {
-      "method": "GET",
-      "path": "/procedures"
-    },
-    {
-      "method": "HEAD",
-      "path": "/procedures"
-    },
-    {
-      "method": "GET",
-      "path": "/room/procedures"
-    },
-    {
-      "method": "HEAD",
-      "path": "/room/procedures"
-    },
-    {
-      "method": "GET",
-      "path": "/project-room/procedures"
-    },
-    {
-      "method": "HEAD",
-      "path": "/project-room/procedures"
-    },
-    {
-      "method": "GET",
-      "path": "/api/rooms/{id}/matchmaking/seeker"
-    },
-    {
-      "method": "HEAD",
-      "path": "/api/rooms/{id}/matchmaking/seeker"
-    },
-    {
-      "method": "GET",
-      "path": "/api/rooms/{id}/matchmaking/openings"
-    },
-    {
-      "method": "HEAD",
-      "path": "/api/rooms/{id}/matchmaking/openings"
-    },
-    {
-      "method": "GET",
-      "path": "/api/rooms/{id}/matchmaking/match"
-    },
-    {
-      "method": "HEAD",
-      "path": "/api/rooms/{id}/matchmaking/match"
-    },
-    {
-      "method": "GET",
-      "path": "/api/rooms/{id}/matchmaking/decisions"
-    },
-    {
-      "method": "HEAD",
-      "path": "/api/rooms/{id}/matchmaking/decisions"
-    },
-    {
-      "method": "GET",
-      "path": "/api/rooms/{id}/matchmaking/decisions/{id}"
-    },
-    {
-      "method": "HEAD",
-      "path": "/api/rooms/{id}/matchmaking/decisions/{id}"
-    },
-    {
-      "method": "GET",
-      "path": "/api/rooms/{id}/matchmaking/decisions/{id}/answer"
-    },
-    {
-      "method": "HEAD",
-      "path": "/api/rooms/{id}/matchmaking/decisions/{id}/answer"
-    },
-    {
-      "method": "POST",
-      "path": "/api/rooms/{id}/matchmaking/seeker"
-    },
-    {
-      "method": "POST",
-      "path": "/api/rooms/{id}/matchmaking/openings"
-    },
-    {
-      "method": "POST",
-      "path": "/api/rooms/{id}/matchmaking/match"
-    },
-    {
-      "method": "POST",
-      "path": "/api/rooms/{id}/matchmaking/decisions"
-    },
-    {
-      "method": "POST",
-      "path": "/api/rooms/{id}/matchmaking/decisions/{id}/answer"
-    },
-    {
-      "method": "GET",
-      "path": "/api/rooms/{id}/files/{id}"
-    },
-    {
-      "method": "HEAD",
-      "path": "/api/rooms/{id}/files/{id}"
-    },
-    {
-      "method": "POST",
-      "path": "/api/rooms/{id}/files/{id}"
-    },
-    {
-      "method": "POST",
-      "path": "/api/rooms/{id}/matchmaking/decisions/{id}"
-    },
-    {
-      "method": "GET",
-      "path": "/api/rooms/{id}/members/{id}/card"
-    },
-    {
-      "method": "POST",
-      "path": "/api/rooms/{id}/directory/seed"
     }
   ]
 }

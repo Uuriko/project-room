@@ -4,6 +4,7 @@ import { rmSync, mkdirSync } from 'node:fs';
 import { chromium } from 'playwright';
 import { createAcceptanceFixture } from './acceptance-fixture.mjs';
 import { createRoomServer } from '../server/http.mjs';
+import { openCatchUpPanel } from './room-chrome.mjs';
 import { signInFixture } from './auth-signin.mjs';
 
 test('two humans share public assistant prompts, constraints, confirmed activity and results; banter stays quiet', { timeout: 60000 }, async t => {
@@ -128,5 +129,59 @@ test('two humans share public assistant prompts, constraints, confirmed activity
   await peer.locator('[data-assistant-message="public-result"]').click();
   assert.equal(await peer.locator('[data-message-record-id="public-result"]').count(),1);
   mkdirSync('test-results',{recursive:true}); await peer.screenshot({path:'test-results/human-shared-conversation.png',fullPage:false});
+  assert.deepEqual(errors,[]);
+});
+
+// Owns post-login discovery, preference persistence, draft recovery and first-screen simplicity.
+test('human Advanced tools stay out of the door and preserve squad drafts and saved preferences', { timeout: 60000 }, async t => {
+  const f = createAcceptanceFixture(), server = createRoomServer({store:f.store, streamInterval:40});
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`, browser=await chromium.launch({headless:true});
+  t.after(async()=>{await browser.close();server.closeStreams();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));f.store.close();rmSync(f.directory,{recursive:true,force:true});});
+  const page=await browser.newPage(), errors=[]; page.on('pageerror',e=>errors.push(e.message));
+  await page.goto(origin+'/#join-agent');
+  await page.locator('#auth-panel').waitFor({state:'visible'});
+  assert.equal(await page.getByRole('button',{name:'Agent sign in',exact:true}).count(),1);
+  assert.equal(await page.locator('#static-hero').count(),0);
+  assert.equal(await page.locator('#connect-guide-dialog').isVisible(),false);
+  assert.equal(await page.locator('#connect-guide-open').isVisible(),false);
+  assert.equal(await page.getByRole('link',{name:'Demo conversation'}).isVisible(),false);
+  await signInFixture(page,f.keys.owner);
+  await page.locator('#connect-guide-dialog').waitFor({state:'visible'});
+  assert.match(await page.locator('#connect-guide-copy').innerText(),/running host/);
+  await page.locator('#connect-guide-close').click();
+  assert.equal(await page.locator('#squads-open').isVisible(),false);
+  await page.locator('#room-more > summary').click(); await page.locator('#topbar-settings').click();
+  await page.keyboard.press('Escape'); await openCatchUpPanel(page,'notification-panel');
+  await page.locator('#human-push-prefs').waitFor({state:'visible'});
+  await page.route('**/api/rooms/commons/human-push', async route => {
+    if (route.request().method() === 'PATCH') await new Promise(resolve=>setTimeout(resolve,250));
+    await route.continue();
+  });
+  await page.locator('#human-push-pref-dm').uncheck();
+  f.store.command(f.keys.guest,'commons',{id:crypto.randomUUID(),type:'message.posted',data:{messageId:crypto.randomUUID(),body:'chat during preference save'}});
+  await page.waitForFunction(()=>document.querySelector('#human-push-note').textContent==='Notification preferences saved.');
+  assert.equal(f.store.humanPush.preferences(f.keys.owner,'commons').preferences.dm,false);
+  assert.equal(await page.locator('#human-push-pref-dm').isEnabled(),true);
+  await page.keyboard.press('Escape'); await page.locator('#room-more > summary').click(); await page.locator('#topbar-settings').click();
+  await page.locator('#advanced-room-tools > summary').click();
+  assert.equal(await page.getByRole('link',{name:'Demo conversation'}).isVisible(),true);
+  await page.locator('#connect-guide-open').click(); await page.locator('#connect-guide-close').click();
+  await page.locator('#human-advanced').check(); await page.keyboard.press('Escape');
+  await page.locator('#squads-open').click();
+  await page.locator('#squads-list input[name=name]').fill('team');
+  await page.locator('#squads-list input[name=goal]').fill('Ship together');
+  await page.locator('#squads-list input[name=memberId][value=guest]').check();
+  f.store.command(f.keys.guest,'commons',{id:crypto.randomUUID(),type:'message.posted',data:{messageId:crypto.randomUUID(),body:'chat while drafting'}});
+  await page.waitForTimeout(200);
+  assert.equal(await page.locator('#squads-list input[name=goal]').inputValue(),'Ship together');
+  await page.locator('#squads-list button[type=submit]').click();
+  await page.locator('#squads-list .squad-card').waitFor();
+  assert.match(f.store.db.prepare("SELECT members_json FROM squads WHERE name='team'").get().members_json,/guest/);
+  await page.locator('#squads-list input[name=name]').fill('team');
+  await page.locator('#squads-list input[name=goal]').fill('Keep this rejected draft');
+  await page.locator('#squads-list button[type=submit]').click();
+  await page.locator('#squads-list [role=alert]').waitFor();
+  assert.equal(await page.locator('#squads-list input[name=goal]').inputValue(),'Keep this rejected draft');
   assert.deepEqual(errors,[]);
 });

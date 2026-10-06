@@ -79,6 +79,7 @@ import { readSpendAllowance, setSpendAllowance } from "./spend-allowance.mjs";
 import { getAgentAutonomyTier, setAgentAutonomyTier } from "./autonomy-tiers.mjs";
 import { listAgentGrants, getAgentCapabilities, issueAgentGrant, revokeAgentGrant } from "./grants.mjs";
 import { listPins, setPin } from "./pins.mjs";
+// (squad roster handlers moved to server/routes/squads.mjs, batch RT)
 import { currentTypists, typingBeats, typingKey } from "./typing.mjs";
 import { renderReceiptsHtml, renderReceiptDetailHtml, receiptsListJson, receiptJson, RECEIPTS_PAGE_CSP } from "./receipts-page.mjs";
 import { queryPublicReceipts, publicReceiptById, listPublicReceiptSitemap, PUBLIC_RECEIPT_ID } from "./receipts-live.mjs";
@@ -4442,20 +4443,6 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const data = await body(req);
         if (!exact(data, ["threadId", "muted"])) reject(422, "invalid_thread_mute", "threadId and muted are the accepted fields");
         return json(res, 200, store.threadMutes.set(selected.token, roomId, data, fence));
-      }
-      // Human browser push. One fixed default (mentions and DMs). GET returns
-      // the VAPID public key when delivery is configured. POST stores the
-      // browser subscription. There is no preference body.
-      if (route === "human-push" && req.method === "GET") {
-        const params = url.searchParams;
-        if ([...params.keys()].some(key => key !== "auth" || params.getAll(key).length !== 1)) reject(422, "invalid_human_push", "No selection on this route");
-        return json(res, 200, store.humanPush.status(selected.token, roomId, fence));
-      }
-      if (route === "human-push" && req.method === "POST") {
-        return json(res, 200, store.humanPush.save(selected.token, roomId, await body(req), fence));
-      }
-      if (route === "human-push" && req.method === "DELETE") {
-        return json(res, 200, store.humanPush.remove(selected.token, roomId, await body(req), fence));
       }
       if (route === "agent-pause" && req.method === "GET") {
         // C6: wake-pause state for the caller, or (signed-in owner) one named

@@ -90,7 +90,7 @@ test("settingsHtml shows linked methods with actions and honest provider states"
   for (const heading of ["Profile", "Notifications", "Agents &amp; connections", "Billing / plan", "Advanced", "Linked sign-in methods"]) {
     assert.ok(html.includes(heading), heading);
   }
-  assert.ok(html.includes("Nothing to configure here yet. Room notifications stay in Catch up."));
+  assert.ok(html.includes("Browser push preferences live per room in Catch up"), "notifications section points at the real push controls");
   assert.ok(html.includes("No plan is billed from account settings."));
   assert.ok(html.includes("a@b.c"), "profile lists the account email");
   const advanced = html.slice(html.indexOf('id="settings-advanced-title"'));

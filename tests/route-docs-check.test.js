@@ -71,3 +71,10 @@ test("account routes must declare their scheme instead of inheriting the room de
   const { failures } = routeDocsDrift({ ...shared, openapi: inherited });
   assert.deepEqual(failures, ["GET /api/account-rooms inherits the room-credential default; account routes must declare accountSession or security: []"]);
 });
+
+// Public table routes must be documented too; metadata cannot escape the gate.
+test("a declarative public demo missing from the spec fails", () => {
+ const missing = openapi.replace(/  \/demo:[\s\S]*?(?=  \/)/,"");
+ const {failures} = routeDocsDrift({...shared,openapi:missing});
+ assert.deepEqual(failures,["served but not documented in docs/openapi.yaml: /demo"]);
+});

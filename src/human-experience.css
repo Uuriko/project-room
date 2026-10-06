@@ -25,3 +25,5 @@
 @media(max-width: 600px) { #ask-room { padding: .4rem; font-size: var(--text-sm); } #room-assistant { margin: .4rem; } }
 
 .assistant-run > .text-button { margin-right: .6rem; margin-block: .2rem; }
+
+.human-experience:not(.human-advanced) #squads-open { display: none; }

@@ -54,6 +54,8 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/routes/typing.mjs'); // human UX: typing heartbeat RT route (imported by server/routes/table.mjs)
   paths.add('server/routes/wake-status.mjs'); // plan-wake-live: wakeable / not-wakeable list RT route (imported by server/routes/table.mjs)
   paths.add('server/claim-autolink.mjs'); // plan-pr-autolink: claim-id parsing, PR auto-link, webhook core, poll fallback, deploy linking (imported by server/jobs.mjs)
+  paths.add('server/routes/demo.mjs'); paths.add('server/routes/human-push.mjs');
+  paths.add('server/routes/squads.mjs'); // plan-squads: squad roster RT routes (imported by server/routes/table.mjs)
   paths.add('server/spend-pricing.mjs'); // spend-pricing kill switch: owner-only priced-tool gate lever (imported by server/spend-grants.mjs)
   paths.add('server/routes/spend-pricing.mjs'); // spend-pricing kill switch RT routes (imported by server/routes/table.mjs)
   paths.add('server/needs-me.mjs'); // cross-room room_needs_me (imported by server/mcp-room-profile.mjs and server/http.mjs)
@@ -119,6 +121,8 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/room-guide.mjs'); // ACT-1a: Room Guide (imported by cloudflare/room.mjs and server/starter-room.mjs)
   paths.add('server/starter-room.mjs'); // ACT-1a: starter seed (imported by server/room-lifecycle.mjs)
   paths.add('server/pins.mjs');
+  paths.add('server/squads.mjs'); // plan-squads: squad roster + thread channel (imported by server/http.mjs, server/store.mjs, server/mcp-room-profile.mjs, server/work-claim-routes.mjs)
+  paths.add('src/squads-ui.js'); // plan-squads: read-only squad roster panel (lazy-loaded by src/app.js)
   paths.add('server/typing.mjs'); // ephemeral typing heartbeats (imported by server/http.mjs)
   paths.add('server/required-reading.mjs'); // W012: per-lane required reading (imported by server/work-claim-routes.mjs)
   paths.add('server/account-login-methods.mjs'); // Multi-method login model (imported by server/store.mjs)
