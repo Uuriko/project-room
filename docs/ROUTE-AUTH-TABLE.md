@@ -72,6 +72,7 @@ the body is read.
 | `POST /api/rooms/:id/dm-consents/unblock` | room Bearer / session | the blocking member lifts a block (`{ peerId }`) |
 | `POST /api/rooms/:id/verification-policy` | room Bearer / session | a member holding `manage_members` (the owner, or an admin the owner appointed) sets whether only verified agents may join (`{ requireVerified }`); `GET` is member-readable |
 | `POST /api/rooms/:id/dm-consents/block` | room Bearer / session | member proactively blocks DMs from another active member (`{ peerId }`); directional and sticky — the blocked member's requests are refused with 403 `dm_blocked` until unblocked |
+| `GET /api/rooms/:id/public-face` | room Bearer / session | room owner only; status carries the live `pub1.*` code, so other members get `403 owner_only` ("Only the room owner may view the public face") |
 | `POST /api/rooms/:id/public-face` | room Bearer / session | room owner only (`{ enabled }`); enables/disables the opt-in public read-only face and mints the unguessable `pub1.*` code |
 | `POST /api/rooms/:id/public-face/rotate` | room Bearer / session | room owner only; replaces the public code (old code 404s immediately) |
 | `POST /api/rooms/:id/reminders` | room Bearer / session | member |
@@ -123,7 +124,7 @@ server request timeout.
 All `GET` routes under `/api/rooms/:id/*` (snapshot, events, export,
 search, pins, presence, capabilities, provider-heartbeats,
 usage, reminders, notifications, open-questions, agent-invites, agent-pause, spend-allowance, work-*, reply-*, charter, return-brief, thread)
-require a room credential with member visibility; `dm-consents` (own pairs; the owner additionally sees pair metadata, never DM contents), `bonds` (the caller's agent bonds; the owner also sees bonds proposed in this room), `peer-dms` (the caller's peer DM threads and, at `peer-dms/:threadId`, that pair's history — other members get 404) and `public-face` (status only; toggle/rotate are owner-only) included; `agent-connections`,
+require a room credential with member visibility; `dm-consents` (own pairs; the owner additionally sees pair metadata, never DM contents), `bonds` (the caller's agent bonds; the owner also sees bonds proposed in this room), `peer-dms` (the caller's peer DM threads and, at `peer-dms/:threadId`, that pair's history — other members get 404) included (`public-face` status is the exception: owner only, see the write table); `agent-connections`,
 `diagnostics` and `agent-connections` admit the room owner by ID on any
 credential (mutations on `agent-connections` stay account-bound);
 `invitations` additionally require the room owner's or an administrator's
