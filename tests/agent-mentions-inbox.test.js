@@ -248,7 +248,8 @@ test("short @names refuse ambiguity across all active members while exact names 
   assert.deepEqual(resolve(members, {}, "@Claude", "other"), [], "sender remains an ambiguity candidate");
   assert.deepEqual(resolve({ cowork, other: { ...other, active: false } }, {}, "@Claude", "owner"), ["cowork"]);
   assert.deepEqual(resolve({ cowork: { ...cowork, active: false } }, {}, "@Claude", "owner"), []);
-  assert.deepEqual(resolve({ cowork, duplicate: cowork }, {}, "@Claude (Cowork)", "owner"), [], "duplicate full names must not pick insertion order");
+  // G16b (deliberate change): exact duplicate full names fan out to every holder, so none misses the wake; still never one by insertion order.
+  assert.deepEqual(resolve({ cowork, duplicate: cowork }, {}, "@Claude (Cowork)", "owner").sort(), ["cowork", "duplicate"], "duplicate full names reach all holders, never one by insertion order");
   assert.deepEqual(resolve({ cowork, exact: { displayName: "Claude" } }, {}, "@Claude", "owner"), ["exact"]);
   assert.deepEqual(resolve({ cowork, exact: { displayName: "Claude" } }, {}, "@Claude (Cowork)", "owner"), ["cowork"]);
   assert.deepEqual(resolve({ cowork }, {}, "Claude please check; @_Claude; mail@Claude; @Claudette", "owner"), []);

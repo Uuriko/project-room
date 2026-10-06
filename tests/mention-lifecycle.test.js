@@ -10,7 +10,7 @@ import { EVENT_TYPES as T } from "../src/events.js";
 import {
   MENTION_STATES, isMentionState, isTerminalMentionState, canTransitionMention,
   assertTransitionMention, effectiveMentionState, resolveMentionTarget,
-  MENTION_TIMEOUT_MS_DEFAULT,
+  resolveMentionTargetsInText, MENTION_TIMEOUT_MS_DEFAULT,
 } from "../server/mention-lifecycle.mjs";
 import { extractAgentMentions } from "../server/inbox-agent-routing.mjs";
 
@@ -89,6 +89,27 @@ test("resolveMentionTarget: id, display name, identity; unresolved is null", () 
   assert.equal(resolveMentionTarget(members, identities, "nobody"), null, "unresolved names create no row");
   assert.equal(resolveMentionTarget(members, identities, "carol"), null, "inactive members are skipped");
   assert.equal(resolveMentionTarget(members, identities, "alice", "alice"), null, "self-mentions never resolve");
+});
+
+test("G16b: legacy duplicate display names notify all non-sender candidates", () => {
+  const members = {
+    instinct1: { displayName: "Instinct", active: true },
+    instinct2: { displayName: "Instinct", active: true },
+    instinct3: { displayName: "Instinct-3", active: true },
+  };
+  // resolveMentionTargetsInText delivers to all matching non-sender candidates
+  const targets = resolveMentionTargetsInText(members, {}, "ping @Instinct please");
+  assert.deepEqual(targets.sort(), ["instinct1", "instinct2"]);
+  // A sender inside the tied tier stays an ambiguity candidate (as on main): nobody.
+  assert.deepEqual(resolveMentionTargetsInText(members, {}, "ping @Instinct please", "instinct1"), []);
+  // Exact handle for Instinct-3 reaches instinct3 alone
+  assert.deepEqual(resolveMentionTargetsInText(members, {}, "ping @Instinct-3 please"), ["instinct3"]);
+  // Self-mention never falls through to weaker prefix matches
+  const prefixMembers = {
+    alice: { displayName: "Alice", active: true },
+    alice2: { displayName: "Alice Smith", active: true },
+  };
+  assert.deepEqual(resolveMentionTargetsInText(prefixMembers, {}, "@Alice can you check?", "alice"), []);
 });
 
 // --- Store: tracking ------------------------------------------------------
