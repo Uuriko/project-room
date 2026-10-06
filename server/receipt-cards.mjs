@@ -36,7 +36,7 @@ export function appendRoomEvent(store, roomId, { id, type, actorId, data, atMs }
     const sequence = room.sequence + 1;
     store.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
     const compact = { ...state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
-    store.db.prepare("UPDATE rooms SET sequence=?, projection=? WHERE id=?").run(sequence, JSON.stringify(compact), roomId);
+    store.db.prepare("UPDATE rooms SET sequence=?, projection=? WHERE id=?").run(sequence, store.storedProjection(roomId, compact), roomId);
     syncMessageRows(store.db, { roomId, sequence, event: incoming, state });
     try {
       if (store.agentPlugin) store.agentPlugin.fanoutRoomEvent({ roomId, event: incoming });

@@ -860,7 +860,7 @@ export class LandQueue {
     const sequence = room.sequence + 1;
     this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
     const compact = { ...state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
-    this.db.prepare("UPDATE rooms SET sequence=?, projection=? WHERE id=?").run(sequence, JSON.stringify(compact), roomId);
+    this.db.prepare("UPDATE rooms SET sequence=?, projection=? WHERE id=?").run(sequence, this.store.storedProjection(roomId, compact), roomId);
     try {
       if (this.store.agentPlugin) this.store.agentPlugin.fanoutRoomEvent({ roomId, event: incoming });
     } catch (error) {

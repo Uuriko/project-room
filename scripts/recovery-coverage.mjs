@@ -7,9 +7,23 @@ import { flagMessage } from "../server/inbox-spam.mjs";
 import { createNotifyPrefs } from "../server/notify-prefs.mjs";
 import { issueGrant } from "../server/grants.mjs";
 import { appendOperatorAction } from "../server/operator-actions.mjs";
+import { RoomAssistant } from "../server/room-assistant.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 
 export async function seedRecoveryCoverage(f) {
+  // Exercise assistant authority, public scope and durable attempt records so
+  // recovery/cold-open coverage includes substantive rows in all three tables.
+  const agent = f.store.room("commons").state.members.agent;
+  f.store.command(f.keys.owner, "commons", { id: "recovery-assistant-permission", type: T.MEMBER_ACCESS_CHANGED,
+    data: { memberId: agent.id, expectedMemberRevision: agent.revision, permissions: [...new Set([...agent.permissions, "accept_work"])], active: true } });
+  const source = f.store.room("commons").state.messages.find(message => message.authorId === "owner" && !message.toMemberId && message.body != null && !message.deletedAt);
+  if (!source) throw new Error("Recovery fixture requires an authored public assistant source");
+  const assistant = new RoomAssistant(f.store);
+  const ownerAuth = () => f.store.authenticate(f.keys.owner, "commons");
+  assistant.apply("commons", { action: "configure", requestId: "recovery-assistant-config", expectedRevision: 0, name: "Room", coordinatorMemberId: agent.id }, ownerAuth);
+  assistant.apply("commons", { action: "invoke", requestId: "recovery-assistant-invoke", runId: "recovery-shared-run", sourceMessageId: source.id }, ownerAuth);
+  assistant.apply("commons", { action: "claim", requestId: "recovery-assistant-claim", runId: "recovery-shared-run", attemptId: "recovery-host-attempt", expectedRevision: 0 }, () => f.store.authenticate(f.keys.agent, "commons"));
+
   // One append-only operator audit row. The cold-start budget and the
   // recovery audit both require every application table to hold a row,
   // except the cron tables.

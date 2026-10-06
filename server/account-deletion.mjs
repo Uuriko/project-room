@@ -193,10 +193,12 @@ const compactState = state => ({ ...state, eventLog: [], seenEvents: {}, seenIde
 function saveRoomProjection(store, roomId, sequence, state) {
   const compact = compactState(state);
   const archivedAt = typeof compact.room?.archivedAt === "string" ? compact.room.archivedAt : null;
-  const projection = JSON.stringify(compact);
+  // Checkpoints keep full bodies: replay edits from them. Only the room row
+  // goes through the Phase 1a serializer.
+  const projection = store.storedProjection(roomId, compact);
   store.db.prepare("UPDATE rooms SET sequence=?, projection=?, archived_at=? WHERE id=?").run(sequence, projection, archivedAt, roomId);
   store.db.prepare(`INSERT INTO projection_checkpoints(room_id, sequence, projection) VALUES(?,?,?)
-    ON CONFLICT(room_id) DO UPDATE SET sequence=excluded.sequence, projection=excluded.projection`).run(roomId, sequence, projection);
+    ON CONFLICT(room_id) DO UPDATE SET sequence=excluded.sequence, projection=excluded.projection`).run(roomId, sequence, JSON.stringify(compact));
 }
 
 function appendRoomEvent(store, roomId, actorId, type, data) {
@@ -238,7 +240,7 @@ function redactRoomMessages(store, roomId, actorId) {
   let removed = 0;
   const at = new Date(store.now()).toISOString();
   for (const messageId of ids) {
-    const result = commitMessageRedaction(store.db, { roomId, state, actorId, at, messageId });
+    const result = commitMessageRedaction(store.db, { roomId, state, actorId, at, messageId, bodiesAtRest: store.bodiesAtRest });
     state = result.state;
     removed += result.rewritten;
   }
