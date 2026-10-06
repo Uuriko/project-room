@@ -1,10 +1,12 @@
 import { mkdirSync, readFileSync, writeFileSync, existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { randomUUID } from "node:crypto";
 import { runCommand, spawnContext } from "./spawn.mjs";
 import { configHome } from "./config.mjs";
 import { gatewayAddress, hostAddresses } from "./measure.mjs";
 
 const RECORD = "system-changes.json";
+const shellQuote = value => "'" + value.replaceAll("'", "'\"'\"'") + "'";
 
 function recordPath(home) {
   return join(home, RECORD);
@@ -141,6 +143,10 @@ export async function applySystemChanges(home = configHome()) {
   if (anchors.code !== 0 || !anchors.stdout.toString("utf8").split("\n").some(line => line.trim() === PF_ANCHOR_NAME)) {
     return { ok: false, error: "pf anchor is not live after wiring", changes };
   }
+  // BSD and GNU sed both accept an attached, non-empty backup suffix.
+  // Use a unique backup so a pre-existing administrator backup is untouched.
+  const backupSuffix = `.room-machine-${randomUUID()}`;
+  const quotedPfConf = shellQuote(pfConf);
   changes.push({
     id: "pf.anchor",
     gateway: anchor.gateway,
@@ -148,7 +154,7 @@ export async function applySystemChanges(home = configHome()) {
     revert: wired.addedLine
       // Remove the anchor reference from pf.conf, reload the main ruleset so
       // the reference is gone, then flush the anchor's rules.
-      ? ["sh", "-c", `sed -i'' '/^anchor "${PF_ANCHOR_NAME}"$/d' ${pfConf} && pfctl -f ${pfConf} && pfctl -a ${PF_ANCHOR_NAME} -F all`]
+      ? ["sh", "-c", `sed -i${backupSuffix} '/^anchor "${PF_ANCHOR_NAME}"$/d' ${quotedPfConf} && pfctl -f ${quotedPfConf} && pfctl -a ${PF_ANCHOR_NAME} -F all && rm -f ${shellQuote(pfConf + backupSuffix)}`]
       : ["pfctl", "-a", PF_ANCHOR_NAME, "-F", "all"],
   });
   const domains = [

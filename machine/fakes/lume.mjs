@@ -27,8 +27,7 @@ if (command === "ssh") {
     if (text.includes("sleep-me")) {
       setTimeout(() => process.exit(0), 30_000);
     } else if (text.includes("big-output")) {
-      process.stdout.write("x".repeat(200_000));
-      process.exit(0);
+      process.stdout.write("x".repeat(200_000), () => process.exit(0));
     } else {
       process.stdin.on("data", () => {});
       process.stdin.on("end", () => process.exit(0));
