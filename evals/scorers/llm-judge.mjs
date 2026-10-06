@@ -5,15 +5,21 @@
 // so no LLM provider is hard-coded anywhere here — swap the transport without
 // touching the scoring logic.
 //
-// REPRODUCIBILITY CONTRACT:
+// REPRODUCIBILITY CONTRACT (narrowed — read the limits):
 //   1. The prompt is a pure function of (rubric, task, outcome, seed). Same inputs
 //      render byte-identical prompts (see buildJudgePrompt); the seed is printed
-//      verbatim in the prompt and logged with every judgment.
+//      verbatim in the prompt, passed to judgeFn, and logged with every judgment.
 //   2. Every judgment attempt is appended to `journal`: { taskId, seed, attempt,
-//      promptHash, judgmentHash, score?, rationale?, error? }. Re-running with the
-//      same judge transport and seed re-derives the same scores.
+//      promptHash, judgmentHash, score?, rationale?, error? }.
 //   3. Retries re-send the SAME prompt (no repair mutation), so promptHash is
 //      stable across attempts; stochastic providers absorb the retry.
+//
+// LIMITS: the module cannot control the provider behind judgeFn — model,
+// version, temperature, and seed semantics are the transport's business. Same
+// seed does NOT guarantee same scores across providers or provider versions;
+// it only makes the module's own input (the prompt) deterministic and auditable.
+// The journal's promptHash/judgmentHash let a later run verify what was sent
+// and received, not reproduce a provider's sampling.
 //
 // FAIL-CLOSED: a judgment that does not parse as the required schema is retried
 // up to maxRetries; persistent malformed output throws instead of producing a
@@ -169,11 +175,14 @@ export function parseJudgment(text, rubric) {
  * @param {object} rubric — validated by validateRubric.
  * @param {function} judgeFn — async ({ prompt, seed, attempt }) => string. The ONLY
  *   provider touchpoint; inject any transport (OpenAI, Anthropic, local model, stub).
- * @param {number} seed — integer, rendered into the prompt and logged.
+ * @param {number} seed — integer, rendered into the prompt, passed to judgeFn, logged.
+ *   Note: the seed makes the module's input deterministic; it cannot force a
+ *   provider to honor seed semantics — see LIMITS above.
  * @param {number} maxRetries — malformed-judgment retries before failing closed.
  * @param {function} [logger] — optional (entry) => void, called per judgment attempt.
  * @returns {{ scorer, journal, rubric, seed }} — scorer is a drop-in runEval scorer
- *   (task, outcome) => number in [0, 1]; journal is the reproducibility log.
+ *   (task, outcome) => number in [0, 1]; journal is the audit log (what was
+ *   sent and received per attempt), not a score-reproduction guarantee.
  */
 export function createLlmJudge({ rubric, judgeFn, seed = 0, maxRetries = 2, logger = null, name } = {}) {
   validateRubric(rubric);

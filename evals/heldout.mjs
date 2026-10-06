@@ -26,11 +26,21 @@
 // deliberate dataset revisions, not silent tuning.
 //
 // THREE-WAY SPLITS: splitTrainDevTest partitions into { train, dev, test }.
-// The test split is never shown to the agent under evaluation: runEvalSealed
-// wraps the tuning solver in a split guard that throws (fail-closed, naming the
-// task) if any task outside the train+dev ids reaches it, and wraps the final
-// solver so it only ever sees test ids. A leak aborts the run; it is never
-// silently absorbed.
+// runEvalGuardedSplits wraps the tuning solver in a split guard that throws
+// (fail-closed, naming the task) if any task outside the train+dev ids reaches
+// it, and wraps the final solver so it only ever sees test ids.
+//
+// HONEST LIMITS (this is a guarded deterministic split, not a sealed test set):
+//   - Split assignment is deterministic (repeatable) via the public sha256(id)
+//     hash — it is predictable, not secret. Anyone holding the task array can
+//     compute the split.
+//   - The guard only checks the task passed to the WRAPPED solver. It cannot
+//     stop the caller from inspecting the task array, reading test tasks
+//     directly, running the solver outside the wrapper, or tuning repeatedly
+//     on test scores. The report itself lists all split ids.
+//   - What the guard does catch: accidentally (or carelessly) pointing the
+//     tuning solver at a test task through the harness — that aborts loudly
+//     instead of silently producing a contaminated score.
 
 import { createHash } from 'node:crypto';
 import { runEval } from './index.mjs';
@@ -112,9 +122,10 @@ export function splitTrainDevTest(tasks, { devFraction = 0.15, testFraction = 0.
 /**
  * Split guard: wraps a solver so it can only ever be invoked with tasks whose
  * ids are in `visibleIds`. Any other task throws fail-closed with code
- * TEST_SPLIT_LEAK, naming the phase and the task id. This is the mechanical
- * guarantee that the test split is never shown to the agent under evaluation:
- * the leak surfaces as an error, never as a silently absorbed score.
+ * TEST_SPLIT_LEAK, naming the phase and the task id. The guard is a misuse
+ * tripwire inside the harness — it catches a solver being pointed at the wrong
+ * split through the wrapper. It does not (and cannot) prevent the caller from
+ * reading tasks outside the wrapper or inspecting the task array directly.
  */
 export function createSplitGuard({ visibleIds, phase = 'tuning' } = {}) {
   const visible = visibleIds instanceof Set ? visibleIds : new Set(visibleIds ?? []);
@@ -131,13 +142,17 @@ export function createSplitGuard({ visibleIds, phase = 'tuning' } = {}) {
 }
 
 /**
- * Sealed evaluation: tuning runs against train+dev only, the final run against
- * test only. Both solvers are guard-wrapped, so a test task reaching the tuning
- * solver (or a non-test task reaching the final solver) aborts the run.
+ * Guarded-split evaluation: tuning runs against train+dev only, the final run
+ * against test only. Both solvers are guard-wrapped, so a test task reaching
+ * the tuning solver (or a non-test task reaching the final solver) through the
+ * wrapper aborts the run. This is NOT a sealed test set — see the HONEST
+ * LIMITS note at the top of this module: split assignment is public and
+ * predictable, the report lists every split id, and the guard cannot stop the
+ * caller from reading tasks outside the wrapper.
  * Report shape: { train, dev, test, splits: { trainIds, devIds, testIds },
  * devFraction, testFraction }.
  */
-export async function runEvalSealed({
+export async function runEvalGuardedSplits({
   tasks,
   tuneSolver,
   testSolver,
@@ -145,8 +160,8 @@ export async function runEvalSealed({
   devFraction = 0.15,
   testFraction = 0.15,
 }) {
-  if (typeof tuneSolver !== 'function') throw new Error('runEvalSealed needs a tuneSolver function');
-  if (typeof testSolver !== 'function') throw new Error('runEvalSealed needs a testSolver function');
+  if (typeof tuneSolver !== 'function') throw new Error('runEvalGuardedSplits needs a tuneSolver function');
+  if (typeof testSolver !== 'function') throw new Error('runEvalGuardedSplits needs a testSolver function');
   const { train, dev, test } = splitTrainDevTest(tasks, { devFraction, testFraction });
   const trainIds = train.map((t) => t.id);
   const devIds = dev.map((t) => t.id);

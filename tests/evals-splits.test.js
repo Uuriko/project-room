@@ -1,6 +1,9 @@
-// Train/dev/test split + test-hiding guard tests (failing-first).
+// Train/dev/test split + split-guard tests.
 // Contract under test: the 3-way split is deterministic, disjoint and exhaustive;
-// the test split is provably never shown to the agent (solver) under evaluation.
+// the guarded run invokes the tuning solver only with train/dev ids, and the
+// guard aborts loudly on cross-split invocation through the wrapper. This is a
+// guarded deterministic split, not a sealed test set — the guard cannot stop
+// the caller from reading tasks outside the wrapper (see heldout.mjs).
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -8,7 +11,7 @@ import {
   splitHeldOut, // existing 2-way API — must keep working
   splitTrainDevTest,
   createSplitGuard,
-  runEvalSealed,
+  runEvalGuardedSplits,
 } from '../evals/heldout.mjs';
 
 const tasks = Array.from({ length: 100 }, (_, i) => ({ id: `t-${String(i).padStart(3, '0')}` }));
@@ -52,7 +55,7 @@ test('split guard throws when a solver touches a hidden test task', async () => 
   await assert.rejects(() => sneaky(testSplit[0]), new RegExp(testSplit[0].id), 'guard must name the leaked task id');
 });
 
-test('sealed run never shows test tasks to the tuning solver', async () => {
+test('guarded run invokes the tuning solver only with train/dev ids', async () => {
   const seen = [];
   const tuneSolver = async (task) => {
     seen.push(task.id);
@@ -60,7 +63,7 @@ test('sealed run never shows test tasks to the tuning solver', async () => {
   };
   const testSolver = async (task) => ({ trajectory: [], finalAnswer: 'final' });
   const scorers = { always: async () => 1 };
-  const report = await runEvalSealed({ tasks, tuneSolver, testSolver, scorers });
+  const report = await runEvalGuardedSplits({ tasks, tuneSolver, testSolver, scorers });
   const testIds = new Set(report.splits.testIds);
   assert.ok(report.test.summary.total === testIds.size && testIds.size > 0);
   assert.deepEqual(
@@ -72,9 +75,9 @@ test('sealed run never shows test tasks to the tuning solver', async () => {
   assert.equal(leaked.length, 0, `tuning solver saw test tasks: ${leaked.join(',')}`);
 });
 
-test('test-phase guard rejects non-test tasks (final run stays test-only)', async () => {
+test('test-phase guard rejects non-test tasks through the wrapper', async () => {
   const { train, test: testSplit } = splitTrainDevTest(tasks, { devFraction: 0.15, testFraction: 0.15 });
-  // Same guard construction runEvalSealed uses for its final phase.
+  // Same guard construction runEvalGuardedSplits uses for its final phase.
   const guard = createSplitGuard({ visibleIds: new Set(testSplit.map((t) => t.id)), phase: 'test' });
   const finalSolver = guard(async (task) => ({ trajectory: [], finalAnswer: 'final' }));
   await finalSolver(testSplit[0]); // test task passes through
