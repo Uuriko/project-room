@@ -143,6 +143,7 @@ import { MembersDirectory, membersDirectorySchema } from "./members-directory.mj
 import {
   MENTION_TIMEOUT_MS_DEFAULT, MENTION_TIMEOUT_MS_MIN, MENTION_TIMEOUT_MS_MAX,
   assertTransitionMention, resolveMentionTargetsInText, mentionStateSchema,
+  mentionTargetWarnings,
 } from "./mention-lifecycle.mjs"; // #658: mention lifecycle state machine + schema.
 import { activitySchema, recordActivityEvents } from "./activity.mjs"; // Attention: activity feed, read horizons, saved messages, thread mutes.
 import { AgentInvites, agentInviteSchema } from "./agent-invites.mjs";
@@ -4609,7 +4610,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // message, and a post by a mentioned member marks their pending
       // mentions responded in the same transaction. Never throws for
       // unparseable input — an unresolvable mention is simply not tracked.
-      if (command.type === T.MESSAGE_POSTED) this.trackMentions(roomId, state, auth.member.id, command.data, incoming.id);
+      // COMMS-02: trackMentions also returns the poster's mention warnings
+      // (@handles whose target is ambiguous or unknown); they ride the response below.
+      let mentionWarnings = null;
+      if (command.type === T.MESSAGE_POSTED) mentionWarnings = this.trackMentions(roomId, state, auth.member.id, command.data, incoming.id);
       // Attention: write-time activity fan-out (mention/reply/thread_reply/
       // reaction). Runs in the same transaction as the triggering event.
       // Never throws: a fan-out failure must not fail the command.
@@ -4659,7 +4663,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         ? `Posted. Wake skipped for ${skippedWakes.map(id => room.state.members?.[id]?.displayName || id).join(", ")}: Room Trust is off, so that agent was not woken.`
         : null;
       syncRoomPublication(this, { roomId, state, previous: room.state, auth });
-      return { sequence, event: incoming, duplicate: false, ...(note ? { note } : {}) };
+      return { sequence, event: incoming, duplicate: false, ...(note ? { note } : {}),
+        ...((Array.isArray(mentionWarnings) && mentionWarnings.length > 0) ? { mentionWarnings } : {}) };
     });
   }
 
@@ -4794,7 +4799,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       ).run(nowMs, roomId, answered.eventId, senderMemberId);
     }
     const body = typeof data.body === "string" ? data.body : "";
-    if (!body.includes("@")) return;
+    if (!body.includes("@")) return [];
     const members = state?.members ?? {};
     let identityNames = {};
     try {
@@ -4809,10 +4814,19 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       `INSERT OR IGNORE INTO mention_states
        (room_id,message_event_id,mentioned_member_id,state,created_at,timeout_at,decided_at)
        VALUES(?,?,?,?,?,?,NULL)`);
+    const toMemberId = typeof data.toMemberId === "string" ? data.toMemberId : "";
     for (const memberId of resolveMentionTargetsInText(members, identityNames, body, senderMemberId)) {
-      if (data.toMemberId && data.toMemberId !== memberId) continue;
+      if (toMemberId && toMemberId !== memberId) continue;
       insert.run(roomId, eventId, memberId, "delivered", nowMs, nowMs + timeoutMs);
     }
+    // COMMS-02: warn the poster about @handles whose target is ambiguous
+    // (2+ members match) or unknown, naming the candidates so they can
+    // disambiguate. Delivery is unchanged — the post still lands; the
+    // warnings ride on the command response. In a targeted DM only handles
+    // naming the DM target are relevant; other handles never create rows.
+    let warnings = mentionTargetWarnings(members, identityNames, body, senderMemberId);
+    if (toMemberId) warnings = warnings.filter(w => w.candidates.some(c => c.memberId === toMemberId));
+    return warnings;
   }
 
   // #658: per-room mention timeout, defaulting to 30 minutes. Owner-
