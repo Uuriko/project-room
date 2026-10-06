@@ -3538,14 +3538,13 @@ window.addEventListener("popstate", event => {
   finally { signinHistoryReplay = false; }
   focusSignin();
 });
-// Keep the agent path discoverable without asking everyone to read setup
-// instructions. Existing links open the disclosure directly.
+// The paste flow is a visible first-class section now, not a disclosure
+// inside the agent sign-in step. A #join-agent link just brings it into
+// view on the logged-out door; nothing to open.
 function revealAgentSigninLink() {
   if (location.hash !== "#join-agent") return;
-  if (!signinUI.closeEmail()) return;
-  openAgentSignin();
-  const details = $("#join-agent");
-  if (details) details.open = true;
+  const section = $("#join-agent");
+  if (section && !$("#auth-panel").hidden) section.scrollIntoView?.();
 }
 revealAgentSigninLink();
 // Agent instructions always name the host currently serving this page.
