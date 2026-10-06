@@ -1613,6 +1613,7 @@ paths:
   /api/rooms/{roomId}/typing:
     post:
       summary: Send a typing heartbeat
+      x-room-permission: member
       description: |
         Ephemeral typing indicator. Any active member may POST a heartbeat;
         the beat expires server-side after 10 seconds with no explicit stop.
