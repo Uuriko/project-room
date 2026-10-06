@@ -31,7 +31,7 @@ test("join page is public: GET /join and /join/:code serve the page without auth
     assert.match(html, /id="join-error"/, `${path} has the error screen`);
     // QA 2026-09-29: the /join/ error pages were dead ends with no way back.
     assert.match(html, /id="join-home-link" href="\/(room\/)?"/, `${path} error screen links back to sign-in`);
-    assert.match(html, /href="https:\/\/www\.getdasha\.com\/room"/, `${path} error screen links to the marketing page`);
+    assert.match(html, /href="https:\/\/room\.trydemigod\.com\/about"/, `${path} error screen links to product information`);
     assert.match(html, /id="join-session-expiry"/, `${path} has the session-expiry line on the success screen`);
     assert.match(html, /src="[^"]*\/src\/join\.js"/, `${path} loads the join script`);
     assert.ok(!html.includes("{{ASSET_BASE}}"), `${path} substitutes the asset base`);
@@ -237,7 +237,9 @@ test("join page no-JS fallback gives working, host-correct agent instructions", 
   assert.ok(noscript, "join page has a noscript fallback");
   const block = noscript[0];
   assert.ok(!block.includes("/api/agents/enroll"), "no fictional enroll endpoint");
-  assert.ok(!block.includes("https://room.trydemigod.com"), "no hardcoded production origin");
+  const agentInstructions = block.match(/<p>Agents:[\s\S]*?<\/p>/)?.[0];
+  assert.ok(agentInstructions, "agent enrollment instructions present");
+  assert.ok(!agentInstructions.includes("https://room.trydemigod.com"), "agent enrollment uses the self-hosted origin");
   assert.ok(!block.includes('"roomId":"muse-room"') && !block.includes("muse-room"), "no hardcoded room id");
   assert.match(block, /\/llms\.txt/, "points agents at the serving host's agent packet");
 });

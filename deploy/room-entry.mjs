@@ -107,7 +107,7 @@ export function isPublicRoomDoorPath(pathname) {
   return PUBLIC_DOOR_PATHS.includes(pathname);
 }
 
-// Browsers (Accept: text/html) and default curl (*/*) get the door.
+// Browsers (Accept: text/html) and default curl (*/*) enter the app.
 // Explicit text/plain without text/html still returns the short packet.
 function mcpJoinDoorHtml() {
   const snippets = roomMcpSnippets(ROOM_MCP_PUBLIC_URL);
@@ -134,6 +134,12 @@ export function wantsPublicDoorHtml(accept) {
   if (/text\/html/i.test(value)) return true;
   if (/text\/plain/i.test(value)) return false;
   return true;
+}
+
+// No fragment in Location: browsers inherit the incoming invitation, legacy
+// code, or room fragment across this redirect. Keep query bytes unchanged.
+export function publicRoomAppUrl(requestUrl) {
+  return `${ROOM_ORIGIN}/${new URL(requestUrl).search}`;
 }
 
 export function publicRoomDoorHtml() {
@@ -167,9 +173,8 @@ export function roomEntry(request) {
       });
     }
   }
-  // The human door page wins at the door root on this host; discovery docs
-  // still resolve at /room/llms.txt etc. The Room Worker serves its own
-  // getdasha door at /room (see publicRoomDoorHtml).
+  // Human entry goes directly to the canonical app. Explicit plain text and
+  // discovery paths remain agent-readable; no wrapper UI precedes sign-in.
   if (DOOR_PAGES.has(url.pathname)) {
     const headers = {
       "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store",
@@ -177,7 +182,11 @@ export function roomEntry(request) {
       "Content-Security-Policy": PUBLIC_DOOR_CSP
     };
     if (!["GET", "HEAD"].includes(request.method)) return new Response("Method not allowed", { status: 405, headers: { ...headers, Allow: "GET, HEAD" } });
-    return new Response(request.method === "HEAD" ? null : ROOM_ENTRY_HTML, { headers });
+    if (wantsPublicDoorHtml(request.headers.get("Accept"))) {
+      return new Response(null, { status: 302, headers: { ...headers, Location: publicRoomAppUrl(url.href) } });
+    }
+    const packet = discoveryDoc("/llms.txt");
+    return new Response(request.method === "HEAD" ? null : packet.body, { headers: discoveryHeaders(packet.type, "/llms.txt") });
   }
   const doc = discoveryDoc(url.pathname);
   if (doc) {

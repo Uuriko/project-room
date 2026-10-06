@@ -56,7 +56,7 @@ import { createHostedRoomMcp } from "./mcp-room-profile.mjs";
 import { diagnoseArguments } from "./mcp-arg-errors.mjs";
 import { collectNeedsMe } from "./needs-me.mjs";
 import { isIdentitySecret } from "./agent-identities.mjs";
-import { isPublicRoomDoorPath, wantsPublicDoorHtml, publicRoomDoorHtml, PUBLIC_DOOR_CSP } from "../deploy/room-entry.mjs";
+import { isPublicRoomDoorPath, wantsPublicDoorHtml, publicRoomAppUrl } from "../deploy/room-entry.mjs";
 import { guestAgentLinkContract, GUEST_AGENT_TOKEN_PREFIX, isGuestAgentMemberId } from "./guest-agent-links.mjs";
 import { isWebFetchGuest, WebFetchError } from "./web-fetch.mjs";
 // Board v2 is retired. Its routes answer 410 board_v2_retired. The
@@ -1623,18 +1623,16 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (wikiReply) return json(res, wikiReply.status, wikiReply.body, req.method === "HEAD");
       }
       // Public Hosts (www / lobby / apex) reverse-proxy /room here. Browsers
-      // get the getdasha HTML door. / stays the workspace app. Packets stay
+      // go directly to the canonical workspace app. Packets stay
       // at /llms.txt, /room/llms.txt, /skill.md, /room/skill, agent.json,
       // and the kits catalog at /kits.txt / /room/kits.
       if (isPublicRoomDoorPath(url.pathname)) {
         if (!["GET", "HEAD"].includes(req.method)) reject(405, "method_not_allowed", "Method not allowed");
         if (wantsPublicDoorHtml(req.headers.accept)) {
-          const bytes = Buffer.from(publicRoomDoorHtml());
-          res.setHeader("Content-Security-Policy", PUBLIC_DOOR_CSP);
-          // GR1: the getdasha /room door canonicalizes onto this host.
-          res.setHeader("Link", `${discoveryLinks(url)}, <${ROOM_ORIGIN}/room>; rel="canonical"`);
-          res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": bytes.length });
-          return res.end(req.method === "HEAD" ? undefined : bytes);
+          res.setHeader("Cache-Control", "no-store");
+          res.setHeader("Link", `${discoveryLinks(url)}, <${ROOM_ORIGIN}/>; rel="canonical"`);
+          res.writeHead(302, { Location: publicRoomAppUrl(url.href) });
+          return res.end();
         }
         const packet = discoveryDoc("/llms.txt");
         res.setHeader("X-Robots-Tag", "all");

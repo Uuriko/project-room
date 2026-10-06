@@ -4,69 +4,85 @@ import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { Miniflare } from 'miniflare';
 import { chromium } from 'playwright';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { RoomStore } from '../server/store.mjs';
+import { createRoomServer } from '../server/http.mjs';
+import { roomEntry } from '../deploy/room-entry.mjs';
 
-// Deployment preserves function names. A source-level browser server cannot
-// detect helpers introduced by bundling a function later serialized as text.
-test('bundled public door executes under CSP and preserves invitation and room links', { timeout: 60000 }, async t => {
-  const bundle = await build({
-    entryPoints: [fileURLToPath(new URL('./room.mjs', import.meta.url))],
-    bundle: true, write: false, format: 'esm', platform: 'neutral',
-    keepNames: true, external: ['node:*', 'cloudflare:*']
-  });
+// The deployed Worker owns host rewriting; Chromium owns fragment inheritance.
+// The destination is the actual app/asset HTTP server, never fabricated auth UI.
+test('bundled default doors reach minimal auth and inherit invitation, legacy, and room fragments', { timeout: 60000 }, async t => {
+  const bundle = await build({ entryPoints: [fileURLToPath(new URL('./room.mjs', import.meta.url))],
+    bundle: true, write: false, format: 'esm', platform: 'neutral', keepNames: true,
+    external: ['node:*', 'cloudflare:*'] });
   const worker = new Miniflare({ modules: true, script: bundle.outputFiles[0].text,
     compatibilityDate: '2026-07-30', compatibilityFlags: ['nodejs_compat'],
     durableObjects: { ROOM: { className: 'ProjectRoom', useSQLite: true } },
-    bindings: { ROOM_ORIGIN: 'https://room.trydemigod.com' }
-  });
+    bindings: { ROOM_ORIGIN: 'https://room.trydemigod.com' } });
   t.after(() => worker.dispose());
-  const response = await worker.dispatchFetch('https://www.getdasha.com/room/');
-  const html = await response.text();
-  assert.equal(response.status, 200, html);
-  // Resolve the actual bundled response hints as an outside agent on the
-  // shared Dasha host would, rather than accepting a matching path substring.
-  const discoveryTargets = [...(response.headers.get('link') ?? '').matchAll(/<([^>]+)>/g)]
-    .map(match => new URL(match[1], 'https://www.getdasha.com/room/').href);
-  assert.deepEqual(discoveryTargets, [
-    'https://room.trydemigod.com/.well-known/agent-card.json',
-    'https://room.trydemigod.com/llms.txt',
-    'https://room.trydemigod.com/skills',
-    'https://room.trydemigod.com/room',
-    'https://room.trydemigod.com/room'
-  ], 'alternate entry discovery leads to Project Room, not the shared host apex');
-  assert.match(response.headers.get('link') ?? '', /<https:\/\/room\.trydemigod\.com\/room>; rel="canonical"/);
-  const headers = Object.fromEntries(response.headers);
-  const browser = await chromium.launch({ headless: true });
-  t.after(() => browser.close());
-  for (const width of [1280, 390]) {
-    const context = await browser.newContext({ viewport: { width, height: 844 } });
+  const directory = mkdtempSync(join(tmpdir(), 'room-entry-browser-'));
+  const store = new RoomStore(join(directory,'room.sqlite'));
+  const server = createRoomServer({store});
+  await new Promise(resolve => server.listen(0,'127.0.0.1',resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  t.after(async () => {server.closeStreams(); server.closeAllConnections(); await new Promise(resolve=>server.close(resolve)); store.close(); rmSync(directory,{recursive:true,force:true});});
+  const browser = await chromium.launch({headless:true});
+  t.after(()=>browser.close());
+  for (const width of [1280,390]) {
+    const context = await browser.newContext({viewport:{width,height:844}});
+    t.after(()=>context.close());
     const page = await context.newPage();
-    const errors = [];
-    const forwards = [];
-    page.on('pageerror', error => errors.push(error.message));
-    await page.route('https://www.getdasha.com/room/**', route => route.fulfill({ status: 200, headers, body: html }));
-    await page.route('https://room.trydemigod.com/**', route => {
-      forwards.push(route.request().url());
-      return route.fulfill({ status: 200, contentType: 'text/html', body: '<title>Destination</title>' });
+    const errors=[]; page.on('pageerror', error=>errors.push(error.stack));
+    page.setDefaultTimeout(10000);
+    // Playwright skips route interception on the second leg of an HTTP
+    // redirect. Assert the production Location, then map only its authority
+    // to the real local app server; path/query/status and fragment inheritance
+    // remain browser-owned. This prevents mixed live/candidate assets.
+    const fulfillDoor = async (route,response) => {
+      const headers=Object.fromEntries(response.headers);
+      assert.equal(response.status,302);
+      const original = new URL(route.request().url());
+      assert.equal(headers.location,'https://room.trydemigod.com/'+original.search);
+      assert.equal(new URL(headers.location).hash,'');
+      headers.location=origin+'/'+original.search;
+      await route.fulfill({status:response.status,headers,body:await response.text()});
+    };
+    await page.route(/^https:\/\/(?:www\.)?getdasha\.com\/room(?:[/?].*)?$/,async route=> {
+      const response=await worker.dispatchFetch(route.request().url(),{redirect:'manual',headers:{Accept:'text/html'}});
+      await fulfillDoor(route,response);
     });
-    await page.goto('https://www.getdasha.com/room/');
-    assert.deepEqual(errors, [], `entry script runs at width ${width}`);
-    await page.evaluate(() => { globalThis.location.hash = '#room/qa-room'; });
-    await page.waitForFunction(() => globalThis.document.querySelector('a.open')?.href.includes('?room=qa-room'));
-    assert.equal(await page.locator('a.open').getAttribute('href'), 'https://room.trydemigod.com/?room=qa-room#room/qa-room');
-    await page.evaluate(() => { globalThis.location.hash = '#join/short'; });
-    await page.locator('#join-empty').waitFor({ state: 'visible' });
-    assert.equal(forwards.length, 0, 'incomplete invitation remains local');
-    const token = 'A'.repeat(43);
-    await page.evaluate(value => { globalThis.location.hash = '#join/' + value; }, token);
-    await page.waitForURL('https://room.trydemigod.com/#join/' + token);
-    assert.equal(forwards.length, 1, 'complete invitation forwards once');
-    await page.goto('https://www.getdasha.com/room/#join/' + token);
-    await page.waitForURL('https://room.trydemigod.com/#join/' + token);
-    assert.equal(forwards.length, 2, 'initial invitation arrival forwards once');
-    await page.goto('https://www.getdasha.com/room/#room/qa-room');
-    await page.locator('a.open').click();
-    await page.waitForURL('https://room.trydemigod.com/?room=qa-room#room/qa-room');
-    assert.deepEqual(errors, []);
+    await page.route('https://www.trydemigod.com/room**',async route=> {
+      const response=roomEntry(new Request(route.request().url(),{headers:{Accept:'text/html'}}));
+      await fulfillDoor(route,response);
+    });
+    for (const host of ['getdasha.com','www.getdasha.com','www.trydemigod.com']) {
+      await page.goto(`https://${host}/room/?entry=release&next=%2Fabout`);
+      await page.locator('#auth-panel').waitFor({state:'visible'});
+      assert.equal(new URL(page.url()).origin,origin);
+      assert.equal(new URL(page.url()).search,'?entry=release&next=%2Fabout');
+      assert.equal(await page.locator('#auth-title').innerText(),'PROJECT ROOM');
+      assert.equal(await page.getByRole('button',{name:'Agent sign in',exact:true}).count(),1);
+      assert.equal(await page.getByRole('button',{name:'Create account',exact:true}).isVisible(),true);
+      assert.equal(await page.getByRole('button',{name:'Log in',exact:true}).isVisible(),true);
+      assert.doesNotMatch(await page.locator('body').innerText(),/A shared place|Conversations, shared work|New here\?|Have an invite\?|Connect an agent|Paste a prompt/);
+    }
+    // Observe the browser's first destination before app routing handles each
+    // fragment. Fragments never reach the HTTP server or the Worker Request.
+    for (const hash of ['#join/'+'A'.repeat(43)+'/work/item-1','#invite/'+'B'.repeat(43),'#code/abc-def-ghj','#room/qa-room','#join/']) {
+      let arrived;
+      const listener=frame=> {if(frame===page.mainFrame() && frame.url().startsWith(origin+'/')) arrived ??= frame.url();};
+      page.on('framenavigated',listener);
+      await page.goto('https://www.getdasha.com/room?ref=invite&room=qa'+hash);
+      page.off('framenavigated',listener);
+      assert.equal(arrived,origin+'/?ref=invite&room=qa'+hash);
+    }
+    assert.deepEqual(errors,[]);
     await context.close();
   }
+  const packet=await worker.dispatchFetch('https://www.getdasha.com/room/',{headers:{Accept:'text/plain'}});
+  assert.equal(packet.status,200); assert.match(await packet.text(),/Project Room/);
+  const discovery=await worker.dispatchFetch('https://www.getdasha.com/room/llms.txt');
+  assert.equal(discovery.status,200); assert.match(await discovery.text(),/Project Room/);
 });
