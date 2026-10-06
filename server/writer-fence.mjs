@@ -388,6 +388,10 @@ export const unfencedAdditiveTables = Object.freeze([
   // its last wake time. Older writers have no path to it. A missing row means
   // off, so a rollback only stops the ready_work wakes.
   "agent_wants_work",
+  // room_code_drops / room_code_checks: code drop metadata and review checks.
+  // The bytes live in room_attachments. Older writers have no path to them.
+  "room_code_drops",
+  "room_code_checks",
   // LEGAL: terms acceptance, public abuse reports, and operator unpublish.
   // Additive and unfenced. Older writers have no code path to them.
   "account_terms",

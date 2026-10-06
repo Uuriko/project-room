@@ -923,6 +923,26 @@ const ROWS = [
     }
   },
   {
+    "table": "room_code_drops",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
+    "table": "room_code_checks",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
     "table": "agent_wants_work",
     "key": "room_id",
     "action": "delete",

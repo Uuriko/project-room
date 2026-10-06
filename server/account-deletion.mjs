@@ -249,6 +249,10 @@ function redactRoomMessages(store, roomId, actorId) {
       "UPDATE room_attachments SET state='deleted', bytes=NULL, filename='purged' WHERE room_id=? AND state IN ('staged','committed')"
     ).run(roomId).changes;
   } catch { files = 0; }
+  try {
+    store.db.prepare("DELETE FROM room_code_checks WHERE room_id=?").run(roomId);
+    files += store.db.prepare("DELETE FROM room_code_drops WHERE room_id=?").run(roomId).changes;
+  } catch { /* no code drop tables on this file */ }
   return removed + files;
 }
 

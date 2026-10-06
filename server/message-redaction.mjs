@@ -123,6 +123,15 @@ export function commitMessageRedaction(db, { roomId, state, actorId, at, message
   } catch (error) {
     if (!/no such (table|column)/i.test(error?.message ?? "")) throw error;
   }
+  // A code drop's card is its message: deleting the card removes the drop's
+  // metadata (title, commit subjects, paths) and its checks with the bytes.
+  try {
+    const drops = db.prepare("SELECT id FROM room_code_drops WHERE room_id=? AND message_id=?").all(roomId, messageId);
+    for (const { id } of drops) db.prepare("DELETE FROM room_code_checks WHERE room_id=? AND drop_id=?").run(roomId, id);
+    db.prepare("DELETE FROM room_code_drops WHERE room_id=? AND message_id=?").run(roomId, messageId);
+  } catch (error) {
+    if (!/no such table/i.test(error?.message ?? "")) throw error;
+  }
   try { db.prepare("DELETE FROM projection_checkpoints WHERE room_id=?").run(roomId); }
   catch (error) {
     if (!/no such table/i.test(error?.message ?? "")) throw error;

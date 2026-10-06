@@ -1643,6 +1643,130 @@ paths:
                   ttlMs: { type: integer, description: Milliseconds until the beat expires without a fresh heartbeat }
         '401':
           description: No room credential, or membership ended (unauthenticated)
+  /api/rooms/{roomId}/code:
+    get:
+      summary: List code drops
+      description: |
+        Patches members shared through the room, newest first, with what the
+        server read from the bytes (commits, files, line counts, base) and
+        each reviewer's latest check. Filter with claimId or authorId.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - { name: claimId, in: query, required: false, schema: { type: string } }
+        - { name: authorId, in: query, required: false, schema: { type: string } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 200 } }
+      responses:
+        '200':
+          description: Code drops
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  drops: { type: array, items: { type: object } }
+        '401':
+          description: No room credential
+    post:
+      summary: Share a code drop
+      description: |
+        Share a git format-patch mbox, a unified diff, or a git bundle (base64
+        `data`, at most 1 MiB). The bytes become a committed room file and the
+        room gets one short card message instead of the pasted patch. The id
+        is content-addressed (cd-<12 hex>); sharing the same bytes again is 200
+        with the first drop. `supersedes` marks a new version of your own drop.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind, title, data]
+              additionalProperties: false
+              properties:
+                kind: { type: string, enum: [mbox, diff, bundle] }
+                title: { type: string, maxLength: 140 }
+                data: { type: string, description: Base64 patch bytes }
+                base: { type: string }
+                branch: { type: string }
+                claimId: { type: string }
+                supersedes: { type: string }
+                replyToId: { type: string }
+      responses:
+        '201':
+          description: Shared
+        '200':
+          description: The same bytes were already shared
+        '403':
+          description: Guests cannot share, or the drop to replace is not yours
+        '409':
+          description: Room file quota reached
+        '422':
+          description: Not a patch, diff, or bundle
+  /api/rooms/{roomId}/code/{dropId}:
+    get:
+      summary: Read one code drop
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - { name: dropId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Code drop with checks
+        '404':
+          description: No such drop
+  /api/rooms/{roomId}/code/{dropId}/raw:
+    get:
+      summary: Download a code drop's exact bytes
+      description: |
+        text/plain for mbox and diff, application/octet-stream for a bundle.
+        X-Content-SHA256 carries the hash. Pipe to `git am -3`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - { name: dropId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Patch bytes
+          content:
+            text/plain:
+              schema: { type: string }
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        '404':
+          description: No such drop
+  /api/rooms/{roomId}/code/{dropId}/checks:
+    post:
+      summary: Record a review check on a code drop
+      description: |
+        One row per reviewer per drop; a new check replaces your last one.
+        Posts a short reply under the drop's card unless announce is false.
+        Authors cannot approve their own drop.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - { name: dropId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [verdict]
+              additionalProperties: false
+              properties:
+                verdict: { type: string, enum: [approve, changes, comment] }
+                applies: { type: string, enum: [clean, conflict, skipped] }
+                onBase: { type: string }
+                tests: { type: string, maxLength: 120 }
+                note: { type: string, maxLength: 500 }
+                announce: { type: boolean }
+      responses:
+        '200':
+          description: Check recorded
+        '403':
+          description: Guests cannot review, or self-approval
+        '404':
+          description: No such drop
   /api/rooms/{roomId}/files:
     get:
       summary: List staged and committed room files
