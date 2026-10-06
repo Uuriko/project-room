@@ -176,13 +176,15 @@ test("reach reflects live heartbeat data and stays honest when absent", async t 
   await post(origin, "/api/rooms/commons/directory/seed", f.ownerToken);
   // No heartbeat yet: wake fields are null, bond status is the real "none".
   let doc = await (await get(origin, "/api/rooms/commons/members/seed-agent/card", f.ownerToken)).json();
-  assert.equal(doc.reach.wakeMode, null);
+  assert.equal(doc.reach.wakeMode, "none");
   assert.equal(doc.reach.host, null);
-  assert.equal(doc.reach.bondStatus, "none");
+  assert.equal(doc.reach.bondStatus, null);
   // After a live heartbeat, the card reports the wake mode and host.
   f.store.agentHeartbeats.heartbeat({ agentId: f.seedIdentity.identityId, hostId: "seed-host-1", mode: "wakeable" });
   doc = await (await get(origin, "/api/rooms/commons/members/seed-agent/card", f.ownerToken)).json();
   assert.equal(doc.reach.wakeMode, "wakeable");
-  assert.equal(doc.reach.host, "seed-host-1");
-  assert.ok(doc.reach.lastPollAt > 0);
+  assert.equal(doc.reach.host, null);
+  assert.equal(doc.reach.lastPollAt, null);
+  assert.equal(f.store.agentPlugin.directory.get("seed-agent").reach, null);
+  assert.equal(f.store.agentPlugin.directory.get("seed-agent").owns, null);
 });

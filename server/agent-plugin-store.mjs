@@ -228,8 +228,8 @@ export class AgentPluginStore {
       // plan-dir-card: host-supplied reach (live wake + bond data) and
       // owns (live claim-derived areas). Both are validated by the pure
       // module and null when the host knows nothing — never fabricated.
-      reach: agentId => this.reachForCard(agentId),
-      owns: agentId => this.ownsForCard(agentId) });
+      reach: () => null,
+      owns: () => null });
     this.webhooks = createAgentWebhookSubscriptions({
       store: this.subs,
       clock,
@@ -773,73 +773,30 @@ export class AgentPluginStore {
   // when the identity has no heartbeat registration and no bond footprint —
   // reach is never fabricated. wakeUrl is never exposed (it is a secret
   // delivery target); only the host id is carried.
+  // Public directory cards never expose private queue, bond, host or lane data.
+  // Room-scoped cards may attach coarse listener availability for that room.
   reachForCard(agentId) {
-    const row = this.db.prepare("SELECT owner_identity_id AS ownerIdentityId FROM agent_directory_cards WHERE agent_id=?").get(agentId);
-    if (!row?.ownerIdentityId) return null;
-    const identityId = row.ownerIdentityId;
-    const heartbeats = this.store.agentHeartbeats;
-    let status = null;
-    try { status = heartbeats ? heartbeats.statusOf(identityId) : null; } catch { status = null; }
-    const registered = Boolean(status && status.hosts.length > 0);
-    let bondStatus = null;
-    try {
-      const active = this.db.prepare(
-        "SELECT 1 FROM agent_bonds WHERE state='active' AND (agent_a=? OR agent_b=?) LIMIT 1"
-      ).get(identityId, identityId);
-      const pending = active ? [] : this.store.bonds.pendingProposalsFor(identityId);
-      bondStatus = active ? "active" : pending.length > 0 ? "pending" : "none";
-    } catch { bondStatus = null; }
-    if (!registered && bondStatus === null) return null;
-    const modes = registered ? status.hosts.map(host => host.mode) : [];
-    let pendingUnacked = 0;
-    try { pendingUnacked = heartbeats.pendingWakes(identityId, { limit: 50 }).length; } catch { /* older DB */ }
-    return {
-      wakeMode: !registered ? null
-        : modes.includes("wakeable") ? "wakeable"
-        : modes.includes("pull-only") ? "pull-only" : "none",
-      lastPollAt: registered ? status.lastSeenAt : null,
-      pendingUnacked,
-      bondStatus,
-      host: registered && status.hosts[0] ? status.hosts[0].hostId : null,
-    };
+    const row = this.db.prepare("SELECT owner_identity_id AS identityId FROM agent_directory_cards WHERE agent_id=?").get(agentId);
+    if (!row) return null;
+    const status = this.store.agentHeartbeats?.wakeStatusOf(row.identityId);
+    if (!status) return null;
+    return { wakeMode: status.wakeable ? "wakeable" : "none", lastPollAt: null,
+      pendingUnacked: 0, bondStatus: null, host: null };
   }
 
-  // plan-dir-card: host-supplied areas/lanes from the agent's live claim
-  // data. Active (claimed/in_progress) claims owned by the card's identity —
-  // the owner may be the identity id or a member id linked to it —
-  // contribute their lane prefix (the leading alpha run of the task id:
-  // e.g. task id fo-sec06 yields prefix fo; qa7-01 yields qa). Deduped,
-  // sorted, capped.
-  // Null only when the host has no claim registry; [] when the agent
-  // currently owns nothing.
-  ownsForCard(agentId) {
-    const row = this.db.prepare("SELECT owner_identity_id AS ownerIdentityId FROM agent_directory_cards WHERE agent_id=?").get(agentId);
-    if (!row?.ownerIdentityId) return null;
-    const identityId = row.ownerIdentityId;
-    const workClaims = this.store.workClaims;
-    if (!workClaims) return null;
-    try {
-      const linkedRooms = this.db.prepare(
-        "SELECT DISTINCT room_id AS roomId FROM identity_links WHERE identity_id=?").all(identityId)
-        .map(r => r.roomId);
-      const owners = new Set([identityId]);
-      const memberOf = this.db.prepare("SELECT member_id AS memberId FROM identity_links WHERE room_id=? AND identity_id=?");
-      for (const roomId of linkedRooms) {
-        for (const m of memberOf.all(roomId, identityId)) owners.add(m.memberId);
-      }
-      const areas = new Set();
-      for (const roomId of linkedRooms) {
-        let claims = [];
-        try { claims = workClaims.list(roomId); } catch { continue; }
-        for (const claim of claims) {
-          if (claim.state !== "claimed" && claim.state !== "in_progress") continue;
-          if (!owners.has(claim.owner)) continue;
-          const lane = /^([a-z]+)/.exec(String(claim.id ?? claim.taskId ?? ""));
-          if (lane) areas.add(lane[1]);
-        }
-      }
-      return [...areas].sort().slice(0, 12);
-    } catch { return null; }
+  ownsForCard(agentId, roomId) {
+    if (!roomId) return null;
+    const row = this.db.prepare("SELECT owner_identity_id AS identityId FROM agent_directory_cards WHERE agent_id=?").get(agentId);
+    if (!row) return null;
+    const members = this.db.prepare("SELECT member_id AS memberId FROM identity_links WHERE room_id=? AND identity_id=?").all(roomId, row.identityId);
+    const owners = new Set(members.map(member => member.memberId));
+    const areas = new Set();
+    for (const claim of this.store.workClaims.list(roomId)) {
+      if (!["claimed", "in_progress"].includes(claim.state) || !owners.has(claim.owner)) continue;
+      const lane = /^([a-z]+)/.exec(String(claim.id));
+      if (lane) areas.add(lane[1]);
+    }
+    return [...areas].sort().slice(0, 12);
   }
 
   // plan-dir-card: the directory agentId linked to an identity, for the
@@ -870,7 +827,8 @@ export class AgentPluginStore {
     try { doc = this.directory.get(row.agentId); } catch { return null; }
     if (doc.visibility === "private" && viewerIdentityId !== link.identityId) return null;
     // A2A v1.0 projection for outside-agent discoverability (interop only).
-    return { ...doc, a2a: toA2ACard(doc, serviceOrigin) };
+    const scoped = { ...doc, reach: this.reachForCard(row.agentId), owns: this.ownsForCard(row.agentId, roomId) };
+    return { ...scoped, a2a: toA2ACard(scoped, serviceOrigin) };
   }
 
   // plan-dir-card: owner-only seeding of directory cards for a room's
