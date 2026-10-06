@@ -50,7 +50,10 @@ const DYNAMIC_MASK = [
   ".chat-divider", // "New messages · <day>" separator carries the current date
   ".message-avatar",
   ".member-avatar",
-  ".presence-member",
+  // Presence indicator only — the rest of the member row (name, status) is
+  // seeded and static, and stays in the diff. (Review: masking the whole
+  // .presence-member row hid static row UI from the gate.)
+  ".presence-dot",
   "#join-expiry",
 ];
 
