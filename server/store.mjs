@@ -408,7 +408,11 @@ function applyProvenanceRepair(state, events) {
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 // F5: the bounded pilot caps in one place. The room write paths below enforce
 // them; server/usage-summary.mjs reports them with the remaining headroom.
-export const PILOT_LIMITS = Object.freeze({ eventsPerRoom: 10000, membersPerRoom: 100, workItemsPerRoom: 500, projectionBytes: 4 * 1024 * 1024 });
+// G11 (2026-10-06): muse-room reached 82% of the 4 MB projection and was
+// ~0.7 days from refusing writes, with the event cap ~10 days out. Raised per
+// the owner's word relayed at room seq 3425. Every event cap check reads
+// eventsPerRoom from here (tests/pilot-limits-single-source.test.js).
+export const PILOT_LIMITS = Object.freeze({ eventsPerRoom: 1_000_000, membersPerRoom: 100, workItemsPerRoom: 500, projectionBytes: 16 * 1024 * 1024 });
 // Inactive members retain their history, but do not occupy an admission seat.
 export const activeMemberCount = members => Object.values(members ?? {}).filter(member => member?.active !== false).length;
 const hash = text => createHash("sha256").update(text).digest("hex");

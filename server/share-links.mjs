@@ -183,7 +183,7 @@ export class ShareLinks {
       const plugin = this.store.agentPlugin;
       if (plugin?.roomVerificationPolicy(row.room_id).requireVerified && plugin.verificationLevel(identity.identityId) !== "verified")
         fail(403, "unverified_identity", "This room only admits verified agents");
-      if (room.sequence >= 10000 || activeMemberCount(room.state.members) >= PILOT_LIMITS.membersPerRoom) fail(409, "pilot_limit", "This room is full");
+      if (room.sequence >= PILOT_LIMITS.eventsPerRoom || activeMemberCount(room.state.members) >= PILOT_LIMITS.membersPerRoom) fail(409, "pilot_limit", "This room is full");
       assertAdmissibleMemberName(displayName.trim(), room.state.members); // Q3-D: roster check plus role names
       const id = agentJoinPrefix(row) + hash(identity.identityId).slice(0, 28), now = this.store.now();
       // A personal invite whose issuer cannot invite members is dead: the
@@ -377,7 +377,7 @@ export class ShareLinks {
       }
       const room = this.store.room(row.room_id), now = this.store.now();
       assertAdmissibleMemberName(displayName.trim(), room.state.members); // Q3-D: roster check plus role names
-      if (room.sequence >= 10000 || activeMemberCount(room.state.members) >= PILOT_LIMITS.membersPerRoom) fail(409, "pilot_limit", "This room is full; ask its owner for help");
+      if (room.sequence >= PILOT_LIMITS.eventsPerRoom || activeMemberCount(room.state.members) >= PILOT_LIMITS.membersPerRoom) fail(409, "pilot_limit", "This room is full; ask its owner for help");
       if (!auth) {
         // An expired/revoked prior identity needs an explicit sign-out before a
         // fresh guest can be created. A link is never recovery for another account.

@@ -35,7 +35,7 @@
 // a forged token, since honest mints can never exceed the cap).
 
 import { createHash, createPrivateKey, createPublicKey, randomUUID, sign as edSign, verify as edVerify } from "node:crypto";
-import { ServiceError } from "./store.mjs";
+import { ServiceError, PILOT_LIMITS } from "./store.mjs";
 import { assertAdmissibleMemberName } from "./display-name-guard.mjs";
 import { generateKeyPair } from "./agent-card-signing.mjs";
 import { refuseArchivedWrite } from "./room-lifecycle.mjs";
@@ -403,7 +403,7 @@ export class ReferralInvites {
       const room = this.store.room(roomId);
       refuseArchivedWrite(room.state);
       const now = this.now();
-      if (room.sequence + 1 > 2000000) fail(409, "pilot_limit", "Room event limit reached; no data was changed");
+      if (room.sequence + 1 >= PILOT_LIMITS.eventsPerRoom) fail(409, "pilot_limit", "Room event limit reached; no data was changed");
       if (Object.keys(room.state.members).length > 5000) fail(409, "pilot_limit", "Room member limit reached; no data was changed");
 
       if (attached) {

@@ -17,6 +17,8 @@
 // join; a member cannot refer themselves (the referee must be a different,
 // newly-joined member).
 
+// G11: read at call time; store.mjs imports this module, so no module-level copy.
+import { PILOT_LIMITS } from "./store.mjs";
 import { randomUUID } from "node:crypto";
 import { event, EVENT_TYPES as T, isRoomArchived } from "../src/events.js";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
@@ -32,7 +34,6 @@ class ServiceError extends Error {
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 // Mirrors the projection compaction in store.mjs: strip replay-only caches.
 const compactState = state => ({ ...state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} });
-const MAX_ROOM_EVENTS = 10000;
 const MAX_PROJECTION_BYTES = 4 * 1024 * 1024;
 
 export const referralSchema = `
@@ -83,7 +84,7 @@ export class Referrals {
   emitReferralCompleted(roomId, { referrerMemberId, refereeMemberId, via, at }) {
     const room = this.store.room(roomId);
     if (isRoomArchived(room.state)) return;
-    if (room.sequence >= MAX_ROOM_EVENTS) fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
+    if (room.sequence >= PILOT_LIMITS.eventsPerRoom) fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
     const incoming = event({
       id: randomUUID(),
       idempotencyKey: `referral-completed:${roomId}:${refereeMemberId}`,
