@@ -224,7 +224,7 @@ for (const mode of ["signup", "login"]) test(`shared invitation: ${mode} returns
   await p.goto(f.origin + "/#join/" + token);
   await p.locator("#join-link-form").waitFor();
   assert.equal(await p.locator("#join-link-submit").textContent(), "Continue as guest");
-  await p.locator("#join-account-signin").click();
+  if (await p.locator("#join-account-signin").isVisible()) await p.locator("#join-account-signin").click();
   const form = await openMagicSignin(p);
   await form.locator('[name="email"]').fill(email);
   await form.locator('button[type="submit"]').click();
@@ -265,9 +265,10 @@ test("shared invitation: Google handoff preserves invitation and purpose, guest 
     expiresAt: Date.now() + 3600000, maxJoins: 2, expectedMemberRevision: 0 });
   await p.goto(f.origin + "/#join/" + token + "/message/test-welcome");
   await p.locator("#join-link-name").fill("Keep my name");
-  await p.locator("#join-account-signin").click(); await p.locator("#join-account-back").click();
+  // Sign-in and the guest form show together for a signed-out visitor.
+  assert.equal(await p.locator("#join-account-auth").isVisible(), true);
   assert.equal(await p.locator("#join-link-name").inputValue(), "Keep my name");
-  await p.locator("#join-account-signin").click();
+  if (await p.locator("#join-account-signin").isVisible()) await p.locator("#join-account-signin").click();
   const scopeBounds = await p.locator("#join-link-scope").boundingBox();
   const googleBounds = await p.locator("#join-account-google").boundingBox();
   assert.ok(googleBounds.y >= scopeBounds.y + scopeBounds.height, "Google sign-in does not overlap the invitation text");

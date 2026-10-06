@@ -578,6 +578,17 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       $("#join-guest-note").hidden = Boolean(account.authenticated);
       $("#join-link-submit").textContent = returning ? "Open room" : account.authenticated ? "Join room" : "Continue as guest";
       $("#join-link-form").hidden = false; $("#join-link-name").focus();
+      // Signed out: sign-in comes first, with "Continue as guest" below it.
+      // Member and co-admin links need an account, so they offer no guest path.
+      const elevated = preview.link.access && preview.link.access !== "guest";
+      $("#join-account-back").hidden = elevated;
+      if (!account.authenticated && !resume && !fragment.reviewSession && !returning) {
+        $("#join-account-choices").hidden = true; $("#join-account-back").hidden = true;
+        $("#join-account-auth").hidden = false; onAccountSignin("magic");
+        $("#join-link-form").hidden = elevated;
+        if (elevated) $("#join-link-scope").textContent = "Sign in or create an account to join. This invitation gives you room permissions.";
+        $("#join-account-google").focus();
+      }
       if (fragment.reviewSession) {
         reviewedSession = account;
         const identity = account.account?.id;
@@ -638,7 +649,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
   $("#join-account-back").addEventListener("click", () => {
     if (joining || !canLeaveAccountSignin()) return;
     onAccountSignin(null); $("#join-account-auth").hidden = true;
-    $("#join-account-choices").hidden = false; $("#join-link-form").hidden = false;
+    $("#join-account-choices").hidden = true; $("#join-link-form").hidden = false;
     $("#join-link-name").focus();
   });
   $("#shared-agent-copy").addEventListener("click", async () => {
