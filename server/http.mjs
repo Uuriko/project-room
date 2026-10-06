@@ -77,6 +77,7 @@ import { readSpendAllowance, setSpendAllowance } from "./spend-allowance.mjs";
 import { getAgentAutonomyTier, setAgentAutonomyTier } from "./autonomy-tiers.mjs";
 import { listAgentGrants, getAgentCapabilities, issueAgentGrant, revokeAgentGrant } from "./grants.mjs";
 import { listPins, setPin } from "./pins.mjs";
+import { currentTypists, typingBeats, typingKey } from "./typing.mjs";
 import { renderReceiptsHtml, renderReceiptDetailHtml, receiptsListJson, receiptJson, RECEIPTS_PAGE_CSP } from "./receipts-page.mjs";
 import { queryPublicReceipts, publicReceiptById, listPublicReceiptSitemap, PUBLIC_RECEIPT_ID } from "./receipts-live.mjs";
 // --- GR2 public acquisition pages (templates, opt-in room pages, agent directory). ---
@@ -128,6 +129,8 @@ for (const name of ["favicon.svg", "icon.svg", "manifest.webmanifest"]) {
   const asset = assets.get(`/${name}`);
   if (asset) assets.set(`/room/${name}`, asset);
 }
+// GET/HEAD-only liveness paths; any other method is 405 with Allow (#1529).
+const LIVENESS_GET_ONLY_PATHS = new Set(["/api/health", "/api/health/", "/api/version"]);
 const reject = (status, code, message, headers) => { throw new ServiceError(status, code, message, headers ?? null); };
 
 // RFC 9116. Contact comes from ROOM_SECURITY_CONTACT. A bare address becomes
@@ -597,6 +600,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // Avoid local-instance sign-in collisions; namespacing is not host isolation.
   const scopedCookieName = name => `${expectedOrigin().startsWith("https:") ? "__Host-" : ""}${cookieNamespace ? cookieNamespace + "_" : ""}${name}`;
   const streams = new Set();
+  // Typing heartbeat state lives in server/typing.mjs (shared with the route
+  // table's POST /typing handler); the SSE pump below prunes on read.
   const diagnostics = new DiagnosticsLog();
 
   // Route templates for diagnostics: static words only, ids become :item.
@@ -731,6 +736,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // still denied with the same message checkOrigin(req, true) produces.
   function checkPreviewOrigin(req) {
     const origin = req.headers.origin;
+    // Same bearer waiver as protectWrite (#1529): a headless agent with a
+    // Bearer credential and no Origin is not a browser forgery. Without a
+    // credential the Origin is still required (RC-2026-09-23).
+    if (origin === undefined && carriesBearer(req)) return;
     if (origin !== expectedOrigin() && !isEdgeDoorOrigin(origin)) {
       reject(403, "origin_denied", "Origin header is required");
     }
@@ -836,6 +845,17 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           res.write(`id: ${item.sequence}\nevent: room-event\ndata: ${JSON.stringify(item)}\n\n`);
           cursor = item.sequence;
           if (lagging()) break;
+        }
+        // Ephemeral typing indicators ride the stream as synthetic `typing`
+        // events with no `id:` — they never disturb Last-Event-ID resume.
+        // Emitted only when the visible typist set changes for this connection.
+        if (!lagging()) {
+          const typists = currentTypists(typingBeats, roomId, entry.memberId);
+          const key = typingKey(typists);
+          if (key !== entry.lastTypingKey) {
+            entry.lastTypingKey = key;
+            res.write(`event: typing\ndata: ${JSON.stringify({ typists })}\n\n`);
+          }
         }
         if (lagging()) lag();
         // Advance past invisible rows only after the complete visible batch
@@ -1016,6 +1036,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (url.pathname === "/api/version" && ["GET", "HEAD"].includes(req.method)) {
         return json(res, 200, { status: "ok", mode: serviceMode, sourceRevision: SOURCE_REVISION, buildId: BUILD_ID, ...deploymentField }, req.method === "HEAD");
+      }
+      // A known liveness path with the wrong method is 405 with Allow, like the
+      // route table, not a 404 that reads as "this path does not exist" (#1529).
+      if ((LIVENESS_GET_ONLY_PATHS.has(url.pathname) || isHealthAliasPath(inboundPath) || isHealthAliasPath(url.pathname))
+        && req.method !== "OPTIONS") {
+        reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET, HEAD" });
       }
       // Google sign-in (Clerk-free). The start route begins the PKCE flow bound
       // to the browser's account session slot; the callback verifies state and
@@ -3836,6 +3862,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }
         reject(405, "method_not_allowed", "Method not allowed");
       }
+      // Typing heartbeats are served by the route table
+      // (server/routes/typing.mjs); the SSE pump below emits synthetic
+      // `typing` events.
       if (route === "provider-heartbeats" && req.method === "GET") {
         // Round-2 #118: provider heartbeat dashboard.
         return json(res, 200, store.providerHeartbeats(selected.token, roomId, fence));

@@ -1610,6 +1610,30 @@ paths:
           $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/InvalidInput'
+  /api/rooms/{roomId}/typing:
+    post:
+      summary: Send a typing heartbeat
+      description: |
+        Ephemeral typing indicator. Any active member may POST a heartbeat;
+        the beat expires server-side after 10 seconds with no explicit stop.
+        Heartbeats are never persisted and never enter the event log. Viewers
+        learn about typists via synthetic `typing` events on the SSE stream
+        (no `id:`, so Last-Event-ID resume is unaffected). The typist never
+        sees themselves in the typist list.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200':
+          description: Heartbeat recorded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  ttlMs: { type: integer, description: Milliseconds until the beat expires without a fresh heartbeat }
+        '401':
+          description: No room credential, or membership ended (unauthenticated)
   /api/rooms/{roomId}/files:
     get:
       summary: List staged and committed room files
@@ -2722,9 +2746,9 @@ paths:
     post:
       summary: Issue a per-agent spend grant
       description: >-
-        Spend-primitive MVP. Owner or grants:issue delegate only; agents
-        request spend, they never self-issue (grantedBy is the caller, never
-        the agent). Issues or replaces the capability="spend" grant edge for
+        Spend-primitive MVP. Owner or grants:issue delegate only; a delegate
+        can never self-issue (403 spend_grant_self_issue_forbidden) while the
+        owner keeps full authority. Issues or replaces the capability="spend" grant edge for
         one agent member: capCents (integer cents as a string, the grant's
         lifetime ceiling), perTxCapCents (per-call ceiling), optional
         expiresAt (epoch ms). t1_readonly and guest agents cannot hold spend
@@ -8812,7 +8836,7 @@ paths:
           schema: { type: string }
           description: Omit for the current backlog. A number filters each room's event sequence. Pass a returned JSON cursor unchanged, including roomAfter, landIds and floor when present.
       responses:
-        '200': { description: "{ identityId, items, cursor, hasMore, untrusted: true }. Cursor retains rooms/land and adds continuation fields; pass it unchanged." }
+        '200': { description: "{ identityId, items, openWork?, cursor, hasMore, untrusted: true }. openWork lists, per room, ready unclaimed Board items you may claim (count, oldestIdleMinutes, the top 3 in Board order with idleMinutes, and the claim route); it is standing state and never moves the cursor. Cursor retains rooms/land and adds continuation fields; pass it unchanged." }
         '401': { description: unauthenticated }
         '422': { description: invalid_cursor }
         '429': { description: rate_limited }

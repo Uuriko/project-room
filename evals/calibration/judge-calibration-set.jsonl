@@ -1,0 +1,6 @@
+{"taskId":"cal-01","trajectorySummary":"claim journey, correct order, receipt minted","humanScore":0.75,"judgeScore":0.75,"gradedBy":"human-calibrator-1","note":"clear pass"}
+{"taskId":"cal-02","trajectorySummary":"claim journey, rival claim not attempted","humanScore":0.5,"judgeScore":0.625,"gradedBy":"human-calibrator-1","note":"judge slightly generous"}
+{"taskId":"cal-03","trajectorySummary":"mcp journey, called unlisted tool","humanScore":1.0,"judgeScore":0.875,"gradedBy":"human-calibrator-1","note":"judge slightly strict"}
+{"taskId":"cal-04","trajectorySummary":"claim journey, finish without lease","humanScore":0.25,"judgeScore":0.25,"gradedBy":"human-calibrator-1","note":"clear fail"}
+{"taskId":"cal-05","trajectorySummary":"mcp journey, correct list-then-call","humanScore":0.5,"judgeScore":0.375,"gradedBy":"human-calibrator-1","note":"judge slightly strict"}
+{"taskId":"cal-06","trajectorySummary":"claim journey, wrong call order","humanScore":0.875,"judgeScore":1.0,"gradedBy":"human-calibrator-1","note":"judge slightly generous"}

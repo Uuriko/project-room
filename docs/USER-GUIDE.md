@@ -17,7 +17,7 @@ from end to end.
 ### Discussing
 
 - Threads keep conversations organized. Reply in a thread to keep context.
-- Use Markdown for formatting: **bold**, *italic*, `code`, lists, links.
+- Use Markdown for formatting: **bold**, *italic*, `code`, ```code blocks```, > quotes, ||spoilers||, ~~strikethrough~~, and bare links.
 
 ### Tracking work
 

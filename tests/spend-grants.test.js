@@ -27,6 +27,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { AgentRooms, agentRoomSchema } from "../server/agent-rooms.mjs";
 import { createRateLimiter } from "../server/identity-ratelimit.mjs";
 import { createHostedRoomMcp } from "../server/mcp-room-profile.mjs";
+import { issueGrant } from "../server/grants.mjs";
 import { SPEND_GRANT_ROUTES } from "../server/routes/spend-grants.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { setTier } from "../server/autonomy-tiers.mjs";
@@ -45,6 +46,7 @@ import {
   voidSpend,
   chargeSpendBeforeCall,
   readSpendGrantRoute,
+  issueSpendGrantRoute,
 } from "../server/spend-grants.mjs";
 
 function setup(t) {
@@ -158,6 +160,36 @@ test("issuance refusals: guest, t1_readonly, bad caps, non-credits denomination"
   }
 });
 
+// #1521: a grants:issue delegate can mint money. Self-issue through the
+// HTTP boundary must be refused (403); the delegate keeps issuing to
+// others, and the room owner (full authority) may still self-issue.
+test("issueSpendGrantRoute: a grants:issue delegate cannot self-issue; the owner can", async t => {
+  const f = roomWithPeer(t);
+  const now = Date.now();
+  issueGrant(f.store.db, f.roomId, f.peerMemberId, "grants:issue", { grantedBy: f.ownerMemberId, nowMs: now });
+  const selfIssue = spendError(
+    () => issueSpendGrantRoute(f.store, f.peer.secret, f.roomId,
+      { agentId: f.peerMemberId, capCents: "1000000", perTxCapCents: "1000000" }),
+    { status: 403, code: "spend_grant_self_issue_forbidden" });
+  assert.match(selfIssue.message, /themselves/i, "the refusal names the reason");
+  // The refused call minted nothing.
+  assert.equal(resolveSpendGrant(f.store.db, f.roomId, f.peerMemberId, { nowMs: now }), null,
+    "no grant row was written by the refused self-issue");
+  // Issuing to a different member still works for the delegate.
+  const plain = f.store.identities.create("Plain agent");
+  const inv = f.store.invites.create(f.owner.secret, f.roomId, { profile: "chat", displayName: "Plain" }, null);
+  const joined = f.store.invites.redeem(inv.code, { displayName: "Plain", identitySecret: plain.secret });
+  const plainMember = joined.memberId ?? joined.member?.id;
+  setTier(f.store.db, f.roomId, plainMember, "t2_standard", { updatedBy: f.ownerMemberId, nowMs: now });
+  const other = issueSpendGrantRoute(f.store, f.peer.secret, f.roomId,
+    { agentId: plainMember, capCents: "100", perTxCapCents: "10" });
+  assert.equal(other.spend.capCents, "100", "delegates keep issuing to other members");
+  // The room owner holds full authority and may self-issue.
+  const own = issueSpendGrantRoute(f.store, f.owner.secret, f.roomId,
+    { agentId: f.ownerMemberId, capCents: "100", perTxCapCents: "10" });
+  assert.equal(own.spend.capCents, "100", "owner self-issue stays allowed");
+});
+
 test("re-issue upserts caps (explicit un-revoke path)", async t => {
   const f = roomWithPeer(t);
   const now = Date.now();
@@ -246,6 +278,71 @@ test("void releases the reservation; settle/void are idempotent", async t => {
   assert.equal(handle2.settle(), false, "second settle is a no-op");
   assert.equal(voidSpend(f.store.db, { roomId, agentId, nonce: "v2" }), false, "settled rows cannot be voided");
   assert.equal(settleSpend(f.store.db, { roomId, agentId, nonce: "v1" }), false, "voided rows cannot be settled");
+});
+
+// #1525: a process crash between reserve and settle/void left a 'reserved'
+// authorization permanently consuming grant cap and room allowance.
+// Reserves now carry a lease (expires_at = created_at + RESERVE_LEASE_MS);
+// the reaper voids orphaned reservations and releases their room
+// reservations. It runs opportunistically inside authorizeSpend, so the
+// next priced call after a crash reaps what the crashed one left behind.
+test("reserve lease: crashed reservations are reaped and the cap returns", async t => {
+  // Dynamic import: these exports do not exist on the pre-fix code, so the
+  // test must fail there while the rest of the file still runs.
+  const { reapExpiredSpendAuthorizations, RESERVE_LEASE_MS } = await import("../server/spend-grants.mjs");
+  assert.equal(typeof reapExpiredSpendAuthorizations, "function", "reaper must exist (#1525)");
+  assert.ok(Number.isSafeInteger(RESERVE_LEASE_MS) && RESERVE_LEASE_MS > 0, "the lease must be a positive timeout");
+  const f = roomWithPeer(t);
+  const now = Date.now();
+  const roomId = f.roomId, agentId = f.peerMemberId;
+  issueSpendGrant(f.store.db, roomId, agentId, {
+    grantedBy: f.ownerMemberId, capCents: "10", perTxCapCents: "10", nowMs: now,
+  });
+  const reserve = (nonce, at, allowance = null) =>
+    authorizeSpend(f.store.db, { roomId, agentId, toolName: "room_put_file", priceCents: 5, nonce, nowMs: at,
+      ...(allowance === null ? {} : { roomAllowanceCents: allowance, roomCommittedCents: 0 }) });
+  // The handle is dropped without settle/void: the crash.
+  reserve("crash-1", now, 1000);
+  assert.equal(spendGrantSummary(f.store.db, roomId, agentId, { nowMs: now }).remainingCents, "5",
+    "the orphaned reservation consumes cap");
+  assert.equal(
+    f.store.db.prepare(`SELECT COUNT(*) AS n FROM spend_room_reservations WHERE room_id = ? AND status = 'active'`).get(roomId).n,
+    1, "the room reservation is also held by the orphan");
+  // Fresh reservations are NOT reaped before the lease expires.
+  assert.equal(reapExpiredSpendAuthorizations(f.store.db, { roomId, nowMs: now }), 0,
+    "the reaper leaves live reservations alone");
+  // Past the lease the orphan is voided, the cap returns, and the room
+  // reservation is released.
+  const pastLease = now + RESERVE_LEASE_MS + 1;
+  assert.equal(reapExpiredSpendAuthorizations(f.store.db, { roomId, nowMs: pastLease }), 1,
+    "the reaper voids the orphaned reservation");
+  const row = f.store.db.prepare(
+    `SELECT status FROM spend_authorizations WHERE room_id = ? AND agent_id = ? AND nonce = ?`)
+    .get(roomId, agentId, "crash-1");
+  assert.equal(row.status, "voided", "orphans are voided, not settled");
+  assert.equal(spendGrantSummary(f.store.db, roomId, agentId, { nowMs: pastLease }).remainingCents, "10",
+    "the reaped cap is spendable again");
+  assert.equal(
+    f.store.db.prepare(`SELECT COUNT(*) AS n FROM spend_room_reservations WHERE room_id = ? AND status = 'active'`).get(roomId).n,
+    0, "the room reservation was released by the reaper");
+  // Opportunistic: authorizeSpend reaps past-lease rows inside its own
+  // transaction, so a crashed call's cap is back for the next caller.
+  reserve("crash-2", now);
+  const next = reserve("after", pastLease);
+  assert.ok(next, "authorizeSpend past the lease sees the freed cap");
+  assert.equal(spendGrantSummary(f.store.db, roomId, agentId, { nowMs: pastLease }).remainingCents, "5");
+  // Pre-migration rows (expires_at NULL, e.g. written before this fix)
+  // reap from created_at, so old databases converge too.
+  f.store.db.prepare(`INSERT INTO spend_authorizations
+      (room_id, agent_id, nonce, tool_name, price_cents, status, created_at, expires_at)
+      VALUES (?, ?, ?, 'room_put_file', '5', 'reserved', ?, NULL)`)
+    .run(roomId, agentId, "legacy-row", now - RESERVE_LEASE_MS - 60_000);
+  assert.equal(reapExpiredSpendAuthorizations(f.store.db, { roomId, nowMs: now }), 1,
+    "legacy rows without expires_at reap from created_at");
+  const legacy = f.store.db.prepare(
+    `SELECT status FROM spend_authorizations WHERE room_id = ? AND agent_id = ? AND nonce = ?`)
+    .get(roomId, agentId, "legacy-row");
+  assert.equal(legacy.status, "voided");
 });
 
 // --- Refusal honesty ---

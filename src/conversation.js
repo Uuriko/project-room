@@ -201,11 +201,11 @@ const escapeMentionName = value => [...String(value)].map(ch => mentionRegExpSpe
 export function mentionHtml(body, members, esc) {
   const text = renderEmojiShortcodes(body);
   const names = [...(members || [])].filter(m => m?.displayName).sort((a, b) => b.displayName.length - a.displayName.length);
-  if (!names.length) return esc(text);
+  if (!names.length) return markdownHtml(esc(text));
   const pattern = new RegExp(`@(?:${names.map(m => escapeMentionName(m.displayName)).join("|")})(?=\\s|$)`, "g");
   let out = "", last = 0, match;
   while ((match = pattern.exec(text))) {
-    out += esc(text.slice(last, match.index));
+    out += markdownHtml(esc(text.slice(last, match.index)));
     const label = match[0].slice(1);
     const member = names.find(m => m.displayName === label);
     const kind = member?.kind === "agent" ? " agent" : "";
@@ -215,7 +215,46 @@ export function mentionHtml(body, members, esc) {
     out += chip;
     last = match.index + match[0].length;
   }
-  return out + esc(text.slice(last));
+  return out + markdownHtml(esc(text.slice(last)));
+}
+
+// Discord-style markdown for message bodies. Input MUST already be HTML-escaped
+// (esc() applied); output is safe HTML. Store raw, render at view — no server change.
+const mdSlot = "\u0000md";
+export function markdownHtml(escaped) {
+  let text = String(escaped ?? "");
+  const saved = [];
+  const stash = html => {
+    const key = `${mdSlot}${saved.length}${mdSlot}`;
+    saved.push(html);
+    return key;
+  };
+  // Fenced code blocks first (may span lines; inner markdown is literal).
+  text = text.replace(/```(\w*)\n?([\s\S]*?)```/g, (m, lang, code) =>
+    stash(`<code class="md-fence"${lang ? ` data-lang="${lang}"` : ""}>${code.replace(/\n$/, "")}</code>`));
+  // Inline code (inner markdown is literal).
+  text = text.replace(/`([^`\n]+)`/g, (m, code) => stash(`<code>${code}</code>`));
+  // Bold: **x** and __x__ (underscore form needs boundaries so some_variable survives).
+  text = text.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  text = text.replace(/(^|[\s(])__([^_]+)__([\s).,;:!?]|$)/g, "$1<strong>$2</strong>$3");
+  // Italic: *x* and _x_ with boundary guards.
+  text = text.replace(/(^|[\s(])\*([^*\n]+)\*([\s).,;:!?]|$)/g, "$1<em>$2</em>");
+  text = text.replace(/(^|[\s(])_([^_\n]+)_([\s).,;:!?]|$)/g, "$1<em>$2</em>");
+  // Strikethrough and spoiler.
+  text = text.replace(/~~([^~]+)~~/g, "<del>$1</del>");
+  text = text.replace(/\|\|([^|]+)\|\|/g, '<details class="md-spoiler"><summary>spoiler</summary>$1</details>');
+  // Quotes: escaped &gt; at line start (esc() runs before this).
+  text = text.replace(/^&gt; ?(.*)$/gm, '<span class="md-quote">$1</span>');
+  // Autolink bare URLs (after code extraction so code spans stay literal).
+  // The URL text is already escaped: quotes are &quot; so no attribute breakout.
+  text = text.replace(/(^|[\s(])(https?:\/\/[^\s<>"')]+)/g, (m, pre, url) => {
+    const clean = url.replace(/[.,;:!?]+$/, "");
+    const tail = url.slice(clean.length);
+    return `${pre}<a href="${clean}" target="_blank" rel="noopener noreferrer">${clean}</a>${tail}`;
+  });
+  // Restore stashed code (placeholders carry no markdown-significant characters).
+  for (let i = 0; i < saved.length; i++) text = text.split(`${mdSlot}${i}${mdSlot}`).join(saved[i]);
+  return text;
 }
 
 export function composerPlaceholder({ workKind = null, inThread = false, channelName = "general" } = {}) {
