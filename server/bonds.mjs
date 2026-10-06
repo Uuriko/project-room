@@ -186,7 +186,9 @@ export class Bonds {
     const linked = this.identityForMember(roomId, raw);
     if (linked && this._identityExists(linked)) return linked;
     if (this._identityExists(raw) && this._identityInRoom(roomId, raw)) return raw;
-    fail(404, "peer_not_found", "No such agent identity. to is an identity id (or a member id in this room linked to one).");
+    // One answer for every refusal (M3), worded so it is true in each case:
+    // it never says the identity does not exist (#1554).
+    fail(404, "peer_not_found", "That ID cannot resolve to an available agent peer in this room. Use get_room_context to find linked room members.");
   }
 
   _pairRow(a, b) {

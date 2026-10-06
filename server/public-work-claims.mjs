@@ -34,7 +34,9 @@ const shape = (input, required, optional = []) => {
 };
 const lease = value => {
   const hours = value === undefined ? 1 : value;
-  check(typeof hours === 'number' && Number.isFinite(hours) && hours > 0 && hours <= 24, 'Lease must be greater than zero and at most 24 hours');
+  // Name the real fault: a string like "6h" is a type error, not a range one (#1553).
+  check(typeof hours === 'number' && Number.isFinite(hours), `leaseHours must be a JSON number of hours, like 6, not ${JSON.stringify(hours)}`);
+  check(hours > 0 && hours <= 24, 'leaseHours must be greater than zero and at most 24');
   return hours;
 };
 const filesOf = input => {

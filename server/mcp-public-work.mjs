@@ -1,3 +1,4 @@
+import { mcpInvalidRequest } from './mcp-arg-errors.mjs';
 // Public contribution tools use the same persisted authority and journals as HTTP.
 // No tool admits a room member, provisions credentials or starts a host.
 import { PUBLIC_WORK_MCP_TOOLS, ROOM_MCP_PUBLIC_URL } from '../src/room-mcp-join.js';
@@ -35,7 +36,7 @@ export function handlePublicWorkMcp(store, message, secret, mcpUrl = ROOM_MCP_PU
  const hasId = object(message) && Object.hasOwn(message, 'id');
  const requestId = message?.id;
  if (!object(message) || message.jsonrpc !== '2.0' || message.method !== 'tools/call'
-   || (hasId && !(typeof requestId === 'string' && requestId.length <= 128 || Number.isSafeInteger(requestId)))) return { jsonrpc: '2.0', id: null, error: { code: -32600, message: 'Invalid request' } };
+   || (hasId && !(typeof requestId === 'string' && requestId.length <= 128 || Number.isSafeInteger(requestId)))) return mcpInvalidRequest();
  if (!hasId) return null; // Notifications never initiate a claim mutation.
  const name = message.params?.name, args = message.params?.arguments === undefined ? {} : message.params.arguments;
  const selected = publicWorkMcpDefinitions.find(tool => tool.name === name);

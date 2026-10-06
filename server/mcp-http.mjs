@@ -10,7 +10,7 @@ import {
   isRoomMcpPath, roomMcpUrlForHost, roomMcpJoinText, roomMcpJoinJson, roomMcpSnippets, ROOM_MCP_SERVER_NAME,
   ROOM_MCP_SERVER_VERSION, HOSTED_ROOM_MCP_TOOLS, PUBLIC_WORK_MCP_TOOLS, isHostedMcpToolName
 } from "../src/room-mcp-join.js";
-import { closestToolName, diagnoseArguments, mcpCallError, mcpTransportError } from "./mcp-arg-errors.mjs";
+import { closestToolName, diagnoseArguments, mcpCallError, mcpInvalidRequest, mcpTransportError } from "./mcp-arg-errors.mjs";
 import { livePublicMcpTools } from "./mcp-discovery.mjs";
 import { MCP_DISCOVERY_BLOCK } from "./discoverability.mjs";
 
@@ -56,7 +56,7 @@ export function handleMcpJoinRpc(message, { mcpUrl } = {}) {
   const requestId = message?.id;
   if (!object(message) || message.jsonrpc !== "2.0" || typeof message.method !== "string"
     || (hasId && !(typeof requestId === "string" && requestId.length <= 128 || Number.isSafeInteger(requestId)))) {
-    return { jsonrpc: "2.0", id: null, error: { code: -32600, message: "Invalid request" } };
+    return mcpInvalidRequest();
   }
   if (!hasId) return null;
   if (message.method === "ping") return { jsonrpc: "2.0", id: requestId, result: {} };
