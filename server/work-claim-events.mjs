@@ -13,7 +13,7 @@ import { randomUUID } from "node:crypto";
 import { EVENT_TYPES, WORK_CLAIM_EVENT_ACTIONS, applyEvent, event, firstBlockedWakeTarget, isRoomArchived } from "../src/events.js";
 import { getTier } from "./autonomy-tiers.mjs";
 import { postReceiptCard } from "./receipt-cards.mjs";
-import { namedReviewers, hasCurrentReview } from "./work-claims.mjs";
+import { resolveNamedReviewers, hasCurrentReview } from "./work-claims.mjs";
 
 export const WORK_CLAIM_ACTIONS = WORK_CLAIM_EVENT_ACTIONS;
 
@@ -129,7 +129,9 @@ export function wakeNamedReviewers(store, roomId, item, { actorId } = {}) {
   if (!item || item.state === "done" || !item.owner || item.supersededBy) return [];
   if (!(item.state === "in_progress" || item.pullRequest || (item.pullRequests ?? []).length)) return [];
   const head = item.ci?.headSha ?? item.revision ?? item.claimedAt ?? "none";
-  return namedReviewers(item).filter(memberId => memberId !== item.owner && !hasCurrentReview(item, memberId))
+  let members = {};
+  try { members = (store.roomAuthority?.(roomId) ?? store.room(roomId)?.state)?.members ?? {}; } catch { return []; }
+  return resolveNamedReviewers(item, members).filter(memberId => memberId !== item.owner && !hasCurrentReview(item, memberId))
     .map(memberId => enqueueClaimWake(store, roomId, memberId, `work-claim:${item.id}:review:${head}`,
       { reason: "review", actorId: actorId ?? item.owner }));
 }

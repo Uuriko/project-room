@@ -17,7 +17,7 @@ import { ServiceError } from "./store.mjs";
 import { nextWorkStep } from "../src/workflow.js";
 import { retiredNeedsMeKeys } from "./updates.mjs";
 import { mayWriteWorkClaims } from "./work-claim-routes.mjs";
-import { claimUpdatedAt, isHardWork, namedReviewers, hasCurrentReview } from "./work-claims.mjs";
+import { claimUpdatedAt, isHardWork, resolveNamedReviewers, hasCurrentReview } from "./work-claims.mjs";
 
 const MAX_ROOMS = 40;
 const MAX_PER_KIND = 8;
@@ -327,11 +327,11 @@ export function openWorkOf(store, roomId, memberId, authority, nowMs = Date.now(
 // linked PR). Standing state like openWork: it never moves the cursor, it
 // retires when the member records a review on the current basis, and it
 // returns when the head moves.
-export function reviewAsksOf(store, roomId, memberId) {
+export function reviewAsksOf(store, roomId, memberId, authority) {
   let list;
   try { list = store.workClaims?.list(roomId) ?? []; } catch { return null; }
   const asks = list.filter(item => item && item.state !== "done" && !item.supersededBy && item.owner && item.owner !== memberId
-      && namedReviewers(item).includes(memberId)
+      && resolveNamedReviewers(item, authority?.members).includes(memberId)
       && (item.state === "in_progress" || item.pullRequest || (item.pullRequests ?? []).length)
       && !hasCurrentReview(item, memberId))
     .sort((a, b) => String(claimUpdatedAt(b) ?? "").localeCompare(String(claimUpdatedAt(a) ?? "")) || String(a.id).localeCompare(String(b.id)));
@@ -344,7 +344,8 @@ export function reviewAsksOf(store, roomId, memberId) {
       title: String(item.title ?? "").slice(0, OPEN_WORK_TITLE),
       owner: item.owner,
       ...(item.pullRequest?.url ? { pullRequest: item.pullRequest.url } : {}),
-      ...((item.ci?.headSha ?? item.revision) ? { headSha: item.ci?.headSha ?? item.revision } : {})
+      ...(item.ci?.headSha ? { headSha: item.ci.headSha } : {}),
+      ...(item.revision ? { revision: item.revision } : {})
     })),
     next: `POST /api/rooms/${encodeURIComponent(roomId)}/work-claims/{id}/review`
   };
@@ -391,7 +392,7 @@ export function collectNeedsMe(store, secret, { since } = {}) {
     // One summary per room this page walks (at most MAX_ROOMS), none dropped.
     const open = openWorkOf(store, link.roomId, link.memberId, authority);
     if (open) openWork.push(open);
-    const asks = reviewAsksOf(store, link.roomId, link.memberId);
+    const asks = reviewAsksOf(store, link.roomId, link.memberId, authority);
     if (asks) reviewAsks.push(asks);
     const after = roomWatermark(parsed, link.roomId);
     const landAfter = landWatermark(parsed, link.roomId);
