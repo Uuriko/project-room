@@ -44,12 +44,12 @@ test('existing 2-way split API is unchanged', () => {
 });
 
 test('split guard throws when a solver touches a hidden test task', async () => {
-  const { test } = splitTrainDevTest(tasks, { devFraction: 0.15, testFraction: 0.15 });
-  const visible = new Set(tasks.filter((t) => !test.some((x) => x.id === t.id)).map((t) => t.id));
+  const { test: testSplit } = splitTrainDevTest(tasks, { devFraction: 0.15, testFraction: 0.15 });
+  const visible = new Set(tasks.filter((t) => !testSplit.some((x) => x.id === t.id)).map((t) => t.id));
   const guard = createSplitGuard({ visibleIds: visible });
   const sneaky = guard(async (task) => ({ trajectory: [], finalAnswer: 'x' }));
   await sneaky({ id: [...visible][0] }); // visible task passes through
-  await assert.rejects(() => sneaky(test[0]), new RegExp(test[0].id), 'guard must name the leaked task id');
+  await assert.rejects(() => sneaky(testSplit[0]), new RegExp(testSplit[0].id), 'guard must name the leaked task id');
 });
 
 test('sealed run never shows test tasks to the tuning solver', async () => {
