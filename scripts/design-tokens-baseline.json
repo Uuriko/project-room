@@ -307,7 +307,6 @@
     "src/styles.css ::: .share-dialog textarea { font-size: 1rem; overflow-wrap: anywhere; }": 1,
     "src/styles.css ::: .sidebar-head .room-overview-open > span:last-child { flex: none; font-size: 1rem; font-weight: 400; color: var(--muted); }": 1,
     "src/styles.css ::: .sidebar-label { margin: 0 0 .3rem; color: var(--muted); font-size: .75rem; font-weight: 600; letter-spacing: 0; }": 1,
-    "src/styles.css ::: .signin-entry-routes #agent-signin-button { justify-self: start; min-height: 44px; font-size: .9rem; color: var(--text); text-decoration: underline; text-underline-offset: .2em; }": 1,
     "src/styles.css ::: .signin-methods #google-signin { font-size: 1rem; padding: .75rem 1rem; margin: 0; }": 1,
     "src/styles.css ::: .signin-methods .button { width: 100%; justify-content: center; min-height: 48px; font-size: 1rem; line-height: 1.4; padding: .75rem 1rem; margin: 0; }": 1,
     "src/styles.css ::: .source-context { margin-bottom: .75rem; padding: .65rem; border-left: 2px solid var(--violet); background: #1a1625; color: #b9acce; font-size: .69rem; line-height: 1.45; }": 3,
