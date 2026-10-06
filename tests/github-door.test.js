@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
@@ -12,6 +14,52 @@ import { parseDoorComment, parseAllowlist, inboundCommand, commandIdFor, readCur
   runInbound, runOutbound, resolveConfig, OUT_MARKER } from "../scripts/github-door.mjs";
 
 const repo = "Uuriko/project-room";
+
+test("a requested inbound delivery fails the CLI when the door is unconfigured", () => {
+  const result = spawnSync(process.execPath, [fileURLToPath(new URL("../scripts/github-door.mjs", import.meta.url)), "in"], {
+    env: { ...process.env, ROOM_DOOR_SECRET: "", GITHUB_REPOSITORY: repo }, encoding: "utf8"
+  });
+  assert.equal(result.error, undefined);
+  assert.equal(result.status, 1);
+  assert.match(result.stdout, /ROOM_DOOR_SECRET/);
+  const scheduled = spawnSync(process.execPath, [fileURLToPath(new URL("../scripts/github-door.mjs", import.meta.url)), "out"], {
+    env: { ...process.env, ROOM_DOOR_SECRET: "", GITHUB_REPOSITORY: repo }, encoding: "utf8"
+  });
+  assert.equal(scheduled.status, 0, "an unused scheduled door can remain disabled");
+});
+
+test("outbound checkpoints quiet pages so later public messages remain reachable", async t => {
+  for (const ignoredMessages of [false, true]) await t.test(ignoredMessages ? "own and private messages" : "non-message events", async () => {
+    const comments = [], requested = [];
+    const client = { roomMessages: async ({ after, limit }) => {
+      requested.push(after);
+      assert.equal(limit, 100);
+      if (after < 2000) return { messages: ignoredMessages ? [
+        { sequence: after + 1, from: "door", messageId: `own-${after}`, body: "own post" },
+        { sequence: after + 2, from: "peer", messageId: `dm-${after}`, body: "private text", private: true }
+      ] : [], next: after + 100, hasMore: true };
+      return { messages: after === 2000 ? [{ sequence: 2001, from: "peer", messageId: "later", body: "later public message" }] : [],
+        next: 2001, hasMore: false };
+    } };
+    const fetchImpl = async (_url, init = {}) => {
+      if (init.method === "GET") return new Response(JSON.stringify(comments));
+      assert.equal(init.method, "POST");
+      const comment = { ...JSON.parse(init.body), user: { login: "github-actions[bot]", type: "Bot" } };
+      comments.push(comment); return new Response(JSON.stringify(comment), { status: 201 });
+    };
+    const options = { repo, doorIssue: 7, token: "synthetic", client, roomId: "commons", selfMemberId: "door", fetchImpl };
+    const first = await runOutbound(options);
+    assert.equal(first.cursor, 2000);
+    assert.equal(readCursor(comments), 2000, "the scanned boundary must survive the next invocation");
+    await runOutbound(options);
+    assert.equal(requested[20], 2000);
+    assert.match(comments.at(-1).body, /later public message/);
+    assert.ok(comments.every(c => !c.body.includes("own post") && !c.body.includes("private text")));
+    const quiet = await runOutbound(options);
+    assert.equal(quiet.posted, false);
+    assert.equal(comments.length, 2);
+  });
+});
 
 test("only trusted, non-empty, non-digest comments enter the room", () => {
   const allow = parseAllowlist("codex-cloud[bot], Some-Agent");

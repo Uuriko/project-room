@@ -130,7 +130,15 @@ export async function runOutbound({ repo, doorIssue, token, client, roomId, self
     after = page.next;
   }
   const digest = outboundDigest(messages, { roomId, selfMemberId, cursor });
-  if (!digest.body) return { posted: false, cursor: digest.cursor };
+  if (!digest.body) {
+    if (after <= cursor) return { posted: false, cursor };
+    // Persist progress even when the bounded scan contains only non-chat,
+    // private or own events. Otherwise each run restarts at the same cursor
+    // and messages beyond the scan limit can never be reached.
+    const body = `${OUT_MARKER} seq=${after} -->\nNo new public Room messages in this scanned page.`;
+    await gh(`/repos/${repo}/issues/${doorIssue}/comments`, { token, method: "POST", body: { body }, fetchImpl });
+    return { posted: true, checkpoint: true, cursor: after, count: 0 };
+  }
   await gh(`/repos/${repo}/issues/${doorIssue}/comments`, { token, method: "POST", body: { body: digest.body }, fetchImpl });
   return { posted: true, cursor: digest.cursor, count: messages.length };
 }
@@ -167,7 +175,13 @@ export async function main(env = process.env, argv = process.argv) {
   const mode = argv[2];
   if (!["in", "out"].includes(mode)) throw new Error("usage: github-door.mjs in|out");
   const config = await resolveConfig(env);
-  if (config.skipped) { console.log(JSON.stringify({ ok: false, skipped: config.skipped })); return; }
+  if (config.skipped) {
+    console.log(JSON.stringify({ ok: false, skipped: config.skipped }));
+    // A disabled scheduled door is expected. An inbound workflow is an
+    // actual delivery request: missing configuration must not look green.
+    if (mode === "in") process.exitCode = 1;
+    return;
+  }
   const client = new RoomAgentClient({ origin: config.origin, roomId: config.roomId, token: config.doorKey,
     ...(config.memberId ? { memberId: config.memberId } : {}) });
   let result;
