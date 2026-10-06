@@ -1,0 +1,7 @@
+Content-Type: multipart/mixed; boundary=abc
+
+--abcX
+not a delimiter
+--abc
+part one
+--abc--

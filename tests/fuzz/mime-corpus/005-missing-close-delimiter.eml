@@ -1,0 +1,6 @@
+Content-Type: multipart/mixed; boundary=zz
+
+--zz
+Content-Type: text/plain
+
+hello there, no close delimiter
