@@ -143,3 +143,14 @@ test("H-19: a high-entropy token beside an allowlisted word is still flagged", (
   assert.equal(findings.length, 1);
   assert.equal(findings[0].rule, "high-entropy");
 });
+
+test("wallet seed detection covers JSON and assignment keys without exposing words", () => {
+  const words = Array.from({ length: 12 }, () => "sample").join(" ");
+  for (const key of ["mnemonic", "seed_phrase", "recovery-phrase"]) {
+    for (const text of [JSON.stringify({ [key]: words }), `${key} = "${words}"`]) {
+      const finding = scanText(text).find(item => item.rule === "wallet-seed");
+      assert.ok(finding, key);
+      assert.ok(!finding.preview.includes(words));
+    }
+  }
+});

@@ -26,7 +26,7 @@ const PATTERNS = [
   // recovery context, quoted (unquoted prose in docs stays quiet). The
   // telegram_bot_token class of incident applies here too — a committed
   // mnemonic is a drained wallet.
-  { id: "wallet-seed", label: "wallet seed phrase", regex: /\b(?:seed[_-]?phrase|mnemonic|recovery[_-]?phrase)\b\s*[:=]\s*["']([a-z]+(?:\s+[a-z]+){11,23})["']/i },
+  { id: "wallet-seed", label: "wallet seed phrase", regex: /\b(?:seed[_-]?phrase|mnemonic|recovery[_-]?phrase)\b["']?\s*[:=]\s*["']([a-z]+(?:\s+[a-z]+){11,23})["']/i },
 ];
 const ENTROPY_THRESHOLD = 4.5, ENTROPY_MIN_LENGTH = 24;
 class SecretScanError extends Error { constructor(code, message) { super(message); this.name = "SecretScanError"; this.code = code; } }

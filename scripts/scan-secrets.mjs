@@ -46,7 +46,7 @@ const PATTERNS = [
   // recovery context, quoted. A committed mnemonic is a drained wallet.
   {
     name: "wallet seed phrase",
-    re: /\b(?:seed[_-]?phrase|mnemonic|recovery[_-]?phrase)\b\s*[:=]\s*["']([a-z]+(?:\s+[a-z]+){11,23})["']/i,
+    re: /\b(?:seed[_-]?phrase|mnemonic|recovery[_-]?phrase)\b["']?\s*[:=]\s*["']([a-z]+(?:\s+[a-z]+){11,23})["']/i,
   },
 ];
 
