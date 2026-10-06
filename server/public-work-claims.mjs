@@ -269,15 +269,39 @@ export class PublicWorkClaims {
     });
   }
 
-  receipt(receiptId) {
-    check(identifier(receiptId), 'Invalid receipt ID');
-    const row = this.available() && this.db.prepare('SELECT receipt_json FROM public_work_receipts WHERE receipt_id=?').get(receiptId);
-    if (!row) fail(404, 'public_receipt_not_found', 'Public receipt not found');
-    return JSON.parse(row.receipt_json);
+  receiptRoomId(receiptId) {
+    return this._receiptRow(receiptId).roomId;
   }
-  artifact(receiptId) {
-    this.receipt(receiptId);
-    const row = this.db.prepare('SELECT artifact_text,artifact_sha256,artifact_bytes FROM public_work_receipts WHERE receipt_id=?').get(receiptId);
-    return { artifactText: row.artifact_text, sha256: row.artifact_sha256, bytes: row.artifact_bytes };
+  // Owner-only public-receipts toggle: a room that turned receipts private
+  // still serves them to its members; everyone else gets 403. Rows without
+  // a task link (legacy) stay public, preserving current behavior.
+  _receiptRow(receiptId) {
+    check(identifier(receiptId), 'Invalid receipt ID');
+    const row = this.available() && this.db.prepare(
+      `SELECT r.receipt_json AS receiptJson, t.room_id AS roomId
+       FROM public_work_receipts r LEFT JOIN public_work_tasks t ON t.offer_id = r.offer_id
+       WHERE r.receipt_id = ?`).get(receiptId);
+    if (!row) fail(404, 'public_receipt_not_found', 'Public receipt not found');
+    return { receiptJson: row.receiptJson, roomId: row.roomId ?? null };
+  }
+  _requireReceiptVisible(roomId, memberId) {
+    if (this.store.roomDirectory.publicReceiptsVisible(roomId)) return;
+    if (typeof memberId === "string" && memberId) {
+      const members = this.store.roomAuthority(roomId)?.members ?? {};
+      const member = members[memberId];
+      if (member && member.active !== false) return;
+    }
+    fail(403, 'receipts_private', 'This room keeps its work receipts private');
+  }
+  receipt(receiptId, viewer = {}) {
+    const row = this._receiptRow(receiptId);
+    this._requireReceiptVisible(row.roomId, viewer.memberId);
+    return JSON.parse(row.receiptJson);
+  }
+  artifact(receiptId, viewer = {}) {
+    const row = this._receiptRow(receiptId);
+    this._requireReceiptVisible(row.roomId, viewer.memberId);
+    const detail = this.db.prepare('SELECT artifact_text,artifact_sha256,artifact_bytes FROM public_work_receipts WHERE receipt_id=?').get(receiptId);
+    return { artifactText: detail.artifact_text, sha256: detail.artifact_sha256, bytes: detail.artifact_bytes };
   }
 }
