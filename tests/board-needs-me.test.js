@@ -19,7 +19,7 @@ test("leases under an hour, quiet claims and reviews owed are sorted into the in
     claim("fine"),
     claim("rev-by-id", { owner: other, state: "in_progress", tags: [`rev-${me}`] }),
     claim("rev-by-slug", { owner: other, tags: ["rev-codexqa"] }),
-    claim("already-reviewed", { owner: other, tags: [`rev-${me}`], reviews: [{ memberId: me, verdict: "approve" }] }),
+    claim("already-reviewed", { owner: other, tags: [`rev-${me}`], reviews: [{ memberId: me, verdict: "approve", basis: { version: 1, owner: other, claimedAt: null, revision: null, headSha: null } }] }),
     claim("partner", { owner: null, state: "unclaimed", tags: [`build-${me}`] }),
     claim("not-mine", { owner: other }),
     claim("done", { state: "done", leaseExpiresAt: iso(now - 1) })
@@ -82,4 +82,9 @@ test("a display-name slug shared by two members matches neither; ids always matc
   const items = [claim("by-slug", { owner: other, tags: ["rev-codexqa"] }), claim("by-id", { owner: other, tags: [`rev-${me}`] })];
   assert.deepEqual(myBoardWork(items, me, twins, now).reviews.map(x => x.item.id), ["by-id"]);
   assert.deepEqual(myBoardWork(items, "ai_twin", twins, now).reviews.map(x => x.item.id), []);
+});
+
+test("a new head restores the review ask instead of trusting stale approval", () => {
+  const item = claim("changed", { owner: other, tags: [`rev-${me}`], ci: { headSha: "b".repeat(40) }, reviews: [{ memberId: me, basis: { version: 1, owner: other, claimedAt: null, revision: null, headSha: "a".repeat(40) } }] });
+  assert.deepEqual(myBoardWork([item], me, members, now).reviews.map(row => row.item.id), ["changed"]);
 });

@@ -58,7 +58,9 @@ export function myBoardWork(items, viewerId, members = {}, now = Date.now()) {
     }
     if (item.owner === viewerId) continue;
     const reviewer = tagged(item, "rev-", viewerId, viewerSlug);
-    const reviewed = (Array.isArray(item.reviews) ? item.reviews : []).some(review => review?.memberId === viewerId);
+    const reviewed = (Array.isArray(item.reviews) ? item.reviews : []).some(review => review?.memberId === viewerId && review.basis?.version === 1
+      && review.basis.owner === item.owner && review.basis.claimedAt === (item.claimedAt ?? null)
+      && review.basis.revision === (item.revision ?? null) && review.basis.headSha === (item.ci?.headSha ?? null));
     const reviewable = open || Boolean(item.pullRequest?.url && !item.pullRequest.outcome);
     if (reviewer && reviewable && item.owner && !reviewed) { out.reviews.push({ item }); continue; }
     if ((reviewer || tagged(item, "build-", viewerId, viewerSlug)) && (open || item.state === "unclaimed")) out.partnered.push({ item });
