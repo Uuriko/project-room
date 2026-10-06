@@ -40,6 +40,7 @@ import { handoffEnvelopeListHtml, envelopesForWork } from "./handoff-envelope-ui
 import { installHumanPush } from "./human-push.js";
 import { chatSuggestions, ASK_AGENT_AFTER_MS } from "./chat-suggestions.js";
 import { paintClaimChat } from "./board-ui.js";
+import { installHumanExperience } from "./human-experience.js";
 
 // Keep a connector/native consent journey through password or provider login.
 // Only our exact consent path is a return target; never follow arbitrary URLs.
@@ -464,6 +465,7 @@ const client = new RoomClient({
     $("#signout-button").disabled = pendingSignout;
     workFormOpener = null; clearNotice();
     $("#main").hidden = true; $("#auth-panel").hidden = false; $("#signout-button").hidden = true;
+    humanExperience?.sync();
     $("#account-settings-button").hidden = true;
     syncSessionMenu();
     $("#auth-panel").setAttribute("aria-busy", pendingSignout ? "true" : "false");
@@ -1137,7 +1139,7 @@ const memberLabel = id => id == null ? "Unassigned" : state.members[id] ? `${sta
 // Keep ordinary conversation readable; exact IDs remain in details and decision
 // controls. Duplicate names retain the full ID so attribution stays unambiguous.
 let displayNames = createMemberDisplayNames({});
-const displayName = id => displayNames(id);
+const displayName = id => humanExperience?.assistantName(id) || displayNames(id);
 const name = displayName; // Ordinary summaries use the same duplicate-aware attribution as authors.
 const can = capability => state?.members[session?.member.id]?.permissions.includes(capability);
 const sameSession = (generation, roomId, memberId) => generation === client.generation && state
@@ -2027,6 +2029,7 @@ function render() {
   renderReturnBrief({ timelineRendered: true });
   setText("#decision-count", state.eventLog.filter(e => e.type === T.DECISION_RECORDED).length || "");
   renderRecordPanel();
+  humanExperience?.sync();
 }
 function renderRecordPanel() {
   if (!state || !$("#settings-dialog").open || $("#settings-dialog").classList.contains("results-only") || !$("#record-panel").open) return;
@@ -3646,6 +3649,8 @@ $("#join-agent-copy")?.addEventListener("click", async () => {
 });
 // C1: mobile session menu (short header) - toggle, Escape, outside click.
 installRoomLayout();
+const humanExperience = installHumanExperience({ getState: () => state, getSession: () => session, client, notice,
+  openWork: id => revealWork(id), openMessage: id => revealMessage(id), selectResult: (id, messageId) => openWorkAction(state.workItems[id], "complete", messageId), refreshTranscript: () => { if (state) renderMessages(); } });
 const sessionMenu = $("#session-menu");
 const sessionMenuButton = $("#session-menu-button");
 const setSessionMenuOpen = open => {
@@ -3782,6 +3787,7 @@ $("#message-form").addEventListener("submit", e => {
   if (composerOverLimit()) { renderComposerLength(); return; }
   if (requestMode) { submitRequest(e.currentTarget); return; }
   const content = { body: $("#message-input").value.trim(), toMemberId: $("#message-to-select").value || null, replyToId, channelId: activeChannelId };
+  const askRoom = humanExperience.intent(content);
   if (!content.body) return;
   if (composerFiles.some(file => file.status === "uploading")) { setComposerError("Wait for the file to finish attaching."); return; }
   // "Also send to channel": a public thread reply also lands as a top-level
@@ -3814,6 +3820,7 @@ $("#message-form").addEventListener("submit", e => {
     $("#message-input").value = ""; pendingMessage = null; clearReply();
     $("#also-send-to-channel").checked = false;
     persistDrafts();
+    await humanExperience.posted(data.messageId, askRoom);
     maybeShowGuestUpgradeHint();
   }, { failureHint: "Draft kept. Send again to retry." });
 });
@@ -5817,6 +5824,7 @@ $("#room-results-list").addEventListener("click", e => {
 function openWorkAction(item, action, draftMessageId = null, offerId = null) {
   if (pendingAction?.uncertain) { resumeAction(); return; }
   if (!item || !Object.hasOwn(actionSpecs, action)) return;
+  if (action === "complete" && !draftMessageId && humanExperience.shareResult(item)) return;
   const [type, , fields] = actionSpecs[action];
   actionEpoch++;
   pendingAction = { type, action, workId: item.id, revision: item.revision, draftMessageId, receipt: item.receipt ? { completionEventId: item.receipt.eventId, evidenceVersion: item.receipt.evidenceVersion } : null, retry: null, uncertain: false, error: "" };

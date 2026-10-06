@@ -13095,6 +13095,57 @@ paths:
         '401': { description: unauthenticated }
         '200': { description: "{ contractVersion, roomId, viewer*, evaluatedThrough, selection, requests, scope }" }
         '422': { description: invalid_reply_selection }
+  /api/rooms/{roomId}/assistant:
+    get:
+      summary: Read the shared room assistant and public requests
+      description: Room membership and rooms read scope required. Returns configuration revision, honest connection availability and up to 100 public runs. Own visible shared source messages define invocation; private messages and hidden history are excluded. Runs contain authored input references, one permanent host attempt, revision and bounded reported public activity. Working becomes unknown after two minutes without a host update. Reading does not start execution or mark read.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200': { description: Configuration and bounded public run projection }
+        '401': { description: Current room authentication required }
+        '403': { description: Scope or access denied }
+    head:
+      summary: Check authenticated shared assistant projection availability
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200': { description: Same status and headers as GET without body }
+        '401': { description: Current room authentication required }
+        '403': { description: Scope or access denied }
+    post:
+      summary: Coordinate an explicitly requested shared assistant run
+      description: Room membership and rooms write scope required; browser writes require same-origin CSRF. Every operation requires a stable requestId and exact retry input. Configure is owner-only and fences expectedRevision. Human invoke and contribute require their own visible public sourceMessageId. Invoke requires a configured authorized agent; no external host is launched. Claim and report are reserved to that coordinator with accept_work and permitted autonomy tier. Claim reserves one attemptId permanently. Existing run writes fence expectedRevision. Conflicting inputs need requester or owner resolution. Pause/cancel stay requested until the host acknowledges. Requester or owner resume fences the paused run revision; an already reserved host must acknowledge resume before Working is shown. Human contributions never refresh host freshness. Done requires a public resultMessageId already authored by the coordinator; it does not approve a separate work artifact.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [action, requestId]
+              properties:
+                action: { type: string, enum: [configure, invoke, contribute, resolve, claim, report, pause, cancel, resume] }
+                requestId: { type: string, minLength: 1, maxLength: 128 }
+                runId: { type: string, minLength: 1, maxLength: 128 }
+                sourceMessageId: { type: string, minLength: 1, maxLength: 128 }
+                expectedRevision: { type: integer, minimum: 0 }
+                attemptId: { type: string, minLength: 1, maxLength: 128 }
+                name: { type: string, minLength: 1, maxLength: 64 }
+                coordinatorMemberId: { type: [string, 'null'] }
+                conflict: { type: boolean }
+                state: { type: string, enum: [working, needs_input, paused, cancelled, done, failed] }
+                summary: { type: string, minLength: 1, maxLength: 2000 }
+                resultMessageId: { type: string, minLength: 1, maxLength: 128 }
+                appliedInputMessageIds: { type: array, maxItems: 100, items: { type: string } }
+      responses:
+        '200': { description: Durable operation receipt with current recorded result }
+        '401': { description: Current room authentication required }
+        '403': { description: Scope or author/coordinator authority denied }
+        '409': { description: Revision conflict, changed retry, reserved attempt, stop pending or assistant unavailable }
+        '422': { description: Invalid action-specific input }
   /api/rooms/{roomId}/request-runs:
     get:
       summary: Read host status for requests you sent or received

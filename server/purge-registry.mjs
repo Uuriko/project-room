@@ -21,6 +21,7 @@ function freezeVia(via) {
 }
 
 const ROWS = [
+  ...["room_assistant_config", "room_assistant_runs", "room_assistant_ops"].map(table => ({ table, key: "room_id", action: "delete", optional: true, match: { room: ["room_id"] } })),
   // Retired schemas remain in upgraded databases but are never created on a
   // fresh store. Their room-owned rows still belong in confirmed room purge.
   ...[

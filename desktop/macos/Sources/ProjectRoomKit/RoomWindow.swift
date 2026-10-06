@@ -25,9 +25,16 @@ public enum RoomLocation {
     private var pendingDestination: URL?
     private var signInPending = false
     private var signInSlot: String?
+    private var cancelledDownloads = Set<ObjectIdentifier>()
+    private let acceptanceDownloadDestination: ((String) -> URL?)?
+    public private(set) var completedDownloadCount = 0
+    public private(set) var failedDownloadCount = 0
 
-    public init(url: URL, isolated: Bool = false) {
+    public init(url: URL, isolated: Bool = false, acceptanceDownloadDestination: ((String) -> URL?)? = nil) {
         precondition(RoomLocation.allowed(url))
+        // Destination overrides are restricted to isolated loopback acceptance.
+        precondition(acceptanceDownloadDestination == nil || (isolated && url.scheme == "http" && ["localhost", "127.0.0.1"].contains(url.host ?? "")))
+        self.acceptanceDownloadDestination = acceptanceDownloadDestination
         self.origin = URL(string: "\(url.scheme!)://\(url.host!)\(url.port.map { ":\($0)" } ?? "")")!
         let config = WKWebViewConfiguration()
         config.websiteDataStore = isolated ? .nonPersistent() : .default()
@@ -174,6 +181,17 @@ public enum RoomLocation {
     }
     public func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         guard let url = navigationAction.request.url else { decisionHandler(.cancel); return }
+        // Blob exports retain their creator's security origin. Third-party
+        // frames, data URLs, and ordinary blob navigation gain no capabilities.
+        let source = navigationAction.sourceFrame.securityOrigin
+        let expectedPort = origin.port ?? (origin.scheme == "https" ? 443 : 80)
+        let sourcePort = source.port == 0 ? (source.protocol == "https" ? 443 : 80) : source.port
+        if navigationAction.shouldPerformDownload, url.scheme == "blob",
+           navigationAction.sourceFrame.isMainFrame,
+           source.protocol == origin.scheme, source.host == origin.host, sourcePort == expectedPort,
+           let creator = URL(string: String(url.absoluteString.dropFirst(5))), RoomLocation.sameOrigin(creator, origin) {
+            decisionHandler(.download); return
+        }
         if RoomLocation.sameOrigin(url, origin) {
             if url.path == "/api/auth/google/start" || url.path == "/api/auth/github/start" {
                 decisionHandler(.cancel); signIn(); return
@@ -198,12 +216,28 @@ public enum RoomLocation {
     public func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) { download.delegate = self }
     public func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) { download.delegate = self }
     public func download(_ download: WKDownload, decideDestinationUsing response: URLResponse, suggestedFilename: String, completionHandler: @escaping (URL?) -> Void) {
+        let filename = URL(fileURLWithPath: suggestedFilename).lastPathComponent
+        if let acceptanceDownloadDestination {
+            completionHandler(acceptanceDownloadDestination(filename)); return
+        }
         let panel = NSSavePanel()
-        panel.nameFieldStringValue = URL(fileURLWithPath: suggestedFilename).lastPathComponent
-        panel.beginSheetModal(for: window) { result in completionHandler(result == .OK ? panel.url : nil) }
+        panel.nameFieldStringValue = filename
+        status.stringValue = "Choose where to save the download…"
+        panel.beginSheetModal(for: window) { [weak self] result in
+            if result != .OK { self?.cancelledDownloads.insert(ObjectIdentifier(download)) }
+            self?.status.stringValue = result == .OK ? "Saving download…" : "Download cancelled"
+            completionHandler(result == .OK ? panel.url : nil)
+        }
     }
-    public func downloadDidFinish(_ download: WKDownload) { status.stringValue = "Download saved" }
-    public func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) { status.stringValue = "Download did not finish · Try again" }
+    public func downloadDidFinish(_ download: WKDownload) {
+        completedDownloadCount += 1
+        status.stringValue = "Download saved"
+    }
+    public func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
+        failedDownloadCount += 1
+        let cancelled = cancelledDownloads.remove(ObjectIdentifier(download)) != nil || (error as NSError).code == NSURLErrorCancelled
+        status.stringValue = cancelled ? "Download cancelled" : "Download did not finish · Try again"
+    }
     public func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { status.stringValue = origin.host ?? "Project Room" }
     public func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         if (error as NSError).code == NSURLErrorCancelled { return }

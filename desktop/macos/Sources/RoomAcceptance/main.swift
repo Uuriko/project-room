@@ -9,7 +9,13 @@ import ProjectRoomKit
     let script: String
     init(url: URL, script: String) { self.url = url; self.script = script }
     func applicationDidFinishLaunching(_ notification: Notification) {
-        room = RoomWindow(url: url, isolated: true)
+        let args = CommandLine.arguments
+        let downloadDirectory: URL? = args.firstIndex(of: "--download-directory").flatMap { index in
+            index + 1 < args.count ? URL(fileURLWithPath: args[index + 1], isDirectory: true) : nil
+        }
+        room = RoomWindow(url: url, isolated: true, acceptanceDownloadDestination: downloadDirectory.map { directory in
+            { filename in directory.appendingPathComponent(filename) }
+        })
         room?.show()
         Task { @MainActor in
             do {
@@ -22,6 +28,16 @@ import ProjectRoomKit
                     if let tiff = shot.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff), let data = bitmap.representation(using: .png, properties: [:]) {
                         try data.write(to: URL(fileURLWithPath: CommandLine.arguments[output + 1]))
                     }
+                }
+                if let index = args.firstIndex(of: "--expect-downloads"), index + 1 < args.count, let count = Int(args[index + 1]) {
+                    for _ in 0..<100 {
+                        if room.completedDownloadCount >= count || room.failedDownloadCount > 0 { break }
+                        try await Task.sleep(nanoseconds: 100_000_000)
+                    }
+                    guard room.completedDownloadCount == count, room.failedDownloadCount == 0 else {
+                        fatalError("Downloads did not finish: \(room.completedDownloadCount) saved, \(room.failedDownloadCount) failed")
+                    }
+                    print("WK_DOWNLOADS \(count) finished")
                 }
                 let activeURL = room.webView.url
                 let draft = try await room.webView.evaluateJavaScript("document.querySelector('#message-input')?.value ?? null") as? String

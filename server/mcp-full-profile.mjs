@@ -1,3 +1,5 @@
+import { RoomAssistant } from "./room-assistant.mjs";
+import { isAssistantTool } from "../client/assistant-tools.mjs";
 import { OutsideAgents } from "./outside-agents.mjs";
 // Hosted MCP full profile: the local stdio room tools, on the same URL as
 // the public join tools, behind Authorization: Bearer pri_….
@@ -44,7 +46,8 @@ function withRoomId(entry) {
       type: "object",
       properties: { roomId: roomIdField, ...entry.inputSchema.properties },
       required: ["roomId", ...(entry.inputSchema.required ?? [])],
-      additionalProperties: false
+      additionalProperties: false,
+      ...(entry.inputSchema.allOf ? { allOf: entry.inputSchema.allOf } : {})
     },
     annotations: entry.annotations
   };
@@ -192,6 +195,11 @@ async function dispatchHostedStdioTool(store, secret, name, args) {
   const auth = store.authenticate(secret, roomId);
   enforceHostedStdioCallVisibility(store, secret, auth.member.id, name);
   const identity = { roomId, memberId: auth.member.id };
+  if (isAssistantTool(name)) {
+    const assistant = new RoomAssistant(store);
+    const authorize = () => store.authenticate(secret, roomId);
+    return { value: withContentTrust(name === "room_assistant_context" ? assistant.list(roomId, authorize) : assistant.apply(roomId, rest, authorize)), isError: false };
+  }
   if (name === "room_list_outside_agents") return { value: new OutsideAgents(store).list(secret, roomId), isError: false };
   if (name === "room_introduce_outside_agent") return { value: new OutsideAgents(store).record(secret, roomId, rest), isError: false };
   if (isHelpTool(name)) {

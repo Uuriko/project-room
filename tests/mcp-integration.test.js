@@ -20,7 +20,13 @@ test("real stdio process uses owner enrollment, selected work and stable draft r
   let mcp;
   t.after(async () => { if (mcp) await mcp.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
   mcp = await openMcpTestClient(directory);
-  assert.equal((await mcp.request("tools/list")).result.tools.length, 41);
+  const tools = (await mcp.request("tools/list")).result.tools;
+  assert.equal(tools.length, 43);
+  assert.deepEqual(tools.filter(tool => tool.name.startsWith("room_assistant_")).map(tool => tool.name), ["room_assistant_context", "room_assistant_action"]);
+  const assistant = (await mcp.call("room_assistant_context", {})).result.structuredContent;
+  assert.equal(assistant.roomId, "commons");
+  assert.equal(assistant.assistant.availability, "not_connected");
+  assert.deepEqual(assistant.runs, []);
   const before = f.store.snapshot(token, "commons");
   assert.equal((await mcp.call("room_check_access")).result.structuredContent.status, "credential_accepted");
   const selected = (await mcp.call("room_read_work", { workItemId: "test-handoff" })).result.structuredContent;
