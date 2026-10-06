@@ -131,6 +131,7 @@ function validRoomArgs(name, args) {
   if (!selected || !allowed(args, Object.keys(selected.inputSchema.properties), selected.inputSchema.required)) return false;
   if (args.roomId !== undefined && !validId(args.roomId)) return false;
   if (name === "room_check_access" || name === "room_activation_pack") return true;
+  if (name === "room_member_card") return validId(args.memberId);
   if (name === "room_needs_me") {
     if (args.since === undefined) return true;
     if (Number.isSafeInteger(args.since) && args.since >= 0) return true;
@@ -477,6 +478,16 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
   if (name === "room_activation_pack") {
     const auth = store.authenticate(secret, roomId);
     return buildActivationPack(store, roomId, auth.member.id);
+  }
+  if (name === "room_member_card") {
+    // plan-dir-card: the member chip's card over MCP. Same read as
+    // GET /api/rooms/:roomId/members/:memberId/card.
+    const auth = store.authenticate(secret, roomId);
+    const doc = store.agentPlugin.cardForMember({
+      roomId, memberId: args.memberId, viewerIdentityId: auth.identityId ?? identity.identityId,
+    });
+    if (!doc) throw Object.assign(new Error("No directory card for this member"), { status: 404, code: "unknown_card" });
+    return doc;
   }
   if (name === "get_room_context") {
     const context = store.roomContext(secret, roomId, {

@@ -1093,6 +1093,30 @@ window.addEventListener("focus", () => confirmAccount());
 document.addEventListener("visibilitychange", () => { if (!document.hidden) confirmAccount(); });
 setInterval(() => { if (!document.hidden) confirmAccount(); }, 5000);
 const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+// plan-dir-card: render a directory card inside the member chip's profile.
+// owns[] and reach{} are host-supplied from live data (never fabricated);
+// provenance tells a seeded placeholder from a self-published card.
+function renderDirectoryCard(card) {
+  if (!card || typeof card !== "object") return `<p class="form-hint">No directory card available.</p>`;
+  const reach = card.reach && typeof card.reach === "object" ? card.reach : null;
+  const reachLine = reach
+    ? `Wake ${reach.wakeMode ?? "unknown"}`
+      + `${reach.lastPollAt ? ` · last poll ${new Date(reach.lastPollAt).toLocaleString()}` : ""}`
+      + ` · ${reach.pendingUnacked ?? 0} unacked`
+      + ` · bonds ${reach.bondStatus ?? "unknown"}`
+      + `${reach.host ? ` · host ${reach.host}` : ""}`
+    : "No live wake/bond data";
+  const owns = Array.isArray(card.owns) && card.owns.length ? card.owns.join(", ") : "—";
+  const provenance = card.provenance === "seeded"
+    ? `<span class="card-provenance card-provenance-seeded" title="Seeded by the room owner from live room data; the agent has not published a card yet">Seeded</span>`
+    : `<span class="card-provenance card-provenance-self">Self-published</span>`;
+  return `<div class="member-card-badges">${provenance}<span class="card-visibility">${esc(card.visibility)}</span></div>`
+    + `<p><strong>${esc(card.name)}</strong></p>`
+    + (card.description ? `<p class="form-hint">${esc(card.description)}</p>` : "")
+    + `<p>Capabilities: ${esc((card.capabilities ?? []).join(", ") || "—")}</p>`
+    + `<p>Owns: ${esc(owns)}</p>`
+    + `<p class="form-hint">${esc(reachLine)}</p>`;
+}
 const humanize = value => String(value).replaceAll("_", " ").replaceAll(".", " ");
 const memberLabel = id => id == null ? "Unassigned" : state.members[id] ? `${state.members[id].displayName} (${id})` : `Unknown member (${id})`;
 // Keep ordinary conversation readable; exact IDs remain in details and decision
@@ -1894,7 +1918,7 @@ function render() {
     const ownedBy = serverPresence?.ownerIdentityId
       ? `<span class="member-owned-by">owned by @${esc(String(serverPresence.ownerIdentityId).slice(0, 12))}</span>`
       : "";
-    return `<div id="${recordDomId("member", m.id)}" class="presence-member" tabindex="-1" data-member-record-id="${esc(m.id)}" data-presence="${esc(presence)}" data-disclosure-host="${esc(m.id)}" data-focus-key="member:${esc(m.id)}"${m.agentType ? ` data-agent-type="${esc(m.agentType)}"` : ""} ${m.active === false ? "" : `title="${esc(`Address ${m.displayName} in chat`)}"`}><div class="member-avatar ${m.kind}" aria-hidden="true"><span>${initials(m.displayName)}</span><i class="presence-dot presence-${esc(presence)}" title="${esc(presenceLabel(presence))}"></i></div><div><div class="member-head"><strong class="member-handle${m.kind === "agent" ? " member-handle-agent" : ""}">${esc(handle)}</strong><span class="sr-only">${esc(presenceLabel(presence))}</span>${doneChip}${agentPauses.has(m.id) && m.active !== false ? `<span class="pause-chip" data-paused-member="${esc(m.id)}" title="Queued wakes will not start">Paused</span>` : ""}${friendBondHtml(m)}</div>${workingOnTitle}<details class="member-profile"><summary data-focus-key="member-profile:${esc(m.id)}" aria-label="Member options for ${esc(m.displayName)}" title="Member options"><span aria-hidden="true">···</span></summary><div class="member-profile-body"><p class="form-hint">Member ID: <code>${esc(m.id)}</code></p><div class="member-profile-badges">${typeChip}${stateChip}${ownerChip}</div><p class="member-status">${esc(status)}</p>${ownedBy}${memberActions(m)}${workControl(m)}<details><summary data-focus-key="member-capabilities:${esc(m.id)}">Room capabilities</summary><p>${esc(m.permissions.join(", ") || "conversation only")}</p>${adminControl(m)}${muteControl(m)}</details>${dmConsentDetails(m)}</div></details></div></div>`;
+    return `<div id="${recordDomId("member", m.id)}" class="presence-member" tabindex="-1" data-member-record-id="${esc(m.id)}" data-presence="${esc(presence)}" data-disclosure-host="${esc(m.id)}" data-focus-key="member:${esc(m.id)}"${m.agentType ? ` data-agent-type="${esc(m.agentType)}"` : ""} ${m.active === false ? "" : `title="${esc(`Address ${m.displayName} in chat`)}"`}><div class="member-avatar ${m.kind}" aria-hidden="true"><span>${initials(m.displayName)}</span><i class="presence-dot presence-${esc(presence)}" title="${esc(presenceLabel(presence))}"></i></div><div><div class="member-head"><strong class="member-handle${m.kind === "agent" ? " member-handle-agent" : ""}">${esc(handle)}</strong><span class="sr-only">${esc(presenceLabel(presence))}</span>${doneChip}${agentPauses.has(m.id) && m.active !== false ? `<span class="pause-chip" data-paused-member="${esc(m.id)}" title="Queued wakes will not start">Paused</span>` : ""}${friendBondHtml(m)}</div>${workingOnTitle}<details class="member-profile"><summary data-focus-key="member-profile:${esc(m.id)}" aria-label="Member options for ${esc(m.displayName)}" title="Member options"><span aria-hidden="true">···</span></summary><div class="member-profile-body"><p class="form-hint">Member ID: <code>${esc(m.id)}</code></p><div class="member-profile-badges">${typeChip}${stateChip}${ownerChip}</div><p class="member-status">${esc(status)}</p>${ownedBy}${memberActions(m)}${workControl(m)}<details><summary data-focus-key="member-capabilities:${esc(m.id)}">Room capabilities</summary><p>${esc(m.permissions.join(", ") || "conversation only")}</p>${adminControl(m)}${muteControl(m)}</details>${dmConsentDetails(m)}${directoryCardDetails(m)}</div></details></div></div>`;
   };
   // E4: mute is the viewer's own preference; the owner (the appeal path) and yourself are never mutable.
   const muteControl = m => m.id === session?.member?.id || m.id === state.room.ownerId ? "" : `<button type="button" class="text-button mute-toggle" data-mute-member="${esc(m.id)}" data-muted="${isMutedBy(state, session?.member?.id, m.id)}" aria-pressed="${isMutedBy(state, session?.member?.id, m.id)}">${isMutedBy(state, session?.member?.id, m.id) ? `Unmute ${esc(m.displayName)}` : `Mute ${esc(m.displayName)} for me`}</button>`;
@@ -1932,6 +1956,14 @@ function render() {
       ? `<span class="dm-consent-note">${esc(a.label)}</span>`
       : `<button type="button" class="text-button" data-dm-consent-action="${a.action}" data-dm-consent-peer="${esc(m.id)}">${esc(a.label)}</button>`).join("");
     return `<details class="dm-consent"><summary data-focus-key="member-dm:${esc(m.id)}">Direct messages</summary><div class="dm-consent-body">${lines}<div class="dm-consent-actions">${actions}</div></div></details>`;
+  };
+  // plan-dir-card: the member chip's directory card section. The card is
+  // lazy-loaded on first expand from the member-card endpoint so the
+  // presence roster stays light; cardAgentId on the member says whether a
+  // visible card exists.
+  const directoryCardDetails = m => {
+    if (!m || m.kind !== "agent" || !m.cardAgentId || m.active === false) return "";
+    return `<details class="member-directory-card" data-directory-card="${esc(m.id)}"><summary data-focus-key="member-card:${esc(m.id)}">Directory card</summary><div class="member-card-body" data-member-card-body="${esc(m.id)}"><p class="form-hint">Loading…</p></div></details>`;
   };
   // Incoming DM requests surface at the top of the People panel so they are
   // visible without opening any one member's details.
@@ -4169,6 +4201,26 @@ async function refreshAgentPauses() {
   } catch { /* the roster stays as last read; the next action re-reads it */ }
 }
 $("#people-panel").addEventListener("toggle", () => { if ($("#people-panel").open) { refreshAgentPauses(); void refreshDmConsents(); void refreshFriendBonds(); void refreshPresenceStates(); } });
+// plan-dir-card: lazy-load a member's directory card the first time its
+// chip section expands. The endpoint 404s when the member has no visible
+// card; the section only renders when the roster advertised a cardAgentId,
+// so a 404 here is just a quiet "not available".
+document.addEventListener("toggle", event => {
+  const details = event.target?.closest?.("[data-directory-card]");
+  if (!details || details.dataset.loaded || !details.open) return;
+  details.dataset.loaded = "1";
+  const memberId = details.dataset.directoryCard;
+  const body = details.querySelector("[data-member-card-body]");
+  if (!body) return;
+  void (async () => {
+    try {
+      const card = await client.request(client.path(`/members/${encodeURIComponent(memberId)}/card`));
+      if (body.isConnected) body.innerHTML = renderDirectoryCard(card);
+    } catch {
+      if (body.isConnected) body.innerHTML = `<p class="form-hint">No directory card available.</p>`;
+    }
+  })();
+}, true);
 $("#presence-list").addEventListener("click", async e => {
   const button = e.target.closest("[data-member-work]");
   if (!button || !ownsRoomActions(null) || memberActionBusy || state.room.ownerId !== session.member.id) return;

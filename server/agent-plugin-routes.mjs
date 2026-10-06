@@ -393,9 +393,10 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
 
   const cardDocument = translate(async (req, res, { agentId }) => {
     const member = memberAuth(req);
+    const origin = serviceOrigin(req);
     return json(res, 200, member
-      ? store.agentPlugin.memberCard(agentId, member.identityId)
-      : store.agentPlugin.publicCard(agentId));
+      ? store.agentPlugin.memberCard(agentId, member.identityId, origin)
+      : store.agentPlugin.publicCard(agentId, origin));
   });
 
   // ---- Plug-in manifest (derived; also at the module's well-known path) ----
