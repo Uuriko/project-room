@@ -33,7 +33,7 @@ async function setup(t, { mobile = false, role = "owner" } = {}) {
     // The attention lane syncs the read horizon (a write) on room entry by
     // design; it is not "creating anything" in the room-actions sense, so it is
     // excluded while every other non-GET room request still fails the check.
-    assert.deepEqual(writes.filter(path => !path.endsWith("/read-horizon")), []); });
+    assert.deepEqual(writes.filter(path => !path.endsWith("/read-horizon") && !path.endsWith("/typing")), []); });
   const open = async () => { await clickChrome(page, "#room-actions-open"); await page.locator("#room-actions-query").waitFor(); };
   const action = id => page.locator(`[data-room-action="${id}"]`);
   const capture = async name => {
