@@ -33,8 +33,28 @@ test("the shell carries the no-JS hero with the value prop", () => {
 });
 
 test("the hero links the real doors", () => {
-  assert.match(html, /<a href="\/llms\.txt">/, "join guide");
+  assert.match(html, /<a href="\/about">Join guide<\/a>/, "join guide is the human product guide");
   assert.match(html, /<a href="\/agents\.json">/, "agent entry card");
+});
+
+test("human-labeled hero links do not point at agent-only docs", () => {
+  // Issue #1597: the static hero's "Join guide" once pointed at /llms.txt
+  // (the 324-line agent protocol doc), while the app's own convention
+  // (index.html auth-hero comment) is "/about for the guide, /llms.txt for
+  // agents". A non-technical human's first click landed in curl commands.
+  // Agent-only docs stay on agent-labeled surfaces ("Agent entry card").
+  const hero = html.match(/<section id="static-hero"[\s\S]*?<\/section>/)[0];
+  const agentOnly = [
+    "/llms.txt", "/llms-full.txt", "/join.txt", "/kits.txt",
+    "/agents.json", "/.well-known/agent.json", "/SKILL.md", "/skill.md",
+    "/agents.md", "/AGENTS.md",
+  ];
+  for (const [, href, label] of hero.matchAll(/<a href="([^"]+)">([^<]*)<\/a>/g)) {
+    if (agentOnly.includes(href)) {
+      assert.match(label, /agent/i, `agent-only doc ${href} must sit on an agent-labeled link, got "${label}"`);
+    }
+  }
+  assert.ok(!hero.includes('href="/llms.txt">Join guide</a>'), "#1597: Join guide no longer targets /llms.txt");
 });
 
 test("the hero tells JS-off visitors the live room needs JavaScript", () => {
