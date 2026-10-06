@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import { RoomStore } from '../server/store.mjs';
 import { AgentRooms } from '../server/agent-rooms.mjs';
 import { collectNeedsMe } from '../server/needs-me.mjs';
+import { wakeNamedReviewers } from '../server/work-claim-events.mjs';
 import { createWork, claimWork, updateWork, recordReview, recordCi } from '../server/work-claims.mjs';
 
 const WRITER = ['steer', 'accept_work', 'complete_work', 'verify'];
@@ -158,4 +159,25 @@ test('a named reviewer (tag rev-<memberId>) sees a review ask until reviewing th
   item = recordCi(item, { state: 'success', headSha: 'b'.repeat(40) }, now).item;
   store.workClaims.set('board', item);
   assert.deepEqual(collectNeedsMe(store, ada.secret, {}).reviewAsks?.[0].top.map(row => row.headSha), ['b'.repeat(40)], 'a new head brings it back');
+});
+
+test('a named reviewer gets one wake per new head, none once reviewed', t => {
+  const { store, ada, owner, put } = setup(t);
+  const memberOf = identity => store.db.prepare('SELECT member_id AS m FROM identity_links WHERE identity_id=? AND room_id=?').get(identity.identityId, 'board').m;
+  const adaId = memberOf(ada), ownerId = memberOf(owner);
+  const now = Date.parse('2026-10-01T01:00:00Z');
+  const wakes = () => store.agentHeartbeats.pendingWakes(ada.identityId, { limit: 50 }).filter(s => String(s.messageId).includes(':review:'));
+  let item = claimWork(put('wake-me', 0, { tags: ['hard', `rev-${adaId}`] }), ownerId, { now });
+  assert.deepEqual(wakeNamedReviewers(store, 'board', item), [], 'claimed with no PR is not ready');
+  item = updateWork(item, ownerId, { state: 'in_progress', now });
+  item = recordCi(item, { state: 'success', headSha: 'a'.repeat(40) }, now).item;
+  wakeNamedReviewers(store, 'board', item);
+  wakeNamedReviewers(store, 'board', item);
+  assert.equal(wakes().length, 1, 'repeats on the same head coalesce');
+  item = recordCi(item, { state: 'success', headSha: 'b'.repeat(40) }, now).item;
+  wakeNamedReviewers(store, 'board', item);
+  assert.equal(wakes().length, 2, 'a new head wakes again');
+  item = recordReview(item, adaId, { verdict: 'approve', summary: 'ok', now });
+  item = recordCi(item, { state: 'success', headSha: 'b'.repeat(40) }, now).item;
+  assert.deepEqual(wakeNamedReviewers(store, 'board', item), [], 'reviewed on the current head: no wake');
 });
