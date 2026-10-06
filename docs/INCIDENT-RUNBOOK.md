@@ -1,15 +1,15 @@
 # Incident Runbook — project-room
 
 How we declare, run, communicate, and learn from incidents. Companion docs:
-- `src/health-status.mjs` (F008) — the `/api/health` payload and `/status` page
-- `docs/SAFE-DIAGNOSTICS.md` — approved diagnostic commands
-- `docs/V8-RECOVERY-RUNBOOK.md` — disaster recovery (restore-from-backup procedures)
-- `docs/SECRETS-ROTATION.md` (F005) — credential-leak response
+- `docs/history/SAFE-DIAGNOSTICS.md` — approved diagnostic commands
+- `docs/history/V8-RECOVERY-RUNBOOK.md` — disaster recovery (restore-from-backup procedures)
+- `docs/SECRETS-ROTATION.md` — credential-leak response
 
 There is no external uptime monitor or paging integration: the monitoring we
-actually have is `GET /api/health` (per-check rows with `status`, `detail`,
-`latencyMs`) and the `/status` page. Anything below that assumes an external
-monitor is stale — fix the doc, not the assumption.
+actually have is `GET /api/health` (thin liveness: `status: "ok"` means the
+process is up) and `GET /api/version` (source revision + build id). There is
+no per-check health table and no `/status` page. Anything below that assumes a
+richer health surface is stale — fix the doc, not the assumption.
 
 Read this doc before you declare your first incident. During a live incident, use it
 as a checklist, not a textbook.
@@ -78,19 +78,11 @@ Never attach a name to blame — attach it to a role and a task.
 Work this list top-down. Stop at the first step that explains the symptom, then
 go fix it. Do not run commands that mutate state until you've named a theory.
 
-1. **Health verdict.** `GET /api/health` (F008, `src/health-status.mjs`) — the
-   whole monitoring surface.
-   - HTTP 200 with `status: "healthy"` → the service is up; the problem is
-     elsewhere (client, proxy, DNS). Check the `/status` page next.
-   - HTTP 200 with `status: "degraded"` → a **non-required** check is failing.
-     Read the `checks[]` rows: the `name` tells you which dependency, `detail`
-     tells you why, `latencyMs` tells you whether it's failing or timing out.
-   - HTTP 503 with `status: "unhealthy"` → a **required** check is failing.
-     This is the readiness signal: treat as SEV1 until proven otherwise.
-   - A single failing optional check is noise only if the next poll recovers;
-     read `detail` and `latencyMs` before dismissing it.
-   - If the payload is `unhealthy` but users are fine, the checks may be too
-     coarse — widen them before closing.
+1. **Health verdict.** `GET /api/health` is a thin liveness probe: HTTP 200
+   with `status: "ok"` means the process is up and answering. It carries no
+   per-check rows — a failing dependency does not move it off `"ok"`.
+   - HTTP 200 with `status: "ok"` → the process is up; the problem is
+     elsewhere (client, proxy, DNS, or a dependency the probe does not check).
    - Endpoint unreachable but the process is alive → suspect the HTTP layer
      (server/http wiring, port binding), not the app logic.
    - Endpoint unreachable and the process is down → check the process
