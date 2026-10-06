@@ -204,6 +204,8 @@ optional.push("server/room-guide.mjs"); // ACT-1a: Room Guide demo agent (import
 optional.push("server/starter-room.mjs"); // ACT-1a: starter seed (imported by server/room-lifecycle.mjs)
 optional.push("server/claim-coordination.mjs"); // exclusive file leases, ready queue, pull-request outcomes (imported by server/work-claims.mjs and server/work-claim-routes.mjs)
 optional.push("server/claim-pr-sync.mjs"); // poll linked pull requests onto claims (imported by server/work-claim-routes.mjs and cloudflare/room.mjs)
+optional.push("server/claim-autolink.mjs"); // plan-pr-autolink: claim-id parsing, PR auto-link, webhook core, poll fallback, deploy linking (imported by server/jobs.mjs and server/routes/pr-webhook.mjs)
+optional.push("server/github-app/verify.mjs"); // plan-pr-autolink: GitHub webhook HMAC verification (imported by server/claim-autolink.mjs; pure, no imports)
 optional.push("server/mention-receipts.mjs"); // sender-facing mention delivery and read/ack receipts (imported by server/http.mjs)
 optional.push("server/feedback-store.mjs"); // RC-2026-09-27-2745: pure /feedback state machine + Mark-staked triage economy (imported by server/feedback-routes.mjs; imports ./feedback-scrub.mjs)
 optional.push("server/feedback-scrub.mjs"); // RC-2026-09-27-2745: secret scrubbing at feedback intake (imported by server/feedback-store.mjs; pure, no imports)

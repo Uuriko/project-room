@@ -3433,11 +3433,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // Provenance walk + premise-invalid rollback (orch-provenance-rollback).
       // Literal segments are matched before the {id} template so they are
       // never mistaken for a claim id.
-      const workClaimProvenanceMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/provenance$/.exec(url.pathname);
-      const workClaimPremiseInvalidMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/premise-invalid$/.exec(url.pathname);
       const workClaimMatch = workClaimsMatch ?? workClaimsStatusMatch ?? workClaimsSweepMatch ?? workClaimsDuplicatesMatch ?? workClaimsConfigMatch ?? workClaimClaimMatch
-        ?? workClaimUpdateMatch ?? workClaimReviewMatch ?? workClaimReleaseMatch ?? workClaimReassignMatch ?? workClaimRenewMatch ?? workClaimProvenanceMatch
-        ?? workClaimPremiseInvalidMatch ?? workClaimItemMatch
+        ?? workClaimUpdateMatch ?? workClaimReviewMatch ?? workClaimReleaseMatch ?? workClaimReassignMatch ?? workClaimRenewMatch
+        ?? workClaimItemMatch
         ?? workClaimReceiptsMatch;
       // Agent /feedback endpoint (structured bug/feature reports): every
       // route template below is documented in docs/openapi.yaml — the
@@ -3719,11 +3717,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           : workClaimReviewMatch ? "review"
           : workClaimReleaseMatch ? "release"
           : workClaimRenewMatch ? "renew"
-          : workClaimProvenanceMatch ? "provenance"
-          : workClaimPremiseInvalidMatch ? "premise-invalid" : "reassign";
+          : "reassign";
         const workClaimIdMatch = workClaimItemMatch ?? workClaimClaimMatch ?? workClaimUpdateMatch
           ?? workClaimReviewMatch ?? workClaimReleaseMatch ?? workClaimReassignMatch ?? workClaimRenewMatch
-          ?? workClaimProvenanceMatch ?? workClaimPremiseInvalidMatch;
+         ;
         return await handleWorkClaims({ req, res, url, store, roomId, auth, workClaimRoute,
           workClaimId: workClaimIdMatch ? pathId(workClaimIdMatch[2]) : null, registry: store.workClaims,
           ...(fetchPullRequest ? { fetchPullRequest } : {}),

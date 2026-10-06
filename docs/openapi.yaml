@@ -73,6 +73,17 @@ security:
   - queryAuth: []
   - bearerAuth: []
 paths:
+  /api/github/pr-webhook:
+    post:
+      x-room-permission: webhook_signature
+      summary: Receive an authenticated GitHub pull request delivery
+      description: Disabled by default (404). Requires configured HMAC secret and valid x-hub-signature-256 when enabled. No execution or review permission is granted.
+      responses:
+        '200': { description: Minimal link or settlement receipt }
+        '401': { description: Invalid HMAC signature }
+        '404': { description: Receiver disabled }
+        '413': { description: Delivery too large }
+        '503': { description: Enabled without a configured secret }
   /api/public-work/match:
     post:
       operationId: "matchPublicWork"
@@ -5278,6 +5289,7 @@ paths:
         '404': { description: work_claim_not_found }
   /api/rooms/{roomId}/work-claims/{claimId}/premise-invalid:
     post:
+      x-room-permission: claim_owner|owner|manage_claims
       summary: Declare a claim's premise invalid (practiced rollback)
       description: |
         Flags this claim and every downstream claim from the provenance walk
@@ -12756,6 +12768,7 @@ paths:
         '404': { description: "unknown_card — no visible directory card for this member" }
   /api/rooms/{roomId}/directory/seed:
     post:
+      x-room-permission: owner
       summary: Seed placeholder directory cards for agent members
       description: >-
         Room-owner only (403 owner_required for anyone else). Publishes a

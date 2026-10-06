@@ -236,3 +236,69 @@ export function createLlmJudge({ rubric, judgeFn, seed = 0, maxRetries = 2, logg
 
   return { scorer, journal, rubric, seed };
 }
+
+// Compatibility scorer for numeric injected transports. The structured, journaled
+// createLlmJudge above remains the reproducible default. No model is called here.
+/** Clamp a judge's raw return into [0,1]; throws on non-numeric. */
+function normalizeScore(raw) {
+  const score = typeof raw === 'number' ? raw : raw?.score;
+  if (typeof score !== 'number' || !Number.isFinite(score)) {
+    throw new Error(`judge returned non-numeric score: ${JSON.stringify(raw)?.slice(0, 120)}`);
+  }
+  return Math.min(1, Math.max(0, score));
+}
+
+/**
+ * Build a judge-backed scorer for the evals/ harness.
+ * @param {{ judgeFn: (input: { task, outcome, rubric }) => Promise<number>|number,
+ *            rubric: string }} opts
+ * @returns {(task, outcome) => Promise<number>} score in [0,1]
+ */
+export function createJudgeScorer({ judgeFn, rubric }) {
+  if (typeof judgeFn !== 'function') {
+    throw new Error('createJudgeScorer needs a judgeFn function');
+  }
+  if (typeof rubric !== 'string' || rubric.length === 0) {
+    throw new Error('createJudgeScorer needs a non-empty rubric string');
+  }
+
+  return async (task, outcome) => {
+    const normalized = outcome ?? {};
+    const judgeInput = {
+      task,
+      outcome: { ...normalized, trajectory: normalized.trajectory ?? [] },
+      rubric,
+    };
+    const raw = await judgeFn(judgeInput);
+    return normalizeScore(raw);
+  };
+}
+
+/**
+ * Measure judge/human agreement over a calibration set: mean |judge − human|.
+ * @param {(record) => Promise<number>|number} judgeFn — grades one calibration record
+ * @param {Array<{ taskId: string, humanScore: number }>} calibrationSet — e.g. loaded
+ *        from evals/calibration/judge-calibration-set.jsonl via loadJsonl
+ * @returns {{ n: number, mae: number, perTask: Array<{ taskId, humanScore, judgeScore, absErr }> }}
+ */
+export async function calibrate(judgeFn, calibrationSet) {
+  if (typeof judgeFn !== 'function') {
+    throw new Error('calibrate needs a judgeFn function');
+  }
+  if (!Array.isArray(calibrationSet) || calibrationSet.length === 0) {
+    throw new Error('calibrate needs a non-empty calibration set');
+  }
+
+  const perTask = [];
+  for (const record of calibrationSet) {
+    if (!record || typeof record.taskId !== 'string' || !record.taskId
+      || !Number.isFinite(record.humanScore) || record.humanScore < 0 || record.humanScore > 1) {
+      throw new Error('calibration records need taskId and a finite humanScore in [0,1]');
+    }
+    const judgeScore = normalizeScore(await judgeFn(record));
+    const absErr = Math.abs(judgeScore - record.humanScore);
+    perTask.push({ taskId: record.taskId, humanScore: record.humanScore, judgeScore, absErr });
+  }
+  const mae = perTask.reduce((sum, r) => sum + r.absErr, 0) / perTask.length;
+  return { n: perTask.length, mae, perTask };
+}
