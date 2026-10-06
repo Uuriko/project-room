@@ -438,6 +438,15 @@ const RETIRED_EMISSARY_TABLES = Object.freeze([
   "emissary_idempotency",
   "emissary_journal",
 ]);
+// Retired operator-prerequisites slice 1/3 (PR #928, rescope #953): no
+// module creates agent_operator_controls anymore, but databases opened while
+// 25ac6ce1 was live (2026-09-24 06:52–21:52 UTC) still carry it (no DROP was
+// issued, for data preservation). It stays in the allowed set so the
+// recovery audit passes on upgraded databases, while fresh databases simply
+// do not have it.
+const RETIRED_OPERATOR_TABLES = Object.freeze([
+  "agent_operator_controls",
+]);
 // Analytics tables (server/analytics/schema.mjs) + the claim-bond P0 shadow
 // journal (server/analytics/claim-bond-shadow.mjs) + the P1 claim-reputation
 // signal journal (server/claim-reputation.mjs): created on demand by
@@ -464,7 +473,7 @@ const MATCHMAKING_ADDITIVE_TABLES = Object.freeze([
   "seeker_declarations",
   "work_offer_terms",
 ]);
-export const lazyAdditiveTables = Object.freeze([...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES, ...RETIRED_EMISSARY_TABLES, ...ANALYTICS_ADDITIVE_TABLES, ...MATCHMAKING_ADDITIVE_TABLES]);
+export const lazyAdditiveTables = Object.freeze([...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES, ...RETIRED_EMISSARY_TABLES, ...RETIRED_OPERATOR_TABLES, ...ANALYTICS_ADDITIVE_TABLES, ...MATCHMAKING_ADDITIVE_TABLES]);
 // (Audit-fix F-2 intent preserved: analytics tables are lazy/additive, never
 // required — they live in ANALYTICS_ADDITIVE_TABLES above.)
 // messages (MSG-1) is fenced at v37 only. v34–v36 files do not have the

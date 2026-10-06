@@ -27,6 +27,17 @@ test("all CREATE TABLE tables in server modules are registered application table
       for (const match of src.matchAll(/CREATE TABLE IF NOT EXISTS\s+([a-z_][a-z0-9_]*)\s*\(/gi)) {
         created.add(match[1].toLowerCase());
       }
+      // Interpolated table names (e.g. server/public-work-claim-fence.mjs
+      // builds its DDL from `const permit = 'public_work_claim_writer_permit'`):
+      // resolve the simple const binding so the guardrail sees the table too.
+      const bindings = new Map();
+      for (const binding of src.matchAll(/^[ \t]*const[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*=[ \t]*'([a-z_][a-z0-9_]*)'[ \t]*;/gim)) {
+        bindings.set(binding[1], binding[2].toLowerCase());
+      }
+      for (const match of src.matchAll(/CREATE TABLE IF NOT EXISTS\s+\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g)) {
+        const table = bindings.get(match[1]);
+        if (table) created.add(table);
+      }
     }
   };
   walk(SERVER_DIR);
