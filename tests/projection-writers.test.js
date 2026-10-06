@@ -12,7 +12,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { readConversation } from "../server/conversation-sync.mjs";
 import { runMessagesBackfill } from "../server/messages-store.mjs";
 import { event, EVENT_TYPES } from "../src/events.js";
-import { rehydrateAllRooms, BODY_AT_REST } from "../server/projection-codec.mjs";
+import { rehydrateAllRooms, setMissingBodyAlarm, BODY_AT_REST } from "../server/projection-codec.mjs";
 
 // Ratchet: a new raw writer of rooms.projection fails here. Route it through
 // storedProjection(db, roomId, state) and bump the pin in the same commit.
@@ -99,4 +99,26 @@ test("flag on: bodies leave the row, every reader gets them back, the way back r
   const back = JSON.parse(row(store));
   assert.ok(!row(store).includes(BODY_AT_REST));
   assert.deepEqual(back.messages.map(m => m.body), state.messages.map(m => m.body));
+});
+
+test("a backfill reset after a slim write keeps every body (lagging table never strands text)", t => {
+  delete process.env.PROJECTION_BODIES_AT_REST;
+  const room = open(t, 60);
+  process.env.PROJECTION_BODIES_AT_REST = "1";
+  room.post("m-new", BODY(7777));
+  assert.ok(row(room.store).includes(`"${BODY_AT_REST}":1`));
+  // A replaced or torn cursor makes the backfill drop the room's table rows and replay.
+  room.store.db.prepare("UPDATE messages_backfill_cursor SET applied_event_id='torn' WHERE room_id='commons'").run();
+  const alarms = [];
+  setMissingBodyAlarm(event => alarms.push(event));
+  t.after(() => setMissingBodyAlarm(null));
+  // One small budgeted pass: the reset lands, the replay has refilled only a few rows.
+  runMessagesBackfill(room.store, { limit: 5 });
+  assert.ok(room.store.db.prepare("SELECT COUNT(*) AS n FROM messages WHERE room_id='commons'").get().n < 20, "the table is lagging");
+  const store = room.reopen();
+  const messages = store.room("commons").state.messages;
+  assert.equal(messages.filter(m => m.bodyUnavailable).length, 0);
+  assert.equal(messages.find(m => m.id === "m-new").body, BODY(7777));
+  assert.equal(messages.find(m => m.id === "m0").body, BODY(0));
+  assert.deepEqual(alarms, []);
 });
