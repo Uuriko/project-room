@@ -10050,7 +10050,7 @@ paths:
       responses:
         '200': { description: "{ ...issued, refreshed: true } — fresh guest credential for the same member" }
         '409': { description: credential_still_live }
-        '410': { description: link_unavailable, invite_unavailable (v1 seat), or membership_ended }
+        '410': { description: link_unavailable, invite_unavailable (v1 seat), membership_ended, or credential_too_old (expired past the 7d refresh grace window) }
         '422': { description: invalid_link or wrong_link_kind }
         '429': { description: rate_limited }
   /api/guest-invites/preview:

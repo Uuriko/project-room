@@ -27,7 +27,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { generateKeyPair, signCard } from "../server/agent-card-signing.mjs";
 import {
-  GUEST_AGENT_TOKEN_PREFIX, GUEST_AGENT_TTL_MS,
+  GUEST_AGENT_TOKEN_PREFIX, GUEST_AGENT_TTL_MS, GUEST_REFRESH_GRACE_MS,
 } from "../server/guest-agent-links.mjs";
 
 const guestToken = () => GUEST_AGENT_TOKEN_PREFIX + randomBytes(32).toString("base64url");
@@ -160,6 +160,25 @@ test("a still-live credential is not refreshable", async t => {
   assert.equal((await res.json()).error.code, "credential_still_live");
   // The live credential keeps working: refresh did not rotate or kill it.
   assert.equal((await preview(request, minted.token)).status, 200);
+});
+
+test("a credential just inside the grace window still refreshes", async t => {
+  const { request, ownerKey, advance } = await serve(t);
+  const minted = await mintV0(request, ownerKey);
+  advance(GUEST_AGENT_TTL_MS + GUEST_REFRESH_GRACE_MS - 1000);
+  assert.equal((await refresh(request, minted.token)).status, 200);
+});
+
+test("a credential expired past the grace window cannot refresh", async t => {
+  const { request, ownerKey, advance } = await serve(t);
+  const minted = await mintV0(request, ownerKey);
+  // Past the window the token is done: without an age bound a leaked
+  // ancient token would be a perpetual re-entry ticket. (No owner key
+  // needed past this point — refresh is ownerless by design.)
+  advance(GUEST_AGENT_TTL_MS + GUEST_REFRESH_GRACE_MS + 1000);
+  const res = await refresh(request, minted.token);
+  assert.equal(res.status, 410);
+  assert.equal((await res.json()).error.code, "credential_too_old");
 });
 
 test("v1 guest-invite seats stay owner-mediated", async t => {

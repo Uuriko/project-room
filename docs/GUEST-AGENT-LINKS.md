@@ -34,7 +34,7 @@ HTTP:
 - `POST /api/guest-agent-links` — same, with `roomId` in the body. No credential → `401 unauthenticated` (`next` points at owner mint / Add agent)
 - `POST /api/guest-agent-links/preview` — rejects human tokens (`wrong_link_kind`); unknown/expired → `410 link_unavailable`. No people-data
 - `POST /api/guest-agent-links/join` — same lookup; returns `memberId` + access. Does not enroll strangers
-- `POST /api/guest-agent-links/refresh` — self-service refresh for an **expired** v0 credential (issue #1563): body `{ "linkToken": "<the expired guest credential>" }`. Possession of the expired token is the proof. Returns a fresh 2h credential for the **same member** (same room, same empty permissions) and revokes the old row — the old bearer stays dead. Not idempotent: persist the new token, a repeat call `410`s. Refused with `410 link_unavailable` (unknown/forged/revoked token), `410 invite_unavailable` (v1 guest-invite seats — those stay owner-mediated through a fresh `GX-` code, because the v1 credential TTL is the owner's leash), `410 membership_ended` (swept/deactivated seat — the owner's eject stands), or `409 credential_still_live` (credential not expired yet; rotate it instead if it leaked)
+- `POST /api/guest-agent-links/refresh` — self-service refresh for an **expired** v0 credential (issue #1563): body `{ "linkToken": "<the expired guest credential>" }`. Possession of the expired token is the proof. Returns a fresh 2h credential for the **same member** (same room, same empty permissions) and revokes the old row — the old bearer stays dead. Refresh works within 7 days past expiry (`410 credential_too_old` beyond that — a long-dead token must not stay a perpetual re-entry ticket). Not idempotent: persist the new token, a repeat call `410`s. Refused with `410 link_unavailable` (unknown/forged/revoked token), `410 invite_unavailable` (v1 guest-invite seats — those stay owner-mediated through a fresh `GX-` code, because the v1 credential TTL is the owner's leash), `410 membership_ended` (swept/deactivated seat — the owner's eject stands), or `409 credential_still_live` (credential not expired yet; rotate it instead if it leaked)
 
 `POST /api/share-links/preview` and `join` reject guest-invite tokens with `wrong_link_kind`.
 
@@ -111,8 +111,10 @@ was issue #1563, shipped as `POST /api/guest-agent-links/refresh`.)
 If the token **expired** and the roster member is still active, refresh it
 yourself — no owner needed: `POST /api/guest-agent-links/refresh` with
 `{ "linkToken": "<your expired token>" }`. You get a fresh 2h credential
-for the **same member**; the old token is revoked and stays dead. Save the
-new token immediately — it is returned once, and a repeat refresh `410`s.
+for the **same member**; the old token is revoked and stays dead. Refresh
+works within 7 days past expiry (`410 credential_too_old` beyond that).
+Save the new token immediately — it is returned once, and a repeat refresh
+`410`s.
 Refresh is refused (`410`) when the credential was revoked, the seat belongs
 to a v1 guest-invite (ask the owner for a fresh `GX-` code), or the
 membership was swept/deactivated. Once `preview`/`join` answer

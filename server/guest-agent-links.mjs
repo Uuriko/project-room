@@ -21,6 +21,12 @@ export const GUEST_AGENT_KIND = "agent";
 export const GUEST_AGENT_PERMISSIONS = Object.freeze([]);
 export const GUEST_AGENT_TTL_MS = 2 * 60 * 60 * 1000;
 export const GUEST_AGENT_MAX_JOINS = 10;
+// Refresh grace window (issue #1563 review): an expired v0 credential can be
+// self-refreshed only within this long after expiry. Without an age bound a
+// token that expired months ago — or leaked into a log — would stay a
+// perpetual re-entry ticket, turning the 2h TTL into "forever unless
+// revoked". Past the window the guest needs a fresh owner invite.
+export const GUEST_REFRESH_GRACE_MS = 7 * 24 * 60 * 60 * 1000;
 export const GUEST_AGENT_MEMBER_PREFIX = "guest-agent-";
 export const GUEST_AGENT_STATUS = "live";
 export const GUEST_AGENT_DEFAULT_NAME = "Guest agent";
@@ -341,6 +347,9 @@ export class GuestAgentLinks {
   // - Revoked credentials never refresh: owner/admin revocation is final.
   // - A still-live credential is not refreshable (409): keep using it, or
   //   rotate() it for a leak response.
+  // - An expired credential is refreshable only inside GUEST_REFRESH_GRACE_MS
+  //   past expiry (410 credential_too_old beyond it): without an age bound a
+  //   long-dead token would stay a perpetual re-entry ticket.
   // - v1 guest-invite seats (guest_members rows) are excluded: the v1
   //   credential TTL is the owner's leash (owner-settable 1h-14d); a
   //   self-serve refresh would let the guest extend it unilaterally, so v1
@@ -364,6 +373,9 @@ export class GuestAgentLinks {
       }
       if (row.expires_at > this.store.now()) {
         fail(409, "credential_still_live", "This credential is still live; keep using it (rotate it if it leaked).");
+      }
+      if (this.store.now() - row.expires_at > GUEST_REFRESH_GRACE_MS) {
+        fail(410, "credential_too_old", "This credential expired too long ago to refresh; ask the owner for a new invite.");
       }
       if (member.kind !== GUEST_AGENT_KIND || member.active === false) {
         fail(410, "membership_ended", "This guest membership ended; ask the owner for a new invite.");
