@@ -46,3 +46,15 @@ test("later access changes do not rewrite the original acceptance evidence", () 
   f.room.sequence = 7;
   assert.doesNotThrow(() => assertInvitationMembershipEvidence(f.record, f.linked, f.binding, f.room));
 });
+
+test("pre-displayNamePolicyVersion joined events still verify (old databases upgrade)", () => {
+  // W4-NEW-1 added displayNamePolicyVersion to invitationJoinedEvent. Joined
+  // events written before that field existed must still pass the membership
+  // evidence check, or every old database fails its upgrade integrity sweep.
+  const f = fixture(), envelope = JSON.parse(f.linked.body);
+  assert.ok("displayNamePolicyVersion" in envelope.data, "test setup: fixture uses the new event shape");
+  delete envelope.data.displayNamePolicyVersion;
+  f.linked.body = JSON.stringify(envelope);
+  assert.doesNotThrow(() => assertInvitationMembershipEvidence(f.record, f.linked, f.binding, f.room),
+    "an old joined event without the policy stamp is legitimate history, not tampering");
+});
