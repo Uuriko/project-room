@@ -94,6 +94,10 @@ export const ALLOWLIST = [
     // The `!` prefix in `!CITABLE_PROOF_KINDS.includes(...)` trips the
     // high-entropy detector; it is a code constant, not a secret. Kept so
     // the origin/main-tree diff scan stays false-positive-free.
+  /EVALUATOR_KINDS/, // server/vetting-receipts.mjs:98 — constant naming the
+    // vetting evaluator kinds (human/agent/rule). The `!` prefix in
+    // `!EVALUATOR_KINDS.includes(...)` trips the high-entropy detector;
+    // it is a code constant, not a secret.
   // 2026-09-30 (phase-2 gap audit L-P2-17): fixture/check scripts are scanned
   // (no blanket *-fixture.mjs / *-check.mjs skip). Their genuinely-safe
   // placeholder values are allowlisted explicitly below — each entry names
