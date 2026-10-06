@@ -1,0 +1,125 @@
+PROJECT ROOM — CONSOLIDATED RELEASE READINESS, 2026-10-06
+
+Status: preparation underway; not cleared for production or public Mac distribution.
+John requested readiness for all agents' intended Project Room work and onward
+notification. This packet records checkpoints and outstanding qualification;
+it does not treat a notification, reported test, or local merge as a deploy.
+
+Coordination
+- Six formal requests recorded in Build Together, sequences1306–1311:
+  Grok, Claude Cowork, Instinct, Jillian AI, Jill and Ryska. Each asked to
+  forward to collaborators and return head/base/hash/tests/risks/dependencies.
+- Disk task broadcast addressed all, Claude, Grok, Cursor and Claude Code.
+  Claude independently forwarded broadly and returned an updated ship list.
+- Four existing Codex chats notified: Continuing from Continue Project Room
+  Development: Continue…, Map agent communication gaps, Simplify Gmail inbox
+  connection, Choose and start the next task.
+- All three current subagents returned readiness packets. Other peer receipts
+  remain pending; absence of a reply is not confirmation of readiness.
+
+Isolated integration rehearsal
+- Source: codex/web-mac-ready-20261006 at
+  584e4660f4830068fe0ddd0f42479a334fe9ce8c; clean before rehearsal.
+- Base: origin/main16fef813bc2d5844d60b33cc0c863d0f10b28852.
+- Checkout: /Users/johnpotter/src/project-room-release-20261006.
+- Branch: codex/release-integration-20261006.
+- Local rehearsal head: f107536388774a9f44358c471d7b226b1a699714.
+  Prior combined source head b6d2f0a7; latest commit reconciles recovery inventory
+  to178 tables confirmed by actual initialized store, schema user_version38.
+- Codex candidate merged cleanly into main. Claude code-dropsv3 and invite
+  accessv3 applied with deliberate conflict resolution: keep both route groups,
+  metadata contracts and current PILOT_LIMITS instead of stale literal limits.
+- No push, PR merge, workflow dispatch or production deployment performed.
+
+Received Claude packets (SHA256 verified locally)
+1. code-drops-v3-8fd77c5f.mbox
+   865a91f16a85070dbe676c4ded7ae72cea6794329443e95542d596ce4521de7f
+   Includes frozen-clock check-reply repair; integrated locally. Independent isolated v3 Node10/10 and actual Mac Worker1/1 now pass.
+   Integrated-tree Worker owner must still run again.
+2. link-access-v3-f5254a28.mbox
+   ce1a61ceb9554b089278d4fc6c1e49fc14991f653e92231821a71fdca01add14
+   Integrated locally. Co-admin means all room permissions; creator-only
+   settings remain with the creator. Real browser invite qualification owed.
+3. p1a-slim-at-rest-v2-d5878c3e.mbox
+   3fe65ea978ce9cbc2f938f6b3842443823b4241e094c4b867a1b56328860013f
+   Retained pending integration: 13 conflicting files in rehearsal, cleanly
+   aborted. Requested a rebased packet from Claude against b6d2f0a7 preserving
+   current limits, assistant/code-drop/link metadata and storage contracts.
+   ROOM_BODIES_AT_REST must remain unset/OFF for the proposed release.
+   Before landing: validate every serializer, missing-body recovery/deletion,
+   packaging, Node/Worker atomicity and actual transactional bulk rollback.
+   Full flag-ON suite was not run by Claude. Do not enable the flag on reports.
+
+Codex scope and evidence
+- Minimal PROJECT ROOM entry; account creation/login/agent sign-in;
+  one public assistant with multiplayer prompting, Project/Activity panels,
+  Advanced disclosure and durable uncertain-request recovery.
+- Additive assistant tables, protected API, direct hosted/stdio MCP tools.
+  An authorized actual host must poll/claim/report; no automatic host launch.
+- Native WK Blob downloads; owner-enabled local Unix broker and file/process
+  stdio MCP tools. Paused on launch; real OS access remains user-granted.
+- Prior focused evidence: human/layout/a11y7/7; assistant/assets18/18;
+  API/MCP/route26/26; stdio/boundary22/22; exact cold package1/1;
+  signin/landing/onboarding34/34; native acceptance6/6; real WK downloads.
+- Independent human-review rerun: assistant10/10 and two-human browser1/1.
+- Earlier broad Node run:6743 passed,65 failed,7 skipped; three long fixtures
+  interrupted. These failures are not all classified or repaired. Require
+  exact integrated-tree baseline comparison and appropriate Linux qualification.
+- Combined source head b6d2f0a7 focused qualification passed92/92: assistant,
+  code-drop/history, invite access, share-link UI/service and route parity.
+  Evidence: project-room-release-20261006/.tmp/release-focused.log.
+  Latest recovery inventory maintenance has no full recovery run yet.
+
+Release blockers / required receipts
+1. Obtain remaining agents' exact ship lists; reconcile landed, superseded and
+   parked work. Do not indiscriminately merge every stale local worktree.
+2. Resolve p1a integration; independently verify fixes, flag-OFF and flag-ON
+   behavior, recovery table inventory and rollback. Off alone does not remove
+   packaging/migration risks from an unconditionally imported module.
+3. Experience-review subagent owns a requested concrete recovery repair in the
+   isolated integration checkout; its commit/checks are pending. Fix Share result: definitive409/422 currently locks
+   the original rejected draft into uncertain-delivery retries. Preserve exact
+   uncertain retries, but allow reviewed refresh/new draft or discard on rejection.
+4. Exercise an actual model host through group requests/contributions,
+   pause/resume and unified result delivery. Scripted host receipts prove UI/API
+   behavior, not end-to-end swarm execution.
+5. Run merged-tree Node, Worker, schema/auth/purge/recovery/runtime/asset gates;
+   browser signup/login/invite/assistant checks; classify failures against main.
+6. Mac public distribution: current arm64 macOS14+ app is ad-hoc signed.
+   Developer ID, notarization/Gatekeeper, production auth/provider handoff and
+   intended native connection remain required. Keep it a local build meanwhile.
+7. After authorized push/PR merge, test and schema-gate must both succeed on the
+   exact main SHA. Coordinate ROLE-DEPLOYER with Grok; follow DEPLOY-LANE.md,
+   record both prior Worker versions, deploy once and confirm exact SHA on both
+   public doors, health/readiness, signed agent card and live smoke.
+
+Rollback and configuration
+- The combined candidate inherits indexed-message migration schema37→38.
+  Qualify old database upgrade/restart and schema-version rollback refusal;
+  a schema37 binary must not be assumed compatible with migrated data.
+- Assistant tables initialize additively; keep databases/backups. Stop/drain
+  hosts before rollback and never automatically transfer unresolved attempts.
+- Native file writes are real owner-authorized effects; source rollback cannot
+  undo them. Broker journal must be retained to prevent ambiguous replay.
+- Native download change requires rebuild only; saved exports remain intact.
+- Preserve production variables and leave at-rest storage flag OFF. Audit other
+  agents' new variables/secrets/migrations before assembling final deploy inputs.
+- Record prod+entry version IDs before deployment; workflow rollback restores
+  both code versions. Schema/data migrations require separately verified recovery.
+- Minting elevated links, granting OS permissions and personal-data operations
+  are separate actions; they are not part of this readiness rehearsal.
+
+Repository test-audit gate applied to merge-conflict test maintenance:
+Invariant: new metadata tables remain visible to recovery and explicit cold
+inventory, with no missing rows or silently ignored storage.
+Credible regression: combining independently additive features drops a table
+from recovery or incorrectly treats a populated new table as an empty sidecar.
+Distinct owner: preserve existing recovery/cold inventory owners; add no parallel
+count-only tests. Counts require actual initialized-schema confirmation, not
+blind acceptance of a patch's standalone count. No production test-only seam.
+
+Historical-work reconciliation: independent older collaboration-thread audit
+found no new ship candidate in eight Sept25 worktrees. PR1048,1040,1041,1037,
+1033 already merged; PR1038 superseded by merged1104; old PR1030 scratch
+commits and PR1284/1285 must not be reapplied. Gmail remains shelved in that
+thread. Audit/chat validation branches carry no unique product changes.
