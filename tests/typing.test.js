@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { recordBeat, currentTypists, typingKey, TYPING_TTL_MS } from "../server/typing.mjs";
+import { recordBeat, currentTypists, typingKey, TYPING_TTL_MS, MAX_TYPING_ROOMS, MAX_TYPISTS_PER_ROOM } from "../server/typing.mjs";
 
 // Authoring-gate answers: typing is ephemeral by contract — heartbeats must
 // expire without any explicit stop, must never be visible to the typist
@@ -57,4 +57,17 @@ test("recordBeat rejects missing room or member", () => {
   assert.equal(recordBeat(state, "", member("a"), 1000), false);
   assert.equal(recordBeat(state, "room1", null, 1000), false);
   assert.equal(state.size, 0);
+});
+
+test("admission is bounded: a full map refuses new rooms and typists, never evicting a live one", () => {
+  const state = new Map();
+  for (let i = 0; i < MAX_TYPING_ROOMS; i += 1) state.set(`r${i}`, new Map([["m", { displayName: "m", kind: "agent", expiresAt: 2_000 }]]));
+  assert.equal(recordBeat(state, "new-room", { id: "x" }, 1_000), false, "full map refuses a new room");
+  assert.equal(recordBeat(state, "r1", { id: "m" }, 1_000), true, "an existing typist can renew");
+  assert.equal(recordBeat(state, "new-room", { id: "x" }, 3_000), true, "expired beats are swept, then admitted");
+  const room = new Map();
+  for (let i = 0; i < MAX_TYPISTS_PER_ROOM; i += 1) room.set(`m${i}`, { displayName: `m${i}`, kind: "agent", expiresAt: 2_000 });
+  const one = new Map([["busy", room]]);
+  assert.equal(recordBeat(one, "busy", { id: "late" }, 1_000), false, "full room refuses a new typist");
+  assert.equal(room.has("m0"), true, "no live typist evicted");
 });
