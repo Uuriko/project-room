@@ -19,6 +19,7 @@ import { BOND_SCOPES } from "./bonds.mjs";
 import { EscrowError } from "./bounty-escrow.mjs";
 import { buildActivationPack } from "./room-activation-pack.mjs";
 import { buildOrient } from "./orient.mjs";
+import { walkProvenance, ClaimError } from "./work-claims.mjs";
 import { randomUUID } from "node:crypto";
 import { validId, ROOM_KINDS, MAX_MESSAGE_BODY_CHARS } from "../src/events.js";
 import { nextWorkStep } from "../src/workflow.js";
@@ -132,6 +133,7 @@ function validRoomArgs(name, args) {
   if (!selected || !allowed(args, Object.keys(selected.inputSchema.properties), selected.inputSchema.required)) return false;
   if (args.roomId !== undefined && !validId(args.roomId)) return false;
   if (name === "room_check_access" || name === "room_activation_pack") return true;
+  if (name === "room_member_card") return validId(args.memberId);
   if (name === "room_needs_me") {
     if (args.since === undefined) return true;
     if (Number.isSafeInteger(args.since) && args.since >= 0) return true;
@@ -157,6 +159,9 @@ function validRoomArgs(name, args) {
   if (name === "room_list_events") {
     return (args.after === undefined || Number.isSafeInteger(args.after) && args.after >= 0)
       && (args.limit === undefined || Number.isSafeInteger(args.limit) && args.limit >= 1 && args.limit <= 100);
+  }
+  if (name === "room_work_claim_provenance") {
+    return typeof args.claimId === "string" && args.claimId.length >= 1 && args.claimId.length <= 128;
   }
   if (name === "room_post_message") {
     const idOk = args.id === undefined || validId(args.id);
@@ -479,6 +484,16 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
     const auth = store.authenticate(secret, roomId);
     return buildActivationPack(store, roomId, auth.member.id);
   }
+  if (name === "room_member_card") {
+    // plan-dir-card: the member chip's card over MCP. Same read as
+    // GET /api/rooms/:roomId/members/:memberId/card.
+    const auth = store.authenticate(secret, roomId);
+    const doc = store.agentPlugin.cardForMember({
+      roomId, memberId: args.memberId, viewerIdentityId: auth.identityId ?? identity.identityId,
+    });
+    if (!doc) throw Object.assign(new Error("No directory card for this member"), { status: 404, code: "unknown_card" });
+    return doc;
+  }
   if (name === "get_room_context") {
     const context = store.roomContext(secret, roomId, {
       sinceVersion: args.since_version === undefined ? null : args.since_version
@@ -490,6 +505,21 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
   if (name === "room_list_events") {
     const auth = store.authenticate(secret, roomId);
     return stampEvents(redactEventPage(store.eventsAfter(secret, roomId, args.after ?? 0, args.limit ?? 50), store.room(roomId).state.messages), auth.member.id);
+  }
+  if (name === "room_work_claim_provenance") {
+    // Provenance walk (orch-provenance-rollback): same graph as GET
+    // /api/rooms/:roomId/work-claims/:claimId/provenance, read over the
+    // room's claim registry. Read-only; any room member may walk.
+    store.authenticate(secret, roomId);
+    const items = store.workClaims.list(roomId);
+    try {
+      return { roomId, claimId: args.claimId, ...walkProvenance(items, args.claimId) };
+    } catch (error) {
+      if (error instanceof ClaimError && error.code === "unknown_claim") {
+        throw new ServiceError(404, "work_claim_not_found", `No work claim "${args.claimId}" in this room`);
+      }
+      throw error;
+    }
   }
   if (name === "room_post_message") {
     const id = args.id ?? randomUUID();

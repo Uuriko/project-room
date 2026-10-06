@@ -13,6 +13,7 @@ import { randomUUID } from "node:crypto";
 import { EVENT_TYPES, WORK_CLAIM_EVENT_ACTIONS, applyEvent, event, firstBlockedWakeTarget, isRoomArchived } from "../src/events.js";
 import { getTier } from "./autonomy-tiers.mjs";
 import { postReceiptCard } from "./receipt-cards.mjs";
+import { resolveNamedReviewers, hasCurrentReview } from "./work-claims.mjs";
 
 export const WORK_CLAIM_ACTIONS = WORK_CLAIM_EVENT_ACTIONS;
 
@@ -118,6 +119,21 @@ export function enqueueClaimWake(store, roomId, memberId, messageId, { reason, a
     console.error("work claim wake failed:", error?.message ?? error);
     return null;
   }
+}
+
+// hw-h2-needs-me-review-asks (3): one wake per new head for each reviewer the
+// item names (tag rev-<memberId>) who has not reviewed that head yet. Ready
+// means in_progress or a linked PR, the same rule as needs-me reviewAsks. The
+// message id carries the head, so repeats coalesce and a new head wakes again.
+export function wakeNamedReviewers(store, roomId, item, { actorId } = {}) {
+  if (!item || item.state === "done" || !item.owner || item.supersededBy) return [];
+  if (!(item.state === "in_progress" || item.pullRequest || (item.pullRequests ?? []).length)) return [];
+  const head = item.ci?.headSha ?? item.revision ?? item.claimedAt ?? "none";
+  let members = {};
+  try { members = (store.roomAuthority?.(roomId) ?? store.room(roomId)?.state)?.members ?? {}; } catch { return []; }
+  return resolveNamedReviewers(item, members).filter(memberId => memberId !== item.owner && !hasCurrentReview(item, memberId))
+    .map(memberId => enqueueClaimWake(store, roomId, memberId, `work-claim:${item.id}:review:${head}`,
+      { reason: "review", actorId: actorId ?? item.owner }));
 }
 
 // SEC-2 / Q3-A event budget: note-only writes (a note on a held claim, a

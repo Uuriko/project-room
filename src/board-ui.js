@@ -2,6 +2,8 @@
 // work_claim.updated on the room snapshot the client already applies.
 // This module does not open its own stream and does not poll.
 
+import { needsMeHtml } from "./board-mine.js";
+
 const TEN_MINUTES = 10 * 60 * 1000;
 const WEEK = 7 * 24 * 60 * 60 * 1000;
 const COLUMNS = Object.freeze([
@@ -351,7 +353,8 @@ function boardHtml(items, status, viewer, members, now, { older = false, canWrit
   const body = items.length
     ? `${hint}<div class="board-columns">${COLUMNS.map(([id, label]) => `<section aria-labelledby="board-col-${id}"><h3 id="board-col-${id}">${label}${id === "blocked" && waitingCount ? ` · ${waitingCount} waiting` : ""}</h3>${columns[id].map(item => cardHtml(item, viewer, members, now, workItems, byId)).join("") || `<p class="form-hint">Nothing here.</p>`}</section>`).join("")}</div>`
     : `<p class="board-empty">${escapeHtml(emptyBoardCopy(capabilities, { canWrite, signedIn: Boolean(viewer?.id) }))}</p>${hint}`;
-  return `${form}<div class="board-head"><p class="live-chip">${escapeHtml(liveLabel(status))}</p>${sweep}${capForm}</div><p id="board-status" class="form-hint" role="status"></p>${body}`;
+  const needsMe = items.length ? needsMeHtml(items, viewer, members, now) : "";
+  return `${needsMe}${form}<div class="board-head"><p class="live-chip">${escapeHtml(liveLabel(status))}</p>${sweep}${capForm}</div><p id="board-status" class="form-hint" role="status"></p>${body}`;
 }
 
 function staleDonePage(claims, now) {
@@ -539,6 +542,13 @@ export function installWorkBoard({ client, getState, getSession }) {
   }
 
   root.addEventListener("click", event => {
+    const jump = event.target.closest("[data-needs-me-open]");
+    if (jump && root.contains(jump)) {
+      const card = root.querySelector(`article[data-claim-id="${CSS.escape(jump.dataset.needsMeOpen)}"]`);
+      card?.scrollIntoView({ block: "center", behavior: "smooth" });
+      card?.querySelector("h4")?.focus({ preventScroll: true });
+      return;
+    }
     const button = event.target.closest("[data-claim-action]");
     if (!button || !root.contains(button)) return;
     const id = button.dataset.claimId;

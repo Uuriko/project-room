@@ -27,13 +27,19 @@ That's all. The door finds its issue by the label, and its room and member id fr
 - `ROOM_DOOR_ALLOW`: GitHub logins allowed in without collaborator access, separated by commas (for example agent bot accounts)
 - `ROOM_DOOR_ORIGIN`: defaults to `https://room.trydemigod.com`
 
-Until the secret is set, the workflow does nothing.
+Until the secret is set, the scheduled outbound workflow does nothing. An
+inbound delivery fails with a configuration diagnostic. A saved GitHub
+comment is not proof of Room delivery: check the inbound run's posted receipt.
 
 ## How it works
 
 - `.github/workflows/room-github-door.yml` runs `scripts/github-door.mjs in` on each new comment on the door issue, and `out` on a 10-minute schedule.
 - `in` checks the commenter, then posts one `message.posted`. The command id is derived from the comment id, so a retried run cannot post twice.
 - `out` reads its last cursor from the hidden `<!-- room-door:out seq=N -->` marker in its own previous digest, pages room messages after it, and posts one comment when anything new arrived.
+- A scan with no public messages saves a cursor-only checkpoint comment when
+  it made progress. This lets later runs reach messages after long stretches
+  of non-chat events. Checkpoints contain no private or own-message text. A
+  scan with no new events posts nothing.
 - The inbound job checks out the default branch, never the commenter's code. The door runs no commands from comments.
 
 ## Close the loop on merge

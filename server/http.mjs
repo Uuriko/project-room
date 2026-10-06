@@ -3366,6 +3366,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // member.access_changed with active:false via the event-sourced path;
       // the identity link is kept (identity is not deleted).
       const memberDeactivateMatch = /^\/api\/rooms\/([^/]{1,384})\/members\/([^/]{1,64})$/.exec(url.pathname);
+      // plan-dir-card: a member's directory card (owns[] + reach{}) for
+      // the member chip, and the owner-only directory seed.
+      const memberCardMatch = /^\/api\/rooms\/([^/]{1,384})\/members\/([^/]{1,64})\/card$/.exec(url.pathname);
+      const dirSeedMatch = /^\/api\/rooms\/([^/]{1,384})\/directory\/seed$/.exec(url.pathname);
       // Public-face controls (owner only): status/toggle at the funnel root, rotate below.
       const publicFaceRotateMatch = /^\/api\/rooms\/([^/]{1,384})\/public-face\/rotate$/.exec(url.pathname);
       // Lane C inbox collaboration (task RC-2026-09-18-011): every collab
@@ -3426,8 +3430,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const workClaimReassignMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/reassign$/.exec(url.pathname);
       const workClaimReceiptsMatch = /^\/api\/rooms\/([^/]{1,384})\/receipts$/.exec(url.pathname);
       const workClaimRenewMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/renew$/.exec(url.pathname);
+      // Provenance walk + premise-invalid rollback (orch-provenance-rollback).
+      // Literal segments are matched before the {id} template so they are
+      // never mistaken for a claim id.
+      const workClaimProvenanceMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/provenance$/.exec(url.pathname);
+      const workClaimPremiseInvalidMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/premise-invalid$/.exec(url.pathname);
       const workClaimMatch = workClaimsMatch ?? workClaimsStatusMatch ?? workClaimsSweepMatch ?? workClaimsDuplicatesMatch ?? workClaimsConfigMatch ?? workClaimClaimMatch
-        ?? workClaimUpdateMatch ?? workClaimReviewMatch ?? workClaimReleaseMatch ?? workClaimReassignMatch ?? workClaimRenewMatch ?? workClaimItemMatch
+        ?? workClaimUpdateMatch ?? workClaimReviewMatch ?? workClaimReleaseMatch ?? workClaimReassignMatch ?? workClaimRenewMatch ?? workClaimProvenanceMatch
+        ?? workClaimPremiseInvalidMatch ?? workClaimItemMatch
         ?? workClaimReceiptsMatch;
       // Agent /feedback endpoint (structured bug/feature reports): every
       // route template below is documented in docs/openapi.yaml — the
@@ -3517,6 +3527,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         && !dmConsentDecideMatch && !dmConsentBlockMatch && !dmConsentRevokeMatch && !dmConsentUnblockMatch && !publicFaceRotateMatch
         && !peerDmThreadMatch && !operatorAgentMatch
         && !mentionAckMatch && !mentionSettingsMatch && !savedDeleteMatch && !memberDeactivateMatch
+        && !memberCardMatch && !dirSeedMatch
         && !agentGrantsMatch && !agentGrantDeleteMatch && !agentCapabilitiesMatch
         && !matchmakingMatch) reject(404, "not_found", "Not found");
       const roomId = pathId((publicWorkRoomReviewMatch ?? projectOfferActionMatch ?? match ?? revokeMatch ?? threadMatch ?? accessDecideMatch ?? delegationGrantMatch ?? delegationRevokeMatch ?? delegationListMatch ?? ownerDelegateGrantMatch ?? ownerDelegateRevokeMatch ?? ownerDelegateListMatch ?? ownershipTransferMatch ?? collabMatch ?? workClaimMatch
@@ -3524,6 +3535,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         ?? dmConsentDecideMatch ?? dmConsentBlockMatch ?? dmConsentRevokeMatch ?? dmConsentUnblockMatch ?? publicFaceRotateMatch
         ?? peerDmThreadMatch ?? operatorAgentMatch
         ?? mentionAckMatch ?? mentionSettingsMatch ?? savedDeleteMatch ?? memberDeactivateMatch
+        ?? memberCardMatch ?? dirSeedMatch
         ?? agentGrantsMatch ?? agentGrantDeleteMatch ?? agentCapabilitiesMatch ?? matchmakingMatch)[1]);
       // NOTE: matchmakingMatch must stay in the roomId chain above — it was
       // added to the 404 guard but forgotten here, so every matchmaking
@@ -3536,6 +3548,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const mentionEventId = mentionAckMatch ? pathId(mentionAckMatch[2]) : null;
       const savedDeleteMessageId = savedDeleteMatch ? pathId(savedDeleteMatch[2]) : null;
       const deactivateMemberId = memberDeactivateMatch ? pathId(memberDeactivateMatch[2]) : null;
+      const cardMemberId = memberCardMatch ? pathId(memberCardMatch[2]) : null;
       const route = publicWorkRoomReviewMatch ? "public-work-review" : projectOfferActionMatch ? "project-offers" : match ? (match[2] ?? "") : revokeMatch ? "invitation-revoke" : threadMatch ? "thread" : accessDecideMatch ? "access-decide" : delegationGrantMatch ? "delegation-grant" : delegationRevokeMatch ? "delegation-revoke" : delegationListMatch ? "delegation-list" : ownerDelegateGrantMatch ? "owner-delegate-grant" : ownerDelegateRevokeMatch ? "owner-delegate-revoke" : ownerDelegateListMatch ? "owner-delegate-list"
         : dmConsentDecideMatch ? "dm-consent-decide" : dmConsentBlockMatch ? "dm-consent-block" : dmConsentRevokeMatch ? "dm-consent-revoke"
         : dmConsentUnblockMatch ? "dm-consent-unblock" : publicFaceRotateMatch ? "public-face-rotate"
@@ -3544,6 +3557,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         : agentCapabilitiesMatch ? "agent-capabilities"
         : mentionAckMatch ? "mention-ack" : mentionSettingsMatch ? "mention-settings" : savedDeleteMatch ? "saved-delete"
         : memberDeactivateMatch ? "member-deactivate"
+        : memberCardMatch ? "member-card" : dirSeedMatch ? "directory-seed"
         : "ownership-transfer";      const selected = roomCredentials(req, url);
       const fence = selected.mode === "account" ? accountBinding(req, route === "stream" ? url : null) : expectedBinding(req);
       const auth = roomAuth(selected, roomId, fence);
@@ -3704,9 +3718,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           : workClaimUpdateMatch ? "update"
           : workClaimReviewMatch ? "review"
           : workClaimReleaseMatch ? "release"
-          : workClaimRenewMatch ? "renew" : "reassign";
+          : workClaimRenewMatch ? "renew"
+          : workClaimProvenanceMatch ? "provenance"
+          : workClaimPremiseInvalidMatch ? "premise-invalid" : "reassign";
         const workClaimIdMatch = workClaimItemMatch ?? workClaimClaimMatch ?? workClaimUpdateMatch
-          ?? workClaimReviewMatch ?? workClaimReleaseMatch ?? workClaimReassignMatch ?? workClaimRenewMatch;
+          ?? workClaimReviewMatch ?? workClaimReleaseMatch ?? workClaimReassignMatch ?? workClaimRenewMatch
+          ?? workClaimProvenanceMatch ?? workClaimPremiseInvalidMatch;
         return await handleWorkClaims({ req, res, url, store, roomId, auth, workClaimRoute,
           workClaimId: workClaimIdMatch ? pathId(workClaimIdMatch[2]) : null, registry: store.workClaims,
           ...(fetchPullRequest ? { fetchPullRequest } : {}),
@@ -4363,6 +4380,28 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const data = await body(req);
         if (!exact(data, ["timeoutMs"])) reject(422, "invalid_request", "timeoutMs is the accepted field");
         return json(res, 200, store.setMentionTimeout(selected.token, roomId, data.timeoutMs, fence));
+      }
+      if (route === "member-card" && req.method === "GET") {
+        // plan-dir-card: a room member's directory card for the member
+        // chip (owns[] + reach{}). Any room member may read it; visibility
+        // is enforced in the store (private cards only to the owning
+        // identity). 404 when the member has no card or the viewer may not
+        // see it — never an existence oracle.
+        const doc = store.agentPlugin.cardForMember({
+          roomId, memberId: cardMemberId, viewerIdentityId: auth.identityId ?? null,
+          // A2A v1.0 projection (interop/discoverability only); interfaces
+          // omitted when the origin is not a public https URL.
+          serviceOrigin: typeof origin === "string" && /^https:\/\/\S+$/.test(origin) ? origin : null,
+        });
+        if (!doc) reject(404, "unknown_card", "No directory card for this member");
+        return json(res, 200, doc);
+      }
+      if (route === "directory-seed" && req.method === "POST") {
+        // plan-dir-card: owner-only seeding of placeholder directory cards
+        // for agent members that have none. Seeded cards are visibility
+        // "room", provenance "seeded", unsigned; the agent replaces its seed
+        // by publishing a signed card.
+        return json(res, 200, store.agentPlugin.seedRoomDirectoryCards({ roomId, ownerMemberId: auth.member.id }));
       }
       if (route === "member-deactivate" && req.method === "DELETE") {
         // RC-2026-09-23: self-deactivation. The caller names its own member

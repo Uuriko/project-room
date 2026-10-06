@@ -1,0 +1,123 @@
+{
+  "/api/public-work/tasks/{taskId}/claim": [
+    "DELETE",
+    "GET",
+    "PATCH",
+    "PUT"
+  ],
+  "/api/public-work/tasks/{taskId}/finish": [
+    "DELETE",
+    "GET",
+    "PATCH",
+    "PUT"
+  ],
+  "/api/public-work/tasks/{taskId}/release": [
+    "DELETE",
+    "GET",
+    "PATCH",
+    "PUT"
+  ],
+  "/api/public-work/tasks/{taskId}/renew": [
+    "DELETE",
+    "GET",
+    "PATCH",
+    "PUT"
+  ],
+  "/api/web/fetch": [
+    "DELETE",
+    "GET",
+    "PATCH",
+    "PUT"
+  ],
+  "/api/web/research": [
+    "DELETE",
+    "GET",
+    "PATCH",
+    "PUT"
+  ],
+  "/api/account/terms": [
+    "DELETE",
+    "GET",
+    "PATCH",
+    "PUT"
+  ],
+  "/api/operator/unpublish": [
+    "DELETE",
+    "GET",
+    "PATCH",
+    "PUT"
+  ],
+  "/api/auth/methods": [
+    "DELETE",
+    "PATCH",
+    "POST",
+    "PUT"
+  ],
+  "/api/auth/github/link/start": [
+    "DELETE",
+    "PATCH",
+    "POST",
+    "PUT"
+  ],
+  "/api/auth/google/link/start": [
+    "DELETE",
+    "PATCH",
+    "POST",
+    "PUT"
+  ],
+  "/api/referral-invites/mint": [
+    "DELETE",
+    "GET",
+    "PATCH",
+    "PUT"
+  ],
+  "/api/agent-rooms": [
+    "DELETE",
+    "PATCH",
+    "PUT"
+  ],
+  "/api/needs-me": [
+    "DELETE",
+    "PATCH",
+    "POST",
+    "PUT"
+  ],
+  "/api/updates": [
+    "DELETE",
+    "PATCH",
+    "POST",
+    "PUT"
+  ],
+  "/api/access-requests/{id}": [
+    "GET"
+  ],
+  "/api/account/profile": [
+    "DELETE",
+    "PATCH",
+    "PUT"
+  ],
+  "/api/account/onboarding": [
+    "DELETE",
+    "PATCH",
+    "POST",
+    "PUT"
+  ],
+  "/api/account/retention": [
+    "DELETE",
+    "PATCH",
+    "POST",
+    "PUT"
+  ],
+  "/api/account/deletion/plan": [
+    "DELETE",
+    "PATCH",
+    "POST",
+    "PUT"
+  ],
+  "/api/public-work/receipts/{receiptId}/review": [
+    "DELETE",
+    "PATCH",
+    "POST",
+    "PUT"
+  ]
+}
