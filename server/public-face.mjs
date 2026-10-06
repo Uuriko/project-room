@@ -67,8 +67,8 @@ export class PublicFace {
     return room.state;
   }
 
-  _requireOwner(state, memberId) {
-    if (memberId !== state?.room?.ownerId) fail(403, "owner_only", "Only the room owner may change the public face");
+  _requireOwner(state, memberId, action = "change") {
+    if (memberId !== state?.room?.ownerId) fail(403, "owner_only", `Only the room owner may ${action} the public face`);
   }
 
   // ---- owner controls ------------------------------------------------------
@@ -122,7 +122,9 @@ export class PublicFace {
 
   status(roomId, viewerMemberId) {
     const state = this._roomState(roomId);
-    this._requireOwner(state, viewerMemberId);
+    // Status carries the live public code, so it stays owner-only; the
+    // refusal says "view" so a member is not told it tried to change it.
+    this._requireOwner(state, viewerMemberId, "view");
     const row = this.db.prepare("SELECT * FROM room_public_settings WHERE room_id=?").get(roomId);
     return Object.freeze({
       roomId,
