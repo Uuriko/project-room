@@ -26,6 +26,9 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 export const KEEP = [
   // Other batches will wire these.
   "server/receipt-standard.mjs",
+  // Lane C (Demigod x Project Room jobs integration): the trial-task
+  // receipt route batch (GET /trial-tasks/:id/receipt) wires this.
+  "server/vetting-receipts.mjs",
   "src/design-tokens.js",
   // Scripts and workflows load these directly.
   "server/backup.mjs",
