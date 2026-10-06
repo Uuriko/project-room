@@ -23,7 +23,7 @@ import { validId } from "../src/events.js";
 import { redactEventPage } from "./redact-read.mjs";
 import { projectBoard } from "../src/board.js";
 import { confirmsWorkReturn } from "../src/workflow.js";
-import { workContextMarkdown } from "../client/room-agent.mjs";
+import { workContextMarkdown, paginateRoomMessages } from "../client/room-agent.mjs";
 import { roomTools, validRoomToolArguments, buildDraftCommand } from "../client/mcp-stdio.mjs";
 import { bountyTools, isBountyTool, validBountyToolArguments } from "../client/bounty-tools.mjs";
 import { trustTools, isTrustTool, validTrustToolArguments } from "../client/trust-tools.mjs";
@@ -82,21 +82,32 @@ function stampRoom(value, roomId) {
   };
 }
 
-function roomMessages(store, secret, roomId, args, memberId) {
+async function roomMessages(store, secret, roomId, args, memberId) {
   const after = args.after ?? 0;
   const limit = args.limit ?? 50;
-  const page = redactEventPage(store.eventsAfter(secret, roomId, after, limit), store.room(roomId).state.messages);
-  const messages = (page?.events ?? []).filter(({ event }) => event?.type === "message.posted").map(({ sequence, event }) => ({
+  const latest = args.latest ?? false;
+  // Edit/delete redaction is per-event (projection-indexed), so applying it
+  // per scanned page is equivalent to applying it to the whole log.
+  const currentMessages = store.room(roomId).state.messages;
+  const fetchPage = (cursor, pageLimit) =>
+    redactEventPage(store.eventsAfter(secret, roomId, cursor, pageLimit), currentMessages);
+  const mapMessage = ({ sequence, event }) => ({
     sequence, eventId: event.id, messageId: event.data?.messageId ?? event.id, from: event.actorId, at: event.at,
     body: event.data?.body ?? "", replyToId: event.data?.replyToId ?? null, workItemId: event.data?.workItemId ?? null, private: Boolean(event.data?.toMemberId),
     ...(event.data?.toMemberId ? { toMemberId: event.data.toMemberId } : {}),
     ...(event.data?.requestKind === "reply" && event.data.requestPolicyVersion === 1
       && [event.actorId, event.data.toMemberId].includes(memberId) ? { requestKind: "reply", nextRead: { tool: "room_read_request", arguments: { roomId, requestMessageId: event.data.messageId ?? event.id } } } : {}),
     ...(Array.isArray(event.mentions) && event.mentions.length ? { mentions: event.mentions.map(mention => ({ memberId: mention.memberId, displayName: mention.displayName })) } : {})
-  }));
+  });
+  const { messages, next, hasMore } = await paginateRoomMessages(fetchPage, {
+    after, limit, latest,
+    // Backward walk needs the log head; the bound is exclusive, so +1.
+    end: latest ? store.roomAuthority(roomId).sequence + 1 : null,
+    mapMessage,
+  });
   return withContentTrust({
     roomId, messages: messages.map(message => markIfOther(message, memberId, message.from)),
-    next: page?.next ?? after, hasMore: Boolean(page?.hasMore)
+    next, hasMore
   });
 }
 
@@ -297,7 +308,7 @@ async function dispatchHostedStdioTool(store, secret, name, args) {
     } : row);
     return { value: { ...inbox, directMessages: stamp(inbox.directMessages), directMentions: stamp(inbox.directMentions), next: stamp(inbox.next) }, isError: false };
   }
-  if (name === "room_read_messages") return { value: roomMessages(store, secret, roomId, rest, auth.member.id), isError: false };
+  if (name === "room_read_messages") return { value: await roomMessages(store, secret, roomId, rest, auth.member.id), isError: false };
   if (isBountyTool(name)) return { value: callBountyTool(store, secret, roomId, auth, name, rest), isError: false };
   if (isTrustTool(name)) return { value: callTrustTool(store, roomId, auth, name, rest), isError: false };
   if (name !== "room_post_draft") {
