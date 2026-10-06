@@ -33,7 +33,7 @@
 //               headSha, at }] }
 
 import { execFileSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync } from "node:fs";
 
 const REPO = argValue("--repo") || "Uuriko/project-room";
 
@@ -61,9 +61,15 @@ export function analyzeReviewState({ prs, reviews = [] }) {
       stale: r.headSha !== pr.headSha,
     }));
     const verdicts = prReviews.filter((r) => r.verdict !== "COMMENT");
-    const latest = verdicts.length ? verdicts[verdicts.length - 1] : null;
+    const perReviewer = new Map();
+    for (const review of verdicts.slice().sort((a, b) => String(a.at ?? "").localeCompare(String(b.at ?? "")))) perReviewer.set(review.reviewer, review);
+    const outstanding = [...perReviewer.values()];
+    const changes = outstanding.filter(review => review.verdict === "CHANGES");
+    const fresh = outstanding.filter(review => !review.stale && review.verdict === "APPROVE");
+    const latest = changes.at(-1) ?? fresh.at(-1) ?? outstanding.at(-1) ?? null;
     let status;
     if (!latest) status = "awaiting_review";
+    else if (changes.length) status = "changes_requested";
     else if (latest.stale) status = "stale_verdict";
     else if (latest.verdict === "APPROVE") status = "approved_fresh";
     else status = "changes_requested";
@@ -126,11 +132,10 @@ export function routeReviews(states, lanes, prior = {}) {
 
 function ghApi(path, paginate = false) {
   const args = ["api", path];
-  if (paginate) args.push("--paginate");
+  if (paginate) args.push("--paginate", "--slurp");
   try {
-    return JSON.parse(
-      execFileSync("gh", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })
-    );
+    const parsed = JSON.parse(execFileSync("gh", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
+    return paginate ? parsed.flat() : parsed;
   } catch (e) {
     const msg = (e.stderr || e.message || "").toString().split("\n")[0];
     console.error(`gh api ${path} failed: ${msg}`);
@@ -139,7 +144,7 @@ function ghApi(path, paginate = false) {
 }
 
 function fetchLive() {
-  const pulls = ghApi(`repos/${REPO}/pulls?state=open&per_page=100`);
+  const pulls = ghApi(`repos/${REPO}/pulls?state=open&per_page=100`, true);
   const prs = pulls.map((p) => ({
     number: p.number,
     title: p.title,
@@ -189,7 +194,7 @@ if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split("/").pop()
   const fixture = input ? JSON.parse(readFileSync(input, "utf8")) : fetchLive();
   const lanes = (argValue("--lanes") || "").split(",").map((s) => s.trim()).filter(Boolean).map((name) => ({ name }));
   const assignFile = argValue("--assign-file");
-  const prior = assignFile ? JSON.parse(readFileSync(assignFile, "utf8")) : {};
+  const prior = assignFile && existsSync(assignFile) ? JSON.parse(readFileSync(assignFile, "utf8")) : {};
 
   const states = analyzeReviewState(fixture);
   const routing = routeReviews(states, lanes, prior);

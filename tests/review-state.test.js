@@ -96,3 +96,13 @@ test('PR with no eligible lane lands in unrouted, not silently dropped', () => {
   assert.deepEqual(assignments, {});
   assert.deepEqual(unrouted, [101]);
 });
+
+test('one reviewers approval cannot dismiss another reviewers requested changes', () => {
+  const reviews = [
+    { prNumber: 101, reviewer: 'alice-reviewer', verdict: 'CHANGES', headSha: 'old-head', at: '2026-10-06T17:00:00Z' },
+    { prNumber: 101, reviewer: 'bob-reviewer', verdict: 'APPROVE', headSha: 'aaa111', at: '2026-10-06T18:00:00Z' }
+  ];
+  assert.equal(analyzeReviewState({prs: PRS, reviews})[0].verdict.status, 'changes_requested');
+  reviews.push({prNumber:101,reviewer:'alice-reviewer',verdict:'APPROVE',headSha:'aaa111',at:'2026-10-06T19:00:00Z'});
+  assert.equal(analyzeReviewState({prs:PRS,reviews})[0].verdict.status,'approved_fresh');
+});
