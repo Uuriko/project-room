@@ -4,10 +4,12 @@
 //   - leases you are about to lose (owned, open, under an hour left or ended)
 //   - reviews you owe (tagged rev-<you> on open work you have not reviewed)
 //   - your claims gone quiet (owned, open, no update for two hours)
-//   - the rest of what you own, and what you are partnered on (rev-/build- tags)
-// Partner tags accept a member id or a display-name slug (rev-codexqa).
-// Presentation only: it never writes claim state; the Renew button reuses the
-// Board's existing data-claim-action="renew" handler.
+//   - the rest of what you own, and what you are partnered on (rev-/build- tags), behind More
+// Partner tags accept a member id, or a display-name slug (rev-codexqa) when that
+// slug belongs to exactly one member. Reviews owed are tag-derived and say so.
+// Presentation only: the panel itself writes nothing. Renew and Hand off are the
+// Board's existing renew and release actions (data-claim-action), the same calls
+// the claim card's own buttons make.
 
 export const LEASE_SOON_MS = 60 * 60 * 1000;
 export const QUIET_MS = 2 * 60 * 60 * 1000;
@@ -30,10 +32,19 @@ function tagged(item, prefix, viewerId, viewerSlug) {
   });
 }
 
+// A display-name slug counts only when exactly one member has it, so two members
+// whose names collapse to the same letters never see each other's rows.
+function uniqueSlug(members, viewerId) {
+  const mine = slug(members?.[viewerId]?.displayName ?? members?.[viewerId]?.name ?? "");
+  if (!mine) return "";
+  const holders = Object.entries(members ?? {}).filter(([id, member]) => id !== viewerId && slug(member?.displayName ?? member?.name ?? "") === mine);
+  return holders.length ? "" : mine;
+}
+
 export function myBoardWork(items, viewerId, members = {}, now = Date.now()) {
   const out = { expiring: [], reviews: [], quiet: [], owned: [], partnered: [] };
   if (!viewerId) return out;
-  const viewerSlug = slug(members?.[viewerId]?.displayName ?? members?.[viewerId]?.name ?? "");
+  const viewerSlug = uniqueSlug(members, viewerId);
   for (const item of Array.isArray(items) ? items : []) {
     if (!item || typeof item !== "object" || !item.id) continue;
     const open = OPEN.has(item.state);
@@ -69,25 +80,29 @@ function nameOf(members, id) {
   return member?.kind === "agent" && !name.startsWith("@") ? `@${name}` : name;
 }
 
+export const NEEDS_ME_LIMIT = 3;
+
+// Most urgent first, at most three rows, one primary action each. Nothing urgent
+// and nothing owned renders nothing; the rest of the viewer's work sits behind More.
 export function needsMeHtml(items, viewer, members = {}, now = Date.now()) {
   if (!viewer?.id) return "";
   const work = myBoardWork(items, viewer.id, members, now);
-  const urgent = work.expiring.length + work.reviews.length + work.quiet.length;
-  const row = (kind, label, item, note, action = "") => `<li class="needs-me-row needs-me-${kind}"><span class="needs-me-kind">${label}</span><button type="button" class="needs-me-open" data-needs-me-open="${esc(item.id)}"><span class="needs-me-title">${esc(item.title || item.id)}</span><span class="needs-me-note">${esc(note)}</span></button>${action}</li>`;
-  const renew = item => `<button type="button" class="button secondary" data-claim-action="renew" data-claim-id="${esc(item.id)}" data-focus-key="needs-me-renew:${esc(item.id)}">Renew</button>`;
-  const rows = [
-    ...work.expiring.map(({ item, left }) => row("lease", "Lease", item, left <= 0 ? "Your lease ended" : `${span(left)} left on your lease`, viewer.write === false ? "" : renew(item))),
-    ...work.reviews.map(({ item }) => row("review", "Review", item, `${nameOf(members, item.owner)} is waiting on your review`)),
-    ...work.quiet.map(({ item, quietFor }) => row("quiet", "Quiet", item, `No update for ${span(quietFor)}: post progress or hand it off`))
-  ].join("");
-  const summary = [
-    work.owned.length + urgent ? `${work.owned.length + work.expiring.length + work.quiet.length} yours` : "",
-    work.partnered.length ? `${work.partnered.length} partnered` : ""
-  ].filter(Boolean).join(" · ");
-  const calm = urgent ? "" : `<p class="needs-me-calm">Nothing needs you right now.${summary ? ` ${esc(summary)}.` : ""}</p>`;
-  const rest = [...work.owned.map(({ item }) => ["Yours", item]), ...work.partnered.map(({ item }) => ["Partner", item])];
-  const restList = rest.length && urgent
-    ? `<details class="needs-me-rest"><summary>${esc(summary)}</summary><ul>${rest.map(([label, item]) => `<li><span class="needs-me-kind">${label}</span><button type="button" class="needs-me-open" data-needs-me-open="${esc(item.id)}"><span class="needs-me-title">${esc(item.title || item.id)}</span></button></li>`).join("")}</ul></details>`
+  const canWrite = viewer.write !== false;
+  const claimButton = (action, label, item) => canWrite
+    ? `<button type="button" class="button secondary needs-me-act" data-claim-action="${action}" data-claim-id="${esc(item.id)}" data-focus-key="needs-me-${action}:${esc(item.id)}">${label}</button>` : "";
+  const openButton = (label, item) => `<button type="button" class="button secondary needs-me-act" data-needs-me-open="${esc(item.id)}">${label}</button>`;
+  const urgent = [
+    ...work.expiring.map(({ item, left }) => ({ item, note: left <= 0 ? "Your lease ended" : `Your lease ends in ${span(left)}`, act: claimButton("renew", "Renew", item) })),
+    ...work.reviews.map(({ item }) => ({ item, note: `You are tagged to review · ${nameOf(members, item.owner)}`, act: openButton("Review", item) })),
+    ...work.quiet.map(({ item, quietFor }) => ({ item, note: `No update for ${span(quietFor)}`, act: claimButton("release", "Hand off", item) }))
+  ];
+  const shown = urgent.slice(0, NEEDS_ME_LIMIT), waiting = urgent.slice(NEEDS_ME_LIMIT);
+  const rest = [...waiting.map(({ item, note }) => [note, item]), ...work.owned.map(({ item }) => ["Yours", item]), ...work.partnered.map(({ item }) => ["Partner", item])];
+  if (!shown.length && !rest.length) return "";
+  const row = ({ item, note, act }) => `<li class="needs-me-row"><button type="button" class="needs-me-open" data-needs-me-open="${esc(item.id)}"><span class="needs-me-title">${esc(item.title || item.id)}</span><span class="needs-me-note">${esc(note)}</span></button>${act}</li>`;
+  const more = rest.length
+    ? `<details class="needs-me-more"><summary>More · ${rest.length}</summary><ul>${rest.map(([note, item]) => `<li><button type="button" class="needs-me-open" data-needs-me-open="${esc(item.id)}"><span class="needs-me-title">${esc(item.title || item.id)}</span><span class="needs-me-note">${esc(note)}</span></button></li>`).join("")}</ul></details>`
     : "";
-  return `<section class="needs-me" aria-labelledby="needs-me-heading"><h3 id="needs-me-heading">What needs me${urgent ? ` <span class="needs-me-count">${urgent}</span>` : ""}</h3>${urgent ? `<ul class="needs-me-list">${rows}</ul>` : calm}${restList}</section>`;
+  const heading = shown.length ? `${urgent.length} need${urgent.length === 1 ? "s" : ""} you` : "Nothing needs you";
+  return `<section class="needs-me" aria-labelledby="needs-me-heading"><h3 id="needs-me-heading">${heading}</h3>${shown.length ? `<ul class="needs-me-list">${shown.map(row).join("")}</ul>` : ""}${more}</section>`;
 }
