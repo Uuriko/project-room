@@ -383,6 +383,7 @@ export async function seedRecoveryCoverage(f) {
     (endpoint, room_id, member_id, p256dh, auth, expiration_time, created_at)
     VALUES ('https://push.example.test/recovery', 'commons', 'owner', 'recovery-p256dh', 'recovery-auth', NULL, ?)`)
     .run(f.now());
+  f.store.db.prepare("INSERT INTO human_push_preferences(room_id,member_id,mention_enabled,dm_enabled,updated_at) VALUES('commons','owner',0,1,?)").run(f.now());
   // Seed one live grant edge so the capture covers agent_capability_grants
   // (per-agent capability grant edges, UFO-steal slice 1 RC-2026-09-27-2728).
   // issueGrant is the product writer; the audit's "every table has

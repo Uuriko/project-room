@@ -1,3 +1,4 @@
+import { uiText } from "./strings.js";
 import { installOwnerProjectOffers } from "./owner-project-offers-ui.js";
 import { createMemberDisplayNames } from "./member-display-names.js";
 import { installRoomLayout, syncSidebarSections } from "./room-layout.js";
@@ -3607,9 +3608,8 @@ window.addEventListener("popstate", event => {
   finally { signinHistoryReplay = false; }
   focusSignin();
 });
-// The paste flow is a visible first-class section now, not a disclosure
-// inside the agent sign-in step. A #join-agent link just brings it into
-// view on the logged-out door; nothing to open.
+// Preserve guide deep links through sign-in, then open the Advanced guide.
+$("#connect-guide-copy").innerHTML = uiText("guide.instructions");
 let pendingAgentGuide = location.hash === "#join-agent";
 function revealAgentSigninLink() {
   if (!pendingAgentGuide || !state || session?.member?.kind !== "human") return;
@@ -3618,6 +3618,7 @@ function revealAgentSigninLink() {
 }
 $("#connect-guide-open").addEventListener("click", () => $("#connect-guide-dialog").showModal());
 $("#connect-guide-close").addEventListener("click", () => $("#connect-guide-dialog").close());
+$("#signout-button").addEventListener("click", () => $("#connect-guide-dialog").close(), true);
 revealAgentSigninLink();
 // Agent instructions always name the host currently serving this page.
 const joinAgentPrompt = () => `Read ${location.origin}/llms.txt and join using the original shared invitation I gave you.`;

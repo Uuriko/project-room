@@ -172,21 +172,13 @@ export class HumanPush {
     return Object.freeze(body);
   }
 
-  // Read this member's push-channel preferences in this room. Absent row or
-  // unreadable store: both kinds on, which is today's behavior.
+  // An absent row preserves the default; unreadable preferences fail closed.
   _prefsFor(roomId, memberId) {
-    try {
-      const row = this.db.prepare(
-        "SELECT mention_enabled, dm_enabled FROM human_push_preferences WHERE room_id=? AND member_id=?"
-      ).get(roomId, memberId);
-      if (!row) return { ...HUMAN_PUSH_PREF_DEFAULTS };
-      return {
-        mention: row.mention_enabled !== 0,
-        dm: row.dm_enabled !== 0
-      };
-    } catch {
-      return { ...HUMAN_PUSH_PREF_DEFAULTS };
-    }
+    const row = this.db.prepare(
+      "SELECT mention_enabled, dm_enabled FROM human_push_preferences WHERE room_id=? AND member_id=?"
+    ).get(roomId, memberId);
+    return row ? { mention: row.mention_enabled !== 0, dm: row.dm_enabled !== 0 }
+      : { ...HUMAN_PUSH_PREF_DEFAULTS };
   }
 
   preferences(token, roomId, binding = null) {

@@ -11,6 +11,9 @@
 // module only resolves handles to member ids; store.mjs inserts one
 // mention_states row per member (reusing delivery/ack/timeout), exactly
 // like a direct @mention. server/mention-lifecycle.mjs is untouched.
+import { messageVisibleToViewer } from "./history-visibility.mjs";
+import { refuseArchivedWrite } from "./room-lifecycle.mjs";
+import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
 import { randomUUID } from "node:crypto";
 import { ServiceError } from "./service-error.mjs";
 import { MAX_MESSAGE_BODY_CHARS } from "../src/events.js";
@@ -121,6 +124,7 @@ export function squadMentionTargets(db, roomId, text, senderMemberId, members, t
       const m = members?.[id];
       if (!m || m.active === false) continue;
       out.push(id);
+      if (out.length >= MAX_SQUAD_MEMBERS) return out;
     }
   }
   return out;
@@ -152,20 +156,29 @@ function checkBody(data) {
   return { name, goal: data.goal ?? "", channelMessageId: data.channelMessageId ?? null, memberIds: data.memberIds ?? [] };
 }
 
+function visibleSquad(store, roomId, viewer, row) {
+  const view = squadView(row);
+  if (view.channel) {
+    const message = store.room(roomId).state.messages.find(m => m.id === view.channel);
+    if (message?.toMemberId || !messageVisibleToViewer(message, viewer, store.historyFloor(roomId, viewer))) view.channel = null;
+  }
+  return view;
+}
+
 export function listSquads(store, token, roomId, expectedSessionBinding = null) {
   return store.readTransaction(() => {
-    store.authenticate(token, roomId, expectedSessionBinding);
+    const auth = store.authenticate(token, roomId, expectedSessionBinding);
     const rows = store.db.prepare("SELECT * FROM squads WHERE room_id=? ORDER BY name").all(roomId);
-    return { roomId, squads: rows.map(squadView) };
+    return { roomId, squads: rows.map(row => visibleSquad(store, roomId, auth.member.id, row)) };
   });
 }
 
 export function getSquad(store, token, roomId, squadId, expectedSessionBinding = null) {
   return store.readTransaction(() => {
-    store.authenticate(token, roomId, expectedSessionBinding);
+    const auth = store.authenticate(token, roomId, expectedSessionBinding);
     const row = typeof squadId === "string" ? getRow(store.db, roomId, squadId) : null;
     if (!row) fail(404, "squad_not_found", "No such squad in this room");
-    return { roomId, squad: squadView(row) };
+    return { roomId, squad: visibleSquad(store, roomId, auth.member.id, row) };
   });
 }
 
@@ -175,8 +188,11 @@ export function createSquad(store, token, roomId, data, expectedSessionBinding =
     const auth = store.authenticate(token, roomId, expectedSessionBinding);
     const me = auth.member?.id;
     if (!me) fail(403, "access_denied", "Membership required");
+    refuseArchivedWrite(store.room(roomId).state);
+    if (isGuestAgentMemberId(me)) fail(403, "guest_scope_denied", "Guest members cannot change squads");
     const room = store.room(roomId);
-    if (input.channelMessageId && !room.state.messages.some(m => m.id === input.channelMessageId && !m.deletedAt)) {
+    if (input.channelMessageId && !room.state.messages.some(m => m.id === input.channelMessageId && !m.toMemberId
+      && messageVisibleToViewer(m, me, store.historyFloor(roomId, me)))) {
       fail(422, "squad_channel_unknown", "channelMessageId is not a live message in this room");
     }
     const members = activeMemberIds(room, [...input.memberIds, me]);
@@ -212,6 +228,8 @@ export function updateSquadMembers(store, token, roomId, squadId, data, expected
     const auth = store.authenticate(token, roomId, expectedSessionBinding);
     const me = auth.member?.id;
     if (!me) fail(403, "access_denied", "Membership required");
+    refuseArchivedWrite(store.room(roomId).state);
+    if (isGuestAgentMemberId(me)) fail(403, "guest_scope_denied", "Guest members cannot change squads");
     const row = typeof squadId === "string" ? getRow(store.db, roomId, squadId) : null;
     if (!row) fail(404, "squad_not_found", "No such squad in this room");
     if (row.state !== "active") fail(409, "squad_disbanded", "A disbanded squad has no roster changes");
@@ -244,6 +262,8 @@ export function disbandSquad(store, token, roomId, squadId, expectedSessionBindi
     const auth = store.authenticate(token, roomId, expectedSessionBinding);
     const me = auth.member?.id;
     if (!me) fail(403, "access_denied", "Membership required");
+    refuseArchivedWrite(store.room(roomId).state);
+    if (isGuestAgentMemberId(me)) fail(403, "guest_scope_denied", "Guest members cannot change squads");
     const row = typeof squadId === "string" ? getRow(store.db, roomId, squadId) : null;
     if (!row) fail(404, "squad_not_found", "No such squad in this room");
     if (row.owner_id !== me) fail(403, "squad_owner_required", "Only the squad owner can disband it");

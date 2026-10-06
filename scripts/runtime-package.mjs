@@ -294,6 +294,7 @@ optional.push("server/work-wants.mjs", "server/routes/wants-work.mjs"); // BOARD
 optional.push("server/routes/spend-grants.mjs"); // spend-primitive MVP: per-agent spend grant RT routes (imported by server/routes/table.mjs)
 optional.push("server/routes/typing.mjs"); // human UX: ephemeral typing heartbeat RT route (imported by server/routes/table.mjs)
 optional.push("server/code-drops.mjs", "server/routes/code-drops.mjs"); // code drops: room-native patch exchange (imported by server/store.mjs and server/routes/table.mjs)
+optional.push("server/routes/demo.mjs", "server/routes/human-push.mjs");
 optional.push("server/routes/squads.mjs"); // plan-squads: squad roster RT routes (imported by server/routes/table.mjs)
 optional.push("server/spend-pricing.mjs", "server/routes/spend-pricing.mjs"); // spend-pricing kill switch: owner-only priced-tool gate lever (imported by server/routes/table.mjs and server/spend-grants.mjs)
 optional.push("server/room-flood-guard.mjs"); // per (room, member) chat post budget (imported by server/store.mjs)

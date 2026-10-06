@@ -141,9 +141,9 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 .message-avatar { display: grid; place-items: center; width: 2rem; height: 2rem; border-radius: 50%; background: #3d465f; color: white; font-size: .65rem; font-weight: 650; }
 .message-avatar.agent { border-radius: .45rem; background: #3a2c57; color: #e7ddff; }
 .message-content { min-width: 0; }
-.message-content p { margin-bottom: .4rem; color: #dfe5ed; font-size: var(--font-size-sm); line-height: 1.55; overflow-wrap: anywhere; }
+.message-content p { margin-bottom: .4rem; color: #dfe5ed; font-size: .9rem; line-height: 1.55; overflow-wrap: anywhere; }
 .message-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: .4rem; margin-bottom: .25rem; }
-.message-meta strong { font-size: var(--font-size-sm); font-weight: 650; }
+.message-meta strong { font-size: .9rem; font-weight: 650; }
 /* UI calming #6: the uppercase "AGENT" pill is gone (the square agent avatar
    already marks agent messages); this rule now styles only the Pinned chip. */
 .pinned-chip { padding: .08rem .34rem; border: 1px solid var(--line); border-radius: 99px; color: var(--violet); font-size: .62rem; text-transform: uppercase; }
@@ -308,7 +308,7 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 .tl-work .work-card h3 { margin: .3rem 0 .2rem; font-size: .95rem; }
 .tl-work .work-next-step { margin: .15rem 0; }
 .dialog-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: .5rem; }
-.dialog-head h2 { margin: 0; font-size: var(--font-size-md); }
+.dialog-head h2 { margin: 0; font-size: 1.1rem; }
 #catchup-dialog, #settings-dialog { width: min(42rem, calc(100vw - 2rem)); max-height: calc(100dvh - 4rem); }
 #settings-dialog .panel, #catchup-dialog .panel { box-shadow: none; }
 .composer { position: relative; padding: .7rem 1.25rem .65rem; background: var(--bg); }
@@ -561,7 +561,7 @@ details[open] > .section-summary::before { transform: rotate(45deg); }
 #people-hint:empty { display: none; }
 .people-actions { display: flex; flex-wrap: wrap; gap: .45rem; margin: 0; padding: 0; }
 .people-actions .button { width: auto; }
-.create-room-details { margin: 0 .8rem .5rem; font-size: var(--font-size-sm); }
+.create-room-details { margin: 0 .8rem .5rem; font-size: .9rem; }
 .create-room-details summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; }
 .create-room-details p { margin: .35rem 0; color: var(--muted); overflow-wrap: anywhere; }
 .create-room-details code { font-size: .85em; }
@@ -632,7 +632,7 @@ button, .button, .message-to-work { min-height: 44px; }
 .invitation-details[hidden] { display: none; }
 .invitation-details > div { display: grid; grid-template-columns: 7.5rem minmax(0, 1fr); gap: .75rem; }
 .invitation-details dt { color: var(--muted); font-size: .76rem; font-weight: 650; }
-.invitation-details dd { min-width: 0; margin: 0; color: var(--text); font-size: var(--font-size-sm); line-height: 1.45; overflow-wrap: anywhere; }
+.invitation-details dd { min-width: 0; margin: 0; color: var(--text); font-size: .9rem; line-height: 1.45; overflow-wrap: anywhere; }
 .invitation-details code { display: block; margin-top: .2rem; color: var(--muted); font-size: .76rem; overflow-wrap: anywhere; }
 .invitation-feedback { min-height: 1.35rem; color: var(--green) !important; overflow-wrap: anywhere; }
 .invitation-feedback.error { color: var(--red) !important; }
@@ -887,7 +887,7 @@ summary { overflow-wrap: anywhere; }
 .agent-type-card:hover, .agent-type-card:focus-visible { border-color: var(--room-ink); }
 .agent-type-icon { flex: 0 0 1.75rem; height: 1.75rem; font: 650 .7rem/1.75rem ui-monospace, SFMono-Regular, Menlo, monospace; text-align: center; border-radius: .35rem; background: color-mix(in srgb, var(--room-ink) 8%, var(--room-paper)); }
 .agent-type-copy { display: flex; flex-direction: column; gap: .15rem; min-width: 0; }
-.agent-type-copy strong { font-size: var(--font-size-sm); line-height: 1.25; }
+.agent-type-copy strong { font-size: .9rem; line-height: 1.25; }
 .agent-type-copy span { font-size: .75rem; line-height: 1.35; color: var(--room-quiet); }
 .agent-type-chip { display: inline-block; margin-left: .35rem; padding: 0 .35rem; font-size: .7rem; line-height: 1.4; color: var(--room-quiet); border: 1px solid var(--room-rule); border-radius: .3rem; }
 .agent-capabilities { margin: .2rem 0 .6rem; padding-left: 1.1rem; }
@@ -962,7 +962,7 @@ summary { overflow-wrap: anywhere; }
 .inbox-add-connection summary { cursor: pointer; min-height: 32px; display: flex; align-items: center; }
 .inbox-connection-form { display: grid; gap: .4rem; padding: .5rem 0; }
 .inbox-connection-form label { font-weight: 550; font-size: .8rem; }
-.inbox-connection-form input, .inbox-connection-form select { width: 100%; box-sizing: border-box; font: inherit; font-size: var(--font-size-sm); padding: .45rem .55rem; }
+.inbox-connection-form input, .inbox-connection-form select { width: 100%; box-sizing: border-box; font: inherit; font-size: .9rem; padding: .45rem .55rem; }
 .inbox-connection-form div[data-channel] { display: grid; gap: .4rem; }
 .inbox-connection-form .form-hint { margin: 0; font-weight: 400; }
 .inbox-group { display: grid; gap: .1rem; }
@@ -971,7 +971,7 @@ summary { overflow-wrap: anywhere; }
 .inbox-row span { font-size: .8rem; color: var(--muted); }
 .inbox-row strong { font-weight: 550; }
 #account-rooms-list .inbox-row { grid-template-columns: minmax(0, 1fr) auto; align-items: center; min-height: 44px; }
-#account-rooms-list .inbox-row span { font-size: var(--font-size-sm); min-height: 44px; display: inline-flex; align-items: center; }
+#account-rooms-list .inbox-row span { font-size: .9rem; min-height: 44px; display: inline-flex; align-items: center; }
 #agent-import-checklist { min-width: 0; overflow-wrap: anywhere; margin: 0 0 1rem; padding-left: 1.25rem; display: grid; gap: .45rem; }
 #agent-import-checklist code { display: block; margin-top: .25rem; overflow-wrap: anywhere; }
 .inbox-row[aria-current="true"] { background: rgba(128, 160, 160, .12); }
@@ -1000,7 +1000,7 @@ summary { overflow-wrap: anywhere; }
 .inbox-conflict pre { white-space: pre-wrap; font: inherit; }
 .inbox-conflict > div { display: flex; flex-wrap: wrap; gap: .5rem; }
 .inbox-results { margin-bottom: 2rem; }
-.inbox-results h3 { font-size: var(--font-size-sm); color: var(--muted); }
+.inbox-results h3 { font-size: .9rem; color: var(--muted); }
 .inbox-result-row { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; padding: .6rem 0; }
 .inbox-result-row > span { color: var(--muted); font-size: .85rem; flex: 1; }
 #inbox-result-dialog pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.6; }
@@ -1101,7 +1101,7 @@ summary { overflow-wrap: anywhere; }
 #account-rooms-list .inbox-row small.inbox-row-kind { grid-column: 1; font-size: .75rem; color: var(--muted); }
 #account-rooms-list .inbox-row > span { grid-column: 2; grid-row: 1 / span 2; }
 #account-rooms-list .inbox-row[data-room-archived="true"] strong { color: var(--muted); }
-.account-room-create { margin: .75rem 0 0; font-size: var(--font-size-sm); }
+.account-room-create { margin: .75rem 0 0; font-size: .9rem; }
 .account-room-create summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; }
 .account-room-form { display: grid; gap: .5rem; margin-top: .5rem; }
 .account-room-form label { font-size: .8rem; color: var(--muted); }
@@ -1181,7 +1181,7 @@ summary { overflow-wrap: anywhere; }
 .pinned-list { list-style: none; margin: 0; padding: 0 0 .6rem; display: grid; gap: .5rem; }
 .pinned-item { display: grid; grid-template-columns: 1fr auto; gap: .1rem .75rem; padding: .5rem .6rem; border: 1px solid var(--line-soft); border-radius: .6rem; }
 .pinned-item .pinned-link { grid-column: 1; font-size: .78rem; }
-.pinned-item .pinned-body { grid-column: 1; margin: 0; color: #dfe5ed; font-size: var(--font-size-sm); line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+.pinned-item .pinned-body { grid-column: 1; margin: 0; color: #dfe5ed; font-size: .9rem; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
 .pinned-item .pinned-meta { grid-column: 1; color: var(--muted); font-size: .7rem; }
 .pinned-item .text-button { grid-column: 2; grid-row: 1 / span 3; align-self: start; min-height: 44px; font-size: .875rem; }
 @media (max-width: 40rem) { .pinned-panel { margin-inline: .75rem; } }
@@ -1195,17 +1195,11 @@ summary { overflow-wrap: anywhere; }
 .invite-help summary, .access-help summary { cursor: pointer; color: var(--muted); font-size: .8rem; }
 #auth-room-hint, #auth-kind-hint { margin: 0 0 1rem; }
 
-/* Connect-your-AI (2026-10-06): the human paste flow is a visible
-   first-class section on the logged-out door, not a disclosure inside the
-   agent sign-in step. The prompt shows in full - a reader who cannot see
-   what they are about to paste into their agent has no reason to trust
-   it, and the clipboard fallback needs visible text to select. */
-.join-agent { margin: 1.25rem 0 0; padding: 1rem 1.1rem; border: 1px solid var(--line); border-radius: .85rem; background: var(--panel-raised); }
-.join-agent h2 { margin: 0 0 .35rem; font-size: var(--font-size-md); }
-.join-agent textarea { margin: .5rem 0 .6rem; overflow-wrap: anywhere; }
-.join-agent .connect-steps { margin: .5rem 0 0; padding-left: 1.25rem; color: var(--muted); font-size: var(--font-size-sm); }
-.join-agent .connect-steps li { margin: .35rem 0; }
-.join-agent .connect-steps strong { color: var(--text); }
+/* Sign-in: connecting an agent is one of the two things you can do from this
+   screen, so it is separated from the sign-in choices rather than trailing off
+   the bottom of them. The prompt shows in full - a reader who cannot see what
+   they are about to paste into their agent has no reason to trust it, and the
+   clipboard fallback needs visible text to select. */
 
 /* Room orientation reuses existing content rather than another work model. */
 .room-overview-open { width: 100%; text-align: left; margin: 0; }
@@ -1505,7 +1499,7 @@ summary { overflow-wrap: anywhere; }
   background: var(--panel-raised);
   border: 1px solid var(--line);
   border-radius: .5rem;
-  font-size: var(--font-size-sm);
+  font-size: .9rem;
 }
 .guest-upgrade-hint[hidden] { display: none; }
 .guest-upgrade-hint p { margin: 0; flex: 1; }
@@ -1530,7 +1524,7 @@ summary { overflow-wrap: anywhere; }
   margin: 1rem 0;
   background: var(--panel, #fff);
 }
-.agent-first-run h2 { margin: 0 0 .5rem; font-size: var(--font-size-md); }
+.agent-first-run h2 { margin: 0 0 .5rem; font-size: 1.1rem; }
 .agent-first-run-lede { margin: 0 0 .75rem; color: var(--muted); }
 .agent-first-run-steps { margin: 0 0 .75rem; padding-left: 1.25rem; display: grid; gap: .5rem; }
 .agent-first-run-steps button { font: inherit; cursor: pointer; background: none; border: none; padding: 0; color: var(--blue); text-decoration: underline; text-align: left; }
@@ -1609,7 +1603,7 @@ summary { overflow-wrap: anywhere; }
 #auth-signin-ui [data-signin-panel] { grid-template-columns: minmax(0, 1fr); margin-top: 0; }
 #auth-signin-ui [data-recovery-option] { width: 100%; min-height: 44px; margin: 0; }
 #auth-signin-ui [data-recovery-option="reset"].primary { font-size: 1rem; padding: .75rem 1rem; }
-#auth-signin-ui [data-recovery-option="magic"] { font-size: var(--font-size-sm); justify-self: center; }
+#auth-signin-ui [data-recovery-option="magic"] { font-size: .9rem; justify-self: center; }
 
 #owner-results-list { overflow-wrap: anywhere; }
 
@@ -1694,3 +1688,10 @@ summary { overflow-wrap: anywhere; }
 
 .app-shell:has(#auth-panel:not([hidden])) ~ .site-footer { display: none; }
 body:has(#auth-panel:not([hidden])) .site-footer { display: none; }
+
+.join-agent { margin: 1.25rem 0 0; padding: 1rem 1.1rem; border: 1px solid var(--line); border-radius: .85rem; background: var(--panel-raised); }
+.join-agent h2 { margin: 0 0 .35rem; font-size: var(--text-md); }
+.join-agent textarea { margin: .5rem 0 .6rem; overflow-wrap: anywhere; }
+.join-agent .connect-steps { margin: .5rem 0 0; padding-left: 1.25rem; color: var(--muted); font-size: var(--text-sm); }
+.join-agent .connect-steps li { margin: .35rem 0; }
+.join-agent .connect-steps strong { color: var(--text); }

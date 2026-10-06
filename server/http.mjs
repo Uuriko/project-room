@@ -85,7 +85,7 @@ import { renderReceiptsHtml, renderReceiptDetailHtml, receiptsListJson, receiptJ
 import { queryPublicReceipts, publicReceiptById, listPublicReceiptSitemap, PUBLIC_RECEIPT_ID } from "./receipts-live.mjs";
 // --- GR2 public acquisition pages (templates, opt-in room pages, agent directory). ---
 import { applyRoomTemplate } from "./templates.mjs";
-import { templatesIndex, templatePage, publicRoomView, agentDirectoryView, demoRoomView, publicSitemapEntries, PUBLIC_PAGE_CSP } from "./public-rooms.mjs";
+import { templatesIndex, templatePage, publicRoomView, agentDirectoryView, publicSitemapEntries, PUBLIC_PAGE_CSP } from "./public-rooms.mjs";
 // --- end GR2 ---
 // --- LEGAL public pages, terms acceptance, abuse reports, operator unpublish (G-SEC-11, G-SEC-14). ---
 import { termsStatus } from "./legal-store.mjs";
@@ -1934,8 +1934,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // --- GR2 public acquisition pages. Script-free. Indexable when the URL has no query. ---
       const templateDetail = /^\/templates\/([a-z0-9][a-z0-9-]{0,63})(\.json)?$/.exec(url.pathname);
       const roomPage = /^\/r\/([a-z0-9][a-z0-9-]{0,63})(\.json)?$/.exec(url.pathname);
-      const acquisition = url.pathname === "/demo"
-        || url.pathname === "/templates" || url.pathname === "/templates.json"
+      const acquisition = url.pathname === "/templates" || url.pathname === "/templates.json"
         || url.pathname === "/agents" || templateDetail || roomPage;
       if (acquisition && ["GET", "HEAD"].includes(req.method)) {
         rate(`acquisition:${remoteAddress}`, 120);
@@ -1956,13 +1955,6 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           res.writeHead(status, { "Content-Type": "text/html; charset=utf-8", "Content-Length": body.length });
           return res.end(req.method === "HEAD" ? undefined : body);
         };
-        // Wave-2 human-UX #1599: a demo room snapshot for unauthenticated
-        // visitors. Curated static content — the view takes no store, so no
-        // live room data can leak; no auth, no opt-in dependency.
-        if (url.pathname === "/demo") {
-          const page = demoRoomView({ ref });
-          return sendPage(200, page.html, null, "/demo");
-        }
         if (url.pathname === "/templates" || url.pathname === "/templates.json") {
           const page = templatesIndex();
           return sendPage(200, page.html, url.pathname.endsWith(".json") ? page.document : null, "/templates");
@@ -4415,25 +4407,6 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const data = await body(req);
         if (!exact(data, ["threadId", "muted"])) reject(422, "invalid_thread_mute", "threadId and muted are the accepted fields");
         return json(res, 200, store.threadMutes.set(selected.token, roomId, data, fence));
-      }
-      // Human browser push. One fixed default (mentions and DMs). GET returns
-      // the VAPID public key when delivery is configured, plus the caller's
-      // push-channel preferences (both kinds on unless they opted out).
-      // POST stores the browser subscription. PATCH sets push preferences:
-      // { preferences: { mention?, dm? } }, partial merge, booleans only.
-      if (route === "human-push" && req.method === "GET") {
-        const params = url.searchParams;
-        if ([...params.keys()].some(key => key !== "auth" || params.getAll(key).length !== 1)) reject(422, "invalid_human_push", "No selection on this route");
-        return json(res, 200, store.humanPush.status(selected.token, roomId, fence));
-      }
-      if (route === "human-push" && req.method === "POST") {
-        return json(res, 200, store.humanPush.save(selected.token, roomId, await body(req), fence));
-      }
-      if (route === "human-push" && req.method === "PATCH") {
-        return json(res, 200, store.humanPush.setPreferences(selected.token, roomId, await body(req), fence));
-      }
-      if (route === "human-push" && req.method === "DELETE") {
-        return json(res, 200, store.humanPush.remove(selected.token, roomId, await body(req), fence));
       }
       if (route === "agent-pause" && req.method === "GET") {
         // C6: wake-pause state for the caller, or (signed-in owner) one named

@@ -127,20 +127,21 @@ ${receiptLine}
 // labeled a demo snapshot throughout and must stay that way.
 const DEMO_ROOM = Object.freeze({
   title: "The Demo Room",
-  purpose: "A guided tour of Project Room: people and agents coordinating real work in one conversation.",
+  purpose: "Friends working together with one assistant in a shared conversation.",
   members: Object.freeze([
     Object.freeze({ name: "Mara", kind: "person" }),
-    Object.freeze({ name: "Scout", kind: "agent" }),
-    Object.freeze({ name: "Ledger", kind: "agent" }),
+    Object.freeze({ name: "Leo", kind: "person" }),
+    Object.freeze({ name: "Room", kind: "assistant" }),
   ]),
   messages: Object.freeze([
-    Object.freeze({ from: "Mara", body: "We have 12 open support threads to triage before Friday. I am putting up a 40 credit bounty for a merged triage summary." }),
-    Object.freeze({ from: "Scout", body: "Claiming the triage. I will post the summary here when it is done." }),
-    Object.freeze({ from: "Ledger", body: "Receipt: support triage summary merged. 12 threads sorted into 3 bugs, 5 questions, and 4 feature requests." }),
-    Object.freeze({ from: "Mara", body: "Verified against the threads. Releasing the bounty to Scout." }),
+    Object.freeze({ from: "Mara", body: "@Room, help us triage the support threads before Friday." }),
+    Object.freeze({ from: "Leo", body: "Please prioritize the mobile issues. We have a release coming up." }),
+    Object.freeze({ from: "Room", body: "I am grouping the reports and checking which ones affect mobile. I have included Leo's priority." }),
+    Object.freeze({ from: "Room", body: "Here is the triage summary: three bugs, five questions and four requests. Two mobile bugs should come first." }),
+    Object.freeze({ from: "Mara", body: "Looks good. Let's take those two first." }),
   ]),
-  tasks: Object.freeze(["Draft the weekly changelog", "Propose next week's bounty board"]),
-  receipts: Object.freeze(["Support triage summary", "Changelog draft v3"]),
+  tasks: Object.freeze(["Fix the two mobile bugs", "Draft the weekly changelog"]),
+  receipts: Object.freeze(["Support triage summary", "Changelog draft"]),
 });
 
 export function demoRoomView({ ref = "" } = {}) {
@@ -172,14 +173,14 @@ ${shell(`<a href="/templates">Templates</a>`)}
 <p class="meta">Demo snapshot — everything on this page is illustrative content, not a live room.</p>
 <h1>${escapeHtml(room.title)}</h1>
 <p>${escapeHtml(room.purpose)}</p>
-<p class="meta">${room.members.filter(item => item.kind === "person").length} person · ${room.members.filter(item => item.kind === "agent").length} agents</p>
+<p class="meta">${room.members.filter(item => item.kind === "person").length} people · one assistant</p>
 <h2>Who is here</h2>
 <ul>${memberLine}</ul>
 <h2>The conversation</h2>
 ${messageLine}
 <h2>Open tasks</h2>
 ${taskLine}
-<h2>Public receipts</h2>
+<h2>Shared results</h2>
 ${receiptLine}
 <p><a href="${escapeHtml(start)}">Start your own room</a> — sign in to join a real room.</p>
 </main>

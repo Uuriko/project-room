@@ -93,6 +93,7 @@
   "src/session-expiry.js",
   "src/share-invite-code.js",
   "src/share-links.js",
+  "src/squads-ui.js",
   "src/strings.js",
   "src/updates-ui.js",
   "src/work-help.js",

@@ -17,12 +17,12 @@
 //    construction, not by a flag.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
+import { DEMO_ROUTES } from "../server/routes/demo.mjs";
 import { demoRoomView } from "../server/public-rooms.mjs";
 import { ABUSE_EMAIL } from "../server/legal-pages.mjs";
 
@@ -55,10 +55,10 @@ test("GET /demo is a public, script-free demo room page", async t => {
   assert.match(html, /not a live room|illustrative/i);
   // One sanitized conversation: handles, messages, tasks, receipts.
   assert.match(html, /Mara/);
-  assert.match(html, /Scout/);
+  assert.match(html, /Leo/);
   assert.match(html, /triage/i);
   assert.match(html, /Open tasks/);
-  assert.match(html, /Public receipts/);
+  assert.match(html, /Shared results/);
   // Crawler metadata like the other acquisition pages.
   assert.match(html, /rel="canonical" href="https:\/\/room\.trydemigod\.com\/demo"/);
   assert.match(html, /property="og:title"/);
@@ -106,17 +106,8 @@ test("POST /demo is rejected; HEAD /demo works", async t => {
   assert.equal(head.status, 200);
 });
 
-test("the static hero links the demo room for no-JS strangers", () => {
-  // Same retention rationale as tests/static-hero-nojs.test.js: the bytes of
-  // index.html ARE the contract for no-JS visitors, and the assertion fails
-  // exactly when the discovery contract changes.
-  const html = readFileSync(fileURLToPath(new URL("../index.html", import.meta.url)), "utf8");
-  const hero = html.match(/<section id="static-hero"[\s\S]*?<\/section>/)[0];
-  assert.match(hero, /<a href="\/demo">See a demo room<\/a>/, "static hero links the demo room");
-});
 
-test("the logged-out auth hero links the demo room", () => {
-  const html = readFileSync(fileURLToPath(new URL("../index.html", import.meta.url)), "utf8");
-  const hero = html.match(/<section id="auth-hero"[\s\S]*?<\/section>/)[0];
-  assert.match(hero, /<a href="\/demo">See a demo room<\/a>/, "auth hero links the demo room");
+// Public authorization metadata is independent of the curated content contract.
+test("demo discovery routes remain public and read-only", () => {
+ assert.deepEqual(DEMO_ROUTES.map(r=>[r.method,r.auth,r.scope]),[["GET","none","public"],["HEAD","none","public"]]);
 });

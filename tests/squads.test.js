@@ -199,6 +199,10 @@ test("routes: squad roster caps at 12 members", async t => {
   const add = await f.squads("POST", f.ownerKey, { add: ["m11", "m12"] }, `/${id}/members`);
   assert.equal(add.status, 422, "growing past the cap is refused");
   assert.equal(add.json.error.code, "squad_roster_full");
+  await f.squads("POST", f.ownerKey, { name: "other", memberIds: ids.slice(11) });
+  const event = f.cmd(f.ownerKey, T.MESSAGE_POSTED, { messageId: randomUUID(), body: "@squad/ok @squad/other" }).event;
+  assert.equal(f.store.db.prepare("SELECT COUNT(*) AS n FROM mention_states WHERE message_event_id=?").get(event.id).n, 12,
+    "multiple squad handles still have one bounded wake fanout");
 });
 
 // --- @squad fanout ---------------------------------------------------------------
@@ -315,4 +319,11 @@ test("mcp: squads_create, squads_update_members, and squads_disband write squads
 
   const disbanded = valueOf(await rpcCall("squads_disband", { roomId, squadId: created.squad.id }, owner.secret));
   assert.equal(disbanded.squad.state, "disbanded");
+});
+
+test("a squad channel cannot disclose a private message", t => {
+ const f=storeFixture(t), messageId=randomUUID();
+ f.cmd(f.ownerKey,T.MESSAGE_POSTED,{messageId,body:"private",toMemberId:"guest"});
+ assert.throws(()=>createSquad(f.store,f.ownerKey,"commons",{name:"private",channelMessageId:messageId}),e=>e.status===422);
+ assert.equal(f.store.db.prepare("SELECT COUNT(*) AS n FROM squads").get().n,0);
 });

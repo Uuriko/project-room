@@ -52,6 +52,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/spend-grants.mjs'); // spend-primitive MVP: per-agent spend grants + charge-then-forward (imported by server/routes/spend-grants.mjs, server/mcp-room-profile.mjs, server/mcp-full-profile.mjs)
   paths.add('server/routes/spend-grants.mjs'); // spend-primitive MVP: spend-grant RT routes (imported by server/routes/table.mjs)
   paths.add('server/routes/typing.mjs'); // human UX: typing heartbeat RT route (imported by server/routes/table.mjs)
+  paths.add('server/routes/demo.mjs'); paths.add('server/routes/human-push.mjs');
   paths.add('server/routes/squads.mjs'); // plan-squads: squad roster RT routes (imported by server/routes/table.mjs)
   paths.add('server/spend-pricing.mjs'); // spend-pricing kill switch: owner-only priced-tool gate lever (imported by server/spend-grants.mjs)
   paths.add('server/routes/spend-pricing.mjs'); // spend-pricing kill switch RT routes (imported by server/routes/table.mjs)

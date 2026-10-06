@@ -707,6 +707,12 @@ const ROWS = [
     }
   },
   {
+    "table": "human_push_preferences",
+    "key": "room_id",
+    "action": "delete",
+    "match": { "room": ["room_id"] }
+  },
+  {
     "table": "human_push_subscriptions",
     "key": "room_id",
     "action": "delete",

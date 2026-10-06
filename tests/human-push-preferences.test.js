@@ -1,3 +1,4 @@
+import { HUMAN_PUSH_ROUTES } from "../server/routes/human-push.mjs";
 // Wave-2 #1601: human push preferences a human can actually control.
 // The push channel delivers exactly two event kinds (mention, dm); the
 // preferences switch each kind on or off, default on (today's behavior),
@@ -188,4 +189,19 @@ test("the older in-app preference levels still do not steer the push", async t =
   send(ownerKey, T.MESSAGE_POSTED, { messageId: "still", body: "@Maya please still ping" });
   await store.humanPush.flush();
   assert.equal(calls.length, 1, "only the new push switches gate the push channel");
+});
+
+// Unreadable preference evidence must not re-enable an opted-out delivery.
+test("unreadable push preferences suppress delivery", async t => {
+ const {store,send,calls,ownerKey,mayaKey}=await boot(t);
+ store.humanPush.save(mayaKey,"commons",browserSub("https://fcm.googleapis.com/fcm/send/maya"));
+ store.humanPush.setPreferences(mayaKey,"commons",{preferences:{mention:false}});
+ store.db.exec("ALTER TABLE human_push_preferences RENAME TO unavailable_push_preferences");
+ send(ownerKey,T.MESSAGE_POSTED,{messageId:"unreadable-prefs",body:"@Maya do not notify"});
+ await store.humanPush.flush();
+ assert.equal(calls.length,0);
+});
+
+test("push route metadata keeps every preference and subscription operation room-authenticated", () => {
+ assert.deepEqual(HUMAN_PUSH_ROUTES.map(r=>[r.method,r.auth,r.scope]),[["GET","room","room"],["POST","room","room"],["PATCH","room","room"],["DELETE","room","room"]]);
 });
