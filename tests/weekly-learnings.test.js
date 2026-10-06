@@ -20,6 +20,11 @@ import {
   watermarkDecision,
   readWatermark,
   commitWatermark,
+  mergeEventLists,
+  readSpill,
+  appendSpill,
+  clearSpill,
+  truncationPlan,
   renderDigest,
 } from "../scripts/weekly-learnings.mjs";
 
@@ -220,6 +225,96 @@ describe("readWatermark / commitWatermark", () => {
     try {
       writeFileSync(join(dir, "room-watermark.json"), "not json{");
       assert.equal(readWatermark(dir), null);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("truncationPlan", () => {
+  it("fails clean on a truncated dry run (persist nothing)", () => {
+    assert.equal(
+      truncationPlan({ truncated: true, dryRun: true }),
+      "fail-clean"
+    );
+  });
+  it("spills and advances on a truncated post run", () => {
+    assert.equal(
+      truncationPlan({ truncated: true, dryRun: false }),
+      "spill-advance"
+    );
+  });
+  it("continues when the walk completes", () => {
+    assert.equal(
+      truncationPlan({ truncated: false, dryRun: false }),
+      "continue"
+    );
+    assert.equal(
+      truncationPlan({ truncated: false, dryRun: true }),
+      "continue"
+    );
+  });
+});
+
+describe("mergeEventLists", () => {
+  it("dedupes by sequence and sorts ascending", () => {
+    const a = [
+      { sequence: 3, body: "c" },
+      { sequence: 1, body: "a" },
+    ];
+    const b = [
+      { sequence: 2, body: "b" },
+      { sequence: 3, body: "c-duplicate" },
+    ];
+    const merged = mergeEventLists(a, b);
+    assert.deepEqual(
+      merged.map((e) => e.sequence),
+      [1, 2, 3]
+    );
+    assert.equal(
+      merged.find((e) => e.sequence === 3).body,
+      "c"
+    );
+  });
+
+  it("handles empty and missing inputs", () => {
+    assert.deepEqual(mergeEventLists([], []), []);
+    assert.deepEqual(mergeEventLists(null, [{ sequence: 5, body: "x" }]), [
+      { sequence: 5, body: "x" },
+    ]);
+  });
+});
+
+describe("spill round-trip", () => {
+  it("appends deduped, reads sorted, clears", () => {
+    const dir = mkdtempSync(join(tmpdir(), "wl-spill-"));
+    try {
+      assert.deepEqual(readSpill(dir), []);
+      appendSpill(dir, [
+        { sequence: 2, body: "b" },
+        { sequence: 1, body: "a" },
+      ]);
+      appendSpill(dir, [
+        { sequence: 2, body: "b-again" },
+        { sequence: 3, body: "c" },
+      ]);
+      const spilled = readSpill(dir);
+      assert.deepEqual(
+        spilled.map((e) => e.sequence),
+        [1, 2, 3]
+      );
+      clearSpill(dir);
+      assert.deepEqual(readSpill(dir), []);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns [] for a corrupt spill file", () => {
+    const dir = mkdtempSync(join(tmpdir(), "wl-spill-"));
+    try {
+      writeFileSync(join(dir, "room-events-spill.json"), "garbage{");
+      assert.deepEqual(readSpill(dir), []);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

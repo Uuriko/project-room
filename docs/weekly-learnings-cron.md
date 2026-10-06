@@ -30,11 +30,14 @@ like `wave-seeder` and `verified-digest`):
 - Watermark policy (fail-closed): the room cursor is committed ONLY after
   a successful post. Dry runs, skips, and failed posts never advance it —
   dry runs are strictly read-only. If the event walk hits the page cap
-  with more events pending, the run fails without posting and preserves
-  the partial cursor + original window, so the next run resumes the walk
-  instead of permanently skipping the rest.
+  with more events pending: a dry run fails clean with no state written;
+  a `--post` run spills the fetched events to `room-events-spill.json`
+  BEFORE advancing the cursor, then exits 1 — the next run replays the
+  spill and resumes the walk, so no fetched event is ever skipped. The
+  spill is cleared only after its events reach a posted digest.
 - State dir (default `~/.config/weekly-learnings/`): `sent.log`
-  (posted weeks) and `room-watermark.json` (`{after, windowStartMs}`).
+  (posted weeks), `room-watermark.json` (`{after, windowStartMs}`), and
+  `room-events-spill.json` (transient, only during multi-run walks).
   Override with `WEEKLY_LEARNINGS_STATE_DIR`.
 
 ## Manual runs

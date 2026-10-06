@@ -32,6 +32,7 @@ import {
   appendFileSync,
   existsSync,
   mkdirSync,
+  unlinkSync,
 } from "node:fs";
 import { join, dirname } from "node:path";
 import { homedir } from "node:os";
@@ -192,6 +193,60 @@ export function commitWatermark(stateDir, after, windowStartMs) {
     join(stateDir, "room-watermark.json"),
     JSON.stringify({ after, windowStartMs, at: new Date().toISOString() }) + "\n"
   );
+}
+
+function spillPath(stateDir) {
+  return join(stateDir, "room-events-spill.json");
+}
+
+/**
+ * Merge two event lists, deduped by sequence (first occurrence wins),
+ * sorted ascending. Used to replay spilled events from a truncated run.
+ */
+export function mergeEventLists(a, b) {
+  const seen = new Map();
+  for (const e of [...(a ?? []), ...(b ?? [])]) {
+    const seq = Number(e.sequence) || 0;
+    if (!seen.has(seq)) seen.set(seq, e);
+  }
+  return [...seen.values()].sort((x, y) => x.sequence - y.sequence);
+}
+
+/** Read spilled events from a previous truncated run ([] when none). */
+export function readSpill(stateDir) {
+  const p = spillPath(stateDir);
+  if (!existsSync(p)) return [];
+  try {
+    const arr = readJson(p);
+    return Array.isArray(arr) ? arr : [];
+  } catch {
+    console.error("weekly-learnings: warn: corrupt spill file, ignoring");
+    return [];
+  }
+}
+
+/** Append fetched events to the spill (deduped), before advancing the cursor. */
+export function appendSpill(stateDir, events) {
+  mkdirSync(stateDir, { recursive: true });
+  const merged = mergeEventLists(readSpill(stateDir), events);
+  writeFileSync(spillPath(stateDir), JSON.stringify(merged) + "\n");
+}
+
+/** Drop the spill after its events reach a posted digest. */
+export function clearSpill(stateDir) {
+  const p = spillPath(stateDir);
+  if (existsSync(p)) unlinkSync(p);
+}
+
+/**
+ * What to do when the event walk hits the page cap with more pending.
+ * - dry run: fail clean — print the truncation, persist nothing (read-only).
+ * - post run: spill the fetched events, then advance the cursor, so the
+ *   next run replays them instead of losing them.
+ */
+export function truncationPlan({ truncated, dryRun }) {
+  if (!truncated) return "continue";
+  return dryRun ? "fail-clean" : "spill-advance";
 }
 
 function bulletList(items, max, total = items.length) {
@@ -457,7 +512,6 @@ async function main() {
     die(`gh pr list failed: ${e.message}`);
   }
 
-  let events = [];
   let roomHead = 0;
   // The window start persists across runs when a walk truncates, so a moved
   // clock never filters out events a previous run fetched but never posted.
@@ -465,13 +519,26 @@ async function main() {
   const windowStartMs = args.since
     ? sinceDate.getTime()
     : storedWm?.windowStartMs ?? sinceDate.getTime();
+  const isDryRun = !args.post || args.dryRun;
+  // Replay events spilled by a previous truncated run before the cursor.
+  const spilled = readSpill(args.stateDir);
+  let events = [];
   try {
     const walk = await fetchRoomEvents(args.room, windowStartMs, storedWm?.after ?? 0);
-    events = walk.events;
     roomHead = walk.head;
+    events = mergeEventLists(spilled, walk.events);
     if (walk.truncated) {
-      // Fail closed: preserve the partial cursor + original window so the
-      // next run resumes the walk instead of permanently skipping the rest.
+      const plan = truncationPlan({ truncated: true, dryRun: isDryRun });
+      if (plan === "fail-clean") {
+        // Dry run: strictly read-only — persist nothing, not even the spill.
+        die(
+          `room event walk hit the ${EVENT_PAGE_LIMIT}-page cap with more events pending; ` +
+            `dry run is read-only, nothing persisted`
+        );
+      }
+      // spill-advance: persist the fetched events for replay BEFORE moving
+      // the cursor past them, or they would never reach any digest.
+      appendSpill(args.stateDir, walk.events);
       const d = watermarkDecision({
         head: roomHead,
         truncated: true,
@@ -482,7 +549,7 @@ async function main() {
       commitWatermark(args.stateDir, d.after, d.windowStartMs);
       die(
         `room event walk hit the ${EVENT_PAGE_LIMIT}-page cap with more events pending; ` +
-          `partial cursor preserved, rerun to continue (raise the cap if this recurs)`
+          `${walk.events.length} events spilled, rerun to continue`
       );
     }
   } catch (e) {
@@ -516,7 +583,8 @@ async function main() {
 
   await postToRoom(args.room, digest);
   // Commit the room cursor only after a successful post: a failed post or a
-  // dry run must never advance past unconsumed signals.
+  // dry run must never advance past unconsumed signals. The spill (if any)
+  // is replayed into this digest, so it can be dropped now.
   const d = watermarkDecision({
     head: roomHead,
     truncated: false,
@@ -525,6 +593,7 @@ async function main() {
     nowMs: now.getTime(),
   });
   if (d.write) commitWatermark(args.stateDir, d.after, d.windowStartMs);
+  clearSpill(args.stateDir);
   appendFileSync(sentPath, `${id}\t${now.toISOString()}\t${digest.length} chars\n`);
   console.error(`weekly-learnings: posted ${digest.length} chars for week ${id}`);
 }
