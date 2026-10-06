@@ -3419,7 +3419,16 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (allowAccountSession && this.db.prepare("SELECT 1 FROM account_session_slots WHERE hash=?").get(hash(token))) return this.authenticateAccountSession(token, roomId ?? null, expectedSessionBinding);
       fail(401, "unauthenticated", "Session or key expired or revoked");
     }
-    if (row.revoked || row.expires_at <= this.now() || (row.parent_hash && (row.parent_revoked !== 0 || row.parent_expiry <= this.now()))) fail(401, "unauthenticated", "Session or key expired or revoked");
+    if (row.revoked || row.expires_at <= this.now() || (row.parent_hash && (row.parent_revoked !== 0 || row.parent_expiry <= this.now()))) {
+      // Guest-token expiry teaches the recovery instead of dead-ending: the
+      // credential is spent, not broken. Status and code stay identical so
+      // existing clients keep matching on them; only the message changes,
+      // and only for expired (never revoked) guest credentials.
+      if (!row.revoked && !row.parent_hash && row.expires_at <= this.now() && isGuestAgentMemberId(row.member_id)) {
+        fail(401, "unauthenticated", "Guest credential expired. It cannot be renewed \u2014 get a fresh pass: self-serve guests re-run POST /api/guest-invites/request with a fresh signed joinRequest (a new requestId); invited guests ask the owner for a fresh invite code, then POST /api/guest-invites/redeem with the saved identity secret.");
+      }
+      fail(401, "unauthenticated", "Session or key expired or revoked");
+    }
     if (roomId && row.room_id !== roomId) fail(403, "access_denied", "This credential does not grant access to that room");
     const members = this.roomAuthority(row.room_id).members;
     const member = Object.hasOwn(members, row.member_id) && members[row.member_id];
