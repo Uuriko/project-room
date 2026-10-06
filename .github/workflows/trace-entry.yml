@@ -1,0 +1,78 @@
+# W001 — merge-time trace-entry automation.
+#
+# When a pull request merges to the default branch, append one line to
+# docs/ROOM-TRACES.jsonl (the raw-traces plane) so the trace practice never
+# needs a manual backfill again. The entry is built from PR metadata (number,
+# title, merge SHA, linked Room-Work claim) by scripts/trace-entry.mjs.
+#
+# Design notes:
+# - pull_request_target (like room-work-sync.yml): runs in the base-branch
+#   context, checks out main only, never executes untrusted PR code.
+# - The job needs contents: write for the docs pushback, gated to the default
+#   branch so a dispatch from another ref can never push to main.
+# - concurrency group serializes merge-time appends: a later run rebases onto
+#   the earlier run's push, keeping the file append-only and date-ordered.
+# - Fail closed: scripts/check-wiki.mjs must pass on the new file before the
+#   commit is created, and the push commit may touch ONLY
+#   docs/ROOM-TRACES.jsonl (same pattern as onboarding-probe's publish job).
+# - The script is idempotent per PR number, so workflow re-runs and the
+#   push-retry loop below can never duplicate a line.
+name: trace-entry
+
+on:
+  pull_request_target:
+    types: [closed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: trace-entry-main
+  cancel-in-progress: false
+
+jobs:
+  append:
+    if: github.event.pull_request.merged == true && github.event.pull_request.base.ref == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - name: Append trace entry and push
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          for attempt in 1 2 3; do
+            git fetch origin main
+            git reset --hard origin/main
+            node scripts/trace-entry.mjs
+            node scripts/check-wiki.mjs
+            git add docs/ROOM-TRACES.jsonl
+            if git diff --cached --quiet; then
+              echo "trace entry already present for PR #${PR_NUMBER}"
+              exit 0
+            fi
+            git commit -m "docs: auto trace-entry for PR #${PR_NUMBER}"
+            # Fail closed: the publish commit touches only the traces file.
+            if [ "$(git show --name-only --format= HEAD | tr '\n' ' ')" != "docs/ROOM-TRACES.jsonl " ]; then
+              echo "refusing to push: publish commit touches unexpected files"
+              git show --name-only --format= HEAD
+              exit 1
+            fi
+            if git push origin HEAD:main; then
+              echo "trace entry pushed for PR #${PR_NUMBER} (attempt ${attempt})"
+              exit 0
+            fi
+            echo "push failed (attempt ${attempt}); refetching"
+          done
+          echo "trace-entry: push failed after 3 attempts"
+          exit 1
