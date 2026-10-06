@@ -31,6 +31,7 @@ export const ALLOWLIST = [
   // would match real secret-shaped values too and silently disable the
   // aws-access-key / github-token / slack-token rules on every scanned line.
   /AKIA\[0-9A-Z\]\{16\}/, // scanner's own AWS pattern doc (server/secret-scan.mjs)
+  /AKIAIOSFODNN7EXAMPLE/, // AWS's official documented example access key ID (docs.aws.amazon.com) — not a real credential (scripts/scan-secrets.mjs usage comment)
   /gh\[op\]_\[A-Za-z0-9\]\{36\}/, // scanner's own GitHub pattern doc
   /xox\[baprs\]-\[A-Za-z0-9-\]\+/, // scanner's own Slack pattern doc
   /<redacted>/i, // explicit redaction marker
@@ -69,6 +70,9 @@ export const ALLOWLIST = [
   /GSM7_BASIC\s*=\s*".*/, // GSM-7 SMS alphabet constant (server/sms-outbound.mjs) — character set for segmentation accounting, not a secret.
     // Anchored to the assignment and spanning the value: the charset splits into several high-entropy tokens.
   /github\.com\/Uuriko\/[A-Za-z0-9_.-]+\/(pull|issues)\/\d+/, // repo PR/issue URLs (evidence links)
+  /hidden_files\/claimbond-shadow\/BASELINE-2026-10-05\.md/, // server/claim-reputation.mjs:4 —
+    // relative path to the P0 shadow-mode baseline doc, in a header comment. A file path,
+    // not a credential; the high-entropy detector joins the path's tokens into a match.
   /\/blob\/main\/docs\//, // docs URLs in discovery configs
   /^\s*secret:\s*<redacted>\s*$/, // literally redacted values
   /\$SCRIPT_DIR/, // shell script variable references
@@ -85,9 +89,11 @@ export const ALLOWLIST = [
     // The private Ed25519 seed is never in the repo (deploy host key file / env only).
   /"sha(?:Full|Url)?":\s*"([0-9a-f]{40}|https:\/\/github\.com\/Uuriko\/project-room\/commit\/[0-9a-f]{40})"/, // receipts-data.mjs: git merge-commit SHAs from public
     // upstream history (verified via `gh api`), not secrets — 40-char hex is the git SHA-1 shape.
-  /CITABLE_PROOF_KINDS/, // emissary-lure.mjs: constant naming the citable Slice 1 receipt
-    // kinds (work/jury/oracle). The `!` prefix in `!CITABLE_PROOF_KINDS.includes(...)`
-    // trips the high-entropy detector; it is a code constant, not a secret.
+  /CITABLE_PROOF_KINDS/, // emissary-lure.mjs (removed on this branch, still on origin/main):
+    // constant naming the citable Slice 1 receipt kinds (work/jury/oracle).
+    // The `!` prefix in `!CITABLE_PROOF_KINDS.includes(...)` trips the
+    // high-entropy detector; it is a code constant, not a secret. Kept so
+    // the origin/main-tree diff scan stays false-positive-free.
   // 2026-09-30 (phase-2 gap audit L-P2-17): fixture/check scripts are scanned
   // (no blanket *-fixture.mjs / *-check.mjs skip). Their genuinely-safe
   // placeholder values are allowlisted explicitly below — each entry names

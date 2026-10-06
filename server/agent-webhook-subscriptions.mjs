@@ -45,6 +45,9 @@ const SENTINEL_PATTERN = new RegExp(`^${SENTINEL_PREFIX}[A-Za-z0-9_-]{1,64}$`);
 // to the host's wakeUrl, via the same sender (server/webhook-dispatch.mjs).
 export const EVENT_CATALOG = Object.freeze([...Object.values(EVENT_TYPES).sort(), WAKE_PING_EVENT]);
 const WILDCARD = "*";
+// A subscription names at most this many distinct event types. Duplicates
+// collapse to one entry before the cap is checked.
+export const MAX_SUBSCRIPTION_EVENTS = 32;
 const unknownEvents = events => events.filter(e => e !== WILDCARD && !EVENT_CATALOG.includes(e));
 // Subscribe-time public-address gate. Shape errors stay
 // invalid_subscription. A hostname that resolves into blocked space, or a
@@ -131,6 +134,8 @@ export function createAgentWebhookSubscriptions({ store, clock, id } = {}) {
     // the HTTP layer already rejects these; the pure module enforces the
     // same catalog so programmatic callers get the same error.
     assertKnownEvents(events);
+    check(new Set(events).size <= MAX_SUBSCRIPTION_EVENTS,
+      `events may name at most ${MAX_SUBSCRIPTION_EVENTS} distinct event types`);
     check(typeof secret === "string" && secret.length >= 16, "secret must be ≥16 chars");
     const sid = subscriptionId ?? newId();
     check(SUBSCRIPTION_ID_PATTERN.test(sid), "subscriptionId must match [A-Za-z0-9_-]{1,64}");

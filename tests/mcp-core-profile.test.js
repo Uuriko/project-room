@@ -8,6 +8,8 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { AgentRooms } from "../server/agent-rooms.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
+import { RoomAgentClient } from "../client/room-agent.mjs";
+import { API_KEY_PREFIX } from "../server/agent-api-keys.mjs";
 import {
   CORE_MCP_TOOLS, PUBLIC_WORK_MCP_TOOLS, CORE_MCP_BLURBS, HOSTED_ROOM_MCP_TOOLS, MCP_TOOL_NAME_RE
 } from "../src/room-mcp-join.js";
@@ -69,6 +71,14 @@ test("default tools/list is the short core profile and every listed name is lega
   assert.equal(names.includes("room_read_board"), false);
   assert.equal(body.result.tools.every(tool => tool.aliases === undefined), true);
   assert.equal(body.result.tools.find(tool => tool.name === "room_needs_me").description, CORE_MCP_BLURBS.room_needs_me);
+  // The core blurb must match the read contract: oldest first from `after`
+  // (default 0), not "recent". A cold agent trusting "recent" reads the room's
+  // first page and misses the current conversation.
+  const readMessages = body.result.tools.find(tool => tool.name === "room_read_messages");
+  assert.equal(readMessages.description, CORE_MCP_BLURBS.room_read_messages);
+  assert.match(readMessages.description, /oldest first/);
+  assert.doesNotMatch(readMessages.description, /\brecent\b/i);
+  assert.equal(readMessages.inputSchema.properties.after.default, 0);
   const coreBytes = Buffer.byteLength(JSON.stringify(body));
   const coreResultBytes = Buffer.byteLength(JSON.stringify(body.result));
   console.log(`core tools/list JSON-RPC bytes=${coreBytes} result bytes=${coreResultBytes}`);
@@ -311,7 +321,7 @@ test("a fresh default-profile client can discover, answer and verify a formal re
 
 test("tools/list focus is explicit, stateless discovery with full-catalog escape and unchanged authorization", async t => {
   const { origin, store, rooms } = await serve(t);
-  const owner = store.identities.create("Owner"), reader = store.identities.create("Reader");
+  const owner = store.identities.create("Owen"), reader = store.identities.create("Reader");
   const roomId = rooms.create(owner.secret, {
     roomId: "focused-tools", title: "Focused tools", purpose: "Discover appropriate actions", kind: "personal"
   }).roomId;
@@ -328,7 +338,7 @@ test("tools/list focus is explicit, stateless discovery with full-catalog escape
   for (const name of ["room_propose_work", "wake_register", "room_put_file"]) assert.ok(!namesOf(review).includes(name));
   const work = await (await rpc(origin, "tools/list", undefined, owner.secret, "?focus=work")).json();
   assert.equal(work.result.focus, "work");
-  for (const name of ["room_begin_work", "room_record_handoff", "room_acquire_claim"]) assert.ok(namesOf(work).includes(name));
+  for (const name of ["room_begin_work", "room_record_handoff", "room_acquire_claim", "room_link_work_claim_pr"]) assert.ok(namesOf(work).includes(name));
   const conversation = await (await rpc(origin, "tools/list", { focus: "conversation" }, owner.secret)).json();
   assert.ok(namesOf(conversation).includes("room_read_messages"));
   assert.ok(!namesOf(conversation).includes("room_record_verification"));
@@ -369,4 +379,101 @@ test("tools/list focus is explicit, stateless discovery with full-catalog escape
   // A tool omitted by a focus is still callable under the existing policy.
   const posted = await call(origin, "room_propose_work", { roomId, workItemId: "off-focus-work", title: "Still available outside review focus", definitionOfDone: "Demonstrate direct invocation", accountableMemberId: owner.identityId, mode: "read", independentVerificationRequired: false, ownerDecisionRequired: false }, owner.secret);
   assert.equal(posted.body.result.isError, undefined);
+});
+
+async function claimLinkFixture(t) {
+  const fixture = await serve(t), { origin, store, rooms } = fixture;
+  const owner = store.identities.create("Claim room owner"), writer = store.identities.create("Claim writer");
+  const roomId = rooms.create(owner.secret, { roomId: "claim-links", title: "Claim links", purpose: "Append PR from hosted MCP", kind: "personal" }).roomId;
+  store.identities.link(owner.secret, roomId, { identityId: writer.identityId, displayName: "Claim writer", permissions: ["accept_work", "complete_work"] });
+  setTier(store.db, roomId, writer.identityId, "t2_standard", { updatedBy: owner.identityId, nowMs: Date.now() });
+  const client = new RoomAgentClient({ origin, roomId, token: writer.secret });
+  await client.workClaim("hosted-pr", { leaseHours: 6 });
+  // HTTP reads carry the Board content-trust stamp; saved records do not.
+  const claimed = stripTrust(await client.workClaimGet("hosted-pr"));
+  const args = { roomId, claimId: claimed.id, pullRequest: "https://github.com/Uuriko/project-room/pull/19",
+    expectedClaimedAt: claimed.claimedAt, expectedHistoryLength: claimed.history.length };
+  return { ...fixture, owner, writer, roomId, client, claimed, args };
+}
+
+const stripTrust = ({ contentTrust, ...rest }) => rest;
+
+// Hosted dispatch bypasses HTTP work-claim routing. This journey owns its
+// independent API-key scope, argument validation and saved-record parity.
+test("hosted claim PR tool preserves API-key scope and current-owner authorization", async t => {
+  const { origin, store, owner, writer, roomId, client, claimed, args } = await claimLinkFixture(t);
+  const catalog = await (await rpc(origin, "tools/list", { profile: "full" }, writer.secret)).json();
+  const definition = catalog.result.tools.find(tool => tool.name === "room_link_work_claim_pr");
+  assert.match(definition.description, /historyOmitted/);
+  assert.match(definition.inputSchema.properties.expectedHistoryLength.description, /historyOmitted/);
+  const issue = scopes => API_KEY_PREFIX + store.agentPlugin.issueApiKey({ identityId: writer.identityId, scopes }).secret;
+  for (const [secret, code] of [[issue(["rooms:read"]), "insufficient_scope"],
+    [issue(["rooms:write", "mcp:room:another-room"]), "insufficient_scope"], [owner.secret, "work_not_owner"]]) {
+    const denied = await call(origin, "room_link_work_claim_pr", args, secret);
+    assert.equal(denied.body.result.isError, true);
+    assert.equal(denied.value.status, 403);
+    assert.equal(denied.value.code, code);
+    if (code === "work_not_owner") assert.ok(denied.value.next.some(step => step.path === `/api/rooms/${roomId}/work-claims/${claimed.id}`));
+    assert.deepEqual(stripTrust(await client.workClaimGet(claimed.id)), claimed);
+  }
+  const invalid = await call(origin, "room_link_work_claim_pr", { ...args, pullRequest: { url: args.pullRequest } }, writer.secret);
+  assert.equal(invalid.body.error.data.reason, "invalid_arguments");
+  const linked = await call(origin, "room_link_work_claim_pr", args, issue(["rooms:write"]));
+  assert.equal(linked.body.result.isError, undefined);
+  assert.equal(linked.value.pullRequests[0].url, args.pullRequest);
+  assert.deepEqual(stripTrust(await client.workClaimGet(claimed.id)), linked.value);
+  store.command(owner.secret, roomId, { id: "archive-linked-room", type: "room.archived", data: { reason: "Complete" } });
+  const archivedSequence = store.snapshot(owner.secret, roomId).sequence;
+  const archived = await call(origin, "room_link_work_claim_pr", { ...args,
+    pullRequest: "https://github.com/Uuriko/project-room/pull/20", expectedHistoryLength: linked.value.history.length }, writer.secret);
+  assert.equal(archived.body.result.isError, true);
+  assert.equal(archived.value.status, 409);
+  assert.equal(archived.value.code, "room_archived");
+  assert.deepEqual(store.workClaims.get(roomId, claimed.id), linked.value);
+  assert.equal(store.snapshot(owner.secret, roomId).sequence, archivedSequence);
+});
+
+test("hosted claim PR calls honor target-room tier, write profile and membership rechecked at mutation time", async t => {
+  const { origin, store, rooms, owner, writer, roomId, claimed, args } = await claimLinkFixture(t);
+  const tool = "room_link_work_claim_pr";
+  setTier(store.db, roomId, writer.identityId, "t1_readonly", { updatedBy: owner.identityId, nowMs: Date.now() });
+  const withheld = await (await rpc(origin, "tools/list", { focus: "work" }, writer.secret)).json();
+  assert.ok(!namesOf(withheld).includes(tool));
+  let denied = await call(origin, tool, args, writer.secret);
+  assert.equal(denied.value.code, "agent_readonly");
+  // A full membership elsewhere makes the tool visible without granting this
+  // target room any more write authority.
+  rooms.create(writer.secret, { roomId: "writer-home", title: "Writer home", purpose: "Separate room authority", kind: "personal" });
+  const visible = await (await rpc(origin, "tools/list", { focus: "work" }, writer.secret)).json();
+  assert.ok(namesOf(visible).includes(tool));
+  denied = await call(origin, tool, args, writer.secret);
+  assert.equal(denied.value.code, "agent_readonly");
+  assert.deepEqual(store.workClaims.get(roomId, claimed.id), claimed);
+  setTier(store.db, roomId, writer.identityId, "t2_standard", { updatedBy: owner.identityId, nowMs: Date.now() });
+  const changePermissions = permissions => {
+    const member = store.roomAuthority(roomId).members[writer.identityId];
+    store.command(owner.secret, roomId, { id: `permissions-${member.revision}`, type: "member.access_changed",
+      data: { memberId: writer.identityId, expectedMemberRevision: member.revision, permissions, active: true } });
+  };
+  changePermissions([]);
+  denied = await call(origin, tool, args, writer.secret);
+  assert.equal(denied.value.code, "work_claims_not_permitted");
+  assert.deepEqual(store.workClaims.get(roomId, claimed.id), claimed);
+  changePermissions(["accept_work", "complete_work"]);
+  // Inject the real membership removal after initial hosted authentication but
+  // before the registry transaction, rather than faking an authorization result.
+  const transaction = store.workClaims.transaction;
+  let removed = false;
+  store.workClaims.transaction = run => {
+    store.workClaims.transaction = transaction;
+    store.identities.unlink(owner.secret, roomId, writer.identityId);
+    removed = true;
+    return transaction(run);
+  };
+  t.after(() => { store.workClaims.transaction = transaction; });
+  denied = await call(origin, tool, args, writer.secret);
+  assert.equal(removed, true);
+  assert.equal(denied.value.status, 401);
+  assert.equal(denied.value.code, "unauthenticated");
+  assert.deepEqual(store.workClaims.get(roomId, claimed.id), claimed);
 });

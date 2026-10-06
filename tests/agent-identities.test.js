@@ -397,6 +397,39 @@ test("POST /api/identity-create is the same handler as /api/agent-identities", a
   assert.equal((await missing.json()).error.code, "invalid_identity");
 });
 
+test("recoverable mint with a normally-minted secret recovers the identity instead of 500ing (QA2 signed-in agent)", async t => {
+  const { store, origin } = await serve(t);
+  const created = await fetch(`${origin}/api/agent-identities`, {
+    method: "POST", headers: { "Content-Type": "application/json", Origin: origin },
+    body: JSON.stringify({ displayName: "Recovery Bot" })
+  });
+  assert.equal(created.status, 201);
+  const { identityId, secret } = await created.json();
+  // Recoverable re-registration with the saved secret of a normally-minted
+  // identity: the derived id cannot match the random one, so the server
+  // recovers by secret. Pre-fix this fell through to the INSERT, violated
+  // the UNIQUE secret_hash, and returned 500.
+  const recovered = await fetch(`${origin}/api/agent-identities`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: origin, Authorization: `Bearer ${secret}` },
+    body: JSON.stringify({ displayName: "Recovery Bot Again", recoverable: true })
+  });
+  assert.equal(recovered.status, 201);
+  const value = await recovered.json();
+  assert.equal(value.duplicate, true);
+  assert.equal(value.identityId, identityId);
+  assert.equal(value.secret, undefined); // the secret is shown once, never re-shown
+  // A revoked credential cannot be recovered: honest 409, not a 500.
+  store.identities.revoke(identityId, secret);
+  const revoked = await fetch(`${origin}/api/agent-identities`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: origin, Authorization: `Bearer ${secret}` },
+    body: JSON.stringify({ displayName: "Recovery Bot Revoked", recoverable: true })
+  });
+  assert.equal(revoked.status, 409);
+  assert.equal((await revoked.json()).error.code, "identity_credential_changed");
+});
+
 test("POST /room/api/identity-create aliases the www enrollment path", async t => {
   const { origin } = await serve(t);
   const created = await fetch(`${origin}/room/api/identity-create`, {

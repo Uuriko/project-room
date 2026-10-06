@@ -8,7 +8,7 @@ import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { refuseArchivedWrite } from "./room-lifecycle.mjs";
 import { classifyJoinToken } from "./guest-agent-links.mjs";
 import { normalizeShareInviteCode, parseShareInviteCode } from "../src/share-invite-code.js";
-import { assertMemberDisplayNameAvailable } from "./display-name-guard.mjs";
+import { assertAdmissibleMemberName } from "./display-name-guard.mjs";
 import { PERSONAL_INVITE_PREFIX, PERSONAL_INVITE_TTL_MS, personalInviteToken, rememberReferee } from "./growth-loop.mjs";
 
 // Agent admissions reuse the durable membership event as their receipt. The
@@ -184,7 +184,7 @@ export class ShareLinks {
       if (plugin?.roomVerificationPolicy(row.room_id).requireVerified && plugin.verificationLevel(identity.identityId) !== "verified")
         fail(403, "unverified_identity", "This room only admits verified agents");
       if (room.sequence >= 10000 || activeMemberCount(room.state.members) >= PILOT_LIMITS.membersPerRoom) fail(409, "pilot_limit", "This room is full");
-      assertMemberDisplayNameAvailable(displayName.trim(), room.state.members);
+      assertAdmissibleMemberName(displayName.trim(), room.state.members); // Q3-D: roster check plus role names
       const id = agentJoinPrefix(row) + hash(identity.identityId).slice(0, 28), now = this.store.now();
       // A personal invite from a member who cannot mint invites is still
       // admitted: the room owner performs the membership write, and the
@@ -369,7 +369,7 @@ export class ShareLinks {
         }
       }
       const room = this.store.room(row.room_id), now = this.store.now();
-      assertMemberDisplayNameAvailable(displayName.trim(), room.state.members);
+      assertAdmissibleMemberName(displayName.trim(), room.state.members); // Q3-D: roster check plus role names
       if (room.sequence >= 10000 || activeMemberCount(room.state.members) >= PILOT_LIMITS.membersPerRoom) fail(409, "pilot_limit", "This room is full; ask its owner for help");
       if (!auth) {
         // An expired/revoked prior identity needs an explicit sign-out before a

@@ -23,7 +23,7 @@
 import { validatePluginManifest, WELL_KNOWN_PATH } from "./agent-plugin-manifest.mjs";
 import { AgentPluginError } from "./agent-plugin-store.mjs";
 import { API_KEY_SCOPES, API_KEY_PREFIX } from "./agent-api-keys.mjs";
-import { EVENT_CATALOG } from "./agent-webhook-subscriptions.mjs";
+import { EVENT_CATALOG, MAX_SUBSCRIPTION_EVENTS } from "./agent-webhook-subscriptions.mjs";
 import { isRoomAccessToken } from "./guest-agent-links.mjs";
 import { assertRoomKeyPullOnly, roomKeyPresenceAuth, roomKeyHostId, roomKeyPresenceView } from "./room-key-presence.mjs";
 import { HOST_ID_PATTERN } from "./agent-heartbeats.mjs";
@@ -440,6 +440,9 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
       reject(422, "invalid_subscription_request",
         `unknown webhook event(s): ${unknown.map(e => `"${e}"`).join(", ")}. Valid event types: ${WEBHOOK_EVENTS.join(", ")}`);
     }
+    const distinctEvents = [...new Set(data.events)];
+    if (distinctEvents.length > MAX_SUBSCRIPTION_EVENTS)
+      reject(422, "invalid_subscription_request", `events may name at most ${MAX_SUBSCRIPTION_EVENTS} distinct event types`);
     if (data.secret !== undefined && data.secret !== null && typeof data.secret !== "string")
       reject(422, "invalid_subscription_request", "secret must be a string when given");
     // QA2 finding P2-8: resolve before the write. Private answers are 422
@@ -448,7 +451,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     const { subscription } = store.agentPlugin.subscribeWebhook({
       identityId: auth.identityId,
       url: data.url,
-      events: data.events,
+      events: distinctEvents,
       secret: data.secret ?? null,
     });
     // RC-2026-09-27-2729 (UFO-steal slice 2): the signing secret never

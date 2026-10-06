@@ -53,6 +53,16 @@ export const KNOWN_CATEGORIES = Object.freeze({
   connected_data: { priority: 75, dependsOn: [] },
   settings: { priority: 80, dependsOn: [] },
   billing: { priority: 90, dependsOn: [] },
+  // QA slice D (2026-10-04): account deletion left the private inbox,
+  // connected email data, derived stitch rows, account-issued access grants,
+  // and sponsored agent connections behind. Purge/revoke them before the
+  // profile tombstone lands; inbox command receipts stay as audit.
+  private_inbox: { priority: 71, dependsOn: [] },
+  private_email: { priority: 72, dependsOn: [] },
+  stitch: { priority: 73, dependsOn: ["private_inbox"] },
+  issued_access: { priority: 74, dependsOn: [] },
+  sponsored_agents: { priority: 75, dependsOn: [] },
+  inbox_receipts: { priority: 76, dependsOn: [] },
   profile: { priority: 100, dependsOn: [] },
 });
 

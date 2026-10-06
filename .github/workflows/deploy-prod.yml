@@ -1,0 +1,332 @@
+name: deploy-prod
+
+# Shared production deploy lane: any agent or person with workflow-dispatch
+# rights on this repo can ship a green main commit to production without a
+# specific operator box. Runbook: docs/DEPLOY-LANE.md.
+#
+# Triggers
+#   workflow_dispatch  sha = full 40-hex commit on main. The run refuses the
+#                      deploy unless the `test` and `schema-gate` push runs on
+#                      that commit both concluded success.
+#   onboarding gate    optional. When the repo variable ROOM_ONBOARDING_GATE is
+#                      "1", the `probe` job runs the onboarding probe against
+#                      staging at the same commit and blocks the deploy on a
+#                      regression (docs/ONBOARDING-PROBE.md). A dispatch can pass
+#                      probe_override with a reason; the reason goes into the
+#                      summary and the receipt. Unset by default.
+#   workflow_run       optional auto-deploy when `test` or `schema-gate`
+#                      finishes on main. Off unless the repo variable
+#                      ROOM_AUTO_DEPLOY is "1", or the merged commit title
+#                      begins with [deploy-production]. It deploys only the current
+#                      main tip, only when both gates are green, and only when
+#                      production is not already on that commit.
+#
+# Steps: record the live prod and entry version ids (artifact), deploy the
+# canonical Worker (`wrangler deploy --env production --keep-vars`), then the
+# public entry (`wrangler deploy --keep-vars`), smoke, and roll both back to
+# the recorded ids when anything after the first upload fails. A receipt goes
+# to muse-room when the ROOM_RECEIPT_TOKEN secret exists.
+#
+# Actions secrets (names only, never values in git):
+#   CLOUDFLARE_API_TOKEN         required. Workers scripts/routes edit on the account.
+#   ROOM_AGENT_CARD_SIGNING_KEY  required. The build signs the agent card and fails
+#                                closed without it (docs/AGENT-CARD-CUSTODY.md).
+#   CLOUDFLARE_ACCOUNT_ID        optional when the token sees exactly one account.
+#   ROOM_RECEIPT_TOKEN           optional. Room bearer token used to post the receipt.
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: "Full 40-character commit SHA on main (test + schema-gate must be green)"
+        required: true
+        type: string
+      reason:
+        description: "Optional note for the receipt"
+        required: false
+        type: string
+      probe_override:
+        description: "Only when ROOM_ONBOARDING_GATE is 1: deploy even if the staging onboarding probe fails, recording this reason"
+        required: false
+        type: string
+  workflow_run:
+    workflows: [test, schema-gate]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+  actions: read
+
+# One production change at a time. Never cancel a deploy that has started.
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+env:
+  PROD_ORIGIN: https://room.trydemigod.com
+  ENTRY_ORIGIN: https://www.getdasha.com/room
+  RECEIPT_ROOM: muse-room
+  WRANGLER_SEND_METRICS: "false"
+
+jobs:
+  gate:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      ((vars.ROOM_AUTO_DEPLOY == '1' ||
+        startsWith(github.event.workflow_run.display_title, '[deploy-production]')) &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      sha: ${{ steps.gate.outputs.sha }}
+      go: ${{ steps.gate.outputs.go }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - name: Resolve the commit and require green test + schema-gate
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          INPUT_SHA: ${{ inputs.sha }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          skip() { echo "::notice title=deploy-prod skipped::$1"; echo "go=false" >> "$GITHUB_OUTPUT"; exit 0; }
+          refuse() { echo "::error title=deploy-prod refused::$1"; echo "go=false" >> "$GITHUB_OUTPUT"; exit 1; }
+          if [ "$EVENT" = "workflow_dispatch" ]; then SHA="$(printf '%s' "$INPUT_SHA" | tr -d '[:space:]')"; else SHA="$RUN_SHA"; fi
+          case "$SHA" in
+            *[!0-9a-f]*|"") refuse "sha must be a full 40-character lowercase hex commit" ;;
+          esac
+          [ "${#SHA}" -eq 40 ] || refuse "sha must be a full 40-character lowercase hex commit"
+          git fetch --quiet origin main
+          git cat-file -e "${SHA}^{commit}" 2>/dev/null || refuse "commit $SHA not found"
+          git merge-base --is-ancestor "$SHA" origin/main || refuse "commit $SHA is not on main"
+          TIP="$(git rev-parse origin/main)"
+          if [ "$EVENT" != "workflow_dispatch" ] && [ "$SHA" != "$TIP" ]; then skip "auto: $SHA is no longer the main tip ($TIP)"; fi
+          gh api "repos/$REPO/actions/runs?head_sha=$SHA&event=push&per_page=100" > runs.json
+          for wf in test schema-gate; do
+            CONCLUSION="$(jq -r --arg wf "$wf" '[.workflow_runs[] | select(.name == $wf)] | sort_by(.created_at) | last | if . == null then "missing" else (.conclusion // .status) end' runs.json)"
+            echo "$wf on $SHA: $CONCLUSION"
+            if [ "$CONCLUSION" != "success" ]; then
+              if [ "$EVENT" = "workflow_dispatch" ]; then refuse "$wf is $CONCLUSION on $SHA; deploy only dual-green commits"; fi
+              skip "auto: $wf is $CONCLUSION on $SHA; the other gate's completion will retry"
+            fi
+          done
+          if [ "$EVENT" != "workflow_dispatch" ]; then
+            LIVE="$(curl -fsS -A 'Mozilla/5.0 project-room-deploy-gate' "$PROD_ORIGIN/api/version" | jq -r '.sourceRevision // empty' || true)"
+            [ "$LIVE" != "$SHA" ] || skip "auto: production already reports $SHA"
+          fi
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "go=true" >> "$GITHUB_OUTPUT"
+          echo "Deploying $SHA (test + schema-gate green)" >> "$GITHUB_STEP_SUMMARY"
+
+  # --- ACT-5b onboarding gate (off unless vars.ROOM_ONBOARDING_GATE == '1') ---
+  # Probes staging at the commit about to ship and fails on a >20% regression
+  # or a newly unreachable step. When the job is skipped (variable unset) the
+  # deploy proceeds exactly as before.
+  probe:
+    needs: gate
+    if: needs.gate.outputs.go == 'true' && vars.ROOM_ONBOARDING_GATE == '1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      verdict: ${{ steps.predeploy.outputs.verdict }}
+      override: ${{ steps.predeploy.outputs.override }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.gate.outputs.sha }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - run: npm ci --no-audit --no-fund
+      - run: npx playwright install --with-deps chromium
+      - name: Onboarding probe gate on staging
+        id: predeploy
+        env:
+          SHA: ${{ needs.gate.outputs.sha }}
+          ROOM_STAGING_ORIGIN: ${{ vars.ROOM_STAGING_ORIGIN }}
+          PROBE_OVERRIDE: ${{ inputs.probe_override }}
+          PROBE_ROUND: predeploy${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          if [ -n "${PROBE_OVERRIDE//[[:space:]]/}" ]; then
+            node scripts/onboarding-probe/predeploy.mjs --target staging --sha "$SHA" --runs 3 --out probe-out --override "$PROBE_OVERRIDE"
+          else
+            node scripts/onboarding-probe/predeploy.mjs --target staging --sha "$SHA" --runs 3 --out probe-out
+          fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: predeploy-probe-${{ needs.gate.outputs.sha }}
+          path: probe-out
+          if-no-files-found: warn
+  # --- end ACT-5b onboarding gate ---
+
+  deploy:
+    needs: [gate, probe]
+    # The probe job is skipped unless the gate variable is on; a skipped probe
+    # does not block. A failed or cancelled probe does.
+    if: >-
+      !cancelled() &&
+      needs.gate.result == 'success' &&
+      needs.gate.outputs.go == 'true' &&
+      (needs.probe.result == 'success' || needs.probe.result == 'skipped')
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      SHA: ${{ needs.gate.outputs.sha }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Require deploy secrets
+        env:
+          SIGNING_KEY: ${{ secrets.ROOM_AGENT_CARD_SIGNING_KEY }}
+        run: |
+          missing=0
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "::error title=missing CLOUDFLARE_API_TOKEN::missing CLOUDFLARE_API_TOKEN: add the Actions secret (Workers scripts/routes edit on the Cloudflare account). Nothing was deployed."
+            missing=1
+          fi
+          if [ -z "$SIGNING_KEY" ]; then
+            echo "::error title=missing ROOM_AGENT_CARD_SIGNING_KEY::missing ROOM_AGENT_CARD_SIGNING_KEY: the production build signs the agent card and fails closed without it (docs/AGENT-CARD-CUSTODY.md). Nothing was deployed."
+            missing=1
+          fi
+          exit "$missing"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.gate.outputs.sha }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10
+      - run: PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm ci --no-audit --no-fund
+      - run: pnpm --dir cloudflare install --frozen-lockfile --ignore-scripts
+      - name: Record the live version ids (rollback targets)
+        id: pre
+        working-directory: cloudflare
+        run: |
+          set -euo pipefail
+          pick() { node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s.slice(s.indexOf("{")));const v=[...(j.versions??[])].sort((a,b)=>b.percentage-a.percentage)[0];if(!v)process.exit(1);console.log(v.version_id)})'; }
+          PROD_PRE="$(pnpm exec wrangler deployments status --env production --json | pick)"
+          ENTRY_PRE="$(pnpm exec wrangler deployments status --json | pick)"
+          LIVE="$(curl -fsS -A 'Mozilla/5.0 project-room-deploy' "$PROD_ORIGIN/api/version" | jq -r '.sourceRevision // empty' || true)"
+          jq -n --arg sha "$SHA" --arg live "$LIVE" --arg prod "$PROD_PRE" --arg entry "$ENTRY_PRE" \
+            --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg run "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            '{targetSha:$sha, liveSourceRevisionBefore:$live, prodRollbackVersionId:$prod, entryRollbackVersionId:$entry, recordedAt:$at, run:$run}' > "$RUNNER_TEMP/pre-deploy.json"
+          cat "$RUNNER_TEMP/pre-deploy.json"
+          echo "prod=$PROD_PRE" >> "$GITHUB_OUTPUT"
+          echo "entry=$ENTRY_PRE" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: pre-deploy-${{ needs.gate.outputs.sha }}
+          path: ${{ runner.temp }}/pre-deploy.json
+          retention-days: 90
+      - name: Deploy canonical Worker (project-room)
+        id: prod
+        working-directory: cloudflare
+        env:
+          ROOM_AGENT_CARD_SIGNING_KEY: ${{ secrets.ROOM_AGENT_CARD_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          pnpm exec wrangler deploy --env production --keep-vars | tee "$RUNNER_TEMP/deploy-prod.txt"
+          VERSION="$(grep -oE 'Current Version ID: [0-9a-f-]{36}' "$RUNNER_TEMP/deploy-prod.txt" | awk '{print $4}' | tail -1)"
+          [ -n "$VERSION" ] || { echo "::error::could not read the new prod version id"; exit 1; }
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+      - name: Deploy public entry Worker (project-room-staging)
+        id: entry
+        working-directory: cloudflare
+        env:
+          ROOM_AGENT_CARD_SIGNING_KEY: ${{ secrets.ROOM_AGENT_CARD_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          pnpm exec wrangler deploy --keep-vars | tee "$RUNNER_TEMP/deploy-entry.txt"
+          VERSION="$(grep -oE 'Current Version ID: [0-9a-f-]{36}' "$RUNNER_TEMP/deploy-entry.txt" | awk '{print $4}' | tail -1)"
+          [ -n "$VERSION" ] || { echo "::error::could not read the new entry version id"; exit 1; }
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+      - name: Smoke version, health, ready, legal pages
+        shell: bash
+        run: node scripts/prod-deploy-smoke.mjs --sha "$SHA" --origin "$PROD_ORIGIN" --entry "$ENTRY_ORIGIN" --wait-ms 300000 | tee "$RUNNER_TEMP/prod-smoke.json"
+      - name: Live smoke
+        shell: bash
+        env:
+          ROOM_SMOKE_ORIGIN: ${{ env.PROD_ORIGIN }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/live-smoke.mjs | tee "$RUNNER_TEMP/live-smoke.json"
+      - name: Roll back both Workers
+        id: rollback
+        if: failure() && steps.pre.outcome == 'success' && steps.prod.outcome != 'skipped'
+        working-directory: cloudflare
+        env:
+          PROD_PRE: ${{ steps.pre.outputs.prod }}
+          ENTRY_PRE: ${{ steps.pre.outputs.entry }}
+          ENTRY_OUTCOME: ${{ steps.entry.outcome }}
+        run: |
+          set -uo pipefail
+          status=0
+          pnpm exec wrangler rollback "$PROD_PRE" --env production --message "deploy-prod run $GITHUB_RUN_ID failed for $SHA" --yes || status=1
+          if [ "$ENTRY_OUTCOME" != "skipped" ]; then
+            pnpm exec wrangler rollback "$ENTRY_PRE" --message "deploy-prod run $GITHUB_RUN_ID failed for $SHA" --yes || status=1
+          fi
+          echo "::error title=deploy-prod rolled back::prod -> $PROD_PRE, entry -> $ENTRY_PRE (status $status)"
+          exit "$status"
+      - name: Receipt to muse-room
+        if: always() && steps.pre.outcome == 'success'
+        continue-on-error: true
+        env:
+          ROOM_RECEIPT_TOKEN: ${{ secrets.ROOM_RECEIPT_TOKEN }}
+          OUTCOME: ${{ job.status }}
+          PROD_NEW: ${{ steps.prod.outputs.version }}
+          ENTRY_NEW: ${{ steps.entry.outputs.version }}
+          PROD_PRE: ${{ steps.pre.outputs.prod }}
+          ENTRY_PRE: ${{ steps.pre.outputs.entry }}
+          ROLLBACK_OUTCOME: ${{ steps.rollback.outcome }}
+          REASON: ${{ inputs.reason }}
+          PROBE_OVERRIDE: ${{ needs.probe.outputs.override }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ -z "$ROOM_RECEIPT_TOKEN" ]; then echo "ROOM_RECEIPT_TOKEN not set; no receipt posted."; exit 0; fi
+          node --input-type=module -e '
+            const e = process.env, s = v => (v || "?").slice(0, 8);
+            const body = e.ROLLBACK_OUTCOME && e.ROLLBACK_OUTCOME !== "skipped"
+              ? `PROD DEPLOY ${s(e.SHA)} FAILED · rolled back prod to ${s(e.PROD_PRE)} · entry to ${s(e.ENTRY_PRE)} (rollback ${e.ROLLBACK_OUTCOME}) · ${e.RUN_URL}`
+              : `PROD DEPLOY ${s(e.SHA)} · prod ${s(e.PROD_NEW)} (rollback ${s(e.PROD_PRE)}) · entry ${s(e.ENTRY_NEW)} (rollback ${s(e.ENTRY_PRE)}) · smoke ${e.OUTCOME === "success" ? "ok" : e.OUTCOME} · ${e.RUN_URL}${e.REASON ? " · " + e.REASON.slice(0, 200) : ""}${e.PROBE_OVERRIDE ? " · onboarding probe overridden: " + e.PROBE_OVERRIDE.slice(0, 200) : ""}`;
+            const command = { id: crypto.randomUUID(), type: "message.posted", data: { messageId: crypto.randomUUID(), body } };
+            const res = await fetch(`${e.PROD_ORIGIN}/api/rooms/${e.RECEIPT_ROOM}/commands`, {
+              method: "POST",
+              headers: { authorization: `Bearer ${e.ROOM_RECEIPT_TOKEN}`, "content-type": "application/json", origin: e.PROD_ORIGIN,
+                "user-agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36 project-room-deploy-prod" },
+              body: JSON.stringify(command),
+            });
+            console.log(`receipt: HTTP ${res.status}`);
+            if (!res.ok) process.exit(1);
+          '
+      - name: Summary
+        if: always()
+        env:
+          PROD_NEW: ${{ steps.prod.outputs.version }}
+          ENTRY_NEW: ${{ steps.entry.outputs.version }}
+          PROD_PRE: ${{ steps.pre.outputs.prod }}
+          ENTRY_PRE: ${{ steps.pre.outputs.entry }}
+          ROLLBACK_OUTCOME: ${{ steps.rollback.outcome }}
+          PROBE_VERDICT: ${{ needs.probe.outputs.verdict }}
+          PROBE_OVERRIDE: ${{ needs.probe.outputs.override }}
+        run: |
+          {
+            echo "## deploy-prod ${SHA:0:8}"
+            echo ""
+            echo "| Worker | New version | Rollback target |"
+            echo "|---|---|---|"
+            echo "| project-room (prod) | ${PROD_NEW:-not deployed} | ${PROD_PRE:-unknown} |"
+            echo "| project-room-staging (entry) | ${ENTRY_NEW:-not deployed} | ${ENTRY_PRE:-unknown} |"
+            echo ""
+            echo "Rollback step: ${ROLLBACK_OUTCOME:-not run}"
+            echo "Onboarding probe gate: ${PROBE_VERDICT:-off}${PROBE_OVERRIDE:+ (override: $PROBE_OVERRIDE)}"
+          } >> "$GITHUB_STEP_SUMMARY"

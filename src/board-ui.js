@@ -186,7 +186,14 @@ export function boardToolNames(capabilities) {
   return names;
 }
 
-export function emptyBoardCopy(capabilities) {
+export function emptyBoardCopy(capabilities, { canWrite = true, signedIn = false } = {}) {
+  // S1: a non-writer used to see the same "Claim work here" line with no form
+  // and no next step. Give them their actual options instead.
+  if (!canWrite) {
+    return signedIn
+      ? "No work posted yet. You can browse the board, but you don't have posting rights here — ask the room owner for access to post work."
+      : "No work posted yet. You can browse the board — sign in to post work here.";
+  }
   const tools = boardToolNames(capabilities);
   const line = "Claim work here so people and agents don't collide.";
   return tools.length ? `${line} Agents can use ${tools.join(", ")}.` : line;
@@ -219,7 +226,7 @@ function viewerOf(state, session) {
   const id = session?.member?.id ?? null;
   const member = id ? state?.members?.[id] : null;
   const manage = Boolean(id && (state?.room?.ownerId === id || (member?.permissions ?? []).includes("manage_claims")));
-  return { id, manage, owner: Boolean(id && state?.room?.ownerId === id) };
+  return { id, manage, owner: Boolean(id && state?.room?.ownerId === id), write: canWriteClaims(state, session) };
 }
 
 function workLink(item, workItems, key, label) {
@@ -231,6 +238,21 @@ function claimReference(id, byId, workItems, key) {
   const target = byId.get(id);
   const label = target?.title ? `${target.title} (#${id})` : `#${id}`;
   return workLink(target, workItems, key, label);
+}
+
+function canLinkPullRequest(item, viewer, now) {
+  return viewer.write && viewer.id === item.owner && !item.supersededBy
+    && ["claimed", "in_progress", "blocked"].includes(item.state)
+    && (!item.leaseExpiresAt || Date.parse(item.leaseExpiresAt) > now);
+}
+
+function reviewLabel(review, item) {
+  if (review.verdict !== "approve") return String(review.verdict ?? "").replaceAll("_", " ");
+  const basis = review.basis;
+  const current = basis?.version === 1 && basis.owner === item.owner && basis.claimedAt === item.claimedAt
+    && basis.revision === (item.revision ?? null) && basis.headSha === (item.ci?.headSha ?? null);
+  const attested = (item.attestations ?? []).some(entry => entry.memberId === review.memberId && entry.at === review.at);
+  return current && attested ? "approve" : "previous approval · does not qualify for current work";
 }
 
 function cardHtml(item, viewer, members, now, workItems, byId) {
@@ -257,7 +279,7 @@ function cardHtml(item, viewer, members, now, workItems, byId) {
   const chain = Array.isArray(item.chain) ? item.chain : [];
   const links = chain.map((link, index) => `<li>${escapeHtml(link.kind)} → ${claimReference(link.targetId, byId, workItems, `claim-chain:${item.id}:${index}`)}${link.note ? ` · ${escapeHtml(link.note)}` : ""}</li>`).join("");
   const reviews = Array.isArray(item.reviews) && item.reviews.length
-    ? `<ul class="claim-reviews">${item.reviews.map(review => `<li>${escapeHtml(memberName(members, review.memberId) || review.memberId)} ${escapeHtml(String(review.verdict ?? "").replaceAll("_", " "))}</li>`).join("")}</ul>`
+    ? `<ul class="claim-reviews">${item.reviews.map(review => `<li>${escapeHtml(memberName(members, review.memberId) || review.memberId)} ${escapeHtml(reviewLabel(review, item))}</li>`).join("")}</ul>`
     : "";
   const dependencies = Array.isArray(item.dependsOn) ? item.dependsOn : [];
   const remaining = dependencies.filter(id => byId.get(id)?.state !== "done");
@@ -274,6 +296,9 @@ function cardHtml(item, viewer, members, now, workItems, byId) {
   }).join("");
   const button = (action, label, tone) => `<button type="button" class="button ${tone}" data-claim-action="${action}" data-claim-id="${escapeHtml(item.id)}" data-focus-key="${action}:${escapeHtml(item.id)}">${label}</button>`;
   const actions = [];
+  if (canLinkPullRequest(item, viewer, now)) {
+    actions.push(`<form class="board-new" data-claim-link-pr="${escapeHtml(item.id)}"><label>Pull request URL <input name="pullRequest" type="url" size="1" maxlength="300" required autocomplete="off" placeholder="https://github.com/…/pull/…" aria-label="Pull request URL for ${escapeHtml(item.title || item.id)}" data-focus-key="link-pr:${escapeHtml(item.id)}"></label><button type="submit" class="button secondary">Link PR</button></form>`);
+  }
   if (item.state === "unclaimed" && !item.owner && !waiting) actions.push(button("claim", "Claim", "primary"));
   if (mine && ["claimed", "in_progress", "blocked"].includes(item.state)) actions.push(button("renew", "Renew", "secondary"));
   if (mine && (item.state === "claimed" || item.state === "blocked")) actions.push(button("progress", "Mark in progress", "secondary"));
@@ -289,7 +314,20 @@ function cardHtml(item, viewer, members, now, workItems, byId) {
 }
 
 function newItemForm() {
-  return `<form id="board-new-item" class="board-new"><h3>New item</h3><label>Title <input name="title" maxlength="200" required autocomplete="off"></label><label>Files <input name="files" maxlength="4000" autocomplete="off" placeholder="Optional, comma-separated"></label><button type="submit" class="button primary">Add item</button></form>`;
+  return `<form id="board-new-item" class="board-new"><h3>New item</h3><label>Title <input name="title" maxlength="200" required autocomplete="off"></label><label>Note <input name="note" maxlength="4000" autocomplete="off" placeholder="Optional, context for whoever picks this up"></label><label>Files <input name="files" maxlength="4000" autocomplete="off" placeholder="Optional, comma-separated"></label><button type="submit" class="button primary">Add item</button></form>`;
+}
+
+// S3: the create API accepts a note, but the form never sent one (F-parity-1).
+// Pure body builder so the note wiring is unit-testable at this boundary.
+export function newItemCreateBody(data) {
+  const title = String(data?.get("title") ?? "").trim();
+  if (!title) return null;
+  const body = { id: claimIdFromTitle(title), title };
+  const note = String(data?.get("note") ?? "").trim();
+  if (note) body.note = note;
+  const files = filesFromField(data?.get("files"));
+  if (files.length) body.files = files;
+  return body;
 }
 
 function boardHtml(items, status, viewer, members, now, { older = false, canWrite = false, capabilities = [], cap = 20, workItems = {} } = {}) {
@@ -302,7 +340,7 @@ function boardHtml(items, status, viewer, members, now, { older = false, canWrit
   const hint = older ? `<p class="form-hint board-older">Older landed work is in the API</p>` : "";
   const body = items.length
     ? `${hint}<div class="board-columns">${COLUMNS.map(([id, label]) => `<section aria-labelledby="board-col-${id}"><h3 id="board-col-${id}">${label}${id === "blocked" && waitingCount ? ` · ${waitingCount} waiting` : ""}</h3>${columns[id].map(item => cardHtml(item, viewer, members, now, workItems, byId)).join("") || `<p class="form-hint">Nothing here.</p>`}</section>`).join("")}</div>`
-    : `<p class="board-empty">${escapeHtml(emptyBoardCopy(capabilities))}</p>${hint}`;
+    : `<p class="board-empty">${escapeHtml(emptyBoardCopy(capabilities, { canWrite, signedIn: Boolean(viewer?.id) }))}</p>${hint}`;
   return `${form}<div class="board-head"><p class="live-chip">${escapeHtml(liveLabel(status))}</p>${sweep}${capForm}</div><p id="board-status" class="form-hint" role="status"></p>${body}`;
 }
 
@@ -321,14 +359,15 @@ async function readClaims(client, current, now = Date.now()) {
   for (let page = 0; page < 20; page += 1) {
     if (!current()) break;
     const query = new URLSearchParams({ limit: "200" });
-    // SEC-2 adds updatedSince=now-7d once the list route accepts it. Until
-    // then an unknown parameter is a 422, so the query stays limit and cursor
-    // and a page of only old done items ends the walk.
+    // The list route leaves out landed work older than a week and counts it
+    // in olderDone. A page of only old done items still ends the walk, for a
+    // server that predates that window.
     if (cursor) query.set("cursor", cursor);
     const body = await client.request(client.path(`/work-claims?${query}`));
     if (!current()) break;
     const pageClaims = body.claims ?? [];
     claims.push(...pageClaims);
+    if (Number(body.olderDone) > 0) older = true;
     if (staleDonePage(pageClaims, now)) { older = true; break; }
     if (!body.nextCursor) return { claims, older };
     cursor = body.nextCursor;
@@ -442,14 +481,16 @@ export function installWorkBoard({ client, getState, getSession }) {
       loadedRoom = session.roomId;
       seen = mark;
       paint();
+      return true;
     } catch {
       if (mine === operation && context() === owned) note("Could not load the board.");
+      return false;
     } finally {
       if (readFlight === pending) readFlight = null;
     }
   }
 
-  async function act(run, focus) {
+  async function act(run, focus, reconcile = null) {
     const owned = context();
     if (!owned || loadedContext !== owned || mutating) return;
     const mine = ++operation;
@@ -458,18 +499,30 @@ export function installWorkBoard({ client, getState, getSession }) {
     readFlight = null;
     if (focus) { pendingFocus = { key: focus.key ?? null, id: focus.id ?? null }; pendingStatus = focus.status ?? ""; }
     mutating = true;
+    if (focus?.pending) note(focus.pending);
     let pending = null;
     try {
       pending = run(); actionFlight = pending;
       await pending;
       if (mine !== operation || context() !== owned) return;
       // Keep duplicate mutations excluded until their new state is visible.
-      await load({ force: true });
+      const refreshed = await load({ force: true });
+      if (reconcile && actionFlight === pending && context() === owned) {
+        note(refreshed ? reconcile(null) : "Could not confirm the PR link. Refresh the board before trying again.");
+      }
     } catch (error) {
       if (mine !== operation || context() !== owned) return;
-      pendingFocus = null;
-      pendingStatus = "";
-      note(error?.message || "Could not update the claim.");
+      if (reconcile) {
+        note("Checking the current claim…");
+        const refreshed = await load({ force: true });
+        if (actionFlight === pending && context() === owned) {
+          note(refreshed ? reconcile(error) : "Could not confirm the PR link. Refresh the board before trying again.");
+        }
+      } else {
+        pendingFocus = null;
+        pendingStatus = "";
+        note(error?.message || "Could not update the claim.");
+      }
     } finally {
       if (actionFlight === pending) { actionFlight = null; mutating = false; }
     }
@@ -495,16 +548,58 @@ export function installWorkBoard({ client, getState, getSession }) {
     }
   });
   root.addEventListener("submit", event => {
+    const linkForm = event.target.closest("[data-claim-link-pr]");
+    if (linkForm && root.contains(linkForm)) {
+      event.preventDefault();
+      if (mutating) return;
+      const id = linkForm.dataset.claimLinkPr;
+      const item = items.find(entry => entry.id === id);
+      if (!item || !canLinkPullRequest(item, viewerOf(getState(), getSession()), Date.now())) return;
+      const pullRequest = String(new FormData(linkForm).get("pullRequest") ?? "").trim();
+      if (!pullRequest) return;
+      let canonicalUrl;
+      try { canonicalUrl = new URL(pullRequest).href.replace(/\/$/, ""); }
+      catch { note("Enter a GitHub pull request URL."); return; }
+      // SEC-2: list pages carry the newest history entries plus a
+      // historyOmitted count; the lifetime count is the concurrency token.
+      const historyTotal = entry => (entry?.history?.length ?? 0) + (Number(entry?.historyOmitted) || 0);
+      const data = { appendPullRequest: pullRequest, expectedClaimedAt: item.claimedAt, expectedHistoryLength: historyTotal(item) };
+      const reconcile = error => {
+        const current = items.find(entry => entry.id === id);
+        const history = current?.history ?? [];
+        const added = historyTotal(current) - historyTotal(item);
+        const changedRound = added < 0 || added > history.length || history.slice(history.length - added)
+          .some(entry => /^(claimed$|state:unclaimed$|lease_expired$|reassigned:)/.test(entry.action));
+        const sameClaim = current?.owner === item.owner && current?.claimedAt === item.claimedAt && !changedRound;
+        const linked = sameClaim && (current.pullRequests ?? [current.pullRequest]).some(pull => pull?.url === canonicalUrl);
+        if (error?.code === "room_archived") return error.message || "This room is archived; no PR link was recorded.";
+        if (error?.status === 409) return linked
+          ? "Claim changed. This PR is already linked; the board is refreshed."
+          : "Claim changed. The board is refreshed; check its current owner and claim before trying again.";
+        if (linked) return `PR linked to '${item.title || id}'`;
+        return error?.message || "Could not confirm the PR link. Check the refreshed claim before trying again.";
+      };
+      void act(() => {
+        linkForm.setAttribute("aria-busy", "true");
+        linkForm.querySelector("input").readOnly = true;
+        linkForm.querySelector("button").disabled = true;
+        return client.request(client.path(`/work-claims/${encodeURIComponent(id)}/update`), { method: "POST", data });
+      }, { id, key: `link-pr:${id}`, pending: "Linking PR and checking the current claim…" }, reconcile).finally(() => {
+        if (!root.contains(linkForm)) return;
+        linkForm.removeAttribute("aria-busy");
+        linkForm.querySelector("input").readOnly = false;
+        linkForm.querySelector("button").disabled = false;
+      });
+      return;
+    }
     const created = event.target.closest("#board-new-item");
     if (created && root.contains(created)) {
       event.preventDefault();
       const data = new FormData(created);
-      const title = String(data.get("title") ?? "").trim();
-      if (!title) return;
-      const id = claimIdFromTitle(title);
-      const files = filesFromField(data.get("files"));
-      const body = files.length ? { id, title, files } : { id, title };
-      void act(() => client.request(client.path("/work-claims"), { method: "POST", data: body }), { id, status: `Opened '${title}'` });
+      const body = newItemCreateBody(data);
+      if (!body) return;
+      const title = body.title;
+      void act(() => client.request(client.path("/work-claims"), { method: "POST", data: body }), { id: body.id, status: `Opened '${title}'` });
       return;
     }
     const form = event.target.closest("[data-claim-reassign]");

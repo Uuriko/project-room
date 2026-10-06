@@ -77,6 +77,26 @@ test("join page route boundaries", async t => {
   assert.match(joinHtml, /id="join-form"/);
 });
 
+test("D-c: malformed invite codes render the join page with the sign-in fallback, not a bare 404", async t => {
+  // Remedy validated by Scribble, room seq 2207. Before the fix, codes that
+  // fail the [A-Za-z0-9_-]{1,64} shape fell through to the generic 404 page
+  // (no sign-in link, no invite context) — a dead end. The join page's
+  // client-side boot() rejects the malformed code and shows the error screen,
+  // which carries the "Back to sign-in" fallback.
+  const { origin } = await serve(t);
+  for (const path of ["/join/!!!", "/join/" + "A".repeat(65), "/join/" + "A".repeat(128), "/room/join/!!!", "/room/join/" + "A".repeat(65)]) {
+    const response = await fetch(`${origin}${path}`);
+    assert.equal(response.status, 200, path);
+    assert.match(response.headers.get("content-type"), /text\/html/);
+    const html = await response.text();
+    assert.match(html, /id="join-error"/, `${path} has the error screen`);
+    assert.match(html, /id="join-home-link"/, `${path} error screen links back to sign-in`);
+  }
+  // Multi-segment paths still 404.
+  const extra = await fetch(`${origin}/join/!!!/extra`);
+  assert.equal(extra.status, 404);
+});
+
 test("full self-serve flow: mint invite, preview the consent screen, join by code", async t => {
   const { origin, ownerKey } = await serve(t);
   const roomId = "commons";
@@ -100,6 +120,29 @@ test("full self-serve flow: mint invite, preview the consent screen, join by cod
   assert.equal(joined.roomId, roomId);
   assert.equal(joined.via, "invite");
   assert.equal(typeof joined.identitySecret, "string");
+  // The invite branch hands out the room-scoped rak_ token, never the identity
+  // secret. It is named honestly as roomToken; identitySecret is the alias.
+  assert.equal(joined.credentialKind, "room_token");
+  assert.match(joined.roomToken, /^rak_/);
+  assert.equal(joined.identitySecret, joined.roomToken);
+  assert.equal(joined.roomToken, joined.mcpToken.credential);
+  // Identity-wide routes refuse it with a reason that does not send the agent
+  // off to mint a replacement identity.
+  for (const path of ["/api/agent-rooms", "/api/needs-me"]) {
+    const refused = await fetch(`${origin}${path}`, { headers: { Authorization: `Bearer ${joined.roomToken}` } });
+    assert.equal(refused.status, 401, path);
+    const refusal = await refused.json();
+    assert.equal(refusal.error.code, "room_token_not_identity", path);
+    assert.match(refusal.error.message, /room-scoped token/, path);
+    assert.doesNotMatch(refusal.error.message, /self-mint/, path);
+  }
+  const created = await fetch(`${origin}/api/agent-rooms`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${joined.roomToken}` },
+    body: JSON.stringify({ title: "Second room", purpose: "should be refused" }),
+  });
+  assert.equal(created.status, 401);
+  assert.equal((await created.json()).error.code, "room_token_not_identity");
 
   // The code is single-use: the join page's consent screen now reports it dead.
   const previewAgain = await fetch(`${origin}/api/agent-invites/preview?code=${minted.code}`);
@@ -181,4 +224,20 @@ test("first-room join also signs the browser in", async t => {
   const cookie = response.headers.get("set-cookie").split(";")[0];
   const snapshot = await (await fetch(`${origin}/api/rooms/${joined.roomId}`, { headers: { Cookie: cookie } })).json();
   assert.equal(snapshot.viewerId, joined.memberId);
+});
+
+test("join page no-JS fallback gives working, host-correct agent instructions", async t => {
+  // Slice E stranger QA: the noscript fallback named a fictional endpoint
+  // (POST /api/agents/enroll exists nowhere in the codebase) and hardcoded
+  // the production origin + muse-room, so a no-JS stranger on a self-hosted
+  // server was instructed to enroll into the wrong server via a 404 route.
+  const { origin } = await serve(t);
+  const html = await (await fetch(`${origin}/join/RM-EXAMPLE`)).text();
+  const noscript = html.match(/<noscript>[\s\S]*?<\/noscript>/);
+  assert.ok(noscript, "join page has a noscript fallback");
+  const block = noscript[0];
+  assert.ok(!block.includes("/api/agents/enroll"), "no fictional enroll endpoint");
+  assert.ok(!block.includes("https://room.trydemigod.com"), "no hardcoded production origin");
+  assert.ok(!block.includes('"roomId":"muse-room"') && !block.includes("muse-room"), "no hardcoded room id");
+  assert.match(block, /\/llms\.txt/, "points agents at the serving host's agent packet");
 });

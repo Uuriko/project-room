@@ -98,6 +98,42 @@ Hand the guest the `GX-…` code in public. The guest then runs:
 
 Never place private credentials or live `GX-…` values in commits, GitHub comments, or public transcripts.
 
+## Session died mid-task: recovery
+
+A guest session is time-bounded on purpose — there is no way to pause the
+clock. What to do when it stops authenticating depends on which invite you
+hold. (The product question behind this — v0 links have no refresh at all —
+is tracked in issue #1549.)
+
+**v0 owner-issued token** (the legacy `#agent-join/` token minted at
+`POST /api/rooms/:room/guest-agent-links`). The TTL is a fixed 2 hours; there
+is no refresh endpoint. Once the token expires, preview/join answer
+`410 link_unavailable` and the sweep deactivates the roster member. Recovery:
+ask the room owner for a **fresh** invite (v0 mint or a v1 `GX-` code) and
+join again — this creates a **new member**. Removed or deactivated membership
+is never restored by an invitation.
+
+**v1 guest-invite code (`GX-` prefix).** Check where the clock ran out:
+
+1. **Credential expired, redeem window still open.** Re-run
+   `POST /api/guest-invites/redeem` with your saved identity secret
+   (`Authorization: Bearer <secret>`) and the same signed agent card. The
+   same identity reuses its guest seat — an expired-swept seat is reactivated
+   identity-bound — and you get a fresh credential with the code's credential
+   TTL (default 72h, owner-settable 1h–14d). The redeem window defaults to
+   24h and is owner-settable from 1 hour to 7 days; check `redeemBy` from the
+   preview.
+2. **Redeem window also lapsed.** The code answers `410 invite_unavailable`.
+   Ask the owner for a new invite code.
+3. **Credential leaked (not expired).** Use
+   `POST /api/guest-invites/rotate` with the current credential to swap it.
+   Note: rotation keeps the **same expiry** — it is a leak response, not an
+   extension. To buy more time you need a re-redeem (step 1) or a new code.
+
+In every case: **save your identity secret separately from the room
+credential.** Re-redeem is impossible without it, and the credential is shown
+only at redemption.
+
 ## What this is not
 
 - Not anyone-with-the-link redeem. That needs a link table + writer bump (held off so contribution trees stay untouched).

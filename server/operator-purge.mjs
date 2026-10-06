@@ -9,6 +9,7 @@ import { ServiceError } from "./store.mjs";
 import { executeAccountDeletion, planAccountDeletion } from "./account-deletion.mjs";
 import { PURGE_TABLES } from "./purge-registry.mjs";
 import { appendOperatorAction } from "./operator-actions.mjs";
+import { emailLookupHash, normalizeEmail } from "./account-login-methods.mjs";
 
 const TOKEN_TTL_MS = 10 * 60 * 1000;
 const MAX_TARGETS = 20;
@@ -47,16 +48,29 @@ function where(entry, kind) {
   return { sql: parts.join(" OR "), params };
 }
 
+function purgeTable(db, entry) {
+  const table = q(entry.table);
+  if (!entry.optional) return table;
+  // Only the explicitly retired registry entries may be absent. Query main
+  // both here and below so a temp table cannot stand in for retained data.
+  return db.prepare("SELECT 1 FROM main.sqlite_master WHERE type='table' AND name=?").get(table)
+    ? `main.${table}` : null;
+}
+
 function countEntry(db, entry, kind, id) {
   const clause = where(entry, kind);
   if (!clause) return 0;
-  return db.prepare(`SELECT count(*) AS n FROM ${q(entry.table)} WHERE ${clause.sql}`).get(...Array(clause.params).fill(id)).n;
+  const table = purgeTable(db, entry);
+  if (!table) return 0;
+  return db.prepare(`SELECT count(*) AS n FROM ${table} WHERE ${clause.sql}`).get(...Array(clause.params).fill(id)).n;
 }
 
 function deleteEntry(db, entry, kind, id) {
   const clause = where(entry, kind);
   if (!clause) return 0;
-  return db.prepare(`DELETE FROM ${q(entry.table)} WHERE ${clause.sql}`).run(...Array(clause.params).fill(id)).changes;
+  const table = purgeTable(db, entry);
+  if (!table) return 0;
+  return db.prepare(`DELETE FROM ${table} WHERE ${clause.sql}`).run(...Array(clause.params).fill(id)).changes;
 }
 
 export function countPurge(store, targets) {
@@ -264,8 +278,10 @@ export function createOperatorPurge(store) {
         const identityNamePrefix = prefix(body.identityNamePrefix, "identityNamePrefix");
         const roomIdPrefix = prefix(body.roomIdPrefix, "roomIdPrefix");
         const createdBefore = createdBeforeMs(body.createdBefore);
-        if (!roomTitlePrefix && !identityNamePrefix && !roomIdPrefix && createdBefore == null) {
-          fail(422, "invalid_find", "Supply a room title, room id, or identity name prefix, or a createdBefore time");
+        const accountEmail = body.accountEmail == null ? null : normalizeEmail(body.accountEmail);
+        if (body.accountEmail != null && !accountEmail) fail(422, "invalid_find", "accountEmail must be an email address");
+        if (!roomTitlePrefix && !identityNamePrefix && !roomIdPrefix && createdBefore == null && !accountEmail) {
+          fail(422, "invalid_find", "Supply a room title, room id, or identity name prefix, an account email, or a createdBefore time");
         }
         const rooms = [];
         if (roomTitlePrefix || roomIdPrefix || (createdBefore != null && !identityNamePrefix)) {
@@ -290,14 +306,25 @@ export function createOperatorPurge(store) {
           for (const row of rows.slice(0, FIND_LIMIT)) identities.push({ id: row.id, displayName: row.displayName });
           if (rows.length > FIND_LIMIT) identities.truncated = true;
         }
+        // Exact address match through the lookup hash. The response carries
+        // account ids and display names only, never the address.
+        const accounts = [];
+        if (accountEmail) {
+          const rows = store.db.prepare(`SELECT DISTINCT a.id AS id, a.display_name AS displayName FROM account_login_methods m
+            JOIN accounts a ON a.id = m.account_id WHERE m.email_hash = ? ORDER BY a.id LIMIT ?`).all(emailLookupHash(accountEmail), FIND_LIMIT + 1);
+          for (const row of rows.slice(0, FIND_LIMIT)) accounts.push({ id: row.id, displayName: typeof row.displayName === "string" ? row.displayName : null });
+          if (rows.length > FIND_LIMIT) accounts.truncated = true;
+        }
         const result = {
           rooms,
           identities,
-          ...(rooms.truncated || identities.truncated ? { truncated: true } : {})
+          ...(accountEmail ? { accounts } : {}),
+          ...(rooms.truncated || identities.truncated || accounts.truncated ? { truncated: true } : {})
         };
         delete rooms.truncated;
         delete identities.truncated;
-        audit(store, { ...base, result: "ok", counts: { rooms: rooms.length, identities: identities.length } });
+        delete accounts.truncated;
+        audit(store, { ...base, result: "ok", counts: { rooms: rooms.length, identities: identities.length, ...(accountEmail ? { accounts: accounts.length } : {}) } });
         return result;
       } catch (error) {
         audit(store, { ...base, result: error.code || "error" });

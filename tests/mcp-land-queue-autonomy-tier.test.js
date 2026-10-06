@@ -36,7 +36,7 @@ function resultValue(response) {
 
 test("t1_readonly agent is refused MCP land-queue writes but can list", async t => {
   const { store, rooms } = setup(t);
-  const owner = store.identities.create("Owner");
+  const owner = store.identities.create("Owen");
   const peer = store.identities.create("Peer agent");
   const created = rooms.create(owner.secret, { title: "Land room", purpose: "Queue lands", displayName: "Owner" });
 
@@ -62,7 +62,7 @@ test("t1_readonly agent is refused MCP land-queue writes but can list", async t 
 
 test("t2_standard agent keeps full land-queue access; owner unaffected", async t => {
   const { store, rooms } = setup(t);
-  const owner = store.identities.create("Owner");
+  const owner = store.identities.create("Owen");
   const created = rooms.create(owner.secret, { title: "Owner room", purpose: "Queue lands", displayName: "Owner" });
 
   const mcp = createHostedRoomMcp(store);

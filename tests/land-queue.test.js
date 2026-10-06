@@ -14,8 +14,9 @@ import { AgentRooms } from "../server/agent-rooms.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import {
   landTransition, tipTransition, landWakePayload, rollupChecks, normalizePull, githubAccessToken,
-  nextPollBackoff, POLL_BACKOFF_STEPS_MS
+  nextPollBackoff, POLL_BACKOFF_STEPS_MS, migrateLandQueueClaims
 } from "../server/land-queue.mjs";
+import { createWork } from "../server/work-claims.mjs";
 import { landCardHtml, shortSha } from "../src/land-queue-board.js";
 
 const SHA = "a".repeat(40);
@@ -672,4 +673,59 @@ test("the board card shows the pull request, short head, checks, behind, and tip
   assert.match(page, /id="land-queue-list"/);
   const registry = readFileSync(new URL("../server/jobs.mjs", import.meta.url), "utf8");
   assert.match(registry, /refreshLandQueue\(\)/);
+});
+
+function claimDeletedEvents(store, roomId = "commons") {
+  return store.db.prepare(
+    "SELECT body FROM events WHERE room_id=? AND json_extract(body,'$.type')=? ORDER BY sequence"
+  ).all(roomId, T.WORK_CLAIM_UPDATED).map(row => JSON.parse(row.body));
+}
+
+test("remove() emits a claim-deleted room event naming the deleted claim and its dependents", async t => {
+  const { store } = fixture(t);
+  store.landQueue.configure({ fetchImpl: mockGitHub(() => snapshot()).fetchImpl });
+  const added = await store.landQueue.add("commons", "owner", { repo: "acme/demo", prNumber: 7 });
+  const itemId = added.item.itemId;
+  assert.ok(store.workClaims.get("commons", itemId), "land claim is mirrored before removal");
+  const dependent = createWork(
+    { id: "work-dep-remove", title: "blocked on the land claim", dependsOn: [itemId] },
+    { now: store.now(), agentId: "owner" }
+  );
+  store.workClaims.set("commons", dependent);
+
+  store.landQueue.remove("commons", "owner", { itemId });
+
+  assert.equal(store.workClaims.get("commons", itemId), null, "mirror claim is deleted");
+  const events = claimDeletedEvents(store);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].data.action, "deleted");
+  assert.equal(events[0].data.workClaim, itemId);
+  assert.deepEqual(events[0].data.dependents, ["work-dep-remove"]);
+});
+
+test("pr_not_found during refresh emits a claim-deleted room event with dependents", async t => {
+  const { store } = fixture(t);
+  const itemId = "lq_gone_1";
+  store.db.prepare(`INSERT INTO land_queue
+    (room_id, item_id, repo, pr_number, claimant_member_id, added_by_member_id, mergeable, behind, checks_state, observed, created_at, updated_at)
+    VALUES ('commons', ?, 'acme/demo', 11, 'owner', 'owner', 'unknown', 0, 'pending', 1, 1, 1)`).run(itemId);
+  migrateLandQueueClaims(store);
+  assert.ok(store.workClaims.get("commons", itemId), "land claim is mirrored before the refresh");
+  const dependent = createWork(
+    { id: "work-dep-refresh", title: "blocked on the land claim", dependsOn: [itemId] },
+    { now: store.now(), agentId: "owner" }
+  );
+  store.workClaims.set("commons", dependent);
+  store.landQueue.configure({
+    fetchImpl: async () => ({ status: 404, ok: false, json: async () => ({ message: "Not Found" }) })
+  });
+
+  await store.landQueue.refreshDue();
+
+  assert.equal(store.workClaims.get("commons", itemId), null, "mirror claim is deleted");
+  const events = claimDeletedEvents(store);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].data.action, "deleted");
+  assert.equal(events[0].data.workClaim, itemId);
+  assert.deepEqual(events[0].data.dependents, ["work-dep-refresh"]);
 });

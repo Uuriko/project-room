@@ -48,6 +48,10 @@ const accountSettingsButton = $("#account-settings-button");
 if (accountSettingsButton) accountSettingsButton.textContent = "Account";
 const accountSettingsSummary = document.querySelector("#account-settings > summary");
 if (accountSettingsSummary) accountSettingsSummary.textContent = "Account";
+// The static hero is the whole page for no-JS strangers and crawlers (QA
+// 2026-10-03 P1-1). It comes down the moment the app boots so it never
+// double-renders with the live UI. Module top level: runs before any render.
+$("#static-hero")?.remove();
 $("#skip-link").addEventListener("click", event => {
   event.preventDefault();
   const target = !$("#inbox-panel").hidden ? "#inbox-heading"
@@ -354,6 +358,7 @@ const client = new RoomClient({
     if (firstSnapshot) revealLocationHash();
   },
   onStatus(text) { setConnectionStatus(text); },
+  onTyping(typists) { renderTyping(typists); },
   onAccessEnded() {
     closeRoomActions(false);
     const endedContext = accessEndContext;
@@ -1962,6 +1967,7 @@ function render() {
   syncRoomHealth();
   syncRoomTrust();
   syncPublicReceipts(); // GR1 owner control for the public receipts page
+  syncHistoryVisibility(); // PRIV-2 owner control for new members' history
   syncAcquisitionControls(); // GR2 public room page, join link, name, and tasks
   $("#event-count").textContent = `${client.sequence}`;
   renderReturnBrief({ timelineRendered: true });
@@ -2075,6 +2081,23 @@ $("#chat-suggestions")?.addEventListener("click", e => {
   input.value = reply.dataset.suggestReply;
   $("#message-form").requestSubmit();
 });
+// Typing indicators: ephemeral, driven by synthetic `typing` SSE events.
+// The server expires beats after 10s, so a missing update clears itself;
+// this also clears on snapshot refresh and when the viewer sends.
+function renderTyping(typists) {
+  const el = $("#typing-indicator");
+  if (!el) return;
+  const names = (typists ?? []).map(t => t.displayName || t.memberId).filter(Boolean).slice(0, 3);
+  const extra = (typists ?? []).length - names.length;
+  if (!names.length) {
+    el.hidden = true;
+    el.textContent = "";
+    return;
+  }
+  const who = extra > 0 ? `${names.join(", ")} and ${extra} other${extra === 1 ? "" : "s"}` : names.join(" and ");
+  el.textContent = `${who} ${names.length + extra === 1 ? "is" : "are"} typing…`;
+  el.hidden = false;
+}
 function renderMessages() {
   const list = $("#message-list"), view = currentThreadId ? `thread:${currentThreadId}` : `room:${activeChannelId}`;
   const sameView = list.dataset.view === view;
@@ -3338,7 +3361,7 @@ $("#invitation-signin-back").addEventListener("click", () => {
 });
 $("#invitation-dismiss").addEventListener("click", () => closeInvitation());
 $("#invitation-retry").addEventListener("click", () => { if (invitation.phase === "preview-failed") previewCurrentInvitation(); });
-for (const id of ["invitation-dialog", "work-dialog", "action-dialog", "result-dialog", "room-actions-dialog", "decision-dialog"]) $(`#${id}`).addEventListener("keydown", e => {
+for (const id of ["invitation-dialog", "work-dialog", "action-dialog", "result-dialog", "room-actions-dialog", "decision-dialog", "board-dialog", "catchup-dialog", "settings-dialog"]) $(`#${id}`).addEventListener("keydown", e => {
   if (e.key !== "Tab") return;
   const controls = [...e.currentTarget.querySelectorAll("button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, a[href], [tabindex]:not([tabindex='-1'])")]
     .filter(element => element.getClientRects().length > 0);
@@ -4080,7 +4103,7 @@ function applyMentionMember(member) {
   hideMentions(); saveComposer(); syncRequestComposer();
   input.focus(); input.setSelectionRange(next.caret, next.caret);
 }
-$("#message-input").addEventListener("input", () => { lastComposerSelection = null; saveComposer(); renderMentions(); renderEmoji(); updateReply(); syncRequestComposer(); });
+$("#message-input").addEventListener("input", () => { lastComposerSelection = null; saveComposer(); renderMentions(); renderEmoji(); updateReply(); syncRequestComposer(); void client.sendTyping(); });
 $("#message-to-select").addEventListener("change", () => { saveComposer(); syncRequestComposer(); syncComposerChrome(); });
 const touchKeyboard = matchMedia("(hover: none) and (pointer: coarse)");
 function syncComposerHint() {
@@ -5005,6 +5028,49 @@ $("#public-receipts-toggle")?.addEventListener("change", async () => {
   }
 });
 // --- end GR1 ---
+// --- PRIV-2 history visibility: owner-only. ---
+let historyVisibilityBusy = false;
+function historyVisibilitySinceJoin() {
+  return state?.room?.historyVisibility?.value === "since_join";
+}
+function syncHistoryVisibility() {
+  const control = $("#history-visibility-control");
+  const box = $("#history-visibility-toggle");
+  const hint = $("#history-visibility-hint");
+  if (!control || !box) return;
+  const viewerId = session?.member?.id;
+  const show = Boolean(state && viewerId && viewerId === state.room.ownerId);
+  // Export is owner-only (PRIV-2): other members don't get a button that can only refuse.
+  const exportActions = $("#record-export-html")?.closest(".record-actions");
+  if (exportActions) exportActions.hidden = !show;
+  control.hidden = !show;
+  if (hint) hint.hidden = !show;
+  if (!show) return;
+  box.checked = historyVisibilitySinceJoin();
+  box.disabled = historyVisibilityBusy;
+  if (hint) {
+    const guestDefault = !state.room.historyVisibility && state.room.historyDefaultsVersion === 1;
+    hint.textContent = guestDefault
+      ? "Until you choose, link guests and agent guests see only messages from after they join. You and members who manage membership always see the full history."
+      : "You and members who manage membership always see the full history.";
+  }
+}
+$("#history-visibility-toggle")?.addEventListener("change", async () => {
+  if (!state || historyVisibilityBusy || session?.member?.id !== state.room.ownerId) return;
+  const historyVisibility = $("#history-visibility-toggle").checked ? "since_join" : "all";
+  historyVisibilityBusy = true;
+  syncHistoryVisibility();
+  try {
+    await client.send({ id: crypto.randomUUID(), type: T.ROOM_HISTORY_VISIBILITY_SET, data: { historyVisibility } });
+  } catch (error) {
+    notice(error.message || "History visibility was not changed.", true);
+    if (state) $("#history-visibility-toggle").checked = historyVisibilitySinceJoin();
+  } finally {
+    historyVisibilityBusy = false;
+    if (state) syncHistoryVisibility();
+  }
+});
+// --- end PRIV-2 ---
 // --- GR2 public room page, join link, name, and starter-template controls. ---
 let acquisitionBusy = false;
 function syncAcquisitionControls() {
@@ -5677,6 +5743,15 @@ function loadActionText(item, action) {
     $("#action-text-origin").textContent = `Posted by ${memberLabel(entry.text.postedById)}${proposal ? ` · draft based on revision ${proposal.basisRevision} · authorship unverified` : ""}`;
     if (value.current.workRevision !== entry.revision) { entry.needsReview = true; entry.error = "Work changed. Review current work before saving."; }
     syncActionForm();
+    // NR-B: the exact text lands asynchronously and can push the focused
+    // control below the dialog's visible edge after the browser's focus
+    // scroll already ran. Re-assert the focused control fully into view.
+    if ($("#action-dialog").open) {
+      const focused = document.activeElement;
+      if (focused && focused !== document.body && $("#action-dialog").contains(focused)) {
+        focused.scrollIntoView({ block: "nearest" });
+      }
+    }
   }).catch(() => {
     if (!owns()) return;
     entry.needsReview = true; entry.error = "Exact text unavailable. Review current work to try again.";
@@ -6895,7 +6970,9 @@ async function exportRoomHtml() {
     status.textContent = `Download started: ${filename}. Deleted messages appear as deleted, as members saw them.`;
   } catch (error) {
     if (request !== exportRequest || !state) return;
-    status.textContent = error.status === 429 ? "Export is rate limited; try again in a minute." : "The export could not be prepared. Try again.";
+    status.textContent = error.status === 429 ? "Export is rate limited; try again in a minute."
+      : error.status === 403 ? "Only the room owner can export this room."
+      : "The export could not be prepared. Try again.";
   } finally { if (request === exportRequest) button.disabled = false; }
 }
 $("#record-export-html").addEventListener("click", () => exportRoomHtml());

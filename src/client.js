@@ -263,13 +263,14 @@ export class AccountClient {
 }
 
 export class RoomClient {
-  constructor({ fetcher = globalThis.fetch.bind(globalThis), events = globalThis.EventSource, accountClient = null, onSnapshot = () => {}, onStatus = () => {}, onAccessEnded = () => {} } = {}) {
-    Object.assign(this, { fetcher, events, accountClient, onSnapshot, onStatus, onAccessEnded });
+  constructor({ fetcher = globalThis.fetch.bind(globalThis), events = globalThis.EventSource, accountClient = null, onSnapshot = () => {}, onStatus = () => {}, onAccessEnded = () => {}, onTyping = () => {} } = {}) {
+    Object.assign(this, { fetcher, events, accountClient, onSnapshot, onStatus, onAccessEnded, onTyping });
     this.session = null;
     this.sequence = 0;
     this.generation = 0;
     this.accountOwnership = null;
     this.streamRetryDelay = 1000;
+    this.lastTypingSent = 0;
   }
   setAccountClient(accountClient) {
     if (this.accountClient === accountClient) return this;
@@ -379,7 +380,9 @@ export class RoomClient {
     if (!response.ok) {
       const body = await response.json().catch(() => null);
       const error = new Error(body?.error?.message || "Room export failed"); error.status = response.status; error.code = body?.error?.code;
-      if ([401, 403].includes(response.status) || (authMode === "account" && error.code === "session_binding_changed")) this.endAccess();
+      // PRIV-2: a member who is not the owner keeps their session; only the export is refused.
+      const ownerOnly = response.status === 403 && error.code === "owner_required";
+      if ((!ownerOnly && [401, 403].includes(response.status)) || (authMode === "account" && error.code === "session_binding_changed")) this.endAccess();
       throw error;
     }
     if (!/^text\/html/i.test(response.headers?.get("content-type") ?? "")) { const error = new Error("Room returned an unexpected export"); error.status = response.status; error.code = "invalid_response"; throw error; }
@@ -530,6 +533,16 @@ export class RoomClient {
     if (generation !== this.generation || this.session !== session) return null;
     if (!this.ownsAccountSession()) { this.endAccess(); return null; }
     return result;
+  }
+  // Ephemeral typing heartbeat. Client-throttled to one beat per 4s; the
+  // server expires the beat after 10s, so no explicit stop is needed.
+  // Failures are swallowed — typing is best-effort ambient signal.
+  sendTyping() {
+    if (!this.session) return Promise.resolve();
+    const now = Date.now();
+    if (now - this.lastTypingSent < 4000) return Promise.resolve();
+    this.lastTypingSent = now;
+    return this.request(this.path("/typing"), { method: "POST", data: {} }).catch(() => {});
   }
   async reminders(request = null) {
     if (!this.session) return null;
@@ -825,6 +838,13 @@ export class RoomClient {
       let receipt;
       try { receipt = JSON.parse(message.data); } catch { /* Unknown notifications still force a read. */ }
       refreshStream(receipt);
+    });
+    stream.addEventListener("typing", message => {
+      if (!ownsStream()) return;
+      try {
+        const parsed = JSON.parse(message.data);
+        if (Array.isArray(parsed.typists)) this.onTyping(parsed.typists);
+      } catch { /* Malformed typing payloads are ignored. */ }
     });
     stream.addEventListener("access-ended", () => { if (ownsStream()) this.endAccess(); });
     stream.addEventListener("error", () => {

@@ -82,7 +82,7 @@ test("a solely owned personal room is archived and its messages and files are pu
   const planned = await (await get(ctx.origin, "/api/account/deletion/plan", ctx.creds.cookie)).json();
   assert.match(planned.summary.text, /Personal rooms archived and purged: Solo notes \(solo-notes\)/);
   assert.match(planned.summary.text, /Retention categories purged:.*personal_room_content/);
-  assert.match(planned.summary.text, /Retention categories retained:.*audit, profile_tombstone, room_history/);
+  assert.match(planned.summary.text, /Retention categories retained: audit, inbox_receipts, abuse_reports, unpublish_records, profile_tombstone, room_history/);
   const res = await authedPost(ctx.origin, "/api/account/delete", { confirmationToken: planned.confirmationToken }, ctx.creds);
   assert.equal(res.status, 200, await res.clone().text());
   const receipt = await res.json();

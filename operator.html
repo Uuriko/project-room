@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>Operator console · Project Room</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/src/operator.css">
+  <script type="module" src="/src/operator-ui.js"></script>
+</head>
+<body>
+  <main id="operator">
+    <h1>Operator console</h1>
+    <p class="op-note">For the people who run this Room deployment. Calls go to <code>/api/operator/*</code> with your operator token. The token stays in this tab only.</p>
+
+    <section aria-labelledby="op-token-heading">
+      <h2 id="op-token-heading">Token</h2>
+      <form id="op-token-form" autocomplete="off">
+        <label for="op-token">Operator token</label>
+        <input id="op-token" name="token" type="password" autocomplete="off" spellcheck="false" required>
+        <button type="submit">Use token</button>
+      </form>
+      <p id="op-token-state" class="op-state" hidden>Token set for this tab. <button type="button" id="op-forget">Forget token</button></p>
+    </section>
+
+    <p id="op-message" role="status" aria-live="polite"></p>
+
+    <div id="op-console" hidden>
+      <section aria-labelledby="op-status-heading">
+        <h2 id="op-status-heading">Status</h2>
+        <button type="button" id="op-status-refresh">Refresh status</button>
+        <dl id="op-status" class="op-facts"></dl>
+        <form id="op-drift-form" class="op-inline">
+          <label for="op-drift-sha">Compare with a main commit</label>
+          <input id="op-drift-sha" name="main" inputmode="latin" spellcheck="false" pattern="[0-9a-fA-F]{7,64}" placeholder="7 to 40 hex characters" required>
+          <button type="submit">Compare</button>
+        </form>
+        <p id="op-drift"></p>
+        <details>
+          <summary>Largest tables</summary>
+          <table id="op-tables"><caption>Row counts for the largest tables</caption><thead><tr><th scope="col">Table</th><th scope="col">Rows</th></tr></thead><tbody></tbody></table>
+        </details>
+      </section>
+
+      <section aria-labelledby="op-find-heading">
+        <h2 id="op-find-heading">Find leftovers</h2>
+        <p class="op-note">Find is read-only. It lists ids and names. Nothing is deleted until you run a plan and confirm it.</p>
+        <form id="op-find-form" class="op-grid">
+          <label for="op-find-room-title">Room title starts with</label>
+          <input id="op-find-room-title" name="roomTitlePrefix" spellcheck="false">
+          <label for="op-find-room-id">Room id starts with</label>
+          <input id="op-find-room-id" name="roomIdPrefix" spellcheck="false">
+          <label for="op-find-identity">Agent identity name starts with</label>
+          <input id="op-find-identity" name="identityNamePrefix" spellcheck="false">
+          <label for="op-find-email">Account email (exact)</label>
+          <input id="op-find-email" name="accountEmail" type="email" spellcheck="false">
+          <button type="submit">Find</button>
+        </form>
+        <ul id="op-find-results" class="op-list"></ul>
+      </section>
+
+      <section aria-labelledby="op-plan-heading">
+        <h2 id="op-plan-heading">Purge plan</h2>
+        <ul id="op-targets" class="op-list"></ul>
+        <form id="op-add-form" class="op-inline">
+          <label for="op-add-kind">Add by id</label>
+          <select id="op-add-kind" name="kind"><option value="room">Room</option><option value="identity">Identity</option><option value="account">Account</option></select>
+          <label for="op-add-id" class="op-visually-hidden">Id</label>
+          <input id="op-add-id" name="id" spellcheck="false" required>
+          <button type="submit">Add</button>
+        </form>
+        <form id="op-plan-form" class="op-grid">
+          <label for="op-reason">Reason (kept in the audit log)</label>
+          <textarea id="op-reason" name="reason" rows="2" maxlength="500" required></textarea>
+          <label class="op-check"><input type="checkbox" id="op-allow-active" name="allowActiveMembers"> Allow rooms that still have active human members</label>
+          <button type="submit" id="op-plan-button" disabled>Plan purge</button>
+        </form>
+        <div id="op-plan" hidden>
+          <p id="op-plan-summary"></p>
+          <ul id="op-plan-warnings" class="op-list"></ul>
+          <table id="op-plan-counts"><caption>Rows this plan deletes or keeps</caption><thead><tr><th scope="col">Table</th><th scope="col">Action</th><th scope="col">Rows</th></tr></thead><tbody></tbody></table>
+          <form id="op-execute-form" class="op-grid">
+            <label for="op-confirm">Type <strong id="op-confirm-phrase"></strong> to confirm</label>
+            <input id="op-confirm" name="confirm" autocomplete="off" spellcheck="false">
+            <button type="submit" id="op-execute" disabled>Execute purge</button>
+          </form>
+        </div>
+      </section>
+
+      <section aria-labelledby="op-actions-heading">
+        <h2 id="op-actions-heading">Recent operator actions</h2>
+        <button type="button" id="op-actions-refresh">Refresh actions</button>
+        <table id="op-actions"><caption>Latest 20 operator actions</caption><thead><tr><th scope="col">When</th><th scope="col">Action</th><th scope="col">Target</th><th scope="col">Result</th><th scope="col">Reason</th></tr></thead><tbody></tbody></table>
+      </section>
+    </div>
+  </main>
+</body>
+</html>

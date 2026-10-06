@@ -119,7 +119,7 @@ test('done closes a claimed or blocked item by moving it through in progress', a
   assert.equal(claimed.state, 'done');
   assert.equal(claimed.history.at(-1).note, 'shipped');
   assert.equal(claimed.history.at(-2).note, 'started to close');
-  assert.deepEqual(claimed.history.map(entry => entry.action).slice(-3), ['claimed', 'state:in_progress', 'state:done']);
+  assert.deepEqual(claimed.history.map(entry => entry.action).slice(-3), ['retention_ack', 'state:in_progress', 'state:done']);
 
   await claimAndVerify(owner, 'finish-blocked', { memberId: 'owner', leaseHours: 1 });
   await owner.updateWorkItem('finish-blocked', { state: 'blocked' });

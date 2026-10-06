@@ -34,7 +34,7 @@ import { buildWakePing, WAKE_PING_EVENT, validateWebhookUrl } from "./outbound-w
 import { syncDirectoryCard } from "./public-read-model.mjs";
 import {
   signDelivery, deliveryEnvelope, deliveryHeaders, postDelivery,
-  backoffDelayMs, MAX_DELIVERY_ATTEMPTS, DELIVERY_TIMEOUT_MS,
+  backoffDelayMs, MAX_DELIVERY_ATTEMPTS, DELIVERY_TIMEOUT_MS, fenceRoomEventData,
 } from "./webhook-dispatch.mjs"; // RC-2026-09-19-064: signed dispatch engine.
 
 export { ApiKeyError, DirectoryError, ManifestError, WebhookSubscriptionError, signPayload, verifySignature, API_KEY_PREFIX };
@@ -1012,6 +1012,14 @@ export class AgentPluginStore {
        JOIN identity_links l ON l.identity_id = s.agent_id AND l.room_id = ?
        WHERE s.enabled = 1`).all(roomId);
     let created = 0;
+    // Q3-D: the actor's kind and name come from the room roster, read once.
+    let members;
+    const actorMember = () => {
+      if (members === undefined) {
+        try { members = this.store?.roomAuthority?.(roomId)?.members ?? null; } catch { members = null; }
+      }
+      return members?.[event?.actorId] ?? null;
+    };
     for (const row of rows) {
       let events = [];
       try { events = JSON.parse(row.eventsJson); } catch { continue; }
@@ -1029,7 +1037,8 @@ export class AgentPluginStore {
         if (event.actorId !== row.memberId && event.data.toMemberId !== row.memberId) continue;
       }
       const delivery = this.buildWebhookDelivery(row.subscriptionId,
-        { eventType: event.type, data: event.data ?? {}, eventId: event.id, roomId });
+        { eventType: event.type, eventId: event.id, roomId,
+          data: fenceRoomEventData(event.data ?? {}, { actorId: event.actorId, member: actorMember(), recipientMemberId: row.memberId }) });
       if (!delivery.duplicate) created++;
     }
     // Prompt dispatch: the drain kicks fire-and-forget after the request

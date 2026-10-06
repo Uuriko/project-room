@@ -35,6 +35,7 @@ import { agentErrorBody, errorCategory } from "../src/agent-error.mjs";
 import { DiagnosticsLog, supportExportBundle } from "./diagnostics.mjs";
 import { renderRoomExportHtml, EXPORT_HTML_CSP } from "./room-export-html.mjs";
 import { redactEventPage, redactEventRows, redactMessageTree, redactSnapshotState } from "./redact-read.mjs";
+import { messageInHistory, eventInHistory, indexMessages as indexHistoryMessages, requireExportOwner, recordRoomExport } from "./history-visibility.mjs"; // PRIV-2
 import { discoveryDoc, isHealthAliasPath, rewriteRoomApiPrefix, EDGE_DOOR_HOSTS, ROOM_ORIGIN } from "../deploy/agent-discovery.mjs";
 import { noteIdentityMint } from "./growth-loop.mjs";
 import { buildOpenApiJson, discoverabilityErrorOverride, nextActionsForAccessRequest, nextActionsForAccessRequestStatus, nextActionsForInviteRedeem } from "./discoverability.mjs";
@@ -68,13 +69,15 @@ import { AccessRequests, REQUEST_TTL_MS } from "./access-requests.mjs";
 import { attentionReport } from "./owner-attention.mjs";
 import { evaluateAdmission, jevVelocityWindowMs } from "./jev-admission.mjs";
 import { jevShadowReport } from "./jev-shadow-journal.mjs";
-import { AgentRooms } from "./agent-rooms.mjs";
+import { AgentRooms, ROOM_TOKEN_NOT_IDENTITY } from "./agent-rooms.mjs";
+import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { createAgentPluginRoutes } from "./agent-plugin-routes.mjs";
 import { createNextActionsRoutes } from "./next-actions-routes.mjs"; // RC-2026-09-25-911: ranked per-agent next actions.
 import { readSpendAllowance, setSpendAllowance } from "./spend-allowance.mjs";
 import { getAgentAutonomyTier, setAgentAutonomyTier } from "./autonomy-tiers.mjs";
 import { listAgentGrants, getAgentCapabilities, issueAgentGrant, revokeAgentGrant } from "./grants.mjs";
 import { listPins, setPin } from "./pins.mjs";
+import { currentTypists, typingBeats, typingKey } from "./typing.mjs";
 import { renderReceiptsHtml, renderReceiptDetailHtml, receiptsListJson, receiptJson, RECEIPTS_PAGE_CSP } from "./receipts-page.mjs";
 import { queryPublicReceipts, publicReceiptById, listPublicReceiptSitemap, PUBLIC_RECEIPT_ID } from "./receipts-live.mjs";
 // --- GR2 public acquisition pages (templates, opt-in room pages, agent directory). ---
@@ -92,13 +95,13 @@ import {
 } from "./activity.mjs";
 import { listOpenQuestions } from "./open-questions.mjs";
 import { GoogleSignIn, GOOGLE_START_PATH, GOOGLE_CALLBACK_PATH, googlePostLoginPage } from "./google-oauth.mjs";
-import { createMagicLinkMailer, magicLinkUnavailable, validateMagicReturnTo } from "./magic-links.mjs";
+import { createMagicLinkMailer } from "./magic-links.mjs";
 import { createRateLimiter } from "./identity-ratelimit.mjs";
 import { normalizeEmail } from "./account-login-methods.mjs";
 import { createPasskeyAuth, resolvePasskeyParams } from "./account-passkeys.mjs";
 import { createDeletionSecret, executeAccountDeletion, issueDeletionToken, planAccountDeletion, verifyDeletionToken, RETENTION_POLICY } from "./account-deletion.mjs"; // RC-2026-09-19-078: account-management surface
 import { createOperatorRoutes } from "./operator-routes.mjs"; // CP-ADMIN-0: operator purge, status, and audit. Paths stay in that module.
-import { hashPassword, verifyPassword, checkPasswordPolicy, DUMMY_PASSWORD_VERIFIER } from "../src/password-auth.mjs";
+import { hashPassword, checkPasswordPolicy } from "../src/password-auth.mjs";
 import { buildGitHubAuthUrl, codeChallengeFor, createPendingStore, exchangeCodeForToken, fetchGitHubUser,
   GitHubOAuthError, GITHUB_START_PATH, GITHUB_CALLBACK_PATH, githubPostLoginPage, githubUnavailablePage } from "./github-oauth.mjs";
 import { createOAuthProvider, OAUTH_SCOPES } from "./oauth-provider.mjs";
@@ -126,6 +129,8 @@ for (const name of ["favicon.svg", "icon.svg", "manifest.webmanifest"]) {
   const asset = assets.get(`/${name}`);
   if (asset) assets.set(`/room/${name}`, asset);
 }
+// GET/HEAD-only liveness paths; any other method is 405 with Allow (#1529).
+const LIVENESS_GET_ONLY_PATHS = new Set(["/api/health", "/api/health/", "/api/version"]);
 const reject = (status, code, message, headers) => { throw new ServiceError(status, code, message, headers ?? null); };
 
 // RFC 9116. Contact comes from ROOM_SECURITY_CONTACT. A bare address becomes
@@ -595,6 +600,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // Avoid local-instance sign-in collisions; namespacing is not host isolation.
   const scopedCookieName = name => `${expectedOrigin().startsWith("https:") ? "__Host-" : ""}${cookieNamespace ? cookieNamespace + "_" : ""}${name}`;
   const streams = new Set();
+  // Typing heartbeat state lives in server/typing.mjs (shared with the route
+  // table's POST /typing handler); the SSE pump below prunes on read.
   const diagnostics = new DiagnosticsLog();
 
   // Route templates for diagnostics: static words only, ids become :item.
@@ -670,7 +677,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     // RC-2026-09-18-012: rak_ presented API-key credentials ("rak_"+secret)
     // authenticate as the bound agent identity with its stored scopes; the
     // keyId form (shorter) never verifies and reads as 401 downstream.
-    const match = /^Bearer ([A-Za-z0-9_-]{43}|ga1\.[A-Za-z0-9_-]{43}|pri_[A-Za-z0-9_-]{43,128}|rak_[A-Za-z0-9_-]{16,128})$/.exec(req.headers.authorization);
+    // QA 2026-10-03 (P1-3): RFC 7235 — the auth scheme is case-insensitive,
+    // so "bearer"/"BEARER" must work like "Bearer". Token shape unchanged.
+    const match = /^[Bb][Ee][Aa][Rr][Ee][Rr] ([A-Za-z0-9_-]{43}|ga1\.[A-Za-z0-9_-]{43}|pri_[A-Za-z0-9_-]{43,128}|rak_[A-Za-z0-9_-]{16,128})$/.exec(req.headers.authorization);
     if (!match) reject(401, "unauthenticated", "Invalid Authorization header");
     return match[1];
   }
@@ -727,6 +736,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // still denied with the same message checkOrigin(req, true) produces.
   function checkPreviewOrigin(req) {
     const origin = req.headers.origin;
+    // Same bearer waiver as protectWrite (#1529): a headless agent with a
+    // Bearer credential and no Origin is not a browser forgery. Without a
+    // credential the Origin is still required (RC-2026-09-23).
+    if (origin === undefined && carriesBearer(req)) return;
     if (origin !== expectedOrigin() && !isEdgeDoorOrigin(origin)) {
       reject(403, "origin_denied", "Origin header is required");
     }
@@ -739,7 +752,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // identity via the store); a forged or missing Origin on a bearer request
   // buys an attacker nothing.
   function carriesBearer(req) {
-    return typeof req.headers.authorization === "string" && req.headers.authorization.startsWith("Bearer ");
+    return typeof req.headers.authorization === "string" && /^bearer /i.test(req.headers.authorization);
   }
   function protectWrite(req, auth, isBearer) {
     checkOrigin(req, !isBearer);
@@ -833,6 +846,17 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           cursor = item.sequence;
           if (lagging()) break;
         }
+        // Ephemeral typing indicators ride the stream as synthetic `typing`
+        // events with no `id:` — they never disturb Last-Event-ID resume.
+        // Emitted only when the visible typist set changes for this connection.
+        if (!lagging()) {
+          const typists = currentTypists(typingBeats, roomId, entry.memberId);
+          const key = typingKey(typists);
+          if (key !== entry.lastTypingKey) {
+            entry.lastTypingKey = key;
+            res.write(`event: typing\ndata: ${JSON.stringify({ typists })}\n\n`);
+          }
+        }
         if (lagging()) lag();
         // Advance past invisible rows only after the complete visible batch
         // was queued. A lagging stream must resume from its last sent event.
@@ -875,7 +899,18 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       let remoteAddress;
       try { remoteAddress = resolveClientAddress(req); }
       catch { reject(403, "proxy_denied", "Invalid proxy configuration"); }
-      const url = new URL(req.url, expectedOrigin()), loopback = ["127.0.0.1", "::1"].includes(remoteAddress);
+      // QA 2026-10-04 (group QA wave): an unparseable request target (e.g. "//")
+      // threw inside new URL and fell through to a 500. Fail it as a 400 up
+      // front so malformed lines never masquerade as server errors.
+      let url;
+      try { url = new URL(req.url, expectedOrigin()); }
+      catch { reject(400, "invalid_request", "Could not parse the request URL"); }
+      const loopback = ["127.0.0.1", "::1"].includes(remoteAddress);
+      // QA 2026-10-03 (P2-1): a trailing slash must reach the route, not a 404
+      // whose "check access" hint misdirects on public endpoints. Normalize
+      // once, up front, so every matcher below sees the canonical path. Only
+      // the URL object is rewritten — req.url stays untouched for diagnostics.
+      if (url.pathname.length > 1 && url.pathname.endsWith("/")) url.pathname = url.pathname.replace(/\/+$/, "");
       if (url.pathname === "/.well-known/security.txt" || url.pathname === "/security.txt" || url.pathname === "/room/.well-known/security.txt") {
         return writeSecurityTxt(req, res);
       }
@@ -918,7 +953,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           // Join traffic stays on the small JSON cap. A live identity secret
           // may stage one room file (base64, at most attachmentLimits.fileBytes).
           const fileBody = typeof req.headers.authorization === "string"
-            && (req.headers.authorization.startsWith("Bearer pri_") || req.headers.authorization.startsWith("Bearer rak_"));
+            // RFC 7235: auth scheme is case-insensitive ("bearer"/"BEARER"
+            // accepted), matching bearer()/carriesBearer() above.
+            && /^bearer (?:pri_|rak_)/i.test(req.headers.authorization);
           const text = await readText(req, fileBody ? mcpAttachmentBodyBytes : JSON_BODY_BYTES, () => new ServiceError(413, "too_large", "Request is too large"));
           return writeRoomMcpNode(req, res, url, { bodyText: text, roomMcp: hostedRoomMcp });
         }
@@ -944,10 +981,40 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (!previewDoorRequest && !publicReceiptsRead) checkOrigin(req);
       url.pathname = rewriteRoomApiPrefix(inboundPath);
       if (url.pathname.startsWith("/api/")) res.setHeader("X-Operation-Id", operationId);
+      // Sign-in slot resolution (slice 7): browser clients cannot read the
+      // HttpOnly account-slot cookie, so the sign-in JSON routes accept the
+      // slot token from the request cookie when the body omits sessionToken.
+      // The cookie path is CSRF-protected via protectWrite (the browser
+      // carries the token in the X-CSRF-Token header); the explicit body
+      // token stays a bearer secret for API clients. `csrf: "always"` keeps
+      // the pre-existing always-CSRF routes (magic consume, recovery redeem)
+      // unchanged for body-token callers.
+      const signInSlotToken = (req, data, fields, { code, message, csrf = "cookie" }) => {
+        const withToken = Object.hasOwn(data, "sessionToken");
+        if (!exact(data, withToken ? [...fields, "sessionToken"] : fields)
+          || (withToken && typeof data.sessionToken !== "string")) {
+          reject(422, code, message);
+        }
+        const slotToken = withToken ? data.sessionToken : cookie(req, accountCookieName);
+        if (typeof slotToken !== "string" || slotToken.length === 0) {
+          reject(401, "account_session_required", "Start an account browser session before signing in");
+        }
+        // Cookie-fallback (browser) slots are resolved here for the CSRF
+        // check; explicit API tokens keep the route's original validation
+        // order and are verified by finish*Slot below.
+        if (!withToken) {
+          const slot = store.accountSessionSlot(slotToken);
+          protectWrite(req, slot, false);
+        } else if (csrf === "always") {
+          const slot = store.accountSessionSlot(slotToken);
+          protectWrite(req, slot, false);
+        }
+        return slotToken;
+      };
       // Route table (batch RT). A matched row is finished here, including
-      // 405 Allow on a known path. The inbox mount keeps its own session
-      // and method checks. Anything else falls through to the legacy chain
-      // below until that chain is empty.
+      // 405 Allow on a known path. The inbox mount and the auth group keep
+      // their own session and method checks. Anything else falls through
+      // to the legacy chain below until that chain is empty.
       if (await dispatchRoute({
         req, res, url, store, remoteAddress, loopback, operationId,
         // JDOT-MEMBER-PERMS begin: share quotas across request aliases.
@@ -956,7 +1023,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         json, reject, rate, cookie, setCookie, bearer, body, readText,
         roomAuth, roomCredentials, expectedBinding, accountBinding,
         checkOrigin, protectWrite, exact, pathId, expectedOrigin,
-        accountCookieName, gmail, channelWebhooks, telegram, telegramStatus,
+        accountCookieName, roomCookieName, tokenPattern, accountView: sessionAccountView,
+        signInSlotToken, magicMailer, magicEmailLimit, passkeys,
+        magicRequestEmailLimiter, magicConsumeEmailLimiter,
+        resetRequestEmailLimiter, resetConsumeEmailLimiter, signupEmailLimiter,
+        gmail, channelWebhooks, telegram, telegramStatus,
         sendBudgets, sendBudgetChannelFor, syntheticInboxTransport,
         resolveChannelTransport, directSendFetch,
       })) return;
@@ -965,6 +1036,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (url.pathname === "/api/version" && ["GET", "HEAD"].includes(req.method)) {
         return json(res, 200, { status: "ok", mode: serviceMode, sourceRevision: SOURCE_REVISION, buildId: BUILD_ID, ...deploymentField }, req.method === "HEAD");
+      }
+      // A known liveness path with the wrong method is 405 with Allow, like the
+      // route table, not a 404 that reads as "this path does not exist" (#1529).
+      if ((LIVENESS_GET_ONLY_PATHS.has(url.pathname) || isHealthAliasPath(inboundPath) || isHealthAliasPath(url.pathname))
+        && req.method !== "OPTIONS") {
+        reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET, HEAD" });
       }
       // Google sign-in (Clerk-free). The start route begins the PKCE flow bound
       // to the browser's account session slot; the callback verifies state and
@@ -1076,254 +1153,6 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           return finishGoogle("/?google=error");
         }
       }
-      // Sign-in slot resolution (slice 7): browser clients cannot read the
-      // HttpOnly account-slot cookie, so the sign-in JSON routes accept the
-      // slot token from the request cookie when the body omits sessionToken.
-      // The cookie path is CSRF-protected via protectWrite (the browser
-      // carries the token in the X-CSRF-Token header); the explicit body
-      // token stays a bearer secret for API clients. `csrf: "always"` keeps
-      // the pre-existing always-CSRF routes (magic consume, recovery redeem)
-      // unchanged for body-token callers.
-      const signInSlotToken = (req, data, fields, { code, message, csrf = "cookie" }) => {
-        const withToken = Object.hasOwn(data, "sessionToken");
-        if (!exact(data, withToken ? [...fields, "sessionToken"] : fields)
-          || (withToken && typeof data.sessionToken !== "string")) {
-          reject(422, code, message);
-        }
-        const slotToken = withToken ? data.sessionToken : cookie(req, accountCookieName);
-        if (typeof slotToken !== "string" || slotToken.length === 0) {
-          reject(401, "account_session_required", "Start an account browser session before signing in");
-        }
-        // Cookie-fallback (browser) slots are resolved here for the CSRF
-        // check; explicit API tokens keep the route's original validation
-        // order and are verified by finish*Slot below.
-        if (!withToken) {
-          const slot = store.accountSessionSlot(slotToken);
-          protectWrite(req, slot, false);
-        } else if (csrf === "always") {
-          const slot = store.accountSessionSlot(slotToken);
-          protectWrite(req, slot, false);
-        }
-        return slotToken;
-      };
-      // ---- Magic link auth (slice 3, RC-2026-09-17-012) ----
-      //
-      // Passwordless email sign-in. POST /api/auth/magic/request issues a
-      // single-use code and hands it to the mailer seam; POST
-      // /api/auth/magic/consume redeems it with { email, code, sessionToken,
-      // sessionRevision }, provisions/links the account, and upgrades the
-      // named account-session slot (same login call as the /api/account-session
-      // POST, with method { kind: "magic" }). The slot is verified before any
-      // code is burned so a CSRF failure cannot consume a one-time code.
-      // QAS-702: the login mints a FRESH slot token and invalidates the
-      // pre-login one, so a planted token never authenticates after sign-in.
-      // QAX-007: a slot already signed in to a different account refuses the
-      // consume (409 magic_account_mismatch) before the code burns.
-      //
-      // Codes are never returned in API responses — only through the
-      // mailer. When no mail provider is configured the request route says
-      // so honestly (mail_not_configured) and issues nothing. Both routes
-      // ride the browser's account slot + CSRF like every other cookie
-      // session write; the response shape never reveals whether the email
-      // already has an account.
-      if (url.pathname === "/api/auth/magic/request" || url.pathname === "/api/auth/magic/consume") {
-        if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
-        checkOrigin(req, true);
-        const slotToken = cookie(req, accountCookieName);
-        if (!slotToken) reject(401, "account_session_required", "Start an account browser session before signing in");
-        const slot = store.accountSessionSlot(slotToken);
-        protectWrite(req, slot, false);
-        if (url.pathname === "/api/auth/magic/request") {
-          const data = await body(req);
-          if (!(exact(data, ["email"]) || exact(data, ["email", "returnTo"])) || typeof data.email !== "string") reject(422, "invalid_email_request", "An email address is required");
-          if (Object.hasOwn(data, "returnTo") && validateMagicReturnTo(data.returnTo) === null) reject(422, "invalid_return_target", "A valid local return target is required");
-          const normalized = normalizeEmail(data.email);
-          if (!normalized) reject(422, "invalid_email", "A valid email address is required");
-          rate(`magic-request:${remoteAddress}`, 5);
-          magicEmailLimit(magicRequestEmailLimiter, normalized);
-          if (!magicMailer.isConfigured()) return json(res, 200, magicLinkUnavailable());
-          const issued = store.accountLogins.issueMagicCode({ email: normalized });
-          await magicMailer.sendMagicLink({ to: normalized, code: issued.code, expiresAt: issued.expiresAt, ...(Object.hasOwn(data, "returnTo") ? { returnTo: data.returnTo } : {}) });
-          return json(res, 200, { status: "sent" });
-        }
-        const data = await body(req);
-        const consumeToken = signInSlotToken(req, data, ["email", "code", "sessionRevision"],
-          { code: "invalid_magic_login", message: "Email, code, session token, and current session revision are required", csrf: "always" });
-        if (typeof data.email !== "string" || typeof data.code !== "string" || !Number.isSafeInteger(data.sessionRevision)) {
-          reject(422, "invalid_magic_login", "Email, code, session token, and current session revision are required");
-        }
-        const normalized = normalizeEmail(data.email);
-        if (!normalized) reject(422, "invalid_email", "A valid email address is required");
-        rate(`magic-consume:${remoteAddress}`, 10);
-        magicEmailLimit(magicConsumeEmailLimiter, normalized);
-        // QAX-007 (RC-2026-09-19-074): never silently switch accounts. A slot
-        // already authenticated to a DIFFERENT account refuses the consume
-        // BEFORE any code burns, so a foreign link stays live for its real
-        // owner. Same-account re-auth (the link's email belongs to the
-        // signed-in account) is unaffected.
-        const alreadySignedIn = (() => {
-          try { return store.authenticateAccountSession(consumeToken); }
-          catch (error) { if (error?.status === 401) return null; throw error; }
-        })();
-        if (alreadySignedIn?.account) {
-          const targetAccountId = store.accountLogins.findAccountHoldingEmail(normalized);
-          if (targetAccountId !== alreadySignedIn.account.id) {
-            reject(409, "magic_account_mismatch",
-              "This browser is already signed in to a different account; sign out before using a magic link for another email");
-          }
-        }
-        // The slot is verified before any code is burned so a CSRF failure
-        // cannot consume a one-time code.
-        // The model burns the code window on failure (401 invalid_magic_code)
-        // after 5 wrong attempts / 15-minute expiry / single use.
-        store.accountLogins.consumeMagicCode({ email: normalized, code: data.code });
-        const oldRoomToken = cookie(req, roomCookieName);
-        // A consumed code proves the email. Attach to the verified owner, or
-        // to an unverified password account for that address (that password
-        // is removed). Otherwise provision email:<sha256>. Login shares this
-        // transaction so a failed sign-in does not remove the password.
-        const { token: freshSlotToken, session: loggedIn } = store.transaction(() => {
-          const adopted = store.accountLogins.adoptVerifiedEmail(normalized, { preserveSlotToken: consumeToken });
-          let accountId = adopted?.accountId ?? null;
-          if (!accountId) {
-            const derived = `email:${createHash("sha256").update(normalized, "utf8").digest("hex")}`;
-            try { store.createAccount(derived, "magic-link"); }
-            catch (error) { if (!(error instanceof ServiceError) || error.status !== 409) throw error; }
-            accountId = derived;
-          }
-          let method = store.accountLogins.listMethods(accountId).find(row => row.type === "magic" && row.email === normalized);
-          if (!method) method = store.accountLogins.linkMagicMethod(accountId, { email: normalized });
-          store.accountLogins.touchMethod(accountId, method.id);
-          return store.loginAccountSessionWithMethod(consumeToken, accountId, data.sessionRevision, {
-            method: { kind: "magic", ref: method.id },
-            revokeRoomToken: oldRoomToken && tokenPattern.test(oldRoomToken) ? oldRoomToken : null,
-            rotateSlot: true
-          });
-        });
-        setCookie(res, accountCookieName, freshSlotToken, Math.max(0, Math.floor((loggedIn.expiresAt - store.now()) / 1000)));
-        return json(res, 201, sessionAccountView(loggedIn));
-      }
-      if (url.pathname === "/api/auth/password/reset/request" || url.pathname === "/api/auth/password/reset/consume") {
-        if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
-        checkOrigin(req, true);
-        const slotToken = cookie(req, accountCookieName);
-        if (!slotToken) reject(401, "account_session_required", "Start a browser session before resetting a password");
-        const slot = store.accountSessionSlot(slotToken);
-        protectWrite(req, slot, false);
-        const data = await body(req);
-        const requesting = url.pathname.endsWith("/request");
-        if (requesting) {
-          if (!(exact(data, ["email"]) || exact(data, ["email", "returnTo"])) || typeof data.email !== "string") reject(422, "invalid_email_request", "An email address is required");
-          if (Object.hasOwn(data, "returnTo") && validateMagicReturnTo(data.returnTo) === null) reject(422, "invalid_return_target", "A valid local return target is required");
-        } else if (!exact(data, ["email", "code", "newPassword", "sessionRevision"]) || typeof data.email !== "string"
-          || typeof data.code !== "string" || typeof data.newPassword !== "string") reject(422, "invalid_password_reset", "Reset proof, new password and current session revision are required");
-        const normalized = normalizeEmail(data.email);
-        if (!normalized) reject(422, "invalid_email", "A valid email address is required");
-        rate(`password-reset-${requesting ? "request" : "consume"}:${remoteAddress}`, requesting ? 5 : 10);
-        magicEmailLimit(requesting ? resetRequestEmailLimiter : resetConsumeEmailLimiter, normalized);
-        if (requesting) {
-          if (!magicMailer.isConfigured()) return json(res, 200, magicLinkUnavailable());
-          const issued = store.accountLogins.issuePasswordResetCode({ email: normalized });
-          await magicMailer.sendMagicLink({ to: normalized, code: issued.code, expiresAt: issued.expiresAt, purpose: "password-reset",
-            ...(Object.hasOwn(data, "returnTo") ? { returnTo: data.returnTo } : {}) });
-          return json(res, 200, { status: "sent" });
-        }
-        const verifyResetSlot = () => {
-          const currentSlot = store.accountSessionSlot(slotToken);
-          protectWrite(req, currentSlot, false);
-          if (!Number.isSafeInteger(data.sessionRevision) || data.sessionRevision !== currentSlot.sessionRevision) reject(409, "stale_session_revision", "The browser session changed; refresh before resetting");
-          let authenticated = null;
-          try { authenticated = store.authenticateAccountSession(slotToken); }
-          catch (error) { if (error.status !== 401) throw error; }
-          const target = store.accountLogins.passwordResetAccount(normalized);
-          if (authenticated && authenticated.account.id !== target?.accountId) reject(409, "reset_account_mismatch", "This reset is for another account. Sign out before continuing.");
-        };
-        // The body may have been held while another tab changed this slot.
-        verifyResetSlot();
-        const policy = checkPasswordPolicy(data.newPassword);
-        if (policy) reject(422, policy.code, policy.message);
-        const verifier = hashPassword(data.newPassword);
-        const resetFailure = store.transaction(() => {
-          // Recheck inside the writer fence so another process cannot change
-          // the browser slot between authorization and proof consumption.
-          verifyResetSlot();
-          try { store.accountLogins.resetPassword({ email: normalized, code: data.code, verifier }); }
-          catch (error) {
-            // Invalid proof attempts deliberately persist their bounded counter.
-            if (error instanceof ServiceError && error.code === "invalid_password_reset") return error;
-            throw error;
-          }
-          return null;
-        });
-        if (resetFailure) throw resetFailure;
-        // Notification failure cannot undo a committed password change or
-        // turn a used proof into a second mutation. Never include secrets.
-        try { await magicMailer.sendPasswordResetNotice?.({ to: normalized }); } catch { /* Password is already reset. */ }
-        return json(res, 200, { status: "password_reset", signInRequired: true });
-      }
-      // ---- Password auth (slice 2, RC-2026-09-17-011) ----
-      // Email+password login. Signup provisions an `email:<sha256>` account,
-      // links password+magic methods, and upgrades the browser's account
-      // session slot; login verifies against the stored scrypt verifier, or
-      // a dummy verifier when the email is unknown, so a wrong password and
-      // an unknown email answer identically; change rotates the verifier on
-      // an authenticated session. Plaintext passwords never reach the store.
-      const passwordAccountId = normalized => `email:${createHash("sha256").update(normalized).digest("hex")}`;
-      const finishPasswordSlot = (slotToken, accountId, expectedRevision, methodRef) => {
-        // QAS-702 (RC-2026-09-19-069): every password login mints a fresh
-        // slot token and invalidates the pre-login one.
-        const { token: freshSlotToken, session: loggedIn } = store.loginAccountSessionWithMethod(slotToken, accountId, expectedRevision, {
-          method: { kind: "password", ref: methodRef },
-          rotateSlot: true
-        });
-        setCookie(res, accountCookieName, freshSlotToken, Math.max(0, Math.floor((loggedIn.expiresAt - store.now()) / 1000)));
-        return loggedIn;
-      };
-      // ---- ID-SEC auth: verified email and uniform signup ----
-      const signupReply = () => ({ status: "check_email", mailConfigured: magicMailer.isConfigured() });
-      const deliverSignupMail = async fn => {
-        try { await fn(); } catch { /* Delivery does not change the signup response. */ }
-      };
-      if (url.pathname === "/api/auth/password/signup") {
-        if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
-        checkOrigin(req, true);
-        rate(`password-signup:${remoteAddress}`, 10);
-        const data = await body(req);
-        const signupToken = signInSlotToken(req, data, ["email", "password", "sessionRevision"],
-          { code: "invalid_signup", message: "An email, password, and current session are required" });
-        if (typeof data.email !== "string" || typeof data.password !== "string") {
-          reject(422, "invalid_signup", "An email, password, and current session are required");
-        }
-        const normalized = normalizeEmail(data.email);
-        if (!normalized) reject(422, "invalid_email", "A valid email address is required");
-        const policy = checkPasswordPolicy(data.password);
-        if (policy) reject(422, policy.code, policy.message);
-        magicEmailLimit(signupEmailLimiter, normalized);
-        const verifier = hashPassword(data.password);
-        const mailConfigured = magicMailer.isConfigured();
-        const holding = store.accountLogins.findAccountHoldingEmail(normalized);
-        if (holding) {
-          if (mailConfigured) await deliverSignupMail(() => magicMailer.sendMagicLink({ to: normalized, purpose: "signup-notice" }));
-          return json(res, 202, signupReply());
-        }
-        const accountId = passwordAccountId(normalized);
-        try { store.createAccount(accountId, "password-signup"); }
-        catch (error) {
-          if (!(error instanceof ServiceError) || error.status !== 409) throw error;
-          if (mailConfigured) await deliverSignupMail(() => magicMailer.sendMagicLink({ to: normalized, purpose: "signup-notice" }));
-          return json(res, 202, signupReply());
-        }
-        const method = store.accountLogins.linkPasswordMethod(accountId, { email: normalized, verifier });
-        store.accountLogins.touchMethod(accountId, method.id);
-        if (mailConfigured) {
-          const issued = store.accountLogins.issueEmailVerifyCode({ accountId, email: normalized });
-          await deliverSignupMail(() => magicMailer.sendMagicLink({
-            to: normalized, code: issued.code, expiresAt: issued.expiresAt, purpose: "email-verify"
-          }));
-        }
-        finishPasswordSlot(signupToken, accountId, data.sessionRevision, method.id);
-        return json(res, 202, signupReply());
-      }
       if (url.pathname === "/api/auth/email/verify") {
         if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
         checkOrigin(req, true);
@@ -1342,69 +1171,6 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!exact(data, ["code"]) || typeof data.code !== "string") reject(422, "invalid_email_code", "A verification code is required");
         const verified = store.accountLogins.consumeEmailVerifyCode({ accountId: session.account.id, code: data.code.trim() });
         return json(res, 200, { status: "verified", email: verified.email });
-      }
-      // ---- end ID-SEC auth ----
-      if (url.pathname === "/api/auth/password/login") {
-        if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
-        checkOrigin(req, true);
-        rate(`password-login-ip:${remoteAddress}`, 60);
-        const data = await body(req);
-        const loginToken = signInSlotToken(req, data, ["email", "password", "sessionRevision"],
-          { code: "invalid_login", message: "An email, password, and current session are required" });
-        if (typeof data.email !== "string" || typeof data.password !== "string") {
-          reject(422, "invalid_login", "An email, password, and current session are required");
-        }
-        const normalized = normalizeEmail(data.email);
-        if (!normalized) reject(422, "invalid_email", "A valid email address is required");
-        rate(`password-login:${normalized}`, 10);
-        const accountId = store.accountLogins.findPasswordAccount(normalized);
-        const verifier = accountId ? store.accountLogins.readPasswordVerifier(accountId) : null;
-        // Unknown emails and verifier-less accounts verify against the dummy
-        // so the response never reveals whether the email is registered.
-        if (!verifyPassword(data.password, verifier ?? DUMMY_PASSWORD_VERIFIER)) {
-          reject(401, "invalid_credentials", "Invalid email or password");
-        }
-        const passwordMethod = store.accountLogins.listMethods(accountId).find(m => m.type === "password");
-        store.accountLogins.touchMethod(accountId, passwordMethod.id);
-        const loggedIn = finishPasswordSlot(loginToken, accountId, data.sessionRevision, passwordMethod.id);
-        return json(res, 200, sessionAccountView(loggedIn));
-      }
-      if (url.pathname === "/api/auth/password/change") {
-        if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
-        checkOrigin(req, true);
-        rate(`password-change:${remoteAddress}`, 20);
-        const slotToken = cookie(req, accountCookieName);
-        if (!slotToken) reject(401, "account_session_required", "Sign in before changing the password");
-        let session;
-        try {
-          session = store.authenticateAccountSession(slotToken);
-        } catch (error) {
-          if (error.status !== 401) throw error;
-          reject(401, "invalid_session", "That session is no longer valid; sign in again");
-        }
-        if (!session.account) reject(401, "account_session_required", "Sign in before changing the password");
-        const data = await body(req);
-        if (!exact(data, ["currentPassword", "newPassword"])
-          || typeof data.currentPassword !== "string" || typeof data.newPassword !== "string") {
-          reject(422, "invalid_password_change", "The current and new passwords are required");
-        }
-        const verifyChangeSession = () => store.authenticateAccountSession(slotToken, null, session.sessionBinding);
-        verifyChangeSession();
-        const verifier = store.accountLogins.readPasswordVerifier(session.account.id);
-        if (!verifyPassword(data.currentPassword, verifier ?? DUMMY_PASSWORD_VERIFIER)) {
-          reject(401, "invalid_credentials", "The current password is incorrect");
-        }
-        const policy = checkPasswordPolicy(data.newPassword);
-        if (policy) reject(422, policy.code, policy.message);
-        const replacementVerifier = hashPassword(data.newPassword);
-        store.transaction(() => {
-          verifyChangeSession();
-          if (store.accountLogins.readPasswordVerifier(session.account.id) !== verifier) {
-            reject(409, "password_changed", "The password changed; retry with the current password");
-          }
-          store.accountLogins.setPasswordVerifier(session.account.id, replacementVerifier);
-        });
-        return json(res, 200, { status: "ok" });
       }
       // ---- GitHub OAuth (slice 4, RC-2026-09-17-013) ----
       // GitHub sign-in (Clerk-free). The start route binds the browser's
@@ -1773,79 +1539,6 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           return json(res, 200, { status: "ready" }, req.method === "HEAD");
         } catch { return json(res, 503, { status: "unavailable" }, req.method === "HEAD"); }
       }
-      // ---- Passkey auth (slice 5, RC-2026-09-17-014) ----
-      const passkeyUnavailable = () => json(res, 503, { status: "unavailable", reason: "passkey_not_configured" });
-      if (url.pathname === "/api/auth/passkey/register/options" && req.method === "POST") {
-        checkOrigin(req, true);
-        const slotToken = cookie(req, accountCookieName);
-        if (!slotToken) reject(401, "account_session_required", "Sign in before registering a passkey");
-        const auth = store.authenticateAccountSession(slotToken); // 401 unless the slot is authenticated
-        protectWrite(req, auth, false);
-        rate(`passkey-register-options:${auth.account.id}`, 10);
-        const params = resolvePasskeyParams(expectedOrigin());
-        if (!params) return passkeyUnavailable();
-        const data = await body(req);
-        if (data.userName !== undefined && typeof data.userName !== "string") {
-          reject(422, "invalid_passkey_request", "userName must be a string");
-        }
-        if (data.authenticatorSelection !== undefined
-          && (data.authenticatorSelection === null || typeof data.authenticatorSelection !== "object")) {
-          reject(422, "invalid_passkey_request", "authenticatorSelection must be an object");
-        }
-        return json(res, 200, passkeys().beginRegistration({ accountId: auth.account.id, rpId: params.rpId,
-          rpName: params.rpId, userName: data.userName ?? auth.account.id, authenticatorSelection: data.authenticatorSelection }));
-      }
-      if (url.pathname === "/api/auth/passkey/register/finish" && req.method === "POST") {
-        checkOrigin(req, true);
-        const slotToken = cookie(req, accountCookieName);
-        if (!slotToken) reject(401, "account_session_required", "Sign in before registering a passkey");
-        const auth = store.authenticateAccountSession(slotToken);
-        protectWrite(req, auth, false);
-        rate(`passkey-register-finish:${auth.account.id}`, 10);
-        const params = resolvePasskeyParams(expectedOrigin());
-        if (!params) return passkeyUnavailable();
-        const data = await body(req);
-        if (!exact(data, ["challengeId", "response"]) || typeof data.challengeId !== "string"
-          || data.response === null || typeof data.response !== "object") {
-          reject(422, "invalid_passkey_response", "A challenge id and credential response are required");
-        }
-        return json(res, 201, passkeys().finishRegistration({ accountId: auth.account.id, challengeId: data.challengeId,
-          response: data.response, expectedOrigin: params.origin, rpId: params.rpId }));
-      }
-      if (url.pathname === "/api/auth/passkey/authenticate/options" && req.method === "POST") {
-        checkOrigin(req, true);
-        rate(`passkey-auth-options:${remoteAddress}`, 20);
-        const params = resolvePasskeyParams(expectedOrigin());
-        if (!params) return passkeyUnavailable();
-        await body(req); // discoverable-credential flow: the JSON body carries no required fields
-        return json(res, 200, passkeys().beginAuthentication({ rpId: params.rpId }));
-      }
-      if (url.pathname === "/api/auth/passkey/authenticate/finish" && req.method === "POST") {
-        checkOrigin(req, true);
-        rate(`passkey-auth-finish:${remoteAddress}`, 10);
-        const params = resolvePasskeyParams(expectedOrigin());
-        if (!params) return passkeyUnavailable();
-        const data = await body(req);
-        const passkeyToken = signInSlotToken(req, data, ["challengeId", "response", "sessionRevision"],
-          { code: "invalid_passkey_response", message: "A challenge id, credential response, and session are required" });
-        if (typeof data.challengeId !== "string" || data.response === null || typeof data.response !== "object"
-          || !Number.isSafeInteger(data.sessionRevision)) {
-          reject(422, "invalid_passkey_response", "A challenge id, credential response, and session are required");
-        }
-        const verified = passkeys().finishAuthentication({ challengeId: data.challengeId, response: data.response,
-          expectedOrigin: params.origin, rpId: params.rpId });
-        const oldRoomToken = cookie(req, roomCookieName);
-        // QAS-702 (RC-2026-09-19-069): mint a fresh slot token on login and
-        // invalidate the pre-login one — the new token is set as the cookie
-        // here (this route previously relied on the in-place slot upgrade).
-        const { token: freshSlotToken, session: loggedIn } = store.loginAccountSessionWithMethod(passkeyToken, verified.accountId, data.sessionRevision, {
-          method: { kind: "passkey", ref: verified.methodRef },
-          revokeRoomToken: oldRoomToken && tokenPattern.test(oldRoomToken) ? oldRoomToken : null,
-          rotateSlot: true
-        });
-        setCookie(res, accountCookieName, freshSlotToken, Math.max(0, Math.floor((loggedIn.expiresAt - store.now()) / 1000)));
-        return json(res, 200, sessionAccountView(loggedIn));
-      }
       // Track C C14 — read-only growth analytics surface. The handler is a
       // pure read over the collector/scheduler; unknown /growth subpaths 404
       // inside the handler so the surface stays explicit. Failure-isolated:
@@ -2185,6 +1878,15 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           return sendPage(200, page.html, null, "/agents");
         }
         const page = publicRoomView(store, roomPage[1], { ref });
+        // A browser opening /r/<slug> for a room that is unknown or not
+        // published gets the same styled 404 as any other public path, not
+        // the JSON API envelope; /r/<slug>.json and non-HTML clients keep JSON.
+        if (!page && !roomPage[2] && acceptPrefersHtml(req.headers.accept)) {
+          const body = Buffer.from(PUBLIC_NOT_FOUND_HTML);
+          res.setHeader("X-Robots-Tag", "noindex");
+          res.writeHead(404, { "Content-Type": "text/html; charset=utf-8", "Content-Length": body.length });
+          return res.end(req.method === "HEAD" ? undefined : body);
+        }
         if (!page) reject(404, "not_found", "Not found");
         return sendPage(200, page.html, roomPage[2] ? page.document : null, `/r/${roomPage[1]}`);
       }
@@ -2824,6 +2526,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           setCookie(res, roomCookieName, joined.token, Math.max(0, Math.floor((joined.expiresAt - store.now()) / 1000)));
           return json(res, 201, {
             identityId: redeemed.identityId,
+            // The invite branch never reveals the identity credential (see
+            // agent-invites.mjs redeem): what it hands out is the room-scoped
+            // rak_ token. roomToken names it honestly; identitySecret stays as a
+            // deprecated alias for existing callers. Identity-wide routes
+            // (/api/agent-rooms, /api/needs-me) do not accept it.
+            roomToken: redeemed.mcpToken.credential,
+            credentialKind: "room_token",
             identitySecret: redeemed.mcpToken.credential,
             mcpToken: redeemed.mcpToken,
             roomId: redeemed.roomId,
@@ -2836,6 +2545,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
               "You are signed in — open the room below",
               "Save the room token — it expires in 30 days and is shown once",
               "Use it as Authorization: Bearer on /mcp for this room",
+              "roomToken (also returned as the deprecated alias identitySecret) is room-scoped: identity-wide routes such as /api/agent-rooms and /api/needs-me refuse it; use room_check_access and room_needs_me on /mcp instead",
               `Orient: GET /api/rooms/${redeemed.roomId}/activation-pack`,
               `Read the room: GET /api/rooms/${redeemed.roomId}?view=work`
             ]
@@ -2893,7 +2603,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // stateless by design, like POST /join: the page previews the invite
       // and joins through the existing rate-limited API routes. Outside the
       // /api/ inventory by design, like the discovery packets.
-      const joinPageMatch = /^\/(?:room\/)?join(?:\/([A-Za-z0-9_-]{1,64}))?\/?$/.exec(url.pathname);
+      // D-c: the code segment is deliberately permissive (any single path
+      // segment, up to 128 chars). Malformed codes must render this page so
+      // the client-side boot() shows the error screen with the "Back to
+      // sign-in" fallback; narrowing it here strands the user on the generic
+      // 404 page. The client still validates the code shape before calling
+      // the preview API.
+      const joinPageMatch = /^\/(?:room\/)?join(?:\/([^/]{1,128}))?\/?$/.exec(url.pathname);
       if (joinPageMatch) {
         if (req.method !== "GET") reject(405, "method_not_allowed", "Method not allowed");
         const assetBase = url.pathname.startsWith("/room/") ? "/room" : "";
@@ -3245,6 +2961,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (url.pathname === "/api/needs-me" && (req.method === "GET" || req.method === "HEAD")) {
         rate(`needs-me:${remoteAddress}`, 60);
         const secret = bearer(req);
+        if (secret && secret.startsWith(API_KEY_PREFIX)) reject(401, "room_token_not_identity", ROOM_TOKEN_NOT_IDENTITY);
         if (!secret || !isIdentitySecret(secret)) reject(401, "unauthenticated", "Identity secret required. Agents can self-mint an identity at POST /api/agent-identities.");
         const sinceParam = url.searchParams.get("since");
         let since;
@@ -3744,11 +3461,17 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // surfaces below apply the same predicate at the HTTP layer so
       // non-participants see no DM existence, count, or metadata.
       const viewerId = auth.member.id;
-      const dmMessageVisible = ({ authorId, toMemberId }) =>
-        !toMemberId || authorId === viewerId || toMemberId === viewerId;
-      const dmEventVisible = event =>
+      // --- PRIV-2 history visibility ---
+      // A since_join reader also loses messages and events from before their
+      // join (server/history-visibility.mjs). null for everyone else.
+      const historyFloor = store.historyFloor(roomId, viewerId);
+      const historyMessages = historyFloor ? indexHistoryMessages(store.room(roomId).state.messages) : null;
+      const dmMessageVisible = message => messageInHistory(message, historyFloor)
+        && (!message.toMemberId || message.authorId === viewerId || message.toMemberId === viewerId);
+      const dmEventVisible = event => eventInHistory(event, historyFloor, historyMessages) && (
         event?.type !== "message.posted" || !event?.data?.toMemberId
-        || event.actorId === viewerId || event.data.toMemberId === viewerId;
+        || event.actorId === viewerId || event.data.toMemberId === viewerId);
+      // --- end PRIV-2 ---
       // Bond receipts and peer DMs are ledger events, visible to the two
       // identities (bond metadata also to the room owner). Not room chat.
       const peerContext = {
@@ -4139,6 +3862,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }
         reject(405, "method_not_allowed", "Method not allowed");
       }
+      // Typing heartbeats are served by the route table
+      // (server/routes/typing.mjs); the SSE pump below emits synthetic
+      // `typing` events.
       if (route === "provider-heartbeats" && req.method === "GET") {
         // Round-2 #118: provider heartbeat dashboard.
         return json(res, 200, store.providerHeartbeats(selected.token, roomId, fence));
@@ -4195,11 +3921,17 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // framing; the CSP header pins the document's single style block and
         // forbids everything else, so a browser that opens it inline runs
         // nothing.
+        //
+        // PRIV-2: owner-only. The export is materialised first, then the
+        // room.exported audit record is appended, so a failed audit write
+        // answers with an error instead of an unaudited download.
+        requireExportOwner(store, roomId, viewerId, reject);
         const format = url.searchParams.get("format") ?? "jsonl";
         if (!["jsonl", "html"].includes(format) || url.searchParams.getAll("format").length > 1) reject(422, "invalid_format", "format is jsonl (default) or html");
         if (format === "html") {
           const rows = redactEventRows([...store.exportEvents(selected.token, roomId, fence)].filter(({ event }) => roomEventVisible(event)), projectionMessages(roomId));
           const bytes = Buffer.from(renderRoomExportHtml(rows, { roomId }), "utf8");
+          recordRoomExport(store, selected.token, roomId, "html", fence); // PRIV-2
           res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": bytes.length,
             "Content-Security-Policy": EXPORT_HTML_CSP,
             "Content-Disposition": `attachment; filename="room-${roomId}-export.html"` });
@@ -4224,6 +3956,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           lines.push(JSON.stringify({ sequence: exportSequence, event: line.event }) + "\n");
         }
         const bytes = Buffer.from(lines.join(""), "utf8");
+        recordRoomExport(store, selected.token, roomId, "jsonl", fence); // PRIV-2
         res.writeHead(200, { "Content-Type": "application/x-ndjson; charset=utf-8", "Content-Length": bytes.length,
           "Content-Disposition": `attachment; filename="room-${roomId}-export.jsonl"` });
         return res.end(bytes);

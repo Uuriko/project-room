@@ -13,6 +13,8 @@ import { createRoomServer } from "../server/http.mjs";
 import { migrateLandQueueClaims } from "../server/land-queue.mjs";
 import { handleWorkClaims } from "../server/work-claim-routes.mjs";
 import { SOURCE_REVISION } from "../server/version.mjs";
+// SEC-2: claim reads carry content-trust markers; compare the claim itself.
+const stripTrust = value => JSON.parse(JSON.stringify(value, (key, entry) => (key === "untrusted" || key === "contentTrust" ? undefined : entry)));
 
 const SHA = "a".repeat(40);
 const MAIN = "b".repeat(40);
@@ -259,6 +261,13 @@ test("reviewed completion requires the named reviewer's latest explicit approval
         const id = `latest-${index}`;
         await startReviewedClaim(f, id, policy);
         const review = body => f.call(key, `/work-claims/${id}/review`, body);
+        if (negative.note && reviewer === "coord") {
+          // SEC-2: review notes come from verify holders, the owner, or claim managers.
+          const refused = await review(negative);
+          assert.equal(refused.status, 403);
+          assert.equal(refused.value.error.code, "work_claims_not_permitted");
+          continue;
+        }
         await refusedCompletion(f, id, reviewer);
         assert.equal((await review(negative)).status, 200);
         await refusedCompletion(f, id, reviewer);
@@ -357,7 +366,7 @@ test("an unchanged latest review retry preserves its timestamp, basis, events, a
   assert.deepEqual(retry.value, first.value);
   assert.equal(f.store.room("commons").sequence, sequence);
   assert.equal(f.store.db.prepare("SELECT COUNT(*) AS n FROM agent_wake_signals WHERE agent_id=?").get("owner").n, wakes);
-  assert.deepEqual((await f.call(f.ownerKey, "/work-claims/retry-review")).value.reviews, first.value.reviews);
+  assert.deepEqual(stripTrust((await f.call(f.ownerKey, "/work-claims/retry-review")).value.reviews), first.value.reviews);
 });
 
 test("approval remains bound to the reviewed revision and observed pull-request head", async t => {

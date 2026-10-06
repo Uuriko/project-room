@@ -166,26 +166,6 @@ export async function seedRecoveryCoverage(f) {
   f.store.db.prepare(`INSERT INTO board_vtwo_idempotency(scoped_key,status,body,fingerprint,created_at)
     VALUES('recovery-scope',200,'{}','recovery-fingerprint',?)`)
     .run(Date.now());
-  // Seed the emissary lure-generation ledgers (Slice 2, RC-2026-09-28-2873)
-  // so the audit's exact-table-set check covers them: the tables are
-  // created at store boot (server/store.mjs). Rows are written directly:
-  // the fixture has no reason to run the lure-generation path (it would
-  // mint share links), and the raw invite token is never fixture data —
-  // only its hash shape.
-  f.store.db.prepare(`INSERT INTO emissary_drops
-    (drop_id,room_id,issuer_member_id,venue,title,terms,deadline_at,artifact_text,artifact_sha256,truncated,source,idempotency_key,created_at)
-    VALUES(?, 'commons','owner','sssnack','Recovery drop','Recovery fixture terms',NULL,'Recovery drop text',?,0,'verified',NULL,?)`)
-    .run(`emd1.${"ab".repeat(16)}`, "d".repeat(64), f.now());
-  f.store.db.prepare(`INSERT INTO emissary_invite_attribution
-    (attribution_id,room_id,issuer_member_id,invite_token_hash,note,minted_at,expires_at)
-    VALUES(?, 'commons','owner',?,'recovery fixture',?,?)`)
-    .run(`eia1.${"cd".repeat(16)}`, "e".repeat(64), f.now(), f.now() + 7 * 86400000);
-  f.store.db.prepare(`INSERT INTO emissary_idempotency (room_id,idempotency_key,tool,result_json,created_at)
-    VALUES('commons','recovery-idem-key','emissary_drop','{}',?)`)
-    .run(f.now());
-  f.store.db.prepare(`INSERT INTO emissary_journal (event_id,room_id,kind,actor_member_id,subject_id,details_json,created_at)
-    VALUES(?,'commons','emissary.drop_generated','owner',?,'{}',?)`)
-    .run(randomUUID(), `emd1.${"ab".repeat(16)}`, f.now());
   // Seed one referral invite (redeemed) + its key row + chain membership so
   // the capture covers referral_invite_keys, referral_invites and
   // referral_chain_members (#1025 signed agent-carried referral invites).
@@ -401,21 +381,6 @@ export async function seedRecoveryCoverage(f) {
     (endpoint, room_id, member_id, p256dh, auth, expiration_time, created_at)
     VALUES ('https://push.example.test/recovery', 'commons', 'owner', 'recovery-p256dh', 'recovery-auth', NULL, ?)`)
     .run(f.now());
-  // Seed one external identity + one receipt so the capture covers the Emissary
-  // slice-1a tables (external_identities, external_receipts, RC-2026-09-27-2860).
-  // register/record are the product writers; the audit's "every table has
-  // substantive data" check needs one row in each.
-  const recoveryExternal = f.store.emissaryGraph.register("commons", {
-    kind: "agent",
-    displayName: "Recovery emissary",
-    venues: [{ venue: "thecolony", handle: "@recovery-emissary", proof: "self_asserted" }],
-  });
-  f.store.emissaryReceipts.record("commons", {
-    externalId: recoveryExternal.external_id,
-    offerId: null,
-    kind: "work",
-    payload: { synthetic: true },
-  });
   // Seed one live grant edge so the capture covers agent_capability_grants
   // (per-agent capability grant edges, UFO-steal slice 1 RC-2026-09-27-2728).
   // issueGrant is the product writer; the audit's "every table has

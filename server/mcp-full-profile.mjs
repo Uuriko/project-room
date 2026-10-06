@@ -8,11 +8,14 @@ import { OutsideAgents } from "./outside-agents.mjs";
 // Local attention tools stay off this URL: they read an operator directory.
 
 import { resolveCatalogAgent, catalogCallDenial } from "./capability-visibility.mjs";
+import { chargeSpendBeforeCall } from "./spend-grants.mjs";
+import { getTier, DEFAULT_AUTONOMY_TIER } from "./autonomy-tiers.mjs";
 import { ServiceError } from "./service-error.mjs";
 import { canonicalLane, normalizeActor } from "./bounty-escrow.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { publishBountyEvent } from "./bounty-escrow-routes.mjs";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
+import { linkWorkClaimPullRequest } from "./work-claim-routes.mjs";
 
 import { prepareWork } from "../client/work-preparation.mjs";
 import { beginSelectedWork, findBeginReceipt } from "../client/begin-work.mjs";
@@ -140,6 +143,40 @@ function enforceHostedStdioCallVisibility(store, secret, memberId, name) {
 }
 
 export async function callHostedStdioTool(store, secret, name, args) {
+  // Spend-primitive MVP (charge-then-forward): same boundary as callRoomTool
+  // in mcp-room-profile.mjs, adapted to this path's { value, isError }
+  // contract. The catalog visibility/tier denial runs FIRST so restricted
+  // agents keep their established denial codes; the spend check only sees
+  // agents the catalog already admits. Settle on success; void on error,
+  // throw, or unconfirmed outcome (never charge for a call whose outcome is
+  // unknown); void an idempotent duplicate or idempotent replay (the
+  // original call already paid).
+  {
+    const { roomId } = args;
+    const auth = store.authenticate(secret, roomId);
+    enforceHostedStdioCallVisibility(store, secret, auth.member.id, name);
+    // Denial hierarchy: autonomy outranks spend. t1_readonly and guest
+    // agents keep their established denials (agent_readonly /
+    // guest_scope_denied from the dispatch below); the spend gate only
+    // sees agents the autonomy system already admits to writes.
+    const tier = getTier(store.db, roomId, auth.member.id)?.autonomyTier ?? DEFAULT_AUTONOMY_TIER;
+    if (tier === "t1_readonly" || isGuestAgentMemberId(auth.member.id))
+      return dispatchHostedStdioTool(store, secret, name, args);
+  }
+  const spend = chargeSpendBeforeCall(store, secret, name, args);
+  if (!spend) return dispatchHostedStdioTool(store, secret, name, args);
+  let outcome;
+  try {
+    outcome = await dispatchHostedStdioTool(store, secret, name, args);
+  } catch (error) { spend.void(); throw error; }
+  const value = outcome?.value;
+  if (outcome?.isError === true) spend.void();
+  else if (value && typeof value === "object" && (value.duplicate === true || value.idempotentReplay === true)) spend.void();
+  else spend.settle();
+  return outcome;
+}
+
+async function dispatchHostedStdioTool(store, secret, name, args) {
   const { roomId, ...rest } = args;
   const auth = store.authenticate(secret, roomId);
   enforceHostedStdioCallVisibility(store, secret, auth.member.id, name);
@@ -184,6 +221,25 @@ export async function callHostedStdioTool(store, secret, name, args) {
       }
     });
     return { value, isError: value.stopped === "unknown" || value.stopped === "disconnected" };
+  }
+  if (name === "room_link_work_claim_pr") {
+    try {
+      const value = linkWorkClaimPullRequest({ store, roomId, auth, claimId: rest.claimId,
+        data: { appendPullRequest: rest.pullRequest, expectedClaimedAt: rest.expectedClaimedAt,
+          expectedHistoryLength: rest.expectedHistoryLength },
+        reauthorize: () => {
+          const current = store.authenticate(secret, roomId, auth.sessionBinding);
+          enforceHostedStdioCallVisibility(store, secret, current.member.id, name);
+          return current;
+        }
+      });
+      return { value, isError: false };
+    } catch (error) {
+      if (!Number.isInteger(error?.status) || typeof error.code !== "string") throw error;
+      return { value: { status: error.status, code: error.code, message: error.message,
+        ...(error.body?.hint ? { hint: error.body.hint } : {}),
+        ...(error.body?.next ? { next: error.body.next } : {}) }, isError: true };
+    }
   }
   if (name === "room_set_member_claim_cap") {
     const authority = store.roomAuthority(roomId);

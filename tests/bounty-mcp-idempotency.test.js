@@ -22,6 +22,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
 import { callHostedStdioTool } from "../server/mcp-full-profile.mjs";
+import { issueSpendGrant, remainingSpendCents } from "../server/spend-grants.mjs";
 
 const ROOM = "commons";
 const AGENT = "agent";
@@ -37,6 +38,9 @@ function fixture(t) {
   keys[AGENT] = store.issueAccessKey(ROOM, AGENT);
   // New agent members default to t1_readonly; the bounty tools need write access.
   setTier(store.db, ROOM, AGENT, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
+  // Spend-primitive MVP: bounty_post is priced (10 credits); the fixture
+  // agent holds a grant so these idempotency tests exercise the paid path.
+  issueSpendGrant(store.db, ROOM, AGENT, { grantedBy: "owner", capCents: "100000", perTxCapCents: "10000", nowMs: Date.now() });
   // The one and only mint: 100 credits per active member, issued by the real
   // genesis path rather than a hand-built journal row (amounts are millis).
   store.bountyEscrow.ensureGenesis(ROOM);
@@ -87,6 +91,30 @@ test("MCP agent approval mode persists and authorizes only the designated verifi
   assert.equal((await callHostedStdioTool(store, keys.reviewer, "bounty_accept", acceptArgs)).value.idempotentReplay, true);
   assert.deepEqual(store.bountyEscrow.balances(ROOM, "worker"), before);
   assert.equal(before.attributed, 10);
+});
+
+test("an idempotent replay of a priced tool voids the pre-call charge instead of settling twice", async t => {
+  // Regression (#1517): the spend wrapper in callHostedStdioTool voided the
+  // reserved charge on isError or on value.duplicate === true, but an
+  // idemExecute replay returns idempotentReplay: true with NO duplicate
+  // flag, so the replay hit spend.settle() and re-charged 10 credits.
+  // These sibling tests assert bounty-level dedup (one bounty, one lock);
+  // none of them touch the spend-grant ledger, so the double charge passed
+  // the whole suite.
+  const { store, keys } = fixture(t);
+  const args = postArgs({ idempotencyKey: "spend-replay-post" });
+  const before = remainingSpendCents(store.db, ROOM, AGENT);
+  const first = await call(store, keys, "bounty_post", args);
+  assert.equal(first.isError, false);
+  assert.equal(first.value.idempotentReplay, false);
+  const afterFirst = remainingSpendCents(store.db, ROOM, AGENT);
+  assert.equal(afterFirst, before - 10, "the first post settles its 10-credit charge");
+  const second = await call(store, keys, "bounty_post", args);
+  assert.equal(second.isError, false);
+  assert.equal(second.value.idempotentReplay, true, "the retry must replay, not execute");
+  assert.equal(remainingSpendCents(store.db, ROOM, AGENT), afterFirst,
+    `DOUBLE CHARGE: idempotent replay settled a second 10-credit charge (remaining=${remainingSpendCents(store.db, ROOM, AGENT)}, want ${afterFirst})`);
+  assert.equal(bounties(store, keys).length, 1, "still exactly one bounty after the replay");
 });
 
 test("a retried bounty_post with the same idempotencyKey replays instead of posting twice", async t => {
@@ -156,6 +184,7 @@ test("the retry scope is per-caller: another member's same key executes", async 
   assert.ok(send);
   keys.agent2 = store.issueAccessKey(ROOM, "agent2");
   setTier(store.db, ROOM, "agent2", "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
+  issueSpendGrant(store.db, ROOM, "agent2", { grantedBy: "owner", capCents: "100000", perTxCapCents: "10000", nowMs: Date.now() });
   await call(store, keys, "bounty_post", postArgs({ idempotencyKey: "shared-key" }));
   const other = await callHostedStdioTool(store, keys.agent2, "bounty_post",
     { roomId: ROOM, ...postArgs({ idempotencyKey: "shared-key" }) });

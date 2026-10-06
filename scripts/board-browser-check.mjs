@@ -2,6 +2,7 @@
 // The room page and the work-claim HTTP API are the boundary. No test doubles.
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createServer } from "node:http";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { chromium } from "playwright";
 import AxeBuilder from "@axe-core/playwright";
@@ -34,6 +35,78 @@ async function post(page, origin, path, data, status = 200) {
   });
   assert.equal(response.status(), status, await response.text());
 }
+
+// Each caller owns all routes on its page. Always open its gates before
+// removing interception; the cleanup must retain the original test failure.
+async function drainBoardRoutes(page, ...releases) {
+  for (const release of releases) release.resolve();
+  await page.unrouteAll({ behavior: "wait" });
+}
+
+// Authoring gate: a real Playwright callback must finish before fixture cleanup
+// returns, including after an assertion fails. Existing happy-path journeys
+// release their responses before cleanup and cannot establish this ordering.
+// This uses a real local HTTP response, with no product export or fetch double.
+test("Board route cleanup drains a held callback and preserves the original failure", { timeout: 20000 }, async t => {
+  const server = createServer((request, response) => {
+    response.writeHead(200, { "Content-Type": "text/html" });
+    response.end(request.url === "/held" ? "held response" : "fixture");
+  });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => {
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+  });
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  await page.goto(origin);
+  const arrived = Promise.withResolvers(), release = Promise.withResolvers();
+  const resumed = Promise.withResolvers(), finish = Promise.withResolvers();
+  let callbackFinished = false, cleanupFinished = false;
+  await page.route(`${origin}/held`, async route => {
+    const response = await route.fetch();
+    assert.equal(response.status(), 200);
+    arrived.resolve();
+    await release.promise;
+    resumed.resolve();
+    await finish.promise;
+    await route.fulfill({ response });
+    callbackFinished = true;
+  });
+  await page.evaluate(() => {
+    window.heldResponse = fetch("/held").then(response => response.text());
+  });
+  await arrived.promise;
+  const sentinel = new Error("original Board assertion failure");
+  const journey = (async () => {
+    try {
+      throw sentinel;
+    } finally {
+      await drainBoardRoutes(page, release);
+      cleanupFinished = true;
+    }
+  })();
+  // Observe rather than discard the rejection so the identical original error
+  // can be asserted after cleanup, without an unhandled rejection in this test.
+  const outcome = journey.then(() => ({ fulfilled: true }), error => ({ error }));
+  try {
+    await resumed.promise;
+    // A same-page protocol/HTTP round trip orders this check after cleanup
+    // started, while the first callback remains explicitly held by finish.
+    assert.equal(await page.evaluate(() => fetch("/probe").then(response => response.text())), "fixture");
+    assert.equal(callbackFinished, false);
+    assert.equal(cleanupFinished, false, "cleanup must remain pending until the held callback ends");
+  } finally {
+    finish.resolve();
+    await outcome;
+  }
+  assert.equal(await page.evaluate(() => window.heldResponse), "held response");
+  assert.equal(callbackFinished, true);
+  assert.equal(cleanupFinished, true);
+  assert.equal((await outcome).error, sentinel, "cleanup preserves the original assertion failure");
+});
 
 async function axe(page) {
   const result = await new AxeBuilder({ page })
@@ -295,10 +368,10 @@ test("board columns, keyboard claim, linked work returns, chat line, 390px, and 
     const arrived = Promise.withResolvers(), release = Promise.withResolvers();
     t.after(() => release.resolve());
     const listPattern = "**/api/rooms/commons/work-claims?*";
-    let captured = false;
+    let captured = null;
     const holdList = async route => {
       if (captured || route.request().method() !== "GET") return route.continue();
-      captured = true;
+      captured = route.request();
       const response = await route.fetch();
       assert.equal(response.status(), 200);
       arrived.resolve();
@@ -320,8 +393,7 @@ test("board columns, keyboard claim, linked work returns, chat line, 390px, and 
       const reopenedUrl = page.url();
       const reopenedScroll = await dialog.evaluate(node => node.scrollTop);
       assert.ok(Math.abs(reopenedScroll - abandonedScroll) > 1, `${dismiss}: the new opening has its own scroll position`);
-      const delivered = page.waitForResponse(response => response.request().method() === "GET"
-        && new URL(response.url()).pathname === "/api/rooms/commons/work-claims");
+      const delivered = page.waitForResponse(response => response.request() === captured);
       release.resolve();
       await (await delivered).finished();
       // This new, persisted claim proves the unmodified held response painted.
@@ -334,8 +406,7 @@ test("board columns, keyboard claim, linked work returns, chat line, 390px, and 
       assert.ok(Math.abs(await dialog.evaluate(node => node.scrollTop) - reopenedScroll) <= 1, `${dismiss}: an abandoned return cannot restore its old scroll`);
       assert.deepEqual(navigationState(), beforeDelayedReturn, `${dismiss}: returning and reopening change no Room state`);
     } finally {
-      release.resolve();
-      await page.unroute(listPattern, holdList);
+      await drainBoardRoutes(page, release);
     }
   }
 
@@ -628,9 +699,168 @@ test("waiting prerequisites stay visible, link by keyboard, and become claimable
     console.error("Board Claim diagnostic:", JSON.stringify(diagnostic));
     throw error;
   } finally {
-    releaseRead.resolve(); releaseAction.resolve(); releaseReconcile.resolve();
-    await page.unroute(listPattern, holdRead);
-    await page.unroute(claimPattern, holdAction);
+    await drainBoardRoutes(page, releaseRead, releaseAction, releaseReconcile);
+  }
+});
+
+// Authoring gate: the real browser owns form availability, approval copy and
+// submit/readback lifecycle. Core/route tests own append preservation and CAS;
+// these checks add no render-only exports or fabricated successful responses.
+test("owners link a draft PR, reconcile held responses, and refresh a changed claim without resending", { timeout: 120000 }, async t => {
+  mkdirSync("test-results", { recursive: true });
+  const fixture = createAcceptanceFixture();
+  fixture.store.command(fixture.keys.owner, "commons", {
+    id: crypto.randomUUID(), type: "member.added",
+    data: { memberId: "pr-reviewer", displayName: "PR reviewer", kind: "human", permissions: ["verify"] }
+  });
+  const reviewerKey = fixture.store.issueAccessKey("commons", "pr-reviewer");
+  const server = createRoomServer({ store: fixture.store, streamInterval: 40, fetchPullRequest: github() });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const browser = await chromium.launch({ headless: true });
+  const errors = [];
+  t.after(async () => {
+    await browser.close(); server.closeStreams(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    fixture.store.close(); rmSync(fixture.directory, { recursive: true, force: true });
+    assert.deepEqual(errors, []);
+  });
+  const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const page = await context.newPage();
+  page.setDefaultTimeout(8000);
+  page.on("pageerror", error => errors.push(error.message));
+  await page.goto(origin);
+  await signInFixture(page, fixture.keys.owner);
+  await page.locator("#main").waitFor({ state: "visible" });
+  await post(page, origin, "/work-claims", { id: "link-draft", title: "Attach the draft", files: ["draft.js"] }, 201);
+  await post(page, origin, "/work-claims/link-draft/claim", {});
+  await post(page, origin, "/work-claims/link-draft/update", { state: "in_progress" });
+  const reviewed = await fetch(`${origin}/api/rooms/commons/work-claims/link-draft/review`, {
+    method: "POST", headers: { Authorization: `Bearer ${reviewerKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ verdict: "approve", summary: "Checked the current work" })
+  });
+  assert.equal(reviewed.status, 200, await reviewed.text());
+  const before = fixture.store.workClaims.get("commons", "link-draft");
+  // Registry fixtures represent persisted cards that have no public creation
+  // field for supersession. They exercise only permission/rendering decisions.
+  const updatedAt = new Date().toISOString();
+  for (const item of [
+    { id: "link-foreign", owner: "pr-reviewer", state: "claimed" },
+    { id: "link-ready", owner: null, state: "unclaimed" },
+    { id: "link-done", owner: "owner", state: "done" },
+    { id: "link-superseded", owner: "owner", state: "blocked", supersededBy: "replacement" },
+    { id: "link-expired", owner: "owner", state: "claimed", leaseExpiresAt: new Date(Date.now() - 60000).toISOString() },
+    { id: "link-blocked", owner: "owner", state: "blocked" }
+  ]) seedClaim(fixture.store, { title: item.id, updatedAt, claimedAt: updatedAt, leaseExpiresAt: new Date(Date.now() + 3600000).toISOString(), ...item });
+  await page.locator("#tasks-board-open").click();
+  const card = page.locator("article[data-claim-id='link-draft']");
+  const form = card.locator("[data-claim-link-pr]");
+  const input = form.locator("input");
+  await input.waitFor({ state: "visible" });
+  assert.equal(await card.locator(".claim-reviews").innerText(), "PR reviewer approve");
+  for (const id of ["link-foreign", "link-ready", "link-done", "link-superseded", "link-expired"]) {
+    assert.equal(await page.locator(`article[data-claim-id='${id}'] [data-claim-link-pr]`).count(), 0, `${id} cannot append`);
+  }
+  assert.equal(await page.locator("article[data-claim-id='link-blocked'] [data-claim-link-pr]").count(), 1);
+  const pullRequest = "https://github.com/Uuriko/project-room/pull/1303";
+  const pattern = "**/api/rooms/commons/work-claims/link-draft/update";
+  const listPattern = "**/api/rooms/commons/work-claims?*";
+  const arrived = Promise.withResolvers(), release = Promise.withResolvers();
+  const readArrived = Promise.withResolvers(), releaseRead = Promise.withResolvers();
+  const requests = [];
+  page.on("request", request => {
+    if (request.method() === "POST" && new URL(request.url()).pathname.endsWith("/work-claims/link-draft/update")) requests.push(request.postDataJSON());
+  });
+  const holdWrite = async route => {
+    const response = await route.fetch();
+    assert.equal(response.status(), 200);
+    arrived.resolve();
+    await release.promise;
+    await route.fulfill({ response });
+  };
+  let capturedRead = false;
+  const holdRead = async route => {
+    if (capturedRead) return route.continue();
+    capturedRead = true;
+    const response = await route.fetch();
+    assert.equal(response.status(), 200);
+    readArrived.resolve();
+    await releaseRead.promise;
+    await route.fulfill({ response });
+  };
+  await page.route(pattern, holdWrite);
+  try {
+    await input.fill(pullRequest);
+    await input.press("Enter");
+    await arrived.promise;
+    assert.equal(await form.getAttribute("aria-busy"), "true");
+    assert.match(await page.locator("#board-status").innerText(), /Linking PR/);
+    assert.equal(await form.locator("button").isDisabled(), true);
+    await input.press("Enter");
+    await input.press("Enter");
+    await page.route(listPattern, holdRead);
+    release.resolve();
+    await readArrived.promise;
+    assert.equal(await card.locator(".claim-pr").count(), 0, "a persisted write stays pending until readback");
+    await input.press("Enter");
+    releaseRead.resolve();
+    await page.waitForFunction(() => document.querySelector("#board-status")?.textContent === "PR linked to 'Attach the draft'");
+    assert.equal(await card.evaluate(node => node.parentElement.getAttribute("aria-labelledby")), "board-col-review");
+    assert.equal(await card.locator(".claim-pr a").getAttribute("href"), pullRequest);
+    assert.match(await card.locator(".claim-reviews").innerText(), /previous approval.*does not qualify for current work/);
+    assert.equal(await input.evaluate(node => node === document.activeElement), true);
+    assert.deepEqual(requests, [{ appendPullRequest: pullRequest, expectedClaimedAt: before.claimedAt, expectedHistoryLength: before.history.length }]);
+    for (const width of [1280, 390]) {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 800 });
+      await card.scrollIntoViewIfNeeded();
+      assert.equal(await page.locator("#board-dialog").evaluate(node => node.scrollWidth <= node.clientWidth + 1), true);
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
+      await page.screenshot({ path: `test-results/board-link-pr-${width}.png` });
+      await axe(page);
+    }
+  } finally {
+    await drainBoardRoutes(page, release, releaseRead);
+  }
+
+  // Keep the old form visible while a real release/reclaim changes its round.
+  // A 409 must refresh the card and explain the change, never resend the URL.
+  const refreshArrived = Promise.withResolvers(), refreshRelease = Promise.withResolvers();
+  let heldRefresh = null;
+  const holdRefresh = async route => {
+    if (heldRefresh) return route.continue();
+    heldRefresh = route.request();
+    const response = await route.fetch();
+    assert.equal(response.status(), 200);
+    refreshArrived.resolve();
+    await refreshRelease.promise;
+    await route.fulfill({ response });
+  };
+  await page.route(listPattern, holdRefresh);
+  try {
+    await post(page, origin, "/work-claims/link-draft/release", {});
+    await refreshArrived.promise;
+    await post(page, origin, "/work-claims/link-draft/claim", {});
+    const newRound = fixture.store.workClaims.get("commons", "link-draft");
+    assert.notEqual(newRound.claimedAt, before.claimedAt);
+    const secondPull = "https://github.com/Uuriko/project-room/pull/1304";
+    await input.fill(secondPull);
+    const rejected = page.waitForResponse(response => response.request().method() === "POST"
+      && new URL(response.url()).pathname.endsWith("/work-claims/link-draft/update"));
+    await input.press("Enter");
+    assert.equal((await rejected).status(), 409);
+    await page.waitForFunction(() => document.querySelector("#board-status")?.textContent.startsWith("Claim changed. The board is refreshed"));
+    assert.equal(await input.evaluate(node => node === document.activeElement), true);
+    await page.locator("#board-close").focus();
+    const delivered = page.waitForResponse(response => response.request() === heldRefresh);
+    refreshRelease.resolve();
+    await (await delivered).finished();
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)));
+    assert.equal(await page.evaluate(() => document.activeElement?.id), "board-close", "retired refresh cannot steal focus");
+    assert.equal(requests.length, 2, "a changed claim round does not trigger an automatic retry");
+    assert.equal(fixture.store.workClaims.get("commons", "link-draft").pullRequests.some(pull => pull.url === secondPull), false);
+    assert.equal(await form.count(), 1, "the retired unclaimed response cannot replace the fresh held claim");
+  } finally {
+    await drainBoardRoutes(page, refreshRelease);
   }
 });
 
@@ -651,6 +881,7 @@ test("held Board reads and mutations retire on room switch and sign-out", { time
   fixture.store.initialize(initialRoom("board-other", memberId));
   fixture.store.bindHumanAccount("board-other", memberId, accountId);
   const accountKey = fixture.store.issueAccountAccessKey(accountId);
+  const memberKey = fixture.store.issueAccessKey("commons", memberId);
   const updatedAt = new Date().toISOString();
   // More than one page makes a retired continuation's next request observable.
   for (let index = 0; index < 201; index += 1) {
@@ -665,10 +896,16 @@ test("held Board reads and mutations retire on room switch and sign-out", { time
     await new Promise(resolve => server.close(resolve));
     fixture.store.close(); rmSync(fixture.directory, { recursive: true, force: true });
   });
-  for (const boundary of ["room", "sign-out"]) for (const operation of ["read", "mutation"]) {
+  for (const boundary of ["room", "sign-out"]) for (const operation of ["read", "mutation", "link-pr"]) {
     const id = `retired-${boundary}-${operation}`;
     seedClaim(fixture.store, { id, title: `Original ${id}`, state: "unclaimed", updatedAt: new Date().toISOString() });
     fixture.store.workClaims.set("board-other", { ...fixture.store.workClaims.get("commons", id), title: `Other room ${id}` });
+    if (operation === "link-pr") {
+      const claimed = await fetch(`${origin}/api/rooms/commons/work-claims/${id}/claim`, {
+        method: "POST", headers: { Authorization: `Bearer ${memberKey}`, "Content-Type": "application/json" }, body: "{}"
+      });
+      assert.equal(claimed.status, 200, await claimed.text());
+    }
     const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
     const page = await context.newPage();
     page.setDefaultTimeout(8000);
@@ -694,7 +931,8 @@ test("held Board reads and mutations retire on room switch and sign-out", { time
     await chooseRoom("commons"); await openBoard();
     const documentOrigin = await page.evaluate(() => performance.timeOrigin);
     const arrived = Promise.withResolvers(), release = Promise.withResolvers();
-    const pattern = operation === "read" ? "**/api/rooms/commons/work-claims?*" : `**/api/rooms/commons/work-claims/${id}/claim`;
+    const pattern = operation === "read" ? "**/api/rooms/commons/work-claims?*"
+      : `**/api/rooms/commons/work-claims/${id}/${operation === "link-pr" ? "update" : "claim"}`;
     let captured = null;
     const hold = async route => {
       if (captured) { await route.continue(); return; }
@@ -717,6 +955,10 @@ test("held Board reads and mutations retire on room switch and sign-out", { time
           body: JSON.stringify({ id: `refresh-${id}`, title: `Refresh ${id}` })
         });
         assert.equal(created.status, 201, await created.text());
+      } else if (operation === "link-pr") {
+        const input = page.locator(`article[data-claim-id='${id}'] [data-claim-link-pr] input`);
+        await input.fill("https://github.com/Uuriko/project-room/pull/1303");
+        await input.press("Enter");
       } else await page.locator(`article[data-claim-id='${id}'] [data-claim-action='claim']`).click();
       await arrived.promise;
       await page.locator("#board-close").click();
@@ -744,6 +986,10 @@ test("held Board reads and mutations retire on room switch and sign-out", { time
       assert.equal(fixture.store.workClaims.get("commons", id).owner, operation === "read" ? null : memberId,
         "only the one mutation already accepted before retirement persists");
       assert.equal(requests.filter(request => request.method === "POST").length, operation === "read" ? 0 : 1);
+      if (operation === "link-pr") {
+        assert.equal(fixture.store.workClaims.get("commons", id).pullRequests.length, 1);
+        assert.equal(fixture.store.workClaims.get("board-other", id).pullRequests?.length ?? 0, 0);
+      }
       if (boundary === "room") {
         assert.equal(await page.locator(`[aria-labelledby='board-col-ready'] article[data-claim-id='${id}']`).count(), 1);
         assert.equal(await page.locator("#board-status").textContent(), "");
@@ -753,8 +999,7 @@ test("held Board reads and mutations retire on room switch and sign-out", { time
       }
       assert.deepEqual(errors, []);
     } finally {
-      release.resolve();
-      await page.unroute(pattern, hold);
+      await drainBoardRoutes(page, release);
       await context.close();
     }
   }
@@ -801,6 +1046,8 @@ test("a read-only member does not see the new item form", { timeout: 60000 }, as
     data: { memberId: "reader", displayName: "Reader", kind: "human", permissions: [] }
   });
   const reader = fixture.store.issueAccessKey("commons", "reader");
+  seedClaim(fixture.store, { id: "reader-held", title: "Previously held work", state: "claimed", owner: "reader",
+    claimedAt: new Date().toISOString(), updatedAt: new Date().toISOString(), leaseExpiresAt: new Date(Date.now() + 3600000).toISOString() });
   const server = createRoomServer({ store: fixture.store, streamInterval: 40, fetchPullRequest: github() });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
@@ -821,4 +1068,6 @@ test("a read-only member does not see the new item form", { timeout: 60000 }, as
   await page.locator("#board-dialog").waitFor({ state: "visible" });
   await page.locator(".live-chip").waitFor();
   assert.equal(await page.locator("#board-new-item").count(), 0);
+  assert.equal(await page.locator("article[data-claim-id='reader-held']").count(), 1);
+  assert.equal(await page.locator("[data-claim-link-pr]").count(), 0, "a held claim does not restore revoked Board-write authority");
 });

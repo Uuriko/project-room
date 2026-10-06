@@ -247,9 +247,9 @@ test("the owner remains sovereign: may approve and link with manage_members", t 
   const decided = requests.decide(ownerToken, "commons", req.requestId,
     { decision: "approve", permissions: ["accept_work", "manage_members"] });
   assert.deepEqual([...decided.grantedPermissions].sort(), ["accept_work", "manage_members"]);
-  const fresh = store.identities.create("Owner Linked Agent");
+  const fresh = store.identities.create("Delegate Linked Agent");
   const linked = store.identities.link(ownerToken, "commons", {
-    identityId: fresh.identityId, displayName: "Owner Linked Agent",
+    identityId: fresh.identityId, displayName: "Delegate Linked Agent",
     permissions: ["manage_members"]
   });
   assert.equal(linked.roomId, "commons");
@@ -411,4 +411,47 @@ test("HTTP delegation-revoke strips direct admin bits as well as the grant", asy
   assert.equal(after.permissions.includes("manage_members"), false, "manage_members bit must be stripped");
   assert.equal(after.permissions.includes("decide"), false, "decide bit must be stripped");
   assert.equal(store.delegation.hasGrant("commons", identity.identityId), false, "grant row must be revoked");
+});
+
+// #1520: a delegate may confer only permissions it holds itself, on both the
+// join-approval and the link path (same rule as the permission-upgrade review).
+test("a delegate cannot approve a join with permissions it does not hold (#1520)", t => {
+  const { delegation, ownerToken, agent, requests, requester } = setup(t);
+  delegation.grant(ownerToken, "commons", { identityId: agent.identityId });
+  const req = requestAccess(requests, requester, "ar_unheld_decide");
+  for (const permission of ["decide", "manage_claims", "invite_member"]) {
+    if (permission === "invite_member") continue; // the grant itself adds agent-safe invite_member to the delegate
+    assert.throws(() => requests.decide(agent.secret, "commons", req.requestId,
+      { decision: "approve", permissions: ["accept_work", permission] }),
+      err => err.status === 403 && new RegExp(`Cannot grant permissions not held: ${permission}`).test(err.message));
+  }
+  const pending = requests.list(agent.secret, "commons", { status: "pending" });
+  assert.ok(pending.some(r => r.requestId === req.requestId), "request still pending after refused escalation");
+  const decided = requests.decide(agent.secret, "commons", req.requestId,
+    { decision: "approve", permissions: ["accept_work", "verify"] });
+  assert.deepEqual([...decided.grantedPermissions].sort(), ["accept_work", "verify"]);
+});
+
+test("a delegate with no work permissions can still admit with read/chat access only (#1520)", t => {
+  const { delegation, ownerToken, requests, store } = setup(t);
+  const bare = store.identities.create("Bare Delegate");
+  const linked = store.identities.link(ownerToken, "commons", { identityId: bare.identityId, displayName: "Bare Delegate", permissions: [] });
+  setTier(store.db, "commons", linked.memberId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
+  delegation.grant(ownerToken, "commons", { identityId: bare.identityId });
+  const requester = store.identities.create("Requesting Agent 2");
+  const req = requests.request("commons", { identityId: requester.identityId, displayName: "Requesting Agent 2", requestedPermissions: ["steer", "verify"], requestId: "ar_bare_delegate" });
+  assert.throws(() => requests.decide(bare.secret, "commons", req.requestId, { decision: "approve" }),
+    err => err.status === 403 && /Cannot grant permissions not held: steer, verify/.test(err.message));
+  const decided = requests.decide(bare.secret, "commons", req.requestId, { decision: "approve", permissions: [] });
+  assert.equal(decided.status, "approved");
+  assert.deepEqual([...decided.grantedPermissions], []);
+});
+
+test("a delegate cannot link an identity with permissions it does not hold (#1520)", t => {
+  const { delegation, ownerToken, agent, store } = setup(t);
+  delegation.grant(ownerToken, "commons", { identityId: agent.identityId });
+  const fresh = store.identities.create("Escalating Agent");
+  assert.throws(() => store.identities.link(agent.secret, "commons", {
+    identityId: fresh.identityId, displayName: "Escalating Agent", permissions: ["decide"]
+  }), err => err.status === 403 && /Cannot grant permissions not held: decide/.test(err.message));
 });

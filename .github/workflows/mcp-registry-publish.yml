@@ -34,11 +34,55 @@ jobs:
             echo "publish=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          if jq -e '[.commits[]?.added[]?, .commits[]?.modified[]?] | index("server.json")' "$GITHUB_EVENT_PATH" >/dev/null; then
-            echo "publish=true" >> "$GITHUB_OUTPUT"
-          else
+          if [ "${GITHUB_EVENT_NAME}" != "push" ] || [ "${GITHUB_REF}" != "refs/heads/main" ]; then
+            echo "::error::Unexpected event/ref for the registry publish gate."
+            exit 1
+          fi
+          if jq -e '.deleted == true' "$GITHUB_EVENT_PATH" >/dev/null; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "Branch deleted; not publishing."
+            exit 0
+          fi
+          # Actions push payloads omit commit added/removed/modified arrays.
+          # Compare this push's exact trees, not HEAD^ or the last published
+          # version. A source-only fix must not publish an older backlog.
+          BEFORE=$(jq -er '.before | strings | select(test("^[0-9a-f]{40}$"))' "$GITHUB_EVENT_PATH") || {
+            echo "::error::Missing or invalid push before SHA."
+            exit 1
+          }
+          AFTER=$(jq -er '.after | strings | select(test("^[0-9a-f]{40}$"))' "$GITHUB_EVENT_PATH") || {
+            echo "::error::Missing or invalid push after SHA."
+            exit 1
+          }
+          if [ "$(git rev-parse HEAD)" != "$AFTER" ]; then
+            echo "::error::Checkout does not match the push after SHA."
+            exit 1
+          fi
+          if [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            # Creating main has no before commit; compare against an empty tree.
+            BEFORE=$(git hash-object -t tree -w /dev/null)
+          elif ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            # Checkout is shallow. Fetch the exact endpoint from the configured
+            # repository; any number of pushed commits (or a force push) is OK.
+            if ! git fetch --no-tags --depth=1 origin "$BEFORE" || ! git cat-file -e "$BEFORE^{commit}"; then
+              echo "::error::Cannot resolve the push before commit; refusing to guess."
+              exit 1
+            fi
+          fi
+          if git diff --quiet "$BEFORE" "$AFTER" -- server.json; then
             echo "publish=false" >> "$GITHUB_OUTPUT"
             echo "server.json did not change on this push; not publishing."
+          else
+            STATUS=$?
+            if [ "$STATUS" -ne 1 ]; then
+              echo "::error::Cannot compare push trees (git diff exit $STATUS)."
+              exit "$STATUS"
+            fi
+            if ! git cat-file -e "$AFTER:server.json"; then
+              echo "::error::server.json was removed; there is no manifest to publish."
+              exit 1
+            fi
+            echo "publish=true" >> "$GITHUB_OUTPUT"
           fi
       - name: Set version from tag
         if: ${{ steps.gate.outputs.publish == 'true' && startsWith(github.ref, 'refs/tags/v') }}

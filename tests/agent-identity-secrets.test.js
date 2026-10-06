@@ -174,6 +174,27 @@ test("rotate/revoke require authentication", async t => {
   assert.equal(await errorCode(await post(origin, `/api/agent-identities/${agent.identityId}/rotate`, { confirm: true }, "pri_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")), "unauthenticated");
 });
 
+test("authorization scheme is case-insensitive per RFC 7235 (QA 2026-10-03 P1-3)", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f);
+  const agent = f.store.identities.create("Scheme-case agent");
+  const path = `/api/agent-identities/${agent.identityId}/rotate`;
+  const postWithScheme = (scheme, secret) => fetch(`${origin}${path}`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `${scheme} ${secret}` },
+    body: JSON.stringify({ confirm: true }),
+  });
+  // Any casing of the Bearer scheme authenticates against the real server.
+  let secret = agent.secret;
+  for (const scheme of ["Bearer", "bearer", "BEARER", "bEaReR"]) {
+    const res = await postWithScheme(scheme, secret);
+    assert.equal(res.status, 200, `scheme "${scheme}" must authenticate`);
+    secret = (await res.json()).secret; // rotation consumed it; use the fresh one
+  }
+  // A non-bearer scheme still 401s.
+  assert.equal(await errorCode(await postWithScheme("Basic", "abc")), "unauthenticated");
+});
+
 test("revoked_at column is backfilled on pre-existing identity tables", async t => {
   const f = createAcceptanceFixture();
   // The fixture's AgentIdentities constructor ran ensureIdentitySecretSchema.
@@ -183,4 +204,27 @@ test("revoked_at column is backfilled on pre-existing identity tables", async t 
   const { ensureIdentitySecretSchema } = await import("../server/agent-identities.mjs");
   assert.doesNotThrow(() => ensureIdentitySecretSchema(f.store.db));
   f.store.close();
+});
+
+test("mcp join file-body cap honors any casing of the bearer scheme (bughunt 2026-10-03)", async t => {
+  // #1418 made bearer() case-insensitive, but the MCP-join attachment cap
+  // gate (server/http.mjs fileBody) still required capital-B "Bearer " —
+  // lowercase "bearer <pri_cred>" got the 16KB JSON cap and 413'd on file
+  // staging. Regression: fails pre-fix with 413, passes after.
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f);
+  const agent = f.store.identities.create("File-cap case agent");
+  const priSecret = f.store.identities.rotate(agent.identityId, agent.secret).secret;
+  assert.ok(priSecret.startsWith("pri_"));
+  // Over the 16KB JSON cap, well under the ~1.4MB attachment cap.
+  const bigBody = JSON.stringify({ jsonrpc: "2.0", id: "1", method: "tools/list", params: { pad: "x".repeat(20 * 1024) } });
+  for (const scheme of ["Bearer", "bearer", "BEARER"]) {
+    const res = await fetch(`${origin}/mcp`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `${scheme} ${priSecret}` },
+      body: bigBody,
+    });
+    assert.notEqual(res.status, 413, `scheme "${scheme}" must get the attachment cap, not 413`);
+    await res.text();
+  }
 });

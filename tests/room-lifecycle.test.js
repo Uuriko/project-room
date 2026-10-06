@@ -111,10 +111,18 @@ test("store: archiving closes commands, import and every join path with 409 room
     expectedSessionRevision: current.sessionRevision, expectedSessionBinding: current.sessionBinding }), { code: "room_archived" });
   assert.throws(() => f.store.invites.redeem(invite.code, { displayName: "Late agent" }), { code: "room_archived" });
   assert.equal(Object.keys(f.store.room("commons").state.members).length, memberCount, "no membership was added");
-  for (const path of ["/api/rooms/commons", "/api/rooms/commons/events", "/api/rooms/commons/export"]) {
+  for (const path of ["/api/rooms/commons", "/api/rooms/commons/events"]) {
     res = await fetch(origin + path, { headers: { Authorization: "Bearer " + f.keys.guest } });
     assert.equal(res.status, 200, path);
   }
+  // PRIV-2: export stays owner-only in an archived room, and the archived
+  // log records nothing new for it.
+  res = await fetch(origin + "/api/rooms/commons/export", { headers: { Authorization: "Bearer " + f.keys.guest } });
+  assert.equal(res.status, 403);
+  const archivedSequence = f.store.room("commons").sequence;
+  res = await fetch(origin + "/api/rooms/commons/export", { headers: { Authorization: "Bearer " + f.keys.owner } });
+  assert.equal(res.status, 200);
+  assert.equal(f.store.room("commons").sequence, archivedSequence);
   res = await fetch(origin + "/api/rooms/commons", { headers: { Authorization: "Bearer " + f.keys.guest } });
   assert.equal((await res.json()).state.room.archivedAt, receipt.event.at);
   assert.equal(auditRecovery(f.store).rooms, 1);

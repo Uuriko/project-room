@@ -23,7 +23,7 @@ import { event, EVENT_TYPES as T, memberCan, canInviteMembers, MEMBERSHIP_AUTHOR
 import { nextActionsForInviteRedeem } from "./discoverability.mjs";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 import { agentAccessProfiles } from "./agent-connections.mjs";
-import { assertMemberDisplayNameAvailable } from "./display-name-guard.mjs";
+import { assertAdmissibleMemberName } from "./display-name-guard.mjs";
 import { connectFields, starterFor } from "./routes/agent-connect.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
@@ -261,7 +261,7 @@ export class AgentInvites {
       // hidden characters, and skeletons that match someone already here
       // before an identity or membership row is written.
       try {
-        assertMemberDisplayNameAvailable(name, room.state.members);
+        assertAdmissibleMemberName(name, room.state.members); // Q3-D: roster check plus role names
       } catch (error) {
         if (error?.code === "display_name_unavailable") {
           error.detail = {

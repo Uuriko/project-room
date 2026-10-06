@@ -13,18 +13,20 @@ for i in $(seq 1 50); do curl -fsS "$ORIGIN/api/health" >/dev/null 2>&1 && break
 TOKEN=$(curl -fsS -X POST "$ORIGIN/api/agent-identities" -H 'content-type: application/json' -H "origin: $ORIGIN" -d '{"displayName":"qa2-fuzz"}' | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).secret))')
 ROOM=$(curl -fsS -X POST "$ORIGIN/api/agent-rooms" -H 'content-type: application/json' -H "origin: $ORIGIN" -H "authorization: Bearer $TOKEN" -d '{"title":"qa2-fuzz","purpose":"fuzz"}' | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).roomId))')
 printf '[parameters]\n"path.roomId" = "%s"\n' "$ROOM" > "$DIR/schemathesis.toml"
-ST="uvx --from schemathesis==4.* st --config-file $DIR/schemathesis.toml"; command -v uvx >/dev/null || ST="pipx run --spec schemathesis st --config-file $DIR/schemathesis.toml"
+ST="uvx --from schemathesis==4.* st"; command -v uvx >/dev/null || ST="pipx run --spec schemathesis st"
 set +e
 # Pass 1 (hard gate): server errors and 2xx response-schema conformance only.
-$ST run "$ORIGIN/openapi.json" --url "$ORIGIN" -H "Authorization: Bearer $TOKEN" -H "Origin: $ORIGIN" \
+# schemathesis 4.x has no --config-file (CLI exits 2); it auto-loads
+# schemathesis.toml from the working directory instead.
+(cd "$DIR" && $ST run "$ORIGIN/openapi.json" --url "$ORIGIN" -H "Authorization: Bearer $TOKEN" -H "Origin: $ORIGIN" \
   --checks not_a_server_error,response_schema_conformance --exclude-checks negative_data_rejection \
   --max-examples 40 --seed 20261001 --phases fuzzing,stateful,coverage \
-  --report junit --report-dir "$OUT/gate" > "$OUT/gate.log" 2>&1
+  --report junit --report-dir "$OUT/gate" > "$OUT/gate.log" 2>&1)
 GATE=$?
 # Pass 2 (report only): every check, for spec-drift tracking.
-$ST run "$ORIGIN/openapi.json" --url "$ORIGIN" -H "Authorization: Bearer $TOKEN" -H "Origin: $ORIGIN" \
+(cd "$DIR" && $ST run "$ORIGIN/openapi.json" --url "$ORIGIN" -H "Authorization: Bearer $TOKEN" -H "Origin: $ORIGIN" \
   --checks all --max-examples 25 --seed 20261001 \
-  --report junit,har --report-dir "$OUT/drift" > "$OUT/drift.log" 2>&1
+  --report junit,har --report-dir "$OUT/drift" > "$OUT/drift.log" 2>&1)
 set -e
 tail -30 "$OUT/gate.log"
 grep -E "^  ❌|^  ⚠️" "$OUT/drift.log" | sed 's/^/drift: /' || true

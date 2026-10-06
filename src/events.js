@@ -19,6 +19,8 @@ export const EVENT_TYPES = Object.freeze({
   ROOM_CHARTER_UPDATED: CHARTER_TYPE,
   ROOM_POLICY_SET: "room.policy_set",
   ROOM_SPEND_ALLOWANCE_SET: "room.spend_allowance_set",
+  // Owner kill-switch for the priced-tool gate. Default enabled when absent.
+  ROOM_SPEND_PRICING_SET: "room.spend_pricing_set",
   // One owner kill-switch for cross-owner assign and wake. Default open.
   ROOM_TRUST_SET: "room.trust_set",
   // Owner opt-in for the public receipts page. Default off when absent.
@@ -42,6 +44,10 @@ export const EVENT_TYPES = Object.freeze({
   // --- PRIV-1 message redaction ---
   MESSAGE_REDACTED: "message.redacted",
   RECEIPT_EVIDENCE_WITHDRAWN: "receipt.evidence_withdrawn",
+  // --- PRIV-2 history visibility and export authority ---
+  ROOM_HISTORY_VISIBILITY_SET: "room.history_visibility_set",
+  ROOM_EXPORTED: "room.exported",
+  // --- end PRIV-2 ---
   // --- end PRIV-1 message redaction ---
   REPLY_REQUEST_CANCELLED: REPLY_CANCELLED,
   MESSAGE_REACTION_SET: "message.reaction_set",
@@ -162,6 +168,41 @@ export function roomPolicy(state) {
 export const TRUST_OFF_CODE = "trust_off";
 export const trustOffMessage = targetId =>
   `Room Trust is off: cross-owner assign and wake are blocked${targetId ? ` (${targetId})` : ""}. Ask the room owner to turn Trust on.`;
+
+// --- PRIV-2 history visibility ---
+// "all": members read the whole history. "since_join": a member reads
+// messages and events from their own join onward. The owner and members who
+// hold manage_members always read everything. Without a recorded setting,
+// rooms created with historyDefaultsVersion 1 start link guests and agent
+// guests at their join point; older rooms keep "all" for everyone.
+export const HISTORY_VISIBILITIES = Object.freeze(["all", "since_join"]);
+export const HISTORY_DEFAULTS_VERSION = 1;
+export const ROOM_EXPORT_FORMATS = Object.freeze(["jsonl", "html"]);
+const LINK_GUEST_ID = /^guest-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+export function isHistoryGuestMemberId(memberId) {
+  return typeof memberId === "string" && (LINK_GUEST_ID.test(memberId) || memberId.startsWith("guest-agent-"));
+}
+export function historyVisibility(state) {
+  const stored = state?.room?.historyVisibility;
+  const value = HISTORY_VISIBILITIES.includes(stored?.value) ? stored.value : null;
+  return {
+    value,
+    guestsSinceJoin: value === null && state?.room?.historyDefaultsVersion === HISTORY_DEFAULTS_VERSION,
+    revision: Number.isSafeInteger(stored?.revision) ? stored.revision : 0,
+    setById: typeof stored?.setById === "string" ? stored.setById : null,
+    setAt: typeof stored?.setAt === "string" ? stored.setAt : null
+  };
+}
+export function memberHistoryVisibility(state, memberId) {
+  const room = state?.room;
+  if (!room || typeof memberId !== "string" || memberId === room.ownerId) return "all";
+  const member = state.members?.[memberId];
+  if (Array.isArray(member?.permissions) && member.permissions.includes("manage_members")) return "all";
+  const setting = historyVisibility(state);
+  if (setting.value) return setting.value;
+  return setting.guestsSinceJoin && isHistoryGuestMemberId(memberId) ? "since_join" : "all";
+}
+// --- end PRIV-2 ---
 
 // Public receipts stay off until the owner records room.public_receipts_set.
 // Absent means off, so older logs replay without a publicReceipts field.
@@ -321,6 +362,33 @@ function setSpendAllowance(state, incoming) {
 }
 
 export const PERMISSIONS = Object.freeze(["steer", "decide", "manage_members", "manage_claims", "accept_work", "complete_work", "verify", "write_external", "invite_member"]);
+
+// Spend-pricing kill switch: the owner can disable the priced-tool gate for
+// the room (room.spend_pricing_set). Event-sourced and carried on the
+// projection; server/spend-grants.mjs prices nothing while disabled. Absent
+// state means enabled — the pre-switch behaviour. Unlike the allowance, this
+// is a boolean lever, not a budget: disabled restores the room to exactly its
+// pre-gate behaviour (tools forward free, no charges, no rows written).
+export function spendPricingEnabled(state) {
+  const stored = state?.room?.spendPricing;
+  if (!stored) return true;
+  return stored.enabled !== false;
+}
+
+function setSpendPricing(state, incoming) {
+  const actor = requireMember(state, incoming.actorId);
+  if (actor.id !== state.room.ownerId) throw new Error("Only the Room owner may set spend pricing");
+  const { enabled } = incoming.data ?? {};
+  if (typeof enabled !== "boolean") throw new Error("enabled must be a boolean");
+  if (Object.keys(incoming.data ?? {}).some(key => key !== "enabled")) throw new Error("spend pricing takes only enabled");
+  const previous = state.room.spendPricing ?? null;
+  state.room.spendPricing = {
+    enabled,
+    revision: (previous?.revision ?? 0) + 1,
+    setById: incoming.actorId,
+    setAt: incoming.at
+  };
+}
 // Default autonomy for collaborating agents: they can steer, take work,
 // complete it, and verify. Attenuated: no manage_members / decide /
 // write_external / invite_member (those stay owner or explicit identity-link).
@@ -440,6 +508,7 @@ export function applyEvent(current, incoming) {
     [EVENT_TYPES.ROOM_CHARTER_UPDATED]: updateCharter,
     [EVENT_TYPES.ROOM_POLICY_SET]: setRoomPolicy,
     [EVENT_TYPES.ROOM_SPEND_ALLOWANCE_SET]: setSpendAllowance,
+    [EVENT_TYPES.ROOM_SPEND_PRICING_SET]: setSpendPricing,
     [EVENT_TYPES.ROOM_TRUST_SET]: setRoomTrust,
     [EVENT_TYPES.ROOM_PUBLIC_RECEIPTS_SET]: setPublicReceipts,
     // --- GR2 ---
@@ -463,6 +532,10 @@ export function applyEvent(current, incoming) {
     [EVENT_TYPES.MESSAGE_REDACTED]: redactMessage,
     [EVENT_TYPES.RECEIPT_EVIDENCE_WITHDRAWN]: recordEvidenceWithdrawn,
     // --- end PRIV-1 message redaction ---
+    // --- PRIV-2 history visibility and export authority ---
+    [EVENT_TYPES.ROOM_HISTORY_VISIBILITY_SET]: setHistoryVisibility,
+    [EVENT_TYPES.ROOM_EXPORTED]: recordRoomExport,
+    // --- end PRIV-2 ---
     [EVENT_TYPES.REPLY_REQUEST_CANCELLED]: cancelReplyRequest,
     [EVENT_TYPES.MESSAGE_REACTION_SET]: setMessageReaction,
     [EVENT_TYPES.MESSAGE_PINNED]: pinMessage,
@@ -583,7 +656,9 @@ function validateEnvelope(incoming) {
       || typeof action.claimId !== "string" || !validId(action.claimId)
       || typeof action.label !== "string" || !action.label.trim() || action.label.length > 512
       || Object.keys(action).some(field => field !== "claimId" && field !== "label")))) throw new Error(`Invalid ${key}`);
-    if (!["string", "boolean", "number"].includes(typeof value) && !["permissions", "paths", "checksClaimed", "capabilities", "preferences", "budget", "outputs", "segments", "signedEvidence", "labels", "scopes", "acceptedScopes", "changed", "state", "pullRequest", "pullRequests", "blocks", "actions"].includes(key)) throw new Error(`Invalid ${key}`);
+    // work_claim.updated deletion receipts name stranded dependents: claim ids.
+    if (key === "dependents" && (!Array.isArray(value) || value.length > 64 || value.some(v => typeof v !== "string" || !validId(v)))) throw new Error(`Invalid ${key}`);
+    if (!["string", "boolean", "number"].includes(typeof value) && !["permissions", "paths", "checksClaimed", "capabilities", "preferences", "budget", "outputs", "segments", "signedEvidence", "labels", "scopes", "acceptedScopes", "changed", "state", "pullRequest", "pullRequests", "blocks", "actions", "dependents"].includes(key)) throw new Error(`Invalid ${key}`);
   }
 }
 
@@ -593,6 +668,11 @@ function createRoom(state, incoming) {
   if (incoming.data.kind !== undefined && !ROOM_KINDS.includes(incoming.data.kind)) throw new Error("Room kind must be personal or organization");
   if (incoming.roomId !== incoming.data.roomId) throw new Error("Room event id mismatch");
   if (incoming.actorId !== incoming.data.ownerId) throw new Error("Room must be created by its owner");
+  // PRIV-2: rooms created after history visibility shipped carry version 1,
+  // which starts link guests and agent guests at their join point.
+  if (incoming.data.historyDefaultsVersion !== undefined && incoming.data.historyDefaultsVersion !== HISTORY_DEFAULTS_VERSION) {
+    throw new Error("Unsupported history defaults version");
+  }
   state.room = { id: incoming.data.roomId, ...incoming.data, createdAt: incoming.at };
   state.channels = {
     [DEFAULT_CHANNEL_ID]: {
@@ -655,6 +735,28 @@ function setPublicReceipts(state, incoming) {
     setAt: incoming.at
   };
 }
+
+// --- PRIV-2 writers: owner-only. Absent stays absent, so older logs replay byte-identically. ---
+function setHistoryVisibility(state, incoming) {
+  const actor = requireMember(state, incoming.actorId);
+  if (actor.id !== state.room.ownerId) throw new Error("Only the Room owner may set history visibility");
+  if (!HISTORY_VISIBILITIES.includes(incoming.data.historyVisibility)) throw new Error("History visibility is all or since_join");
+  const previous = state.room.historyVisibility ?? null;
+  state.room.historyVisibility = {
+    value: incoming.data.historyVisibility,
+    revision: (previous?.revision ?? 0) + 1,
+    setById: incoming.actorId,
+    setAt: incoming.at
+  };
+}
+
+// The export itself is a read. This audit record changes no projection field.
+function recordRoomExport(state, incoming) {
+  const actor = requireMember(state, incoming.actorId);
+  if (actor.id !== state.room.ownerId) throw new Error("Only the Room owner may export the room");
+  if (!ROOM_EXPORT_FORMATS.includes(incoming.data.format)) throw new Error("Export format is jsonl or html");
+}
+// --- end PRIV-2 writers ---
 
 // --- GR2 opt-in writers. Same shape as public receipts: owner or the member who owns the text. ---
 function writeOptIn(previous, incoming) {
@@ -1567,7 +1669,7 @@ function recordLandUpdate(state, incoming) {
   }
 }
 
-export const WORK_CLAIM_EVENT_ACTIONS = Object.freeze(["created", "claimed", "state_changed", "reviewed", "released", "reassigned", "renewed", "lease_expired", "pr_merged", "pr_closed", "ci_changed"]);
+export const WORK_CLAIM_EVENT_ACTIONS = Object.freeze(["created", "claimed", "state_changed", "reviewed", "released", "reassigned", "renewed", "lease_expired", "pr_merged", "pr_closed", "ci_changed", "deleted"]);
 const WORK_CLAIM_EVENT_STATES = ["unclaimed", "claimed", "in_progress", "blocked", "done"];
 
 // Thin receipt: validated, never copied into the projection.

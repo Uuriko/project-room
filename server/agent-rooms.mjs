@@ -15,13 +15,24 @@
 // for the pilot bound. It is non-authoritative: the projection's ownerId
 // and the event log are the source of truth for who owns a room.
 import { randomBytes, randomUUID } from "node:crypto";
-import { EVENT_TYPES as T, PERMISSIONS, event, validId, ROOM_KINDS } from "../src/events.js";
+import { EVENT_TYPES as T, PERMISSIONS, event, validId, ROOM_KINDS, HISTORY_DEFAULTS_VERSION } from "../src/events.js";
 import { ServiceError } from "./store.mjs";
 import { createRateLimiter } from "./identity-ratelimit.mjs";
 import { nextActionsForRoomCreate } from "./discoverability.mjs";
 import { growthFundedRooms, GROWTH_FUNDING, identityRoomCredits } from "./growth-loop.mjs";
 import { claimWork, createWork } from "./work-claims.mjs";
+import { isFirstContribution, retentionAck } from "./retention-response.mjs";
 import { emitWorkClaimEvent } from "./work-claim-events.mjs";
+import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
+
+// Invite joins hand out a room-scoped rak_ token (POST /join returns it as
+// roomToken, plus the deprecated alias identitySecret). Identity-wide routes
+// must say so instead of "unknown identity" — that wording sends agents to
+// mint a replacement identity, which the resume guidance forbids.
+export const ROOM_TOKEN_NOT_IDENTITY = "This is a room-scoped token (rak_), not an identity secret. It works on /mcp (room_check_access, room_needs_me) and on /api/rooms/{roomId}/ routes for its room. This route needs the identity secret, which invite joins do not reveal. Keep using the room token; do not mint a replacement identity.";
+const refuseRoomToken = secret => {
+  if (typeof secret === "string" && secret.startsWith(API_KEY_PREFIX)) fail(401, "room_token_not_identity", ROOM_TOKEN_NOT_IDENTITY);
+};
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 
@@ -80,6 +91,15 @@ function ensureAgentStarter(store, roomId, memberId) {
   store.workClaims.set(roomId, item);
   emitWorkClaimEvent(store, roomId, { actorId: memberId, item, action: "created", atMs: now });
   item = claimWork(item, memberId, { leaseHours: 2, now });
+  // Retention ack (research brief 2026-09-28, mechanic #2): the starter is
+  // the member's first contribution, so it carries the bot's immediate
+  // receipt with the 24h verdict SLA — no contribution sits at zero replies
+  // from t=0, including the room's very first. Firstness is read from the
+  // room's other claims; the starter's own created stamp is not a prior
+  // contribution. The ack rides the same "claimed" commit, one room event.
+  const first = isFirstContribution(
+    store.workClaims.list(roomId).filter(entry => entry.id !== AGENT_STARTER_ID), memberId);
+  item = retentionAck(item, { now, first, agentId: memberId });
   store.workClaims.set(roomId, item);
   emitWorkClaimEvent(store, roomId, { actorId: memberId, item, action: "claimed", atMs: now });
   return { claimId: AGENT_STARTER_ID, state: item.state };
@@ -109,6 +129,7 @@ export class AgentRooms {
   // identity may join rooms created by someone else. Recheck live membership.
   list(secret, after = "") {
     const identity = this.store.identities.resolveGlobalIdentitySecret(secret);
+    if (!identity) refuseRoomToken(secret);
     if (!identity) fail(401, "unauthenticated", "Unknown identity secret");
     if (typeof after !== "string" || after.length > 128 || (after && !validId(after)))
       fail(422, "invalid_cursor", "Use the nextCursor returned by the previous page");
@@ -151,6 +172,7 @@ export class AgentRooms {
     const title = request.title.trim(), purpose = request.purpose.trim();
     return this.store.transaction(() => {
       const identity = this.store.identities.resolveGlobalIdentitySecret(secret);
+      if (!identity) refuseRoomToken(secret);
       if (!identity) fail(401, "unauthenticated", "Unknown identity secret");
       const suppliedName = Object.hasOwn(request, "displayName") ? request.displayName : identity.displayName;
       if (!text(suppliedName, 80)) fail(422, "invalid_room_request", "displayName must be 1 to 80 characters");
@@ -190,7 +212,7 @@ export class AgentRooms {
       // The identity is its own founding member: member id = identity id,
       // full owner permission set (bootstrap owner path in addMember).
       this.store.initialize([
-        event({ type: T.ROOM_CREATED, actorId: memberId, roomId, at, data: { roomId, ownerId: memberId, title, purpose, kind } }),
+        event({ type: T.ROOM_CREATED, actorId: memberId, roomId, at, data: { roomId, ownerId: memberId, title, purpose, kind, historyDefaultsVersion: HISTORY_DEFAULTS_VERSION } }), // PRIV-2
         event({ type: T.MEMBER_ADDED, actorId: memberId, roomId, at, data: { memberId, displayName, kind: "agent", permissions: [...PERMISSIONS], identityId: identity.identityId } })
       ]);
       // Link the identity so its pri_ secret authenticates to the new room.

@@ -67,6 +67,18 @@ test("a public room page stays off until the owner opts in, and private text sta
   const { origin, store, ownerKey, adaKey, send } = await serve(t);
   assert.equal((await raw(origin, "/r/alpha")).status, 404);
   assert.equal((await raw(origin, "/r/alpha.json")).status, 404);
+  // A browser gets the styled HTML 404 for an unpublished room page, not the
+  // JSON API envelope; the .json twin and non-HTML clients keep JSON.
+  const browser404 = await raw(origin, "/r/alpha", { headers: { Accept: "text/html,application/xhtml+xml" } });
+  assert.equal(browser404.status, 404);
+  assert.match(browser404.headers.get("content-type"), /^text\/html/);
+  assert.equal(browser404.headers.get("x-robots-tag"), "noindex");
+  assert.doesNotMatch(browser404.text, /"error"/);
+  const json404 = await raw(origin, "/r/alpha.json", { headers: { Accept: "text/html" } });
+  assert.match(json404.headers.get("content-type"), /^application\/json/);
+  const unknown404 = await raw(origin, "/r/no-such-room", { headers: { Accept: "text/html" } });
+  assert.equal(unknown404.status, 404);
+  assert.match(unknown404.headers.get("content-type"), /^text\/html/);
   const denied = await raw(origin, "/api/rooms/alpha/commands", {
     method: "POST",
     headers: { authorization: `Bearer ${adaKey}`, "content-type": "application/json" },

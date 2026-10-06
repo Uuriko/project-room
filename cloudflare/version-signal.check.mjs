@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { Miniflare } from 'miniflare';
+import { readFile } from 'node:fs/promises';
 
 // Storage/DO-independent version signal: GET /api/version/worker is answered
 // entirely by the Worker from module scope + env - no Durable Object round
@@ -61,6 +62,33 @@ test('pure-Worker /api/version/worker: revision, build, deployment, served objec
 
     // A spoofed host is still refused by the origin guard.
     assert.equal((await call('https://spoofed.example/api/version/worker')).status, 403);
+  } finally {
+    await mf.dispose();
+  }
+});
+
+// The top-level Worker in wrangler.jsonc is the public entry door
+// (www.getdasha.com/room). It serves production traffic against the
+// production Durable Object, so the answers it gives itself (liveness,
+// readiness, version/worker) must say production, not staging.
+test('entry door Worker built from the checked-in config reports production', async () => {
+  const cloudflareDir = fileURLToPath(new URL('.', import.meta.url));
+  const release = JSON.parse(await readFile(new URL('./wrangler.jsonc', import.meta.url), 'utf8'));
+  const bundled = await build({
+    stdin: { contents: `export { default, ProjectRoom } from './room.mjs';`, resolveDir: cloudflareDir, loader: 'js' },
+    bundle: true, write: false, format: 'esm', platform: 'neutral', external: ['node:*', 'cloudflare:*']
+  });
+  const mf = new Miniflare({ modules: true, script: bundled.outputFiles[0].text,
+    compatibilityDate: release.compatibility_date, compatibilityFlags: release.compatibility_flags,
+    durableObjects: { ROOM: { className: 'ProjectRoom', useSQLite: true } }, bindings: release.vars });
+  try {
+    for (const path of ['/api/health', '/api/ready', '/api/version/worker']) {
+      const res = await mf.dispatchFetch('https://www.getdasha.com/room' + path, { headers: { 'CF-Connecting-IP': '192.0.2.8' } });
+      assert.equal(res.status, 200, path);
+      const body = await res.json();
+      assert.equal(body.deployment, 'production', path);
+      if (body.mode !== undefined) assert.equal(body.mode, 'cloudflare-production', path);
+    }
   } finally {
     await mf.dispose();
   }

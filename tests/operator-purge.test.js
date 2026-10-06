@@ -11,7 +11,9 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { PURGE_TABLES } from "../server/purge-registry.mjs";
-import { collectLargestTables } from "../server/operator-status.mjs";
+import { countPurge, createOperatorPurge } from "../server/operator-purge.mjs";
+import { auditRecovery } from "../server/recovery.mjs";
+import { collectLargestTables, revisionDrift } from "../server/operator-status.mjs";
 import { event, EVENT_TYPES as T, PERMISSIONS } from "../src/events.js";
 
 const TOKEN = "operator-test-token-0123456789abcdef";
@@ -47,6 +49,7 @@ function matchingRows(db, entry, kind, id) {
     params.push(id);
   }
   if (!parts.length) return 0;
+  if (RETIRED_TABLES.includes(entry.table) && !db.prepare("SELECT 1 FROM main.sqlite_master WHERE type='table' AND name=?").get(entry.table)) return 0;
   return db.prepare(`SELECT count(*) AS n FROM ${entry.table} WHERE ${parts.join(" OR ")}`).get(...params).n;
 }
 
@@ -196,6 +199,7 @@ describe("operator purge and status", { concurrency: false }, () => {
 
   test("purging one room removes its rows, leaves the other room, and keeps integrity matched", async t => {
     const { store, call } = await serve(t);
+    assert.deepEqual(retiredTableNames(store.db), []);
     const roomA = "qa2-authz-fixture";
     const roomB = "room-b-keep";
     store.initialize(createdRoom(roomA, "qa2 authz"));
@@ -231,6 +235,7 @@ describe("operator purge and status", { concurrency: false }, () => {
     assert.ok(plan.body.totalRows > 0);
     assert.equal(executed.status, 200, JSON.stringify(executed.body));
     assert.equal(executed.body.result, "executed");
+    assert.deepEqual(retiredTableNames(store.db), []);
     for (const entry of PURGE_TABLES) {
       if (entry.action !== "delete") continue;
       assert.equal(matchingRows(store.db, entry, "room", roomA), 0, entry.table);
@@ -393,5 +398,290 @@ describe("operator purge and status", { concurrency: false }, () => {
     assert.equal(invalid.body.error.code, "invalid_revision");
     const cut = collectLargestTables(store.db, { deadlineMs: 0 });
     assert.equal(cut.partial, true);
+  });
+});
+
+describe("operator follow-ups (CP-ADMIN-0c)", { concurrency: false }, () => {
+  before(() => { process.env.ROOM_OPERATOR_TOKEN_SHA256 = HASH; });
+  after(() => { delete process.env.ROOM_OPERATOR_TOKEN_SHA256; });
+
+  test("status leaves out platform _cf_ tables and skips a table that refuses a count instead of failing", async t => {
+    const { store, call } = await serve(t);
+    store.initialize(createdRoom("commons", "Commons"));
+    store.db.exec("CREATE TABLE IF NOT EXISTS _cf_KV (key TEXT PRIMARY KEY, value BLOB)");
+    const status = await call("/api/operator/status");
+    assert.equal(status.status, 200, JSON.stringify(status.body));
+    assert.equal(status.body.tables.some(row => row.table.startsWith("_cf_")), false);
+    const refusing = {
+      prepare(sql) {
+        if (/FROM rooms$/.test(sql)) throw new Error("not authorized");
+        return store.db.prepare(sql);
+      }
+    };
+    const cut = collectLargestTables(refusing, { deadlineMs: 60_000 });
+    assert.deepEqual(cut.skipped, ["rooms"]);
+    assert.equal(cut.partial, false);
+    assert.ok(cut.tables.length > 0);
+  });
+
+  test("drift accepts a short SHA as a prefix of the deployed commit", () => {
+    const full = "0123456789abcdef0123456789abcdef01234567";
+    assert.equal(revisionDrift(full, "0123456").match, true);
+    assert.equal(revisionDrift(full, "0123456789ABCDEF").match, true);
+    assert.equal(revisionDrift(full, full).match, true);
+    assert.equal(revisionDrift(full, "0123457").match, false);
+    assert.equal(revisionDrift("unstamped", "0123456").match, false);
+    assert.equal(revisionDrift("unstamped", "unstamped").match, true);
+  });
+
+  test("find by account email returns account ids and names, never the address, and deletes nothing", async t => {
+    const { store, call } = await serve(t);
+    store.createAccount("acct-qa-growth");
+    store.accountLogins.linkMagicMethod("acct-qa-growth", { email: "qa-growth2-probe@example.com" });
+    store.createAccount("acct-other");
+    store.accountLogins.linkMagicMethod("acct-other", { email: "someone-else@example.com" });
+    const countsBefore = tableCounts(store.db);
+    const found = await call("/api/operator/purge/find", { method: "POST", data: { accountEmail: "  QA-Growth2-Probe@Example.com " } });
+    assert.equal(found.status, 200, JSON.stringify(found.body));
+    assert.deepEqual(found.body.accounts.map(row => row.id), ["acct-qa-growth"]);
+    assert.equal(JSON.stringify(found.body).includes("@"), false);
+    const none = await call("/api/operator/purge/find", { method: "POST", data: { accountEmail: "nobody@example.com" } });
+    assert.deepEqual(none.body.accounts, []);
+    const bad = await call("/api/operator/purge/find", { method: "POST", data: { accountEmail: "not an address" } });
+    assert.equal(bad.status, 422);
+    const countsAfter = tableCounts(store.db);
+    assert.equal(countsAfter.operator_actions, countsBefore.operator_actions + 3);
+    delete countsBefore.operator_actions;
+    delete countsAfter.operator_actions;
+    assert.deepEqual(countsAfter, countsBefore);
+    const audit = store.db.prepare("SELECT * FROM operator_actions WHERE action='find'").all();
+    assert.equal(JSON.stringify(audit).includes("@"), false);
+  });
+
+  test("find by account email flags truncation past the find limit", async t => {
+    const { store, call } = await serve(t);
+    for (let i = 0; i < 55; i++) {
+      const id = `acct-trunc-${String(i).padStart(2, "0")}`;
+      store.createAccount(id);
+      store.accountLogins.linkMagicMethod(id, { email: "shared-trunc@example.com" });
+    }
+    const found = await call("/api/operator/purge/find", { method: "POST", data: { accountEmail: "shared-trunc@example.com" } });
+    assert.equal(found.status, 200, JSON.stringify(found.body));
+    assert.equal(found.body.accounts.length, 50);
+    assert.equal(found.body.truncated, true);
+  });
+});
+
+// Frozen on-disk format from 00e800eb, before the feature was removed. It
+// intentionally exists only in this upgrade fixture, never in fresh stores.
+const RETIRED_SCHEMA = `
+CREATE TABLE IF NOT EXISTS external_identities (
+    room_id TEXT NOT NULL REFERENCES rooms(id),
+    external_id TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK(kind IN ('agent','human')),
+    display_name TEXT NOT NULL,
+    venues_json TEXT NOT NULL DEFAULT '[]',
+    status TEXT NOT NULL DEFAULT 'stranger' CHECK(status IN ('stranger','known','working','vouched','member')),
+    referrer_external_id TEXT,
+    reputation INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    last_seen_at INTEGER NOT NULL,
+    PRIMARY KEY (room_id, external_id)
+  );
+  CREATE INDEX IF NOT EXISTS external_identities_by_status ON external_identities(room_id, status);
+  CREATE INDEX IF NOT EXISTS external_identities_by_referrer ON external_identities(room_id, referrer_external_id);
+CREATE TABLE IF NOT EXISTS external_receipts (
+    room_id TEXT NOT NULL REFERENCES rooms(id),
+    receipt_id TEXT NOT NULL,
+    external_id TEXT,
+    offer_id TEXT,
+    kind TEXT NOT NULL CHECK(kind IN ('work','jury','oracle','tier_cut','reputation_import')),
+    payload_json TEXT NOT NULL DEFAULT '{}',
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (room_id, receipt_id)
+  );
+  CREATE INDEX IF NOT EXISTS external_receipts_by_external ON external_receipts(room_id, external_id);
+  CREATE INDEX IF NOT EXISTS external_receipts_by_offer ON external_receipts(room_id, offer_id);
+CREATE TABLE IF NOT EXISTS emissary_drops (
+  drop_id TEXT PRIMARY KEY,
+  room_id TEXT NOT NULL,
+  issuer_member_id TEXT NOT NULL,
+  venue TEXT NOT NULL,
+  title TEXT NOT NULL,
+  terms TEXT NOT NULL,
+  deadline_at INTEGER NULL,
+  artifact_text TEXT NOT NULL,
+  artifact_sha256 TEXT NOT NULL,
+  truncated INTEGER NOT NULL DEFAULT 0,
+  source TEXT NOT NULL DEFAULT 'default-unverified',
+  idempotency_key TEXT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS emissary_drops_room_venue_day ON emissary_drops(room_id, venue, created_at);
+CREATE INDEX IF NOT EXISTS emissary_drops_idem ON emissary_drops(room_id, idempotency_key);
+CREATE TABLE IF NOT EXISTS emissary_invite_attribution (
+  attribution_id TEXT PRIMARY KEY,
+  room_id TEXT NOT NULL,
+  issuer_member_id TEXT NOT NULL,
+  invite_token_hash TEXT NOT NULL,
+  note TEXT NULL,
+  minted_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS emissary_invite_attribution_issuer_day ON emissary_invite_attribution(room_id, issuer_member_id, minted_at);
+CREATE TABLE IF NOT EXISTS emissary_idempotency (
+  room_id TEXT NOT NULL,
+  idempotency_key TEXT NOT NULL,
+  tool TEXT NOT NULL,
+  result_json TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (room_id, idempotency_key)
+);
+CREATE TABLE IF NOT EXISTS emissary_journal (
+  seq INTEGER PRIMARY KEY AUTOINCREMENT,
+  event_id TEXT NOT NULL UNIQUE,
+  room_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  actor_member_id TEXT NOT NULL,
+  subject_id TEXT NULL,
+  details_json TEXT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS emissary_journal_room_kind ON emissary_journal(room_id, kind, seq);`;
+const RETIRED_TABLES = [
+  "external_identities", "external_receipts", "emissary_drops",
+  "emissary_invite_attribution", "emissary_idempotency", "emissary_journal"
+];
+
+function retiredTableNames(db) {
+  return db.prepare("SELECT name FROM main.sqlite_master WHERE type='table' ORDER BY name").all()
+    .map(row => row.name).filter(name => RETIRED_TABLES.includes(name));
+}
+
+function retiredRows(db, roomId) {
+  return Object.fromEntries(RETIRED_TABLES.map(table => [table,
+    db.prepare(`SELECT * FROM main.${table} WHERE room_id=? ORDER BY rowid`).all(roomId)
+  ]));
+}
+
+function seedRetiredRows(db, roomId) {
+  db.prepare("INSERT INTO external_identities(room_id, external_id, kind, display_name, created_at, last_seen_at) VALUES(?,?,'agent','Synthetic fixture',1,1)").run(roomId, `external-${roomId}`);
+  db.prepare("INSERT INTO external_receipts(room_id, receipt_id, external_id, kind, payload_json, created_at) VALUES(?,?,?,'work','{\"synthetic\":true}',1)").run(roomId, `receipt-${roomId}`, `external-${roomId}`);
+  db.prepare("INSERT INTO emissary_drops(drop_id, room_id, issuer_member_id, venue, title, terms, artifact_text, artifact_sha256, created_at) VALUES(?,?,'owner','generic','Synthetic','Synthetic','Synthetic',?,1)").run(`drop-${roomId}`, roomId, "0".repeat(64));
+  db.prepare("INSERT INTO emissary_invite_attribution(attribution_id, room_id, issuer_member_id, invite_token_hash, minted_at, expires_at) VALUES(?,?,'owner',?,1,2)").run(`attribution-${roomId}`, roomId, "0".repeat(64));
+  db.prepare("INSERT INTO emissary_idempotency(room_id, idempotency_key, tool, result_json, created_at) VALUES(?,'synthetic-key','synthetic','{}',1)").run(roomId);
+  db.prepare("INSERT INTO emissary_journal(event_id, room_id, kind, actor_member_id, created_at) VALUES(?,?,'synthetic','owner',1)").run(`journal-${roomId}`, roomId);
+}
+
+function retainedStore(t) {
+  const directory = mkdtempSync(join(tmpdir(), "project-room-retained-purge-"));
+  const path = join(directory, "room.sqlite");
+  let store = new RoomStore(path);
+  t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
+  assert.deepEqual(retiredTableNames(store.db), []);
+  store.initialize(createdRoom("retained-room", "Remove this fixture"));
+  store.initialize(createdRoom("keep-room", "Keep this fixture"));
+  store.db.exec(RETIRED_SCHEMA);
+  seedRetiredRows(store.db, "retained-room");
+  seedRetiredRows(store.db, "keep-room");
+  const retainedBefore = retiredRows(store.db, "retained-room");
+  const kept = retiredRows(store.db, "keep-room");
+  store.close();
+  store = new RoomStore(path);
+  assert.deepEqual(retiredRows(store.db, "retained-room"), retainedBefore);
+  assert.deepEqual(retiredRows(store.db, "keep-room"), kept);
+  assert.doesNotThrow(() => auditRecovery(store));
+  return { store, retainedBefore, kept };
+}
+
+function planRetainedRoom(purge) {
+  return purge.plan({ targets: [{ kind: "room", id: "retained-room" }], reason: "Synthetic retained-data cleanup" }, randomUUID());
+}
+
+function executePlan(purge, plan) {
+  return purge.execute({ planId: plan.planId, confirmToken: plan.confirmToken }, randomUUID());
+}
+
+function nonAuditRows(db) {
+  return Object.entries(tableCounts(db)).reduce((sum, [table, count]) =>
+    sum + (["operator_actions", "integrity_snapshot"].includes(table) ? 0 : count), 0);
+}
+
+describe("retained room cleanup compatibility", () => {
+  test("reopened retained rows are counted and removed only for the selected room", t => {
+    const { store, kept } = retainedStore(t);
+    const purge = createOperatorPurge(store);
+    const keptRoom = store.db.prepare("SELECT * FROM rooms WHERE id='keep-room'").get();
+    const keptEvents = store.db.prepare("SELECT * FROM events WHERE room_id='keep-room' ORDER BY sequence").all();
+    const schema = store.db.prepare("SELECT name, sql FROM main.sqlite_master WHERE type='table' ORDER BY name").all();
+    const totalBefore = nonAuditRows(store.db);
+    const plan = planRetainedRoom(purge);
+    const result = executePlan(purge, plan);
+    assert.equal(result.result, "executed");
+    for (const table of RETIRED_TABLES) {
+      assert.equal(plan.counts.find(row => row.table === table)?.rows, 1, table);
+      assert.equal(store.db.prepare(`SELECT count(*) AS n FROM main.${table} WHERE room_id='retained-room'`).get().n, 0, table);
+    }
+    assert.equal(store.db.prepare("SELECT 1 FROM rooms WHERE id='retained-room'").get(), undefined);
+    assert.deepEqual(retiredRows(store.db, "keep-room"), kept);
+    assert.deepEqual(store.db.prepare("SELECT * FROM rooms WHERE id='keep-room'").get(), keptRoom);
+    assert.deepEqual(store.db.prepare("SELECT * FROM events WHERE room_id='keep-room' ORDER BY sequence").all(), keptEvents);
+    assert.deepEqual(store.db.prepare("SELECT name, sql FROM main.sqlite_master WHERE type='table' ORDER BY name").all(), schema);
+    assert.equal(result.totalRows, totalBefore - nonAuditRows(store.db) - 1, "count includes every deleted child row, excluding the room itself");
+    assert.equal(plan.totalRows, result.totalRows);
+    const audit = store.db.prepare("SELECT counts_json FROM operator_actions WHERE action='execute' AND result='executed'").all();
+    assert.equal(audit.length, 1);
+    assert.equal(JSON.parse(audit[0].counts_json).totalRows, result.totalRows);
+    assert.doesNotThrow(() => auditRecovery(store));
+  });
+
+  test("a retained row added after planning invalidates confirmation without deleting data", t => {
+    const { store, kept } = retainedStore(t);
+    const purge = createOperatorPurge(store);
+    const plan = planRetainedRoom(purge);
+    store.db.prepare("INSERT INTO emissary_idempotency(room_id, idempotency_key, tool, result_json, created_at) VALUES('retained-room','later','synthetic','{}',2)").run();
+    const retainedBefore = retiredRows(store.db, "retained-room");
+    assert.throws(() => executePlan(purge, plan), error => error.code === "plan_changed");
+    assert.deepEqual(retiredRows(store.db, "retained-room"), retainedBefore);
+    assert.deepEqual(retiredRows(store.db, "keep-room"), kept);
+    assert.ok(store.db.prepare("SELECT 1 FROM rooms WHERE id='retained-room'").get());
+    assert.equal(store.db.prepare("SELECT count(*) AS n FROM operator_actions WHERE result='executed'").get().n, 0);
+  });
+
+  test("a retained cleanup failure rolls back earlier deletions and leaves its confirmation retryable", t => {
+    const { store, retainedBefore, kept } = retainedStore(t);
+    const purge = createOperatorPurge(store);
+    const plan = planRetainedRoom(purge);
+    const snapshot = store.db.prepare("SELECT * FROM integrity_snapshot").all();
+    const rowsBefore = nonAuditRows(store.db);
+    store.db.exec(`CREATE TRIGGER retained_cleanup_failure BEFORE DELETE ON external_receipts
+      WHEN OLD.room_id='retained-room' BEGIN SELECT RAISE(ABORT, 'synthetic retained cleanup failure'); END`);
+    assert.throws(() => executePlan(purge, plan), /synthetic retained cleanup failure/);
+    assert.equal(nonAuditRows(store.db), rowsBefore);
+    assert.deepEqual(retiredRows(store.db, "retained-room"), retainedBefore);
+    assert.deepEqual(retiredRows(store.db, "keep-room"), kept);
+    assert.deepEqual(store.db.prepare("SELECT * FROM integrity_snapshot").all(), snapshot);
+    assert.ok(store.db.prepare("SELECT 1 FROM rooms WHERE id='retained-room'").get());
+    assert.equal(store.db.prepare("SELECT count(*) AS n FROM operator_actions WHERE result='executed'").get().n, 0);
+    store.db.exec("DROP TRIGGER retained_cleanup_failure");
+    assert.equal(executePlan(purge, plan).result, "executed");
+    assert.equal(store.db.prepare("SELECT count(*) AS n FROM operator_actions WHERE result='executed'").get().n, 1);
+    assert.doesNotThrow(() => auditRecovery(store));
+  });
+
+  test("absent main tables ignore temp names while malformed retained tables fail loudly", async t => {
+    const { store } = await serve(t);
+    store.initialize(createdRoom("retained-room", "Synthetic main schema check"));
+    store.db.exec("CREATE TEMP TABLE external_receipts(room_id TEXT); INSERT INTO temp.external_receipts VALUES('retained-room')");
+    const purge = createOperatorPurge(store);
+    const plan = planRetainedRoom(purge);
+    assert.equal(plan.counts.find(row => row.table === "external_receipts")?.rows, 0);
+    assert.equal(executePlan(purge, plan).result, "executed");
+    assert.equal(store.db.prepare("SELECT count(*) AS n FROM temp.external_receipts").get().n, 1);
+    assert.deepEqual(retiredTableNames(store.db), []);
+    store.initialize(createdRoom("retained-room", "Synthetic malformed schema check"));
+    store.db.exec("CREATE TABLE main.external_receipts(unexpected TEXT)");
+    assert.throws(() => countPurge(store, [{ kind: "room", id: "retained-room" }]), /room_id/);
+    assert.ok(store.db.prepare("SELECT 1 FROM rooms WHERE id='retained-room'").get());
   });
 });

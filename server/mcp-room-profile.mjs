@@ -12,17 +12,18 @@ import { ServiceError } from "./store.mjs";
 import { isIdentitySecret } from "./agent-identities.mjs";
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
-import { handleEmissaryTool } from "./emissary-lure.mjs";
 import { HeartbeatError } from "./agent-heartbeats.mjs";
 import { AgentPluginError } from "./agent-plugin-store.mjs";
 import { EVENT_CATALOG, WebhookSubscriptionError } from "./agent-webhook-subscriptions.mjs";
 import { BOND_SCOPES } from "./bonds.mjs";
+import { EscrowError } from "./bounty-escrow.mjs";
 import { buildActivationPack } from "./room-activation-pack.mjs";
 import { buildOrient } from "./orient.mjs";
 import { randomUUID } from "node:crypto";
 import { validId, ROOM_KINDS, MAX_MESSAGE_BODY_CHARS } from "../src/events.js";
 import { nextWorkStep } from "../src/workflow.js";
 import { completedResults, searchWork } from "../src/work-selectors.js";
+import { sortWorkByCuriosity, viewerHistory } from "../src/curiosity-rank.mjs";
 import { workHelpContext } from "../src/work-help.js";
 import { HOSTED_ROOM_MCP_TOOLS, HOSTED_MCP_FOLLOW_UPS, ROOM_MCP_SERVER_NAME, ROOM_MCP_SERVER_VERSION, canonicalMcpToolName } from "../src/room-mcp-join.js";
 import { MCP_JOIN_TOOLS, MCP_AUTH_REQUIRED, handleMcpJoinRpc } from "./mcp-http.mjs";
@@ -33,6 +34,7 @@ import { isHostedStdioTool, validHostedStdioArgs, callHostedStdioTool } from "./
 import { friendBondCommand } from "../src/friend-bond.js";
 import { validAttachmentData } from "./room-attachment-bytes.mjs";
 import { closestToolName, diagnoseArguments, mcpCallError } from "./mcp-arg-errors.mjs";
+import { chargeSpendBeforeCall } from "./spend-grants.mjs";
 import {
   hostedRoomTools as ROOM_TOOLS,
   hostedInboxTools as INBOX_TOOLS,
@@ -68,14 +70,32 @@ function failureValue(error) {
   if (error instanceof ServiceError || (error && Number.isInteger(error.status) && typeof error.code === "string")) {
     return {
       status: error.status, code: error.code, message: error.message,
-      ...(error.item ? { item: error.item } : {})
+      ...(error.item ? { item: error.item } : {}),
+      // Spend-grant refusals carry machine-readable detail (price, reason,
+      // remaining cap) alongside the human text — the x402 PaymentRequired
+      // shape: structuredContent AND content[0].text both name the price.
+      ...(error.detail ? { detail: error.detail } : {})
     };
+  }
+  // qa4-fix-mcp-escrow500: the escrow module throws EscrowError (code, no
+  // HTTP status). Map it exactly like the HTTP routes do
+  // (server/bounty-escrow-routes.mjs runPure) so MCP callers get the same
+  // structured codes instead of an opaque 500.
+  if (error instanceof EscrowError) {
+    const code = error.code;
+    const status = code === "unknown_bounty" || code === "unknown_flag" ? 404
+      : code === "not_authorized" ? 403
+      : code === "already_claimed" || code === "dispute_exists"
+        || code === "idempotency_actor_mismatch" || code === "idempotency_key_reused" ? 409
+      : 422;
+    return { status, code, message: error.message };
   }
   return { status: 500, code: "internal", message: "Request could not be completed" };
 }
 
 export function identityBearer(authorization) {
-  if (typeof authorization !== "string" || !authorization.startsWith("Bearer ")) {
+  // RFC 7235: auth scheme is case-insensitive ("bearer"/"BEARER" accepted).
+  if (typeof authorization !== "string" || !/^bearer /i.test(authorization)) {
     return { error: "Hosted room tools require Authorization: Bearer and a live identity or room token" };
   }
   const token = authorization.slice("Bearer ".length);
@@ -146,7 +166,8 @@ function validRoomArgs(name, args) {
   }
   if (name === "room_list_work") {
     const queryOk = args.query === undefined || typeof args.query === "string" && args.query.length <= 200 && args.query.trim().length > 0;
-    return (args.focus === undefined || ["all", "needs_me", "help_wanted", "results"].includes(args.focus)) && queryOk;
+    const sortOk = args.sort === undefined || args.sort === "curiosity";
+    return (args.focus === undefined || ["all", "needs_me", "help_wanted", "results"].includes(args.focus)) && queryOk && sortOk;
   }
   if (name === "bond_propose") {
     const noteOk = args.note === undefined || typeof args.note === "string" && args.note.length <= 500;
@@ -181,37 +202,7 @@ function validRoomArgs(name, args) {
     const buildOk = args.buildId === undefined || typeof args.buildId === "string" && args.buildId.length >= 1 && args.buildId.length <= 200;
     return validId(args.itemId) && sourceOk && buildOk && (args.sourceRevision !== undefined || args.buildId !== undefined);
   }
-  if (name === "emissary_drop" || name === "emissary_pitch" || name === "human_invite_mint") {
-    return validEmissaryArgs(name, args);
-  }
   return false;
-}
-
-// Emissary growth layer (Slice 2): first-pass shape check for the three
-// generation tools. Deep validation (venue caps, lint, proof resolution,
-// rate limits) lives in server/emissary-lure.mjs and stays authoritative.
-function validEmissaryArgs(name, args) {
-  const idemOk = args.idempotency_key === undefined
-    || typeof args.idempotency_key === "string" && args.idempotency_key.length >= 1 && args.idempotency_key.length <= 128;
-  if (name === "emissary_drop") {
-    const venueOk = typeof args.venue === "string" && ["sssnack", "colony", "tantive", "agentboard", "x", "generic"].includes(args.venue);
-    const variantOk = args.variant === undefined || ["thread", "reply", "subject"].includes(args.variant);
-    const titleOk = typeof args.title === "string" && args.title.trim().length > 0 && args.title.length <= 120;
-    const termsOk = typeof args.terms === "string" && args.terms.trim().length > 0 && args.terms.length <= 2000;
-    const deadlineOk = args.deadline === undefined || Number.isSafeInteger(args.deadline) && args.deadline > 0;
-    const attemptsOk = args.attempts_remaining === undefined || Number.isSafeInteger(args.attempts_remaining) && args.attempts_remaining >= 0;
-    const codeOk = args.code === undefined || typeof args.code === "string" && /^[A-Za-z0-9-]{1,32}$/.test(args.code);
-    return venueOk && variantOk && titleOk && termsOk && deadlineOk && attemptsOk && codeOk && idemOk;
-  }
-  if (name === "emissary_pitch") {
-    const focusOk = typeof args.focus === "string" && args.focus.trim().length > 0 && args.focus.length <= 200;
-    const refsOk = Array.isArray(args.proof_refs) && args.proof_refs.length <= 5
-      && args.proof_refs.every(ref => typeof ref === "string" && ref.length > 0 && ref.length <= 64);
-    return focusOk && refsOk && idemOk;
-  }
-  const expiryOk = args.expires_in_days === undefined || Number.isSafeInteger(args.expires_in_days) && args.expires_in_days >= 1 && args.expires_in_days <= 7;
-  const noteOk = args.note === undefined || typeof args.note === "string" && args.note.length <= 140;
-  return expiryOk && noteOk && idemOk;
 }
 
 function validInboxArgs(name, args) {
@@ -326,10 +317,25 @@ function listWork(store, secret, args) {
     members: snapshot.state.members,
     workItems: Object.fromEntries(candidates.map(item => [item.id, item]))
   }, args.query);
-  const work = (matches?.work ?? candidates.map(item => ({ item }))).map(({ item, excerpt }) => ({
+  let work = (matches?.work ?? candidates.map(item => ({ item }))).map(({ item, excerpt }) => ({
     ...workRecord(item, now),
     ...(excerpt === undefined ? {} : { excerpt })
   }));
+  let sort = null;
+  if (args.sort === "curiosity") {
+    // Curiosity ranking: the calling member's own completed work (receipt
+    // producerId) is the familiarity baseline; listed items rank
+    // unfamiliar-but-learnable first.
+    const history = viewerHistory(snapshot.state, snapshot.viewerId);
+    const rawById = new Map(candidates.map(item => [item.id, item]));
+    const order = new Map(sortWorkByCuriosity(
+      work.map(entry => rawById.get(entry.id)).filter(Boolean), history)
+      .map(({ item, curiosity }, index) => [item.id, { index, curiosity }]));
+    work = work
+      .map(entry => ({ ...entry, curiosity: order.get(entry.id)?.curiosity ?? null }))
+      .sort((a, b) => (order.get(a.id)?.index ?? 0) - (order.get(b.id)?.index ?? 0));
+    sort = "curiosity";
+  }
   const replyListing = focus === "needs_me" ? store.replyRequests.list(secret, args.roomId, { direction: "incoming", status: "open" }) : null;
   const replyRequests = replyListing?.requests.map(request => ({
     id: request.id, requesterId: request.requesterId, workItemId: request.workItemId, revision: request.revision,
@@ -340,6 +346,7 @@ function listWork(store, secret, args) {
     member: member ? { id: member.id, kind: member.kind, permissions: [...member.permissions] } : null,
     charter: snapshot.charter ?? null,
     ...(matches ? { selection: { query: args.query.trim(), matches: matches.total, shown: work.length } } : {}),
+    ...(sort ? { sort } : {}),
     work, ...(focus === "needs_me" ? { replyRequests, replyRequestsEvaluatedThrough: replyListing.evaluatedThrough } : {})
   });
 }
@@ -385,8 +392,31 @@ async function callLandTool(store, secret, name, args) {
   });
 }
 
+// Spend-primitive MVP (charge-then-forward): the tool is never invoked until
+// payment has settled against the agent's spend grant. Unpriced tools,
+// humans, and the room owner pass through untouched. A SpendGrantError means
+// refusal — the tool must not run. settle() after success, void() on any
+// failure; an idempotent duplicate retry is voided (the original call
+// already paid).
 function callRoomTool(store, secret, identity, name, args, agentRooms) {
   enforceMcpCallVisibility(store, identity, name);
+  const spend = chargeSpendBeforeCall(store, secret, name, args);
+  if (!spend) return dispatchRoomToolCall(store, secret, identity, name, args, agentRooms);
+  let result;
+  try {
+    result = dispatchRoomToolCall(store, secret, identity, name, args, agentRooms);
+  } catch (error) { spend.void(); throw error; }
+  return Promise.resolve(result).then(
+    value => {
+      if (value && typeof value === "object" && value.duplicate === true) spend.void();
+      else spend.settle();
+      return value;
+    },
+    error => { spend.void(); throw error; }
+  );
+}
+
+function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
   if (name === "room_needs_me") return collectNeedsMe(store, secret, { since: args.since });
   if (name === "room_create") {
     const request = {};
@@ -451,14 +481,6 @@ function callRoomTool(store, secret, identity, name, args, agentRooms) {
   if (name === "room_list_work") return listWork(store, secret, args);
   if (name === "add_land_item" || name === "list_land_queue" || name === "remove_land_item" || name === "report_tip") {
     return callLandTool(store, secret, name, args);
-  }
-  // Emissary growth layer (Slice 2): generation only — the member copies
-  // the returned text/URL and transports it by hand. Authorization
-  // (member-only, guest denied, t1_readonly denied) lives in
-  // handleEmissaryTool; human invites additionally pass through
-  // ShareLinks.create's owner/delegated-admin gate.
-  if (name === "emissary_drop" || name === "emissary_pitch" || name === "human_invite_mint") {
-    return handleEmissaryTool(store, secret, name, args);
   }
   if (name === "room_list_peer_dms") return listPeerDms(store, secret, args);
   if (name === "room_put_file") {
@@ -679,9 +701,15 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
       return { jsonrpc: "2.0", id: requestId, error: { code: -32602, message: "Invalid initialization" } };
     }
     const negotiated = MCP_SUPPORTED_VERSIONS.includes(params.protocolVersion) ? params.protocolVersion : MCP_VERSION;
+    // MCP lets a server answer with another version it supports. Say so in
+    // _meta instead of swapping the client's version silently (#1529).
+    const versionNote = negotiated === params.protocolVersion ? {} : { _meta: { protocolVersionSubstituted: {
+      requested: params.protocolVersion, negotiated, supported: [...MCP_SUPPORTED_VERSIONS],
+      hint: "This server does not support the requested protocol version. Continue with the negotiated version, or disconnect." } } };
     return {
       jsonrpc: "2.0", id: requestId,
       result: {
+        ...versionNote,
         protocolVersion: negotiated,
         capabilities: { tools: {} },
         serverInfo: { name: ROOM_MCP_SERVER_NAME, version: ROOM_MCP_SERVER_VERSION },

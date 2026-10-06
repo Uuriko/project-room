@@ -120,17 +120,43 @@ export function enqueueClaimWake(store, roomId, memberId, messageId, { reason, a
   }
 }
 
+// SEC-2 / Q3-A event budget: note-only writes (a note on a held claim, a
+// review note, a lease renewal) coalesce into at most one room event per
+// claim and action per 60 s. The claim row still records every write and the
+// next event carries the latest state. Transitions, assignments, verdicts
+// and PR facts are never coalesced. Memory only, per store: a restart allows
+// one extra event per claim, which keeps the bound.
+export const CLAIM_EVENT_COALESCE_MS = 60_000;
+const CLAIM_EVENT_MEMORY = 10_000;
+const lastClaimEvent = new WeakMap();
+
+function noteClaimEvent(store, key, atMs) {
+  let seen = lastClaimEvent.get(store);
+  if (!seen) { seen = new Map(); lastClaimEvent.set(store, seen); }
+  seen.delete(key);
+  seen.set(key, atMs);
+  if (seen.size > CLAIM_EVENT_MEMORY) seen.delete(seen.keys().next().value);
+}
+
+const coalesceKey = (roomId, claimId, action) => `${roomId}\u0000${claimId}\u0000${action}`;
+
+export function claimEventCoalesced(store, roomId, claimId, action, atMs) {
+  const at = store && typeof store === "object" ? lastClaimEvent.get(store)?.get(coalesceKey(roomId, claimId, action)) : undefined;
+  return Number.isFinite(at) && atMs - at >= 0 && atMs - at < CLAIM_EVENT_COALESCE_MS;
+}
+
 // Handler unit tests drive the routes with a registry-only store; events need
 // the real event log, so a store without one records nothing here.
-export function emitWorkClaimEvent(store, roomId, { actorId, item, action, previousOwnerId = null, atMs = null, paths = undefined, pullRequest = undefined, reason = undefined, ciState = undefined, verdict = undefined, attention = undefined, attentionMemberId = undefined }) {
+export function emitWorkClaimEvent(store, roomId, { actorId, item, action, previousOwnerId = null, atMs = null, paths = undefined, pullRequest = undefined, reason = undefined, ciState = undefined, verdict = undefined, attention = undefined, attentionMemberId = undefined, coalesce = false }) {
   if (!store?.db || typeof store.room !== "function") return null;
+  const stamp = Number.isFinite(atMs) ? atMs : (typeof store.now === "function" ? store.now() : Date.now());
+  if (coalesce && claimEventCoalesced(store, roomId, item.id, action, stamp)) return null;
   const room = store.room(roomId);
   // The event log refuses anything after archive (applyEvent throws). Skip
   // the receipt so the claim write still commits; an archived room has no
   // live timeline to update.
   if (isRoomArchived(room.state)) return null;
   const actor = room.state.members?.[actorId];
-  const stamp = Number.isFinite(atMs) ? atMs : (typeof store.now === "function" ? store.now() : Date.now());
   const incoming = event({
     id: randomUUID(),
     idempotencyKey: randomUUID(),
@@ -146,6 +172,7 @@ export function emitWorkClaimEvent(store, roomId, { actorId, item, action, previ
   store.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
   const compact = { ...state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
   store.db.prepare("UPDATE rooms SET sequence=?, projection=? WHERE id=?").run(sequence, JSON.stringify(compact), roomId);
+  if (coalesce) noteClaimEvent(store, coalesceKey(roomId, item.id, action), stamp);
   try {
     if (store.agentPlugin) store.agentPlugin.fanoutRoomEvent({ roomId, event: incoming });
   } catch (error) {

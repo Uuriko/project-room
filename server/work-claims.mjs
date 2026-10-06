@@ -280,6 +280,7 @@ const reviewBasisOf = value => {
 };
 const reviewBasisFor = item => Object.freeze({ version: 1, owner: item.owner, claimedAt: item.claimedAt,
   revision: item.revision ?? null, headSha: item.ci?.headSha ?? null });
+const sameBasis = (left, right) => Boolean(left && right) && Object.keys(right).every(key => left[key] === right[key]);
 const currentReviewBasis = (review, item) => {
   const basis = review?.basis, current = reviewBasisFor(item);
   return basis && Object.keys(current).every(key => basis[key] === current[key]);
@@ -306,7 +307,10 @@ const attestationOf = value => {
   check(typeof value.memberId === "string" && value.memberId.length > 0 && value.memberId.length <= 128, "attestation memberId must be 1..128 characters");
   check(typeof value.at === "string" && Number.isFinite(Date.parse(value.at)), "attestation at must be an ISO timestamp");
   if (value.note !== undefined && value.note !== null) check(typeof value.note === "string" && value.note.length <= 512, "attestation note must be at most 512 characters");
-  return Object.freeze({ memberId: value.memberId, at: value.at, note: value.note ?? null });
+  // SEC-2: note attestations record the claim round and revision they were
+  // made against, so a repeat note from the same reviewer is deduplicated.
+  const basis = reviewBasisOf(value.basis);
+  return Object.freeze({ memberId: value.memberId, at: value.at, note: value.note ?? null, ...(basis ? { basis } : {}) });
 };
 
 const workOf = value => {
@@ -336,8 +340,10 @@ const workOf = value => {
   const kind = kindOf(value.kind);
   const revision = revisionOf(value.revision);
   if (kind === "deploy") check(revision, "a deploy claim needs a revision");
+  const historyOmitted = historyOmittedOf(value.historyOmitted);
   return { id: value.id, title: value.title ?? value.id, state: value.state ?? "unclaimed",
     owner: value.owner ?? null, history: Array.isArray(value.history) ? value.history : [],
+    ...(historyOmitted > 0 ? { historyOmitted } : {}),
     claimedAt: value.claimedAt ?? null, leaseStartAt: value.leaseStartAt ?? null, leaseExpiresAt: value.leaseExpiresAt ?? null,
     deliveryMode: value.deliveryMode ?? null, reviewPolicy: value.reviewPolicy ?? null,
     reviewedBy: value.reviewedBy ?? null, attestations: Object.freeze(attestations),
@@ -350,8 +356,31 @@ const workOf = value => {
 const agentOf = value => idOf(value, "agent id", 128);
 const stamp = (atMs, agentId, action, note) =>
   Object.freeze({ at: isoOf(atMs), agentId, action, note: note ?? null });
-const withHistory = (work, atMs, agentId, action, note) =>
-  Object.freeze({ ...work, updatedAt: isoOf(atMs), history: Object.freeze([...work.history, stamp(atMs, agentId, action, note)]) });
+// SEC-2: a claim keeps at most MAX_CLAIM_HISTORY history entries. Older
+// entries are dropped from the front and counted in historyOmitted, so
+// history.length + historyOmitted is the claim's lifetime entry count and
+// still changes on every write (the PR-link concurrency check reads it).
+export const MAX_CLAIM_HISTORY = 200;
+const historyOmittedOf = value => (Number.isSafeInteger(value) && value > 0 ? value : 0);
+export const claimHistoryLength = item =>
+  (Array.isArray(item?.history) ? item.history.length : 0) + historyOmittedOf(item?.historyOmitted);
+const withHistory = (work, atMs, agentId, action, note) => {
+  const full = [...work.history, stamp(atMs, agentId, action, note)];
+  const dropped = Math.max(0, full.length - MAX_CLAIM_HISTORY);
+  const omitted = historyOmittedOf(work.historyOmitted) + dropped;
+  return Object.freeze({ ...work, updatedAt: isoOf(atMs),
+    history: Object.freeze(dropped > 0 ? full.slice(dropped) : full),
+    ...(omitted > 0 ? { historyOmitted: omitted } : {}) });
+};
+// A copy of the claim that keeps only the newest `keep` history entries,
+// with the rest counted in historyOmitted. Board lists use it; the
+// single-claim read returns the stored history.
+export function summarizeClaimHistory(item, keep) {
+  const history = Array.isArray(item?.history) ? item.history : [];
+  if (history.length <= keep) return item;
+  const dropped = history.length - keep;
+  return { ...item, history: history.slice(dropped), historyOmitted: historyOmittedOf(item.historyOmitted) + dropped };
+}
 // Board order is updatedAt desc, then id. A later history stamp wins when a
 // writer appended history without refreshing updatedAt.
 export function claimUpdatedAt(item) {
@@ -400,6 +429,10 @@ export function createWork({ id, title, reviewPolicy, note, tags, files, depends
   const atMs = nowMsOf(now);
   idOf(id, "work id", 256);
   if (title !== undefined) check(typeof title === "string" && title.length > 0 && title.length <= 512, "title must be 1..512 characters");
+  // SEC2: the create note is stored on the "created" history stamp and served
+  // on every board list — without a bound, a direct API caller can stash an
+  // arbitrarily large string. 4000 matches the New-item form's maxlength.
+  if (note !== undefined && note !== null) check(typeof note === "string" && note.length <= 4000, "note must be a string of at most 4000 characters");
   if (reviewPolicy !== undefined && reviewPolicy !== null) check(REVIEW_POLICIES.includes(reviewPolicy), `reviewPolicy must be one of ${REVIEW_POLICIES.join(", ")}`);
   const claimKind = kindOf(kind);
   const claimRevision = revisionOf(revision);
@@ -428,6 +461,10 @@ export function createWork({ id, title, reviewPolicy, note, tags, files, depends
 export function claimWork(work, agentId, { note, leaseHours, files, dependsOn, pullRequest, pullRequests, repo, branch, fileBlocks, room, now } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
   check(item.state === "unclaimed", `work "${item.id}" is already ${item.state} — release it first`);
+  // QA D-1: the 4000-char bound applies to every note stored on a history
+  // stamp, not just create — an unbounded claim note is the same
+  // storage/amplification vector the SEC2 create cap closed.
+  if (note !== undefined && note !== null) check(typeof note === "string" && note.length <= 4000, "note must be a string of at most 4000 characters");
   const wanted = leaseHoursOf(leaseHours);
   const effective = wanted === null ? null : wanted ?? roomWorkClaimConfig(room).defaultLeaseHours;
   const declared = files === undefined || files === null ? null : claimedFilesOf(files);
@@ -461,6 +498,8 @@ export function renewWork(work, agentId, { note, leaseHours, room, now } = {}) {
   check(ACTIVE_CLAIM_STATES.includes(item.state), `work "${item.id}" is ${item.state} — only active claims can be renewed`);
   check(item.leaseExpiresAt !== null, `work "${item.id}" has no lease — nothing to renew`);
   check(Date.parse(item.leaseExpiresAt) > atMs, `work "${item.id}" lease already lapsed — claim it again instead`);
+  // QA D-1: same 4000-char bound as create — see claimWork.
+  if (note !== undefined && note !== null) check(typeof note === "string" && note.length <= 4000, "note must be a string of at most 4000 characters");
   const wanted = leaseHoursOf(leaseHours);
   // Explicit null opts out of leases, exactly like claimWork: the renewed
   // claim carries no lease window (it previously fell through to the room
@@ -471,6 +510,35 @@ export function renewWork(work, agentId, { note, leaseHours, room, now } = {}) {
     leaseExpiresAt: effective === null ? null : isoOf(atMs + effective * 3600 * 1000) };
   return withHistory(renewed, atMs, agent, "renewed",
     note ?? (effective === null ? "lease removed" : `lease: ${effective}h`));
+}
+// Append one URL to the current claim round without replacing its lease or
+// evidence. A fresh duplicate is a byte-identical no-op; stale replay must
+// read back before deciding whether the link was already recorded.
+export function appendWorkPullRequest(work, agentId, { pullRequest, expectedClaimedAt, expectedHistoryLength, now } = {}) {
+  const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
+  check(typeof pullRequest === "string" && pullRequest.length <= 300, "pullRequest must be a URL string of at most 300 characters");
+  const parsed = parsePullRequestUrl(pullRequest);
+  check(parsed && !new URL(pullRequest.trim()).port, "pullRequest must be a canonical https://github.com/{owner}/{repo}/pull/{number} URL");
+  check(typeof expectedClaimedAt === "string" && expectedClaimedAt.length <= 100 && Number.isFinite(Date.parse(expectedClaimedAt)), "expectedClaimedAt must be the current claim timestamp");
+  check(Number.isSafeInteger(expectedHistoryLength) && expectedHistoryLength >= 0, "expectedHistoryLength must be a non-negative integer");
+  if (!ACTIVE_CLAIM_STATES.includes(item.state) || !item.owner || item.supersededBy) {
+    fail("work_claim_conflict", "Only an active, unsuperseded claim can receive a PR link");
+  }
+  if (item.owner !== agent) fail("work_not_owner", "Only the current claim owner can link a PR");
+  if (isLeaseExpired(item, atMs)) fail("claim_lease_lapsed", "The current claim lease has lapsed");
+  if (item.claimedAt !== expectedClaimedAt || claimHistoryLength(item) !== expectedHistoryLength) {
+    fail("work_claim_conflict", "The claim changed since it was read");
+  }
+  if (item.pullRequests.some(pull => pull.url === parsed.url)) return work;
+  check(item.pullRequests.length < MAX_PULLS, `pullRequests must list at most ${MAX_PULLS} pull requests`);
+  // Keep the existing observations verbatim; only the server's poller may
+  // fill in the new link's outcome, polling metadata, or CI.
+  const prior = Array.isArray(work.pullRequests) && work.pullRequests.length ? work.pullRequests
+    : (work.pullRequest ? [work.pullRequest] : []);
+  const links = Object.freeze([...prior, pullRequestOf(parsed.url)]);
+  return withHistory({ ...work, pullRequests: links,
+    pullRequest: links.find(pull => !pull.outcome) ?? links[links.length - 1],
+    ci: null, attestations: Object.freeze([]) }, atMs, agent, "pr_linked", `Linked pull request ${parsed.url}`);
 }
 // Update claimed work: move state or add a note. Only the owner may update.
 // The done transition accepts deliveryMode (how the work was delivered),
@@ -506,6 +574,8 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
     check(state === "done", "blobs are only recorded on the done transition");
     blobsOf(blobs);
   }
+  // QA D-1: same 4000-char bound as create — see claimWork.
+  if (note !== undefined && note !== null) check(typeof note === "string" && note.length <= 4000, "note must be a string of at most 4000 characters");
   const released = state === "unclaimed";
   const next = state === undefined ? item : { ...item, state,
     owner: released ? null : item.owner,
@@ -535,7 +605,15 @@ export function attestWork(work, agentId, { note, now } = {}) {
   const prior = item.attestations.find(entry => entry.memberId === agent);
   const explicit = item.reviews.some(entry => entry.memberId === agent);
   if (!explicit && prior && prior.note === (note ?? null)) return Object.freeze(item);
-  const attestation = Object.freeze({ memberId: agent, at: isoOf(atMs), note: note ?? null });
+  const basis = reviewBasisFor(item);
+  // SEC-2: one attestation per reviewer per claim round and revision. A
+  // repeat note on the same basis replaces the recorded note in place: no
+  // history entry, so the route appends no room event for it.
+  if (!explicit && prior && sameBasis(prior.basis, basis)) {
+    const replaced = Object.freeze({ memberId: agent, at: prior.at, note: note ?? null, basis });
+    return Object.freeze({ ...item, attestations: Object.freeze(item.attestations.map(entry => (entry.memberId === agent ? replaced : entry))) });
+  }
+  const attestation = Object.freeze({ memberId: agent, at: isoOf(atMs), note: note ?? null, basis });
   const attestations = Object.freeze([
     ...item.attestations.filter(entry => entry.memberId !== agent),
     attestation,

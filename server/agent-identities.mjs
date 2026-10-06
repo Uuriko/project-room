@@ -14,7 +14,7 @@ import { ServiceError } from "./store.mjs";
 import { generateKeyPair as generateEd25519KeyPair } from "./agent-card-signing.mjs";
 import { memberCan } from "../src/events.js";
 import { nextActionsForIdentityMint } from "./discoverability.mjs";
-import { checkAgentDisplayName } from "./display-name-guard.mjs";
+import { checkAgentDisplayName, assertNotReservedRoleName } from "./display-name-guard.mjs";
 import { refreshDirectoryIdentity } from "./public-read-model.mjs";
 
 const fail = (status, code, message, headers = null, detail = null) => {
@@ -261,7 +261,7 @@ const SIGNUP_NEXT = Object.freeze([
   // Burs-IA steal A1: the mint response names the tools-list surface so a
   // cold agent learns its capabilities without reading llms.txt.
   Object.freeze({ action: "list-tools", method: "POST", path: "/room/mcp",
-    description: "See what this identity can do: POST { jsonrpc: \"2.0\", id: \"1\", method: \"tools/list\" } to /room/mcp with Authorization: Bearer <secret>. Without a credential it lists the four public join tools; with it, the enrolled room profile." }),
+    description: "See what this identity can do: POST { jsonrpc: \"2.0\", id: \"1\", method: \"tools/list\" } to /room/mcp with Authorization: Bearer <secret>. Without a credential it lists six tools: the four public join tools plus public_work_recommend and public_work_read_task; with it, the enrolled room profile." }),
 ]);
 
 export class AgentIdentities {
@@ -319,6 +319,7 @@ export class AgentIdentities {
     // RC-2026-09-19-086: reject C0 control chars like share-link join does
     // (422 there) — storing them raw corrupts logs, exports, and renders.
     if (/[\u0000-\u001f\u007f]/.test(name)) fail(422, "invalid_identity", "displayName must not contain control characters");
+    assertNotReservedRoleName(name); // Q3-D: role-like names are refused at mint
     if (suppliedSecret !== undefined && !/^pri_[A-Za-z0-9_-]{43}$/.test(suppliedSecret))
       fail(422, "invalid_identity", "Recoverable registration requires a generated identity credential");
     return this.store.transaction(() => {
@@ -339,6 +340,23 @@ export class AgentIdentities {
           return { identityId: recoveredId, displayName: existing.display_name, duplicate: true,
             next: SIGNUP_NEXT, nextActions: nextActionsForIdentityMint() };
         }
+        // The credential may belong to an identity minted through the normal
+        // path (random identity id): the derived id cannot match, so recover
+        // by secret. Without this, the INSERT below violates the UNIQUE
+        // secret_hash and the request 500s (QA2 signed-in agent journey).
+        const bySecret = this.rowForSecret(suppliedSecret);
+        if (bySecret) {
+          this.noteActivated(bySecret.identityId);
+          return { identityId: bySecret.identityId, displayName: bySecret.displayName, duplicate: true,
+            next: SIGNUP_NEXT, nextActions: nextActionsForIdentityMint() };
+        }
+        // A revoked identity still holds its secret hash: recovery of a
+        // revoked credential is an honest 409, never a UNIQUE-violation 500.
+        const candidates = [...fastIdentityHashCandidates(suppliedSecret, this.hashKey), legacyIdentityHash(suppliedSecret)];
+        const revokedHit = candidates.some(hash => this.db.prepare(
+          "SELECT 1 FROM agent_identities WHERE revoked_at IS NOT NULL AND (secret_hash=? OR fallback_secret_hash=?)").get(hash, hash));
+        if (revokedHit)
+          fail(409, "identity_credential_changed", "Identity credential changed; use the current saved identity");
       }
       // Keep the existing credential-recovery path above idempotent. Global
       // identity names are not unique: ordinary exact-name duplicates remain
@@ -600,6 +618,8 @@ export class AgentIdentities {
     if (permissions.includes("manage_members") && !this.store.delegation.mayConferManageMembers(authority, auth)) {
       fail(403, "access_denied", "Delegated membership administration cannot grant manage_members");
     }
+    const unheld = this.store.delegation.unheldPermissions(authority, auth, permissions);
+    if (unheld.length) fail(403, "access_denied", `Cannot grant permissions not held: ${unheld.join(", ")}. Link with permissions you hold, or ask the room owner`);
     if (displayName !== undefined && (typeof displayName !== "string" || displayName.length > 80)) fail(422, "invalid_identity", "displayName must be text of at most 80 characters");
     // Referral attribution: optional member id of the referrer, written onto
     // the new member record and journaled via referral.completed. Shape is
@@ -641,6 +661,7 @@ export class AgentIdentities {
         .filter(member => member.active !== false && member.id !== resolvedMemberId
           && canonical(member.displayName) !== canonical(memberName))
         .map(member => ({ memberId: member.id, displayName: member.displayName }));
+      assertNotReservedRoleName(memberName); // Q3-D: and when the identity joins a room
       const checked = checkAgentDisplayName(memberName, { activeNames });
       if (!checked.safe) fail(422, "invalid_identity", "displayName is unsafe or already used in this room");
       this.store.command(token, roomId, { id: randomUUID(), type: "member.added",

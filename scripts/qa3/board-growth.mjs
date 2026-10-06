@@ -1,18 +1,16 @@
 #!/usr/bin/env node
-// Nightly board-growth budget: 400 done claims plus 300 attestations.
-// List p95, the limit=1 body, and room-event headroom stay bounded once
-// Q3-A lands. Until then a miss is expectedFail (F4 event headroom, F8 list).
+// Nightly board-growth budget: 400 done claims plus 300 review notes from
+// five review-profile members. List p95, the limit=1 body, and room-event
+// headroom stay bounded (SEC-2 with Q3-A: F4 event headroom, F8 list).
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { randomBytes, randomUUID } from "node:crypto";
 import { RoomStore } from "../../server/store.mjs";
 import { createRoomServer } from "../../server/http.mjs";
 import { createWork, claimWork, updateWork } from "../../server/work-claims.mjs";
 import { createQaClient } from "../qa2/lib/client.mjs";
 import { createReport } from "./lib/summary.mjs";
 
-const FINDING = "F4 F8 Q3-A";
 const DONE = 400;
 const NOTES = 300;
 const GUESTS = 5;
@@ -33,18 +31,6 @@ const must = (response, what) => {
   return response.json;
 };
 
-async function shareLink(client, roomPath, token) {
-  for (let revision = 0; revision <= 8; revision++) {
-    const linkToken = randomBytes(32).toString("base64url").slice(0, 43);
-    const response = await client.request("POST", `${roomPath}/share-links`, {
-      token,
-      body: { requestId: randomUUID(), linkToken, expiresAt: Date.now() + 3600e3, maxJoins: GUESTS + 2, expectedMemberRevision: revision },
-    });
-    if (response.status < 300) return linkToken;
-    if (response.status !== 409) throw new Error(`share link: HTTP ${response.status} ${response.text.slice(0, 200)}`);
-  }
-  throw new Error("share link: member revision did not match");
-}
 
 try {
   const directory = mkdtempSync(join(tmpdir(), "qa3-growth-"));
@@ -76,14 +62,19 @@ try {
     store.workClaims.set(roomId, active);
 
     const before = store.room(roomId).sequence;
-    const linkToken = await shareLink(client, roomPath, owner.secret);
+    // Review notes come from review-profile members (SEC-2).
     const guests = [];
     for (let i = 0; i < GUESTS; i++) {
-      const guest = must(await client.request("POST", "/api/agent-identities", { body: { displayName: `Qa3G${i}${stamp}` } }), `mint guest ${i}`);
-      must(await client.request("POST", "/api/share-links/join-agent", {
+      const name = `Qa3G${i}${stamp}`;
+      const guest = must(await client.request("POST", "/api/agent-identities", { body: { displayName: name } }), `mint reviewer ${i}`);
+      const invite = must(await client.request("POST", `${roomPath}/agent-invites`, {
+        token: owner.secret,
+        body: { profile: "review", displayName: name },
+      }), `invite reviewer ${i}`);
+      must(await client.request("POST", "/api/agent-invites/redeem", {
         token: guest.secret,
-        body: { linkToken, displayName: `Qa3G${i}${stamp}` },
-      }), `join guest ${i}`);
+        body: { code: invite.code, displayName: name },
+      }), `redeem reviewer ${i}`);
       guests.push(guest.secret);
     }
     const perGuest = NOTES / GUESTS;
@@ -115,14 +106,9 @@ try {
       { name: "limit=1 bytes", ok: bytes < LIST_BYTES, detail: `${bytes} bytes` },
       { name: "event headroom", ok: after - before <= SEQUENCE_HEADROOM, detail: `sequence +${after - before}` },
     ];
-    const missed = checks.filter(check => !check.ok);
-    if (missed.length === 0) {
-      report.fail("board growth", `${FINDING} expectedFail is set but every bound held; remove the flag`);
-    } else {
-      for (const check of checks) {
-        if (check.ok) report.pass(`${check.name} ${check.detail}`);
-        else report.expectFail(`${check.name} ${check.detail}`, FINDING);
-      }
+    for (const check of checks) {
+      if (check.ok) report.pass(`${check.name} ${check.detail}`);
+      else report.fail(`${check.name}`, check.detail);
     }
   } finally {
     server.closeStreams();

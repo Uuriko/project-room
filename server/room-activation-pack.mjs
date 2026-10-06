@@ -12,6 +12,7 @@ import { roomOrientation } from "../src/work-selectors.js";
 import { pinnedMessages, roomKind, roomPolicy, WORK_STATES, roomTrust } from "../src/events.js";
 import { annotateOrientation, claimNote, withContentTrust } from "./content-trust.mjs";
 import { buildOrient } from "./orient.mjs";
+import { messageVisibleToViewer, summaryHistoryFloor } from "./history-visibility.mjs"; // QA4 Q4-SEC-1
 
 /**
  * Activation pack schema (returned by buildActivationPack).
@@ -152,6 +153,7 @@ export function buildActivationPack(store, roomSlug, viewerId = null) {
     .filter(item => item && OPEN_WORK_STATES.has(item.state))
     .sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0))
     .map(item => workOf(item, now));
+  const floor = summaryHistoryFloor(store, roomSlug, viewerId, sequence); // QA4 Q4-SEC-1
   const pack = withContentTrust({
     room: {
       slug: state.room.id,
@@ -163,7 +165,8 @@ export function buildActivationPack(store, roomSlug, viewerId = null) {
     orientation: annotateOrientation(roomOrientation(state)),
     members,
     openWork,
-    pinnedResources: pinnedMessages(state).map(pinnedOf),
+    // QA4 Q4-SEC-1: only pins whose message this viewer may read.
+    pinnedResources: pinnedMessages(state).filter(pin => messageVisibleToViewer(pin.message, viewerId, floor)).map(pinnedOf),
     repoHead: null,
     participationRules: { ...roomPolicy(state), trust: roomTrust(state).enabled },
     coordinationNorms: { ...COORDINATION_NORMS },

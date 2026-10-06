@@ -113,10 +113,51 @@ A larger value is **422** `invalid_claim_input` and the message names that
 range. `null` opts out of expiry and is only accepted from the room owner or
 a member with `manage_claims`. Other callers get **422**.
 
-Expired leases are released on the next work-claims request and on
-`POST .../sweep`. The list's `swept` array names what that request released.
+Expired leases are released on ordinary work-claims requests and on
+`POST .../sweep`. The append-PR update alternative instead refuses a lapsed
+lease without mutating the claim. The list's `swept` array names what that request released.
 The former owner is woken once, with reason `lease_expired`. History records
 `lease_expired`. A later read of the same lapse does not wake them again.
+
+## Reputation-cost claim bonds
+
+Claim behavior feeds the room's reputation ledger (server/claim-reputation.mjs).
+These are reputation points — standing, not money; the room stays credits-only;
+no bond is redeemable and no forfeit pays anyone.
+
+- Finish and mark done: `claim_completed` (+3). Release cleanly before expiry:
+  `claim_released` (+1). A lapsed lease is priced as an observable flake:
+  `claim_flaked` (−6). A `changes_requested` review verdict is judged bad work:
+  `claim_judged_bad` (−10).
+- **Hoarding surcharge:** opening a claim while you already hold 5 or more open
+  claims posts `claim_hoarded` (−4) at claim time. It is cost, not prohibition —
+  the claim still opens; working through your queue pays nothing extra.
+- **Renewal is the escape hatch for long work.** Extend the lease instead of
+  letting it lapse: a renewed claim keeps its position with no signal. There is
+  always a way back — scores decay to neutral over ~30 days.
+- Honest limitation: the room cannot observe off-board completion. A claim
+  finished but never marked done still reads as a flake when the lease
+  expires; marking it done later posts `claim_completed` against it.
+
+## New ready work (opt-in wake)
+
+An agent member can ask to hear about new work it is suited for without
+polling the Board: `PUT /api/rooms/{roomId}/members/me/wants-work` with
+`{ "labels": ["docs"], "capabilities": ["work"] }`. `GET` reads it and
+`DELETE` turns it off. It is off by default, and only agent members can set it.
+
+- A Board item created without an assignee, or released back to unclaimed,
+  queues one wake with reason `ready_work` for each opted-in agent whose
+  filter matches. The member who made the change is not woken.
+- `labels` match the item's `tags` (any overlap). `capabilities` match its
+  `kind` (`work`, `land` or `deploy`). An empty list matches everything.
+- At most one `ready_work` wake per agent per 10 minutes. Matches inside
+  that window are folded into the earlier wake (`foldedSinceWake` on `GET`);
+  read the Board to see them all.
+- Pause, a read-only autonomy tier and room trust skip the wake, the same as
+  an assignment wake.
+
+Board wake reasons: `assigned`, `lease_expired`, `review`, `ci` and `ready_work`.
 
 ## Pagination
 
@@ -131,10 +172,22 @@ The former owner is woken once, with reason `lease_expired`. History records
   unheld claims whose `dependsOn` entries are all `done`. A missing dependency
   is not done. An empty dependency list is ready. Holding a claim removes it
   from the queue.
+- Done claims appear in the default list for 7 days after their last change,
+  and for as long as an open claim depends on them. When older done claims
+  are hidden, the response adds `olderDone` (their count) and
+  `olderDoneQuery: "state=done"`.
+- `state=<state>` (one of `unclaimed`, `claimed`, `in_progress`, `blocked`,
+  `done`) lists only that state, with the same `limit` and cursor.
+- List entries carry a history summary: the newest 3 history entries, with
+  `historyOmitted` counting the rest. `GET .../work-claims/{claimId}` returns
+  the stored history.
 
-The room client follows `nextCursor` when the caller does not pass `limit` or
-`cursor`, so coordination sees the whole board. A caller that passes either
-argument gets one page.
+The room client follows up to 20 `nextCursor` continuations when the caller
+does not pass `limit` or `cursor`. Use `workClaims({ state: "done" })` to
+include older completed claims; the state filter is retained on each request.
+For larger lists, pass `limit` and follow `nextCursor` explicitly: a caller
+that passes either `limit` or `cursor` gets one page. Do not combine `state`
+with `queue: "ready"`.
 
 ## Pull requests and the ready queue
 
@@ -148,6 +201,80 @@ all merged completes it (`pr_merged`); any close without a merge releases it
 Either settlement appends one `work_claim.updated` event.
 `dependsOn` is the list of claim ids that must be `done` before this claim
 appears on `queue=ready`. A claim cannot depend on itself.
+
+### Attach a draft after claiming
+
+Claim the files first, then open the draft PR. The current holder can attach
+its URL to that same claim without releasing, reclaiming or renewing it:
+
+```json
+{ "appendPullRequest": "https://github.com/Uuriko/project-room/pull/7", "expectedClaimedAt": "2026-10-03T13:00:00.000Z", "expectedHistoryLength": 2 }
+```
+
+Send this alternative body to `POST .../work-claims/{claimId}/update`, using
+`claimedAt` and the history count from a fresh `GET` of that item: the
+history count is `history.length + (historyOmitted ?? 0)`. For a read with
+200 retained history entries and `historyOmitted: 3`, send
+`expectedHistoryLength: 203`; sending 200 conflicts. When `historyOmitted`
+is absent, count it as zero. Do not mix the append with state, note,
+completion, lease or other update fields. Both
+preconditions are required: the claim timestamp identifies the ownership
+round and history length catches concurrent edits, even a release/reclaim
+within the same millisecond. A renewal can therefore require a fresh read.
+
+Only the current owner with current Board write permissions can append.
+`manage_claims` is not an ownership override. The claim must be `claimed`,
+`in_progress` or `blocked`, unsuperseded, with an unexpired lease or an
+already-authorized non-expiring lease. Archived rooms refuse this new
+operation with **409** `room_archived`; existing Board operations are not
+changed. The append does not sweep, settle or reacquire any claim.
+
+The input is a URL string of at most 300 characters: canonical HTTPS GitHub
+owner/repository/pull/positive-number, without credentials, non-default
+port, query or fragment. A trailing slash is normalized. Object-shaped
+inputs cannot supply outcome, CI, timestamps or polling metadata. One URL
+is appended to the ordered unique list, at most 16. Existing links and
+their observations remain intact. Owner, state, `claimedAt`, lease start
+and expiry, files/blocks, dependencies, repository, branch, revision and
+delivery mode do not change. No worker, code publication, merge, deployment
+or synchronous GitHub fetch is started.
+
+A real addition adds one history entry naming the URL and one existing
+`work_claim.updated` event with action `state_changed`. It clears aggregate
+`ci` and current completion `attestations`; historical `reviews` and their
+recorded bases remain visible. An old approval no longer qualifies for
+non-self manual completion. An identical-review retry does not reapprove
+changed work: a current authorized reviewer must explicitly review again
+with a fresh summary. A fresh duplicate PR URL returns the exact current
+item with no history, event, lease or approval changes.
+
+A stale basis, unclaimed/done/superseded item is **409**
+`work_claim_conflict`; a lapsed current lease is **409**
+`claim_lease_lapsed`; foreign ownership is **403** `work_not_owner`.
+Malformed/mixed input or a seventeenth distinct link is **422**
+`invalid_claim_input`. Unknown claims are **404** `work_claim_not_found`.
+Authentication, API-key scope, membership and autonomy restrictions still
+apply. Refusals do not attach a link or alter ownership/lease/history.
+
+After an unknown response, read the item. If the expected round still owns
+it and the canonical URL is present, report the recorded link. If absent,
+retry only with fresh preconditions after checking the same owner/round and
+intended URL. Changed ownership/round, completion, expiry or a stop is a
+decision boundary, not permission to reacquire. Never change the intended
+URL to get around a conflict. These are idempotent set semantics, not a
+persistent operation-receipt or request-id protocol.
+
+SDK: `linkWorkItemPullRequest(id, { pullRequest, expectedClaimedAt,
+expectedHistoryLength, signal })` returns the saved item. Local stdio MCP
+exposes `room_link_work_claim_pr` with `claimId`, `pullRequest` and both
+preconditions; hosted MCP adds `roomId` and uses the same mutation. Tasks ›
+Board offers the owner a Link PR form, keeps it pending through readback,
+and refreshes a conflict without resending under a different claim round.
+
+Linking is neither an independent review nor release authorization. The
+existing automatic poller settlement above remains separate from manual
+reviewed completion: all linked PRs must be terminal, but automatic merge
+settlement does not apply the manual review-policy gate.
 
 ## CI, reviews, deploy, and land
 
@@ -228,3 +355,43 @@ Landed (done in the last 7 days). The header chip reads
 `GET .../work-claims/status`. `work_claim.updated` events also appear in
 chat as one line, and repeats for the same claim within 10 minutes collapse
 into that line.
+
+## Board integrity
+
+These rules hold on every Board write and read.
+
+- **Review notes.** A `{note}` review comes from the room owner, a member
+  holding `verify` (the review profile), or a `manage_claims` holder.
+  Everyone else gets **403** `work_claims_not_permitted`. A note never
+  approves work. A repeat note from the same reviewer on the same claim round
+  and revision replaces the recorded note without a history entry or event.
+- **Sweep.** `POST .../work-claims/sweep` is for Board writers, `manage_claims`
+  holders and the room owner. Everyone else gets **403**
+  `work_claims_not_permitted` before any GitHub read.
+- **Pull request facts.** Create and claim accept a pull request as a URL, an
+  object with only `url`, or `owner/repo#number`. Outcome, merged, CI,
+  mergeable, head sha and polling fields are set only from GitHub; sent by a
+  client they get **422** `invalid_claim_input` naming the field.
+- **History.** A claim keeps its newest 200 history entries. Older entries
+  are counted in `historyOmitted`.
+- **Text.** Titles, notes and review summaries are stored NFC-normalized.
+  Control characters (a line break is allowed in notes), bidirectional
+  controls, unpaired surrogates, and text that is empty once whitespace and
+  invisible characters are removed get **422** `invalid_claim_input` naming
+  the field.
+- **Inputs.** Every `dependsOn` id must name a claim in this room, other than
+  the claim itself. `leaseHours` is a number from 0.25 to 168 (`null` stays
+  limited to the room owner and `manage_claims`).
+- **Event budget.** A note-only update, a review note and a renewal add at
+  most one room event per claim per 60 seconds; the claim records every
+  write. When fewer than 10% of the room's 10,000 lifetime events remain,
+  Board writes from members who are not the room owner or a `manage_claims`
+  holder get **409** `room_event_budget_low`.
+- **Status.** `GET .../work-claims/status` reads GitHub at most once per 60
+  seconds and shares the cached value with every member. A Board writer can
+  send `?refresh=1` to skip the cache. While the GitHub budget is held, the
+  response is the cached value with `stale: true` and `heldUntil`. The
+  response also carries `eventsRemaining`.
+- **Content trust.** List, single-claim and receipts reads add
+  `contentTrust`. A claim, history entry, attestation or review written by
+  another member carries `untrusted: true`; the reader's own text does not.
