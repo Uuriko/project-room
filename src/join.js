@@ -78,6 +78,21 @@ export function formatInviteExpiry(expiresAt, nowMs = Date.now()) {
   return `in ${days} day${days === 1 ? "" : "s"}`;
 }
 
+// Error codes that end the join flow: the full error card (with its
+// Back to sign-in exit) beats inline status text — there is nothing left
+// to do on the consent screen.
+export const JOIN_END_CODES = new Set([
+  "invite_unavailable",
+  "invite_revoked",
+  "invite_expired",
+  "invite_already_used",
+  "invite_authority_changed",
+  // 2026-10-06: an already-joined member re-clicking their invite used to
+  // get bare inline text with no way back; the card's Back to sign-in
+  // link is the exit the message names.
+  "identity_already_linked",
+]);
+
 // Maps a failed preview/join call to a message with a next step.
 // Every branch names what happened and what to do — no dead ends.
 export function joinErrorMessage({ status, code, action = "join" } = {}) {
@@ -240,7 +255,7 @@ async function boot() {
       if (button) button.disabled = false;
       // A dead code stays dead: surface the reason instead of a retry loop.
       const mapped = joinErrorMessage({ status: joined.status, code: joined.error?.code, action: "join" });
-      if (["invite_unavailable", "invite_revoked", "invite_expired", "invite_already_used", "invite_authority_changed"].includes(joined.error?.code)) fail(mapped);
+      if (JOIN_END_CODES.has(joined.error?.code)) fail(mapped);
       else if (statusEl) statusEl.textContent = mapped.message;
       return;
     }

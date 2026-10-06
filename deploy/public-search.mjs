@@ -31,7 +31,7 @@ export function publicPageCsp(origin, policy = PUBLIC_SEARCH_CSP) {
   return policy.replace(/\bconnect-src([^;]*)/, (_, sources) => `connect-src${sources} ${url.origin}/cdn-cgi/rum`);
 }
 
-// Static browser 404. 404.html is the same document.
+// Static browser 404. 404.html is the same document — keep the two in sync.
 export const PUBLIC_NOT_FOUND_HTML = `<!doctype html>
 <html lang="en">
 <head>
@@ -43,6 +43,7 @@ export const PUBLIC_NOT_FOUND_HTML = `<!doctype html>
 <main>
 <h1>Page not found</h1>
 <p>This address is not a page on Project Room.</p>
+<p>Tip: invite links open exactly as sent and work once — if this was an invite link, ask the inviter for a fresh one.</p>
 <p><a href="/">Home</a> · <a href="/about">About</a> · <a href="/receipts">Receipts</a></p>
 </main>
 </body>
