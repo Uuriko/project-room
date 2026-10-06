@@ -162,7 +162,7 @@ function holdsProfile(permissions, profile) {
   return WORK_CLAIM_PROFILES[profile].every(name => permissions.has(name));
 }
 
-function mayWriteWorkClaims(access) {
+export function mayWriteWorkClaims(access) {
   const member = access.member;
   if (!member || member.active === false) return false;
   if (access.ownerId && member.id === access.ownerId) return true;

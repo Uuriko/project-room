@@ -16,10 +16,19 @@
 import { ServiceError } from "./store.mjs";
 import { nextWorkStep } from "../src/workflow.js";
 import { retiredNeedsMeKeys } from "./updates.mjs";
+import { mayWriteWorkClaims } from "./work-claim-routes.mjs";
+import { claimUpdatedAt } from "./work-claims.mjs";
 
 const MAX_ROOMS = 40;
 const MAX_PER_KIND = 8;
 const MAX_ITEMS = 100;
+// Open work: unclaimed, ready Board items this member may claim. Measured in
+// muse-room on 2026-10-05: 21 of 21 items posted for someone else to pick up
+// were never claimed (oldest 88h), because the one read every agent polls
+// listed none of them. It is standing state, not an event, so it rides beside
+// items, never moves the cursor, and shows even when nothing else is new.
+const OPEN_WORK_SHOWN = 3;
+const OPEN_WORK_TITLE = 80;
 const MENTION_WINDOW = 100;
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
@@ -269,6 +278,46 @@ function mentionHorizon(store, roomId, memberId, after, through) {
 
 // The cursor acknowledges discovery, not completion. Only advance through
 // sequence groups returned in full; multiple attention kinds may share an event.
+export function openWorkOf(store, roomId, memberId, authority, nowMs = Date.now()) {
+  const member = authority?.members?.[memberId];
+  const ownerId = typeof authority?.ownerId === "string" && authority.ownerId ? authority.ownerId : null;
+  if (!member || !mayWriteWorkClaims({ member: { ...member, id: memberId }, ownerId })) return null;
+  let list;
+  try { list = store.workClaims?.list(roomId) ?? []; } catch { return null; }
+  const done = new Set(list.filter(item => item?.state === "done").map(item => item.id));
+  const updatedMs = item => {
+    const ms = Date.parse(claimUpdatedAt(item));
+    return Number.isFinite(ms) ? ms : null;
+  };
+  // Sort on the exact timestamp; round to minutes only for display.
+  const minutesSince = ms => (ms === null ? null : Math.max(0, Math.round((nowMs - ms) / 60000)));
+  // Board order (updatedAt desc, then id) within each group, as the Board shows.
+  const ready = list.filter(item => item?.state === "unclaimed" && (item.kind ?? "work") === "work"
+    && (item.dependsOn ?? []).every(dep => done.has(dep)))
+    .map(item => ({ item, at: updatedMs(item), released: (item.history ?? []).some(entry => entry?.action === "claimed") }))
+    // Work posted for pickup (never claimed) first; released or lease-expired
+    // items can be finished work handed back without "done", so they follow.
+    .sort((a, b) => Number(a.released) - Number(b.released)
+      || (b.at ?? -Infinity) - (a.at ?? -Infinity) || String(a.item.id).localeCompare(String(b.item.id)))
+    .map(row => ({ ...row, idleMinutes: minutesSince(row.at) }));
+  if (!ready.length) return null;
+  const idles = ready.map(row => row.idleMinutes).filter(value => value !== null);
+  return {
+    roomId,
+    count: ready.length,
+    neverClaimed: ready.filter(row => !row.released).length,
+    ...(idles.length ? { oldestIdleMinutes: Math.max(...idles) } : {}),
+    top: ready.slice(0, OPEN_WORK_SHOWN).map(({ item, idleMinutes, released }) => ({
+      id: item.id,
+      title: String(item.title ?? "").slice(0, OPEN_WORK_TITLE),
+      ...(idleMinutes !== null ? { idleMinutes } : {}),
+      ...(released ? { released: true } : {}),
+      ...(item.tags?.length ? { tags: item.tags.slice(0, 3) } : {})
+    })),
+    next: `POST /api/rooms/${encodeURIComponent(roomId)}/work-claims/{id}/claim`
+  };
+}
+
 export function collectNeedsMe(store, secret, { since } = {}) {
   let identity = null;
   let allowedRooms = null;
@@ -296,6 +345,7 @@ export function collectNeedsMe(store, secret, { since } = {}) {
   const land = { ...parsed.land };
   const landIds = { ...parsed.landIds };
   const pendingBonds = store.bonds.pendingProposalsFor(identity.identityId);
+  const openWork = [];
   let roomAfter = parsed.roomAfter ?? "";
   let hasMore = links.length > MAX_ROOMS;
   for (const link of links.slice(0, MAX_ROOMS)) {
@@ -305,6 +355,9 @@ export function collectNeedsMe(store, secret, { since } = {}) {
     const authority = store.roomAuthority(link.roomId);
     const member = authority.members?.[link.memberId];
     if (!member || member.active === false) { roomAfter = link.roomId; continue; }
+    // One summary per room this page walks (at most MAX_ROOMS), none dropped.
+    const open = openWorkOf(store, link.roomId, link.memberId, authority);
+    if (open) openWork.push(open);
     const after = roomWatermark(parsed, link.roomId);
     const landAfter = landWatermark(parsed, link.roomId);
     let through = mentionHorizon(store, link.roomId, link.memberId, after, Math.max(after, authority.sequence));
@@ -351,5 +404,5 @@ export function collectNeedsMe(store, secret, { since } = {}) {
   // Retain the old rooms/land shape and extend it only for continuation/ties.
   const cursor = { rooms, land, landIds, ...(parsed.number !== null ? { floor: parsed.number } : {}), ...(hasMore ? { roomAfter } : {}) };
   items.sort((a, b) => a.roomId.localeCompare(b.roomId) || b.seq - a.seq);
-  return { identityId: identity.identityId, items, cursor, hasMore, untrusted: true };
+  return { identityId: identity.identityId, items, ...(openWork.length ? { openWork } : {}), cursor, hasMore, untrusted: true };
 }
