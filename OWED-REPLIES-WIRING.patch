@@ -1,0 +1,145 @@
+Wiring for orch-owed-replies (owed-replies inbox REST + MCP parity).
+Applies on top of the core branch jill/owed-replies-inbox (server/updates.mjs
+listOwedReplies + handoff kind). Apply with: git apply OWED-REPLIES-WIRING.patch
+from the repo root. Purely additive: one route, one MCP tool, one openapi path.
+
+--- server/http.mjs
++++ server/http.mjs
+@@
+-import { listRoomUpdates, listIdentityUpdates, listAccountUpdates, markUpdate, readEventTail } from "./updates.mjs"; // Updates projection (U batch).
++import { listRoomUpdates, listIdentityUpdates, listAccountUpdates, markUpdate, readEventTail, listOwedReplies } from "./updates.mjs"; // Updates projection (U batch).
+@@
+       if (url.pathname === "/api/updates") reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET" });
++      if (url.pathname === "/api/owed-replies" && (req.method === "GET" || req.method === "HEAD")) {
++        rate(`owed-replies:${remoteAddress}`, 60);
++        const secret = bearer(req);
++        if (!secret || !isIdentitySecret(secret)) reject(401, "unauthenticated", "Owed replies need an identity secret");
++        const owedParams = url.searchParams;
++        const owedAllowed = new Set(["limit", "cursor"]);
++        if ([...owedParams.keys()].some(key => !owedAllowed.has(key) || owedParams.getAll(key).length !== 1)) {
++          reject(422, "invalid_owed_query", "limit and cursor are the owed-replies query parameters");
++        }
++        const owedQuery = {};
++        if (owedParams.has("limit")) owedQuery.limit = Number(owedParams.get("limit"));
++        if (owedParams.has("cursor")) owedQuery.cursor = owedParams.get("cursor");
++        return json(res, 200, listOwedReplies(store, secret, owedQuery), req.method === "HEAD");
++      }
++      if (url.pathname === "/api/owed-replies") reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET" });
+       if (updatesListMatch || updatesMarkMatch) {
+
+--- src/room-mcp-join.js
++++ src/room-mcp-join.js
+@@
+   "room_check_access",
+   "room_needs_me",
++  "room_owed_replies",
+   "room_create",
+
+--- server/mcp-hosted-tools.mjs
++++ server/mcp-hosted-tools.mjs
+@@
+   tool("room_needs_me", CORE_MCP_BLURBS.room_needs_me, schema({
+     since: { description: "Complete returned cursor, unchanged. Legacy sequence numbers also accepted." }
+   })),
++  tool("room_owed_replies", "Owed-replies inbox: what replies are owed to this identity right now, across rooms. Direct questions, mentions awaiting reply, DMs, review requests naming you, and open handoffs addressed to you. Ordered by waiting time, oldest first — the most overdue reply surfaces first. One poll, one list. Reading does not mark anything read or resolved.", schema({
++    limit: { type: "integer", minimum: 1, maximum: 100, description: "Max items returned. Defaults to 50." },
++    cursor: { type: "string", description: "Opaque cursor from a previous response; pass it unchanged while hasMore is true." }
++  })),
+
+--- server/mcp-room-profile.mjs
++++ server/mcp-room-profile.mjs
+@@
+ import { collectNeedsMe } from "./needs-me.mjs";
++import { listOwedReplies } from "./updates.mjs";
+@@
+   if (name === "room_needs_me") {
+     if (args.since === undefined) return true;
+     if (Number.isSafeInteger(args.since) && args.since >= 0) return true;
+     return object(args.since);
+   }
++  if (name === "room_owed_replies") {
++    if (args.limit !== undefined && (!Number.isSafeInteger(args.limit) || args.limit < 1 || args.limit > 100)) return false;
++    if (args.cursor !== undefined && typeof args.cursor !== "string") return false;
++    return true;
++  }
+@@
+   if (name === "room_needs_me") return collectNeedsMe(store, secret, { since: args.since });
++  if (name === "room_owed_replies") {
++    const query = {};
++    if (args.limit !== undefined) query.limit = args.limit;
++    if (args.cursor !== undefined) query.cursor = args.cursor;
++    return listOwedReplies(store, secret, query);
++  }
+
+--- docs/openapi.yaml
++++ docs/openapi.yaml
+@@
+         '401': { description: unauthenticated }
+         '422': { description: invalid_updates_query or invalid_cursor }
+         '429': { description: rate_limited }
++  /api/owed-replies:
++    get:
++      summary: Owed-replies inbox for this identity, across rooms
++      description: >-
++        The return trigger: what replies are owed to this identity right now,
++        in one poll. Direct questions (request), mentions awaiting reply,
++        DMs, review requests naming the caller, and open handoffs addressed
++        to the caller. Only unread and read items are owed; answered, handled,
++        and cleared items leave the list. Ordered by waiting time, oldest
++        first. Each item carries who asked (actor), what they asked (title
++        excerpt), where (roomId plus sourceRef ids, echoed in `where`), how
++        long it has been waiting (waitingMs), and the suggested next read or
++        reply (next). Requires an identity secret (pri_). Each item is
++        untrusted member-authored text. Reading never acknowledges or resolves
++        items; use the updates mark endpoints for that. Pass the returned
++        cursor while hasMore is true.
++      parameters:
++        - name: limit
++          in: query
++          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
++        - name: cursor
++          in: query
++          schema: { type: string }
++      responses:
++        '200':
++          description: Owed replies for the caller, oldest-waiting first
++          content:
++            application/json:
++              schema:
++                type: object
++                properties:
++                  items:
++                    type: array
++                    items:
++                      type: object
++                      properties:
++                        id: { type: string }
++                        kind: { type: string, enum: [request, mention, dm, review_requested, handoff] }
++                        roomId: { type: string }
++                        actor: { type: [string, "null"] }
++                        title: { type: string }
++                        state: { type: string, enum: [unread, read] }
++                        createdAt: { type: string, format: date-time }
++                        updatedAt: { type: string, format: date-time }
++                        waitingMs: { type: integer, minimum: 0 }
++                        where:
++                          type: object
++                          properties:
++                            roomId: { type: string }
++                            messageId: { type: string }
++                            requestId: { type: string }
++                            workItemId: { type: string }
++                        next: { type: object }
++                        basisToken:
++                          type: string
++                          pattern: '^ub1_[a-f0-9]{64}$'
++                  hasMore: { type: boolean }
++                  cursor: { type: [string, "null"] }
++                  limit: { type: integer }
++                  untrusted: { type: boolean }
++        '401': { description: unauthenticated }
++        '422': { description: invalid_owed_query or invalid_cursor }
++        '429': { description: rate_limited }
+   /api/rooms/{roomId}/updates:
+     get:
+       summary: What needs this member in one room

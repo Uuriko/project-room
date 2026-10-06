@@ -20,7 +20,7 @@ export { ServiceError };
 import {
   applyEvent, emptyRoomState, event, EVENT_TYPES as T, WORK_STATES, INVITATION_ROLE_POLICIES,
   INVITATION_ROLE_POLICY_VERSION, INVITATION_ROLES,
-  MEMBERSHIP_AUTHORITY_POLICY_VERSION, DISPLAY_NAME_POLICY_VERSION, validId, memberCan, ROOM_POLICY_FIELDS, DEFAULT_CHANNEL_ID,
+  MEMBERSHIP_AUTHORITY_POLICY_VERSION, DISPLAY_NAME_POLICY_VERSION, PIN_DM_PARTY_POLICY_VERSION, validId, memberCan, ROOM_POLICY_FIELDS, DEFAULT_CHANNEL_ID,
   TRUST_OFF_CODE, trustOffMessage, firstBlockedWakeTarget,
   MAX_MESSAGE_BODY_CHARS, MAX_MESSAGE_COMMAND_BYTES
 } from "../src/events.js";
@@ -4515,6 +4515,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         }
       }
       const memberAuthorityEvent = [T.MEMBER_ADDED, T.MEMBER_ACCESS_CHANGED].includes(command.type);
+      // F-1 follow-up: stamp new pins with the DM-party policy version at
+      // live admission (both the pins route and direct /commands flow through
+      // here). The reducer enforces the party check only on stamped events,
+      // so pins recorded before the rule keep replaying.
+      const pinEvent = command.type === T.MESSAGE_PINNED;
       const incoming = event({
         type: bondEffect?.eventType ?? command.type, roomId, actorId: auth.member.id, at: new Date(this.now()).toISOString(),
         idempotencyKey: hash(`${auth.member.id}:${command.id}`), causationId: command.causationId,
@@ -4524,7 +4529,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
             authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION,
             ...(command.type === T.MEMBER_ADDED ? { displayNamePolicyVersion: DISPLAY_NAME_POLICY_VERSION } : {}),
           }
-          : requestMode ? { ...command.data, requestPolicyVersion: REPLY_POLICY_VERSION } : command.data
+          : requestMode ? { ...command.data, requestPolicyVersion: REPLY_POLICY_VERSION }
+          : pinEvent ? { ...command.data, pinDmPartyPolicyVersion: PIN_DM_PARTY_POLICY_VERSION }
+          : command.data
       });
       // A display name is checked before the reducer stores it. Exact
       // duplicates stay allowed: identity link already accepts two members

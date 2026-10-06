@@ -37,7 +37,9 @@ export const threadMutesSchema = `
 `;
 
 // Walk a message up to its thread root. Returns "" when the message is
-// unknown or the chain is broken; the caller turns that into a 404.
+// unknown (the caller turns that into a 404); a broken chain resolves to
+// the highest known ancestor, matching the readers in
+// server/notifications.mjs and server/human-push.mjs.
 function threadRootOf(messages, messageId) {
   const byId = new Map((messages ?? []).map(m => [m.id, m]));
   let node = byId.get(messageId);

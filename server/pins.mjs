@@ -64,7 +64,10 @@ export function setPin(store, token, roomId, data, expectedSessionBinding = null
     const message = room.state.messages.find(m => m.id === messageId);
     if (!message) fail(404, "message_not_found", "No such message in this room");
     // 409 on both write paths: the same refusal through `commands` is 409 command_rejected (store.command maps the reducer message).
-    if (data.pinned && (message.deletedAt || message.body == null)) fail(409, "message_deleted", "A deleted message cannot be pinned");
+    // Mirrors the pinMessage reducer's condition: a redacted-but-live message
+    // (body null, redacted true, no deletedAt — e.g. after an account-deletion
+    // log scrub + projection rebuild) is pinnable, only a tombstone is not.
+    if (data.pinned && (message.deletedAt || (message.body == null && message.redacted !== true))) fail(409, "message_deleted", "A deleted message cannot be pinned");
     return { pinned: Boolean(room.state.pins?.some(pin => pin.messageId === messageId)), viewerId: auth.member?.id };
   });
   let receipt = null;
