@@ -489,11 +489,17 @@ test("account-only confirmation preserves a newer login and retires a held priva
   phase = "second tab sign-out";
   const oldCookie = (await p.context().cookies()).find(cookie => cookie.name === "account_session");
   assert.ok(oldCookie); assert.ok(captured.cookie?.split("; ").includes(`account_session=${oldCookie.value}`));
-  const oldBinding = f.store.authenticateAccountSession(oldCookie.value).sessionBinding;
-  if (await other.locator("#session-menu-button").isVisible()) await other.locator("#session-menu-button").click();
-  const logoutResponse = other.waitForResponse(response => new URL(response.url()).pathname === "/api/account-session" && response.request().method() === "DELETE");
-  await clickChrome(other, "#signout-button"); assert.equal((await logoutResponse).status(), 200);
-  await other.locator('#auth-panel[aria-busy="false"]').waitFor();
+  const oldSlot = f.store.authenticateAccountSession(oldCookie.value);
+  const oldBinding = oldSlot.sessionBinding;
+  // Sign out through the same real credential API as the UI sign-out, but
+  // without the slow UI round-trips: the held confirmation must be released
+  // well before the client's 10s request deadline, or the browser aborts it
+  // and the response never reaches its contract ("closed before finish").
+  const signedOut = await other.context().request.delete(f.origin + "/api/account-session", {
+    headers: { Origin: f.origin, "X-CSRF-Token": oldSlot.csrf, "X-Session-Binding": oldSlot.sessionBinding },
+    data: { expectedSessionRevision: oldSlot.sessionRevision }
+  });
+  assert.equal(signedOut.status(), 200);
   phase = "second tab guest login";
   assert.equal(await p.locator("#auth-panel").isVisible(), false, "old account-only view awaits confirmation");
   const guest = f.store.accountForMember("commons", "guest");
