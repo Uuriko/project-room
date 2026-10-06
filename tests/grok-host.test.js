@@ -726,3 +726,25 @@ test("text claim posts the stored work-item id, not a lowercased copy", async t 
   assert.ok(urls.every(url => url.endsWith("/work-claims/ROLE-DRIVER/claim")), urls.join("\n"));
   assert.equal(JSON.stringify(first).includes(secret), false);
 });
+
+test("a playbook CLAIM line posts files and a lease, not a chat-only claim", async t => {
+  const directory = fixtureDir();
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  let posted;
+  const fetchImpl = async (url, init) => {
+    posted = { url: String(url), body: JSON.parse(init.body) };
+    return new Response(JSON.stringify({ id: "fo-matchmaking-land-20261005", state: "claimed", fileWarnings: [] }), { status: 200 });
+  };
+  const until = new Date(Date.now() + 3 * 3600000).toISOString();
+  const result = await handleTextCommand({
+    env: { ROOM_AGENT_CONFIG: directory },
+    fetchImpl,
+    line: `CLAIM fo-matchmaking-land-20261005 | files: server/a.mjs, server/b.mjs | lease until: ${until} | not touching: docs/x.md`,
+  });
+  assert.equal(result.verb, "claim");
+  assert.equal(result.workItemId, "fo-matchmaking-land-20261005");
+  assert.ok(posted.url.endsWith("/work-claims/fo-matchmaking-land-20261005/claim"));
+  assert.deepEqual(posted.body.files, ["server/a.mjs", "server/b.mjs"]);
+  assert.ok(posted.body.leaseHours >= 3 && posted.body.leaseHours <= 4);
+  assert.equal(JSON.stringify(result).includes(secret), false);
+});

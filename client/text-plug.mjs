@@ -11,11 +11,50 @@ function fail(code) {
   throw error;
 }
 
+export function leaseHoursFromUntil(iso, now = Date.now()) {
+  const end = Date.parse(iso);
+  if (!Number.isFinite(end)) fail("invalid_text_plug");
+  const hours = Math.ceil((end - now) / 3600000);
+  if (!Number.isInteger(hours) || hours < 1 || hours > 720) fail("invalid_text_plug");
+  return hours;
+}
+
+function parsePlaybookClaim(joined) {
+  const [head, ...segments] = joined.split("|").map(part => part.trim());
+  if (!head || head.length > 128 || /\s/.test(head)) fail("invalid_text_plug");
+  const files = [];
+  let leaseUntil;
+  for (const segment of segments) {
+    const split = segment.indexOf(":");
+    if (split < 1) fail("invalid_text_plug");
+    const key = segment.slice(0, split).trim().toLowerCase();
+    const value = segment.slice(split + 1).trim();
+    if (key === "files") {
+      for (const path of value.split(",").map(item => item.trim()).filter(Boolean)) {
+        if (path.length > 512 || path.startsWith("/") || path.split("/").includes("..")) fail("invalid_text_plug");
+        files.push(path);
+      }
+      if (files.length > 64) fail("invalid_text_plug");
+    } else if (key === "lease until") {
+      if (!Number.isFinite(Date.parse(value))) fail("invalid_text_plug");
+      leaseUntil = new Date(value).toISOString();
+    } else if (key === "not touching") {
+      continue;
+    } else fail("invalid_text_plug");
+  }
+  return {
+    verb: "claim",
+    workItemId: head,
+    ...(files.length ? { files: Object.freeze(files) } : {}),
+    ...(leaseUntil ? { leaseUntil } : {}),
+  };
+}
+
 export function parseRoomText(text) {
   if (typeof text !== "string") fail("invalid_text_plug");
   if (/pri_[A-Za-z0-9_-]{8,}/i.test(text)) fail("secret_in_text");
   const raw = text.trim().replace(/\s+/g, " ");
-  if (!raw || raw.length > 280) fail("invalid_text_plug");
+  if (!raw || raw.length > 1000) fail("invalid_text_plug");
   const rawParts = raw.split(" ");
   const lowerParts = rawParts.map(part => part.toLowerCase());
   const start = lowerParts[0] === "pr" || lowerParts[0] === "room" ? 1 : 0;
@@ -28,6 +67,8 @@ export function parseRoomText(text) {
     return { verb };
   }
   if (verb === "claim") {
+    const joined = restRaw.join(" ");
+    if (joined.includes("|")) return parsePlaybookClaim(joined);
     const id = restRaw[0];
     if (!id || restRaw.length !== 1 || id.length > 128) fail("invalid_text_plug");
     return { verb, workItemId: id };

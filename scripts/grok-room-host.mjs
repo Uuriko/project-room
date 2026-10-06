@@ -10,7 +10,7 @@ import {
   pendingWakeToItem, attentionKey, selectUnhandled, markHandled, setCursor, loadJournal,
   emptyJournal, buildRunPlan, assertPlanSafe, childEnvFor, emptyAttentionNext, countKinds
 } from "../client/grok-host.mjs";
-import { parseRoomText } from "../client/text-plug.mjs";
+import { leaseHoursFromUntil, parseRoomText } from "../client/text-plug.mjs";
 import { matchListings } from "../client/matchmaking.mjs";
 
 function fail(code, message) {
@@ -474,12 +474,15 @@ export async function fileAccessRequest({ env = process.env, fetchImpl = fetch, 
   return { ok: true, requestId: parsed.requestId || requestId, status: parsed.status, roomId: parsed.roomId || roomId };
 }
 
-export async function claimWork({ env = process.env, fetchImpl = fetch, workItemId, leaseHours, roomId } = {}) {
+export async function claimWork({ env = process.env, fetchImpl = fetch, workItemId, leaseHours, files, roomId } = {}) {
   const connection = connectionFromEnv(env);
   if (typeof workItemId !== "string" || workItemId.length < 1 || workItemId.length > 128) fail("invalid_attention_item", "workItemId required");
   const room = (typeof roomId === "string" && roomId) ? roomId : connection.roomId;
   const path = `/api/rooms/${encodeURIComponent(room)}/work-claims/${encodeURIComponent(workItemId)}/claim`;
-  const body = { ...(leaseHours === undefined ? {} : { leaseHours }) };
+  const body = {
+    ...(leaseHours === undefined ? {} : { leaseHours }),
+    ...(files === undefined ? {} : { files }),
+  };
   const parsed = await jsonRequest(connection, path, { fetchImpl, method: "POST", body });
   const token = connection.token;
   const safe = JSON.parse(JSON.stringify(parsed));
@@ -503,8 +506,11 @@ export async function handleTextCommand({ env = process.env, fetchImpl = fetch, 
     return { ok: true, verb: "pull", silent: result.silent, planned: result.planned.length };
   }
   if (parsed.verb === "claim") {
-    const result = await claimWork({ env, fetchImpl, workItemId: parsed.workItemId });
-    return { ok: true, verb: "claim", workItemId: result.workItemId, state: result.state };
+    const leaseHours = parsed.leaseUntil ? leaseHoursFromUntil(parsed.leaseUntil) : undefined;
+    const result = await claimWork({
+      env, fetchImpl, workItemId: parsed.workItemId, leaseHours, files: parsed.files,
+    });
+    return { ok: true, verb: "claim", workItemId: result.workItemId, state: result.state, fileWarnings: result.fileWarnings };
   }
   if (parsed.verb === "done") return { ok: true, verb: "done" };
   const hits = matchListings({ motive: parsed.motive, tags: parsed.tags }, listings);
