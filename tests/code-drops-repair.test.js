@@ -79,6 +79,14 @@ test("two reviewers with identical checks each get their own reply", async t => 
   // A retry of the current check is a no-op, not a fifth reply.
   assert.equal(store.codeDrops.check(reviewer, "commons", drop.id, same).status, "unchanged");
   assert.equal(store.room("commons").state.messages.filter(m => m.replyToId === drop.messageId).length, 4);
+  // Same history again under a frozen clock: every transition still replies.
+  const frozen = store.now; store.now = () => 1770000000000;
+  try {
+    for (const verdict of ["changes", "approve", "changes", "approve"]) {
+      store.codeDrops.check(reviewer, "commons", drop.id, verdict === "approve" ? same : { verdict: "changes", note: "one thing" });
+    }
+  } finally { store.now = frozen; }
+  assert.equal(store.room("commons").state.messages.filter(m => m.replyToId === drop.messageId).length, 8);
 });
 
 test("fetch refuses bytes that arrive without X-Content-SHA256", async t => {

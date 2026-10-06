@@ -344,7 +344,11 @@ export class CodeDrops {
         if (applies) parts.push(onBase ? `${applies} on ${short(onBase)}` : applies);
         if (tests) parts.push(`tests ${tests}`);
         const body = [parts.join(" · "), note].filter(Boolean).join("\n");
-        const stamp = createHash("sha256").update(JSON.stringify([auth.member.id, prior?.at ?? null, applies, onBase, tests, verdict, note])).digest("hex").slice(0, 12);
+        // The room sequence moves with every posted reply, so each new check
+        // gets its own id even when timestamps repeat; an exact retry of the
+        // current check returned "unchanged" above and never reaches here.
+        const transition = this.store.room(roomId).sequence;
+        const stamp = createHash("sha256").update(JSON.stringify([auth.member.id, transition, applies, onBase, tests, verdict, note])).digest("hex").slice(0, 12);
         this.store.command(token, roomId, {
           id: `code-check-${id}-${stamp}`, type: T.MESSAGE_POSTED,
           data: { messageId: `code-check-${id}-${auth.member.id}-${stamp}`.slice(0, 128), body, replyToId: row.message_id }
