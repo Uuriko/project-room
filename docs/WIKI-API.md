@@ -38,9 +38,14 @@ case-insensitively across all three planes.
   merging agent at merge time (`docs/ROOM-WIKI.md` is append-only by rule,
   enforced by `node scripts/check-wiki.mjs`), and procedures change through
   the normal PR process.
-- If the wiki planes are unreadable in a deployment (e.g. a runtime package
-  without `docs/`), every wiki route fails closed with
-  `503 wiki_unavailable` — never a dropped connection.
+- The planes are embedded at build time: `node scripts/wiki-build.mjs`
+  parses them into `server/wiki-data.mjs`, which is what the API serves —
+  in the Node server, the browser-gate runtime package, and the bundled
+  Cloudflare worker alike (the worker has no filesystem, so file reads
+  would 503 there). **After changing any wiki plane, run
+  `node scripts/wiki-build.mjs` and commit the regenerated
+  `server/wiki-data.mjs`.** `node scripts/wiki-build.mjs --check` (part of
+  `npm run check`) fails on a stale embed, so the served data cannot drift.
 - Contract tests: `tests/wiki-read-api.test.js`. Handler:
   `server/wiki-read-api.mjs` (prefix-delegated from `server/http.mjs`, same
-  shape as the growth surface).
+  shape as the growth surface); pure parsers in `server/wiki-parse.mjs`.

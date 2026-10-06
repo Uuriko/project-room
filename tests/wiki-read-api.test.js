@@ -10,14 +10,17 @@
 //  - GET /api/wiki/search?q=             search procedures + entries + runbooks; 400 without q
 //  - Non-GET on any wiki route           405 (read-only: no write API in W009)
 //  - Unknown wiki subpath                404 with the canonical error envelope
-//  - Unreadable wiki files               503 wiki_unavailable (fail closed, never a dropped connection)
+//  - Embedded data is current            regenerating from the docs planes reproduces
+//                                        server/wiki-data.mjs exactly (also a CI gate)
+//  - Worker-safe                         no filesystem reads, no eager import.meta.url
+//                                        resolution: serves in the bundled worker
 //
 // Test-audit gate: the observable contract is the public read API surface.
 // No existing test covers wiki serving (the wiki is docs-only today, and the
 // route-docs/invite-only gates extract from http.mjs literals, which the
-// prefix-delegated /api/wiki/ routes intentionally keep out of). The only
-// production seam is createWikiReadApi({ root }), which pins the fail-closed
-// 503 contract for deployments whose docs/ are absent.
+// prefix-delegated /api/wiki/ routes intentionally keep out of). The wiki
+// planes are embedded at build time (scripts/wiki-build.mjs), so there is no
+// production seam: the freshness test above is the staleness guard.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -28,12 +31,18 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import {
   createWikiReadApi,
+} from "../server/wiki-read-api.mjs";
+import {
   parseProcedures,
   parseRunbooks,
   parseWikiEntries,
   searchWiki,
   slugify,
-} from "../server/wiki-read-api.mjs";
+} from "../server/wiki-parse.mjs";
+import { WIKI_DATA } from "../server/wiki-data.mjs";
+import { buildWikiData } from "../scripts/wiki-build.mjs";
+import { dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 
 // ---------------------------------------------------------------------------
 // Pure parsers (fixture strings; no I/O).
@@ -296,16 +305,23 @@ test("GET /api/wiki/nope: unknown subpath is a 404 envelope", { timeout: 30000 }
   assertEnvelope(t, await res.json(), 404, "unknown wiki subpath");
 });
 
-test("unreadable wiki files fail closed with 503 (never a dropped connection)", () => {
-  const params = new URLSearchParams();
-  for (const root of [join(tmpdir(), "wiki-read-api-missing-root"), ""]) {
-    const api = createWikiReadApi({ root });
-    assert.throws(() => api.handle("/api/wiki/procedures", "GET", params), error => {
-      assert.equal(error.status, 503);
-      assert.equal(error.code, "wiki_unavailable");
-      return true;
-    });
-  }
-  const api = createWikiReadApi({ root: join(tmpdir(), "wiki-read-api-missing-root") });
-  assert.equal(api.handle("/api/other", "GET", params), null, "non-wiki paths fall through");
+test("embedded wiki data is current with the docs planes (build-time embed)", () => {
+  // The served data is generated, never hand-maintained: regenerating from
+  // the worktree's docs must reproduce server/wiki-data.mjs exactly, or the
+  // API would serve stale wiki content (the same check runs in CI via
+  // `node scripts/wiki-build.mjs --check`).
+  const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+  assert.deepEqual(buildWikiData(root), WIKI_DATA);
+});
+
+test("createWikiReadApi serves without a filesystem root (worker-safe)", () => {
+  // The handler takes no root and reads no files: in the bundled Cloudflare
+  // worker import.meta.url is undefined and there is no fs, so any eager
+  // path resolution at module-evaluation time would take the worker down
+  // (caught once by the cloudflare CI job).
+  const api = createWikiReadApi();
+  const reply = api.handle("/api/wiki/procedures", "GET", new URLSearchParams());
+  assert.equal(reply.status, 200);
+  assert.ok(reply.body.count > 0, "embedded procedures served");
+  assert.equal(api.handle("/api/other", "GET", new URLSearchParams()), null, "non-wiki paths fall through");
 });
