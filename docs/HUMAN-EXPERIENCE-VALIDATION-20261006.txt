@@ -29,3 +29,8 @@ Limits:
   sequences 1302–1305 are pending; plan refinements use existing reports and review.
   Signing/notarization, production deployment and real provider email access remain
   unverified. See HUMAN-EXPERIENCE-PLAN-20261006.txt section16 and MAC-POWER-PLAN.
+
+Post-checkpoint checks: CI-mode static check passes (syntax, lint, secret scan,
+route docs, wiki/docs links and contrast; intentionally does not rerun unit suite).
+Exact-commit cold runtime-package check passes after updating its tool-count contract
+for the two new assistant tools. Whole-suite limitations above remain unresolved.

@@ -145,3 +145,36 @@ https://developer.apple.com/documentation/security/hardened-runtime
 https://developer.apple.com/documentation/bundleresources/entitlements/com.apple.security.automation.apple-events
 Apple: SIP also applies to administrative processes
 https://support.apple.com/guide/security/system-integrity-protection-secb7ea06b49/web
+
+
+WEB + NATIVE PLATFORM — REFINED AFTER JOHN'S FOLLOW-UP
+
+The Mac app is a substantial native product, not permanently a web shell. It provides
+computer permission setup, device identity, background execution, native app tools,
+local/private context, account credentials, agent hosts, journal/recovery and emergency
+pause. It can still reuse the shared conversation UI to preserve web/desktop parity.
+
+The webapp is a full control surface for cloud tools and enrolled devices. Email/cloud
+connectors, hosted jobs and agent coordination can run through the authenticated server
+without a desktop install. Browser-only selected-file access and explicit screen sharing
+are possible; broad OS app control, arbitrary filesystem/shell access and unattended
+local execution require an installed authorized native component.
+
+Use an owner-enrolled outbound authenticated device connection/pull channel to the
+Room server. The web submits owner-authorized jobs bound to account/device/room/run/
+attempt/policy revision; the native broker performs the actual operation and returns
+scoped results. Both interfaces share the same tools and authority checks. No inbound
+public port, untrusted website-to-shell bridge or automatic sharing of personal data.
+A connected Mac can keep working when its Room window is closed, with explicit
+background enablement. Show offline/asleep/disconnected honestly; do not imply a web
+request can wake or execute on every sleeping computer.
+
+A browser extension is an optional browser-control adapter. Chrome Native Messaging
+connects an extension to an installed native host; it is not a standalone website API
+or a substitute for installing the helper. Use extension/service-worker validation and
+authenticated owner grants. Browser page content remains untrusted.
+
+Browser documentation:
+https://developer.mozilla.org/en-US/docs/Web/API/File_System_API
+https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/getDisplayMedia
+https://developer.chrome.com/docs/extensions/develop/concepts/native-messaging
