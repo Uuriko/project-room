@@ -894,7 +894,16 @@
   "tests/human-push-preferences.test.js": 529.707,
   "tests/read-cursor-unify.test.js": 65.47,
   "tests/squads-ui.test.js": 68.693,
-  "tests/squads.test.js": 602.751
+  "tests/squads.test.js": 602.751,
+  "tests/buyer-offer-http.test.js": 431,
+  "tests/buyer-signoff.test.js": 423,
+  "tests/demigod-contracts.test.js": 382,
+  "tests/demigod-jobs-money.test.js": 82,
+  "tests/demigod-offers.test.js": 419,
+  "tests/trial-task-http.test.js": 4332,
+  "tests/trial-tasks.test.js": 84,
+  "tests/vetting-receipts.test.js": 95
  },
- "_note": "Per-file wall-clock ms of `node --test <file>` measured 2026-10-06 on a 2-CPU host with 16-way parallelism (values are contention-inflated; used only as relative weights for shard balancing, never for membership). Files hitting the 300s measurement timeout are capped at 300000."
+ "_note": "Per-file wall-clock ms of `node --test <file>` measured 2026-10-06 on a 2-CPU host with 16-way parallelism (values are contention-inflated; used only as relative weights for shard balancing, never for membership). Files hitting the 300s measurement timeout are capped at 300000.",
+ "releaseRecordMeasurement": "Eight record-rail files measured on macOS Node26, four concurrent real Node processes, 2026-10-06; all eight passed. Timing allocates files only."
 }
