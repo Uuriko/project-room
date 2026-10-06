@@ -14,6 +14,7 @@
 //   - lastProgress is null until AX-1 claim activity exists.
 
 import { getTier } from "./autonomy-tiers.mjs";
+import { claimUpdatedAt } from "./work-claims.mjs";
 import { isRunningSession, sessionRecord } from "../src/work-item-session.js";
 
 export const FLEET_STATES = Object.freeze(["removed", "halted", "read_only", "over_budget", "paused", "waiting_for_you", "stuck", "working", "idle"]);
@@ -21,6 +22,9 @@ const ACTIVE_CLAIM_STATES = new Set(["claimed", "in_progress", "blocked"]);
 const DAY_MS = 86_400_000;
 const SPEND_DAYS = 7;
 const OUTCOME_DAYS = 30;
+// A held, unblocked claim with no room-visible activity for this long is
+// flagged claim_idle, so silent holds surface before the lease lapses.
+export const CLAIM_IDLE_MS = 2 * 3_600_000;
 
 const ms = value => {
   const parsed = typeof value === "string" ? Date.parse(value) : NaN;
@@ -123,6 +127,15 @@ function currentClaimOf(claims, memberId) {
   return claim ? { claimId: claim.id, title: claim.title ?? claim.id, state: claim.state, leaseExpiresAt: claim.leaseExpiresAt ?? null, untrusted: true } : null;
 }
 
+// One rule for the fleet badge and the needs-me inbox: a held claim is idle
+// when its own stamps (claim, renew, update) are 2h old. Room chatter does
+// not count; renew with a progress message (or update the claim) to clear it.
+export function claimIdle(claim, nowMs) {
+  if (!claim || claim.state === "blocked") return false;
+  const touched = Math.max(ms(claimUpdatedAt(claim)) ?? 0, ms(claim.leaseStartAt) ?? 0, ms(claim.claimedAt) ?? 0);
+  return touched > 0 && nowMs - touched >= CLAIM_IDLE_MS;
+}
+
 // Who may read which rows: the room owner and delegated admins see every
 // agent; a human sees the agents they sponsor; anyone else is refused.
 export function fleetScope(state, viewerId) {
@@ -166,6 +179,7 @@ export function fleetRows(store, roomId, room, { memberIds = null } = {}) {
     if (member.system === true) badges.push("system");
     if (currentClaim?.state === "blocked") badges.push("claim_blocked");
     if (currentClaim?.leaseExpiresAt && (ms(currentClaim.leaseExpiresAt) ?? Infinity) <= nowMs) badges.push("lease_expired");
+    else if (currentClaim && claimIdle(claims.find(claim => claim.id === currentClaim.claimId), nowMs)) badges.push("claim_idle");
     if ((wakes.dead.get(member.id) ?? 0) > 0) badges.push("wake_failed");
     return {
       memberId: member.id,

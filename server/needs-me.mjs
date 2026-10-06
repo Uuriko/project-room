@@ -18,6 +18,7 @@ import { nextWorkStep } from "../src/workflow.js";
 import { retiredNeedsMeKeys } from "./updates.mjs";
 import { mayWriteWorkClaims } from "./work-claim-routes.mjs";
 import { claimUpdatedAt, isHardWork, resolveNamedReviewers, hasCurrentReview } from "./work-claims.mjs";
+import { claimIdle } from "./agent-fleet.mjs";
 
 const MAX_ROOMS = 40;
 const MAX_PER_KIND = 8;
@@ -29,6 +30,9 @@ const MAX_ITEMS = 100;
 // items, never moves the cursor, and shows even when nothing else is new.
 const OPEN_WORK_SHOWN = 3;
 const OPEN_WORK_TITLE = 80;
+const MY_WORK_SHOWN = 5;
+const MY_ACTIVE_STATES = new Set(["claimed", "in_progress"]);
+export const LEASE_SOON_MS = 3_600_000;
 const MENTION_WINDOW = 100;
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
@@ -360,6 +364,34 @@ export function reviewAsksOf(store, roomId, memberId, authority) {
   };
 }
 
+// The caller's own held claims that need attention, so the one inbox carries
+// them: a lease that lapses within the hour, or a claim idle for 2h
+// (agent-fleet claimIdle). Reviews owed are reviewAsks (rev-<memberId>,
+// hw-h2-needs-me-review-asks), not repeated here. Standing state like
+// openWork: never moves the cursor.
+export function myWorkOf(store, roomId, memberId, nowMs = Date.now()) {
+  let list;
+  try { list = store.workClaims?.list(roomId) ?? []; } catch { return null; }
+  const title = item => String(item.title ?? item.id).slice(0, OPEN_WORK_TITLE);
+  const rows = [];
+  for (const item of list) {
+    if (!item || !MY_ACTIVE_STATES.has(item.state)) continue;
+    if (item.owner === memberId) {
+      const left = item.leaseExpiresAt ? Date.parse(item.leaseExpiresAt) - nowMs : NaN;
+      if (left > 0 && left <= LEASE_SOON_MS) {
+        rows.push({ id: item.id, title: title(item), why: "lease_expiring", minutesLeft: Math.ceil(left / 60000) });
+      } else if (claimIdle(item, nowMs)) {
+        const idleMinutes = Math.round((nowMs - Date.parse(claimUpdatedAt(item) || item.claimedAt)) / 60000);
+        rows.push({ id: item.id, title: title(item), why: "claim_idle", ...(Number.isFinite(idleMinutes) ? { idleMinutes } : {}) });
+      }
+    }
+  }
+  if (!rows.length) return null;
+  const rank = { lease_expiring: 0, claim_idle: 1 };
+  rows.sort((a, b) => rank[a.why] - rank[b.why] || String(a.id).localeCompare(String(b.id)));
+  return { roomId, count: rows.length, top: rows.slice(0, MY_WORK_SHOWN) };
+}
+
 export function collectNeedsMe(store, secret, { since } = {}) {
   let identity = null;
   let allowedRooms = null;
@@ -389,6 +421,7 @@ export function collectNeedsMe(store, secret, { since } = {}) {
   const pendingBonds = store.bonds.pendingProposalsFor(identity.identityId);
   const openWork = [];
   const reviewAsks = [];
+  const myWork = [];
   let roomAfter = parsed.roomAfter ?? "";
   let hasMore = links.length > MAX_ROOMS;
   for (const link of links.slice(0, MAX_ROOMS)) {
@@ -403,6 +436,8 @@ export function collectNeedsMe(store, secret, { since } = {}) {
     if (open) openWork.push(open);
     const asks = reviewAsksOf(store, link.roomId, link.memberId, authority);
     if (asks) reviewAsks.push(asks);
+    const mine = myWorkOf(store, link.roomId, link.memberId);
+    if (mine) myWork.push(mine);
     const after = roomWatermark(parsed, link.roomId);
     const landAfter = landWatermark(parsed, link.roomId);
     let through = mentionHorizon(store, link.roomId, link.memberId, after, Math.max(after, authority.sequence));
@@ -449,5 +484,5 @@ export function collectNeedsMe(store, secret, { since } = {}) {
   // Retain the old rooms/land shape and extend it only for continuation/ties.
   const cursor = { rooms, land, landIds, ...(parsed.number !== null ? { floor: parsed.number } : {}), ...(hasMore ? { roomAfter } : {}) };
   items.sort((a, b) => a.roomId.localeCompare(b.roomId) || b.seq - a.seq);
-  return { identityId: identity.identityId, items, ...(openWork.length ? { openWork } : {}), ...(reviewAsks.length ? { reviewAsks } : {}), cursor, hasMore, untrusted: true };
+  return { identityId: identity.identityId, items, ...(openWork.length ? { openWork } : {}), ...(reviewAsks.length ? { reviewAsks } : {}), ...(myWork.length ? { myWork } : {}), cursor, hasMore, untrusted: true };
 }
