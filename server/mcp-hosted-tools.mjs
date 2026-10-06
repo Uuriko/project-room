@@ -167,7 +167,14 @@ export const hostedRoomTools = [
     itemId: { ...idField, description: "Land queue item id." },
     sourceRevision: { type: "string", minLength: 1, maxLength: 200 },
     buildId: { type: "string", minLength: 1, maxLength: 200 }
-  }, ["roomId", "itemId"]), false)
+  }, ["roomId", "itemId"]), false),
+  tool("squads_list", "List the squads in a room: id, name, goal, members, channel (the thread-root message id), owner, and state. Same call as GET /api/rooms/:roomId/squads. @squad/<name> in a message fans out to every active member. This read does not create, change, or disband a squad.", schema({
+    roomId: roomIdField
+  }, ["roomId"])),
+  tool("squads_get", "Read one squad by id or name: goal, member roster, channel thread, owner, and state. Same call as GET /api/rooms/:roomId/squads/:squadId. This read does not change the squad.", schema({
+    roomId: roomIdField,
+    squadId: { ...idField, description: "Squad id (sq_...) or squad name." }
+  }, ["roomId", "squadId"]))
 
 ];
 

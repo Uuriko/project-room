@@ -153,6 +153,7 @@ import { ReferralInvites, referralInviteSchema } from "./referral-invites.mjs";
 import { ThreadMutes, threadMutesSchema } from "./thread-mutes.mjs"; // Per-thread mutes: private side table, additive.
 import { HumanPush, humanPushSchema, humanPushPrefsSchema } from "./human-push.mjs";
 import { ensurePayoutColumns, ensureGrowthFundingColumn } from "./growth-loop.mjs";
+import { squadSchema, squadMentionTargets } from "./squads.mjs";
 import { Referrals, referralSchema } from "./referrals.mjs";
 import { AccountLoginMethods, accountLoginMethodsSchema, ensureVerifiedEmailSchema } from "./account-login-methods.mjs";
 import { verifyTextCompletion, selectedWorkResult } from "./text-results.mjs";
@@ -976,7 +977,8 @@ const workSessionsNext = (roomId, sessions) => {
 // Agent members a message.posted would wake: @mentions resolved the same way
 // as wake-on-mention (member id and display name, not identity aliases) plus
 // a DM addressed to an agent. Order is first appearance. The sender is never a target.
-function agentWakeTargets(state, senderMemberId, data) {
+// plan-squads: @squad/<name> also wakes agent members of the squad when db is passed.
+function agentWakeTargets(state, senderMemberId, data, db = null, roomId = "") {
   const members = state?.members ?? {};
   const targets = new Map();
   const body = typeof data?.body === "string" ? data.body : "";
@@ -984,6 +986,12 @@ function agentWakeTargets(state, senderMemberId, data) {
     if (members[memberId]?.kind !== "agent") continue;
     if (data?.toMemberId && data.toMemberId !== memberId) continue;
     if (!targets.has(memberId)) targets.set(memberId, "mention");
+  }
+  if (db) {
+    for (const memberId of squadMentionTargets(db, roomId, body, senderMemberId, members, data?.toMemberId)) {
+      if (members[memberId]?.kind !== "agent") continue;
+      if (!targets.has(memberId)) targets.set(memberId, "squad-mention");
+    }
   }
   const dmId = typeof data?.toMemberId === "string" ? data.toMemberId : "";
   const dm = dmId ? members[dmId] : null;
@@ -993,8 +1001,8 @@ function agentWakeTargets(state, senderMemberId, data) {
   return targets;
 }
 
-function agentWakeTargetIds(state, senderMemberId, data) {
-  return [...agentWakeTargets(state, senderMemberId, data).keys()];
+function agentWakeTargetIds(state, senderMemberId, data, db = null, roomId = "") {
+  return [...agentWakeTargets(state, senderMemberId, data, db, roomId).keys()];
 }
 
 // ensure*Schema helpers the full schema pass runs (ALTER-based convergence
@@ -1033,7 +1041,7 @@ function roomSchemaStamp() {
     landQueueSchema, inboxAttachmentBytesSchema, membersDirectorySchema, channelJournalSchema,
     telegramLiveStatusSchema, spamQuarantineSchema, jevShadowSchema, dmConsentSchema, bondSchema,
     roomPublicFaceSchema, roomDirectorySchema, guestInviteSchema, guestSelfServeSchema,
-    webFetchSchema, webResearchSchema, mentionStateSchema, activitySchema, threadMutesSchema,
+    webFetchSchema, webResearchSchema, mentionStateSchema, activitySchema, threadMutesSchema, squadSchema,
     humanPushSchema, humanPushPrefsSchema, quarantineThreadSplitSchema, slaBreachAlertSchema, inboxHandoffSchema,
     inboxHandoffRoomSchema, handoffEnvelopeSchema, agentPluginSchema, inboxCollabSchema,
     moderationSchema, accountTermsSchema, publicAbuseSchema, publicUnpublishSchema,
@@ -1566,6 +1574,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // bump, intentionally outside the writer fence. DDL matches the
       // attention slice's table so the two converge on merge.
       this.db.exec(threadMutesSchema);
+      // Squads (plan-squads). Purely additive side table (no events, no
+      // projection impact): IF NOT EXISTS is idempotent, no schema version
+      // bump, registered in writer-fence unfencedAdditiveTables.
+      this.db.exec(squadSchema);
       // Human browser push subscriptions. Purely additive side table (no
       // events, no projection impact): IF NOT EXISTS is idempotent, no
       // schema version bump, intentionally outside the writer fence.
@@ -4446,7 +4458,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // lands. The wake is skipped and the result carries a note. Assign
       // stays blocked in the reducer.
       const skippedWakes = command.type === T.MESSAGE_POSTED
-        ? agentWakeTargetIds(room.state, auth.member.id, command.data)
+        ? agentWakeTargetIds(room.state, auth.member.id, command.data, this.db, roomId)
           .filter(id => firstBlockedWakeTarget(room.state, auth.member.id, [id]))
         : [];
       const target = room.state.members[command.data.memberId];
@@ -4838,7 +4850,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // agent identity. Never throws for unparseable input — a mention that
   // resolves to nobody (or to an online agent) is simply not woken.
   maybeWakeOnMention(roomId, state, senderMemberId, data, eventId) {
-    const targets = agentWakeTargets(state, senderMemberId, data);
+    const targets = agentWakeTargets(state, senderMemberId, data, this.db, roomId);
     if (targets.size === 0) return;
     const linkOf = this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?");
     for (const [memberId, kind] of targets) {
@@ -4907,6 +4919,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     const toMemberId = typeof data.toMemberId === "string" ? data.toMemberId : "";
     for (const memberId of resolveMentionTargetsInText(members, identityNames, body, senderMemberId)) {
       if (toMemberId && toMemberId !== memberId) continue;
+      insert.run(roomId, eventId, memberId, "delivered", nowMs, nowMs + timeoutMs);
+    }
+    // plan-squads: @squad/<name> fans out to one mention row per active
+    // member (INSERT OR IGNORE dedupes against direct mentions). The
+    // mention lifecycle owns delivery/ack/timeout from here.
+    for (const memberId of squadMentionTargets(this.db, roomId, body, senderMemberId, members, data.toMemberId)) {
       insert.run(roomId, eventId, memberId, "delivered", nowMs, nowMs + timeoutMs);
     }
     // COMMS-02: warn the poster about @handles whose target is ambiguous

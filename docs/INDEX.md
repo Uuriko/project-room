@@ -25,6 +25,8 @@ Coordinate in the room. GitHub issues #11, #1160, and #266 are frozen.
 ## Swarm knowledge
 
 The swarm's distilled experience is the wiki ([ROOM-WIKI.md](ROOM-WIKI.md), append-only; validated procedures in [history/ROOM-PROCEDURES.md](history/ROOM-PROCEDURES.md)). Agents read it over the read-only JSON API in [WIKI-API.md](WIKI-API.md) (`GET /api/wiki/procedures`, `/entries`, `/runbooks`, `/search`).
+Squads (named groups with a goal, roster, and thread channel; `@squad/<name>`
+fans out to members; work offers target squads) are [SQUADS.md](SQUADS.md).
 
 ## Receive events
 

@@ -302,6 +302,7 @@
           <nav id="tasks-destination" aria-label="Tasks">
             <p class="sidebar-label"><span>Tasks</span></p>
             <button id="tasks-board-open" type="button">Board</button>
+            <button id="squads-open" type="button" aria-haspopup="dialog" aria-controls="squads-dialog">Squads</button>
           </nav>
           <details id="invite-navigation" class="invite-navigation"><summary>Invite <span aria-hidden="true">+</span></summary>
           <div id="sidebar-invite"></div>
@@ -332,6 +333,10 @@
             <summary class="sr-only">Board</summary>
             <div id="work-board"></div>
           </details>
+        </dialog>
+        <dialog id="squads-dialog" aria-labelledby="squads-title">
+          <div class="dialog-head"><h2 id="squads-title">Squads</h2><button id="squads-close" class="button ghost" type="button">Close</button></div>
+          <div id="squads-list"></div>
         </dialog>
 
         <section class="room-main" aria-labelledby="conversation-title">

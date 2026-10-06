@@ -407,7 +407,12 @@ export const unfencedAdditiveTables = Object.freeze([
   // operator_actions (CP-ADMIN-0): append-only operator audit. Purely additive
   // and intentionally NOT fenced — older writers have no path to it. The
   // append-only triggers are the integrity gate.
-  "operator_actions"
+  "operator_actions",
+  // squads (plan-squads): named groups with goal, roster, and thread channel.
+  // Purely additive and intentionally NOT fenced — older writers have no code
+  // path to it; the owner-managed roster rules in server/squads.mjs are the
+  // integrity gate.
+  "squads"
 ]);
 // Created on first use, not in the constructor. A database that has never
 // issued an OAuth grant or persisted an abuse rate bucket does not have

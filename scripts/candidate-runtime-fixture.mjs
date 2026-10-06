@@ -117,6 +117,8 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/room-guide.mjs'); // ACT-1a: Room Guide (imported by cloudflare/room.mjs and server/starter-room.mjs)
   paths.add('server/starter-room.mjs'); // ACT-1a: starter seed (imported by server/room-lifecycle.mjs)
   paths.add('server/pins.mjs');
+  paths.add('server/squads.mjs'); // plan-squads: squad roster + thread channel (imported by server/http.mjs, server/store.mjs, server/mcp-room-profile.mjs, server/work-claim-routes.mjs)
+  paths.add('src/squads-ui.js'); // plan-squads: read-only squad roster panel (lazy-loaded by src/app.js)
   paths.add('server/typing.mjs'); // ephemeral typing heartbeats (imported by server/http.mjs)
   paths.add('server/required-reading.mjs'); // W012: per-lane required reading (imported by server/work-claim-routes.mjs)
   paths.add('server/account-login-methods.mjs'); // Multi-method login model (imported by server/store.mjs)
