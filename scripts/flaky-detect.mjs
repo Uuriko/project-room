@@ -53,10 +53,32 @@ function runOnce(file, { timeout = DEFAULT_TIMEOUT_MS, env = process.env } = {})
       clearTimeout(timer);
       const tests = new Map();
       // TAP assertion lines: "ok 1 - name" / "not ok 1 - name", possibly indented (subtests).
+      // Identity is hierarchy-aware: the "# Subtest: <name>" comment lines
+      // the TAP reporter emits before each test block push an ancestor frame,
+      // so two subtests with the same (indent, number, name) under different
+      // parents never merge into one record (a stable subtest would otherwise
+      // be misreported as flaky, and the real culprit's parent invisible).
+      // Assertion numbers stay in the key so duplicate names under one parent
+      // still get distinct identities.
+      const stack = []; // { indent: number, name: string }
       for (const line of stdout.split('\n')) {
+        const subComment = line.match(/^(\s*)# Subtest:\s*(.*)$/);
+        if (subComment) {
+          const indent = subComment[1].length;
+          while (stack.length > 0 && stack[stack.length - 1].indent >= indent) stack.pop();
+          stack.push({ indent, name: subComment[2].trim() });
+          continue;
+        }
         const m = line.match(/^(\s*)(not )?ok (\d+) - (.*)$/);
         if (m) {
-          const key = `${m[1]}${m[3]} - ${m[4].trim()}`;
+          const indent = m[1].length;
+          const name = m[4].trim();
+          while (stack.length > 0 && stack[stack.length - 1].indent > indent) stack.pop();
+          // The test's own "# Subtest:" frame is not an ancestor of itself.
+          if (stack.length > 0 && stack[stack.length - 1].indent === indent && stack[stack.length - 1].name === name) stack.pop();
+          const key = stack.length > 0
+            ? `${stack.map((f) => f.name).join(' > ')} > ${m[3]} - ${name}`
+            : `${m[3]} - ${name}`;
           tests.set(key, !m[2]);
         }
       }
@@ -128,18 +150,22 @@ function formatReport(result, { json = false } = {}) {
 }
 
 function parseArgs(argv) {
-  const opts = { runs: DEFAULT_RUNS, timeout: DEFAULT_TIMEOUT_MS, json: false, file: null };
+  const opts = { runs: DEFAULT_RUNS, timeout: DEFAULT_TIMEOUT_MS, json: false, file: null, runsSet: false };
   for (const arg of argv) {
     if (arg === '--json') opts.json = true;
-    else if (arg.startsWith('--runs=')) opts.runs = parseInt(arg.slice(7), 10);
+    else if (arg.startsWith('--runs=')) { opts.runs = parseInt(arg.slice(7), 10); opts.runsSet = true; }
     else if (arg.startsWith('--timeout=')) opts.timeout = parseInt(arg.slice(10), 10);
     else if (arg.startsWith('--')) throw new Error(`unknown flag: ${arg}`);
     else if (opts.file === null) opts.file = arg;
-    else if (Number.isInteger(parseInt(arg, 10)) && String(opts.runs) === String(DEFAULT_RUNS)) opts.runs = parseInt(arg, 10);
+    // A bare positional run count is only accepted when --runs was not given:
+    // "--runs=5 file 7" and "file 5 7" are contradictions, not overrides.
+    // /^\d+$/ (not parseInt) so "5x" is rejected instead of silently read as 5.
+    else if (/^\d+$/.test(arg) && !opts.runsSet) { opts.runs = parseInt(arg, 10); opts.runsSet = true; }
     else throw new Error(`unexpected argument: ${arg}`);
   }
   if (!opts.file) throw new Error('usage: node scripts/flaky-detect.mjs <test-file> [runs] [--runs=N] [--timeout=ms] [--json]');
   if (!Number.isInteger(opts.runs) || opts.runs < 2) throw new Error('runs must be an integer >= 2');
+  if (!Number.isInteger(opts.timeout) || opts.timeout <= 0) throw new Error('timeout must be a positive integer of ms');
   return opts;
 }
 
