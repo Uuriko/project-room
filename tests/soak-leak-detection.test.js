@@ -7,7 +7,7 @@
 //
 // Without (1) and (3) the harness could be "green-always" and never catch a
 // real leak or rejection; without (2) it could be "red-always". Each test
-// boots the real server (scripts/soak-test.mjs) with a scratch database, so
+// boots the real server (scripts/soak-run.mjs) with a scratch database, so
 // nothing here touches production state or server behavior — the preload is
 // observe-only and fault injection lives entirely in the harness.
 import { test } from "node:test";

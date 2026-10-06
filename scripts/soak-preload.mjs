@@ -1,7 +1,7 @@
 // Q007 soak harness — server-side instrumentation (observe-only).
 //
 // Loaded into the server process with `node --import scripts/soak-preload.mjs`
-// by scripts/soak-test.mjs. It changes nothing about how the server handles
+// by scripts/soak-run.mjs. It changes nothing about how the server handles
 // requests; it only samples the event loop, heap, and file descriptors, and
 // records unhandled rejections. All samples are appended as NDJSON to the
 // file in SOAK_METRICS_PATH.

@@ -37,7 +37,7 @@ jobs:
           SOAK_CRASH_RECOVERY: "1"
           SOAK_CRASH_AT_S: "300"
           SOAK_REPORT_PATH: ${{ github.workspace }}/soak-report.json
-        run: node scripts/soak-test.mjs
+        run: node scripts/soak-run.mjs
       - name: upload soak report
         if: always()
         uses: actions/upload-artifact@b5c5fca5f78071c0d17c0d02a9e0dcf5e5e1 # v4

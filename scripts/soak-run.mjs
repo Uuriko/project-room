@@ -6,8 +6,8 @@
 // file-descriptor growth, unhandled rejections, and crashes.
 //
 // Usage:
-//   SOAK_DURATION_S=900 SOAK_LOAD_RPS=10 node scripts/soak-test.mjs
-//   SOAK_DURATION_S=86400 node scripts/soak-test.mjs   # the full 24 h run
+//   SOAK_DURATION_S=900 SOAK_LOAD_RPS=10 node scripts/soak-run.mjs
+//   SOAK_DURATION_S=86400 node scripts/soak-run.mjs   # the full 24 h run
 //
 // Exit code: 0 = PASS, 1 = FAIL (threshold exceeded, rejection, or crash),
 //            2 = harness error (could not boot the server, etc).

@@ -10,7 +10,7 @@ loaded into the server process with `node --import` (see
 
 | File | Role |
 |---|---|
-| `scripts/soak-test.mjs` | Orchestrator: boots the server on a scratch DB, drives load, evaluates, writes the report, exits 0/1/2 |
+| `scripts/soak-run.mjs` | Orchestrator: boots the server on a scratch DB, drives load, evaluates, writes the report, exits 0/1/2 |
 | `scripts/soak-preload.mjs` | Observe-only in-process instrumentation (lag sampler, heap/FD samples, rejection recorder) + fault-injection flags for the failing-first proof |
 | `tests/soak-leak-detection.test.js` | node:test: proves the harness FAILS on an injected leak, PASSES clean, FAILS on an injected rejection |
 | `.github/workflows/soak-test.yml` | CI job: the bounded 15-minute version, weekly + manual |
@@ -19,13 +19,13 @@ loaded into the server process with `node --import` (see
 
 ```sh
 # 15-minute bounded run (what CI does)
-SOAK_DURATION_S=900 SOAK_LOAD_RPS=10 SOAK_CRASH_RECOVERY=1 node scripts/soak-test.mjs
+SOAK_DURATION_S=900 SOAK_LOAD_RPS=10 SOAK_CRASH_RECOVERY=1 node scripts/soak-run.mjs
 
 # short local smoke (~40 s)
-SOAK_DURATION_S=40 SOAK_LOAD_RPS=5 node scripts/soak-test.mjs
+SOAK_DURATION_S=40 SOAK_LOAD_RPS=5 node scripts/soak-run.mjs
 
 # failing-first proof by hand: this MUST exit 1 with a heap-growth failure
-SOAK_DURATION_S=45 SOAK_INJECT_LEAK=1 SOAK_MAX_HEAP_GROWTH_MB=8 node scripts/soak-test.mjs
+SOAK_DURATION_S=45 SOAK_INJECT_LEAK=1 SOAK_MAX_HEAP_GROWTH_MB=8 node scripts/soak-run.mjs
 ```
 
 The report lands at `$SOAK_REPORT_PATH` (default: a fresh temp dir) as
@@ -62,7 +62,7 @@ persistent machine:
 SOAK_DURATION_S=86400 SOAK_LOAD_RPS=10 SOAK_CRASH_RECOVERY=1 \
   SOAK_CRASH_AT_S=43200 \
   SOAK_REPORT_PATH=~/soak-24h-report.json \
-  node scripts/soak-test.mjs
+  node scripts/soak-run.mjs
 ```
 
 Expect roughly: heap growth well under 25 MB (a healthy run stays nearly
