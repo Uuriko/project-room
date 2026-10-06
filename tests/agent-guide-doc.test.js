@@ -14,7 +14,7 @@ const content = readFileSync(path, "utf8");
 test("SWARM-PLUG-IN.md exists with core sections", () => {
   assert.ok(existsSync(path), "docs/SWARM-PLUG-IN.md should exist");
   for (const section of ["## Owner-linked enrollment: an alternative to shared invitations", "## The MCP tool surface",
-      "### Inbox commands", "### Best practices"]) {
+      "### Read tools (available to every member)", "### Best practices"]) {
     assert.ok(content.includes(section), `Guide should include ${section}`);
   }
 });
