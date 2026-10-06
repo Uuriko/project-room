@@ -77,11 +77,27 @@ function mentionCandidates(members, identityNames) {
   return candidates;
 }
 
+function uniqueTargets(candidates, senderMemberId) {
+  if (!candidates.length) return [];
+  const rank = Math.min(...candidates.map(c => c.rank));
+  const tier = candidates.filter(c => c.rank === rank);
+  // The sender in the best tier (a self-mention, or a tie with the sender)
+  // resolves to nobody, exactly as before G16b.
+  if (tier.some(c => c.memberId === senderMemberId)) return [];
+  const ids = new Set(tier.map(c => c.memberId));
+  if (ids.size === 1) return [[...ids][0]];
+  // AUX-21 / G16b: legacy duplicate display names in the room (e.g. multiple Instinct members).
+  // When an exact display name match (rank 1) has multiple active non-sender candidates,
+  // notify all matching candidates so no active agent misses the wake.
+  if (ids.size > 1 && rank === 1) {
+    return [...ids];
+  }
+  return [];
+}
+
 function uniqueTarget(candidates, senderMemberId) {
-  if (!candidates.length) return null;
-  const rank = Math.min(...candidates.map(candidate => candidate.rank));
-  const ids = new Set(candidates.filter(candidate => candidate.rank === rank).map(candidate => candidate.memberId));
-  return ids.size === 1 && !ids.has(senderMemberId) ? [...ids][0] : null;
+  const targets = uniqueTargets(candidates, senderMemberId);
+  return targets.length ? targets[0] : null;
 }
 
 export function resolveMentionTarget(members, identityNames, name, senderMemberId) {
@@ -130,8 +146,69 @@ export function resolveMentionTargetsInText(members, identityNames, text, sender
       if (candidate.lower.length > longest) { matches = []; longest = candidate.lower.length; }
       if (candidate.lower.length === longest) matches.push(candidate);
     }
-    const target = uniqueTarget(matches, senderMemberId);
-    if (target && !found.includes(target)) found.push(target);
+    const targets = uniqueTargets(matches, senderMemberId);
+    for (const target of targets) {
+      if (!found.includes(target)) found.push(target);
+    }
   }
   return found;
+}
+
+// COMMS-02: per-handle mention warnings for the poster. An @mention whose
+// target is unclear deserves a nudge so the poster can disambiguate. Uses the
+// exact longest-label-first scan as resolveMentionTargetsInText:
+//   - "ambiguous": the handle matches 2+ distinct active members at the best
+//     rank (the P5 two-members-named-Instinct case). Post-G16b an exact
+//     display-name duplicate notifies ALL of them, and a prefix tie notifies
+//     nobody — either way the target is genuinely ambiguous, so the warning
+//     fires and candidates name each member ({memberId, displayName}).
+//   - "not_member": the handle matches no active member at all.
+// Handles that resolve to exactly one member carry no warning, and a handle
+// whose only match is the sender is intentional self-silence, not a warning.
+// Silent @_mentions and email addresses are skipped like delivery. Pure and
+// frozen; never throws for unparseable input.
+export function mentionTargetWarnings(members, identityNames, text, senderMemberId) {
+  if (typeof text !== "string" || text.length === 0 || text.length > MAX_MESSAGE_BODY_CHARS) return [];
+  const candidates = mentionCandidates(members, identityNames);
+  const displayOf = memberId => {
+    const name = members?.[memberId]?.displayName;
+    return typeof name === "string" && name.trim() ? name : memberId;
+  };
+  const lowerText = text.toLowerCase(), warnings = [], seen = new Set();
+  for (let at = text.indexOf("@"); at >= 0; at = text.indexOf("@", at + 1)) {
+    if (at > 0 && /[A-Za-z0-9_.@]/.test(text[at - 1])) continue;
+    if (text[at + 1] === "_") continue;
+    const nameAt = at + 1;
+    let matches = [], longest = 0;
+    for (const candidate of candidates) {
+      const end = nameAt + candidate.lower.length;
+      if (lowerText.slice(nameAt, end) !== candidate.lower) continue;
+      if (end < text.length && /[A-Za-z0-9_]/.test(text[end])) continue;
+      if (candidate.lower.length > longest) { matches = []; longest = candidate.lower.length; }
+      if (candidate.lower.length === longest) matches.push(candidate);
+    }
+    if (longest === 0) {
+      // No member label matches here: take the raw handle text for the
+      // warning (same handle grammar as the mention parser).
+      const rawHandle = /^@([a-zA-Z0-9][a-zA-Z0-9._-]{0,63})/.exec(text.slice(at))?.[1]?.replace(/[._-]+$/, "") ?? "";
+      const key = `not_member:${rawHandle.toLowerCase()}`;
+      if (rawHandle && !seen.has(key)) {
+        seen.add(key);
+        warnings.push(Object.freeze({ handle: rawHandle, reason: "not_member", candidates: Object.freeze([]) }));
+      }
+      continue;
+    }
+    const rank = Math.min(...matches.map(match => match.rank));
+    const ids = [...new Set(matches.filter(match => match.rank === rank).map(match => match.memberId))];
+    if (ids.length === 1 && ids[0] === senderMemberId) continue; // intentional self-silence
+    if (ids.length <= 1) continue; // exactly one recipient: delivery is unambiguous
+    const handle = text.slice(nameAt, nameAt + longest);
+    const key = `ambiguous:${handle.toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    warnings.push(Object.freeze({ handle, reason: "ambiguous",
+      candidates: Object.freeze(ids.map(memberId =>
+        Object.freeze({ memberId, displayName: displayOf(memberId) }))) }));
+  }
+  return Object.freeze(warnings);
 }

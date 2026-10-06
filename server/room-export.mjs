@@ -8,6 +8,7 @@ import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { RoomStore } from "./store.mjs";
 import { auditRecovery } from "./recovery.mjs";
+import { Buffer } from "node:buffer";
 
 const IDENT = /^[a-z_][a-z0-9_]*$/;
 const TOKEN_SOURCE = "(?:pri_|rak_|ga1\\.)[A-Za-z0-9_-]{8,}";
@@ -35,6 +36,10 @@ function scrubTokens(value) {
 function sanitizeCell(column, value) {
   if (value === null || value === undefined) return null;
   if (secretColumn(column)) return sha256Hex(typeof value === "string" ? value : String(value));
+  // REL-14: BLOB cells (room file bytes) leave as base64. JSON.stringify of a
+  // Uint8Array is an object of indices that replay could not bind, so any room
+  // holding a file produced an export that could not be restored.
+  if (value instanceof Uint8Array) return { $base64: Buffer.from(value).toString("base64") };
   if (typeof value !== "string") return value;
   return scrubTokens(value);
 }
@@ -118,6 +123,30 @@ export function operatorExportResponse(request, token, db) {
   return new Response(exportNdjsonStream(db), { status: 200, headers: ndjsonHeaders });
 }
 
+// REL-14: the inverse of sanitizeCell's BLOB encoding. Any other object is
+// refused by name instead of failing as an unbindable parameter.
+function cellOf(value) {
+  if (value === null || typeof value !== "object") return value;
+  const keys = Object.keys(value);
+  if (keys.length === 1 && keys[0] === "$base64" && typeof value.$base64 === "string") {
+    // Buffer.from skips characters it cannot decode; only canonical base64 is a BLOB.
+    const bytes = Buffer.from(value.$base64, "base64");
+    if (bytes.toString("base64") !== value.$base64) throw new Error("Export BLOB cell is not canonical base64");
+    return bytes;
+  }
+  throw new Error("Export cell is an object that is not an encoded BLOB");
+}
+
+// REL-14 (Instinct-3 4534): a file row carries its own byte_length and sha256;
+// replay proves the decoded bytes against both, so a tampered BLOB is refused.
+function checkStoredBytes(table, row) {
+  if (!(row.bytes instanceof Uint8Array)) return;
+  if (typeof row.byte_length === "number" && row.bytes.length !== row.byte_length)
+    throw new Error(`Export ${table} row ${row.id ?? "?"} bytes do not match its byte_length`);
+  if (typeof row.sha256 === "string" && sha256Hex(row.bytes) !== row.sha256)
+    throw new Error(`Export ${table} row ${row.id ?? "?"} bytes do not match its sha256`);
+}
+
 function parseExport(ndjson) {
   if (typeof ndjson !== "string" || !ndjson.trim()) throw new Error("Export is empty");
   const byTable = new Map();
@@ -172,8 +201,10 @@ export function replayNdjson(ndjson, filename) {
           const keys = Object.keys(row);
           if (keys.some(key => !known.has(key))) throw new Error("Export row does not match the store schema");
           if (!keys.length) continue;
+          const cells = Object.fromEntries(keys.map(key => [key, cellOf(row[key])]));
+          checkStoredBytes(table, cells);
           store.db.prepare(`INSERT INTO ${quoteIdent(table)} (${keys.map(quoteIdent).join(", ")}) VALUES (${keys.map(() => "?").join(", ")})`)
-            .run(...keys.map(key => row[key]));
+            .run(...keys.map(key => cells[key]));
         }
       }
     });

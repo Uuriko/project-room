@@ -43,7 +43,9 @@ async function saved(t, { listen = false } = {}) {
 }
 
 function run(t, script, args, env) {
-  const child = spawn(process.execPath, [script, ...args], { env, stdio: ['pipe', 'pipe', 'pipe'] });
+  // These tests parse the child's stderr as JSON, so a Node runtime warning
+  // (e.g. NO_COLOR ignored because FORCE_COLOR is set) must not land there.
+  const child = spawn(process.execPath, [script, ...args], { env: { ...env, NODE_NO_WARNINGS: '1' }, stdio: ['pipe', 'pipe', 'pipe'] });
   let stdout = '', stderr = '';
   child.stdout.on('data', chunk => { stdout += chunk; });
   child.stderr.on('data', chunk => { stderr += chunk; });

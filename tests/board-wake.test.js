@@ -22,11 +22,15 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
 import { verifyDeliverySignature } from "../server/webhook-dispatch.mjs";
+import { installFakeWebhookDns } from "./helpers/fake-webhook-dns.mjs";
 
 const SIGNING_SECRET = "board-wake-signing-secret-012345";
 
 async function fixture(t) {
   const store = new RoomStore(":memory:");
+  // Test-only DNS: fixture webhook URLs (https://*.test) go through the
+  // fully fail-closed production gate, so a fake resolver stands in.
+  installFakeWebhookDns(store);
   let at = Date.now();
   store.now = () => at;
   store.initialize(initialRoom("commons"));

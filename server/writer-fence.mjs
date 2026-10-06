@@ -432,7 +432,16 @@ const ANALYTICS_ADDITIVE_TABLES = Object.freeze([
   "claim_bond_shadow",
   "claim_reputation_signals",
 ]);
-export const lazyAdditiveTables = Object.freeze([...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES, ...RETIRED_EMISSARY_TABLES, ...ANALYTICS_ADDITIVE_TABLES]);
+// seeker_declarations + work_offer_terms (matchmaking, Fo ship-train
+// 2026-10-05, server/work-declarations.mjs): purely additive, created on
+// first use — allowed by the recovery audit but not required in every DB.
+const MATCHMAKING_ADDITIVE_TABLES = Object.freeze([
+  "seeker_declarations",
+  "work_offer_terms",
+]);
+export const lazyAdditiveTables = Object.freeze([...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES, ...RETIRED_EMISSARY_TABLES, ...ANALYTICS_ADDITIVE_TABLES, ...MATCHMAKING_ADDITIVE_TABLES]);
+// (Audit-fix F-2 intent preserved: analytics tables are lazy/additive, never
+// required — they live in ANALYTICS_ADDITIVE_TABLES above.)
 // messages (MSG-1) is fenced at v37 only. v34–v36 files do not have the
 // table or its triggers; verifyWriterFence(36) must not require them.
 const v34FencedTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables])]);

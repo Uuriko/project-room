@@ -1,0 +1,187 @@
+# Cheap-first mechanical review pass.
+#
+# Runs automatically on every pull request, before any human or strong-model
+# reviewer looks at it:
+#   - diff size (files changed, lines added/deleted)
+#   - claim-scope match (scripts/review-scope-check.mjs): does the diff touch
+#     only the files the claim declared in the PR body?
+#   - lint and test-suite conclusions, once the `test` workflow finishes
+#
+# The result is a machine-readable JSON block in the job summary
+# (marked with <!-- review-mechanical-report -->). The strong-model judgment
+# pass (docs/REVIEW-PARALLELISM.md) reads this report plus the diff plus the
+# claim, in clean context.
+#
+# Scope drift is a reviewer signal, NOT a merge blocker: claims legitimately
+# grow (lockfiles, generated files). Drift shows up as a warning annotation
+# and in the report; the reviewer acknowledges it.
+name: review-mechanical
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+  # Post-merge steady state: this trigger only fires once this file exists on
+  # the default branch. Until then the pull_request job below covers PRs by
+  # waiting (bounded) for the test workflow itself.
+  workflow_run:
+    workflows: ["test"]
+    types: [completed]
+
+permissions:
+  contents: read
+  pull-requests: read
+  actions: read
+
+# One mechanical report per PR; a newer push or a finished test run replaces
+# the older one. workflow_run dispatches are keyed by run id.
+concurrency:
+  group: ${{ github.event_name == 'workflow_run' && format('review-mechanical-run-{0}', github.event.workflow_run.id) || format('review-mechanical-pr-{0}', github.event.pull_request.number) }}
+  cancel-in-progress: true
+
+jobs:
+  # Fast signals immediately (diff size + claim scope, gh + node only, no npm
+  # install), then a bounded wait for the `test` workflow on this head so the
+  # same check run also carries the lint and test-suite conclusions.
+  mechanical:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - name: Fast signals and the fast report
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          gh pr view "$PR_NUMBER" --json files --jq '.files[].path' > /tmp/changed.txt
+          gh pr view "$PR_NUMBER" --json body --jq '.body' > /tmp/body.md
+          HEAD_SHA=$(gh pr view "$PR_NUMBER" --json headRefOid --jq '.headRefOid')
+          echo "HEAD_SHA=$HEAD_SHA" >> "$GITHUB_ENV"
+          {
+            echo "ADDITIONS=$(gh pr view "$PR_NUMBER" --json additions --jq '.additions')"
+            echo "DELETIONS=$(gh pr view "$PR_NUMBER" --json deletions --jq '.deletions')"
+          } >> "$GITHUB_ENV"
+          node scripts/review-scope-check.mjs --files-file /tmp/changed.txt --body-file /tmp/body.md > /tmp/scope.json
+          node scripts/review-mechanical-report.mjs --stage fast --pr "$PR_NUMBER" \
+            --head "$HEAD_SHA" --lint pending --tests pending \
+            --additions "$ADDITIONS" --deletions "$DELETIONS" \
+            --scope-json /tmp/scope.json >> "$GITHUB_STEP_SUMMARY"
+          node scripts/review-mechanical-report.mjs --annotations --scope-json /tmp/scope.json
+      - name: Wait for the test workflow on this head
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_SHA: ${{ env.HEAD_SHA }}
+          HEAD_BRANCH: ${{ github.head_ref }}
+          REPO: ${{ github.repository }}
+        run: |
+          # Bounded wait (~40 min): re-resolve the test run every minute so a
+          # newer synchronize push supersedes the run we wait on.
+          deadline=$(( $(date +%s) + 2400 ))
+          RUN_ID=""
+          RUN_STATUS=""
+          CONCLUSION=""
+          while [ "$(date +%s)" -lt "$deadline" ]; do
+            RUN_JSON=$(gh run list --workflow test.yml --branch "$HEAD_BRANCH" --limit 5 \
+              --json databaseId,headSha,status,conclusion \
+              --jq "[.[] | select(.headSha==\"$HEAD_SHA\")][0] // empty")
+            if [ -n "$RUN_JSON" ]; then
+              RUN_STATUS=$(echo "$RUN_JSON" | jq -r .status)
+              RUN_ID=$(echo "$RUN_JSON" | jq -r .databaseId)
+              if [ "$RUN_STATUS" = "completed" ]; then
+                CONCLUSION=$(echo "$RUN_JSON" | jq -r .conclusion)
+                break
+              fi
+            fi
+            sleep 60
+          done
+          if [ -z "$RUN_ID" ]; then
+            CONCLUSION="not-started"
+          elif [ "$RUN_STATUS" != "completed" ]; then
+            CONCLUSION="timed-out"
+          fi
+          LINT="unknown"
+          if [ -n "$RUN_ID" ]; then
+            LINT=$(gh api "repos/$REPO/actions/runs/$RUN_ID/jobs" --paginate \
+              -q '[.jobs[] | select(.name=="lint")][0].conclusion // "unknown"')
+          fi
+          {
+            echo "TEST_CONCLUSION=$CONCLUSION"
+            echo "LINT_CONCLUSION=$LINT"
+          } >> "$GITHUB_ENV"
+      - name: Full report with lint and test conclusions
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ env.HEAD_SHA }}
+          ADDITIONS: ${{ env.ADDITIONS }}
+          DELETIONS: ${{ env.DELETIONS }}
+          LINT_CONCLUSION: ${{ env.LINT_CONCLUSION }}
+          TEST_CONCLUSION: ${{ env.TEST_CONCLUSION }}
+        run: |
+          node scripts/review-mechanical-report.mjs --stage full --pr "$PR_NUMBER" \
+            --head "$HEAD_SHA" --lint "$LINT_CONCLUSION" --tests "$TEST_CONCLUSION" \
+            --additions "$ADDITIONS" --deletions "$DELETIONS" \
+            --scope-json /tmp/scope.json >> "$GITHUB_STEP_SUMMARY"
+
+  # Full report once the `test` workflow finishes, event-driven (no polling).
+  # Active once this file is merged to the default branch. Skips silently for
+  # main-branch pushes (no PR attached).
+  full:
+    if: github.event_name == 'workflow_run'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - name: Collect test conclusions, PR facts, and run the scope check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          TEST_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          TESTED_SHA: ${{ github.event.workflow_run.head_sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          PR_NUMBER=$(jq -r '.workflow_run.pull_requests[0].number // empty' "$GITHUB_EVENT_PATH")
+          if [ -z "$PR_NUMBER" ]; then echo "no PR attached to this test run; nothing to report"; exit 0; fi
+          echo "PR_NUMBER=$PR_NUMBER" >> "$GITHUB_ENV"
+          # Never pair a completed run's conclusion with a newer PR head: the
+          # test result belongs to TESTED_SHA. On mismatch the pull_request
+          # mechanical job (which waits for the run on the current head)
+          # owns the report, so skip here.
+          CURRENT_HEAD=$(gh pr view "$PR_NUMBER" --json headRefOid --jq '.headRefOid')
+          if [ "$TESTED_SHA" != "$CURRENT_HEAD" ]; then
+            echo "HEAD_MISMATCH=true" >> "$GITHUB_ENV"
+            echo "stale test run: tested $TESTED_SHA but PR head is now $CURRENT_HEAD; skipping this report"
+            exit 0
+          fi
+          echo "HEAD_SHA=$TESTED_SHA" >> "$GITHUB_ENV"
+          LINT=$(gh api "repos/$REPO/actions/runs/$RUN_ID/jobs" --paginate -q '[.jobs[] | select(.name=="lint")][0].conclusion // "unknown"')
+          echo "LINT_CONCLUSION=$LINT" >> "$GITHUB_ENV"
+          gh pr view "$PR_NUMBER" --json files --jq '.files[].path' > /tmp/changed.txt
+          gh pr view "$PR_NUMBER" --json body --jq '.body' > /tmp/body.md
+          {
+            echo "ADDITIONS=$(gh pr view "$PR_NUMBER" --json additions --jq '.additions')"
+            echo "DELETIONS=$(gh pr view "$PR_NUMBER" --json deletions --jq '.deletions')"
+          } >> "$GITHUB_ENV"
+          node scripts/review-scope-check.mjs --files-file /tmp/changed.txt --body-file /tmp/body.md > /tmp/scope.json
+          node scripts/review-mechanical-report.mjs --annotations --scope-json /tmp/scope.json
+      - name: Write the machine-readable report
+        if: env.PR_NUMBER != '' && env.HEAD_MISMATCH != 'true'
+        env:
+          PR_NUMBER: ${{ env.PR_NUMBER }}
+          HEAD_SHA: ${{ env.HEAD_SHA }}
+          ADDITIONS: ${{ env.ADDITIONS }}
+          DELETIONS: ${{ env.DELETIONS }}
+        run: |
+          node scripts/review-mechanical-report.mjs --stage full --pr "$PR_NUMBER" \
+            --head "$HEAD_SHA" --lint "$LINT_CONCLUSION" --tests "$TEST_CONCLUSION" \
+            --additions "$ADDITIONS" --deletions "$DELETIONS" \
+            --scope-json /tmp/scope.json >> "$GITHUB_STEP_SUMMARY"

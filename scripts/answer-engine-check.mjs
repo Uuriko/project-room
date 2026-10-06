@@ -1,4 +1,4 @@
-import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { postAnalyticsSnapshot, postOpsSummary, redact, resolveIngestPath } from "./snippet-adoption.mjs";
@@ -226,7 +226,10 @@ async function callEngine(engineId, engine, prompt, instruction, credential, { f
   let response = await fetchImpl(request.url, init);
   if (response.status === 429 || response.status === 503) {
     const retryAfter = Number(response.headers?.get?.("retry-after"));
-    await sleepImpl((Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : 20) * 1000);
+    // W3-F5: clamp the server-directed sleep — a rogue retry-after must not
+    // stall the weekly run for days.
+    const waitSec = Number.isFinite(retryAfter) && retryAfter > 0 ? Math.min(retryAfter, 300) : 20;
+    await sleepImpl(waitSec * 1000);
     response = await fetchImpl(request.url, init);
   }
   const text = await response.text();
@@ -359,8 +362,11 @@ export async function runAnswerCheck({
   const report = { date, engines };
   const summaryPath = resolve(outDir, `answer-engine-${date}.json`);
   const rawPath = resolve(outDir, `answer-engine-raw-${date}.json`);
-  writeFileSync(summaryPath, `${JSON.stringify(report, null, 2)}\n`);
-  writeFileSync(rawPath, `${JSON.stringify({ date, runs: raw }, null, 2)}\n`);
+  // W3-F1: atomic report writes.
+  writeFileSync(`${summaryPath}.tmp`, `${JSON.stringify(report, null, 2)}\n`);
+  renameSync(`${summaryPath}.tmp`, summaryPath);
+  writeFileSync(`${rawPath}.tmp`, `${JSON.stringify({ date, runs: raw }, null, 2)}\n`);
+  renameSync(`${rawPath}.tmp`, rawPath);
   const markdown = answerSummaryMarkdown(report);
   say(answerOpsText(report));
   if (env.GITHUB_STEP_SUMMARY) appendFileSync(env.GITHUB_STEP_SUMMARY, markdown);
@@ -408,7 +414,9 @@ async function main() {
 
 const isMain = !!process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href;
 if (isMain) main().catch(error => {
-  const secrets = ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "PERPLEXITY_API_KEY", "XAI_API_KEY"].map(name => process.env[name]);
+  // W3-F4: build the redaction list from the same config the check uses, so
+  // a new engine's secret can never drift out of the crash-path redaction.
+  const secrets = Object.values(loadPromptConfig().engines ?? {}).map(engine => process.env[engine.secret]);
   console.error(redact(error?.message ?? error, secrets));
   process.exit(1);
 });

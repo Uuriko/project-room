@@ -64,6 +64,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('deploy/capabilities.mjs'); // #601: build-time route-family inventory (imported by deploy/agent-discovery.mjs)
   paths.add('deploy/agent-card-key.mjs'); // RC-2026-09-23-105: room card signing key, public half (imported by deploy/agent-discovery.mjs)
   paths.add('deploy/agent-card-signed.mjs'); // RC-2026-09-23-105: build-time card signature (imported by deploy/agent-discovery.mjs)
+  paths.add('deploy/procedures-index.mjs'); // W008: baked shared-procedure index (imported by deploy/agent-discovery.mjs)
   paths.add('deploy/room-entry.mjs');
   paths.add('server/guest-agent-links.mjs');
   paths.add('server/agent-invites.mjs');
@@ -117,6 +118,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/starter-room.mjs'); // ACT-1a: starter seed (imported by server/room-lifecycle.mjs)
   paths.add('server/pins.mjs');
   paths.add('server/typing.mjs'); // ephemeral typing heartbeats (imported by server/http.mjs)
+  paths.add('server/required-reading.mjs'); // W012: per-lane required reading (imported by server/work-claim-routes.mjs)
   paths.add('server/account-login-methods.mjs'); // Multi-method login model (imported by server/store.mjs)
   paths.add('server/account-deletion.mjs'); // RC-2026-09-19-078: deletion executor (imported by server/http.mjs)
   paths.add('src/account-deletion.mjs'); // RC-2026-09-19-078: pure purge planner (imported by server/account-deletion.mjs)

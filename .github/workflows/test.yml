@@ -50,6 +50,25 @@ jobs:
           cache: npm
       - run: npm ci # `npm run check` now includes the lint gate, which needs the eslint devDependency.
       - run: npm run check
+  # Fo follow-up (Q003): the .refresh-requested marker is a branch-local
+  # refresh signal for the visual regression baselines. If it ever reaches
+  # main, every visual run silently re-baselines instead of comparing and
+  # the regression gate dies quietly. This job fails the run when the marker
+  # is present on main; on branches the marker stays legal (the refresh flow
+  # commits it there to capture CI-canonical baselines).
+  visual-refresh-guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Fail if the baseline refresh marker reached main
+        run: |
+          marker="scripts/visual-regression-baselines/.refresh-requested"
+          if [ "$GITHUB_REF" = "refs/heads/main" ] && [ -e "$marker" ]; then
+            echo "::error file=$marker::.refresh-requested must never be on main: it flips every visual regression run into silent re-baseline mode. Delete the marker and re-capture baselines on a branch instead."
+            exit 1
+          fi
+          echo "visual refresh marker check passed (ref=$GITHUB_REF)"
   lint:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -245,21 +264,22 @@ jobs:
   # job in the graph was skipped, so an intentional browser-shard skip would
   # skip this required check. Evaluate the direct results instead.
   test:
-    needs: [contract, lint, unit, browser, cloudflare]
+    needs: [contract, lint, unit, browser, cloudflare, visual-refresh-guard]
     if: always() && !cancelled()
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Require contract, lint, unit, browser, and cloudflare
+      - name: Require contract, lint, unit, browser, cloudflare, and visual-refresh-guard
         env:
           CONTRACT: ${{ needs.contract.result }}
           LINT: ${{ needs.lint.result }}
           UNIT: ${{ needs.unit.result }}
           BROWSER: ${{ needs.browser.result }}
           CLOUDFLARE: ${{ needs.cloudflare.result }}
+          VISUAL_REFRESH_GUARD: ${{ needs.visual-refresh-guard.result }}
         run: |
           failed=0
-          for pair in "contract:$CONTRACT" "lint:$LINT" "unit:$UNIT" "browser:$BROWSER" "cloudflare:$CLOUDFLARE"; do
+          for pair in "contract:$CONTRACT" "lint:$LINT" "unit:$UNIT" "browser:$BROWSER" "cloudflare:$CLOUDFLARE" "visual-refresh-guard:$VISUAL_REFRESH_GUARD"; do
             name=${pair%%:*}
             result=${pair#*:}
             echo "$name=$result"

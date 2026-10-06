@@ -21,6 +21,8 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    outputs:
+      mode: ${{ steps.target.outputs.mode }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -70,3 +72,55 @@ jobs:
           name: onboarding-probe
           path: probe-out
           if-no-files-found: warn
+
+  # Publishes the run table to docs/onboarding-probe/results.md (newest run
+  # first) so measured onboarding times are visible from the repo, not only
+  # in the CI job summary. Separate job so the probe itself keeps read-only
+  # permissions; this job alone can push the docs file.
+  # Runs only on main: a workflow_dispatch from any other ref must never
+  # push that ref's commits to main.
+  publish:
+    name: publish results to docs
+    needs: probe
+    if: always() && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        id: artifact
+        continue-on-error: true
+        with:
+          name: onboarding-probe
+          path: probe-out
+      - name: Write docs results
+        id: write
+        if: steps.artifact.outcome == 'success' && hashFiles('probe-out/table.md') != ''
+        run: |
+          node scripts/onboarding-probe/docs-publish.mjs \
+            --result probe-out/probe-result.json \
+            --table probe-out/table.md \
+            --docs docs/onboarding-probe/results.md \
+            --mode "${{ needs.probe.outputs.mode }}" \
+            --run-id "${{ github.run_id }}" \
+            --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+      - name: Commit docs results
+        if: steps.write.outcome == 'success'
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/onboarding-probe/results.md
+          git diff --cached --quiet && { echo "no docs changes"; exit 0; }
+          git commit -m "docs: publish onboarding probe results (run ${{ github.run_id }})"
+          git fetch origin main:refs/remotes/origin/main
+          git rebase origin/main
+          # Fail closed: the only change ever pushed to main is the results file.
+          if [ "$(git show --name-only --format= HEAD | tr '\n' ' ')" != "docs/onboarding-probe/results.md " ]; then
+            echo "refusing to push: publish commit touches unexpected files"
+            git show --name-only --format= HEAD
+            exit 1
+          fi
+          git push origin HEAD:main

@@ -16,6 +16,14 @@ ROOM_MACHINE_ENABLED=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.
 
 `<commit>` is the commit that contains this installer. The script checks the flag first and exits 0 when the flag is off, without `sudo` and without downloading anything.
 
+Verify before you run (M7): the hash embedded in the script guards the payload against truncation only — it cannot authenticate the script itself. Download the script, compare its sha256 against the value published in the release notes (never against a value inside the script), then run the downloaded file with the expected hash exported:
+
+```bash
+curl -fsSL -o install.sh https://raw.githubusercontent.com/Uuriko/project-room/<commit>/machine/install.sh
+echo "<sha256 from the release notes>  install.sh" | shasum -a 256 -c -
+ROOM_MACHINE_ENABLED=1 ROOM_MACHINE_INSTALL_SHA256=<sha256 from the release notes> bash install.sh -- --enroll <ONE-TIME-CODE>
+```
+
 What the owner does on the Mac:
 
 1. Power, network, and a logged-in session.
@@ -40,6 +48,6 @@ The bot loop stays off until `room-machine bot enable --room <roomId>`. `room-ma
 
 ## Commands
 
-`status`, `doctor`, `stop`, `pause --minutes N`, `resume`, `uninstall`, `preflight`, `enroll --enroll CODE`, `provider set NAME`, `bot enable --room ROOM`, `bot disable`, `run`.
+`status`, `doctor`, `stop`, `pause --minutes N`, `resume`, `uninstall`, `preflight`, `enroll` (code via `--enroll CODE` or stdin), `provider set NAME`, `bot enable --room ROOM`, `bot disable`, `run`.
 
 `doctor` posts measured facts only: architecture, chip, RAM, free disk, macOS version, Lume version, driver version, guest grants, and whether Ollama and Xcode answered. A probe that fails is `not measured` or `absent`.

@@ -1,0 +1,114 @@
+[
+  {
+    "file": "001-deep-nesting-100.eml",
+    "expect": "error",
+    "code": "mime_depth_limit"
+  },
+  {
+    "file": "002-huge-header-line.eml",
+    "expect": "error",
+    "code": "mime_header_limit"
+  },
+  {
+    "file": "003-many-headers-500.eml",
+    "expect": "error",
+    "code": "mime_header_limit"
+  },
+  {
+    "file": "004-boundary-prefix-confusion.eml",
+    "expect": "error",
+    "code": "malformed_mime_header"
+  },
+  {
+    "file": "005-missing-close-delimiter.eml",
+    "expect": "ok"
+  },
+  {
+    "file": "006-part-flood-2000.eml",
+    "expect": "error",
+    "code": "mime_part_limit"
+  },
+  {
+    "file": "007-encoded-word-unterminated.eml",
+    "expect": "ok"
+  },
+  {
+    "file": "008-encoded-word-many.eml",
+    "expect": "ok"
+  },
+  {
+    "file": "009-quoted-printable-edges.eml",
+    "expect": "ok"
+  },
+  {
+    "file": "010-base64-garbage.eml",
+    "expect": "ok"
+  },
+  {
+    "file": "011-address-unbalanced.eml",
+    "expect": "ok"
+  },
+  {
+    "file": "012-address-truncated-200.eml",
+    "expect": "ok"
+  },
+  {
+    "file": "013-charset-rfc2231-evil.eml",
+    "expect": "ok"
+  },
+  {
+    "file": "014-html-unclosed-tags.eml",
+    "expect": "ok"
+  },
+  {
+    "file": "015-html-script-noclose.eml",
+    "expect": "ok"
+  },
+  {
+    "file": "016-html-entity-flood.eml",
+    "expect": "ok"
+  },
+  {
+    "file": "017-binary-junk.eml",
+    "expect": "error",
+    "code": "malformed_mime_header"
+  },
+  {
+    "file": "018-boundary-invalid-chars.eml",
+    "expect": "error",
+    "code": "malformed_mime_boundary"
+  },
+  {
+    "file": "019-rfc2231-continuations.eml",
+    "expect": "ok"
+  },
+  {
+    "file": "020-nested-same-boundary.eml",
+    "expect": "error",
+    "code": "malformed_mime_boundary"
+  },
+  {
+    "file": "021-controls-in-header.eml",
+    "expect": "ok"
+  },
+  {
+    "file": "022-headers-no-body.eml",
+    "expect": "ok"
+  },
+  {
+    "file": "023-empty.eml",
+    "expect": "ok"
+  },
+  {
+    "file": "024-preamble-epilogue.eml",
+    "expect": "ok"
+  },
+  {
+    "file": "025-charset-oversize-label.eml",
+    "expect": "ok"
+  },
+  {
+    "file": "026-param-proto-names.eml",
+    "expect": "ok"
+  }
+]

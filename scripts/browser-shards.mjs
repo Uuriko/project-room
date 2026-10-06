@@ -22,8 +22,50 @@ export function browserPlan(script) {
   const shards = Array.from({ length: SHARD_COUNT }, (_, i) => ({ index: i + 1, files: [], estimatedMs: 0 }));
   const estimate = file => Number.isFinite(timings[file]) && timings[file] > 0 ? timings[file] : 10000;
   const compare = (a, b) => a < b ? -1 : a > b ? 1 : 0;
+  const owner = new Map(); // file -> 0-based shard; timing data rebalances membership, never selects it.
   for (const file of [...files].sort((a, b) => estimate(b) - estimate(a) || compare(a, b))) {
     const shard = [...shards].sort((a, b) => a.estimatedMs - b.estimatedMs || a.index - b.index)[0];
+    shard.files.push(file); shard.estimatedMs += estimate(file); owner.set(file, shard.index - 1);
+  }
+  // Deterministic best-improvement local search: the greedy pass can strand
+  // weight on the heaviest shard when no single later file fits. Every pass
+  // tries each single-file move and each pairwise swap in canonical order and
+  // applies the one that lowers the makespan most (first in canonical order
+  // wins ties), repeating until no move helps. A move that would empty a shard
+  // is never taken: every shard must keep at least one file.
+  const loads = () => shards.map(shard => shard.estimatedMs);
+  const counts = shards.map(shard => shard.files.length);
+  for (;;) {
+    const current = loads(), before = Math.max(...current);
+    const afterLoads = updates => {
+      const next = [...current];
+      for (const [shard, delta] of updates) next[shard] += delta;
+      return Math.max(...next);
+    };
+    let best = null;
+    const consider = candidate => { if (candidate.gain > 0 && (!best || candidate.gain > best.gain)) best = candidate; };
+    for (const file of files) {
+      const from = owner.get(file), weight = estimate(file);
+      if (counts[from] === 1) continue;
+      for (let to = 0; to < SHARD_COUNT; to++) {
+        if (to === from) continue;
+        const gain = before - afterLoads([[from, -weight], [to, weight]]);
+        consider({ gain, apply() { owner.set(file, to); counts[from]--; counts[to]++; shards[from].estimatedMs -= weight; shards[to].estimatedMs += weight; } });
+      }
+    }
+    for (let a = 0; a < files.length; a++) for (let b = a + 1; b < files.length; b++) {
+      const fa = files[a], fb = files[b], sa = owner.get(fa), sb = owner.get(fb);
+      if (sa === sb) continue;
+      const wa = estimate(fa), wb = estimate(fb);
+      const gain = before - afterLoads([[sa, wb - wa], [sb, wa - wb]]);
+      consider({ gain, apply() { owner.set(fa, sb); owner.set(fb, sa); shards[sa].estimatedMs += wb - wa; shards[sb].estimatedMs += wa - wb; } });
+    }
+    if (!best) break;
+    best.apply();
+  }
+  for (const shard of shards) { shard.files = []; shard.estimatedMs = 0; }
+  for (const file of files) {
+    const shard = shards[owner.get(file)];
     shard.files.push(file); shard.estimatedMs += estimate(file);
   }
   // Retain the canonical relative order within each shard.

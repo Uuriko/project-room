@@ -54,7 +54,8 @@ export async function runAgentDocs({ target, outDir = null, created = emptyCreat
     const step = { step: stepName(curl), t: elapsed(started), calls, bytes: done.bytes, status: done.response.status };
     steps.push(step);
     remember(created, creds, done.response.json ?? {});
-    if (step.step === "post" && done.response.status < 300) firstPost = { t: step.t, calls };
+    if (done.skipped) confusions.push(`A documented curl (${step.step}) pointed off-target and was skipped without credentials.`);
+    if (!done.skipped && step.step === "post" && done.response.status < 300) firstPost = { t: step.t, calls };
   }
   if (!firstPost) confusions.push("The documented post did not succeed.");
   const board = boardCloseCurls(packet);
@@ -68,7 +69,8 @@ export async function runAgentDocs({ target, outDir = null, created = emptyCreat
       calls += done.calls;
       const step = { step: "board-close", t: elapsed(started), calls, bytes: done.bytes, status: done.response.status };
       steps.push(step);
-      if (done.response.status < 300) firstClose = { t: step.t, calls };
+      if (done.skipped) confusions.push("A documented close curl pointed off-target and was skipped without credentials.");
+      if (!done.skipped && done.response.status < 300) firstClose = { t: step.t, calls };
     }
     if (!firstClose) confusions.push("The packet documents a work-claim close, and that call did not succeed.");
   }

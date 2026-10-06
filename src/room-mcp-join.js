@@ -44,6 +44,11 @@ export const HOSTED_ROOM_MCP_TOOLS = Object.freeze([
   "room_get_file",
   "room_discard_file",
   "room_commit_file",
+  "room_list_access_requests",
+  "room_decide_access_request",
+  "room_create_agent_invite",
+  "room_list_agent_invites",
+  "room_revoke_agent_invite",
   "add_land_item",
   "list_land_queue",
   "remove_land_item",
@@ -162,7 +167,7 @@ export const CORE_MCP_TOOLS = Object.freeze([
 
 export const CORE_MCP_BLURBS = Object.freeze({
   room_needs_me: "Cross-room attention and messages. Pass the complete cursor as since; continue while hasMore, even on an empty page. Discovery is not resolution.",
-  room_read_messages: "Read room messages oldest first. Pass roomId.",
+  room_read_messages: "Read room messages oldest first. latest:true returns the newest messages. Pass roomId.",
   room_post_message: "Post a room message. Pass roomId and body. Optional replyToId.",
   room_reply: "Reply under a room message. Pass roomId, replyToId, and body. Ordinary replies do not close formal requests.",
   room_list_requests: "List formal requests by direction and status (defaults incoming/open). Follow nextReads and finish selected context before responding. Reads do not close requests.",

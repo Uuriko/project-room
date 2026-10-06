@@ -17,6 +17,7 @@ import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { listPins, setPin } from "../server/pins.mjs";
+import { buildActivationPack } from "../server/room-activation-pack.mjs";
 
 let tmpdirPath;
 let store;
@@ -78,4 +79,32 @@ test("room message pins remain visible to every room member", () => {
   const malloryView = listPins(store, malloryKey, "commons");
   assert.equal(malloryView.pins.length, 1, "room pins must not be over-filtered");
   assert.equal(malloryView.pins[0].body, "room announcement");
+});
+
+test("the activation pack hides another pair's pinned DM from a bystander", () => {
+  const { aliceKey, cmd } = storeFixture();
+  const dmId = cmd(aliceKey, T.MESSAGE_POSTED, {
+    messageId: randomUUID(), body: "secret DM body", toMemberId: "bob",
+  }).event.data.messageId;
+  setPin(store, aliceKey, "commons", { messageId: dmId, pinned: true });
+
+  const malloryPack = buildActivationPack(store, "commons", "mallory");
+  assert.equal(malloryPack.pinnedResources.length, 0,
+    "the activation pack must not leak another pair's pinned DM");
+
+  const bobPack = buildActivationPack(store, "commons", "bob");
+  assert.equal(bobPack.pinnedResources.length, 1,
+    "the DM recipient still sees their pinned DM in the pack");
+});
+
+test("a non-party cannot pin another pair's DM at the event layer", () => {
+  const { aliceKey, malloryKey, cmd } = storeFixture();
+  const dmId = cmd(aliceKey, T.MESSAGE_POSTED, {
+    messageId: randomUUID(), body: "secret DM body", toMemberId: "bob",
+  }).event.data.messageId;
+  assert.throws(
+    () => cmd(malloryKey, T.MESSAGE_PINNED, { messageId: dmId }),
+    /not a party/,
+    "pinning a DM you cannot read must be refused by the reducer",
+  );
 });

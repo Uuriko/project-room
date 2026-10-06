@@ -241,3 +241,33 @@ test("join page no-JS fallback gives working, host-correct agent instructions", 
   assert.ok(!block.includes('"roomId":"muse-room"') && !block.includes("muse-room"), "no hardcoded room id");
   assert.match(block, /\/llms\.txt/, "points agents at the serving host's agent packet");
 });
+
+test("join page loader cannot stick forever: external watchdog ships a no-invite fallback (#1608)", async t => {
+  // #1608: /join with no invite token sat on "Loading your invite…" forever
+  // when src/join.js never executed (blocked, failed, or stalled module).
+  // The watchdog is a classic external script, loaded before the module:
+  // the page is served with CSP script-src 'self' (no 'unsafe-inline'), so
+  // an inline watchdog would be blocked by the browser. Cheapest
+  // independent guards: the served page carries no inline scripts, loads
+  // the watchdog ahead of the module, and the watchdog file itself ships
+  // the user-facing fallback copy.
+  const { origin } = await serve(t);
+  for (const [pagePath, watchdogPath] of [["/join", "/src/join-watchdog.js"], ["/room/join", "/room/src/join-watchdog.js"]]) {
+    const html = await (await fetch(`${origin}${pagePath}`)).text();
+    assert.match(html, /id="join-loading"/, `${pagePath} has the loader card`);
+    const inlineScripts = [...html.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)];
+    assert.equal(inlineScripts.length, 0, `${pagePath} has no inline scripts (CSP script-src 'self')`);
+    const scripts = [...html.matchAll(/<script[^>]*\ssrc="([^"]+)"[^>]*><\/script>/g)].map(m => m[1]);
+    assert.ok(scripts.includes(watchdogPath), `${pagePath} loads the watchdog`);
+    assert.ok(scripts.indexOf(watchdogPath) < scripts.findIndex(s => /\/join\.js$/.test(s)),
+      `${pagePath} loads the watchdog before the module`);
+    const res = await fetch(`${origin}${watchdogPath}`);
+    assert.equal(res.status, 200, `${watchdogPath} serves`);
+    assert.match(res.headers.get("content-type") ?? "", /javascript/, `${watchdogPath} content type`);
+    const watchdog = await res.text();
+    assert.match(watchdog, /join-loading/, "watchdog watches the loader card");
+    assert.match(watchdog, /No invite found/, "watchdog ships the no-invite fallback copy");
+    assert.match(watchdog, /ask a room owner for an invite link/i, "watchdog fallback names the next step");
+    assert.ok(!html.includes("{{ASSET_BASE}}"), `${pagePath} substitutes the asset base`);
+  }
+});

@@ -28,10 +28,10 @@ import { PIN_COMMAND_SHAPES, isPinned } from "../src/events.js";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 import { buildReturnBrief, resolveHistoryWindow, RETURN_BRIEF_DEFAULT_LIMIT } from "./return-brief.mjs";
 import { enforceSpendAllowance } from "./spend-allowance.mjs";
-import { ensureAutonomyTiersSchema, enforceAutonomyTiers } from "./autonomy-tiers.mjs";
+import { ensureAutonomyTiersSchema, enforceAutonomyTiers, AUTONOMY_TIERS_SCHEMA } from "./autonomy-tiers.mjs";
 import { ensureOperatorActionsSchema, OPERATOR_ACTIONS_SCHEMA } from "./operator-actions.mjs"; // CP-ADMIN-0: append-only operator audit.
-import { ensureGrantsSchema } from "./grants.mjs";
-import { ensureSpendGrantsSchema } from "./spend-grants.mjs";
+import { ensureGrantsSchema, GRANTS_SCHEMA } from "./grants.mjs";
+import { ensureSpendGrantsSchema, SPEND_GRANTS_SCHEMA } from "./spend-grants.mjs";
 import { canonicalInvitationData, invitationJournalEntry, invitationJournalSchema, replayInvitationJournal } from "./invitation-journal.mjs";
 import { invitationJoinedEvent, assertInvitationMembershipEvidence } from "./invitation-evidence.mjs";
 import { STORE_SCHEMA_VERSION, fenceDefinitions, registerWriter, installWriterFence, verifyWriterFence } from "./writer-fence.mjs";
@@ -88,7 +88,7 @@ import { GuestAgentLinks, isRoomAccessToken, isGuestAgentMemberId } from "./gues
 import { GuestInvites, guestInviteSchema, guestSelfServeSchema } from "./guest-invites.mjs";
 import { WebFetch, webFetchSchema, migrateWebFetchLogColumns } from "./web-fetch.mjs";
 import { WebResearch, webResearchSchema } from "./web-research.mjs"; // RC-2026-09-24-310: knowledge router (additive)
-import { AgentIdentities, agentIdentitySchema, ensureIdentitySecretSchema, ensureIdentityCapacitySchema, ensureIdentityLinkCodeSchema, isIdentitySecret } from "./agent-identities.mjs";
+import { AgentIdentities, agentIdentitySchema, ensureIdentitySecretSchema, ensureIdentityCapacitySchema, ensureIdentityLinkCodeSchema, identityLinkCodeSchema, isIdentitySecret } from "./agent-identities.mjs";
 import { AgentKeyRegistry, agentKeyRegistrySchema } from "./agent-key-registry.mjs"; // Integration map slice 9: agent public-key registry.
 // Board v2 is retired. These tables stay so existing databases and the
 // recovery audit still see them. Nothing drops board_vtwo_*.
@@ -143,6 +143,7 @@ import { MembersDirectory, membersDirectorySchema } from "./members-directory.mj
 import {
   MENTION_TIMEOUT_MS_DEFAULT, MENTION_TIMEOUT_MS_MIN, MENTION_TIMEOUT_MS_MAX,
   assertTransitionMention, resolveMentionTargetsInText, mentionStateSchema,
+  mentionTargetWarnings,
 } from "./mention-lifecycle.mjs"; // #658: mention lifecycle state machine + schema.
 import { activitySchema, recordActivityEvents } from "./activity.mjs"; // Attention: activity feed, read horizons, saved messages, thread mutes.
 import { AgentInvites, agentInviteSchema } from "./agent-invites.mjs";
@@ -989,6 +990,27 @@ function agentWakeTargetIds(state, senderMemberId, data) {
   return [...agentWakeTargets(state, senderMemberId, data).keys()];
 }
 
+// ensure*Schema helpers the full schema pass runs (ALTER-based convergence
+// has no DDL constant to hash, so the function source stands in for it).
+// tests/schema-stamp-coverage.test.js fails if the pass calls one not listed.
+// Each entry is hashed by its "name@revision" label, never by fn.toString():
+// the Workers bundle rewrites function source, so a source hash gave the
+// Worker and Node different stamps for the same code (cloudflare CI, #1627).
+// tests/schema-stamp-coverage.test.js pins a digest of each helper's source
+// to its label, so changing a helper without bumping its revision fails CI.
+export const ADDITIVE_SCHEMA_ENSURES = [
+  [ensureIdentitySecretSchema, "ensureIdentitySecretSchema@1"],
+  [ensureIdentityCapacitySchema, "ensureIdentityCapacitySchema@1"],
+  [ensureIdentityLinkCodeSchema, "ensureIdentityLinkCodeSchema@1"],
+  [ensureAutonomyTiersSchema, "ensureAutonomyTiersSchema@1"],
+  [ensureOperatorActionsSchema, "ensureOperatorActionsSchema@1"],
+  [ensureGrantsSchema, "ensureGrantsSchema@1"],
+  [ensureSpendGrantsSchema, "ensureSpendGrantsSchema@1"],
+  [ensureAccountProfileSchema, "ensureAccountProfileSchema@1"],
+  [ensureVerifiedEmailSchema, "ensureVerifiedEmailSchema@1"],
+  [ensureAttachmentSchema, "ensureAttachmentSchema@1"]
+];
+
 // Hash of the DDL this process knows how to apply. A stored match means
 // schema setup and the writer fence already ran for this code, so a wake
 // can skip both. Fence SQL is included: a trigger change must reinstall.
@@ -1016,9 +1038,15 @@ function roomSchemaStamp() {
     agentKeyRegistrySchema, INTEGRITY_SNAPSHOT_SCHEMA, OPERATOR_ACTIONS_SCHEMA,
     INTEGRITY_JOB_CURSOR_SCHEMA, INTEGRITY_ROOM_STATE_SCHEMA, INTEGRITY_SWEEP_COLUMN,
     ROOM_SCHEMA_STAMP_SCHEMA, LOOKUP_INDEXES, MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, WANTS_WORK_SCHEMA,
-    PUBLIC_READ_MODEL_SCHEMA
+    PUBLIC_READ_MODEL_SCHEMA,
+    // Additive tables converged outside the version bump. A warm wake whose
+    // stamp matches skips the whole schema pass, so any DDL the pass applies
+    // must be hashed here or a room stamped by an older deploy never gets it
+    // (the priced-tool 500: spend_authorizations missing on muse-room).
+    updatesSchema, GRANTS_SCHEMA, SPEND_GRANTS_SCHEMA, AUTONOMY_TIERS_SCHEMA, identityLinkCodeSchema
   ];
   for (const part of parts) hash.update("\0").update(part ?? "");
+  for (const [, label] of ADDITIVE_SCHEMA_ENSURES) hash.update("\0").update(label);
   for (const def of fenceDefinitions(STORE_SCHEMA_VERSION)) hash.update("\0").update(def.name).update(def.sql);
   return hash.digest("hex");
 }
@@ -4441,8 +4469,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       enforceAutonomyTiers({ db: this.db, roomId, state: room.state, command, actor: auth.member, nowMs: this.now(), fail });
       // Projection claims follow the board writer rule. Live only: an exact
       // command retry returned above, and replay of an older event never
-      // reaches this line. write_external does not admit a claim.
-      if ([T.CLAIM_ACQUIRED, T.CLAIM_RELEASED, T.CLAIM_RENEWED].includes(command.type)) {
+      // reaches this line. write_external does not admit a claim. Handoffs and
+      // supersessions write board cards through the same mirror, so they use
+      // the same rule: recording scope is a board write whoever performs it.
+      if ([T.CLAIM_ACQUIRED, T.CLAIM_RELEASED, T.CLAIM_RENEWED, T.WORK_HANDOFF_RECORDED, T.WORK_SUPERSEDED].includes(command.type)) {
         const actor = room.state.members?.[auth.member.id];
         if (!mayWriteBoardClaims(actor, room.state.room?.ownerId)) {
           fail(403, "work_claims_not_permitted", "Creating, claiming, renewing, or updating work claims needs a contribute, review, or collaborate profile.");
@@ -4636,7 +4666,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // message, and a post by a mentioned member marks their pending
       // mentions responded in the same transaction. Never throws for
       // unparseable input — an unresolvable mention is simply not tracked.
-      if (command.type === T.MESSAGE_POSTED) this.trackMentions(roomId, state, auth.member.id, command.data, incoming.id);
+      // COMMS-02: trackMentions also returns the poster's mention warnings
+      // (@handles whose target is ambiguous or unknown); they ride the response below.
+      let mentionWarnings = null;
+      if (command.type === T.MESSAGE_POSTED) mentionWarnings = this.trackMentions(roomId, state, auth.member.id, command.data, incoming.id);
       // Attention: write-time activity fan-out (mention/reply/thread_reply/
       // reaction). Runs in the same transaction as the triggering event.
       // Never throws: a fan-out failure must not fail the command.
@@ -4686,7 +4719,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         ? `Posted. Wake skipped for ${skippedWakes.map(id => room.state.members?.[id]?.displayName || id).join(", ")}: Room Trust is off, so that agent was not woken.`
         : null;
       syncRoomPublication(this, { roomId, state, previous: room.state, auth });
-      return { sequence, event: incoming, duplicate: false, ...(note ? { note } : {}) };
+      return { sequence, event: incoming, duplicate: false, ...(note ? { note } : {}),
+        ...((Array.isArray(mentionWarnings) && mentionWarnings.length > 0) ? { mentionWarnings } : {}) };
     });
   }
 
@@ -4821,7 +4855,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       ).run(nowMs, roomId, answered.eventId, senderMemberId);
     }
     const body = typeof data.body === "string" ? data.body : "";
-    if (!body.includes("@")) return;
+    if (!body.includes("@")) return [];
     const members = state?.members ?? {};
     let identityNames = {};
     try {
@@ -4836,10 +4870,19 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       `INSERT OR IGNORE INTO mention_states
        (room_id,message_event_id,mentioned_member_id,state,created_at,timeout_at,decided_at)
        VALUES(?,?,?,?,?,?,NULL)`);
+    const toMemberId = typeof data.toMemberId === "string" ? data.toMemberId : "";
     for (const memberId of resolveMentionTargetsInText(members, identityNames, body, senderMemberId)) {
-      if (data.toMemberId && data.toMemberId !== memberId) continue;
+      if (toMemberId && toMemberId !== memberId) continue;
       insert.run(roomId, eventId, memberId, "delivered", nowMs, nowMs + timeoutMs);
     }
+    // COMMS-02: warn the poster about @handles whose target is ambiguous
+    // (2+ members match) or unknown, naming the candidates so they can
+    // disambiguate. Delivery is unchanged — the post still lands; the
+    // warnings ride on the command response. In a targeted DM only handles
+    // naming the DM target are relevant; other handles never create rows.
+    let warnings = mentionTargetWarnings(members, identityNames, body, senderMemberId);
+    if (toMemberId) warnings = warnings.filter(w => w.candidates.some(c => c.memberId === toMemberId));
+    return warnings;
   }
 
   // #658: per-room mention timeout, defaulting to 30 minutes. Owner-

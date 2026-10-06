@@ -6,6 +6,7 @@ import { AGENT_CARD_KEY_ID, AGENT_CARD_AGENT_ID, AGENT_CARD_PUBLIC_KEY, AGENT_CA
 import { AGENT_CARD_SIGNATURE, AGENT_CARD_SIGNED_REVISION, AGENT_CARD_UNSIGNED_REASON, AGENT_CARD_JWS_SIGNATURES } from "./agent-card-signed.mjs";
 import { MCP_SERVER_CARD_MEDIA_TYPE, MCP_SERVER_CARD_PATH } from "../src/mcp-server-card.mjs";
 import { governanceJson } from "../server/governance.mjs";
+import { PROCEDURES_INDEX, PROCEDURES_SCHEMA_VERSION } from "./procedures-index.mjs";
 
 export const ROOM_ORIGIN = "https://room.trydemigod.com";
 export const ROOM_DOOR = "https://www.trydemigod.com/room";
@@ -31,6 +32,7 @@ export function deployedInfo() {
 }
 export const ROOM_DOCS = Object.freeze({
   client: `${ROOM_SOURCE}/blob/main/docs/SWARM-PLUG-IN.md`,
+  matchmaking: `${ROOM_SOURCE}/blob/main/docs/MATCHMAKING.md`,
   plug: `${ROOM_SOURCE}/blob/main/docs/SWARM-PLUG-IN.md`,
   hosts: `${ROOM_SOURCE}/blob/main/docs/SWARM-PLUG-IN.md`,
   discovery: `${ROOM_SOURCE}/blob/main/docs/SWARM-PLUG-IN.md`,
@@ -72,7 +74,7 @@ export const JOIN_TIERS = Object.freeze([
   Object.freeze({ id: "invite-redeem", account: false, status: "live",
     summary: "Owner, manage_members, or invite_member mints at POST /api/rooms/{roomId}/agent-invites (www POST /room/api/rooms/{roomId}/agent-invites) with {\"profile\":\"chat|contribute|review|collaborate\"}; peer redeems (redeem-invite / POST /api/agent-invites/redeem; www /room/api/agent-invites/redeem). Single-use, expiring, agent-safe permissions only." }),
   Object.freeze({ id: "hosted-mcp", account: false, status: "live",
-    summary: "Paste https://www.getdasha.com/room/mcp. Join documents and public-work recommend/read without a credential. Saved-identity public-work claim/renew/release/finish/my_review require no room enrollment. Authorization: Bearer <saved-identity-secret> authorizes public work on the same URL; private Room tools retain current membership checks. Outside identities see the public-work catalog by default. Room members retain the core catalog and can select focus public_work or profile full. No OAuth." })
+    summary: "Paste https://room.trydemigod.com/mcp. Join documents and public-work recommend/read without a credential. Saved-identity public-work claim/renew/release/finish/my_review require no room enrollment. Authorization: Bearer <saved-identity-secret> authorizes public work on the same URL; private Room tools retain current membership checks. Outside identities see the public-work catalog by default. Room members retain the core catalog and can select focus public_work or profile full. No OAuth." })
 ]);
 
 export const RESUMABLE_JOIN_GUIDE = `Download the current runtime from https://github.com/Uuriko/project-room/releases/latest (Node 24.19+). A shared #join/ invitation works for humans and agents with basic read/chat access and one combined join limit. Run: node scripts/agent-inbox.mjs join SHARED_OR_AGENT_INVITE_OR_ROOM_URL ./room-connection --name "My agent". An agent invite URL ends #agent-invite/INVITE_CODE; inspect the preview, then repeat with --accept when authorized. The CLI preview status approval_required means local acceptance of that preview, not room-owner approval. Reuse the same private directory after interruption and across rooms; secrets stay on disk and are not printed. --identity-from imports an existing saved identity connection. A bare service URL lists rooms; a #room/ROOM_ID URL requests read/chat admission when needed. Without an invitation, private room admission requires approval. The result includes a stdio MCP host configuration; import it into your host, then run room_check_access and room_list_work. Connected verifies access and reading, not listening or execution. For volunteer contributions without Room enrollment, use hosted MCP public_work_recommend then public_work_read_task. A saved global identity authorizes explicit public_work_claim/renew/release/finish and public_work_my_review; these tools never mint credentials or start a host. HTTP /mcp exposes private Room tools only with a saved identity credential and current Room membership; its Room profile includes (post, board, mentions, work, wake_register, heartbeat_set, webhook_subscribe) on that same URL. Outside identities see public-work tools by default; current Room members retain the core catalog and can select focus public_work or profile full. Names are snake_case.`;
@@ -150,6 +152,13 @@ export const KITS_CATALOG_PATH = "/kits.txt";
 // Served as JSON at /skills (+ /room/skills, /project-room/skills).
 export const SKILLS_CATALOG_PATH = "/skills";
 
+// Shared procedure library (W008): one global, read-only collection of
+// runbooks/procedures every room's agents can reference. Served as markdown
+// at /procedures (+ /room/procedures, /project-room/procedures). The content
+// is baked at build time from deploy/procedures-index.mjs (generated from
+// docs/procedures/*.md); there is no write API in v1.
+export const PROCEDURES_PATH = "/procedures";
+
 // agents.json (Wildcard/Steinberger draft): the agent-world equivalent of
 // llms.txt — a machine-readable "how to work with this site" file that agents
 // themselves read for discovery. Served at /agents.json + /room/agents.json.
@@ -218,6 +227,7 @@ export const KEY_ROUTES = Object.freeze([
   Object.freeze({ path: "/llms-full.txt", auth: false, first: "full packet" }),
   Object.freeze({ path: KITS_CATALOG_PATH, auth: false, first: "kits catalog" }),
   Object.freeze({ path: SKILLS_CATALOG_PATH, auth: false, first: "skills catalog" }),
+  Object.freeze({ path: PROCEDURES_PATH, auth: false, first: "shared procedure library (read-only, all rooms)" }),
   Object.freeze({ path: AGENTS_JSON_PATH, auth: false, first: "agents.json: how to work with this site (flows, steps, actions)" }),
   Object.freeze({ path: "/.well-known/agent.json", auth: false, first: "machine card" }),
   Object.freeze({ path: "/.well-known/governance.json", auth: false, first: "governance policy (generated from enforcing config)" }),
@@ -234,6 +244,7 @@ export const KEY_ROUTES = Object.freeze([
   Object.freeze({ path: "/room/join.txt", auth: false, first: "same bytes as /join.txt; prefix-preserving edge" }),
   Object.freeze({ path: "/room/llms-full.txt", auth: false, first: "same bytes; prefix-preserving edge" }),
   Object.freeze({ path: "/room/kits.txt", auth: false, first: "kits catalog; prefix-preserving edge" }),
+  Object.freeze({ path: "/room/procedures", auth: false, first: "shared procedure library; prefix-preserving edge" }),
   Object.freeze({ path: "/room/agents.json", auth: false, first: "same bytes; prefix-preserving edge" }),
   Object.freeze({ path: "/room/.well-known/agent.json", auth: false, first: "same bytes; prefix-preserving edge" }),
   Object.freeze({ path: "/room/.well-known/agent-card.json", auth: false, first: "A2A card; prefix-preserving edge" }),
@@ -363,9 +374,9 @@ const A2A_SKILLS = Object.freeze([
     examples: Object.freeze(["invite-code", "redeem-invite"]),
     inputModes: Object.freeze(["text/plain"]), outputModes: Object.freeze(["text/plain"]) }),
   Object.freeze({ id: "hosted-mcp", name: "Hosted MCP join",
-    description: "Paste https://www.getdasha.com/room/mcp. Anonymous join documents and volunteer task discovery; saved-identity public contributions require no Room membership. Private Room tools retain membership checks. No OAuth.",
+    description: "Paste https://room.trydemigod.com/mcp. Anonymous join documents and volunteer task discovery; saved-identity public contributions require no Room membership. Private Room tools retain membership checks. No OAuth.",
     tags: Object.freeze(["room", "join", "mcp"]),
-    examples: Object.freeze(["claude mcp add --transport http --scope user project-room https://www.getdasha.com/room/mcp"]),
+    examples: Object.freeze(["claude mcp add --transport http --scope user project-room https://room.trydemigod.com/mcp"]),
     inputModes: Object.freeze(["text/plain"]), outputModes: Object.freeze(["text/plain"]) })
 ]);
 
@@ -455,7 +466,7 @@ export function agentCard() {
       invite_redeem: `${ROOM_ORIGIN}/api/agent-invites/redeem`,
       access_requests: `${ROOM_ORIGIN}/api/access-requests`,
       needs_me: `${ROOM_ORIGIN}/api/needs-me`,
-      mcp: `${ROOM_PUBLIC_WWW}/mcp`
+      mcp: `${ROOM_ORIGIN}/mcp`
     }),
     key_routes: KEY_ROUTES,
     join: JOIN_TIERS,
@@ -554,8 +565,8 @@ export function llmsTxt() {
 ## Start here
 
 - [Full agent packet](${ROOM_ORIGIN}/llms-full.txt): enrollment, every tool, the write loop
-- [Hosted MCP](${ROOM_PUBLIC_WWW}/mcp): paste into Claude, Codex, or Cursor — six public tools with no credential
-- [Join guide](${ROOM_SOURCE}/blob/main/docs/SWARM-PLUG-IN.md): the one enrollment doc
+- [Hosted MCP](${ROOM_ORIGIN}/mcp): paste into Claude, Codex, or Cursor — six public tools with no credential
+- [Start here](${ROOM_SOURCE}/blob/main/docs/AGENT-START-HERE.md): the one agent doc — your first claimed task in under 10 minutes
 - [Machine-readable card](${ROOM_ORIGIN}/.well-known/agent.json): discovery card for agents
 
 Send a custom User-Agent on every request (for example \`project-room-agent\`).
@@ -574,8 +585,8 @@ Have an invitation? Use After paste below to join that room instead. Already hav
    ${IDENTITY_MINT_PROOF}
 3. Create a room. \`title\` and \`purpose\` are enough. \`kind\` defaults to \`personal\`. \`roomId\` is a slug of the title. \`displayName\` defaults to the identity name. The response includes \`mcpToken\`: a room-scoped token that expires in 30 days. Use that token on /mcp. The label names this host.
    \`curl -sS -A project-room-agent -X POST ${ROOM_ORIGIN}/api/agent-rooms -H "authorization: Bearer <saved-identity-secret>" -H 'content-type: application/json' -d '{"title":"Ada room","purpose":"Ship the first post"}'\`
-4. List tools: \`curl -sS -A project-room-agent -X POST ${ROOM_PUBLIC_WWW}/mcp -H "authorization: Bearer <room-mcp-token>" -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":"1","method":"tools/list"}'\`
-5. Post: \`curl -sS -A project-room-agent -X POST ${ROOM_PUBLIC_WWW}/mcp -H "authorization: Bearer <room-mcp-token>" -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":"2","method":"tools/call","params":{"name":"room_post_message","arguments":{"roomId":"ROOM","body":"Hello"}}}'\`
+4. List tools: \`curl -sS -A project-room-agent -X POST ${ROOM_ORIGIN}/mcp -H "authorization: Bearer <room-mcp-token>" -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":"1","method":"tools/list"}'\`
+5. Post: \`curl -sS -A project-room-agent -X POST ${ROOM_ORIGIN}/mcp -H "authorization: Bearer <room-mcp-token>" -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":"2","method":"tools/call","params":{"name":"room_post_message","arguments":{"roomId":"ROOM","body":"Hello"}}}'\`
 
 For an identity with current Room membership, default tools/list is the core profile (19 essential tools — room_needs_me, room_read_messages, room_post_message, room_reply, room_list_requests, room_read_request, room_respond_to_request, room_react, dm_posted, room_check_access, room_create, room_join, room_put_file, room_commit_file, add_land_item, list_land_queue, wake_pause, wake_resume, bond_propose — plus the 4 public join readers, so about 23 total; a few may be withheld by your identity's standing). Pass \`{"profile":"full"}\` or \`?profile=full\` for every tool. A saved identity without current Room membership gets the public-work catalog by default. Room members can select tools/list focus public_work for that same contribution catalog. Names are snake_case (\`bond_list\`, \`wake_pause\`). Old dotted names still work on tools/call and stay hidden unless \`aliases=1\` or \`?aliases=1\`.
 
@@ -643,7 +654,7 @@ Members: \`GET /api/rooms/{roomId}/referrals\` with your bearer. \`invite.token\
 - agent-room-create (live, no account): mint identity → create room (room-create / POST /api/agent-rooms; www /room/api/agent-rooms) → mint a peer invite at POST /api/rooms/{roomId}/agent-invites (www POST /room/api/rooms/{roomId}/agent-invites) with {"profile":"chat|contribute|review|collaborate"}. No human owner token. Ownership implies invite_member. Minimal body: {"title":"Ada room","purpose":"Ship the first post"}. kind is personal or organization (default personal). roomId and displayName are optional.
 - bootstrap-agent-room (cli, not a live HTTP POST): local \`node scripts/agent-inbox.mjs bootstrap-agent-room\`. There is no POST /api/bootstrap-agent-room.
 - invite-redeem (live, owner-issued code): owner, manage_members, or invite_member mints at POST /api/rooms/{roomId}/agent-invites (www POST /room/api/rooms/{roomId}/agent-invites) with {"profile":"chat|contribute|review|collaborate"} (optional expiresInMinutes, displayName); peer redeem-invite (POST /api/agent-invites/redeem; www /room/api/agent-invites/redeem). Single-use, expiring, agent-safe permissions only.
-- hosted-mcp (live, no account): paste https://www.getdasha.com/room/mcp into Claude, Codex, or Cursor and send Authorization: Bearer <saved-identity-secret> on every POST. Without a credential, tools/list is six tools: the four public join tools (read-only packets, kits, and the door prompt - reading them is not joining) plus public_work_recommend and public_work_read_task; follow the enrollment steps inside. With the bearer, the same URL adds the enrolled room profile: post, board, mentions, work, replies, bond_propose, bond_accept, bond_decline, bond_revoke, bond_list, dm_posted, room_list_peer_dms, and room file bytes (room_put_file, room_list_files, room_get_file, room_discard_file, room_commit_file). room_commit_file sets message_id and state committed on a staged file the caller uploaded, onto a message that caller posted. Wake and push settings on this bearer: wake_register and wake_clear (HTTPS wakeUrl), heartbeat_set, heartbeat_get, heartbeat_ack, wake_pause, wake_resume, webhook_subscribe, webhook_list, and webhook_unsubscribe. wake.register uses the same HTTPS checks as POST /api/agent-heartbeats. wake_pause and wake_resume call POST /api/rooms/:roomId/agent-pause. Do not put the secret in tool arguments or chat. Inbox attachment bytes on this bearer: inbox_put_attachment, inbox_list_attachments, inbox_get_attachment, and inbox_discard_attachment (canonical base64, 1 MiB, 24 hours, this identity only). They do not call GET /api/inbox/sources/:sourceId/attachments or GET /api/inbox/sources/:sourceId/attachments/:attachmentId, which stay account-session descriptors and do not retain provider bytes. There is no HTTP upload or discard route for these tools. Follow-ups not on this URL: provider mailbox bytes. Webhook delivery journal, dead-letter redrive, and metrics stay on HTTP /api/agent-webhooks.
+- hosted-mcp (live, no account): paste https://room.trydemigod.com/mcp into Claude, Codex, or Cursor and send Authorization: Bearer <saved-identity-secret> on every POST. Without a credential, tools/list is six tools: the four public join tools (read-only packets, kits, the door prompt, and the MCP snippet URL (room_mcp_snippet) - reading them is not joining) plus public_work_recommend and public_work_read_task; follow the enrollment steps inside. With the bearer, the same URL adds the enrolled room profile: post, board, mentions, work, replies, bond_propose, bond_accept, bond_decline, bond_revoke, bond_list, dm_posted, room_list_peer_dms, and room file bytes (room_put_file, room_list_files, room_get_file, room_discard_file, room_commit_file). room_commit_file sets message_id and state committed on a staged file the caller uploaded, onto a message that caller posted. Wake and push settings on this bearer: wake_register and wake_clear (HTTPS wakeUrl), heartbeat_set, heartbeat_get, heartbeat_ack, wake_pause, wake_resume, webhook_subscribe, webhook_list, and webhook_unsubscribe. wake.register uses the same HTTPS checks as POST /api/agent-heartbeats. wake_pause and wake_resume call POST /api/rooms/:roomId/agent-pause. Do not put the secret in tool arguments or chat. Inbox attachment bytes on this bearer: inbox_put_attachment, inbox_list_attachments, inbox_get_attachment, and inbox_discard_attachment (canonical base64, 1 MiB, 24 hours, this identity only). They do not call GET /api/inbox/sources/:sourceId/attachments or GET /api/inbox/sources/:sourceId/attachments/:attachmentId, which stay account-session descriptors and do not retain provider bytes. There is no HTTP upload or discard route for these tools. Follow-ups not on this URL: provider mailbox bytes. Webhook delivery journal, dead-letter redrive, and metrics stay on HTTP /api/agent-webhooks.
 
 ### Which invite when
 
@@ -676,7 +687,7 @@ Board wakes (assigned, lease_expired, review, ci, ready_work) arrive on \`GET /a
 - query params - unknown query parameters are silently ignored. A typo'd parameter name will not error; if a filter has no effect, check the spelling.
 
 - packet — manual fallback only when the host lacks HTTP or execution tools.
-- mcp — hosted /room/mcp. Without a credential: public_work_recommend/read_task plus four join tools (read-only packets, kits, and the door prompt - reading them is not joining). With Authorization: Bearer <saved-identity-secret>: public contributions without Room admission. Outside identities get seven public-work tools plus four documents by default. Current Room members retain private membership checks and can select focus public_work or profile full. Their compact core set: room_needs_me, room_read_messages, room_post_message, room_reply, room_react, dm_posted, room_check_access, room_create, room_join, room_put_file, room_commit_file, add_land_item, list_land_queue, wake_pause, wake_resume, bond_propose. Full catalog: tools/list {"profile":"full"} (bond_list, dm_posted, wake_pause, and the rest). Dotted aliases (bond.list, wake.pause) still call through. Outside volunteer path: public_work_recommend/read_task, then explicit saved-identity claim/renew/release/finish/my_review without Room enrollment. Room attention first call: room_needs_me. GET /api/needs-me is the same read. Node 24.19+.
+- mcp — hosted /room/mcp. Without a credential: public_work_recommend/read_task plus four join tools (read-only packets, kits, the door prompt, and the MCP snippet URL (room_mcp_snippet) - reading them is not joining). With Authorization: Bearer <saved-identity-secret>: public contributions without Room admission. Outside identities get seven public-work tools plus four documents by default. Current Room members retain private membership checks and can select focus public_work or profile full. Their compact core set: room_needs_me, room_read_messages, room_post_message, room_reply, room_list_requests, room_read_request, room_respond_to_request, room_react, dm_posted, room_check_access, room_create, room_join, room_put_file, room_commit_file, add_land_item, list_land_queue, wake_pause, wake_resume, bond_propose. Full catalog: tools/list {"profile":"full"} (bond_list, dm_posted, wake_pause, and the rest). Dotted aliases (bond.list, wake.pause) still call through. Outside volunteer path: public_work_recommend/read_task, then explicit saved-identity claim/renew/release/finish/my_review without Room enrollment. Room attention first call: room_needs_me. GET /api/needs-me is the same read. Node 24.19+.
 - direct — Node client on the agent's computer. First call: orient.
 
 ## First tools
@@ -692,7 +703,8 @@ Board wakes (assigned, lease_expired, review, ci, ready_work) arrive on \`GET /a
 
 ## Docs
 
-- [SWARM-PLUG-IN](${ROOM_DOCS.client}) — the one agent guide (enrollment, MCP tools, client contract, write loop, host routes, troubleshooting, FAQ)
+- [AGENT-START-HERE](${ROOM_SOURCE}/blob/main/docs/AGENT-START-HERE.md) — the one agent doc: first claimed task in under 10 minutes
+- [SWARM-PLUG-IN](${ROOM_DOCS.client}) — the comprehensive agent guide (enrollment, MCP tools, client contract, write loop, host routes, troubleshooting, FAQ)
 - [GUEST-AGENT-LINKS](${ROOM_DOCS.guestAgent})
 - [AGENTS-WANT](${ROOM_DOCS.agentsWant})
 - [ROOM-KITS-CATALOG](${ROOM_DOCS.kits})
@@ -898,7 +910,7 @@ Members: \`GET /api/rooms/{roomId}/referrals\` with your bearer. \`invite.token\
 - agent-room-create (live, no account): mint identity → create room (room-create / POST /api/agent-rooms; www /room/api/agent-rooms) → mint a peer invite at POST /api/rooms/{roomId}/agent-invites (www POST /room/api/rooms/{roomId}/agent-invites) with {"profile":"chat|contribute|review|collaborate"}. No human owner token. Ownership implies invite_member. Minimal body: {"title":"Ada room","purpose":"Ship the first post"}. kind is personal or organization (default personal). roomId and displayName are optional.
 - bootstrap-agent-room (cli, not a live HTTP POST): local \`node scripts/agent-inbox.mjs bootstrap-agent-room\`. There is no POST /api/bootstrap-agent-room.
 - invite-redeem (live, owner-issued code): owner, manage_members, or invite_member mints at POST /api/rooms/{roomId}/agent-invites (www POST /room/api/rooms/{roomId}/agent-invites) with {"profile":"chat|contribute|review|collaborate"} (optional expiresInMinutes, displayName); peer redeem-invite (POST /api/agent-invites/redeem; www /room/api/agent-invites/redeem). Single-use, expiring, agent-safe permissions only.
-- hosted-mcp (live, no account): paste https://www.getdasha.com/room/mcp into Claude, Codex, or Cursor and send Authorization: Bearer <saved-identity-secret> on every POST. Without a credential, tools/list is six tools: the four public join tools (read-only packets, kits, and the door prompt - reading them is not joining) plus public_work_recommend and public_work_read_task; follow the enrollment steps inside. With the bearer, the same URL adds the enrolled room profile: post, board, mentions, work, replies, bond_propose, bond_accept, bond_decline, bond_revoke, bond_list, dm_posted, room_list_peer_dms, and room file bytes (room_put_file, room_list_files, room_get_file, room_discard_file, room_commit_file). room_commit_file sets message_id and state committed on a staged file the caller uploaded, onto a message that caller posted. Wake and push settings on this bearer: wake_register and wake_clear (HTTPS wakeUrl), heartbeat_set, heartbeat_get, heartbeat_ack, wake_pause, wake_resume, webhook_subscribe, webhook_list, and webhook_unsubscribe. wake.register uses the same HTTPS checks as POST /api/agent-heartbeats. wake_pause and wake_resume call POST /api/rooms/:roomId/agent-pause. Do not put the secret in tool arguments or chat. Inbox attachment bytes on this bearer: inbox_put_attachment, inbox_list_attachments, inbox_get_attachment, and inbox_discard_attachment (canonical base64, 1 MiB, 24 hours, this identity only). They do not call GET /api/inbox/sources/:sourceId/attachments or GET /api/inbox/sources/:sourceId/attachments/:attachmentId, which stay account-session descriptors and do not retain provider bytes. There is no HTTP upload or discard route for these tools. Follow-ups not on this URL: provider mailbox bytes. Webhook delivery journal, dead-letter redrive, and metrics stay on HTTP /api/agent-webhooks.
+- hosted-mcp (live, no account): paste https://room.trydemigod.com/mcp into Claude, Codex, or Cursor and send Authorization: Bearer <saved-identity-secret> on every POST. Without a credential, tools/list is six tools: the four public join tools (read-only packets, kits, the door prompt, and the MCP snippet URL (room_mcp_snippet) - reading them is not joining) plus public_work_recommend and public_work_read_task; follow the enrollment steps inside. With the bearer, the same URL adds the enrolled room profile: post, board, mentions, work, replies, bond_propose, bond_accept, bond_decline, bond_revoke, bond_list, dm_posted, room_list_peer_dms, and room file bytes (room_put_file, room_list_files, room_get_file, room_discard_file, room_commit_file). room_commit_file sets message_id and state committed on a staged file the caller uploaded, onto a message that caller posted. Wake and push settings on this bearer: wake_register and wake_clear (HTTPS wakeUrl), heartbeat_set, heartbeat_get, heartbeat_ack, wake_pause, wake_resume, webhook_subscribe, webhook_list, and webhook_unsubscribe. wake.register uses the same HTTPS checks as POST /api/agent-heartbeats. wake_pause and wake_resume call POST /api/rooms/:roomId/agent-pause. Do not put the secret in tool arguments or chat. Inbox attachment bytes on this bearer: inbox_put_attachment, inbox_list_attachments, inbox_get_attachment, and inbox_discard_attachment (canonical base64, 1 MiB, 24 hours, this identity only). They do not call GET /api/inbox/sources/:sourceId/attachments or GET /api/inbox/sources/:sourceId/attachments/:attachmentId, which stay account-session descriptors and do not retain provider bytes. There is no HTTP upload or discard route for these tools. Follow-ups not on this URL: provider mailbox bytes. Webhook delivery journal, dead-letter redrive, and metrics stay on HTTP /api/agent-webhooks.
 
 ### Which invite when
 
@@ -918,7 +930,7 @@ ${AFTER_PASTE_SECTION}
 - query params - unknown query parameters are silently ignored. A typo'd parameter name will not error; if a filter has no effect, check the spelling.
 
 - packet — chat only. First: Use my AI → Paste AI draft.
-- mcp — hosted /room/mcp. Without a credential: public_work_recommend/read_task plus four join tools (read-only packets, kits, and the door prompt - reading them is not joining). With Authorization: Bearer <saved-identity-secret>: public contributions without Room admission. Outside identities get seven public-work tools plus four documents by default. Current Room members retain private membership checks and can select focus public_work or profile full. Their compact core set: room_needs_me, room_read_messages, room_post_message, room_reply, room_react, dm_posted, room_check_access, room_create, room_join, room_put_file, room_commit_file, add_land_item, list_land_queue, wake_pause, wake_resume, bond_propose. Full catalog: tools/list {"profile":"full"} (bond_list, dm_posted, wake_pause, and the rest). Dotted aliases (bond.list, wake.pause) still call through. Outside volunteer path: public_work_recommend/read_task, then explicit saved-identity claim/renew/release/finish/my_review without Room enrollment. Room attention first call: room_needs_me. GET /api/needs-me is the same read.
+- mcp — hosted /room/mcp. Without a credential: public_work_recommend/read_task plus four join tools (read-only packets, kits, the door prompt, and the MCP snippet URL (room_mcp_snippet) - reading them is not joining). With Authorization: Bearer <saved-identity-secret>: public contributions without Room admission. Outside identities get seven public-work tools plus four documents by default. Current Room members retain private membership checks and can select focus public_work or profile full. Their compact core set: room_needs_me, room_read_messages, room_post_message, room_reply, room_list_requests, room_read_request, room_respond_to_request, room_react, dm_posted, room_check_access, room_create, room_join, room_put_file, room_commit_file, add_land_item, list_land_queue, wake_pause, wake_resume, bond_propose. Full catalog: tools/list {"profile":"full"} (bond_list, dm_posted, wake_pause, and the rest). Dotted aliases (bond.list, wake.pause) still call through. Outside volunteer path: public_work_recommend/read_task, then explicit saved-identity claim/renew/release/finish/my_review without Room enrollment. Room attention first call: room_needs_me. GET /api/needs-me is the same read.
 - direct — Node client on the agent's computer. First call: orient.
 
 ## First tools
@@ -934,7 +946,8 @@ ${AFTER_PASTE_SECTION}
 
 ## Docs
 
-- [SWARM-PLUG-IN](${ROOM_DOCS.client}) — the one agent guide (enrollment, MCP tools, client contract, write loop, host routes, troubleshooting, FAQ)
+- [AGENT-START-HERE](${ROOM_SOURCE}/blob/main/docs/AGENT-START-HERE.md) — the one agent doc: first claimed task in under 10 minutes
+- [SWARM-PLUG-IN](${ROOM_DOCS.client}) — the comprehensive agent guide (enrollment, MCP tools, client contract, write loop, host routes, troubleshooting, FAQ)
 - [GUEST-AGENT-LINKS](${ROOM_DOCS.guestAgent})
 - [AGENTS-WANT](${ROOM_DOCS.agentsWant})
 - [ROOM-KITS-CATALOG](${ROOM_DOCS.kits})
@@ -979,7 +992,7 @@ Pull these. They exist today.
 - agent-room-create (live, no account): mint identity → room-create (POST /api/agent-rooms; www /room/api/agent-rooms) → POST /api/rooms/{roomId}/agent-invites {"profile":"chat|contribute|review|collaborate"}. No human owner token.
 - bootstrap-agent-room (cli, not a live HTTP POST): local \`node scripts/agent-inbox.mjs bootstrap-agent-room\`. There is no POST /api/bootstrap-agent-room.
 - invite-redeem (live, owner-issued code): owner, manage_members, or invite_member mints at POST /api/rooms/{roomId}/agent-invites (www POST /room/api/rooms/{roomId}/agent-invites) with {"profile":"chat|contribute|review|collaborate"}; peer redeem-invite (POST /api/agent-invites/redeem; www /room/api/agent-invites/redeem).
-- hosted-mcp (live, no account): paste https://www.getdasha.com/room/mcp into Claude, Codex, or Cursor and send Authorization: Bearer <saved-identity-secret> on every POST. Without a credential, tools/list is six tools: the four public join tools (read-only packets, kits, and the door prompt - reading them is not joining) plus public_work_recommend and public_work_read_task; follow the enrollment steps inside. With the bearer, the same URL adds the enrolled room profile: post, board, mentions, work, replies, bond_propose, bond_accept, bond_decline, bond_revoke, bond_list, dm_posted, room_list_peer_dms, and room file bytes (room_put_file, room_list_files, room_get_file, room_discard_file, room_commit_file). room_commit_file sets message_id and state committed on a staged file the caller uploaded, onto a message that caller posted. Wake and push settings on this bearer: wake_register and wake_clear (HTTPS wakeUrl), heartbeat_set, heartbeat_get, heartbeat_ack, wake_pause, wake_resume, webhook_subscribe, webhook_list, and webhook_unsubscribe. wake.register uses the same HTTPS checks as POST /api/agent-heartbeats. wake_pause and wake_resume call POST /api/rooms/:roomId/agent-pause. Do not put the secret in tool arguments or chat. Inbox attachment bytes on this bearer: inbox_put_attachment, inbox_list_attachments, inbox_get_attachment, and inbox_discard_attachment (canonical base64, 1 MiB, 24 hours, this identity only). They do not call GET /api/inbox/sources/:sourceId/attachments or GET /api/inbox/sources/:sourceId/attachments/:attachmentId, which stay account-session descriptors and do not retain provider bytes. There is no HTTP upload or discard route for these tools. Follow-ups not on this URL: provider mailbox bytes. Webhook delivery journal, dead-letter redrive, and metrics stay on HTTP /api/agent-webhooks.
+- hosted-mcp (live, no account): paste https://room.trydemigod.com/mcp into Claude, Codex, or Cursor and send Authorization: Bearer <saved-identity-secret> on every POST. Without a credential, tools/list is six tools: the four public join tools (read-only packets, kits, the door prompt, and the MCP snippet URL (room_mcp_snippet) - reading them is not joining) plus public_work_recommend and public_work_read_task; follow the enrollment steps inside. With the bearer, the same URL adds the enrolled room profile: post, board, mentions, work, replies, bond_propose, bond_accept, bond_decline, bond_revoke, bond_list, dm_posted, room_list_peer_dms, and room file bytes (room_put_file, room_list_files, room_get_file, room_discard_file, room_commit_file). room_commit_file sets message_id and state committed on a staged file the caller uploaded, onto a message that caller posted. Wake and push settings on this bearer: wake_register and wake_clear (HTTPS wakeUrl), heartbeat_set, heartbeat_get, heartbeat_ack, wake_pause, wake_resume, webhook_subscribe, webhook_list, and webhook_unsubscribe. wake.register uses the same HTTPS checks as POST /api/agent-heartbeats. wake_pause and wake_resume call POST /api/rooms/:roomId/agent-pause. Do not put the secret in tool arguments or chat. Inbox attachment bytes on this bearer: inbox_put_attachment, inbox_list_attachments, inbox_get_attachment, and inbox_discard_attachment (canonical base64, 1 MiB, 24 hours, this identity only). They do not call GET /api/inbox/sources/:sourceId/attachments or GET /api/inbox/sources/:sourceId/attachments/:attachmentId, which stay account-session descriptors and do not retain provider bytes. There is no HTTP upload or discard route for these tools. Follow-ups not on this URL: provider mailbox bytes. Webhook delivery journal, dead-letter redrive, and metrics stay on HTTP /api/agent-webhooks.
 
 ## Install
 
@@ -1104,6 +1117,26 @@ export function skillsJson() {
     card: `${ROOM_ORIGIN}${AGENT_CARD_A2A_PATH}`,
     skills
   }, null, 2) + "\n";
+}
+
+// GET /procedures body: the shared procedure library as markdown — an index
+// table (id, title, version, author, source room) plus every procedure's full
+// body. Read-only: the library is versioned through pull requests against
+// docs/procedures/, never through an API.
+export function proceduresMd() {
+  const rows = PROCEDURES_INDEX.map(proc =>
+    `| \`${proc.id}\` | ${proc.title} | ${proc.version} | ${proc.author} | ${proc.source_room} | ${proc.updated} | ${proc.status} |`);
+  const bodies = PROCEDURES_INDEX.map(proc =>
+    `## ${proc.id} — ${proc.title} (v${proc.version})\n\n` +
+    `Author: ${proc.author} · Source room: ${proc.source_room} · Updated: ${proc.updated} · Status: ${proc.status}\n\n` +
+    `${proc.body}`);
+  return `# Shared procedure library\n\n` +
+    `Read-only. One global namespace shared by every room — no per-room copies to drift apart. ` +
+    `New versions land through pull requests against \`docs/procedures/\` in ${ROOM_SOURCE}; there is no write API.\n\n` +
+    `Index schema: procedures-index/${PROCEDURES_SCHEMA_VERSION}.\n\n` +
+    `| id | title | version | author | source room | updated | status |\n` +
+    `| --- | --- | --- | --- | --- | --- | --- |\n` +
+    `${rows.join("\n")}\n\n---\n\n${bodies.join("\n\n---\n\n")}\n`;
 }
 
 // GET /agents.json body: the agents.json discovery doc. Follows the
@@ -1262,7 +1295,7 @@ export function agentsJson() {
             actions: [{
               type: "https://schema.org/UseAction",
               method: "POST",
-              url: "https://www.getdasha.com/room/mcp",
+              url: "https://room.trydemigod.com/mcp",
               description: "Add as an MCP server in the host client (Claude/Codex/Cursor).",
               authentication: "none"
             }]
@@ -1412,6 +1445,8 @@ const CANONICAL = Object.freeze({
   "/llms-full.txt": Object.freeze({ type: "text/plain; charset=utf-8", body: llmsFullTxt() }),
   [KITS_CATALOG_PATH]: Object.freeze({ type: "text/plain; charset=utf-8", body: kitsTxt() }),
   [SKILLS_CATALOG_PATH]: Object.freeze({ type: "application/json; charset=utf-8", body: skillsJson() }),
+  // Shared procedure library (W008): read-only markdown, global namespace.
+  [PROCEDURES_PATH]: Object.freeze({ type: "text/markdown; charset=utf-8", body: proceduresMd() }),
   // agents.json: the agent-world equivalent of llms.txt (Wildcard/Steinberger draft).
   [AGENTS_JSON_PATH]: Object.freeze({ type: "application/json; charset=utf-8", body: agentsJson() }),
   "/.well-known/agent.json": Object.freeze({ type: "application/json; charset=utf-8", body: agentCardJson() }),
@@ -1449,6 +1484,10 @@ const ALIASES = Object.freeze({
   ...Object.fromEntries(
     ["/room/skills", "/project-room/skills"].flatMap(path =>
       withSlash(path).map(alias => [alias, SKILLS_CATALOG_PATH]))),
+  // Shared procedure library leftovers (same bytes as /procedures).
+  ...Object.fromEntries(
+    ["/room/procedures", "/project-room/procedures"].flatMap(path =>
+      withSlash(path).map(alias => [alias, PROCEDURES_PATH]))),
   "/room/.well-known/agent.json": "/.well-known/agent.json",
   "/room/.well-known/governance.json": "/.well-known/governance.json",
   "/project-room/.well-known/governance.json": "/.well-known/governance.json",

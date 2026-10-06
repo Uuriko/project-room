@@ -1,0 +1,136 @@
+# W001 — merge-time trace-entry automation.
+#
+# When a pull request merges to the default branch, open a bot PR that appends
+# one line to docs/ROOM-TRACES.jsonl (the raw-traces plane), built from PR
+# metadata — number, title, merge SHA, linked Room-Work claim — by
+# scripts/trace-entry.mjs. No manual backfill, ever.
+#
+# Why a bot PR and not a direct push: main's branch protection requires status
+# checks [test, contract, lint, browser, cloudflare] on merges, which blocks
+# direct pushes of fresh commits (a new SHA has no passing checks).
+#
+# Why a PAT and not GITHUB_TOKEN: GitHub suppresses workflow runs for
+# GITHUB_TOKEN-caused events (anti-recursion), so a PR opened with
+# GITHUB_TOKEN would never launch the required status checks and could never
+# merge. A fine-grained PAT (or GitHub App token) triggers workflows normally.
+# (Validated 2026-10-06: PR #1650, opened with a non-GITHUB_TOKEN credential,
+# launched the full CI suite.)
+#
+# One-time setup (needs the repo owner): create a fine-grained PAT with
+# contents:write and pull-requests:write on Uuriko/project-room, store it as
+# the TRACE_ENTRY_TOKEN repo secret. Until it exists this workflow fails
+# loudly on every run (it never falls back to GITHUB_TOKEN — that would
+# silently reintroduce the suppression bug).
+#
+# Design notes:
+# - pull_request_target (like room-work-sync.yml): runs in the base-branch
+#   context, checks out main only, never executes untrusted PR code.
+# - Trace PRs themselves are excluded via the trace-entry/ head-ref prefix,
+#   so merging a trace PR does not spawn another trace run (no regress).
+# - concurrency group serializes merge-time runs: a later run always starts
+#   from a main that already contains the earlier run's merged trace PR, so
+#   the file stays append-only and date-ordered with no rebase conflicts.
+# - Fail closed: scripts/check-wiki.mjs must pass before the bot branch is
+#   pushed; the trace PR is squash-merged only after GitHub reports it
+#   mergeable (required checks green). If it never becomes mergeable the job
+#   fails loudly and the trace PR stays open for a lane.
+# - The script is idempotent per PR number, so workflow re-runs can never
+#   duplicate a line; a re-run reuses the open trace PR if one exists.
+name: trace-entry
+
+on:
+  pull_request_target:
+    types: [closed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: trace-entry-main
+  cancel-in-progress: false
+
+jobs:
+  trace-pr:
+    if: >-
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.base.ref == github.event.repository.default_branch &&
+      !startsWith(github.event.pull_request.head.ref, 'trace-entry/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - name: Build trace entry on a bot branch
+        id: build
+        env:
+          GH_TOKEN: ${{ secrets.TRACE_ENTRY_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "trace-entry: secrets.TRACE_ENTRY_TOKEN is not set."
+            echo "One-time setup: create a fine-grained PAT (contents:write,"
+            echo "pull-requests:write on Uuriko/project-room) and store it as"
+            echo "the TRACE_ENTRY_TOKEN repo secret. GITHUB_TOKEN cannot be"
+            echo "used: GitHub suppresses workflow runs for GITHUB_TOKEN-caused"
+            echo "events, so the trace PR would never launch CI."
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          BR="trace-entry/pr-${PR_NUMBER}"
+          git fetch origin "$DEFAULT_BRANCH"
+          git reset --hard "origin/$DEFAULT_BRANCH"
+          node scripts/trace-entry.mjs
+          node scripts/check-wiki.mjs
+          git add docs/ROOM-TRACES.jsonl
+          if git diff --cached --quiet; then
+            echo "trace entry already present for PR #${PR_NUMBER}"
+            echo "branch=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git checkout -B "$BR"
+          git commit -m "docs: trace entry for PR #${PR_NUMBER}"
+          # PAT (not GITHUB_TOKEN): the push must trigger workflows normally.
+          git -c http.extraheader="AUTHORIZATION: bearer ${GH_TOKEN}" \
+            push --force origin "$BR"
+          echo "branch=$BR" >> "$GITHUB_OUTPUT"
+      - name: Open trace PR and squash-merge when green
+        if: steps.build.outputs.branch != ''
+        env:
+          GH_TOKEN: ${{ secrets.TRACE_ENTRY_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          TRACE_BRANCH: ${{ steps.build.outputs.branch }}
+        run: |
+          set -euo pipefail
+          # Reuse the open trace PR if a previous run left one behind.
+          TRACE_PR=$(gh pr list --head "$TRACE_BRANCH" --base "$DEFAULT_BRANCH" \
+            --state open --json number --jq '.[0].number // empty')
+          if [ -z "$TRACE_PR" ]; then
+            TRACE_PR=$(gh pr create --title "docs: trace entry for #${PR_NUMBER}" \
+              --body "Automated trace entry for PR #${PR_NUMBER}, appended to docs/ROOM-TRACES.jsonl by the W001 trace-entry automation (.github/workflows/trace-entry.yml). No manual step." \
+              --head "$TRACE_BRANCH" --base "$DEFAULT_BRANCH" \
+              --json number --jq '.number')
+          fi
+          echo "trace PR: #${TRACE_PR}"
+          # gh pr merge succeeds only once the required status checks are
+          # green, so retry until mergeable. Loud failure if it never is.
+          for i in $(seq 1 30); do
+            if gh pr merge --squash --delete-branch "$TRACE_PR"; then
+              echo "trace PR #${TRACE_PR} merged"
+              exit 0
+            fi
+            echo "not mergeable yet (attempt ${i}/30); waiting 120s"
+            sleep 120
+          done
+          echo "trace PR #${TRACE_PR} did not become mergeable in 60m; left open for a lane"
+          exit 1

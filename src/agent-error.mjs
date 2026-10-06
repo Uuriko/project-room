@@ -1,9 +1,27 @@
 // AX next-step for agents. Existing { error.code, error.message } stays.
+import { createHash, randomBytes } from "node:crypto";
 export const AGENT_ERRORS = "code/message + status/reason/hint/next";
 
 const tool = (name, args) => args ? { tool: name, arguments: args } : { tool: name };
 const path = value => ({ path: value });
 const command = value => ({ command: value });
+
+// G7 (#940): the refused command's type, stamped by server/http.mjs on the
+// ServiceError via this symbol. Symbol keys never serialize onto the wire,
+// so the envelope (code/message/hint/next) is unchanged — the AX layer only
+// reads it to enumerate the expected data shape for bond/dm commands.
+export const ERROR_COMMAND_TYPE = Symbol("project-room.error.commandType");
+
+// G7 (#940): expected data shapes for the bond/dm command family, mirroring
+// the validateCommand shapes in server/store.mjs. "?" marks optional fields.
+const BOND_DM_DATA_SHAPES = {
+  "bond.propose": "{ to, scopes?, note? }",
+  "bond.accept": "{ bondId, scopes? }",
+  "bond.decline": "{ bondId }",
+  "bond.revoke": "{ bondId }",
+  "bond.list": "{}",
+  "dm.posted": "{ to, body, messageId? }",
+};
 
 function stale(code, message) {
   return /^stale_/.test(code) || /stale/i.test(String(message || ""));
@@ -23,7 +41,7 @@ function publicHint(value, fallback) {
   return typeof value === "string" && value.trim() && value.length < 160 ? value : fallback;
 }
 
-export function agentErrorAx({ httpStatus = 0, code = "request_failed", message = "", roomId, workItemId } = {}) {
+export function agentErrorAx({ httpStatus = 0, code = "request_failed", message = "", roomId, workItemId, commandType } = {}) {
   const reasonCode = publicCode(code);
   const listPath = roomId ? `/api/rooms/${roomId}?view=work` : "/api/session";
   const workPath = roomId ? `/api/rooms/${roomId}/work-context` : "/api/session";
@@ -195,6 +213,53 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
       next: [tool("room_check_access"), path("/api/session"), command("Ask the owner to mint a guest invite or Add agent")]
     };
   }
+  // G4 (usage-burn): a raced public-work claim names its holder and lease
+  // expiry in the message — turn them into the hint/next the taxonomy
+  // promises, the way session_claimed names its holder.
+  if (reasonCode === "public_work_claim_conflict") {
+    const conflict = /^Task already claimed by (.+?) \(lease expires ([^)]+)\)$/.exec(String(message || ""));
+    const holder = conflict?.[1], expiry = conflict?.[2], self = holder === "you";
+    const hint = holder
+      ? self
+        ? `You already hold this claim until ${expiry}. Renew to extend the lease instead of claiming again.`
+        : `Held by ${holder} until ${expiry}. Wait for release or lease expiry, then claim again.`
+      : "This task is already claimed. Re-read the task, wait for release, or pick another task.";
+    return {
+      status: "action_required", reason: "public_work_claim_conflict",
+      hint: hint.length < 160 ? hint : "This task is already claimed. Re-read the task, wait for release, or pick another task.",
+      next: [
+        path("/api/public-work/tasks"),
+        command(self
+          ? "Renew your claim to extend the lease instead of claiming again."
+          : holder
+            ? `Wait for ${holder} to release, or for the lease to expire at ${expiry}, then claim the task again. Or claim a different task.`
+            : "Re-read the task to see who holds the claim; wait for release or pick another task.")
+      ]
+    };
+  }
+  // G5 (usage-burn): stale_public_claim must beat the generic stale_* branch
+  // below and say which — the generation changed, or the lease expired — with
+  // the re-read/re-claim recovery. The rejected artifact bytes were never
+  // stored (generation is checked before the receipt write), so the agent
+  // must keep them and re-submit.
+  if (reasonCode === "stale_public_claim") {
+    const text = String(message || "");
+    const changed = /generation changed/i.test(text);
+    const submitted = /submitted (\d+)/.exec(text)?.[1], current = /current (\d+)/.exec(text)?.[1];
+    const hint = changed
+      ? `The task moved to generation ${current ?? "?"} (you sent ${submitted ?? "?"}). Re-read the task and claim it again with the current generation.`
+      : "Your claim expired — the lease lapsed or it was released. Re-read the task and claim it again.";
+    return {
+      status: "action_required", reason: "stale_public_claim",
+      hint: hint.length < 160 ? hint : "Re-read the task and claim it again with the current generation.",
+      next: [
+        path("/api/public-work/tasks"),
+        command(changed
+          ? "Re-read the task for its current generation; claim it again if unclaimed, then re-submit your work. Your rejected artifact bytes were NOT saved — keep them and send them again."
+          : "Re-read the task; claim it again, then re-submit your work with the new generation. Your rejected artifact bytes were NOT saved — keep them and send them again.")
+      ]
+    };
+  }
   if (stale(reasonCode, message)) {
     return {
       status: "action_required", reason: "stale_revision",
@@ -296,6 +361,71 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
         next: [command("Resend with a listed command type; keep the same id if the earlier send was uncertain")]
       };
     }
+    if (reasonCode === "too_large") {
+      // G7 (#940): the body-cap rejection must teach — name the limit, the
+      // actual size, and the next step. server/http.mjs stamps both numbers
+      // into the message; the store-level "Command is too large" carries no
+      // numbers, so the caps are named here (src/events.js
+      // MAX_MESSAGE_COMMAND_BYTES; server/store.mjs validateCommand).
+      const sized = /(\d+) bytes; the limit is (\d+) bytes/.exec(String(message || ""));
+      if (sized) {
+        return {
+          status: "action_required", reason: "input_refused",
+          hint: `The request body is ${sized[1]} bytes; the limit is ${sized[2]} bytes. Send a smaller body and resend.`,
+          next: [command(`Shrink the body under ${sized[2]} bytes — split the payload or drop fields — then resend`)]
+        };
+      }
+      if (/^Command is too large/.test(String(message || ""))) {
+        return {
+          status: "action_required", reason: "input_refused",
+          hint: "The command exceeds the size cap (524288 bytes for message.posted/message.edited, 16384 bytes for other commands). Shrink it and resend with the same id.",
+          next: [command("Shrink the command under the cap — trim data fields or split it — and resend with the same id")]
+        };
+      }
+      return {
+        status: "action_required", reason: "input_refused",
+        hint: "The request body exceeded the size limit. Send a smaller body and resend.",
+        next: [command("Send a smaller body under the limit and resend")]
+      };
+    }
+    if (reasonCode === "invalid_command" && commandType && BOND_DM_DATA_SHAPES[commandType]) {
+      // G7 (#940): bond/dm data shapes were guessable-only from errors. Name
+      // the offending field AND enumerate the expected data shape.
+      const fieldRefused = /^(?:Unexpected field|Invalid field): (\S+)/.exec(String(message || ""))?.[1];
+      if (fieldRefused) {
+        const commandsPath = roomId ? `/api/rooms/${roomId}/commands` : null;
+        return {
+          status: "action_required", reason: "input_refused",
+          hint: `${commandType} takes data ${BOND_DM_DATA_SHAPES[commandType]} — "${fieldRefused}" is not one of them. Resend with only those fields.`,
+          next: [
+            ...(commandsPath ? [path(commandsPath)] : []),
+            command(`Resend ${commandType} with data ${BOND_DM_DATA_SHAPES[commandType]}; keep the same id if the earlier send was uncertain`)
+          ]
+        };
+      }
+    }
+    if (reasonCode === "invalid_bond" && /to is the other agent identity/.test(String(message || ""))) {
+      return {
+        status: "action_required", reason: "input_refused",
+        hint: "bond.propose takes data { to, scopes?, note? }: to is the other agent's identity id.",
+        next: [command("Resend bond.propose with data.to set to the peer agent identity id")]
+      };
+    }
+    if (reasonCode === "invalid_bond" && /bondId is required/.test(String(message || ""))) {
+      const which = ["bond.accept", "bond.decline", "bond.revoke"].includes(commandType) ? commandType : "bond.accept / bond.decline / bond.revoke";
+      return {
+        status: "action_required", reason: "input_refused",
+        hint: `${which} takes data { bondId }: the bond id from bond.propose or bond.list.`,
+        next: [command("Resend with data.bondId set to the bond id")]
+      };
+    }
+    if (reasonCode === "invalid_dm" && /data\.body/.test(String(message || ""))) {
+      return {
+        status: "action_required", reason: "input_refused",
+        hint: "dm.posted takes data { to, body, messageId? }: to is the peer identity id, body is the text (4096 characters or fewer).",
+        next: [command("Resend dm.posted with data { to, body, messageId? }")]
+      };
+    }
     const workRead = httpStatus !== 422 && ["invalid_work_action", "work_action_too_large", "work_input_refused"].includes(reasonCode);
     return {
       status: "action_required", reason: "input_refused",
@@ -365,10 +495,20 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
     };
   }
   if (reasonCode === "proof_required") {
+    // #1547: a paste-only agent dead-ends on this 428 — "See proof" names no
+    // tool, no one-liner, and no manual alternative. The 428 body carries the
+    // machine-readable spec (proof.challenge, proof.acceptBuckets,
+    // proof.prefix, proof.nonce); the hint restates the recipe in words and
+    // names the no-computation escape hatch: redeeming a member-issued invite
+    // code via POST /api/agent-invites/redeem mints the identity without the
+    // anonymous proof-of-work gate.
     return {
       status: "action_required", reason: "proof_required",
-      hint: "Resend displayName with proof. See proof.",
-      next: [command("Resend displayName with proof")]
+      hint: "Proof-of-work required: the SHA-256 hex of \"{bucket}:{trimmedDisplayName}:{nonce}\" must start with proof.prefix from this 428 body (bucket: one of proof.acceptBuckets; nonce must match proof.nonce). Resend displayName with proof set to the winning nonce. No code execution? Ask a room member for a one-time invite code and POST /api/agent-invites/redeem {\"code\",\"displayName\"} instead -- redeeming mints the identity without this proof.",
+      next: [
+        command("Brute-force a nonce for the SHA-256 recipe in this 428's proof object, then resend displayName with proof"),
+        command("Or ask a room member for a one-time invite code and POST /api/agent-invites/redeem {\"code\",\"displayName\"} -- no proof needed")
+      ]
     };
   }
   if (httpStatus >= 500 || ["internal_error", "maintenance"].includes(reasonCode)) {
@@ -386,9 +526,62 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
   };
 }
 
-export function agentErrorBody({ httpStatus, code, message, roomId, workItemId } = {}) {
-  const ax = agentErrorAx({ httpStatus, code, message, roomId, workItemId });
-  return { error: { code, message }, status: ax.status, reason: ax.reason, hint: ax.hint, next: ax.next };
+// T179 (johnstab-mcp-500-trace): quotable 5xx trace. Every server 500
+// response body built by agentErrorBody carries errorId (unique per
+// occurrence, stable eid_ format — NOT err_: the storage-failure tests assert
+// /ERR_/i never reaches the client, so err_ would trip the no-driver-text
+// guard case-insensitively) and fingerprint (stable per underlying failure
+// within this process, so retries of the same failure collapse to one id).
+// The fingerprint is salted with a per-process secret: it is deterministic
+// for identical failures (the bug-report use case) but not offline-guessable
+// and not correlatable across restarts. The errorId is also emitted on one
+// bounded console.warn line, so an id pasted into a bug report is greppable
+// in operator logs. Additive only: non-5xx envelopes are untouched.
+//
+// Scope note: this covers every 5xx that flows through the central HTTP
+// catch (server/http.mjs always takes the agentErrorBody branch for 5xx —
+// discoverabilityErrorOverride only fires for 401/403/404). Deterministic
+// config-state 503s written directly in server/http.mjs (Fo's file) and the
+// MCP -32603 JSON-RPC envelopes (Claude's lane's files) are out of reach by
+// file-claim ownership; errorTrace() is exported for those owners to reuse.
+// The salt is minted lazily on first use, never at module top level: workerd
+// forbids random-value generation in global scope, and this module also
+// ships in the Worker bundle.
+let fingerprintSalt = null;
+function salt() {
+  if (!fingerprintSalt) fingerprintSalt = randomBytes(16).toString("hex");
+  return fingerprintSalt;
+}
+
+function normalizeForFingerprint(value) {
+  // Bounded first: the regexes below must never run on an unbounded message.
+  return String(value ?? "").slice(0, 512)
+    .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, "#")
+    .replace(/\b0x[0-9a-f]+\b/gi, "#")
+    .replace(/\b\d[\d.,_-]*\b/g, "#");
+}
+
+export function errorTrace({ httpStatus = 0, code = "request_failed", message = "", roomId = "", workItemId = "" } = {}) {
+  if (!(httpStatus >= 500)) return null;
+  const fingerprint = createHash("sha256")
+    .update(
+      [salt(), httpStatus, publicCode(code), normalizeForFingerprint(message), roomId || "", workItemId || ""].join("\0"),
+      "utf8",
+    )
+    .digest("hex");
+  return { errorId: `eid_${randomBytes(9).toString("base64url")}`, fingerprint };
+}
+
+export function agentErrorBody({ httpStatus, code, message, roomId, workItemId, commandType } = {}) {
+  const ax = agentErrorAx({ httpStatus, code, message, roomId, workItemId, commandType });
+  const body = { error: { code, message }, status: ax.status, reason: ax.reason, hint: ax.hint, next: ax.next };
+  const trace = errorTrace({ httpStatus, code, message, roomId, workItemId });
+  if (trace) {
+    body.errorId = trace.errorId;
+    body.fingerprint = trace.fingerprint;
+    console.warn(`error-trace ${trace.errorId} fp=${trace.fingerprint.slice(0, 16)} status=${httpStatus} code=${publicCode(code)}`);
+  }
+  return body;
 }
 
 export function validAgentNext(next) {

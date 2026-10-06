@@ -227,6 +227,52 @@ test("account-session bootstrap and login require Origin, CSRF, and revision CAS
   assert.equal(replacement.sessionRevision, 0);
 });
 
+test("bound account confirmation cannot change cookies and keeps bootstrap recovery separate", async t => {
+  const { store, origin, request, accountKeys } = await fixture(t);
+  const original = await loginAccount(request, origin, accountKeys.owner);
+  const switchedResponse = await request("/api/account-session", {
+    method: "POST", headers: { Cookie: original.cookie, Origin: origin, "X-CSRF-Token": original.session.csrf },
+    data: { accountAccessKey: accountKeys.target, expectedSessionRevision: original.session.sessionRevision }
+  });
+  assert.equal(switchedResponse.status, 201);
+  const current = { cookie: accountCookie(switchedResponse), session: await switchedResponse.json() };
+  const matched = await request("/api/account-session", { headers: accountRoomHeaders(current) });
+  assert.equal(matched.status, 200); assert.equal(matched.headers.get("set-cookie"), null);
+  assert.deepEqual(await matched.json(), current.session);
+  const anonymous = store.createAccountSessionSlot(), expired = store.createAccountSessionSlot();
+  store.db.prepare("UPDATE account_session_slots SET expires_at=0 WHERE hash=?").run(expired.session.credentialHash);
+  const revoked = await loginAccount(request, origin, accountKeys.other);
+  store.revokeAccountCredential("account-other", accountKeys.other);
+  const cases = [
+    ["retired", original.cookie, original.session.sessionBinding, 401, "unauthenticated"],
+    ["missing", null, current.session.sessionBinding, 401, "unauthenticated"],
+    ["malformed cookie", "account_session=invalid", current.session.sessionBinding, 401, "unauthenticated"],
+    ["anonymous", `account_session=${anonymous.token}`, anonymous.session.sessionBinding, 401, "unauthenticated"],
+    ["expired", `account_session=${expired.token}`, expired.session.sessionBinding, 401, "unauthenticated"],
+    ["revoked", revoked.cookie, revoked.session.sessionBinding, 401, "unauthenticated"],
+    ["changed binding", current.cookie, original.session.sessionBinding, 409, "session_binding_changed"],
+    ["malformed binding", current.cookie, "invalid", 422, "invalid_session_binding"],
+    ["empty binding", current.cookie, "", 422, "invalid_session_binding"]
+  ];
+  for (const [label, cookie, binding, status, code] of cases) {
+    const slotsBefore = store.db.prepare("SELECT count(*) n FROM account_session_slots").get().n;
+    const result = await request("/api/account-session", {
+      headers: { ...(cookie ? { Cookie: cookie } : {}), "X-Session-Binding": binding }
+    });
+    assert.equal(result.headers.has("set-cookie"), false, `${label} confirmation must not replace the browser cookie`);
+    await errorCode(result, status, code);
+    assert.equal(store.db.prepare("SELECT count(*) n FROM account_session_slots").get().n, slotsBefore, `${label} confirmation creates no slot`);
+  }
+  const stillCurrent = await request("/api/account-session", { headers: accountRoomHeaders(current) });
+  assert.equal((await stillCurrent.json()).account.id, "account-target");
+  // The ordinary unbound landing retains its existing recovery behavior.
+  for (const cookie of [null, `account_session=${expired.token}`]) {
+    const recovered = await request("/api/account-session", { headers: cookie ? { Cookie: cookie } : {} });
+    assert.equal(recovered.status, 200); assert.ok(accountCookie(recovered));
+    assert.equal((await recovered.json()).authenticated, false);
+  }
+});
+
 test("invitation preview, account-bound acceptance, Room access, replay, and wrong-account denial hold over HTTP", async t => {
   const { store, origin, request, accountKeys } = await fixture(t);
   const owner = await loginAccount(request, origin, accountKeys.owner);

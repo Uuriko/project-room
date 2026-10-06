@@ -17,3 +17,20 @@ jobs:
           node-version: 20
       - name: Enforce quarantine contract
         run: node scripts/quarantine-check.mjs
+
+  # Non-blocking lane for quarantined tests (docs/FLAKY-QUARANTINE.md step 3):
+  # runs the quarantined list with QUARANTINE_RUN=1 and reports, but never
+  # fails the PR — a red result here is honest signal for the repair owner.
+  quarantined-tests:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Run quarantined tests (non-blocking)
+        run: scripts/test-env.sh npm run test:quarantined

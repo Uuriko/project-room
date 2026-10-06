@@ -21,6 +21,12 @@ export const GUEST_AGENT_KIND = "agent";
 export const GUEST_AGENT_PERMISSIONS = Object.freeze([]);
 export const GUEST_AGENT_TTL_MS = 2 * 60 * 60 * 1000;
 export const GUEST_AGENT_MAX_JOINS = 10;
+// Refresh grace window (issue #1563 review): an expired v0 credential can be
+// self-refreshed only within this long after expiry. Without an age bound a
+// token that expired months ago — or leaked into a log — would stay a
+// perpetual re-entry ticket, turning the 2h TTL into "forever unless
+// revoked". Past the window the guest needs a fresh owner invite.
+export const GUEST_REFRESH_GRACE_MS = 7 * 24 * 60 * 60 * 1000;
 export const GUEST_AGENT_MEMBER_PREFIX = "guest-agent-";
 export const GUEST_AGENT_STATUS = "live";
 export const GUEST_AGENT_DEFAULT_NAME = "Guest agent";
@@ -328,6 +334,62 @@ export class GuestAgentLinks {
       if (!this.liveCredential(row, member)) fail(410, "link_unavailable", "This guest invite is not valid.");
       const preview = this.previewPublic(row, member);
       return { ...preview, memberId: member.id, access: "read_chat" };
+    });
+  }
+
+  // Self-service refresh for an EXPIRED v0 credential (issue #1563): no
+  // owner round-trip. Possession of the expired token is the proof — it is
+  // a 256-bit secret only the holder (and the minting store) ever saw.
+  //
+  // Tight scoping, and why:
+  // - The old credential stays dead: a FRESH token is issued for the same
+  //   seat and the old row is revoked. Burned codes are never resurrected.
+  // - Revoked credentials never refresh: owner/admin revocation is final.
+  // - A still-live credential is not refreshable (409): keep using it, or
+  //   rotate() it for a leak response.
+  // - An expired credential is refreshable only inside GUEST_REFRESH_GRACE_MS
+  //   past expiry (410 credential_too_old beyond it): without an age bound a
+  //   long-dead token would stay a perpetual re-entry ticket.
+  // - v1 guest-invite seats (guest_members rows) are excluded: the v1
+  //   credential TTL is the owner's leash (owner-settable 1h-14d); a
+  //   self-serve refresh would let the guest extend it unilaterally, so v1
+  //   stays owner-mediated through a fresh GX- code.
+  // - A swept (deactivated) membership is not resurrected: the owner's
+  //   eject stands; the guest needs a new invite.
+  // - Same member, same room, same (empty) permissions, same fixed 2h TTL:
+  //   refresh cannot escalate anything.
+  // - Not idempotent: the new bearer is returned once, like mint. A repeat
+  //   call finds the old row revoked and 410s — persist the new token.
+  refresh(linkToken) {
+    assertGuestAgentToken(linkToken);
+    return this.store.transaction(() => {
+      const row = this.credential(linkToken);
+      const member = row && this.store.room(row.room_id).state.members[row.member_id];
+      if (!row || !member || !isGuestAgentMemberId(member.id)) {
+        fail(410, "link_unavailable", "This guest credential is not valid.");
+      }
+      if (this.db.prepare("SELECT 1 FROM guest_members WHERE member_id=?").get(member.id)) {
+        fail(410, "invite_unavailable", "v1 guest-invite credentials refresh through a fresh owner code, not this endpoint.");
+      }
+      if (row.expires_at > this.store.now()) {
+        fail(409, "credential_still_live", "This credential is still live; keep using it (rotate it if it leaked).");
+      }
+      if (this.store.now() - row.expires_at > GUEST_REFRESH_GRACE_MS) {
+        fail(410, "credential_too_old", "This credential expired too long ago to refresh; ask the owner for a new invite.");
+      }
+      if (member.kind !== GUEST_AGENT_KIND || member.active === false) {
+        fail(410, "membership_ended", "This guest membership ended; ask the owner for a new invite.");
+      }
+      if (row.revoked !== 0) {
+        fail(410, "link_unavailable", "This guest credential was revoked and cannot be refreshed.");
+      }
+      const issuedToken = GUEST_AGENT_TOKEN_PREFIX + randomBytes(32).toString("base64url");
+      this.conflict(hash(issuedToken));
+      const expiresAt = this.store.now() + GUEST_AGENT_TTL_MS;
+      this.db.prepare("INSERT INTO credentials(hash,room_id,member_id,kind,parent_hash,expires_at,account_id,account_auth_epoch) VALUES(?,?,?,'access',NULL,?,NULL,NULL)")
+        .run(hash(issuedToken), row.room_id, member.id, expiresAt);
+      this.db.prepare("UPDATE credentials SET revoked=1 WHERE hash=?").run(hash(linkToken));
+      return { ...this.issued(issuedToken, { expires_at: expiresAt }, member, row.room_id), refreshed: true };
     });
   }
 }

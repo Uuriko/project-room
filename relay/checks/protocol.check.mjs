@@ -50,6 +50,8 @@ test("enroll and the machine socket match machine/PROTOCOL.md", async () => {
       inviteCode: "RM-0123456789ABCDEF",
       displayName: "Room machine",
       profile: "contribute",
+      passthroughOptIn: true,
+      passthroughCaps: ["desktop.screenshot"],
     });
     assert.equal(minted.status, 201);
     const issued = await enroll(ctx, minted.body.code);

@@ -73,3 +73,23 @@ test("sendTyping without a session does nothing", async () => {
   await client.sendTyping();
   assert.deepEqual(requests, []);
 });
+
+// Instinct-3 (muse-room 3675): typing a private message must not broadcast a
+// room-wide typing beat.
+test("sendTyping sends no beat while a private recipient is selected", async () => {
+  const requests = [];
+  const client = new RoomClient({ fetcher: async url => { requests.push(url); return response({ ok: true }); } });
+  client.session = identity();
+  await client.sendTyping({ toMemberId: "member-b" });
+  assert.equal(requests.length, 0);
+  assert.equal(client.lastTypingSent ?? 0, 0, "a suppressed beat does not consume the throttle window");
+  await client.sendTyping({ toMemberId: "" });
+  assert.equal(requests.length, 1);
+});
+
+test("the composer passes the private recipient to sendTyping", async () => {
+  const { readFileSync } = await import("node:fs");
+  const app = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
+  assert.match(app, /client\.sendTyping\(\{ toMemberId: \$\("#message-to-select"\)\.value \}\)/);
+  assert.doesNotMatch(app, /client\.sendTyping\(\)/);
+});

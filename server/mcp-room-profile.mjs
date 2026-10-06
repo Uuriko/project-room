@@ -29,6 +29,7 @@ import { HOSTED_ROOM_MCP_TOOLS, HOSTED_MCP_FOLLOW_UPS, ROOM_MCP_SERVER_NAME, ROO
 import { MCP_JOIN_TOOLS, MCP_AUTH_REQUIRED, handleMcpJoinRpc } from "./mcp-http.mjs";
 import { mcpInvalidRequest } from "./mcp-arg-errors.mjs";
 import { AgentRooms } from "./agent-rooms.mjs";
+import { AccessRequests } from "./access-requests.mjs";
 import { collectNeedsMe } from "./needs-me.mjs";
 import { MCP_SUPPORTED_VERSIONS, MCP_VERSION } from "../client/mcp-stdio.mjs";
 import { isHostedStdioTool, validHostedStdioArgs, callHostedStdioTool } from "./mcp-full-profile.mjs";
@@ -104,6 +105,11 @@ export function identityBearer(authorization) {
     return { error: "Hosted room tools require a live identity or room token" };
   }
   return { secret: token };
+}
+
+function validPermissionList(value) {
+  return Array.isArray(value) && value.length <= 32
+    && value.every(item => typeof item === "string" && item.length > 0 && item.length <= 64);
 }
 
 function allowed(args, names, required) {
@@ -188,6 +194,23 @@ function validRoomArgs(name, args) {
       && validAttachmentData(args.data);
   }
   if (name === "room_list_files") return true;
+  if (name === "room_list_access_requests") return args.status === undefined || typeof args.status === "string" && args.status.length <= 32;
+  if (name === "room_decide_access_request") {
+    const permsOk = args.permissions === undefined || validPermissionList(args.permissions);
+    const noteOk = args.note === undefined || typeof args.note === "string" && args.note.length <= 500;
+    return typeof args.requestId === "string" && args.requestId.length > 0 && args.requestId.length <= 64
+      && ["approve", "deny"].includes(args.decision) && permsOk && noteOk;
+  }
+  if (name === "room_create_agent_invite") {
+    const hasScope = args.profile !== undefined || args.permissions !== undefined;
+    const profileOk = args.profile === undefined || typeof args.profile === "string" && args.profile.length <= 32;
+    const permsOk = args.permissions === undefined || validPermissionList(args.permissions);
+    const ttlOk = args.expiresInMinutes === undefined || Number.isSafeInteger(args.expiresInMinutes) && args.expiresInMinutes >= 1;
+    const nameOk = args.displayName === undefined || typeof args.displayName === "string" && args.displayName.length > 0 && args.displayName.length <= 80;
+    return hasScope && profileOk && permsOk && ttlOk && nameOk;
+  }
+  if (name === "room_list_agent_invites") return true;
+  if (name === "room_revoke_agent_invite") return typeof args.inviteId === "string" && args.inviteId.length > 0 && args.inviteId.length <= 64;
   if (name === "room_get_file" || name === "room_discard_file") return validId(args.id);
   if (name === "room_commit_file") return validId(args.id) && validId(args.messageId);
   if (name === "add_land_item") {
@@ -490,6 +513,26 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
     });
   }
   if (name === "room_list_files") return store.roomAttachments.list(secret, roomId);
+  // Membership administration over MCP: the same store calls as the REST
+  // access-requests and agent-invites routes, so UI, REST, and MCP agree.
+  if (name === "room_list_access_requests") {
+    return { roomId, requests: new AccessRequests(store).list(secret, roomId, { status: args.status ?? "pending" }) };
+  }
+  if (name === "room_decide_access_request") {
+    const decision = { decision: args.decision };
+    if (args.permissions !== undefined) decision.permissions = args.permissions;
+    if (args.note !== undefined) decision.note = args.note;
+    return new AccessRequests(store).decide(secret, roomId, args.requestId, decision);
+  }
+  if (name === "room_create_agent_invite") {
+    const request = {};
+    for (const key of ["profile", "permissions", "expiresInMinutes", "displayName"]) {
+      if (args[key] !== undefined) request[key] = args[key];
+    }
+    return store.invites.create(secret, roomId, request);
+  }
+  if (name === "room_list_agent_invites") return { roomId, invites: store.invites.list(secret, roomId) };
+  if (name === "room_revoke_agent_invite") return store.invites.revoke(secret, roomId, args.inviteId);
   if (name === "room_get_file") return store.roomAttachments.get(secret, roomId, args.id);
   if (name === "room_discard_file") return store.roomAttachments.discard(secret, roomId, args.id);
   if (name === "room_commit_file") {
@@ -770,9 +813,18 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
         return { jsonrpc: "2.0", id: requestId, result: toolResult(outcome.value, outcome.isError) };
       }
       if (INBOX_TOOLS.some(entry => entry.name === name)) {
+        // Scoped API keys need the mcp:inbox scope: inbox tools reach the
+        // identity's whole inbox, which room scopes never cover.
+        if (!mcpKeyGrantsScope(store, secret, MCP_INBOX_SCOPE)) {
+          return mcpCallError(requestId, { reason: "insufficient_scope", tool: name, hint: `API key lacks the ${MCP_INBOX_SCOPE} scope` });
+        }
         return { jsonrpc: "2.0", id: requestId, result: toolResult(callInboxTool(store, identity, name, args)) };
       }
       if (WAKE_TOOLS.some(entry => entry.name === name)) {
+        // Same for wake tools: wake_register sets push URLs for the identity.
+        if (!mcpKeyGrantsScope(store, secret, MCP_WAKE_SCOPE)) {
+          return mcpCallError(requestId, { reason: "insufficient_scope", tool: name, hint: `API key lacks the ${MCP_WAKE_SCOPE} scope` });
+        }
         return { jsonrpc: "2.0", id: requestId, result: toolResult(await callWakeTool(store, secret, identity, name, args)) };
       }
       return { jsonrpc: "2.0", id: requestId, result: toolResult(await callRoomTool(store, secret, identity, name, args, agentRooms)) };
@@ -787,8 +839,21 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
   return { jsonrpc: "2.0", id: requestId, error: { code: -32601, message: "Method not found" } };
 }
 
-function mcpRoomAllowlist(store, secret) {
-  if (typeof secret !== "string" || !secret.startsWith(API_KEY_PREFIX)) return null;
+// API keys are scoped; the owner identity secret is not. A scoped key must
+// carry the matching scope to reach the identity-wide inbox/wake tools:
+// room scopes (mcp:room:*) never imply them. Mirrors the exact-or-prefix:*
+ // wildcard rule in agent-plugin-routes.mjs.
+const MCP_INBOX_SCOPE = "mcp:inbox";
+const MCP_WAKE_SCOPE = "mcp:wake";
+function mcpKeyGrantsScope(store, secret, requiredScope) {
+  if (typeof secret !== "string" || !secret.startsWith(API_KEY_PREFIX)) return true;
+  const record = store.agentPlugin.verifyPresentedApiKey(secret);
+  if (!record) return false;
+  return (record.scopes ?? []).some(scope =>
+    scope === requiredScope || (scope.endsWith(":*") && requiredScope.startsWith(scope.slice(0, -1))));
+}
+
+function mcpRoomAllowlist(store, secret) {  if (typeof secret !== "string" || !secret.startsWith(API_KEY_PREFIX)) return null;
   const record = store.agentPlugin.verifyPresentedApiKey(secret);
   if (!record) return [];
   const rooms = record.scopes.filter(scope => scope.startsWith("mcp:room:")).map(scope => scope.slice("mcp:room:".length));

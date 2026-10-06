@@ -1,0 +1,53 @@
+name: mime-fuzz
+
+# Continuous fuzzing of the MIME parser (server/mime-message.mjs), backlog Q005.
+# The invariant: any byte input either parses or raises a well-formed
+# MimeError -- never a hang, crash, or uncaught exception. The seed corpus
+# also runs inside `npm test` (tests/mime-fuzz.test.js) on every PR; this job
+# runs the longer deterministic random sweep: a short bounded pass on every
+# PR and push to main ("run always"), and a deeper pass nightly.
+#
+# Bounded by design: fixed seed (reproducible), iteration cap AND wall-clock
+# budget, plus a per-case time limit inside the harness and the job-level
+# timeout-minutes below. A true infinite loop would hang the harness process;
+# `timeout` converts that into a failed step instead of a stalled pipeline.
+# Failing inputs are uploaded as artifacts with their seed for reproduction.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "41 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Fuzz the MIME parser (bounded, deterministic seed)
+        # Nightly schedule gets the deep sweep; PRs and main pushes get the
+        # short sweep so the pipeline never stalls on this job.
+        run: >
+          timeout 1000
+          node scripts/fuzz-mime.mjs
+          --seed 20261006
+          --iterations ${{ github.event_name == 'schedule' && '200000' || '5000' }}
+          --budget-ms ${{ github.event_name == 'schedule' && '840000' || '180000' }}
+          --max-ms 5000
+          --report mime-fuzz-out
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: failure()
+        with:
+          name: mime-fuzz-${{ github.run_id }}
+          path: mime-fuzz-out
+          retention-days: 14

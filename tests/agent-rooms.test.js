@@ -10,6 +10,8 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { AgentRooms, agentRoomSchema } from "../server/agent-rooms.mjs";
+import { nextActionsForRoomCreate } from "../server/discoverability.mjs";
+import { updateWork } from "../server/work-claims.mjs";
 import { createRateLimiter } from "../server/identity-ratelimit.mjs";
 import { PERMISSIONS, AGENT_AUTONOMY_PERMISSIONS, ROOM_KINDS, validId } from "../src/events.js";
 import { RoomAgentClient, createAgentIdentity, createAgentRoom, redeemAgentInvite } from "../client/room-agent.mjs";
@@ -681,4 +683,61 @@ test("the auto-claimed starter task carries the retention ack with the 24h SLA",
   assert.ok(ack, "starter claim carries the bot's ack receipt");
   assert.equal(ack.agentId, identity.identityId);
   assert.match(ack.note, /first=1 sla_due=/);
+});
+
+// 2026-10-05 human-agent user-testing wave (M1, finding F1): the create-room
+// taught finish-work body ({"state":"done",...}) applied verbatim to the
+// auto-claimed starter 422s — claimed -> done is not a legal transition.
+// The taught golden path is start-work first, and the finish-work description
+// must say so. These pin the taught vocabulary to the state machine it drives.
+const finishWorkStep = list => list.find(entry => entry.action === "finish-work");
+const startWorkStep = list => list.find(entry => entry.action === "start-work");
+
+test("the taught finish-work description names the in_progress intermediate step", t => {
+  const { rooms, identity } = setup(t);
+  const created = rooms.create(identity.secret, createArgs());
+  for (const vocabulary of [created.next, created.nextActions]) {
+    const finish = finishWorkStep(vocabulary);
+    assert.ok(finish, "finish-work is taught");
+    assert.equal(finish.path, "/api/rooms/agent-den/work-claims/starter/update");
+    assert.match(finish.description, /in_progress/,
+      "the description must teach that the starter has to be started first");
+  }
+});
+
+test("finish-work verbatim on a fresh claimed starter is still rejected", t => {
+  // The state machine keeps the two-step path: a repair that quietly adds
+  // claimed -> done would silently change the taught onboarding flow, so this
+  // fails loudly instead.
+  const { store, rooms, identity } = setup(t);
+  const created = rooms.create(identity.secret, createArgs());
+  assert.equal(created.starter.state, "claimed");
+  const finish = finishWorkStep(created.next);
+  const item = store.workClaims.get("agent-den", "starter");
+  assert.throws(
+    () => updateWork(item, identity.identityId, { ...finish.body, now: store.now() }),
+    err => err.code === "invalid_claim_input" && /claimed -> in_progress\|blocked\|released/.test(String(err.message)));
+});
+
+test("the full taught sequence (start-work then finish-work) walks the starter to done", t => {
+  const { store, rooms, identity } = setup(t);
+  const created = rooms.create(identity.secret, createArgs());
+  let item = store.workClaims.get("agent-den", "starter");
+  const start = startWorkStep(created.next);
+  const finish = finishWorkStep(created.next);
+  item = updateWork(item, identity.identityId, { ...start.body, now: store.now() });
+  assert.equal(item.state, "in_progress");
+  item = updateWork(item, identity.identityId, { ...finish.body, now: store.now() });
+  assert.equal(item.state, "done");
+  assert.equal(item.deliveryMode, "result");
+});
+
+test("both taught vocabularies agree on the starter verbs (non-divergent)", t => {
+  const { rooms, identity } = setup(t);
+  const created = rooms.create(identity.secret, createArgs());
+  const finishNext = finishWorkStep(created.next);
+  const finishActions = finishWorkStep(nextActionsForRoomCreate("agent-den"));
+  assert.equal(finishNext.path, finishActions.path);
+  assert.equal(finishNext.method, finishActions.method);
+  assert.deepEqual(finishNext.body, finishActions.body);
 });

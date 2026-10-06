@@ -167,7 +167,12 @@ export class PublicWorkClaims {
         for (const item of releaseExpired(this.store.workClaims.list(row.namespace_key), this.store.now())) this.store.workClaims.set(row.namespace_key, item);
         let item = this.store.workClaims.get(row.namespace_key, offerId);
         if (action === 'claim') {
-          if (item.state !== 'unclaimed') fail(409, 'public_work_claim_conflict', 'Task already claimed');
+          if (item.state !== 'unclaimed') {
+            // G4: name the holder and the lease expiry — a bare
+            // "Task already claimed" teaches the raced agent nothing actionable.
+            const holder = item.owner === identity.identityId ? 'you' : (item.owner ?? 'another agent');
+            fail(409, 'public_work_claim_conflict', `Task already claimed by ${holder} (lease expires ${item.leaseExpiresAt ?? 'unknown'})`);
+          }
           const files = JSON.parse(row.files_json);
           for (const other of this.store.workClaims.list(row.namespace_key)) {
             if (other.id !== offerId && other.owner && other.files.some(path => files.some(file => overlaps(path, file))))
@@ -178,7 +183,16 @@ export class PublicWorkClaims {
           this.db.prepare('UPDATE public_work_tasks SET generation=generation+1 WHERE offer_id=?').run(offerId);
           row.generation += 1;
         } else {
-          if (row.generation !== input.generation || !item.owner) fail(409, 'stale_public_claim', 'Claim generation expired or changed');
+          if (row.generation !== input.generation || !item.owner) {
+            // G5: say which — the generation changed, or the claim expired —
+            // so the agent knows the recovery. The rejected artifact bytes are
+            // never persisted: the generation check runs before the receipt
+            // write and before the request journal, so the agent must keep
+            // them and re-submit after re-reading and re-claiming.
+            if (row.generation !== input.generation)
+              fail(409, 'stale_public_claim', `Claim generation changed (submitted ${input.generation}, current ${row.generation})`);
+            fail(409, 'stale_public_claim', `Claim expired: the lease lapsed or the claim was released (generation ${input.generation} is no longer held)`);
+          }
           if (item.owner !== identity.identityId) fail(403, 'public_work_not_owner', 'Only the claimant may change this lease');
           if (action === 'renew') item = renewWork(item, identity.identityId, { leaseHours: lease(input.leaseHours), now: this.store.now() });
           if (action === 'release') {

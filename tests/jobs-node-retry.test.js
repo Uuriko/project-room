@@ -12,6 +12,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { wireNodeJobs } from "../server/jobs.mjs";
 import { backoffDelayMs, MAX_DELIVERY_ATTEMPTS } from "../server/webhook-dispatch.mjs";
+import { installFakeWebhookDns } from "./helpers/fake-webhook-dns.mjs";
 
 const publicDns = { resolve4: async () => ["93.184.216.34"], resolve6: async () => [] };
 
@@ -19,6 +20,9 @@ test("node scheduler retries a failing webhook receiver then dead-letters it", a
   const directory = mkdtempSync(join(tmpdir(), "room-jobs-retry-"));
   let clock = Date.now();
   const store = new RoomStore(join(directory, "room.sqlite"), { now: () => clock });
+  // Test-only DNS for the registration gate: the fixture webhook URL
+  // (https://*.test) goes through the fully fail-closed production gate.
+  installFakeWebhookDns(store);
   store.initialize(initialRoom("commons"));
   const ownerKey = store.issueAccessKey("commons", "owner");
   const identity = store.identities.create("Hook Agent");

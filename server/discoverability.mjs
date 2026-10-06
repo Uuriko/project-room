@@ -107,6 +107,7 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/llms-full.txt", ["GET"], "none", "Full agent packet.", "getLlmsFullTxt"),
   route("/kits.txt", ["GET"], "none", "Room kits catalog.", "getKitsTxt"),
   route("/skills", ["GET"], "none", "Skills catalog as plain JSON.", "getSkills"),
+  route("/procedures", ["GET"], "none", "Shared procedure library: read-only runbooks for every room.", "getProcedures"),
   route("/join.txt", ["GET"], "none", "Join prompt for paste-in enrollment.", "getJoinTxt"),
   route("/.well-known/agent.json", ["GET"], "none", "Machine-readable discovery card.", "getAgentJson"),
   route("/.well-known/agent-card.json", ["GET"], "none", "A2A-style agent card with endpoints.", "getAgentCard"),
@@ -172,6 +173,14 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   ...["decide", "verify"].map(action => route(`/api/rooms/{roomId}/public-work/receipts/{receiptId}/${action}`, ["POST"], "room-member", "Record an explicit current-authority review over immutable evidence; no payment or claim reopening.", `${action}PublicWorkReview`, { publicReview: action })),
   route("/api/rooms/{roomId}/public-work/receipts/{receiptId}/follow-up", ["POST"], "room-member", "Owner explicitly publishes one linked unpaid follow-up; no automatic claim or private feedback publication.", "openPublicWorkFollowUp", { publicReview: "follow-up" }),
   route("/api/rooms/{roomId}/project-offers/{offerId}/claims", ["POST"], "room-member", "Owner-only: explicitly enable outside volunteer claims for declared repository paths.", "enablePublicWorkClaims", { publicWork: "enable" }),
+  // Matchmaking: the arrival surface. Declaring is separate from matching on
+  // purpose, so undeclared work stays claimable by id and invisible here.
+  route("/api/rooms/{roomId}/matchmaking/seeker", ["POST"], "room-credential", "Declare what you are here for: motive, capabilities, appetite. The seeker is always the caller.", "declareSeeker"),
+  route("/api/rooms/{roomId}/matchmaking/openings", ["POST"], "room-credential", "Declare the terms of one opening: reward kind and amount, capabilities required, size, trust floor.", "declareOpening"),
+  route("/api/rooms/{roomId}/matchmaking/match", ["POST"], "room-credential", "Pair the calling agent with one opening, with alternatives and a coded reason for everything passed over.", "matchWork"),
+  route("/api/rooms/{roomId}/matchmaking/decisions", ["POST"], "room-credential", "Open a question only a person can answer, and route it to the couriers who can reach one.", "openDecision"),
+  route("/api/rooms/{roomId}/matchmaking/decisions/{decisionId}", ["GET"], "room-credential", "Read one decision and its recorded answer.", "getDecision"),
+  route("/api/rooms/{roomId}/matchmaking/decisions/{decisionId}/answer", ["POST"], "room-credential", "Record a person's answer. The courier is the carrier and the human is the author; the two are never merged.", "answerDecision"),
   // Hosted MCP (JSON-RPC over POST).
   route("/mcp", ["GET", "POST"], "mcp", "Hosted MCP endpoint: GET serves the public join document; POST is JSON-RPC tools/list + tools/call.", "postMcp",
     { operationIds: { GET: "getMcpJoinDoc", POST: "postMcp" } }),
@@ -560,9 +569,31 @@ function matchScope(pathname) {
   return null;
 }
 
+// #1603: the unauthenticated /api/public/* surface (and its /room/api/*
+// www-door alias) is human-facing — browsers and curl land here. A plain
+// not_found on an unlisted path means the address matched no route, so the
+// 404 reads as plain language, never with MCP agent-tool names. Registered
+// routes (scope matched above, or a non-not_found code like face_not_found)
+// keep their machine-readable shape.
+function isHumanPublicPath(pathname) {
+  if (typeof pathname !== "string") return false;
+  const normalized = pathname.startsWith("/room/api/") ? pathname.slice("/room".length) : pathname;
+  return normalized === "/api/public" || normalized.startsWith("/api/public/");
+}
+
 export function discoverabilityErrorOverride({ pathname, httpStatus, code }) {
   const scope = matchScope(pathname);
-  if (!scope) return null;
+  if (!scope) {
+    if (httpStatus === 404 && code === "not_found" && isHumanPublicPath(pathname)) {
+      return {
+        status: "action_required",
+        reason: "not_found",
+        hint: "That address does not exist. For the public room list, see GET /api/public/rooms/directory.",
+        next: [{ path: "/api/public/rooms/directory" }],
+      };
+    }
+    return null;
+  }
   const base = agentErrorAx({ httpStatus, code, message: "" });
   let hint = null;
   let next = null;
@@ -588,6 +619,14 @@ export function discoverabilityErrorOverride({ pathname, httpStatus, code }) {
   } else if (httpStatus === 404 && scope.auth === "none" && scope.path.startsWith("/.well-known/")) {
     hint = "That discovery path is not published. Start at GET / and follow its Link headers, or fetch /openapi.json for the machine-readable route inventory.";
     next = [{ path: "/" }, { path: "/openapi.json" }];
+  } else if (httpStatus === 404 && code === "public_receipt_not_found"
+      && (scope.publicWork === "receipt" || scope.publicWork === "artifact")) {
+    // #1603 (Instinct-3 review): public receipt reads are human-facing —
+    // immutable submitted receipts for independent hash verification. A
+    // missing receipt answers in plain language, never with agent tool
+    // names. Other 404s on these routes are untouched.
+    hint = "That receipt does not exist.";
+    next = [{ path: "/api/public-work/tasks" }];
   }
   if (!hint && !next) return null;
   return {
@@ -628,7 +667,7 @@ export const nextActionsForRoomCreate = roomId => {
       description: "Post the room's first message: { id: <uuid>, type: \"message.posted\", data: { messageId: <uuid>, body } }." }),
     Object.freeze({ action: "finish-work", transport: "http", method: "POST", path: starterUpdate,
       body: Object.freeze({ state: "done", deliveryMode: "result", note: "<what you did>" }),
-      description: "Close the starter task with a result note." }),
+      description: "Close the starter task with a result note. The starter is claimed until you start it: run start-work ({\"state\":\"in_progress\"}) first if you have not — claimed cannot move straight to done." }),
     Object.freeze({ action: "create-task", transport: "http", method: "POST", path: `${room}/work-claims`,
       body: Object.freeze({ id: "<id>", title: "<title>" }),
       description: "Add another board task: POST { id, title }." }),

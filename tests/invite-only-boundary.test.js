@@ -157,6 +157,11 @@ const PROBES = {
   "POST /api/invitations/preview": [{ invitationToken: token() }, 404],
   "POST /api/guest-agent-links/preview": [{ linkToken: `gt_${token()}` }, 410],
   "POST /api/guest-agent-links/join": [{ linkToken: `gt_${token()}` }, 410],
+  // v0 self-service refresh: a forged token is indistinguishable from an
+  // unknown one — 410 link_unavailable, never an oracle. (Expired-real,
+  // revoked, v1-seat, swept, and live tokens take the 200/409/410 branches
+  // covered in tests/guest-agent-refresh.test.mjs.)
+  "POST /api/guest-agent-links/refresh": [{ linkToken: `gt_${token()}` }, 410],
   "POST /api/session": [{ accessKey: token() }, 401],
   // Provider webhook: per-connection secret header is the credential; 409 until a webhook inbox is wired.
   "POST /api/inbox/webhooks/{}": [{ update_id: 1 }, 409],

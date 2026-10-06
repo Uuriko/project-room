@@ -168,6 +168,17 @@ function classifyMemberDisplayName(name, activeNames) {
   if (names.some(other => normalizedName(other) === normalized)) return { available: false, reason: 'duplicate' };
   if (isReservedLabel(skeleton)) return { available: false, reason: 'reserved' };
   if (names.some(other => displayNameSkeleton(other) === skeleton)) return { available: false, reason: 'confusable' };
+  // G16b: names whose first word collides with an existing member
+  const firstWord = normalized.split(/\s+/)[0];
+  if (firstWord && names.some(other => {
+    const otherNorm = normalizedName(other);
+    const otherFirst = otherNorm.split(/\s+/)[0];
+    // A numbered suffix ("Member 2") is the intended disambiguator, not a collision.
+    if (normalized.startsWith(`${otherNorm} `) && /^\d+$/.test(normalized.slice(otherNorm.length + 1))) return false;
+    return otherNorm !== normalized && (otherNorm === firstWord || otherFirst === normalized);
+  })) {
+    return { available: false, reason: 'confusable' };
+  }
   return { available: true, reason: null };
 }
 
