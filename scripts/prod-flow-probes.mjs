@@ -10,8 +10,6 @@ async function get(url, init = {}) {
   const res = await fetch(url, { redirect: "follow", ...init, headers: { "User-Agent": UA, ...(init.headers ?? {}) } });
   return { status: res.status, headers: res.headers, text: await res.text() };
 }
-const digest = async s => Buffer.from(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s))).toString("hex").slice(0, 12);
-
 export const PROBES = [
   ["room version is ok", async () => { const r = await get(`${ROOM}/api/version`); return r.status === 200 && JSON.parse(r.text).status === "ok"; }],
   ["public work tasks list", async () => (await get(`${ROOM}/api/public-work/tasks`)).status === 200],
