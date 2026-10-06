@@ -13,7 +13,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { signInFixture } from "./auth-signin.mjs";
 import { openSettings } from "./room-chrome.mjs";
 import { ROOM_ENTRY_HTML, publicRoomDoorHtml } from "../deploy/room-entry.mjs";
-import { contrastRatio } from "../src/design-tokens.js";
+import { contrastRatio, DARK } from "../src/design-tokens.js";
 
 const hex = rgb => "#" + rgb.match(/\d+/g).slice(0, 3).map(n => Number(n).toString(16).padStart(2, "0")).join("");
 
@@ -49,13 +49,13 @@ test("shared tokens, focus, and settings sections render together", { timeout: 6
   await page.locator("#auth-title").waitFor();
   const bg = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--bg").trim());
   assert.equal(bg, "#202127");
-  const hint = await page.locator("#auth-hero > .form-hint").evaluate(node => {
+  const hint = await page.locator("#agent-signin-button").evaluate(node => {
     const color = getComputedStyle(node).color;
-    const background = getComputedStyle(node.parentElement).backgroundColor;
+    const background = getComputedStyle(document.documentElement).backgroundColor;
     return { color, background };
   });
   const hintRatio = contrastRatio(hex(hint.color), hex(hint.background));
-  assert.ok(hintRatio >= 4.5, `#auth-hero hint ${hint.color} on ${hint.background} is ${hintRatio.toFixed(2)}:1`);
+  assert.ok(hintRatio >= 4.5, `entrance More ${hint.color} on ${hint.background} is ${hintRatio.toFixed(2)}:1`);
   assert.equal(hex(hint.color), "#aaaab7");
   await page.keyboard.press("Tab");
   const outline = await page.evaluate(() => {
@@ -65,6 +65,12 @@ test("shared tokens, focus, and settings sections render together", { timeout: 6
   assert.notEqual(outline.style, "none");
   assert.notEqual(outline.width, "0px");
   await page.screenshot({ path: `${shots}/after-auth.png`, fullPage: true });
+  for (const width of [320, 390]) {
+    await page.setViewportSize({ width, height: 844 });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    await page.screenshot({ path: `${shots}/minimal-entry-${width}.png`, fullPage: true });
+  }
+  await page.setViewportSize({ width: 1280, height: 900 });
 
   await signInFixture(page, key);
   await page.locator("#main").waitFor({ state: "visible" });
@@ -220,7 +226,7 @@ test("message, pinned and work-fact text stays readable through light/dark chang
   const failures = evidence.filter(sample => sample.ratio < 4.5);
   assert.deepEqual(failures.map(({ theme, width, name, ratio }) => `${theme}/${width}/${name}: ${ratio}:1`), [], "Visible component text must meet unrounded 4.5:1 in both themes");
   for (const sample of evidence.filter(sample => sample.theme === "dark")) {
-    assert.equal(sample.foreground, sample.name === "work-fact" ? "rgb(216, 222, 232)" : "rgb(223, 229, 237)", "Existing dark message/value palette is unchanged");
+    assert.equal(hex(sample.foreground), sample.name === "work-fact" ? "#d8dee8" : ["pinned", "draft-metadata"].includes(sample.name) ? "#dfe5ed" : DARK["--text"], "Dark message/value colors follow the canonical text token and existing metadata colors");
   }
   for (const sample of evidence.filter(sample => sample.theme === "light" && ["deleted", "muted", "draft-metadata"].includes(sample.name))) {
     assert.equal(sample.foreground, "rgb(92, 91, 106)", "Secondary message state retains the light muted hierarchy");

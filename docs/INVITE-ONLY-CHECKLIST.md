@@ -95,6 +95,10 @@ error, never a shorter file. Semantics and the leave/close procedure:
 
 Gmail mailbox return: `GET /api/auth/gmail/callback` requires single-use state and the still-current initiating account session.
 
+| `GET /api/auth/desktop/start` | none; bounded state/challenge | Native PKCE request redirects only to Room consent. |
+| `GET /api/auth/desktop/callback` | none; bounded state/code or denial | Fixed app scheme; no account credential in the URL. |
+| `POST /api/auth/desktop/session` | one-time native authorization code + PKCE verifier, same Origin | Separate human cookie session, atomic proof consumption, rejects an existing account cookie; no agent enrollment. |
+
 ## 2. Capability URLs — the boundaries behind the unlinked URL
 
 Each mechanism was checked for: unguessable token, hash-only storage,

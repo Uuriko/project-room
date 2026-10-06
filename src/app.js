@@ -41,6 +41,32 @@ import { installHumanPush } from "./human-push.js";
 import { chatSuggestions, ASK_AGENT_AFTER_MS } from "./chat-suggestions.js";
 import { paintClaimChat } from "./board-ui.js";
 
+// Keep a connector/native consent journey through password or provider login.
+// Only our exact consent path is a return target; never follow arbitrary URLs.
+const oauthReturnKey = "project-room:oauth-return:v1";
+function validatedOAuthReturn(value) {
+  if (typeof value !== "string" || !value.startsWith("/oauth/authorize?") || value.length > 4096) return null;
+  try {
+    const target = new URL(value, location.origin);
+    return target.origin === location.origin && target.pathname === "/oauth/authorize" && !target.hash
+      && !target.username && !target.password ? target.pathname + target.search : null;
+  } catch { return null; }
+}
+try {
+  const params = new URLSearchParams(location.search);
+  const target = params.get("oauth") === "login" ? validatedOAuthReturn(params.get("return")) : null;
+  if (target) sessionStorage.setItem(oauthReturnKey, target);
+} catch { /* A blocked storage leaves ordinary sign-in available. */ }
+function resumeOAuthConsent() {
+  if (!accountClient.session?.authenticated || accountClient.session.terms?.required) return false;
+  try {
+    const target = validatedOAuthReturn(sessionStorage.getItem(oauthReturnKey));
+    sessionStorage.removeItem(oauthReturnKey);
+    if (target) { location.assign(target); return true; }
+  } catch { /* No arbitrary redirect fallback. */ }
+  return false;
+}
+
 const $ = selector => document.querySelector(selector);
 applyStoredTheme();
 organizeRoomSettings($("#settings-dialog"));
@@ -285,7 +311,7 @@ let recovery;
 let leavingPage = false;
 let composerFiles = [];
 let roomFilesByMessage = new Map();
-try { recovery = new DraftRecovery(window.sessionStorage); } catch { recovery = new DraftRecovery(null); }
+try { recovery = new DraftRecovery(navigator.userAgent.includes("ProjectRoomMac/") ? window.localStorage : window.sessionStorage); } catch { recovery = new DraftRecovery(null); }
 const draftScope = draftRecoveryScope;
 const client = new RoomClient({
   accountClient,
@@ -612,6 +638,7 @@ let accountCheckFlight = null, roomListVersion = 0, roomListCursor = null;
 // (RC-2026-09-19-066): the redeem failed before any network call and the
 // user was left on the welcome screen.
 let accountRestoreFlight = null;
+let firstRoomNamePending = false;
 let humanAuthBusy = false;
 let signinView = "password-login", signinHistoryReplay = false, resetJourneyPending = false;
 let resumeResetJourney = false;
@@ -726,6 +753,7 @@ const signinUI = createAuthSigninUI({
 });
 const initialAuthLink = classifyAuthLink(new URLSearchParams(location.search));
 const initialPasswordReset = initialAuthLink.kind === "reset";
+if (initialAuthLink.kind === "none" && !initialGoogleFailed) signinUI.showWelcome();
 const initialSignin = signinUI.mount($("#auth-signin-ui"));
 
 // Agent sign-in (RC-2026-09-23): agents choose their own account (identity
@@ -813,18 +841,22 @@ async function openPersonalRoomAfterSignup() {
     if (startRoomFlight) await startRoomFlight;
     return;
   }
+  firstRoomNamePending = true;
+  showAccountWorkspace();
   try { await inboxUI.askSetupName?.(); } catch { /* a name is optional; the room still opens */ }
+  finally { firstRoomNamePending = false; }
   if (accountClient.session !== owned || state) return;
   const body = await ensureDefaultRoom();
   if (accountClient.session !== owned || state) return;
   const roomId = body?.room?.id;
   if (!roomId) { showAccountWorkspace(); return; }
   history.replaceState(null, "", roomHandoffLocation(roomId));
-  try { await client.restore(roomId); inboxUI.refreshSetup?.(); }
+  try { await client.restore(roomId); inboxUI.showRooms(); inboxUI.refreshSetup?.(); }
   catch { if (accountClient.session === owned && !state) showAccountWorkspace(); }
 }
 // --- end Q3-C ---
 async function landAfterSignIn() {
+  if (resumeOAuthConsent()) return;
   const target = signInRoomTarget({
     nextRoom: roomIdFromNext(new URLSearchParams(location.search).get("next")),
     deepLinkRoom: roomFromLocation({ search: location.search, hash: location.hash }),
@@ -859,6 +891,7 @@ async function landAfterSignIn() {
 let startRoomFlight = null;
 function showAccountWorkspace() {
   if (!accountClient.session?.authenticated) return;
+  if (resumeOAuthConsent()) return;
   if (accountClient.session.terms?.required) {
     $("#main").hidden = true;
     $("#auth-panel").hidden = false;
@@ -903,7 +936,7 @@ async function openStartedRoom() {
   const roomId = body?.room?.id;
   if (!roomId) { inboxUI.open(); return; }
   history.replaceState(null, "", roomHandoffLocation(roomId));
-  try { await client.restore(roomId); inboxUI.refreshSetup?.(); }
+  try { await client.restore(roomId); inboxUI.showRooms(); inboxUI.refreshSetup?.(); }
   catch { if (accountClient.session === owned && !state) { inboxUI.showRoomList(); $("#account-rooms-status").textContent = "Couldn’t open your room. Choose it below."; } }
 }
 async function confirmAccount() {
@@ -957,7 +990,8 @@ async function loadAccountRooms(more = false) {
     // RC-2026-09-19-088: first sign-in must never land in an empty void. A
     // fresh account with no rooms and no pending invitation gets its default
     // room created and opened.
-    if (!more && !$("#account-rooms-list").children.length && !roomListCursor) ensureDefaultRoom();
+    if (!more && !$("#account-rooms-list").children.length && !roomListCursor
+      && !firstRoomNamePending && !startRoomIntent && !startRoomFlight) ensureDefaultRoom();
   } catch (error) {
     if (version !== roomListVersion || (accountClient.session && accountClient.session !== owned)) return;
     if ([401, 403].includes(error.status) || !accountClient.session) endAccountAccess();
@@ -3507,11 +3541,11 @@ function syncSigninView(view) {
   const previous = signinView;
   signinView = view;
   if (!mainSigninHost()) return;
-  const auxiliary = !view.startsWith("password-");
-  if (!signinHistoryReplay && auxiliary && previous !== view) {
+  const auxiliary = view !== "welcome" && !view.startsWith("password-");
+  if (!signinHistoryReplay && (auxiliary || previous === "welcome" && view.startsWith("password-")) && previous !== view) {
     if (previous.startsWith("password-")) {
       const base = { ...history.state };
-      delete base.roomSigninView; delete base.roomSigninStep;
+      base.roomSigninView = previous; delete base.roomSigninStep;
       history.replaceState(base, "", location.href);
     }
     const sameFlow = previous.startsWith("magic-") && view.startsWith("magic-")
@@ -3523,13 +3557,15 @@ function syncSigninView(view) {
   $("#email-auth-step").hidden = !auxiliary;
   $("#signin-methods").hidden = auxiliary;
   $("#signin-entry-routes").hidden = auxiliary;
+  $("#google-signin").hidden = view === "welcome";
+  $("#terms-notice").hidden = view === "welcome";
 }
 function showSigninMethods() {
   $("#agent-auth-step").hidden = true;
   $("#agent-signin-button").setAttribute("aria-expanded", "false");
   $("#signin-controller").prepend($("#auth-signin-ui"));
-  signinUI.showPassword();
-  syncSigninView("password-login");
+  signinUI.showWelcome();
+  syncSigninView("welcome");
 }
 function openEmailAuth(mode, { recordHistory = true } = {}) {
   if (!agentSigninUI.canLeave() || !signinUI.canLeave()) return;
@@ -3563,7 +3599,7 @@ window.addEventListener("popstate", event => {
   if ($("#auth-panel").hidden || !mainSigninHost()) return;
   if (!signinUI.canLeave()) { history.forward(); return; }
   signinHistoryReplay = true;
-  try { signinUI.showView(event.state?.roomSigninView || "password-login"); }
+  try { signinUI.showView(event.state?.roomSigninView || "welcome"); }
   finally { signinHistoryReplay = false; }
   focusSignin();
 });
@@ -7294,7 +7330,7 @@ if (initialInvitationFragment && !initialPasswordReset) openInvitation(initialIn
     return;
   }
   const requestedRoom = selectedRoomFromLocation();
-  if (requestedRoom || accountHomeFromLocation()) {
+  if (requestedRoom || accountHomeFromLocation() || new URLSearchParams(location.search).get("oauth") === "login") {
     // Join-flow sessions are room-cookie sessions with no account behind
     // them — the /join page's "Open room" link lands here with a valid
     // __Host-room_session cookie but no account session. Try the room

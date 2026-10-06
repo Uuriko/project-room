@@ -1,0 +1,31 @@
+const wait = async (predicate, label) => {
+  const deadline = Date.now() + 20000;
+  while (Date.now() < deadline) { if (predicate()) return; await new Promise(resolve => setTimeout(resolve, 25)); }
+  throw new Error('Timed out: ' + label);
+};
+const check = (condition, label) => { if (!condition) throw new Error(label); };
+const fill = (selector, value) => {
+  const field = document.querySelector(selector); check(field, selector);
+  field.value = value; field.dispatchEvent(new Event('input', { bubbles: true })); field.dispatchEvent(new Event('change', { bubbles: true }));
+};
+await wait(() => document.querySelector('#auth-panel')?.hidden === false, 'signed-out door');
+const email = 'wk-' + Date.now() + '@example.invalid';
+document.querySelector('[data-password-mode="signup"]').click();
+check(document.querySelector('[name="password"]').minLength === 10, 'signup policy');
+fill('#auth-signin-ui [name="email"]', email);
+fill('#auth-signin-ui [name="password"]', 'synthetic-native-long-passphrase');
+document.querySelector('[data-signin-form="password"]').requestSubmit();
+await wait(() => document.querySelector('#setup-name'), 'account setup');
+fill('#setup-name', 'Mac acceptance');
+[...document.querySelectorAll('#account-setup-dialog button')].find(button => button.textContent === 'Done').click();
+await wait(() => document.querySelector('#main')?.hidden === false && document.querySelector('#message-input'), 'personal room');
+check(document.querySelector('#identity-label').textContent === 'Mac acceptance', 'chosen name preserved');
+check(new URL(location.href).searchParams.get('room')?.startsWith('personal-'), 'personal room destination');
+fill('#message-input', 'A real message from the native WebKit acceptance journey.');
+document.querySelector('#message-form').requestSubmit();
+await wait(() => [...document.querySelectorAll('[data-message-record-id]')].some(node => node.textContent.includes('A real message from the native WebKit acceptance journey.')), 'message receipt');
+fill('#message-input', 'Keep this native draft when I close the window.');
+await wait(() => localStorage.getItem('project-room:drafts:v3')?.includes('Keep this native draft'), 'durable scoped text draft');
+check(!sessionStorage.getItem('project-room:drafts:v3'), 'Mac uses durable draft storage');
+check(document.documentElement.scrollWidth <= innerWidth + 1, 'no horizontal overflow');
+return JSON.stringify({ accountCreated: true, personalRoom: true, messageReceipt: true, durableTextDraft: true, agentActivation: false });

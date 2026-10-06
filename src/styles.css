@@ -1568,7 +1568,7 @@ summary { overflow-wrap: anywhere; }
 
 /* Visible entry routes, each opening a focused sign-in flow. */
 .signin-entry-routes { display: grid; gap: .5rem; margin-top: 1.25rem; }
-.signin-entry-routes #agent-signin-button { justify-self: start; min-height: 44px; font-size: .9rem; color: var(--text); text-decoration: underline; text-underline-offset: .2em; }
+.signin-entry-routes #agent-signin-button { justify-self: start; min-height: 44px; font-size: .85rem; color: var(--muted); text-decoration: none; }
 #agent-auth-step { margin-top: 1rem; }
 #agent-auth-back { min-height: 44px; }
 
@@ -1643,3 +1643,27 @@ summary { overflow-wrap: anywhere; }
 #room-actions-list [data-room-task] { overflow-wrap: anywhere; }
 #room-actions-list [data-room-task] span, #room-actions-list [data-room-task] small { display: block; }
 #room-actions-list [data-room-task] small { color: var(--muted); font-size: var(--text-xs); }
+
+/* Signup guidance belongs to the complete credential row. */
+[data-signin-form="password"] > .form-hint { grid-column: 1 / -1; margin: 0; }
+
+/* The entrance offers two choices; explanation and agent entry live in More. */
+@font-face { font-family: RoomWordmark; src: url("/og/fonts/Inter-Regular.ttf") format("truetype"); font-display: swap; }
+#auth-panel.auth-panel { width: min(100% - 3rem, 25rem); max-width: 25rem; margin: clamp(5rem, 18vh, 12rem) auto 3rem; padding: 0; border: 0; background: transparent; box-shadow: none; }
+.auth-panel #auth-title { font-family: RoomWordmark, var(--font-sans); font-size: clamp(1.75rem, 7vw, 2.4rem); font-weight: 400; letter-spacing: -.07em; line-height: 1.1; text-align: center; margin-bottom: 2.75rem; white-space: nowrap; }
+.signin-welcome { display: grid; gap: .75rem; }
+.signin-welcome .button { border-radius: .75rem; }
+.signin-more { text-align: center; }
+.signin-more > summary { cursor: pointer; color: var(--muted); font-size: .85rem; min-height: 44px; padding: .8rem; list-style: none; }
+.signin-more > summary::after { content: " +"; }
+.signin-more[open] > summary::after { content: " −"; }
+.signin-more > summary::-webkit-details-marker { display: none; }
+.signin-more > a, .signin-more > button { display: block; margin: .25rem auto; min-height: 44px; padding: .6rem; font-size: .85rem; }
+#signin-entry-routes { margin-top: .6rem; }
+#signin-entry-routes #agent-signin-button { justify-self: center; color: var(--muted); text-decoration: none; font-weight: 400; }
+[data-signin-form="password"] > .signin-more, #signup-password-hint { grid-column: 1 / -1; }
+#terms-notice { order: 3; margin: .5rem 0 0; font-size: .75rem; text-align: center; }
+@media (max-width: 520px) { #auth-panel.auth-panel { margin-top: 22vh; } }
+
+.app-shell:has(#auth-panel:not([hidden])) ~ .site-footer { display: none; }
+body:has(#auth-panel:not([hidden])) .site-footer { display: none; }

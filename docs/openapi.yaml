@@ -14528,6 +14528,43 @@ paths:
         - queryAuth: []
         - accountBrowserSession: []
 
+  /api/auth/desktop/start:
+    get:
+      summary: Begin native Mac browser sign-in with PKCE
+      security: []
+      parameters:
+        - { in: query, name: state, required: true, schema: { type: string } }
+        - { in: query, name: challenge, required: true, schema: { type: string } }
+      responses:
+        '302': { description: Fixed Room OAuth consent destination }
+        '422': { description: Invalid native request }
+  /api/auth/desktop/callback:
+    get:
+      summary: Return a bounded authorization code to the Mac authentication session
+      security: []
+      responses:
+        '302': { description: Fixed projectroom auth callback with state and code or denial }
+        '422': { description: Invalid callback }
+  /api/auth/desktop/session:
+    post:
+      summary: Exchange a single-use native PKCE code for a separate human cookie session
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [code, verifier]
+              properties:
+                code: { type: string }
+                verifier: { type: string }
+      responses:
+        '201': { description: HttpOnly native Room session installed; no token in JSON }
+        '401': { description: Invalid, expired, mismatched or consumed proof }
+        '409': { description: Existing account cookie refused }
+
 components:
   securitySchemes:
     accountBrowserSession:

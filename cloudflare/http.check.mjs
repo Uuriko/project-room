@@ -4,7 +4,7 @@ import { readFile, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID, createHash } from 'node:crypto';
 import { build } from 'esbuild';
 import { Miniflare, Response } from 'miniflare';
 
@@ -22,8 +22,8 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
       return new Response(await readFile(new URL('..' + pathname, import.meta.url)));
     } }
   });
-  const call = (path, { data, headers = {}, method = data ? 'POST' : 'GET', ip = '192.0.2.1' } = {}) => mf.dispatchFetch(origin + path, {
-    method, headers: { Host: new URL(origin).host, 'CF-Connecting-IP': ip, ...(data ? { Origin: origin, 'Content-Type': 'application/json' } : {}), ...headers },
+  const call = (path, { data, headers = {}, method = data ? 'POST' : 'GET', ip = '192.0.2.1', redirect = 'follow' } = {}) => mf.dispatchFetch(origin + path, {
+    method, redirect, headers: { Host: new URL(origin).host, 'CF-Connecting-IP': ip, ...(data ? { Origin: origin, 'Content-Type': 'application/json' } : {}), ...headers },
     ...(data ? { body: JSON.stringify(data) } : {})
   });
   const json = async (response, status = 200) => {
@@ -209,6 +209,25 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     // QAS-702 (QA-Auth 2026-09-19): the account-key login rotates the slot —
     // the pre-login cookie is dead; the response cookie carries the session.
     const mailHeaders = { Cookie: mailLoginResponse.headers.get('set-cookie').split(';')[0], 'X-CSRF-Token': mailSession.csrf, 'X-Session-Binding': mailSession.sessionBinding };
+    // Actual Worker SQLite owns native proof consumption and cookie creation.
+    const nativeVerifier = "v".repeat(43), nativeState = "s".repeat(43);
+    const nativeChallenge = createHash("sha256").update(nativeVerifier).digest("base64url");
+    const nativeStart = await call(`/api/auth/desktop/start?state=${nativeState}&challenge=${nativeChallenge}`, { redirect: 'manual' });
+    assert.equal(nativeStart.status, 302);
+    const nativeRequest = new URL(nativeStart.headers.get("location"), origin);
+    const nativeConsent = await call('/oauth/authorize', { headers: mailHeaders, redirect: 'manual',
+      data: { ...Object.fromEntries(nativeRequest.searchParams), decision: 'allow' } });
+    assert.equal(nativeConsent.status, 302);
+    const nativeCallback = new URL(nativeConsent.headers.get('location'));
+    const nativeReturn = await call(nativeCallback.pathname + nativeCallback.search, { redirect: 'manual' });
+    assert.equal(nativeReturn.status, 302);
+    const nativeCode = new URL(nativeReturn.headers.get('location')).searchParams.get('code');
+    const nativeProof = { code: nativeCode, verifier: nativeVerifier };
+    await json(await call('/api/auth/desktop/session', { data: { ...nativeProof, verifier: 'x'.repeat(43) } }), 401);
+    const nativeExchange = await call('/api/auth/desktop/session', { data: nativeProof });
+    assert.deepEqual(await json(nativeExchange, 201), { status: 'signed_in' });
+    assert.match(nativeExchange.headers.get('set-cookie'), /^__Host-account_session=.*HttpOnly.*Secure/);
+    await json(await call('/api/auth/desktop/session', { data: nativeProof }), 401);
     const reviewPath = '/api/inbox/sources/' + sourceId + '/reply-review?view=reply-review-v1';
     const draftReview = await json(await call(reviewPath, { headers: mailHeaders }));
     assert.equal(draftReview.attempt.canReview, true); assert.equal(draftReview.attempt.canSend, false);
