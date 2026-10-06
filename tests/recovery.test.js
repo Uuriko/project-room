@@ -67,6 +67,10 @@ test("online capture preserves all application tables, identity boundaries and e
       assert.equal(table.rows, 0, "the deferred integrity cursor is written by the cron, not on open");
       continue;
     }
+    if (table.table === "projection_bodies") {
+      assert.equal(table.rows, 0, "body storage is empty while flag OFF and no large message is stored");
+      continue;
+    }
     if (table.table === "room_code_drops" || table.table === "room_code_checks" || table.table === "share_link_access") {
       assert.equal(table.rows, 0, "code drops and link-access metadata are empty until explicitly created");
       continue;

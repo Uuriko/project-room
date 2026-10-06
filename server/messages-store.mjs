@@ -1,3 +1,4 @@
+import { hydrateProjection } from "./projection-at-rest.mjs";
 // MSG-1: the messages table, double-written with the room event log.
 // Read paths still use the projection. The command path writes rows in the
 // same transaction as the event insert. MSG-2 replays events that landed
@@ -414,7 +415,9 @@ function certifyMessagesParity(store) {
   if (numbers.projectionCount !== numbers.tableCount || numbers.projectionLastSeq !== numbers.tableLastSeq) {
     throw new Error(`messages parity failed for ${roomId}: projection count ${numbers.projectionCount}, table count ${numbers.tableCount}, projection last seq ${numbers.projectionLastSeq}, table last seq ${numbers.tableLastSeq}`);
   }
-  const state = JSON.parse(store.db.prepare("SELECT projection FROM rooms WHERE id=?").get(roomId).projection);
+  const hydration = hydrateProjection(store.db, roomId, JSON.parse(store.db.prepare("SELECT projection FROM rooms WHERE id=?").get(roomId).projection));
+  if (hydration.missing.length) throw new Error(`messages parity failed for ${roomId}: stored message body missing`);
+  const state = hydration.state;
   const messages = new Map((state.messages ?? []).map(message => [message.id, message]));
   const pinned = new Set((state.pins ?? []).map(pin => pin.messageId));
   const sequences = new Map();

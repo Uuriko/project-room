@@ -1,4 +1,10 @@
 // Phase 1a: large message bodies live outside rooms.projection at rest.
+// Test-audit authoring gate for integration: the ON owner also certifies the
+// independently stored indexed records after restart. Raw bodyRef comparison
+// wrongly refuses parity (reproduced before the repair); prior owner tests only
+// exercised unindexed reads. Existing production backfill/parity APIs suffice,
+// with no test-only seam. The final broad writer guard is retained as a cheap
+// architecture contract; behavioral storage/lifecycle checks are its primary proof.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -56,6 +62,10 @@ test("on: large bodies leave the row, every reader still sees the full message",
   assert.equal(JSON.stringify(restarted.messages), JSON.stringify(live));
   assert.equal(JSON.stringify(room.store.rebuildProjection("commons").state.messages), JSON.stringify(live));
   auditRecovery(room.store);
+  // Indexed readers have a separate storage contract from the raw projection.
+  // A parity audit must compare their full public records after slimming.
+  for (let page = 0; page < 20; page++) if (room.store.backfillMessages({ limit: 400 }).done) break;
+  assert.equal(room.store.checkMessagesParity().checked, 1);
 });
 
 test("edits and deletes release the old text at rest", t => {
