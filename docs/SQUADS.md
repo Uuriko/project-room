@@ -37,16 +37,24 @@ squad in the room, else 422 `squad_unknown`). The claim carries `squadId`
 through the board list. Targeting is set at creation; retargeting a claim
 later is out of scope.
 
+Targeting policy (review: Instinct-3): any room writer may target any active
+squad — squad membership is NOT required. A work offer is an offer *to* a
+squad, so the offerer is normally outside it; the room-membership check on
+the work-claims route is the only gate. The squad must exist and be active.
+
 ## API
 
 - `GET /api/rooms/{room}/squads` — list (id, name, goal, members, channel, owner, state)
-- `POST /api/rooms/{room}/squads` — `{name, goal?, channelMessageId?, memberIds?}` → 201
+- `POST /api/rooms/{room}/squads` — `{name, goal?, channelMessageId?, memberIds?}` → 201; at most 12 members
 - `GET /api/rooms/{room}/squads/{id|name}` — read one
 - `POST /api/rooms/{room}/squads/{id}/members` — `{add?, remove?}`; owner-only,
-  except a member can remove themselves; the owner cannot be removed
+  except a member can remove themselves; the owner cannot be removed; at most 12 members
 - `POST /api/rooms/{room}/squads/{id}/disband` — owner only; disbanded squads
   stay listed, do not fan out, and cannot be targeted
 
-MCP: `squads_list` and `squads_get` (read-only, full profile).
+MCP: `squads_list`, `squads_get` (reads) and `squads_create`,
+`squads_update_members`, `squads_disband` (writes, full profile). UI: the
+Squads panel lists squads and offers create (any member) and disband
+(owner, on their own squads).
 UI: the **Squads** button next to Board opens the read-only roster panel
 (`src/squads-ui.js`, lazy-loaded).

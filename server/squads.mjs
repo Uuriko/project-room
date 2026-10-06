@@ -36,6 +36,11 @@ export const squadSchema = `
 
 const NAME_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
+// plan-squads: roster cap (review: Tab 4205, Fo 4239). One member must not be
+// able to build a squad of every agent and wake them all with @squad/<name>.
+// The cap bounds @squad fan-out: one mention row per member, at most this many.
+export const MAX_SQUAD_MEMBERS = 12;
+
 // Pure: the normalized handle, or throws 422.
 export function validateSquadName(name) {
   if (typeof name !== "string" || !NAME_RE.test(name.trim())) {
@@ -178,6 +183,9 @@ export function createSquad(store, token, roomId, data, expectedSessionBinding =
     for (const id of input.memberIds) {
       if (!members.includes(id)) fail(422, "squad_member_unknown", `member "${id}" is not an active member of this room`);
     }
+    if (members.length > MAX_SQUAD_MEMBERS) {
+      fail(422, "squad_roster_full", `A squad holds at most ${MAX_SQUAD_MEMBERS} members`);
+    }
     if (store.db.prepare("SELECT 1 FROM squads WHERE room_id=? AND lower(name)=lower(?)").get(roomId, input.name)) {
       fail(409, "squad_exists", `Squad "${input.name}" already exists in this room`);
     }
@@ -221,6 +229,9 @@ export function updateSquadMembers(store, token, roomId, squadId, data, expected
     }
     const next = current.filter(id => !remove.includes(id));
     for (const id of add) if (!next.includes(id)) next.push(id);
+    if (next.length > MAX_SQUAD_MEMBERS) {
+      fail(422, "squad_roster_full", `A squad holds at most ${MAX_SQUAD_MEMBERS} members`);
+    }
     const now = store.now();
     store.db.prepare("UPDATE squads SET members_json=?, updated_at=? WHERE room_id=? AND squad_id=?")
       .run(JSON.stringify(next), now, roomId, row.squad_id);
