@@ -95,7 +95,7 @@ for (const width of [1280, 320]) test(`owner enables scoped public work and anon
 });
 
 
-test('an empty bounded recommendation page offers a working next scan', { timeout: 45000 }, async t => {
+test('an empty bounded recommendation page recovers failed fresh and continuation searches', { timeout: 45000 }, async t => {
   const f = await setup(t, 320), identity = f.store.identities.create('Synthetic prior worker');
   f.store.initialize(initialRoom('overflow'));
   for (let n = 0; n < 101; n++) {
@@ -107,11 +107,39 @@ test('an empty bounded recommendation page offers a working next scan', { timeou
   }
   await f.page.goto(`${f.origin}/offers`); await f.page.locator('#find-work-form [type=submit]').click();
   await f.page.locator('#more-matches').waitFor({ state: 'visible' }); assert.equal(await f.page.locator('[data-match-offer]').count(), 0);
+  let interruptNext = true;
+  const inputs = [];
+  await f.page.route('**/api/public-work/match', async route => {
+    assert.equal(route.request().method(), 'POST');
+    inputs.push(route.request().postDataJSON());
+    if (!interruptNext) return route.continue();
+    interruptNext = false;
+    const response = await route.fetch();
+    assert.equal(response.status(), 200);
+    await route.abort('failed');
+  });
+  // A fresh search discards the old cursor even when preferences are unchanged.
+  await f.page.locator('#find-work-form [type=submit]').click();
+  await f.page.locator('#find-work-status').filter({ hasText: 'Couldn’t find work' }).waitFor();
+  assert.equal(await f.page.locator('#more-matches').isVisible(), false, 'a failed fresh search must not offer a discarded continuation');
+  assert.equal(await f.page.locator('#find-work-form [type=submit]').isEnabled(), true);
+  assert.deepEqual(inputs.at(-1), { skills: [], interests: [], reward: 'volunteer', limit: 3 });
+  await f.page.locator('#find-work-form [type=submit]').click();
+  await f.page.locator('#more-matches').waitFor({ state: 'visible' });
   await f.page.locator('#find-work-form [name=reward]').selectOption('cash');
   assert.equal(await f.page.locator('#more-matches').isVisible(), false, 'an edited preference invalidates the prior scan cursor');
   await f.page.locator('#find-work-form [type=submit]').click(); await f.page.locator('#find-work-status').filter({ hasText: 'No claimable cash matches' }).waitFor(); assert.equal(await f.page.locator('[data-match-offer]').count(), 0);
   await f.page.locator('#find-work-form [name=reward]').selectOption('volunteer'); await f.page.locator('#find-work-form [type=submit]').click(); await f.page.locator('#more-matches').waitFor({ state: 'visible' });
+  // Interrupted continuation reads retain their cursor so this button can retry.
+  interruptNext = true;
+  await f.page.locator('#more-matches').click();
+  await f.page.locator('#find-work-status').filter({ hasText: 'Couldn’t find work' }).waitFor();
+  assert.equal(await f.page.locator('#more-matches').isVisible(), true);
+  assert.equal(await f.page.locator('#more-matches').isEnabled(), true);
+  const continuationInput = inputs.at(-1);
+  assert.equal(continuationInput.after, 'page-099');
   await f.page.locator('#more-matches').click(); await f.page.locator('[data-match-offer="page-100"]').waitFor();
+  assert.deepEqual(inputs.at(-1), continuationInput, 'retry resumes the same bounded scan');
   assert.equal(await f.page.locator('#more-matches').isVisible(), false);
   assert.equal(f.store.publicWorkClaims.read('page-100').claim.state, 'unclaimed');
   let observed, release, delivered;
