@@ -1,0 +1,42 @@
+# PR size discipline check.
+#
+# Flags pull requests whose diff exceeds the line budget unless the PR body
+# carries an explicit justification section. Default mode is advisory: the
+# check stays green and posts/updates a warning comment. Set PR_SIZE_MODE=require
+# (or .github/pr-size.json "mode") to fail instead.
+name: pr-size-discipline
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+# One run per PR; a new push cancels the stale check.
+concurrency:
+  group: pr-size-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0 # Three-dot diff against the PR base needs history on both sides.
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - name: Check PR size
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_SIZE_LIMIT: ${{ vars.PR_SIZE_LIMIT }}
+          PR_SIZE_MODE: ${{ vars.PR_SIZE_MODE }}
+        run: node scripts/pr-size-check.mjs
