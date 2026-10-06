@@ -3299,8 +3299,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const workClaimReassignMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/reassign$/.exec(url.pathname);
       const workClaimReceiptsMatch = /^\/api\/rooms\/([^/]{1,384})\/receipts$/.exec(url.pathname);
       const workClaimRenewMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/renew$/.exec(url.pathname);
+      // Provenance walk + premise-invalid rollback (orch-provenance-rollback).
+      // Literal segments are matched before the {id} template so they are
+      // never mistaken for a claim id.
+      const workClaimProvenanceMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/provenance$/.exec(url.pathname);
+      const workClaimPremiseInvalidMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/premise-invalid$/.exec(url.pathname);
       const workClaimMatch = workClaimsMatch ?? workClaimsStatusMatch ?? workClaimsSweepMatch ?? workClaimsDuplicatesMatch ?? workClaimsConfigMatch ?? workClaimClaimMatch
-        ?? workClaimUpdateMatch ?? workClaimReviewMatch ?? workClaimReleaseMatch ?? workClaimReassignMatch ?? workClaimRenewMatch ?? workClaimItemMatch
+        ?? workClaimUpdateMatch ?? workClaimReviewMatch ?? workClaimReleaseMatch ?? workClaimReassignMatch ?? workClaimRenewMatch ?? workClaimProvenanceMatch
+        ?? workClaimPremiseInvalidMatch ?? workClaimItemMatch
         ?? workClaimReceiptsMatch;
       // Agent /feedback endpoint (structured bug/feature reports): every
       // route template below is documented in docs/openapi.yaml — the
@@ -3577,9 +3583,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           : workClaimUpdateMatch ? "update"
           : workClaimReviewMatch ? "review"
           : workClaimReleaseMatch ? "release"
-          : workClaimRenewMatch ? "renew" : "reassign";
+          : workClaimRenewMatch ? "renew"
+          : workClaimProvenanceMatch ? "provenance"
+          : workClaimPremiseInvalidMatch ? "premise-invalid" : "reassign";
         const workClaimIdMatch = workClaimItemMatch ?? workClaimClaimMatch ?? workClaimUpdateMatch
-          ?? workClaimReviewMatch ?? workClaimReleaseMatch ?? workClaimReassignMatch ?? workClaimRenewMatch;
+          ?? workClaimReviewMatch ?? workClaimReleaseMatch ?? workClaimReassignMatch ?? workClaimRenewMatch
+          ?? workClaimProvenanceMatch ?? workClaimPremiseInvalidMatch;
         return await handleWorkClaims({ req, res, url, store, roomId, auth, workClaimRoute,
           workClaimId: workClaimIdMatch ? pathId(workClaimIdMatch[2]) : null, registry: store.workClaims,
           ...(fetchPullRequest ? { fetchPullRequest } : {}),

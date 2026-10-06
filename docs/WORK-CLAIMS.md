@@ -204,6 +204,33 @@ Either settlement appends one `work_claim.updated` event.
 `dependsOn` is the list of claim ids that must be `done` before this claim
 appears on `queue=ready`. A claim cannot depend on itself.
 
+### Provenance and rollback
+
+`dependsOn` is scheduling — "do this after that". Provenance is genealogy —
+"this work builds on that claim's output or premise". Record it with
+`parentClaimId` (optional, one claim id) on create, claim, or any owner
+update; `null` clears it. `evidenceRefs` are documentary pointers —
+`sha256:<64 hex>` content hashes or `https://` URLs without credentials
+(at most 16) — recorded the same way, including on the `done` transition.
+Both ride the claim onto its receipt, so a receipt says what it was built
+on. The walk follows `parentClaimId` edges only; evidence refs are for
+humans, not graph edges.
+
+`GET .../work-claims/{claimId}/provenance` returns every claim that builds on
+the given claim, directly and transitively, breadth-first with `depth`
+(cycle-safe, capped at 200 nodes). The hosted MCP tool
+`room_work_claim_provenance` returns the same graph.
+
+When a premise turns out bad, `POST .../work-claims/{claimId}/premise-invalid`
+with `{ "reason" }` runs the practiced rollback: the premise claim and every
+downstream claim from the walk are flagged for re-review — each gets a
+`premiseFlag` (`premiseId`, `reason`, `by`, `at`) and a `premise_flagged`
+history stamp, and each flagged claim's owner is woken. Nothing is reverted;
+flag + notify is the whole rollback. Only the claim's owner, the room owner,
+or a member with `manage_claims` may declare. After re-review,
+`{ "clear": true, "note"? }` lifts one claim's flag; the history keeps both
+stamps so the flag-clear cycle stays auditable.
+
 ### Attach a draft after claiming
 
 Claim the files first, then open the draft PR. The current holder can attach

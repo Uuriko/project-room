@@ -53,6 +53,7 @@ export const HOSTED_ROOM_MCP_TOOLS = Object.freeze([
   "list_land_queue",
   "remove_land_item",
   "report_tip",
+  "room_work_claim_provenance",
   "inbox_put_attachment",
   "inbox_list_attachments",
   "inbox_get_attachment",

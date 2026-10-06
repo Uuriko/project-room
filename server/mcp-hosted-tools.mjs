@@ -167,7 +167,11 @@ export const hostedRoomTools = [
     itemId: { ...idField, description: "Land queue item id." },
     sourceRevision: { type: "string", minLength: 1, maxLength: 200 },
     buildId: { type: "string", minLength: 1, maxLength: 200 }
-  }, ["roomId", "itemId"]), false)
+  }, ["roomId", "itemId"]), false),
+  tool("room_work_claim_provenance", "Walk the work-claim provenance graph: given a claim id, return the claims and receipts that build on it directly or transitively through parentClaimId edges, with depth, state, owner and title. Read-only. Same data as GET /api/rooms/:roomId/work-claims/:claimId/provenance. Use it to find what depends on a claim before changing its premise.", schema({
+    roomId: roomIdField,
+    claimId: { ...idField, maxLength: 128, description: "Work-claim id to walk downstream from." }
+  }, ["roomId", "claimId"]))
 
 ];
 
