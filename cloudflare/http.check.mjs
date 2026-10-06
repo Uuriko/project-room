@@ -32,6 +32,17 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
   };
   try {
     const { ownerKey, accountKey, sourceId } = await json(await call('/__test-provision'));
+    // Worker SQLite JSON extraction supplies ISO event times. A real command
+    // must count as recent human activity after crossing this adapter boundary.
+    await json(await call('/api/rooms/commons/commands', { data: {
+      id: randomUUID(), type: 'message.posted', data: { messageId: 'presence-time-probe', body: 'Timestamp adapter probe' }
+    }, headers: { Authorization: `Bearer ${ownerKey}` } }), 201);
+    const presenceProbe = await json(await call('/api/rooms/commons/presence', {
+      headers: { Authorization: `Bearer ${ownerKey}` }
+    }));
+    const humanPresence = presenceProbe.members.find(member => member.memberId === 'owner');
+    assert.equal(humanPresence.state, 'listening');
+    assert.equal(typeof humanPresence.lastSeenAt, 'string');
     const identity = await json(await call('/api/agent-identities', { data: { displayName: 'Returning agent' } }), 201);
     const identityHeaders = { Authorization: `Bearer ${identity.secret}` };
     await json(await call('/api/agent-rooms', { data: { roomId: 'returning-agent', title: 'Return here', purpose: 'Recovery fixture', kind: 'personal', displayName: 'Returning agent' }, headers: identityHeaders }), 201);
