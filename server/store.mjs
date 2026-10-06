@@ -28,10 +28,10 @@ import { PIN_COMMAND_SHAPES, isPinned } from "../src/events.js";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 import { buildReturnBrief, resolveHistoryWindow, RETURN_BRIEF_DEFAULT_LIMIT } from "./return-brief.mjs";
 import { enforceSpendAllowance } from "./spend-allowance.mjs";
-import { ensureAutonomyTiersSchema, enforceAutonomyTiers } from "./autonomy-tiers.mjs";
+import { ensureAutonomyTiersSchema, enforceAutonomyTiers, AUTONOMY_TIERS_SCHEMA } from "./autonomy-tiers.mjs";
 import { ensureOperatorActionsSchema, OPERATOR_ACTIONS_SCHEMA } from "./operator-actions.mjs"; // CP-ADMIN-0: append-only operator audit.
-import { ensureGrantsSchema } from "./grants.mjs";
-import { ensureSpendGrantsSchema } from "./spend-grants.mjs";
+import { ensureGrantsSchema, GRANTS_SCHEMA } from "./grants.mjs";
+import { ensureSpendGrantsSchema, SPEND_GRANTS_SCHEMA } from "./spend-grants.mjs";
 import { canonicalInvitationData, invitationJournalEntry, invitationJournalSchema, replayInvitationJournal } from "./invitation-journal.mjs";
 import { invitationJoinedEvent, assertInvitationMembershipEvidence } from "./invitation-evidence.mjs";
 import { STORE_SCHEMA_VERSION, fenceDefinitions, registerWriter, installWriterFence, verifyWriterFence } from "./writer-fence.mjs";
@@ -88,7 +88,7 @@ import { GuestAgentLinks, isRoomAccessToken, isGuestAgentMemberId } from "./gues
 import { GuestInvites, guestInviteSchema, guestSelfServeSchema } from "./guest-invites.mjs";
 import { WebFetch, webFetchSchema, migrateWebFetchLogColumns } from "./web-fetch.mjs";
 import { WebResearch, webResearchSchema } from "./web-research.mjs"; // RC-2026-09-24-310: knowledge router (additive)
-import { AgentIdentities, agentIdentitySchema, ensureIdentitySecretSchema, ensureIdentityCapacitySchema, ensureIdentityLinkCodeSchema, isIdentitySecret } from "./agent-identities.mjs";
+import { AgentIdentities, agentIdentitySchema, ensureIdentitySecretSchema, ensureIdentityCapacitySchema, ensureIdentityLinkCodeSchema, identityLinkCodeSchema, isIdentitySecret } from "./agent-identities.mjs";
 import { AgentKeyRegistry, agentKeyRegistrySchema } from "./agent-key-registry.mjs"; // Integration map slice 9: agent public-key registry.
 // Board v2 is retired. These tables stay so existing databases and the
 // recovery audit still see them. Nothing drops board_vtwo_*.
@@ -967,6 +967,27 @@ function agentWakeTargetIds(state, senderMemberId, data) {
   return [...agentWakeTargets(state, senderMemberId, data).keys()];
 }
 
+// ensure*Schema helpers the full schema pass runs (ALTER-based convergence
+// has no DDL constant to hash, so the function source stands in for it).
+// tests/schema-stamp-coverage.test.js fails if the pass calls one not listed.
+// Each entry is hashed by its "name@revision" label, never by fn.toString():
+// the Workers bundle rewrites function source, so a source hash gave the
+// Worker and Node different stamps for the same code (cloudflare CI, #1627).
+// tests/schema-stamp-coverage.test.js pins a digest of each helper's source
+// to its label, so changing a helper without bumping its revision fails CI.
+export const ADDITIVE_SCHEMA_ENSURES = [
+  [ensureIdentitySecretSchema, "ensureIdentitySecretSchema@1"],
+  [ensureIdentityCapacitySchema, "ensureIdentityCapacitySchema@1"],
+  [ensureIdentityLinkCodeSchema, "ensureIdentityLinkCodeSchema@1"],
+  [ensureAutonomyTiersSchema, "ensureAutonomyTiersSchema@1"],
+  [ensureOperatorActionsSchema, "ensureOperatorActionsSchema@1"],
+  [ensureGrantsSchema, "ensureGrantsSchema@1"],
+  [ensureSpendGrantsSchema, "ensureSpendGrantsSchema@1"],
+  [ensureAccountProfileSchema, "ensureAccountProfileSchema@1"],
+  [ensureVerifiedEmailSchema, "ensureVerifiedEmailSchema@1"],
+  [ensureAttachmentSchema, "ensureAttachmentSchema@1"]
+];
+
 // Hash of the DDL this process knows how to apply. A stored match means
 // schema setup and the writer fence already ran for this code, so a wake
 // can skip both. Fence SQL is included: a trigger change must reinstall.
@@ -994,9 +1015,15 @@ function roomSchemaStamp() {
     agentKeyRegistrySchema, INTEGRITY_SNAPSHOT_SCHEMA, OPERATOR_ACTIONS_SCHEMA,
     INTEGRITY_JOB_CURSOR_SCHEMA, INTEGRITY_ROOM_STATE_SCHEMA, INTEGRITY_SWEEP_COLUMN,
     ROOM_SCHEMA_STAMP_SCHEMA, LOOKUP_INDEXES, MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, WANTS_WORK_SCHEMA,
-    PUBLIC_READ_MODEL_SCHEMA
+    PUBLIC_READ_MODEL_SCHEMA,
+    // Additive tables converged outside the version bump. A warm wake whose
+    // stamp matches skips the whole schema pass, so any DDL the pass applies
+    // must be hashed here or a room stamped by an older deploy never gets it
+    // (the priced-tool 500: spend_authorizations missing on muse-room).
+    updatesSchema, GRANTS_SCHEMA, SPEND_GRANTS_SCHEMA, AUTONOMY_TIERS_SCHEMA, identityLinkCodeSchema
   ];
   for (const part of parts) hash.update("\0").update(part ?? "");
+  for (const [, label] of ADDITIVE_SCHEMA_ENSURES) hash.update("\0").update(label);
   for (const def of fenceDefinitions(STORE_SCHEMA_VERSION)) hash.update("\0").update(def.name).update(def.sql);
   return hash.digest("hex");
 }
