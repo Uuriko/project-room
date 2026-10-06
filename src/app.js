@@ -7273,4 +7273,21 @@ if (initialInvitationFragment && !initialPasswordReset) openInvitation(initialIn
   const priorMessages = renderMessages;
   renderMessages = () => { priorMessages(); paintChat(); };
 }
+// --- plan-squads: Squads panel. Read-only roster UI, lazy-loaded. ---
+{
+  const squadsPanel = lazyDisclosure({ panel: $("#squads-dialog"),
+    load: () => import("./squads-ui.js"),
+    install: module => module.installSquadsPanel({ client, getState: () => state, getSession: () => session }),
+    onError: () => notice("Could not load squads. Close and reopen to retry.", true) });
+  const openSquads = () => {
+    const dialog = $("#squads-dialog");
+    if (!dialog.open) dialog.showModal();
+    squadsPanel.sync();
+  };
+  $("#squads-open").addEventListener("click", openSquads);
+  $("#squads-close").addEventListener("click", () => { $("#squads-dialog").close(); });
+  $("#signout-button").addEventListener("click", () => { $("#squads-dialog").close(); squadsPanel.reset(); }, true);
+  const priorSquadsRender = render;
+  render = () => { if (!state) { squadsPanel.reset(); return; } priorSquadsRender(); squadsPanel.sync(); };
+}
 // --- end W board ---

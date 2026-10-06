@@ -46,6 +46,7 @@ import { listedMcpTools, MCP_TOOL_FOCUSES } from "./mcp-discovery.mjs";
 import { stampEvents, stampWorkListing } from "./content-trust.mjs";
 import { redactEventPage } from "./redact-read.mjs";
 import { resolveCatalogAgent, catalogCallDenial } from "./capability-visibility.mjs";
+import { listSquads, getSquad } from "./squads.mjs"; // plan-squads: squad reads
 
 const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
 
@@ -131,6 +132,8 @@ function validRoomArgs(name, args) {
   if (!selected || !allowed(args, Object.keys(selected.inputSchema.properties), selected.inputSchema.required)) return false;
   if (args.roomId !== undefined && !validId(args.roomId)) return false;
   if (name === "room_check_access" || name === "room_activation_pack") return true;
+  if (name === "squads_list") return true;
+  if (name === "squads_get") return typeof args.squadId === "string" && args.squadId.length >= 1 && args.squadId.length <= 128;
   if (name === "room_needs_me") {
     if (args.since === undefined) return true;
     if (Number.isSafeInteger(args.since) && args.since >= 0) return true;
@@ -478,6 +481,8 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
     const auth = store.authenticate(secret, roomId);
     return buildActivationPack(store, roomId, auth.member.id);
   }
+  if (name === "squads_list") return listSquads(store, secret, roomId);
+  if (name === "squads_get") return getSquad(store, secret, roomId, args.squadId);
   if (name === "get_room_context") {
     const context = store.roomContext(secret, roomId, {
       sinceVersion: args.since_version === undefined ? null : args.since_version
