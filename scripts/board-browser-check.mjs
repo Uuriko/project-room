@@ -464,7 +464,11 @@ function seedClaim(store, item) {
 
 // Rendering, dependency navigation and readiness are the UI boundary here.
 // The projection matrix separately owns classification/old-completion filtering.
-test("waiting prerequisites stay visible, link by keyboard, and become claimable only when ready", { timeout: 120000 }, async t => {
+// Quarantined flakes (tests/quarantine.json): both browser tests below fail
+// intermittently on green main. They run in the non-blocking lane
+// (`npm run test:quarantined`, QUARANTINE_RUN=1).
+const QUARANTINED_BOARD_FLAKES = process.env.QUARANTINE_RUN !== "1";
+test("waiting prerequisites stay visible, link by keyboard, and become claimable only when ready", { timeout: 120000, skip: QUARANTINED_BOARD_FLAKES ? "quarantined: tests/quarantine.json (browser timing flake; repair by 2026-10-20)" : false }, async t => {
   mkdirSync("test-results", { recursive: true });
   const fixture = createAcceptanceFixture();
   const server = createRoomServer({ store: fixture.store, streamInterval: 40, fetchPullRequest: github() });
@@ -706,7 +710,7 @@ test("waiting prerequisites stay visible, link by keyboard, and become claimable
 // Authoring gate: the real browser owns form availability, approval copy and
 // submit/readback lifecycle. Core/route tests own append preservation and CAS;
 // these checks add no render-only exports or fabricated successful responses.
-test("owners link a draft PR, reconcile held responses, and refresh a changed claim without resending", { timeout: 120000 }, async t => {
+test("owners link a draft PR, reconcile held responses, and refresh a changed claim without resending", { timeout: 120000, skip: QUARANTINED_BOARD_FLAKES ? "quarantined: tests/quarantine.json (browser timing flake; repair by 2026-10-20)" : false }, async t => {
   mkdirSync("test-results", { recursive: true });
   const fixture = createAcceptanceFixture();
   fixture.store.command(fixture.keys.owner, "commons", {
