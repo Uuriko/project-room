@@ -6,6 +6,7 @@
 import { createHash } from "node:crypto";
 import { roomPolicy } from "../src/events.js";
 import { activeClaim, nextWorkStep } from "../src/workflow.js";
+import { isRunningSession, sessionRecord } from "../src/work-item-session.js";
 
 export const ROOM_CONTEXT_OMITTED = Object.freeze([
   "message_bodies", "file_bodies", "native_result_text", "definition_of_done",
@@ -25,6 +26,28 @@ function evidenceRef(workItemId, record, source) {
   const url = text(source?.evidenceUrl);
   if (!url) return null;
   return { kind: "evidence", workItemId, record, url, evidenceVersion: text(source.evidenceVersion) };
+}
+
+// Running work-item sessions, one row per item. Heartbeat time is structural.
+// A missing heartbeat, or one older than SESSION_HEARTBEAT_STALE_MS (10 minutes),
+// is takeable under sessionWorker. Staleness is not hashed: the clock is not
+// part of context_version. Spend, budgets, and receipts stay on the session read.
+function liveSessions(items) {
+  const rows = [];
+  for (const item of items) {
+    if (item.supersededBy || item.state === "superseded") continue;
+    const session = sessionRecord(item);
+    if (!isRunningSession(session.status)) continue;
+    rows.push({
+      workItemId: item.id,
+      holderId: session.worker_member_id,
+      status: session.status,
+      heartbeatAt: session.heartbeat_at,
+      stopRequested: session.stop_requested_at != null,
+    });
+  }
+  rows.sort((a, b) => a.workItemId < b.workItemId ? -1 : a.workItemId > b.workItemId ? 1 : 0);
+  return rows;
 }
 
 // Latest open handoff whose triage member is the viewer. doneSummary is omitted.
@@ -113,7 +136,7 @@ export function buildRoomContext({ state, sequence, viewerId, caughtUp, now }) {
       requireOwnerDecision: roomPolicy(state).requireOwnerDecision,
       revision: Number.isSafeInteger(storedPolicy.revision) ? storedPolicy.revision : 0
     },
-    focusWork, locks, deps, handoffToYou: handoffToYou(items, viewerId, ownerId),
+    focusWork, locks, deps, liveSessions: liveSessions(items), handoffToYou: handoffToYou(items, viewerId, ownerId),
     decisions, fileRefs,
     omitted: [...ROOM_CONTEXT_OMITTED]
   };

@@ -80,6 +80,7 @@ test("the projection keeps refs and drops message, file, and result bodies", () 
   assert.deepEqual(owner.cursors, { roomSequence: 12, caughtUp: 4, eventsQuery: "after", resumeAfter: 4 });
   assert.ok(owner.fileRefs.some(ref => ref.kind === "evidence" && ref.url === "https://example.test/result" && ref.record === "receipt"));
   assert.deepEqual(owner.locks.map(lock => [lock.holderId, lock.paths[0]]), [["worker", "src/app.js"]]);
+  assert.deepEqual(owner.liveSessions, []);
   const worker = buildRoomContext({ state, sequence: 12, viewerId: "worker", caughtUp: 0, now });
   assert.equal(worker.handoffToYou, null);
   assert.deepEqual(worker.locks.map(lock => lock.workItemId), ["live"]);
@@ -87,6 +88,32 @@ test("the projection keeps refs and drops message, file, and result bodies", () 
   assert.ok(worker.focusWork.some(item => item.id === "live"));
   assert.notEqual(worker.context_version, owner.context_version);
   for (const view of [owner, worker]) assertNoBodies(view);
+  const held = {
+    ...state,
+    workItems: {
+      ...state.workItems,
+      live: {
+        ...state.workItems.live,
+        status: "processing",
+        worker_member_id: "worker",
+        heartbeat_at: "2026-09-24T00:00:00.000Z",
+        stop_requested_at: null,
+        spend_cents: 40,
+      },
+    },
+  };
+  const withSession = buildRoomContext({ state: held, sequence: 12, viewerId: "owner", caughtUp: 4, now });
+  assert.deepEqual(withSession.liveSessions, [{
+    workItemId: "live", holderId: "worker", status: "processing",
+    heartbeatAt: "2026-09-24T00:00:00.000Z", stopRequested: false,
+  }]);
+  assert.equal(JSON.stringify(withSession).includes("spend"), false);
+  assert.notEqual(withSession.context_version, owner.context_version);
+  const stopped = buildRoomContext({
+    state: { ...held, workItems: { ...held.workItems, live: { ...held.workItems.live, status: "done" } } },
+    sequence: 12, viewerId: "owner", caughtUp: 4, now,
+  });
+  assert.deepEqual(stopped.liveSessions, []);
   owner.roster[0].displayName = "mutated";
   assert.equal(buildRoomContext({ state, sequence: 12, viewerId: "owner", caughtUp: 4, now }).roster.find(member => member.id === "owner").displayName, "Owner");
 });
@@ -158,6 +185,7 @@ test("get_room_context is not_modified when unchanged and never carries bodies",
   assert.equal(owner.cursors.eventsQuery, "after");
   assert.equal(owner.cursors.resumeAfter, 0);
   assert.equal(owner.policy.requireIndependentReview, true);
+  assert.ok(Array.isArray(owner.liveSessions));
   assert.ok(owner.roster.some(member => member.id === "worker" && member.kind === "agent"));
   assert.ok(owner.focusWork.some(item => item.id === "live" && item.title === "Live task"));
   assert.equal(owner.deps.length, 0);
