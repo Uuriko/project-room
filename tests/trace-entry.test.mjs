@@ -60,6 +60,7 @@ const SEED_LINE =
 
 describe("trace-entry automation (W001)", () => {
   before(() => {
+    mkdirSync(join(repoRoot, ".tmp"), { recursive: true }); // .tmp/ is gitignored: never exists in a fresh checkout
     scratch = mkdtempSync(join(repoRoot, ".tmp", "trace-entry-test-"));
   });
   after(() => {

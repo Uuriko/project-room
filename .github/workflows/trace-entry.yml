@@ -17,6 +17,14 @@
 #   docs/ROOM-TRACES.jsonl (same pattern as onboarding-probe's publish job).
 # - The script is idempotent per PR number, so workflow re-runs and the
 #   push-retry loop below can never duplicate a line.
+# - Branch-protection note (verified 2026-10-06 via the branches API): main
+#   requires status checks [test, contract, lint, browser, cloudflare] on PR
+#   merges but has NO "require a pull request" rule, no push restrictions,
+#   and no lock — so a GITHUB_TOKEN docs-only push is permitted without
+#   weakening any protection. The pushed commit triggers the normal main CI
+#   (test.yml on push), so the required checks still run on the new tip. If
+#   the ruleset ever tightens, this job fails loudly (non-zero after 3 push
+#   attempts) instead of half-writing state.
 name: trace-entry
 
 on:
@@ -47,13 +55,14 @@ jobs:
       - name: Append trace entry and push
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           for attempt in 1 2 3; do
-            git fetch origin main
-            git reset --hard origin/main
+            git fetch origin "$DEFAULT_BRANCH"
+            git reset --hard "origin/$DEFAULT_BRANCH"
             node scripts/trace-entry.mjs
             node scripts/check-wiki.mjs
             git add docs/ROOM-TRACES.jsonl
@@ -68,7 +77,7 @@ jobs:
               git show --name-only --format= HEAD
               exit 1
             fi
-            if git push origin HEAD:main; then
+            if git push origin "HEAD:$DEFAULT_BRANCH"; then
               echo "trace entry pushed for PR #${PR_NUMBER} (attempt ${attempt})"
               exit 0
             fi
