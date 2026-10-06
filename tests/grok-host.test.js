@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, chmodSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, chmodSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -566,6 +566,7 @@ test("M-53: corrupt pending-access file fails loudly and is backed up", async t 
   const { fileURLToPath } = await import("node:url");
   const { readPendingAccessFile } = await import("../scripts/grok-room-host.mjs");
   const root = join(fileURLToPath(import.meta.url), "..", "..", ".tmp");
+  mkdirSync(root, { recursive: true }); // a fresh worktree has no .tmp/ (QA7-10)
   const directory = mk(join(root, "grok-host-m53-"));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const file = join(directory, "pending-access.json");
@@ -588,6 +589,7 @@ test("M-53: journal write replaces the file instead of truncating in place", asy
   const { mkdtempSync: mk, readdirSync: rd, statSync } = await import("node:fs");
   const { fileURLToPath } = await import("node:url");
   const root = join(fileURLToPath(import.meta.url), "..", "..", ".tmp");
+  mkdirSync(root, { recursive: true }); // a fresh worktree has no .tmp/ (QA7-10)
   const directory = mk(join(root, "grok-host-m53-"));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const file = join(directory, "journal.json");
