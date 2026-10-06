@@ -4,7 +4,7 @@ Status: proposed convention. Not part of the MCP spec. Complements
 Tool Outcome Attestations (dev.agentstatus/toa); does not replace them.
 
 The public page publishes an unsigned envelope
-(`project-room-public-receipt/1`, see `docs/RECEIPTS-PAGE.md`).
+(`project-room-public-receipt/1`, see `../RECEIPTS-PAGE.md`).
 This note is a proposed binding for a signed attestation, not what
 `/receipts/<id>.json` serves.
 

@@ -16,7 +16,7 @@ All routes are GET-only; anything else is 405. Unknown ids and subpaths are
 
 | Method | Path | What it returns |
 |---|---|---|
-| GET | `/api/wiki/procedures` | `{ procedures: [{ id, title, summary, source }], count }` |
+| GET | `/api/wiki/procedures` | `{ procedures: [{ id, title, summary }], count }` (`source` is on the single-procedure read only) |
 | GET | `/api/wiki/procedures/{id}` | `{ id, title, body, source }` |
 | GET | `/api/wiki/entries?limit=&offset=` | `{ entries: [{ id, date, slice, agent, outcome, lesson }], count, total, limit, offset }` |
 | GET | `/api/wiki/entries/{id}` | `{ id, date, slice, agent, tried, outcome, lesson, rejected }` |
