@@ -29,6 +29,12 @@ const STATUSES = Object.freeze(["online", "offline", "unregistered"]);
 // RC-2026-09-24-203: the default reachability window is 180s (was 60s).
 // Per host the window is max(180s, cadenceSeconds * 1.5).
 export const HEARTBEAT_STALE_AFTER_MS = 180000;
+// plan-wake-live: an agent is "wakeable" when it polled (GET
+// /api/agent-wakes/poll) or heartbeated within the last 24h. Deliberately
+// far wider than the 180s presence window: presence measures host
+// liveness, wakeability measures listener recency — the room must tell a
+// live listener from an idle agent whose queue merely looks empty.
+export const WAKEABLE_WINDOW_MS = 24 * 60 * 60 * 1000;
 const MAX_PENDING_WAKES = 50;
 const AGENT_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 const HOST_ID_PATTERN = /^[A-Za-z0-9._-]{1,128}$/;
@@ -73,7 +79,18 @@ export const agentHeartbeatSchema = `
     PRIMARY KEY(agent_id, host_id)
   );
   CREATE INDEX IF NOT EXISTS agent_push_configs_seen ON agent_push_configs(agent_id, updated_at);
+  CREATE TABLE IF NOT EXISTS agent_wake_polls (
+    agent_id TEXT PRIMARY KEY,
+    last_polled_at INTEGER NOT NULL
+  );
 `;
+// plan-wake-live: agent_wake_polls is the durable per-agent last-polled-at.
+// Recorded on poll AND heartbeat activity (a heartbeat carries the pending
+// queue, so it proves the host is listening). Purely additive: existing
+// tables are never altered; agents from before this table existed simply
+// read as not wakeable until they next poll or heartbeat. (The comment
+// lives outside the template: verifySchema() splits the schema on
+// statement boundaries and SQL comments between statements break it.)
 
 export class HeartbeatError extends Error {
   constructor(status, code, message) {
@@ -204,6 +221,60 @@ export class AgentHeartbeats {
     return true;
   }
 
+  // plan-wake-live: stamp the agent's last-polled-at. Polls and
+  // heartbeats both prove the host is listening (a heartbeat response
+  // carries the pending wake queue), so both count as poll activity.
+  recordPollActivity(agentId, at = this.now()) {
+    this.db.prepare(`INSERT INTO agent_wake_polls (agent_id, last_polled_at)
+      VALUES (?, ?) ON CONFLICT(agent_id) DO UPDATE SET last_polled_at=excluded.last_polled_at`)
+      .run(agentId, at);
+    return this;
+  }
+
+  // plan-wake-live: wakeable = the agent polled or heartbeated within
+  // WAKEABLE_WINDOW_MS. Agents that never polled (including host rows
+  // from before agent_wake_polls existed) read as not wakeable with a
+  // null stamp — never as an error. The COMMS-02 mention-target-warning
+  // surface consumes this to warn the poster before @mentioning an
+  // idle agent.
+  wakeStatusOf(agentId) {
+    checkAgentId(agentId);
+    const row = this.db.prepare(
+      "SELECT last_polled_at AS lastPolledAt FROM agent_wake_polls WHERE agent_id=?").get(agentId);
+    const lastPolledAt = row?.lastPolledAt ?? null;
+    return Object.freeze({
+      agentId, lastPolledAt, windowMs: WAKEABLE_WINDOW_MS,
+      wakeable: lastPolledAt !== null && this.now() - lastPolledAt <= WAKEABLE_WINDOW_MS,
+    });
+  }
+
+  // plan-wake-live: every registered agent partitioned into the wakeable
+  // list and the not-wakeable list. Read-only; never migrates (an older
+  // DB without agent_wake_polls lists everyone as not wakeable).
+  wakeStatusList() {
+    const at = this.now();
+    let rows;
+    try {
+      rows = this.db.prepare(`SELECT h.agent_id AS agentId, p.last_polled_at AS lastPolledAt
+        FROM (SELECT DISTINCT agent_id FROM agent_hosts) h
+        LEFT JOIN agent_wake_polls p ON p.agent_id = h.agent_id
+        ORDER BY h.agent_id`).all();
+    } catch {
+      rows = this.db.prepare("SELECT DISTINCT agent_id AS agentId FROM agent_hosts ORDER BY agent_id")
+        .all().map(row => ({ agentId: row.agentId, lastPolledAt: null }));
+    }
+    const wakeable = [], notWakeable = [];
+    for (const row of rows) {
+      const lastPolledAt = row.lastPolledAt ?? null;
+      const entry = Object.freeze({ agentId: row.agentId, lastPolledAt });
+      (lastPolledAt !== null && at - lastPolledAt <= WAKEABLE_WINDOW_MS ? wakeable : notWakeable).push(entry);
+    }
+    return Object.freeze({
+      windowMs: WAKEABLE_WINDOW_MS, asOf: at,
+      wakeable: Object.freeze(wakeable), notWakeable: Object.freeze(notWakeable),
+    });
+  }
+
   // Record a heartbeat from one of the agent's hosts. Upserts the host row
   // and returns the host plus the agent's currently pending wake signals.
   // Pending signals are NOT marked delivered here — the host acknowledges
@@ -250,6 +321,8 @@ export class AgentHeartbeats {
         wake_url=excluded.wake_url, last_seen_at=excluded.last_seen_at,
         updated_at=excluded.updated_at`)
       .run(agentId, hostId, effectiveMode, url, at, at, at);
+    // plan-wake-live: heartbeat activity proves the host is listening.
+    this.recordPollActivity(agentId, at);
     // The push/cadence row tracks the latest heartbeat; push fields change
     // only when the body carries pushNotification (never on bare
     // heartbeats), and a fresh subscription resets failures/suspension.
@@ -503,6 +576,8 @@ export class AgentHeartbeats {
     checkAgentId(agentId);
     const known = this.db.prepare("SELECT 1 FROM agent_hosts WHERE agent_id=? LIMIT 1").get(agentId);
     if (!known) return Object.freeze({ agentId, registered: false, pendingWakes: Object.freeze([]) });
+    // plan-wake-live: the poll itself is listener evidence.
+    this.recordPollActivity(agentId);
     return Object.freeze({
       agentId, registered: true, pendingWakes: this.pendingWakes(agentId, { roomId }),
     });

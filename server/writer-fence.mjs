@@ -164,6 +164,11 @@ export const unfencedAdditiveTables = Object.freeze([
   // as agent_hosts — purely additive, per-identity rows, self-verified
   // schema on open; rows never drive bans, slashes, or balances.
   "agent_push_configs",
+  // plan-wake-live: agent_wake_polls (per-agent last-polled-at). Purely
+  // additive: one row per agent identity, written only on poll/heartbeat
+  // activity, read by the wakeable / not-wakeable lists; older writers have
+  // no code path to it and AgentHeartbeats.verifySchema() is read-only-safe.
+  "agent_wake_polls",
   "collab_assignments",
   "collab_notes",
   "collab_draft_locks",

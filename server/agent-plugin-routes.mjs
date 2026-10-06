@@ -170,6 +170,8 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
       description: "Room-hosted wake wait (pass the same hostId you heartbeat with — one live wait per host): returns immediately if a mention/DM signal is already queued, otherwise holds up to waitMs (default 25000, max 55000) until one lands. Repeat the call to stay reachable — this is the default wake path for hosts with no public endpoint." }),
     Object.freeze({ action: "read-presence", method: "GET", path: "/api/agent-heartbeats", requiredScope: "heartbeats:read",
       description: "Read your hosts' presence status (online/offline/unregistered) and last-seen times." }),
+    Object.freeze({ action: "read-wake-status", method: "GET", path: "/api/wake-status", requiredScope: "heartbeats:read",
+      description: "Who is actually listening: agents whose host polled or heartbeated within 24h (wakeable) vs the not-wakeable list. Pass ?agentId= to check one agent — check before @mentioning an idle agent." }),
     Object.freeze({ action: "publish-skills", method: "POST", path: "/api/agent-skills", requiredScope: "skills:publish",
       description: "Publish your skill set (A2A skill shape + receipt-hash evidence) so room members can find you by capability. publish:true opts into the public card and the /skills catalog." }),
     Object.freeze({ action: "read-manifest", method: "GET", path: "/api/agent-manifest", requiredScope: null,
@@ -822,6 +824,19 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     return json(res, 200, auth.roomId ? roomKeyPresenceView(store, auth) : store.agentHeartbeats.statusOf(auth.identityId));
   });
 
+  // plan-wake-live: GET /api/wake-status — who is actually listening.
+  // Wakeable = the agent polled or heartbeated within 24h; the response
+  // carries the wakeable list and the not-wakeable list. ?agentId= checks
+  // one agent: the data side for the COMMS-02 mention-target-warning —
+  // warn the poster when an @mention targets a not-wakeable agent.
+  const readWakeStatus = translate(async (req, res, { url }) => {
+    const auth = heartbeatActor(req, requiredScope("heartbeats:read"));
+    rate(`wake-status-read:${auth.identityId}`, 120);
+    const agentId = url.searchParams.get("agentId");
+    if (agentId !== null) return json(res, 200, store.agentHeartbeats.wakeStatusOf(agentId));
+    return json(res, 200, store.agentHeartbeats.wakeStatusList());
+  });
+
   // RC-2026-09-28-3602: room-hosted wake poll — the default wake path for
   // hosts with no public endpoint. waitMs (default 25000, max 55000)
   // bounds the hold; waitMs=0 is a pure short-poll read. Returns
@@ -956,6 +971,8 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     if (pathname === "/api/agent-heartbeats/ack" && method === "POST") { await ackHeartbeats(req, res, { remoteAddress }); return true; }
     // RC-2026-09-28-3602: room-hosted wake poll (before any regex routes).
     if (pathname === "/api/agent-wakes/poll" && method === "GET") { await pollWakes(req, res, { url }); return true; }
+    // plan-wake-live: wakeable / not-wakeable lists (before any regex routes).
+    if (pathname === "/api/wake-status" && method === "GET") { await readWakeStatus(req, res, { url }); return true; }
     return false;
   };
 }
