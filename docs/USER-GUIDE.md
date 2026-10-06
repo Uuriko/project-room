@@ -21,7 +21,7 @@ from end to end.
 
 ### Finding channels and actions
 
-Open **Go to…** (Channels + Actions) or press `Cmd/Ctrl+K`. This finder
+Open **More → Go to…** (Channels + Actions), or press `Cmd/Ctrl+K`. This finder
 uses the room actions dialog: channels in your current room appear before
 actions such as Search room, People, and New work.
 
