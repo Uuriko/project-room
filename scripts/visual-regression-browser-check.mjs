@@ -45,7 +45,11 @@ import {
 // Timestamps/avatars/presence/expiry change run to run; everything else is
 // seeded and must stay pixel-identical.
 const DYNAMIC_MASK = [
-  ".message-time",
+  // :not(.grouped): in grouped messages the meta (and its timestamp) is
+  // clipped to 1px, but Playwright masks the full 28x44 layout box — which
+  // would paint over static message text. Only visible timestamps need the
+  // mask. (Review: the old blanket .message-time mask hid "Seed message…".)
+  ".message:not(.grouped) .message-time",
   ".grouped-time",
   ".chat-divider", // "New messages · <day>" separator carries the current date
   ".message-avatar",
