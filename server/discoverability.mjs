@@ -568,9 +568,31 @@ function matchScope(pathname) {
   return null;
 }
 
+// #1603: the unauthenticated /api/public/* surface (and its /room/api/*
+// www-door alias) is human-facing — browsers and curl land here. A plain
+// not_found on an unlisted path means the address matched no route, so the
+// 404 reads as plain language, never with MCP agent-tool names. Registered
+// routes (scope matched above, or a non-not_found code like face_not_found)
+// keep their machine-readable shape.
+function isHumanPublicPath(pathname) {
+  if (typeof pathname !== "string") return false;
+  const normalized = pathname.startsWith("/room/api/") ? pathname.slice("/room".length) : pathname;
+  return normalized === "/api/public" || normalized.startsWith("/api/public/");
+}
+
 export function discoverabilityErrorOverride({ pathname, httpStatus, code }) {
   const scope = matchScope(pathname);
-  if (!scope) return null;
+  if (!scope) {
+    if (httpStatus === 404 && code === "not_found" && isHumanPublicPath(pathname)) {
+      return {
+        status: "action_required",
+        reason: "not_found",
+        hint: "That address does not exist. For the public room list, see GET /api/public/rooms/directory.",
+        next: [{ path: "/api/public/rooms/directory" }],
+      };
+    }
+    return null;
+  }
   const base = agentErrorAx({ httpStatus, code, message: "" });
   let hint = null;
   let next = null;
