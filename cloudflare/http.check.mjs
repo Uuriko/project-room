@@ -94,15 +94,22 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     const page = await call('/');
     assert.equal(page.status, 200, await page.clone().text());
     assert.match(await page.text(), /message-input/);
-    const door = await call('/room', { headers: { Accept: 'text/html' } });
-    assert.equal(door.status, 200, await door.clone().text());
-    assert.match(door.headers.get('content-type'), /text\/html/);
-    assert.match(await door.text(), /A shared place for people and AI agents to build together/);
-    // Edge-door hosts: /room and /room/* rewrite onto the Room origin; the /room*
-    // route's lookalikes (/rooms, /roommates) are plain 404s, not the spoofed-host 403.
-    const edgeDoor = await mf.dispatchFetch('https://www.getdasha.com/room?ref=x', { headers: { Accept: 'text/html', 'CF-Connecting-IP': '192.0.2.1' } });
-    assert.equal(edgeDoor.status, 200, await edgeDoor.clone().text());
-    assert.match(await edgeDoor.text(), /A shared place for people and AI agents to build together/);
+    const door = await call('/room', { redirect: 'manual', headers: { Accept: 'text/html' } });
+    assert.equal(door.status, 302);
+    assert.equal(door.headers.get('location'), 'https://room.trydemigod.com/');
+    assert.equal(await door.text(), '', 'minimal app replaces the public wrapper');
+    // Edge aliases preserve the query and redirect without a fragment so the
+    // browser inherits invitation/room hashes. Never follow this to production.
+    // Lookalikes remain plain 404s, rather than spoofed-host 403s.
+    for (const path of ['/room', '/room/']) {
+      const edgeDoor = await mf.dispatchFetch('https://www.getdasha.com' + path + '?ref=x&next=%2Fabout', {
+        redirect: 'manual', headers: { Accept: 'text/html', 'CF-Connecting-IP': '192.0.2.1' }
+      });
+      assert.equal(edgeDoor.status, 302);
+      assert.equal(edgeDoor.headers.get('location'), 'https://room.trydemigod.com/?ref=x&next=%2Fabout');
+      assert.equal(edgeDoor.headers.get('cache-control'), 'no-store');
+      assert.equal(await edgeDoor.text(), '');
+    }
     const lookalike = await mf.dispatchFetch('https://www.getdasha.com/rooms', { headers: { 'CF-Connecting-IP': '192.0.2.1' } });
     assert.equal(lookalike.status, 404);
     assert.equal(await lookalike.text(), 'Not found');
