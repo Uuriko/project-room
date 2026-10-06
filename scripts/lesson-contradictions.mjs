@@ -40,7 +40,6 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   parseWikiEntries,
   parseQueueEntries,
-  loadCorpus,
   tokenize,
 } from "./lesson-scorer.mjs";
 
