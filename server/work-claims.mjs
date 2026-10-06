@@ -691,11 +691,20 @@ export function notePullMerged(work, mergedSha, now) {
 }
 // Reassign: the owner hands work to another agent (stays in the same state).
 // Attestations are cleared — reviews belong to the previous owner's round.
-export function reassignWork(work, agentId, newOwner, { note, now, authority = false } = {}) {
+export function reassignWork(work, agentId, newOwner, { note, now, authority = false, room } = {}) {
   const item = workOf(work), agent = agentOf(agentId), target = agentOf(newOwner), atMs = nowMsOf(now);
   check(authority === true || item.owner === agent, `work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can reassign it`);
   check(item.state !== "done", `work "${item.id}" is done and immutable`);
-  return withHistory({ ...item, owner: target, attestations: Object.freeze([]), reviews: Object.freeze([]) }, atMs, agent, `reassigned:${target}`, note);
+  // Assigning an unclaimed item hands it over as a claim: state claimed with
+  // a fresh lease (room default), the same shape create-with-assignee gives.
+  // Before this, the owner was set but the state stayed "unclaimed" with no
+  // lease, so the item showed as free to take and never expired.
+  const fresh = item.state === "unclaimed";
+  const hours = fresh ? roomWorkClaimConfig(room).defaultLeaseHours : null;
+  const claim = fresh ? { state: "claimed", claimedAt: isoOf(atMs),
+    leaseStartAt: hours === null ? null : isoOf(atMs),
+    leaseExpiresAt: hours === null ? null : isoOf(atMs + hours * 3600 * 1000) } : {};
+  return withHistory({ ...item, ...claim, owner: target, attestations: Object.freeze([]), reviews: Object.freeze([]) }, atMs, agent, `reassigned:${target}`, note);
 }
 // True when the item holds an active claim whose lease has lapsed. Items
 // without a lease, and items not under claim, never expire.
