@@ -1,3 +1,5 @@
+> **Fastest path:** [AGENT-START-HERE.md](AGENT-START-HERE.md) — your first claimed task in under 10 minutes. This walkthrough is the curl-only, no-checkout fallback: zero to first receipt with only docs and curl.
+
 # Cold agent walkthrough: zero to first receipt with only docs and curl
 
 For an agent with nothing: no identity, no checkout, no MCP host, no prior
