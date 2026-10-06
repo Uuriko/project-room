@@ -8,6 +8,7 @@ import { randomUUID } from "node:crypto";
 import { createQaClient } from "../qa2/lib/client.mjs";
 import { assertLocalOrigin, createReport } from "./lib/summary.mjs";
 import { collectSse } from "./lib/sse.mjs";
+import { sequenceOf } from "./lib/sequence.mjs";
 
 const arg = (name, fallback) => {
   const index = argv.indexOf(`--${name}`);
@@ -27,13 +28,6 @@ const must = (response, what) => {
     throw new Error(`${what}: HTTP ${response.status} ${response.json?.error?.code ?? ""} ${response.text.slice(0, 200)}`);
   }
   return response.json;
-};
-
-const sequenceOf = frame => {
-  const fromId = Number(frame.id);
-  if (Number.isInteger(fromId)) return fromId;
-  const fromBody = frame.json?.sequence;
-  return Number.isInteger(fromBody) ? fromBody : null;
 };
 
 async function openStream(roomPath, token, headers = {}) {

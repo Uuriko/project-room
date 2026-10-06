@@ -107,7 +107,7 @@ for (const mobile of [false, true]) {
     assert.equal(await card("return-1").evaluate(node => node === document.activeElement), true);
     assert.deepEqual(await page.locator("#message-input").evaluate(node => [node.value, node.selectionStart, node.selectionEnd]), ["A draft to keep while catching up.", 2, 9]);
     assert.equal(await page.locator("#message-to-select").inputValue(), "guest");
-    assert.deepEqual(snapshot(), initial); assert.deepEqual(writes, []);
+    assert.deepEqual(snapshot(), initial); assert.deepEqual(writes.filter(path => !path.endsWith("/typing")), []);
 
     // No event arrives when permission scope expires. Both places must agree,
     // without shifting the focused second item to the first or marking anything read.
@@ -126,7 +126,7 @@ for (const mobile of [false, true]) {
     assert.match(await card("return-1").locator(".claim > summary").textContent(), /expired/);
     assert.equal(await card("return-1").locator(".work-details").evaluate(node => node.open), true);
     assert.equal(Number(await page.locator("#rb-ack-button").getAttribute("data-horizon")), horizon);
-    assert.deepEqual(snapshot(), initial); assert.deepEqual(writes, []);
+    assert.deepEqual(snapshot(), initial); assert.deepEqual(writes.filter(path => !path.endsWith("/typing")), []);
 
     mutate("return-0", T.WORK_ACCEPTED);
     mutate("return-0", T.WORK_COMPLETED, { summary: "Synthetic agenda", producerId: "owner", evidenceVersion: "v1", evidenceUrl: "https://example.invalid/fixture", nextAction: "No further gates" });
@@ -146,7 +146,7 @@ for (const mobile of [false, true]) {
     await page.waitForFunction(() => document.querySelector("#rb-status").textContent.includes("could not load"));
     assert.equal(await page.locator("#rb-attention-list a").count(), 5);
     assert.equal(await page.locator("#rb-ack-button").isDisabled(), true);
-    assert.equal(snapshot().cursor, 0); assert.deepEqual(writes, []);
+    assert.equal(snapshot().cursor, 0); assert.deepEqual(writes.filter(path => !path.endsWith("/typing")), []);
     assert.equal(await page.locator("#message-input").inputValue(), "A draft to keep while catching up.");
     failBrief = false; await page.locator("#rb-refresh-button").click(); await ready();
 

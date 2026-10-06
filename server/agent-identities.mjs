@@ -618,6 +618,8 @@ export class AgentIdentities {
     if (permissions.includes("manage_members") && !this.store.delegation.mayConferManageMembers(authority, auth)) {
       fail(403, "access_denied", "Delegated membership administration cannot grant manage_members");
     }
+    const unheld = this.store.delegation.unheldPermissions(authority, auth, permissions);
+    if (unheld.length) fail(403, "access_denied", `Cannot grant permissions not held: ${unheld.join(", ")}. Link with permissions you hold, or ask the room owner`);
     if (displayName !== undefined && (typeof displayName !== "string" || displayName.length > 80)) fail(422, "invalid_identity", "displayName must be text of at most 80 characters");
     // Referral attribution: optional member id of the referrer, written onto
     // the new member record and journaled via referral.completed. Shape is

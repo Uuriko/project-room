@@ -7,11 +7,46 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse } from "yaml";
+import { generateKeyPair, signCard, signCardJws } from "../server/agent-card-signing.mjs";
 
 const script = fileURLToPath(new URL("../scripts/prod-deploy-smoke.mjs", import.meta.url));
 const revision = "a".repeat(40);
 const smokePaths = ["/api/health", "/api/ready", "/terms", "/privacy", "/"];
 const versionPaths = ["/api/version", "/api/version/worker"];
+const cardPath = "/.well-known/agent-card.json";
+
+// The CLI verifies every served card against a key the tests must inject —
+// they cannot sign for the production pinned key. One keypair signs the
+// fixture card; its public half is handed to the CLI through the
+// --agent-card-* knobs (flags for the direct tests, SMOKE_AGENT_CARD_* env
+// for the workflow-pipeline test, which runs the literal deploy step).
+const cardKeyPair = generateKeyPair();
+const cardKeyId = "test-card-key-smoke";
+const cardAgentId = "project-room";
+const buildFixtureCard = () => {
+  const card = {
+    name: "Test Room",
+    description: "prod-deploy-smoke fixture",
+    url: null,
+    capabilities: { streaming: false },
+    skills: [],
+    version: "1",
+  };
+  const signature = signCard({ agentId: cardAgentId, card, privateKey: cardKeyPair.privateKey });
+  const withEnvelope = {
+    ...card,
+    keyId: cardKeyId,
+    signatureAgentId: cardAgentId,
+    publicKey: cardKeyPair.publicKey,
+    cardSignature: signature,
+    signedRevision: revision,
+  };
+  withEnvelope.signatures = [
+    signCardJws({ card: withEnvelope, privateKey: cardKeyPair.privateKey, keyId: cardKeyId, jku: "https://example.test/.well-known/jwks.json" }),
+  ];
+  return withEnvelope;
+};
+const fixtureCard = buildFixtureCard();
 
 // Exercise the shipped CLI over real HTTP. Unknown paths/methods fail closed,
 // so dropping either door's path prefix cannot accidentally pass the fixture.
@@ -22,6 +57,7 @@ async function door(t, prefix, failure) {
     ["/api/ready", { status: "ready" }],
     ...versionPaths.map(path => [path, { sourceRevision: revision }]),
     ...["/terms", "/privacy", "/"].map(path => [path, "<!doctype html><title>Room</title>"]),
+    [cardPath, fixtureCard],
   ].map(([path, body]) => [`${prefix}${path}`, { status: 200, body }]));
   if (failure) responses.set(`${prefix}${failure.path}`, failure);
   const server = createServer((req, res) => {
@@ -57,7 +93,13 @@ function runReport(command, args, options = {}) {
 }
 
 function runSmoke(origin, entry, withSha) {
-  const args = [script, "--origin", `${origin.url}/`, "--entry", `${entry.url}/`];
+  const args = [script, "--origin", `${origin.url}/`, "--entry", `${entry.url}/`,
+    "--agent-card-public-key", cardKeyPair.publicKey,
+    "--agent-card-key-id", cardKeyId,
+    "--agent-card-agent-id", cardAgentId,
+    // One fetch per door: the production default (10 fetches x 1.5s gaps x 2
+    // doors ~ 27s) cannot fit inside the CLI timeout this suite enforces.
+    "--agent-card-fetches", "1"];
   if (withSha) args.push("--sha", revision, "--wait-ms", "0");
   return runReport(process.execPath, args);
 }
@@ -74,7 +116,7 @@ for (const withSha of [false, true]) {
     assert.equal(report.sha, withSha ? revision : null);
     assert.equal(report.origin, origin.url);
     assert.equal(report.entry, entry.url);
-    const paths = [...smokePaths, ...(withSha ? versionPaths : [])];
+    const paths = [...smokePaths, ...(withSha ? versionPaths : []), cardPath];
     for (const current of [origin, entry]) {
       assert.deepEqual(current.requests.toSorted(), paths.map(path => `${current.prefix}${path}`).toSorted());
     }
@@ -131,7 +173,13 @@ for (const filename of ["prod-deploy-smoke.mjs", "live-smoke.mjs"]) {
         cwd: fileURLToPath(new URL("../", import.meta.url)),
         env: { ...process.env, SHA: revision, PROD_ORIGIN: origin.url, ENTRY_ORIGIN: entry.url,
           ROOM_SMOKE_ORIGIN: origin.url, ROOM_SMOKE_GITHUB_API: origin.url,
-          RUNNER_TEMP: directory, GITHUB_TOKEN: "", GITHUB_STEP_SUMMARY: "" },
+          RUNNER_TEMP: directory, GITHUB_TOKEN: "", GITHUB_STEP_SUMMARY: "",
+          // The pipeline test runs the literal deploy-prod.yml step, so the
+          // card-check test seams arrive through the env fallbacks.
+          SMOKE_AGENT_CARD_PUBLIC_KEY: cardKeyPair.publicKey,
+          SMOKE_AGENT_CARD_KEY_ID: cardKeyId,
+          SMOKE_AGENT_CARD_AGENT_ID: cardAgentId,
+          SMOKE_AGENT_CARD_FETCHES: "1" },
       });
       // The sparse fixture intentionally fails live-smoke's discovery checks.
       assert.equal(result.report.ok, healthy, result.stdout);

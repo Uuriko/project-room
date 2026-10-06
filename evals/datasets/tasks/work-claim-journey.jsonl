@@ -1,0 +1,2 @@
+{"id":"wcj-01","solver":"join-claim-finish","room":"evals-lab","agent":"eval-agent-1","taskId":"task-evals-alpha","notes":"happy path: join, exclusive claim, rival denied, finish mints receipt"}
+{"id":"wcj-02","solver":"join-claim-finish","room":"evals-lab","agent":"eval-agent-2","taskId":"task-evals-beta","notes":"second pinned task, distinct lease, same contract"}

@@ -212,6 +212,108 @@ test("reassignment moves the open position to the new lane", () => {
   assert.equal(signalsFor(rows, "claim_hoarded").filter(s => s.agent === "lane-a").length, 0);
 });
 
+// --- re-claim after a closed lifecycle (P1 re-claim position gap) -------------
+// The fold's `seen` mark is ever-observed, so a re-claim of the same claimId
+// after a closed lifecycle must open a fresh position via the settled mark;
+// duplicate terminals after a close must still stay silent.
+
+test("a re-claim after done opens a fresh position and prices both lifecycles", () => {
+  const rows = [
+    row(1, "c1", "claimed"),
+    row(2, "c1", "state_changed", { claimState: "done" }),
+    row(3, "c1", "claimed"),
+    row(4, "c1", "state_changed", { claimState: "done" })
+  ];
+  const got = signalsFor(rows, "claim_completed");
+  assert.equal(got.length, 2);
+  assert.deepEqual(got.map(s => s.seq), [2, 4]);
+});
+
+test("a re-claim after release opens a fresh position", () => {
+  const rows = [
+    row(1, "c1", "claimed"),
+    row(2, "c1", "released", { claimState: "unclaimed", ownerId: null }),
+    row(3, "c1", "claimed"),
+    row(4, "c1", "state_changed", { claimState: "done" })
+  ];
+  assert.equal(signalsFor(rows, "claim_released").length, 1);
+  const completed = signalsFor(rows, "claim_completed");
+  assert.equal(completed.length, 1);
+  assert.equal(completed[0].seq, 4);
+});
+
+test("a re-claim after lease expiry opens a fresh position", () => {
+  const rows = [
+    row(1, "c1", "claimed", { ownerId: "lane-a" }),
+    row(2, "c1", "lease_expired", { claimState: "unclaimed", ownerId: null, previousOwnerId: "lane-a" }),
+    row(3, "c1", "claimed", { ownerId: "lane-b" }),
+    row(4, "c1", "state_changed", { claimState: "done", ownerId: "lane-b" })
+  ];
+  assert.equal(signalsFor(rows, "claim_flaked").length, 1);
+  const completed = signalsFor(rows, "claim_completed");
+  assert.equal(completed.length, 1);
+  assert.equal(completed[0].agent, "lane-b");
+});
+
+test("reassignment of a settled claim opens a fresh position", () => {
+  const rows = [
+    row(1, "c1", "claimed", { ownerId: "lane-a" }),
+    row(2, "c1", "state_changed", { claimState: "done", ownerId: "lane-a" }),
+    row(3, "c1", "reassigned", { ownerId: "lane-b" }),
+    row(4, "c1", "state_changed", { claimState: "done", ownerId: "lane-b" })
+  ];
+  const completed = signalsFor(rows, "claim_completed");
+  assert.equal(completed.length, 2);
+  assert.equal(completed[1].agent, "lane-b");
+});
+
+test("duplicate terminals after a close stay silent (settled is not a re-open)", () => {
+  const rows = [
+    row(1, "c1", "claimed"),
+    row(2, "c1", "state_changed", { claimState: "done" }),
+    row(3, "c1", "state_changed", { claimState: "done" })
+  ];
+  assert.equal(signalsFor(rows, "claim_completed").length, 1);
+});
+
+// --- terminal-before-first-claim residual (RC-2026-10-05-156) ----------------
+// A terminal event (done/released) seen before the observer's first claim
+// event marks the claim observed but not settled, so a later claimed or
+// reassigned event for the same ID stays blocked. The terminal closes a
+// lifecycle the observer never saw open — it must mark settled so the next
+// claim opens a fresh position. (muse-room seq 3319.)
+
+test("done seen before the first claim does not block the later claim", () => {
+  const rows = [
+    row(1, "c1", "state_changed", { claimState: "done", ownerId: "lane-a" }),
+    row(2, "c1", "claimed", { ownerId: "lane-a" }),
+    row(3, "c1", "state_changed", { claimState: "done", ownerId: "lane-a" })
+  ];
+  const completed = signalsFor(rows, "claim_completed");
+  assert.equal(completed.length, 2);
+  assert.deepEqual(completed.map(s => s.seq), [1, 3]);
+});
+
+test("released seen before the first claim does not block the later claim", () => {
+  const rows = [
+    row(1, "c1", "released", { claimState: "unclaimed", ownerId: "lane-a" }),
+    row(2, "c1", "claimed", { ownerId: "lane-a" }),
+    row(3, "c1", "state_changed", { claimState: "done", ownerId: "lane-a" })
+  ];
+  assert.equal(signalsFor(rows, "claim_released").length, 1);
+  const completed = signalsFor(rows, "claim_completed");
+  assert.equal(completed.length, 1);
+  assert.equal(completed[0].seq, 3);
+});
+
+test("duplicate terminals after a mid-history terminal stay silent", () => {
+  const rows = [
+    row(1, "c1", "state_changed", { claimState: "done", ownerId: "lane-a" }),
+    row(2, "c1", "state_changed", { claimState: "done", ownerId: "lane-a" })
+  ];
+  assert.equal(signalsFor(rows, "claim_completed").length, 1);
+});
+
 // --- replay / determinism ---------------------------------------------------
 
 test("replaying the same events yields byte-identical signals", () => {

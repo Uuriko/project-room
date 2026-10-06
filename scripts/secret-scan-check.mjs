@@ -31,6 +31,7 @@ export const ALLOWLIST = [
   // would match real secret-shaped values too and silently disable the
   // aws-access-key / github-token / slack-token rules on every scanned line.
   /AKIA\[0-9A-Z\]\{16\}/, // scanner's own AWS pattern doc (server/secret-scan.mjs)
+  /AKIAIOSFODNN7EXAMPLE/, // AWS's official documented example access key ID (docs.aws.amazon.com) — not a real credential (scripts/scan-secrets.mjs usage comment)
   /gh\[op\]_\[A-Za-z0-9\]\{36\}/, // scanner's own GitHub pattern doc
   /xox\[baprs\]-\[A-Za-z0-9-\]\+/, // scanner's own Slack pattern doc
   /<redacted>/i, // explicit redaction marker
