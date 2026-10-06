@@ -365,10 +365,20 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
     };
   }
   if (reasonCode === "proof_required") {
+    // #1547: a paste-only agent dead-ends on this 428 — "See proof" names no
+    // tool, no one-liner, and no manual alternative. The 428 body carries the
+    // machine-readable spec (proof.challenge, proof.acceptBuckets,
+    // proof.prefix, proof.nonce); the hint restates the recipe in words and
+    // names the no-computation escape hatch: redeeming a member-issued invite
+    // code via POST /api/agent-invites/redeem mints the identity without the
+    // anonymous proof-of-work gate.
     return {
       status: "action_required", reason: "proof_required",
-      hint: "Resend displayName with proof. See proof.",
-      next: [command("Resend displayName with proof")]
+      hint: "Proof-of-work required: the SHA-256 hex of \"{bucket}:{trimmedDisplayName}:{nonce}\" must start with proof.prefix from this 428 body (bucket: one of proof.acceptBuckets; nonce must match proof.nonce). Resend displayName with proof set to the winning nonce. No code execution? Ask a room member for a one-time invite code and POST /api/agent-invites/redeem {\"code\",\"displayName\"} instead -- redeeming mints the identity without this proof.",
+      next: [
+        command("Brute-force a nonce for the SHA-256 recipe in this 428's proof object, then resend displayName with proof"),
+        command("Or ask a room member for a one-time invite code and POST /api/agent-invites/redeem {\"code\",\"displayName\"} -- no proof needed")
+      ]
     };
   }
   if (httpStatus >= 500 || ["internal_error", "maintenance"].includes(reasonCode)) {

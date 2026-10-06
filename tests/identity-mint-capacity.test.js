@@ -453,7 +453,7 @@ test("HTTP mint accepts a quiet signup, then requires proof and enforces the add
   assert.equal(challenge.category, "input");
   assert.ok(challenge.hint);
   assert.ok(challenge.next.length > 0);
-  assert.equal(challenge.hint, "Resend displayName with proof. See proof.");
+  assert.equal(challenge.hint, "Proof-of-work required: the SHA-256 hex of \"{bucket}:{trimmedDisplayName}:{nonce}\" must start with proof.prefix from this 428 body (bucket: one of proof.acceptBuckets; nonce must match proof.nonce). Resend displayName with proof set to the winning nonce. No code execution? Ask a room member for a one-time invite code and POST /api/agent-invites/redeem {\"code\",\"displayName\"} instead -- redeeming mints the identity without this proof.");
   assertProofRecipe(challenge.proof, "Needs Proof", store.now());
   const proved = await post("/api/agent-identities", {
     displayName: "Needs Proof",
