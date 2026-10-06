@@ -236,7 +236,7 @@ jobs:
           ROOM_AGENT_CARD_SIGNING_KEY: ${{ secrets.ROOM_AGENT_CARD_SIGNING_KEY }}
         run: |
           set -euo pipefail
-          pnpm exec wrangler deploy --env production --keep-vars | tee "$RUNNER_TEMP/deploy-prod.txt"
+          pnpm exec wrangler deploy --env production --keep-vars --var ROOM_BODIES_AT_REST:0 | tee "$RUNNER_TEMP/deploy-prod.txt"
           VERSION="$(grep -oE 'Current Version ID: [0-9a-f-]{36}' "$RUNNER_TEMP/deploy-prod.txt" | awk '{print $4}' | tail -1)"
           [ -n "$VERSION" ] || { echo "::error::could not read the new prod version id"; exit 1; }
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
@@ -247,7 +247,7 @@ jobs:
           ROOM_AGENT_CARD_SIGNING_KEY: ${{ secrets.ROOM_AGENT_CARD_SIGNING_KEY }}
         run: |
           set -euo pipefail
-          pnpm exec wrangler deploy --keep-vars | tee "$RUNNER_TEMP/deploy-entry.txt"
+          pnpm exec wrangler deploy --keep-vars --var ROOM_BODIES_AT_REST:0 | tee "$RUNNER_TEMP/deploy-entry.txt"
           VERSION="$(grep -oE 'Current Version ID: [0-9a-f-]{36}' "$RUNNER_TEMP/deploy-entry.txt" | awk '{print $4}' | tail -1)"
           [ -n "$VERSION" ] || { echo "::error::could not read the new entry version id"; exit 1; }
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
