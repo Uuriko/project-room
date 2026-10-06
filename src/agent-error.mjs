@@ -462,7 +462,14 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
 // config-state 503s written directly in server/http.mjs (Fo's file) and the
 // MCP -32603 JSON-RPC envelopes (Claude's lane's files) are out of reach by
 // file-claim ownership; errorTrace() is exported for those owners to reuse.
-const fingerprintSalt = randomBytes(16).toString("hex");
+// The salt is minted lazily on first use, never at module top level: workerd
+// forbids random-value generation in global scope, and this module also
+// ships in the Worker bundle.
+let fingerprintSalt = null;
+function salt() {
+  if (!fingerprintSalt) fingerprintSalt = randomBytes(16).toString("hex");
+  return fingerprintSalt;
+}
 
 function normalizeForFingerprint(value) {
   // Bounded first: the regexes below must never run on an unbounded message.
@@ -476,7 +483,7 @@ export function errorTrace({ httpStatus = 0, code = "request_failed", message = 
   if (!(httpStatus >= 500)) return null;
   const fingerprint = createHash("sha256")
     .update(
-      [fingerprintSalt, httpStatus, publicCode(code), normalizeForFingerprint(message), roomId || "", workItemId || ""].join("\0"),
+      [salt(), httpStatus, publicCode(code), normalizeForFingerprint(message), roomId || "", workItemId || ""].join("\0"),
       "utf8",
     )
     .digest("hex");
