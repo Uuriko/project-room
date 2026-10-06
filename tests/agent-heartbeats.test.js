@@ -9,6 +9,7 @@ import { rmSync } from "node:fs";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
+import { installFakeWebhookDns } from "./helpers/fake-webhook-dns.mjs";
 import {
   AgentHeartbeats, HeartbeatError, agentHeartbeatSchema,
   HEARTBEAT_STALE_AFTER_MS,
@@ -153,6 +154,9 @@ test("buildWakePing carries the canonical agent.wake payload", () => {
 // ---- HTTP integration: heartbeat endpoints, mention trigger, directory ----
 
 async function startServer(t, f) {
+  // Test-only DNS: fixture webhook URLs (https://*.test) go through the
+  // fully fail-closed production gate, so a fake resolver stands in.
+  installFakeWebhookDns(f.store);
   const server = createRoomServer({ store: f.store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => {
