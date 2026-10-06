@@ -64,10 +64,10 @@ always cheaper than declaring late.
 3. **Open an incident log** (a fresh section in the incident channel or a
    scratch file under `~/workspace/...`; never in the repo working tree): log
    every action with timestamps. This becomes the postmortem's timeline.
-4. **Snapshot first evidence:** run `GET /api/health` and save the payload.
-   Record `status`, `version`, `uptimeMs`, `checkedAt`, and the per-check rows
-   (`name`, `required`, `status`, `detail`, `latencyMs`). Those rows are the
-   whole monitoring surface — there is no separate uptime monitor.
+4. **Snapshot first evidence:** run `GET /api/health` and `GET /api/version`
+   and save both payloads. Record `status`, `mode`, `sourceRevision`, and
+   `buildId`. The health probe is thin liveness only — there is no per-check
+   table and no separate uptime monitor.
 5. **Set the first update time** (see §5) and start the clock.
 
 An incident is declared against **impact**, not against a person or a change.
@@ -87,17 +87,15 @@ go fix it. Do not run commands that mutate state until you've named a theory.
      (server/http wiring, port binding), not the app logic.
    - Endpoint unreachable and the process is down → check the process
      supervisor / host first; do not re-run provisioning blindly.
-2. **Compare versions and uptime.** `version` and `uptimeMs` in the health
-   payload: did the process just restart (low `uptimeMs` — crash loop?), or did
-   a deploy land just before the incident started? A fresh restart + SEV1
-   almost always means the last change or the last crash.
-3. **Per-check details.** For every `fail` row: note `required` (does it gate
-   unhealthy?), `detail` (probe's own words), and `latencyMs` (a timeout
-   versus an instant failure points at different causes). Probes are cheap and
-   non-invasive by contract — a failing probe means the dependency, not the
-   probe, is sick.
+2. **Compare versions.** `sourceRevision` and `buildId` in the
+   `/api/version` payload: did a deploy land just before the incident
+   started? A fresh deploy + SEV1 almost always means the last change.
+   (The health payload carries no version or uptime fields.)
+3. **Dependency symptoms.** There is no per-dependency probe table anymore.
+   Confirm suspected dependencies directly (is SQLite writable? is GitHub
+   reachable?) instead of hunting a `checks[]` table that no longer exists.
 4. **Logs.** With a theory in hand, look at the app logs around the alert time
-   (see `docs/SAFE-DIAGNOSTICS.md` for the approved read-only commands). Never
+   (see `docs/history/SAFE-DIAGNOSTICS.md` for the approved read-only commands). Never
    `tail -f` a SEV1 into confusion — sample a bounded window and paste the
    relevant lines into the incident log.
 5. **Stop and reassess.** If the first 30 minutes produce no theory, the IC
@@ -109,12 +107,9 @@ go fix it. Do not run commands that mutate state until you've named a theory.
 
 | Signal | Meaning | First action |
 |--------|---------|--------------|
-| `GET /api/health` → 503, `status: "unhealthy"` | Required dependency down | Read `checks[]` for the failing required check; SEV1 |
-| `GET /api/health` → 200, `status: "degraded"` | Optional dependency down | Read failing check's `detail`; scope the blast radius |
-| `GET /api/health` → 200, `status: "healthy"` | Service itself up | Look outward: proxy, DNS, client; check `/status` page |
-| `GET /status` disagrees with `/api/health` | Rendering/route wiring issue | Compare `renderStatusPage` inputs vs health payload |
-| `GET /api/health` → 503 | Required check failing | Treat as SEV1 until proven otherwise; start at step 1 |
-| `GET /api/health` flapping (`unhealthy` → `healthy` → `unhealthy`) | Intermittent fault or too-aggressive probe timeout | Check `latencyMs` in health rows; consider widening the check |
+| `GET /api/health` → 200, `status: "ok"` | Process up and answering | Look outward: proxy, DNS, client, dependencies the probe does not check |
+| `GET /api/health` → non-200 or unreachable | Process down or HTTP layer broken | Check the supervisor/host first, then server wiring |
+| `GET /api/version` → unexpected `sourceRevision` | Wrong revision deployed | Compare with the intended ship commit; roll back if needed |
 
 ## 5. Communication cadence
 
