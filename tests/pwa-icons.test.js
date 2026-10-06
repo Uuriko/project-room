@@ -1,5 +1,7 @@
 // Committed PWA icons. Dimensions come from the PNG header. The manifest
-// entries that point at them wait until SEC-1's content-type fix has merged.
+// entries that point at them were gated on SEC-1's content-type fix (merged
+// 2026-09-26, PR #1105); the hold is lifted and the manifest contract below
+// pins the wiring.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -16,6 +18,26 @@ test("PWA icons are PNGs at the installable sizes", () => {
   assert.deepEqual(pngSize("icon-512.png"), { width: 512, height: 512 });
   assert.deepEqual(pngSize("maskable-512.png"), { width: 512, height: 512 });
   assert.deepEqual(pngSize("apple-touch-icon-180.png"), { width: 180, height: 180 });
+});
+
+test("manifest installability contract: PNG icons wired, theme-color matches the page", () => {
+  const manifest = JSON.parse(readFileSync(new URL("../manifest.webmanifest", import.meta.url), "utf8"));
+  const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
+  const pageTheme = html.match(/<meta name="theme-color" content="([^"]+)"/)?.[1];
+  assert.ok(pageTheme, "index.html must declare a theme-color meta");
+  assert.equal(manifest.theme_color, pageTheme, "manifest theme_color must match the page");
+  assert.equal(manifest.background_color, "#202127", "manifest background must match the app --bg");
+  const pngIcons = manifest.icons.filter(icon => icon.type === "image/png");
+  assert.ok(pngIcons.some(icon => icon.sizes === "192x192"), "manifest needs a 192px PNG icon");
+  assert.ok(pngIcons.some(icon => icon.sizes === "512x512"), "manifest needs a 512px PNG icon");
+  assert.ok(pngIcons.some(icon => icon.purpose === "maskable"), "manifest needs a maskable icon");
+  for (const icon of pngIcons) {
+    // Each manifest entry must point at a committed file at the declared size.
+    const size = pngSize(icon.src.replace(/^\//, "").replace(/^icons\//, ""));
+    const [width, height] = icon.sizes.split("x").map(Number);
+    assert.equal(size.width, width, icon.src);
+    assert.equal(size.height, height, icon.src);
+  }
 });
 
 test("a declarative push stays under 4KB and is omitted when the flag is off", () => {
