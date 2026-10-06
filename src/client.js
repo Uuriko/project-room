@@ -626,6 +626,15 @@ export class RoomClient {
     if (!this.ownsResponse(result, session)) { this.endAccess(); return null; }
     return result;
   }
+  async saveHumanPushPreferences(preferences) {
+    if (!this.session) return null;
+    if (!this.ownsAccountSession()) { this.endAccess(); return null; }
+    const generation = this.generation, session = this.session;
+    const result = await this.request(this.path("/human-push"), { method: "PATCH", data: { preferences } });
+    if (generation !== this.generation || session !== this.session) return null;
+    if (!this.ownsResponse(result, session)) { this.endAccess(); return null; }
+    return result;
+  }
   async notifications(before = null) {
     // B4: read-only feed; a 401/403 ends access exactly like the sibling reads.
     if (!this.session) return null;

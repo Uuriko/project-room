@@ -349,6 +349,11 @@ export const unfencedAdditiveTables = Object.freeze([
   // — older writers have no code path to it. Rows are a delivery address,
   // never room content and never a grant.
   "human_push_subscriptions",
+  // human_push_preferences (wave-2 #1601: per-member push-channel switches,
+  // one row per member in a room). Same rationale as subscriptions: purely
+  // additive, older writers have no code path to it, and the row only gates
+  // delivery — it never grants anything.
+  "human_push_preferences",
   // board_vtwo_* (BOARD-v2 SQLite persistence, PR #1144): board_vtwo_claims,
   // board_vtwo_events, board_vtwo_mirror, board_vtwo_idempotency. Purely additive
   // and intentionally NOT fenced — older writers have no code path to them,

@@ -6254,6 +6254,11 @@ humanPushUi = installHumanPush({
   client,
   button: $("#human-push-button"),
   note: $("#human-push-note"),
+  prefs: {
+    box: $("#human-push-prefs"),
+    mention: $("#human-push-pref-mention"),
+    dm: $("#human-push-pref-dm")
+  },
   eligible: () => Boolean(state) && ownsNotifications(notificationOwner) && client.session?.member?.kind !== "agent"
 });
 // Tag acknowledgment (2026-09-23): one tap on a pending mention sends the
