@@ -162,14 +162,9 @@ test("signed-in room view and message list match visual baselines", { timeout: 1
 // baseline, exercises the real gate function against real page pixels, and
 // cleans up after itself.
 test("visual diff detector fails on an altered screenshot, passes on an identical one", { timeout: 180000 }, async t => {
-  // The self-test manages VISUAL_UPDATE_BASELINES itself: an outer update
-  // run must not flip the altered screenshot into a passing baseline write.
-  const outerUpdate = process.env.VISUAL_UPDATE_BASELINES;
-  delete process.env.VISUAL_UPDATE_BASELINES;
-  t.after(() => {
-    if (outerUpdate === undefined) delete process.env.VISUAL_UPDATE_BASELINES;
-    else process.env.VISUAL_UPDATE_BASELINES = outerUpdate;
-  });
+  // The self-test pins update mode explicitly per call, so an outer update
+  // run (env var or .refresh-requested marker) cannot flip the altered
+  // screenshot into a passing baseline write.
   const { origin } = await startServer(t);
   const page = await launchPage(t);
   await page.goto(origin);
@@ -188,16 +183,9 @@ test("visual diff detector fails on an altered screenshot, passes on an identica
   assert.equal(diffPngBuffers(shot, shot).diffPixels, 0, "identical screenshots must diff to zero");
 
   // Register the throwaway baseline, then prove identical passes the gate.
-  const previous = process.env.VISUAL_UPDATE_BASELINES;
-  process.env.VISUAL_UPDATE_BASELINES = "1";
-  try {
-    compareScreenshotBuffer(shot, "detector-selftest");
-  } finally {
-    if (previous === undefined) delete process.env.VISUAL_UPDATE_BASELINES;
-    else process.env.VISUAL_UPDATE_BASELINES = previous;
-  }
+  compareScreenshotBuffer(shot, "detector-selftest", { update: true });
   assert.ok(existsSync(baselinePath), "self-test baseline should have been written");
-  const clean = compareScreenshotBuffer(shot, "detector-selftest");
+  const clean = compareScreenshotBuffer(shot, "detector-selftest", { update: false });
   assert.equal(clean.diffPixels, 0, "identical screenshot must pass the gate");
 
   // Deliberately alter the screenshot: paint a solid block over real content.
@@ -216,7 +204,7 @@ test("visual diff detector fails on an altered screenshot, passes on an identica
     `altered screenshot should exceed the diff budget, got ${(alteredDiff.ratio * 100).toFixed(2)}%`,
   );
   assert.throws(
-    () => compareScreenshotBuffer(altered, "detector-selftest"),
+    () => compareScreenshotBuffer(altered, "detector-selftest", { update: false }),
     /visual regression/,
     "altered screenshot must fail the gate",
   );

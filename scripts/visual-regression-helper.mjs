@@ -18,12 +18,17 @@
 // Regenerating baselines after an intentional UI change:
 // Baselines are CI-canonical: the comparator sees 1-2% pixel drift from
 // system font rasterization between environments, so a locally captured
-// baseline fails the CI gate on environment, not on UI changes. Refresh via:
-//   gh workflow run visual-baselines.yml --ref <branch>
-// then download the `visual-baselines` artifact and commit the PNGs here.
-// (VISUAL_UPDATE_BASELINES=1 node --test scripts/visual-regression-browser-check.mjs
-// also works for local iteration, but its PNGs must not be committed.)
-// Review the baseline diff in the PR like any snapshot.
+// baseline fails the CI gate on environment, not on UI changes. Refresh:
+//   1. commit an empty scripts/visual-regression-baselines/.refresh-requested
+//      marker and push — the next CI run captures fresh baselines instead of
+//      comparing, and uploads them under test-results/visual-baselines/
+//      (picked up by the existing browser-shards artifact upload)
+//   2. download the shard-4 artifact, copy the PNGs over this directory,
+//      delete the marker, commit, push
+//   3. CI compares against the new baselines; review the PNG diff in the PR
+//      like any snapshot
+// (VISUAL_UPDATE_BASELINES=1 also forces update mode, for local iteration;
+// its PNGs must not be committed.)
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -86,15 +91,27 @@ export function diffPngBuffers(actual, expected, { threshold = PIXEL_THRESHOLD }
   return { diffPixels, ratio: diffPixels / (a.width * a.height), diffPng: PNG.sync.write(diff) };
 }
 
+// Update mode is explicit: the VISUAL_UPDATE_BASELINES=1 env var (local
+// iteration) or the .refresh-requested marker file (CI capture — the marker
+// is how a runner without shell access requests fresh CI-canonical
+// baselines; see the header docs).
+export function shouldUpdateBaselines() {
+  return process.env.VISUAL_UPDATE_BASELINES === "1" || existsSync(join(BASELINE_DIR, ".refresh-requested"));
+}
+
 // Compare one captured PNG buffer against the committed baseline for `name`.
 // Pure (no browser): the failing-first detector test calls this directly
 // with a deliberately altered buffer. Returns the diff stats on a pass.
-// On VISUAL_UPDATE_BASELINES=1 the buffer becomes the new baseline.
-export function compareScreenshotBuffer(shot, name, { maxDiffPixelRatio = MAX_DIFF_PIXEL_RATIO } = {}) {
+// In update mode the buffer becomes the new baseline; a copy also lands in
+// test-results/visual-baselines/ so the CI artifact carries it out.
+export function compareScreenshotBuffer(shot, name, { maxDiffPixelRatio = MAX_DIFF_PIXEL_RATIO, update = shouldUpdateBaselines() } = {}) {
   const baselinePath = join(BASELINE_DIR, `${name}.png`);
-  if (process.env.VISUAL_UPDATE_BASELINES === "1") {
+  if (update) {
     mkdirSync(BASELINE_DIR, { recursive: true });
     writeFileSync(baselinePath, shot);
+    const exportDir = join(EVIDENCE_DIR, "..", "visual-baselines");
+    mkdirSync(exportDir, { recursive: true });
+    writeFileSync(join(exportDir, `${name}.png`), shot);
     return { updated: true, diffPixels: 0, ratio: 0 };
   }
   if (!existsSync(baselinePath)) {
