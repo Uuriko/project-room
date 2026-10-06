@@ -29,7 +29,7 @@ function open(t, options = {}) {
 const big = (tag, n = 6000) => `${tag}:` + "x".repeat(n);
 
 test("off by default: the stored row is the full state and no body rows exist", t => {
-  const room = open(t);
+  const room = open(t, { bodiesAtRest: false });
   room.post("long", big("long"));
   assert.match(room.raw(), /long:xxxx/);
   assert.doesNotMatch(room.raw(), /bodyRef/);
@@ -81,7 +81,7 @@ test("the room size cap counts the stored row, so long patches stop filling it",
   };
   // A moving clock keeps the per-member message rate limit out of the way.
   const clock = () => { let at = Date.parse("2026-10-06T00:00:00Z"); return () => (at += 120000); };
-  assert.equal(fill(open(t, { now: clock() })).code, "pilot_limit", "without bodies at rest the room fills up");
+  assert.equal(fill(open(t, { bodiesAtRest: false, now: clock() })).code, "pilot_limit", "without bodies at rest the room fills up");
   const slim = open(t, { bodiesAtRest: true, now: clock() });
   assert.equal(fill(slim).stoppedAt, null);
   assert.ok(Buffer.byteLength(slim.raw()) < 64 * 1024);
@@ -103,6 +103,27 @@ test("the unindexed conversation read returns full bodies", t => {
   const page = readConversation(room.store, room.owner(), "commons", { limit: 10 });
   assert.equal(page.messages.find(m => m.id === "m")?.body, text);
   assert.equal(page.messages.some(m => "bodyRef" in m), false);
+});
+
+test("rehydrateAllProjections writes every room back with full bodies, for a rollback", t => {
+  const room = open(t, { bodiesAtRest: true });
+  const text = big("rollback");
+  room.post("m", text);
+  room.reopen({ bodiesAtRest: false });
+  assert.equal(room.store.rehydrateAllProjections(), 1);
+  assert.match(room.raw(), /rollback:xxxx/);
+  assert.doesNotMatch(room.raw(), /bodyRef/);
+  assert.equal(room.bodies().length, 0);
+  auditRecovery(room.store);
+});
+
+test("the unindexed conversation read recovers a lost body row from the log", t => {
+  const room = open(t, { bodiesAtRest: true });
+  const text = big("recover");
+  room.post("m", text);
+  room.store.db.prepare("DELETE FROM projection_bodies").run();
+  const page = readConversation(room.store, room.owner(), "commons", { limit: 10 });
+  assert.equal(page.messages.find(m => m.id === "m")?.body, text);
 });
 
 test("turning it off writes full bodies back on the next write", t => {

@@ -11,8 +11,9 @@
 //
 // Rollout: hydration is always on. Slimming is on only when the store was
 // opened with bodiesAtRest (ROOM_BODIES_AT_REST=1). Turning it off makes the
-// next write of each room store full bodies again; rehydrateAll() does that
-// for every room at once, which an older build needs before a rollback.
+// next write of each room store full bodies again; store.rehydrateAllProjections()
+// does that for every room at once, in one transaction, which an older build
+// needs before a rollback. Take a backup first, as for any rollback.
 import { createHash } from "node:crypto";
 
 export const BODY_AT_REST_MIN_CHARS = 512;
@@ -126,11 +127,15 @@ export function atRestBodyBytes(db, roomId) {
 
 // One message record read straight out of rooms.projection with SQLite JSON
 // functions (conversation-sync's unindexed path). Same result as hydration.
-export function hydrateRecordText(db, roomId, text) {
+// A missing row falls back to `recover(messageId)` (the store's hydrated
+// room, which replays the event log), the same path store.room() uses.
+export function hydrateRecordText(db, roomId, text, recover = null) {
   if (typeof text !== "string" || !text.includes('"bodyRef"')) return text;
   const record = JSON.parse(text);
   if (typeof record?.bodyRef !== "string") return text;
   const row = db.prepare("SELECT body FROM projection_bodies WHERE room_id=? AND sha=?").get(roomId, record.bodyRef);
-  if (typeof row?.body !== "string" || shaOf(row.body) !== record.bodyRef) throw new Error("projection_corrupt: stored message body missing");
-  return JSON.stringify(renameKey(record, "bodyRef", "body", row.body));
+  let body = typeof row?.body === "string" && shaOf(row.body) === record.bodyRef ? row.body : null;
+  if (body === null && recover) body = recover(record.id);
+  if (typeof body !== "string") throw new Error("projection_corrupt: stored message body missing");
+  return JSON.stringify(renameKey(record, "bodyRef", "body", body));
 }

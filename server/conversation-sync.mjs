@@ -104,7 +104,8 @@ export function readConversation(store, token, roomId, { limit = 50, cursor = nu
       .all(roomId, before, auth.member.id, auth.member.id, channelId, DEFAULT_CHANNEL_ID, channelId,
         messageId, messageId, floor?.at ?? null, floor?.at ?? null,
         floor?.at ?? null, floor?.at ?? null, exclusions, messageId === null ? limit + 1 : 1))
-      .map(row => indexed ? row : { ...row, body: hydrateRecordText(store.db, roomId, row.body) })
+      .map(row => indexed ? row : { ...row, body: hydrateRecordText(store.db, roomId, row.body,
+        id => store.room(roomId).state.messages.find(message => message.id === id)?.body) })
       .filter(row => !floor || messageInHistory(JSON.parse(row.body), floor));
     if (messageId !== null && !rows.length) fail(404, "message_not_found", "Message not found");
     const selected = [];

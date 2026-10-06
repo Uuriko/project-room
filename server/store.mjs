@@ -2593,6 +2593,20 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     cache.insert(roomId, meta.sequence, value, Buffer.byteLength(row.projection) + (state.messages ?? []).reduce((n, m) => n + (m?.body?.length ?? 0), 0));
     return value;
   }
+  // Phase 1a rollback: write every room back with full bodies in one
+  // transaction. The release trigger then empties projection_bodies.
+  rehydrateAllProjections() {
+    return this.transaction(() => {
+      let count = 0;
+      for (const { id } of this.db.prepare("SELECT id FROM rooms WHERE projection LIKE '%\"bodyRef\"%'").all()) {
+        const state = this.room(id).state;
+        this.db.prepare("UPDATE rooms SET projection=? WHERE id=?").run(storedProjection(this.db, id, state, { enabled: false }), id);
+        this._projectionCache?.clear?.();
+        count += 1;
+      }
+      return count;
+    });
+  }
   // Phase 1a: the one serializer for rooms.projection. Every writer uses it.
   storedProjection(roomId, state) {
     return storedProjection(this.db, roomId, state, { enabled: this.bodiesAtRest });
