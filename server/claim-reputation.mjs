@@ -171,9 +171,14 @@ function foldClaims(rows) {
           else if (!observed) {
             // Mid-history completion: the lane did real work we never saw
             // claimed; price it once, then mark seen so repeats stay silent.
+            // The lifecycle we never saw open is closed by this terminal, so
+            // mark settled: a later claimed/reassigned must open a fresh
+            // position instead of staying blocked behind the ever-observed
+            // mark (RC-2026-10-05-156 residual).
             const who = laneOf(data.ownerId);
             if (who) emit(claimId, row, who, "claim_completed");
             else seen.set(claimId, true);
+            closePosition(claimId);
           }
           // done on a seen-but-closed claim: duplicate terminal, silent.
         } else if ((state === "claimed" || state === "in_progress") && !position && !observed) {
@@ -187,9 +192,13 @@ function foldClaims(rows) {
       case "released": {
         if (position) { emit(claimId, row, position, "claim_released"); closePosition(claimId); }
         else if (!observed) {
+          // Mid-history release of a claim we never saw open: price it once,
+          // then close the unseen lifecycle so a later claimed/reassigned
+          // opens a fresh position (RC-2026-10-05-156 residual).
           const who = laneOf(data.ownerId);
           if (who) emit(claimId, row, who, "claim_released");
           else seen.set(claimId, true);
+          closePosition(claimId);
         }
         break;
       }
