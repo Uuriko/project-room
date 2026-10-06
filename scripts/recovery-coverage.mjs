@@ -1,3 +1,4 @@
+import {seedRecordRails} from "./record-rails-fixture.mjs";
 // The rows the recovery audit requires. Shared with the cold-start budget so
 // a wake is measured against a store that has every application table, not
 // only the event log. Disposable synthetic data only.
@@ -23,6 +24,7 @@ export async function seedRecoveryCoverage(f) {
   assistant.apply("commons", { action: "configure", requestId: "recovery-assistant-config", expectedRevision: 0, name: "Room", coordinatorMemberId: agent.id }, ownerAuth);
   assistant.apply("commons", { action: "invoke", requestId: "recovery-assistant-invoke", runId: "recovery-shared-run", sourceMessageId: source.id }, ownerAuth);
   assistant.apply("commons", { action: "claim", requestId: "recovery-assistant-claim", runId: "recovery-shared-run", attemptId: "recovery-host-attempt", expectedRevision: 0 }, () => f.store.authenticate(f.keys.agent, "commons"));
+  seedRecordRails(f.store,f.keys.owner,"agent",f.projectOffers[0].offerId);
 
   // One append-only operator audit row. The cold-start budget and the
   // recovery audit both require every application table to hold a row,

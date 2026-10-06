@@ -15200,6 +15200,557 @@ paths:
         '401': { description: Invalid, expired, mismatched or consumed proof }
         '409': { description: Existing account cookie refused }
 
+  /api/rooms/{roomId}/demigod-offers:
+    get:
+      summary: demigod-offers-list (private, record-only)
+      operationId: demigod-offers-list
+      description: Active room membership and party authority required. No money moves. Writes require CSRF for browsers and rooms write scope for API keys. Trial verdict requires owner-configured receipt trust and exact signed binding.
+      parameters:
+        - in: path
+          name: roomId
+          required: true
+          schema: {type: string}
+      responses:
+        '200': {description: Record-only result}
+        '201': {description: Record created}
+        '403': {description: Room or party access denied}
+        '409': {description: Revision or exact retry conflict}
+        '422': {description: Invalid input or receipt binding}
+    post:
+      summary: demigod-offers-create (private, record-only)
+      operationId: demigod-offers-create
+      description: Active room membership and party authority required. No money moves. Writes require CSRF for browsers and rooms write scope for API keys. Trial verdict requires owner-configured receipt trust and exact signed binding.
+      parameters:
+        - in: path
+          name: roomId
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object}
+      responses:
+        '200': {description: Record-only result}
+        '201': {description: Record created}
+        '403': {description: Room or party access denied}
+        '409': {description: Revision or exact retry conflict}
+        '422': {description: Invalid input or receipt binding}
+  /api/rooms/{roomId}/demigod-offers/{recordId}:
+    get:
+      summary: demigod-offers-get (private, record-only)
+      operationId: demigod-offers-get
+      description: Active room membership and party authority required. No money moves. Writes require CSRF for browsers and rooms write scope for API keys. Trial verdict requires owner-configured receipt trust and exact signed binding.
+      parameters:
+        - in: path
+          name: roomId
+          required: true
+          schema: {type: string}
+        - in: path
+          name: recordId
+          required: true
+          schema: {type: string}
+      responses:
+        '200': {description: Record-only result}
+        '201': {description: Record created}
+        '403': {description: Room or party access denied}
+        '409': {description: Revision or exact retry conflict}
+        '422': {description: Invalid input or receipt binding}
+  /api/rooms/{roomId}/demigod-offers/{recordId}/present:
+    post:
+      summary: demigod-offers-present (private, record-only)
+      operationId: demigod-offers-present
+      description: Active room membership and party authority required. No money moves. Writes require CSRF for browsers and rooms write scope for API keys. Trial verdict requires owner-configured receipt trust and exact signed binding.
+      parameters:
+        - in: path
+          name: roomId
+          required: true
+          schema: {type: string}
+        - in: path
+          name: recordId
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object}
+      responses:
+        '200': {description: Record-only result}
+        '201': {description: Record created}
+        '403': {description: Room or party access denied}
+        '409': {description: Revision or exact retry conflict}
+        '422': {description: Invalid input or receipt binding}
+  /api/rooms/{roomId}/demigod-offers/{recordId}/accept:
+    post:
+      summary: demigod-offers-accept (private, record-only)
+      operationId: demigod-offers-accept
+      description: Active room membership and party authority required. No money moves. Writes require CSRF for browsers and rooms write scope for API keys. Trial verdict requires owner-configured receipt trust and exact signed binding.
+      parameters:
+        - in: path
+          name: roomId
+          required: true
+          schema: {type: string}
+        - in: path
+          name: recordId
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object}
+      responses:
+        '200': {description: Record-only result}
+        '201': {description: Record created}
+        '403': {description: Room or party access denied}
+        '409': {description: Revision or exact retry conflict}
+        '422': {description: Invalid input or receipt binding}
+  /api/rooms/{roomId}/demigod-offers/{recordId}/decline:
+    post:
+      summary: demigod-offers-decline (private, record-only)
+      operationId: demigod-offers-decline
+      description: Active room membership and party authority required. No money moves. Writes require CSRF for browsers and rooms write scope for API keys. Trial verdict requires owner-configured receipt trust and exact signed binding.
+      parameters:
+        - in: path
+          name: roomId
+          required: true
+          schema: {type: string}
+        - in: path
+          name: recordId
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object}
+      responses:
+        '200': {description: Record-only result}
+        '201': {description: Record created}
+        '403': {description: Room or party access denied}
+        '409': {description: Revision or exact retry conflict}
+        '422': {description: Invalid input or receipt binding}
+  /api/rooms/{roomId}/demigod-offers/{recordId}/expire:
+    post:
+      summary: demigod-offers-expire (private, record-only)
+      operationId: demigod-offers-expire
+      description: Active room membership and party authority required. No money moves. Writes require CSRF for browsers and rooms write scope for API keys. Trial verdict requires owner-configured receipt trust and exact signed binding.
+      parameters:
+        - in: path
+          name: roomId
+          required: true
+          schema: {type: string}
+        - in: path
+          name: recordId
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object}
+      responses:
+        '200': {description: Record-only result}
+        '201': {description: Record created}
+        '403': {description: Room or party access denied}
+        '409': {description: Revision or exact retry conflict}
+        '422': {description: Invalid input or receipt binding}
+  /api/rooms/{roomId}/demigod-offers/{recordId}/withdraw:
+    post:
+      summary: demigod-offers-withdraw (private, record-only)
+      operationId: demigod-offers-withdraw
+      description: Active room membership and party authority required. No money moves. Writes require CSRF for browsers and rooms write scope for API keys. Trial verdict requires owner-configured receipt trust and exact signed binding.
+      parameters:
+        - in: path
+          name: roomId
+          required: true
+          schema: {type: string}
+        - in: path
+          name: recordId
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object}
+      responses:
+        '200': {description: Record-only result}
+        '201': {description: Record created}
+        '403': {description: Room or party access denied}
+        '409': {description: Revision or exact retry conflict}
+        '422': {description: Invalid input or receipt binding}
+  /api/rooms/{roomId}/demigod-offers/{recordId}/document:
+    get:
+      summary: demigod-offers-document (private, record-only)
+      operationId: demigod-offers-document
+      description: Active room membership and party authority required. No money moves. Writes require CSRF for browsers and rooms write scope for API keys. Trial verdict requires owner-configured receipt trust and exact signed binding.
+      parameters:
+        - in: path
+          name: roomId
+          required: true
+          schema: {type: string}
+        - in: path
+          name: recordId
+          required: true
+          schema: {type: string}
+      responses:
+        '200': {description: Record-only result}
+        '201': {description: Record created}
+        '403': {description: Room or party access denied}
+        '409': {description: Revision or exact retry conflict}
+        '422': {description: Invalid input or receipt binding}
+  /api/rooms/{roomId}/demigod-contracts:
+    get:
+      summary: demigod-contracts-list (private, record-only)
+      operationId: demigod-contracts-list
+      description: Active room membership and party authority required. No money moves. Writes require CSRF for browsers and rooms write scope for API keys. Trial verdict requires owner-configured receipt trust and exact signed binding.
+      parameters:
+        - in: path
+          name: roomId
+          required: true
+          schema: {type: string}
+      responses:
+        '200': {description: Record-only result}
+        '201': {description: Record created}
+        '403': {description: Room or party access denied}
+        '409': {description: Revision or exact retry conflict}
+        '422': {description: Invalid input or receipt binding}
+    post:
+      summary: demigod-contracts-create (private, record-only)
+      operationId: demigod-contracts-create
+      description: Active room membership and party authority required. No money moves. Writes require CSRF for browsers and rooms write scope for API keys. Trial verdict requires owner-configured receipt trust and exact signed binding.
+      parameters:
+        - in: path
+          name: roomId
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object}
+      responses:
+        '200': {description: Record-only result}
+        '201': {description: Record created}
+        '403': {description: Room or party access denied}
+        '409': {description: Revision or exact retry conflict}
+        '422': {description: Invalid input or receipt binding}
+  /api/rooms/{roomId}/demigod-contracts/{recordId}:
+    get:
+      summary: demigod-contracts-get (private, record-only)
+      operationId: demigod-contracts-get
+      description: Active room membership and party authority required. No money moves. Writes require CSRF for browsers and rooms write scope for API keys. Trial verdict requires owner-configured receipt trust and exact signed binding.
+      parameters:
+        - in: path
+          name: roomId
+          required: true
+          schema: {type: string}
+        - in: path
+          name: recordId
+          required: true
+          schema: {type: string}
+      responses:
+        '200': {description: Record-only result}
+        '201': {description: Record created}
+        '403': {description: Room or party access denied}
+        '409': {description: Revision or exact retry conflict}
+        '422': {description: Invalid input or receipt binding}
+  /api/rooms/{roomId}/demigod-contracts/{recordId}/acknowledge:
+    post:
+      summary: demigod-contracts-acknowledge (private, record-only)
+      operationId: demigod-contracts-acknowledge
+      description: Active room membership and party authority required. No money moves. Writes require CSRF for browsers and rooms write scope for API keys. Trial verdict requires owner-configured receipt trust and exact signed binding.
+      parameters:
+        - in: path
+          name: roomId
+          required: true
+          schema: {type: string}
+        - in: path
+          name: recordId
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object}
+      responses:
+        '200': {description: Record-only result}
+        '201': {description: Record created}
+        '403': {description: Room or party access denied}
+        '409': {description: Revision or exact retry conflict}
+        '422': {description: Invalid input or receipt binding}
+  /api/rooms/{roomId}/demigod-contracts/{recordId}/complete:
+    post:
+      summary: demigod-contracts-complete (private, record-only)
+      operationId: demigod-contracts-complete
+      description: Active room membership and party authority required. No money moves. Writes require CSRF for browsers and rooms write scope for API keys. Trial verdict requires owner-configured receipt trust and exact signed binding.
+      parameters:
+        - in: path
+          name: roomId
+          required: true
+          schema: {type: string}
+        - in: path
+          name: recordId
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object}
+      responses:
+        '200': {description: Record-only result}
+        '201': {description: Record created}
+        '403': {description: Room or party access denied}
+        '409': {description: Revision or exact retry conflict}
+        '422': {description: Invalid input or receipt binding}
+  /api/rooms/{roomId}/demigod-contracts/{recordId}/terminate:
+    post:
+      summary: demigod-contracts-terminate (private, record-only)
+      operationId: demigod-contracts-terminate
+      description: Active room membership and party authority required. No money moves. Writes require CSRF for browsers and rooms write scope for API keys. Trial verdict requires owner-configured receipt trust and exact signed binding.
+      parameters:
+        - in: path
+          name: roomId
+          required: true
+          schema: {type: string}
+        - in: path
+          name: recordId
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object}
+      responses:
+        '200': {description: Record-only result}
+        '201': {description: Record created}
+        '403': {description: Room or party access denied}
+        '409': {description: Revision or exact retry conflict}
+        '422': {description: Invalid input or receipt binding}
+  /api/rooms/{roomId}/signoff-loops:
+    get:
+      summary: signoff-loops-list (private, record-only)
+      operationId: signoff-loops-list
+      description: Active room membership and party authority required. No money moves. Writes require CSRF for browsers and rooms write scope for API keys. Trial verdict requires owner-configured receipt trust and exact signed binding.
+      parameters:
+        - in: path
+          name: roomId
+          required: true
+          schema: {type: string}
+      responses:
+        '200': {description: Record-only result}
+        '201': {description: Record created}
+        '403': {description: Room or party access denied}
+        '409': {description: Revision or exact retry conflict}
+        '422': {description: Invalid input or receipt binding}
+    post:
+      summary: signoff-loops-create (private, record-only)
+      operationId: signoff-loops-create
+      description: Active room membership and party authority required. No money moves. Writes require CSRF for browsers and rooms write scope for API keys. Trial verdict requires owner-configured receipt trust and exact signed binding.
+      parameters:
+        - in: path
+          name: roomId
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object}
+      responses:
+        '200': {description: Record-only result}
+        '201': {description: Record created}
+        '403': {description: Room or party access denied}
+        '409': {description: Revision or exact retry conflict}
+        '422': {description: Invalid input or receipt binding}
+  /api/rooms/{roomId}/signoff-loops/{recordId}:
+    get:
+      summary: signoff-loops-get (private, record-only)
+      operationId: signoff-loops-get
+      description: Active room membership and party authority required. No money moves. Writes require CSRF for browsers and rooms write scope for API keys. Trial verdict requires owner-configured receipt trust and exact signed binding.
+      parameters:
+        - in: path
+          name: roomId
+          required: true
+          schema: {type: string}
+        - in: path
+          name: recordId
+          required: true
+          schema: {type: string}
+      responses:
+        '200': {description: Record-only result}
+        '201': {description: Record created}
+        '403': {description: Room or party access denied}
+        '409': {description: Revision or exact retry conflict}
+        '422': {description: Invalid input or receipt binding}
+  /api/rooms/{roomId}/signoff-loops/{recordId}/submit:
+    post:
+      summary: signoff-loops-submit (private, record-only)
+      operationId: signoff-loops-submit
+      description: Active room membership and party authority required. No money moves. Writes require CSRF for browsers and rooms write scope for API keys. Trial verdict requires owner-configured receipt trust and exact signed binding.
+      parameters:
+        - in: path
+          name: roomId
+          required: true
+          schema: {type: string}
+        - in: path
+          name: recordId
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object}
+      responses:
+        '200': {description: Record-only result}
+        '201': {description: Record created}
+        '403': {description: Room or party access denied}
+        '409': {description: Revision or exact retry conflict}
+        '422': {description: Invalid input or receipt binding}
+  /api/rooms/{roomId}/signoff-loops/{recordId}/review:
+    post:
+      summary: signoff-loops-review (private, record-only)
+      operationId: signoff-loops-review
+      description: Active room membership and party authority required. No money moves. Writes require CSRF for browsers and rooms write scope for API keys. Trial verdict requires owner-configured receipt trust and exact signed binding.
+      parameters:
+        - in: path
+          name: roomId
+          required: true
+          schema: {type: string}
+        - in: path
+          name: recordId
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object}
+      responses:
+        '200': {description: Record-only result}
+        '201': {description: Record created}
+        '403': {description: Room or party access denied}
+        '409': {description: Revision or exact retry conflict}
+        '422': {description: Invalid input or receipt binding}
+  /api/rooms/{roomId}/signoff-loops/{recordId}/cancel:
+    post:
+      summary: signoff-loops-cancel (private, record-only)
+      operationId: signoff-loops-cancel
+      description: Active room membership and party authority required. No money moves. Writes require CSRF for browsers and rooms write scope for API keys. Trial verdict requires owner-configured receipt trust and exact signed binding.
+      parameters:
+        - in: path
+          name: roomId
+          required: true
+          schema: {type: string}
+        - in: path
+          name: recordId
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object}
+      responses:
+        '200': {description: Record-only result}
+        '201': {description: Record created}
+        '403': {description: Room or party access denied}
+        '409': {description: Revision or exact retry conflict}
+        '422': {description: Invalid input or receipt binding}
+  /api/rooms/{roomId}/signoff-loops/{recordId}/status:
+    get:
+      summary: signoff-loops-status (private, record-only)
+      operationId: signoff-loops-status
+      description: Active room membership and party authority required. No money moves. Writes require CSRF for browsers and rooms write scope for API keys. Trial verdict requires owner-configured receipt trust and exact signed binding.
+      parameters:
+        - in: path
+          name: roomId
+          required: true
+          schema: {type: string}
+        - in: path
+          name: recordId
+          required: true
+          schema: {type: string}
+      responses:
+        '200': {description: Record-only result}
+        '201': {description: Record created}
+        '403': {description: Room or party access denied}
+        '409': {description: Revision or exact retry conflict}
+        '422': {description: Invalid input or receipt binding}
+  /api/rooms/{roomId}/trial-tasks:
+    get:
+      summary: trial-tasks-list (private, record-only)
+      operationId: trial-tasks-list
+      description: Active room membership and party authority required. No money moves. Writes require CSRF for browsers and rooms write scope for API keys. Trial verdict requires owner-configured receipt trust and exact signed binding.
+      parameters:
+        - in: path
+          name: roomId
+          required: true
+          schema: {type: string}
+      responses:
+        '200': {description: Record-only result}
+        '201': {description: Record created}
+        '403': {description: Room or party access denied}
+        '409': {description: Revision or exact retry conflict}
+        '422': {description: Invalid input or receipt binding}
+    post:
+      summary: trial-tasks-apply (private, record-only)
+      operationId: trial-tasks-apply
+      description: Active room membership and party authority required. No money moves. Writes require CSRF for browsers and rooms write scope for API keys. Trial verdict requires owner-configured receipt trust and exact signed binding.
+      parameters:
+        - in: path
+          name: roomId
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object}
+      responses:
+        '200': {description: Record-only result}
+        '201': {description: Record created}
+        '403': {description: Room or party access denied}
+        '409': {description: Revision or exact retry conflict}
+        '422': {description: Invalid input or receipt binding}
+  /api/rooms/{roomId}/trial-tasks/{recordId}:
+    get:
+      summary: trial-tasks-read (private, record-only)
+      operationId: trial-tasks-read
+      description: Active room membership and party authority required. No money moves. Writes require CSRF for browsers and rooms write scope for API keys. Trial verdict requires owner-configured receipt trust and exact signed binding.
+      parameters:
+        - in: path
+          name: roomId
+          required: true
+          schema: {type: string}
+        - in: path
+          name: recordId
+          required: true
+          schema: {type: string}
+      responses:
+        '200': {description: Record-only result}
+        '201': {description: Record created}
+        '403': {description: Room or party access denied}
+        '409': {description: Revision or exact retry conflict}
+        '422': {description: Invalid input or receipt binding}
+
+  /api/rooms/{roomId}/trial-tasks/{recordId}/receipt:
+    get:
+      summary: Read a private verified vetting receipt (record-only)
+      description: Active room and party access required. Returns the signed receipt and owner-configured issuer public key provenance. Consumers must independently trust the issuer and verify candidate/task binding.
+      parameters:
+        - {in: path, name: roomId, required: true, schema: {type: string}}
+        - {in: path, name: recordId, required: true, schema: {type: string}}
+      responses:
+        '200': {description: Signed receipt and configured trust provenance}
+        '403': {description: Room or party access denied}
+        '404': {description: Receipt not available}
 components:
   securitySchemes:
     accountBrowserSession:
