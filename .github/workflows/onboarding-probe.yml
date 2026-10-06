@@ -113,6 +113,6 @@ jobs:
           git add docs/onboarding-probe/results.md
           git diff --cached --quiet && { echo "no docs changes"; exit 0; }
           git commit -m "docs: publish onboarding probe results (run ${{ github.run_id }})"
-          git fetch origin main
+          git fetch origin main:refs/remotes/origin/main
           git rebase origin/main
           git push origin HEAD:main
