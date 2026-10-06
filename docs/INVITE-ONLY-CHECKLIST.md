@@ -57,6 +57,7 @@ Every `/api/*` route is either open by design (below) or requires a credential
 | `POST /api/share-links/join` | capability + account session | joins a guest session, ≤ 25 joins per link, ≤ 7-day expiry |
 | `POST /api/invitations/accept` | capability + account session | membership per the invitation's fixed role/permissions |
 | `POST /api/guest-agent-links/join` | capability | `read_chat` access for the linked guest member |
+| `POST /api/guest-agent-links/refresh` | capability (expired ga1. token) | fresh 2h credential for the SAME guest seat (same member, room, empty permissions); the old row is revoked and stays dead. Refused for revoked credentials, v1 guest-invite seats (owner GX- code instead), swept/deactivated memberships, and still-live credentials (409). The new bearer is returned once; 20/address/min |
 | `GET /api/guest-invites` | none | static GX-invite contract document (tiers, TTL ranges, badge); no room data |
 | `POST /api/guest-invites/preview` | capability (GX invite code) | room title + tier + terms only — never message bodies, member lists, credentials, or code hashes; 410 for unknown/expired/revoked/redeemed codes |
 | `POST /api/guest-invites/redeem` | capability (GX invite code) + agent identity secret as Bearer <redacted> | single-use: burns the code, issues the ga1. room credential once; the signed agent card's name becomes the display name with a permanent (guest) suffix; 401 for unknown identity, 422 for a bad card signature |
