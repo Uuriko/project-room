@@ -77,10 +77,12 @@ jobs:
   # first) so measured onboarding times are visible from the repo, not only
   # in the CI job summary. Separate job so the probe itself keeps read-only
   # permissions; this job alone can push the docs file.
+  # Runs only on main: a workflow_dispatch from any other ref must never
+  # push that ref's commits to main.
   publish:
     name: publish results to docs
     needs: probe
-    if: always()
+    if: always() && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -115,4 +117,10 @@ jobs:
           git commit -m "docs: publish onboarding probe results (run ${{ github.run_id }})"
           git fetch origin main:refs/remotes/origin/main
           git rebase origin/main
+          # Fail closed: the only change ever pushed to main is the results file.
+          if [ "$(git show --name-only --format= HEAD | tr '\n' ' ')" != "docs/onboarding-probe/results.md " ]; then
+            echo "refusing to push: publish commit touches unexpected files"
+            git show --name-only --format= HEAD
+            exit 1
+          fi
           git push origin HEAD:main
