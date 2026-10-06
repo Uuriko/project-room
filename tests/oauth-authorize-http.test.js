@@ -1,3 +1,4 @@
+// Real createRoomServer HTTP requests below own the native PKCE start/callback and authorization rejection boundary for server/routes/desktop-auth.mjs.
 // QA-Auth 2026-09-19: HTTP tests for POST /oauth/authorize.
 //
 // The consent POST must validate the authorization request (client_id +

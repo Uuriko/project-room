@@ -1,3 +1,4 @@
+// Real createRoomServer HTTP requests below own public assistant revision, membership, and host authority boundaries for server/routes/room-assistant.mjs.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
