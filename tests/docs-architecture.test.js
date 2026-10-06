@@ -15,7 +15,6 @@ import { EVENT_TYPES } from "../src/events.js";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (rel) => readFileSync(join(root, rel), "utf8");
-const httpSrc = read("server/http.mjs");
 
 const eventValues = new Set(Object.values(EVENT_TYPES));
 
