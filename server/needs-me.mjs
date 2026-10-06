@@ -17,7 +17,7 @@ import { ServiceError } from "./store.mjs";
 import { nextWorkStep } from "../src/workflow.js";
 import { retiredNeedsMeKeys } from "./updates.mjs";
 import { mayWriteWorkClaims } from "./work-claim-routes.mjs";
-import { claimUpdatedAt, isHardWork } from "./work-claims.mjs";
+import { claimUpdatedAt, isHardWork, namedReviewers, hasCurrentReview } from "./work-claims.mjs";
 
 const MAX_ROOMS = 40;
 const MAX_PER_KIND = 8;
@@ -322,6 +322,34 @@ export function openWorkOf(store, roomId, memberId, authority, nowMs = Date.now(
   };
 }
 
+// Review asks (hw-h2-needs-me-review-asks): open items that name this member
+// as reviewer (tag rev-<memberId>) and are ready to review (in_progress or a
+// linked PR). Standing state like openWork: it never moves the cursor, it
+// retires when the member records a review on the current basis, and it
+// returns when the head moves.
+export function reviewAsksOf(store, roomId, memberId) {
+  let list;
+  try { list = store.workClaims?.list(roomId) ?? []; } catch { return null; }
+  const asks = list.filter(item => item && item.state !== "done" && !item.supersededBy && item.owner && item.owner !== memberId
+      && namedReviewers(item).includes(memberId)
+      && (item.state === "in_progress" || item.pullRequest || (item.pullRequests ?? []).length)
+      && !hasCurrentReview(item, memberId))
+    .sort((a, b) => String(claimUpdatedAt(b) ?? "").localeCompare(String(claimUpdatedAt(a) ?? "")) || String(a.id).localeCompare(String(b.id)));
+  if (!asks.length) return null;
+  return {
+    roomId,
+    count: asks.length,
+    top: asks.slice(0, OPEN_WORK_SHOWN).map(item => ({
+      id: item.id,
+      title: String(item.title ?? "").slice(0, OPEN_WORK_TITLE),
+      owner: item.owner,
+      ...(item.pullRequest?.url ? { pullRequest: item.pullRequest.url } : {}),
+      ...((item.ci?.headSha ?? item.revision) ? { headSha: item.ci?.headSha ?? item.revision } : {})
+    })),
+    next: `POST /api/rooms/${encodeURIComponent(roomId)}/work-claims/{id}/review`
+  };
+}
+
 export function collectNeedsMe(store, secret, { since } = {}) {
   let identity = null;
   let allowedRooms = null;
@@ -350,6 +378,7 @@ export function collectNeedsMe(store, secret, { since } = {}) {
   const landIds = { ...parsed.landIds };
   const pendingBonds = store.bonds.pendingProposalsFor(identity.identityId);
   const openWork = [];
+  const reviewAsks = [];
   let roomAfter = parsed.roomAfter ?? "";
   let hasMore = links.length > MAX_ROOMS;
   for (const link of links.slice(0, MAX_ROOMS)) {
@@ -362,6 +391,8 @@ export function collectNeedsMe(store, secret, { since } = {}) {
     // One summary per room this page walks (at most MAX_ROOMS), none dropped.
     const open = openWorkOf(store, link.roomId, link.memberId, authority);
     if (open) openWork.push(open);
+    const asks = reviewAsksOf(store, link.roomId, link.memberId);
+    if (asks) reviewAsks.push(asks);
     const after = roomWatermark(parsed, link.roomId);
     const landAfter = landWatermark(parsed, link.roomId);
     let through = mentionHorizon(store, link.roomId, link.memberId, after, Math.max(after, authority.sequence));
@@ -408,5 +439,5 @@ export function collectNeedsMe(store, secret, { since } = {}) {
   // Retain the old rooms/land shape and extend it only for continuation/ties.
   const cursor = { rooms, land, landIds, ...(parsed.number !== null ? { floor: parsed.number } : {}), ...(hasMore ? { roomAfter } : {}) };
   items.sort((a, b) => a.roomId.localeCompare(b.roomId) || b.seq - a.seq);
-  return { identityId: identity.identityId, items, ...(openWork.length ? { openWork } : {}), cursor, hasMore, untrusted: true };
+  return { identityId: identity.identityId, items, ...(openWork.length ? { openWork } : {}), ...(reviewAsks.length ? { reviewAsks } : {}), cursor, hasMore, untrusted: true };
 }

@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { RoomStore } from '../server/store.mjs';
 import { AgentRooms } from '../server/agent-rooms.mjs';
 import { collectNeedsMe } from '../server/needs-me.mjs';
-import { createWork, claimWork } from '../server/work-claims.mjs';
+import { createWork, claimWork, updateWork, recordReview, recordCi } from '../server/work-claims.mjs';
 
 const WRITER = ['steer', 'accept_work', 'complete_work', 'verify'];
 
@@ -132,4 +132,30 @@ test('hard work (tag hard / hard-problem) ranks first and says how to close it',
   assert.equal(open.top[1].reviewPolicy, 'distinct_member');
   assert.equal(open.top[0].reviewPolicy, 'self_attested', 'a hard item that can close unreviewed says so');
   assert.equal(open.top[2].hard, undefined);
+});
+
+test('a named reviewer (tag rev-<memberId>) sees a review ask until reviewing the current head', t => {
+  const { store, ada, rex, owner, put } = setup(t);
+  const memberOf = identity => store.db.prepare('SELECT member_id AS m FROM identity_links WHERE identity_id=? AND room_id=?').get(identity.identityId, 'board').m;
+  const adaId = memberOf(ada), rexId = memberOf(rex), ownerId = memberOf(owner);
+  const now = Date.parse('2026-10-01T01:00:00Z');
+  const tags = ['hard', 'H2', `rev-${adaId}`];
+  put('waiting', 0, { tags });
+  store.workClaims.set('board', claimWork(put('claimed-only', 1, { tags }), ownerId, { now }));
+  let item = updateWork(claimWork(put('ready', 2, { tags }), ownerId, { now }), ownerId, { state: 'in_progress', now });
+  item = recordCi(item, { state: 'success', headSha: 'a'.repeat(40) }, now).item;
+  store.workClaims.set('board', item);
+  const page = collectNeedsMe(store, ada.secret, {});
+  assert.equal(page.reviewAsks?.length, 1);
+  assert.deepEqual(page.reviewAsks[0].top.map(row => row.id), ['ready'], 'unclaimed and not-yet-started items are not asks');
+  assert.equal(page.reviewAsks[0].top[0].headSha, 'a'.repeat(40));
+  assert.match(page.reviewAsks[0].next, /\/work-claims\/\{id\}\/review$/);
+  assert.equal(collectNeedsMe(store, rex.secret, {}).reviewAsks, undefined, 'only the named reviewer is asked');
+  assert.deepEqual(collectNeedsMe(store, ada.secret, { since: page.cursor }).cursor, page.cursor, 'review asks never move the cursor');
+  item = recordReview(item, adaId, { verdict: 'approve', summary: 'ok on head a', now });
+  store.workClaims.set('board', item);
+  assert.equal(collectNeedsMe(store, ada.secret, {}).reviewAsks, undefined, 'a review on the current head retires the ask');
+  item = recordCi(item, { state: 'success', headSha: 'b'.repeat(40) }, now).item;
+  store.workClaims.set('board', item);
+  assert.deepEqual(collectNeedsMe(store, ada.secret, {}).reviewAsks?.[0].top.map(row => row.headSha), ['b'.repeat(40)], 'a new head brings it back');
 });
