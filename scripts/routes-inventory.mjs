@@ -384,6 +384,7 @@ export function loadRouteSources(root) {
     nextActions: read("server/next-actions-routes.mjs"),
     workClaims: read("server/work-claim-routes.mjs"),
     feedback: read("server/feedback-routes.mjs"),
+    buyerOffer: read("server/buyer-offer-routes.mjs"),
     bounty: read("server/bounty-escrow-routes.mjs"),
     collab: read("server/inbox-collab-routes.mjs"),
     worker: read("cloudflare/room.mjs"),
@@ -399,7 +400,7 @@ export function extractLegacyRoutes(sources) {
   const { byVar } = matcherPaths(prepared);
   const bag = new Map();
   scanSource(prepared, bag, { names, matchers: byVar, bindings: indexRegexConsts(prepared) });
-  for (const file of [sources.plugin, sources.nextActions, sources.workClaims, sources.feedback, sources.bounty, sources.collab, sources.legal]) {
+  for (const file of [sources.plugin, sources.nextActions, sources.workClaims, sources.feedback, sources.buyerOffer, sources.bounty, sources.collab, sources.legal]) {
     const text = substitute(file, sources.constants);
     scanSource(text, bag, { names, matchers: byVar, bindings: indexRegexConsts(text) });
   }

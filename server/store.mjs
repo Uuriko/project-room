@@ -3,6 +3,9 @@ import { PublicWorkClaims, publicWorkClaimsSchema } from "./public-work-claims.m
 import { PublicWorkReviews, publicWorkReviewsSchema } from "./public-work-reviews.mjs";
 import { PublicWorkSuccessors, publicWorkSuccessorsSchema } from "./public-work-successors.mjs";
 import { ProjectOffers, projectOffersSchema } from "./project-offers.mjs";
+import { DemigodOffers, demigodOffersSchema } from "./demigod-offers.mjs";
+import { DemigodContracts, demigodContractsSchema } from "./demigod-contracts.mjs";
+import { BuyerSignoff, buyerSignoffSchema } from "./buyer-signoff.mjs";
 import { gmailSchema } from './gmail-mailbox.mjs';
 import { DatabaseSync } from "node:sqlite";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
@@ -1007,7 +1010,8 @@ function roomSchemaStamp() {
     humanPushSchema, quarantineThreadSplitSchema, slaBreachAlertSchema, inboxHandoffSchema,
     inboxHandoffRoomSchema, handoffEnvelopeSchema, agentPluginSchema, inboxCollabSchema,
     moderationSchema, accountTermsSchema, publicAbuseSchema, publicUnpublishSchema,
-    bountyEscrowSchema, projectOffersSchema, publicWorkClaimsSchema,
+    bountyEscrowSchema, projectOffersSchema, demigodOffersSchema, demigodContractsSchema,
+    buyerSignoffSchema, publicWorkClaimsSchema,
     publicWorkClaimFenceSchema, publicWorkReviewsSchema, publicWorkSuccessorsSchema,
     accessRequestSchema, membershipDelegationSchema, membershipDelegationJournalSchema,
     ownerDelegateSchema, agentRoomSchema, oauthPendingSchema, gmailSchema, requestRunSchema,
@@ -1183,6 +1187,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     this.landQueue = new LandQueue(this);
     this.membersDirectory = new MembersDirectory(this); // RC-2026-09-24-202: members directory + evidence-backed skill cards.
     this.projectOffers = new ProjectOffers(this);
+    this.demigodOffers = new DemigodOffers(this);
+    this.demigodContracts = new DemigodContracts(this);
+    this.buyerSignoff = new BuyerSignoff(this);
     this.publicWorkClaims = new PublicWorkClaims(this);
     this.publicWorkReviews = new PublicWorkReviews(this);
     this.publicWorkSuccessors = new PublicWorkSuccessors(this);
@@ -1590,6 +1597,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       convergeBountyDeployedSchema(this.db);
       this.db.exec(bountyEscrowSchema);
       this.db.exec(projectOffersSchema);
+      this.db.exec(demigodOffersSchema);
+      this.db.exec(demigodContractsSchema);
+      this.db.exec(buyerSignoffSchema);
       this.publicWorkClaims.verifySchema({ allowAbsent: true });
       verifyPublicWorkClaimFence(this.db, { allowAbsent: true });
       this.db.exec(publicWorkClaimsSchema);

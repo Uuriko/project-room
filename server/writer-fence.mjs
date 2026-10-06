@@ -33,6 +33,9 @@ export const unfencedAdditiveTables = Object.freeze([
   "public_work_reviews", "public_work_review_requests", // Private review projections/journals never alter existing claims, receipts or awards.
   "public_work_successors", "public_work_successor_requests", // Additive follow-up lineage and replay journal; older writers never mutate these tables.
   "project_offers", "project_offer_requests", // Owner-authored public terms, additive; older writers have no routes.
+  "demigod_offer_profiles", "demigod_offer_requests", // Demigod buyer-offer profiles anchored to project_offers; older writers have no routes.
+  "demigod_contracts", "demigod_contract_requests", // Record-only Demigod contracts; older writers have no routes.
+  "buyer_signoff_loops", "buyer_signoff_requests", // Buyer revision/sign-off loops; older writers have no routes.
   "request_runs", // Permanent host reservations; older writers have no execution route.
   "private_inbox_reads",
   "access_requests",

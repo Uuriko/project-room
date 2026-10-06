@@ -6192,6 +6192,567 @@ paths:
         '404': { description: feedback_not_found }
         '409': { description: invalid_transition }
         '422': { description: invalid_outcome }
+  /api/rooms/{roomId}/demigod-offers:
+    get:
+      summary: List Demigod buyer-offer profiles
+      description: |
+        Demigod buyer-offer profiles for the room: structured, presentable
+        deal documents anchored to project_offers offers, carrying trial
+        scope, pinned vetting rubric, price type, timeline, and revision
+        terms. RECORD-ONLY: every record carries recordOnly/paymentStatus
+        markers; no money moves. Any room member may read; API keys need
+        `rooms:read`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200':
+          description: Offer profiles
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  profiles: { type: array, items: { type: object } }
+                  nextCursor: { type: string, nullable: true }
+        '401': { description: unauthenticated }
+    post:
+      summary: Create a Demigod buyer-offer profile
+      description: |
+        Creates a draft offer profile anchored to an existing project_offers
+        offer (`offerRef`). The room owner authors the profile; the named
+        buyer accepts it. The vetting rubric is pinned at creation.
+        Idempotent on `requestId`. API keys need `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [requestId, profileId, offerRef, demigodReqId, buyerId, trialScope, vettingRubric, priceType, timeline, revisionTerms]
+              properties:
+                requestId: { type: string }
+                profileId: { type: string }
+                offerRef: { type: string, description: "Existing project_offers offer id in this room" }
+                demigodReqId: { type: string }
+                buyerId: { type: string }
+                trialScope:
+                  type: object
+                  required: [hours, deliverableShape]
+                  properties:
+                    hours: { type: string, description: "Positive integer string" }
+                    deliverableShape: { type: string }
+                vettingRubric:
+                  type: array
+                  items:
+                    type: object
+                    required: [criterionId, description, maxScore]
+                    properties:
+                      criterionId: { type: string }
+                      description: { type: string }
+                      maxScore: { type: string }
+                priceType: { type: string, enum: [fixed, hourly, trial_management_fee] }
+                priceMilli: { type: string, description: "Positive integer string; required unless trial_management_fee" }
+                timeline:
+                  type: object
+                  required: [estimateDays, deadline]
+                  properties:
+                    estimateDays: { type: string }
+                    deadline: { type: string, format: date-time }
+                revisionTerms:
+                  type: object
+                  required: [maxRounds, turnaroundDays]
+                  properties:
+                    maxRounds: { type: integer, minimum: 1, maximum: 10 }
+                    turnaroundDays: { type: string }
+                feePolicyRef: { type: string }
+      responses:
+        '201': { description: Draft offer profile }
+        '401': { description: unauthenticated }
+        '403': { description: owner_only | guest_scope_denied }
+        '409': { description: demigod_offer_exists | request_id_reused }
+        '422': { description: invalid_demigod_offer | demigod_offer_ref_missing }
+  /api/rooms/{roomId}/demigod-offers/{profileId}:
+    get:
+      summary: Read a Demigod buyer-offer profile
+      description: The full profile record, including the pinned rubric and record-only markers.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: profileId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: Offer profile }
+        '401': { description: unauthenticated }
+        '404': { description: demigod_offer_not_found }
+  /api/rooms/{roomId}/demigod-offers/{profileId}/document:
+    get:
+      summary: Buyer-presentable offer document
+      description: |
+        The deal rendered as Markdown in plain language: scope, rubric,
+        price, timeline, revision terms, and the honest record-only line.
+        This is what a buyer reads before accepting.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: profileId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Markdown offer document
+          content:
+            text/markdown:
+              schema: { type: string }
+        '401': { description: unauthenticated }
+        '404': { description: demigod_offer_not_found }
+  /api/rooms/{roomId}/demigod-offers/{profileId}/present:
+    post:
+      summary: Present an offer to the buyer
+      description: draft -> presented. Owner only. Requires `requestId` and the current `expectedRevision`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: profileId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [requestId, expectedRevision]
+              properties:
+                requestId: { type: string }
+                expectedRevision: { type: integer }
+      responses:
+        '200': { description: Presented offer profile }
+        '401': { description: unauthenticated }
+        '403': { description: owner_only }
+        '404': { description: demigod_offer_not_found }
+        '409': { description: stale_demigod_offer | invalid_demigod_offer_status | request_id_reused }
+  /api/rooms/{roomId}/demigod-offers/{profileId}/accept:
+    post:
+      summary: Buyer accepts the offer
+      description: presented -> accepted. Only the named buyer (or the room owner) may accept, and only the exact revision they read.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: profileId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [requestId, expectedRevision]
+              properties:
+                requestId: { type: string }
+                expectedRevision: { type: integer }
+      responses:
+        '200': { description: Accepted offer profile }
+        '401': { description: unauthenticated }
+        '403': { description: accept_not_buyer }
+        '404': { description: demigod_offer_not_found }
+        '409': { description: stale_demigod_offer | invalid_demigod_offer_status | request_id_reused }
+  /api/rooms/{roomId}/demigod-offers/{profileId}/decline:
+    post:
+      summary: Buyer declines the offer
+      description: presented -> declined. Buyer or owner. Requires `requestId` and `expectedRevision`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: profileId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [requestId, expectedRevision]
+              properties:
+                requestId: { type: string }
+                expectedRevision: { type: integer }
+      responses:
+        '200': { description: Declined offer profile }
+        '401': { description: unauthenticated }
+        '403': { description: accept_not_buyer }
+        '404': { description: demigod_offer_not_found }
+        '409': { description: stale_demigod_offer | invalid_demigod_offer_status | request_id_reused }
+  /api/rooms/{roomId}/demigod-offers/{profileId}/expire:
+    post:
+      summary: Expire a presented offer
+      description: presented -> expired. Owner only. Requires `requestId` and `expectedRevision`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: profileId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [requestId, expectedRevision]
+              properties:
+                requestId: { type: string }
+                expectedRevision: { type: integer }
+      responses:
+        '200': { description: Expired offer profile }
+        '401': { description: unauthenticated }
+        '403': { description: owner_only }
+        '404': { description: demigod_offer_not_found }
+        '409': { description: stale_demigod_offer | invalid_demigod_offer_status | request_id_reused }
+  /api/rooms/{roomId}/demigod-offers/{profileId}/withdraw:
+    post:
+      summary: Withdraw an offer
+      description: draft|presented -> withdrawn. Owner only. Requires `requestId` and `expectedRevision`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: profileId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [requestId, expectedRevision]
+              properties:
+                requestId: { type: string }
+                expectedRevision: { type: integer }
+      responses:
+        '200': { description: Withdrawn offer profile }
+        '401': { description: unauthenticated }
+        '403': { description: owner_only }
+        '404': { description: demigod_offer_not_found }
+        '409': { description: stale_demigod_offer | invalid_demigod_offer_status | request_id_reused }
+  /api/rooms/{roomId}/demigod-contracts:
+    get:
+      summary: List Demigod contracts
+      description: Record-only agreements minted from accepted offers. Any room member may read; API keys need `rooms:read`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200':
+          description: Contracts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  contracts: { type: array, items: { type: object } }
+                  nextCursor: { type: string, nullable: true }
+        '401': { description: unauthenticated }
+    post:
+      summary: Mint a contract from an accepted offer
+      description: |
+        Freezes the exact accepted terms as a byte-exact snapshot
+        (canonical JSON). The caller names the accepted `expectedRevision`;
+        a stale revision is 409. Buyer or owner. Idempotent on `requestId`.
+        API keys need `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [requestId, contractId, offerProfileId, expectedRevision]
+              properties:
+                requestId: { type: string }
+                contractId: { type: string }
+                offerProfileId: { type: string }
+                expectedRevision: { type: integer }
+                workerId: { type: string }
+      responses:
+        '201': { description: Pending contract }
+        '401': { description: unauthenticated }
+        '403': { description: contract_not_party | guest_scope_denied }
+        '404': { description: demigod_offer_not_found }
+        '409': { description: demigod_contract_exists | stale_demigod_offer | invalid_demigod_offer_status | request_id_reused }
+        '422': { description: invalid_demigod_contract }
+  /api/rooms/{roomId}/demigod-contracts/{contractId}:
+    get:
+      summary: Read a Demigod contract
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: contractId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: Contract with terms snapshot, acceptance, and record-only markers }
+        '401': { description: unauthenticated }
+        '404': { description: demigod_contract_not_found }
+  /api/rooms/{roomId}/demigod-contracts/{contractId}/acknowledge:
+    post:
+      summary: Worker acknowledges the contract
+      description: pending -> active. Only the named worker. Requires `requestId`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: contractId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [requestId]
+              properties:
+                requestId: { type: string }
+      responses:
+        '200': { description: Active contract }
+        '401': { description: unauthenticated }
+        '403': { description: guest_scope_denied }
+        '404': { description: demigod_contract_not_found }
+        '409': { description: invalid_demigod_contract_status | request_id_reused }
+        '422': { description: invalid_demigod_contract }
+  /api/rooms/{roomId}/demigod-contracts/{contractId}/complete:
+    post:
+      summary: Buyer completes the contract against a trial receipt
+      description: |
+        active -> completed. Only the buyer or owner, and only with a
+        `trialTaskId` and `receiptRef` — completion cites the vetting
+        receipt, it never self-asserts. The linkage is recorded; the
+        receipt itself is issued by the trial-task lane. Requires `requestId`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: contractId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [requestId, trialTaskId, receiptRef]
+              properties:
+                requestId: { type: string }
+                trialTaskId: { type: string }
+                receiptRef: { type: string }
+      responses:
+        '200': { description: Completed contract }
+        '401': { description: unauthenticated }
+        '403': { description: guest_scope_denied }
+        '404': { description: demigod_contract_not_found }
+        '409': { description: invalid_demigod_contract_status | request_id_reused }
+        '422': { description: invalid_demigod_contract }
+  /api/rooms/{roomId}/demigod-contracts/{contractId}/terminate:
+    post:
+      summary: Terminate a contract
+      description: pending|active -> terminated with a recorded reason. Buyer or owner. Requires `requestId` and `reason`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: contractId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [requestId, reason]
+              properties:
+                requestId: { type: string }
+                reason: { type: string }
+      responses:
+        '200': { description: Terminated contract }
+        '401': { description: unauthenticated }
+        '403': { description: guest_scope_denied }
+        '404': { description: demigod_contract_not_found }
+        '409': { description: invalid_demigod_contract_status | request_id_reused }
+        '422': { description: invalid_demigod_contract }
+  /api/rooms/{roomId}/signoff-loops:
+    get:
+      summary: List buyer sign-off loops
+      description: Revision/sign-off loops anchored to trial tasks. Any room member may read; API keys need `rooms:read`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200':
+          description: Sign-off loops
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  loops: { type: array, items: { type: object } }
+                  nextCursor: { type: string, nullable: true }
+        '401': { description: unauthenticated }
+    post:
+      summary: Open a buyer sign-off loop
+      description: |
+        Opens a revision loop anchored to a trial task id, naming the
+        buyer who will review. `maxRounds` defaults to the linked
+        contract's revision terms, else 3. Buyer or owner. Idempotent on
+        `requestId`. API keys need `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [requestId, loopId, trialTaskId, buyerId]
+              properties:
+                requestId: { type: string }
+                loopId: { type: string }
+                trialTaskId: { type: string }
+                buyerId: { type: string }
+                contractId: { type: string }
+                maxRounds: { type: integer, minimum: 1, maximum: 10 }
+      responses:
+        '201': { description: Open sign-off loop }
+        '401': { description: unauthenticated }
+        '403': { description: signoff_not_party | guest_scope_denied }
+        '404': { description: demigod_contract_not_found }
+        '409': { description: signoff_exists | request_id_reused }
+        '422': { description: invalid_signoff }
+  /api/rooms/{roomId}/signoff-loops/{loopId}:
+    get:
+      summary: Read a sign-off loop
+      description: The full loop record with every journaled round.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: loopId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: Sign-off loop }
+        '401': { description: unauthenticated }
+        '404': { description: signoff_not_found }
+  /api/rooms/{roomId}/signoff-loops/{loopId}/status:
+    get:
+      summary: Buyer-visible loop status
+      description: |
+        Where the job stands, without room internals: state, round,
+        maxRounds, the current deliverable summary, and the last review.
+        This is the status surface the fulfillment dry run found missing.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: loopId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: Buyer-visible status }
+        '401': { description: unauthenticated }
+        '404': { description: signoff_not_found }
+  /api/rooms/{roomId}/signoff-loops/{loopId}/submit:
+    post:
+      summary: Deliver a round
+      description: |
+        Records a delivery round (deliverable ref + sha256 + summary).
+        Round N+1 requires the previous round to be changes_requested;
+        resubmitting past maxRounds is 422 revision_rounds_exhausted.
+        Requires `requestId`. API keys need `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: loopId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [requestId, deliverableRef, sha256, summary, candidateId]
+              properties:
+                requestId: { type: string }
+                deliverableRef: { type: string }
+                sha256: { type: string, description: "64 lowercase hex" }
+                summary: { type: string }
+                candidateId: { type: string }
+      responses:
+        '200': { description: Loop in submitted state }
+        '401': { description: unauthenticated }
+        '403': { description: guest_scope_denied }
+        '404': { description: signoff_not_found }
+        '409': { description: invalid_signoff_status | request_id_reused }
+        '422': { description: invalid_signoff | revision_rounds_exhausted }
+  /api/rooms/{roomId}/signoff-loops/{loopId}/review:
+    post:
+      summary: Buyer reviews the delivery
+      description: |
+        decision is begin (marks under_review), accept (loop accepted —
+        the sign-off the trial verdict waits on), or request_changes
+        (with a note; the worker re-delivers). Only the recorded buyer
+        may review — the worker cannot self-accept. Requires `requestId`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: loopId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [requestId, decision]
+              properties:
+                requestId: { type: string }
+                decision: { type: string, enum: [begin, accept, request_changes] }
+                note: { type: string }
+      responses:
+        '200': { description: Reviewed loop }
+        '401': { description: unauthenticated }
+        '403': { description: signoff_not_buyer | guest_scope_denied }
+        '404': { description: signoff_not_found }
+        '409': { description: invalid_signoff_status | request_id_reused }
+        '422': { description: invalid_signoff }
+  /api/rooms/{roomId}/signoff-loops/{loopId}/cancel:
+    post:
+      summary: Cancel a sign-off loop
+      description: Buyer or owner. Requires `requestId` and `reason`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: loopId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [requestId, reason]
+              properties:
+                requestId: { type: string }
+                reason: { type: string }
+      responses:
+        '200': { description: Cancelled loop }
+        '401': { description: unauthenticated }
+        '403': { description: signoff_not_party | guest_scope_denied }
+        '404': { description: signoff_not_found }
+        '409': { description: invalid_signoff_status | request_id_reused }
+        '422': { description: invalid_signoff }
   /api/rooms/{roomId}/bounties:
     get:
       summary: List bounties by semantic group

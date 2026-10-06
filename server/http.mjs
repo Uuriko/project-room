@@ -27,6 +27,7 @@ import { handleAgentConnect } from "./routes/agent-connect.mjs";
 import { listMentionReceipts } from "./mention-receipts.mjs";
 import { handleMatchmaking } from "./matchmaking-routes.mjs"; // Arrival surface: declare, offer, match, and human decisions as work.
 import { handleFeedback } from "./feedback-routes.mjs"; // Agent /feedback endpoint (structured bug/feature reports).
+import { handleBuyerOffers } from "./buyer-offer-routes.mjs"; // Demigod buyer-offer layer: offer profiles, contracts, sign-off loops (record-only).
 import { handleBountyEscrow } from "./bounty-escrow-routes.mjs"; // Escrowed bounties + credit ledger (agent work exchange, slice 1).
 import { buildOpportunitiesFeed } from "./opportunities.mjs"; // Public opportunity feed v2: read-only open-work discovery, decoupled from admission.
 import { telegramConfig, TelegramLiveStatus } from "./channel-adapters/telegram-config.mjs";
@@ -3403,6 +3404,35 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const feedbackMatch = feedbackBaseMatch ?? feedbackQueueMatch ?? feedbackNotificationsMatch
         ?? feedbackAppealDecisionMatch ?? feedbackTriageMatch ?? feedbackAppealMatch
         ?? feedbackOutcomeMatch ?? feedbackItemMatch;
+      // Demigod buyer-offer layer (record-only): one anchored literal per
+      // route template, like the /feedback matchers above — the route-docs
+      // gate extracts these literals, so no alternation groups are used.
+      const demigodOffersMatch = /^\/api\/rooms\/([^/]{1,384})\/demigod-offers$/.exec(url.pathname);
+      const demigodOfferMatch = /^\/api\/rooms\/([^/]{1,384})\/demigod-offers\/([^/]{1,128})$/.exec(url.pathname);
+      const demigodOfferDocumentMatch = /^\/api\/rooms\/([^/]{1,384})\/demigod-offers\/([^/]{1,128})\/document$/.exec(url.pathname);
+      const demigodOfferPresentMatch = /^\/api\/rooms\/([^/]{1,384})\/demigod-offers\/([^/]{1,128})\/present$/.exec(url.pathname);
+      const demigodOfferAcceptMatch = /^\/api\/rooms\/([^/]{1,384})\/demigod-offers\/([^/]{1,128})\/accept$/.exec(url.pathname);
+      const demigodOfferDeclineMatch = /^\/api\/rooms\/([^/]{1,384})\/demigod-offers\/([^/]{1,128})\/decline$/.exec(url.pathname);
+      const demigodOfferExpireMatch = /^\/api\/rooms\/([^/]{1,384})\/demigod-offers\/([^/]{1,128})\/expire$/.exec(url.pathname);
+      const demigodOfferWithdrawMatch = /^\/api\/rooms\/([^/]{1,384})\/demigod-offers\/([^/]{1,128})\/withdraw$/.exec(url.pathname);
+      const demigodContractsMatch = /^\/api\/rooms\/([^/]{1,384})\/demigod-contracts$/.exec(url.pathname);
+      const demigodContractMatch = /^\/api\/rooms\/([^/]{1,384})\/demigod-contracts\/([^/]{1,128})$/.exec(url.pathname);
+      const demigodContractAcknowledgeMatch = /^\/api\/rooms\/([^/]{1,384})\/demigod-contracts\/([^/]{1,128})\/acknowledge$/.exec(url.pathname);
+      const demigodContractCompleteMatch = /^\/api\/rooms\/([^/]{1,384})\/demigod-contracts\/([^/]{1,128})\/complete$/.exec(url.pathname);
+      const demigodContractTerminateMatch = /^\/api\/rooms\/([^/]{1,384})\/demigod-contracts\/([^/]{1,128})\/terminate$/.exec(url.pathname);
+      const signoffLoopsMatch = /^\/api\/rooms\/([^/]{1,384})\/signoff-loops$/.exec(url.pathname);
+      const signoffLoopMatch = /^\/api\/rooms\/([^/]{1,384})\/signoff-loops\/([^/]{1,128})$/.exec(url.pathname);
+      const signoffLoopStatusMatch = /^\/api\/rooms\/([^/]{1,384})\/signoff-loops\/([^/]{1,128})\/status$/.exec(url.pathname);
+      const signoffLoopSubmitMatch = /^\/api\/rooms\/([^/]{1,384})\/signoff-loops\/([^/]{1,128})\/submit$/.exec(url.pathname);
+      const signoffLoopReviewMatch = /^\/api\/rooms\/([^/]{1,384})\/signoff-loops\/([^/]{1,128})\/review$/.exec(url.pathname);
+      const signoffLoopCancelMatch = /^\/api\/rooms\/([^/]{1,384})\/signoff-loops\/([^/]{1,128})\/cancel$/.exec(url.pathname);
+      const buyerOfferMatch = demigodOffersMatch ?? demigodOfferMatch ?? demigodOfferDocumentMatch
+        ?? demigodOfferPresentMatch ?? demigodOfferAcceptMatch ?? demigodOfferDeclineMatch
+        ?? demigodOfferExpireMatch ?? demigodOfferWithdrawMatch
+        ?? demigodContractsMatch ?? demigodContractMatch ?? demigodContractAcknowledgeMatch
+        ?? demigodContractCompleteMatch ?? demigodContractTerminateMatch
+        ?? signoffLoopsMatch ?? signoffLoopMatch ?? signoffLoopStatusMatch
+        ?? signoffLoopSubmitMatch ?? signoffLoopReviewMatch ?? signoffLoopCancelMatch;
       // Escrowed bounties + credit ledger (agent work exchange, slice 1):
       // every route template below is documented in docs/openapi.yaml — the
       // route-docs gate extracts these literals from this file. The
@@ -3470,14 +3500,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // Consent-bound DMs (decide/revoke/unblock) and public-face rotate ride
       // the same funnel: their literal segments must never be mistaken for ids.
       if (!publicWorkRoomReviewMatch && !projectOfferActionMatch && !match && !revokeMatch && !threadMatch && !accessDecideMatch && !delegationGrantMatch && !delegationRevokeMatch && !delegationListMatch && !ownerDelegateGrantMatch && !ownerDelegateRevokeMatch && !ownerDelegateListMatch && !ownershipTransferMatch && !collabMatch && !workClaimMatch
-        && !feedbackMatch && !bountyMatch && !creditsMatch && !boardV2Match
+        && !feedbackMatch && !buyerOfferMatch && !bountyMatch && !creditsMatch && !boardV2Match
         && !dmConsentDecideMatch && !dmConsentBlockMatch && !dmConsentRevokeMatch && !dmConsentUnblockMatch && !publicFaceRotateMatch
         && !peerDmThreadMatch && !operatorAgentMatch
         && !mentionAckMatch && !mentionSettingsMatch && !savedDeleteMatch && !memberDeactivateMatch
         && !agentGrantsMatch && !agentGrantDeleteMatch && !agentCapabilitiesMatch
         && !matchmakingMatch) reject(404, "not_found", "Not found");
       const roomId = pathId((publicWorkRoomReviewMatch ?? projectOfferActionMatch ?? match ?? revokeMatch ?? threadMatch ?? accessDecideMatch ?? delegationGrantMatch ?? delegationRevokeMatch ?? delegationListMatch ?? ownerDelegateGrantMatch ?? ownerDelegateRevokeMatch ?? ownerDelegateListMatch ?? ownershipTransferMatch ?? collabMatch ?? workClaimMatch
-        ?? feedbackMatch ?? bountyMatch ?? creditsMatch ?? boardV2Match
+        ?? feedbackMatch ?? buyerOfferMatch ?? bountyMatch ?? creditsMatch ?? boardV2Match
         ?? dmConsentDecideMatch ?? dmConsentBlockMatch ?? dmConsentRevokeMatch ?? dmConsentUnblockMatch ?? publicFaceRotateMatch
         ?? peerDmThreadMatch ?? operatorAgentMatch
         ?? mentionAckMatch ?? mentionSettingsMatch ?? savedDeleteMatch ?? memberDeactivateMatch
@@ -3737,6 +3767,45 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const feedbackIdMatch = feedbackTriageMatch ?? feedbackAppealMatch ?? feedbackOutcomeMatch ?? feedbackItemMatch;
         return await handleFeedback({ req, res, url, store, roomId, auth, feedbackRoute,
           feedbackId: feedbackIdMatch ? pathId(feedbackIdMatch[2]) : null,
+          reauthorize: () => {
+            const current = selected.mode === "account" ? store.authenticateAccountSession(selected.token, roomId, fence)
+              : store.authenticate(selected.token, roomId, fence, { allowAccountSession: false });
+            if (current.kind === "api-key") {
+              const required = ["GET", "HEAD"].includes(req.method) ? "rooms:read" : "rooms:write";
+              if (!(current.apiKeyScopes ?? []).some(scope => scope === required || (scope.endsWith(":*") && required.startsWith(scope.slice(0, -1))))) reject(403, "insufficient_scope", `API key lacks the ${required} scope`);
+            }
+            if (isGuestAgentMemberId(current.member.id) && !["GET", "HEAD"].includes(req.method)) reject(403, "guest_scope_denied", "Guest members cannot perform this action");
+            return current;
+          }, helpers: { json, reject, body } });
+      }
+      // Demigod buyer-offer layer (record-only): offer profiles anchored to
+      // project_offers, contracts minted from accepted offers, and the
+      // buyer-visible revision/sign-off loop. Same mounting pattern as
+      // /feedback above; the handler maps domain errors to stable codes.
+      // buyerOfferMatch is defined with the other route matchers above so
+      // the 404 gate and roomId extraction know these routes.
+      if (buyerOfferMatch) {
+        const buyerOfferRoute = demigodOffersMatch ? (["GET", "HEAD"].includes(req.method) ? "offers-list" : "offers-create")
+          : demigodOfferMatch ? "offer-read"
+          : demigodOfferDocumentMatch ? "offer-document"
+          : demigodOfferPresentMatch ? "offer-present"
+          : demigodOfferAcceptMatch ? "offer-accept"
+          : demigodOfferDeclineMatch ? "offer-decline"
+          : demigodOfferExpireMatch ? "offer-expire"
+          : demigodOfferWithdrawMatch ? "offer-withdraw"
+          : demigodContractsMatch ? (["GET", "HEAD"].includes(req.method) ? "contracts-list" : "contracts-create")
+          : demigodContractMatch ? "contract-read"
+          : demigodContractAcknowledgeMatch ? "contract-acknowledge"
+          : demigodContractCompleteMatch ? "contract-complete"
+          : demigodContractTerminateMatch ? "contract-terminate"
+          : signoffLoopsMatch ? (["GET", "HEAD"].includes(req.method) ? "loops-list" : "loops-create")
+          : signoffLoopMatch ? "loop-read"
+          : signoffLoopStatusMatch ? "loop-status"
+          : signoffLoopSubmitMatch ? "loop-submit"
+          : signoffLoopReviewMatch ? "loop-review"
+          : "loop-cancel";
+        return await handleBuyerOffers({ req, res, url, store, roomId, auth, buyerOfferRoute,
+          buyerOfferId: buyerOfferMatch[2] ? pathId(buyerOfferMatch[2]) : null,
           reauthorize: () => {
             const current = selected.mode === "account" ? store.authenticateAccountSession(selected.token, roomId, fence)
               : store.authenticate(selected.token, roomId, fence, { allowAccountSession: false });
