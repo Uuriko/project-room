@@ -297,12 +297,15 @@ test("GET /api/wiki/nope: unknown subpath is a 404 envelope", { timeout: 30000 }
 });
 
 test("unreadable wiki files fail closed with 503 (never a dropped connection)", () => {
-  const api = createWikiReadApi({ root: join(tmpdir(), "wiki-read-api-missing-root") });
   const params = new URLSearchParams();
-  assert.throws(() => api.handle("/api/wiki/procedures", "GET", params), error => {
-    assert.equal(error.status, 503);
-    assert.equal(error.code, "wiki_unavailable");
-    return true;
-  });
+  for (const root of [join(tmpdir(), "wiki-read-api-missing-root"), ""]) {
+    const api = createWikiReadApi({ root });
+    assert.throws(() => api.handle("/api/wiki/procedures", "GET", params), error => {
+      assert.equal(error.status, 503);
+      assert.equal(error.code, "wiki_unavailable");
+      return true;
+    });
+  }
+  const api = createWikiReadApi({ root: join(tmpdir(), "wiki-read-api-missing-root") });
   assert.equal(api.handle("/api/other", "GET", params), null, "non-wiki paths fall through");
 });

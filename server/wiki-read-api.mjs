@@ -191,8 +191,21 @@ function clampInt(raw, fallback, min, max) {
 }
 
 export function createWikiReadApi({ root } = {}) {
-  const repoRoot = root ?? join(dirname(fileURLToPath(import.meta.url)), "..");
+  // The default root resolves lazily (not at import time): in the bundled
+  // Cloudflare worker import.meta.url is undefined, and an eager
+  // fileURLToPath would throw during module evaluation and take the whole
+  // worker down. A null root fails closed to 503 wiki_unavailable.
+  const defaultRoot = () => {
+    try {
+      if (!import.meta.url) return null;
+      return join(dirname(fileURLToPath(import.meta.url)), "..");
+    } catch {
+      return null;
+    }
+  };
   const load = () => {
+    const repoRoot = root ?? defaultRoot();
+    if (!repoRoot) throw new ServiceError(503, "wiki_unavailable", "Wiki planes unreadable in this runtime", null);
     try {
       return loadWikiIndex(repoRoot);
     } catch (error) {
