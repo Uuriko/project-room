@@ -33,7 +33,8 @@
     "qa3:content-trust": "node scripts/qa3/content-trust.mjs",
     "qa3:public-scan-budget": "node scripts/qa3/public-scan-budget.mjs",
     "qa3:sse-contract": "node scripts/qa3/sse-contract.mjs",
-    "qa3:board-growth": "node scripts/qa3/board-growth.mjs"
+    "qa3:board-growth": "node scripts/qa3/board-growth.mjs",
+    "detect-flaky": "node scripts/flaky-detect.mjs"
   },
   "engines": {
     "node": ">=24.19.0"
