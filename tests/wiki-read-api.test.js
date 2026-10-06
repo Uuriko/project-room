@@ -298,6 +298,20 @@ test("wiki API is read-only: writes are 405", { timeout: 30000 }, async t => {
   }
 });
 
+test("wiki 405 names every served method in Allow (HEAD is served)", { timeout: 30000 }, async t => {
+  // RFC 9110 15.5.6: a 405 MUST carry an Allow header listing the target
+  // resource's currently supported methods. The wiki handler serves HEAD
+  // alongside GET, so an Allow that names only GET misleads clients.
+  const origin = await serve(t);
+  const head = await get(origin, "/api/wiki/procedures", "HEAD");
+  assert.equal(head.status, 200, "HEAD /api/wiki/procedures is served");
+  const res = await get(origin, "/api/wiki/procedures", "POST");
+  assert.equal(res.status, 405, "POST /api/wiki/procedures is refused");
+  const allowed = (res.headers.get("allow") ?? "").split(",").map(s => s.trim());
+  assert.ok(allowed.includes("GET"), `Allow names GET (got "${res.headers.get("allow")}")`);
+  assert.ok(allowed.includes("HEAD"), `Allow names HEAD (got "${res.headers.get("allow")}")`);
+});
+
 test("GET /api/wiki/nope: unknown subpath is a 404 envelope", { timeout: 30000 }, async t => {
   const origin = await serve(t);
   const res = await get(origin, "/api/wiki/nope");
