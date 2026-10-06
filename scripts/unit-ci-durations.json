@@ -894,7 +894,25 @@
   "tests/human-push-preferences.test.js": 529.707,
   "tests/read-cursor-unify.test.js": 65.47,
   "tests/squads-ui.test.js": 68.693,
-  "tests/squads.test.js": 602.751
+  "tests/squads.test.js": 602.751,
+  "tests/account-setup-ui.test.js": 78,
+  "tests/agent-first-run-fallback.test.js": 82,
+  "tests/agent-signin-ui.test.js": 94,
+  "tests/composer-file-chip.test.js": 83,
+  "tests/contribution-public.test.js": 103,
+  "tests/cursor-guards.test.js": 96,
+  "tests/emoji-catalog.test.js": 94,
+  "tests/gmail-ui.test.js": 84,
+  "tests/land-card-model.test.js": 82,
+  "tests/operator-ui.test.js": 79,
+  "tests/owner-project-offers-ui.test.js": 100,
+  "tests/recovery-retired-tables.test.js": 255,
+  "tests/result-evidence.test.js": 107,
+  "tests/room-instructions.test.js": 107,
+  "tests/seed-integrity.test.js": 97,
+  "tests/share-links-email-gate.test.js": 434,
+  "tests/sidebar-section-sync.test.js": 87,
+  "tests/updates-ui.test.js": 80
  },
  "_note": "Per-file wall-clock ms of `node --test <file>` measured 2026-10-06 on a 2-CPU host with 16-way parallelism (values are contention-inflated; used only as relative weights for shard balancing, never for membership). Files hitting the 300s measurement timeout are capped at 300000."
 }
