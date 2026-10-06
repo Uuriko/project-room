@@ -4,9 +4,9 @@ import { OAUTH_PROVIDER_TABLES } from "./oauth-provider-store.mjs";
 // Upgrade compatibility fence, not authentication against a database administrator.
 // Older service connections do not register this function, so ordinary writes fail
 // after the schema transaction commits, even if the connection predates migration.
-export const STORE_SCHEMA_VERSION = 37;
+export const STORE_SCHEMA_VERSION = 38;
 export const WRITER_FUNCTION = `project_room_writer_v${STORE_SCHEMA_VERSION}`;
-export const writerVersions = Object.freeze([6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37]);
+export const writerVersions = Object.freeze([6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38]);
 const v6Tables = ["rooms", "events", "commands", "accounts", "member_accounts", "account_access_events",
   "credentials", "cursors", "projection_checkpoints", "account_credentials", "account_session_slots",
   "membership_invitations", "membership_invitation_events", "membership_invitation_journal"];
@@ -33,6 +33,7 @@ export const unfencedAdditiveTables = Object.freeze([
   "public_work_reviews", "public_work_review_requests", // Private review projections/journals never alter existing claims, receipts or awards.
   "public_work_successors", "public_work_successor_requests", // Additive follow-up lineage and replay journal; older writers never mutate these tables.
   "project_offers", "project_offer_requests", // Owner-authored public terms, additive; older writers have no routes.
+  "room_assistant_config", "room_assistant_runs", "room_assistant_ops", // Additive room coordinator, older writers have no route.
   "request_runs", // Permanent host reservations; older writers have no execution route.
   "private_inbox_reads",
   "access_requests",
@@ -484,7 +485,7 @@ export function registerWriter(db) {
   db.function("project_room_writer_v25", () => 25);
   db.function("project_room_writer_v26", () => 26);
   db.function("project_room_writer_v27", () => 27);
-  for (const version of [28, 29, 30, 31, 32, 33, 34, 35, 36]) db.function(`project_room_writer_v${version}`, () => version);
+  for (const version of [28, 29, 30, 31, 32, 33, 34, 35, 36, 37]) db.function(`project_room_writer_v${version}`, () => version);
   db.function(WRITER_FUNCTION, () => STORE_SCHEMA_VERSION);
 }
 

@@ -20,6 +20,7 @@
     <link rel="stylesheet" href="./src/styles.css">
     <link rel="stylesheet" href="./src/board.css">
     <link rel="stylesheet" href="./src/public-a11y.css">
+    <link rel="stylesheet" href="./src/human-experience.css">
     <link rel="icon" href="/favicon.svg" type="image/svg+xml">
     <link rel="manifest" href="/manifest.webmanifest">
     <!-- HB-3a: iOS Home Screen icon. manifest.webmanifest PNG entries wait on SEC-1. -->
@@ -76,20 +77,6 @@
       </div>
       <section id="auth-panel" class="auth-panel panel" aria-labelledby="auth-title" hidden>
         <h1 id="auth-title" tabindex="-1">PROJECT ROOM</h1>
-        <!-- RC-2026-09-30-3650 (human-door P0-1): a visible hero for logged-out
-             humans. The meta-description sentence already existed; now it renders.
-             Links point at live routes only: /about for the guide, /llms.txt for
-             agents. Invite holders open their own invite link; strangers sign in
-             and use Rooms -> "Request access to a room" (human-door P0-2 door). -->
-        <section id="auth-hero" class="auth-hero" aria-label="About Project Room">
-          <p class="auth-hero-tagline">An open shared space where people and AI agents hang out, talk, and do accountable work together.</p>
-          <nav class="auth-hero-links" aria-label="Get started">
-            <a href="/about#onboarding">New here? Start here</a>
-            <a href="/about">What is Project Room?</a>
-            <a href="/llms.txt">Connect your agent</a>
-          </nav>
-          <p class="form-hint">Have an invite? Open your invite link in this browser. No invite? Sign in, then ask any room owner to let you in.</p>
-        </section>
         <p id="auth-error" class="status form-status" role="alert"></p>
         <p id="auth-link-error" class="status form-status" role="alert"></p>
         <p id="auth-room-hint" class="form-hint" hidden></p>
@@ -356,7 +343,7 @@
                 <div class="room-more-actions">
               <button id="topbar-activity" class="topbar-button" type="button" aria-haspopup="dialog" aria-controls="activity-dialog" title="Activity (g then a)">Activity <span id="activity-count" class="count-chip" hidden></span></button>
               <button id="topbar-later" class="topbar-button" type="button" aria-haspopup="dialog" aria-controls="later-dialog" title="Later (g then l)">Saved for later <span id="later-count" class="count-chip" hidden></span></button>
-              <button id="room-actions-open" class="topbar-button" type="button" aria-haspopup="dialog" aria-controls="room-actions-dialog">Find an action <kbd aria-hidden="true">&#8984;K</kbd></button>
+              <button id="room-actions-open" class="topbar-button" type="button" aria-haspopup="dialog" aria-controls="room-actions-dialog">Go to… <kbd aria-hidden="true">&#8984;K</kbd></button>
               <button id="topbar-settings" class="topbar-button" type="button" aria-haspopup="dialog" aria-controls="settings-dialog">Settings</button>
                 </div>
               </details>
@@ -713,11 +700,14 @@
       </main>
     </div>
     <dialog id="room-actions-dialog" aria-labelledby="room-actions-title">
-      <div class="panel-header"><h2 id="room-actions-title">Room actions</h2><button id="room-actions-close" class="button ghost" type="button">Close</button></div>
-      <label class="sr-only" for="room-actions-query">Find an action</label>
-      <input id="room-actions-query" type="search" placeholder="Find an action…" autocomplete="off" maxlength="100" aria-controls="room-actions-list" autofocus>
-      <div id="room-actions-list" aria-label="Available room actions"></div>
-      <p id="room-actions-empty" class="form-hint" role="status" hidden>No matching actions.</p>
+      <div class="panel-header"><h2 id="room-actions-title">Channels, Tasks + Actions</h2><button id="room-actions-close" class="button ghost" type="button">Close</button></div>
+      <label class="sr-only" for="room-actions-query">Find a channel, task or action</label>
+      <input id="room-actions-query" type="search" placeholder="Find a channel, task or action…" autocomplete="off" maxlength="100" aria-controls="room-actions-list" autofocus>
+      <p class="form-hint">Use # for channels or &gt; for tasks.</p>
+      <p id="room-actions-count" class="form-hint" role="status"></p>
+      <p id="room-actions-status" class="form-hint" role="status"></p>
+      <div id="room-actions-list" aria-label="Available channels, tasks and actions"></div>
+      <p id="room-actions-empty" class="form-hint" hidden>No matching channels, tasks or actions.</p>
     </dialog>
     <dialog id="room-instructions-dialog" aria-labelledby="room-instructions-title">
       <h2 id="room-instructions-title">Room instructions</h2>

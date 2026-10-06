@@ -20,9 +20,9 @@ test("visible entry choices open focused flows without hiding pending agent sign
     page.setDefaultTimeout(10000);
     await page.goto(`http://127.0.0.1:${server.address().port}/`);
     await page.locator("#auth-panel").waitFor({ state: "visible" });
-    for (const selector of ["#google-signin", "#auth-signin-ui [data-signin-form]", "#agent-signin-button"]) {
-      assert.equal(await page.locator(selector).isVisible(), true, `${selector} is immediately discoverable at ${width}px`);
-    }
+    assert.equal(await page.locator('[data-password-mode="signup"]').isVisible(), true);
+    assert.equal(await page.locator('[data-password-mode="login"]').isVisible(), true);
+    assert.equal(await page.locator("#google-signin").isVisible(), false);
     await page.locator("#agent-signin-button").click();
     assert.equal(await page.locator("#join-agent-prompt").isVisible(), false);
     assert.equal(await page.locator("#signin-extra").isVisible(), false);
@@ -39,7 +39,7 @@ test("visible entry choices open focused flows without hiding pending agent sign
     await route.fulfill({ status: 401, contentType: "application/json", body: JSON.stringify({ message: "Test identity could not be verified." }) });
     await page.locator('[data-agent-status]').filter({ hasText: "Test identity could not be verified." }).waitFor();
     await page.locator("#agent-auth-back").click();
-    assert.equal(await page.locator("#google-signin").isVisible(), true);
+    assert.equal(await page.locator("#google-signin").isVisible(), false);
     assert.equal(await page.evaluate(() => document.activeElement.id), "agent-signin-button");
     await page.locator("#agent-signin-button").click();
     await page.locator("[data-agent-new]").click();
@@ -63,7 +63,7 @@ test("visible entry choices open focused flows without hiding pending agent sign
     assert.equal(await page.locator("[data-agent-create-room]").isVisible(), true);
 
     await page.locator("#agent-auth-back").click();
-    assert.equal(await page.locator('#auth-signin-ui [data-signin-form]').isVisible(), true);
+    assert.equal(await page.locator('#auth-signin-ui [data-password-mode=signup]').isVisible(), true);
     assert.equal(await page.locator("#agent-auth-step").isVisible(), false);
     assert.equal(await page.locator("#access-key, #signin-support-root, #signin-more, #signin-extra").count(), 0);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
@@ -89,7 +89,7 @@ test("agent browser sign-in opens a linked room and survives reload without the 
   const errors = [];
   page.on("pageerror", error => errors.push(error.message));
   await page.goto(`http://127.0.0.1:${server.address().port}/`);
-  await page.locator("#agent-signin-button").click();
+    await page.locator("#agent-signin-button").click();
   await page.locator('[name="identityId"]').fill(identity.identityId);
   await page.locator('[name="secret"]').fill(identity.secret);
   await page.locator('[data-agent-form="credentials"] button[type="submit"]').click();
@@ -202,7 +202,7 @@ test("leaving an unsaved new agent identity requires confirmation and clears it 
   t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
   const page = await browser.newPage();
   await page.goto(`http://127.0.0.1:${server.address().port}/`);
-  await page.locator("#agent-signin-button").click(); await page.locator('[data-agent-new]').click();
+    await page.locator("#agent-signin-button").click(); await page.locator('[data-agent-new]').click();
   await page.locator('[name="createName"]').fill("Unsaved fixture agent");
   await page.locator('[data-agent-form="create"] button[type="submit"]').click();
   await page.locator('[data-agent-created]').waitFor();
@@ -212,7 +212,7 @@ test("leaving an unsaved new agent identity requires confirmation and clears it 
   assert.equal(await page.locator('[data-agent-secret][type="password"]').count(), 2);
   page.once("dialog", dialog => dialog.accept());
   await page.locator("#agent-auth-back").click();
-  await page.locator("#agent-signin-button").click();
+    await page.locator("#agent-signin-button").click();
   assert.equal(await page.locator('[name="identityId"]').inputValue(), "");
   assert.equal(await page.locator('[name="secret"]').inputValue(), "");
   assert.equal(await page.locator('[data-agent-secret]').count(), 0);

@@ -73,6 +73,9 @@ function assertRowsMatchProjection(store, createdAt) {
     const reactions = message.reactions && Object.keys(message.reactions).length ? JSON.stringify(message.reactions) : null;
     assert.equal(row.reactions_json, reactions);
     assert.equal(row.seq, createdAt.get(message.id));
+    const { editHistory: _history, ...currentRecord } = message;
+    assert.deepEqual(JSON.parse(row.record_json), currentRecord,
+      'indexed storage preserves the complete current conversation record without prior edits');
   }
 }
 

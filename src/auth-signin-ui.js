@@ -15,7 +15,7 @@ export function classifyAuthLink(params) {
 }
 
 export function createAuthSigninUI({ accountClient, ensureAccountSession, onSignedIn, onMagicLinkFailure, onBusyChange, beforeSignIn, onSignInUncertain, onMagicLinkRequest, onAccountSwitch, onPasswordResetComplete, onViewChange, onBack }) {
-  let container = null;
+  let container = null, welcome = false;
   let emailMethod = "password", passwordMode = "login", passwordEmail = "";
   let magicPhase = "request", magicEmail = "", busy = false;
   let resetPhase = "request", resetEmail = "", resetCode = "";
@@ -58,6 +58,7 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
   });
   function currentView() {
     if (pendingTerms) return "terms";
+    if (welcome) return "welcome";
     if (pendingLink) return "account-switch";
     if (emailMethod === "forgot") return "forgot";
     if (emailMethod === "reset") return `reset-${resetPhase}`;
@@ -65,16 +66,18 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
   }
   function showView(view) {
     if (busy || pendingTerms) return false;
-    const valid = ["password-login", "password-signup", "forgot", "reset-request", "reset-sent", "reset-form", "magic-request", "magic-sent", "account-switch"];
+    const valid = ["welcome", "password-login", "password-signup", "forgot", "reset-request", "reset-sent", "reset-form", "magic-request", "magic-sent", "account-switch"];
     if (!valid.includes(view)) return false;
     if (view === "account-switch") { if (!pendingLink) return false; }
     else {
       pendingLink = null;
-      if (view.startsWith("password-")) { emailMethod = "password"; passwordMode = view.slice(9); }
+      if (view === "welcome") { emailMethod = "password"; passwordMode = "login"; }
+      else if (view.startsWith("password-")) { emailMethod = "password"; passwordMode = view.slice(9); }
       else if (view.startsWith("reset-")) { emailMethod = "reset"; resetPhase = view.slice(6); }
       else if (view.startsWith("magic-")) { emailMethod = "magic"; magicPhase = view.slice(6); }
       else emailMethod = "forgot";
     }
+    welcome = view === "welcome";
     setStatus(""); render(); focusView(); return true;
   }
   function focusView() {
@@ -85,6 +88,7 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
   function back() { if (busy) return false; resetCode = ""; return showView("password-login"); }
   const failureText = error => error?.message || "Couldn’t sign in. Try again.";
   function panelHtml() {
+    if (welcome) return `<div class="signin-welcome"><button type="button" class="button primary" data-password-mode="signup">Create account</button><button type="button" class="button secondary" data-password-mode="login">Log in</button></div>`;
     if (pendingTerms) return `<form data-signin-form="terms"><p class="form-hint">The terms changed. Read the <a href="/terms">Terms</a> and <a href="/privacy">Privacy Policy</a>, then continue.</p><button class="button primary" type="submit" ${busy ? "disabled" : ""}>Agree and continue</button></form>`;
     if (pendingLink) return `<p class="form-hint">This link is for a different account.</p><button type="button" class="button primary" data-magic-switch ${busy ? "disabled" : ""}>Switch account</button>`;
     if (emailMethod === "forgot") return `<button type="button" class="button primary" data-recovery-option="reset" data-reset-password>Reset password</button><button type="button" class="text-button" data-recovery-option="magic" data-email-method="magic">Email me a sign-in link</button>`;
@@ -97,11 +101,13 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
       const signup = passwordMode === "signup";
       return `<form data-signin-form="password" autocomplete="on">
         <label>Email <input name="email" type="email" required autocomplete="email" maxlength="254" value="${escapeHtml(passwordEmail)}"></label>
-        <label>Password <input name="password" type="password" required autocomplete="${signup ? "new-password" : "current-password"}"></label>
-        <button class="button primary" type="submit" ${busy ? "disabled" : ""}>${signup ? "Create account" : "Sign in"}</button>
+        <label>Password <input name="password" type="password" required autocomplete="${signup ? "new-password" : "current-password"}" maxlength="256" ${signup ? 'minlength="10" aria-describedby="signup-password-hint"' : ""}></label>
+        <button type="button" class="text-button" data-password-visibility aria-pressed="false">Show password</button>
+        ${signup ? '<p class="form-hint" id="signup-password-hint">10–256 characters</p>' : ""}
+        <button class="button primary" type="submit" ${busy ? "disabled" : ""}>${busy ? (signup ? "Creating account…" : "Signing in…") : (signup ? "Create account" : "Sign in")}</button>
         <button type="button" class="text-button" data-password-mode="${signup ? "login" : "signup"}">${signup ? "Sign in" : "Create account"}</button>
         <button type="button" class="text-button" data-forgot-password>Forgot password?</button>
-        <button type="button" class="text-button" data-email-method="magic">Email me a sign-in link</button>
+        <details class="signin-more"><summary>Other options</summary><button type="button" class="text-button" data-email-method="magic">Email me a sign-in link</button></details>
       </form>`;
     }
     if (magicPhase === "sent") return `<form data-signin-form="magic-code" autocomplete="on">
@@ -119,8 +125,12 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
   function render() {
     const node = surface();
     const view = currentView();
-    const hideBack = view.startsWith("password-") || view === "terms";
+    const hideBack = view === "welcome" || view === "terms";
     if (node) node.innerHTML = `${hideBack ? "" : `<button type="button" class="text-button" data-signin-back ${busy ? "disabled" : ""}>Back</button>`}<div data-signin-panel>${panelHtml()}</div><p class="status form-status" role="alert" data-signin-status></p>`;
+    if (node) {
+      node.setAttribute("aria-busy", String(busy));
+      for (const control of node.querySelectorAll("input, button")) control.disabled = busy;
+    }
     setStatus(statusText, statusError);
     onViewChange?.(currentView());
   }
@@ -159,7 +169,17 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
   }
   const onClick = async event => {
     if (busy) return;
-    if (event.target?.closest?.("[data-signin-back]")) { if (onBack?.() !== false) back(); return; }
+    const visibility = event.target?.closest?.("[data-password-visibility]");
+    if (visibility) {
+      const input = surface()?.querySelector('[name="password"]');
+      if (!input) return;
+      const shown = input.type === "password";
+      input.type = shown ? "text" : "password";
+      visibility.textContent = shown ? "Hide password" : "Show password";
+      visibility.setAttribute("aria-pressed", String(shown));
+      return;
+    }
+    if (event.target?.closest?.("[data-signin-back]")) { if (onBack?.() !== false) { if (currentView().startsWith("password-")) showView("welcome"); else back(); } return; }
     if (event.target?.closest?.("[data-forgot-password]")) {
       const email = surface()?.querySelector('[name="email"]')?.value?.trim();
       if (email) passwordEmail = magicEmail = resetEmail = email;
@@ -170,9 +190,11 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
     const method = event.target?.closest?.("[data-email-method]");
     const mode = event.target?.closest?.("[data-password-mode]");
     if (method || mode) {
+      welcome = false;
       const currentEmail = surface()?.querySelector('[name="email"]')?.value;
       if (currentEmail) { magicEmail = currentEmail; passwordEmail = currentEmail; }
       if (method) emailMethod = method.dataset.emailMethod === "password" ? "password" : "magic";
+      if (mode) emailMethod = "password";
       if (mode) passwordMode = mode.dataset.passwordMode === "signup" ? "signup" : "login";
       pendingLink = null; magicPhase = "request"; setStatus(""); render();
       surface()?.querySelector('[name="email"]')?.focus(); return;
@@ -345,10 +367,11 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
       return true;
     },
     showView, back, focus: focusView,
+    showWelcome() { return showView("welcome"); },
     showPassword(mode = "login") { return showView(mode === "signup" ? "password-signup" : "password-login"); },
     showMagic() {
       if (busy) return false;
-      emailMethod = "magic"; if (!pendingLink) magicPhase = "request"; render(); return true;
+      welcome = false; emailMethod = "magic"; if (!pendingLink) magicPhase = "request"; render(); return true;
     },
     openEmail(mode = "magic", panel) {
       if (busy) return false;

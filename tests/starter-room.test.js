@@ -10,6 +10,16 @@ import { postReceiptCard } from "../server/receipt-cards.mjs";
 import { buildGrowthEvent } from "../src/growth-emit.js";
 import { roomUsageSummary } from "../server/usage-summary.mjs";
 
+function assertIndexedMessage(store, roomId, message) {
+  const row = store.db.prepare("SELECT seq, body, record_json FROM messages WHERE room_id=? AND message_id=?").get(roomId, message.id);
+  assert.ok(row, "Guide/receipt message is indexed immediately without backfill");
+  const { editHistory: _history, ...current } = message;
+  assert.deepEqual(JSON.parse(row.record_json), current, "complete current metadata agrees with authoritative projection");
+  assert.equal(row.body, message.body);
+  const event = store.db.prepare("SELECT sequence FROM events WHERE room_id=? AND json_extract(body,'$.type')='message.posted' AND json_extract(body,'$.data.messageId')=? ORDER BY sequence LIMIT 1").get(roomId, message.id);
+  assert.equal(row.seq, event.sequence, "index retains original posting order");
+}
+
 const WELCOME = "I'm Room Guide, a demo agent. I took **See how work closes here** to show you how work closes. Pick what your own agent should do first:";
 
 function signIn(store, accountId) {
@@ -140,6 +150,7 @@ test("a choice closes the starter with a result card, then the first agent is as
   const state = store.room("script-room").state;
   const welcome = state.messages.find(message => message.authorId === "room-guide");
   assert.equal(welcome.body, WELCOME);
+  assertIndexedMessage(store, "script-room", welcome);
   assert.deepEqual(welcome.actions.map(action => action.claimId), ["agent-pair-agree", "agent-pair-next", "agent-pair-receipt"]);
   assert.equal(store.workClaims.get("script-room", "starter-receipt").owner, "room-guide");
   assert.equal(store.workClaims.get("script-room", "starter-receipt").state, "claimed");
@@ -155,6 +166,7 @@ test("a choice closes the starter with a result card, then the first agent is as
   assert.ok(card);
   assert.equal(card.deliveryMode, "result");
   assert.equal(card.closedBy, "Room Guide");
+  assertIndexedMessage(store, "script-room", card);
   const done = store.db.prepare("SELECT body FROM events WHERE room_id=? AND json_extract(body,'$.type')='work_claim.updated' AND json_extract(body,'$.data.workClaim')='starter-receipt' AND json_extract(body,'$.data.claimState')='done'").get("script-room");
   assert.ok(done, "the done work_claim.updated event is the claim_completed record");
   const welcomeEvent = store.db.prepare("SELECT body FROM events WHERE room_id=? AND json_extract(body,'$.data.messageId')=?").get("script-room", welcome.id);
@@ -170,6 +182,7 @@ test("a choice closes the starter with a result card, then the first agent is as
   assert.equal(store.workClaims.get("script-room", "agent-pair-agree").owner, identity.identityId);
   const assign = store.room("script-room").state.messages.find(message => message.authorId === "room-guide" && message.body.includes("is yours"));
   assert.equal(assign.body, "@Pair Agent Agree the change is yours.");
+  assertIndexedMessage(store, "script-room", assign);
   assert.ok(store.db.prepare("SELECT 1 FROM agent_wake_signals WHERE agent_id=? AND room_id=? AND message_id=?").get(identity.identityId, "script-room", assign.id));
   assert.equal(roomUsageSummary(store, ownerKey, "script-room").members.agents, 1);
   const before = store.room("script-room").state.messages.length;
@@ -195,7 +208,61 @@ test("done claims of every delivery mode get one in-room receipt card", async t 
   }
   const cards = store.room("receipt-room").state.messages.filter(message => message.kind === "receipt_card");
   assert.deepEqual(cards.map(card => card.deliveryMode).sort(), ["merged", "production", "result"]);
+  for (const card of cards) assertIndexedMessage(store, "receipt-room", card);
   const before = cards.length;
+  const eventsBefore = store.room("receipt-room").sequence;
+  const indexBefore = store.db.prepare("SELECT count(*) AS n FROM messages WHERE room_id=?").get("receipt-room").n;
   postReceiptCard(store, "receipt-room", store.workClaims.get("receipt-room", "close-result"));
   assert.equal(store.room("receipt-room").state.messages.filter(message => message.kind === "receipt_card").length, before);
+  assert.equal(store.room("receipt-room").sequence, eventsBefore);
+  assert.equal(store.db.prepare("SELECT count(*) AS n FROM messages WHERE room_id=?").get("receipt-room").n, indexBefore);
+});
+
+test("a caught receipt index failure preserves the done claim without a partial receipt", async t => {
+  const { origin, store } = await serve(t);
+  await createRoom(origin, store, "receipt-fault", {
+    roomId: "fault-room", title: "Fault", purpose: "Atomic receipt", kind: "personal", displayName: "Fay"
+  });
+  const ownerKey = store.issueAccessKey("fault-room", "owner");
+  assert.equal((await bearer(origin, "/api/rooms/fault-room/work-claims", ownerKey, { id: "fault-claim", title: "Fault claim" })).status, 201);
+  assert.equal((await bearer(origin, "/api/rooms/fault-room/work-claims/fault-claim/claim", ownerKey, {})).status, 200);
+  assert.equal((await bearer(origin, "/api/rooms/fault-room/work-claims/fault-claim/update", ownerKey, { state: "in_progress" })).status, 200);
+  const identity = store.identities.create("Receipt observer");
+  store.identities.link(ownerKey, "fault-room", { identityId: identity.identityId, displayName: "Observer", permissions: [] });
+  const { subscription } = store.agentPlugin.subscribeWebhook({ identityId: identity.identityId,
+    url: "https://observer.example/receipt", events: ["message.posted"], secret: "synthetic-receipt-observer-secret" });
+  store.db.exec(`CREATE TRIGGER reject_receipt_index BEFORE INSERT ON messages
+    WHEN NEW.room_id='fault-room' AND json_extract(NEW.record_json,'$.kind')='receipt_card'
+    BEGIN SELECT RAISE(ABORT,'receipt index rejected'); END`);
+  const done = await bearer(origin, "/api/rooms/fault-room/work-claims/fault-claim/update", ownerKey, {
+    state: "done", deliveryMode: "result", note: "Claim must survive receipt failure."
+  });
+  assert.equal(done.status, 200, await done.clone().text());
+  assert.equal(store.workClaims.get("fault-room", "fault-claim").state, "done");
+  assert.equal(store.room("fault-room").state.messages.filter(message => message.kind === "receipt_card").length, 0, "no projection receipt survives the caught write failure");
+  assert.equal(store.db.prepare("SELECT count(*) AS n FROM events WHERE room_id=? AND json_extract(body,'$.data.kind')='receipt_card'").get("fault-room").n, 0);
+  assert.equal(store.db.prepare("SELECT count(*) AS n FROM messages WHERE room_id=? AND json_extract(record_json,'$.kind')='receipt_card'").get("fault-room").n, 0);
+  assert.equal(store.db.prepare("SELECT count(*) AS n FROM agent_webhook_deliveries WHERE subscription_id=?").get(subscription.subscriptionId).n, 0, "failed receipt does not reach fan-out");
+  store.db.exec("DROP TRIGGER reject_receipt_index");
+  postReceiptCard(store, "fault-room", store.workClaims.get("fault-room", "fault-claim"));
+  const cards = store.room("fault-room").state.messages.filter(message => message.kind === "receipt_card");
+  assert.equal(cards.length, 1, "same receipt can be retried after storage recovers");
+  assertIndexedMessage(store, "fault-room", cards[0]);
+  assert.equal(store.db.prepare("SELECT count(*) AS n FROM agent_webhook_deliveries WHERE subscription_id=?").get(subscription.subscriptionId).n, 1, "successful retry retains receipt fan-out");
+});
+
+test("explicit receipt isolation preserves Node transaction guards and parent rollback", async t => {
+  const { store } = await serve(t);
+  store.transaction(() => {
+    assert.throws(() => store.transaction(() => { store.createAccount('default-kept'); throw new Error('default fault'); }), /default fault/);
+    assert.throws(() => store.transaction(() => Promise.resolve(), { isolated: true }), /synchronous/);
+  });
+  assert.ok(store.account('default-kept'));
+  assert.throws(() => store.transaction(() => {
+    store.createAccount('outer-lost');
+    store.transaction(() => store.createAccount('inner-lost'), { isolated: true });
+    throw new Error('outer fault');
+  }), /outer fault/);
+  for (const id of ['outer-lost', 'inner-lost']) assert.equal(store.db.prepare("SELECT count(*) AS n FROM accounts WHERE id=?").get(id).n, 0);
+  assert.throws(() => store.readTransaction(() => store.transaction(() => store.createAccount('readonly-denied'), { isolated: true })), /read-only/);
 });

@@ -50,6 +50,7 @@ import { Reminders, reminderSchema } from "./reminders.mjs";
 import { Notifications } from "./notifications.mjs";
 import { Moderation, moderationSchema, mutedEvent } from "./moderation.mjs";
 import { accountTermsSchema, publicAbuseSchema, publicUnpublishSchema, recordSignupTerms } from "./legal-store.mjs"; // terms, public reports, unpublish (G-SEC-11, G-SEC-14)
+import { roomAssistantSchema } from "./room-assistant.mjs";
 import { RequestRuns, requestRunSchema } from "./request-runs.mjs";
 import { WakeQueue, wakeQueueSchema, wakeQueuePauseSchema } from "./wake-queue.mjs";
 import { Attention, attentionSchema } from "./attention.mjs";
@@ -150,6 +151,7 @@ import { AgentInvites, agentInviteSchema } from "./agent-invites.mjs";
 import { ReferralInvites, referralInviteSchema } from "./referral-invites.mjs";
 import { ThreadMutes, threadMutesSchema } from "./thread-mutes.mjs"; // Per-thread mutes: private side table, additive.
 import { HumanPush, humanPushSchema } from "./human-push.mjs"; // Human browser push: mentions and DMs, additive.
+import { ensurePayoutColumns, ensureGrowthFundingColumn } from "./growth-loop.mjs";
 import { Referrals, referralSchema } from "./referrals.mjs";
 import { AccountLoginMethods, accountLoginMethodsSchema, ensureVerifiedEmailSchema } from "./account-login-methods.mjs";
 import { verifyTextCompletion, selectedWorkResult } from "./text-results.mjs";
@@ -162,7 +164,7 @@ import { validateHelpData, WORK_HELP_UPDATED } from "../src/work-help.js";
 import { auditWorkHelp } from "./work-help.mjs";
 import { HELP_OFFER_OPENED, HELP_OFFER_UPDATED, validateHelpOfferData } from "../src/help-offers.js";
 import { classifyCommand } from "./action-classes.mjs";
-import { presenceState, PRESENCE_UNREACHABLE_AFTER_MS } from "../src/presence-state.js"; // #660: agent presence/working states.
+import { presenceState } from "../src/presence-state.js"; // #660: agent presence/working states.
 import {
   isSessionStatus, isTerminalSession, sessionRecord, listWorkItemSessions, sessionCommandType, sessionWorker,
   sessionClaimConflict,
@@ -617,6 +619,7 @@ const sessionEventMatchesRequest = (event, request) => event?.data?.workItemId =
 // Platform differences stay at the database boundary; identity, invitation and
 // command rules below are shared by every runtime. The default remains Node.
 const nodeReadTransactions = new WeakSet();
+const nodeFailedIsolations = new WeakSet();
 const nodeStorage = {
   version: db => db.prepare("PRAGMA user_version").get().user_version,
   setVersion: (db, version) => db.exec(`PRAGMA user_version=${version}`),
@@ -631,16 +634,38 @@ const nodeStorage = {
       : "PRAGMA foreign_keys=ON; PRAGMA busy_timeout=3000; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;");
   },
   registerWriter, installWriterFence, verifyWriterFence,
-  transaction(db, fn, readOnly) {
+  transaction(db, fn, readOnly, { isolated = false } = {}) {
+    const run = () => {
+      const result = fn();
+      if (isolated && result && typeof result.then === "function") throw new Error("Room transactions must remain synchronous");
+      return result;
+    };
     if (db.isTransaction) {
       if (!readOnly && nodeReadTransactions.has(db)) throw new Error("Cannot write inside a read-only transaction");
-      return fn();
+      if (!isolated) return run();
+      // Explicit best-effort writers can fail without retaining partial writes.
+      // Critical SQLite faults may abort the parent transaction as well.
+      db.exec("SAVEPOINT room_isolated_write");
+      try { const result = run(); db.exec("RELEASE room_isolated_write"); return result; }
+      catch (error) {
+        if (db.isTransaction) {
+          try { db.exec("ROLLBACK TO room_isolated_write"); db.exec("RELEASE room_isolated_write"); }
+          catch (isolationError) {
+            nodeFailedIsolations.add(db);
+            try { db.exec("ROLLBACK"); } catch { /* The parent commit guard remains armed. */ }
+            throw new Error("Isolated transaction rollback failed", { cause: isolationError });
+          }
+        }
+        throw error;
+      }
     }
     const queryOnly = readOnly ? db.prepare("PRAGMA query_only").get().query_only : null;
     db.exec(readOnly ? "BEGIN" : "BEGIN IMMEDIATE");
     try {
       if (readOnly) { db.exec("PRAGMA query_only=ON"); nodeReadTransactions.add(db); }
-      const result = fn(); db.exec("COMMIT"); return result;
+      const result = run();
+      if (nodeFailedIsolations.has(db)) throw new Error("Cannot commit after isolated transaction rollback failed");
+      db.exec("COMMIT"); return result;
     }
     catch (error) {
       // SQLITE_FULL and I/O failures already rolled the transaction back;
@@ -648,7 +673,7 @@ const nodeStorage = {
       if (db.isTransaction) { try { db.exec("ROLLBACK"); } catch { /* already rolled back */ } }
       throw error;
     }
-    finally { if (readOnly) { nodeReadTransactions.delete(db); db.exec(`PRAGMA query_only=${queryOnly}`); } }
+    finally { nodeFailedIsolations.delete(db); if (readOnly) { nodeReadTransactions.delete(db); db.exec(`PRAGMA query_only=${queryOnly}`); } }
   }
 };
 const work = "workItemId expectedRevision";
@@ -1014,7 +1039,7 @@ function roomSchemaStamp() {
     bountyEscrowSchema, projectOffersSchema, publicWorkClaimsSchema,
     publicWorkClaimFenceSchema, publicWorkReviewsSchema, publicWorkSuccessorsSchema,
     accessRequestSchema, membershipDelegationSchema, membershipDelegationJournalSchema,
-    ownerDelegateSchema, agentRoomSchema, oauthPendingSchema, gmailSchema, requestRunSchema,
+    ownerDelegateSchema, agentRoomSchema, oauthPendingSchema, gmailSchema, requestRunSchema, roomAssistantSchema,
     directSendSchema, inboxStitchSchema, RETIRED_BOARD_V2_SCHEMA,
     agentKeyRegistrySchema, INTEGRITY_SNAPSHOT_SCHEMA, OPERATOR_ACTIONS_SCHEMA,
     INTEGRITY_JOB_CURSOR_SCHEMA, INTEGRITY_ROOM_STATE_SCHEMA, INTEGRITY_SWEEP_COLUMN,
@@ -1654,6 +1679,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.db.exec(oauthPendingSchema);
       this.db.exec(gmailSchema);
       this.db.exec(requestRunSchema);
+      this.db.exec(roomAssistantSchema);
+      // Fresh recovery stores must include the same additive growth columns
+      // as HTTP registration; otherwise NDJSON replay rejects existing rows.
+      ensurePayoutColumns(this.db);
+      ensureGrowthFundingColumn(this.db);
       this.requestRuns.verifySchema();
       // Direct channel-send journal: purely additive, intentionally outside
       // the writer fence (see unfencedAdditiveTables). Applied here (not only in
@@ -1668,9 +1698,17 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // before installWriterFence attaches the v37 triggers. IF NOT EXISTS
       // is idempotent. A warm wake whose stamp matches skips this block.
       this.db.exec(MESSAGES_SCHEMA);
+      // v38 preserves complete current message records. Existing rows remain
+      // null until the budgeted replay fills them; never scan history on open.
+      if (!this.db.prepare("SELECT 1 FROM pragma_table_info('messages') WHERE name='record_json'").get()) {
+        this.db.exec("ALTER TABLE messages ADD COLUMN record_json TEXT");
+      }
       // MSG-2: replay cursor. Unfenced. The integrity cron fills it. A warm
       // wake whose stamp matches skips this block; the stamp includes this DDL.
       this.db.exec(MESSAGES_BACKFILL_CURSOR_SCHEMA);
+      if (version > 0 && version < 38) {
+        this.db.prepare("DELETE FROM messages_backfill_cursor").run();
+      }
       // BOARD-WAKE-2: opt-in ready-work preference. Unfenced, empty until an
       // agent opts in. The stamp includes this DDL.
       this.db.exec(WANTS_WORK_SCHEMA);
@@ -2480,7 +2518,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       };
     }
   }
-  transaction(fn) {
+  transaction(fn, { isolated = false } = {}) {
     // Nested startup helpers share the outer migration transaction and its rollback.
     const outermost = !this.db.isTransaction;
     this._armProjectionWatch();
@@ -2488,12 +2526,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // idempotent replay commits nothing. Measured only while degraded.
     const before = outermost && this.storageFailures > 0 ? this.storagePlatform.changes?.(this.db) : null;
     let result;
-    try { result = this.storagePlatform.transaction(this.db, fn, false); }
+    try { result = this.storagePlatform.transaction(this.db, fn, false, { isolated }); }
     catch (error) {
-      if (outermost) this._dropProjectionCache();
+      if (outermost || isolated) this._dropProjectionCache();
       throw this.storageFailure(error, outermost);
     }
-    if (outermost) this._dropProjectionCache();
+    if (outermost || isolated) this._dropProjectionCache();
     if (before !== null && (before === undefined || this.storagePlatform.changes(this.db) !== before)) this.storageRecovered();
     return result;
   }
@@ -3751,7 +3789,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     });
   }
   // Who is around: the active roster, plus live SSE watchers and fresh
-  // session claims. lastSeenAt is last command `at` or session heartbeat.
+  // executing sessions. Legacy lastSeenAt also retains enrollment time.
   // Derived from existing data — no new tables, no people-data store.
   presence(token, roomId, watcherMemberIds, expectedSessionBinding = null) {
     return this.readTransaction(() => {
@@ -3759,6 +3797,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const { members, ownerId } = this.roomAuthority(roomId);
       const room = this.room(roomId);
       const now = this.now();
+      const timestamp = value => typeof value === "number" ? value : typeof value === "string" ? Date.parse(value) : NaN;
       const working = new Map();
       const heartbeats = new Map();
       for (const item of Object.values(room.state.workItems ?? {})) {
@@ -3768,7 +3807,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           if (!prev || session.heartbeat_at > prev) heartbeats.set(session.worker_member_id, session.heartbeat_at);
         }
         const worker = sessionWorker(item, now);
-        if (!worker) continue;
+        const heartbeatAt = timestamp(session.heartbeat_at);
+        if (!worker || !["processing", "active"].includes(session.status)
+          || !Number.isFinite(heartbeatAt) || heartbeatAt > now
+          || now - heartbeatAt > SESSION_HEARTBEAT_STALE_MS) continue;
         if (!working.has(worker)) working.set(worker, []);
         working.get(worker).push({ workItemId: item.id, title: item.title, heartbeat_at: item.heartbeat_at });
       }
@@ -3801,12 +3843,6 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         if (host.status === null) return null;
         return { status: host.status, lastSeenAt: host.lastSeenAt };
       };
-      // #660: unreachable threshold is 60 min or 3x the host heartbeat
-      // interval, whichever is smaller.
-      const unreachableAfterMs = Math.min(
-        PRESENCE_UNREACHABLE_AFTER_MS,
-        3 * this.agentHeartbeats.staleAfterMs
-      );
       const listed = Object.values(members)
         .filter(m => m && m.active !== false)
         .map(m => {
@@ -3826,9 +3862,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
               watching: isWatching,
               hostStatus: host.status,
               hostLastSeenAt: host.lastSeenAt,
-              lastCommandAt: lastCommandAt.get(m.id) ?? null,
-              lastSeenAt,
-              unreachableAfterMs,
+              lastCommandAt: timestamp(lastCommandAt.get(m.id)),
+              // Enrollment is retained in legacy lastSeenAt, but is not activity.
+              lastSeenAt: Math.max(timestamp(lastCommandAt.get(m.id)) || 0,
+                timestamp(heartbeats.get(m.id)) <= now ? timestamp(heartbeats.get(m.id)) || 0 : 0) || null,
               now,
             }),
             isOwner: m.id === ownerId,
@@ -3837,12 +3874,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           };
         })
         .sort((a, b) => a.memberId < b.memberId ? -1 : 1);
-      // RC-2026-09-18-054: next[] follows who is actually around — watching,
-      // holding work, or in a live presence state (a host heartbeat inside
-      // the live window) — not the idle roster. A pull-only agent that
-      // heartbeated a minute ago is around even when nobody is watching
-      // its stream; the old filter called that "nobody online".
-      const onlineIds = listed.filter(m => m.watching || m.workingOn.length > 0
+      // Suggested DM targets require current connection/execution observations.
+      const onlineIds = listed.filter(m => m.watching
         || m.state === "listening" || m.state === "working").map(m => m.memberId);
       return {
         members: listed,
@@ -3930,6 +3963,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.db.prepare("DELETE FROM membership_invitations WHERE room_id=?").run(roomId);
       // Reader cursors point into the old history; reset them.
       this.db.prepare("DELETE FROM cursors WHERE room_id=?").run(roomId);
+      // Replacing history may preserve the head id and sequence. Invalidate
+      // message replay snapshots and full-record certification explicitly.
+      this.db.prepare("DELETE FROM messages_backfill_cursor WHERE room_id=?").run(roomId);
       // The projection checkpoint is a replay accelerator over the old
       // history — a stale checkpoint would corrupt rebuildProjection, so
       // replace it with one taken from the imported state.

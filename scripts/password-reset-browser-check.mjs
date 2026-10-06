@@ -22,6 +22,7 @@ async function setup(t) {
   const page = await browser.newPage(); page.setDefaultTimeout(10000);
   const errors = []; page.on('pageerror', e => errors.push(e.message)); t.after(() => assert.deepEqual(errors, []));
   await page.goto(origin);
+  await page.locator('[data-password-mode="login"]').click();
   return { ...f, origin, browser, page, delivered };
 }
 async function requestReset(f) {
@@ -109,6 +110,7 @@ test('foreign-account reset requires confirmed logout and fresh password entry w
   f.store.createAccount('foreign-reset-account'); f.store.completeOnboarding('foreign-reset-account');
   f.store.accountLogins.linkPasswordMethod('foreign-reset-account', { email: foreignEmail, verifier: hashPassword(oldPassword) });
   const page = await f.browser.newPage(); page.setDefaultTimeout(10000); await page.goto(f.origin);
+  await page.locator('[data-password-mode="login"]').click();
   const login = page.locator('[data-signin-form="password"]'); await login.locator('[name="email"]').fill(foreignEmail); await login.locator('[name="password"]').fill(oldPassword);
   const signed = page.waitForResponse(r => new URL(r.url()).pathname === '/api/auth/password/login');
   await login.locator('button[type="submit"]').click(); await signed; await page.locator('#auth-panel').waitFor({ state: 'hidden' });

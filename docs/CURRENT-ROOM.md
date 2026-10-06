@@ -6,7 +6,7 @@ Do not continue from a ChatGPT worktree or the stale project-root
 
 | | |
 | --- | --- |
-| Schema | 37 |
+| Schema | 38 |
 | Live app | https://room.trydemigod.com |
 | Public door | https://room.trydemigod.com |
 | Public door (getdasha) | https://www.getdasha.com/room |

@@ -168,3 +168,43 @@ test("unauthenticated consent POST -> 401 before any request validation", async 
   });
   assert.equal(res.status, 401);
 });
+
+test("native Mac consent exchanges one PKCE code into an independent HttpOnly human session", async t => {
+  const { origin, sent } = await startServer(t);
+  const state = "s".repeat(43);
+  const start = await fetch(`${origin}/api/auth/desktop/start?state=${state}&challenge=${CHALLENGE}`, { redirect: "manual" });
+  assert.equal(start.status, 302);
+  const authorize = new URL(start.headers.get("location"), origin);
+  const browserSession = await magicLogin(t, origin, sent);
+  const params = Object.fromEntries(authorize.searchParams);
+  const allowed = await postAuthorize(origin, browserSession, { ...params, decision: "allow" });
+  assert.equal(allowed.status, 302);
+  const callback = new URL(allowed.headers.get("location"));
+  assert.equal(callback.pathname, "/api/auth/desktop/callback");
+  const returned = await fetch(callback, { redirect: "manual" });
+  assert.equal(returned.status, 302);
+  const appURL = new URL(returned.headers.get("location"));
+  assert.equal(appURL.protocol, "projectroom:"); assert.equal(appURL.hostname, "auth");
+  assert.equal(appURL.searchParams.get("state"), state);
+  const code = appURL.searchParams.get("code");
+  const exchange = (verifier, cookie) => fetch(`${origin}/api/auth/desktop/session`, {
+    method: "POST", headers: { Origin: origin, "Content-Type": "application/json", ...(cookie ? { Cookie: cookie } : {}) },
+    body: JSON.stringify({ code, verifier })
+  });
+  assert.equal((await exchange("x".repeat(43))).status, 401, "wrong PKCE cannot sign in or burn the genuine proof");
+  assert.equal((await exchange(VERIFIER, "account_session=" + browserSession.token)).status, 409, "cannot replace an existing browser slot");
+  const native = await exchange(VERIFIER);
+  assert.equal(native.status, 201);
+  assert.deepEqual(await native.json(), { status: "signed_in" }, "JSON exposes no credential");
+  const nativeCookie = native.headers.get("set-cookie");
+  assert.match(nativeCookie, /HttpOnly/i); assert.match(nativeCookie, /SameSite=Strict/i);
+  const cookieHeader = nativeCookie.split(";")[0];
+  const session = await (await fetch(origin + "/api/account-session", { headers: { Cookie: cookieHeader } })).json();
+  assert.equal(session.authenticated, true);
+  const browser = await (await fetch(origin + "/api/account-session", { headers: { Cookie: "account_session=" + browserSession.token } })).json();
+  assert.equal(session.account.id, browser.account.id);
+  assert.notEqual(session.sessionBinding, browser.sessionBinding, "desktop owns a separate session");
+  assert.equal((await exchange(VERIFIER)).status, 401, "a consumed code cannot sign in twice");
+  assert.equal((await fetch(origin + "/api/auth/desktop/callback?state=" + state + "&code=bad", { redirect: "manual" })).status, 422);
+  assert.equal((await fetch(origin + "/api/auth/desktop/session")).status, 405);
+});

@@ -11,8 +11,6 @@ import { randomUUID } from "node:crypto";
 import { EVENT_TYPES as T, memberHistoryVisibility, isRoomArchived } from "../src/events.js";
 
 const JOIN_TYPES = [T.MEMBER_ADDED, T.MEMBER_JOINED_VIA_INVITATION];
-// Events that share the join's millisecond sit just before it in the log.
-const SAME_INSTANT_WINDOW = 500;
 
 // Returns null (no limit) or { sequence, at, sameInstant } for the member's
 // join event. Timestamps have millisecond precision, so `sameInstant` lists
@@ -34,8 +32,8 @@ export function historyFloor(db, state, roomId, memberId, headSequence = null) {
   const sameInstant = new Set();
   const earlier = db.prepare(
     `SELECT json_extract(body,'$.id') AS id, json_extract(body,'$.data.messageId') AS messageId FROM events
-     WHERE room_id=? AND sequence<? AND sequence>=? AND json_extract(body,'$.at')=?`
-  ).all(roomId, row.sequence, Math.max(1, row.sequence - SAME_INSTANT_WINDOW), row.at);
+     WHERE room_id=? AND sequence<? AND json_extract(body,'$.at')=?`
+  ).all(roomId, row.sequence, row.at);
   for (const entry of earlier) {
     for (const id of [entry.id, entry.messageId]) {
       if (typeof id !== "string") continue;

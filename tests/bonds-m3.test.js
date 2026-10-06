@@ -58,7 +58,7 @@ async function setup(t) {
   return { origin, roomId, owner, command, fixture };
 }
 
-test("roomless and nonexistent targets fail with one uniform peer_not_found", async t => {
+test("unavailable peers fail with one truthful uniform peer_not_found", async t => {
   const { origin, roomId, owner, command, fixture } = await setup(t);
   const roomless = fixture.store.identities.create("m3 roomless"); // never joins any room
 
@@ -70,8 +70,19 @@ test("roomless and nonexistent targets fail with one uniform peer_not_found", as
   assert.equal(toMissing.status, 404);
   assert.equal(toMissing.body.error.code, "peer_not_found");
 
-  // Identical error shape: no existence signal in code or message.
+  const revoked = fixture.store.identities.create("m3 revoked co-member");
+  await admit(origin, roomId, owner.secret, revoked, "Revoked peer");
+  fixture.store.identities.revoke(revoked.identityId, revoked.secret);
+  const toRevoked = await jsonOf(await command(owner.secret, "bond.propose", { to: revoked.identityId }));
+  assert.equal(toRevoked.status, 404);
+  assert.equal(toRevoked.body.error.code, "peer_not_found");
+
+  // Identical error shape: no existence or revocation signal in code/message.
   assert.deepEqual(toRoomless.body.error, toMissing.body.error);
+  assert.deepEqual(toRevoked.body.error, toMissing.body.error);
+  assert.match(toMissing.body.error.message, /available agent peer in this room/);
+  assert.match(toMissing.body.error.message, /get_room_context/);
+  assert.doesNotMatch(toMissing.body.error.message, /No such agent identity/);
 
   // Co-member identity still resolves and proposes.
   const friend = fixture.store.identities.create("m3 friend");

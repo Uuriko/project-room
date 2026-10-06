@@ -222,7 +222,18 @@ for (const touch of [false, true]) test(`work search ${touch ? 'touch' : 'deskto
   assert.equal(await page.evaluate(() => document.activeElement.id), 'message-search');
   await search.fill('Orbit');
   await page.locator('#message-input').fill('');
-  if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await clickChrome(page, "#signout-button"); await page.locator('#auth-panel').waitFor({ state: 'visible' });
+  if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click();
+  // Earlier channel/thread/request drafts remain even after clearing this input.
+  // This journey intentionally signs out, acknowledging their scoped cleanup.
+  const confirmation = page.waitForEvent('dialog');
+  const signingOut = clickChrome(page, "#signout-button");
+  const dialog = await confirmation;
+  const confirmationType = dialog.type(), confirmationMessage = dialog.message();
+  await dialog.accept();
+  await signingOut;
+  assert.equal(confirmationType, 'confirm');
+  assert.equal(confirmationMessage, 'Sign out and clear unsent drafts and private setup on this device?');
+  await page.locator('#auth-panel').waitFor({ state: 'visible' });
   assert.equal(await search.inputValue(), ''); assert.equal(await hits.textContent(), '');
   assert.equal(f.store.db.prepare('SELECT sequence FROM cursors WHERE room_id=? AND member_id=?').get('commons', 'owner')?.sequence ?? 0, 0);
   // A new authenticated browser has no in-memory origin, even for a valid URL.

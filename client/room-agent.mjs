@@ -578,6 +578,13 @@ export class RoomAgentClient {
     const result = await this.#request(route + "?" + new URLSearchParams(args), undefined, signal);
     return validateReplyRead(result, { name, args, roomId: this.#roomId });
   }
+  async assistant(input, { signal } = {}) {
+    const value = await this.#request("/assistant", input, signal);
+    if (value?.contractVersion !== 1 || value.roomId !== this.#roomId
+      || input && (value.action !== input.action || value.result?.id !== input.runId || value.result?.attemptId !== input.attemptId))
+      throw new RoomClientError(200, "invalid_response", "Shared assistant response does not match this request");
+    return withContentTrust(value);
+  }
   async requestRuns(input, { signal } = {}) {
     const value = await this.#request("/request-runs", input, signal);
     if (value?.contractVersion !== 1 || value.roomId !== this.#roomId || value.viewerId !== this.#memberId)

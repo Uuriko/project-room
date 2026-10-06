@@ -18,6 +18,7 @@ async function setup(t) {
   const page = await browser.newPage(); page.setDefaultTimeout(10000);
   const errors = []; page.on("pageerror", error => errors.push(error.message)); t.after(() => assert.deepEqual(errors, []));
   await page.goto(origin);
+  await page.locator('[data-password-mode="login"]').click();
   return { ...f, page, origin };
 }
 
@@ -40,7 +41,7 @@ test("contextual email creation signs in using the actual password signup API", 
 
 test("password signup lands in the personal room", { timeout: 40000 }, async t => {
   const { page } = await setup(t);
-  const shots = "/opt/cursor/artifacts/screenshots";
+  const shots = "test-results/onboarding";
   mkdirSync(shots, { recursive: true });
   const email = "room-landing@example.invalid";
   const form = page.locator('#auth-signin-ui [data-signin-form="password"]');
@@ -50,11 +51,16 @@ test("password signup lands in the personal room", { timeout: 40000 }, async t =
   await form.locator('button[type="submit"]').click();
   const setupName = page.locator("#setup-name");
   await setupName.waitFor({ state: "visible" });
+  const slot = await (await page.context().request.get(new URL("/api/account-session", page.url()).href)).json();
+  await page.waitForTimeout(100);
+  const beforeName = await page.context().request.get(new URL("/api/account-rooms", page.url()).href, { headers: { "X-Session-Binding": slot.sessionBinding } });
+  assert.deepEqual((await beforeName.json()).rooms, [], "the name step owns first-room creation");
   await setupName.fill("Ada");
   await page.getByRole("button", { name: "Done", exact: true }).click();
   await page.waitForURL(/[?&]room=personal-/);
   await page.locator("#main").waitFor({ state: "visible" });
   assert.equal(await page.locator("#inbox-panel").isVisible(), false);
+  assert.equal(await page.locator("#identity-label").textContent(), "Ada", "first room uses the chosen name");
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.screenshot({ path: `${shots}/first-run-1280.png` });
   await page.setViewportSize({ width: 390, height: 844 });
@@ -77,4 +83,47 @@ test("contextual email login reports a rejected password then signs into the exi
   await page.locator("#auth-panel").waitFor({ state: "hidden" });
   const actual = await (await page.context().request.get(`${origin}/api/account-session`)).json();
   assert.equal(actual.authenticated, true); assert.equal(actual.account.id, "existing-password-account");
+});
+
+test("signup guidance, password visibility and pending-write controls work before native browser consent resumes", { timeout: 40000 }, async t => {
+  const { page, origin } = await setup(t);
+  const { createHash } = await import("node:crypto");
+  const verifier = "v".repeat(43), state = "s".repeat(43);
+  const challenge = createHash("sha256").update(verifier).digest("base64url");
+  await page.goto(`${origin}/api/auth/desktop/start?state=${state}&challenge=${challenge}`);
+  await page.locator('[data-password-mode="signup"]').click();
+  const form = page.locator('#auth-signin-ui [data-signin-form="password"]');
+  assert.equal(await form.locator('[name="password"]').getAttribute("minlength"), "10");
+  assert.match(await form.locator("#signup-password-hint").textContent(), /10–256/);
+  await form.locator('[name="email"]').fill("native-browser-signup@example.invalid");
+  await form.locator('[name="password"]').fill(password);
+  await form.locator('[data-password-visibility]').click();
+  assert.equal(await form.locator('[name="password"]').getAttribute("type"), "text");
+  assert.equal(await form.locator('[name="password"]').inputValue(), password);
+  await form.locator('[data-password-visibility]').click();
+  assert.equal(await form.locator('[name="password"]').getAttribute("type"), "password");
+  let held;
+  const routed = new Promise(resolve => { held = resolve; });
+  await page.route("**/api/auth/password/signup", route => held(route));
+  await form.locator('button[type="submit"]').click();
+  const route = await routed;
+  assert.equal(await page.locator("#auth-signin-ui").getAttribute("aria-busy"), "true");
+  assert.equal(await form.locator("button:enabled, input:enabled").count(), 0);
+  assert.match(await form.locator('button[type="submit"]').textContent(), /Creating account/);
+  await route.continue();
+  await page.waitForURL(/\/oauth\/authorize\?/);
+  assert.match(await page.locator("h1").textContent(), /Project Room for Mac/);
+  assert.match(await page.locator("li").textContent(), /account controls/);
+  assert.equal(await page.evaluate(() => sessionStorage.getItem("project-room:oauth-return:v1")), null, "return target is consumed");
+  assert.doesNotMatch(page.url(), /password=/);
+  const consent = page.waitForResponse(response => response.request().method() === "POST" && new URL(response.url()).pathname === "/oauth/authorize");
+  await page.getByRole("button", { name: "Allow", exact: true }).click();
+  const decision = await consent;
+  assert.equal(decision.status(), 302, "the browser's actual consent form passes Origin and CSRF checks");
+  const callback = new URL(decision.headers().location, origin);
+  assert.equal(callback.searchParams.get("state"), state);
+  const mac = await page.context().request.post(`${origin}/api/auth/desktop/session`, {
+    headers: { Origin: origin, Cookie: "" }, data: { code: callback.searchParams.get("code"), verifier }
+  });
+  assert.equal(mac.status(), 201);
 });

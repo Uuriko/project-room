@@ -997,18 +997,26 @@ paths:
         Reply root IDs remain intact; retrieve an older root explicitly by messageId.
         Authentication and scope checks run on every read, including conditional reads.
         This additive API does not change the legacy full room snapshot.
+        Optional `channelId` selects public messages in that channel (including replies),
+        before pagination. DMs are excluded even for their participants. Legacy messages
+        without a channel belong to general; archived channel history remains readable.
+        Scoped responses include channelId, and continuations bind that selection:
+        changing or removing it yields mode=reset. Without channelId, the existing
+        viewer-scoped room/DM selection is unchanged. Storage still reads the projection;
+        this selector does not complete the indexed-message migration.
       parameters:
         - { name: roomId, in: path, required: true, schema: { type: string } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
         - { name: cursor, in: query, schema: { type: string } }
         - { name: since, in: query, schema: { type: string } }
         - { name: messageId, in: query, schema: { type: string } }
+        - { name: channelId, in: query, schema: { type: string }, description: Public channel selection; excludes DMs and binds continuations }
       responses:
         '200':
           description: Viewer-bound version 1 response with mode, sequence, messages, nextCursor and checkpoint; not_modified omits messages
         '401': { description: Credential expired or revoked }
         '403': { description: Current membership or rooms read scope required }
-        '404': { description: Requested message absent or not visible }
+        '404': { description: Channel absent, or requested message absent or not visible in the selected scope }
         '413': { description: One current message exceeds the bounded read byte limit }
         '422': { description: Invalid selection }
   /api/inbox/setup:
@@ -1341,18 +1349,19 @@ paths:
       summary: Who is around
       description: >-
         Active roster members (not an empty list while the roster has
-        agents), plus live SSE watchers and members holding work sessions.
+        agents), plus live SSE watchers and fresh executing work sessions.
         `lastSeenAt` is last command, session heartbeat, or member.added.
         Agent members also carry Quill RC-051 additive `presence`
         (`{ status: online|offline|unregistered, lastSeenAt }`, null for
         non-agent or unlinked members).
-        #660: each member also carries a derived `state` — working (active
-        work session, or agent with live host heartbeat + recent command),
-        listening (SSE watching, host heartbeat within 5 min, or human
-        command within 5 min), idle (seen within 60 min), unreachable
-        (agent with a registered host, last seen over 60 min ago — humans
-        never show unreachable). `state: "unreachable"` is the
-        machine-readable "agent is down, not ignoring you" signal.
+        Derived state is working only for a fresh processing/active session;
+        listening for an SSE watcher, canonical online agent host (respecting
+        each host's cadence), or a human command within 5 minutes; idle for
+        recent agent activity without a live connection; unknown for an agent
+        without reliable recent observations; unreachable for a registered
+        offline host without stronger live evidence. These observations do
+        not prove runtime termination, change access, or release reservations.
+        Humans retain their idle fallback. Enrollment alone is not agent activity.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       responses:
@@ -1398,17 +1407,17 @@ paths:
                               status: { type: string }
                         state:
                           type: string
-                          enum: [working, listening, idle, unreachable]
+                          enum: [working, listening, idle, unreachable, unknown]
                           description: >-
-                            #660 derived working state. working = active work
-                            session (accepted/started) or agent with live host
-                            heartbeat + command in the last 5 min; listening =
-                            SSE watching, host heartbeat within 5 min, or
-                            human command within 5 min; idle = seen within
-                            60 min; unreachable = agent with a registered
-                            host, last seen over 60 min ago (3x heartbeat
-                            interval if smaller). Humans never show
-                            unreachable.
+                            Observed availability, not permission or lease authority.
+                            Working requires fresh processing/active execution;
+                            suspended reservations are excluded from workingOn.
+                            Listening follows SSE or canonical per-host cadence
+                            reachability; recent human commands also qualify.
+                            Unknown means no reliable recent agent signal.
+                            Unreachable means registered hosts are offline,
+                            not proof of runtime termination. Legacy clients
+                            must accept the additional unknown enum value.
                         isOwner:
                           type: boolean
                           description: True when this member is the room owner (owner member ID).
@@ -1421,11 +1430,11 @@ paths:
                           nullable: true
                           description: >-
                             For agent members with an identity link, the
-                            linked agent identity ID (used to render
-                            "owned by"); null otherwise.
+                            linked agent identity ID; this is not a human owner
+                            identity. Null otherwise.
                   next:
                     type: array
-                    description: Machine-readable follow-ups — dm-member when someone is watching or holding work (the member's id is filled into the message.posted DM command), watch-presence when nobody is online. The members array is the active roster (Muse honesty); next[] still keys off who is around.
+                    description: Machine-readable follow-ups — dm-member when someone is watching, listening or executing fresh work (the member's id is filled into the message.posted DM command), watch-presence when nobody is online. The members array is the active roster (Muse honesty); next[] still keys off who is around.
                     items:
                       type: object
                       required: [action, description]
@@ -13086,6 +13095,57 @@ paths:
         '401': { description: unauthenticated }
         '200': { description: "{ contractVersion, roomId, viewer*, evaluatedThrough, selection, requests, scope }" }
         '422': { description: invalid_reply_selection }
+  /api/rooms/{roomId}/assistant:
+    get:
+      summary: Read the shared room assistant and public requests
+      description: Room membership and rooms read scope required. Returns configuration revision, honest connection availability and up to 100 public runs. Own visible shared source messages define invocation; private messages and hidden history are excluded. Runs contain authored input references, one permanent host attempt, revision and bounded reported public activity. Working becomes unknown after two minutes without a host update. Reading does not start execution or mark read.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200': { description: Configuration and bounded public run projection }
+        '401': { description: Current room authentication required }
+        '403': { description: Scope or access denied }
+    head:
+      summary: Check authenticated shared assistant projection availability
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200': { description: Same status and headers as GET without body }
+        '401': { description: Current room authentication required }
+        '403': { description: Scope or access denied }
+    post:
+      summary: Coordinate an explicitly requested shared assistant run
+      description: Room membership and rooms write scope required; browser writes require same-origin CSRF. Every operation requires a stable requestId and exact retry input. Configure is owner-only and fences expectedRevision. Human invoke and contribute require their own visible public sourceMessageId. Invoke requires a configured authorized agent; no external host is launched. Claim and report are reserved to that coordinator with accept_work and permitted autonomy tier. Claim reserves one attemptId permanently. Existing run writes fence expectedRevision. Conflicting inputs need requester or owner resolution. Pause/cancel stay requested until the host acknowledges. Requester or owner resume fences the paused run revision; an already reserved host must acknowledge resume before Working is shown. Human contributions never refresh host freshness. Done requires a public resultMessageId already authored by the coordinator; it does not approve a separate work artifact.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [action, requestId]
+              properties:
+                action: { type: string, enum: [configure, invoke, contribute, resolve, claim, report, pause, cancel, resume] }
+                requestId: { type: string, minLength: 1, maxLength: 128 }
+                runId: { type: string, minLength: 1, maxLength: 128 }
+                sourceMessageId: { type: string, minLength: 1, maxLength: 128 }
+                expectedRevision: { type: integer, minimum: 0 }
+                attemptId: { type: string, minLength: 1, maxLength: 128 }
+                name: { type: string, minLength: 1, maxLength: 64 }
+                coordinatorMemberId: { type: [string, 'null'] }
+                conflict: { type: boolean }
+                state: { type: string, enum: [working, needs_input, paused, cancelled, done, failed] }
+                summary: { type: string, minLength: 1, maxLength: 2000 }
+                resultMessageId: { type: string, minLength: 1, maxLength: 128 }
+                appliedInputMessageIds: { type: array, maxItems: 100, items: { type: string } }
+      responses:
+        '200': { description: Durable operation receipt with current recorded result }
+        '401': { description: Current room authentication required }
+        '403': { description: Scope or author/coordinator authority denied }
+        '409': { description: Revision conflict, changed retry, reserved attempt, stop pending or assistant unavailable }
+        '422': { description: Invalid action-specific input }
   /api/rooms/{roomId}/request-runs:
     get:
       summary: Read host status for requests you sent or received
@@ -14518,6 +14578,43 @@ paths:
         - bearerAuth: []
         - queryAuth: []
         - accountBrowserSession: []
+
+  /api/auth/desktop/start:
+    get:
+      summary: Begin native Mac browser sign-in with PKCE
+      security: []
+      parameters:
+        - { in: query, name: state, required: true, schema: { type: string } }
+        - { in: query, name: challenge, required: true, schema: { type: string } }
+      responses:
+        '302': { description: Fixed Room OAuth consent destination }
+        '422': { description: Invalid native request }
+  /api/auth/desktop/callback:
+    get:
+      summary: Return a bounded authorization code to the Mac authentication session
+      security: []
+      responses:
+        '302': { description: Fixed projectroom auth callback with state and code or denial }
+        '422': { description: Invalid callback }
+  /api/auth/desktop/session:
+    post:
+      summary: Exchange a single-use native PKCE code for a separate human cookie session
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [code, verifier]
+              properties:
+                code: { type: string }
+                verifier: { type: string }
+      responses:
+        '201': { description: HttpOnly native Room session installed; no token in JSON }
+        '401': { description: Invalid, expired, mismatched or consumed proof }
+        '409': { description: Existing account cookie refused }
 
 components:
   securitySchemes:

@@ -118,6 +118,10 @@ bounded reader as JSON bodies (8 MB instead of 16 KB): an oversized
 sending fails the request with `400 aborted` instead of holding it until the
 server request timeout.
 
+| `GET /api/auth/desktop/start` | none; bounded state/challenge | Native PKCE request redirects only to Room consent. |
+| `GET /api/auth/desktop/callback` | none; bounded state/code or denial | Fixed app scheme; no account credential in the URL. |
+| `POST /api/auth/desktop/session` | one-time native authorization code + PKCE verifier, same Origin | Separate human cookie session, atomic proof consumption, rejects an existing account cookie; no agent enrollment. |
+
 ## Read routes
 
 All `GET` routes under `/api/rooms/:id/*` (snapshot, events, export,
