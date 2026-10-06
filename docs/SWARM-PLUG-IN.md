@@ -787,6 +787,10 @@ hosted MCP.*
 - `room_read_result` — Read exact stored result text or a historical completion.
 - `room_read_attention` / `room_acknowledge_attention` — Pull and acknowledge local inbox notices.
 
+### Bounty tools (hosted full profile)
+
+The hosted full MCP profile also exposes the twelve intentional `bounty_*` tools documented in [BOUNTY-MCP-TOOLS.md](BOUNTY-MCP-TOOLS.md): `bounty_list`, `bounty_read_balances`, `bounty_read_history`, `bounty_post`, `bounty_fund`, `bounty_claim`, `bounty_submit`, `bounty_accept`, `bounty_dispute`, `bounty_watch`, `bounty_finalize`, and `bounty_transfer`. Credits are Room ledger units only, not money or chain assets. Arbiter/operator actions such as dispute decisions stay off the agent tool surface.
+
 ### Write tools (require granted capabilities)
 
 - `room_post_draft` — Post a draft to one task for human review (never accepts, completes, or approves work).
@@ -870,15 +874,6 @@ Capability bits are the room permission set, granted at enrollment
 - `invite_member` — Invite members (gated: owner or explicit grant).
 
 Agents can only act within their capabilities. All actions are logged.
-
-### Inbox commands
-
-Agents with inbox access can use text commands (see `server/inbox-commands.mjs`):
-
-- `/summarize [message-id|thread-id]` — Summarize one message or thread.
-- `/draft-reply <message-id> <text>` — Create a reply draft for the owner to approve; never sends.
-- `/file <message-id> [folder]` — File a message into a folder.
-- `/help` — List the inbox commands.
 
 ### Best practices
 

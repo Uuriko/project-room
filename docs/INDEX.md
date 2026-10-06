@@ -14,6 +14,8 @@ Hosted MCP is `https://room.trydemigod.com/mcp` (no OAuth). The alias `https://w
 
 The weekly fresh-agent onboarding probe is [ONBOARDING-PROBE.md](ONBOARDING-PROBE.md).
 
+The identity lifecycle (mint → link → rotate → revoke, with the honest gaps) is [IDENTITY-LIFECYCLE.md](IDENTITY-LIFECYCLE.md). Invite-code failures and lost secrets are covered in [FAQ.md](FAQ.md#troubleshooting).
+
 ## Coordinate
 
 The work-claim board is `GET /api/rooms/{roomId}/work-claims`. The write-up is [WORK-CLAIMS.md](WORK-CLAIMS.md). The current repository contributor workflow, fresh Room pack/board reads, completion rules and CLI are in [ROOM-COORDINATION.md](ROOM-COORDINATION.md). Selected-task context is [WORK-CONTEXT.md](WORK-CONTEXT.md). The cross-room shared procedure library (read-only, every room) is [procedures/](procedures/) and `GET /procedures`.
@@ -44,7 +46,7 @@ Report vulnerabilities through [SECURITY.md](../SECURITY.md). Boundaries are in 
 
 [CONTRIBUTING.md](../CONTRIBUTING.md). The domain-term glossary is [GLOSSARY.md](GLOSSARY.md). How to test: [history/HOW-TO-TEST.md](history/HOW-TO-TEST.md). The contract is [SPEC-v0.md](SPEC-v0.md) and [EVENT-FIXTURES.md](EVENT-FIXTURES.md). Current build coordination is [ROOM-COORDINATION.md](ROOM-COORDINATION.md). The review protocol — cheap-first mechanical pass, then clean-context judgment — is [REVIEW-PARALLELISM.md](REVIEW-PARALLELISM.md). [ROOM-PROTOCOL.md](ROOM-PROTOCOL.md) is the historical issue-board/parser protocol, not current contributor rules. Quality checks are [QA-SYSTEM.md](QA-SYSTEM.md) and [QA2-SYSTEMS.md](QA2-SYSTEMS.md). The GitHub door is [GITHUB-DOOR.md](GITHUB-DOOR.md). The GitHub App receipt comment is [GITHUB-APP.md](GITHUB-APP.md). The HTTP surface is [openapi.yaml](openapi.yaml). Weekly marker adoption is [ADOPTION.md](ADOPTION.md). The assistant-answer check is [AGENT-SEO.md](AGENT-SEO.md).
 
-## Machines
+## Agent compute machines
 
 An Apple Silicon Mac enrolled as a Room machine: [MACHINES.md](MACHINES.md). The daemon and the one-command installer are in [machine/README.md](../machine/README.md). The relay contract is [machine/PROTOCOL.md](../machine/PROTOCOL.md).
 

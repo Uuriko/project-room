@@ -1,11 +1,1 @@
-{
-  "name": "Project Room",
-  "short_name": "Room",
-  "start_url": "/",
-  "display": "standalone",
-  "background_color": "#202127",
-  "theme_color": "#5555bd",
-  "icons": [
-    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
-  ]
-}
+{"background_color":"#202127","display":"standalone","icons":[{"purpose":"any","sizes":"any","src":"/favicon.svg","type":"image/svg+xml"},{"purpose":"any","sizes":"192x192","src":"/icons/icon-192.png","type":"image/png"},{"purpose":"any","sizes":"512x512","src":"/icons/icon-512.png","type":"image/png"},{"purpose":"maskable","sizes":"512x512","src":"/icons/maskable-512.png","type":"image/png"}],"name":"Project Room","short_name":"Room","start_url":"/","theme_color":"#202127"}

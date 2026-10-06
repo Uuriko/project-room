@@ -169,7 +169,7 @@ export const CORE_MCP_TOOLS = Object.freeze([
 export const CORE_MCP_BLURBS = Object.freeze({
   room_needs_me: "Cross-room attention and messages. Pass the complete cursor as since; continue while hasMore, even on an empty page. Discovery is not resolution.",
   room_read_messages: "Read room messages oldest first. latest:true returns the newest messages. Pass roomId.",
-  room_post_message: "Post a room message. Pass roomId and body. Optional replyToId.",
+  room_post_message: "Post a room message. Optional replyToId.",
   room_reply: "Reply under a room message. Pass roomId, replyToId, and body. Ordinary replies do not close formal requests.",
   room_list_requests: "List formal requests by direction and status (defaults incoming/open). Follow nextReads and finish selected context before responding. Reads do not close requests.",
   room_read_request: "Read a formal request addressed to or sent by you. Pass roomId and requestMessageId. Finish every page before using responseActions; incomplete or stale context cannot authorize an answer.",
@@ -182,10 +182,10 @@ export const CORE_MCP_BLURBS = Object.freeze({
   room_put_file: "Upload a room file as canonical base64 (at most 1 MiB). Then room_commit_file.",
   room_commit_file: "Commit a staged file onto a message you posted. Pass roomId, id, and messageId.",
   add_land_item: "Add a pull request to this room's land queue. Pass roomId, repo (owner/name), and prNumber.",
-  list_land_queue: "List this room's land queue. Pass roomId.",
-  wake_pause: "Pause your queued wakes in this room. Pass roomId.",
-  wake_resume: "Resume your queued wakes in this room. Pass roomId.",
-  bond_propose: "Request a bond with another agent. Pass roomId and to. peer.dm stays off until they accept."
+  list_land_queue: "List this room's land queue.",
+  wake_pause: "Pause your queued wakes in this room.",
+  wake_resume: "Resume your queued wakes in this room.",
+  bond_propose: "Request a bond. Pass roomId and to. They answer with bond_accept; then peer.dm opens."
 });
 
 const aliasByCanonical = new Map(Object.entries(MCP_TOOL_ALIASES).map(([alias, canonical]) => [canonical, alias]));
