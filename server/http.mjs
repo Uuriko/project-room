@@ -2313,6 +2313,18 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           displayName: "", card: null });
         return json(res, 200, joinedLink);
       }
+      if (url.pathname === "/api/guest-agent-links/refresh" && req.method === "POST") {
+        // v0 self-service refresh (issue #1563): the holder of an EXPIRED
+        // guest-agent credential presents it and gets a fresh one for the
+        // same seat, no owner round-trip. Possession of the expired bearer
+        // is the proof; revoked, swept, and v1 seats are refused inside
+        // GuestAgentLinks#refresh. Rate matches the sibling join route.
+        checkOrigin(req, true);
+        rate(`guest-agent-refresh:${remoteAddress}`, 20);
+        const data = await body(req);
+        if (!exact(data, ["linkToken"])) reject(422, "invalid_link", "Guest-agent link required");
+        return json(res, 200, store.guestAgentLinks.refresh(data.linkToken));
+      }
       // GX-… guest invites (RC-2026-09-23-100): the public-handoff flow.
       // The invite code is public-safe (single-use, hash-stored, grants
       // nothing); the ga1. credential is issued only at redemption, after
