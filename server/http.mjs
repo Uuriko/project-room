@@ -1183,6 +1183,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (url.pathname === "/api/auth/email/verify/resend") {
         if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
         checkOrigin(req, true);
+        // Delivery failures do not change the resend response: the fresh code
+        // is already issued and the client can retry.
+        const deliverSignupMail = async fn => { try { await fn(); } catch { /* noop */ } };
         const slotToken = cookie(req, accountCookieName);
         if (!slotToken) reject(401, "account_session_required", "Sign in before verifying your email");
         let session;
