@@ -1,0 +1,184 @@
+# Cheap-first mechanical review pass.
+#
+# Runs automatically on every pull request, before any human or strong-model
+# reviewer looks at it:
+#   - diff size (files changed, lines added/deleted)
+#   - claim-scope match (scripts/review-scope-check.mjs): does the diff touch
+#     only the files the claim declared in the PR body?
+#   - lint and test-suite conclusions, once the `test` workflow finishes
+#
+# The result is a machine-readable JSON block in the job summary
+# (marked with <!-- review-mechanical-report -->). The strong-model judgment
+# pass (docs/REVIEW-PARALLELISM.md) reads this report plus the diff plus the
+# claim, in clean context.
+#
+# Scope drift is a reviewer signal, NOT a merge blocker: claims legitimately
+# grow (lockfiles, generated files). Drift shows up as a warning annotation
+# and in the report; the reviewer acknowledges it.
+name: review-mechanical
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+  workflow_run:
+    workflows: ["test"]
+    types: [completed]
+
+permissions:
+  contents: read
+  pull-requests: read
+  actions: read
+
+# One mechanical report per PR; a newer push or a finished test run replaces
+# the older one. workflow_run dispatches are keyed by run id.
+concurrency:
+  group: ${{ github.event_name == 'workflow_run' && format('review-mechanical-run-{0}', github.event.workflow_run.id) || format('review-mechanical-pr-{0}', github.event.pull_request.number) }}
+  cancel-in-progress: true
+
+jobs:
+  # Fast signals that need no test execution: diff size + claim-scope match.
+  # gh + node only, no npm install.
+  fast:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - name: Collect PR facts and run the scope check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          gh pr view "$PR_NUMBER" --json files --jq '.files[].path' > /tmp/changed.txt
+          gh pr view "$PR_NUMBER" --json body --jq '.body' > /tmp/body.md
+          ADDITIONS=$(gh pr view "$PR_NUMBER" --json additions --jq '.additions')
+          DELETIONS=$(gh pr view "$PR_NUMBER" --json deletions --jq '.deletions')
+          HEAD_SHA=$(gh pr view "$PR_NUMBER" --json headRefOid --jq '.headRefOid')
+          node scripts/review-scope-check.mjs --files-file /tmp/changed.txt --body-file /tmp/body.md > /tmp/scope.json
+          {
+            echo "ADDITIONS=$ADDITIONS"
+            echo "DELETIONS=$DELETIONS"
+            echo "HEAD_SHA=$HEAD_SHA"
+          } >> "$GITHUB_ENV"
+      - name: Annotate scope drift as warnings
+        run: |
+          node -e '
+            const r = require("/tmp/scope.json");
+            for (const f of r.drift) console.log(`::warning file=${f}::Scope drift: ${f} is not in the declared claim files`);
+          '
+      - name: Write the machine-readable report
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          node -e '
+            const fs = require("node:fs");
+            const scope = JSON.parse(fs.readFileSync("/tmp/scope.json", "utf8"));
+            const report = {
+              check: "review-mechanical",
+              stage: "fast",
+              pr: Number(process.env.PR_NUMBER),
+              head: process.env.HEAD_SHA,
+              lint: "pending",
+              tests: "pending",
+              files_changed: scope.changedCount,
+              lines_added: Number(process.env.ADDITIONS),
+              lines_deleted: Number(process.env.DELETIONS),
+              scope: { verdict: scope.verdict, drift: scope.drift, declared: scope.declared },
+              generated_at: new Date().toISOString(),
+            };
+            const driftLine = report.scope.verdict === "drift"
+              ? `⚠️ **scope drift**: ${report.scope.drift.join(", ")} — reviewer acknowledges`
+              : report.scope.verdict === "undeclared"
+                ? "ℹ️ no `claim-files` declared in the PR body — reviewer checks scope by hand"
+                : "✅ diff stays inside the declared claim files";
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,
+              `## review-mechanical report\n\n` +
+              `| signal | result |\n|---|---|\n` +
+              `| lint | pending (test workflow still running) |\n` +
+              `| tests | pending (test workflow still running) |\n` +
+              `| files changed | ${report.files_changed} |\n` +
+              `| lines + / − | ${report.lines_added} / ${report.lines_deleted} |\n` +
+              `| claim scope | ${report.scope.verdict} |\n\n${driftLine}\n\n` +
+              `<!-- review-mechanical-report -->\n\`\`\`json\n${JSON.stringify(report, null, 2)}\n\`\`\`\n`);
+          '
+
+  # Full report once the `test` workflow finishes: same fast signals plus the
+  # lint and test-suite conclusions. Skips silently for main-branch pushes
+  # (no PR attached).
+  full:
+    if: github.event_name == 'workflow_run'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - name: Collect test conclusions, PR facts, and run the scope check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          TEST_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          REPO: ${{ github.repository }}
+        run: |
+          PR_NUMBER=$(jq -r '.workflow_run.pull_requests[0].number // empty' "$GITHUB_EVENT_PATH")
+          if [ -z "$PR_NUMBER" ]; then echo "no PR attached to this test run; nothing to report"; exit 0; fi
+          echo "PR_NUMBER=$PR_NUMBER" >> "$GITHUB_ENV"
+          LINT=$(gh api "repos/$REPO/actions/runs/$RUN_ID/jobs" --paginate -q '[.jobs[] | select(.name=="lint")][0].conclusion // "unknown"')
+          echo "LINT=$LINT" >> "$GITHUB_ENV"
+          gh pr view "$PR_NUMBER" --json files --jq '.files[].path' > /tmp/changed.txt
+          gh pr view "$PR_NUMBER" --json body --jq '.body' > /tmp/body.md
+          {
+            echo "ADDITIONS=$(gh pr view "$PR_NUMBER" --json additions --jq '.additions')"
+            echo "DELETIONS=$(gh pr view "$PR_NUMBER" --json deletions --jq '.deletions')"
+            echo "HEAD_SHA=$(gh pr view "$PR_NUMBER" --json headRefOid --jq '.headRefOid')"
+          } >> "$GITHUB_ENV"
+          node scripts/review-scope-check.mjs --files-file /tmp/changed.txt --body-file /tmp/body.md > /tmp/scope.json
+      - name: Annotate scope drift as warnings
+        if: env.PR_NUMBER != ''
+        run: |
+          node -e '
+            const r = require("/tmp/scope.json");
+            for (const f of r.drift) console.log(`::warning file=${f}::Scope drift: ${f} is not in the declared claim files`);
+          '
+      - name: Write the machine-readable report
+        if: env.PR_NUMBER != ''
+        run: |
+          node -e '
+            const fs = require("node:fs");
+            const scope = JSON.parse(fs.readFileSync("/tmp/scope.json", "utf8"));
+            const report = {
+              check: "review-mechanical",
+              stage: "full",
+              pr: Number(process.env.PR_NUMBER),
+              head: process.env.HEAD_SHA,
+              lint: process.env.LINT,
+              tests: process.env.TEST_CONCLUSION,
+              files_changed: scope.changedCount,
+              lines_added: Number(process.env.ADDITIONS),
+              lines_deleted: Number(process.env.DELETIONS),
+              scope: { verdict: scope.verdict, drift: scope.drift, declared: scope.declared },
+              generated_at: new Date().toISOString(),
+            };
+            const driftLine = report.scope.verdict === "drift"
+              ? `⚠️ **scope drift**: ${report.scope.drift.join(", ")} — reviewer acknowledges`
+              : report.scope.verdict === "undeclared"
+                ? "ℹ️ no `claim-files` declared in the PR body — reviewer checks scope by hand"
+                : "✅ diff stays inside the declared claim files";
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,
+              `## review-mechanical report\n\n` +
+              `| signal | result |\n|---|---|\n` +
+              `| lint | ${report.lint} |\n` +
+              `| tests | ${report.tests} |\n` +
+              `| files changed | ${report.files_changed} |\n` +
+              `| lines + / − | ${report.lines_added} / ${report.lines_deleted} |\n` +
+              `| claim scope | ${report.scope.verdict} |\n\n${driftLine}\n\n` +
+              `<!-- review-mechanical-report -->\n\`\`\`json\n${JSON.stringify(report, null, 2)}\n\`\`\`\n`);
+          '
