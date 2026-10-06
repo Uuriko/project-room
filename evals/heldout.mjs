@@ -24,6 +24,13 @@
 // If a task id ever changes (README: add a new id, never edit in place) the
 // split moves with it deterministically — still no leak, since id edits are
 // deliberate dataset revisions, not silent tuning.
+//
+// THREE-WAY SPLITS: splitTrainDevTest partitions into { train, dev, test }.
+// The test split is never shown to the agent under evaluation: runEvalSealed
+// wraps the tuning solver in a split guard that throws (fail-closed, naming the
+// task) if any task outside the train+dev ids reaches it, and wraps the final
+// solver so it only ever sees test ids. A leak aborts the run; it is never
+// silently absorbed.
 
 import { createHash } from 'node:crypto';
 import { runEval } from './index.mjs';
@@ -72,4 +79,94 @@ export async function runEvalHeldOut({ tasks, solver, scorers, holdoutFraction =
     heldOut.length > 0 ? runEval({ tasks: heldOut, solver, scorers }) : emptyReport(),
   ]);
   return { train: trainReport, heldOut: heldOutReport, holdoutFraction };
+}
+
+/**
+ * Deterministic train/dev/test split by task-id hash.
+ * A task goes to test iff heldOutScore(task.id) < testFraction, to dev iff the
+ * score is below testFraction + devFraction, else to train. Disjoint,
+ * exhaustive, order-independent — same hash discipline as splitHeldOut.
+ */
+export function splitTrainDevTest(tasks, { devFraction = 0.15, testFraction = 0.15 } = {}) {
+  if (!Array.isArray(tasks)) throw new Error('splitTrainDevTest needs a tasks array');
+  for (const [label, f] of [['devFraction', devFraction], ['testFraction', testFraction]]) {
+    if (typeof f !== 'number' || Number.isNaN(f) || f < 0 || f > 1) {
+      throw new Error(`${label} must be a number in [0, 1]`);
+    }
+  }
+  if (devFraction + testFraction > 1) {
+    throw new Error(`devFraction + testFraction must not exceed 1 (got ${devFraction + testFraction})`);
+  }
+  const train = [];
+  const dev = [];
+  const test = [];
+  for (const task of tasks) {
+    const s = heldOutScore(task?.id);
+    if (s < testFraction) test.push(task);
+    else if (s < testFraction + devFraction) dev.push(task);
+    else train.push(task);
+  }
+  return { train, dev, test };
+}
+
+/**
+ * Split guard: wraps a solver so it can only ever be invoked with tasks whose
+ * ids are in `visibleIds`. Any other task throws fail-closed with code
+ * TEST_SPLIT_LEAK, naming the phase and the task id. This is the mechanical
+ * guarantee that the test split is never shown to the agent under evaluation:
+ * the leak surfaces as an error, never as a silently absorbed score.
+ */
+export function createSplitGuard({ visibleIds, phase = 'tuning' } = {}) {
+  const visible = visibleIds instanceof Set ? visibleIds : new Set(visibleIds ?? []);
+  return (solver) => async (task) => {
+    if (!visible.has(task?.id)) {
+      const err = new Error(
+        `test-split leak: phase "${phase}" solver was shown task "${task?.id}", which is outside its visible split`,
+      );
+      err.code = 'TEST_SPLIT_LEAK';
+      throw err;
+    }
+    return solver(task);
+  };
+}
+
+/**
+ * Sealed evaluation: tuning runs against train+dev only, the final run against
+ * test only. Both solvers are guard-wrapped, so a test task reaching the tuning
+ * solver (or a non-test task reaching the final solver) aborts the run.
+ * Report shape: { train, dev, test, splits: { trainIds, devIds, testIds },
+ * devFraction, testFraction }.
+ */
+export async function runEvalSealed({
+  tasks,
+  tuneSolver,
+  testSolver,
+  scorers,
+  devFraction = 0.15,
+  testFraction = 0.15,
+}) {
+  if (typeof tuneSolver !== 'function') throw new Error('runEvalSealed needs a tuneSolver function');
+  if (typeof testSolver !== 'function') throw new Error('runEvalSealed needs a testSolver function');
+  const { train, dev, test } = splitTrainDevTest(tasks, { devFraction, testFraction });
+  const trainIds = train.map((t) => t.id);
+  const devIds = dev.map((t) => t.id);
+  const testIds = test.map((t) => t.id);
+
+  const guardedTune = createSplitGuard({ visibleIds: [...trainIds, ...devIds], phase: 'tuning' })(tuneSolver);
+  const guardedTest = createSplitGuard({ visibleIds: testIds, phase: 'test' })(testSolver);
+
+  const [trainReport, devReport] = await Promise.all([
+    train.length > 0 ? runEval({ tasks: train, solver: guardedTune, scorers }) : emptyReport(),
+    dev.length > 0 ? runEval({ tasks: dev, solver: guardedTune, scorers }) : emptyReport(),
+  ]);
+  const testReport = test.length > 0 ? await runEval({ tasks: test, solver: guardedTest, scorers }) : emptyReport();
+
+  return {
+    train: trainReport,
+    dev: devReport,
+    test: testReport,
+    splits: { trainIds, devIds, testIds },
+    devFraction,
+    testFraction,
+  };
 }
