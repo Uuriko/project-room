@@ -14,7 +14,18 @@ APPROVE on the exact head, never with an open CHANGES REQUESTED.
 ## 1. The mechanical pass
 
 `review-mechanical` runs on `pull_request` (opened, synchronize, reopened,
-edited) and again when the `test` workflow completes. It reports:
+edited). One check run does two stages, both written to the same job summary:
+
+- **fast** (immediately): diff size + claim-scope match. `gh` + `node`
+  only, no `npm install`, so the reviewer sees signal in ~1 minute.
+- **full** (same run, after a bounded ~40 min wait): the job polls for the
+  `test` workflow run on the PR head and appends the lint and test-suite
+  conclusions. If the wait times out, the report says `timed-out` honestly
+  instead of guessing.
+
+A second trigger, `workflow_run` on the `test` workflow, re-emits the full
+report event-driven with no polling — it activates once this workflow file
+is merged to the default branch. It reports:
 
 | signal | source |
 |---|---|
@@ -25,7 +36,11 @@ edited) and again when the `test` workflow completes. It reports:
 
 The result lands as a **machine-readable JSON block** in the check-run job
 summary, marked with `<!-- review-mechanical-report -->`, plus a small
-human table. Fetch it without opening a browser:
+human table. The JSON shape (emitted by
+`scripts/review-mechanical-report.mjs`) is the contract: `check`, `stage`,
+`pr`, `head`, `lint`, `tests`, `files_changed`, `lines_added`,
+`lines_deleted`, `scope: {verdict, drift, declared}`, `generated_at`.
+Fetch it without opening a browser:
 
 ```bash
 gh run list --workflow review-mechanical.yml --branch <branch> --limit 1

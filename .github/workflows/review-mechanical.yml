@@ -20,6 +20,9 @@ name: review-mechanical
 on:
   pull_request:
     types: [opened, synchronize, reopened, edited]
+  # Post-merge steady state: this trigger only fires once this file exists on
+  # the default branch. Until then the pull_request job below covers PRs by
+  # waiting (bounded) for the test workflow itself.
   workflow_run:
     workflows: ["test"]
     types: [completed]
@@ -36,12 +39,13 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Fast signals that need no test execution: diff size + claim-scope match.
-  # gh + node only, no npm install.
-  fast:
+  # Fast signals immediately (diff size + claim scope, gh + node only, no npm
+  # install), then a bounded wait for the `test` workflow on this head so the
+  # same check run also carries the lint and test-suite conclusions.
+  mechanical:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -49,67 +53,86 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
-      - name: Collect PR facts and run the scope check
+      - name: Fast signals and the fast report
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           gh pr view "$PR_NUMBER" --json files --jq '.files[].path' > /tmp/changed.txt
           gh pr view "$PR_NUMBER" --json body --jq '.body' > /tmp/body.md
-          ADDITIONS=$(gh pr view "$PR_NUMBER" --json additions --jq '.additions')
-          DELETIONS=$(gh pr view "$PR_NUMBER" --json deletions --jq '.deletions')
           HEAD_SHA=$(gh pr view "$PR_NUMBER" --json headRefOid --jq '.headRefOid')
-          node scripts/review-scope-check.mjs --files-file /tmp/changed.txt --body-file /tmp/body.md > /tmp/scope.json
+          echo "HEAD_SHA=$HEAD_SHA" >> "$GITHUB_ENV"
           {
-            echo "ADDITIONS=$ADDITIONS"
-            echo "DELETIONS=$DELETIONS"
-            echo "HEAD_SHA=$HEAD_SHA"
+            echo "ADDITIONS=$(gh pr view "$PR_NUMBER" --json additions --jq '.additions')"
+            echo "DELETIONS=$(gh pr view "$PR_NUMBER" --json deletions --jq '.deletions')"
           } >> "$GITHUB_ENV"
-      - name: Annotate scope drift as warnings
-        run: |
+          node scripts/review-scope-check.mjs --files-file /tmp/changed.txt --body-file /tmp/body.md > /tmp/scope.json
+          node scripts/review-mechanical-report.mjs --stage fast --pr "$PR_NUMBER" \
+            --head "$HEAD_SHA" --lint pending --tests pending \
+            --additions "$ADDITIONS" --deletions "$DELETIONS" \
+            --scope-json /tmp/scope.json >> "$GITHUB_STEP_SUMMARY"
           node -e '
             const r = require("/tmp/scope.json");
             for (const f of r.drift) console.log(`::warning file=${f}::Scope drift: ${f} is not in the declared claim files`);
           '
-      - name: Write the machine-readable report
+      - name: Wait for the test workflow on this head
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_SHA: ${{ env.HEAD_SHA }}
+          HEAD_BRANCH: ${{ github.head_ref }}
+          REPO: ${{ github.repository }}
+        run: |
+          # Bounded wait (~40 min): re-resolve the test run every minute so a
+          # newer synchronize push supersedes the run we wait on.
+          deadline=$(( $(date +%s) + 2400 ))
+          RUN_ID=""
+          RUN_STATUS=""
+          CONCLUSION=""
+          while [ "$(date +%s)" -lt "$deadline" ]; do
+            RUN_JSON=$(gh run list --workflow test.yml --branch "$HEAD_BRANCH" --limit 5 \
+              --json databaseId,headSha,status,conclusion \
+              --jq "[.[] | select(.headSha==\"$HEAD_SHA\")][0] // empty")
+            if [ -n "$RUN_JSON" ]; then
+              RUN_STATUS=$(echo "$RUN_JSON" | jq -r .status)
+              RUN_ID=$(echo "$RUN_JSON" | jq -r .databaseId)
+              if [ "$RUN_STATUS" = "completed" ]; then
+                CONCLUSION=$(echo "$RUN_JSON" | jq -r .conclusion)
+                break
+              fi
+            fi
+            sleep 60
+          done
+          if [ -z "$RUN_ID" ]; then
+            CONCLUSION="not-started"
+          elif [ "$RUN_STATUS" != "completed" ]; then
+            CONCLUSION="timed-out"
+          fi
+          LINT="unknown"
+          if [ -n "$RUN_ID" ]; then
+            LINT=$(gh api "repos/$REPO/actions/runs/$RUN_ID/jobs" --paginate \
+              -q '[.jobs[] | select(.name=="lint")][0].conclusion // "unknown"')
+          fi
+          {
+            echo "TEST_CONCLUSION=$CONCLUSION"
+            echo "LINT_CONCLUSION=$LINT"
+          } >> "$GITHUB_ENV"
+      - name: Full report with lint and test conclusions
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ env.HEAD_SHA }}
+          ADDITIONS: ${{ env.ADDITIONS }}
+          DELETIONS: ${{ env.DELETIONS }}
+          LINT_CONCLUSION: ${{ env.LINT_CONCLUSION }}
+          TEST_CONCLUSION: ${{ env.TEST_CONCLUSION }}
         run: |
-          node -e '
-            const fs = require("node:fs");
-            const scope = JSON.parse(fs.readFileSync("/tmp/scope.json", "utf8"));
-            const report = {
-              check: "review-mechanical",
-              stage: "fast",
-              pr: Number(process.env.PR_NUMBER),
-              head: process.env.HEAD_SHA,
-              lint: "pending",
-              tests: "pending",
-              files_changed: scope.changedCount,
-              lines_added: Number(process.env.ADDITIONS),
-              lines_deleted: Number(process.env.DELETIONS),
-              scope: { verdict: scope.verdict, drift: scope.drift, declared: scope.declared },
-              generated_at: new Date().toISOString(),
-            };
-            const driftLine = report.scope.verdict === "drift"
-              ? `⚠️ **scope drift**: ${report.scope.drift.join(", ")} — reviewer acknowledges`
-              : report.scope.verdict === "undeclared"
-                ? "ℹ️ no `claim-files` declared in the PR body — reviewer checks scope by hand"
-                : "✅ diff stays inside the declared claim files";
-            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,
-              `## review-mechanical report\n\n` +
-              `| signal | result |\n|---|---|\n` +
-              `| lint | pending (test workflow still running) |\n` +
-              `| tests | pending (test workflow still running) |\n` +
-              `| files changed | ${report.files_changed} |\n` +
-              `| lines + / − | ${report.lines_added} / ${report.lines_deleted} |\n` +
-              `| claim scope | ${report.scope.verdict} |\n\n${driftLine}\n\n` +
-              `<!-- review-mechanical-report -->\n\`\`\`json\n${JSON.stringify(report, null, 2)}\n\`\`\`\n`);
-          '
+          node scripts/review-mechanical-report.mjs --stage full --pr "$PR_NUMBER" \
+            --head "$HEAD_SHA" --lint "$LINT_CONCLUSION" --tests "$TEST_CONCLUSION" \
+            --additions "$ADDITIONS" --deletions "$DELETIONS" \
+            --scope-json /tmp/scope.json >> "$GITHUB_STEP_SUMMARY"
 
-  # Full report once the `test` workflow finishes: same fast signals plus the
-  # lint and test-suite conclusions. Skips silently for main-branch pushes
-  # (no PR attached).
+  # Full report once the `test` workflow finishes, event-driven (no polling).
+  # Active once this file is merged to the default branch. Skips silently for
+  # main-branch pushes (no PR attached).
   full:
     if: github.event_name == 'workflow_run'
     runs-on: ubuntu-latest
@@ -132,7 +155,7 @@ jobs:
           if [ -z "$PR_NUMBER" ]; then echo "no PR attached to this test run; nothing to report"; exit 0; fi
           echo "PR_NUMBER=$PR_NUMBER" >> "$GITHUB_ENV"
           LINT=$(gh api "repos/$REPO/actions/runs/$RUN_ID/jobs" --paginate -q '[.jobs[] | select(.name=="lint")][0].conclusion // "unknown"')
-          echo "LINT=$LINT" >> "$GITHUB_ENV"
+          echo "LINT_CONCLUSION=$LINT" >> "$GITHUB_ENV"
           gh pr view "$PR_NUMBER" --json files --jq '.files[].path' > /tmp/changed.txt
           gh pr view "$PR_NUMBER" --json body --jq '.body' > /tmp/body.md
           {
@@ -141,44 +164,19 @@ jobs:
             echo "HEAD_SHA=$(gh pr view "$PR_NUMBER" --json headRefOid --jq '.headRefOid')"
           } >> "$GITHUB_ENV"
           node scripts/review-scope-check.mjs --files-file /tmp/changed.txt --body-file /tmp/body.md > /tmp/scope.json
-      - name: Annotate scope drift as warnings
-        if: env.PR_NUMBER != ''
-        run: |
           node -e '
             const r = require("/tmp/scope.json");
             for (const f of r.drift) console.log(`::warning file=${f}::Scope drift: ${f} is not in the declared claim files`);
           '
       - name: Write the machine-readable report
         if: env.PR_NUMBER != ''
+        env:
+          PR_NUMBER: ${{ env.PR_NUMBER }}
+          HEAD_SHA: ${{ env.HEAD_SHA }}
+          ADDITIONS: ${{ env.ADDITIONS }}
+          DELETIONS: ${{ env.DELETIONS }}
         run: |
-          node -e '
-            const fs = require("node:fs");
-            const scope = JSON.parse(fs.readFileSync("/tmp/scope.json", "utf8"));
-            const report = {
-              check: "review-mechanical",
-              stage: "full",
-              pr: Number(process.env.PR_NUMBER),
-              head: process.env.HEAD_SHA,
-              lint: process.env.LINT,
-              tests: process.env.TEST_CONCLUSION,
-              files_changed: scope.changedCount,
-              lines_added: Number(process.env.ADDITIONS),
-              lines_deleted: Number(process.env.DELETIONS),
-              scope: { verdict: scope.verdict, drift: scope.drift, declared: scope.declared },
-              generated_at: new Date().toISOString(),
-            };
-            const driftLine = report.scope.verdict === "drift"
-              ? `⚠️ **scope drift**: ${report.scope.drift.join(", ")} — reviewer acknowledges`
-              : report.scope.verdict === "undeclared"
-                ? "ℹ️ no `claim-files` declared in the PR body — reviewer checks scope by hand"
-                : "✅ diff stays inside the declared claim files";
-            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,
-              `## review-mechanical report\n\n` +
-              `| signal | result |\n|---|---|\n` +
-              `| lint | ${report.lint} |\n` +
-              `| tests | ${report.tests} |\n` +
-              `| files changed | ${report.files_changed} |\n` +
-              `| lines + / − | ${report.lines_added} / ${report.lines_deleted} |\n` +
-              `| claim scope | ${report.scope.verdict} |\n\n${driftLine}\n\n` +
-              `<!-- review-mechanical-report -->\n\`\`\`json\n${JSON.stringify(report, null, 2)}\n\`\`\`\n`);
-          '
+          node scripts/review-mechanical-report.mjs --stage full --pr "$PR_NUMBER" \
+            --head "$HEAD_SHA" --lint "$LINT_CONCLUSION" --tests "$TEST_CONCLUSION" \
+            --additions "$ADDITIONS" --deletions "$DELETIONS" \
+            --scope-json /tmp/scope.json >> "$GITHUB_STEP_SUMMARY"
