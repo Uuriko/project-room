@@ -3134,10 +3134,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // Stage bytes, list them, then commit a staged file onto a message.
       const roomFilesMatch = /^\/api\/rooms\/([^/]{1,384})\/files$/.exec(url.pathname);
       const roomFileCommitMatch = /^\/api\/rooms\/([^/]{1,384})\/files\/([^/]{1,384})\/commit$/.exec(url.pathname);
-      if (roomFilesMatch || roomFileCommitMatch) {
-        const roomId = pathId((roomFilesMatch || roomFileCommitMatch)[1]);
+      // FO-PARITY-FILE-GET: REST download of one file, the same payload as MCP room_get_file.
+      const roomFileItemMatch = /^\/api\/rooms\/([^/]{1,384})\/files\/([^/]{1,384})$/.exec(url.pathname);
+      if (roomFilesMatch || roomFileCommitMatch || roomFileItemMatch) {
+        const roomId = pathId((roomFilesMatch || roomFileCommitMatch || roomFileItemMatch)[1]);
         const fileId = roomFileCommitMatch ? pathId(roomFileCommitMatch[2]) : null;
-        const writing = req.method === "POST";
+        const itemId = roomFileItemMatch ? pathId(roomFileItemMatch[2]) : null;
+        const writing = req.method === "POST" && !itemId;
         const selected = roomCredentials(req, url);
         const fence = selected.mode === "account" ? accountBinding(req, null) : expectedBinding(req);
         const auth = roomAuth(selected, roomId, fence);
@@ -3150,6 +3153,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           if (!granted) reject(403, "insufficient_scope", `API key lacks the ${requiredScope} scope`);
         }
         if (!writing) {
+          if (itemId) {
+            if (!["GET", "HEAD"].includes(req.method)) reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET" });
+            rate(`read:${auth.credentialHash}`, 600);
+            return json(res, 200, store.roomAttachments.get(selected.token, roomId, itemId), req.method === "HEAD");
+          }
           if (!["GET", "HEAD"].includes(req.method) || fileId) reject(405, "method_not_allowed", "Method not allowed", { Allow: fileId ? "POST" : "GET" });
           rate(`read:${auth.credentialHash}`, 600);
           return json(res, 200, store.roomAttachments.list(selected.token, roomId), req.method === "HEAD");

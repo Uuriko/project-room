@@ -65,4 +65,19 @@ test("room file routes stage a composer upload and commit it onto a message", as
 
   const listed = await (await request("/api/rooms/commons/files")).json();
   assert.equal(listed.files.some(file => file.id === "file-1" && file.messageId === "msg-1" && file.state === "committed"), true);
+
+  // FO-PARITY-FILE-GET: REST downloads the same bytes MCP room_get_file returns.
+  const fetched = await request("/api/rooms/commons/files/file-1");
+  assert.equal(fetched.status, 200);
+  const fetchedBody = await fetched.json();
+  assert.equal(fetchedBody.attachment.id, "file-1");
+  assert.equal(fetchedBody.attachment.state, "committed");
+  assert.equal(fetchedBody.attachment.encoding, "base64");
+  assert.equal(Buffer.from(fetchedBody.attachment.data, "base64").toString(), "hello room");
+  assert.deepEqual(fetchedBody, store.roomAttachments.get(human, "commons", "file-1"));
+  assert.equal((await request("/api/rooms/commons/files/file-1", { token: null })).status, 401);
+  assert.equal((await request("/api/rooms/commons/files/missing-file")).status, 404);
+  const wrongMethod = await request("/api/rooms/commons/files/file-1", { method: "POST", data: {} });
+  assert.equal(wrongMethod.status, 405);
+  assert.equal(wrongMethod.headers.get("allow"), "GET");
 });

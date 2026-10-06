@@ -1685,6 +1685,39 @@ paths:
           description: File or request exceeds the room attachment limit
         '422':
           description: Attachment was rejected
+  /api/rooms/{roomId}/files/{id}:
+    get:
+      summary: Download one room file
+      description: |
+        Returns one staged or committed room file with its bytes. The payload
+        is the same as MCP room_get_file: attachment metadata, sha256,
+        encoding "base64", and canonical base64 in attachment.data. Current
+        room members can read files visible to them. A file that is not
+        visible to the caller is 404, so the id does not leak existence.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: The file with its bytes
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  attachment: { type: object }
+        '401':
+          description: No room credential
+        '404':
+          description: File not found or not visible to the caller
+        '410':
+          description: The file was discarded, expired, or deleted
+        '422':
+          description: The file id is not valid
   /api/rooms/{roomId}/files/{id}/commit:
     post:
       summary: Commit a staged room file onto a message
