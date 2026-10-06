@@ -4111,6 +4111,8 @@ function syncComposerHint() {
   const input = $("#message-input");
   input.title = hint;
   input.setAttribute("aria-description", hint);
+  const caption = $("#composer-hint");
+  if (caption) caption.textContent = hint;
   input.enterKeyHint = touchKeyboard.matches ? "enter" : "send";
 }
 touchKeyboard.addEventListener("change", syncComposerHint);

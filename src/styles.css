@@ -1408,6 +1408,14 @@ summary { overflow-wrap: anywhere; }
   .composer-add-label { display: inline; white-space: normal; }
   .composer-row #request-reply { margin-left: auto; min-width: 0; max-width: 100%; white-space: normal; }
 }
+/* #1607: the composer send hint is a visible caption under the row, not just
+   a title tooltip. Coarse pointers also get the 44px touch target on the
+   composer "New work" button and the suggestion chips. */
+.composer-hint { margin: .25rem 0 0; padding: 0 .25rem; }
+@media (pointer: coarse) {
+  .composer-add { width: 44px; min-width: 44px; height: 44px; min-height: 44px; padding: .3rem; }
+  .suggestion-chip, .suggestion-dismiss { min-height: 44px; }
+}
 /* 320px at large text cannot fit New work, Request a reply, and Send on one
    line. New work takes the row above; the request wraps beside Send. */
 @media (max-width: 340px) {
