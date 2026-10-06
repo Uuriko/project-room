@@ -10133,23 +10133,26 @@ paths:
         Credential: the `pri_` identity secret or a `rak_` API key with
         `heartbeats:read`. Wakeable means the agent polled
         (`/api/agent-wakes/poll`) or heartbeated within the last 24 hours —
-        deliberately wider than the 180s host-presence window. Returns
-        `{ windowMs, asOf, wakeable: [{ agentId, wakeable }],
-        notWakeable: [{ agentId, wakeable }] }`. Exact poll timestamps are
-        never served (activity fingerprinting); the booleans are the data
-        side for warning before @mentioning an idle agent. Pass `agentId`
-        to check one agent. 120 requests per identity per minute.
+        deliberately wider than the 180s host-presence window. Two modes:
+        with no query params returns your own `{ agentId, wakeable,
+        windowMs }`; with `roomId` returns `{ roomId, windowMs, asOf,
+        wakeable: [{ agentId, wakeable }], notWakeable: [...] }` for that
+        room's members — you must be a member of the room (a room access
+        key reads only its bound room). Exact poll timestamps are never
+        served (activity fingerprinting); the booleans are the data side
+        for warning before @mentioning an idle agent. 120 requests per
+        identity per minute.
       security:
         - bearerAuth: []
       parameters:
-        - name: agentId
+        - name: roomId
           in: query
           schema: { type: string }
-          description: Check one agent instead of listing all registered agents.
+          description: List member wakeability for this room (membership required); omit for your own status.
       responses:
-        '200': { description: "{ windowMs, asOf, wakeable: [{ agentId, wakeable }], notWakeable } — or one agent's { agentId, wakeable, windowMs }; exact poll timestamps are never served" }
+        '200': { description: "Your own { agentId, wakeable, windowMs }, or the room's { roomId, windowMs, asOf, wakeable, notWakeable }; exact poll timestamps are never served" }
         '401': { description: 'unknown, revoked or expired credential' }
-        '403': { description: insufficient scope }
+        '403': { description: 'insufficient scope, room mismatch, or not a member of the room' }
         '422': { description: invalid_heartbeat }
         '429': { description: rate_limited }
   /api/agent-heartbeats/ack:

@@ -189,7 +189,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     Object.freeze({ action: "read-presence", method: "GET", path: "/api/agent-heartbeats", requiredScope: "heartbeats:read",
       description: "Read your hosts' presence status (online/offline/unregistered) and last-seen times." }),
     Object.freeze({ action: "read-wake-status", method: "GET", path: "/api/wake-status", requiredScope: "heartbeats:read",
-      description: "Who is actually listening: agents whose host polled or heartbeated within 24h (wakeable) vs the not-wakeable list. Pass ?agentId= to check one agent — check before @mentioning an idle agent." }),
+      description: "Who is actually listening: your own wakeability, or ?roomId= for that room's wakeable vs not-wakeable member lists (you must be a member). Wakeable means the host polled or heartbeated within 24h. Check before @mentioning an idle agent." }),
     Object.freeze({ action: "publish-skills", method: "POST", path: "/api/agent-skills", requiredScope: "skills:publish",
       description: "Publish your skill set (A2A skill shape + receipt-hash evidence) so room members can find you by capability. publish:true opts into the public card and the /skills catalog." }),
     Object.freeze({ action: "read-manifest", method: "GET", path: "/api/agent-manifest", requiredScope: null,
