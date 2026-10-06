@@ -38,7 +38,7 @@ Qualification recorded so far
 - Protocol/schema55/55; substantive recovery restart182 initialized tables
   with real assistant configuration/invocation/claim fixtures, not exemptions.
 - Catalog freshness, i18n, route inventory/docs, public package closure, design
-  ratchets and module coverage pass. i18n shrank to4712 hardcoded/521 concat;
+  ratchets and module coverage pass. i18n shrank to4711 hardcoded/521 concat;
   no increased baseline or new untested-module exception.
 - Earlier complete Worker68/68, storage OFF/ON10/10, ON storage/backfill36/36,
   ON assistant/drops/invite/deletion31/31, actual Worker OFF/ON2/2, recovery10/10,
@@ -61,8 +61,13 @@ Remaining release checkpoint
   are integrated. Actual initialized inventory192, schema38. Combined immutable
   c007 qualification:170/170 Node owners,69/69 Worker,2/2 real human browser.
   Verification/privacy/scanner65/65 and48/48; UI coverage79/79.
-- Finish canonical public HTML entrance redirect and portable Mac CLI fixture
-  qualification, then verify final lint/public inventories and runtime closure.
+- Public entry6de89ddd integrated:90/90 Node owners, desktop/mobile real
+  Worker/browser1/1, exact runtime3/3; invite/query/fragment forwarding preserved.
+- Mac host repair54e7fb66 integrated:13/13 on Node24 and26, no skips.
+  Portable BSD sed inverse and output/doctor fixtures repaired; historical
+  serialized uninstall commands are not automatically state-migrated.
+- Final combined lint/public inventories/runtime and exact-head hosted gates
+  remain before merge/deploy.
 - Run final combined Worker/schema/recovery/packaging checks, push the final
   branch and obtain required exact-head hosted checks. Merge without bypasses.
 - Require test + schema-gate success on exact resulting main before one deploy.
@@ -83,7 +88,11 @@ Mac and configuration limits
   OS privacy grants, real provider login and personal-data actions are separate.
 - No remote computer enrollment transport, automatic model launch, universal
   links, APNs or signed updater is supplied by this checkpoint.
-- ROOM_BODIES_AT_REST remains OFF. Before any rollback to older code after
+- This rollout explicitly pins ROOM_BODIES_AT_REST=0 on both Workers; other
+  existing variables remain preserved. Previous live binding value is unverified;
+  previous live source7d114379 has no body-storage implementation. This is a
+  rollout setting, not a repair for previously stored body references.
+  Before any rollback to older code after
   enabling it, back up and rehydrate EVERY room under new code; OFF alone
   repairs only subsequently touched projections. No bulk operator Worker RPC.
 - Schema38 migration is forward-only; an older schema37 binary is not assumed
