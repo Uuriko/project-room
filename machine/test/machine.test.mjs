@@ -296,7 +296,7 @@ test.describe("room-machine", { concurrency: false }, () => {
   test("uninstall reverts pmset, the pf anchor, and the local-network defaults", async () => {
     const home = homeDir();
     // Disposable pf.conf: never touch the host's real /etc/pf.conf.
-    const pfConf = join(home, "pf.conf");
+    const pfConf = join(home, "owner's pf rules.conf");
     writeFileSync(pfConf, "scrub-anchor \"com.apple/*\"\n");
     const env = machineEnv(home, { ROOM_MACHINE_PF_CONF: pfConf });
     await spawnContext.run({ env }, async () => {
@@ -458,10 +458,19 @@ test.describe("room-machine", { concurrency: false }, () => {
     assert.equal(report.ok, true, report.body);
     const arch = spawnSync("uname", ["-m"], { encoding: "utf8" }).stdout.trim();
     assert.match(report.body, new RegExp(`arch: ${arch}`));
-    assert.match(report.body, /macos: not measured/);
-    assert.match(report.body, /chip: not measured/);
+    // Compare reported host facts with independent probes, not Linux-only
+    // absence assumptions. A real Mac must report its measured chip/OS.
+    for (const [key, command, args] of [
+      ["macos", "sw_vers", ["-productVersion"]],
+      ["chip", "sysctl", ["-n", "machdep.cpu.brand_string"]],
+    ]) {
+      const probe = spawnSync(command, args, { encoding: "utf8" });
+      const expected = probe.status === 0 && probe.stdout.trim() ? probe.stdout.trim() : "not measured";
+      assert.equal(report.facts[key], expected);
+      assert.ok(report.body.split("\n").includes(`${key}: ${expected}`));
+    }
     assert.match(report.body, /lume: lume 0\.6\.0-fake/);
-    assert.equal(report.body.includes("Apple M"), false);
+
     const events = await get(origin, "/api/rooms/commons/events?after=0&limit=100", secret);
     assert.equal(events.status, 200);
     assert.equal(events.json.events.some(entry => String(entry.event?.data?.body ?? "").includes(`arch: ${arch}`)), true);
