@@ -31,7 +31,9 @@ const keyPair = generateKeyPair();
 // Envelope fields are assigned directly (instead of via
 // attachCardSignatureEnvelope, which hardcodes the production pinned key)
 // so the fixture uses the test keypair end to end.
-const buildSignedCard = () => {
+// `deployed` mirrors the served card, which names its own build
+// (deploy/agent-discovery.mjs deployedInfo()); omit it to model older cards.
+const buildSignedCard = (revision = REVISION, { deployed = false } = {}) => {
   const card = {
     name: "Test Room",
     description: "consistency fixture",
@@ -39,6 +41,7 @@ const buildSignedCard = () => {
     capabilities: { streaming: false },
     skills: [],
     version: "1",
+    ...(deployed ? { deployed: { revision } } : {}),
   };
   const signature = signCard({ agentId: AGENT_ID, card, privateKey: keyPair.privateKey });
   const withEnvelope = {
@@ -47,7 +50,7 @@ const buildSignedCard = () => {
     signatureAgentId: AGENT_ID,
     publicKey: keyPair.publicKey,
     cardSignature: signature,
-    signedRevision: REVISION,
+    signedRevision: revision,
   };
   withEnvelope.signatures = [
     signCardJws({ card: withEnvelope, privateKey: keyPair.privateKey, keyId: KEY_ID, jku: JKU }),
@@ -129,25 +132,101 @@ test("checkAgentCardDoor passes when every fetch is signed and verifying", async
   assert.deepEqual(failures, []);
 });
 
-test("checkAgentCardDoor fails when the fetch sequence flaps signed/unsigned (#1524)", async () => {
-  const signed = JSON.stringify(buildSignedCard());
+// Fake clock for the propagation window: sleep advances time, nothing waits.
+const fakeClock = () => {
+  let t = 0;
+  return { now: () => t, sleep: async ms => { t += ms; } };
+};
+const PREVIOUS = "b187c345c6c2ec468c0752614fc706c269b97bcf";
+const doorUrl = "https://example.test/.well-known/agent-card.json";
+const sequence = bodies => {
   let n = 0;
   const get = async () => {
-    n += 1;
-    // 1 signed fetch in 15, like the QA-b production observation.
-    const body = n === 7 ? signed : JSON.stringify({ signed: false, name: "x" });
+    const body = bodies(++n);
     return { status: 200, json: JSON.parse(body), ms: 1 };
   };
+  return { get, count: () => n };
+};
+
+test("checkAgentCardDoor fails when the fetch sequence flaps signed/unsigned (#1524)", async () => {
+  const signed = JSON.stringify(buildSignedCard());
+  const unsigned = JSON.stringify({ signed: false, name: "x" });
+  // 1 signed fetch in 15, like the QA-b production observation — forever.
+  const seq = sequence(n => (n % 15 === 7 ? signed : unsigned));
+  const clock = fakeClock();
+  const stats = {};
   const failures = await checkAgentCardDoor({
-    url: "https://example.test/.well-known/agent-card.json",
-    fetches: 15, gapMs: 0, get, ...opts,
+    url: doorUrl, fetches: 10, gapMs: 1500, waitMs: 90000, get: seq.get, ...clock, ...opts, stats,
   });
   assert.ok(failures.length > 0, "expected the flapping sequence to fail");
-  // Every failure names its fetch; exactly the 14 unsigned fetches fail —
-  // the single signed fetch (#7) passes.
-  const failedFetches = new Set(
-    failures.map(f => Number(/^fetch #(\d+):/.exec(f)?.[1])).filter(Number.isInteger),
-  );
-  assert.deepEqual([...failedFetches].sort((a, b) => a - b),
-    [1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15]);
+  assert.ok(failures.some(f => f.includes("signed:false")), `got: ${failures.join("; ")}`);
+  assert.ok(failures.at(-1).startsWith("not converged"), `got: ${failures.at(-1)}`);
+  assert.equal(stats.converged, false);
+  assert.ok(clock.now() >= 90000, "the door used the whole window before failing");
+  // The lone signed fetch never counts as a converged door.
+  assert.ok(stats.attempts > 15);
+});
+
+test("checkAgentCardDoor tolerates a previous build still propagating, then converges (run 37392991641)", async () => {
+  const fresh = JSON.stringify(buildSignedCard(REVISION, { deployed: true }));
+  const stale = JSON.stringify(buildSignedCard(PREVIOUS, { deployed: true }));
+  // Production: fetches #1-#6 carried the previous build's (validly signed) card.
+  const seq = sequence(n => (n <= 6 ? stale : fresh));
+  const stats = {};
+  const failures = await checkAgentCardDoor({
+    url: doorUrl, fetches: 10, gapMs: 1500, waitMs: 90000, get: seq.get, ...fakeClock(), ...opts, stats,
+  });
+  assert.deepEqual(failures, []);
+  assert.equal(stats.converged, true);
+  assert.equal(stats.staleFetches, 6);
+  // Ten consecutive passing fetches AFTER the last stale one.
+  assert.equal(seq.count(), 16);
+});
+
+test("checkAgentCardDoor resets the streak when a stale card reappears", async () => {
+  const fresh = JSON.stringify(buildSignedCard(REVISION, { deployed: true }));
+  const stale = JSON.stringify(buildSignedCard(PREVIOUS, { deployed: true }));
+  const seq = sequence(n => (n === 1 || n === 4 ? stale : fresh));
+  const failures = await checkAgentCardDoor({
+    url: doorUrl, fetches: 5, gapMs: 1500, waitMs: 90000, get: seq.get, ...fakeClock(), ...opts,
+  });
+  assert.deepEqual(failures, []);
+  // #2-#3 pass, #4 stale resets, #5-#9 are the five consecutive passes.
+  assert.equal(seq.count(), 9);
+});
+
+test("checkAgentCardDoor fails a persistent previous-build card once the window closes", async () => {
+  const stale = JSON.stringify(buildSignedCard(PREVIOUS, { deployed: true }));
+  const seq = sequence(() => stale);
+  const clock = fakeClock();
+  const stats = {};
+  const failures = await checkAgentCardDoor({
+    url: doorUrl, fetches: 10, gapMs: 1500, waitMs: 90000, get: seq.get, ...clock, ...opts, stats,
+  });
+  assert.ok(failures.some(f => f.includes(`signedRevision "${PREVIOUS}" does not match deployed revision ${REVISION}`)), `got: ${failures.join("; ")}`);
+  assert.ok(failures.at(-1).startsWith("not converged"), `got: ${failures.at(-1)}`);
+  assert.equal(stats.converged, false);
+  assert.ok(clock.now() >= 90000 && clock.now() < 90000 + 1500 * 2);
+});
+
+test("checkAgentCardDoor fails at once when the target build serves a bad card (no retry)", async () => {
+  const card = buildSignedCard(REVISION, { deployed: true });
+  card.name = "Impostor Room"; // signature no longer verifies
+  const tampered = JSON.stringify(card);
+  const seq = sequence(() => tampered);
+  const failures = await checkAgentCardDoor({
+    url: doorUrl, fetches: 10, gapMs: 1500, waitMs: 90000, get: seq.get, ...fakeClock(), ...opts,
+  });
+  assert.equal(seq.count(), 1, "a broken card from the new build must not be retried");
+  assert.ok(failures.some(f => f.startsWith("fetch #1:") && f.includes("does not verify")), `got: ${failures.join("; ")}`);
+});
+
+test("checkAgentCardDoor fails at once when the target build serves an unsigned card", async () => {
+  const unsigned = JSON.stringify({ signed: false, name: "x", deployed: { revision: REVISION } });
+  const seq = sequence(() => unsigned);
+  const failures = await checkAgentCardDoor({
+    url: doorUrl, fetches: 10, gapMs: 1500, waitMs: 90000, get: seq.get, ...fakeClock(), ...opts,
+  });
+  assert.equal(seq.count(), 1);
+  assert.ok(failures.some(f => f.includes("signed:false")), `got: ${failures.join("; ")}`);
 });
