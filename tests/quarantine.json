@@ -13,6 +13,20 @@
       "reason": "p95 timing assertion (list p95 < 50 ms over 10 samples) fails non-deterministically on loaded/slow VMs; reproduced 2026-10-05 failing 5 of 7 runs on pristine main (e.g. `list p95 58.3 ms`). All functional board assertions stay in the blocking suite; only the timing assertion is quarantined.",
       "repair_by": "2026-10-19",
       "test": "tests/work-claim-integrity.test.js > the Board list endpoint p95 stays under the 50 ms budget"
+    },
+    {
+      "test": "scripts/board-browser-check.mjs > owners link a draft PR, reconcile held responses, and refresh a changed claim without resending",
+      "reason": "Fails intermittently on green main with 'Expected values to be strictly equal: false !== true' (boolean assertion, ~2.1s). Failed on main runs 37512753096 (2026-10-06T18:37Z, head 2d808362) and 37504564917 (2026-10-06T17:34Z, head 742a25b50c); passed on main runs 37514808041 (18:53Z), 37509966421, 37508713760, 37504619530 the same day. Non-deterministic on the same green tree => timing/harness flake, not product breakage.",
+      "owner": "jill",
+      "quarantined_at": "2026-10-06",
+      "repair_by": "2026-10-20"
+    },
+    {
+      "test": "scripts/board-browser-check.mjs > waiting prerequisites stay visible, link by keyboard, and become claimable only when ready",
+      "reason": "Fails intermittently on green main with 'locator.waitFor: Timeout 8000ms exceeded' waiting for #board-dialog to become visible (dialog resolved to hidden 20x). Failed on main run 37506438368 (2026-10-06T17:48Z, head dddbee1a); passed on main runs 37514808041 (18:53Z), 37509966421, 37508713760, 37504619530 the same day. Non-deterministic on the same green tree => browser timing flake, not product breakage.",
+      "owner": "jill",
+      "quarantined_at": "2026-10-06",
+      "repair_by": "2026-10-20"
     }
   ]
 }
