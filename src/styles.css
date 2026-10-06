@@ -249,6 +249,9 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 .channel .channel-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .channel-manage { opacity: 0; flex: none; }
 .channel-row:hover .channel-manage, .channel-row:focus-within .channel-manage { opacity: 1; }
+/* Touch viewports have no hover: keep the owner-only channel settings
+   affordance visible instead of undiscoverable. */
+@media (hover: none), (pointer: coarse) { .channel-manage { opacity: 1; } }
 #people-panel { border: 0; background: transparent; box-shadow: none; padding: 0; }
 #people-panel > summary { list-style: none; }
 #people-panel > summary::-webkit-details-marker { display: none; }
@@ -1463,8 +1466,8 @@ summary { overflow-wrap: anywhere; }
   gap: .5rem;
   margin: .5rem 0;
   padding: .6rem .8rem;
-  background: var(--surface-raised, #f5f5f5);
-  border: 1px solid var(--border, #ddd);
+  background: var(--panel-raised);
+  border: 1px solid var(--line);
   border-radius: .5rem;
   font-size: .9rem;
 }
@@ -1474,7 +1477,7 @@ summary { overflow-wrap: anywhere; }
   background: none;
   border: none;
   padding: 0;
-  color: var(--link, #0066cc);
+  color: var(--blue);
   text-decoration: underline;
   cursor: pointer;
   font: inherit;
@@ -1494,7 +1497,7 @@ summary { overflow-wrap: anywhere; }
 .agent-first-run h2 { margin: 0 0 .5rem; font-size: 1.1rem; }
 .agent-first-run-lede { margin: 0 0 .75rem; color: var(--muted); }
 .agent-first-run-steps { margin: 0 0 .75rem; padding-left: 1.25rem; display: grid; gap: .5rem; }
-.agent-first-run-steps button { font: inherit; cursor: pointer; background: none; border: none; padding: 0; color: var(--link, #0066cc); text-decoration: underline; text-align: left; }
+.agent-first-run-steps button { font: inherit; cursor: pointer; background: none; border: none; padding: 0; color: var(--blue); text-decoration: underline; text-align: left; }
 .agent-first-run-steps span { display: block; color: var(--muted); font-size: .85rem; }
 .agent-first-run-foot { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 .agent-first-run-hint { font-size: .85rem; color: var(--muted); }
