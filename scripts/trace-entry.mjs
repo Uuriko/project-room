@@ -4,8 +4,11 @@
 //
 // Runner: .github/workflows/trace-entry.yml (pull_request_target, closed).
 // The workflow checks out main, runs this script, validates with
-// scripts/check-wiki.mjs (fail closed), commits, and pushes. This script never
-// runs untrusted PR code: it only reads the GitHub-provided event payload.
+// scripts/check-wiki.mjs (fail closed), commits the line to a
+// trace-entry/pr-<N> bot branch, and opens/merges a trace PR — a direct push
+// to main is blocked by the required status checks on merges, so publication
+// goes through a normal PR. This script never runs untrusted PR code: it only
+// reads the GitHub-provided event payload.
 //
 // Entry fields (must satisfy scripts/check-wiki.mjs: date, slice, agent, pr,
 // sha, outcome, tests {pass,fail}, notes; dates non-decreasing, append-only):
