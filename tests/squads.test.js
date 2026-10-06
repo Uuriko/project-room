@@ -162,6 +162,25 @@ test("routes: squad roster is owner-managed; members can leave; owner can disban
   assert.ok(listed.json.squads.find(s => s.id === id && s.state === "disbanded"), "disbanded squads stay listed with state");
 });
 
+// --- REST: roster cap ---------------------------------------------------------------
+
+test("routes: squad roster caps at 12 members", async t => {
+  const f = await serve(t);
+  for (let i = 0; i < 13; i++) {
+    f.cmd(f.ownerKey, T.MEMBER_ADDED, { memberId: `m${i}`, displayName: `M${i}`, kind: "agent", permissions: [], accountableHumanId: "owner" });
+  }
+  const ids = Array.from({ length: 13 }, (_, i) => `m${i}`);
+  const over = await f.squads("POST", f.ownerKey, { name: "big", memberIds: ids });
+  assert.equal(over.status, 422, "owner + 13 would exceed the cap");
+  assert.equal(over.json.error.code, "squad_roster_full");
+  const ok = await f.squads("POST", f.ownerKey, { name: "ok", memberIds: ids.slice(0, 11) });
+  assert.equal(ok.status, 201, "owner + 11 = 12 members fits the cap");
+  const id = ok.json.squad.id;
+  const add = await f.squads("POST", f.ownerKey, { add: ["m11", "m12"] }, `/${id}/members`);
+  assert.equal(add.status, 422, "growing past the cap is refused");
+  assert.equal(add.json.error.code, "squad_roster_full");
+});
+
 // --- @squad fanout ---------------------------------------------------------------
 
 test("@squad/<name> fans out to one mention row per active member, never the sender", async t => {
@@ -232,6 +251,9 @@ test("mcp: squads_list and squads_get read squads", async t => {
   const names = listed.result.tools.map(tool => tool.name);
   assert.ok(names.includes("squads_list"), "squads_list is in the hosted catalog");
   assert.ok(names.includes("squads_get"), "squads_get is in the hosted catalog");
+  assert.ok(names.includes("squads_create"), "squads_create is in the hosted catalog");
+  assert.ok(names.includes("squads_update_members"), "squads_update_members is in the hosted catalog");
+  assert.ok(names.includes("squads_disband"), "squads_disband is in the hosted catalog");
 
   const empty = valueOf(await rpcCall("squads_list", { roomId }, owner.secret));
   assert.deepEqual(empty.squads, []);
@@ -244,4 +266,33 @@ test("mcp: squads_list and squads_get read squads", async t => {
   const one = valueOf(await rpcCall("squads_get", { roomId, squadId: squad.id }, owner.secret));
   assert.equal(one.squad.id, squad.id);
   assert.equal(one.squad.goal, "ship it");
+});
+
+test("mcp: squads_create, squads_update_members, and squads_disband write squads", async t => {
+  const f = storeFixture(t);
+  const owner = f.store.identities.create("Owen");
+  const rooms = new AgentRooms(f.store);
+  const createdRoom = rooms.create(owner.secret, { title: "Squad room", purpose: "squad mcp writes", displayName: "Owen" });
+  const roomId = createdRoom.roomId;
+  const mcp = createHostedRoomMcp(f.store);
+  const rpcCall = (name, args, secret) => mcp(
+    { jsonrpc: "2.0", id: "c", method: "tools/call", params: { name, arguments: args } },
+    { authorization: `Bearer ${secret}` });
+  const valueOf = response => {
+    if (response.error) throw new Error(`mcp error: ${JSON.stringify(response.error)}`);
+    return response.result?.structuredContent ?? JSON.parse(response.result.content[0].text);
+  };
+
+  const created = valueOf(await rpcCall("squads_create", { roomId, name: "crew", goal: "ship it" }, owner.secret));
+  assert.equal(created.squad.name, "crew");
+  assert.equal(created.squad.goal, "ship it");
+  const ownerMemberId = created.squad.owner;
+  assert.ok(created.squad.members.includes(ownerMemberId), "the caller becomes owner and member");
+
+  const updated = valueOf(await rpcCall("squads_update_members",
+    { roomId, squadId: created.squad.id, add: [ownerMemberId] }, owner.secret));
+  assert.deepEqual(updated.squad.members, created.squad.members, "adding an existing member is a no-op");
+
+  const disbanded = valueOf(await rpcCall("squads_disband", { roomId, squadId: created.squad.id }, owner.secret));
+  assert.equal(disbanded.squad.state, "disbanded");
 });

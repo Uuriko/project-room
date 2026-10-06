@@ -35,4 +35,14 @@ test("squadsHtml marks disbanded squads and teaches the handle when empty", () =
   assert.ok(html.includes("disbanded"));
   const empty = squadsHtml([], members);
   assert.ok(empty.includes("@squad/&lt;name&gt;"), "empty state teaches the mention handle");
+  assert.ok(empty.includes("create squad"), "empty state offers the create action");
+});
+
+test("squadsHtml shows the disband button to the owner only", () => {
+  const ownerView = squadsHtml([squad()], members, "owner");
+  assert.ok(ownerView.includes('data-squad-action="disband"'), "owner sees disband");
+  const guestView = squadsHtml([squad()], members, "guest");
+  assert.ok(!guestView.includes('data-squad-action="disband"'), "non-owner sees no disband");
+  const gone = squadsHtml([squad({ state: "disbanded" })], members, "owner");
+  assert.ok(!gone.includes('data-squad-action="disband"'), "disbanded squads show no disband");
 });
