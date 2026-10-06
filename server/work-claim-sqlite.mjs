@@ -20,18 +20,21 @@ const WORK_CLAIM_FIELDS = ["id", "title", "state", "owner", "history", "claimedA
   "leaseStartAt", "leaseExpiresAt", "deliveryMode", "reviewPolicy", "reviewedBy",
   "attestations", "tags", "files", "fileBlocks", "blobs", "dependsOn", "pullRequest", "pullRequests", "updatedAt",
   "repo", "branch", "chain", "supersededBy", "workItemId",
-  "kind", "revision", "ci", "reviews", "historyOmitted", "readingAcks"];
+  "kind", "revision", "ci", "reviews", "historyOmitted", "readingAcks",
+  "deploy"]; // plan-pr-autolink: { revision, at } of the deploy that shipped the item
 const WORK_CLAIM_DEFAULTS = { title: null, state: "unclaimed", owner: null, history: [],
   claimedAt: null, leaseStartAt: null, leaseExpiresAt: null, deliveryMode: null,
   reviewPolicy: null, reviewedBy: null, attestations: [], tags: [], files: [], fileBlocks: {}, blobs: [],
   dependsOn: [], pullRequest: null, pullRequests: [], updatedAt: null,
   repo: null, branch: null, chain: [], supersededBy: null, workItemId: null,
-  kind: "work", revision: null, ci: null, reviews: [], readingAcks: {} };
+  kind: "work", revision: null, ci: null, reviews: [], readingAcks: {}, deploy: null };
 const decodeItem = text => {
   const item = decodeRow(text, { kind: WORK_CLAIM_ROW_KIND, fields: WORK_CLAIM_FIELDS, defaults: WORK_CLAIM_DEFAULTS });
   if (item.title == null) item.title = item.id; // workOf: title ?? id
   // SEC-2 history cap: only claims that dropped history carry the counter.
   if (item.historyOmitted == null) delete item.historyOmitted;
+  // plan-pr-autolink: deploy links are sparse; absent means never deployed.
+  if (item.deploy == null) delete item.deploy;
   return item;
 };
 

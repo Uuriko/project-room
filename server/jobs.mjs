@@ -4,6 +4,8 @@
 // stays disabled so an idle room does not wake for it.
 import { telegramConfig } from "./channel-adapters/telegram-config.mjs";
 import { syncClaimPullRequests } from "./claim-pr-sync.mjs";
+import { discoverUnlinkedPulls, linkDeployToSettledClaims } from "./claim-autolink.mjs";
+import { SOURCE_REVISION } from "./version.mjs";
 import { RETENTION_TABLES, runLiveStoreRetention } from "./retention-run.mjs";
 import { pruneAbuseRateBuckets } from "./abuse-rate-buckets.mjs";
 import { pruneOAuthProvider } from "./oauth-provider-store.mjs";
@@ -71,6 +73,34 @@ function claimDueAt(store, now) {
   if (!row?.n) return null;
   const due = Number(row.due);
   return Number.isFinite(due) ? due : now;
+}
+
+// plan-pr-autolink: the discovery poll runs when a live claim declares a
+// repo but carries no PR link yet. It stays quiet while the webhook is
+// fresh for that repo (webhookDeliveryStale in claim-autolink.mjs); this
+// only decides whether the job wakes at all.
+function autolinkDueAt(store, now) {
+  const row = read(store, `SELECT COUNT(*) AS n
+    FROM work_claims
+    WHERE (
+      json_extract(item_json, '$.data.state') IN ('claimed', 'in_progress', 'blocked')
+      AND typeof(json_extract(item_json, '$.data.repo')) = 'text'
+      AND (
+        json_extract(item_json, '$.data.pullRequests') IS NULL
+        OR json_array_length(json_extract(item_json, '$.data.pullRequests')) = 0
+      )
+      AND json_extract(item_json, '$.data.pullRequest.url') IS NULL
+    ) OR (
+      json_extract(item_json, '$.state') IN ('claimed', 'in_progress', 'blocked')
+      AND typeof(json_extract(item_json, '$.repo')) = 'text'
+      AND (
+        json_extract(item_json, '$.pullRequests') IS NULL
+        OR json_array_length(json_extract(item_json, '$.pullRequests')) = 0
+      )
+      AND json_extract(item_json, '$.pullRequest.url') IS NULL
+    )`);
+  if (!row?.n) return null;
+  return now;
 }
 
 function backfillPending(store) {
@@ -189,12 +219,27 @@ export const JOBS = Object.freeze([
     name: "claim-prs",
     cadenceMs: MINUTE_MS,
     runtimes: Object.freeze(["worker", "node"]),
-    enabled(_env, store) { return store ? claimDueAt(store, Date.now()) != null : true; },
-    disabledReason: () => "No linked pull request is waiting",
-    nextDueAt: (store, now) => claimDueAt(store, now),
+    enabled(_env, store) {
+      if (!store) return true;
+      const now = Date.now();
+      return claimDueAt(store, now) != null || autolinkDueAt(store, now) != null;
+    },
+    disabledReason: () => "No open pull request is waiting",
+    nextDueAt: (store, now) => claimDueAt(store, now) ?? autolinkDueAt(store, now),
     async run(store, ctx) {
       if (ctx.room?.refreshClaimPullRequests) return ctx.room.refreshClaimPullRequests();
-      return syncClaimPullRequests(store, { env: ctx.env, deadline: ctx.deadline });
+      const out = await syncClaimPullRequests(store, { env: ctx.env, deadline: ctx.deadline });
+      // plan-pr-autolink: poll fallback for repos without the webhook, and
+      // link the recorded deploy revision back to the items it shipped.
+      // Neither may fail the linked-PR poll above.
+      try {
+        const found = await discoverUnlinkedPulls(store, { env: ctx.env, deadline: ctx.deadline, nowMs: Date.now() });
+        const deployed = linkDeployToSettledClaims(store, { revision: SOURCE_REVISION, nowMs: Date.now() });
+        return { ...out, autolink: { discovered: found, deployed } };
+      } catch (error) {
+        console.error("claim autolink follow-up failed:", error?.message ?? error);
+        return out;
+      }
     }
   }),
   defineJob({
