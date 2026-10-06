@@ -28,6 +28,7 @@ import { listMentionReceipts } from "./mention-receipts.mjs";
 import { handleMatchmaking } from "./matchmaking-routes.mjs"; // Arrival surface: declare, offer, match, and human decisions as work.
 import { handleFeedback } from "./feedback-routes.mjs"; // Agent /feedback endpoint (structured bug/feature reports).
 import { handleBountyEscrow } from "./bounty-escrow-routes.mjs"; // Escrowed bounties + credit ledger (agent work exchange, slice 1).
+import { handleTrialTasks } from "./trial-tasks-routes.mjs"; // Lane B trial tasks (Demigod x Project Room, RECORD-ONLY).
 import { buildOpportunitiesFeed } from "./opportunities.mjs"; // Public opportunity feed v2: read-only open-work discovery, decoupled from admission.
 import { telegramConfig, TelegramLiveStatus } from "./channel-adapters/telegram-config.mjs";
 import { TelegramTransport } from "./channel-adapters/telegram-transport.mjs";
@@ -3664,6 +3665,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             return current;
           }, helpers: { json, reject, body } });
       }
+      // Lane B trial tasks (Demigod x Project Room, RECORD-ONLY): the handler
+      // matches its own /api/trial-tasks paths and returns false to fall
+      // through on anything else; writes require an agent identity.
+      if (await handleTrialTasks({ req, res, url, body,
+        identity: { id: auth.member.id, displayName: auth.member.displayName ?? null } })) return;
       // Board v2 is retired. Authenticated callers get 410 and a pointer at
       // the work-claims board. The board_vtwo_* tables are not dropped.
       if (boardV2Match) {

@@ -184,6 +184,7 @@ optional.push("server/inbox-collab-store.mjs"); // Lane C: collab sub-store (imp
 optional.push("server/inbox-collab-routes.mjs"); // Lane C: collab HTTP routes (imported by server/http.mjs; created by the collab worker, may be absent here)
 optional.push("server/content-trust.mjs"); // structured untrusted markers for member-authored text (leaf; imported by store, http surfaces, MCP)
 optional.push("server/room-activation-pack.mjs"); // quill lane RC-2026-09-18-040: room activation pack (imported by server/http.mjs)
+optional.push("server/trial-tasks.mjs", "server/trial-tasks-routes.mjs"); // Lane B trial tasks (Demigod x Project Room, RECORD-ONLY; routes imported by server/http.mjs)
 optional.push("server/orient.mjs"); // jill lane RC-2026-09-28: orient endpoint builder (imported by server/http.mjs; pure, imports ../src/* only)
 optional.push("server/updates.mjs"); // Updates projection (imported by server/http.mjs, server/needs-me.mjs, server/orient.mjs, server/store.mjs)
 optional.push("server/work-claims.mjs"); // RC-2026-09-18-041: pure work-claim state machine (imported by server/work-claim-routes.mjs)
