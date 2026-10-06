@@ -42,6 +42,7 @@ import {
 } from "../server/agent-heartbeats.mjs";
 import { WAKE_STATUS_ROUTES } from "../server/routes/wake-status.mjs";
 import { assertRouteRow } from "../server/routes/table.mjs";
+import { PURGE_TABLES } from "../server/purge-registry.mjs";
 
 const T0 = 1_750_000_000_000;
 
@@ -138,6 +139,18 @@ test("wake-status route-table row is well-formed", () => {
   assert.equal(typeof row.handler, "function");
 });
 
+test("agent_wake_polls is registered for identity purge", () => {
+  // Contract: purging an identity deletes its poll-activity row — no
+  // orphaned per-identity rows. Regression: the table shipped without a
+  // purge entry (Instinct-3 review on PR #1565). The operator-purge suite
+  // only scans room_id/identity_id/account_id columns, and this table is
+  // keyed by agent_id, so the registration needs its own pin.
+  const entry = PURGE_TABLES.find(e => e.table === "agent_wake_polls");
+  assert.ok(entry, "purge registry covers agent_wake_polls");
+  assert.equal(entry.action, "delete");
+  assert.deepEqual(entry.match.identity, ["agent_id"]);
+});
+
 // ---- HTTP integration ----
 
 async function startServer(t, f) {
@@ -186,11 +199,18 @@ test("GET /api/wake-status exposes the wakeable and not-wakeable lists", async t
   assert.equal(doc.windowMs, WAKEABLE_WINDOW_MS);
   assert.ok(doc.wakeable.some(e => e.agentId === live.identity.identityId), "live agent is wakeable");
   assert.ok(doc.notWakeable.some(e => e.agentId === idle.identity.identityId), "idle agent is not wakeable");
+  // Instinct-3 review (PR #1565): the HTTP surface coarsens — exact poll
+  // timestamps never leave the server (activity fingerprinting).
+  for (const e of [...doc.wakeable, ...doc.notWakeable]) {
+    assert.ok(!("lastPolledAt" in e), "no exact poll timestamps are served");
+    assert.equal(typeof e.wakeable, "boolean");
+  }
 
   // Single-agent lookup: the consumption point for the COMMS-02 warning.
   const one = await (await get(origin, `/api/wake-status?agentId=${idle.identity.identityId}`, live.credential)).json();
   assert.equal(one.agentId, idle.identity.identityId);
   assert.equal(one.wakeable, false);
+  assert.ok(!("lastPolledAt" in one), "single lookup is coarsened too");
 
   assert.equal((await get(origin, "/api/wake-status")).status, 401, "unauthenticated is refused");
 });

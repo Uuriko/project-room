@@ -15,16 +15,30 @@
 
 import { createHeartbeatActor, translateWith, requiredScope } from "../agent-plugin-routes.mjs";
 
+// Instinct-3 review (PR #1565): exact lastPolledAt is activity
+// fingerprinting — the HTTP surface coarsens to { agentId, wakeable } and
+// never serves raw poll timestamps. Server-side consumers (the COMMS-02
+// mention-target warning) use the exact in-process
+// store.agentHeartbeats.wakeStatusOf/wakeStatusList instead.
+const coarsen = wakeable => entry => Object.freeze({ agentId: entry.agentId, wakeable });
+
 export async function readWakeStatus(ctx) {
   const heartbeatActor = createHeartbeatActor({ store: ctx.store, bearer: ctx.bearer, reject: ctx.reject });
   const auth = heartbeatActor(ctx.req, requiredScope("heartbeats:read"));
   ctx.rate(`wake-status-read:${auth.identityId}`, 120);
   return translateWith(ctx.reject)(async () => {
     const agentId = ctx.url.searchParams.get("agentId");
-    const body = agentId !== null
-      ? ctx.store.agentHeartbeats.wakeStatusOf(agentId)
-      : ctx.store.agentHeartbeats.wakeStatusList();
-    return ctx.json(ctx.res, 200, body);
+    if (agentId !== null) {
+      const status = ctx.store.agentHeartbeats.wakeStatusOf(agentId);
+      return ctx.json(ctx.res, 200,
+        { agentId: status.agentId, wakeable: status.wakeable, windowMs: status.windowMs });
+    }
+    const list = ctx.store.agentHeartbeats.wakeStatusList();
+    return ctx.json(ctx.res, 200, {
+      windowMs: list.windowMs, asOf: list.asOf,
+      wakeable: Object.freeze(list.wakeable.map(coarsen(true))),
+      notWakeable: Object.freeze(list.notWakeable.map(coarsen(false))),
+    });
   })();
 }
 
