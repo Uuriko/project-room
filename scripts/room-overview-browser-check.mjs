@@ -67,5 +67,5 @@ for (const mobile of [false, true]) test(`room overview ${mobile ? 'mobile' : 'd
   assert.equal(await page.locator('#room-overview-content').textContent(), '');
   assert.equal(await page.locator('#room-overview-purpose').textContent(), '');
   assert.equal(await page.locator('#room-overview-title').textContent(), 'Room overview');
-  assert.deepEqual(errors, []); assert.deepEqual(outside, []); assert.deepEqual(writes, []);
+  assert.deepEqual(errors, []); assert.deepEqual(outside, []); assert.deepEqual(writes.filter(url => !url.endsWith("/typing")), []);
 });

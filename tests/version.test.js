@@ -31,7 +31,11 @@ test("GET /api/version returns the release receipt metadata without authenticati
   const head = await fetch(`${origin}/api/version`, { method: "HEAD" });
   assert.equal(head.status, 200);
   assert.equal(await head.text(), "");
-  assert.equal((await fetch(`${origin}/api/version`, { method: "POST" })).status, 404);
+  // #1529/#1537: a known liveness path with the wrong method is 405 with
+  // Allow, not a 404 that reads as "this path does not exist".
+  const wrongMethod = await fetch(`${origin}/api/version`, { method: "POST" });
+  assert.equal(wrongMethod.status, 405);
+  assert.equal(wrongMethod.headers.get("allow"), "GET, HEAD");
   // QA 2026-10-03 P2-1: a trailing slash must hit the route, not a 404 whose
   // "check access" hint misdirects on a public endpoint.
   const slashed = await fetch(`${origin}/api/version/`);

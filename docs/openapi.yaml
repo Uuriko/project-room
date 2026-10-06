@@ -1610,6 +1610,30 @@ paths:
           $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/InvalidInput'
+  /api/rooms/{roomId}/typing:
+    post:
+      summary: Send a typing heartbeat
+      description: |
+        Ephemeral typing indicator. Any active member may POST a heartbeat;
+        the beat expires server-side after 10 seconds with no explicit stop.
+        Heartbeats are never persisted and never enter the event log. Viewers
+        learn about typists via synthetic `typing` events on the SSE stream
+        (no `id:`, so Last-Event-ID resume is unaffected). The typist never
+        sees themselves in the typist list.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200':
+          description: Heartbeat recorded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  ttlMs: { type: integer, description: Milliseconds until the beat expires without a fresh heartbeat }
+        '401':
+          description: No room credential, or membership ended (unauthenticated)
   /api/rooms/{roomId}/files:
     get:
       summary: List staged and committed room files

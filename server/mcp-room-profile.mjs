@@ -744,9 +744,15 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
       return { jsonrpc: "2.0", id: requestId, error: { code: -32602, message: "Invalid initialization" } };
     }
     const negotiated = MCP_SUPPORTED_VERSIONS.includes(params.protocolVersion) ? params.protocolVersion : MCP_VERSION;
+    // MCP lets a server answer with another version it supports. Say so in
+    // _meta instead of swapping the client's version silently (#1529).
+    const versionNote = negotiated === params.protocolVersion ? {} : { _meta: { protocolVersionSubstituted: {
+      requested: params.protocolVersion, negotiated, supported: [...MCP_SUPPORTED_VERSIONS],
+      hint: "This server does not support the requested protocol version. Continue with the negotiated version, or disconnect." } } };
     return {
       jsonrpc: "2.0", id: requestId,
       result: {
+        ...versionNote,
         protocolVersion: negotiated,
         capabilities: { tools: {} },
         serverInfo: { name: ROOM_MCP_SERVER_NAME, version: ROOM_MCP_SERVER_VERSION },
