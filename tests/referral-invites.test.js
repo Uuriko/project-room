@@ -364,7 +364,7 @@ test("existing invite-code redemption still works alongside referral invites", a
 test("tier gate: t1_readonly agents cannot mint referral invites; t2, humans, and the owner can", async t => {
   const { store, origin, ownerKey } = await serve(t);
   const t2 = await enrollInviter(store, origin, ownerKey, "Inviter");
-  const t1 = await enrollInviter(store, origin, ownerKey, "Inviter Two");
+  const t1 = await enrollInviter(store, origin, ownerKey, "Inviter 2");
   demoteToReadonly(store.db, "commons", t1.identityId, { updatedBy: "owner" });
   store.command(ownerKey, "commons", { id: randomUUID(), type: T.MEMBER_ADDED,
     data: { memberId: "human1", displayName: "Human One", kind: "human", permissions: [] } });
