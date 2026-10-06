@@ -74,6 +74,10 @@ test("a solely owned personal room is archived and its messages and files are pu
     id: "secret-file", filename: "secret.txt", mediaType: "text/plain",
     data: Buffer.from("secret-bytes-p211").toString("base64")
   });
+  // Distinct cleanup risk: private record-only rail notes and exact-retry
+  // outputs must not survive personal-room account deletion.
+  ctx.f.store.command(key,roomId,{id:randomUUID(),type:T.MEMBER_ADDED,data:{memberId:"rail-agent",displayName:"Rail agent",kind:"agent",permissions:["accept_work"]}});
+  ctx.f.store.trialTasks.apply(roomId,"owner",{action:"create",requestId:"private-trial",taskId:"private-trial",candidateId:"rail-agent",buyerId:"owner",demigodReqId:"delete-room",title:SECRET,trialScope:{hoursMax:"1",deliverableShape:"other"},vettingRubric:[{criterion:"c1",weightBps:"10000"}],feePolicyRef:"record-only",budgetRecord:{note:SECRET}});
   const audit = ctx.f.store.db.prepare("SELECT COALESCE(MAX(revision),0) AS revision FROM account_access_events WHERE account_id=?").get(ctx.accountId);
   ctx.f.store.db.prepare("INSERT INTO account_access_events(account_id,revision,active,auth_epoch,reason,at) VALUES(?,?,?,?,?,?)")
     .run(ctx.accountId, audit.revision + 1, 1, 0, "deletion-audit", Date.now());
@@ -106,6 +110,7 @@ test("a solely owned personal room is archived and its messages and files are pu
   const rebuilt = ctx.f.store.rebuildProjection(roomId);
   assert.equal(rebuilt.state.room.archivedAt, room.state.room.archivedAt);
   assert.equal(rebuilt.state.messages.find(message => message.id === "secret-note").body, null);
+  for(const table of ["room_trial_tasks","room_trial_requests","room_vetting_keys","room_vetting_receipts","demigod_offer_profiles","demigod_offer_requests","demigod_contracts","demigod_contract_requests","buyer_signoff_loops","buyer_signoff_requests"]) assert.equal(ctx.f.store.db.prepare(`SELECT count(*) n FROM ${table} WHERE room_id=?`).get(roomId).n,0,`${table} personal data purged`);
 });
 
 test("a shared room with another owner transfers and the account is deleted", async t => {

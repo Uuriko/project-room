@@ -1,3 +1,4 @@
+import {RECORD_RAIL_ROUTES} from "./record-rails.mjs";
 // Declarative HTTP route table (batch RT).
 //
 // Every route that has left the legacy chain in server/http.mjs is one frozen
@@ -43,6 +44,7 @@ function unknownSchemaTypes(schema, out) {
 
 // Rows land here as groups leave the legacy chain. Do not push; replace the array.
 export const ROUTES = Object.freeze([...AUTH_ROUTES, ...ROOM_ASSISTANT_ROUTES,
+  ...RECORD_RAIL_ROUTES,
   ...DESKTOP_AUTH_ROUTES, ...INBOX_ROUTES, ...MEMBER_PERMISSION_ROUTES, ...AGENT_FLEET_ROUTES, ...WANTS_WORK_ROUTES, ...WORK_CLAIM_ROUTES, ...SPEND_GRANT_ROUTES, ...SPEND_PRICING_ROUTES, ...TYPING_ROUTES, ...CODE_DROP_ROUTES]);
 
 export function assertRouteRow(row) {
