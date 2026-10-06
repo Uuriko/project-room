@@ -10,6 +10,7 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { AgentRooms } from "../server/agent-rooms.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
+import { installFakeWebhookDns } from "./helpers/fake-webhook-dns.mjs";
 
 const JOIN_TOOLS = ["room_join_packet", "room_join_kits", "room_join_prompt", "room_mcp_snippet"];
 const WAKE_TOOLS = [
@@ -25,6 +26,9 @@ const PUSH_CRED = "push-bearer-not-a-secret";
 function serve(t) {
   const directory = mkdtempSync(join(tmpdir(), "room-mcp-wake-"));
   const store = new RoomStore(join(directory, "room.sqlite"));
+  // Test-only DNS: fixture webhook URLs (https://*.test) go through the
+  // fully fail-closed production gate, so a fake resolver stands in.
+  installFakeWebhookDns(store);
   const rooms = new AgentRooms(store);
   const server = createRoomServer({ store });
   return new Promise(resolve => server.listen(0, "127.0.0.1", () => {

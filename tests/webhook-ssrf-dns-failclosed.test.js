@@ -6,13 +6,14 @@
 // (resolveWebhookTarget refuses unresolvable names), so the stored URL could
 // never fire, but the registration itself was a lie.
 //
-// One narrow exception: RFC 2606 reserves .test, .example, and .invalid,
-// which can never resolve on the public internet. The agent-plugin-http
-// suite registers https://*.test URLs through this exact gate, so a
-// resolution failure for exactly these names stays acceptable. Any address
-// a resolver does return for them is still screened — the exception is not
-// a blanket bypass. The Workers path is untouched (it already fails closed
-// for every name; cloudflare/webhook-doh.check.mjs pins that).
+// The gate is fully fail-closed for EVERY name: there is no reserved-name
+// exemption in production code (Instinct-3 seq 4267 review of PR #1590).
+// Tests that need a resolvable fixture name inject a fake resolver through
+// the `lookup` option instead of relying on real DNS behavior — the
+// production module never touches the test seam.
+//
+// The Workers path is untouched (it already fails closed for every name;
+// cloudflare/webhook-doh.check.mjs pins that).
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -56,25 +57,27 @@ test("hw-sec-15-dns-failclosed: a public answer still registers", async () => {
   assert.equal(url, "https://hooks.example.com/room-events");
 });
 
-test("hw-sec-15-dns-failclosed: .test names stay acceptable when they do not resolve (agent-plugin-http escape)", async () => {
-  const url = await assertSubscriptionWebhookUrl("https://hooks.example.test/agent", { lookup: throwingLookup() });
-  assert.equal(url, "https://hooks.example.test/agent");
-  const bare = await assertSubscriptionWebhookUrl("https://sub.hooks.test/agent", { lookup: emptyLookup });
-  assert.equal(bare, "https://sub.hooks.test/agent");
-});
-
-test("hw-sec-15-dns-failclosed: .example and .invalid names stay acceptable when they do not resolve", async () => {
-  assert.equal(
-    await assertSubscriptionWebhookUrl("https://x.example/hook", { lookup: emptyLookup }),
-    "https://x.example/hook"
+test("hw-sec-15-dns-failclosed: .test names fail closed too — no production exemption", async () => {
+  // The production gate has no reserved-name carve-out: an unresolvable
+  // .test name is refused exactly like any other name.
+  await rejectsNotPublic(
+    assertSubscriptionWebhookUrl("https://hooks.example.test/agent", { lookup: throwingLookup() })
   );
-  assert.equal(
-    await assertSubscriptionWebhookUrl("https://x.invalid/hook", { lookup: throwingLookup() }),
-    "https://x.invalid/hook"
+  await rejectsNotPublic(
+    assertSubscriptionWebhookUrl("https://sub.hooks.test/agent", { lookup: emptyLookup })
   );
 });
 
-test("hw-sec-15-dns-failclosed: the escape does not bypass the private-address check", async () => {
+test("hw-sec-15-dns-failclosed: .example and .invalid names fail closed too", async () => {
+  await rejectsNotPublic(
+    assertSubscriptionWebhookUrl("https://x.example/hook", { lookup: emptyLookup })
+  );
+  await rejectsNotPublic(
+    assertSubscriptionWebhookUrl("https://x.invalid/hook", { lookup: throwingLookup() })
+  );
+});
+
+test("hw-sec-15-dns-failclosed: a reserved name resolving to private space is still refused", async () => {
   await assert.rejects(
     assertSubscriptionWebhookUrl("https://hooks.example.test/agent", { lookup: privateLookup("10.0.0.5") }),
     error => error instanceof WebhookSubscriptionError &&

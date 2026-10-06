@@ -226,18 +226,6 @@ export async function resolveWebhookTarget(url, options = {}) {
   return { url, addresses: answers };
 }
 
-// RFC 2606 reserves .test, .example, and .invalid for documentation and
-// testing — they are guaranteed never to resolve on the public internet,
-// so they can never become a real delivery target. .localhost is also
-// reserved but never reaches the DNS gate (assertPublicHost refuses it
-// synchronously). The trailing dot is already stripped by callers.
-const RESERVED_TEST_TLDS = new Set(["test", "example", "invalid"]);
-function isReservedTestName(hostname) {
-  const name = String(hostname ?? "").toLowerCase().replace(/\.$/, "");
-  if (!name) return false;
-  return RESERVED_TEST_TLDS.has(name.split(".").pop());
-}
-
 // Subscribe-time gate (QA2 finding P2-8). validateWebhookUrl already
 // refuses IP literals, localhost, and metadata names. On Node, also
 // dns.lookup({ all: true }) and refuse when any address is loopback,
@@ -245,12 +233,14 @@ function isReservedTestName(hostname) {
 // those. Callers await this before opening the write transaction. On Node
 // a lookup failure or an empty answer refuses the subscription — the
 // registration gate agrees with the dispatcher's fail-closed re-check —
-// except for RFC 2606 reserved names (.test/.example/.invalid), which can
-// never resolve and are tolerated so the agent-plugin-http suite's
-// https://*.test URLs keep working; any address a resolver does return for
-// them is still screened. On Workers a resolution failure refuses the
-// subscription for every name; delivery retries that failure instead of
-// treating it as allowed.
+// for every name, with no exemptions: a name that does not resolve cannot
+// be a real delivery target, and an exemption in production code is an
+// SSRF-shaped hole (Instinct-3 review, PR #1590 seq 4267). Tests that need
+// a fixture name to resolve inject a fake resolver through the `lookup`
+// option (dns.lookup-compatible); production wiring always passes the
+// real resolver. On Workers a resolution failure refuses the subscription
+// for every name; delivery retries that failure instead of treating it as
+// allowed.
 export async function assertAgentWebhookUrlPublic(url, options = {}) {
   const lookup = typeof options.lookup === "function" ? options.lookup : dns.lookup;
   // A non-public host or port already throws webhook_url_not_public here.
@@ -269,19 +259,16 @@ export async function assertAgentWebhookUrlPublic(url, options = {}) {
   }
   const bare = stripBrackets(host);
   if (parseIpv4(bare) !== null || parseIpv6(bare) !== null) return url;
-  // hw-sec-15-dns-failclosed: a name that does not resolve is refused.
-  // isReservedTestName is the one narrow exception (see above).
-  const reservedTestName = isReservedTestName(bare);
+  // hw-sec-15-dns-failclosed: a name that does not resolve is refused —
+  // fully fail-closed, no reserved-name exemption in production.
   let records;
   try {
     records = await lookup(bare, { all: true, verbatim: true });
   } catch {
-    if (reservedTestName) return url;
     fail("webhook_url_not_public", "webhook hostname does not resolve to a public address");
   }
   const answers = normalizeLookup(records);
   if (answers.length === 0) {
-    if (reservedTestName) return url;
     fail("webhook_url_not_public", "webhook hostname does not resolve to a public address");
   }
   for (const answer of answers) {
