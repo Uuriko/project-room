@@ -70,6 +70,23 @@ const held = async (f, id, by = "contrib") => {
   return out.value;
 };
 
+// Seed a Board with 431 done claims (400 recent + 30 old + 1 dependency
+// target) shared by the list/paging test and the quarantined p95 perf test.
+function seedBoardClaims(f) {
+  const dayMs = 86_400_000;
+  const seed = (id, atMs) => {
+    let item = createWork({ id, title: id }, { now: atMs, agentId: "owner" });
+    item = claimWork(item, "owner", { now: atMs, leaseHours: 1 });
+    item = updateWork(item, "owner", { state: "in_progress", now: atMs });
+    for (let i = 0; i < 20; i++) item = updateWork(item, "owner", { note: `step ${i}`, now: atMs });
+    item = updateWork(item, "owner", { state: "done", note: "finished", now: atMs });
+    f.store.workClaims.set("commons", item);
+  };
+  for (let i = 0; i < 400; i++) seed(`done-${String(i).padStart(3, "0")}`, Date.now() - dayMs);
+  for (let i = 0; i < 30; i++) seed(`old-${i}`, Date.now() - 30 * dayMs);
+  seed("needed", Date.now() - 30 * dayMs);
+}
+
 test("review notes come from reviewers, the owner, or claim managers", async t => {
   const f = roomFixture(t);
   await held(f, "noted");
@@ -187,30 +204,11 @@ test("claim history keeps 200 entries and the PR link precondition counts the dr
 
 test("the Board list pages done claims by age and summarizes history", async t => {
   const f = roomFixture(t);
-  const dayMs = 86_400_000;
-  const seed = (id, atMs) => {
-    let item = createWork({ id, title: id }, { now: atMs, agentId: "owner" });
-    item = claimWork(item, "owner", { now: atMs, leaseHours: 1 });
-    item = updateWork(item, "owner", { state: "in_progress", now: atMs });
-    for (let i = 0; i < 20; i++) item = updateWork(item, "owner", { note: `step ${i}`, now: atMs });
-    item = updateWork(item, "owner", { state: "done", note: "finished", now: atMs });
-    f.store.workClaims.set("commons", item);
-  };
-  for (let i = 0; i < 400; i++) seed(`done-${String(i).padStart(3, "0")}`, Date.now() - dayMs);
-  for (let i = 0; i < 30; i++) seed(`old-${i}`, Date.now() - 30 * dayMs);
-  seed("needed", Date.now() - 30 * dayMs);
+  seedBoardClaims(f);
   await created(f, "waiting", "owner", { dependsOn: ["needed"] });
 
   await f.call("owner", "list", { query: "?limit=200" });
-  const samples = [];
-  let page;
-  for (let i = 0; i < 10; i++) {
-    const started = performance.now();
-    page = await f.call("owner", "list", { query: "?limit=50" });
-    samples.push(performance.now() - started);
-  }
-  samples.sort((a, b) => a - b);
-  assert.ok(samples[Math.ceil(samples.length * 0.95) - 1] < 50, `list p95 ${samples.at(-1).toFixed(1)} ms`);
+  const page = await f.call("owner", "list", { query: "?limit=50" });
   const bytes = Buffer.byteLength(JSON.stringify(page.value));
   assert.ok(bytes < 64 * 1024, `a 50-claim page is ${bytes} bytes`);
   assert.equal(page.value.olderDone, 30, "done claims older than 7 days leave the default list");
@@ -241,6 +239,27 @@ test("the Board list pages done claims by age and summarizes history", async t =
   const full = await f.call("owner", "read", { id: "done-000" });
   assert.equal(full.value.history.length, 24, "the single-claim read returns the stored history");
   assert.equal((await f.call("owner", "list", { query: "?state=finished" })).status, 422);
+});
+
+// QUARANTINED — see tests/quarantine.json and docs/FLAKY-QUARANTINE.md.
+// The p95 timing assertion below flakes on loaded/slow VMs (it fails on
+// pristine main), so it is skipped in the blocking suite and runs only in
+// the non-blocking quarantine lane (`npm run test:quarantined`, which sets
+// QUARANTINE_RUN=1).
+const QUARANTINE_RUN = process.env.QUARANTINE_RUN === "1";
+
+test("the Board list endpoint p95 stays under the 50 ms budget", { skip: !QUARANTINE_RUN }, async t => {
+  const f = roomFixture(t);
+  seedBoardClaims(f);
+  await f.call("owner", "list", { query: "?limit=200" }); // warm-up
+  const samples = [];
+  for (let i = 0; i < 10; i++) {
+    const started = performance.now();
+    await f.call("owner", "list", { query: "?limit=50" });
+    samples.push(performance.now() - started);
+  }
+  samples.sort((a, b) => a - b);
+  assert.ok(samples[Math.ceil(samples.length * 0.95) - 1] < 50, `list p95 ${samples.at(-1).toFixed(1)} ms`);
 });
 
 test("Board reads mark another member's claim text untrusted and never the reader's own", async t => {
