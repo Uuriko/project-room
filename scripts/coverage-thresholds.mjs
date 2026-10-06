@@ -18,10 +18,18 @@
 //
 // Measurement notes (approximations, applied identically on every run so the
 // ratchet stays comparable):
-// - A source line is "covered" when any V8 range with count > 0 touches it,
-//   minus bytes inside ranges with count == 0 (uncalled functions, untaken
-//   blocks nested in a covered parent range). This matches how the zero-count
-//   `unused` function in an otherwise-executed file must not count as covered.
+// - Coverage is computed PER TEST PROCESS from that process's own V8 ranges
+//   (where boundaries are self-consistent), then unioned across processes: a
+//   line counts as covered when any process covers it. Raw ranges are never
+//   merged across processes, because V8 range boundaries for the same code can
+//   differ between processes — merging them lets a zero-count child span from
+//   one process shadow a positive parent span from another, making coverage
+//   non-monotonic in the test set.
+// - Within one process, a source line is "covered" when its code span touches
+//   executed bytes (count > 0 ranges minus count == 0 ranges nested inside
+//   them). Lines overlapped by a never-called function's own span are
+//   uncovered — this matches how the zero-count `unused` function in an
+//   otherwise-executed file must not count as covered.
 // - "Coverable" lines exclude blank lines and comment-only lines (//, /* */,
 //   and * continuations, with block-comment state tracked across lines).
 // - Files in a module that were never loaded by the suite count as 0 covered
@@ -120,20 +128,19 @@ export function* readCoveragePayloads(coverageDir) {
   }
 }
 
-const rangeKey = (start, end) => `${start}:${end}`;
-
 /**
- * Merge raw V8 coverage payloads into one entry per script URL.
- * Functions merge by their primary span (ranges[0], the whole function —
- * unique per function); ranges merge by (startOffset, endOffset) taking the
- * max count, so a line executed in any test process counts as covered.
- * Returns Map<url, { url, functions: [{ name, ranges: [{ start, end, count }] }] }>.
- * Pass `into` to merge into an existing map (lets callers stream files one at
- * a time instead of holding every payload in memory).
+ * Group raw V8 coverage payloads by script URL WITHOUT merging ranges across
+ * payloads. Each payload keeps its own function/range list, because V8 range
+ * boundaries for the same code can differ between processes: merging raw
+ * ranges by (startOffset, endOffset) with max count lets a zero-count child
+ * span from one process shadow a positive parent span from another (the same
+ * tests split across processes then report less coverage than together —
+ * non-monotonic). Coverage is instead computed per payload and unioned.
+ * Returns Map<url, Array<{ name, ranges: [{ start, end, count }] }>>.
  */
-export function mergeCoverage(payloads, root = ROOT, into = null) {
+export function groupFunctionsByUrl(payloads, root = ROOT) {
   const rootPrefix = pathToFileURL(root + sep).href;
-  const merged = into || new Map();
+  const grouped = new Map();
   for (const payload of payloads) {
     const scripts = payload?.result;
     if (!Array.isArray(scripts)) continue;
@@ -141,48 +148,27 @@ export function mergeCoverage(payloads, root = ROOT, into = null) {
       const url = script?.url;
       if (typeof url !== "string" || !url.startsWith("file://")) continue;
       if (!url.startsWith(rootPrefix) || url.includes("/node_modules/")) continue;
-      let entry = merged.get(url);
-      if (!entry) {
-        entry = { url, functions: new Map() };
-        merged.set(url, entry);
-      } else if (Array.isArray(entry.functions)) {
-        // Rehydrate a previously finalized entry (streaming `into` merges).
-        const map = new Map();
-        for (const f of entry.functions) {
-          const r0 = f.ranges[0];
-          map.set(`${f.name}\0${rangeKey(r0.start, r0.end)}`, {
-            name: f.name,
-            ranges: new Map(f.ranges.map(r => [rangeKey(r.start, r.end), r])),
-          });
-        }
-        entry.functions = map;
-      }
+      const functions = [];
       for (const fn of script.functions || []) {
-        const ranges = fn.ranges || [];
-        if (ranges.length === 0) continue;
-        const key = `${fn.functionName || ""}\0${rangeKey(ranges[0].startOffset, ranges[0].endOffset)}`;
-        let fent = entry.functions.get(key);
-        if (!fent) {
-          fent = { name: fn.functionName || "", ranges: new Map() };
-          entry.functions.set(key, fent);
-        }
-        for (const range of ranges) {
+        const ranges = [];
+        for (const range of fn.ranges || []) {
           const { startOffset: start, endOffset: end, count } = range;
           if (typeof start !== "number" || typeof end !== "number" || end <= start) continue;
-          const rkey = rangeKey(start, end);
-          const prev = fent.ranges.get(rkey);
-          if (!prev || count > prev.count) fent.ranges.set(rkey, { start, end, count });
+          ranges.push({ start, end, count });
         }
+        if (ranges.length === 0) continue;
+        functions.push({ name: fn.functionName || "", ranges });
       }
+      if (functions.length === 0) continue;
+      let list = grouped.get(url);
+      if (!list) {
+        list = [];
+        grouped.set(url, list);
+      }
+      list.push(functions);
     }
   }
-  for (const entry of merged.values()) {
-    entry.functions = [...entry.functions.values()].map(f => ({
-      name: f.name,
-      ranges: [...f.ranges.values()],
-    }));
-  }
-  return merged;
+  return grouped;
 }
 
 /** Split text into lines as [startOffset, endOffset) spans (end excludes the newline). */
@@ -260,7 +246,9 @@ export function subtractIntervals(base, cuts) {
 }
 
 /**
- * Line coverage for one source file given its merged V8 functions.
+ * Covered line indices (0-based) for one source file from ONE payload's V8
+ * functions. Boundaries are only ever compared within a single payload, where
+ * V8's ranges are self-consistent; callers union these sets across payloads.
  *
  * A line is covered when its code span (first to last non-whitespace char)
  * touches executed bytes (count > 0 ranges minus count == 0 ranges nested
@@ -268,11 +256,8 @@ export function subtractIntervals(base, cuts) {
  * function's own span (ranges[0] with count == 0) is uncovered — this is what
  * keeps `export function unused` in an otherwise-executed file from counting
  * as covered via its `export ` prefix bytes.
- *
- * Returns { covered, coverable, pct, uncoveredLines } where uncoveredLines
- * lists up to the first 25 uncovered 1-based line numbers (for the report).
  */
-export function lineCoverage(text, functions) {
+export function coveredLinesForPayload(text, functions) {
   const spans = splitLineSpans(text);
   const coverable = coverableLines(text);
   const positive = [];
@@ -287,34 +272,38 @@ export function lineCoverage(text, functions) {
     }
   }
   const coveredBytes = subtractIntervals(positive, zero);
-  const codeSpan = ls => {
-    const line = text.slice(spans[ls][0], spans[ls][1]);
-    const m = line.match(/\S/);
-    if (!m) return null;
-    const cs = spans[ls][0] + m.index;
-    const ce = spans[ls][0] + line.search(/\s*$/);
-    return [cs, ce];
-  };
-  let covered = 0;
-  let coverableCount = 0;
-  const uncoveredLines = [];
+  const covered = new Set();
   let iv = 0;
   for (let i = 0; i < spans.length; i++) {
     if (!coverable[i]) continue;
-    coverableCount++;
     const [ls, le] = spans[i];
-    const span = codeSpan(i);
-    let isCovered = false;
-    if (span && !zeroFnSpans.some(([zs, ze]) => zs < le && ze > ls)) {
-      const [cs, ce] = span;
-      while (iv < coveredBytes.length && coveredBytes[iv][1] <= cs) iv++;
-      isCovered = iv < coveredBytes.length && coveredBytes[iv][0] < ce;
-    }
-    if (isCovered) covered++;
-    else if (uncoveredLines.length < 25) uncoveredLines.push(i + 1);
+    if (zeroFnSpans.some(([zs, ze]) => zs < le && ze > ls)) continue;
+    const line = text.slice(ls, le);
+    const m = line.match(/\S/);
+    if (!m) continue;
+    const cs = ls + m.index;
+    const ce = ls + line.search(/\s*$/);
+    while (iv < coveredBytes.length && coveredBytes[iv][1] <= cs) iv++;
+    if (iv < coveredBytes.length && coveredBytes[iv][0] < ce) covered.add(i);
   }
-  const pct = coverableCount === 0 ? 100 : (100 * covered) / coverableCount;
-  return { covered, coverable: coverableCount, pct, uncoveredLines };
+  return covered;
+}
+
+/**
+ * Line coverage for one source file from a single payload's V8 functions.
+ * Returns { covered, coverable, pct, uncoveredLines } where uncoveredLines
+ * lists up to the first 25 uncovered 1-based line numbers (for the report).
+ */
+export function lineCoverage(text, functions) {
+  const coverable = coverableLines(text);
+  const coverableCount = coverable.filter(Boolean).length;
+  const covered = coveredLinesForPayload(text, functions);
+  const uncoveredLines = [];
+  for (let i = 0; i < coverable.length && uncoveredLines.length < 25; i++) {
+    if (coverable[i] && !covered.has(i)) uncoveredLines.push(i + 1);
+  }
+  const pct = coverableCount === 0 ? 100 : (100 * covered.size) / coverableCount;
+  return { covered: covered.size, coverable: coverableCount, pct, uncoveredLines };
 }
 
 function excludedBySuffix(relPosix, suffixes) {
@@ -347,10 +336,12 @@ export function listModuleFiles(root, dir, extraExclude = []) {
 }
 
 /**
- * Evaluate every configured module against merged coverage.
- * Files with no coverage data count as 0 covered lines (decay-catching).
+ * Evaluate every configured module against per-payload coverage.
+ * A line counts as covered when ANY payload (test process) covers it —
+ * coverage is monotonic in the test set. Files with no coverage data count
+ * as 0 covered lines (decay-catching).
  */
-export function evaluateModules(root, config, merged) {
+export function evaluateModules(root, config, grouped) {
   const rootPrefix = pathToFileURL(root + sep).href;
   const results = {};
   for (const [name, mod] of Object.entries(config.modules)) {
@@ -361,12 +352,25 @@ export function evaluateModules(root, config, merged) {
     const zeroCoverageFiles = [];
     for (const rel of files) {
       const text = readFileSync(join(root, rel), "utf8");
-      const entry = merged.get(rootPrefix + rel);
-      const lc = lineCoverage(text, entry ? entry.functions : []);
-      covered += lc.covered;
-      coverable += lc.coverable;
-      fileRows.push({ file: rel, ...lc });
-      if (!entry) zeroCoverageFiles.push(rel);
+      const coverableArr = coverableLines(text);
+      const coverableCount = coverableArr.filter(Boolean).length;
+      const payloads = grouped.get(rootPrefix + rel);
+      const union = new Set();
+      if (payloads) {
+        for (const functions of payloads) {
+          for (const i of coveredLinesForPayload(text, functions)) union.add(i);
+        }
+      } else {
+        zeroCoverageFiles.push(rel);
+      }
+      const pct = coverableCount === 0 ? 100 : (100 * union.size) / coverableCount;
+      covered += union.size;
+      coverable += coverableCount;
+      const uncoveredLines = [];
+      for (let i = 0; i < coverableArr.length && uncoveredLines.length < 25; i++) {
+        if (coverableArr[i] && !union.has(i)) uncoveredLines.push(i + 1);
+      }
+      fileRows.push({ file: rel, covered: union.size, coverable: coverableCount, pct, uncoveredLines });
     }
     fileRows.sort((a, b) => a.pct - b.pct);
     results[name] = {
@@ -482,17 +486,25 @@ if (isMain) {
   }
 
   const payloads = readCoveragePayloads(coverageDir);
-  const merged = new Map();
+  const grouped = new Map();
   let payloadCount = 0;
   for (const payload of payloads) {
     payloadCount++;
-    mergeCoverage([payload], ROOT, merged);
+    const one = groupFunctionsByUrl([payload], ROOT);
+    for (const [url, list] of one) {
+      let target = grouped.get(url);
+      if (!target) {
+        target = [];
+        grouped.set(url, target);
+      }
+      target.push(...list);
+    }
   }
   if (payloadCount === 0) {
     console.error(`coverage gate: no coverage data in ${coverageDir}`);
     process.exit(2);
   }
-  const results = evaluateModules(ROOT, config, merged);
+  const results = evaluateModules(ROOT, config, grouped);
 
   if (opts.baseline) {
     const out = {};
