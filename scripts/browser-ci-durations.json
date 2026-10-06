@@ -2,13 +2,15 @@
   "sourceRepository": "Uuriko/project-room",
   "sourceRunIds": [
     37494137475,
-    37489393130
+    37489393130,
+    37499506413
   ],
   "sourceRevisions": [
     "39e55eb0f50efa4c9213ad6e5df879d174cfaf36",
-    "05e73f00b3696af89eb50076bd2f81023b87afd9"
+    "05e73f00b3696af89eb50076bd2f81023b87afd9",
+    "41cc5c5bca139ff028101e8927897adfff80bf39"
   ],
-  "note": "Per-file junit durations averaged over two Ubuntu CI runs (2026-10-06), rounded to whole ms. Timing data rebalances shard membership only; it never selects which tests run.",
+  "note": "Per-file junit durations averaged over two Ubuntu CI runs (2026-10-06), rounded to whole ms; scripts/visual-regression-browser-check.mjs measured once (run 37499506413, 4.6s). Timing data rebalances shard membership only; it never selects which tests run.",
   "milliseconds": {
     "scripts/a11y-composer-browser-check.mjs": 3361,
     "scripts/a11y-login-browser-check.mjs": 4515,
@@ -126,6 +128,7 @@
     "scripts/thread-options-browser-check.mjs": 2165,
     "scripts/unified-journey-check.mjs": 2233,
     "scripts/updates-browser-check.mjs": 37132,
+    "scripts/visual-regression-browser-check.mjs": 4600,
     "scripts/work-attempts-browser-check.mjs": 1153,
     "scripts/work-changes-browser-check.mjs": 1286,
     "scripts/work-recipes-browser-check.mjs": 2386,
