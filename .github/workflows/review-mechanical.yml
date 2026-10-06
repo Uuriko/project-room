@@ -71,10 +71,7 @@ jobs:
             --head "$HEAD_SHA" --lint pending --tests pending \
             --additions "$ADDITIONS" --deletions "$DELETIONS" \
             --scope-json /tmp/scope.json >> "$GITHUB_STEP_SUMMARY"
-          node -e '
-            const r = require("/tmp/scope.json");
-            for (const f of r.drift) console.log(`::warning file=${f}::Scope drift: ${f} is not in the declared claim files`);
-          '
+          node scripts/review-mechanical-report.mjs --annotations --scope-json /tmp/scope.json
       - name: Wait for the test workflow on this head
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -164,10 +161,7 @@ jobs:
             echo "HEAD_SHA=$(gh pr view "$PR_NUMBER" --json headRefOid --jq '.headRefOid')"
           } >> "$GITHUB_ENV"
           node scripts/review-scope-check.mjs --files-file /tmp/changed.txt --body-file /tmp/body.md > /tmp/scope.json
-          node -e '
-            const r = require("/tmp/scope.json");
-            for (const f of r.drift) console.log(`::warning file=${f}::Scope drift: ${f} is not in the declared claim files`);
-          '
+          node scripts/review-mechanical-report.mjs --annotations --scope-json /tmp/scope.json
       - name: Write the machine-readable report
         if: env.PR_NUMBER != ''
         env:
