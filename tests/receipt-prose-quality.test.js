@@ -124,3 +124,60 @@ test("merge-queue removal receipt keeps PR, SHA, reason, and claim guidance", ()
   assert.match(body, /new commits were pushed/);
   assert.match(body, /claim stays open/);
 });
+
+// The reviewer's bar (Instinct-3 seq 5312): the test outcome must survive
+// board parsing into the persisted receipt record — not just the generator
+// output. These run the real `_state` reducer on fixture board comments.
+function stateFor(comments) {
+  // _parse turns board comments into events; _state reduces events to state.
+  const env = { ...process.env };
+  const parsed = spawnSync("bash", [room, "_parse"], { input: JSON.stringify(comments), encoding: "utf8", env });
+  assert.equal(parsed.status, 0, parsed.stderr);
+  const run = spawnSync("bash", [room, "_state", "--now", "2026-10-06T19:10:00Z"], {
+    input: parsed.stdout, encoding: "utf8", env,
+  });
+  assert.equal(run.status, 0, run.stderr);
+  return JSON.parse(run.stdout);
+}
+
+const claimFixture = (id, task) => ({
+  id, created_at: "2026-10-06T19:00:00Z",
+  body: `[qa-receipt-prose-2][claim] fixture\n\n\`\`\`room-claim\ntask-id:    ${task}\nlane:       qa-receipt-prose-2\nfiles:      scripts/room\nlease:      lease=6h\nstate:      working\nreason:     fixture\n\`\`\`\n\n· claim:${task} · lane:qa-receipt-prose-2`,
+});
+
+test("test outcome persists into the task's receipt record", () => {
+  const gen = receipt([
+    "--task-id", "RC-2026-10-06-903",
+    "--lane", "qa-receipt-prose-2",
+    "--merged", "abc1234def5678",
+    "--pr", "1660",
+    "--tests", "hosted 12/12 green; npm run check pass",
+    "--note", "persistence",
+  ]);
+  assert.equal(gen.status, 0, gen.stderr);
+  const state = stateFor([
+    claimFixture(1, "RC-2026-10-06-903"),
+    { id: 2, created_at: "2026-10-06T19:05:00Z", body: gen.stdout },
+  ]);
+  // The reduced state carries tasks as an array; find ours by task_id.
+  const task = state.tasks.find(t => t.task_id === "RC-2026-10-06-903");
+  assert.ok(task, "the fixture claim reduced to a task");
+  const receipts = task.receipts;
+  assert.equal(receipts.length, 1, "the DONE receipt is persisted");
+  assert.equal(receipts[0].pr, "1660");
+  assert.equal(receipts[0].merged, "abc1234def5678");
+  assert.equal(receipts[0].tests, "hosted 12/12 green; npm run check pass",
+    "the test outcome survives the reducer, not just the event");
+});
+
+test("prose receipt row carries the test outcome", () => {
+  const state = stateFor([{
+    id: 1, created_at: "2026-10-06T19:00:00Z",
+    body: "[qa-receipt-prose-2][receipt] RC-2026-10-06-904\n\n```room-receipt\ntask-id:      RC-2026-10-06-904\npr:           1661\nmerged:       abc1234\ntests:        hosted 9/9 green\nattribution:  (qa-receipt-prose-2, agent, quill)\n```",
+  }]);
+  const rows = state.prose_receipts.filter(r => r.task === "RC-2026-10-06-904");
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].pr, "1661");
+  assert.equal(rows[0].tests, "hosted 9/9 green",
+    "the prose receipt row keeps the test outcome for reporting");
+});

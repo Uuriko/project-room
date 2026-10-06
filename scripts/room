@@ -894,6 +894,7 @@ reduce_state() { # $1=now_epoch $2=comment_count $3=watermark ; stdin: events ->
                       .receipts += [{merged:($e.receipt.merged // null),
                                     attribution:($e.receipt.attribution // null),
                                     pr:($e.receipt.pr // null),
+                                    tests:($e.receipt.tests // null),
                                     at:$at, comment_id:$cid}]
                     else . end
                   | .missing_receipt = ((.receipts | length) == 0))
@@ -910,6 +911,7 @@ reduce_state() { # $1=now_epoch $2=comment_count $3=watermark ; stdin: events ->
           .prose_receipts += [{task:($e.task // "unknown"), lane:$e.lane,
                                pr:($e.pr // null),
                                merged:(($e.receipt // {})["merged"] // $e.merged // "none"),
+                               tests:(($e.receipt // {})["tests"] // null),
                                at:$at, comment_id:$cid}]
           | .log += [{id:$cid, at:$at, kind:"receipt", task_id:$e.task, ok:true}]
         elif $e.kind == "handoff" then
@@ -1368,14 +1370,14 @@ render_md() { # $1=now_epoch $2=registry_json $3=watcher_state ; stdin: state JS
                     and (epoch(.lease_expires_at) - $now < 21600)))) as $exp
     | ([$open_all[] | .lane] | map(select(. != null)) | unique) as $livelanes
     | ($reg | map(select(.lane as $l | ($livelanes | index($l)) | not))) as $unclaimed
-    | ([.tasks[] | .task_id as $t | .receipts[] | {task_id:$t, merged:(.merged // "none"), comment_id}]
-       + [.prose_receipts[] | {task_id:.task, merged:(.merged // "none"), comment_id}]
+    | ([.tasks[] | .task_id as $t | .receipts[] | {task_id:$t, merged:(.merged // "none"), tests:(.tests // "none"), comment_id}]
+       + [.prose_receipts[] | {task_id:.task, merged:(.merged // "none"), tests:(.tests // "none"), comment_id}]
        | sort_by(.comment_id) | reverse | .[0:10]) as $rcpts
     | ($open | .[0:25] | map(row(.))) as $orows
     | (($open | length) - 25) as $orest
     | ($exp | map(row(.))) as $erows
     | ($unclaimed | map("\(.lane) | \(.focus) | \(.trust)")) as $urows
-    | ($rcpts | map("\(.task_id) | \(.merged) | \(.comment_id)")) as $rrows
+    | ($rcpts | map("\(.task_id) | \(.merged) | \(.tests) | \(.comment_id)")) as $rrows
     | (if .comments >= 1500 then "yes" else "no" end) as $rot
     | ([$open_all[]
         | .task_id as $t | .lane as $l | .state as $s
@@ -1414,7 +1416,7 @@ render_md() { # $1=now_epoch $2=registry_json $3=watcher_state ; stdin: state JS
       (if ($urows | length) == 0 then "(none)" else ($urows | join("\n")) end),
       "",
       "## recent-receipts",
-      "task-id | merged | comment-id",
+      "task-id | merged | tests | comment-id",
       (if ($rrows | length) == 0 then "(none)" else ($rrows | join("\n")) end),
       "",
       "## prose-claims-needing-fence",
