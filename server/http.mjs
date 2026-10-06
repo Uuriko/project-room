@@ -39,6 +39,7 @@ import { redactEventPage, redactEventRows, redactMessageTree, redactSnapshotStat
 import { messageInHistory, eventInHistory, indexMessages as indexHistoryMessages, requireExportOwner, recordRoomExport } from "./history-visibility.mjs"; // PRIV-2
 import { discoveryDoc, isHealthAliasPath, rewriteRoomApiPrefix, EDGE_DOOR_HOSTS, ROOM_ORIGIN } from "../deploy/agent-discovery.mjs";
 import { noteIdentityMint } from "./growth-loop.mjs";
+import { createWikiReadApi } from "./wiki-read-api.mjs"; // W009: read-only wiki API for agents (prefix-delegated, no route literals here)
 import { buildOpenApiJson, discoverabilityErrorOverride, nextActionsForAccessRequest, nextActionsForAccessRequestStatus, nextActionsForInviteRedeem } from "./discoverability.mjs";
 import { MCP_SERVER_CARD_PATH, MCP_DISCOVERY_CACHE_CONTROL, MCP_SERVER_CARD_CORS } from "../src/mcp-server-card.mjs";
 import { SKILLS_CATALOG_PATH } from "../deploy/agent-discovery.mjs";
@@ -132,6 +133,9 @@ for (const name of ["favicon.svg", "icon.svg", "manifest.webmanifest"]) {
 }
 // GET/HEAD-only liveness paths; any other method is 405 with Allow (#1529).
 const LIVENESS_GET_ONLY_PATHS = new Set(["/api/health", "/api/health/", "/api/version"]);
+// W009: the wiki read API owns every /api/wiki/ template inside
+// server/wiki-read-api.mjs (reads are lazy per request; import is side-effect-free).
+const wikiReadApi = createWikiReadApi();
 const reject = (status, code, message, headers) => { throw new ServiceError(status, code, message, headers ?? null); };
 
 // RFC 9116. Contact comes from ROOM_SECURITY_CONTACT. A bare address becomes
@@ -1599,6 +1603,15 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           growthReply = growth.handle(url.pathname, req.method, url.searchParams);
         } catch { return json(res, 503, { status: "unavailable", reason: "growth_unavailable" }); }
         if (growthReply) return json(res, growthReply.status, growthReply.body);
+      }
+      // W009 — read-only wiki API for agents (procedures, lessons, runbooks).
+      // Prefix-delegated: server/wiki-read-api.mjs owns every /api/wiki/
+      // template and throws ServiceError for 4xx/503, so the canonical error
+      // envelope applies and a throwing plane fails closed to 503, never to a
+      // dropped connection. /room/api/wiki/* reaches here via the prefix rewrite.
+      if (url.pathname.startsWith("/api/wiki/")) {
+        const wikiReply = wikiReadApi.handle(url.pathname, req.method, url.searchParams);
+        if (wikiReply) return json(res, wikiReply.status, wikiReply.body, req.method === "HEAD");
       }
       // Public Hosts (www / lobby / apex) reverse-proxy /room here. Browsers
       // get the getdasha HTML door. / stays the workspace app. Packets stay
