@@ -20,10 +20,23 @@ export const PRESENCE_IDLE_WINDOW_MS = 60 * 60 * 1000; // 60 min
 // 3x the host's expected heartbeat interval (see store.presence).
 export const PRESENCE_UNREACHABLE_AFTER_MS = 60 * 60 * 1000; // 60 min
 
-const within = (at, now, windowMs) =>
-  Number.isFinite(at) && Number.isFinite(now) && now - at >= 0 && now - at <= windowMs;
+// Timestamps arrive as epoch ms (host heartbeats) or ISO strings (event
+// `at` values from store.presence). Comparing an ISO string with
+// Number.isFinite() is always false, which made every agent with a registered
+// host read "unreachable" seconds after it posted. Normalize both forms.
+const toMs = at => {
+  if (typeof at === "number") return at;
+  if (typeof at === "string" && at) return Date.parse(at);
+  return NaN;
+};
 
-// All timestamps are ms epoch (or null). hostStatus is "online" | "offline" |
+const within = (at, now, windowMs) => {
+  const atMs = toMs(at);
+  const nowMs = toMs(now);
+  return Number.isFinite(atMs) && Number.isFinite(nowMs) && nowMs - atMs >= 0 && nowMs - atMs <= windowMs;
+};
+
+// Timestamps are ms epoch or ISO strings (or null). hostStatus is "online" | "offline" |
 // null (null = no registered host). Returns one of the four state strings.
 export function presenceState({
   kind,
