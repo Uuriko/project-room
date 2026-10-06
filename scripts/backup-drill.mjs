@@ -1,4 +1,5 @@
-// Backup/restore drill: prove a live room survives a sqlite backup round-trip.
+// Backup/restore drill: prove a live room survives a sqlite backup round-trip,
+// byte for byte on events and room files (REL-14), not just by row counts.
 // Usage: node scripts/backup-drill.mjs
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -8,7 +9,8 @@ import assert from "node:assert/strict";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
-import { backupRoom } from "../server/backup.mjs";
+import { backupRoom, backupDigests } from "../server/backup.mjs";
+import { verifyRestoredBackup } from "./backup-verify.mjs";
 
 const directory = mkdtempSync(join(tmpdir(), "room-backup-drill-"));
 const filename = join(directory, "room.sqlite");
@@ -22,10 +24,16 @@ for (let i = 0; i < 5; i++) store.command(ownerKey, "commons", { id: randomUUID(
   data: { messageId: randomUUID(), body: `drill message ${i}` } });
 store.command(ownerKey, "commons", { id: randomUUID(), type: T.WORK_PROPOSED, data: {
   workItemId: "drill-task", title: "Drill task", definitionOfDone: "Survives backup", accountableMemberId: "drill-agent", mode: "read" } });
+// A room file with every byte value, so encoding slips (text vs blob) show up.
+const fileBytes = Buffer.from(Array.from({ length: 512 }, (_, i) => i % 256));
+store.roomAttachments.stage(ownerKey, "commons", { id: "drill-file", filename: "drill.bin",
+  mediaType: "application/octet-stream", data: fileBytes.toString("base64") });
+const liveDigests = backupDigests(store.db);
 const before = {
   events: store.db.prepare("SELECT count(*) AS n FROM events").get().n,
   members: Object.keys(store.room("commons").state.members).length,
   workItems: Object.keys(store.room("commons").state.workItems).length,
+  files: liveDigests.attachments.rows,
 };
 store.close();
 
@@ -40,11 +48,17 @@ const after = {
   events: restored.db.prepare("SELECT count(*) AS n FROM events").get().n,
   members: Object.keys(restored.room("commons").state.members).length,
   workItems: Object.keys(restored.room("commons").state.workItems).length,
+  files: backupDigests(restored.db).attachments.rows,
 };
 assert.deepEqual(after, before, "restored room must match the live room");
+assert.deepEqual(backupDigests(restored.db), liveDigests, "restored events and files must be byte-equal to the live room");
+const file = restored.db.prepare("SELECT bytes FROM room_attachments WHERE room_id='commons' AND id='drill-file'").get();
+assert.ok(file && Buffer.from(file.bytes).equals(fileBytes), "room file bytes must survive the round-trip");
 const drillMsg = restored.db.prepare("SELECT body FROM events WHERE body LIKE '%drill message 3%'").get();
 assert.ok(drillMsg, "message content must survive the round-trip");
 restored.close();
-console.log(JSON.stringify({ ok: true, before, after, audit: result.recovery ? "recovery-audit-passed" : "no-recovery-audit" }));
+const verification = await verifyRestoredBackup({ backupFilename: result.filename, watermarkPath: result.watermark });
+assert.equal(verification.ok, true, `restore verification failed: ${JSON.stringify(verification.checks.filter(c => !c.ok))}`);
+console.log(JSON.stringify({ ok: true, before, after, digests: { events: liveDigests.events.sha256.slice(0, 12), files: liveDigests.attachments.sha256.slice(0, 12) }, audit: result.recovery ? "recovery-audit-passed" : "no-recovery-audit" }));
 rmSync(directory, { recursive: true, force: true });
 rmSync(backupDir, { recursive: true, force: true });
