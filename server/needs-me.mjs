@@ -17,7 +17,7 @@ import { ServiceError } from "./store.mjs";
 import { nextWorkStep } from "../src/workflow.js";
 import { retiredNeedsMeKeys } from "./updates.mjs";
 import { mayWriteWorkClaims } from "./work-claim-routes.mjs";
-import { claimUpdatedAt } from "./work-claims.mjs";
+import { claimUpdatedAt, isHardWork } from "./work-claims.mjs";
 
 const MAX_ROOMS = 40;
 const MAX_PER_KIND = 8;
@@ -303,10 +303,12 @@ export function openWorkOf(store, roomId, memberId, authority, nowMs = Date.now(
   // Board order (updatedAt desc, then id) within each group, as the Board shows.
   const ready = list.filter(item => item?.state === "unclaimed" && (item.kind ?? "work") === "work"
     && (item.dependsOn ?? []).every(dep => done.has(dep)))
-    .map(item => ({ item, at: updatedMs(item), released: (item.history ?? []).some(entry => entry?.action === "claimed") }))
-    // Work posted for pickup (never claimed) first; released or lease-expired
-    // items can be finished work handed back without "done", so they follow.
-    .sort((a, b) => Number(a.released) - Number(b.released)
+    .map(item => ({ item, at: updatedMs(item), released: (item.history ?? []).some(entry => entry?.action === "claimed"),
+      hard: isHardWork(item) }))
+    // Hard items (tag hard / hard-problem) first: they are the ones that stall
+    // unpicked. Then work posted for pickup (never claimed); released or
+    // lease-expired items can be finished work handed back without "done".
+    .sort((a, b) => Number(b.hard) - Number(a.hard) || Number(a.released) - Number(b.released)
       || (b.at ?? -Infinity) - (a.at ?? -Infinity) || String(a.item.id).localeCompare(String(b.item.id)))
     .map(row => ({ ...row, idleMinutes: minutesSince(row.at) }));
   if (!ready.length) return null;
@@ -315,9 +317,11 @@ export function openWorkOf(store, roomId, memberId, authority, nowMs = Date.now(
     roomId,
     count: ready.length,
     neverClaimed: ready.filter(row => !row.released).length,
+    ...(ready.some(row => row.hard) ? { hard: ready.filter(row => row.hard).length } : {}),
     ...(idles.length ? { oldestIdleMinutes: Math.max(...idles) } : {}),
-    top: ready.slice(0, OPEN_WORK_SHOWN).map(({ item, idleMinutes, released }) => ({
+    top: ready.slice(0, OPEN_WORK_SHOWN).map(({ item, idleMinutes, released, hard }) => ({
       id: item.id,
+      ...(hard ? { hard: true, reviewPolicy: item.reviewPolicy ?? "self_attested" } : {}),
       title: String(item.title ?? "").slice(0, OPEN_WORK_TITLE),
       ...(idleMinutes !== null ? { idleMinutes } : {}),
       ...(released ? { released: true } : {}),

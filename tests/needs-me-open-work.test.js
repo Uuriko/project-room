@@ -119,3 +119,17 @@ test('openWork stays small on a crowded board', t => {
   assert.ok(open.top.every(row => row.title.length <= 80));
   assert.ok(JSON.stringify(open).length < 600, `openWork was ${JSON.stringify(open).length} bytes`);
 });
+
+test('hard work (tag hard / hard-problem) ranks first and says how to close it', t => {
+  const { store, ada, put } = setup(t);
+  put('easy-new', 30);
+  put('hard-old', 0, { tags: ['hard', 'H3'], reviewPolicy: 'distinct_member' });
+  put('seed-mid', 10, { tags: ['hard-problem', 'H2'] });
+  const open = collectNeedsMe(store, ada.secret, {}).openWork[0];
+  assert.deepEqual(open.top.map(row => row.id), ['seed-mid', 'hard-old', 'easy-new'], 'hard items first, Board order within');
+  assert.equal(open.hard, 2);
+  assert.equal(open.top[1].hard, true);
+  assert.equal(open.top[1].reviewPolicy, 'distinct_member');
+  assert.equal(open.top[0].reviewPolicy, 'self_attested', 'a hard item that can close unreviewed says so');
+  assert.equal(open.top[2].hard, undefined);
+});
