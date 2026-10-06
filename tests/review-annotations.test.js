@@ -6,8 +6,8 @@ import { driftAnnotations } from "../scripts/review-mechanical-report.mjs";
 test("driftAnnotations escapes workflow-command special characters", () => {
   const lines = driftAnnotations({ drift: ["we:ird,%.mjs"] });
   assert.equal(lines.length, 1);
-  // Property escaping: : -> %3A, , -> %3B, % -> %25.
-  assert.ok(lines[0].startsWith("::warning file=we%3Aird%3B%25.mjs::"));
+  // Property escaping: : -> %3A, , -> %2C, % -> %25.
+  assert.ok(lines[0].startsWith("::warning file=we%3Aird%2C%25.mjs::"));
 });
 
 test("driftAnnotations escapes CR/LF in the message", () => {

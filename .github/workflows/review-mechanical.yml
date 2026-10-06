@@ -146,11 +146,23 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RUN_ID: ${{ github.event.workflow_run.id }}
           TEST_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          TESTED_SHA: ${{ github.event.workflow_run.head_sha }}
           REPO: ${{ github.repository }}
         run: |
           PR_NUMBER=$(jq -r '.workflow_run.pull_requests[0].number // empty' "$GITHUB_EVENT_PATH")
           if [ -z "$PR_NUMBER" ]; then echo "no PR attached to this test run; nothing to report"; exit 0; fi
           echo "PR_NUMBER=$PR_NUMBER" >> "$GITHUB_ENV"
+          # Never pair a completed run's conclusion with a newer PR head: the
+          # test result belongs to TESTED_SHA. On mismatch the pull_request
+          # mechanical job (which waits for the run on the current head)
+          # owns the report, so skip here.
+          CURRENT_HEAD=$(gh pr view "$PR_NUMBER" --json headRefOid --jq '.headRefOid')
+          if [ "$TESTED_SHA" != "$CURRENT_HEAD" ]; then
+            echo "HEAD_MISMATCH=true" >> "$GITHUB_ENV"
+            echo "stale test run: tested $TESTED_SHA but PR head is now $CURRENT_HEAD; skipping this report"
+            exit 0
+          fi
+          echo "HEAD_SHA=$TESTED_SHA" >> "$GITHUB_ENV"
           LINT=$(gh api "repos/$REPO/actions/runs/$RUN_ID/jobs" --paginate -q '[.jobs[] | select(.name=="lint")][0].conclusion // "unknown"')
           echo "LINT_CONCLUSION=$LINT" >> "$GITHUB_ENV"
           gh pr view "$PR_NUMBER" --json files --jq '.files[].path' > /tmp/changed.txt
@@ -158,12 +170,11 @@ jobs:
           {
             echo "ADDITIONS=$(gh pr view "$PR_NUMBER" --json additions --jq '.additions')"
             echo "DELETIONS=$(gh pr view "$PR_NUMBER" --json deletions --jq '.deletions')"
-            echo "HEAD_SHA=$(gh pr view "$PR_NUMBER" --json headRefOid --jq '.headRefOid')"
           } >> "$GITHUB_ENV"
           node scripts/review-scope-check.mjs --files-file /tmp/changed.txt --body-file /tmp/body.md > /tmp/scope.json
           node scripts/review-mechanical-report.mjs --annotations --scope-json /tmp/scope.json
       - name: Write the machine-readable report
-        if: env.PR_NUMBER != ''
+        if: env.PR_NUMBER != '' && env.HEAD_MISMATCH != 'true'
         env:
           PR_NUMBER: ${{ env.PR_NUMBER }}
           HEAD_SHA: ${{ env.HEAD_SHA }}

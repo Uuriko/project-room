@@ -24,7 +24,8 @@ export function escapeCommandData(s) {
 }
 
 export function escapeCommandProperty(s) {
-  return escapeCommandData(s).replace(/:/g, "%3A").replace(/,/g, "%3B");
+  // Matches actions/toolkit escapeProperty: , -> %2C (not %3B).
+  return escapeCommandData(s).replace(/:/g, "%3A").replace(/,/g, "%2C");
 }
 
 // Scope-drift annotations for the workflow log. File paths are interpolated

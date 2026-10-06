@@ -25,7 +25,10 @@ edited). One check run does two stages, both written to the same job summary:
 
 A second trigger, `workflow_run` on the `test` workflow, re-emits the full
 report event-driven with no polling — it activates once this workflow file
-is merged to the default branch. It reports:
+is merged to the default branch. It binds the report to
+`workflow_run.head_sha` (the tested commit): if the PR head moved since the
+test run, it skips instead of pairing a stale conclusion with a new head —
+the `pull_request` job owns the current head. It reports:
 
 | signal | source |
 |---|---|
