@@ -125,7 +125,7 @@ export async function runAgentCode({ target, outDir = null, created = emptyCreat
     confusions.push("The invite page did not include a redeem call.");
     return finish(outDir, blank(steps, confusions));
   }
-  const redeemed = await executeCurl({ ...redeem, data: (redeem.data || "").replace("<your name>", stamp) });
+  const redeemed = await executeCurl({ ...redeem, data: (redeem.data || "").replace("<your name>", stamp) }, { target: origin });
   calls += redeemed.calls;
   steps.push({ step: "redeem", t: elapsed(started), calls, bytes: redeemed.bytes, status: redeemed.response.status });
   const joined = redeemed.response.json ?? {};
@@ -141,11 +141,12 @@ export async function runAgentCode({ target, outDir = null, created = emptyCreat
   let firstClose = null;
   if (!closeReachable) confusions.push("The invite page did not include a done call.");
   for (const curl of rest) {
-    const done = await executeCurl(curl, { secret: roomToken });
+    const done = await executeCurl(curl, { secret: roomToken, target: origin });
     calls += done.calls;
     const step = { step: (curl.data || "").includes('"done"') ? "done" : "board", t: elapsed(started), calls, bytes: done.bytes, status: done.response.status };
     steps.push(step);
-    if (step.step === "done" && done.response.status < 300) firstClose = { t: step.t, calls };
+    if (done.skipped) confusions.push("A page curl pointed off-target and was skipped without credentials.");
+    if (!done.skipped && step.step === "done" && done.response.status < 300) firstClose = { t: step.t, calls };
   }
   if (closeReachable && !firstClose) confusions.push("The page's done call did not succeed.");
   return finish(outDir, { steps, firstPost, firstClose, closeReachable, confusions });
