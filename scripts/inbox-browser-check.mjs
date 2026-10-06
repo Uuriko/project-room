@@ -516,7 +516,7 @@ test("account-only confirmation preserves a newer login and retires a held priva
   // Establish the guest's room session (as signInFixture does) so the
   // reloaded tab can enter the room; the account login alone is not enough.
   const roomSession = await other.context().request.post(f.origin + "/api/session", {
-    headers: { Origin: f.origin }, data: { accessKey: guestAccessKey }
+    headers: { Origin: f.origin }, data: { accessKey: f.store.issueAccessKey("commons", "guest") }
   });
   assert.equal(roomSession.status(), 201);
   phase = "confirmation response";
