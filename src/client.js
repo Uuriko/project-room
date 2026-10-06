@@ -555,8 +555,12 @@ export class RoomClient {
   // Ephemeral typing heartbeat. Client-throttled to one beat per 4s; the
   // server expires the beat after 10s, so no explicit stop is needed.
   // Failures are swallowed — typing is best-effort ambient signal.
-  sendTyping() {
+  // Instinct-3 (muse-room 3675): /typing is room-wide, so a beat while a
+  // private recipient is selected would tell every member who is writing a
+  // DM and when. A private draft sends no beat.
+  sendTyping({ toMemberId = "" } = {}) {
     if (!this.session) return Promise.resolve();
+    if (toMemberId) return Promise.resolve();
     const now = Date.now();
     if (now - this.lastTypingSent < 4000) return Promise.resolve();
     this.lastTypingSent = now;
