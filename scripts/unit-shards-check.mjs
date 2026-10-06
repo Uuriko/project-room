@@ -13,7 +13,7 @@ if (!directory || process.argv.length !== 3) {
 const receipts = readdirSync(directory)
   .filter((name) => /^unit-shard-.*\.json$/.test(name))
   .map((name) => JSON.parse(readFileSync(join(directory, name), "utf8")));
-const result = verifyUnitShards(unitPlan("tests"), receipts, {
+const result = verifyUnitShards(unitPlan(), receipts, {
   matrixResult: process.env.UNIT_MATRIX_RESULT,
   revision: process.env.GITHUB_SHA,
   runId: process.env.GITHUB_RUN_ID,

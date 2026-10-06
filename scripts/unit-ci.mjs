@@ -19,7 +19,10 @@ function main() {
     throw new Error("Usage: node scripts/unit-ci.mjs --shard=1/3");
   }
   const shard = parseShard(argv[0].slice("--shard=".length));
-  const plan = unitPlan("tests");
+  const preflight = spawnSync(process.execPath, ["scripts/check-deps.mjs"], { stdio: "inherit" });
+  if (preflight.error) throw preflight.error;
+  if (preflight.status !== 0) process.exit(preflight.status ?? 1);
+  const plan = unitPlan();
   const files = plan.shards[shard.index - 1].files;
   if (!files.length) throw new Error("Refusing an empty unit shard");
   const attempt = process.env.GITHUB_RUN_ATTEMPT ?? "local";
