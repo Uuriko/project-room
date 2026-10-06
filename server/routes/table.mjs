@@ -10,6 +10,7 @@ import { MEMBER_PERMISSION_ROUTES } from "./member-permissions.mjs";
 import { AGENT_FLEET_ROUTES } from "./agents.mjs";
 import { WANTS_WORK_ROUTES } from "./wants-work.mjs"; // BOARD-WAKE-2
 import { WORK_CLAIM_ROUTES } from "./work-claims.mjs";
+import { TYPING_ROUTES } from "./typing.mjs";
 import { SPEND_GRANT_ROUTES } from "./spend-grants.mjs"; // spend-primitive MVP
 import { SPEND_PRICING_ROUTES } from "./spend-pricing.mjs"; // spend-pricing kill switch
 
@@ -38,7 +39,7 @@ function unknownSchemaTypes(schema, out) {
 }
 
 // Rows land here as groups leave the legacy chain. Do not push; replace the array.
-export const ROUTES = Object.freeze([...AUTH_ROUTES, ...INBOX_ROUTES, ...MEMBER_PERMISSION_ROUTES, ...AGENT_FLEET_ROUTES, ...WANTS_WORK_ROUTES, ...WORK_CLAIM_ROUTES, ...SPEND_GRANT_ROUTES, ...SPEND_PRICING_ROUTES]);
+export const ROUTES = Object.freeze([...AUTH_ROUTES, ...INBOX_ROUTES, ...MEMBER_PERMISSION_ROUTES, ...AGENT_FLEET_ROUTES, ...WANTS_WORK_ROUTES, ...WORK_CLAIM_ROUTES, ...SPEND_GRANT_ROUTES, ...SPEND_PRICING_ROUTES, ...TYPING_ROUTES]);
 
 export function assertRouteRow(row) {
   const problems = [];

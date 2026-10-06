@@ -31,7 +31,7 @@ async function setup(t, { mobile = false, guest = false, expectedWrites = 0 } = 
   });
   await p.goto(origin); await signInFixture(p, f.keys[guest ? "guest" : "owner"]);
   await p.locator("#main").waitFor({ state: "visible" });
-  p.on("request", request => { if (request.method() !== "GET" && new URL(request.url()).pathname.startsWith("/api/rooms/")) writes.push(request.url()); });
+  p.on("request", request => { if (request.method() !== "GET" && new URL(request.url()).pathname.startsWith("/api/rooms/") && !new URL(request.url()).pathname.endsWith("/typing")) writes.push(request.url()); });
   t.after(() => { assert.deepEqual(errors, []); assert.deepEqual(outside, []); assert.equal(writes.length, expectedWrites); });
   const row = id => p.locator(`#room-results-list [data-result-work-id="${id}"]`);
   const open = async () => { await clickChrome(p, "#topbar-settings"); await p.locator("#results-panel > summary").click(); };

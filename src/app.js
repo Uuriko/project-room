@@ -361,6 +361,7 @@ const client = new RoomClient({
     if (firstSnapshot) revealLocationHash();
   },
   onStatus(text) { setConnectionStatus(text); },
+  onTyping(typists) { renderTyping(typists); },
   onAccessEnded() {
     closeRoomActions(false);
     const endedContext = accessEndContext;
@@ -2105,6 +2106,23 @@ $("#chat-suggestions")?.addEventListener("click", e => {
   input.value = reply.dataset.suggestReply;
   $("#message-form").requestSubmit();
 });
+// Typing indicators: ephemeral, driven by synthetic `typing` SSE events.
+// The server expires beats after 10s, so a missing update clears itself;
+// this also clears on snapshot refresh and when the viewer sends.
+function renderTyping(typists) {
+  const el = $("#typing-indicator");
+  if (!el) return;
+  const names = (typists ?? []).map(t => t.displayName || t.memberId).filter(Boolean).slice(0, 3);
+  const extra = (typists ?? []).length - names.length;
+  if (!names.length) {
+    el.hidden = true;
+    el.textContent = "";
+    return;
+  }
+  const who = extra > 0 ? `${names.join(", ")} and ${extra} other${extra === 1 ? "" : "s"}` : names.join(" and ");
+  el.textContent = `${who} ${names.length + extra === 1 ? "is" : "are"} typing…`;
+  el.hidden = false;
+}
 function renderMessages() {
   const list = $("#message-list"), view = currentThreadId ? `thread:${currentThreadId}` : `room:${activeChannelId}`;
   const sameView = list.dataset.view === view;
@@ -4111,7 +4129,7 @@ function applyMentionMember(member) {
   hideMentions(); saveComposer(); syncRequestComposer();
   input.focus(); input.setSelectionRange(next.caret, next.caret);
 }
-$("#message-input").addEventListener("input", () => { lastComposerSelection = null; saveComposer(); renderMentions(); renderEmoji(); updateReply(); syncRequestComposer(); });
+$("#message-input").addEventListener("input", () => { lastComposerSelection = null; saveComposer(); renderMentions(); renderEmoji(); updateReply(); syncRequestComposer(); void client.sendTyping(); });
 $("#message-to-select").addEventListener("change", () => { saveComposer(); syncRequestComposer(); syncComposerChrome(); });
 const touchKeyboard = matchMedia("(hover: none) and (pointer: coarse)");
 function syncComposerHint() {
