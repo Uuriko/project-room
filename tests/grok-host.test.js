@@ -402,7 +402,7 @@ test("pull sends the saved needs-me cursor on the next pass", async t => {
   assert.equal(handlers.beats, 2);
   assert.equal(handlers.beatBodies[0].mode, "pull-only");
   assert.equal(handlers.beatBodies[0].workWakes, undefined);
-  assert.match(handlers.needs[1], /since=/);
+  assert.ok(handlers.needs.some(path => path.includes("since=")));
   const journal = readJournalFile(join(directory, "grok-host-journal.json"));
   assert.deepEqual(journal.cursor, { rooms: { den: 4 } });
 });
@@ -445,6 +445,9 @@ test("pull follows needs-me hasMore for a bounded number of pages", async t => {
     const path = String(url);
     if (path.includes("/api/agent-heartbeats")) {
       return new Response(JSON.stringify({ host: { hostId: "grok-build" }, pendingWakes: [], acknowledged: [] }), { status: 200 });
+    }
+    if (path.includes("/work-claims")) {
+      return new Response(JSON.stringify({ claims: [] }), { status: 200 });
     }
     pages += 1;
     if (pages === 1) {
@@ -747,4 +750,77 @@ test("a playbook CLAIM line posts files and a lease, not a chat-only claim", asy
   assert.deepEqual(posted.body.files, ["server/a.mjs", "server/b.mjs"]);
   assert.ok(posted.body.leaseHours >= 3 && posted.body.leaseHours <= 4);
   assert.equal(JSON.stringify(result).includes(secret), false);
+});
+
+test("a playbook HANDOFF line reassigns on the claim route, resolving a display name", async t => {
+  const directory = fixtureDir();
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const posts = [];
+  const fetchImpl = async (url, init) => {
+    const path = String(url);
+    if (path.endsWith("/presence")) {
+      return new Response(JSON.stringify({ members: [{ id: "ai_holder", displayName: "Jill - Dot", active: true }] }), { status: 200 });
+    }
+    posts.push({ url: path, body: JSON.parse(init.body) });
+    return new Response(JSON.stringify({ id: "plan-pr-autolink", state: "claimed", owner: "ai_holder" }), { status: 200 });
+  };
+  const result = await handleTextCommand({
+    env: { ROOM_AGENT_CONFIG: directory },
+    fetchImpl,
+    line: "HANDOFF plan-pr-autolink | to: Jill - Dot | note: take the two-line splice | room: muse-room",
+  });
+  assert.equal(result.verb, "handoff");
+  assert.equal(result.owner, "ai_holder");
+  assert.equal(posts.length, 1);
+  assert.ok(posts[0].url.endsWith("/api/rooms/muse-room/work-claims/plan-pr-autolink/reassign"));
+  assert.equal(posts[0].body.newOwner, "ai_holder");
+  assert.equal(posts[0].body.note, "take the two-line splice");
+  assert.equal(JSON.stringify(result).includes(secret), false);
+});
+
+test("holders reads the claim list and does not post", async t => {
+  const directory = fixtureDir();
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const methods = [];
+  const fetchImpl = async (url, init = {}) => {
+    methods.push(init.method || "GET");
+    assert.equal(String(url).includes("/api/rooms/muse-room/work-claims"), true);
+    return new Response(JSON.stringify({
+      claims: [
+        { id: "plan-pr-autolink", state: "claimed", owner: "ai_holder", files: ["scripts/runtime-package.mjs"], leaseExpiresAt: "2026-10-07T04:31:00.000Z" },
+        { id: "other", state: "done", owner: "ai_old", files: ["scripts/runtime-package.mjs"] },
+      ],
+    }), { status: 200 });
+  };
+  const result = await handleTextCommand({
+    env: { ROOM_AGENT_CONFIG: directory },
+    fetchImpl,
+    line: "holders scripts/runtime-package.mjs | room: muse-room",
+  });
+  assert.deepEqual(methods, ["GET"]);
+  assert.deepEqual(result.holders, [{
+    id: "plan-pr-autolink", owner: "ai_holder", state: "claimed", leaseExpiresAt: "2026-10-07T04:31:00.000Z",
+  }]);
+});
+
+test("DONE posts the done transition and PROGRESS posts in_progress", async t => {
+  const directory = fixtureDir();
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const posts = [];
+  const fetchImpl = async (url, init) => {
+    posts.push({ url: String(url), body: JSON.parse(init.body) });
+    return new Response(JSON.stringify({ id: "qa-receipt-prose-2", state: posts.at(-1).body.state }), { status: 200 });
+  };
+  await handleTextCommand({
+    env: { ROOM_AGENT_CONFIG: directory }, fetchImpl,
+    line: "PROGRESS qa-receipt-prose-2 | note: tests kept | room: muse-room",
+  });
+  await handleTextCommand({
+    env: { ROOM_AGENT_CONFIG: directory }, fetchImpl,
+    line: "DONE qa-receipt-prose-2 | room: muse-room",
+  });
+  assert.equal(posts[0].body.state, "in_progress");
+  assert.equal(posts[0].body.note, "tests kept");
+  assert.equal(posts[1].body.state, "done");
+  assert.ok(posts.every(post => post.url.includes("/api/rooms/muse-room/work-claims/qa-receipt-prose-2/update")));
 });

@@ -11,6 +11,7 @@ import {
   emptyJournal, buildRunPlan, assertPlanSafe, childEnvFor, emptyAttentionNext, countKinds
 } from "../client/grok-host.mjs";
 import { leaseHoursFromUntil, parseRoomText } from "../client/text-plug.mjs";
+import { holdersForPath, resolveMemberId, swarmBriefFromClaims } from "../client/swarm-brief.mjs";
 import { matchListings } from "../client/matchmaking.mjs";
 
 function fail(code, message) {
@@ -291,6 +292,19 @@ export async function pull({ env = process.env, fetchImpl = fetch, execute = fal
     await ackWakes(connection, completedSignals, { fetchImpl });
   }
   const silent = result.plans.length === 0;
+  const rooms = [...new Set([
+    connection.roomId,
+    ...(cursor && typeof cursor.rooms === "object" ? Object.keys(cursor.rooms) : []),
+  ])].slice(0, 4);
+  const swarm = [];
+  for (const roomId of rooms) {
+    try {
+      const listed = await listWorkClaims({ env, fetchImpl, roomId });
+      swarm.push(swarmBriefFromClaims(roomId, listed.claims));
+    } catch {
+      swarm.push({ roomId, open: null, collisions: [], truncated: false, unavailable: true });
+    }
+  }
   return {
     ok: true,
     identityId,
@@ -304,6 +318,7 @@ export async function pull({ env = process.env, fetchImpl = fetch, execute = fal
     hostId: beat.hostId,
     silent,
     kinds: countKinds(result.plans.map(plan => plan.item)),
+    swarm,
     next: silent ? emptyAttentionNext({ execute }) : "Review planned items; --execute starts Grok."
   };
 }
@@ -474,19 +489,12 @@ export async function fileAccessRequest({ env = process.env, fetchImpl = fetch, 
   return { ok: true, requestId: parsed.requestId || requestId, status: parsed.status, roomId: parsed.roomId || roomId };
 }
 
-export async function claimWork({ env = process.env, fetchImpl = fetch, workItemId, leaseHours, files, roomId } = {}) {
-  const connection = connectionFromEnv(env);
-  if (typeof workItemId !== "string" || workItemId.length < 1 || workItemId.length > 128) fail("invalid_attention_item", "workItemId required");
-  const room = (typeof roomId === "string" && roomId) ? roomId : connection.roomId;
-  const path = `/api/rooms/${encodeURIComponent(room)}/work-claims/${encodeURIComponent(workItemId)}/claim`;
-  const body = {
-    ...(leaseHours === undefined ? {} : { leaseHours }),
-    ...(files === undefined ? {} : { files }),
-  };
-  const parsed = await jsonRequest(connection, path, { fetchImpl, method: "POST", body });
-  const token = connection.token;
-  const safe = JSON.parse(JSON.stringify(parsed));
-  const blob = JSON.stringify(safe);
+function claimRoom(connection, roomId) {
+  return typeof roomId === "string" && roomId ? roomId : connection.roomId;
+}
+
+function safeClaimResult(parsed, token, workItemId, room) {
+  const blob = JSON.stringify(parsed);
   if (blob.includes(token)) fail("secret_in_plan");
   return {
     ok: true,
@@ -495,8 +503,74 @@ export async function claimWork({ env = process.env, fetchImpl = fetch, workItem
     state: parsed.state || null,
     owner: parsed.owner || parsed.claimedBy || null,
     leaseExpiresAt: parsed.leaseExpiresAt ?? null,
-    fileWarnings: Array.isArray(parsed.fileWarnings) ? parsed.fileWarnings : []
+    fileWarnings: Array.isArray(parsed.fileWarnings) ? parsed.fileWarnings : [],
   };
+}
+
+export async function listWorkClaims({ env = process.env, fetchImpl = fetch, roomId } = {}) {
+  const connection = connectionFromEnv(env);
+  const room = claimRoom(connection, roomId);
+  const claims = [];
+  let cursor = "";
+  for (let page = 0; page < 4; page++) {
+    const path = `/api/rooms/${encodeURIComponent(room)}/work-claims?limit=50${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
+    const parsed = await jsonRequest(connection, path, { fetchImpl });
+    if (!Array.isArray(parsed.claims)) break;
+    claims.push(...parsed.claims);
+    if (!parsed.hasMore || typeof parsed.nextCursor !== "string" || !parsed.nextCursor) break;
+    cursor = parsed.nextCursor;
+  }
+  const blob = JSON.stringify(claims);
+  if (blob.includes(connection.token)) fail("secret_in_plan");
+  return { roomId: room, claims };
+}
+
+export async function updateClaim({ env = process.env, fetchImpl = fetch, workItemId, state, note, roomId } = {}) {
+  const connection = connectionFromEnv(env);
+  if (typeof workItemId !== "string" || workItemId.length < 1 || workItemId.length > 128) fail("invalid_attention_item", "workItemId required");
+  const room = claimRoom(connection, roomId);
+  const path = `/api/rooms/${encodeURIComponent(room)}/work-claims/${encodeURIComponent(workItemId)}/update`;
+  const parsed = await jsonRequest(connection, path, {
+    fetchImpl, method: "POST",
+    body: { ...(state === undefined ? {} : { state }), ...(note === undefined ? {} : { note }) },
+  });
+  return safeClaimResult(parsed, connection.token, workItemId, room);
+}
+
+export async function reassignClaim({ env = process.env, fetchImpl = fetch, workItemId, newOwner, note, roomId } = {}) {
+  const connection = connectionFromEnv(env);
+  if (typeof workItemId !== "string" || workItemId.length < 1 || workItemId.length > 128) fail("invalid_attention_item", "workItemId required");
+  if (typeof newOwner !== "string" || newOwner.length < 1) fail("invalid_attention_item", "newOwner required");
+  const room = claimRoom(connection, roomId);
+  const path = `/api/rooms/${encodeURIComponent(room)}/work-claims/${encodeURIComponent(workItemId)}/reassign`;
+  const parsed = await jsonRequest(connection, path, {
+    fetchImpl, method: "POST",
+    body: { newOwner, ...(note === undefined ? {} : { note }) },
+  });
+  return safeClaimResult(parsed, connection.token, workItemId, room);
+}
+
+async function resolveHandoffOwner(connection, room, token, fetchImpl) {
+  try {
+    const presence = await jsonRequest(connection, `/api/rooms/${encodeURIComponent(room)}/presence`, { fetchImpl });
+    const resolved = resolveMemberId(presence.members, token);
+    if (resolved) return resolved;
+  } catch { /* the claim route still checks membership */ }
+  if (!/^[A-Za-z0-9_.:-]{1,128}$/.test(token)) fail("invalid_text_plug");
+  return token;
+}
+
+export async function claimWork({ env = process.env, fetchImpl = fetch, workItemId, leaseHours, files, roomId } = {}) {
+  const connection = connectionFromEnv(env);
+  if (typeof workItemId !== "string" || workItemId.length < 1 || workItemId.length > 128) fail("invalid_attention_item", "workItemId required");
+  const room = claimRoom(connection, roomId);
+  const path = `/api/rooms/${encodeURIComponent(room)}/work-claims/${encodeURIComponent(workItemId)}/claim`;
+  const body = {
+    ...(leaseHours === undefined ? {} : { leaseHours }),
+    ...(files === undefined ? {} : { files }),
+  };
+  const parsed = await jsonRequest(connection, path, { fetchImpl, method: "POST", body });
+  return safeClaimResult(parsed, connection.token, workItemId, room);
 }
 
 export async function handleTextCommand({ env = process.env, fetchImpl = fetch, line, listings = [] } = {}) {
@@ -508,11 +582,35 @@ export async function handleTextCommand({ env = process.env, fetchImpl = fetch, 
   if (parsed.verb === "claim") {
     const leaseHours = parsed.leaseUntil ? leaseHoursFromUntil(parsed.leaseUntil) : undefined;
     const result = await claimWork({
-      env, fetchImpl, workItemId: parsed.workItemId, leaseHours, files: parsed.files,
+      env, fetchImpl, workItemId: parsed.workItemId, leaseHours, files: parsed.files, roomId: parsed.roomId,
     });
-    return { ok: true, verb: "claim", workItemId: result.workItemId, state: result.state, fileWarnings: result.fileWarnings };
+    return { ok: true, verb: "claim", workItemId: result.workItemId, roomId: result.roomId, state: result.state, fileWarnings: result.fileWarnings };
   }
-  if (parsed.verb === "done") return { ok: true, verb: "done" };
+  if (parsed.verb === "progress" || parsed.verb === "blocked" || parsed.verb === "done") {
+    if (!parsed.workItemId) return { ok: true, verb: "done" };
+    const state = parsed.verb === "progress" ? "in_progress" : parsed.verb === "blocked" ? "blocked" : "done";
+    const result = await updateClaim({
+      env, fetchImpl, workItemId: parsed.workItemId, state, note: parsed.note, roomId: parsed.roomId,
+    });
+    return { ok: true, verb: parsed.verb, workItemId: result.workItemId, roomId: result.roomId, state: result.state };
+  }
+  if (parsed.verb === "handoff") {
+    const connection = connectionFromEnv(env);
+    const room = claimRoom(connection, parsed.roomId);
+    const newOwner = await resolveHandoffOwner(connection, room, parsed.to, fetchImpl);
+    const result = await reassignClaim({
+      env, fetchImpl, workItemId: parsed.workItemId, newOwner, note: parsed.note, roomId: room,
+    });
+    return { ok: true, verb: "handoff", workItemId: result.workItemId, roomId: result.roomId, owner: result.owner };
+  }
+  if (parsed.verb === "holders" || parsed.verb === "collisions") {
+    const listed = await listWorkClaims({ env, fetchImpl, roomId: parsed.roomId });
+    if (parsed.verb === "holders") {
+      return { ok: true, verb: "holders", roomId: listed.roomId, path: parsed.path, holders: holdersForPath(listed.claims, parsed.path) };
+    }
+    const brief = swarmBriefFromClaims(listed.roomId, listed.claims);
+    return { ok: true, verb: "collisions", ...brief };
+  }
   const hits = matchListings({ motive: parsed.motive, tags: parsed.tags }, listings);
   return {
     ok: true,

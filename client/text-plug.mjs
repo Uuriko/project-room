@@ -1,8 +1,9 @@
 // SMS / iMessage / WhatsApp plug for Instinct, Fo, and other text-only agents.
-// One short line becomes match, claim, or pull. Does not send SMS, mint
-// identities, or hold a lease. The next hop is the existing matcher or claim.
+// One short line becomes match, claim, pull, or a playbook claim action.
+// Does not send SMS, mint identities, or hold a lease. The next hop is the
+// existing matcher or the existing work-claim route.
 
-const VERBS = new Set(["match", "claim", "pull", "done"]);
+const VERBS = new Set(["match", "claim", "pull", "done", "progress", "blocked", "handoff", "holders", "collisions"]);
 const MOTIVES = new Set(["hobby", "credits", "cash", "any"]);
 
 function fail(code) {
@@ -19,35 +20,62 @@ export function leaseHoursFromUntil(iso, now = Date.now()) {
   return hours;
 }
 
-function parsePlaybookClaim(joined) {
-  const [head, ...segments] = joined.split("|").map(part => part.trim());
-  if (!head || head.length > 128 || /\s/.test(head)) fail("invalid_text_plug");
+function workItemIdOf(value) {
+  if (!value || value.length > 128 || /\s/.test(value)) fail("invalid_text_plug");
+  return value;
+}
+
+function roomIdOf(value) {
+  if (!value || value.length > 128 || /\s/.test(value)) fail("invalid_text_plug");
+  return value;
+}
+
+function noteOf(value) {
+  if (!value || value.length > 512) fail("invalid_text_plug");
+  return value;
+}
+
+function memberTokenOf(value) {
+  if (!value || value.length > 128) fail("invalid_text_plug");
+  return value;
+}
+
+function filesOf(value) {
   const files = [];
-  let leaseUntil;
+  for (const path of value.split(",").map(item => item.trim()).filter(Boolean)) {
+    if (path.length > 512 || path.startsWith("/") || path.split("/").includes("..")) fail("invalid_text_plug");
+    files.push(path);
+  }
+  if (files.length > 64) fail("invalid_text_plug");
+  return files;
+}
+
+// Playbook segments are `key: value`, split on `|`. Unknown keys fail closed.
+// `not touching` is acknowledged and dropped: it is not a lease.
+function parseSegments(joined, allowed) {
+  const [head, ...segments] = joined.split("|").map(part => part.trim());
+  const fields = {};
   for (const segment of segments) {
     const split = segment.indexOf(":");
     if (split < 1) fail("invalid_text_plug");
     const key = segment.slice(0, split).trim().toLowerCase();
     const value = segment.slice(split + 1).trim();
-    if (key === "files") {
-      for (const path of value.split(",").map(item => item.trim()).filter(Boolean)) {
-        if (path.length > 512 || path.startsWith("/") || path.split("/").includes("..")) fail("invalid_text_plug");
-        files.push(path);
-      }
-      if (files.length > 64) fail("invalid_text_plug");
-    } else if (key === "lease until") {
+    if (!allowed.has(key)) fail("invalid_text_plug");
+    if (key === "files") fields.files = filesOf(value);
+    else if (key === "lease until") {
       if (!Number.isFinite(Date.parse(value))) fail("invalid_text_plug");
-      leaseUntil = new Date(value).toISOString();
-    } else if (key === "not touching") {
-      continue;
-    } else fail("invalid_text_plug");
+      fields.leaseUntil = new Date(value).toISOString();
+    } else if (key === "not touching") continue;
+    else if (key === "room") fields.roomId = roomIdOf(value);
+    else if (key === "note") fields.note = noteOf(value);
+    else if (key === "to") fields.to = memberTokenOf(value);
+    else fail("invalid_text_plug");
   }
-  return {
-    verb: "claim",
-    workItemId: head,
-    ...(files.length ? { files: Object.freeze(files) } : {}),
-    ...(leaseUntil ? { leaseUntil } : {}),
-  };
+  return { head, fields };
+}
+
+function withRoom(fields) {
+  return fields.roomId ? { roomId: fields.roomId } : {};
 }
 
 export function parseRoomText(text) {
@@ -62,16 +90,46 @@ export function parseRoomText(text) {
   const restLower = lowerParts.slice(start + 1);
   const restRaw = rawParts.slice(start + 1);
   if (!VERBS.has(verb)) fail("unknown_text_verb");
-  if (verb === "pull" || verb === "done") {
+  if (verb === "pull") {
     if (restLower.length !== 0) fail("invalid_text_plug");
     return { verb };
   }
-  if (verb === "claim") {
-    const joined = restRaw.join(" ");
-    if (joined.includes("|")) return parsePlaybookClaim(joined);
+  if (verb === "collisions") {
+    if (restRaw.length === 0) return { verb };
+    const { head, fields } = parseSegments(restRaw.join(" "), new Set(["room"]));
+    if (head) fail("invalid_text_plug");
+    return { verb, ...withRoom(fields) };
+  }
+  if (verb === "holders") {
+    const { head, fields } = parseSegments(restRaw.join(" "), new Set(["room"]));
+    if (!head || head.length > 512 || head.startsWith("/") || head.split("/").includes("..")) fail("invalid_text_plug");
+    return { verb, path: head, ...withRoom(fields) };
+  }
+  if (verb === "done" && restRaw.length === 0) return { verb };
+  if (verb === "claim" && !restRaw.join(" ").includes("|")) {
     const id = restRaw[0];
-    if (!id || restRaw.length !== 1 || id.length > 128) fail("invalid_text_plug");
-    return { verb, workItemId: id };
+    if (!id || restRaw.length !== 1) fail("invalid_text_plug");
+    return { verb, workItemId: workItemIdOf(id) };
+  }
+  if (verb === "claim" || verb === "progress" || verb === "blocked" || verb === "handoff" || verb === "done") {
+    const allowed = new Set(["files", "lease until", "not touching", "room", "note", "to"]);
+    const { head, fields } = parseSegments(restRaw.join(" "), allowed);
+    const workItemId = workItemIdOf(head);
+    if (verb === "claim" && fields.to) fail("invalid_text_plug");
+    if (verb === "claim" && fields.note) fail("invalid_text_plug");
+    if (verb !== "claim" && fields.files) fail("invalid_text_plug");
+    if (verb !== "claim" && fields.leaseUntil) fail("invalid_text_plug");
+    if (verb === "handoff" && !fields.to) fail("invalid_text_plug");
+    if (verb !== "handoff" && fields.to) fail("invalid_text_plug");
+    return {
+      verb,
+      workItemId,
+      ...withRoom(fields),
+      ...(fields.files?.length ? { files: Object.freeze(fields.files) } : {}),
+      ...(fields.leaseUntil ? { leaseUntil: fields.leaseUntil } : {}),
+      ...(fields.note ? { note: fields.note } : {}),
+      ...(fields.to ? { to: fields.to } : {}),
+    };
   }
   const motive = MOTIVES.has(restLower[0]) ? restLower[0] : "any";
   const tagSource = MOTIVES.has(restLower[0]) ? restLower.slice(1) : restLower;
