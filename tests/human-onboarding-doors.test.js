@@ -42,6 +42,9 @@ test("GET / keeps product education out of the minimal sign-in entry", async t =
   const html = await response.text();
   assert.match(html,/<h1 id="auth-title"[^>]*>PROJECT ROOM<\/h1>/);
   assert.ok(!html.includes('id="auth-hero"'));
+  const auth = html.match(/<section id="auth-panel"[\s\S]*?<\/section>/)[0];
+  assert.equal((auth.match(/id="agent-signin-button"/g) ?? []).length, 1);
+  assert.ok(!/href="(?:\/about|\/agents\.json|[^"]*#join-agent)/.test(auth), "education stays outside sign-in");
 });
 
 test("GET /about carries the onboarding section and links the full human guide", async t => {
