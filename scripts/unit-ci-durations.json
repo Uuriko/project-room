@@ -827,7 +827,10 @@
   "tests/workflow.test.js": 5073,
   "tests/writer-fence-property.test.js": 300000,
   "tests/writer-fence-unfenced.test.js": 58675,
-  "tests/writer-fence.test.js": 77595
+  "tests/writer-fence.test.js": 77595,
+  "tests/agent-directory-a2a.test.mjs": 71.422,
+  "tests/agent-directory-owns-reach.test.mjs": 68.729,
+  "tests/directory-card-seed.test.mjs": 576.781
  },
  "_note": "Per-file wall-clock ms of `node --test <file>` measured 2026-10-06 on a 2-CPU host with 16-way parallelism (values are contention-inflated; used only as relative weights for shard balancing, never for membership). Files hitting the 300s measurement timeout are capped at 300000."
 }

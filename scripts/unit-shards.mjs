@@ -5,13 +5,13 @@
 // the suite into SHARD_COUNT file shards with balanced estimated duration, so
 // the `unit-shards` matrix finishes in roughly 1/SHARD_COUNT of the time.
 //
-// Allocation consumes the canonical file list; timing data never selects
+// Allocation follows Node24 default test discovery; timing data never selects
 // membership: every tests/*.test.js file is always in exactly one shard.
 // Per-file durations live in scripts/unit-ci-durations.json (milliseconds,
 // measured on hosted CI); files without a measurement get a conservative
 // default so a new test file lands in a shard instead of breaking the plan.
 import { createHash } from "node:crypto";
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, globSync } from "node:fs";
 
 export const SHARD_COUNT = 3;
 
@@ -32,12 +32,19 @@ export function parseShard(value) {
   return { index: Number(match[1]), total: SHARD_COUNT };
 }
 
-export function unitPlan(testsDir = "tests") {
-  const files = readdirSync(testsDir)
-    .filter((f) => f.endsWith(".test.js"))
-    .sort()
-    .map((f) => `${testsDir}/${f}`);
-  if (!files.length) throw new Error("unitPlan: no tests/*.test.js files found");
+// Node24 source: internal/test_runner/utils.js kDefaultPattern and runner.js
+// createTestFileList. Types are stripped by default in CI; glob excludes modules.
+// https://nodejs.org/docs/latest-v24.x/api/test.html#running-tests-from-the-command-line
+export function discoverUnitTests(directory = ".") {
+  const extensions = process.features?.typescript === false ? "js,mjs,cjs" : "js,mjs,cjs,ts,mts,cts";
+  const pattern = `**/{test,test/**/*,test-*,*[._-]test}.{${extensions}}`;
+  return globSync(pattern, { cwd: directory, exclude: name => name.split(/[\\/]/).includes("node_modules") })
+    .sort().map(file => directory === "." ? file : `${directory}/${file}`);
+}
+
+export function unitPlan(testsDir = ".") {
+  const files = discoverUnitTests(testsDir);
+  if (!files.length) throw new Error("unitPlan: no Node-discovered test files found");
   if (new Set(files).size !== files.length) throw new Error("unitPlan: duplicate test files");
   const shards = Array.from({ length: SHARD_COUNT }, (_, i) => ({ index: i + 1, files: [], estimatedMs: 0 }));
   const estimate = (file) => {
@@ -134,17 +141,27 @@ export function verifyUnitShards(plan, receipts, { matrixResult, revision, runId
   // A re-run shard uploads a second receipt under a new attempt number; the
   // latest attempt per shard is authoritative, bound to this run by runId +
   // revision + planHash.
-  const attemptNumber = (receipt) => {
-    const n = Number(receipt?.runAttempt);
-    return Number.isFinite(n) ? n : -1;
+  const attemptNumber = value => {
+    if ((typeof value !== "string" && typeof value !== "number")
+      || !/^[1-9]\d*$/.test(String(value)) || !Number.isSafeInteger(Number(value))) {
+      throw new Error("Unit shard receipt has invalid run attempt");
+    }
+    return Number(value);
   };
+  const currentAttempt = attemptNumber(runAttempt);
+  const seen = new Set();
   const latest = new Map();
   for (const receipt of receipts) {
     const index = receipt?.index;
     if (!Number.isInteger(index) || index < 1 || index > SHARD_COUNT)
       throw new Error("Unit shard receipt has invalid index");
+    const attempt = attemptNumber(receipt.runAttempt);
+    if (attempt > currentAttempt) throw new Error("Unit shard receipt is from a future attempt");
+    const key = `${index}:${attempt}`;
+    if (seen.has(key)) throw new Error("Duplicate unit shard receipt attempt");
+    seen.add(key);
     const current = latest.get(index);
-    if (!current || attemptNumber(receipt) > attemptNumber(current)) latest.set(index, receipt);
+    if (!current || attempt > attemptNumber(current.runAttempt)) latest.set(index, receipt);
   }
   if (latest.size !== SHARD_COUNT) throw new Error("Missing or duplicate unit shard receipts");
   for (const shard of plan.shards) {
@@ -167,7 +184,7 @@ export function verifyUnitShards(plan, receipts, { matrixResult, revision, runId
 
 // CLI: print the plan (for debugging / CI validation). Run from the repo root.
 if (process.argv[1] && import.meta.url === new URL(process.argv[1], "file:").href) {
-  const plan = unitPlan("tests");
+  const plan = unitPlan();
   for (const shard of plan.shards) {
     console.log(`shard ${shard.index}/${SHARD_COUNT}: ${shard.files.length} files, ~${Math.round(shard.estimatedMs / 1000)}s`);
   }
