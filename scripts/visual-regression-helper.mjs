@@ -16,9 +16,14 @@
 //     baselines carry the same masks, so the gate never sees them
 //
 // Regenerating baselines after an intentional UI change:
-//   VISUAL_UPDATE_BASELINES=1 node --test scripts/visual-regression-browser-check.mjs
-// The update run writes fresh baselines and passes; the next normal run
-// diffs against them. Review the baseline diff in the PR like any snapshot.
+// Baselines are CI-canonical: the comparator sees 1-2% pixel drift from
+// system font rasterization between environments, so a locally captured
+// baseline fails the CI gate on environment, not on UI changes. Refresh via:
+//   gh workflow run visual-baselines.yml --ref <branch>
+// then download the `visual-baselines` artifact and commit the PNGs here.
+// (VISUAL_UPDATE_BASELINES=1 node --test scripts/visual-regression-browser-check.mjs
+// also works for local iteration, but its PNGs must not be committed.)
+// Review the baseline diff in the PR like any snapshot.
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
