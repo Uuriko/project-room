@@ -131,7 +131,25 @@ export class AccountClient {
   }
   async confirm() {
     const session = this.currentSession("confirming access", { authenticated: true }), generation = this.generation;
-    const value = await this.request("/api/account-session");
+    let value;
+    try {
+      // Name the session this read is checking: a delayed confirmation must
+      // never mint a slot, rotate a cookie, or clobber a newer sign-in.
+      value = await this.request("/api/account-session", { session });
+    } catch (error) {
+      // A response that lands after a newer session replaced this one is
+      // obsolete: never let it touch the replacement, whatever it reports.
+      if (!this.owns(generation, session)) return null;
+      // Ownership ended (signed out, revoked, binding rotated): retire the
+      // view instead of throwing. Uncertain failures (5xx, offline) keep
+      // the session so the caller can retry.
+      if (error?.status === 401 || error?.status === 403 || error?.status === 409
+        || ["unauthenticated", "access_denied", "session_binding_changed"].includes(error?.code)) {
+        this.invalidate(generation, session);
+        return false;
+      }
+      throw error;
+    }
     if (!this.owns(generation, session)) return null;
     if (!value?.authenticated || !sameAccountSession(value, session)) { this.invalidate(generation, session); return false; }
     return true; // Keep object identity and generation: Room and Inbox own these.

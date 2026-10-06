@@ -2028,6 +2028,16 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (url.pathname === "/api/account-session") {
         const slotToken = cookie(req, accountCookieName);
         if (req.method === "GET") {
+          const binding = expectedBinding(req);
+          if (binding !== null) {
+            // Bound account confirmation: the read names the session it is
+            // checking and must never mint a recovery slot, rotate the
+            // cookie, or clobber a newer sign-in. A malformed binding was
+            // rejected as 422 above; authenticateAccountSession answers 401
+            // for a dead session and 409 when the binding rotated.
+            const confirmed = store.authenticateAccountSession(slotToken, null, binding);
+            return json(res, 200, sessionAccountView(confirmed));
+          }
           if (!slotToken) {
             rate(`account-slot:${remoteAddress}`, 20);
             const created = store.createAccountSessionSlot();
