@@ -32,7 +32,7 @@ import { buildOpportunitiesFeed } from "./opportunities.mjs"; // Public opportun
 import { telegramConfig, TelegramLiveStatus } from "./channel-adapters/telegram-config.mjs";
 import { TelegramTransport } from "./channel-adapters/telegram-transport.mjs";
 import { SOURCE_REVISION, BUILD_ID } from "./version.mjs";
-import { agentErrorBody, errorCategory } from "../src/agent-error.mjs";
+import { agentErrorBody, errorCategory, ERROR_COMMAND_TYPE } from "../src/agent-error.mjs";
 import { DiagnosticsLog, supportExportBundle } from "./diagnostics.mjs";
 import { renderRoomExportHtml, EXPORT_HTML_CSP } from "./room-export-html.mjs";
 import { redactEventPage, redactEventRows, redactMessageTree, redactSnapshotState } from "./redact-read.mjs";
@@ -785,18 +785,20 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // so a client that finishes sending can read the 413. Aborts fail promptly.
   function readText(req, limit, tooLarge) {
     const declaredBytes = Number(req.headers["content-length"]);
-    if (declaredBytes > limit) { req.resume(); throw tooLarge(); }
+    if (declaredBytes > limit) { req.resume(); throw tooLarge(declaredBytes); }
     return new Promise((resolve, rejectPromise) => {
       let bytes = 0;
-      let oversize = declaredBytes > limit;
+      let oversize = false;
       const chunks = [];
       req.on("data", chunk => {
-        if (oversize) return;
+        // Keep counting past the limit without buffering, so the 413 names
+        // the actual size (G7); over-limit chunk buffers are still dropped.
         bytes += chunk.length;
+        if (oversize) return;
         if (bytes > limit) { oversize = true; chunks.length = 0; }
         else chunks.push(chunk);
       });
-      req.on("end", () => oversize ? rejectPromise(tooLarge()) : resolve(Buffer.concat(chunks).toString("utf8")));
+      req.on("end", () => oversize ? rejectPromise(tooLarge(bytes)) : resolve(Buffer.concat(chunks).toString("utf8")));
       req.on("error", rejectPromise);
       req.on("aborted", () => rejectPromise(new ServiceError(400, "aborted", "Request ended early")));
     });
@@ -806,7 +808,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // the replied-to message).
   async function body(req, { limit = JSON_BODY_BYTES } = {}) {
     if (!/^application\/json(?:\s*;|$)/i.test(req.headers["content-type"] || "")) reject(415, "json_required", "Use application/json");
-    const text = await readText(req, limit, () => new ServiceError(413, "too_large", "Request is too large"));
+    // G7 (#940): the body-cap rejection names the limit and the actual size.
+    // Code stays too_large; the AX layer adds the next step.
+    const text = await readText(req, limit, actualBytes => new ServiceError(413, "too_large", `Request body is ${actualBytes} bytes; the limit is ${limit} bytes`));
     try { const value = JSON.parse(text); if (!value || Array.isArray(value) || typeof value !== "object") throw new Error(); return value; }
     catch { reject(400, "invalid_json", "Expected a JSON object"); }
   }
@@ -4670,6 +4674,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           return json(res, result.duplicate ? 200 : 201, result);
         } catch (error) {
           inboundSpan.recordException(error);
+          // G7 (#940): hand the refused command's type to the AX layer via a
+          // symbol key (never serialized) so bond/dm field-shape errors can
+          // enumerate the expected data shape. Codes/messages unchanged.
+          if (error instanceof ServiceError && typeof command?.type === "string") error[ERROR_COMMAND_TYPE] = command.type;
           throw error;
         } finally {
           inboundSpan.end();
@@ -4771,7 +4779,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       } catch { /* base envelope keeps its shape on parse failure */ }
       const errorBody = errorOverride
         ? { error: { code, message }, ...errorOverride, operationId, category }
-        : { ...agentErrorBody({ httpStatus, code, message, roomId, workItemId }), operationId, category };
+        : { ...agentErrorBody({ httpStatus, code, message, roomId, workItemId, commandType: error[ERROR_COMMAND_TYPE] }), operationId, category };
       if (error.detail && typeof error.detail === "object" && !Array.isArray(error.detail)) {
         for (const [key, value] of Object.entries(error.detail)) {
           if (!["error", "status", "reason", "hint", "next", "operationId", "category"].includes(key)) errorBody[key] = value;
