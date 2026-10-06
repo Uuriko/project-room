@@ -26,6 +26,8 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      # Same runtime as the blocking suite (test.yml): the repo requires
+      # Node >= 24.19.0 (node:sqlite). Node 20 cannot even load the tests.
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
