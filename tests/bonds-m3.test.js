@@ -70,8 +70,17 @@ test("roomless and nonexistent targets fail with one uniform peer_not_found", as
   assert.equal(toMissing.status, 404);
   assert.equal(toMissing.body.error.code, "peer_not_found");
 
-  // Identical error shape: no existence signal in code or message.
-  assert.deepEqual(toRoomless.body.error, toMissing.body.error);
+  // Identical error shape: no existence signal in code or message. The message
+  // echoes the caller-supplied `to`, so strip it before comparing: everything
+  // else must be byte-identical for roomless vs nonexistent targets.
+  const stripTo = (err, to) => ({
+    ...err,
+    message: err.message.split(to).join("<to>")
+  });
+  assert.deepEqual(
+    stripTo(toRoomless.body.error, roomless.identityId),
+    stripTo(toMissing.body.error, "ai_does_not_exist_m3")
+  );
 
   // Co-member identity still resolves and proposes.
   const friend = fixture.store.identities.create("m3 friend");
@@ -79,6 +88,51 @@ test("roomless and nonexistent targets fail with one uniform peer_not_found", as
   const ok = await jsonOf(await command(owner.secret, "bond.propose", { to: friend.identityId }));
   assert.equal(ok.status, 201);
   assert.equal(ok.body.event.type, "bond.proposed");
+});
+
+// QA7-14: the 404 peer_not_found for a stale/ex-peer DM target must teach.
+// It names the attempted target, explains that the identity is either unknown
+// or no longer a peer in this room, and gives the next steps (re-check
+// membership, re-invite, propose a new bond) - while keeping the M3 uniform
+// shape so the route stays useless as an existence oracle.
+test("peer_not_found teaches: names the target, explains the ended-or-unknown relationship, gives next steps", async t => {
+  const { origin, roomId, owner, command, fixture } = await setup(t);
+  const roomless = fixture.store.identities.create("teach roomless"); // never joins any room
+  const missing = "ai_teach_missing_9f2c7"; // never existed
+
+  // A true ex-peer: admit them to the room, then unlink (owner-only).
+  const exPeer = fixture.store.identities.create("teach ex-peer");
+  await admit(origin, roomId, owner.secret, exPeer, "ExPeer");
+  const unlinkRes = await fetch(`${origin}/api/rooms/${roomId}/identity-links`, {
+    method: "DELETE",
+    headers: { "content-type": "application/json", authorization: `Bearer ${owner.secret}` },
+    body: JSON.stringify({ identityId: exPeer.identityId })
+  });
+  assert.equal(unlinkRes.status, 200, "unlink the ex-peer");
+
+  const cases = [
+    ["bond.propose to roomless identity", "bond.propose", roomless.identityId],
+    ["bond.propose to nonexistent identity", "bond.propose", missing],
+    ["bond.propose to ex-peer", "bond.propose", exPeer.identityId],
+    ["dm.posted to ex-peer", "dm.posted", exPeer.identityId],
+  ];
+  const stripped = [];
+  for (const [label, cmd, to] of cases) {
+    const data = cmd === "dm.posted"
+      ? { to, body: "hello from the teaching test", messageId: randomUUID() }
+      : { to };
+    const r = await jsonOf(await command(owner.secret, cmd, data));
+    assert.equal(r.status, 404, label);
+    assert.equal(r.body.error.code, "peer_not_found", label);
+    const msg = r.body.error.message;
+    assert.ok(msg.includes(to), `${label}: names the attempted target: ${msg}`);
+    assert.match(msg, /unknown|no longer/i, `${label}: explains unknown-or-ended relationship`);
+    assert.match(msg, /next|invite|member|re-join|rejoin|bond/i, `${label}: gives next steps`);
+    stripped.push(msg.split(to).join("<to>"));
+  }
+  // M3 anti-oracle preserved: roomless, ex-peer, and nonexistent targets
+  // differ ONLY in the echoed caller-supplied target.
+  for (const s of stripped.slice(1)) assert.equal(s, stripped[0]);
 });
 
 test("incoming pending proposals are capped per recipient", async t => {

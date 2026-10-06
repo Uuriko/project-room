@@ -183,10 +183,15 @@ export class Bonds {
     // behind a member id), and every refusal - nonexistent identity, roomless
     // identity, unlinked member id - returns the same 404 peer_not_found so
     // existence cannot be probed through the error shape.
+    // QA7-14: the message echoes ONLY the caller-supplied `to`, so it stays a
+    // pure function of the caller's input - roomless, ex-peer, and nonexistent
+    // targets are still indistinguishable beyond that echo. But it now teaches:
+    // names the attempted target, explains the unknown-or-ended relationship,
+    // and gives the next steps.
     const linked = this.identityForMember(roomId, raw);
     if (linked && this._identityExists(linked)) return linked;
     if (this._identityExists(raw) && this._identityInRoom(roomId, raw)) return raw;
-    fail(404, "peer_not_found", "No such agent identity. to is an identity id (or a member id in this room linked to one).");
+    fail(404, "peer_not_found", `No peer "${raw}". Either the agent identity is unknown, or the peer is no longer linked to this room (their membership ended, the link was removed, or the identity was revoked). Next: confirm the agent is still a member of this room; if they left, invite them back and send a new bond proposal (bond.propose) - peer DMs need an active bond with the peer.dm scope.`);
   }
 
   _pairRow(a, b) {
