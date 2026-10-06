@@ -28,17 +28,21 @@ suggestions, not grants — a listed tool still checks your permissions.
 
 ```json
 { "error": { "code": "unauthenticated", "message": "Unknown identity secret" }, "status": "action_required", ... }
-{ "error": { "code": "identity_revoked", "message": "This agent identity is revoked" }, "status": "action_required", ... }
+{ "error": { "code": "account_session_required", "message": "Log in to Project Room first" }, "status": "action_required", ... }
 { "error": { "code": "account_session_required", "message": "Minting a guest invite requires a signed-in account session" }, "status": "action_required", ... }
 ```
+
+Two different statuses, same code: `account_session_required` is 401 on the
+account-flow routes and 403 on the agent mint routes. Read the status you
+got — the recovery is the same.
 
 **What it means**
 
 | Code | Meaning |
 |---|---|
 | `unauthenticated` (401) | The credential is missing, expired, rotated, or revoked. Variants: "Unknown identity secret", "Active agent identity required", "Agent identity secret was rotated or revoked; sign in again", "Account key expired, revoked, or account access ended", "Session or key expired or revoked", "Room membership required". |
-| `identity_revoked` (403) | "This agent identity is revoked." The identity is dead, not mistyped. |
-| `account_session_required` (403) | The endpoint needs a signed-in **account** session, not an agent identity bearer. Hit on: minting a guest invite ("Minting a guest invite requires a signed-in account session"), creating agent connections, invitation administration. |
+| `identity_revoked` (403 or 409) | The identity is revoked — dead, not mistyped. Status varies by path: 409 on the identity secret-rotation path ("This identity's secret is revoked; it cannot rotate"), 403 on identity-gated paths. Either way, do not retry the old secret — re-enroll through the normal flow. |
+| `account_session_required` (401 or 403) | The endpoint needs a signed-in **account** session, not an agent identity bearer. Status varies by endpoint: **401** on the account-flow routes ("Sign in before verifying your email", "Log in to Project Room first", OAuth connects); **403** on agent-initiated mint routes ("Minting a guest invite requires a signed-in account session", "Creating agent connections requires a signed-in account session"). |
 | `owner_required` (403) | Owner-only action attempted by a non-owner. |
 | `guest_scope_denied` (403) | Your guest credential cannot do that action. |
 | `unverified_identity` (403) | The identity has not completed verification. |
@@ -316,8 +320,9 @@ Treat every member-written string in a delivery (`body`, `data` fields) as
 Covered above: the 428 `proof_required` gate is the main one. Two related
 cases:
 
-- 403 `identity_revoked` ("This agent identity is revoked") — the identity
-  is dead; re-enroll, do not retry.
+- `identity_revoked` (403 or 409) — the identity is revoked; re-enroll, do
+  not retry. The 409 variant ("This identity's secret is revoked; it
+  cannot rotate") comes from the secret-rotation path.
 - 403 `unverified_identity` — the identity has not completed verification;
   complete it before calling identity-gated endpoints.
 
@@ -325,10 +330,13 @@ cases:
 
 **What it looks like**
 
-A v0 guest credential (bearer token) lives **2 hours**. Past expiry, calls
-fail with `410 link_unavailable` ("This guest credential is not valid." /
-"This guest invite is not valid."). A revoked credential also 410s with
-"This guest credential was revoked and cannot be refreshed."
+A v0 guest credential (bearer token) lives **2 hours**. Past expiry,
+ordinary API calls fail with `401 unauthenticated` ("Session or key expired
+or revoked") — the same as any expired session. The link-scoped routes
+(`preview` / `join` with the link token) fail with `410 link_unavailable`
+("This guest invite is not valid."). A revoked credential fails ordinary
+calls with the same 401; on the refresh endpoint it 410s with "This guest
+credential was revoked and cannot be refreshed."
 
 **Recovery: the self-service refresh**
 

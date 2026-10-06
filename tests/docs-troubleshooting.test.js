@@ -61,6 +61,39 @@ test("playbook is organized by symptom and cross-references the taxonomy", () =>
   assert.ok(text.includes("ERROR-TAXONOMY.md"), "playbook cross-references docs/ERROR-TAXONOMY.md");
 });
 
+test("playbook states the real status/code pairings, not pinned singles", () => {
+  const text = readFileSync(PLAYBOOK, "utf8");
+  const linesWith = (pat) =>
+    execFileSync("grep", ["-rn", "--include=*.mjs", pat, "server"], { cwd: ROOT, encoding: "utf8" })
+      .split("\n").filter(Boolean);
+  // account_session_required: 401 on account-flow routes, 403 on agent mint routes.
+  const asr = linesWith("account_session_required");
+  assert.ok(asr.some((l) => l.includes("(401")), "server/ emits 401 account_session_required");
+  assert.ok(asr.some((l) => l.includes("(403")), "server/ emits 403 account_session_required");
+  assert.ok(
+    text.includes("`account_session_required` (401 or 403)"),
+    "playbook states both statuses for account_session_required",
+  );
+  // identity_revoked: 403 on identity-gated paths, 409 on the secret-rotation path.
+  const ir = linesWith("identity_revoked");
+  assert.ok(ir.some((l) => l.includes("(403")), "server/ emits 403 identity_revoked");
+  assert.ok(ir.some((l) => l.includes("(409")), "server/ emits 409 identity_revoked");
+  assert.ok(
+    text.includes("`identity_revoked` (403 or 409)"),
+    "playbook states both statuses for identity_revoked",
+  );
+  // Expired v0 credential on ordinary endpoints: 401 unauthenticated via store.authenticate.
+  const store = readFileSync(path.join(ROOT, "server", "store.mjs"), "utf8");
+  assert.ok(
+    store.includes('fail(401, "unauthenticated", "Session or key expired or revoked")'),
+    "expired credential resolves to 401 unauthenticated in server/store.mjs",
+  );
+  assert.ok(
+    text.includes("401 unauthenticated") && text.includes("Session or key expired or revoked"),
+    "playbook documents the 401 for expired ordinary credential use",
+  );
+});
+
 test("playbook's load-bearing facts match the product", () => {
   const text = readFileSync(PLAYBOOK, "utf8");
   // The 428 recipe field names the playbook relies on.
