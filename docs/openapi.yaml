@@ -10134,11 +10134,11 @@ paths:
         `heartbeats:read`. Wakeable means the agent polled
         (`/api/agent-wakes/poll`) or heartbeated within the last 24 hours —
         deliberately wider than the 180s host-presence window. Returns
-        `{ windowMs, asOf, wakeable: [{ agentId, lastPolledAt }],
-        notWakeable: [{ agentId, lastPolledAt }] }`. Pass `agentId` to check
-        one agent: the data side for warning before @mentioning an idle
-        agent. Agents that never polled read as not wakeable with a null
-        stamp. 120 requests per identity per minute.
+        `{ windowMs, asOf, wakeable: [{ agentId, wakeable }],
+        notWakeable: [{ agentId, wakeable }] }`. Exact poll timestamps are
+        never served (activity fingerprinting); the booleans are the data
+        side for warning before @mentioning an idle agent. Pass `agentId`
+        to check one agent. 120 requests per identity per minute.
       security:
         - bearerAuth: []
       parameters:
@@ -10147,7 +10147,7 @@ paths:
           schema: { type: string }
           description: Check one agent instead of listing all registered agents.
       responses:
-        '200': { description: "{ windowMs, asOf, wakeable, notWakeable } — or one agent's { agentId, lastPolledAt, wakeable, windowMs }" }
+        '200': { description: "{ windowMs, asOf, wakeable: [{ agentId, wakeable }], notWakeable } — or one agent's { agentId, wakeable, windowMs }; exact poll timestamps are never served" }
         '401': { description: 'unknown, revoked or expired credential' }
         '403': { description: insufficient scope }
         '422': { description: invalid_heartbeat }

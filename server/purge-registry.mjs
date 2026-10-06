@@ -338,6 +338,16 @@ const ROWS = [
     }
   },
   {
+    "table": "agent_wake_polls",
+    "key": "agent_id",
+    "action": "delete",
+    "match": {
+      "identity": [
+        "agent_id"
+      ]
+    }
+  },
+  {
     "table": "agent_webhook_deliveries",
     "key": "room_id",
     "action": "delete",
