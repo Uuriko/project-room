@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-06T16:45:21.212Z",
+  "generatedAt": "2026-10-06T17:08:41.080Z",
   "note": "Ratchet baseline: counts on the tree it was generated from. --check fails when any rule count grows beyond this.",
   "counts": {
     "hardcoded-ui-string": 4728,
