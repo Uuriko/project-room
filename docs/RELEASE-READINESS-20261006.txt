@@ -22,6 +22,7 @@ Integrated source and coordination
   preserved. Storage p1a-v2 integrated via9babe6b8; flag stays OFF.
 - Human review/adaptation8ee2fce7, native/backend1901a7c7, combined ownership
   checkpoint88fdc3fd, CI receipt/discovery auditaf011b18.
+- Final reviewed security/coverage branch2befa657 is integrated.
 - Exact reviewed PR inventory and classifications are recorded in
   claude-github-door/RELEASE-PR-INVENTORY-20261006.txt and
   claude-github-door/RELEASE-BACKEND-INTEGRATION-20261006.txt on the coordination
@@ -56,8 +57,12 @@ Qualification recorded so far
   Focused passes do not replace the exact-head protected hosted gates.
 
 Remaining release checkpoint
-- Finish reviewed record-only trial/receipt/offer integration and new1710–1719
-  security/tooling patches; verify actual initialized table inventory afterward.
+- Record integration70992899 and reviewed1710–1719 security/coverage patches
+  are integrated. Actual initialized inventory192, schema38. Combined immutable
+  c007 qualification:170/170 Node owners,69/69 Worker,2/2 real human browser.
+  Verification/privacy/scanner65/65 and48/48; UI coverage79/79.
+- Finish canonical public HTML entrance redirect and portable Mac CLI fixture
+  qualification, then verify final lint/public inventories and runtime closure.
 - Run final combined Worker/schema/recovery/packaging checks, push the final
   branch and obtain required exact-head hosted checks. Merge without bypasses.
 - Require test + schema-gate success on exact resulting main before one deploy.
