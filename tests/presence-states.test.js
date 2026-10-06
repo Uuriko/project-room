@@ -30,12 +30,12 @@ test("presenceState: active session -> working", () => {
   assert.equal(presenceState({ kind: "human", hasActiveSession: true, now: NOW }), "working");
 });
 
-test("presenceState: agent with live host + recent command -> working", () => {
+test("presenceState: agent ordinary command with live host -> listening", () => {
   assert.equal(presenceState({
     kind: "agent", hasActiveSession: false,
     hostStatus: "online", hostLastSeenAt: NOW - 2 * min, lastCommandAt: NOW - 2 * min,
     now: NOW,
-  }), "working");
+  }), "listening");
 });
 
 test("presenceState: agent with live host but stale command -> not working", () => {
@@ -52,10 +52,10 @@ test("presenceState: watching -> listening", () => {
   assert.equal(presenceState({ kind: "human", watching: true, now: NOW }), "listening");
 });
 
-test("presenceState: host heartbeat within live window -> listening", () => {
+test("presenceState: offline host timestamp does not imply listening", () => {
   assert.equal(presenceState({
     kind: "agent", hostStatus: "offline", hostLastSeenAt: NOW - 3 * min, now: NOW,
-  }), "listening");
+  }), "unreachable");
 });
 
 test("presenceState: human command within live window -> listening", () => {
@@ -88,24 +88,18 @@ test("presenceState: human, gone 2h -> idle (never unreachable)", () => {
   }), "idle");
 });
 
-test("presenceState: unregistered agent host (null status), gone 2h -> idle", () => {
-  // No registered host: we cannot say "down", so idle — and the presence
+test("presenceState: unregistered agent host (null status), gone 2h -> unknown", () => {
+  // No registered host: stale activity cannot establish availability. The presence
   // object stays null per the RC-051 contract (tested at the store level).
   assert.equal(presenceState({
     kind: "agent", hostStatus: null, lastSeenAt: NOW - 120 * min, now: NOW,
-  }), "idle");
+  }), "unknown");
 });
 
-test("presenceState: custom unreachable threshold (3x heartbeat interval)", () => {
-  // A 10-minute heartbeat interval gives a 30-minute unreachable threshold.
-  assert.equal(presenceState({
-    kind: "agent", hostStatus: "offline",
-    lastSeenAt: NOW - 45 * min, unreachableAfterMs: 30 * min, now: NOW,
-  }), "unreachable");
-  assert.equal(presenceState({
-    kind: "agent", hostStatus: "offline",
-    lastSeenAt: NOW - 20 * min, unreachableAfterMs: 30 * min, now: NOW,
-  }), "idle");
+test("presenceState: invalid and future host observations remain unknown", () => {
+  for (const hostLastSeenAt of [null, NaN, NOW + min]) {
+    assert.equal(presenceState({ kind: "agent", hostStatus: "offline", hostLastSeenAt, now: NOW }), "unknown");
+  }
 });
 
 test("presenceState: thresholds are the documented constants", () => {
@@ -145,7 +139,7 @@ test("presence: additive fields present, existing fields unchanged", () => {
     assert.ok("statusMessage" in m);
     assert.ok("presence" in m);
     // #660 additive fields.
-    assert.ok(["working", "listening", "idle", "unreachable"].includes(m.state), `state=${m.state}`);
+    assert.ok(["working", "listening", "idle", "unreachable", "unknown"].includes(m.state), `state=${m.state}`);
     assert.equal(typeof m.isOwner, "boolean");
     assert.ok(Array.isArray(m.scopes));
     assert.ok("ownerIdentityId" in m);
@@ -203,6 +197,37 @@ test("presence: member with active session -> working with workingOn", async t =
   assert.equal(agent.state, "working");
   assert.equal(agent.workingOn.length, 1);
   assert.equal(agent.workingOn[0].workItemId, "state-one");
+  const suspended = await fetch(origin + "/api/rooms/commons/work-sessions", {
+    method: "POST",
+    headers: { Origin: origin, Authorization: `Bearer ${agentKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ requestId: randomUUID(), workItemId: "state-one", expectedRevision: 1, action: "set_status", status: "suspended" }),
+  });
+  assert.equal(suspended.status, 201);
+  const paused = store.presence(agentKey, "commons", []);
+  assert.equal(byId(paused.members, "agent").state, "idle");
+  assert.deepEqual(byId(paused.members, "agent").workingOn, []);
+  assert.ok(!paused.next.some(n => n.description.includes("agent")), "reserved suspended work does not advertise execution");
+  const { sessionWorker } = await import("../src/work-item-session.js");
+  assert.equal(sessionWorker(store.room("commons").state.workItems["state-one"], store.now()), "agent", "presentation must preserve reserved ownership");
+  const active = await fetch(origin + "/api/rooms/commons/work-sessions", {
+    method: "POST",
+    headers: { Origin: origin, Authorization: `Bearer ${agentKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ requestId: randomUUID(), workItemId: "state-one", expectedRevision: 2, action: "set_status", status: "active" }),
+  });
+  assert.equal(active.status, 201);
+  assert.equal(byId(store.presence(agentKey, "commons", []).members, "agent").state, "working");
+  const observedAt = store.now();
+  store.now = () => observedAt - 60_000;
+  let uncertain = store.presence(agentKey, "commons", []);
+  assert.equal(byId(uncertain.members, "agent").state, "unknown", "future heartbeat is not execution evidence");
+  assert.deepEqual(byId(uncertain.members, "agent").workingOn, []);
+  assert.equal(sessionWorker(store.room("commons").state.workItems["state-one"], store.now()), "agent", "future observation does not alter lease policy");
+  store.now = () => observedAt + 11 * 60_000;
+  uncertain = store.presence(agentKey, "commons", []);
+  assert.equal(byId(uncertain.members, "agent").state, "idle");
+  assert.deepEqual(byId(uncertain.members, "agent").workingOn, []);
+
+
 });
 
 test("presence: unregistered agent host keeps presence=null (RC-051 contract)", () => {
@@ -212,12 +237,12 @@ test("presence: unregistered agent host keeps presence=null (RC-051 contract)", 
     data: { memberId: "agent", displayName: "Test agent", kind: "agent", permissions: ["accept_work"] },
   });
   // No identity link and no host heartbeat: presence stays null, state is
-  // derived from the remaining signals (idle — member.added is recent).
+  // unknown because membership enrollment is not activity.
   const { members } = store.presence(ownerKey, "commons", []);
   const agent = byId(members, "agent");
   assert.equal(agent.presence, null);
   assert.equal(agent.ownerIdentityId, null);
-  assert.ok(["idle", "listening"].includes(agent.state));
+  assert.equal(agent.state, "unknown");
 });
 
 test("presence: agent with identity link projects ownerIdentityId", () => {

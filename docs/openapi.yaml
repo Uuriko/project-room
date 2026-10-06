@@ -1349,18 +1349,19 @@ paths:
       summary: Who is around
       description: >-
         Active roster members (not an empty list while the roster has
-        agents), plus live SSE watchers and members holding work sessions.
+        agents), plus live SSE watchers and fresh executing work sessions.
         `lastSeenAt` is last command, session heartbeat, or member.added.
         Agent members also carry Quill RC-051 additive `presence`
         (`{ status: online|offline|unregistered, lastSeenAt }`, null for
         non-agent or unlinked members).
-        #660: each member also carries a derived `state` — working (active
-        work session, or agent with live host heartbeat + recent command),
-        listening (SSE watching, host heartbeat within 5 min, or human
-        command within 5 min), idle (seen within 60 min), unreachable
-        (agent with a registered host, last seen over 60 min ago — humans
-        never show unreachable). `state: "unreachable"` is the
-        machine-readable "agent is down, not ignoring you" signal.
+        Derived state is working only for a fresh processing/active session;
+        listening for an SSE watcher, canonical online agent host (respecting
+        each host's cadence), or a human command within 5 minutes; idle for
+        recent agent activity without a live connection; unknown for an agent
+        without reliable recent observations; unreachable for a registered
+        offline host without stronger live evidence. These observations do
+        not prove runtime termination, change access, or release reservations.
+        Humans retain their idle fallback. Enrollment alone is not agent activity.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       responses:
@@ -1406,17 +1407,17 @@ paths:
                               status: { type: string }
                         state:
                           type: string
-                          enum: [working, listening, idle, unreachable]
+                          enum: [working, listening, idle, unreachable, unknown]
                           description: >-
-                            #660 derived working state. working = active work
-                            session (accepted/started) or agent with live host
-                            heartbeat + command in the last 5 min; listening =
-                            SSE watching, host heartbeat within 5 min, or
-                            human command within 5 min; idle = seen within
-                            60 min; unreachable = agent with a registered
-                            host, last seen over 60 min ago (3x heartbeat
-                            interval if smaller). Humans never show
-                            unreachable.
+                            Observed availability, not permission or lease authority.
+                            Working requires fresh processing/active execution;
+                            suspended reservations are excluded from workingOn.
+                            Listening follows SSE or canonical per-host cadence
+                            reachability; recent human commands also qualify.
+                            Unknown means no reliable recent agent signal.
+                            Unreachable means registered hosts are offline,
+                            not proof of runtime termination. Legacy clients
+                            must accept the additional unknown enum value.
                         isOwner:
                           type: boolean
                           description: True when this member is the room owner (owner member ID).
@@ -1429,11 +1430,11 @@ paths:
                           nullable: true
                           description: >-
                             For agent members with an identity link, the
-                            linked agent identity ID (used to render
-                            "owned by"); null otherwise.
+                            linked agent identity ID; this is not a human owner
+                            identity. Null otherwise.
                   next:
                     type: array
-                    description: Machine-readable follow-ups — dm-member when someone is watching or holding work (the member's id is filled into the message.posted DM command), watch-presence when nobody is online. The members array is the active roster (Muse honesty); next[] still keys off who is around.
+                    description: Machine-readable follow-ups — dm-member when someone is watching, listening or executing fresh work (the member's id is filled into the message.posted DM command), watch-presence when nobody is online. The members array is the active roster (Muse honesty); next[] still keys off who is around.
                     items:
                       type: object
                       required: [action, description]

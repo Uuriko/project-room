@@ -161,7 +161,7 @@ import { validateHelpData, WORK_HELP_UPDATED } from "../src/work-help.js";
 import { auditWorkHelp } from "./work-help.mjs";
 import { HELP_OFFER_OPENED, HELP_OFFER_UPDATED, validateHelpOfferData } from "../src/help-offers.js";
 import { classifyCommand } from "./action-classes.mjs";
-import { presenceState, PRESENCE_UNREACHABLE_AFTER_MS } from "../src/presence-state.js"; // #660: agent presence/working states.
+import { presenceState } from "../src/presence-state.js"; // #660: agent presence/working states.
 import {
   isSessionStatus, isTerminalSession, sessionRecord, listWorkItemSessions, sessionCommandType, sessionWorker,
   sessionClaimConflict,
@@ -3718,7 +3718,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     });
   }
   // Who is around: the active roster, plus live SSE watchers and fresh
-  // session claims. lastSeenAt is last command `at` or session heartbeat.
+  // executing sessions. Legacy lastSeenAt also retains enrollment time.
   // Derived from existing data — no new tables, no people-data store.
   presence(token, roomId, watcherMemberIds, expectedSessionBinding = null) {
     return this.readTransaction(() => {
@@ -3726,6 +3726,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const { members, ownerId } = this.roomAuthority(roomId);
       const room = this.room(roomId);
       const now = this.now();
+      const timestamp = value => typeof value === "number" ? value : typeof value === "string" ? Date.parse(value) : NaN;
       const working = new Map();
       const heartbeats = new Map();
       for (const item of Object.values(room.state.workItems ?? {})) {
@@ -3735,7 +3736,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           if (!prev || session.heartbeat_at > prev) heartbeats.set(session.worker_member_id, session.heartbeat_at);
         }
         const worker = sessionWorker(item, now);
-        if (!worker) continue;
+        const heartbeatAt = timestamp(session.heartbeat_at);
+        if (!worker || !["processing", "active"].includes(session.status)
+          || !Number.isFinite(heartbeatAt) || heartbeatAt > now
+          || now - heartbeatAt > SESSION_HEARTBEAT_STALE_MS) continue;
         if (!working.has(worker)) working.set(worker, []);
         working.get(worker).push({ workItemId: item.id, title: item.title, heartbeat_at: item.heartbeat_at });
       }
@@ -3768,12 +3772,6 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         if (host.status === null) return null;
         return { status: host.status, lastSeenAt: host.lastSeenAt };
       };
-      // #660: unreachable threshold is 60 min or 3x the host heartbeat
-      // interval, whichever is smaller.
-      const unreachableAfterMs = Math.min(
-        PRESENCE_UNREACHABLE_AFTER_MS,
-        3 * this.agentHeartbeats.staleAfterMs
-      );
       const listed = Object.values(members)
         .filter(m => m && m.active !== false)
         .map(m => {
@@ -3793,9 +3791,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
               watching: isWatching,
               hostStatus: host.status,
               hostLastSeenAt: host.lastSeenAt,
-              lastCommandAt: lastCommandAt.get(m.id) ?? null,
-              lastSeenAt,
-              unreachableAfterMs,
+              lastCommandAt: timestamp(lastCommandAt.get(m.id)),
+              // Enrollment is retained in legacy lastSeenAt, but is not activity.
+              lastSeenAt: Math.max(timestamp(lastCommandAt.get(m.id)) || 0,
+                timestamp(heartbeats.get(m.id)) <= now ? timestamp(heartbeats.get(m.id)) || 0 : 0) || null,
               now,
             }),
             isOwner: m.id === ownerId,
@@ -3804,12 +3803,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           };
         })
         .sort((a, b) => a.memberId < b.memberId ? -1 : 1);
-      // RC-2026-09-18-054: next[] follows who is actually around — watching,
-      // holding work, or in a live presence state (a host heartbeat inside
-      // the live window) — not the idle roster. A pull-only agent that
-      // heartbeated a minute ago is around even when nobody is watching
-      // its stream; the old filter called that "nobody online".
-      const onlineIds = listed.filter(m => m.watching || m.workingOn.length > 0
+      // Suggested DM targets require current connection/execution observations.
+      const onlineIds = listed.filter(m => m.watching
         || m.state === "listening" || m.state === "working").map(m => m.memberId);
       return {
         members: listed,
