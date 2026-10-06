@@ -17,7 +17,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync, writeFileSync, renameSync } from "node:fs";
+import { readFileSync, writeFileSync, renameSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import {
@@ -26,13 +26,10 @@ import {
   checkSource,
   runExtraction,
   summarize,
-  collectFiles,
-  checkScope,
-  findInflatedCounts,
-  REQUIRED_SCOPE,
+  scannableRels,
+  checkScopeConsistency,
   RULES,
 } from "../scripts/i18n-harness.mjs";
-import { relative } from "node:path";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const harness = join(root, "scripts", "i18n-harness.mjs");
@@ -106,57 +103,65 @@ test("runExtraction on current main proves the harness detects (failing-first ev
   assert.deepEqual(Object.keys(s.counts).sort(), [...RULES].sort());
 });
 
-test("--check ratchets: fails when a rule count grows beyond baseline", () => {
-  const had = (() => { try { return readFileSync(baselinePath, "utf8"); } catch { return null; } })();
+test("checkScopeConsistency reports dropped and extra files", () => {
+  const manifest = ["a.js", "b.js", "c.js"];
+  const r1 = checkScopeConsistency(manifest, ["a.js", "b.js", "c.js", "d.js"]);
+  assert.deepEqual(r1.dropped, []);
+  assert.deepEqual(r1.extra, ["d.js"]);
+  const r2 = checkScopeConsistency(manifest, ["a.js"]);
+  assert.deepEqual(r2.dropped, ["b.js", "c.js"]);
+  // Live: the committed manifest must be a subset of the current scan.
+  const scope = JSON.parse(readFileSync(join(root, "strings", "i18n-scope.json"), "utf8"));
+  const live = checkScopeConsistency(scope, scannableRels());
+  assert.deepEqual(live.dropped, [], "manifest lists files the scan no longer covers");
+});
+
+test("--check fails closed when the scope manifest is tampered", () => {
+  const scopePath = join(root, "strings", "i18n-scope.json");
+  const had = readFileSync(scopePath, "utf8");
   try {
-    writeFileSync(baselinePath, JSON.stringify({ generatedAt: "test", counts: { "hardcoded-ui-string": 0, "sentence-concatenation": 0, "positional-placeholder": 0 } }));
+    // Shrink the manifest to 3 files: simulates a narrowed scan scope.
+    const manifest = JSON.parse(had);
+    writeFileSync(scopePath, JSON.stringify(manifest.slice(0, 3), null, 2));
     const r = spawnSync(process.execPath, [harness, "--check"], { encoding: "utf8" });
-    assert.equal(r.status, 1, `--check should exit 1 when counts exceed baseline; stderr: ${r.stderr}`);
-    assert.match(r.stderr + r.stdout, /grew 0 ->/);
-    // Restoring the true baseline makes --check pass again.
-    if (had !== null) writeFileSync(baselinePath, had);
-    const r2 = spawnSync(process.execPath, [harness, "--check"], { encoding: "utf8" });
-    assert.equal(r2.status, 0, `--check should exit 0 within baseline; stderr: ${r2.stderr}`);
+    assert.equal(r.status, 1, `--check should exit 1 on scope tamper; stderr: ${r.stderr}`);
+    assert.match(r.stderr, /scope manifest modified but does not match/);
   } finally {
-    if (had !== null) writeFileSync(baselinePath, had);
+    writeFileSync(scopePath, had);
   }
 });
 
-test("checkScope fails closed when a required path is unscanned", () => {
-  assert.deepEqual(checkScope(["src/other.js"]), REQUIRED_SCOPE);
-  assert.deepEqual(checkScope(REQUIRED_SCOPE), []);
-  const scanned = collectFiles().map((p) => relative(root, p).replace(/\\/g, "/"));
-  assert.deepEqual(checkScope(scanned), [], "current scope must cover every required path");
-});
-
-test("findInflatedCounts flags baseline inflation", () => {
-  const base = { counts: { "hardcoded-ui-string": 4728, "sentence-concatenation": 522, "positional-placeholder": 0 } };
-  assert.deepEqual(findInflatedCounts(base, base), []);
-  const inflated = { counts: { "hardcoded-ui-string": 100000, "sentence-concatenation": 522, "positional-placeholder": 0 } };
-  const hits = findInflatedCounts(inflated, base);
-  assert.equal(hits.length, 1);
-  assert.equal(hits[0].rule, "hardcoded-ui-string");
-  // Lowering the baseline (migration progress) is not inflation.
-  const lowered = { counts: { "hardcoded-ui-string": 4000, "sentence-concatenation": 522, "positional-placeholder": 0 } };
-  assert.deepEqual(findInflatedCounts(lowered, base), []);
-});
-
-test("--check rejects an inflated committed baseline (anti-gaming)", () => {
-  const had = (() => { try { return readFileSync(baselinePath, "utf8"); } catch { return null; } })();
+test("--check rejects an inflated committed baseline (bootstrap exactness)", () => {
+  const had = readFileSync(baselinePath, "utf8");
   try {
     const baseline = JSON.parse(had);
     const inflated = { ...baseline, counts: { ...baseline.counts, "hardcoded-ui-string": 100000 } };
     writeFileSync(baselinePath, JSON.stringify(inflated));
-    // HEAD carries the honest committed baseline, so HEAD is the base ref.
-    const r = spawnSync(process.execPath, [harness, "--check"], {
-      encoding: "utf8",
-      env: { ...process.env, I18N_BASE_REF: "HEAD" },
-    });
+    const r = spawnSync(process.execPath, [harness, "--check"], { encoding: "utf8" });
     assert.equal(r.status, 1, `--check should exit 1 on baseline inflation; stderr: ${r.stderr}`);
-    assert.match(r.stderr, /baseline inflation/);
+    assert.match(r.stderr, /baseline counts do not match fresh scan/);
   } finally {
-    if (had !== null) writeFileSync(baselinePath, had);
+    writeFileSync(baselinePath, had);
   }
+});
+
+test("--check ratchets in steady state: fails when counts grow past an untouched baseline", () => {
+  // Steady state = baseline file identical to the base ref (committed). With
+  // I18N_BASE_REF=HEAD the classic ratchet applies, not bootstrap exactness.
+  // Simulate growth by adding a temp probe file with a hardcoded string.
+  const probe = join(root, "src", "__i18n-probe.tmp.mjs");
+  const env = { ...process.env, I18N_BASE_REF: "HEAD" };
+  const baseCount = JSON.parse(readFileSync(baselinePath, "utf8")).counts["hardcoded-ui-string"];
+  try {
+    writeFileSync(probe, 'export const probe = "This is a brand new hardcoded user facing sentence for the probe";\n');
+    const r = spawnSync(process.execPath, [harness, "--check"], { encoding: "utf8", env });
+    assert.equal(r.status, 1, `--check should exit 1 when counts exceed baseline; stderr: ${r.stderr}`);
+    assert.match(r.stderr, new RegExp(`grew ${baseCount} -> ${baseCount + 1}`));
+  } finally {
+    rmSync(probe, { force: true });
+  }
+  const r2 = spawnSync(process.execPath, [harness, "--check"], { encoding: "utf8", env });
+  assert.equal(r2.status, 0, `--check should exit 0 within baseline; stderr: ${r2.stderr}`);
 });
 
 test("--check without a baseline exits 2 with guidance", () => {

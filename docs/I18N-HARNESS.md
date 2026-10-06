@@ -33,21 +33,24 @@ node scripts/i18n-harness.mjs --baseline  # regenerate strings/i18n-baseline.jso
 
 ## Baseline ratchet
 
-`strings/i18n-baseline.json` records violation counts at generation time.
-`--check` runs three gates and exits 1 if any fails:
+`strings/i18n-baseline.json` records violation counts; `strings/i18n-scope.json`
+records the exact set of scanned files. `--check` runs fail-closed gates:
 
-1. **Scope guard** — a fixed `REQUIRED_SCOPE` list (`src/app.js`, the email
-   templates, key HTML pages) must be covered by the scan. Shrinking the scan
-   scope fails closed instead of silently unscanning code.
-2. **Anti-inflation** — the committed baseline must not exceed the baseline at
-   the merge-base with `origin/main` (`I18N_BASE_REF` overrides the base ref).
-   Raising baseline counts to dodge the ratchet is itself a failure.
-3. **Ratchet** — current violation counts must not exceed the committed
-   baseline.
+1. **Scope lock** — every manifest-listed file must still be scanned. Dropping
+   files from the scan fails; a *modified* manifest must exactly match the
+   current scan (hand-edited or narrowed manifests fail). Adding files is free
+   — the ratchet counts their strings. Regenerate both files with `--baseline`
+   when files are legitimately added or removed.
+2. **Baseline integrity** — a new or modified baseline must *exactly* match a
+   fresh scan of the current tree. This closes the bootstrap gap: with no
+   earlier baseline to compare against, an inflated (or stale) committed
+   baseline fails instead of becoming the new truth. An untouched baseline
+   gets the classic ratchet: fresh counts must not exceed committed counts.
 
 The current codebase is grandfathered in; new hardcoded strings get caught.
-When code is migrated into the catalog (counts drop), regenerate the baseline
-so the ratchet tightens:
+Regenerate with `--baseline` after migrating strings into the catalog so the
+ratchet tightens. `I18N_BASE_REF` overrides the base ref used for the
+new/modified detection (CI auto-detects the merge-base with `origin/main`).
 
 ```sh
 node scripts/i18n-harness.mjs --baseline

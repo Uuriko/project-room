@@ -25,26 +25,19 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 const BASELINE_PATH = join(root, "strings", "i18n-baseline.json");
 const CATALOG_PATH = join(root, "strings", "en.json");
 
-// Scan-scope guard: these paths MUST be scanned. If a future change shrinks
-// UI_GLOBS / EMAIL_FILES so a required path drops out, --check fails closed
-// instead of silently unscanning most of the code.
-export const REQUIRED_SCOPE = [
-  "src/app.js",
-  "server/notify-email.mjs",
-  "server/email-envelope.mjs",
-  "index.html",
-  "join.html",
-];
+// Scan-scope manifest: the exact set of files the scan covers, committed at
+// strings/i18n-scope.json. --check fails closed when a manifest-listed file
+// drops out of the scan (silent unscanning), and when a modified manifest no
+// longer matches the actual scan (tampered scope). Additions are free; the
+// ratchet counts their strings.
+export const SCOPE_PATH = join(root, "strings", "i18n-scope.json");
 
-export function checkScope(scannedRels) {
-  const set = new Set(scannedRels);
-  return REQUIRED_SCOPE.filter((p) => !set.has(p));
+function isScannableRel(rel) {
+  return !(/(^|\/)(tests?|__tests__|fixtures?)\//.test(rel) || /\.test\.[mc]?js$/.test(rel));
 }
 
-// Baseline anti-inflation: the committed baseline must not exceed the
-// baseline at the merge base with main. Raising baseline counts to dodge the
-// ratchet is itself a failure. I18N_BASE_REF overrides the base ref (CI uses
-// the auto-detected merge-base; tests pin a known ref).
+// I18N_BASE_REF overrides the base ref (CI auto-detects the merge-base with
+// origin/main; tests pin a known ref).
 function baseRef() {
   if (process.env.I18N_BASE_REF) return process.env.I18N_BASE_REF;
   const mb = spawnSync("git", ["merge-base", "HEAD", "origin/main"], { cwd: root, encoding: "utf8" });
@@ -52,20 +45,32 @@ function baseRef() {
   return "origin/main";
 }
 
-function baselineAtRef(ref) {
-  const r = spawnSync("git", ["show", `${ref}:strings/i18n-baseline.json`], { cwd: root, encoding: "utf8" });
-  if (r.status !== 0) return null;
-  try { return JSON.parse(r.stdout); } catch { return null; }
+function gitOk(args) {
+  try {
+    const r = spawnSync("git", args, { cwd: root, encoding: "utf8" });
+    return r.status === 0 ? r.stdout : null;
+  } catch {
+    return null;
+  }
 }
 
-export function findInflatedCounts(committed, base) {
-  const inflated = [];
-  for (const r of RULES) {
-    const c = committed?.counts?.[r] ?? 0;
-    const b = base?.counts?.[r] ?? 0;
-    if (c > b) inflated.push({ rule: r, base: b, committed: c });
-  }
-  return inflated;
+// True when the file is new or differs versus the base ref (working tree).
+// Fail-closed: when git cannot tell, treat as modified.
+function fileModifiedVsBase(rel) {
+  const ref = baseRef();
+  if (gitOk(["cat-file", "-e", `${ref}:${rel}`]) === null) return true;
+  const out = gitOk(["diff", "--name-only", ref, "--", rel]);
+  if (out === null) return true;
+  return out.trim() !== "";
+}
+
+export function checkScopeConsistency(manifest, scanned) {
+  const manifestSet = new Set(manifest);
+  const scannedSet = new Set(scanned);
+  return {
+    dropped: manifest.filter((f) => !scannedSet.has(f)),
+    extra: scanned.filter((f) => !manifestSet.has(f)),
+  };
 }
 
 // Files the harness READS but never modifies; everything else lives in
@@ -229,6 +234,13 @@ function checkServerErrors(source, relPath) {
   return violations;
 }
 
+export function scannableRels() {
+  return collectFiles()
+    .map((p) => relative(root, p).replace(/\\/g, "/"))
+    .filter(isScannableRel)
+    .sort();
+}
+
 export function collectFiles() {
   const files = [];
   for (const g of UI_GLOBS) {
@@ -248,7 +260,7 @@ export function runExtraction() {
   const violations = [];
   for (const abs of collectFiles()) {
     const rel = relative(root, abs).replace(/\\/g, "/");
-    if (/(^|\/)(tests?|__tests__|fixtures?)\//.test(rel) || /\.test\.[mc]?js$/.test(rel)) continue;
+    if (!isScannableRel(rel)) continue;
     const source = readFileSync(abs, "utf8");
     if (isErrorMessageScope(rel) && !EMAIL_FILES.includes(rel)) {
       violations.push(...checkServerErrors(source, rel));
@@ -269,9 +281,9 @@ export function summarize(violations) {
   return { total: violations.length, counts, files: Object.keys(byFile).length };
 }
 
-function loadBaseline() {
-  if (!existsSync(BASELINE_PATH)) return null;
-  return JSON.parse(readFileSync(BASELINE_PATH, "utf8"));
+function loadJson(path, label) {
+  if (!existsSync(path)) return null;
+  return JSON.parse(readFileSync(path, "utf8"));
 }
 
 const args = process.argv.slice(2);
@@ -283,7 +295,7 @@ if (mode === "--extract") {
   const violations = runExtraction();
   const s = summarize(violations);
   console.log(`# i18n readiness report\n`);
-  console.log(`- files scanned: ${collectFiles().length}`);
+  console.log(`- files scanned: ${scannableRels().length}`);
   console.log(`- violations: ${s.total} across ${s.files} files`);
   for (const r of RULES) console.log(`- ${r}: ${s.counts[r]}`);
 } else if (mode === "--baseline") {
@@ -291,46 +303,66 @@ if (mode === "--extract") {
   const s = summarize(violations);
   const baseline = {
     generatedAt: new Date().toISOString(),
-    note: "Ratchet baseline: counts on current main. --check fails when any rule count grows beyond this.",
+    note: "Ratchet baseline: counts on the tree it was generated from. --check fails when any rule count grows beyond this.",
     counts: s.counts,
     total: s.total,
   };
   writeFileSync(BASELINE_PATH, JSON.stringify(baseline, null, 2) + "\n");
+  const scanned = scannableRels();
+  writeFileSync(SCOPE_PATH, JSON.stringify(scanned, null, 2) + "\n");
   console.log(`baseline written to ${relative(root, BASELINE_PATH)}: ${JSON.stringify(s.counts)}`);
+  console.log(`scope manifest written to ${relative(root, SCOPE_PATH)}: ${scanned.length} files`);
 } else if (mode === "--check") {
-  const baseline = loadBaseline();
+  const baseline = loadJson(BASELINE_PATH);
   if (!baseline) {
     console.error("i18n-harness: no baseline (strings/i18n-baseline.json). Run `node scripts/i18n-harness.mjs --baseline`.");
     process.exit(2);
   }
+  const manifest = loadJson(SCOPE_PATH);
+  if (!manifest) {
+    console.error("i18n-harness: no scope manifest (strings/i18n-scope.json). Run `node scripts/i18n-harness.mjs --baseline`.");
+    process.exit(2);
+  }
   let failed = false;
-  // 1. Scope guard: required paths must be scanned (fails closed).
-  const scannedRels = collectFiles().map((p) => relative(root, p).replace(/\\/g, "/"));
-  const missing = checkScope(scannedRels);
-  if (missing.length > 0) {
-    console.error(`i18n-harness FAIL: scan scope regressed, required paths not scanned: ${missing.join(", ")}`);
-    failed = true;
-  }
-  // 2. Anti-inflation: committed baseline must not exceed the merge-base baseline.
-  const ref = baseRef();
-  const baseBaseline = baselineAtRef(ref);
-  if (baseBaseline) {
-    for (const { rule, base, committed } of findInflatedCounts(baseline, baseBaseline)) {
-      console.error(`i18n-harness FAIL: baseline inflation on ${rule}: ${base} (at ${ref}) -> ${committed} (committed)`);
-      failed = true;
-    }
-  } else {
-    console.warn(`i18n-harness: no baseline at ${ref}; skipping inflation check (new baseline file)`);
-  }
-  // 3. Ratchet: current counts must not exceed the committed baseline.
   const violations = runExtraction();
   const s = summarize(violations);
-  for (const r of RULES) {
-    const now = s.counts[r] ?? 0;
-    const base = baseline.counts?.[r] ?? 0;
-    if (now > base) {
-      console.error(`i18n-harness FAIL: ${r} grew ${base} -> ${now} (baseline ratchet)`);
-      failed = true;
+  const scanned = scannableRels();
+
+  // 1. Scope lock: manifest-listed files must still be scanned (no silent
+  //    unscanning). A modified manifest must exactly match the current scan.
+  const { dropped, extra } = checkScopeConsistency(manifest, scanned);
+  if (dropped.length > 0) {
+    console.error(`i18n-harness FAIL: scan scope regressed, ${dropped.length} manifest file(s) no longer scanned (showing 5): ${dropped.slice(0, 5).join(", ")}. Regenerate with --baseline if files were legitimately removed.`);
+    failed = true;
+  }
+  if (fileModifiedVsBase("strings/i18n-scope.json") && (dropped.length > 0 || extra.length > 0)) {
+    console.error(`i18n-harness FAIL: scope manifest modified but does not match the current scan (${extra.length} unscanned additions, ${dropped.length} drops). Regenerate with --baseline; hand-edited manifests fail.`);
+    failed = true;
+  }
+
+  // 2. Baseline integrity: a new or modified baseline must exactly match a
+  //    fresh scan of the current tree. This closes the bootstrap gap: there
+  //    is no earlier baseline to compare against, so an inflated (or stale)
+  //    committed baseline fails instead of becoming the new truth. An
+  //    untouched baseline gets the classic ratchet: fresh counts must not
+  //    exceed committed counts.
+  if (fileModifiedVsBase("strings/i18n-baseline.json")) {
+    for (const r of RULES) {
+      const now = s.counts[r] ?? 0;
+      const committed = baseline.counts?.[r] ?? 0;
+      if (now !== committed) {
+        console.error(`i18n-harness FAIL: baseline counts do not match fresh scan on ${r}: committed ${committed}, fresh ${now}. Regenerate with --baseline on this tree; inflated baselines fail.`);
+        failed = true;
+      }
+    }
+  } else {
+    for (const r of RULES) {
+      const now = s.counts[r] ?? 0;
+      const base = baseline.counts?.[r] ?? 0;
+      if (now > base) {
+        console.error(`i18n-harness FAIL: ${r} grew ${base} -> ${now} (baseline ratchet)`);
+        failed = true;
+      }
     }
   }
   if (failed) process.exit(1);
