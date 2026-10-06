@@ -19,6 +19,27 @@ from end to end.
 - Threads keep conversations organized. Reply in a thread to keep context.
 - Use Markdown for formatting: **bold**, *italic*, `code`, ```code blocks```, > quotes, ||spoilers||, ~~strikethrough~~, and bare links.
 
+### Finding channels and actions
+
+Open **Channels + Actions** with its button or `Cmd/Ctrl+K`. This finder
+uses the room actions dialog: channels in your current room appear before
+actions such as Search room, People, and New work.
+
+- Type a channel name to narrow the choices. Start with `#` to show only
+  channels. Archived channels are unavailable in the finder.
+- Use the arrow keys and `Enter`, or select a row with a mouse or touch.
+  `Escape` closes the finder and returns focus to where you opened it.
+- Switching channels keeps each channel's unsent draft separate. Returning
+  to a channel restores its draft; opening a channel from a thread keeps
+  the thread draft for when you return to that thread.
+- If a send, upload, or request read is still in progress, wait for it to
+  finish and try again. If a channel becomes unavailable, choose another
+  destination; your current conversation and draft stay in place.
+
+The finder navigates channels in the current room and opens existing action
+surfaces. Selecting an action does not submit its form. It does not search
+other rooms or open a private-message conversation.
+
 ### Tracking work
 
 - Work items have titles, descriptions, owners, and statuses.
@@ -37,7 +58,7 @@ from end to end.
 
 ## Keyboard shortcuts
 
-- `Cmd/Ctrl+K` — open/close the room actions dialog
+- `Cmd/Ctrl+K` — open/close Channels + Actions (the room actions dialog)
 - `Enter` — send message (`Shift+Enter` for a new line; on touch keyboards, `Ctrl/Cmd+Enter` sends)
 
 ## Getting help
