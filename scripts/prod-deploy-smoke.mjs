@@ -6,13 +6,15 @@
 //     [--origin https://room.trydemigod.com] [--entry https://www.getdasha.com/room] \
 //     [--wait-ms 300000] \
 //     [--agent-card-public-key <base64>] [--agent-card-key-id <id>] \
-//     [--agent-card-agent-id <id>] [--agent-card-fetches 10]
+//     [--agent-card-agent-id <id>] [--agent-card-fetches 10] \
+//     [--agent-card-wait-ms 90000]
 //
 // Test-only knobs (env fallbacks SMOKE_AGENT_CARD_PUBLIC_KEY,
-// SMOKE_AGENT_CARD_KEY_ID, SMOKE_AGENT_CARD_AGENT_ID, SMOKE_AGENT_CARD_FETCHES):
-// let the test suite inject its own signing key and shrink the repeated card
-// fetches. The deploy pipeline never sets them, so production always pins the
-// real key and runs the full fetch count.
+// SMOKE_AGENT_CARD_KEY_ID, SMOKE_AGENT_CARD_AGENT_ID, SMOKE_AGENT_CARD_FETCHES,
+// SMOKE_AGENT_CARD_WAIT_MS): let the test suite inject its own signing key,
+// shrink the repeated card fetches and the propagation window. The deploy
+// pipeline never sets them, so production always pins the real key, runs the
+// full fetch count and the full propagation window.
 //
 // Waits until /api/version and /api/version/worker report --sha on both the
 // canonical host and the public entry (edge propagation takes a few seconds),
@@ -31,6 +33,20 @@
 // requires EVERY fetch to carry a signature that verifies against the pinned
 // key (and binds the deployed revision when --sha is given). Any unsigned or
 // flapping state fails the smoke, and the deploy pipeline rolls back.
+//
+// Propagation tolerance (deploy-prod run 37392991641): the card is baked into
+// the Worker bundle and served from module scope (cloudflare/edge-public.mjs,
+// Cache-Control: no-store, never cached at the edge), so a card naming the
+// previous revision means the request hit a Worker isolate still running the
+// previous version. Cloudflare takes seconds to retire those after
+// `wrangler deploy`: run 37392991641 saw fetches #1-#6 on the room host (about
+// 17-26s after the deploy) carry the previous build's card, then #7-#10 and
+// all 10 entry fetches carry the new one. The door check therefore waits up to
+// --agent-card-wait-ms for --agent-card-fetches CONSECUTIVE passing fetches.
+// A card served by a previous build resets the streak; it is never counted as
+// a pass. A card served by the target build that fails any check fails the
+// door at once (no retry), and a door that has not converged when the window
+// closes fails, so a persistent mismatch still rolls the deploy back.
 import { pathToFileURL } from "node:url";
 import { verifyCardJws, verifyCardSignature } from "../server/agent-card-signing.mjs";
 import {
@@ -59,6 +75,8 @@ const agentCardPublicKey = opt("agent-card-public-key", process.env.SMOKE_AGENT_
 const agentCardKeyId = opt("agent-card-key-id", process.env.SMOKE_AGENT_CARD_KEY_ID || AGENT_CARD_KEY_ID);
 const agentCardAgentId = opt("agent-card-agent-id", process.env.SMOKE_AGENT_CARD_AGENT_ID || AGENT_CARD_AGENT_ID);
 const agentCardFetches = Math.max(1, Number(opt("agent-card-fetches", process.env.SMOKE_AGENT_CARD_FETCHES || "10")) || 10);
+const agentCardWaitRaw = Number(opt("agent-card-wait-ms", process.env.SMOKE_AGENT_CARD_WAIT_MS || "90000"));
+const agentCardWaitMs = Number.isFinite(agentCardWaitRaw) && agentCardWaitRaw >= 0 ? agentCardWaitRaw : 90000;
 if (sha && !/^[0-9a-f]{40}$/.test(sha)) {
   console.error("prod-deploy-smoke: --sha must be a full 40-character lowercase hex commit");
   process.exit(2);
@@ -129,34 +147,75 @@ export function checkAgentCard({ card, expectedRevision = null, publicKey = AGEN
   return failures;
 }
 
-// Fetch one door's agent card `fetches` times and require EVERY fetch to
-// pass checkAgentCard. A single passing fetch is not enough: a traffic split
-// between Worker versions serves a mix of signed and unsigned cards (#1524),
-// and the deploy must not go green until the split has fully converged.
+// Which build served this card? The card names its own build in
+// deployed.revision, and signedRevision is only attached when the signature
+// covers the serving build's revision (deploy/agent-discovery.mjs). Pure.
+export function cardServedByRevision(card, expectedRevision) {
+  if (!expectedRevision || card === null || typeof card !== "object") return false;
+  return card.deployed?.revision === expectedRevision || card.signedRevision === expectedRevision;
+}
+
+// Fetch one door's agent card until `fetches` CONSECUTIVE fetches pass
+// checkAgentCard, within `waitMs`. A single passing fetch is not enough: a
+// traffic split or a version still propagating serves a mix of cards
+// (#1524, run 37392991641), and the deploy must not go green until the door
+// has converged. Failing fetches from a previous build (propagation) reset
+// the streak and are retried until the window closes; a failing card served
+// by the target build fails at once. Without expectedRevision (post-rollback
+// mode) every failure is treated as not-yet-converged until the window
+// closes. Returns the failure list (empty = converged); when `stats` is
+// given it is filled with attempt counts for the report.
 export async function checkAgentCardDoor({
   url,
   expectedRevision = null,
   fetches = 10,
   gapMs = 1500,
+  waitMs = 90000,
   get: getFn = get,
   sleep: sleepFn = sleep,
+  now = Date.now,
   publicKey = AGENT_CARD_PUBLIC_KEY,
   keyId = AGENT_CARD_KEY_ID,
   agentId = AGENT_CARD_AGENT_ID,
+  stats = null,
 }) {
-  const failures = [];
-  for (let i = 1; i <= fetches; i += 1) {
+  const started = now();
+  const deadline = started + Math.max(0, waitMs);
+  let streak = 0;
+  let attempt = 0;
+  let staleFetches = 0;
+  const pending = [];
+  const done = (failures, converged) => {
+    if (stats) Object.assign(stats, { attempts: attempt, staleFetches, converged, elapsedMs: now() - started });
+    return failures;
+  };
+  for (;;) {
+    attempt += 1;
     const r = await getFn(url);
+    let failures;
+    let target = false;
     if (r.status !== 200 || r.json === null) {
-      failures.push(`fetch #${i}: HTTP ${r.status}${r.error ? ` (${r.error})` : ""} — card not served`);
+      failures = [`HTTP ${r.status}${r.error ? ` (${r.error})` : ""} — card not served`];
     } else {
-      for (const f of checkAgentCard({ card: r.json, expectedRevision, publicKey, keyId, agentId })) {
-        failures.push(`fetch #${i}: ${f}`);
+      failures = checkAgentCard({ card: r.json, expectedRevision, publicKey, keyId, agentId });
+      target = cardServedByRevision(r.json, expectedRevision);
+    }
+    if (failures.length === 0) {
+      streak += 1;
+      if (streak >= fetches) return done([], true);
+    } else {
+      const labelled = failures.map(f => `fetch #${attempt}: ${f}`);
+      // The target build itself served a bad card: no amount of waiting fixes it.
+      if (target) return done(labelled, false);
+      streak = 0;
+      staleFetches += 1;
+      pending.push(...labelled);
+      if (now() >= deadline) {
+        return done([...pending.slice(-8), `not converged: ${fetches} consecutive passing fetches not reached within ${waitMs}ms (${staleFetches} failing of ${attempt} fetches)`], false);
       }
     }
-    if (i < fetches) await sleepFn(gapMs);
+    await sleepFn(gapMs);
   }
-  return failures;
 }
 
 async function main() {
@@ -196,17 +255,22 @@ async function main() {
   // production always uses the pinned key and the full fetch count.
   for (const door of [origin, entry]) {
     const cardUrl = `${door}/.well-known/agent-card.json`;
+    const stats = {};
     const failures = await checkAgentCardDoor({
       url: cardUrl,
       expectedRevision: sha || null,
       fetches: agentCardFetches,
+      waitMs: agentCardWaitMs,
       publicKey: agentCardPublicKey,
       keyId: agentCardKeyId,
       agentId: agentCardAgentId,
+      stats,
     });
     record(`agent-card ${cardUrl}`, failures.length === 0, {
       fetches: agentCardFetches,
-      failures: failures.slice(0, 8),
+      waitMs: agentCardWaitMs,
+      ...stats,
+      failures: failures.slice(0, 9),
       failureCount: failures.length,
     });
   }
