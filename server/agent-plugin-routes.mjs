@@ -39,11 +39,67 @@ const WEBHOOK_EVENTS = Object.freeze([...EVENT_CATALOG, "*"]);
 // Scope vocabulary is the single source of truth in
 // server/agent-api-keys.mjs (API_KEY_SCOPES): requiredScope names below
 // must resolve there, so a scope can never be enforced but undocumented.
-const requiredScope = name => {
+export const requiredScope = name => {
   const entry = API_KEY_SCOPES.find(scope => scope.scope === name);
   if (!entry) throw new Error(`unknown agent API-key scope: ${name}`);
   return entry.scope;
 };
+
+// plan-wake-live: the route-table row for GET /api/wake-status needs the
+// same agent-credential auth as these plugin routes (the OpenAPI route
+// gate forbids new legacy-chain registrations — the allowlist only
+// shrinks — so the row lives in server/routes/table.mjs and reuses these
+// factories instead of duplicating credential logic).
+export const translateWith = reject => handler => async (...args) => {
+  try {
+    return await handler(...args);
+  } catch (error) {
+    if (error instanceof AgentPluginError) reject(error.status, error.code, error.message);
+    if (error && (error.name === "ApiKeyError" || error.name === "DirectoryError"
+      || error.name === "WebhookSubscriptionError" || error.name === "ManifestError"
+      || error.name === "VerificationError"
+      || error.name === "HeartbeatError")) {
+      reject(error.status ?? (error.code === "directory_not_found" ? 404 : 422), error.code, error.message);
+    }
+    throw error;
+  }
+};
+
+// Full agent credential: the pri_ identity secret (owner, full
+// permissions) or a rak_ API key (scoped to its stored scopes).
+// requiredScope denies scoped keys without it (403 insufficient_scope).
+// Returns { identityId, keyId, scopes }; scopes is null for the owner.
+export function createAgentAuth({ store, bearer, reject }) {
+  // RC-2026-09-18-012: API-key scopes, mirroring server/token-scopes.mjs:
+  // exact match or "prefix:*" wildcard. scopes null = the owner identity
+  // secret (full permissions).
+  const grants = (scopes, required) => (scopes ?? []).some(scope =>
+    scope === required || (scope.endsWith(":*") && required.startsWith(scope.slice(0, -1))));
+  return (req, scopeName = null) => {
+    const secret = bearer(req);
+    if (!secret) reject(401, "unauthenticated", "Agent credential required");
+    if (secret.startsWith("pri_")) {
+      const resolved = store.identities.resolveGlobalIdentitySecret(secret);
+      if (!resolved) reject(401, "unauthenticated", "Unknown agent identity");
+      return { identityId: resolved.identityId, keyId: null, scopes: null };
+    }
+    if (secret.startsWith("rak_")) {
+      const record = store.agentPlugin.verifyPresentedApiKey(secret);
+      if (!record) reject(401, "unauthenticated", "Unknown, revoked, or expired API key");
+      if (scopeName && !grants(record.scopes, scopeName))
+        reject(403, "insufficient_scope", `API key lacks the ${scopeName} scope`);
+      return { identityId: record.identityId, keyId: record.keyId, scopes: record.scopes };
+    }
+    reject(401, "unauthenticated", "Agent credential required");
+  };
+}
+
+export function createHeartbeatActor({ store, bearer, reject }) {
+  const agentAuth = createAgentAuth({ store, bearer, reject });
+  return (req, scope) => isRoomAccessToken(bearer(req))
+    ? roomKeyPresenceAuth(store, bearer(req))
+    : agentAuth(req, scope);
+}
 
 const KEY_ACTION_ROUTE = /^\/api\/agent-keys\/(rak_[A-Za-z0-9_-]{1,64})\/(rotate|revoke)$/;
 const SUBSCRIPTION_ROUTE = /^\/api\/agent-webhooks\/([A-Za-z0-9_-]{1,64})$/;
@@ -58,48 +114,9 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
   // Coded pure-module errors -> HTTP: unknown/not-found reads as 404,
   // validation as 422. Ownership errors come from the sub-store as
   // AgentPluginError with their own status.
-  const translate = handler => async (...args) => {
-    try {
-      return await handler(...args);
-    } catch (error) {
-      if (error instanceof AgentPluginError) reject(error.status, error.code, error.message);
-      if (error && (error.name === "ApiKeyError" || error.name === "DirectoryError"
-        || error.name === "WebhookSubscriptionError" || error.name === "ManifestError"
-        || error.name === "VerificationError"
-        || error.name === "HeartbeatError")) {
-        reject(error.status ?? (error.code === "directory_not_found" ? 404 : 422), error.code, error.message);
-      }
-      throw error;
-    }
-  };
+  const translate = translateWith(reject);
 
-  // RC-2026-09-18-012: API-key scopes, mirroring server/token-scopes.mjs:
-  // exact match or "prefix:*" wildcard. scopes null = the owner identity
-  // secret (full permissions).
-  const grants = (scopes, required) => (scopes ?? []).some(scope =>
-    scope === required || (scope.endsWith(":*") && required.startsWith(scope.slice(0, -1))));
-
-  // Full agent credential: the pri_ identity secret (owner, full
-  // permissions) or a rak_ API key (scoped to its stored scopes).
-  // requiredScope denies scoped keys without it (403 insufficient_scope).
-  // Returns { identityId, keyId, scopes }; scopes is null for the owner.
-  const agentAuth = (req, requiredScope = null) => {
-    const secret = bearer(req);
-    if (!secret) reject(401, "unauthenticated", "Agent credential required");
-    if (secret.startsWith("pri_")) {
-      const resolved = store.identities.resolveGlobalIdentitySecret(secret);
-      if (!resolved) reject(401, "unauthenticated", "Unknown agent identity");
-      return { identityId: resolved.identityId, keyId: null, scopes: null };
-    }
-    if (secret.startsWith("rak_")) {
-      const record = store.agentPlugin.verifyPresentedApiKey(secret);
-      if (!record) reject(401, "unauthenticated", "Unknown, revoked, or expired API key");
-      if (requiredScope && !grants(record.scopes, requiredScope))
-        reject(403, "insufficient_scope", `API key lacks the ${requiredScope} scope`);
-      return { identityId: record.identityId, keyId: record.keyId, scopes: record.scopes };
-    }
-    reject(401, "unauthenticated", "Agent credential required");
-  };
+  const agentAuth = createAgentAuth({ store, bearer, reject });
 
   // Owner-only: key issuance, rotation and revocation need the pri_ identity
   // secret — an API key must never mint or manage keys (no privilege
@@ -749,9 +766,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
   // reads. The owner identity secret grants both. A room access key for a
   // single-room linked agent may report and read pull-only presence for
   // itself; wake URLs and push stay on the identity secret.
-  const heartbeatActor = (req, scope) => isRoomAccessToken(bearer(req))
-    ? roomKeyPresenceAuth(store, bearer(req))
-    : agentAuth(req, scope);
+  const heartbeatActor = createHeartbeatActor({ store, bearer, reject });
   const heartbeatNext = pendingWakes => pendingWakes.length > 0
     ? [Object.freeze({ action: "ack-wakes", method: "POST", path: "/api/agent-heartbeats/ack",
         description: "Acknowledge the wake signals you received (signalIds) so they stop being returned on the next heartbeat." })]
@@ -824,18 +839,10 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     return json(res, 200, auth.roomId ? roomKeyPresenceView(store, auth) : store.agentHeartbeats.statusOf(auth.identityId));
   });
 
-  // plan-wake-live: GET /api/wake-status — who is actually listening.
-  // Wakeable = the agent polled or heartbeated within 24h; the response
-  // carries the wakeable list and the not-wakeable list. ?agentId= checks
-  // one agent: the data side for the COMMS-02 mention-target-warning —
-  // warn the poster when an @mention targets a not-wakeable agent.
-  const readWakeStatus = translate(async (req, res, { url }) => {
-    const auth = heartbeatActor(req, requiredScope("heartbeats:read"));
-    rate(`wake-status-read:${auth.identityId}`, 120);
-    const agentId = url.searchParams.get("agentId");
-    if (agentId !== null) return json(res, 200, store.agentHeartbeats.wakeStatusOf(agentId));
-    return json(res, 200, store.agentHeartbeats.wakeStatusList());
-  });
+  // plan-wake-live: GET /api/wake-status lives in the route table
+  // (server/routes/wake-status.mjs) — the OpenAPI route gate forbids new
+  // legacy-chain registrations, so it must not be registered here. The
+  // read-wake-status action descriptor above stays as discovery.
 
   // RC-2026-09-28-3602: room-hosted wake poll — the default wake path for
   // hosts with no public endpoint. waitMs (default 25000, max 55000)
@@ -971,8 +978,6 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     if (pathname === "/api/agent-heartbeats/ack" && method === "POST") { await ackHeartbeats(req, res, { remoteAddress }); return true; }
     // RC-2026-09-28-3602: room-hosted wake poll (before any regex routes).
     if (pathname === "/api/agent-wakes/poll" && method === "GET") { await pollWakes(req, res, { url }); return true; }
-    // plan-wake-live: wakeable / not-wakeable lists (before any regex routes).
-    if (pathname === "/api/wake-status" && method === "GET") { await readWakeStatus(req, res, { url }); return true; }
     return false;
   };
 }
