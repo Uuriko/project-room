@@ -859,6 +859,23 @@ export function isHardWork(item) {
 export function namedReviewers(item) {
   return (item?.tags ?? []).filter(tag => typeof tag === "string" && tag.startsWith("rev-")).map(tag => tag.slice(4));
 }
+// Resolve rev-<x> tags to ACTIVE members of the room: x is a member id, or a
+// handle slug (display name lowercased, letters and digits only, e.g.
+// rev-codexqa for "Codex QA") that matches exactly one active member, for ids
+// too long for a 32-character tag. Anything else is dropped, so a tag can
+// never route a wake or an ask to an identity outside the room.
+const handleSlug = name => String(name ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+export function resolveNamedReviewers(item, members = {}) {
+  const active = Object.entries(members ?? {}).filter(([, member]) => member && member.active !== false);
+  const ids = new Set();
+  for (const value of namedReviewers(item)) {
+    if (active.some(([id]) => id === value)) { ids.add(value); continue; }
+    const slug = handleSlug(value);
+    const matches = slug ? active.filter(([, member]) => handleSlug(member.displayName) === slug) : [];
+    if (matches.length === 1) ids.add(matches[0][0]);
+  }
+  return [...ids];
+}
 export function hasCurrentReview(item, memberId) {
   return (item?.reviews ?? []).some(review => review?.memberId === memberId && currentReviewBasis(review, item));
 }

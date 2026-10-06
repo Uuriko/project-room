@@ -181,3 +181,21 @@ test('a named reviewer gets one wake per new head, none once reviewed', t => {
   item = recordCi(item, { state: 'success', headSha: 'b'.repeat(40) }, now).item;
   assert.deepEqual(wakeNamedReviewers(store, 'board', item), [], 'reviewed on the current head: no wake');
 });
+
+test('rev- tags only reach active room members: an outside id gets no wake, a handle slug resolves', t => {
+  const { store, ada, owner, put } = setup(t);
+  const outsider = store.identities.create('Outsider');
+  const memberOf = identity => store.db.prepare('SELECT member_id AS m FROM identity_links WHERE identity_id=? AND room_id=?').get(identity.identityId, 'board').m;
+  const ownerId = memberOf(owner);
+  const now = Date.parse('2026-10-01T01:00:00Z');
+  let item = claimWork(put('outside', 0, { tags: ['hard', `rev-${outsider.identityId}`] }), ownerId, { now });
+  item = updateWork(item, ownerId, { state: 'in_progress', now });
+  store.workClaims.set('board', item);
+  assert.deepEqual(wakeNamedReviewers(store, 'board', item), [], 'no wake for a non-member');
+  assert.equal(store.agentHeartbeats.pendingWakes(outsider.identityId, { limit: 50 }).length, 0);
+  let slugged = claimWork(put('slugged', 1, { tags: ['hard', 'rev-ada'] }), ownerId, { now });
+  slugged = updateWork(slugged, ownerId, { state: 'in_progress', now });
+  store.workClaims.set('board', slugged);
+  assert.deepEqual(collectNeedsMe(store, ada.secret, {}).reviewAsks?.[0].top.map(row => row.id), ['slugged'], 'rev-ada resolves to the member named Ada');
+  assert.equal(wakeNamedReviewers(store, 'board', slugged).filter(result => result?.enqueued).length, 1);
+});
