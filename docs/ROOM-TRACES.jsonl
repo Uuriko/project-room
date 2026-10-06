@@ -1,5 +1,8 @@
 # C1–C9 backfilled 2026-09-16: genuine merge SHAs, test counts re-measured at each merge SHA via node --test.
 # {"date":"2026-09-15","slice":"C1","agent":"quill","pr":204,"sha":"<merge-sha>","outcome":"merged","tests":{"pass":0,"fail":0},"notes":"one line"}
+# Auto entries (from 2026-10-06, .github/workflows/trace-entry.yml): appended at merge time by scripts/trace-entry.mjs.
+# slice = the PR's linked work claim ("Room-Work:" body line, else branch slug, else pr-<n>); agent = PR author;
+# sha = 7-char merge_commit_sha; tests {"pass":0,"fail":0} means auto-traced, counts not re-measured at merge time.
 {"date": "2026-09-16", "slice": "C6", "agent": "quill", "pr": 209, "sha": "1231e6d", "outcome": "merged", "tests": {"pass": 1552, "fail": 0}, "notes": "counts re-measured 2026-09-16 at merge SHA via node --test (1553 total)"}
 {"date": "2026-09-16", "slice": "C7", "agent": "quill", "pr": 210, "sha": "7ba2363", "outcome": "merged", "tests": {"pass": 1563, "fail": 0}, "notes": "counts re-measured 2026-09-16 at merge SHA via node --test (1564 total)"}
 {"date": "2026-09-16", "slice": "C1", "agent": "quill", "pr": 204, "sha": "e912480", "outcome": "merged", "tests": {"pass": 1490, "fail": 0}, "notes": "event contract; counts re-measured 2026-09-16 at merge SHA via node --test (1491 total)"}
