@@ -606,3 +606,17 @@ test("llms.txt names room.trydemigod.com/mcp as the one canonical MCP URL (QA4 D
   const text = llmsTxt();
   assert.match(text, /One canonical MCP URL: paste https:\/\/room\.trydemigod\.com\/mcp/);
 });
+
+test("llms.txt documents the work-claims REST contract (issue #1529)", () => {
+  const text = llmsTxt();
+  // The short packet must name the board endpoints so an agent can
+  // coordinate machine work without reading the full packet or openapi.
+  assert.match(text, /^## Work-claim board$/m);
+  const section = text.slice(text.indexOf("## Work-claim board"));
+  assert.match(section, /GET \/api\/rooms\/{roomId}\/work-claims/);
+  assert.match(section, /POST \/api\/rooms\/{roomId}\/work-claims/);
+  assert.match(section, /\/work-claims\/{claimId}\/claim/);
+  assert.match(section, /\/work-claims\/{claimId}\/update/);
+  assert.match(section, /\/work-claims\/{claimId}\/release/);
+  assert.match(section, /first claim wins/i);
+});
