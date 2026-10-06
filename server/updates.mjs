@@ -172,7 +172,10 @@ function projectRoom(store, roomId, memberId, identityId) {
 
   for (const request of Object.values(requests)) {
     if (!request || request.recipientId !== memberId) continue;
-    const context = byId.get(request.contextMessageId) ?? byId.get(request.id);
+    const latest = byId.get(request.contextMessageId) ?? byId.get(request.id);
+    // Same rule as reply-context (server/reply-requests.mjs): a private message is
+    // visible only to its author and recipient, so never echo it as the title.
+    const context = latest?.toMemberId && latest.authorId !== memberId && latest.toMemberId !== memberId ? null : latest;
     const updatedAt = iso(context?.createdAt ?? request.closedAt ?? request.createdAt);
     const terminal = request.status === "answered" || request.status === "declined" ? "answered"
       : request.status === "cancelled" ? "cleared" : null;
