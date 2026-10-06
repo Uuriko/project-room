@@ -166,6 +166,9 @@ export function buildActivationPack(store, roomSlug, viewerId = null) {
     members,
     openWork,
     // QA4 Q4-SEC-1: only pins whose message this viewer may read.
+    // (Supersedes the audit-fix F-1 pinVisibleToViewer filter: the shared
+    // messageVisibleToViewer predicate also enforces the history floor, and
+    // keeps the owner non-exempt on DMs.)
     pinnedResources: pinnedMessages(state).filter(pin => messageVisibleToViewer(pin.message, viewerId, floor)).map(pinnedOf),
     repoHead: null,
     participationRules: { ...roomPolicy(state), trust: roomTrust(state).enabled },

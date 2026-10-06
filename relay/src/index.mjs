@@ -9,7 +9,7 @@ import { errorResponse, json, readJson } from "./http.mjs";
 import { MachineLink } from "./machine-link.mjs";
 import { log, recentLogs } from "./redact.mjs";
 import {
-  ENROLL_TTL_MS, MAX_SMALL_BYTES, SERVER_NAME, challengeHeader, isInviteCode, isLabel, isMachineId, isMemberId, isRoomId, missingSecrets, passthroughEnabled, roomOriginOf,
+  ENROLL_TTL_MS, MAX_SMALL_BYTES, SERVER_NAME, challengeHeader, isInviteCode, isLabel, isMachineId, isMemberId, isRoomId, roomOriginOf,
 } from "./protocol.mjs";
 
 export { MachineLink };
@@ -63,12 +63,9 @@ async function route(request, env, url) {
 }
 
 function healthz(request, env) {
-  const body = {
-    status: "ok",
-    service: SERVER_NAME,
-    phase0Passthrough: passthroughEnabled(env),
-    missing: missingSecrets(env),
-  };
+  // L1: no unauthenticated recon — which secrets are unset stays behind
+  // admin auth. Liveness only.
+  const body = { status: "ok", service: SERVER_NAME };
   if (request.method === "HEAD") return new Response(null, { status: 200, headers: { "cache-control": "no-store" } });
   if (request.method !== "GET") throw relayError(405, "method_not_allowed", "Use GET");
   return json(200, body);
@@ -118,6 +115,9 @@ async function mintEnroll(request, env) {
       roomOrigin,
       codeHash: await sha256Hex(verifier),
       expiresAt,
+      // W5-M5: forward the per-machine passthrough opt-in and caps.
+      passthroughOptIn: value.passthroughOptIn === true,
+      passthroughCaps: Array.isArray(value.passthroughCaps) ? value.passthroughCaps : null,
     }),
   }));
   if (!response.ok) return response;

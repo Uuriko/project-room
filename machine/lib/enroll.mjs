@@ -7,11 +7,15 @@ import { mintIdentity, redeemInvite, registerHeartbeat } from "./room.mjs";
 // in the secret store. It is not returned to the caller and not placed in
 // the environment. Room identity, invite redeem, and the wakeable heartbeat
 // use the Room origin from the enroll response.
-export async function enroll({ code, home = configHome(), env = process.env, relayHttp }) {
+export async function enroll({ code, home = configHome(), env = process.env, relayHttp, insecure = false }) {
   if (!machineEnabled(env)) return { ok: false, error: "disabled" };
   const base = relayHttp ?? env.ROOM_MACHINE_RELAY_URL;
   if (!base) return { ok: false, error: "relay_url_missing" };
   if (typeof code !== "string" || !code.trim()) return { ok: false, error: "code_missing" };
+  // L6: refuse cleartext relay URLs unless the operator explicitly opts in.
+  // The single-use enroll code must not travel unencrypted by accident.
+  const secure = /^wss:|^https:/.test(base);
+  if (!secure && !insecure) return { ok: false, error: "insecure_relay_url" };
   const httpBase = base.replace(/^wss:/, "https:").replace(/^ws:/, "http:");
   const response = await fetch(new URL("/v0/enroll", httpBase), {
     method: "POST",

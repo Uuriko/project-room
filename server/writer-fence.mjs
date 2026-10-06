@@ -440,6 +440,8 @@ const MATCHMAKING_ADDITIVE_TABLES = Object.freeze([
   "work_offer_terms",
 ]);
 export const lazyAdditiveTables = Object.freeze([...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES, ...RETIRED_EMISSARY_TABLES, ...ANALYTICS_ADDITIVE_TABLES, ...MATCHMAKING_ADDITIVE_TABLES]);
+// (Audit-fix F-2 intent preserved: analytics tables are lazy/additive, never
+// required — they live in ANALYTICS_ADDITIVE_TABLES above.)
 // messages (MSG-1) is fenced at v37 only. v34–v36 files do not have the
 // table or its triggers; verifyWriterFence(36) must not require them.
 const v34FencedTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables])]);

@@ -10,6 +10,11 @@
 // schema.body and bodyLimit, then the handler). Extracted handlers still
 // carry their own auth and body reads, so the production hook does not set
 // pipeline and those steps are not run twice.
+//
+// F-3 contract: the row's `auth` column is ENFORCED ONLY when ctx.pipeline
+// is set. When pipeline is unset, `auth` is documentation — the handler
+// MUST enforce its own authorization. Never add a row that relies on the
+// column alone without also setting ctx.pipeline at the call site.
 
 import { ROUTES, assertRouteTable } from "./table.mjs";
 

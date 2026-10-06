@@ -98,7 +98,7 @@ import { listOpenQuestions } from "./open-questions.mjs";
 import { GoogleSignIn, GOOGLE_START_PATH, GOOGLE_CALLBACK_PATH, googlePostLoginPage } from "./google-oauth.mjs";
 import { createMagicLinkMailer } from "./magic-links.mjs";
 import { createRateLimiter } from "./identity-ratelimit.mjs";
-import { normalizeEmail } from "./account-login-methods.mjs";
+import { emailLookupHash, normalizeEmail } from "./account-login-methods.mjs";
 import { createPasskeyAuth, resolvePasskeyParams } from "./account-passkeys.mjs";
 import { createDeletionSecret, executeAccountDeletion, issueDeletionToken, planAccountDeletion, verifyDeletionToken, RETENTION_POLICY } from "./account-deletion.mjs"; // RC-2026-09-19-078: account-management surface
 import { createOperatorRoutes } from "./operator-routes.mjs"; // CP-ADMIN-0: operator purge, status, and audit. Paths stay in that module.
@@ -418,6 +418,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     // answers the reuse attempt with a distinct invalid_grant.
     onSecurityEvent: event => {
       console.warn(`oauth security event: ${JSON.stringify(event)}`);
+    },
+    // Deleted/deactivated accounts lose connector access immediately: token
+    // verification fails closed even if a token row survived a purge.
+    isAccountActive: userId => {
+      try {
+        return store.db.prepare("SELECT active FROM accounts WHERE id=?").get(userId)?.active === 1;
+      } catch { return false; }
     },
   });
   for (const c of connectorClients) {
@@ -1172,6 +1179,103 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!exact(data, ["code"]) || typeof data.code !== "string") reject(422, "invalid_email_code", "A verification code is required");
         const verified = store.accountLogins.consumeEmailVerifyCode({ accountId: session.account.id, code: data.code.trim() });
         return json(res, 200, { status: "verified", email: verified.email });
+      }
+      if (url.pathname === "/api/auth/email/verify/resend") {
+        if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
+        checkOrigin(req, true);
+        const slotToken = cookie(req, accountCookieName);
+        if (!slotToken) reject(401, "account_session_required", "Sign in before verifying your email");
+        let session;
+        try { session = store.authenticateAccountSession(slotToken); }
+        catch (error) {
+          if (error.status !== 401) throw error;
+          reject(401, "invalid_session", "That session is no longer valid; sign in again");
+        }
+        if (!session.account) reject(401, "account_session_required", "Sign in before verifying your email");
+        protectWrite(req, session, false);
+        // Tight per-account budget: a resend mints a fresh code, so this is
+        // not a free oracle for someone else's inbox.
+        rate(`email-verify-resend:${session.account.id}`, 5);
+        const emailRow = store.db.prepare(`SELECT email FROM account_login_methods
+          WHERE account_id=? AND type='password' AND disabled=0 AND email IS NOT NULL LIMIT 1`)
+          .get(session.account.id);
+        const normalized = emailRow ? normalizeEmail(emailRow.email) : null;
+        if (!normalized) reject(422, "invalid_email", "This account has no email to verify");
+        const pending = store.db.prepare(`SELECT 1 FROM account_login_methods
+          WHERE account_id=? AND email_hash=? AND disabled=0 AND verified_at IS NULL LIMIT 1`)
+          .get(session.account.id, emailLookupHash(normalized));
+        if (!pending) return json(res, 200, { status: "already_verified", email: normalized });
+        if (!magicMailer.isConfigured()) {
+          reject(503, "mail_not_configured", "Email delivery is not configured; contact the operator to verify this address");
+        }
+        const issued = store.accountLogins.issueEmailVerifyCode({ accountId: session.account.id, email: normalized });
+        await deliverSignupMail(() => magicMailer.sendMagicLink({
+          to: normalized, code: issued.code, expiresAt: issued.expiresAt, purpose: "email-verify"
+        }));
+        return json(res, 200, { status: "resent", email: normalized, expiresAt: issued.expiresAt });
+      }
+      // ---- end ID-SEC auth ----
+      if (url.pathname === "/api/auth/password/login") {
+        if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
+        checkOrigin(req, true);
+        rate(`password-login-ip:${remoteAddress}`, 60);
+        const data = await body(req);
+        const loginToken = signInSlotToken(req, data, ["email", "password", "sessionRevision"],
+          { code: "invalid_login", message: "An email, password, and current session are required" });
+        if (typeof data.email !== "string" || typeof data.password !== "string") {
+          reject(422, "invalid_login", "An email, password, and current session are required");
+        }
+        const normalized = normalizeEmail(data.email);
+        if (!normalized) reject(422, "invalid_email", "A valid email address is required");
+        rate(`password-login:${normalized}`, 10);
+        const accountId = store.accountLogins.findPasswordAccount(normalized);
+        const verifier = accountId ? store.accountLogins.readPasswordVerifier(accountId) : null;
+        // Unknown emails and verifier-less accounts verify against the dummy
+        // so the response never reveals whether the email is registered.
+        if (!verifyPassword(data.password, verifier ?? DUMMY_PASSWORD_VERIFIER)) {
+          reject(401, "invalid_credentials", "Invalid email or password");
+        }
+        const passwordMethod = store.accountLogins.listMethods(accountId).find(m => m.type === "password");
+        store.accountLogins.touchMethod(accountId, passwordMethod.id);
+        const loggedIn = finishPasswordSlot(loginToken, accountId, data.sessionRevision, passwordMethod.id);
+        return json(res, 200, sessionAccountView(loggedIn));
+      }
+      if (url.pathname === "/api/auth/password/change") {
+        if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
+        checkOrigin(req, true);
+        rate(`password-change:${remoteAddress}`, 20);
+        const slotToken = cookie(req, accountCookieName);
+        if (!slotToken) reject(401, "account_session_required", "Sign in before changing the password");
+        let session;
+        try {
+          session = store.authenticateAccountSession(slotToken);
+        } catch (error) {
+          if (error.status !== 401) throw error;
+          reject(401, "invalid_session", "That session is no longer valid; sign in again");
+        }
+        if (!session.account) reject(401, "account_session_required", "Sign in before changing the password");
+        const data = await body(req);
+        if (!exact(data, ["currentPassword", "newPassword"])
+          || typeof data.currentPassword !== "string" || typeof data.newPassword !== "string") {
+          reject(422, "invalid_password_change", "The current and new passwords are required");
+        }
+        const verifyChangeSession = () => store.authenticateAccountSession(slotToken, null, session.sessionBinding);
+        verifyChangeSession();
+        const verifier = store.accountLogins.readPasswordVerifier(session.account.id);
+        if (!verifyPassword(data.currentPassword, verifier ?? DUMMY_PASSWORD_VERIFIER)) {
+          reject(401, "invalid_credentials", "The current password is incorrect");
+        }
+        const policy = checkPasswordPolicy(data.newPassword);
+        if (policy) reject(422, policy.code, policy.message);
+        const replacementVerifier = hashPassword(data.newPassword);
+        store.transaction(() => {
+          verifyChangeSession();
+          if (store.accountLogins.readPasswordVerifier(session.account.id) !== verifier) {
+            reject(409, "password_changed", "The password changed; retry with the current password");
+          }
+          store.accountLogins.setPasswordVerifier(session.account.id, replacementVerifier);
+        });
+        return json(res, 200, { status: "ok" });
       }
       // ---- GitHub OAuth (slice 4, RC-2026-09-17-013) ----
       // GitHub sign-in (Clerk-free). The start route binds the browser's

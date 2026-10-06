@@ -33,6 +33,37 @@ function check() {
   console.log(`machine check ok (${files.length} files)`);
 }
 
+function assertImportClosure(names) {
+  const inPack = new Set(names);
+  const missing = new Set();
+  const seen = new Set();
+  const queue = ["machine/bin/room-machine.mjs"];
+  while (queue.length) {
+    const rel = queue.pop();
+    if (seen.has(rel)) continue;
+    seen.add(rel);
+    let source;
+    try {
+      source = readFileSync(join(repo, rel), "utf8");
+    } catch {
+      missing.add(rel);
+      continue;
+    }
+    for (const match of source.matchAll(/(?:import|export)[^'"]*from\s*["']([^"']+)["']/g)) {
+      const spec = match[1];
+      if (!spec.startsWith(".")) continue; // bare/node specifiers ship with the runtime
+      const withExt = /\.[a-z]+$/i.test(spec) ? spec : `${spec}.mjs`;
+      const resolved = join(dirname(rel), withExt).split("\\").join("/");
+      if (!inPack.has(resolved)) missing.add(`${resolved} (imported by ${rel})`);
+      else if (!seen.has(resolved)) queue.push(resolved);
+    }
+  }
+  if (missing.size) {
+    for (const m of missing) console.error(`pack is missing import: ${m}`);
+    process.exit(1);
+  }
+}
+
 function pack() {
   const names = [
     "machine/bin/room-machine.mjs",
@@ -42,7 +73,11 @@ function pack() {
     "machine/build.mjs",
     "machine/launchd/com.uuriko.room-machine.plist",
     ...walk(join(root, "lib")).map(path => relative(repo, path).split("\\").join("/")),
+    ...walk(join(root, "bot")).map(path => relative(repo, path).split("\\").join("/")),
   ];
+  // The CLI statically imports ../bot/*.mjs: fail the pack if any relative
+  // import reachable from the entry point is missing from the pack set.
+  assertImportClosure(names);
   const result = spawnSync("tar", ["-czf", "-", "-C", repo, ...names], { encoding: "buffer", maxBuffer: 16 * 1024 * 1024 });
   if (result.status !== 0) {
     process.stderr.write(result.stderr);
