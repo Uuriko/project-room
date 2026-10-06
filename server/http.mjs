@@ -1215,68 +1215,6 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return json(res, 200, { status: "resent", email: normalized, expiresAt: issued.expiresAt });
       }
       // ---- end ID-SEC auth ----
-      if (url.pathname === "/api/auth/password/login") {
-        if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
-        checkOrigin(req, true);
-        rate(`password-login-ip:${remoteAddress}`, 60);
-        const data = await body(req);
-        const loginToken = signInSlotToken(req, data, ["email", "password", "sessionRevision"],
-          { code: "invalid_login", message: "An email, password, and current session are required" });
-        if (typeof data.email !== "string" || typeof data.password !== "string") {
-          reject(422, "invalid_login", "An email, password, and current session are required");
-        }
-        const normalized = normalizeEmail(data.email);
-        if (!normalized) reject(422, "invalid_email", "A valid email address is required");
-        rate(`password-login:${normalized}`, 10);
-        const accountId = store.accountLogins.findPasswordAccount(normalized);
-        const verifier = accountId ? store.accountLogins.readPasswordVerifier(accountId) : null;
-        // Unknown emails and verifier-less accounts verify against the dummy
-        // so the response never reveals whether the email is registered.
-        if (!verifyPassword(data.password, verifier ?? DUMMY_PASSWORD_VERIFIER)) {
-          reject(401, "invalid_credentials", "Invalid email or password");
-        }
-        const passwordMethod = store.accountLogins.listMethods(accountId).find(m => m.type === "password");
-        store.accountLogins.touchMethod(accountId, passwordMethod.id);
-        const loggedIn = finishPasswordSlot(loginToken, accountId, data.sessionRevision, passwordMethod.id);
-        return json(res, 200, sessionAccountView(loggedIn));
-      }
-      if (url.pathname === "/api/auth/password/change") {
-        if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
-        checkOrigin(req, true);
-        rate(`password-change:${remoteAddress}`, 20);
-        const slotToken = cookie(req, accountCookieName);
-        if (!slotToken) reject(401, "account_session_required", "Sign in before changing the password");
-        let session;
-        try {
-          session = store.authenticateAccountSession(slotToken);
-        } catch (error) {
-          if (error.status !== 401) throw error;
-          reject(401, "invalid_session", "That session is no longer valid; sign in again");
-        }
-        if (!session.account) reject(401, "account_session_required", "Sign in before changing the password");
-        const data = await body(req);
-        if (!exact(data, ["currentPassword", "newPassword"])
-          || typeof data.currentPassword !== "string" || typeof data.newPassword !== "string") {
-          reject(422, "invalid_password_change", "The current and new passwords are required");
-        }
-        const verifyChangeSession = () => store.authenticateAccountSession(slotToken, null, session.sessionBinding);
-        verifyChangeSession();
-        const verifier = store.accountLogins.readPasswordVerifier(session.account.id);
-        if (!verifyPassword(data.currentPassword, verifier ?? DUMMY_PASSWORD_VERIFIER)) {
-          reject(401, "invalid_credentials", "The current password is incorrect");
-        }
-        const policy = checkPasswordPolicy(data.newPassword);
-        if (policy) reject(422, policy.code, policy.message);
-        const replacementVerifier = hashPassword(data.newPassword);
-        store.transaction(() => {
-          verifyChangeSession();
-          if (store.accountLogins.readPasswordVerifier(session.account.id) !== verifier) {
-            reject(409, "password_changed", "The password changed; retry with the current password");
-          }
-          store.accountLogins.setPasswordVerifier(session.account.id, replacementVerifier);
-        });
-        return json(res, 200, { status: "ok" });
-      }
       // ---- GitHub OAuth (slice 4, RC-2026-09-17-013) ----
       // GitHub sign-in (Clerk-free). The start route binds the browser's
       // account session slot (passed as ?sessionToken=) into a single-use

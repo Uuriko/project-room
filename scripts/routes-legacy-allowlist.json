@@ -382,6 +382,10 @@
       "path": "/api/auth/email/verify"
     },
     {
+      "method": "POST",
+      "path": "/api/auth/email/verify/resend"
+    },
+    {
       "method": "GET",
       "path": "/api/auth/github/callback"
     },
@@ -4098,6 +4102,10 @@
     {
       "method": "POST",
       "path": "/api/auth/email/verify"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/email/verify/resend"
     },
     {
       "method": "GET",
