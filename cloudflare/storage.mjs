@@ -150,7 +150,7 @@ export const durableStorage = {
       }
     }
   },
-  transaction(db, fn, readOnly = false) {
+  transaction(db, fn, readOnly = false, { isolated = false } = {}) {
     const run = () => {
       const result = fn();
       if (result && typeof result.then === 'function') throw new Error('Room transactions must remain synchronous');
@@ -158,6 +158,12 @@ export const durableStorage = {
     };
     if (db.isTransaction) {
       if (db.readOnlyTransaction && !readOnly) throw new Error('Cannot write inside a read-only Room transaction');
+      // The native API supplies nested rollback; SQL SAVEPOINT is forbidden.
+      // Critical storage faults can still abort the enclosing transaction.
+      if (isolated) {
+        try { return db.storage.transactionSync(run); }
+        catch (error) { forgetRuntime(db); throw error; }
+      }
       return run();
     }
     return db.storage.transactionSync(() => {

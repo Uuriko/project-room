@@ -612,6 +612,7 @@ const sessionEventMatchesRequest = (event, request) => event?.data?.workItemId =
 // Platform differences stay at the database boundary; identity, invitation and
 // command rules below are shared by every runtime. The default remains Node.
 const nodeReadTransactions = new WeakSet();
+const nodeFailedIsolations = new WeakSet();
 const nodeStorage = {
   version: db => db.prepare("PRAGMA user_version").get().user_version,
   setVersion: (db, version) => db.exec(`PRAGMA user_version=${version}`),
@@ -626,16 +627,38 @@ const nodeStorage = {
       : "PRAGMA foreign_keys=ON; PRAGMA busy_timeout=3000; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;");
   },
   registerWriter, installWriterFence, verifyWriterFence,
-  transaction(db, fn, readOnly) {
+  transaction(db, fn, readOnly, { isolated = false } = {}) {
+    const run = () => {
+      const result = fn();
+      if (isolated && result && typeof result.then === "function") throw new Error("Room transactions must remain synchronous");
+      return result;
+    };
     if (db.isTransaction) {
       if (!readOnly && nodeReadTransactions.has(db)) throw new Error("Cannot write inside a read-only transaction");
-      return fn();
+      if (!isolated) return run();
+      // Explicit best-effort writers can fail without retaining partial writes.
+      // Critical SQLite faults may abort the parent transaction as well.
+      db.exec("SAVEPOINT room_isolated_write");
+      try { const result = run(); db.exec("RELEASE room_isolated_write"); return result; }
+      catch (error) {
+        if (db.isTransaction) {
+          try { db.exec("ROLLBACK TO room_isolated_write"); db.exec("RELEASE room_isolated_write"); }
+          catch (isolationError) {
+            nodeFailedIsolations.add(db);
+            try { db.exec("ROLLBACK"); } catch { /* The parent commit guard remains armed. */ }
+            throw new Error("Isolated transaction rollback failed", { cause: isolationError });
+          }
+        }
+        throw error;
+      }
     }
     const queryOnly = readOnly ? db.prepare("PRAGMA query_only").get().query_only : null;
     db.exec(readOnly ? "BEGIN" : "BEGIN IMMEDIATE");
     try {
       if (readOnly) { db.exec("PRAGMA query_only=ON"); nodeReadTransactions.add(db); }
-      const result = fn(); db.exec("COMMIT"); return result;
+      const result = run();
+      if (nodeFailedIsolations.has(db)) throw new Error("Cannot commit after isolated transaction rollback failed");
+      db.exec("COMMIT"); return result;
     }
     catch (error) {
       // SQLITE_FULL and I/O failures already rolled the transaction back;
@@ -643,7 +666,7 @@ const nodeStorage = {
       if (db.isTransaction) { try { db.exec("ROLLBACK"); } catch { /* already rolled back */ } }
       throw error;
     }
-    finally { if (readOnly) { nodeReadTransactions.delete(db); db.exec(`PRAGMA query_only=${queryOnly}`); } }
+    finally { nodeFailedIsolations.delete(db); if (readOnly) { nodeReadTransactions.delete(db); db.exec(`PRAGMA query_only=${queryOnly}`); } }
   }
 };
 const work = "workItemId expectedRevision";
@@ -2456,7 +2479,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       };
     }
   }
-  transaction(fn) {
+  transaction(fn, { isolated = false } = {}) {
     // Nested startup helpers share the outer migration transaction and its rollback.
     const outermost = !this.db.isTransaction;
     this._armProjectionWatch();
@@ -2464,12 +2487,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // idempotent replay commits nothing. Measured only while degraded.
     const before = outermost && this.storageFailures > 0 ? this.storagePlatform.changes?.(this.db) : null;
     let result;
-    try { result = this.storagePlatform.transaction(this.db, fn, false); }
+    try { result = this.storagePlatform.transaction(this.db, fn, false, { isolated }); }
     catch (error) {
-      if (outermost) this._dropProjectionCache();
+      if (outermost || isolated) this._dropProjectionCache();
       throw this.storageFailure(error, outermost);
     }
-    if (outermost) this._dropProjectionCache();
+    if (outermost || isolated) this._dropProjectionCache();
     if (before !== null && (before === undefined || this.storagePlatform.changes(this.db) !== before)) this.storageRecovered();
     return result;
   }

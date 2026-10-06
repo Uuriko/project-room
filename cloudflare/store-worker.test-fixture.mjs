@@ -37,6 +37,35 @@ export class StoreTestRoom {
   async fetch(request) {
     const store = this.store;
     const path = new URL(request.url).pathname;
+    if (path === '/isolated-transactions') {
+      store.initialize(initialRoom('isolated'));
+      const owner = store.issueAccessKey('isolated', 'owner');
+      store.transaction(() => {
+        store.createAccount('outer-kept');
+        assert.throws(() => store.transaction(() => {
+          store.command(owner, 'isolated', { id: 'inner-post', type: T.MESSAGE_POSTED,
+            data: { messageId: 'inner-message', body: 'Must roll back' } });
+          assert.ok(store.room('isolated').state.messages.some(m => m.id === 'inner-message'));
+          store.db.prepare("INSERT INTO accounts(id,created_at) VALUES(?,?)").run('outer-kept', store.now());
+        }, { isolated: true }), /UNIQUE|constraint/i);
+        assert.ok(!store.room('isolated').state.messages.some(m => m.id === 'inner-message'), 'rolled-back projection cache is discarded');
+        assert.equal(store.db.prepare("SELECT count(*) AS n FROM events WHERE id='inner-post'").get().n, 0);
+        assert.equal(store.db.prepare("SELECT count(*) AS n FROM messages WHERE message_id='inner-message'").get().n, 0);
+        // Default nested helpers deliberately continue sharing the parent.
+        assert.throws(() => store.transaction(() => { store.createAccount('default-kept'); throw new Error('default fault'); }), /default fault/);
+      });
+      assert.ok(store.account('outer-kept'));
+      assert.ok(store.account('default-kept'));
+      assert.throws(() => store.transaction(() => {
+        store.createAccount('outer-lost');
+        store.transaction(() => store.createAccount('inner-lost'), { isolated: true });
+        throw new Error('outer fault');
+      }), /outer fault/);
+      for (const id of ['outer-lost', 'inner-lost']) assert.equal(store.db.prepare("SELECT count(*) AS n FROM accounts WHERE id=?").get(id).n, 0);
+      assert.throws(() => store.readTransaction(() => store.transaction(() => store.createAccount('readonly-denied'), { isolated: true })), /read-only/);
+      assert.throws(() => store.transaction(() => Promise.resolve(), { isolated: true }), /synchronous/);
+      return Response.json({ innerRolledBack: true, parentPreserved: true, outerRollback: true, cacheRestored: true, defaultsPreserved: true, readOnlyProtected: true, synchronous: true });
+    }
     if (path === '/bounty-receipts' || path === '/bounty-receipts-resume') {
       const room = 'bounty-worker', escrow = store.bountyEscrow;
       if (path === '/bounty-receipts') store.initialize(initialRoom(room));
