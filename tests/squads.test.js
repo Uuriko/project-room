@@ -20,7 +20,27 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { createHostedRoomMcp } from "../server/mcp-room-profile.mjs";
 import { AgentRooms } from "../server/agent-rooms.mjs";
 import { parseSquadMentions, validateSquadName, createSquad } from "../server/squads.mjs";
+import { SQUAD_ROUTES } from "../server/routes/squads.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
+
+// --- route table -----------------------------------------------------------------
+
+test("SQUAD_ROUTES registers the five squad rows in the route table", () => {
+  const rows = new Map(SQUAD_ROUTES.map(row => [`${row.method} ${row.path}`, row]));
+  for (const key of [
+    "GET /api/rooms/{roomId}/squads",
+    "POST /api/rooms/{roomId}/squads",
+    "GET /api/rooms/{roomId}/squads/{squadId}",
+    "POST /api/rooms/{roomId}/squads/{squadId}/members",
+    "POST /api/rooms/{roomId}/squads/{squadId}/disband",
+  ]) {
+    const row = rows.get(key);
+    assert.ok(row, `${key} is a route-table row`);
+    assert.equal(row.auth, "room");
+    assert.equal(row.scope, "room");
+    assert.equal(typeof row.handler, "function");
+  }
+});
 
 // --- pure unit ---------------------------------------------------------------
 
