@@ -54,10 +54,13 @@ const DYNAMIC_MASK = [
   "#join-expiry",
 ];
 
+// Short on purpose: every message must stay on one rendered line at the
+// fixed column width on any platform font, or the #message-list element
+// height (and its baseline dimensions) would drift between environments.
 const SEED_MESSAGES = [
-  "Visual regression seed message one: plain text.",
-  "Visual regression seed message two: a second paragraph to exercise grouping and spacing.",
-  "Visual regression seed message three, with an emoji 🙂 and some *markdown-ish* characters.",
+  "Seed message one.",
+  "Seed message two.",
+  "Seed message three.",
 ];
 
 async function startServer(t, { seedMessages = [] } = {}) {

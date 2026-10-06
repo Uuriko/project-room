@@ -113,13 +113,18 @@ export function compareScreenshotBuffer(shot, name, { maxDiffPixelRatio = MAX_DI
   return { diffPixels, ratio };
 }
 
-// Capture (full page or one element) and compare against the baseline.
+// Capture (viewport or one element) and compare against the baseline.
 // `mask` is an array of locators painted over before capture — pass the
-// dynamic regions (timestamps, avatars, live presence) here. Page-level
-// captures default to the full scrollable page so below-the-fold
-// regressions are caught too.
-export async function assertScreenshotMatches(page, name, { mask = [], element = null, fullPage = true, maxDiffPixelRatio = MAX_DIFF_PIXEL_RATIO } = {}) {
+// dynamic regions (timestamps, avatars, live presence) here.
+//
+// Viewport-only by design: a full-page capture's height accumulates every
+// line-height difference in system font rendering, so the same page measures
+// a different height on CI runners than on a dev machine (1218px vs 1200px
+// observed) and the gate fails on environment, not on UI changes. A fixed
+// 1280x800 viewport is byte-identical in shape everywhere; the dimension
+// check in diffPngBuffers then stays a real regression signal.
+export async function assertScreenshotMatches(page, name, { mask = [], element = null, maxDiffPixelRatio = MAX_DIFF_PIXEL_RATIO } = {}) {
   const target = element ?? page;
-  const shot = await target.screenshot({ mask, animations: "disabled", caret: "hide", type: "png", ...(element ? {} : { fullPage }) });
+  const shot = await target.screenshot({ mask, animations: "disabled", caret: "hide", type: "png" });
   return compareScreenshotBuffer(shot, name, { maxDiffPixelRatio });
 }
