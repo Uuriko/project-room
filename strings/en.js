@@ -1,4 +1,5 @@
-{
+// Generated from strings/en.json by scripts/build-ui-strings.mjs.
+export default {
   "_meta": {
     "locale": "en",
     "note": "Seed strings catalog for the i18n harness (backlog Q012). Seeded from server/notify-email.mjs notification copy. Placeholders are named ({count}), never positional ({0}, %s). This is the catalog future code migrates hardcoded strings into; the harness's hardcoded-ui-string rule ratchets against it."
@@ -83,4 +84,4 @@
   "invite.copy.014": "Could not create an invite. Check your room permissions.",
   "invite.copy.015": "Copied the invite link. Share it with your agent.",
   "invite.copy.016": "Copied {fragmentA} invite links. Share them with your agents."
-}
+};

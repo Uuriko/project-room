@@ -1,3 +1,4 @@
+import { uiText } from './strings.js';
 import { currentResult } from './work-selectors.js';
 // Human presentation and explicitly PUBLIC assistant invocation. No private request reuse.
 export function installHumanExperience({ getState, getSession, client, notice, openWork, openMessage, selectResult, refreshTranscript }) {
@@ -5,21 +6,21 @@ export function installHumanExperience({ getState, getSession, client, notice, o
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
   const human = () => getSession()?.member?.kind === 'human';
   let boundary = '', projection = null, reading = false, selected = false, contribution = null, operation = null, rejectedOperation = null, configureOperation = null, error = '', lastRead = 0;
-  const key = () => `${client.generation}:${getState()?.room.id}:${getSession()?.member.id}`;
-  const pendingKey = () => `room-assistant-pending:${getState()?.room.id}:${getSession()?.member.id}`;
+  const key = () => ["", client.generation, ":", getState()?.room.id, ":", getSession()?.member.id, ""].join('');
+  const pendingKey = () => ["room-assistant-pending:", getState()?.room.id, ":", getSession()?.member.id, ""].join('');
   function persistOperation() { try { if (operation) sessionStorage.setItem(pendingKey(), JSON.stringify(operation)); else sessionStorage.removeItem(pendingKey()); } catch { /* the current tab still has the exact retry */ } }
   const path = () => `/api/rooms/${encodeURIComponent(getState().room.id)}/assistant`;
   const section = document.createElement('section'); section.id = 'room-assistant'; section.hidden = true;
   section.setAttribute('aria-label', 'Room assistant');
-  section.innerHTML = '<div class="assistant-heading"><strong>Room</strong><span id="room-assistant-status"></span><button type="button" id="assistant-setup" class="text-button">Connect</button><button type="button" id="human-project-open" class="text-button">Project</button></div><details id="assistant-activity"><summary>Activity</summary><div id="assistant-runs"></div></details><p id="assistant-error" class="form-hint" role="status"></p><button type="button" id="assistant-retry" class="text-button" hidden>Retry request</button><button type="button" id="assistant-review" class="text-button" hidden>Review current request</button><button type="button" id="assistant-discard" class="text-button" hidden>Dismiss</button>';
+  section.innerHTML = uiText("human.copy.001");
   $('#typing-indicator').before(section);
   const ask = document.createElement('button'); ask.type = 'button'; ask.id = 'ask-room'; ask.className = 'button ghost';
-  ask.textContent = 'Ask Room'; ask.setAttribute('aria-pressed', 'false'); ask.title = 'Ask the room assistant in this shared conversation';
+  ask.textContent = 'Ask Room'; ask.setAttribute('aria-pressed', 'false'); ask.title = uiText("human.copy.002");
   const composerActions = document.createElement('div'); composerActions.className = 'human-composer-actions';
   composerActions.append($('#composer-options'), ask); $('.composer-row').append(composerActions);
   ask.addEventListener('click', () => { selected = !selected; if (!selected) { contribution = null; ask.textContent = 'Ask Room'; } ask.setAttribute('aria-pressed', String(selected)); $('#message-input').focus(); });
   const advanced = document.createElement('label'); advanced.className = 'check';
-  advanced.innerHTML = '<input id="human-advanced" type="checkbox"> Show advanced agent controls';
+  advanced.innerHTML = uiText("human.copy.003");
   $('#settings-dialog').append(advanced);
   $('#human-advanced').addEventListener('change', () => {
     document.body.classList.toggle('human-advanced', $('#human-advanced').checked);
@@ -31,21 +32,21 @@ export function installHumanExperience({ getState, getSession, client, notice, o
   document.body.append(dialog); dialog.querySelector('[data-close-project]').onclick = () => dialog.close();
   $('#human-project-open').onclick = () => {
     const state = getState();
-    $('#human-project-content').innerHTML = `<p>${esc(state.room.purpose || 'Your shared work and results.')}</p>` + Object.values(state.workItems ?? {}).filter(w => !w.supersededBy).map(w => {
-      const label = w.state === 'completed' ? (currentResult(w) ? 'Done' : 'Needs review') : w.state === 'working' ? 'In progress · reported' : w.state === 'blocked' ? 'Needs input' : 'Planned';
-      return `<button type="button" class="human-project-item" data-project-work="${esc(w.id)}"><strong>${esc(w.title)}</strong><span>${esc(label)}</span></button>`;
-    }).join('');
-    if (!Object.keys(state.workItems ?? {}).length) $('#human-project-content').insertAdjacentHTML('beforeend', '<p>No tasks yet. Start with a conversation.</p>');
+    $('#human-project-content').innerHTML = [`<p>${esc(state.room.purpose || uiText("human.copy.004"))}</p>`, Object.values(state.workItems ?? {}).filter(w => !w.supersededBy).map(w => {
+      const label = w.state === 'completed' ? (currentResult(w) ? 'Done' : 'Needs review') : w.state === 'working' ? uiText("human.copy.005") : w.state === 'blocked' ? 'Needs input' : 'Planned';
+      return ["<button type=\"button\" class=\"human-project-item\" data-project-work=\"", esc(w.id), "\"><strong>", esc(w.title), "</strong><span>", esc(label), "</span></button>"].join('');
+    }).join('')].join('');
+    if (!Object.keys(state.workItems ?? {}).length) $('#human-project-content').insertAdjacentHTML('beforeend', uiText("human.copy.006"));
     dialog.showModal();
   };
   dialog.addEventListener('click', event => { const button = event.target.closest('[data-project-work]'); if (button) { dialog.close(); openWork(button.dataset.projectWork); } });
   const setup = document.createElement('dialog'); setup.id = 'room-assistant-setup'; setup.setAttribute('aria-labelledby', 'assistant-setup-title');
-  setup.innerHTML = '<form><div class="dialog-head"><h2 id="assistant-setup-title">Connect Room</h2></div><p>Choose an agent to coordinate this room. Shared prompts and activity are visible to everyone here. This does not start an outside agent.</p><label>Coordinator<select name="coordinatorMemberId" required></select></label><button type="button" id="assistant-enroll" class="button ghost">Add an agent</button><p id="assistant-setup-error" role="alert"></p><div class="form-actions"><button type="button" data-close-setup class="button ghost">Cancel</button><button type="submit" class="button primary">Connect</button></div></form>';
+  setup.innerHTML = uiText("human.copy.007");
   document.body.append(setup); setup.querySelector('[data-close-setup]').onclick = () => setup.close();
   setup.querySelector('#assistant-enroll').onclick = () => { setup.close(); $('#connect-agent-button').click(); };
   $('#assistant-setup').onclick = () => {
     const state = getState();
-    setup.querySelector('select').innerHTML = '<option value="">Choose an agent</option>' + Object.values(state.members).filter(m => m.kind === 'agent' && m.active !== false && m.permissions.includes('accept_work')).map(m => `<option value="${esc(m.id)}">${esc(m.displayName)}</option>`).join('');
+    setup.querySelector('select').innerHTML = uiText("human.copy.008") + Object.values(state.members).filter(m => m.kind === 'agent' && m.active !== false && m.permissions.includes('accept_work')).map(m => ["<option value=\"", esc(m.id), "\">", esc(m.displayName), "</option>"].join('')).join('');
     if (configureOperation) setup.querySelector('select').value = configureOperation.coordinatorMemberId;
     setup.querySelector('select').disabled = Boolean(configureOperation);
     $('#assistant-setup-error').textContent = ''; setup.showModal();
@@ -63,7 +64,7 @@ export function installHumanExperience({ getState, getSession, client, notice, o
     if (!human() || !projection) return;
     const assistant = projection.assistant;
     section.querySelector('strong').textContent = assistant.name || 'Room';
-    $('#room-assistant-status').textContent = assistant.availability === 'connected' ? 'Connected' : assistant.availability === 'awaiting_host' ? 'Waiting for connection' : 'Not connected';
+    $('#room-assistant-status').textContent = assistant.availability === 'connected' ? 'Connected' : assistant.availability === 'awaiting_host' ? uiText("human.copy.009") : 'Not connected';
     $('#assistant-setup').hidden = getState().room.ownerId !== getSession().member.id;
     const runs = Object.values(projection.runs ?? {});
     $('#assistant-activity').hidden = !runs.length;
@@ -72,10 +73,10 @@ export function installHumanExperience({ getState, getSession, client, notice, o
       const controls = getState().room.ownerId === getSession().member.id || run.initiatorId === getSession().member.id;
       const inputs = run.inputs.slice(1).map(input => {
         const message = getState().messages.find(m => m.id === input.sourceMessageId);
-        return `<p>${esc(getState().members[input.memberId]?.displayName || 'Participant')}: ${esc(message?.body?.slice(0,100) || 'Context')} · ${input.status === 'applied' ? 'Applied' : 'Pending'}</p>`;
+        return ["<p>", esc(getState().members[input.memberId]?.displayName || 'Participant'), ": ", esc(message?.body?.slice(0,100) || 'Context'), " · ", input.status === 'applied' ? 'Applied' : 'Pending', "</p>"].join('');
       }).join('');
       const editable = !['done','failed','cancelled'].includes(run.status);
-      return `<article class="assistant-run" data-assistant-run="${esc(run.id)}"><strong>${esc(source?.body?.slice(0,160) || 'Shared request')}</strong><p>${esc(({ queued: 'Waiting for assistant', working: 'Working', unknown: 'Connection interrupted', paused: 'Paused', resume_requested: 'Resuming · waiting for confirmation', pause_requested: 'Pausing · waiting for confirmation', cancel_requested: 'Stopping · waiting for confirmation', done: 'Result ready', failed: "Couldn't finish", needs_input: 'Needs input', cancelled: 'Cancelled' })[run.status] || run.status)}</p><button type="button" class="text-button" data-assistant-message="${esc(run.sourceMessageId)}">Original prompt</button>${run.resultMessageId ? `<button type="button" class="text-button" data-assistant-message="${esc(run.resultMessageId)}">Open result</button>` : ''}${(run.activity ?? []).slice(-5).map(a => `<p>${esc(a.summary)}</p>`).join('')}${inputs}${editable ? `<button type="button" class="text-button" data-contribute-run="${esc(run.id)}" data-revision="${run.revision}">Add context</button>` : ''}${editable && run.status !== 'needs_input' ? `<button type="button" class="text-button" data-contribute-run="${esc(run.id)}" data-conflict="true" data-revision="${run.revision}">Change direction</button>` : ''}${controls && run.status === 'needs_input' ? `<button type="button" class="text-button" data-contribute-run="${esc(run.id)}" data-resolve="true" data-revision="${run.revision}">Resolve direction</button>` : ''}${controls && ['queued', 'working', 'unknown'].includes(run.status) ? `<button type="button" class="text-button" data-pause-run="${esc(run.id)}" data-revision="${run.revision}">Pause</button>` : controls && run.status === 'paused' ? `<button type="button" class="text-button" data-pause-run="${esc(run.id)}" data-resume="true" data-revision="${run.revision}">Resume</button>` : ''}</article>`;
+      return ["<article class=\"assistant-run\" data-assistant-run=\"", esc(run.id), "\"><strong>", esc(source?.body?.slice(0,160) || 'Shared request'), "</strong><p>", esc(({ queued: uiText("human.copy.010"), working: 'Working', unknown: 'Connection interrupted', paused: 'Paused', resume_requested: uiText("human.copy.011"), pause_requested: uiText("human.copy.012"), cancel_requested: uiText("human.copy.013"), done: 'Result ready', failed: "Couldn't finish", needs_input: 'Needs input', cancelled: 'Cancelled' })[run.status] || run.status), "</p><button type=\"button\" class=\"text-button\" data-assistant-message=\"", esc(run.sourceMessageId), "\">Original prompt</button>", run.resultMessageId ? `<button type="button" class="text-button" data-assistant-message="${esc(run.resultMessageId)}">Open result</button>` : '', "", (run.activity ?? []).slice(-5).map(a => `<p>${esc(a.summary)}</p>`).join(''), "", inputs, "", editable ? ["<button type=\"button\" class=\"text-button\" data-contribute-run=\"", esc(run.id), "\" data-revision=\"", run.revision, "\">Add context</button>"].join('') : '', "", editable && run.status !== 'needs_input' ? ["<button type=\"button\" class=\"text-button\" data-contribute-run=\"", esc(run.id), "\" data-conflict=\"true\" data-revision=\"", run.revision, "\">Change direction</button>"].join('') : '', "", controls && run.status === 'needs_input' ? ["<button type=\"button\" class=\"text-button\" data-contribute-run=\"", esc(run.id), "\" data-resolve=\"true\" data-revision=\"", run.revision, "\">Resolve direction</button>"].join('') : '', "", controls && ['queued', 'working', 'unknown'].includes(run.status) ? ["<button type=\"button\" class=\"text-button\" data-pause-run=\"", esc(run.id), "\" data-revision=\"", run.revision, "\">Pause</button>"].join('') : controls && run.status === 'paused' ? ["<button type=\"button\" class=\"text-button\" data-pause-run=\"", esc(run.id), "\" data-resume=\"true\" data-revision=\"", run.revision, "\">Resume</button>"].join('') : '', "</article>"].join('');
     }).join('');
     if ($('#assistant-runs')._html !== runsHtml) {
       const panel = $('#assistant-runs'), focused = panel.contains(document.activeElement) ? document.activeElement : null;
@@ -89,7 +90,7 @@ export function installHumanExperience({ getState, getSession, client, notice, o
     if (!human() || !getState() || reading || document.hidden || Date.now() - lastRead < 1500) return;
     const stamp = key(); reading = true; lastRead = Date.now();
     try { const next = await client.request(path()); if (stamp !== key()) return; const changed = projection?.assistant.coordinatorMemberId !== next.assistant.coordinatorMemberId || projection?.assistant.name !== next.assistant.name; projection = next; paint(); if (changed) refreshTranscript(); }
-    catch (failure) { if (stamp === key()) { error = failure.status === 404 ? 'Assistant service unavailable' : failure.message; $('#assistant-error').textContent = error; } }
+    catch (failure) { if (stamp === key()) { error = failure.status === 404 ? uiText("human.copy.014") : failure.message; $('#assistant-error').textContent = error; } }
     finally { reading = false; }
   }
   async function invoke() {
@@ -98,7 +99,7 @@ export function installHumanExperience({ getState, getSession, client, notice, o
     try { await client.request(path(), { method: 'POST', data: owned }); if (stamp !== key() || operation !== owned) return; operation = null; persistOperation(); contribution = null; selected = false; ask.textContent = 'Ask Room'; ask.setAttribute('aria-pressed', 'false'); error = ''; lastRead = 0; await refresh(); }
     catch (failure) { if (stamp === key()) {
       const rejected = failure.status >= 400 && failure.status < 500;
-      error = `${owned.sourceMessageId && ['invoke','contribute','resolve'].includes(owned.action) ? 'Message sent. ' : ''}Assistant request ${rejected ? 'was rejected' : 'not confirmed'}: ${failure.message}`;
+      error = ["", owned.sourceMessageId && ['invoke','contribute','resolve'].includes(owned.action) ? 'Message sent. ' : '', "Assistant request ", rejected ? 'was rejected' : 'not confirmed', ": ", failure.message, ""].join('');
       if (rejected) { rejectedOperation = owned; operation = null; persistOperation(); }
       paint();
     } }
@@ -110,9 +111,9 @@ export function installHumanExperience({ getState, getSession, client, notice, o
     try {
       const latest = await client.request(path()); if (stamp !== key() || original !== rejectedOperation) return;
       const run = latest.runs.find(r => r.id === original.runId);
-      if (original.action !== 'invoke' && (!run || ['done','failed','cancelled'].includes(run.status))) { error = 'That request is closed. Your message is still in the conversation.'; paint(); return; }
+      if (original.action !== 'invoke' && (!run || ['done','failed','cancelled'].includes(run.status))) { error = uiText("human.copy.015"); paint(); return; }
       operation = { ...original, requestId: crypto.randomUUID(), ...(original.action !== 'invoke' ? { expectedRevision: run.revision } : {}) }; rejectedOperation = null; projection = latest; persistOperation();
-      error = 'Review the current activity, then choose Retry request to confirm applying your already-posted message.'; paint();
+      error = uiText("human.copy.016"); paint();
     } catch (failure) { if (stamp === key()) { error = failure.message; paint(); } }
   };
   $('#assistant-runs').onclick = async event => {
@@ -130,7 +131,7 @@ export function installHumanExperience({ getState, getSession, client, notice, o
 
   };
   const resultDialog = document.createElement('dialog'); resultDialog.id = 'human-share-result'; resultDialog.setAttribute('aria-labelledby', 'human-share-title');
-  resultDialog.innerHTML = '<form><div class="dialog-head"><h2 id="human-share-title">Share result</h2></div><p>Write the result here, then review it before saving. It will be shared with this room.</p><label>Result<textarea name="body" rows="5" maxlength="4000" required></textarea></label><p id="human-share-error" role="alert"></p><button type="button" id="human-share-refresh" class="button ghost" hidden>Review updated task</button><div class="form-actions"><button type="button" data-close-share class="button ghost">Cancel</button><button type="submit" class="button primary">Review result</button></div><details><summary>Use an existing draft</summary><div id="human-existing-drafts"></div></details></form>';
+  resultDialog.innerHTML = uiText("human.copy.017");
   document.body.append(resultDialog); let resultEntry = null;
   resultDialog.querySelector('[data-close-share]').onclick = () => { if (resultEntry?.rejected) resultEntry = null; resultDialog.close(); };
   $('#human-share-refresh').onclick = async () => {
@@ -139,11 +140,11 @@ export function installHumanExperience({ getState, getSession, client, notice, o
     try {
       await client.refresh(); if (stamp !== key() || resultEntry !== entry) return;
       const item = getState().workItems[entry.workId];
-      if (!item || item.supersededBy) { $('#human-share-error').textContent = 'This task is no longer available. Your draft is kept here; cancel to discard it.'; return; }
+      if (!item || item.supersededBy) { $('#human-share-error').textContent = uiText("human.copy.018"); return; }
       entry.revision = item.revision; entry.command = null; entry.rejected = false;
       resultDialog.querySelector('textarea').disabled = false;
       const submit = resultDialog.querySelector('[type=submit]'); submit.disabled = false; submit.textContent = 'Review result'; review.hidden = true;
-      $('#human-share-error').textContent = `Updated task: ${item.title}. Review your draft, then choose Review result to post it against the current task.`;
+      $('#human-share-error').textContent = uiText("human.copy.019", { fragmentA: item.title });
       resultDialog.querySelector('textarea').focus();
     } catch (failure) { if (stamp === key() && resultEntry === entry) $('#human-share-error').textContent = failure.message; }
     finally { review.disabled = false; }
@@ -161,11 +162,11 @@ export function installHumanExperience({ getState, getSession, client, notice, o
       if (stamp !== key()) return;
       entry.rejected = failure.status >= 400 && failure.status < 500;
       $('#human-share-error').textContent = entry.rejected
-        ? `Draft was not saved: ${failure.message}. Review the updated task before posting again, or cancel to discard this draft.`
-        : `Draft not confirmed: ${failure.message}. Retry preserves the original draft.`;
+        ? uiText("human.copy.020", { fragmentA: failure.message })
+        : uiText("human.copy.021", { fragmentA: failure.message });
       resultDialog.querySelector('textarea').disabled = true;
       $('#human-share-refresh').hidden = !entry.rejected;
-      button.textContent = entry.rejected ? 'Review result' : 'Retry original draft';
+      button.textContent = entry.rejected ? 'Review result' : uiText("human.copy.022");
     } finally { button.disabled = Boolean(resultEntry === entry && entry.rejected); }
   };
   $('#human-existing-drafts').onclick = event => {
@@ -191,7 +192,7 @@ export function installHumanExperience({ getState, getSession, client, notice, o
         try {
           const pending = JSON.parse(sessionStorage.getItem(pendingKey()) || 'null');
           if (pending && ['invoke','contribute','resolve','pause','resume'].includes(pending.action) && typeof pending.requestId === 'string' && typeof pending.runId === 'string'
-            && (['pause','resume'].includes(pending.action) || getState().messages.some(m => m.id === pending.sourceMessageId && m.authorId === getSession().member.id && !m.toMemberId))) { operation = pending; error = 'An earlier assistant request needs confirmation. Retry preserves the original request.'; }
+            && (['pause','resume'].includes(pending.action) || getState().messages.some(m => m.id === pending.sourceMessageId && m.authorId === getSession().member.id && !m.toMemberId))) { operation = pending; error = uiText("human.copy.023"); }
         } catch { /* corrupt/unavailable saved state is not executed */ }
         let enabled = false; try { enabled = sessionStorage.getItem(`room-human-advanced:${boundary}`) === 'true'; } catch { /* defaults */ }
         $('#human-advanced').checked = enabled; document.body.classList.toggle('human-advanced', enabled);
@@ -208,7 +209,7 @@ export function installHumanExperience({ getState, getSession, client, notice, o
         resultDialog.querySelector('[type=submit]').textContent = 'Review result'; resultDialog.querySelector('[type=submit]').disabled = false; $('#human-share-refresh').hidden = true; $('#human-share-error').textContent = '';
       }
       const drafts = getState().messages.filter(m => m.workItemId === item.id && !m.deletedAt && !m.toMemberId);
-      $('#human-existing-drafts').innerHTML = drafts.map(m => `<button type="button" class="text-button" data-result-draft="${esc(m.id)}">${esc(m.body.slice(0,100))}</button>`).join('') || '<p>No drafts yet.</p>';
+      $('#human-existing-drafts').innerHTML = drafts.map(m => ["<button type=\"button\" class=\"text-button\" data-result-draft=\"", esc(m.id), "\">", esc(m.body.slice(0,100)), "</button>"].join('')).join('') || uiText("human.copy.024");
       resultDialog.showModal(); return true;
     },
     async posted(messageId, wanted) {
