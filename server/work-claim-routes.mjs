@@ -35,7 +35,7 @@
 import {
   createWork, claimWork, updateWork, appendWorkPullRequest, attestWork, recordReview, reassignWork, releaseExpired, canCloseWork,
   renewWork, roomWorkClaimConfig, closeWhenLive, isReceiptTag, ClaimError, REVIEW_POLICIES, CLAIM_KINDS,
-  claimUpdatedAt, ACTIVE_CLAIM_STATES, MAX_LEASE_HOURS, STATES, summarizeClaimHistory,
+  claimUpdatedAt, ACTIVE_CLAIM_STATES, MAX_LEASE_HOURS, STATES, summarizeClaimHistory, isHardWork,
 } from "./work-claims.mjs";
 import { findDuplicates, DuplicateError } from "./work-duplicates.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
@@ -850,7 +850,10 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
           `assignee "${typeof assignee === "string" ? assignee : "?"}" is not an active member of this room`);
       }
     }
-    let item = runPure(reject, () => createWork({ id, title: data.title, reviewPolicy: data.reviewPolicy, note: data.note, tags: data.tags, files: data.files, dependsOn: data.dependsOn, pullRequest: data.pullRequest, pullRequests: data.pullRequests, repo: data.repo, branch: data.branch, kind: data.kind, revision: data.revision }, { now: nowMs, agentId: caller }));
+    // Pair rule: hard work defaults to a distinct reviewer, so it cannot close
+    // without a non-owner APPROVE. An explicit reviewPolicy still wins.
+    const reviewPolicy = data.reviewPolicy ?? (isHardWork({ tags: data.tags }) ? "distinct_member" : undefined);
+    let item = runPure(reject, () => createWork({ id, title: data.title, reviewPolicy, note: data.note, tags: data.tags, files: data.files, dependsOn: data.dependsOn, pullRequest: data.pullRequest, pullRequests: data.pullRequests, repo: data.repo, branch: data.branch, kind: data.kind, revision: data.revision }, { now: nowMs, agentId: caller }));
     if (assignee) {
       const held = registry.list(roomId).filter(entry => entry.owner === assignee && ACTIVE_CLAIM_STATES.includes(entry.state)).length;
       if (held >= config.maxMemberOpenClaims) {

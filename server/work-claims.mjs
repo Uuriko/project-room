@@ -776,6 +776,13 @@ export function canCloseWork(work, reviewerId, { policy, verifyMembers, reviewMe
   const verifiers = verifyMembers instanceof Set ? verifyMembers : new Set(verifyMembers ?? []);
   return verifiers.has(reviewerId);
 }
+// Hard work (Hard Problems board, muse-room 2026-10-06): items tagged hard or
+// hard-problem are done in pairs. needs-me lists them first, and the create
+// route defaults them to a distinct reviewer.
+export const HARD_WORK_TAGS = Object.freeze(["hard", "hard-problem"]);
+export function isHardWork(item) {
+  return (item?.tags ?? []).some(tag => HARD_WORK_TAGS.includes(String(tag).toLowerCase()));
+}
 // Query helpers over a list.
 export function workOwnedBy(items, agentId) {
   check(Array.isArray(items), "items must be a list");
