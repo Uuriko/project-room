@@ -101,6 +101,7 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
         <button class="button primary" type="submit" ${busy ? "disabled" : ""}>${signup ? "Create account" : "Sign in"}</button>
         <button type="button" class="text-button" data-password-mode="${signup ? "login" : "signup"}">${signup ? "Sign in" : "Create account"}</button>
         <button type="button" class="text-button" data-forgot-password>Forgot password?</button>
+        <button type="button" class="text-button" data-email-method="magic">Email me a sign-in link</button>
       </form>`;
     }
     if (magicPhase === "sent") return `<form data-signin-form="magic-code" autocomplete="on">

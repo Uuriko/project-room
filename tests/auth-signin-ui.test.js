@@ -73,6 +73,15 @@ test("primary entry exposes password sign-in and contextual recovery", async () 
   assert.match(container.innerHTML, /data-reset-password/);
   assert.match(container.innerHTML, /data-email-method="magic"/);
 });
+test("default sign-in view offers a first-class magic-link CTA", async () => {
+  const { container } = mount({ "/api/auth/magic/request": { status: "sent" } });
+  assert.match(container.innerHTML, /data-signin-form="password"/);
+  // Visible without going through "Forgot password?" first.
+  assert.match(container.innerHTML, /data-email-method="magic"/);
+  assert.match(container.innerHTML, /Email me a sign-in link/);
+  await container.listeners.click[0](clickOnDataset("email-method", { emailMethod: "magic" }));
+  assert.match(container.innerHTML, /data-signin-form="magic-request"/);
+});
 test("unconfigured delivery stays visible after pending state clears", async () => {
   const { container, ui } = mount({ "/api/auth/magic/request": { status: "unavailable", message: "Delivery unavailable" } });
   await container.listeners.submit[0](submitForm("magic-request", { email: "m@example.invalid" }));
