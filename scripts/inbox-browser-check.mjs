@@ -512,7 +512,9 @@ test("account-only confirmation preserves a newer login and retires a held priva
     headers: { Origin: f.origin, "X-CSRF-Token": browserSlot.csrf, "X-Session-Binding": browserSlot.sessionBinding },
     data: { accountAccessKey: guestAccessKey, expectedSessionRevision: browserSlot.sessionRevision }
   });
-  assert.equal(signedIn.status(), 201); assert.equal((await signedIn.json()).account.id, guest.id);
+  const signedInBody = await signedIn.text();
+  assert.equal(signedIn.status(), 201, `guest login failed: ${signedInBody}`);
+  assert.equal(JSON.parse(signedInBody).account.id, guest.id);
   // Establish the guest's room session (as signInFixture does) so the
   // reloaded tab can enter the room; the account login alone is not enough.
   const roomSession = await other.context().request.post(f.origin + "/api/session", {
