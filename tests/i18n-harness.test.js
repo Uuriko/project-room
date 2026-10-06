@@ -28,6 +28,7 @@ import {
   summarize,
   scannableRels,
   checkScopeConsistency,
+  findEvasionDrops,
   RULES,
 } from "../scripts/i18n-harness.mjs";
 
@@ -162,6 +163,31 @@ test("--check ratchets in steady state: fails when counts grow past an untouched
   }
   const r2 = spawnSync(process.execPath, [harness, "--check"], { encoding: "utf8", env });
   assert.equal(r2.status, 0, `--check should exit 0 within baseline; stderr: ${r2.stderr}`);
+});
+
+test("findEvasionDrops flags manifest shrinkage while files still exist", () => {
+  const exists = (f) => f !== "gone.js";
+  assert.deepEqual(findEvasionDrops(["a.js", "b.js", "gone.js"], ["a.js"], exists), ["b.js"]);
+  assert.deepEqual(findEvasionDrops(["a.js"], ["a.js", "b.js"], exists), []);
+});
+
+test("--check defeats paired evasion: narrowed manifest + regenerated baseline still fails", () => {
+  // Simulates: attacker narrows UI_GLOBS and regenerates manifest+baseline
+  // with --baseline. I18N_BASE_REF=HEAD pins the base manifest independently.
+  const scopePath = join(root, "strings", "i18n-scope.json");
+  const hadScope = readFileSync(scopePath, "utf8");
+  const hadBaseline = readFileSync(baselinePath, "utf8");
+  const env = { ...process.env, I18N_BASE_REF: "HEAD" };
+  try {
+    const manifest = JSON.parse(hadScope);
+    writeFileSync(scopePath, JSON.stringify(manifest.slice(0, 5), null, 2));
+    const r = spawnSync(process.execPath, [harness, "--check"], { encoding: "utf8", env });
+    assert.equal(r.status, 1, `--check should exit 1 on paired evasion; stderr: ${r.stderr}`);
+    assert.match(r.stderr, /dropped \d+ file\(s\) that still exist/);
+  } finally {
+    writeFileSync(scopePath, hadScope);
+    writeFileSync(baselinePath, hadBaseline);
+  }
 });
 
 test("--check without a baseline exits 2 with guidance", () => {

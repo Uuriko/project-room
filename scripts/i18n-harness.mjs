@@ -73,6 +73,27 @@ export function checkScopeConsistency(manifest, scanned) {
   };
 }
 
+// Paired-regeneration evasion: narrowing the scan globs AND regenerating the
+// manifest/baseline with --baseline would otherwise pass --check on a shrunken
+// scope. The independent pin: files removed from the manifest versus the base
+// ref must genuinely no longer exist in the tree. Shrinking the manifest while
+// the files are still there fails.
+export function findEvasionDrops(baseManifest, manifest, exists) {
+  const manifestSet = new Set(manifest);
+  return baseManifest.filter((f) => !manifestSet.has(f) && exists(f));
+}
+
+function manifestAtRef(ref) {
+  const out = gitOk(["show", `${ref}:strings/i18n-scope.json`]);
+  if (out === null) return null;
+  try {
+    const parsed = JSON.parse(out);
+    return Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 // Files the harness READS but never modifies; everything else lives in
 // scripts/, tests/, strings/, docs/ (new files this lane owns).
 const UI_GLOBS = ["src", "index.html", "join.html", "about.html", "offers.html", "operator.html", "offline.html", "404.html"];
@@ -338,6 +359,18 @@ if (mode === "--extract") {
   if (fileModifiedVsBase("strings/i18n-scope.json") && (dropped.length > 0 || extra.length > 0)) {
     console.error(`i18n-harness FAIL: scope manifest modified but does not match the current scan (${extra.length} unscanned additions, ${dropped.length} drops). Regenerate with --baseline; hand-edited manifests fail.`);
     failed = true;
+  }
+  // Independent scope pin: against the base ref's manifest, files dropped
+  // from the manifest must be genuinely gone from the tree. This defeats the
+  // paired evasion (narrow globs + regenerate manifest/baseline with --baseline).
+  const baseManifest = manifestAtRef(baseRef());
+  if (baseManifest) {
+    const exists = (f) => existsSync(join(root, f));
+    const evasion = findEvasionDrops(baseManifest, manifest, exists);
+    if (evasion.length > 0) {
+      console.error(`i18n-harness FAIL: scope manifest dropped ${evasion.length} file(s) that still exist in the tree (showing 5): ${evasion.slice(0, 5).join(", ")}. The manifest may only shrink by files deleted from the repo.`);
+      failed = true;
+    }
   }
 
   // 2. Baseline integrity: a new or modified baseline must exactly match a
