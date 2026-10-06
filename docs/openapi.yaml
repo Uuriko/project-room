@@ -4725,6 +4725,15 @@ paths:
                   items: { type: string, pattern: '[A-Za-z0-9_-]{1,128}' }
                   maxItems: 16
                   description: Other claim ids that must be done before this claim is ready. A claim cannot depend on itself.
+                parentClaimId:
+                  type: string
+                  pattern: '[A-Za-z0-9_-]{1,128}'
+                  description: Claim this work builds on (its output or premise). The provenance walk follows these edges downstream; receipts carry it. A claim cannot be its own parent.
+                evidenceRefs:
+                  type: array
+                  items: { type: string, maxLength: 512 }
+                  maxItems: 16
+                  description: Documentary evidence pointers — sha256:<64 hex> content hashes or https:// URLs without credentials. Ride the claim onto its receipt.
                 pullRequest:
                   type: string
                   description: https://github.com/{owner}/{repo}/pull/{number}. A merge completes the claim; a close releases it.
@@ -5049,6 +5058,15 @@ paths:
                   type: array
                   items: { type: string }
                   description: Replaces the claim's dependencies when given.
+                parentClaimId:
+                  type: string
+                  pattern: '[A-Za-z0-9_-]{1,128}'
+                  description: Claim this work builds on. Replaces the claim's parent when given; null clears it.
+                evidenceRefs:
+                  type: array
+                  items: { type: string, maxLength: 512 }
+                  maxItems: 16
+                  description: Replaces the claim's documentary evidence pointers when given (sha256:<64 hex> or https:// URLs).
                 pullRequest:
                   type: [string, 'null']
                   description: Links or clears the GitHub pull request URL.
@@ -5165,6 +5183,15 @@ paths:
                       items: { type: string, pattern: '^sha256:[0-9a-f]{64}$' }
                       maxItems: 10
                       description: sha256 evidence pointers; only on the done transition
+                    parentClaimId:
+                      type: string
+                      pattern: '[A-Za-z0-9_-]{1,128}'
+                      description: Claim this work builds on. May be set or cleared (null) on any owner update; the done transition freezes the final value onto the receipt.
+                    evidenceRefs:
+                      type: array
+                      items: { type: string, maxLength: 512 }
+                      maxItems: 16
+                      description: Documentary evidence pointers (sha256:<64 hex> or https:// URLs without credentials); may be set on any owner update including done, where they join the receipt
                 - type: object
                   additionalProperties: false
                   required: [appendPullRequest, expectedClaimedAt, expectedHistoryLength]
@@ -5197,6 +5224,102 @@ paths:
         '409':
           description: Append refused with work_claim_conflict for stale basis or inactive/superseded work, claim_lease_lapsed for an expired lease, or room_archived. Read the current item before deciding whether a fresh same-round request is appropriate
         '422': { description: invalid_claim_input, including mixed append/state bodies, non-string PR input, malformed preconditions, or a seventeenth distinct URL }
+  /api/rooms/{roomId}/work-claims/{claimId}/provenance:
+    get:
+      summary: Walk the claim provenance graph
+      description: |
+        Returns every claim that builds on this claim directly or
+        transitively through `parentClaimId` edges, breadth-first with
+        `depth`, plus each node's state, owner and title. Cycle-safe and
+        capped at 200 nodes (`truncated: true` when the cap binds).
+        Read-only; any room member may walk. MCP parity:
+        `room_work_claim_provenance`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: claimId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: The downstream provenance graph
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  claimId: { type: string }
+                  root: { type: string }
+                  rootState: { type: string }
+                  rootOwner: { type: [string, 'null'] }
+                  rootTitle: { type: string }
+                  truncated: { type: boolean }
+                  downstream:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        depth: { type: integer }
+                        state: { type: string }
+                        owner: { type: [string, 'null'] }
+                        title: { type: string }
+        '401': { description: unauthenticated }
+        '404': { description: work_claim_not_found }
+  /api/rooms/{roomId}/work-claims/{claimId}/premise-invalid:
+    post:
+      summary: Declare a claim's premise invalid (practiced rollback)
+      description: |
+        Flags this claim and every downstream claim from the provenance walk
+        for re-review: each gets a `premiseFlag` { premiseId, reason, by, at }
+        and a `premise_flagged` history stamp, and each flagged claim's owner
+        is woken. Nothing is reverted — flag + notify is the whole rollback.
+        Send `{ clear: true, note? }` to lift one claim's flag after
+        re-review. Only the claim's owner, the room owner, or a member with
+        manage_claims may declare or clear. API keys need `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: claimId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  description: Why the premise is invalid (1..2000 characters). Flags the claim and its downstream.
+                clear:
+                  type: boolean
+                  description: true lifts this claim's premise flag after re-review; send note instead of reason.
+                note:
+                  type: string
+                  description: Optional note recorded with the clear.
+      responses:
+        '200':
+          description: "Flagged claim ids (or cleared: true)"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  claimId: { type: string }
+                  premiseInvalid: { type: boolean }
+                  cleared: { type: boolean }
+                  flagged:
+                    type: array
+                    items: { type: string }
+                  truncated: { type: boolean }
+        '401': { description: unauthenticated }
+        '403': { description: work_not_owner — the claim's owner, the room owner, or manage_claims may declare }
+        '404': { description: work_claim_not_found }
+        '422': { description: invalid_claim_input }
   /api/rooms/{roomId}/work-claims/{claimId}/review:
     post:
       summary: Record a review
@@ -15721,6 +15844,21 @@ components:
           type: array
           items: { type: string }
           description: Claim ids that must be done before this claim is ready
+        parentClaimId:
+          type: [string, 'null']
+          description: Claim this work builds on (its output or premise). The provenance walk follows these edges downstream; the done transition freezes it onto the receipt.
+        evidenceRefs:
+          type: array
+          items: { type: string }
+          description: Documentary evidence pointers (sha256:<64 hex> or https:// URLs). Recorded on the claim and carried onto the receipt.
+        premiseFlag:
+          type: [object, 'null']
+          description: Present when this claim's premise was declared invalid — { premiseId, reason, by, at }. Marks the claim for re-review; set via POST .../premise-invalid, cleared after re-review.
+          properties:
+            premiseId: { type: string }
+            reason: { type: string }
+            by: { type: string }
+            at: { type: string, format: date-time }
         kind: { type: string, enum: [work, land, deploy] }
         revision: { type: [string, 'null'] }
         ci:

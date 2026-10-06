@@ -783,7 +783,7 @@ export class RoomAgentClient {
     const done = next === null;
     return { ...page, claims, hasMore: !done, nextCursor: done ? null : next };
   }
-  workClaimCreate({ id, title, reviewPolicy, note, tags, files, dependsOn, pullRequest, assignee } = {}, { signal } = {}) {
+  workClaimCreate({ id, title, reviewPolicy, note, tags, files, dependsOn, parentClaimId, evidenceRefs, pullRequest, assignee } = {}, { signal } = {}) {
     if (typeof id !== "string" || !id) throw new Error("Choose a work claim id");
     return this.#request("/work-claims", { id,
       ...(title === undefined ? {} : { title }),
@@ -791,24 +791,42 @@ export class RoomAgentClient {
       ...(tags === undefined ? {} : { tags }),
       ...(files === undefined ? {} : { files }),
       ...(dependsOn === undefined ? {} : { dependsOn }),
+      ...(parentClaimId === undefined ? {} : { parentClaimId }),
+      ...(evidenceRefs === undefined ? {} : { evidenceRefs }),
       ...(pullRequest === undefined ? {} : { pullRequest }),
       ...(assignee === undefined ? {} : { assignee }),
       ...(note === undefined ? {} : { note }) }, signal);
   }
   workClaimGet(id, { signal } = {}) { return this.#request(`/work-claims/${encodeURIComponent(id)}`, undefined, signal); }
-  claimWorkItem(id, { note, leaseHours, files, advisory, dependsOn, pullRequest, signal } = {}) {
+  // Provenance walk (orch-provenance-rollback): the downstream graph of
+  // claims building on this claim through parentClaimId edges.
+  workClaimProvenance(id, { signal } = {}) {
+    return this.#request(`/work-claims/${encodeURIComponent(id)}/provenance`, undefined, signal);
+  }
+  // Practiced rollback: declare this claim's premise invalid (flag +
+  // notify), or clear one claim's flag after re-review.
+  workClaimPremiseInvalid(id, { reason, clear, note, signal } = {}) {
+    return this.#request(`/work-claims/${encodeURIComponent(id)}/premise-invalid`,
+      { ...(reason === undefined ? {} : { reason }), ...(clear === undefined ? {} : { clear }),
+        ...(note === undefined ? {} : { note }) }, signal);
+  }
+  claimWorkItem(id, { note, leaseHours, files, advisory, dependsOn, parentClaimId, evidenceRefs, pullRequest, signal } = {}) {
     return this.#request(`/work-claims/${encodeURIComponent(id)}/claim`,
       { ...(note === undefined ? {} : { note }), ...(leaseHours === undefined ? {} : { leaseHours }),
         ...(files === undefined ? {} : { files }), ...(advisory === undefined ? {} : { advisory }),
         ...(dependsOn === undefined ? {} : { dependsOn }),
+        ...(parentClaimId === undefined ? {} : { parentClaimId }),
+        ...(evidenceRefs === undefined ? {} : { evidenceRefs }),
         ...(pullRequest === undefined ? {} : { pullRequest }) }, signal);
   }
-  updateWorkItem(id, { state, note, deliveryMode, reviewedBy, tags, blobs, signal } = {}) {
+  updateWorkItem(id, { state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, signal } = {}) {
     return this.#request(`/work-claims/${encodeURIComponent(id)}/update`,
       { ...(state === undefined ? {} : { state }), ...(note === undefined ? {} : { note }),
         ...(deliveryMode === undefined ? {} : { deliveryMode }),
         ...(reviewedBy === undefined ? {} : { reviewedBy }),
-        ...(tags === undefined ? {} : { tags }), ...(blobs === undefined ? {} : { blobs }) }, signal);
+        ...(tags === undefined ? {} : { tags }), ...(blobs === undefined ? {} : { blobs }),
+        ...(parentClaimId === undefined ? {} : { parentClaimId }),
+        ...(evidenceRefs === undefined ? {} : { evidenceRefs }) }, signal);
   }
   linkWorkItemPullRequest(id, { pullRequest, expectedClaimedAt, expectedHistoryLength, signal } = {}) {
     return this.#request(`/work-claims/${encodeURIComponent(id)}/update`,
@@ -841,16 +859,16 @@ export class RoomAgentClient {
   // Convenience: claim, creating the item first when it does not exist yet.
   // title, reviewPolicy and tags apply only to creation; files apply to every
   // claim. Omitted files retain the declaration, while [] explicitly clears it.
-  async workClaim(id, { title, reviewPolicy, note, tags, files, leaseHours, advisory, dependsOn, pullRequest, signal } = {}) {
-    try { return await this.claimWorkItem(id, { note, leaseHours, files, advisory, dependsOn, pullRequest, signal }); }
+  async workClaim(id, { title, reviewPolicy, note, tags, files, leaseHours, advisory, dependsOn, parentClaimId, evidenceRefs, pullRequest, signal } = {}) {
+    try { return await this.claimWorkItem(id, { note, leaseHours, files, advisory, dependsOn, parentClaimId, evidenceRefs, pullRequest, signal }); }
     catch (error) {
       if (!(error instanceof RoomClientError) || error.status !== 404) throw error;
-      await this.workClaimCreate({ id, title, reviewPolicy, note, tags, files, dependsOn, pullRequest }, { signal });
+      await this.workClaimCreate({ id, title, reviewPolicy, note, tags, files, dependsOn, parentClaimId, evidenceRefs, pullRequest }, { signal });
       return this.claimWorkItem(id, { note, leaseHours, files, advisory, pullRequest, signal });
     }
   }
-  async workComplete(id, { deliveryMode, note, reviewedBy, tags, blobs, signal } = {}) {
-    return this.updateWorkItem(id, { state: "done", note, deliveryMode, reviewedBy, tags, blobs, signal });
+  async workComplete(id, { deliveryMode, note, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, signal } = {}) {
+    return this.updateWorkItem(id, { state: "done", note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, signal });
   }
   async workRelease(id, { note, reason, signal } = {}) { return this.releaseWorkItem(id, { note, reason, signal }); }
   // Selected task only; the normal authenticated snapshot never leaves this client.

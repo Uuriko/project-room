@@ -130,6 +130,50 @@ const dependsOnOf = (value, selfId) => {
   });
   return Object.freeze([...new Set(ids)].sort());
 };
+// Provenance (orch-provenance-rollback): parentClaimId names the claim whose
+// output or premise this claim builds on — the edge the provenance walk
+// follows downstream. evidenceRefs are documentary pointers (sha256: content
+// hashes or https:// URLs without credentials) that ride the claim onto its
+// receipt. The walk traverses parentClaimId edges only; evidenceRefs are for
+// humans, not graph edges.
+const parentClaimIdOf = (value, selfId) => {
+  if (value === undefined || value === null || value === "") return null;
+  check(typeof value === "string" && DEPENDS_PATTERN.test(value), "parentClaimId must be a claim id");
+  check(value !== selfId, "a claim cannot be its own parent");
+  return value;
+};
+const MAX_EVIDENCE_REFS = 16;
+const evidenceRefsOf = value => {
+  if (value === undefined || value === null) return Object.freeze([]);
+  check(Array.isArray(value), "evidenceRefs must be an array");
+  check(value.length <= MAX_EVIDENCE_REFS, `evidenceRefs must hold at most ${MAX_EVIDENCE_REFS} pointers`);
+  return Object.freeze(value.map(ref => {
+    check(typeof ref === "string" && ref.length > 0 && ref.length <= 512,
+      "each evidenceRef must be a 1..512 character string");
+    if (BLOB_PATTERN.test(ref)) return ref;
+    let url = null;
+    try { url = new URL(ref); } catch { url = null; }
+    check(url && url.protocol === "https:" && !url.username && !url.password,
+      "each evidenceRef must be sha256:<64 hex> or an https:// URL without credentials");
+    return ref;
+  }));
+};
+// A premise-invalid flag: the named premise claim was declared a bad premise
+// and this claim builds on it (directly or transitively). The flag marks the
+// claim for re-review; it never changes the work's state or outcome.
+const premiseFlagOf = value => {
+  if (value === undefined || value === null) return null;
+  check(value !== null && typeof value === "object" && !Array.isArray(value), "premiseFlag must be an object");
+  check(typeof value.premiseId === "string" && value.premiseId.length > 0 && value.premiseId.length <= 256,
+    "premiseFlag premiseId must be 1..256 characters");
+  check(typeof value.reason === "string" && value.reason.length > 0 && value.reason.length <= 2000,
+    "premiseFlag reason must be 1..2000 characters");
+  check(typeof value.by === "string" && value.by.length > 0 && value.by.length <= 128,
+    "premiseFlag by must be 1..128 characters");
+  check(typeof value.at === "string" && Number.isFinite(Date.parse(value.at)),
+    "premiseFlag at must be an ISO timestamp");
+  return Object.freeze({ premiseId: value.premiseId, reason: value.reason, by: value.by, at: value.at });
+};
 const pullRequestOf = value => {
   if (value === undefined || value === null) return null;
   const url = typeof value === "string" ? value : value?.url;
@@ -350,6 +394,9 @@ const workOf = value => {
   const fileBlocks = Object.freeze({ ...storedBlocks, ...declared.fileBlocks });
   const files = declared.files;
   const dependsOn = value.dependsOn === undefined || value.dependsOn === null ? Object.freeze([]) : dependsOnOf(value.dependsOn, value.id);
+  const parentClaimId = parentClaimIdOf(value.parentClaimId, value.id);
+  const evidenceRefs = evidenceRefsOf(value.evidenceRefs);
+  const premiseFlag = premiseFlagOf(value.premiseFlag);
   const listedPulls = Array.isArray(value.pullRequests) && value.pullRequests.length
     ? pullRequestsOf(value.pullRequests)
     : (value.pullRequest ? Object.freeze([pullRequestOf(value.pullRequest)]) : Object.freeze([]));
@@ -367,6 +414,7 @@ const workOf = value => {
     deliveryMode: value.deliveryMode ?? null, reviewPolicy: value.reviewPolicy ?? null,
     reviewedBy: value.reviewedBy ?? null, attestations: Object.freeze(attestations),
     tags, files, fileBlocks, blobs, dependsOn, pullRequest, pullRequests: listedPulls,
+    parentClaimId, evidenceRefs, premiseFlag,
     repo: repoOf(value.repo), branch: branchOf(value.branch),
     chain: chainOf(value.chain), supersededBy: optionalId(value.supersededBy, "supersededBy"),
     workItemId: optionalId(value.workItemId, "workItemId"),
@@ -452,7 +500,7 @@ const pullList = (pullRequest, pullRequests) => {
 // claiming an unknown id is refused so claims always reference real work.
 // `tags` may be supplied up front (free-form, recorded on the item); blobs
 // are evidence pointers and are only recorded on the done transition.
-export function createWork({ id, title, reviewPolicy, note, tags, files, dependsOn, pullRequest, pullRequests, repo, branch, fileBlocks, workItemId, kind, revision } = {}, { now, agentId } = {}) {
+export function createWork({ id, title, reviewPolicy, note, tags, files, dependsOn, parentClaimId, evidenceRefs, pullRequest, pullRequests, repo, branch, fileBlocks, workItemId, kind, revision } = {}, { now, agentId } = {}) {
   const atMs = nowMsOf(now);
   idOf(id, "work id", 256);
   if (title !== undefined) check(typeof title === "string" && title.length > 0 && title.length <= 512, "title must be 1..512 characters");
@@ -474,6 +522,9 @@ export function createWork({ id, title, reviewPolicy, note, tags, files, depends
     fileBlocks: Object.freeze({ ...fileBlocksOf(fileBlocks), ...declared.fileBlocks }),
     blobs: Object.freeze([]),
     dependsOn: dependsOn === undefined || dependsOn === null ? Object.freeze([]) : dependsOnOf(dependsOn, id),
+    parentClaimId: parentClaimIdOf(parentClaimId, id),
+    evidenceRefs: evidenceRefsOf(evidenceRefs),
+    premiseFlag: null,
     pullRequest: links.find(pull => !pull.outcome) ?? links[links.length - 1] ?? null,
     pullRequests: links,
     repo: repoOf(repo), branch: branchOf(branch),
@@ -485,7 +536,7 @@ export function createWork({ id, title, reviewPolicy, note, tags, files, depends
 // Claim unclaimed work. Refuses already-claimed work (the anti-collision rule).
 // leaseHours: hours until the claim lapses (default: the room's
 // defaultLeaseHours, else 24h); null opts out — the claim never expires.
-export function claimWork(work, agentId, { note, leaseHours, files, dependsOn, pullRequest, pullRequests, repo, branch, fileBlocks, room, now } = {}) {
+export function claimWork(work, agentId, { note, leaseHours, files, dependsOn, parentClaimId, evidenceRefs, pullRequest, pullRequests, repo, branch, fileBlocks, room, now } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
   check(item.state === "unclaimed", `work "${item.id}" is already ${item.state} — release it first`);
   // QA D-1: the 4000-char bound applies to every note stored on a history
@@ -502,6 +553,8 @@ export function claimWork(work, agentId, { note, leaseHours, files, dependsOn, p
       ? Object.freeze({ ...fileBlocksOf(fileBlocks), ...declared.fileBlocks })
       : (fileBlocks === undefined ? item.fileBlocks : fileBlocksOf(fileBlocks)),
     dependsOn: dependsOn === undefined ? item.dependsOn : dependsOnOf(dependsOn ?? [], item.id),
+    parentClaimId: parentClaimId === undefined ? item.parentClaimId : parentClaimIdOf(parentClaimId, item.id),
+    evidenceRefs: evidenceRefs === undefined ? item.evidenceRefs : evidenceRefsOf(evidenceRefs),
     pullRequests: links ?? item.pullRequests,
     pullRequest: links ? (links.find(pull => !pull.outcome) ?? links[links.length - 1] ?? null) : item.pullRequest,
     repo: repo === undefined ? item.repo : repoOf(repo),
@@ -574,7 +627,7 @@ export function appendWorkPullRequest(work, agentId, { pullRequest, expectedClai
 // four are recorded on the item and then frozen with the done state. tags
 // and blobs are only meaningful on the done transition and are refused
 // anywhere else.
-export function updateWork(work, agentId, { state, note, deliveryMode, reviewedBy, tags, blobs, now, authority = false } = {}) {
+export function updateWork(work, agentId, { state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, now, authority = false } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
   check(authority === true || item.owner === agent, `work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can update it`);
   check(item.state !== "done", `work "${item.id}" is done and immutable`);
@@ -604,7 +657,14 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
   // QA D-1: same 4000-char bound as create — see claimWork.
   if (note !== undefined && note !== null) check(typeof note === "string" && note.length <= 4000, "note must be a string of at most 4000 characters");
   const released = state === "unclaimed";
-  const next = state === undefined ? item : { ...item, state,
+  // Provenance is work-level, like dependsOn: it survives release and the
+  // done transition freezes the final values onto the receipt. It applies on
+  // note-only updates too — a provenance correction needs no state change.
+  const withProvenance = {
+    parentClaimId: parentClaimId === undefined ? item.parentClaimId : parentClaimIdOf(parentClaimId, item.id),
+    evidenceRefs: evidenceRefs === undefined ? item.evidenceRefs : evidenceRefsOf(evidenceRefs),
+  };
+  const next = state === undefined ? { ...item, ...withProvenance } : { ...item, state,
     owner: released ? null : item.owner,
     leaseStartAt: released ? null : item.leaseStartAt, // a released claim holds no lease
     leaseExpiresAt: released ? null : item.leaseExpiresAt, // a released claim holds no lease
@@ -619,7 +679,8 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
     deliveryMode: state === "done" && deliveryMode != null ? deliveryMode : item.deliveryMode,
     reviewedBy: state === "done" && reviewedBy != null ? reviewedBy : item.reviewedBy,
     tags: state === "done" && tags != null ? tagsOf(tags) : item.tags,
-    blobs: state === "done" && blobs != null ? blobsOf(blobs) : item.blobs };
+    blobs: state === "done" && blobs != null ? blobsOf(blobs) : item.blobs,
+    ...withProvenance };
   return withHistory(next, atMs, agent, state === undefined ? "noted" : `state:${state}`, note);
 }
 // Record a note from the caller's own authenticated session. A new note
@@ -794,5 +855,69 @@ export function workOwnedBy(items, agentId) {
 export function unclaimedWork(items) {
   check(Array.isArray(items), "items must be a list");
   return items.map(workOf).filter(item => item.state === "unclaimed");
+}
+// Provenance walk (orch-provenance-rollback): given a claim id, return every
+// claim that builds on it directly or transitively through parentClaimId
+// edges, breadth-first with depth. Cycle-safe (a visited set bounds the
+// traversal) and capped at MAX_PROVENANCE_WALK nodes so a pathological graph
+// cannot burn the room's event budget when the rollback path flags it.
+export const MAX_PROVENANCE_WALK = 200;
+export function walkProvenance(items, rootId) {
+  check(Array.isArray(items), "items must be a list");
+  check(typeof rootId === "string" && rootId.length > 0 && rootId.length <= 256, "rootId must be a claim id");
+  const byId = new Map();
+  for (const entry of items) {
+    const item = workOf(entry);
+    byId.set(item.id, item);
+  }
+  const root = byId.get(rootId);
+  if (!root) fail("unknown_claim", `No work claim "${rootId}"`);
+  const children = new Map();
+  for (const item of byId.values()) {
+    if (item.parentClaimId && byId.has(item.parentClaimId)) {
+      const list = children.get(item.parentClaimId) ?? [];
+      list.push(item.id);
+      children.set(item.parentClaimId, list);
+    }
+  }
+  const downstream = [];
+  const visited = new Set([rootId]);
+  const queue = [{ id: rootId, depth: 0 }];
+  let truncated = false;
+  while (queue.length > 0 && !truncated) {
+    const { id, depth } = queue.shift();
+    for (const childId of children.get(id) ?? []) {
+      if (visited.has(childId)) continue;
+      visited.add(childId);
+      if (downstream.length >= MAX_PROVENANCE_WALK) { truncated = true; break; }
+      const child = byId.get(childId);
+      downstream.push(Object.freeze({ id: childId, depth: depth + 1,
+        state: child.state, owner: child.owner, title: child.title }));
+      queue.push({ id: childId, depth: depth + 1 });
+    }
+  }
+  return Object.freeze({ root: rootId, rootState: root.state, rootOwner: root.owner, rootTitle: root.title,
+    truncated, downstream: Object.freeze(downstream) });
+}
+// Declare a claim's premise invalid: stamp the premise flag without changing
+// the work's state or outcome. Works on done claims too — the bad premise is
+// usually a completed receipt. The route layer walks the provenance graph and
+// flags every downstream claim the same way, then notifies in the room.
+export function flagPremiseInvalid(work, { premiseId, reason, byMemberId, now } = {}) {
+  const item = workOf(work), agent = agentOf(byMemberId), atMs = nowMsOf(now);
+  const pid = idOf(premiseId, "premise id", 256);
+  check(typeof reason === "string" && reason.length > 0 && reason.length <= 2000, "reason must be 1..2000 characters");
+  const flag = Object.freeze({ premiseId: pid, reason, by: agent, at: isoOf(atMs) });
+  return withHistory({ ...item, premiseFlag: flag }, atMs, agent, "premise_flagged",
+    `Premise "${pid}" declared invalid: ${reason.slice(0, 200)}`);
+}
+// Clear a premise flag after re-review. The history keeps both stamps, so
+// the flag-clear cycle stays auditable.
+export function clearPremiseFlag(work, { byMemberId, note, now } = {}) {
+  const item = workOf(work), agent = agentOf(byMemberId), atMs = nowMsOf(now);
+  check(item.premiseFlag !== null, `work "${item.id}" carries no premise flag`);
+  if (note !== undefined && note !== null) check(typeof note === "string" && note.length <= 2000, "note must be at most 2000 characters");
+  const { premiseFlag: _dropped, ...rest } = item;
+  return withHistory({ ...rest, premiseFlag: null }, atMs, agent, "premise_cleared", note ?? null);
 }
 export { ClaimError, STATES, TRANSITIONS, DELIVERY_MODES, REVIEW_POLICIES, REVIEW_VERDICTS, CLAIM_KINDS, CI_STATES, DEFAULT_LEASE_HOURS, MAX_LEASE_HOURS, ACTIVE_CLAIM_STATES };

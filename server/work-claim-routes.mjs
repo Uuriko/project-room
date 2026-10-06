@@ -37,6 +37,7 @@ import {
   createWork, claimWork, updateWork, appendWorkPullRequest, attestWork, recordReview, reassignWork, releaseExpired, canCloseWork,
   renewWork, roomWorkClaimConfig, closeWhenLive, isReceiptTag, ClaimError, REVIEW_POLICIES, CLAIM_KINDS,
   claimUpdatedAt, ACTIVE_CLAIM_STATES, MAX_LEASE_HOURS, STATES, summarizeClaimHistory,
+  walkProvenance, flagPremiseInvalid, clearPremiseFlag,
 } from "./work-claims.mjs";
 import { findDuplicates, DuplicateError } from "./work-duplicates.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
@@ -830,7 +831,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   }
   if (workClaimRoute === "create" && req.method === "POST") {
     const raw = body(req);
-    if (!shape(raw, { required: ["id"], optional: ["title", "reviewPolicy", "note", "tags", "files", "dependsOn", "pullRequest", "pullRequests", "repo", "branch", "kind", "revision", "assignee"] })) invalidInput(reject, "{id, title?, reviewPolicy?, note?, tags?, files?, dependsOn?, pullRequest?, pullRequests?, repo?, branch?, kind?, revision?, assignee?}");
+    if (!shape(raw, { required: ["id"], optional: ["title", "reviewPolicy", "note", "tags", "files", "dependsOn", "parentClaimId", "evidenceRefs", "pullRequest", "pullRequests", "repo", "branch", "kind", "revision", "assignee"] })) invalidInput(reject, "{id, title?, reviewPolicy?, note?, tags?, files?, dependsOn?, parentClaimId?, evidenceRefs?, pullRequest?, pullRequests?, repo?, branch?, kind?, revision?, assignee?}");
     requireWriter();
     requireEventBudget();
     const id = claimIdOf(reject, raw.id);
@@ -854,7 +855,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
           `assignee "${typeof assignee === "string" ? assignee : "?"}" is not an active member of this room`);
       }
     }
-    let item = runPure(reject, () => createWork({ id, title: data.title, reviewPolicy: data.reviewPolicy, note: data.note, tags: data.tags, files: data.files, dependsOn: data.dependsOn, pullRequest: data.pullRequest, pullRequests: data.pullRequests, repo: data.repo, branch: data.branch, kind: data.kind, revision: data.revision }, { now: nowMs, agentId: caller }));
+    let item = runPure(reject, () => createWork({ id, title: data.title, reviewPolicy: data.reviewPolicy, note: data.note, tags: data.tags, files: data.files, dependsOn: data.dependsOn, parentClaimId: data.parentClaimId, evidenceRefs: data.evidenceRefs, pullRequest: data.pullRequest, pullRequests: data.pullRequests, repo: data.repo, branch: data.branch, kind: data.kind, revision: data.revision }, { now: nowMs, agentId: caller }));
     if (assignee) {
       const held = registry.list(roomId).filter(entry => entry.owner === assignee && ACTIVE_CLAIM_STATES.includes(entry.state)).length;
       if (held >= config.maxMemberOpenClaims) {
@@ -887,7 +888,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   }
   if (workClaimRoute === "claim" && req.method === "POST") {
     const data = body(req);
-    if (!shape(data, { optional: ["note", "leaseHours", "files", "advisory", "dependsOn", "pullRequest", "pullRequests", "repo", "branch"] })) invalidInput(reject, "{note?, leaseHours?, files?, advisory?, dependsOn?, pullRequest?, pullRequests?, repo?, branch?}");
+    if (!shape(data, { optional: ["note", "leaseHours", "files", "advisory", "dependsOn", "parentClaimId", "evidenceRefs", "pullRequest", "pullRequests", "repo", "branch"] })) invalidInput(reject, "{note?, leaseHours?, files?, advisory?, dependsOn?, parentClaimId?, evidenceRefs?, pullRequest?, pullRequests?, repo?, branch?}");
     if ("advisory" in data && typeof data.advisory !== "boolean") invalidInput(reject, "advisory true or false");
     const item = load(claimIdOf(reject, workClaimId));
     if (item.state !== "unclaimed") reject(409, "work_claim_conflict", `Work "${item.id}" is already ${item.state} — release it first`);
@@ -905,7 +906,8 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     }
     const claimed = runPure(reject, () => claimWork(item, caller, {
       note: data.note, leaseHours: leaseHoursOfBody(data), files: data.files,
-      dependsOn: data.dependsOn, pullRequest: data.pullRequest, pullRequests: data.pullRequests,
+      dependsOn: data.dependsOn, parentClaimId: data.parentClaimId, evidenceRefs: data.evidenceRefs,
+      pullRequest: data.pullRequest, pullRequests: data.pullRequests,
       repo: data.repo, branch: data.branch, room: roomLike, now: nowMs
     }));
     // Exclusive file lease. Overlap with another live claim is a 409 that
@@ -942,7 +944,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   }
   if (workClaimRoute === "update" && req.method === "POST") {
     const data = body(req);
-    if (!shape(data, { optional: ["state", "note", "deliveryMode", "reviewedBy", "tags", "blobs", "readingAck"] })) invalidInput(reject, "{state?, note?, deliveryMode?, reviewedBy?, tags?, blobs?, readingAck?}");
+    if (!shape(data, { optional: ["state", "note", "deliveryMode", "reviewedBy", "tags", "blobs", "readingAck", "parentClaimId", "evidenceRefs"] })) invalidInput(reject, "{state?, note?, deliveryMode?, reviewedBy?, tags?, blobs?, readingAck?, parentClaimId?, evidenceRefs?}");
     if (data.state === undefined && data.note === undefined && data.readingAck === undefined) invalidInput(reject, "a state transition, a note, or a reading ack");
     // W012 required reading: the owner confirms they read the enrollment
     // reading list. { docs: [...] } is validated by the pure machine; a
@@ -988,7 +990,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     }
     const updated = runPure(reject, () => updateWork(item, caller,
       { state: data.state, note: data.note, deliveryMode: data.deliveryMode, reviewedBy: data.reviewedBy,
-        tags: data.tags, blobs: data.blobs, now: nowMs }));
+        tags: data.tags, blobs: data.blobs, parentClaimId: data.parentClaimId, evidenceRefs: data.evidenceRefs, now: nowMs }));
     if (data.state === "done") {
       // Jev-harness receipt-acceptance gate, shadow mode (docs/JEV-GATES.md):
       // score the receipt, journal the would-be verdict (flagging
@@ -1173,12 +1175,68 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     const saved = registry.configure(roomId, { maxMemberOpenClaims: data.maxMemberOpenClaims });
     return json(res, 200, { roomId, ...saved });
   }
+  if (workClaimRoute === "provenance" && (req.method === "GET" || req.method === "HEAD")) {
+    // Provenance walk (orch-provenance-rollback): the downstream graph of
+    // claims that build on this claim through parentClaimId edges, direct
+    // and transitive. Read-only; any room member may walk.
+    const id = claimIdOf(reject, workClaimId);
+    load(id); // 404 when the claim does not exist
+    let walk;
+    try {
+      walk = walkProvenance(registry.list(roomId), id);
+    } catch (error) {
+      if (error instanceof ClaimError) reject(422, error.code, error.message);
+      throw error;
+    }
+    return json(res, 200, { roomId, claimId: id, ...walk });
+  }
+  if (workClaimRoute === "premise-invalid" && req.method === "POST") {
+    // Practiced rollback (orch-provenance-rollback): declare this claim's
+    // premise invalid. The premise claim and every downstream claim (the
+    // provenance walk) are flagged for re-review — history-stamped, never
+    // reverted — and each flagged claim's owner is woken. Mechanical: flag +
+    // notify, no code is touched. { clear: true } lifts the flag on one
+    // claim after re-review. Only the premise claim's owner, the room owner,
+    // or a manage_claims holder may declare or clear.
+    const data = body(req);
+    if (!shape(data, { optional: ["reason", "clear", "note"] })) invalidInput(reject, "{reason} or {clear: true, note?}");
+    const item = load(claimIdOf(reject, workClaimId));
+    authorityOver(item); // the premise owner, room owner, or a manage_claims holder may declare or clear
+    requireEventBudget();
+    if (data.clear === true) {
+      if (data.reason !== undefined) invalidInput(reject, "either {reason} to flag or {clear: true} to clear, not both");
+      const note = data.note === undefined ? undefined : text("note", data.note, { multiline: true });
+      const cleared = runPure(reject, () => clearPremiseFlag(item, { byMemberId: caller, note, now: nowMs }));
+      commit(cleared, "premise_cleared");
+      return json(res, 200, { roomId, claimId: item.id, cleared: true });
+    }
+    if (data.clear !== undefined) invalidInput(reject, "{reason} or {clear: true, note?}");
+    const reason = text("reason", data.reason, { multiline: true });
+    if (typeof reason !== "string" || reason.trim().length === 0) invalidInput(reject, "{reason} naming why the premise is invalid");
+    const walk = runPure(reject, () => walkProvenance(registry.list(roomId), item.id));
+    const flagged = [];
+    for (const targetId of [item.id, ...walk.downstream.map(node => node.id)]) {
+      const target = registry.get(roomId, targetId);
+      if (!target) continue;
+      const next = runPure(reject, () => flagPremiseInvalid(target,
+        { premiseId: item.id, reason, byMemberId: caller, now: nowMs }));
+      // The flag's reason lives on the claim's history stamp and premiseFlag
+      // field; the room event carries the action and claim id (its `reason`
+      // is a closed vocabulary — premise ids do not belong there).
+      commit(next, "premise_flagged", {
+        ...(next.owner ? { wakeMemberId: next.owner, wakeReason: "premise_flagged" } : {}),
+      });
+      flagged.push(targetId);
+    }
+    return json(res, 200, { roomId, claimId: item.id, premiseInvalid: true,
+      flagged, truncated: walk.truncated });
+  }
   // RFC 9110: a 405 names the resource's valid methods. The route table above
   // is the source of truth; an unknown route has no meaningful Allow value.
   const WORK_CLAIM_METHODS = {
     list: "GET", receipts: "GET", sweep: "POST", duplicates: "GET", status: "GET", config: "GET, POST", create: "POST",
     read: "GET", claim: "POST", update: "POST", review: "POST", release: "POST",
-    reassign: "POST", renew: "POST",
+    reassign: "POST", renew: "POST", provenance: "GET", "premise-invalid": "POST",
   };
   const allowedMethod = WORK_CLAIM_METHODS[workClaimRoute];
   reject(405, "method_not_allowed", "Method not allowed",
