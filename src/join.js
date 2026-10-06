@@ -180,7 +180,19 @@ function renderConsent(preview) {
   $("join-name")?.focus();
 }
 
+// The preview fetch has no server-side deadline; bound it so a stalled
+// network can never leave the loader up forever (#1608). Must stay below
+// the inline watchdog in join.html (15s) so the module handles the timeout
+// first when it is running.
+const PREVIEW_TIMEOUT_MS = 10_000;
+
+// Retry starts a newer boot(); an older boot resolving late must not clobber
+// it — without this, a timed-out first attempt firing after a retry would
+// blank a screen the retry already rendered.
+let bootSeq = 0;
+
 async function boot() {
+  const seq = ++bootSeq;
   const code = parseJoinCode(globalThis.location?.pathname);
   // Register the retry button before any network call: when the preview
   // fetch fails, the user must still be able to retry (L-39). Once-only so
@@ -191,11 +203,17 @@ async function boot() {
     retryEl.addEventListener("click", () => boot());
   }
   if (!code) {
-    fail({ title: "Invite link problem", message: "This invitation is invalid. Ask for a new link.", retry: false });
+    // #1608: a missing token is not a broken link — name what's missing and
+    // the two ways forward, instead of leaving the loader up.
+    fail({ title: "No invite found", message: "Ask a room owner for an invite link, or sign in and request access.", retry: false });
     return;
   }
   const apiBase = serviceApiBase(globalThis.location?.pathname);
-  const preview = await apiFetch(`${apiBase}/agent-invites/preview?code=${encodeURIComponent(code)}`);
+  const preview = await Promise.race([
+    apiFetch(`${apiBase}/agent-invites/preview?code=${encodeURIComponent(code)}`),
+    new Promise(resolve => setTimeout(() => resolve({ ok: false, status: 0, error: { code: "preview_timeout" } }), PREVIEW_TIMEOUT_MS)),
+  ]);
+  if (seq !== bootSeq) return;
   if (!preview.ok) {
     fail(joinErrorMessage({ status: preview.status, code: preview.error?.code, action: "preview" }));
     return;
