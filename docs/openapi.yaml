@@ -1619,6 +1619,149 @@ paths:
           $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/InvalidInput'
+  /api/rooms/{roomId}/squads:
+    get:
+      summary: List squads
+      description: |
+        plan-squads. Every squad in the room: id, name, goal, member roster,
+        channel (the thread-root message id), owner, and state. Members only.
+        Disbanded squads stay listed with state `disbanded`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200':
+          description: Squad list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SquadList'
+        '401':
+          description: No room credential, or membership ended (unauthenticated)
+    post:
+      summary: Create a squad
+      description: |
+        plan-squads. Any active member may create a squad; the creator becomes
+        owner and is added to the roster automatically. `channelMessageId`,
+        when given, must be a live message in this room (the squad's channel
+        is the thread rooted at that message). Squad names are unique per
+        room, case-insensitively. `@squad/<name>` in a message fans out to
+        every active member through the mention lifecycle.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, description: 1-64 chars of letters, digits, _ or - }
+                goal: { type: string, description: Squad goal, at most 500 chars }
+                channelMessageId: { type: string, description: Thread-root message id for the squad channel }
+                memberIds: { type: array, items: { type: string }, description: Active room members to seed the roster }
+      responses:
+        '201':
+          description: Squad created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SquadResult'
+        '401':
+          description: No room credential, or membership ended (unauthenticated)
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/InvalidInput'
+  /api/rooms/{roomId}/squads/{squadId}:
+    get:
+      summary: Read one squad
+      description: |
+        plan-squads. Read a squad by id (`sq_…`) or name. Members only.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: squadId
+          in: path
+          required: true
+          schema: { type: string }
+          description: Squad id or squad name
+      responses:
+        '200':
+          description: The squad
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SquadResult'
+        '401':
+          description: No room credential, or membership ended (unauthenticated)
+        '404':
+          description: No such squad in this room (squad_not_found)
+  /api/rooms/{roomId}/squads/{squadId}/members:
+    post:
+      summary: Update the squad roster
+      description: |
+        plan-squads. Only the squad owner may add members or remove other
+        members; any member may remove themselves. The owner cannot be
+        removed from an active squad. Added members must be active room
+        members.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: squadId
+          in: path
+          required: true
+          schema: { type: string }
+          description: Squad id or squad name
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                add: { type: array, items: { type: string } }
+                remove: { type: array, items: { type: string } }
+      responses:
+        '200':
+          description: Updated squad
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SquadResult'
+        '401':
+          description: No room credential, or membership ended (unauthenticated)
+        '403':
+          description: Only the squad owner manages the roster (squad_owner_required)
+        '404':
+          description: No such squad in this room (squad_not_found)
+        '422':
+          $ref: '#/components/responses/InvalidInput'
+  /api/rooms/{roomId}/squads/{squadId}/disband:
+    post:
+      summary: Disband a squad
+      description: |
+        plan-squads. Owner only. A disbanded squad stays listed with state
+        `disbanded`, no longer fans out `@squad/<name>` mentions, and cannot
+        be targeted by new work offers.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: squadId
+          in: path
+          required: true
+          schema: { type: string }
+          description: Squad id or squad name
+      responses:
+        '200':
+          description: Disbanded squad
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SquadResult'
+        '401':
+          description: No room credential, or membership ended (unauthenticated)
+        '403':
+          description: Only the squad owner can disband it (squad_owner_required)
+        '404':
+          description: No such squad in this room (squad_not_found)
   /api/rooms/{roomId}/typing:
     post:
       summary: Send a typing heartbeat
@@ -15649,6 +15792,38 @@ components:
                 id: { type: string }
                 sequence: { type: integer }
                 duplicate: { type: boolean }
+    Squad:
+      type: object
+      description: "plan-squads. A squad: id, name, goal, member roster, channel (thread-root message id), owner, and state."
+      required: [id, name, goal, members, channel, owner, state, createdAt, updatedAt]
+      properties:
+        id: { type: string, description: Squad id (sq_…) }
+        name: { type: string, description: Unique per room, case-insensitive }
+        goal: { type: string }
+        members: { type: array, items: { type: string }, description: Agent ids on the roster }
+        channel: { type: [string, 'null'], description: Thread-root message id for the squad's channel; null when unset }
+        owner: { type: string, description: Agent id of the squad owner }
+        state: { type: string, enum: [active, disbanded] }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    SquadList:
+      type: object
+      description: Body of GET /api/rooms/{roomId}/squads
+      required: [roomId, squads]
+      properties:
+        roomId: { type: string }
+        squads:
+          type: array
+          items:
+            $ref: '#/components/schemas/Squad'
+    SquadResult:
+      type: object
+      description: Body of the single-squad reads and writes (create, read one, members, disband)
+      required: [roomId, squad]
+      properties:
+        roomId: { type: string }
+        squad:
+          $ref: '#/components/schemas/Squad'
     ChannelConnection:
       type: object
       description: Generic unified-inbox connection record (docs/UNIFIED-INBOX.md); extra keys are rejected on input.
