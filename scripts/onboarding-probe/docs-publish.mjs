@@ -5,8 +5,11 @@
 // Additive: it never touches probe-out or the job summary, only docs.
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
+import { redactText } from "./lib.mjs";
 
 const ANCHOR = "<!-- onboarding-probe-runs: newest first -->";
+const SHA_RE = /^[0-9a-f]{7,40}$/i;
+const RUN_ID_RE = /^[0-9]+$/;
 
 export function fileHeader() {
   return [
@@ -26,25 +29,52 @@ function runDate(runAt) {
   return String(runAt ?? "").slice(0, 10) || "unknown date";
 }
 
+// probe-result.json is produced from a live target response, so its string
+// fields are remote-controlled: keep every one to a single plain-text line,
+// accept only http(s) URLs, and require the revision to look like a SHA.
+function oneLine(value) {
+  return String(value ?? "").replace(/[\r\n]+/g, " ").replace(/`/g, "'").slice(0, 200).trim();
+}
+
+function webUrl(value) {
+  const text = oneLine(value);
+  try {
+    const url = new URL(text);
+    if (url.protocol === "http:" || url.protocol === "https:") return text;
+  } catch {
+    // not a URL
+  }
+  return "";
+}
+
+export function sanitizeResult(result) {
+  const sourceRevision = String(result?.sourceRevision ?? "");
+  return {
+    runAt: oneLine(result?.runAt) || "unknown time",
+    target: webUrl(result?.target) || "unknown target",
+    sourceRevision: SHA_RE.test(sourceRevision) ? sourceRevision : "unknown",
+  };
+}
+
 function ciLine({ runId, runUrl }) {
-  if (!runId) return "";
+  if (!runId || !RUN_ID_RE.test(String(runId))) return "";
   const label = `CI run ${runId}`;
-  return runUrl ? `[${label}](${runUrl})` : label;
+  const url = webUrl(runUrl);
+  return url ? `[${label}](${url})` : label;
 }
 
 export function renderRunSection({ result, table, mode, runId, runUrl }) {
-  const runAt = result?.runAt ?? null;
-  const target = result?.target ?? "unknown target";
-  const sourceRevision = result?.sourceRevision ?? "unknown";
+  const { runAt, target, sourceRevision } = sanitizeResult(result);
   const meta = [
-    `## ${runDate(runAt)} — ${mode ?? "production"}`,
+    `## ${runDate(runAt)} — ${oneLine(mode) || "production"}`,
     "",
-    `- Ran ${runAt ?? "unknown time"} · target \`${target}\` · source revision \`${sourceRevision}\``,
+    `- Ran ${runAt} · target \`${target}\` · source revision \`${sourceRevision}\``,
   ];
   const ci = ciLine({ runId, runUrl });
   if (ci) meta.push(`- ${ci}`);
   meta.push("", String(table ?? "").replace(/\s+$/, ""), "");
-  return `${meta.join("\n")}\n`;
+  // The probe's own contract: written files never carry a secret.
+  return `${redactText(meta.join("\n"))}\n`;
 }
 
 export function publishRunSection(docsPath, section) {

@@ -45,6 +45,36 @@ test("a probe run renders a docs section with the measured paths and the run tim
   assert.match(section, /51803999/);
 });
 
+test("remote-controlled result fields are sanitized before landing in docs", () => {
+  const section = renderRunSection({
+    result: {
+      runAt: "2026-10-12T15:04:05.000Z",
+      target: "javascript:alert(1)",
+      sourceRevision: "deadbeef`); [evil](http://x",
+    },
+    table: TABLE,
+    mode: "production\ninjected",
+    runId: "12ab",
+    runUrl: "javascript:alert(2)",
+  });
+  assert.doesNotMatch(section, /javascript:/);
+  assert.match(section, /source revision `unknown`/);
+  assert.match(section, /target `unknown target`/);
+  assert.doesNotMatch(section, /CI run/);
+  assert.match(section, /## 2026-10-12 — production injected/);
+});
+
+test("a secret-shaped string never survives into the published section", () => {
+  const section = renderRunSection({
+    result: fixtureResult({ target: "https://room.trydemigod.com/?k=pri_abc123" }),
+    table: TABLE,
+    mode: "production",
+    runId: "1",
+    runUrl: "",
+  });
+  assert.doesNotMatch(section, /pri_/);
+});
+
 test("published runs land newest first and earlier runs are kept", t => {
   const dir = mkdtempSync(join(tmpdir(), "probe-docs-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
