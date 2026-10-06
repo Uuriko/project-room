@@ -88,6 +88,8 @@ test("People panel: owner pauses, resumes and removes an agent with a two-click 
   // Pause: the row shows Paused, the button flips, and the queued wake is not leasable.
   await pause.click();
   await row.locator(".pause-chip").waitFor();
+  assert.equal(await row.locator(".pause-chip").textContent(), "Wakes paused");
+  assert.match(await row.locator(".member-pause-explanation").textContent(), /Queued wakes will not start; a running attempt may finish/);
   assert.equal(await pause.textContent(), "Resume");
   assert.match(await page.locator("#status").textContent(), /paused: queued wakes will not start/);
   assert.ok(store.wakeQueue.pauseStatus("commons", "codex"), "pause row written through the route");

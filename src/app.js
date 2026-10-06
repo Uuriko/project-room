@@ -1870,7 +1870,9 @@ function render() {
     // carries the authoritative working state plus owner/scope projection.
     const serverPresence = m.active === false ? null : presenceStates.get(m.id);
     const merged = serverPresence ? { ...m, ...serverPresence } : m;
-    const presence = memberPresence(merged, railCtx);
+    const agent = m.kind === "agent" && m.active !== false;
+    const presence = agent && presenceUnrefreshed ? "unknown" : memberPresence(merged, railCtx);
+    const availability = agent && presenceUnrefreshed ? "Availability not refreshed" : presenceLabel(presence);
     // Keep names readable; duplicate names retain their IDs and every exact
     // identity remains available in the member disclosure and action choices.
     const handle = m.kind === "agent" ? memberHandle(m, displayName(m.id)) : displayName(m.id);
@@ -1884,19 +1886,23 @@ function render() {
       : "";
     // #660: state chip, owner chip, "working on {title}", "owned by".
     const serverState = serverPresence?.state;
-    const stateChip = serverState
-      ? `<span class="member-state-chip" data-state="${esc(serverState)}">${esc(presenceLabel(serverState))}</span>`
+    const stateChip = agent || serverState
+      ? `<span class="member-state-chip" data-state="${esc(presence)}">${esc(availability)}</span>`
       : "";
     const ownerChip = m.id === state.room.ownerId
       ? `<span class="owner-chip" title="Room owner">Owner</span>`
       : m.active !== false && m.permissions.includes("manage_members") ? `<span class="owner-chip" title="Can invite and manage members">Admin</span>` : "";
-    const workingOnTitle = serverState === "working" && serverPresence?.workingOn?.[0]?.title
+    const workingOnTitle = !presenceUnrefreshed && serverState === "working" && serverPresence?.workingOn?.[0]?.title
       ? `<span class="member-working-on">working on ${esc(String(serverPresence.workingOn[0].title))}…</span>`
       : "";
     const ownedBy = serverPresence?.ownerIdentityId
-      ? `<span class="member-owned-by">owned by @${esc(String(serverPresence.ownerIdentityId).slice(0, 12))}</span>`
+      ? `<span class="member-owned-by">Agent identity: <code>${esc(serverPresence.ownerIdentityId)}</code></span>`
       : "";
-    return `<div id="${recordDomId("member", m.id)}" class="presence-member" tabindex="-1" data-member-record-id="${esc(m.id)}" data-presence="${esc(presence)}" data-disclosure-host="${esc(m.id)}" data-focus-key="member:${esc(m.id)}"${m.agentType ? ` data-agent-type="${esc(m.agentType)}"` : ""} ${m.active === false ? "" : `title="${esc(`Address ${m.displayName} in chat`)}"`}><div class="member-avatar ${m.kind}" aria-hidden="true"><span>${initials(m.displayName)}</span><i class="presence-dot presence-${esc(presence)}" title="${esc(presenceLabel(presence))}"></i></div><div><div class="member-head"><strong class="member-handle${m.kind === "agent" ? " member-handle-agent" : ""}">${esc(handle)}</strong><span class="sr-only">${esc(presenceLabel(presence))}</span>${doneChip}${agentPauses.has(m.id) && m.active !== false ? `<span class="pause-chip" data-paused-member="${esc(m.id)}" title="Queued wakes will not start">Paused</span>` : ""}${friendBondHtml(m)}</div>${workingOnTitle}<details class="member-profile"><summary data-focus-key="member-profile:${esc(m.id)}" aria-label="Member options for ${esc(m.displayName)}" title="Member options"><span aria-hidden="true">···</span></summary><div class="member-profile-body"><p class="form-hint">Member ID: <code>${esc(m.id)}</code></p><div class="member-profile-badges">${typeChip}${stateChip}${ownerChip}</div><p class="member-status">${esc(status)}</p>${ownedBy}${memberActions(m)}${workControl(m)}<details><summary data-focus-key="member-capabilities:${esc(m.id)}">Room capabilities</summary><p>${esc(m.permissions.join(", ") || "conversation only")}</p>${adminControl(m)}${muteControl(m)}</details>${dmConsentDetails(m)}</div></details></div></div>`;
+    const hostReport = Number.isFinite(serverPresence?.presence?.lastSeenAt)
+      ? `<p class="member-observation">Last host report: <time datetime="${esc(new Date(serverPresence.presence.lastSeenAt).toISOString())}">${esc(new Date(serverPresence.presence.lastSeenAt).toLocaleString())}</time></p>` : "";
+    const lastReport = agent && presenceUnrefreshed && serverState
+      ? `<p class="member-observation">Last reported availability: ${esc(presenceLabel(serverState))}</p>` : "";
+    return `<div id="${recordDomId("member", m.id)}" class="presence-member" tabindex="-1" data-member-record-id="${esc(m.id)}" data-presence="${esc(presence)}" data-disclosure-host="${esc(m.id)}" data-focus-key="member:${esc(m.id)}"${m.agentType ? ` data-agent-type="${esc(m.agentType)}"` : ""} ${m.active === false ? "" : `title="${esc(`Address ${m.displayName} in chat`)}"`}><div class="member-avatar ${m.kind}" aria-hidden="true"><span>${initials(m.displayName)}</span><i class="presence-dot presence-${esc(presence)}" title="${esc(availability)}"></i></div><div><div class="member-head"><strong class="member-handle${m.kind === "agent" ? " member-handle-agent" : ""}">${esc(handle)}</strong><span class="sr-only">${esc(availability)}</span>${doneChip}${agentPauses.has(m.id) && m.active !== false ? `<span class="pause-chip" data-paused-member="${esc(m.id)}" title="Queued wakes will not start; a running attempt may finish">Wakes paused</span>` : ""}${friendBondHtml(m)}</div>${agent ? `<span class="member-availability">${esc(availability)}</span>` : ""}${workingOnTitle}${agent ? `<p class="member-status member-assignment">${esc(status)}</p>` : ""}<details class="member-profile"><summary data-focus-key="member-profile:${esc(m.id)}" aria-label="Member options for ${esc(m.displayName)}" title="Member options"><span aria-hidden="true">···</span></summary><div class="member-profile-body"><p class="form-hint">Member ID: <code>${esc(m.id)}</code></p><div class="member-profile-badges">${typeChip}${stateChip}${ownerChip}</div><p class="member-status">${esc(status)}</p>${lastReport}${hostReport}${ownedBy}${agentPauses.has(m.id) && agent ? `<p class="member-pause-explanation">Queued wakes will not start; a running attempt may finish.</p>` : ""}${memberActions(m)}${workControl(m)}<details><summary data-focus-key="member-capabilities:${esc(m.id)}">Room capabilities</summary><p>${esc(m.permissions.join(", ") || "conversation only")}</p>${adminControl(m)}${muteControl(m)}</details>${dmConsentDetails(m)}</div></details></div></div>`;
   };
   // E4: mute is the viewer's own preference; the owner (the appeal path) and yourself are never mutable.
   const muteControl = m => m.id === session?.member?.id || m.id === state.room.ownerId ? "" : `<button type="button" class="text-button mute-toggle" data-mute-member="${esc(m.id)}" data-muted="${isMutedBy(state, session?.member?.id, m.id)}" aria-pressed="${isMutedBy(state, session?.member?.id, m.id)}">${isMutedBy(state, session?.member?.id, m.id) ? `Unmute ${esc(m.displayName)}` : `Mute ${esc(m.displayName)} for me`}</button>`;
@@ -1955,7 +1961,10 @@ function render() {
   // visible and historical identities inspectable without crowding the rail.
   const removedAgentsHtml = removedAgents.length
     ? `<details class="removed-agents"><summary data-focus-key="removed-agents">Removed agents (${removedAgents.length})</summary>${removedAgents.map(presenceRow).join("")}</details>` : "";
-  renderContent("#presence-list", `${dmRequestInbox()}${people.length ? `<p class="presence-heading">People</p>${people.map(presenceRow).join("")}` : ""}${agents.length ? `<p class="presence-heading">Agents</p>${agents.map(presenceRow).join("")}` : ""}${removedAgentsHtml}`);
+  const presenceNote = presenceUnrefreshed ? "Availability could not refresh. Try again." : "";
+  const checked = presenceCheckedAt ? `${presenceUnrefreshed ? "Last successful check" : "Last checked"}: ${time(new Date(presenceCheckedAt).toISOString())}` : "";
+  const presenceRefresh = `<div class="presence-refresh"><button type="button" class="text-button" data-refresh-presence data-focus-key="refresh-presence">Refresh availability</button><span class="presence-check-note">${esc([presenceNote, checked].filter(Boolean).join(" "))}</span></div>`;
+  renderContent("#presence-list", `${presenceRefresh}${dmRequestInbox()}${people.length ? `<p class="presence-heading">People</p>${people.map(presenceRow).join("")}` : ""}${agents.length ? `<p class="presence-heading">Agents</p>${agents.map(presenceRow).join("")}` : ""}${removedAgentsHtml}`);
   // JDOT-MEMBER-PERMS-UI begin
   memberPermissionsUI.sync();
   ownerAttentionCard.sync();
@@ -6007,6 +6016,7 @@ let friendBonds = [], friendBusy = false, friendSeq = 0, friendDmPeerId = null;
 // prefers these over the local derivation. Never loaded for the public
 // read-only face.
 let presenceStates = new Map(), presenceBusy = false, presenceSeq = 0, presenceTimer = null;
+let presenceUnrefreshed = false, presenceCheckedAt = null;
 const PRESENCE_REFRESH_MS = 30000;
 // New room events are coalesced: the feed refetches at most once per window while the tab is visible.
 const NOTIFICATION_COALESCE_MS = 1500;
@@ -6450,8 +6460,8 @@ document.addEventListener("visibilitychange", () => {
 });
 // ---- Presence states ----------------------------------------------------------
 // #660: server-derived per-member working states (working/listening/idle/
-// unreachable) plus owner/scope projection. Load failures stay silent; the
-// rail falls back to its local derivation.
+// unreachable/unknown) observations. Failed refreshes retain context while
+// clearly qualifying cached availability as unrefreshed.
 async function refreshPresenceStates() {
   if (!state || !session || $("#main").hidden || presenceBusy) return;
   const seq = ++presenceSeq, generation = client.generation, room = state;
@@ -6463,16 +6473,19 @@ async function refreshPresenceStates() {
     for (const entry of result?.members ?? []) {
       if (entry && entry.memberId) next.set(entry.memberId, entry);
     }
-    presenceStates = next;
+    presenceStates = next; presenceUnrefreshed = false; presenceCheckedAt = Date.now();
   } catch {
     if (seq !== presenceSeq || generation !== client.generation || state !== room) return;
-    // Keep the last known states on failure; wiping them would flash the
-    // whole People panel back to the local derivation.
+    // Keep useful context, but never present a cached report as current.
+    presenceUnrefreshed = true;
   } finally {
-    presenceBusy = false;
+    if (seq === presenceSeq) presenceBusy = false;
     if (seq === presenceSeq && generation === client.generation && state === room) render();
   }
 }
+$("#presence-list").addEventListener("click", event => {
+  if (event.target.closest("[data-refresh-presence]")) void refreshPresenceStates();
+});
 function startPresencePoll() {
   stopPresencePoll();
   void refreshPresenceStates();
@@ -6483,7 +6496,7 @@ function startPresencePoll() {
 function stopPresencePoll() {
   presenceSeq++;
   if (presenceTimer) { clearInterval(presenceTimer); presenceTimer = null; }
-  presenceStates = new Map();
+  presenceStates = new Map(); presenceUnrefreshed = false; presenceCheckedAt = null; presenceBusy = false;
 }
 // ---- DM consent ---------------------------------------------------------------
 // The signed-in member's consent pairs drive the People panel's Direct

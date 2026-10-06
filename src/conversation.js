@@ -116,6 +116,7 @@ export function presenceLabel(presence) {
   if (presence === "working") return "Working";
   if (presence === "listening") return "Listening";
   if (presence === "idle") return "Idle";
+  if (presence === "unknown") return "No live signal";
   if (presence === "unreachable") return "Unreachable";
   return presence === "online" ? "Online" : presence === "offline" ? "Offline" : "Away";
 }
@@ -127,7 +128,9 @@ export function presenceLabel(presence) {
 export function memberPresence(member, { workItems, messages, now } = {}) {
   if (!member || member.active === false) return "offline";
   if (member.state === "working" || member.state === "listening"
-    || member.state === "idle" || member.state === "unreachable") return member.state;
+    || member.state === "idle" || member.state === "unreachable" || member.state === "unknown") return member.state;
+  // Assignment and old chat are not observations of a reachable agent host.
+  if (member.kind === "agent") return "unknown";
   const clock = Number.isFinite(now) ? now : Date.now();
   const items = workList(workItems);
   if (items.some(item => item.accountableMemberId === member.id
@@ -153,7 +156,7 @@ export function memberOnLine(member, { workItems, now } = {}) {
 export function memberStatus(member, context) {
   if (!member || member.active === false) return "access revoked";
   const line = context ? memberOnLine(member, context) : "";
-  return line || kindLabel(member.kind);
+  return line ? member.kind === "agent" ? `Assigned: ${line}` : line : kindLabel(member.kind);
 }
 
 // Compact Done receipt for an agent who posted completion. Not chat spam.

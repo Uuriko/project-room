@@ -1624,3 +1624,11 @@ summary { overflow-wrap: anywhere; }
 /* Revoked memberships remain inspectable separately from active agents. */
 .removed-agents { margin-top: .75rem; color: var(--muted); }
 .removed-agents > summary { min-height: 44px; padding: .65rem 0; font-size: var(--text-sm); cursor: pointer; }
+
+/* Availability is readable without relying on presence-dot colors. */
+.presence-unknown { background: var(--muted); }
+.member-availability { display: block; color: var(--muted); font-size: var(--text-xs); }
+.member-observation, .member-pause-explanation, .presence-check-note { color: var(--muted); font-size: var(--text-sm); overflow-wrap: anywhere; }
+.presence-refresh { margin-bottom: .75rem; }
+.presence-check-note { display: block; }
+.member-owned-by { overflow-wrap: anywhere; }

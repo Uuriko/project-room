@@ -335,13 +335,15 @@ test("People rail derives presence, one-line status, and Done chips from room wo
   };
   const messages = [{ id: "m1", authorId: "maya", createdAt: "2026-09-12T01:50:00.000Z" }];
   const ctx = { workItems, messages, now };
-  assert.equal(memberPresence(codex, ctx), "online");
+  assert.equal(memberPresence(codex, ctx), "unknown");
   assert.equal(memberPresence(potter, ctx), "online");
-  assert.equal(memberPresence(instinct, ctx), "away");
+  assert.equal(memberPresence(instinct, ctx), "unknown");
   assert.equal(memberPresence(maya, ctx), "online");
   assert.equal(memberPresence(revoked, ctx), "offline");
+  assert.equal(memberPresence({ ...codex, state: "unknown" }, ctx), "unknown");
+  assert.equal(presenceLabel("unknown"), "No live signal");
   assert.equal(memberOnLine(codex, ctx), "Build the first executable Room slice");
-  assert.equal(memberStatus(codex, ctx), "Build the first executable Room slice");
+  assert.equal(memberStatus(codex, ctx), "Assigned: Build the first executable Room slice");
   assert.equal(memberStatus(potter, ctx), "Review the Project Room v0 contract");
   assert.equal(memberStatus(instinct, ctx), "Agent");
   assert.equal(memberDoneChip(codex, ctx)?.label, "Done");
