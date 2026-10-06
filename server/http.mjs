@@ -78,7 +78,7 @@ import { readSpendAllowance, setSpendAllowance } from "./spend-allowance.mjs";
 import { getAgentAutonomyTier, setAgentAutonomyTier } from "./autonomy-tiers.mjs";
 import { listAgentGrants, getAgentCapabilities, issueAgentGrant, revokeAgentGrant } from "./grants.mjs";
 import { listPins, setPin } from "./pins.mjs";
-import { listSquads, getSquad, createSquad, updateSquadMembers, disbandSquad } from "./squads.mjs";
+// (squad roster handlers moved to server/routes/squads.mjs, batch RT)
 import { currentTypists, typingBeats, typingKey } from "./typing.mjs";
 import { renderReceiptsHtml, renderReceiptDetailHtml, receiptsListJson, receiptJson, RECEIPTS_PAGE_CSP } from "./receipts-page.mjs";
 import { queryPublicReceipts, publicReceiptById, listPublicReceiptSitemap, PUBLIC_RECEIPT_ID } from "./receipts-live.mjs";
@@ -3229,13 +3229,6 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const agentGrantsMatch = /^\/api\/rooms\/([^/]{1,384})\/agent-grants$/.exec(url.pathname);
       const agentGrantDeleteMatch = /^\/api\/rooms\/([^/]{1,384})\/agent-grants\/([^/]{1,64})\/([^/]{1,128})$/.exec(url.pathname);
       const agentCapabilitiesMatch = /^\/api\/rooms\/([^/]{1,384})\/agent-capabilities$/.exec(url.pathname);
-      // plan-squads: squad roster reads/writes. squadOneMatch names the squad
-      // by id or name; the members segment is tested first so it is never
-      // mistaken for a squad id.
-      const squadMembersMatch = /^\/api\/rooms\/([^/]{1,384})\/squads\/([^/]{1,128})\/members$/.exec(url.pathname);
-      const squadDisbandMatch = /^\/api\/rooms\/([^/]{1,384})\/squads\/([^/]{1,128})\/disband$/.exec(url.pathname);
-      const squadOneMatch = /^\/api\/rooms\/([^/]{1,384})\/squads\/([^/]{1,128})$/.exec(url.pathname);
-      const squadMatch = /^\/api\/rooms\/([^/]{1,384})\/squads$/.exec(url.pathname);
       // #658: mention lifecycle. The ack template names the message event;
       // settings is a literal segment and is tested first so it is never
       // mistaken for a message event id.
@@ -3417,7 +3410,6 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const mentionEventId = mentionAckMatch ? pathId(mentionAckMatch[2]) : null;
       const savedDeleteMessageId = savedDeleteMatch ? pathId(savedDeleteMatch[2]) : null;
       const deactivateMemberId = memberDeactivateMatch ? pathId(memberDeactivateMatch[2]) : null;
-      const squadId = (squadOneMatch ?? squadMembersMatch ?? squadDisbandMatch) ? pathId((squadOneMatch ?? squadMembersMatch ?? squadDisbandMatch)[2]) : null;
       const route = publicWorkRoomReviewMatch ? "public-work-review" : projectOfferActionMatch ? "project-offers" : match ? (match[2] ?? "") : revokeMatch ? "invitation-revoke" : threadMatch ? "thread" : accessDecideMatch ? "access-decide" : delegationGrantMatch ? "delegation-grant" : delegationRevokeMatch ? "delegation-revoke" : delegationListMatch ? "delegation-list" : ownerDelegateGrantMatch ? "owner-delegate-grant" : ownerDelegateRevokeMatch ? "owner-delegate-revoke" : ownerDelegateListMatch ? "owner-delegate-list"
         : dmConsentDecideMatch ? "dm-consent-decide" : dmConsentBlockMatch ? "dm-consent-block" : dmConsentRevokeMatch ? "dm-consent-revoke"
         : dmConsentUnblockMatch ? "dm-consent-unblock" : publicFaceRotateMatch ? "public-face-rotate"
@@ -3426,8 +3418,6 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         : agentCapabilitiesMatch ? "agent-capabilities"
         : mentionAckMatch ? "mention-ack" : mentionSettingsMatch ? "mention-settings" : savedDeleteMatch ? "saved-delete"
         : memberDeactivateMatch ? "member-deactivate"
-        : squadMembersMatch ? "squad-members" : squadDisbandMatch ? "squad-disband"
-        : squadOneMatch ? "squad" : squadMatch ? "squads"
         : "ownership-transfer";      const selected = roomCredentials(req, url);
       const fence = selected.mode === "account" ? accountBinding(req, route === "stream" ? url : null) : expectedBinding(req);
       const auth = roomAuth(selected, roomId, fence);
@@ -3931,26 +3921,6 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           const result = setPin(store, selected.token, roomId, await body(req), fence);
           return json(res, result.changed ? 201 : 200, stripHiddenPinTargets(result)); // 201 when an event was appended, 200 when the room was already in that state or the requestId replayed
         }
-        reject(405, "method_not_allowed", "Method not allowed");
-      }
-      if (route === "squads" || route === "squad" || route === "squad-members" || route === "squad-disband") {
-        // plan-squads: squad roster (server/squads.mjs). GET lists squads;
-        // POST creates one; /{id} reads; /{id}/members manages the roster;
-        // /{id}/disband retires it. Reads are member-scoped by authenticate.
-        if (route === "squads") {
-          if (req.method === "GET") return json(res, 200, listSquads(store, selected.token, roomId, fence));
-          if (req.method === "POST") return json(res, 201, createSquad(store, selected.token, roomId, await body(req), fence));
-          reject(405, "method_not_allowed", "Method not allowed");
-        }
-        if (route === "squad") {
-          if (req.method === "GET") return json(res, 200, getSquad(store, selected.token, roomId, squadId, fence));
-          reject(405, "method_not_allowed", "Method not allowed");
-        }
-        if (route === "squad-members") {
-          if (req.method === "POST") return json(res, 200, updateSquadMembers(store, selected.token, roomId, squadId, await body(req), fence));
-          reject(405, "method_not_allowed", "Method not allowed");
-        }
-        if (req.method === "POST") return json(res, 200, disbandSquad(store, selected.token, roomId, squadId, fence));
         reject(405, "method_not_allowed", "Method not allowed");
       }
       // Typing heartbeats are served by the route table
