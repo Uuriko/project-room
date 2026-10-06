@@ -160,7 +160,7 @@ const at = now => now ?? new Date().toISOString();
 const requireState = (task, want) => {
   if (task.state !== want) {
     fail("illegal_transition",
-      `cannot move from "${task.state}" to "${want}".`,
+      `cannot leave state "${task.state}" for "${want}".`,
       { from: task.state, to: want, allowed: [...TRANSITIONS[task.state]] });
   }
 };
