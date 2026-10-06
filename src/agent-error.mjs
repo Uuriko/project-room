@@ -1,4 +1,5 @@
 // AX next-step for agents. Existing { error.code, error.message } stays.
+import { createHash, randomBytes } from "node:crypto";
 export const AGENT_ERRORS = "code/message + status/reason/hint/next";
 
 const tool = (name, args) => args ? { tool: name, arguments: args } : { tool: name };
@@ -443,9 +444,40 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
   };
 }
 
+// T179 (johnstab-mcp-500-trace): quotable 5xx trace. Every server 500
+// response body carries errorId (unique per occurrence, stable err_ format)
+// and fingerprint (stable per underlying failure, so retries of the same
+// failure collapse to one id). The errorId is also emitted on one bounded
+// console.warn line, so an id pasted into a bug report is greppable in
+// operator logs. Additive only: non-5xx envelopes are untouched.
+function normalizeForFingerprint(value) {
+  return String(value ?? "")
+    .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, "#")
+    .replace(/\b0x[0-9a-f]+\b/gi, "#")
+    .replace(/\b\d[\d.,_-]*\b/g, "#");
+}
+
+export function errorTrace({ httpStatus = 0, code = "request_failed", message = "", roomId = "", workItemId = "" } = {}) {
+  if (!(httpStatus >= 500)) return null;
+  const fingerprint = createHash("sha256")
+    .update(
+      [httpStatus, publicCode(code), normalizeForFingerprint(message).slice(0, 256), roomId || "", workItemId || ""].join("|"),
+      "utf8",
+    )
+    .digest("hex");
+  return { errorId: `err_${randomBytes(9).toString("base64url")}`, fingerprint };
+}
+
 export function agentErrorBody({ httpStatus, code, message, roomId, workItemId } = {}) {
   const ax = agentErrorAx({ httpStatus, code, message, roomId, workItemId });
-  return { error: { code, message }, status: ax.status, reason: ax.reason, hint: ax.hint, next: ax.next };
+  const body = { error: { code, message }, status: ax.status, reason: ax.reason, hint: ax.hint, next: ax.next };
+  const trace = errorTrace({ httpStatus, code, message, roomId, workItemId });
+  if (trace) {
+    body.errorId = trace.errorId;
+    body.fingerprint = trace.fingerprint;
+    console.warn(`error-trace ${trace.errorId} fp=${trace.fingerprint.slice(0, 16)} status=${httpStatus} code=${publicCode(code)}`);
+  }
+  return body;
 }
 
 export function validAgentNext(next) {
