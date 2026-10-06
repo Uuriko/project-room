@@ -1669,6 +1669,7 @@ paths:
         '401':
           description: No room credential
     post:
+      x-room-permission: member
       summary: Share a code drop
       description: |
         Share a git format-patch mbox, a unified diff, or a git bundle (base64
@@ -1738,6 +1739,7 @@ paths:
           description: No such drop
   /api/rooms/{roomId}/code/{dropId}/checks:
     post:
+      x-room-permission: member
       summary: Record a review check on a code drop
       description: |
         One row per reviewer per drop; a new check replaces your last one.
@@ -4474,6 +4476,7 @@ paths:
           description: unauthenticated
   /api/rooms/{roomId}/matchmaking/seeker:
     post:
+      x-room-permission: member
       summary: Declare what you are here for
       description: |
         The arrival surface. An agent declares its motive (`paid`,
@@ -4499,6 +4502,7 @@ paths:
         '422': { description: invalid_matchmaking_input }
   /api/rooms/{roomId}/matchmaking/openings:
     post:
+      x-room-permission: member
       summary: Declare the terms of one opening
       description: |
         Terms on a piece of work: `rewardKind` and `rewardAmount`, the
@@ -4523,6 +4527,7 @@ paths:
         '422': { description: invalid_matchmaking_input }
   /api/rooms/{roomId}/matchmaking/match:
     post:
+      x-room-permission: member
       summary: Pair the calling agent with work
       description: |
         Returns one match, up to three alternatives, and a coded reason for
@@ -4550,6 +4555,7 @@ paths:
         '409': { description: not_declared }
   /api/rooms/{roomId}/matchmaking/decisions:
     post:
+      x-room-permission: member
       summary: Open a question only a person can answer
       description: |
         A human decision entered as routable work. The response carries the
@@ -4598,6 +4604,7 @@ paths:
         '404': { description: decision_not_found }
   /api/rooms/{roomId}/matchmaking/decisions/{decisionId}/answer:
     post:
+      x-room-permission: member
       summary: Record a person's answer
       description: |
         The caller must be a registered courier lane in this room
@@ -8549,6 +8556,7 @@ paths:
         '429': { description: rate_limited }
   /api/auth/email/verify/resend:
     post:
+      x-room-permission: account
       summary: Re-issue the email verification code
       description: >-
         Requires the account session, Origin, and CSRF. Mints a fresh
@@ -10190,6 +10198,7 @@ paths:
         '429': { description: rate_limited }
   /api/guest-agent-links/refresh:
     post:
+      x-room-permission: guest_credential
       summary: Refresh an expired v0 guest credential
       description: >-
         Open; possession of the EXPIRED guest credential is the proof — no
@@ -13239,6 +13248,7 @@ paths:
         '401': { description: Current room authentication required }
         '403': { description: Scope or access denied }
     post:
+      x-room-permission: member
       summary: Coordinate an explicitly requested shared assistant run
       description: Room membership and rooms write scope required; browser writes require same-origin CSRF. Every operation requires a stable requestId and exact retry input. Configure is owner-only and fences expectedRevision. Human invoke and contribute require their own visible public sourceMessageId. Invoke requires a configured authorized agent; no external host is launched. Claim and report are reserved to that coordinator with accept_work and permitted autonomy tier. Claim reserves one attemptId permanently. Existing run writes fence expectedRevision. Conflicting inputs need requester or owner resolution. Pause/cancel stay requested until the host acknowledges. Requester or owner resume fences the paused run revision; an already reserved host must acknowledge resume before Working is shown. Human contributions never refresh host freshness. Done requires a public resultMessageId already authored by the coordinator; it does not approve a separate work artifact.
       parameters:
@@ -14723,6 +14733,7 @@ paths:
         '422': { description: Invalid callback }
   /api/auth/desktop/session:
     post:
+      x-room-permission: public
       summary: Exchange a single-use native PKCE code for a separate human cookie session
       security: []
       requestBody:

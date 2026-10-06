@@ -35,56 +35,6 @@
     "PATCH",
     "PUT"
   ],
-  "/api/rooms/{roomId}/spend-pricing": [
-    "DELETE",
-    "PATCH",
-    "PUT"
-  ],
-  "/api/rooms/{roomId}/spend-grants": [
-    "DELETE",
-    "GET",
-    "PATCH",
-    "PUT"
-  ],
-  "/api/rooms/{roomId}/spend-grants/{agentId}": [
-    "GET",
-    "PATCH",
-    "POST",
-    "PUT"
-  ],
-  "/api/rooms/{roomId}/spend-grant": [
-    "DELETE",
-    "PATCH",
-    "POST",
-    "PUT"
-  ],
-  "/api/rooms/{roomId}/access-requests": [
-    "DELETE",
-    "PATCH",
-    "PUT"
-  ],
-  "/api/rooms/{roomId}/agents/overview": [
-    "DELETE",
-    "PATCH",
-    "POST",
-    "PUT"
-  ],
-  "/api/rooms/{roomId}/members/me/wants-work": [
-    "PATCH",
-    "POST"
-  ],
-  "/api/rooms/{roomId}/members/me/permission-requests": [
-    "DELETE",
-    "GET",
-    "PATCH",
-    "PUT"
-  ],
-  "/api/rooms/{roomId}/work-claims/retention": [
-    "DELETE",
-    "PATCH",
-    "POST",
-    "PUT"
-  ],
   "/api/account/terms": [
     "DELETE",
     "GET",
