@@ -53,3 +53,5 @@ An Apple Silicon Mac enrolled as a Room machine: [MACHINES.md](MACHINES.md). The
 ## History
 
 Dated plans, checkpoints, and working notes are in [history/](history/). That folder is not maintained.
+
+- [Read-only Board claim pages](WORK-CLAIMS-READ.md) — scoped paging without lifecycle housekeeping.
