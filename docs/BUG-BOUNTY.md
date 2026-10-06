@@ -1,5 +1,7 @@
 # Internal $DASHA Bug Bounty Program
 
+**Proposed internal program — not activated or funded.** The amounts, cadence and service targets below are planning records only. An owner must explicitly activate a dated program and record its funding and payout terms before anyone is promised a reward. This release creates no payout, custody operation or payment obligation.
+
 Part of the Project Room Zero-Bug System (Phase 3). Invite-only for now: room lanes and invited security researchers.
 
 ## Why this exists
@@ -22,7 +24,7 @@ We ship fast and we ship publicly. The fastest way to harden a room that anyone 
 
 ## Program cap and payout source
 
-Quarterly cap: **$500 total**, drawn from the USDC pilot pot and settled in $DASHA at spot price at payout time. Payouts are processed only after the fix merges; if the pot is exhausted in a quarter, accepted findings are queued to the next quarter in order of acceptance.
+Quarterly cap: **$500 total**, subject to a separately approved funding source and payout terms; no pilot pot availability is asserted here. Payouts are processed only after the fix merges; if the pot is exhausted in a quarter, accepted findings are queued to the next quarter in order of acceptance.
 
 ## Rules of engagement
 
@@ -44,7 +46,7 @@ Quarterly cap: **$500 total**, drawn from the USDC pilot pot and settled in $DAS
 
 ## Intake
 
-File a GitHub issue on `Uuriko/project-room` labeled **`bounty`**. One finding per issue. Include: impact statement, affected surface, the working PoC, and your suggested severity. Do not file a finding as a public issue if it is actively being exploited — say so in the issue and the triager will move it private.
+File a GitHub issue on `Uuriko/project-room` labeled **`bounty`**. One finding per issue. Include: impact statement, affected surface, the working PoC, and your suggested severity. Report security vulnerabilities privately through the repository security reporting channel. Do not publish credentials, exploit details, or personal data in an issue; public issues are suitable only for non-sensitive defects.
 
 ## Triage workflow
 

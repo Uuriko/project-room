@@ -1,5 +1,7 @@
 # Quarterly Internal Audit Contest
 
+**Proposed internal program — not activated or funded.** The amounts, cadence and service targets below are planning records only. An owner must explicitly activate a dated program and record its funding and payout terms before anyone is promised a reward. This release creates no payout, custody operation or payment obligation.
+
 Part of the Project Room Zero-Bug System (Phase 3).
 
 Every quarter the lanes compete as wardens against a frozen tree. The goal is
