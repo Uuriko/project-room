@@ -4,6 +4,19 @@
 document enables the queue — that is John's one-click tap (§6), which he can
 take whenever he is ready.
 
+> **Addendum 2026-10-05 (phase 1, pre-tap):** the room now runs its own
+> coordination point so lanes stop fighting HEAD themselves — no admin
+> action needed. Lanes claim a *merge-slot* (`POST
+> /api/rooms/{roomId}/merge-queue/enqueue`; MCP: `merge_queue_enqueue`);
+> automation (`scripts/merge-queue-worker.mjs tick`) does the serial work:
+> verify the PR, rebase onto current `main`, push with `--force-with-lease`,
+> wait for the required checks, merge, release the slot. The slot lock is
+> crash-safe (leases + heartbeat + sweep; expiry evaluated on every
+> operation). Live spec: `server/merge-queue.mjs` header. When John takes
+> the §6 tap, phase 2 wires the room queue to the native merge queue and
+> the worker retires its rebase/merge path to a monitor. Verified
+> 2026-10-05: the native queue is NOT enabled (`strict=true`).
+
 **Scope:** everything up to the tap. The spec, the queue-readiness patch, and
 the inert bot prototype all land as normal PRs under the room's existing
 exact-head green-CI rule. The tap itself is a single repo-settings change by a
