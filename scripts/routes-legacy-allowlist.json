@@ -1983,6 +1983,14 @@
     },
     {
       "method": "GET",
+      "path": "/api/rooms/{id}/files/{id}"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/files/{id}"
+    },
+    {
+      "method": "GET",
       "path": "/api/rooms/{id}/files/{id}/commit"
     },
     {
@@ -3632,6 +3640,82 @@
     {
       "method": "HEAD",
       "path": "/project-room/SKILL.md"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/matchmaking/seeker"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/matchmaking/seeker"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/matchmaking/openings"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/matchmaking/openings"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/matchmaking/match"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/matchmaking/match"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/matchmaking/decisions"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/matchmaking/decisions"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/matchmaking/decisions/{id}"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/matchmaking/decisions/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/matchmaking/decisions/{id}/answer"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/matchmaking/decisions/{id}/answer"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/matchmaking/seeker"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/matchmaking/openings"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/matchmaking/match"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/matchmaking/decisions"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/matchmaking/decisions/{id}/answer"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/files/{id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/matchmaking/decisions/{id}"
     }
   ],
   "routes": [
@@ -7038,6 +7122,90 @@
     {
       "method": "HEAD",
       "path": "/project-room/SKILL.md"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/matchmaking/seeker"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/matchmaking/seeker"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/matchmaking/openings"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/matchmaking/openings"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/matchmaking/match"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/matchmaking/match"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/matchmaking/decisions"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/matchmaking/decisions"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/matchmaking/decisions/{id}"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/matchmaking/decisions/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/matchmaking/decisions/{id}/answer"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/matchmaking/decisions/{id}/answer"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/matchmaking/seeker"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/matchmaking/openings"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/matchmaking/match"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/matchmaking/decisions"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/matchmaking/decisions/{id}/answer"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/files/{id}"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/files/{id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/files/{id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/matchmaking/decisions/{id}"
     }
   ]
 }

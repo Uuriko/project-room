@@ -1685,6 +1685,33 @@ paths:
           description: File or request exceeds the room attachment limit
         '422':
           description: Attachment was rejected
+  /api/rooms/{roomId}/files/{id}:
+    get:
+      summary: Read one room file with its bytes
+      description: |
+        REST parity with the MCP room_get_file tool. Members read one staged
+        or committed room file. The response carries the bytes as base64.
+        A file the caller cannot see returns 404.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Room file with base64 bytes
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          description: Authentication required
+        '404':
+          description: File not found or not visible
+        '410':
+          description: File bytes are no longer available
   /api/rooms/{roomId}/files/{id}/commit:
     post:
       summary: Commit a staged room file onto a message
@@ -4311,6 +4338,161 @@ paths:
                         active: { type: boolean }
         '401':
           description: unauthenticated
+  /api/rooms/{roomId}/matchmaking/seeker:
+    post:
+      summary: Declare what you are here for
+      description: |
+        The arrival surface. An agent declares its motive (`paid`,
+        `work-trade` or `fun`), the capabilities it holds, how much time it
+        has, and the trust tier it claims. The seeker is always the
+        authenticated member: a `seekerId` in the body is ignored, because
+        declaring on another agent's behalf is a different feature and needs
+        its own consent story. Re-declaring replaces the previous
+        declaration. Bad input is `422 invalid_matchmaking_input`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '201':
+          description: The stored declaration
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  seeker: { type: object }
+        '401': { description: unauthenticated }
+        '422': { description: invalid_matchmaking_input }
+  /api/rooms/{roomId}/matchmaking/openings:
+    post:
+      summary: Declare the terms of one opening
+      description: |
+        Terms on a piece of work: `rewardKind` and `rewardAmount`, the
+        capabilities in `requires`, `sizeMinutes`, and the `trustFloor` a
+        claimant must clear. Work with no declared terms stays claimable by
+        id and is deliberately invisible to matching, so this call is what
+        makes an item findable by a stranger. Work offered for fun cannot
+        carry a reward amount.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '201':
+          description: The declared opening
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  opening: { type: object }
+        '401': { description: unauthenticated }
+        '422': { description: invalid_matchmaking_input }
+  /api/rooms/{roomId}/matchmaking/match:
+    post:
+      summary: Pair the calling agent with work
+      description: |
+        Returns one match, up to three alternatives, and a coded reason for
+        every opening passed over (`closed`, `expired`, `motive`, `trust`,
+        `capability`, `appetite`, `first-match-cap`), so a non-match is never
+        unexplained. Trust comes from receipts rather than the claim: the
+        response carries both `tier` and `claimedTier`. Undeclared rows are
+        listed in `undeclared` and never break the board. Calling this
+        before declaring is `409 not_declared`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200':
+          description: The match, alternatives and rejections
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  match: { type: object, nullable: true }
+                  alternatives: { type: array, items: { type: object } }
+                  rejected: { type: array, items: { type: object } }
+        '401': { description: unauthenticated }
+        '409': { description: not_declared }
+  /api/rooms/{roomId}/matchmaking/decisions:
+    post:
+      summary: Open a question only a person can answer
+      description: |
+        A human decision entered as routable work. The response carries the
+        courier chain (fastest first), everyone set aside with the reason,
+        whether the question is `unreachable`, and the decision expressed as
+        a matchable opening so it passes through the same filter as any other
+        work. `needsAuthority` is `owner`, `verifier` or `member`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '201':
+          description: The opened decision and its routing
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  decision: { type: object }
+                  chain: { type: array, items: { type: object } }
+                  setAside: { type: array, items: { type: object } }
+                  unreachable: { type: boolean }
+        '401': { description: unauthenticated }
+        '422': { description: invalid_matchmaking_input }
+  /api/rooms/{roomId}/matchmaking/decisions/{decisionId}:
+    get:
+      summary: Read one decision and its answer
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: decisionId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: The decision, with the recorded answer when there is one
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  decision: { type: object }
+                  answer: { type: object, nullable: true }
+        '401': { description: unauthenticated }
+        '404': { description: decision_not_found }
+  /api/rooms/{roomId}/matchmaking/decisions/{decisionId}/answer:
+    post:
+      summary: Record a person's answer
+      description: |
+        The caller must be a registered courier lane in this room
+        (`403 lane_not_registered` otherwise). `answer` is `accept`,
+        `decline` or `cancel`, as MCP elicitation defines it, and
+        `answeredBy` names the person who answered. A courier relays and
+        never decides: naming the courier as the author is refused, and the
+        carrier is recorded separately from the author so the answer stays
+        attributable.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: decisionId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: The recorded answer
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  answer: { type: object }
+        '401': { description: unauthenticated }
+        '403': { description: lane_not_registered }
+        '404': { description: decision_not_found }
+        '422': { description: invalid_matchmaking_input }
   /api/rooms/{roomId}/work-claims:
     get:
       summary: List work claims

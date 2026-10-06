@@ -10,7 +10,7 @@ const FORBIDDEN = /Bearer |ROOM_AGENT_TOKEN|sk-|password|@gmail|John |Potter |Uu
 test("unlisted entry opens the isolated Room without forwarding input or embedding credentials", async () => {
   const response = roomEntry(new Request("https://www.trydemigod.com/room?return=untrusted"));
   assert.equal(response.status, 200);
-  assert.equal(response.headers.get("X-Robots-Tag"), "noindex, nofollow");
+  assert.equal(response.headers.get("X-Robots-Tag"), "index, follow");
   assert.equal(response.headers.get("Referrer-Policy"), "no-referrer");
   const html = await response.text();
   assert.match(html, /href="https:\/\/room.trydemigod.com"/);
@@ -67,10 +67,10 @@ test("unlisted entry opens the isolated Room without forwarding input or embeddi
   assert.doesNotMatch(html, /Genie/);
 });
 
-test("/project-room is the same noindex landing", async () => {
+test("/project-room is the same indexable landing", async () => {
   const response = roomEntry(new Request("https://www.trydemigod.com/project-room"));
   assert.equal(response.status, 200);
-  assert.equal(response.headers.get("X-Robots-Tag"), "noindex, nofollow");
+  assert.equal(response.headers.get("X-Robots-Tag"), "index, follow");
   assert.match(await response.text(), /Open Project Room/);
 });
 

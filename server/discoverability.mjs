@@ -172,6 +172,14 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   ...["decide", "verify"].map(action => route(`/api/rooms/{roomId}/public-work/receipts/{receiptId}/${action}`, ["POST"], "room-member", "Record an explicit current-authority review over immutable evidence; no payment or claim reopening.", `${action}PublicWorkReview`, { publicReview: action })),
   route("/api/rooms/{roomId}/public-work/receipts/{receiptId}/follow-up", ["POST"], "room-member", "Owner explicitly publishes one linked unpaid follow-up; no automatic claim or private feedback publication.", "openPublicWorkFollowUp", { publicReview: "follow-up" }),
   route("/api/rooms/{roomId}/project-offers/{offerId}/claims", ["POST"], "room-member", "Owner-only: explicitly enable outside volunteer claims for declared repository paths.", "enablePublicWorkClaims", { publicWork: "enable" }),
+  // Matchmaking: the arrival surface. Declaring is separate from matching on
+  // purpose, so undeclared work stays claimable by id and invisible here.
+  route("/api/rooms/{roomId}/matchmaking/seeker", ["POST"], "room-credential", "Declare what you are here for: motive, capabilities, appetite. The seeker is always the caller.", "declareSeeker"),
+  route("/api/rooms/{roomId}/matchmaking/openings", ["POST"], "room-credential", "Declare the terms of one opening: reward kind and amount, capabilities required, size, trust floor.", "declareOpening"),
+  route("/api/rooms/{roomId}/matchmaking/match", ["POST"], "room-credential", "Pair the calling agent with one opening, with alternatives and a coded reason for everything passed over.", "matchWork"),
+  route("/api/rooms/{roomId}/matchmaking/decisions", ["POST"], "room-credential", "Open a question only a person can answer, and route it to the couriers who can reach one.", "openDecision"),
+  route("/api/rooms/{roomId}/matchmaking/decisions/{decisionId}", ["GET"], "room-credential", "Read one decision and its recorded answer.", "getDecision"),
+  route("/api/rooms/{roomId}/matchmaking/decisions/{decisionId}/answer", ["POST"], "room-credential", "Record a person's answer. The courier is the carrier and the human is the author; the two are never merged.", "answerDecision"),
   // Hosted MCP (JSON-RPC over POST).
   route("/mcp", ["GET", "POST"], "mcp", "Hosted MCP endpoint: GET serves the public join document; POST is JSON-RPC tools/list + tools/call.", "postMcp",
     { operationIds: { GET: "getMcpJoinDoc", POST: "postMcp" } }),

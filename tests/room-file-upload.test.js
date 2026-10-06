@@ -65,4 +65,14 @@ test("room file routes stage a composer upload and commit it onto a message", as
 
   const listed = await (await request("/api/rooms/commons/files")).json();
   assert.equal(listed.files.some(file => file.id === "file-1" && file.messageId === "msg-1" && file.state === "committed"), true);
+
+  // REST parity with MCP room_get_file: read one file's bytes.
+  const fetched = await request("/api/rooms/commons/files/file-1");
+  assert.equal(fetched.status, 200);
+  const fetchedBody = await fetched.json();
+  assert.equal(fetchedBody.attachment.encoding, "base64");
+  assert.equal(Buffer.from(fetchedBody.attachment.data, "base64").toString(), "hello room");
+  assert.equal((await request("/api/rooms/commons/files/nope-1")).status, 404);
+  assert.equal((await request("/api/rooms/commons/files/file-1", { token: null })).status, 401);
+  assert.equal((await request("/api/rooms/commons/files/file-1", { method: "DELETE" })).status, 405);
 });
