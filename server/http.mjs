@@ -4365,8 +4365,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return json(res, 200, store.threadMutes.set(selected.token, roomId, data, fence));
       }
       // Human browser push. One fixed default (mentions and DMs). GET returns
-      // the VAPID public key when delivery is configured. POST stores the
-      // browser subscription. There is no preference body.
+      // the VAPID public key when delivery is configured, plus the caller's
+      // push-channel preferences (both kinds on unless they opted out).
+      // POST stores the browser subscription. PATCH sets push preferences:
+      // { preferences: { mention?, dm? } }, partial merge, booleans only.
       if (route === "human-push" && req.method === "GET") {
         const params = url.searchParams;
         if ([...params.keys()].some(key => key !== "auth" || params.getAll(key).length !== 1)) reject(422, "invalid_human_push", "No selection on this route");
@@ -4374,6 +4376,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (route === "human-push" && req.method === "POST") {
         return json(res, 200, store.humanPush.save(selected.token, roomId, await body(req), fence));
+      }
+      if (route === "human-push" && req.method === "PATCH") {
+        return json(res, 200, store.humanPush.setPreferences(selected.token, roomId, await body(req), fence));
       }
       if (route === "human-push" && req.method === "DELETE") {
         return json(res, 200, store.humanPush.remove(selected.token, roomId, await body(req), fence));

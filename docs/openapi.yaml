@@ -12552,14 +12552,29 @@ paths:
       description: >-
         Whether browser push is configured for this server, and the VAPID
         public key when it is. The default is fixed: mentions and direct
-        messages. The response has no preference levels and no quiet hours.
+        messages. The response also carries the caller's push-channel
+        preferences (per-kind on/off, default on); no quiet hours.
         Human members only.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       responses:
         '401': { description: unauthenticated }
-        '200': { description: "{ roomId, configured, default: mentions_and_dms, publicKey? } plus the viewer ownership envelope" }
+        '200': { description: "{ roomId, configured, default: mentions_and_dms, preferences: { mention, dm }, publicKey? } plus the viewer ownership envelope" }
         '403': { description: human_push_humans_only }
+    patch:
+      summary: Set this member's push-channel preferences
+      description: >-
+        Body is `{ preferences: { mention?, dm? } }`, a partial merge over the
+        stored row; each value is true or false. The switches gate delivery:
+        a kind set false is never pushed to this member in this room. Human
+        members only. Preferences store even when push is not configured.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, preferences, configured } plus the viewer ownership envelope" }
+        '403': { description: human_push_humans_only }
+        '422': { description: invalid_human_push_preferences }
     post:
       summary: Store this browser's push subscription
       description: >-
