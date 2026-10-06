@@ -130,12 +130,27 @@ export function installHumanExperience({ getState, getSession, client, notice, o
 
   };
   const resultDialog = document.createElement('dialog'); resultDialog.id = 'human-share-result'; resultDialog.setAttribute('aria-labelledby', 'human-share-title');
-  resultDialog.innerHTML = '<form><div class="dialog-head"><h2 id="human-share-title">Share result</h2></div><p>Write the result here, then review it before saving. It will be shared with this room.</p><label>Result<textarea name="body" rows="5" maxlength="4000" required></textarea></label><p id="human-share-error" role="alert"></p><div class="form-actions"><button type="button" data-close-share class="button ghost">Cancel</button><button type="submit" class="button primary">Review result</button></div><details><summary>Use an existing draft</summary><div id="human-existing-drafts"></div></details></form>';
+  resultDialog.innerHTML = '<form><div class="dialog-head"><h2 id="human-share-title">Share result</h2></div><p>Write the result here, then review it before saving. It will be shared with this room.</p><label>Result<textarea name="body" rows="5" maxlength="4000" required></textarea></label><p id="human-share-error" role="alert"></p><button type="button" id="human-share-refresh" class="button ghost" hidden>Review updated task</button><div class="form-actions"><button type="button" data-close-share class="button ghost">Cancel</button><button type="submit" class="button primary">Review result</button></div><details><summary>Use an existing draft</summary><div id="human-existing-drafts"></div></details></form>';
   document.body.append(resultDialog); let resultEntry = null;
-  resultDialog.querySelector('[data-close-share]').onclick = () => resultDialog.close();
+  resultDialog.querySelector('[data-close-share]').onclick = () => { if (resultEntry?.rejected) resultEntry = null; resultDialog.close(); };
+  $('#human-share-refresh').onclick = async () => {
+    const entry = resultEntry, stamp = key(); if (!entry?.rejected || entry.boundary !== stamp) return;
+    const review = $('#human-share-refresh'); review.disabled = true;
+    try {
+      await client.refresh(); if (stamp !== key() || resultEntry !== entry) return;
+      const item = getState().workItems[entry.workId];
+      if (!item || item.supersededBy) { $('#human-share-error').textContent = 'This task is no longer available. Your draft is kept here; cancel to discard it.'; return; }
+      entry.revision = item.revision; entry.command = null; entry.rejected = false;
+      resultDialog.querySelector('textarea').disabled = false;
+      const submit = resultDialog.querySelector('[type=submit]'); submit.disabled = false; submit.textContent = 'Review result'; review.hidden = true;
+      $('#human-share-error').textContent = `Updated task: ${item.title}. Review your draft, then choose Review result to post it against the current task.`;
+      resultDialog.querySelector('textarea').focus();
+    } catch (failure) { if (stamp === key() && resultEntry === entry) $('#human-share-error').textContent = failure.message; }
+    finally { review.disabled = false; }
+  };
   resultDialog.querySelector('form').onsubmit = async event => {
     event.preventDefault(); const entry = resultEntry, stamp = key(), body = resultDialog.querySelector('textarea').value;
-    if (!entry || entry.boundary !== stamp) return;
+    if (!entry || entry.boundary !== stamp || entry.rejected) return;
     const button = resultDialog.querySelector('[type=submit]'); button.disabled = true;
     entry.command ??= { id: crypto.randomUUID(), type: 'message.posted', data: { messageId: crypto.randomUUID(), workItemId: entry.workId,
       packetId: crypto.randomUUID(), basisRevision: entry.revision, body } };
@@ -144,10 +159,14 @@ export function installHumanExperience({ getState, getSession, client, notice, o
       const messageId = entry.command.data.messageId; resultEntry = null; resultDialog.close(); selectResult(entry.workId, messageId);
     } catch (failure) {
       if (stamp !== key()) return;
-      $('#human-share-error').textContent = failure.message;
+      entry.rejected = failure.status >= 400 && failure.status < 500;
+      $('#human-share-error').textContent = entry.rejected
+        ? `Draft was not saved: ${failure.message}. Review the updated task before posting again, or cancel to discard this draft.`
+        : `Draft not confirmed: ${failure.message}. Retry preserves the original draft.`;
       resultDialog.querySelector('textarea').disabled = true;
-      button.textContent = 'Retry original draft';
-    } finally { button.disabled = false; }
+      $('#human-share-refresh').hidden = !entry.rejected;
+      button.textContent = entry.rejected ? 'Review result' : 'Retry original draft';
+    } finally { button.disabled = Boolean(resultEntry === entry && entry.rejected); }
   };
   $('#human-existing-drafts').onclick = event => {
     const button = event.target.closest('[data-result-draft]'); if (!button || resultEntry?.boundary !== key()) return;
@@ -186,7 +205,7 @@ export function installHumanExperience({ getState, getSession, client, notice, o
       if (!resultEntry?.command || resultEntry.workId !== item.id || resultEntry.boundary !== key()) {
         resultEntry = { workId: item.id, revision: item.revision, boundary: key(), command: null };
         resultDialog.querySelector('form').reset(); resultDialog.querySelector('textarea').disabled = false;
-        resultDialog.querySelector('[type=submit]').textContent = 'Review result'; $('#human-share-error').textContent = '';
+        resultDialog.querySelector('[type=submit]').textContent = 'Review result'; resultDialog.querySelector('[type=submit]').disabled = false; $('#human-share-refresh').hidden = true; $('#human-share-error').textContent = '';
       }
       const drafts = getState().messages.filter(m => m.workItemId === item.id && !m.deletedAt && !m.toMemberId);
       $('#human-existing-drafts').innerHTML = drafts.map(m => `<button type="button" class="text-button" data-result-draft="${esc(m.id)}">${esc(m.body.slice(0,100))}</button>`).join('') || '<p>No drafts yet.</p>';

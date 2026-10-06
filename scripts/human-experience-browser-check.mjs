@@ -54,9 +54,42 @@ test('two humans share public assistant prompts, constraints, confirmed activity
   const resultTask = owner.locator('[data-work-record-id="human-result-task"]');
   await resultTask.locator('details.work-details > summary').click();
   await resultTask.locator('[data-action="complete"]').click();
-  await owner.locator('#human-share-result textarea').fill('A result written by a human, without protocol fields.');
+  const humanResultBody = 'A result written by a human, without protocol fields.';
+  await owner.locator('#human-share-result textarea').fill(humanResultBody);
+  // The task changes after opening the result editor. The real server rejects
+  // the old proposal revision; recovery must preserve text and require review.
+  f.store.command(f.keys.owner,'commons',{id:crypto.randomUUID(),type:'work.blocked',data:{workItemId:'human-result-task',expectedRevision:2,reason:'New requirement',nextAction:'Review the updated task'}});
+  f.store.command(f.keys.owner,'commons',{id:crypto.randomUUID(),type:'work.started',data:{workItemId:'human-result-task',expectedRevision:3,resolvedBlocker:'Requirement reviewed'}});
+  const rejectedDraft = owner.waitForResponse(response => response.url().endsWith('/commands') && response.request().postDataJSON()?.data?.body === humanResultBody);
+  await owner.locator('#human-share-result button[type=submit]').click();
+  assert.equal((await rejectedDraft).status(),409);
+  assert.equal(f.store.room('commons').state.messages.filter(m=>m.body===humanResultBody).length,0);
+  await owner.locator('#human-share-refresh').waitFor({state:'visible',timeout:3000});
+  assert.equal(await owner.locator('#human-share-result textarea').inputValue(),humanResultBody);
+  await owner.locator('#human-share-refresh').click();
+  await owner.waitForFunction(()=>!document.querySelector('#human-share-result textarea').disabled);
+  assert.equal(await owner.locator('#human-share-result textarea').isEnabled(),true);
+  assert.equal(await owner.locator('#human-share-result textarea').inputValue(),humanResultBody);
+  // A committed draft with a lost response is a different case: retry the
+  // same immutable command, even if transport confirmation is unavailable.
+  const draftCommands = [];
+  await owner.route('**/api/rooms/commons/commands',async route=>{
+    const command=route.request().postDataJSON();
+    if(command?.data?.body===humanResultBody) {
+      draftCommands.push(command);
+      if(draftCommands.length===1) { await route.fetch(); await route.abort(); return; }
+    }
+    await route.continue();
+  });
+  await owner.locator('#human-share-result button[type=submit]').click();
+  await owner.locator('#human-share-result button[type=submit]').filter({hasText:'Retry original draft'}).waitFor();
+  assert.equal(await owner.locator('#human-share-refresh').isVisible(),false);
   await owner.locator('#human-share-result button[type=submit]').click();
   await owner.locator('#action-dialog').waitFor({state:'visible'});
+  await owner.unroute('**/api/rooms/commons/commands');
+  assert.equal(draftCommands.length,2); assert.deepEqual(draftCommands[1],draftCommands[0]);
+  assert.equal(draftCommands[0].data.basisRevision,4);
+  assert.equal(f.store.room('commons').state.messages.filter(m=>m.body===humanResultBody).length,1);
   assert.equal(await owner.locator('#action-fields [name=signedEvidence]').count(),0);
   await owner.locator('#action-fields [name=producerId]').selectOption('owner');
   await owner.locator('#action-fields [name=summary]').fill('Simple human result');
