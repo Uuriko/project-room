@@ -442,6 +442,12 @@ export async function seedRecoveryCoverage(f) {
     .run(createHash("sha256").update("project-room-public-report:recovery").digest("hex"), f.now());
   f.store.db.prepare("INSERT INTO public_unpublish (kind, target, at, by_account) VALUES ('room', 'recovery-public-room', ?, ?)")
     .run(f.now(), termsAccount.id);
+  // plan-squads: one squad row so the recovery audit and cold-start budget
+  // see the squads table with substantive fixture data.
+  f.store.db.prepare(`INSERT INTO squads
+    (room_id, squad_id, name, goal, members_json, channel_message_id, owner_id, state, created_at, updated_at)
+    VALUES ('commons', 'sq_recovery0001', 'recovery-crew', 'recover the room', '["owner"]', NULL, 'owner', 'active', ?, ?)`)
+    .run(f.now(), f.now());
 
   return {
     runRequest, runInput, offerRecords: f.store.projectOffers.ownerList("commons", "owner"),
