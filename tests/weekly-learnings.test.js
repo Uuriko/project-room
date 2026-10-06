@@ -7,6 +7,9 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   weekId,
   lessonFromPr,
@@ -14,6 +17,9 @@ import {
   parseQueue,
   isMaterial,
   weekAlreadySent,
+  watermarkDecision,
+  readWatermark,
+  commitWatermark,
   renderDigest,
 } from "../scripts/weekly-learnings.mjs";
 
@@ -157,6 +163,66 @@ describe("weekAlreadySent", () => {
   it("handles an empty or missing log", () => {
     assert.equal(weekAlreadySent("", "2026-W41"), false);
     assert.equal(weekAlreadySent(null, "2026-W41"), false);
+  });
+});
+
+describe("watermarkDecision", () => {
+  it("preserves the partial cursor and original window when truncated", () => {
+    const d = watermarkDecision({
+      head: 8000,
+      truncated: true,
+      posted: false,
+      windowStartMs: 1000,
+      nowMs: 9000,
+    });
+    assert.deepEqual(d, { write: true, after: 8000, windowStartMs: 1000 });
+  });
+
+  it("advances the cursor and starts a new window only after a successful post", () => {
+    const d = watermarkDecision({
+      head: 9000,
+      truncated: false,
+      posted: true,
+      windowStartMs: 1000,
+      nowMs: 9500,
+    });
+    assert.deepEqual(d, { write: true, after: 9000, windowStartMs: 9500 });
+  });
+
+  it("writes nothing on dry run, skip, or failed post", () => {
+    for (const posted of [false]) {
+      const d = watermarkDecision({
+        head: 9000,
+        truncated: false,
+        posted,
+        windowStartMs: 1000,
+        nowMs: 9500,
+      });
+      assert.deepEqual(d, { write: false });
+    }
+  });
+});
+
+describe("readWatermark / commitWatermark", () => {
+  it("round-trips the cursor", () => {
+    const dir = mkdtempSync(join(tmpdir(), "wl-wm-"));
+    try {
+      assert.equal(readWatermark(dir), null);
+      commitWatermark(dir, 4242, 1234567890);
+      assert.deepEqual(readWatermark(dir), { after: 4242, windowStartMs: 1234567890 });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns null for a corrupt watermark file", () => {
+    const dir = mkdtempSync(join(tmpdir(), "wl-wm-"));
+    try {
+      writeFileSync(join(dir, "room-watermark.json"), "not json{");
+      assert.equal(readWatermark(dir), null);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

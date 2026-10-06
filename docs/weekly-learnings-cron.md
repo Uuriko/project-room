@@ -27,8 +27,14 @@ like `wave-seeder` and `verified-digest`):
   each section capped, whole post hard-capped at 4000 chars.
 - Anti-spam: skips the week when total signal items < 3. Skips when the
   ISO week is already in the sent log — a week is never posted twice.
+- Watermark policy (fail-closed): the room cursor is committed ONLY after
+  a successful post. Dry runs, skips, and failed posts never advance it —
+  dry runs are strictly read-only. If the event walk hits the page cap
+  with more events pending, the run fails without posting and preserves
+  the partial cursor + original window, so the next run resumes the walk
+  instead of permanently skipping the rest.
 - State dir (default `~/.config/weekly-learnings/`): `sent.log`
-  (posted weeks) and `room-watermark.json` (room event cursor).
+  (posted weeks) and `room-watermark.json` (`{after, windowStartMs}`).
   Override with `WEEKLY_LEARNINGS_STATE_DIR`.
 
 ## Manual runs

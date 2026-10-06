@@ -49,7 +49,7 @@ const MAX_LEARNED = 10;
 const MAX_DONE = 6;
 const ONE_LINE_CAP = 160;
 const PR_FETCH_LIMIT = 200;
-const EVENT_PAGE_LIMIT = 100; // pages of 100 events; covers ~10k events/week of bursts
+const EVENT_PAGE_LIMIT = 200; // pages of 100 events; hitting it fails closed (see below)
 
 function oneLine(s, cap = ONE_LINE_CAP) {
   const t = String(s ?? "")
@@ -146,6 +146,52 @@ export function weekAlreadySent(sentLog, id) {
   return String(sentLog)
     .split("\n")
     .some((line) => line.split("\t")[0] === id);
+}
+
+/**
+ * Watermark commit policy (pure contract; review finding: never advance the
+ * cursor past signals that were not consumed).
+ *
+ * - truncated (hit the page cap with more events pending): preserve the
+ *   partial head AND the original window start, so the next run resumes the
+ *   walk with the same window instead of permanently skipping the rest.
+ * - posted (digest posted successfully): advance to the walk head and start
+ *   the next window now.
+ * - otherwise (dry run, skip, failed post, already sent): write nothing.
+ *   Dry runs are strictly read-only.
+ */
+export function watermarkDecision({ head, truncated, posted, windowStartMs, nowMs }) {
+  if (truncated) {
+    return { write: true, after: head, windowStartMs };
+  }
+  if (posted) {
+    return { write: true, after: head, windowStartMs: nowMs };
+  }
+  return { write: false };
+}
+
+/** Read the persisted room cursor, or null on a first run. */
+export function readWatermark(stateDir) {
+  const wmPath = join(stateDir, "room-watermark.json");
+  if (!existsSync(wmPath)) return null;
+  try {
+    const wm = readJson(wmPath);
+    const after = Number(wm.after);
+    const windowStartMs = Number(wm.windowStartMs);
+    if (!Number.isFinite(after) || !Number.isFinite(windowStartMs)) return null;
+    return { after, windowStartMs };
+  } catch {
+    return null;
+  }
+}
+
+/** Persist the room cursor. Called only via watermarkDecision. */
+export function commitWatermark(stateDir, after, windowStartMs) {
+  mkdirSync(stateDir, { recursive: true });
+  writeFileSync(
+    join(stateDir, "room-watermark.json"),
+    JSON.stringify({ after, windowStartMs, at: new Date().toISOString() }) + "\n"
+  );
 }
 
 function bulletList(items, max, total = items.length) {
@@ -290,22 +336,17 @@ function countMergedPrs(repo, sinceDate) {
 }
 
 /**
- * Room message events since the stored watermark (or the window start on a
- * first run). Walks the after-cursor, limit=100 per page (the API's cap).
+ * Room message events for the window. Walks the after-cursor, limit=100 per
+ * page (the API's cap). Pure read: never touches the watermark — the caller
+ * commits it via watermarkDecision() only after a successful post.
+ * Returns { events, head, truncated }.
  */
-async function fetchRoomEvents(room, sinceMs, stateDir) {
+async function fetchRoomEvents(room, sinceMs, startAfter) {
   const token = roomToken();
-  const wmPath = join(stateDir, "room-watermark.json");
-  let after = 0;
-  if (existsSync(wmPath)) {
-    try {
-      after = Number(readJson(wmPath).after) || 0;
-    } catch {
-      after = 0;
-    }
-  }
+  let after = Number(startAfter) || 0;
   const events = [];
   let head = after;
+  let truncated = false;
   for (let page = 0; page < EVENT_PAGE_LIMIT; page++) {
     const qs = `limit=100${after ? `&after=${after}` : ""}`;
     const data = await httpsJson({
@@ -326,10 +367,9 @@ async function fetchRoomEvents(room, sinceMs, stateDir) {
     }
     after = head;
     if (!data.hasMore) break;
+    if (page === EVENT_PAGE_LIMIT - 1) truncated = true;
   }
-  mkdirSync(stateDir, { recursive: true });
-  writeFileSync(wmPath, JSON.stringify({ after: head, at: new Date().toISOString() }) + "\n");
-  return events;
+  return { events, head, truncated };
 }
 
 /** Post one message to the room as the owner identity. */
@@ -418,8 +458,33 @@ async function main() {
   }
 
   let events = [];
+  let roomHead = 0;
+  // The window start persists across runs when a walk truncates, so a moved
+  // clock never filters out events a previous run fetched but never posted.
+  const storedWm = readWatermark(args.stateDir);
+  const windowStartMs = args.since
+    ? sinceDate.getTime()
+    : storedWm?.windowStartMs ?? sinceDate.getTime();
   try {
-    events = await fetchRoomEvents(args.room, sinceDate.getTime(), args.stateDir);
+    const walk = await fetchRoomEvents(args.room, windowStartMs, storedWm?.after ?? 0);
+    events = walk.events;
+    roomHead = walk.head;
+    if (walk.truncated) {
+      // Fail closed: preserve the partial cursor + original window so the
+      // next run resumes the walk instead of permanently skipping the rest.
+      const d = watermarkDecision({
+        head: roomHead,
+        truncated: true,
+        posted: false,
+        windowStartMs,
+        nowMs: now.getTime(),
+      });
+      commitWatermark(args.stateDir, d.after, d.windowStartMs);
+      die(
+        `room event walk hit the ${EVENT_PAGE_LIMIT}-page cap with more events pending; ` +
+          `partial cursor preserved, rerun to continue (raise the cap if this recurs)`
+      );
+    }
   } catch (e) {
     die(`room events fetch failed: ${e.message}`);
   }
@@ -444,11 +509,22 @@ async function main() {
 
   if (!args.post || args.dryRun) {
     console.log(digest);
-    if (!args.post) console.error("weekly-learnings: dry run (pass --post to post)");
+    if (!args.post)
+      console.error("weekly-learnings: dry run (pass --post to post; watermark untouched)");
     return;
   }
 
   await postToRoom(args.room, digest);
+  // Commit the room cursor only after a successful post: a failed post or a
+  // dry run must never advance past unconsumed signals.
+  const d = watermarkDecision({
+    head: roomHead,
+    truncated: false,
+    posted: true,
+    windowStartMs,
+    nowMs: now.getTime(),
+  });
+  if (d.write) commitWatermark(args.stateDir, d.after, d.windowStartMs);
   appendFileSync(sentPath, `${id}\t${now.toISOString()}\t${digest.length} chars\n`);
   console.error(`weekly-learnings: posted ${digest.length} chars for week ${id}`);
 }
