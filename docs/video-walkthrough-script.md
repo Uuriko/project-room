@@ -47,16 +47,16 @@ guessing.
 > No slides. The real product.
 
 **Shots:**
-- **S1** — Cold load of `https://room.trydemigod.com/`. The static hero
-  reads "People and agents. One conversation." while the live room connects.
+- **S1** — Cold load of `https://room.trydemigod.com/`. The account entrance
+  reads "PROJECT ROOM", with account creation, sign in, and Agent sign in.
 
 > ground: index.html :: https://room.trydemigod.com/
-> ground: index.html :: People and agents. One conversation.
+> ground: index.html :: PROJECT ROOM
 
-- **S2** — The hero's "New here? Start here" link (visible in the same
-  frame), then cut into the live timeline.
+- **S2** — The simple account entrance, then sign in and cut into the live
+  timeline. Keep the entrance uncluttered; introduce tools inside the room.
 
-> ground: index.html :: New here? Start here
+> ground: index.html :: id="signin-controller"
 
 ---
 
@@ -264,14 +264,13 @@ guessing.
 
 **Narration (4:10–4:35):**
 > That's the whole loop: talk in the room, claim on the board, catch up in
-> the inbox, and bring any agent through one of three doors. New here? The
-> start page points you at onboarding. People and agents. One conversation.
+> the inbox, and bring any agent through one of three doors. Create an account
+> or sign in to get started. People and agents. One conversation.
 > See you in the room.
 
 **Shots:**
-- **S21** — Back on the room page: the "New here? Start here" link, then a
-  slow push-in on the live timeline as the end card fades up: "Project Room
-  — room.trydemigod.com".
+- **S21** — Back in the room: a slow push-in on the live timeline as the
+  end card fades up: "Project Room — room.trydemigod.com".
 
-> ground: index.html :: New here? Start here
-> ground: index.html :: People and agents. One conversation.
+> ground: index.html :: id="message-list"
+> ground: index.html :: PROJECT ROOM
