@@ -190,7 +190,7 @@ function projectRoom(store, roomId, memberId, identityId) {
   const requestIds = new Set(Object.keys(requests));
   try {
     const rows = store.db.prepare(
-      `SELECT m.message_event_id AS messageEventId, m.state, m.created_at AS createdAt,
+      `SELECT m.message_event_id AS messageEventId, m.state, m.created_at AS createdAt, e.sequence AS sequence,
               json_extract(e.body,'$.actorId') AS actorId, json_extract(e.body,'$.data.messageId') AS messageId,
               json_extract(e.body,'$.data.body') AS body
        FROM mention_states m JOIN events e ON e.room_id=m.room_id AND e.id=m.message_event_id
@@ -206,7 +206,9 @@ function projectRoom(store, roomId, memberId, identityId) {
         title: clip(row.body || "Mentioned you"), actor: row.actorId, createdAt: at, updatedAt: at,
         basis: `${row.state}|${messageId}`,
         sourceRef: { messageId }, terminal,
-        next: { method: "GET", path: `/api/rooms/${encodeURIComponent(roomId)}/events?after=0` }
+        // Point at the mention itself (and what followed), not the start of
+        // the log: after=0 sent agents to day-one history in a 3k-event room.
+        next: { method: "GET", path: `/api/rooms/${encodeURIComponent(roomId)}/events?after=${Math.max(0, (row.sequence ?? 1) - 1)}&limit=20` }
       }));
     }
   } catch (error) {

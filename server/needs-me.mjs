@@ -30,6 +30,8 @@ const MAX_ITEMS = 100;
 const OPEN_WORK_SHOWN = 3;
 const OPEN_WORK_TITLE = 80;
 const MENTION_WINDOW = 100;
+const LATEST_MENTIONS_SHOWN = 3;
+const LATEST_MENTIONS_SCAN = 20;
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 
@@ -109,7 +111,11 @@ function mentionsOf(store, roomId, memberId, after, through) {
     if (/no such table/i.test(error?.message ?? "")) return [];
     throw error;
   }
-  return rows.filter(row => row.sequence > after).sort((a, b) => a.sequence - b.sequence).slice(0, MAX_PER_KIND + 1).map(row => ({
+  return rows.filter(row => row.sequence > after).sort((a, b) => a.sequence - b.sequence).slice(0, MAX_PER_KIND + 1).map(row => mentionItem(roomId, row));
+}
+
+function mentionItem(roomId, row) {
+  return {
     kind: "mention",
     roomId,
     seq: row.sequence,
@@ -124,7 +130,33 @@ function mentionsOf(store, roomId, memberId, after, through) {
         ...(row.private && row.replyToMemberId ? { toMemberId: row.replyToMemberId } : {})
       }
     }
-  }));
+  };
+}
+
+// Latest open mentions: the newest @mentions of this member that are still
+// unanswered, newest first. Measured in muse-room on 2026-10-05: an agent
+// that calls needs-me without a saved cursor (most hosted sessions start
+// fresh) got the 8 OLDEST open mentions (seq 792-1444, days old) and never
+// the two posted minutes earlier (seq 3626, 3633), so recent asks looked
+// like history and went unanswered. Like openWork this is standing state:
+// it rides beside items, never moves the cursor, and is capped small. It is
+// computed only when the room is read anyway (no cursor, or new events since
+// the cursor), so a quiet poll does no extra work. Cleared/handled mentions
+// (retired update keys) stay out.
+function latestMentionsOf(store, roomId, memberId, retired) {
+  let rows;
+  try { rows = store.openDirectMentions(roomId, memberId, LATEST_MENTIONS_SCAN, store.now()); }
+  catch (error) {
+    if (/no such table/i.test(error?.message ?? "")) return null;
+    throw error;
+  }
+  rows = rows.filter(row => !retired.has(`mention:${row.messageId ?? row.eventId}`));
+  if (!rows.length) return null;
+  return {
+    roomId,
+    top: rows.slice(0, LATEST_MENTIONS_SHOWN).map(row => ({ ...mentionItem(roomId, row), from: row.from, at: row.at, state: row.state })),
+    newestSeq: rows[0].sequence
+  };
 }
 
 function directAsksOf(store, roomId, memberId, after, state) {
@@ -346,6 +378,7 @@ export function collectNeedsMe(store, secret, { since } = {}) {
   const landIds = { ...parsed.landIds };
   const pendingBonds = store.bonds.pendingProposalsFor(identity.identityId);
   const openWork = [];
+  const latestMentions = [];
   let roomAfter = parsed.roomAfter ?? "";
   let hasMore = links.length > MAX_ROOMS;
   for (const link of links.slice(0, MAX_ROOMS)) {
@@ -377,6 +410,8 @@ export function collectNeedsMe(store, secret, { since } = {}) {
         for (const item of kind) push(candidates, item);
       }
       const retired = retiredNeedsMeKeys(store, link.roomId, link.memberId);
+      const latest = latestMentionsOf(store, link.roomId, link.memberId, retired);
+      if (latest) latestMentions.push(latest);
       candidates = candidates.filter(item => item.seq <= through && !retired.has(`${item.kind}:${item.id}`)).sort((a, b) => a.seq - b.seq);
       const remaining = MAX_ITEMS - items.length;
       if (candidates.length > remaining) {
@@ -404,5 +439,5 @@ export function collectNeedsMe(store, secret, { since } = {}) {
   // Retain the old rooms/land shape and extend it only for continuation/ties.
   const cursor = { rooms, land, landIds, ...(parsed.number !== null ? { floor: parsed.number } : {}), ...(hasMore ? { roomAfter } : {}) };
   items.sort((a, b) => a.roomId.localeCompare(b.roomId) || b.seq - a.seq);
-  return { identityId: identity.identityId, items, ...(openWork.length ? { openWork } : {}), cursor, hasMore, untrusted: true };
+  return { identityId: identity.identityId, items, ...(openWork.length ? { openWork } : {}), ...(latestMentions.length ? { latestMentions } : {}), cursor, hasMore, untrusted: true };
 }
