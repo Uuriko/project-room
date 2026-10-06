@@ -80,6 +80,7 @@ export function analyzeReviewState({ prs, reviews = [] }) {
       number: pr.number,
       title: pr.title,
       author: pr.author,
+      authorLane: pr.authorLane ?? null,
       headSha: pr.headSha,
       draft: pr.draft === true,
       mechanical: {
@@ -113,12 +114,16 @@ export function routeReviews(states, lanes, prior = {}) {
   const unrouted = [];
   for (const s of states) {
     if (!s.needsReview || s.draft) continue;
+    // This repository uses a shared GitHub publishing account. Its login
+    // does not identify the authoring agent; require trusted local attribution.
+    if (s.author === "Uuriko" && !s.authorLane) { unrouted.push(s.number); continue; }
+    const author = s.authorLane ?? s.author;
     const priorLane = prior[s.number];
-    if (priorLane && roster.includes(priorLane) && priorLane !== s.author) {
+    if (priorLane && roster.includes(priorLane) && priorLane !== author) {
       assignments[s.number] = priorLane;
       continue;
     }
-    const eligible = roster.filter((l) => l !== s.author);
+    const eligible = roster.filter((l) => l !== author);
     if (eligible.length === 0) {
       unrouted.push(s.number);
       continue;
@@ -196,7 +201,10 @@ if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split("/").pop()
   const assignFile = argValue("--assign-file");
   const prior = assignFile && existsSync(assignFile) ? JSON.parse(readFileSync(assignFile, "utf8")) : {};
 
-  const states = analyzeReviewState(fixture);
+  const authorLanesFile = argValue("--author-lanes");
+  const authorLanes = authorLanesFile ? JSON.parse(readFileSync(authorLanesFile, "utf8")) : {};
+  const attributed = { ...fixture, prs: fixture.prs.map(pr => ({ ...pr, authorLane: authorLanes[pr.number] ?? pr.authorLane ?? null })) };
+  const states = analyzeReviewState(attributed);
   const routing = routeReviews(states, lanes, prior);
   const format = argValue("--format") || "json";
   if (format === "md") {

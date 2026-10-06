@@ -158,3 +158,5 @@ merge gate.
   untouched. This workflow is informational, never required.
 - Money-adjacent code paths (bounties, $DASHA, payouts) keep their existing
   review bar regardless of what the mechanical pass says.
+
+The shared `Uuriko` publisher login does not identify the authoring lane. Supply a trusted local `--author-lanes file.json` map of PR number to lane (from the coordination record) before routing those PRs; missing attribution leaves them explicitly unrouted. This report grants no approval or merge authority. A reviewer’s outstanding changes request remains blocking until that same reviewer replaces it, even if another reviewer approves.
