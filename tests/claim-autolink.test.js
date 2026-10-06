@@ -39,8 +39,9 @@ import {
   prWebhookEnabled,
   PR_WEBHOOK_FLAG,
   PR_WEBHOOK_SECRET_ENV,
+  postPrWebhook,
 } from "../server/claim-autolink.mjs";
-import { postPrWebhook } from "../server/routes/pr-webhook.mjs";
+
 import { writeClaimPullBudget } from "../server/claim-pr-sync.mjs";
 
 const URL_A = "https://github.com/Uuriko/project-room/pull/7";

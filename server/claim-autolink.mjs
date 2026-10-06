@@ -26,6 +26,7 @@ import { parsePullRequestUrl, pullLinks, rateLimitUntil } from "./claim-coordina
 import { applyPullRequestWebhook, readClaimPullBudget, writeClaimPullBudget } from "./claim-pr-sync.mjs";
 import { emitWorkClaimEvent } from "./work-claim-events.mjs";
 import { MAX_CLAIM_HISTORY } from "./work-claims.mjs";
+import { parseEvent, verifyWebhook, WEBHOOK_BODY_LIMIT } from "./github-app/verify.mjs";
 
 // Claim ids in the wild: plan-pr-autolink, fo-sec06-invite-race,
 // qa7-10-m53-tmpdir, ready-WK41-E3, claude-code-drops.
@@ -428,3 +429,57 @@ export function linkDeployToSettledClaims(store, { revision, nowMs = Date.now() 
   });
   return out;
 }
+
+// --- HTTP route (mounted via the route table; mount is a coordinated
+// handoff, see the module header) ---------------------------------------
+// POST /api/github/pr-webhook — GitHub pull_request webhook receiver.
+//
+// OFF BY DEFAULT: without ROOM_PR_WEBHOOK=1 (or true/yes) the route answers
+// 404, indistinguishable from no route. Enabled without the
+// GITHUB_PR_WEBHOOK_SECRET secret it fails closed with 503. Deliveries are
+// HMAC-verified with the existing github-app verifier (constant-time); the
+// secret value is never logged, stored, or echoed — only its env var NAME is
+// documented (ops__STATE.md). Responses are minimal (claim id + PR number +
+// state); PR bodies are never echoed back. No debug endpoint points at a
+// public URL.
+export async function postPrWebhook(ctx) {
+  const env = liveEnv();
+  if (!prWebhookEnabled(env)) ctx.reject(404, "not_found", "Not found");
+  ctx.rate(`pr-webhook:${ctx.remoteAddress ?? "unknown"}`, 120);
+  const secret = typeof env[PR_WEBHOOK_SECRET_ENV] === "string" ? env[PR_WEBHOOK_SECRET_ENV] : "";
+  if (!secret) ctx.reject(503, "webhook_unconfigured", "The PR webhook is enabled but its secret is not configured");
+  const text = await ctx.readText(ctx.req, WEBHOOK_BODY_LIMIT, () => ctx.reject(413, "too_large", "Request is too large"));
+  const check = await verifyWebhook({
+    rawBody: text,
+    signature256: ctx.req.headers["x-hub-signature-256"],
+    secret,
+  });
+  if (!check.ok) ctx.reject(401, "webhook_signature", "Bad webhook signature");
+  const parsedEvent = parseEvent(ctx.req.headers, text);
+  if (parsedEvent.ignored || parsedEvent.event !== "pull_request") {
+    return ctx.json(ctx.res, 200, { ok: true, ignored: true });
+  }
+  const result = handlePrWebhookPayload(ctx.store, parsedEvent.payload, { nowMs: Date.now() });
+  if (!result.ok) return ctx.json(ctx.res, 200, { ok: true, ignored: true, reason: result.reason });
+  // Minimal by design: claim id, PR number, and state. Nothing else.
+  return ctx.json(ctx.res, 200, {
+    ok: true,
+    event: "pull_request",
+    action: result.action,
+    linked: result.linked ? result.linked.claimId : null,
+    settled: result.settled.map(entry => ({ claimId: entry.claimId, outcome: entry.outcome })),
+  });
+}
+
+export const PR_WEBHOOK_ROUTES = Object.freeze([
+  Object.freeze({
+    id: "pr.webhook", method: "POST", path: "/api/github/pr-webhook",
+    auth: "none", capability: null, scope: "worker", handler: postPrWebhook,
+    schema: { body: { type: "object" }, response: { type: "object" } },
+    events: [],
+  }),
+]);
+
+// Names the operator records when enabling the webhook. Exported so the
+// ops doc and the route stay in sync; the VALUE never enters the repo.
+export const PR_WEBHOOK_OPS = Object.freeze({ flag: PR_WEBHOOK_FLAG, secretEnv: PR_WEBHOOK_SECRET_ENV });
