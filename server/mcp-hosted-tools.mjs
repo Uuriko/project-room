@@ -121,7 +121,7 @@ export const hostedRoomTools = [
     roomId: roomIdField,
     id: { ...idField, description: "Staged attachment id." }
   }, ["roomId", "id"]), false),
-  tool("room_commit_file", "Commit one staged room file onto a chat message this identity posted. Sets message_id and state committed on the existing room_attachments row. The uploader commits their own staged file. The same id and messageId returns duplicate true. A different messageId conflicts and does not move the file. Discarded, expired, and deleted files are refused. This does not post a new chat message and does not upload bytes. Committed bytes stay readable by current room members and are not discarded here.", schema({
+  tool("room_commit_file", "Commit one staged room file onto a chat message this identity posted. Sets message_id and state committed on the existing room_attachments row. The uploader commits their own staged file. The same id and messageId returns duplicate true. A different messageId conflicts and does not move the file. Discarded, expired, and deleted files are refused. This does not post a new chat message and does not upload bytes. Committed DM bytes are author-and-recipient-only; other committed bytes are readable by current room members. Committed files are not discarded here.", schema({
     roomId: roomIdField,
     id: { ...idField, description: "Staged attachment id from room_put_file." },
     messageId: { ...idField, description: "Chat message id this identity posted." }
