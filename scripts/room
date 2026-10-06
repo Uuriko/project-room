@@ -210,8 +210,10 @@ Agent verbs (post as comments on the board, prefixed [<lane>] + protocol prefix)
   handoff   --task-id ID --from LANE --to LANE --context "..." [--note "..."] [--dry-run]
             Post [lane]HANDOFF: with room-handoff block + restated claim block
             naming the receiving lane. (Transfers on ACK, not on post.)
-  receipt   --task-id ID --lane LANE --merged SHA|none --note "..." [--dry-run]
+  receipt   --task-id ID --lane LANE --merged SHA|none [--pr N|none] [--tests "..."]
+            --note "..." [--dry-run]
             Post [lane]DONE: + room-receipt block (24h receipt SLO).
+            The block names the PR, the merge SHA, and the test outcome.
   backlog   [list] [--file PATH]
             List BACKLOG.md ready items, top first.
   backlog   pull [--lane LANE] [--task-id ID] [--lease Nh] [--file PATH] [--dry-run]
@@ -1459,9 +1461,13 @@ claim_block_text() { # task lane files lease state reason
     "$1" "$2" "$3" "$4" "$5" "$6"
 }
 
-receipt_block_text() { # task merged attribution
-  printf '```room-receipt\ntask-id:      %s\nmerged:       %s\nattribution:  %s\n```\n' \
-    "$1" "$2" "$3"
+receipt_block_text() { # task pr merged tests attribution
+  # The quality bar: every generated receipt names the PR, the merge SHA,
+  # and the test outcome (ROOM-PROCEDURES receipt format: PR number + merge
+  # SHA + check counts). The board parser reads every `key: value` line
+  # generically, so the two new fields are backward compatible.
+  printf '```room-receipt\ntask-id:      %s\npr:           %s\nmerged:       %s\ntests:        %s\nattribution:  %s\n```\n' \
+    "$1" "$2" "$3" "$4" "$5"
 }
 
 handoff_block_text() { # task from to state_at_handoff context reason
@@ -1475,6 +1481,12 @@ suffix_line() { # task lane
 
 latest_block() { # $1 = task-id -> prints "lane|files|lease|state|reason" or dies
   local task="$1" st blk
+  # Test seam: ROOM_TEST_CLAIM_BLOCK carries the same "lane|files|lease|state|reason"
+  # shape latest_block returns, so tests render receipts without a live board read.
+  if [ -n "${ROOM_TEST_CLAIM_BLOCK:-}" ]; then
+    printf '%s' "$ROOM_TEST_CLAIM_BLOCK"
+    return 0
+  fi
   st="$(build_state)"
   blk="$(printf '%s' "$st" | jq -r --arg t "$task" '
     (.tasks[] | select(.task_id == $t) | .last_block) // empty
@@ -1674,11 +1686,13 @@ $(suffix_line "$task" "$from")"
 }
 
 cmd_receipt() {
-  local task="" lane="$DEFAULT_LANE" merged="" note=""
+  local task="" lane="$DEFAULT_LANE" merged="" note="" pr="" tests=""
   while [ $# -gt 0 ]; do case "$1" in
     --task-id) need_val "receipt" "$1" "$#" "${2:-}"; task="$2"; shift 2 ;;
     --lane) need_val "receipt" "$1" "$#" "${2:-}"; lane="$2"; shift 2 ;;
     --merged) need_val "receipt" "$1" "$#" "${2:-}"; merged="$2"; shift 2 ;;
+    --pr) need_val "receipt" "$1" "$#" "${2:-}"; pr="$2"; shift 2 ;;
+    --tests) need_val "receipt" "$1" "$#" "${2:-}"; tests="$2"; shift 2 ;;
     --note) need_val "receipt" "$1" "$#" "${2:-}"; note="$2"; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
     *) die "receipt: unknown flag $1" ;;
@@ -1686,14 +1700,28 @@ cmd_receipt() {
   [ -n "$task" ]   || die "receipt: --task-id required"
   [ -n "$merged" ] || die "receipt: --merged required (SHA or 'none')"
   [ -n "$note" ]   || die "receipt: --note required"
+  # The quality bar: a receipt names the PR and the test outcome. An absent
+  # flag renders as an explicit `none` — never silently omitted — and nudges
+  # the lane to say it out loud.
+  if [ -z "$pr" ]; then
+    warn "receipt: --pr not given; block will carry 'pr: none' — pass --pr <N> or --pr none explicitly"
+    pr="none"
+  fi
+  pr="${pr#\#}"
+  case "$pr" in none|[0-9]*) ;; *) die "receipt: --pr must be a PR number or 'none'" ;; esac
+  if [ -z "$tests" ]; then
+    warn "receipt: --tests not given; block will carry 'tests: none' — pass --tests \"<outcome>\" or --tests none explicitly"
+    tests="none"
+  fi
   note="$(one_line "$note")"
+  tests="$(one_line "$tests")"
   local blk blane bfiles blease _bstate breason
   blk="$(latest_block "$task")" || exit 1
   IFS='|' read -r blane bfiles blease _bstate breason <<< "$blk"
   local body
   body="[$lane]DONE: $task — $note $(attribution "$lane" agent)
 
-$(receipt_block_text "$task" "$merged" "$(attribution "$lane" agent)")
+$(receipt_block_text "$task" "$pr" "$merged" "$tests" "$(attribution "$lane" agent)")
 
 reason: $breason
 
