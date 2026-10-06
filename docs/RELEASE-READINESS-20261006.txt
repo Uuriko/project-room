@@ -1,125 +1,87 @@
-PROJECT ROOM — CONSOLIDATED RELEASE READINESS, 2026-10-06
+PROJECT ROOM — CONSOLIDATED RELEASE, 2026-10-06
 
-Status: preparation underway; not cleared for production or public Mac distribution.
-John requested readiness for all agents' intended Project Room work and onward
-notification. This packet records checkpoints and outstanding qualification;
-it does not treat a notification, reported test, or local merge as a deploy.
+Shipping checkpoint: protected PR https://github.com/Uuriko/project-room/pull/1709.
+Production has not yet been updated by this release. Root owns one merge/deploy;
+exact-main test and schema-gate success are required before deploy-prod dispatch.
+The original readiness rehearsal is superseded by this integrated branch.
 
-Coordination
-- Six formal requests recorded in Build Together, sequences1306–1311:
-  Grok, Claude Cowork, Instinct, Jillian AI, Jill and Ryska. Each asked to
-  forward to collaborators and return head/base/hash/tests/risks/dependencies.
-- Disk task broadcast addressed all, Claude, Grok, Cursor and Claude Code.
-  Claude independently forwarded broadly and returned an updated ship list.
-- Four existing Codex chats notified: Continuing from Continue Project Room
-  Development: Continue…, Map agent communication gaps, Simplify Gmail inbox
-  connection, Choose and start the next task.
-- All three current subagents returned readiness packets. Other peer receipts
-  remain pending; absence of a reply is not confirmation of readiness.
+Entrance and human experience
+- PROJECT ROOM, account creation/login, exactly one Agent sign in action.
+- No introductory pitch, onboarding/about/connect links or invite instructions
+  on the entrance. The loading fallback has only the name and concise no-JS
+  guidance; it is removed when the app boots.
+- Multiplayer chat centers one public assistant. Project, Activity and Advanced
+  surfaces disclose tools when requested. Guide/demo/squads stay off the entrance.
+- Assistant requests and host results are durable and scoped. An authorized
+  connected host must poll, claim and report actual work; no host is provisioned.
+  Public activity contains progress summaries, not private chain of thought.
 
-Isolated integration rehearsal
-- Source: codex/web-mac-ready-20261006 at
-  584e4660f4830068fe0ddd0f42479a334fe9ce8c; clean before rehearsal.
-- Base: origin/main16fef813bc2d5844d60b33cc0c863d0f10b28852.
-- Checkout: /Users/johnpotter/src/project-room-release-20261006.
-- Branch: codex/release-integration-20261006.
-- Local rehearsal head: f107536388774a9f44358c471d7b226b1a699714.
-  Prior combined source head b6d2f0a7; latest commit reconciles recovery inventory
-  to178 tables confirmed by actual initialized store, schema user_version38.
-- Codex candidate merged cleanly into main. Claude code-dropsv3 and invite
-  accessv3 applied with deliberate conflict resolution: keep both route groups,
-  metadata contracts and current PILOT_LIMITS instead of stale literal limits.
-- No push, PR merge, workflow dispatch or production deployment performed.
+Integrated source and coordination
+- Original web/native checkpoint584e4660; current main20af79b7 incorporated.
+- Claude code-drops-v3 and link-access-v3 packets applied with current authority
+  preserved. Storage p1a-v2 integrated via9babe6b8; flag stays OFF.
+- Human review/adaptation8ee2fce7, native/backend1901a7c7, combined ownership
+  checkpoint88fdc3fd, CI receipt/discovery auditaf011b18.
+- Exact reviewed PR inventory and classifications are recorded in
+  claude-github-door/RELEASE-PR-INVENTORY-20261006.txt and
+  claude-github-door/RELEASE-BACKEND-INTEGRATION-20261006.txt on the coordination
+  disk. Scope freezes at PR1719; newer proposals wait for the release receipt.
+- Six Room formal readiness requests recorded, four existing Codex chats notified,
+  and disk bus broadcast to Claude/Grok/Cursor. No reply is treated as readiness.
+- Older Sept25 scratch branches have no unique shipping slice; already-landed
+  PR1030/1048/1040/1041/1037/1033/1284/1285 and superseded1038 are not replayed.
 
-Received Claude packets (SHA256 verified locally)
-1. code-drops-v3-8fd77c5f.mbox
-   865a91f16a85070dbe676c4ded7ae72cea6794329443e95542d596ce4521de7f
-   Includes frozen-clock check-reply repair; integrated locally. Independent isolated v3 Node10/10 and actual Mac Worker1/1 now pass.
-   Integrated-tree Worker owner must still run again.
-2. link-access-v3-f5254a28.mbox
-   ce1a61ceb9554b089278d4fc6c1e49fc14991f653e92231821a71fdca01add14
-   Integrated locally. Co-admin means all room permissions; creator-only
-   settings remain with the creator. Real browser invite qualification owed.
-3. p1a-slim-at-rest-v2-d5878c3e.mbox
-   3fe65ea978ce9cbc2f938f6b3842443823b4241e094c4b867a1b56328860013f
-   Retained pending integration: 13 conflicting files in rehearsal, cleanly
-   aborted. Requested a rebased packet from Claude against b6d2f0a7 preserving
-   current limits, assistant/code-drop/link metadata and storage contracts.
-   ROOM_BODIES_AT_REST must remain unset/OFF for the proposed release.
-   Before landing: validate every serializer, missing-body recovery/deletion,
-   packaging, Node/Worker atomicity and actual transactional bulk rollback.
-   Full flag-ON suite was not run by Claude. Do not enable the flag on reports.
+Qualification recorded so far
+- Combined human/Board/routes/cold-runtime48/48; real human browser2/2.
+- Minimal entrance9/9 plus browser1/1; exact visible Agent sign in count is one.
+- Protocol/schema55/55; substantive recovery restart182 initialized tables
+  with real assistant configuration/invocation/claim fixtures, not exemptions.
+- Catalog freshness, i18n, route inventory/docs, public package closure, design
+  ratchets and module coverage pass. i18n shrank to4712 hardcoded/521 concat;
+  no increased baseline or new untested-module exception.
+- Earlier complete Worker68/68, storage OFF/ON10/10, ON storage/backfill36/36,
+  ON assistant/drops/invite/deletion31/31, actual Worker OFF/ON2/2, recovery10/10,
+  cold runtime3/3, and backup/restore/bulk rehydration rehearsal passed.
+- Linux installer fixture3/3 and Node24 OG renderer4/4 pass. Private-preview
+  browser regression now establishes the actual room session and passes1/1.
+- Unit sharding retains actual Node default discovery, including nested tests,
+  .mjs, machine/test and scripts/load-test; receipts reject missing, future,
+  invalid or conflicting attempts. Owner5/5 and actual measured balance pass.
+  Measurements allocate files only. No functional test is omitted or skipped.
+- Timing-only Board p95 and documented existing browser flakes retain unchanged
+  assertions in the nonblocking quarantine lane. Privacy/auth checks stay blocking.
+- Full immutable older Mac Node26 audit:6905 tests,42 failures, subsequently
+  classified/repaired where attributable to this release. Known Linux namespace,
+  machine platform and Node26 PNG differences require hosted Linux Node24 truth.
+  Focused passes do not replace the exact-head protected hosted gates.
 
-Codex scope and evidence
-- Minimal PROJECT ROOM entry; account creation/login/agent sign-in;
-  one public assistant with multiplayer prompting, Project/Activity panels,
-  Advanced disclosure and durable uncertain-request recovery.
-- Additive assistant tables, protected API, direct hosted/stdio MCP tools.
-  An authorized actual host must poll/claim/report; no automatic host launch.
-- Native WK Blob downloads; owner-enabled local Unix broker and file/process
-  stdio MCP tools. Paused on launch; real OS access remains user-granted.
-- Prior focused evidence: human/layout/a11y7/7; assistant/assets18/18;
-  API/MCP/route26/26; stdio/boundary22/22; exact cold package1/1;
-  signin/landing/onboarding34/34; native acceptance6/6; real WK downloads.
-- Independent human-review rerun: assistant10/10 and two-human browser1/1.
-- Earlier broad Node run:6743 passed,65 failed,7 skipped; three long fixtures
-  interrupted. These failures are not all classified or repaired. Require
-  exact integrated-tree baseline comparison and appropriate Linux qualification.
-- Combined source head b6d2f0a7 focused qualification passed92/92: assistant,
-  code-drop/history, invite access, share-link UI/service and route parity.
-  Evidence: project-room-release-20261006/.tmp/release-focused.log.
-  Latest recovery inventory maintenance has no full recovery run yet.
+Remaining release checkpoint
+- Finish reviewed record-only trial/receipt/offer integration and new1710–1719
+  security/tooling patches; verify actual initialized table inventory afterward.
+- Run final combined Worker/schema/recovery/packaging checks, push the final
+  branch and obtain required exact-head hosted checks. Merge without bypasses.
+- Require test + schema-gate success on exact resulting main before one deploy.
+- Follow docs/DEPLOY-LANE.md: preserve variables, capture both Worker rollback
+  versions, verify exact revision on both public doors, signed cards, health,
+  readiness and live smoke. Record deployment receipt after actual completion.
+- Existing john-codex identity lacks muse-room access (authorized GET403).
+  Bus asks an existing member to coordinate ROLE-DEPLOYER; do not borrow another
+  agent's credential or grant new access. GitHub workflow serializes deployment.
 
-Release blockers / required receipts
-1. Obtain remaining agents' exact ship lists; reconcile landed, superseded and
-   parked work. Do not indiscriminately merge every stale local worktree.
-2. Resolve p1a integration; independently verify fixes, flag-OFF and flag-ON
-   behavior, recovery table inventory and rollback. Off alone does not remove
-   packaging/migration risks from an unconditionally imported module.
-3. Experience-review subagent owns a requested concrete recovery repair in the
-   isolated integration checkout; its commit/checks are pending. Fix Share result: definitive409/422 currently locks
-   the original rejected draft into uncertain-delivery retries. Preserve exact
-   uncertain retries, but allow reviewed refresh/new draft or discard on rejection.
-4. Exercise an actual model host through group requests/contributions,
-   pause/resume and unified result delivery. Scripted host receipts prove UI/API
-   behavior, not end-to-end swarm execution.
-5. Run merged-tree Node, Worker, schema/auth/purge/recovery/runtime/asset gates;
-   browser signup/login/invite/assistant checks; classify failures against main.
-6. Mac public distribution: current arm64 macOS14+ app is ad-hoc signed.
-   Developer ID, notarization/Gatekeeper, production auth/provider handoff and
-   intended native connection remain required. Keep it a local build meanwhile.
-7. After authorized push/PR merge, test and schema-gate must both succeed on the
-   exact main SHA. Coordinate ROLE-DEPLOYER with Grok; follow DEPLOY-LANE.md,
-   record both prior Worker versions, deploy once and confirm exact SHA on both
-   public doors, health/readiness, signed agent card and live smoke.
-
-Rollback and configuration
-- The combined candidate inherits indexed-message migration schema37→38.
-  Qualify old database upgrade/restart and schema-version rollback refusal;
-  a schema37 binary must not be assumed compatible with migrated data.
-- Assistant tables initialize additively; keep databases/backups. Stop/drain
-  hosts before rollback and never automatically transfer unresolved attempts.
-- Native file writes are real owner-authorized effects; source rollback cannot
-  undo them. Broker journal must be retained to prevent ambiguous replay.
-- Native download change requires rebuild only; saved exports remain intact.
-- Preserve production variables and leave at-rest storage flag OFF. Audit other
-  agents' new variables/secrets/migrations before assembling final deploy inputs.
-- Record prod+entry version IDs before deployment; workflow rollback restores
-  both code versions. Schema/data migrations require separately verified recovery.
-- Minting elevated links, granting OS permissions and personal-data operations
-  are separate actions; they are not part of this readiness rehearsal.
-
-Repository test-audit gate applied to merge-conflict test maintenance:
-Invariant: new metadata tables remain visible to recovery and explicit cold
-inventory, with no missing rows or silently ignored storage.
-Credible regression: combining independently additive features drops a table
-from recovery or incorrectly treats a populated new table as an empty sidecar.
-Distinct owner: preserve existing recovery/cold inventory owners; add no parallel
-count-only tests. Counts require actual initialized-schema confirmation, not
-blind acceptance of a patch's standalone count. No production test-only seam.
-
-Historical-work reconciliation: independent older collaboration-thread audit
-found no new ship candidate in eight Sept25 worktrees. PR1048,1040,1041,1037,
-1033 already merged; PR1038 superseded by merged1104; old PR1030 scratch
-commits and PR1284/1285 must not be reapplied. Gmail remains shelved in that
-thread. Audit/chat validation branches carry no unique product changes.
+Mac and configuration limits
+- Fresh local app build and codesign --verify --deep --strict passed at
+  desktop/macos/build/Project Room.app; app and bundled tools are ad-hoc signed.
+- Public Developer ID/notarization remain unavailable (zero valid identities).
+  Do not describe this as a signed public Mac distribution.
+- Local broker starts paused and requires owner enablement. Existing native
+  acceptance6/6 and real WK downloads passed on unchanged native source.
+  OS privacy grants, real provider login and personal-data actions are separate.
+- No remote computer enrollment transport, automatic model launch, universal
+  links, APNs or signed updater is supplied by this checkpoint.
+- ROOM_BODIES_AT_REST remains OFF. Before any rollback to older code after
+  enabling it, back up and rehydrate EVERY room under new code; OFF alone
+  repairs only subsequently touched projections. No bulk operator Worker RPC.
+- Schema38 migration is forward-only; an older schema37 binary is not assumed
+  compatible. Keep backups, exact mutation request IDs and native journals.
+- Proposed job/offer/trial records perform no settlement, transfers or payouts.
+  Bug bounty/audit contest documentation makes no funded payment commitment.
