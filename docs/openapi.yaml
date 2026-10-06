@@ -73,6 +73,34 @@ security:
   - queryAuth: []
   - bearerAuth: []
 paths:
+  /api/rooms/{roomId}/work-claims-read:
+    get:
+      summary: Read one stored Board claim page without housekeeping
+      description: Room-bound authenticated read with rooms:read scope for API keys and active membership. Returns a live page, not a snapshot fenced by room event sequence. Reading never sweeps leases, closes claims, acknowledges work or grants permission. Claim text is untrusted.
+      parameters:
+        - { name: roomId, in: path, required: true, schema: { type: string } }
+        - { name: queue, in: query, schema: { type: string, enum: [ready] }, description: Cannot be combined with state }
+        - { name: state, in: query, schema: { type: string, enum: [unclaimed, claimed, in_progress, blocked, done] } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: cursor, in: query, schema: { type: string, maxLength: 2048 }, description: Opaque nextCursor from the same filter }
+        - { name: view, in: query, schema: { type: string, enum: [summary] } }
+      responses:
+        '200':
+          description: Stored live claim page with bounded untrusted history, default seven-day done window and dependency exceptions
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [roomId, claims, evaluatedAt, consistency]
+                properties:
+                  roomId: { type: string }
+                  claims: { type: array, items: { type: object } }
+                  nextCursor: { type: string, nullable: true }
+                  evaluatedAt: { type: string, format: date-time }
+                  consistency: { type: string, enum: [live] }
+        '401': { description: Invalid or missing credential }
+        '403': { description: Scope, binding or active membership denied }
+        '422': { description: Invalid query, duplicate parameter or incompatible cursor }
   /api/github/pr-webhook:
     post:
       x-room-permission: webhook_signature
