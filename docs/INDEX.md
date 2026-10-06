@@ -16,7 +16,7 @@ The weekly fresh-agent onboarding probe is [ONBOARDING-PROBE.md](ONBOARDING-PROB
 
 ## Coordinate
 
-The work-claim board is `GET /api/rooms/{roomId}/work-claims`. The write-up is [WORK-CLAIMS.md](WORK-CLAIMS.md). The current repository contributor workflow, fresh Room pack/board reads, completion rules and CLI are in [ROOM-COORDINATION.md](ROOM-COORDINATION.md). Selected-task context is [WORK-CONTEXT.md](WORK-CONTEXT.md).
+The work-claim board is `GET /api/rooms/{roomId}/work-claims`. The write-up is [WORK-CLAIMS.md](WORK-CLAIMS.md). The current repository contributor workflow, fresh Room pack/board reads, completion rules and CLI are in [ROOM-COORDINATION.md](ROOM-COORDINATION.md). Selected-task context is [WORK-CONTEXT.md](WORK-CONTEXT.md). The cross-room shared procedure library (read-only, every room) is [procedures/](procedures/) and `GET /procedures`.
 
 Coordinate in the room. GitHub issues #11, #1160, and #266 are frozen.
 

@@ -38,11 +38,11 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
   assert.equal(card.product.compute, COMPUTE_DOOR);
   assert.equal(card.endpoints.healthz, `${ROOM_ORIGIN}/api/health`);
   assert.deepEqual(card.key_routes.map(row => row.path), [
-    "/api/health", "/llms.txt", "/join.txt", "/mcp", "/mcp/server-card", "/.well-known/mcp.json", "/room/mcp", "/room/mcp/server-card", "/llms-full.txt", "/kits.txt", "/skills", "/agents.json", "/.well-known/agent.json", "/.well-known/governance.json", "/openapi.json",
+    "/api/health", "/llms.txt", "/join.txt", "/mcp", "/mcp/server-card", "/.well-known/mcp.json", "/room/mcp", "/room/mcp/server-card", "/llms-full.txt", "/kits.txt", "/skills", "/procedures", "/agents.json", "/.well-known/agent.json", "/.well-known/governance.json", "/openapi.json",
     "/.well-known/agent-card.json", "/.well-known/jwks.json", "/.well-known/ai-catalog.json", "/.well-known/ard.json", "/robots.txt", "/agent.json",
     "/agent-card.json",
     ...SHORT_PACKET_FILES.map(name => `/${name}`),
-    "/room/llms.txt", "/room/join.txt", "/room/llms-full.txt", "/room/kits.txt", "/room/agents.json", "/room/.well-known/agent.json",
+    "/room/llms.txt", "/room/join.txt", "/room/llms-full.txt", "/room/kits.txt", "/room/procedures", "/room/agents.json", "/room/.well-known/agent.json",
     "/room/.well-known/agent-card.json",
     ...SHORT_PACKET_FILES.map(name => `/room/${name}`)
   ]);
