@@ -149,15 +149,19 @@ test("--check rejects an inflated committed baseline (bootstrap exactness)", () 
 test("--check ratchets in steady state: fails when counts grow past an untouched baseline", () => {
   // Steady state = baseline file identical to the base ref (committed). With
   // I18N_BASE_REF=HEAD the classic ratchet applies, not bootstrap exactness.
-  // Simulate growth by adding a temp probe file with a hardcoded string.
+  // Current copy may be below the ratchet after a legitimate catalog migration.
+  // Add enough real probe literals to exceed the unchanged baseline by one.
   const probe = join(root, "src", "__i18n-probe.tmp.mjs");
   const env = { ...process.env, I18N_BASE_REF: "HEAD" };
   const baseCount = JSON.parse(readFileSync(baselinePath, "utf8")).counts["hardcoded-ui-string"];
+  const currentCount = summarize(runExtraction()).counts["hardcoded-ui-string"];
+  const addedCount = Math.max(1, baseCount - currentCount + 1);
   try {
-    writeFileSync(probe, 'export const probe = "This is a brand new hardcoded user facing sentence for the probe";\n');
+    const literals = Array(addedCount).fill('"This is a brand new hardcoded user facing sentence for the probe"');
+    writeFileSync(probe, `export const probe = [${literals.join(",")}];\n`);
     const r = spawnSync(process.execPath, [harness, "--check"], { encoding: "utf8", env });
     assert.equal(r.status, 1, `--check should exit 1 when counts exceed baseline; stderr: ${r.stderr}`);
-    assert.match(r.stderr, new RegExp(`grew ${baseCount} -> ${baseCount + 1}`));
+    assert.match(r.stderr, new RegExp(`grew ${baseCount} -> ${currentCount + addedCount}`));
   } finally {
     rmSync(probe, { force: true });
   }
