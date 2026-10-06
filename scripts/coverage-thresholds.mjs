@@ -392,7 +392,10 @@ export function checkThresholds(config, results) {
   const failures = [];
   for (const [name, mod] of Object.entries(config.modules)) {
     const r = results[name];
-    if (r.pct < mod.threshold) {
+    // Compare at 0.1 precision (thresholds are specified to 0.1): flooring
+    // absorbs floating-point epsilon so 95.64% vs a 95.6 threshold passes.
+    const pctFloor = Math.floor(r.pct * 10) / 10;
+    if (pctFloor < mod.threshold) {
       failures.push({
         module: name,
         dir: mod.dir,

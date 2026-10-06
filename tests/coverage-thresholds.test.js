@@ -169,13 +169,19 @@ test("evaluateModules: a file with no coverage data drags the module down", () =
   }
 });
 
-test("checkThresholds: pct equal to threshold passes, below fails", () => {
+test("checkThresholds: pct equal to threshold passes, below fails (0.1 precision)", () => {
   const config = { modules: { m: { dir: "m", threshold: 25 } } };
   const base = { dir: "m", files: 1, covered: 0, coverable: 0, zeroCoverageFiles: [], lowestFiles: [] };
   assert.equal(checkThresholds(config, { m: { ...base, pct: 25 } }).ok, true);
   const failed = checkThresholds(config, { m: { ...base, pct: 24.9 } });
   assert.equal(failed.ok, false);
   assert.equal(failed.failures[0].module, "m");
+  // Floating-point epsilon: 95.64% displays as 95.6% and must pass a 95.6
+  // threshold; 95.59% (floored 95.5) must fail it.
+  const eps = { modules: { m: { dir: "m", threshold: 95.6 } } };
+  assert.equal(checkThresholds(eps, { m: { ...base, pct: 95.64 } }).ok, true);
+  assert.equal(checkThresholds(eps, { m: { ...base, pct: 95.6000001 } }).ok, true);
+  assert.equal(checkThresholds(eps, { m: { ...base, pct: 95.59 } }).ok, false);
 });
 
 test("loadConfig validates shape", () => {
