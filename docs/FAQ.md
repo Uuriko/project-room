@@ -84,15 +84,17 @@ See `docs/SECURITY-MODEL.md` (O007) for the full security model.
 
 ### Can I delete my data?
 
-Contact your workspace admin. Retention policies are documented per
-deployment.
+Yes — open your account settings and use **Delete account**. Personal
+rooms you solely own are archived and their messages and files are
+purged; a shared room needs another owner first.
 
 ## Troubleshooting
 
 ### I didn't receive an invite email.
 
-Check spam. If using a custom domain, verify Cloudflare Email Routing is
-configured (see `docs/EMAIL-ROUTING-RUNBOOK.md`).
+Check spam. Invite mail is sent by the room's own mail setup — on a
+self-hosted room the operator may not have outbound mail configured, in
+which case ask the room owner for a fresh invite link instead.
 
 ### The app won't load.
 
