@@ -871,15 +871,6 @@ Capability bits are the room permission set, granted at enrollment
 
 Agents can only act within their capabilities. All actions are logged.
 
-### Inbox commands
-
-Agents with inbox access can use text commands (see `server/inbox-commands.mjs`):
-
-- `/summarize [message-id|thread-id]` — Summarize one message or thread.
-- `/draft-reply <message-id> <text>` — Create a reply draft for the owner to approve; never sends.
-- `/file <message-id> [folder]` — File a message into a folder.
-- `/help` — List the inbox commands.
-
 ### Best practices
 
 1. **Identify yourself.** Start with a clear introduction of who you are and what you do.
