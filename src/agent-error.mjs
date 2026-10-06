@@ -6,6 +6,23 @@ const tool = (name, args) => args ? { tool: name, arguments: args } : { tool: na
 const path = value => ({ path: value });
 const command = value => ({ command: value });
 
+// G7 (#940): the refused command's type, stamped by server/http.mjs on the
+// ServiceError via this symbol. Symbol keys never serialize onto the wire,
+// so the envelope (code/message/hint/next) is unchanged — the AX layer only
+// reads it to enumerate the expected data shape for bond/dm commands.
+export const ERROR_COMMAND_TYPE = Symbol("project-room.error.commandType");
+
+// G7 (#940): expected data shapes for the bond/dm command family, mirroring
+// the validateCommand shapes in server/store.mjs. "?" marks optional fields.
+const BOND_DM_DATA_SHAPES = {
+  "bond.propose": "{ to, scopes?, note? }",
+  "bond.accept": "{ bondId, scopes? }",
+  "bond.decline": "{ bondId }",
+  "bond.revoke": "{ bondId }",
+  "bond.list": "{}",
+  "dm.posted": "{ to, body, messageId? }",
+};
+
 function stale(code, message) {
   return /^stale_/.test(code) || /stale/i.test(String(message || ""));
 }
@@ -24,7 +41,7 @@ function publicHint(value, fallback) {
   return typeof value === "string" && value.trim() && value.length < 160 ? value : fallback;
 }
 
-export function agentErrorAx({ httpStatus = 0, code = "request_failed", message = "", roomId, workItemId } = {}) {
+export function agentErrorAx({ httpStatus = 0, code = "request_failed", message = "", roomId, workItemId, commandType } = {}) {
   const reasonCode = publicCode(code);
   const listPath = roomId ? `/api/rooms/${roomId}?view=work` : "/api/session";
   const workPath = roomId ? `/api/rooms/${roomId}/work-context` : "/api/session";
@@ -344,6 +361,71 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
         next: [command("Resend with a listed command type; keep the same id if the earlier send was uncertain")]
       };
     }
+    if (reasonCode === "too_large") {
+      // G7 (#940): the body-cap rejection must teach — name the limit, the
+      // actual size, and the next step. server/http.mjs stamps both numbers
+      // into the message; the store-level "Command is too large" carries no
+      // numbers, so the caps are named here (src/events.js
+      // MAX_MESSAGE_COMMAND_BYTES; server/store.mjs validateCommand).
+      const sized = /(\d+) bytes; the limit is (\d+) bytes/.exec(String(message || ""));
+      if (sized) {
+        return {
+          status: "action_required", reason: "input_refused",
+          hint: `The request body is ${sized[1]} bytes; the limit is ${sized[2]} bytes. Send a smaller body and resend.`,
+          next: [command(`Shrink the body under ${sized[2]} bytes — split the payload or drop fields — then resend`)]
+        };
+      }
+      if (/^Command is too large/.test(String(message || ""))) {
+        return {
+          status: "action_required", reason: "input_refused",
+          hint: "The command exceeds the size cap (524288 bytes for message.posted/message.edited, 16384 bytes for other commands). Shrink it and resend with the same id.",
+          next: [command("Shrink the command under the cap — trim data fields or split it — and resend with the same id")]
+        };
+      }
+      return {
+        status: "action_required", reason: "input_refused",
+        hint: "The request body exceeded the size limit. Send a smaller body and resend.",
+        next: [command("Send a smaller body under the limit and resend")]
+      };
+    }
+    if (reasonCode === "invalid_command" && commandType && BOND_DM_DATA_SHAPES[commandType]) {
+      // G7 (#940): bond/dm data shapes were guessable-only from errors. Name
+      // the offending field AND enumerate the expected data shape.
+      const fieldRefused = /^(?:Unexpected field|Invalid field): (\S+)/.exec(String(message || ""))?.[1];
+      if (fieldRefused) {
+        const commandsPath = roomId ? `/api/rooms/${roomId}/commands` : null;
+        return {
+          status: "action_required", reason: "input_refused",
+          hint: `${commandType} takes data ${BOND_DM_DATA_SHAPES[commandType]} — "${fieldRefused}" is not one of them. Resend with only those fields.`,
+          next: [
+            ...(commandsPath ? [path(commandsPath)] : []),
+            command(`Resend ${commandType} with data ${BOND_DM_DATA_SHAPES[commandType]}; keep the same id if the earlier send was uncertain`)
+          ]
+        };
+      }
+    }
+    if (reasonCode === "invalid_bond" && /to is the other agent identity/.test(String(message || ""))) {
+      return {
+        status: "action_required", reason: "input_refused",
+        hint: "bond.propose takes data { to, scopes?, note? }: to is the other agent's identity id.",
+        next: [command("Resend bond.propose with data.to set to the peer agent identity id")]
+      };
+    }
+    if (reasonCode === "invalid_bond" && /bondId is required/.test(String(message || ""))) {
+      const which = ["bond.accept", "bond.decline", "bond.revoke"].includes(commandType) ? commandType : "bond.accept / bond.decline / bond.revoke";
+      return {
+        status: "action_required", reason: "input_refused",
+        hint: `${which} takes data { bondId }: the bond id from bond.propose or bond.list.`,
+        next: [command("Resend with data.bondId set to the bond id")]
+      };
+    }
+    if (reasonCode === "invalid_dm" && /data\.body/.test(String(message || ""))) {
+      return {
+        status: "action_required", reason: "input_refused",
+        hint: "dm.posted takes data { to, body, messageId? }: to is the peer identity id, body is the text (4096 characters or fewer).",
+        next: [command("Resend dm.posted with data { to, body, messageId? }")]
+      };
+    }
     const workRead = httpStatus !== 422 && ["invalid_work_action", "work_action_too_large", "work_input_refused"].includes(reasonCode);
     return {
       status: "action_required", reason: "input_refused",
@@ -490,8 +572,8 @@ export function errorTrace({ httpStatus = 0, code = "request_failed", message = 
   return { errorId: `eid_${randomBytes(9).toString("base64url")}`, fingerprint };
 }
 
-export function agentErrorBody({ httpStatus, code, message, roomId, workItemId } = {}) {
-  const ax = agentErrorAx({ httpStatus, code, message, roomId, workItemId });
+export function agentErrorBody({ httpStatus, code, message, roomId, workItemId, commandType } = {}) {
+  const ax = agentErrorAx({ httpStatus, code, message, roomId, workItemId, commandType });
   const body = { error: { code, message }, status: ax.status, reason: ax.reason, hint: ax.hint, next: ax.next };
   const trace = errorTrace({ httpStatus, code, message, roomId, workItemId });
   if (trace) {
