@@ -47,8 +47,14 @@ export function parseArgs(argv) {
   return { positional, flags };
 }
 
-function git(args, { cwd = process.cwd(), input, binary = false } = {}) {
-  const run = spawnSync("git", args, { cwd, input, encoding: binary ? "buffer" : "utf8", maxBuffer: 64 * 1024 * 1024 });
+// Throwaway commits made by `try` need a committer. A reviewer with no git
+// identity configured would otherwise see every drop as "does not apply".
+const TRY_IDENTITY = { GIT_COMMITTER_NAME: "room code try", GIT_COMMITTER_EMAIL: "room-code-try@localhost",
+  GIT_AUTHOR_NAME: "room code try", GIT_AUTHOR_EMAIL: "room-code-try@localhost" };
+
+function git(args, { cwd = process.cwd(), input, binary = false, env } = {}) {
+  const run = spawnSync("git", args, { cwd, input, encoding: binary ? "buffer" : "utf8", maxBuffer: 64 * 1024 * 1024,
+    ...(env ? { env: { ...process.env, ...env } } : {}) });
   if (run.error) throw run.error;
   return run;
 }
@@ -144,7 +150,8 @@ async function fetchBytes(conn, id, io) {
   const bytes = Buffer.from(await response.arrayBuffer());
   const expected = response.headers.get("x-content-sha256");
   const actual = createHash("sha256").update(bytes).digest("hex");
-  if (expected && expected !== actual) throw new Error(`sha256 mismatch for ${id}: expected ${expected}, got ${actual}`);
+  if (!expected) throw new Error(`No X-Content-SHA256 header for ${id}; refusing unverified bytes`);
+  if (expected !== actual) throw new Error(`sha256 mismatch for ${id}: expected ${expected}, got ${actual}`);
   return { bytes, sha256: actual };
 }
 
@@ -153,20 +160,25 @@ async function tryDrop(conn, id, flags, io) {
   const { bytes } = await fetchBytes(conn, id, io);
   const head = String(gitOk(["rev-parse", "HEAD"])).trim();
   const dir = mkdtempSync(join(tmpdir(), `room-${id}-`));
+  const tempRef = `refs/room/${id}-${process.pid}`;
+  const opts = { cwd: dir, binary: true, env: TRY_IDENTITY };
   let applies = "clean";
   let tests = null;
+  let testsFailed = false;
   try {
     gitOk(["worktree", "add", "--detach", dir, head]);
     let run;
-    if (drop.kind === "mbox") run = git(["am", "-3", "--keep-cr"], { cwd: dir, input: bytes, binary: true });
-    else if (drop.kind === "diff") run = git(["apply", "--3way", "--index"], { cwd: dir, input: bytes, binary: true });
+    if (drop.kind === "mbox") run = git(["am", "-3", "--keep-cr"], { ...opts, input: bytes });
+    else if (drop.kind === "diff") run = git(["apply", "--3way", "--index"], { ...opts, input: bytes });
     else {
-      const file = join(tmpdir(), `room-${id}-${process.pid}.bundle`);
+      // Land the bundle the way a merge would: its tip merged onto this
+      // HEAD. Testing the sender's tip alone would report a base it never ran on.
+      const file = join(dir, `.room-${id}.bundle`);
       writeFileSync(file, bytes);
       const tip = drop.summary.refs[0];
-      run = git(["fetch", file, `${tip.ref}:refs/room/${id}`], { cwd: dir, binary: true });
-      if (run.status === 0) run = git(["checkout", "--detach", `refs/room/${id}`], { cwd: dir, binary: true });
+      run = git(["fetch", "--no-tags", file, `${tip.ref}:${tempRef}`], opts);
       rmSync(file, { force: true });
+      if (run.status === 0) run = git(["merge", "--no-ff", "--no-edit", "-m", `room code try ${id}`, tempRef], opts);
     }
     if (run.status !== 0) {
       applies = "conflict";
@@ -178,20 +190,28 @@ async function tryDrop(conn, id, flags, io) {
         const tail = `${test.stdout ?? ""}${test.stderr ?? ""}`.trim().split("\n").slice(-8).join("\n");
         const pass = /# pass (\d+)/.exec(tail)?.[1];
         const fail = /# fail (\d+)/.exec(tail)?.[1];
-        tests = test.status === 0 ? (pass ? `${pass}/${Number(pass) + Number(fail ?? 0)} pass` : "pass") : (fail ? `${fail} failing` : `exit ${test.status}`);
+        testsFailed = test.status !== 0;
+        tests = !testsFailed ? (pass ? `${pass}/${Number(pass) + Number(fail ?? 0)} pass` : "pass") : (fail ? `${fail} failing` : `exit ${test.status ?? test.signal}`);
         io.out(`tests: ${tests}\n${tail}\n`);
       }
     }
   } finally {
     if (!flags.keep) git(["worktree", "remove", "--force", dir]);
+    git(["update-ref", "-d", tempRef]);
   }
+  const failed = applies !== "clean" || testsFailed;
   if (flags.report) {
-    const verdict = flags.verdict ?? "comment";
+    let verdict = flags.verdict ?? "comment";
+    if (verdict === "approve" && failed) {
+      verdict = "changes";
+      io.out(`not approving: ${applies !== "clean" ? "the drop does not apply" : "tests failed"}; reporting changes instead\n`);
+    }
     await call(conn, `/${encodeURIComponent(id)}/checks`, { method: "POST", fetchImpl: io.fetchImpl,
       data: { verdict, applies, onBase: head, ...(tests ? { tests } : {}), ...(flags.note ? { note: flags.note } : {}) } });
     io.out(`reported ${verdict} on ${id}\n`);
   }
-  return applies === "clean" ? 0 : 2;
+  // 0 clean and passing, 2 does not apply, 3 applies but tests fail.
+  return applies !== "clean" ? 2 : testsFailed ? 3 : 0;
 }
 
 export async function codeCommand(argv, io = {}) {

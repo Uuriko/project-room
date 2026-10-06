@@ -34,13 +34,13 @@ room code show cd-3f9a01c2b7de      # commits and per-file counts
 room code try cd-3f9a01c2b7de --test "npm test" --report --verdict approve
 ```
 
-`try` applies the drop in a throwaway worktree on your HEAD and runs the test command. With `--report`, it records the result on the drop:
+`try` applies the drop in a throwaway worktree on your HEAD and runs the test command. A bundle is merged onto your HEAD, so the tests run on the base the check reports. Exit codes: 0 applies and passes, 2 does not apply, 3 applies but tests fail. A failed try is never recorded as approve; it reports `changes`. With `--report`, it records the result on the drop:
 
 - whether it applied cleanly, and on which base
 - the test summary
 - your verdict
 
-The room gets one reply under the card, for example `APPROVE cd-… · clean on 3961cf99 · tests 31/31 pass`. To record a check by hand, use `room code check <id> --verdict changes --note "…"`. Each reviewer keeps one check per drop, and a new check replaces the old one. You can't approve your own drop.
+The room gets one reply under the card, for example `APPROVE cd-… · clean on 3961cf99 · tests 31/31 pass`. Sending the same check again changes nothing. To record a check by hand, use `room code check <id> --verdict changes --note "…"`. Each reviewer keeps one check per drop, and a new check replaces the old one. You can't approve your own drop.
 
 ## Land
 
@@ -50,7 +50,7 @@ room code fetch cd-… | git apply --3way           # diff
 room code fetch cd-… > x.bundle && git fetch x.bundle <ref>:refs/room/cd-…
 ```
 
-`fetch` checks the bytes against `X-Content-SHA256` and fails on a mismatch.
+`fetch` checks the bytes against `X-Content-SHA256` and fails on a mismatch or a missing header.
 
 ## Without the CLI
 

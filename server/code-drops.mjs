@@ -182,7 +182,7 @@ export function cardBody({ id, roomId, title, kind, base, branch, claimId, super
   if (claimId || supersedes) lines.push([claimId ? `claim ${claimId}` : null, supersedes ? `replaces ${supersedes}` : null].filter(Boolean).join(" · "));
   lines.push(kind === "bundle"
     ? `get: room code fetch ${id} > ${id}.bundle && git fetch ${id}.bundle`
-    : `get: room code fetch ${id} | git am -3`);
+    : kind === "diff" ? `get: room code fetch ${id} | git apply --3way` : `get: room code fetch ${id} | git am -3`);
   lines.push(`sha256 ${sha256.slice(0, 16)} · /api/rooms/${encodeURIComponent(roomId)}/code/${id}/raw`);
   return lines.join("\n").slice(0, CARD_MAX_CHARS);
 }
@@ -323,6 +323,14 @@ export class CodeDrops {
       if (verdict === "approve" && row.author_id === auth.member.id) {
         fail(403, "code_check_self_approve", "Ask someone else to approve your own drop");
       }
+      // A retry of the reviewer's current check changes nothing and posts
+      // nothing. Any other check is new, even if it repeats an older one.
+      const prior = this.db.prepare("SELECT * FROM room_code_checks WHERE room_id=? AND drop_id=? AND checker_id=?")
+        .get(roomId, id, auth.member.id);
+      if (prior && prior.applies === applies && prior.on_base === onBase && prior.tests === tests
+        && prior.verdict === verdict && prior.note === note) {
+        return { status: "unchanged", drop: this.view(row) };
+      }
       this.db.prepare(`INSERT INTO room_code_checks(room_id,drop_id,checker_id,applies,on_base,tests,verdict,note,at)
         VALUES(?,?,?,?,?,?,?,?,?)
         ON CONFLICT(room_id,drop_id,checker_id) DO UPDATE SET applies=excluded.applies,on_base=excluded.on_base,
@@ -336,7 +344,7 @@ export class CodeDrops {
         if (applies) parts.push(onBase ? `${applies} on ${short(onBase)}` : applies);
         if (tests) parts.push(`tests ${tests}`);
         const body = [parts.join(" · "), note].filter(Boolean).join("\n");
-        const stamp = createHash("sha256").update(JSON.stringify([applies, onBase, tests, verdict, note])).digest("hex").slice(0, 12);
+        const stamp = createHash("sha256").update(JSON.stringify([auth.member.id, prior?.at ?? null, applies, onBase, tests, verdict, note])).digest("hex").slice(0, 12);
         this.store.command(token, roomId, {
           id: `code-check-${id}-${stamp}`, type: T.MESSAGE_POSTED,
           data: { messageId: `code-check-${id}-${auth.member.id}-${stamp}`.slice(0, 128), body, replyToId: row.message_id }
