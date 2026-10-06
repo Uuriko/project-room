@@ -56,6 +56,10 @@ export const KEEP = [
   "src/seed.js",
   // Open PRs #1299, #1305, #1307, #1309. Do not treat their modules as orphans.
   "server/agent-rooms.mjs",
+  // PR #1615 (orch-merge-queue): wired by the server/http.mjs mount, which is
+  // file-leased to claude-code-drops until 2026-10-07T00:23Z (ASK with exact
+  // diff posted in room). Not an orphan; remove when the mount lands.
+  "server/merge-queue.mjs",
   "server/growth-loop.mjs",
   "server/referrals.mjs",
   "server/room-lifecycle.mjs",
