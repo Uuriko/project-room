@@ -10029,8 +10029,8 @@ paths:
     post:
       summary: Refresh an expired v0 guest credential
       description: >-
-        Open; possession of the EXPIRED ga1. guest credential is the proof —
-        no owner round-trip. Issues a fresh 2h credential for the same guest
+        Open; possession of the EXPIRED guest credential is the proof — no
+        owner round-trip. Issues a fresh 2h credential for the same guest
         seat (same member, room, empty permissions) and revokes the old row;
         the old bearer stays dead. The new bearer is returned once — a repeat
         call 410s. Refused for revoked credentials, v1 guest-invite seats
@@ -10046,9 +10046,9 @@ paths:
               type: object
               required: [linkToken]
               properties:
-                linkToken: { type: string, description: The expired ga1. guest credential }
+                linkToken: { type: string, description: The expired guest credential }
       responses:
-        '200': { description: "{ ...issued, refreshed: true } — fresh ga1. credential for the same member" }
+        '200': { description: "{ ...issued, refreshed: true } — fresh guest credential for the same member" }
         '409': { description: credential_still_live }
         '410': { description: link_unavailable, invite_unavailable (v1 seat), or membership_ended }
         '422': { description: invalid_link or wrong_link_kind }
