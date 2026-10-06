@@ -36,7 +36,8 @@
     "qa3:sse-contract": "node scripts/qa3/sse-contract.mjs",
     "qa3:board-growth": "node scripts/qa3/board-growth.mjs",
     "detect-flaky": "node scripts/flaky-detect.mjs",
-    "fuzz:mime": "node scripts/fuzz-mime.mjs"
+    "fuzz:mime": "node scripts/fuzz-mime.mjs",
+    "test:quarantined": "node scripts/run-quarantined-tests.mjs"
   },
   "engines": {
     "node": ">=24.19.0"
