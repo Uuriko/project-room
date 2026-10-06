@@ -186,7 +186,9 @@ test("actual MCP discovery and reconnection keep current invitation boundaries w
   t.after(() => mcp?.close());
   const before = auditRecovery(f.store).dataSha256;
   const tools = (await mcp.request("tools/list")).result.tools;
-  assert.equal(tools.length, 41);
+  assert.equal(tools.length, 43);
+  assert.ok(tools.some(tool => tool.name === "room_assistant_context"));
+  assert.ok(tools.some(tool => tool.name === "room_assistant_action"));
   const tool = tools.find(tool => tool.name === "room_list_work");
   assert.ok(tool.inputSchema.properties.focus.enum.includes("help_wanted"));
   assert.equal(tool.annotations.readOnlyHint, true);
