@@ -56,7 +56,7 @@ const PUBLIC_WORK_ALL = [...PUBLIC_WORK_ANON,
   "public_work_claim", "public_work_renew", "public_work_release",
   "public_work_finish", "public_work_my_review"];
 
-let origin, memberSecret;
+let origin, memberSecret, outsiderSecret;
 let server, store, directory;
 
 before(async () => {
@@ -80,6 +80,14 @@ before(async () => {
     body: JSON.stringify({ title: "LLMS accuracy fixture", purpose: "accuracy test" }),
   });
   assert.equal(room.status, 201, "room create must work for the fixture");
+
+  // A second identity with no room membership: the outside-identity catalog.
+  const outsider = await fetch(`${origin}/api/agent-identities`, {
+    method: "POST", headers: { "Content-Type": "application/json", Origin: origin },
+    body: JSON.stringify({ displayName: "LlmsOutsider" }),
+  });
+  assert.equal(outsider.status, 201, "second identity mint must work");
+  outsiderSecret = (await outsider.json()).secret;
 });
 
 after(async () => {
@@ -113,6 +121,13 @@ test("anonymous catalog is exactly the packet's six tools", async () => {
   assert.deepEqual(names, [...JOIN_READERS, ...PUBLIC_WORK_ANON]);
   assert.ok(llmsTxt().includes("room_mcp_snippet"),
     "packet must name room_mcp_snippet among the four join tools");
+});
+
+test("outside identity gets the packet's seven public-work tools plus four join readers", async () => {
+  const names = await toolsList(undefined, outsiderSecret);
+  // Packet: "Outside identities get seven public-work tools plus four
+  // documents by default."
+  assert.deepEqual(names, [...JOIN_READERS, ...PUBLIC_WORK_ALL]);
 });
 
 test("member core profile is the packet's 19 essential tools plus the 4 join readers", async () => {
