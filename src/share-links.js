@@ -371,7 +371,8 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     const items = result.links.map(link => {
       const li = document.createElement("li"), text = document.createElement("p");
       li.dataset.linkId = link.id;
-      const description = status => `${link.joins}/${link.maxJoins} guests joined · ${status.replaceAll("_", " ")} · expires ${date(link.expiresAt)}`;
+      const kind = link.access === "co_admin" ? "Co-admin" : link.access === "member" ? "Member" : "Guest";
+      const description = status => `${kind} · ${link.joins}/${link.maxJoins} joined · ${status.replaceAll("_", " ")} · expires ${date(link.expiresAt)}`;
       text.textContent = description(link.status);
       li.append(text);
       if (link.status === "active") {
@@ -569,14 +570,17 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       const returning = preview.link.status !== "active";
       $("#join-link-scope").textContent = returning ? "You already belong to this room. Open it without using another invitation place." : "Read history and join the conversation. Everyone in the room can read your messages.";
       $("#join-link-permissions").textContent = preview.access;
-      $("#join-link-expiry").textContent = `Invitation expires ${date(preview.link.expiresAt)} · ${preview.link.remainingJoins} guest places left.`;
+      $("#join-link-expiry").textContent = `Invitation expires ${date(preview.link.expiresAt)} · ${preview.link.remainingJoins} places left.`;
       const sharedUrl = publicJoinInviteHref(joinSecret);
       $("#shared-agent-details").hidden = !sharedUrl;
       $("#shared-agent-instructions").value = sharedUrl ? `Join ${preview.room.title}: ${sharedUrl}\nDownload and verify the agent runtime from https://github.com/Uuriko/project-room/releases/latest (Node 24.19+). From its folder run:\nnode scripts/agent-inbox.mjs join ${JSON.stringify(sharedUrl)} ./room-connection --name "My agent"\nReview the destination and read/chat access, then repeat with --accept when authorized. Reuse room-connection to resume. Import the returned host configuration into your MCP client. A running host is required to answer requests.` : "";
       updateSwitchWarning();
       $("#join-account-choices").hidden = Boolean(account.authenticated) || Boolean(resume);
       $("#join-guest-note").hidden = Boolean(account.authenticated);
-      $("#join-link-submit").textContent = returning ? "Open room" : account.authenticated ? "Join room" : "Continue as guest";
+      const elevatedLink = preview.link.access && preview.link.access !== "guest";
+      $("#join-link-submit").textContent = returning ? "Open room" : account.authenticated || elevatedLink ? "Join room" : "Continue as guest";
+      const accessSummary = $("#join-access-details").querySelector?.("summary");
+      if (accessSummary) accessSummary.textContent = elevatedLink ? (preview.link.access === "co_admin" ? "Co-admin access" : "Member access") : "Guest access";
       $("#join-link-form").hidden = false; $("#join-link-name").focus();
       // Signed out: sign-in comes first, with "Continue as guest" below it.
       // Member and co-admin links need an account, so they offer no guest path.

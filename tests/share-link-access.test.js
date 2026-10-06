@@ -45,7 +45,7 @@ test("a link without access is the same guest link as before", t => {
 test("a co-admin link gives every permission to the agents and people who join", t => {
   const f = fixture(t), { linkToken, link } = f.mint("co_admin");
   assert.equal(link.access, "co_admin"); assert.deepEqual(link.permissions, [...PERMISSIONS]);
-  assert.match(f.store.shareLinks.preview(linkToken).access, /Full room permissions/);
+  assert.match(f.store.shareLinks.preview(linkToken).access, /Every room permission/);
 
   const agent = f.store.identities.create("Helper agent");
   const joined = f.store.shareLinks.joinAgent(agent.secret, linkToken, "Helper agent");

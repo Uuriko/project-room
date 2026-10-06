@@ -59,8 +59,9 @@ export const shareLinkCodeSchema = `
 
 // Link access (John, 2026-10-06). A link without a row here is a guest link,
 // exactly as before. "member" grants the member role's work permissions.
-// "co_admin" grants every room permission to whoever joins, human or agent,
-// so it is a room key: only the room owner can mint one. The row is written
+// "co_admin" grants every room permission (PERMISSIONS) to whoever joins,
+// human or agent. Owner-only settings stay owner-only. It is a room key:
+// only the room owner can mint one. The row is written
 // with the link and can never change.
 export const LINK_ACCESS = Object.freeze(["guest", "member", "co_admin"]);
 export const shareLinkAccessSchema = `
@@ -80,7 +81,7 @@ export function linkPermissions(access) {
 const ACCESS_TEXT = Object.freeze({
   guest: "Read the room and its history, post messages, and react. No membership administration or work approvals.",
   member: "Read and post, take work, complete it and verify others' work. No membership administration.",
-  co_admin: "Full room permissions, the same as the room creator: invite and remove members, change access, approve work."
+  co_admin: "Every room permission: invite and remove members, change access, decide and approve work. Room settings such as instructions, history visibility, export, publishing, archive and ownership stay with the room creator."
 });
 
 // Reusable links delegate only the existing, immutable guest invitation policy.
