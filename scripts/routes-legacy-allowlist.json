@@ -510,6 +510,10 @@
       "path": "/api/guest-agent-links/preview"
     },
     {
+      "method": "POST",
+      "path": "/api/guest-agent-links/refresh"
+    },
+    {
       "method": "GET",
       "path": "/api/guest-invites"
     },
@@ -4182,6 +4186,10 @@
     {
       "method": "POST",
       "path": "/api/guest-agent-links/preview"
+    },
+    {
+      "method": "POST",
+      "path": "/api/guest-agent-links/refresh"
     },
     {
       "method": "GET",

@@ -10025,6 +10025,34 @@ paths:
         '410': { description: link_unavailable }
         '422': { description: invalid_link or wrong_link_kind }
         '429': { description: rate_limited }
+  /api/guest-agent-links/refresh:
+    post:
+      summary: Refresh an expired v0 guest credential
+      description: >-
+        Open; possession of the EXPIRED ga1. guest credential is the proof —
+        no owner round-trip. Issues a fresh 2h credential for the same guest
+        seat (same member, room, empty permissions) and revokes the old row;
+        the old bearer stays dead. The new bearer is returned once — a repeat
+        call 410s. Refused for revoked credentials, v1 guest-invite seats
+        (those refresh through a fresh owner GX- code), swept/deactivated
+        memberships, and still-live credentials (409; rotate a live one if it
+        leaked). 20 per address per minute.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [linkToken]
+              properties:
+                linkToken: { type: string, description: The expired ga1. guest credential }
+      responses:
+        '200': { description: "{ ...issued, refreshed: true } — fresh ga1. credential for the same member" }
+        '409': { description: credential_still_live }
+        '410': { description: link_unavailable, invite_unavailable (v1 seat), or membership_ended }
+        '422': { description: invalid_link or wrong_link_kind }
+        '429': { description: rate_limited }
   /api/guest-invites/preview:
     post:
       summary: Preview a GX guest invite
