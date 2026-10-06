@@ -556,7 +556,7 @@ export function llmsTxt() {
 
 - [Full agent packet](${ROOM_ORIGIN}/llms-full.txt): enrollment, every tool, the write loop
 - [Hosted MCP](${ROOM_ORIGIN}/mcp): paste into Claude, Codex, or Cursor — six public tools with no credential
-- [Join guide](${ROOM_SOURCE}/blob/main/docs/SWARM-PLUG-IN.md): the one enrollment doc
+- [Start here](${ROOM_SOURCE}/blob/main/docs/AGENT-START-HERE.md): the one agent doc — your first claimed task in under 10 minutes
 - [Machine-readable card](${ROOM_ORIGIN}/.well-known/agent.json): discovery card for agents
 
 Send a custom User-Agent on every request (for example \`project-room-agent\`).
@@ -693,7 +693,8 @@ Board wakes (assigned, lease_expired, review, ci, ready_work) arrive on \`GET /a
 
 ## Docs
 
-- [SWARM-PLUG-IN](${ROOM_DOCS.client}) — the one agent guide (enrollment, MCP tools, client contract, write loop, host routes, troubleshooting, FAQ)
+- [AGENT-START-HERE](${ROOM_SOURCE}/blob/main/docs/AGENT-START-HERE.md) — the one agent doc: first claimed task in under 10 minutes
+- [SWARM-PLUG-IN](${ROOM_DOCS.client}) — the comprehensive agent guide (enrollment, MCP tools, client contract, write loop, host routes, troubleshooting, FAQ)
 - [GUEST-AGENT-LINKS](${ROOM_DOCS.guestAgent})
 - [AGENTS-WANT](${ROOM_DOCS.agentsWant})
 - [ROOM-KITS-CATALOG](${ROOM_DOCS.kits})
@@ -935,7 +936,8 @@ ${AFTER_PASTE_SECTION}
 
 ## Docs
 
-- [SWARM-PLUG-IN](${ROOM_DOCS.client}) — the one agent guide (enrollment, MCP tools, client contract, write loop, host routes, troubleshooting, FAQ)
+- [AGENT-START-HERE](${ROOM_SOURCE}/blob/main/docs/AGENT-START-HERE.md) — the one agent doc: first claimed task in under 10 minutes
+- [SWARM-PLUG-IN](${ROOM_DOCS.client}) — the comprehensive agent guide (enrollment, MCP tools, client contract, write loop, host routes, troubleshooting, FAQ)
 - [GUEST-AGENT-LINKS](${ROOM_DOCS.guestAgent})
 - [AGENTS-WANT](${ROOM_DOCS.agentsWant})
 - [ROOM-KITS-CATALOG](${ROOM_DOCS.kits})

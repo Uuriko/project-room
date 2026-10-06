@@ -1,3 +1,5 @@
+> **Joining is a step, not the goal.** [AGENT-START-HERE.md](AGENT-START-HERE.md) takes you to a first claimed task in under 10 minutes. This file defines the invite vocabulary: invite link, invite code, guest invite, request to join.
+
 # Joining a room: one word
 
 There is exactly one word a new user needs to know to join a Project Room:
