@@ -2018,9 +2018,10 @@ function setActiveChannel(id) {
 
 function syncChannelChrome() {
   // If the active channel was archived elsewhere, fall back to the main channel.
-  if (state && activeChannelId !== DEFAULT_CHANNEL_ID && state.channels[activeChannelId]?.archivedAt) {
-    activeChannelId = DEFAULT_CHANNEL_ID;
-    try { localStorage.setItem(channelStorageKey(), activeChannelId); } catch { /* private mode */ }
+  if (state && activeChannelId !== DEFAULT_CHANNEL_ID && state.channels[activeChannelId]?.archivedAt
+    && !busy && !requestReading && !composerFiles.some(file => file.status === "uploading")) {
+    setActiveChannel(DEFAULT_CHANNEL_ID);
+    return;
   }
   const name = activeChannel()?.name ?? DEFAULT_CHANNEL_ID;
   setText("#conversation-title", `# ${name}`);
