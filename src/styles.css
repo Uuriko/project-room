@@ -27,6 +27,22 @@
 :root[data-theme="light"] .message-content > .message-muted,
 :root[data-theme="light"] .message-content > .message-tombstone,
 :root[data-theme="light"] .draft-feedback > .form-hint { color: var(--muted); }
+/* Light theme: components below keep hardcoded dark backgrounds for the dark
+   (default) theme, but their text follows the theme tokens — without these
+   overrides the text is unreadable in light theme (measured 1.01–2.63:1).
+   Dark theme rendering is untouched. */
+:root[data-theme="light"] .thread-bar,
+:root[data-theme="light"] .search-results,
+:root[data-theme="light"] .invitation-details,
+:root[data-theme="light"] .new-work-form,
+:root[data-theme="light"] .handoff-envelopes { background: var(--panel-raised); }
+:root[data-theme="light"] .new-work-form { border-color: var(--line); }
+:root[data-theme="light"] .handoff-envelope { background: var(--panel); }
+:root[data-theme="light"] .new-messages-button { background: var(--panel-raised); color: var(--text); }
+:root[data-theme="light"] .mention-option:hover,
+:root[data-theme="light"] .mention-option.active,
+:root[data-theme="light"] .search-results a:hover,
+:root[data-theme="light"] .rb-event-link:hover { background: var(--panel-hover); }
 
 * { box-sizing: border-box; }
 html { background: var(--bg); scroll-behavior: smooth; }
