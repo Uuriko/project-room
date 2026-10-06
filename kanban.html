@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Work board — Project Room</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: system-ui, -apple-system, sans-serif; margin: 0; padding: 1rem; }
+  .kanban-board { display: grid; grid-template-columns: repeat(4, minmax(220px, 1fr)); gap: 0.75rem; align-items: start; }
+  .kanban-column { background: rgba(127,127,127,0.08); border-radius: 8px; padding: 0.5rem; min-height: 120px; }
+  .kanban-column h3 { margin: 0.25rem 0.5rem 0.5rem; font-size: 0.9rem; }
+  .kanban-count { opacity: 0.6; font-weight: normal; }
+  .kanban-cards { display: flex; flex-direction: column; gap: 0.5rem; min-height: 60px; }
+  .kanban-card { background: rgba(255,255,255,0.7); border: 1px solid rgba(127,127,127,0.35); border-radius: 6px; padding: 0.5rem; cursor: grab; }
+  @media (prefers-color-scheme: dark) { .kanban-card { background: rgba(0,0,0,0.35); } }
+  .kanban-card h4 { margin: 0 0 0.25rem; font-size: 0.85rem; font-weight: 600; overflow-wrap: anywhere; }
+  .kanban-owner { font-size: 0.7rem; opacity: 0.6; display: block; }
+  .kanban-moves { margin-top: 0.4rem; display: flex; flex-wrap: wrap; gap: 0.3rem; }
+  .kanban-moves button { font-size: 0.75rem; padding: 0.2rem 0.5rem; border-radius: 4px; border: 1px solid rgba(127,127,127,0.4); background: transparent; cursor: pointer; }
+  .kanban-blocked { margin-top: 0.75rem; border: 1px dashed rgba(127,127,127,0.5); border-radius: 8px; padding: 0.5rem; }
+  .kanban-blocked h3 { margin: 0.25rem 0.5rem 0.5rem; font-size: 0.9rem; }
+  .kanban-blocked .kanban-cards { flex-direction: row; flex-wrap: wrap; }
+  .kanban-status { min-height: 1.2em; font-size: 0.85rem; opacity: 0.8; }
+  @media (max-width: 900px) { .kanban-board { grid-template-columns: repeat(2, minmax(200px, 1fr)); } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Work board</h1>
+  <p><a href="/">← back to the room</a></p>
+  <div id="kanban" data-autoboot>
+    <p id="kanban-loading">Loading work…</p>
+    <p id="kanban-noclient" hidden>Could not load the room client. Reload the page to try again.</p>
+    <p id="kanban-signin" hidden><a href="/">Sign in</a> to see the work board.</p>
+    <p id="kanban-noroom" hidden>No room selected. Open this page with ?room= followed by the room id.</p>
+    <noscript><p><strong>JavaScript is off.</strong> The kanban board needs it to load claims and move work.</p></noscript>
+    <div class="kanban-board">
+      <section class="kanban-column" data-column="unclaimed" aria-label="Unclaimed">
+        <h3>Unclaimed <span class="kanban-count">0</span></h3>
+        <div class="kanban-cards" data-drop-column="unclaimed"></div>
+      </section>
+      <section class="kanban-column" data-column="claimed" aria-label="Claimed">
+        <h3>Claimed <span class="kanban-count">0</span></h3>
+        <div class="kanban-cards" data-drop-column="claimed"></div>
+      </section>
+      <section class="kanban-column" data-column="in_progress" aria-label="In progress">
+        <h3>In progress <span class="kanban-count">0</span></h3>
+        <div class="kanban-cards" data-drop-column="in_progress"></div>
+      </section>
+      <section class="kanban-column" data-column="done" aria-label="Done">
+        <h3>Done <span class="kanban-count">0</span></h3>
+        <div class="kanban-cards" data-drop-column="done"></div>
+      </section>
+    </div>
+    <section class="kanban-blocked" id="kanban-blocked" data-column="blocked" aria-label="Blocked" hidden>
+      <h3>Blocked <span class="kanban-count">0</span></h3>
+      <div class="kanban-cards" data-drop-column="blocked"></div>
+    </section>
+    <p class="kanban-status" id="kanban-status" role="status" aria-live="polite"></p>
+    <template id="kanban-card-template">
+      <article class="kanban-card" draggable="true">
+        <h4></h4>
+        <span class="kanban-owner"></span>
+        <div class="kanban-moves"></div>
+      </article>
+    </template>
+  </div>
+</main>
+<script type="module" src="/src/work-kanban.js"></script>
+</body>
+</html>
