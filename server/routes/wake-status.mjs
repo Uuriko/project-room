@@ -33,9 +33,13 @@ function isRoomMember(store, roomId, identityId) {
     "SELECT 1 FROM identity_links WHERE room_id=? AND identity_id=? LIMIT 1").get(roomId, identityId);
 }
 
-export async function readWakeStatus(ctx) {
+export function authenticateWakeStatus(ctx) {
   const heartbeatActor = createHeartbeatActor({ store: ctx.store, bearer: ctx.bearer, reject: ctx.reject });
-  const auth = heartbeatActor(ctx.req, requiredScope("heartbeats:read"));
+  return heartbeatActor(ctx.req, requiredScope("heartbeats:read"));
+}
+
+export async function readWakeStatus(ctx) {
+  const auth = authenticateWakeStatus(ctx);
   ctx.rate(`wake-status-read:${auth.identityId}`, 120);
   return translateWith(ctx.reject)(async () => {
     const roomId = ctx.url.searchParams.get("roomId");
@@ -76,7 +80,7 @@ const query = Object.freeze({ type: "object",
 
 export const WAKE_STATUS_ROUTES = Object.freeze([
   Object.freeze({ id: "wake-status", method: "GET", path: "/api/wake-status",
-    auth: "bearer", capability: null, scope: "directory", handler: readWakeStatus,
+    auth: "bearer", capability: null, scope: "directory", handler: readWakeStatus, authenticate: authenticateWakeStatus,
     schema: { query, response: { type: "object" } },
     events: [] }),
 ]);

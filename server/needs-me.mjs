@@ -1,3 +1,4 @@
+import { sessionWatermark } from "./read-cursor.mjs";
 // Cross-room "what needs me" for one identity.
 //
 // One read replaces listing rooms and then opening each inbox. Items are
@@ -440,7 +441,7 @@ export function collectNeedsMe(store, secret, { since } = {}) {
     if (mine) myWork.push(mine);
     const after = roomWatermark(parsed, link.roomId);
     const landAfter = landWatermark(parsed, link.roomId);
-    let through = mentionHorizon(store, link.roomId, link.memberId, after, Math.max(after, authority.sequence));
+    let through = mentionHorizon(store, link.roomId, link.memberId, after, sessionWatermark(after, authority.sequence));
     let candidates = [];
     if (authority.sequence > after) {
       const state = store.room(link.roomId).state;

@@ -106,3 +106,10 @@ test('one reviewers approval cannot dismiss another reviewers requested changes'
   reviews.push({prNumber:101,reviewer:'alice-reviewer',verdict:'APPROVE',headSha:'aaa111',at:'2026-10-06T19:00:00Z'});
   assert.equal(analyzeReviewState({prs:PRS,reviews})[0].verdict.status,'approved_fresh');
 });
+
+test('shared publisher requires author lane attribution before assignment', () => {
+  const states = analyzeReviewState({prs: [{...PRS[0],author:'Uuriko'}]});
+  assert.deepEqual(routeReviews(states, LANES).unrouted,[101]);
+  states[0].authorLane='fo';
+  assert.equal(routeReviews(states, LANES).assignments[101],'instinct');
+});

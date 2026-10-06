@@ -175,7 +175,8 @@ export async function dispatchRoute(ctx, routes = ROUTES) {
   const found = matchRoute(routes, ctx.req.method, ctx.url.pathname);
   if (!found) return false;
   if (!found.row) {
-    // Authenticate protected room paths before exposing their method surface.
+    // Authenticate protected paths before exposing their method surface.
+    if (typeof found.authRow?.authenticate === "function") await found.authRow.authenticate(ctx);
     if (found.authRow?.auth === "room" && typeof ctx.roomCredentials === "function") {
       const selected = ctx.roomCredentials(ctx.req, ctx.url);
       const fence = selected.mode === "account" ? ctx.accountBinding(ctx.req) : ctx.expectedBinding(ctx.req);
