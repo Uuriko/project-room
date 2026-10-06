@@ -4407,21 +4407,62 @@ function roomActionEntries() {
 function closeRoomActions(restore = true) {
   const context = roomActionsContext; roomActionsContext = null;
   $("#room-actions-dialog").close(); $("#room-actions-list").replaceChildren(); $("#room-actions-query").value = "";
-  $("#room-actions-empty").hidden = true;
+  $("#room-actions-empty").hidden = true; $("#room-actions-count").textContent = ""; $("#room-actions-status").textContent = "";
   if (restore && context && ownsRoomActions(context) && context.opener?.isConnected && context.opener.getClientRects().length) {
     context.opener.focus({ preventScroll: true });
     if (context.selection && context.opener.value === context.value) context.opener.setSelectionRange(...context.selection);
   }
 }
+const ROOM_CHANNEL_RESULT_LIMIT = 20;
 function renderRoomActions() {
   if (!roomActionsContext || !ownsRoomActions()) { closeRoomActions(false); return; }
-  const terms = $("#room-actions-query").value.toLowerCase().trim().split(/\s+/).filter(Boolean);
-  const entries = roomActionEntries().filter(entry => terms.every(term => `${entry.label} ${entry.words}`.toLowerCase().includes(term)));
-  $("#room-actions-list").replaceChildren(...entries.map(entry => {
+  const raw = $("#room-actions-query").value.toLowerCase().trim();
+  const channelsOnly = raw.startsWith("#"), query = (channelsOnly ? raw.slice(1) : raw).trim();
+  const terms = query.split(/\s+/).filter(Boolean);
+  const channels = channelList(state).filter(channel => !channel.archivedAt && terms.every(term => channel.name.toLowerCase().includes(term)));
+  const rank = channel => !query ? channel.id === activeChannelId ? -1 : 0
+    : channel.name.toLowerCase() === query ? 0 : channel.name.toLowerCase().startsWith(query) ? 1 : 2;
+  channels.sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name, "en") || a.id.localeCompare(b.id, "en"));
+  const shown = channels.slice(0, ROOM_CHANNEL_RESULT_LIMIT);
+  const entries = channelsOnly ? [] : roomActionEntries().filter(entry => terms.every(term => `${entry.label} ${entry.words}`.toLowerCase().includes(term)));
+  const group = (name, buttons) => {
+    const section = document.createElement("section"), heading = document.createElement("h3");
+    heading.id = `room-finder-${name.toLowerCase()}`; heading.textContent = name;
+    section.setAttribute("aria-labelledby", heading.id); section.append(heading, ...buttons); return section;
+  };
+  const groups = [];
+  if (shown.length) groups.push(group("Channels", shown.map(channel => {
+    const button = document.createElement("button"); button.type = "button"; button.dataset.roomChannel = channel.id;
+    button.textContent = `# ${channel.name}${channel.id === activeChannelId ? " · Current" : ""}`; return button;
+  })));
+  if (entries.length) groups.push(group("Actions", entries.map(entry => {
     const button = document.createElement("button"); button.type = "button"; button.dataset.roomAction = entry.id;
     button.textContent = entry.label; return button;
-  }));
-  $("#room-actions-empty").hidden = entries.length > 0;
+  })));
+  $("#room-actions-list").replaceChildren(...groups);
+  $("#room-actions-count").textContent = `Showing ${shown.length} of ${channels.length} channels.${channels.length > shown.length ? " Type more to refine the list." : ""}`;
+  $("#room-actions-empty").hidden = shown.length + entries.length > 0;
+  $("#room-actions-status").textContent = "";
+}
+function chooseRoomChannel(id) {
+  if (!roomActionsContext || !ownsRoomActions()) { closeRoomActions(false); return; }
+  const channel = state.channels?.[id];
+  if (!channel || channel.archivedAt) {
+    renderRoomActions(); $("#room-actions-status").textContent = "That channel is unavailable. Choose another channel.";
+    $("#room-actions-query").focus(); return;
+  }
+  const blocked = busy ? "Wait for the current send to finish, then try again."
+    : composerFiles.some(file => file.status === "uploading") ? "Wait for the file upload to finish, then try again."
+    : requestReading ? "Wait for the request to finish loading, then try again." : "";
+  if (blocked) { $("#room-actions-status").textContent = blocked; $("#room-actions-status").scrollIntoView({ block: "nearest" }); return; }
+  setActiveChannel(id); closeRoomActions(false);
+  $("#main").classList.remove("sidebar-open"); $("#sidebar-toggle").setAttribute("aria-expanded", "false");
+  $("#conversation-title").focus({ preventScroll: true });
+}
+function chooseRoomChoice(button) {
+  if (!roomActionsContext || !ownsRoomActions()) { closeRoomActions(false); return; }
+  if (button?.dataset.roomChannel) chooseRoomChannel(button.dataset.roomChannel);
+  else if (button?.dataset.roomAction) chooseRoomAction(button.dataset.roomAction);
 }
 function openRoomActions() {
   if (!ownsRoomActions(null) || document.querySelector("dialog[open]")) return;
@@ -4482,10 +4523,11 @@ $("#room-actions-open").addEventListener("click", openRoomActions);
 $("#room-actions-close").addEventListener("click", () => closeRoomActions());
 $("#room-actions-dialog").addEventListener("cancel", event => { event.preventDefault(); closeRoomActions(); });
 $("#room-actions-query").addEventListener("input", renderRoomActions);
-$("#room-actions-list").addEventListener("click", event => { const id = event.target.closest("[data-room-action]")?.dataset.roomAction; if (id) chooseRoomAction(id); });
+$("#room-actions-list").addEventListener("click", event => chooseRoomChoice(event.target.closest("[data-room-channel], [data-room-action]")));
 $("#room-actions-dialog").addEventListener("keydown", event => {
   if (event.isComposing || event.keyCode === 229) { if (event.key === "Enter") event.preventDefault(); return; }
   if (event.altKey || event.ctrlKey || event.metaKey) return;
+  if (event.key === "Escape") { event.preventDefault(); closeRoomActions(); return; }
   if (event.key === "Enter" && event.repeat) { event.preventDefault(); return; }
   const buttons = [...$("#room-actions-list").querySelectorAll("button")], index = buttons.indexOf(document.activeElement);
   if (["ArrowDown", "ArrowUp"].includes(event.key)) {
@@ -4493,7 +4535,7 @@ $("#room-actions-dialog").addEventListener("keydown", event => {
     const next = event.key === "ArrowDown" ? index + 1 : index < 0 ? buttons.length - 1 : index - 1;
     (buttons[next] || $("#room-actions-query")).focus();
   } else if (event.key === "Enter" && document.activeElement === $("#room-actions-query")) {
-    event.preventDefault(); if (!event.repeat && buttons[0]) chooseRoomAction(buttons[0].dataset.roomAction);
+    event.preventDefault(); if (!event.repeat && buttons[0]) chooseRoomChoice(buttons[0]);
   }
 });
 document.addEventListener("keydown", event => {

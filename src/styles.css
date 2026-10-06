@@ -1632,3 +1632,7 @@ summary { overflow-wrap: anywhere; }
 .presence-refresh { margin-bottom: .75rem; }
 .presence-check-note { display: block; }
 .member-owned-by { overflow-wrap: anywhere; }
+
+#room-actions-list section { display: grid; gap: .15rem; }
+#room-actions-list h3 { color: var(--muted); font-size: var(--text-sm); margin: .75rem .75rem .25rem; }
+#room-actions-status:empty { display: none; }

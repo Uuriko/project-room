@@ -355,7 +355,7 @@
                 <div class="room-more-actions">
               <button id="topbar-activity" class="topbar-button" type="button" aria-haspopup="dialog" aria-controls="activity-dialog" title="Activity (g then a)">Activity <span id="activity-count" class="count-chip" hidden></span></button>
               <button id="topbar-later" class="topbar-button" type="button" aria-haspopup="dialog" aria-controls="later-dialog" title="Later (g then l)">Saved for later <span id="later-count" class="count-chip" hidden></span></button>
-              <button id="room-actions-open" class="topbar-button" type="button" aria-haspopup="dialog" aria-controls="room-actions-dialog">Find an action <kbd aria-hidden="true">&#8984;K</kbd></button>
+              <button id="room-actions-open" class="topbar-button" type="button" aria-haspopup="dialog" aria-controls="room-actions-dialog">Go to… <kbd aria-hidden="true">&#8984;K</kbd></button>
               <button id="topbar-settings" class="topbar-button" type="button" aria-haspopup="dialog" aria-controls="settings-dialog">Settings</button>
                 </div>
               </details>
@@ -711,11 +711,13 @@
       </main>
     </div>
     <dialog id="room-actions-dialog" aria-labelledby="room-actions-title">
-      <div class="panel-header"><h2 id="room-actions-title">Room actions</h2><button id="room-actions-close" class="button ghost" type="button">Close</button></div>
-      <label class="sr-only" for="room-actions-query">Find an action</label>
-      <input id="room-actions-query" type="search" placeholder="Find an action…" autocomplete="off" maxlength="100" aria-controls="room-actions-list" autofocus>
-      <div id="room-actions-list" aria-label="Available room actions"></div>
-      <p id="room-actions-empty" class="form-hint" role="status" hidden>No matching actions.</p>
+      <div class="panel-header"><h2 id="room-actions-title">Channels + Actions</h2><button id="room-actions-close" class="button ghost" type="button">Close</button></div>
+      <label class="sr-only" for="room-actions-query">Find a channel or action</label>
+      <input id="room-actions-query" type="search" placeholder="Find a channel or action…" autocomplete="off" maxlength="100" aria-controls="room-actions-list" autofocus>
+      <p id="room-actions-count" class="form-hint" role="status"></p>
+      <p id="room-actions-status" class="form-hint" role="status"></p>
+      <div id="room-actions-list" aria-label="Available channels and actions"></div>
+      <p id="room-actions-empty" class="form-hint" hidden>No matching channels or actions.</p>
     </dialog>
     <dialog id="room-instructions-dialog" aria-labelledby="room-instructions-title">
       <h2 id="room-instructions-title">Room instructions</h2>

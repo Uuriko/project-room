@@ -8,7 +8,7 @@ import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { signInFixture } from "./auth-signin.mjs";
 
-async function setup(t, { mobile = false, role = "owner" } = {}) {
+async function setup(t, { mobile = false, role = "owner", expectedMessageWrites = 0 } = {}) {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 50 });
   let browser;
   t.after(async () => {
@@ -33,7 +33,9 @@ async function setup(t, { mobile = false, role = "owner" } = {}) {
     // The attention lane syncs the read horizon (a write) on room entry by
     // design; it is not "creating anything" in the room-actions sense, so it is
     // excluded while every other non-GET room request still fails the check.
-    assert.deepEqual(writes.filter(path => !path.endsWith("/read-horizon")), []); });
+    const effects = writes.filter(path => !path.endsWith("/read-horizon"));
+    assert.equal(effects.filter(path => path.endsWith("/commands")).length, expectedMessageWrites);
+    assert.deepEqual(effects.filter(path => !path.endsWith("/commands")), []); });
   const open = async () => { await clickChrome(page, "#room-actions-open"); await page.locator("#room-actions-query").waitFor(); };
   const action = id => page.locator(`[data-room-action="${id}"]`);
   const capture = async name => {
@@ -73,6 +75,8 @@ test("room actions filter by intent, support keyboard selection, empty state and
   assert.equal(await p.locator("#room-actions-dialog").isVisible(), true);
   await f.capture("no-match");
   await p.locator("#room-actions-query").fill(""); await p.keyboard.press("ArrowDown");
+  assert.equal(await p.locator('[data-room-channel="general"]').evaluate(node => node === document.activeElement), true);
+  await p.keyboard.press("ArrowDown");
   assert.equal(await f.action("write").evaluate(node => node === document.activeElement), true);
   await p.keyboard.press("ArrowDown"); await p.keyboard.press("Enter");
   assert.equal(await p.locator("#message-search").evaluate(node => node === document.activeElement), true);
@@ -168,4 +172,85 @@ test("room actions fit a small touch viewport and keep the last action reachable
   assert.ok(box.y >= 0 && box.y + box.height <= 568 && box.width >= 44 && box.height >= 44);
   await f.capture("small-touch");
   await f.action("instructions").click(); await p.locator("#room-instructions-dialog").waitFor();
+});
+
+for (const mobile of [false, true]) test(`channel finder ${mobile ? "touch" : "keyboard"}: bounded destinations, scoped drafts and stale refusal`, { timeout: 45000 }, async t => {
+  const f = await setup(t, { mobile, expectedMessageWrites: mobile ? 0 : 1 }), p = f.page;
+  for (const [id, name] of [['design', 'design'], ['notes', 'design-notes'], ['redesign', 'redesign'], ...Array.from({ length: 26 }, (_, i) => [`design-${i}`, `design-${String(i).padStart(2, '0')}`])]) {
+    f.store.command(f.keys.owner, 'commons', { id: crypto.randomUUID(), type: 'channel.created', data: { channelId: id, name } });
+  }
+  f.store.command(f.keys.owner, 'commons', { id: crypto.randomUUID(), type: 'message.posted', data: { messageId: 'finder-thread-root', body: 'General discussion', channelId: 'general' } });
+  f.store.command(f.keys.owner, 'commons', { id: crypto.randomUUID(), type: 'message.posted', data: { messageId: 'finder-thread-reply', body: 'Thread reply', replyToId: 'finder-thread-root' } });
+  await p.locator('#channel-list [data-channel="design-25"]').waitFor({ state: 'attached' });
+  const input = p.locator('#message-input'), query = p.locator('#room-actions-query');
+  await input.fill('Unsent general thought'); await input.focus();
+  await input.evaluate(node => node.setSelectionRange(2, 7, 'backward'));
+  const began = performance.now(); if (mobile) await f.open(); else await input.press("Control+k");
+  assert.equal(await p.locator('[data-room-channel]').count(), 20);
+  assert.match(await p.locator('#room-actions-count').textContent(), /Showing 20 of 30 channels/);
+  assert.match(await p.locator('[data-room-channel="general"]').textContent(), /Current/);
+  await query.fill('# design');
+  assert.equal(await p.locator('[data-room-action]').count(), 0);
+  assert.equal(await p.locator('[data-room-channel]').first().getAttribute('data-room-channel'), 'design');
+  assert.match(await p.locator('#room-actions-count').textContent(), /Showing 20 of 29 channels/);
+  t.diagnostic(`30-channel local fixture open+filter ${Math.round(performance.now() - began)}ms; browser orchestration included`);
+  await query.fill('# no-channel'); await p.keyboard.press('Enter');
+  assert.equal(await p.locator('#room-actions-dialog').isVisible(), true);
+  await p.keyboard.press('Escape'); await p.locator('#room-actions-dialog').waitFor({ state: 'hidden' });
+  assert.equal(await input.inputValue(), 'Unsent general thought');
+  if (!mobile) assert.deepEqual(await input.evaluate(node => [node === document.activeElement, node.selectionStart, node.selectionEnd, node.selectionDirection]), [true, 2, 7, 'backward']);
+  await f.open(); await query.fill('# design');
+  await query.dispatchEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true });
+  assert.equal(await p.locator('#conversation-title').textContent(), '# general');
+  if (mobile) await p.locator('[data-room-channel="design"]').tap(); else await query.press('Enter');
+  assert.equal(await p.locator('#conversation-title').textContent(), '# design');
+  assert.equal(await p.locator('#conversation-title').evaluate(node => node === document.activeElement), true);
+  assert.equal(await input.inputValue(), '');
+  assert.equal(await p.locator('#main').evaluate(node => node.classList.contains('sidebar-open')), false);
+  await input.fill('Unsent design thought'); await f.open(); await query.fill('# general'); await query.press('Enter');
+  assert.equal(await input.inputValue(), 'Unsent general thought');
+  await p.locator('[data-message-record-id="finder-thread-root"] .thread-link').click();
+  await input.fill('Unsent thread thought'); await f.open(); await query.fill('# general'); await query.press('Enter');
+  await p.locator('#thread-bar').waitFor({ state: 'hidden' });
+  assert.equal(await input.inputValue(), 'Unsent general thought', 'same-channel finder selection leaves the thread and restores its channel draft');
+  await p.locator('[data-message-record-id="finder-thread-root"] .thread-link').click();
+  assert.equal(await input.inputValue(), 'Unsent thread thought', 'finder exit preserves the independent thread reply draft');
+  await f.open(); await query.fill('# general'); await query.press('Enter');
+  await f.open(); await query.fill('# design');
+  f.store.command(f.keys.owner, 'commons', { id: crypto.randomUUID(), type: 'channel.renamed', data: { channelId: 'design', name: 'studio' } });
+  await p.locator('#channel-list [data-channel="design"]').filter({ hasText: 'studio' }).waitFor({ state: 'attached' });
+  await p.locator('[data-room-channel="design"]').click();
+  assert.equal(await p.locator('#conversation-title').textContent(), '# studio');
+  assert.equal(await input.inputValue(), 'Unsent design thought');
+  await f.open(); await query.fill('# design-notes');
+  f.store.command(f.keys.owner, 'commons', { id: crypto.randomUUID(), type: 'channel.archived', data: { channelId: 'notes' } });
+  await p.locator('#channel-list [data-channel="notes"]').waitFor({ state: 'detached' });
+  await p.locator('[data-room-channel="notes"]').click();
+  assert.match(await p.locator('#room-actions-status').textContent(), /unavailable/i);
+  assert.equal(await p.locator('#conversation-title').textContent(), '# studio');
+  assert.equal(await input.inputValue(), 'Unsent design thought');
+  await p.keyboard.press('Escape');
+  if (!mobile) {
+    let release, seen;
+    const held = new Promise(resolve => { seen = resolve; });
+    const released = new Promise(resolve => { release = resolve; });
+    await p.route('**/api/rooms/commons/commands', async route => { seen(); await released; await route.continue(); });
+    await input.fill('Deliberate pending send'); await p.locator('#message-form button[type="submit"]').click(); await held;
+    await f.open(); await query.fill('# general'); await query.press('Enter');
+    assert.match(await p.locator('#room-actions-status').textContent(), /send.*finish|sending/i);
+    assert.equal(await p.locator('#conversation-title').textContent(), '# studio');
+    release(); await p.locator('#message-list .message-body').filter({ hasText: 'Deliberate pending send' }).waitFor();
+    await query.press('Enter');
+    assert.equal(await p.locator('#conversation-title').textContent(), '# general');
+    await p.unroute('**/api/rooms/commons/commands');
+  }
+  await f.open(); await query.fill('# design-');
+  for (const theme of ['dark', 'light']) {
+    await p.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
+    const box = await p.locator('[data-room-channel]').first().boundingBox();
+    assert.ok(box.height >= 44); assert.equal(await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    const feedback = await p.locator('#room-actions-count').boundingBox();
+    assert.ok(feedback.y >= 0 && feedback.y + feedback.height <= (mobile ? 844 : 1000), 'bounded-result feedback remains visible above the choices');
+    await f.capture(`finder-${mobile ? 'mobile' : 'desktop'}-${theme}`);
+  }
 });
