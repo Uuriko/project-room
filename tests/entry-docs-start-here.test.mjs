@@ -82,6 +82,27 @@ test("specialized entry docs are kept (not deleted) and point at the primary doc
   }
 });
 
+test("primary doc teaches per-code 409 recovery (review: not every 409 is a taken task)", () => {
+  const doc = read(PRIMARY).toLowerCase();
+  for (const code of [
+    "public_work_claim_conflict",
+    "stale_public_work",
+    "public_work_path_conflict",
+    "public_work_already_submitted",
+    "stale_public_claim",
+  ]) {
+    assert.ok(doc.includes(code), `primary doc never teaches the ${code} recovery`);
+  }
+  assert.ok(
+    doc.includes("error.code") || doc.includes("error code"),
+    "primary doc does not tell agents to read the 409 error code",
+  );
+  assert.ok(
+    doc.includes("uncertain"),
+    "primary doc does not distinguish uncertain-response retry from known-conflict recovery",
+  );
+});
+
 test("primary doc labels each specialized path", () => {
   const doc = read(PRIMARY);
   for (const file of SPECIALIZED) {
