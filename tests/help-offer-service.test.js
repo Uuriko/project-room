@@ -8,7 +8,7 @@ import { Worker } from "node:worker_threads";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRuntimePackage } from "../scripts/runtime-package.mjs";
 import { frozenAcceptanceFixture, v13OfferBaseline } from "../scripts/frozen-runtime-fixture.mjs";
-import { RoomStore } from "../server/store.mjs";
+import { RoomStore, PILOT_LIMITS } from "../server/store.mjs";
 import { STORE_SCHEMA_VERSION } from "../server/writer-fence.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
 import { createRoomServer } from "../server/http.mjs";
@@ -166,7 +166,8 @@ test("event/projection capacity allows only valid offer cleanup with exact recei
   const f = setup(t); f.send("guest", f.open("selected")); f.send("owner", f.open("pending")); f.send("producer", f.update("selected"));
   const state = structuredClone(f.store.room("commons").state); state.messages.push({ body: "x".repeat(4 * 1024 * 1024) });
   // Synthetic capacity projection only; not evidence of recoverable history.
-  f.store.db.prepare("UPDATE rooms SET sequence=10000,projection=? WHERE id='commons'").run(JSON.stringify(state));
+  // G11b: the event cap is PILOT_LIMITS.eventsPerRoom now, not a 10000 literal.
+  f.store.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id='commons'").run(PILOT_LIMITS.eventsPerRoom, JSON.stringify(state));
   assert.throws(() => f.send("producer", f.update("pending")), { code: "pilot_limit" });
   const invalid = f.update("selected", "released"); invalid.data.externalActivityUnverified = false;
   assert.throws(() => f.send("guest", invalid), { status: 422 });
