@@ -164,8 +164,19 @@ async function main() {
   }
   if (command === "enroll") {
     const index = argv.indexOf("--enroll");
-    const code = argv[index + 1];
-    const result = await enroll({ code, home });
+    let code = argv[index + 1];
+    // L5: never require the one-time code on argv (ps-visible). When
+    // --enroll is absent or "-", read it from stdin instead.
+    if (index === -1 || code === undefined || code === "-") {
+      code = await new Promise(resolve => {
+        let data = "";
+        process.stdin.setEncoding("utf8");
+        process.stdin.on("data", chunk => { data += chunk; });
+        process.stdin.on("end", () => resolve(data.trim()));
+      });
+    }
+    const insecure = argv.includes("--insecure");
+    const result = await enroll({ code, home, insecure });
     const { ...safe } = result;
     console.log(JSON.stringify(safe));
     process.exitCode = result.ok ? 0 : 1;

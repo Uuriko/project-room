@@ -6,6 +6,13 @@
 // a freshly minted identity previously had no documented or API-discoverable
 // way to learn any real room ID).
 //
+// The owner also controls whether the room's work receipts are publicly
+// visible (room_directory_settings.public_receipts, default 1 = public,
+// preserving current behavior). When the owner turns receipts private, the
+// public-work receipt endpoints and the public receipts feed hide the
+// room's receipts from non-members; members keep reading them through the
+// member-gated room endpoints.
+//
 // Sanitization is a strict field-by-field rebuild — never a passthrough:
 //   - Only roomId, title, purpose, kind, memberCount and listedAt leave.
 //   - No member ids, handles, emails, identity links, permissions, or DMs.
@@ -32,9 +39,23 @@ export const roomDirectorySchema = `
     discoverable INTEGER NOT NULL DEFAULT 0,
     listed_at INTEGER,
     updated_at INTEGER NOT NULL,
-    opportunities_enabled INTEGER NOT NULL DEFAULT 1
+    opportunities_enabled INTEGER NOT NULL DEFAULT 1,
+    public_receipts INTEGER NOT NULL DEFAULT 1
   );
 `;
+
+// Additive migration for databases whose room_directory_settings table
+// predates the public_receipts column. Idempotent: a second call is a
+// PRAGMA read only. Default 1 keeps receipts public (current behavior)
+// for every room that never touched the setting.
+export function ensurePublicReceiptsColumn(db) {
+  const table = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='room_directory_settings'").get();
+  if (!table) return;
+  const columns = new Set(db.prepare("PRAGMA table_info(room_directory_settings)").all().map(column => column.name));
+  if (!columns.has("public_receipts")) {
+    db.exec("ALTER TABLE room_directory_settings ADD COLUMN public_receipts INTEGER NOT NULL DEFAULT 1");
+  }
+}
 
 export const DIRECTORY_PAGE_LIMIT = 100;
 export const DIRECTORY_DEFAULT_LIMIT = 50;
@@ -67,12 +88,21 @@ export class RoomDirectory {
     if (memberId !== state?.room?.ownerId) fail(403, "owner_only", "Only the room owner may change public discovery settings");
   }
 
+  // Runs the additive public_receipts migration at most once per instance.
+  _ensureReceiptsColumn() {
+    if (this._receiptsColumnEnsured) return;
+    ensurePublicReceiptsColumn(this.db);
+    this._receiptsColumnEnsured = true;
+  }
+
   // ---- owner controls ------------------------------------------------------
   status(roomId, memberId) {
     const state = this._roomState(roomId);
     this._requireOwner(state, memberId);
-    const row = this.db.prepare("SELECT discoverable, listed_at FROM room_directory_settings WHERE room_id=?").get(roomId);
-    return { roomId, discoverable: row?.discoverable === 1, listedAt: row?.listed_at ?? null };
+    this._ensureReceiptsColumn();
+    const row = this.db.prepare("SELECT discoverable, listed_at, public_receipts FROM room_directory_settings WHERE room_id=?").get(roomId);
+    return { roomId, discoverable: row?.discoverable === 1, listedAt: row?.listed_at ?? null,
+      publicReceipts: row?.public_receipts !== 0 };
   }
 
   set(roomId, memberId, discoverable) {
@@ -117,6 +147,43 @@ export class RoomDirectory {
             updated_at=excluded.updated_at`)
         .run(roomId, nowMs(), enabled ? 1 : 0);
       return { roomId, enabled };
+    });
+  }
+
+  // ---- public receipts visibility ------------------------------------------
+  // Owner-only toggle: whether the room's work receipts are publicly
+  // visible. Default true (current behavior) — a room that never touched
+  // the setting, or whose settings row predates the column, stays public.
+  // When false, the public-work receipt endpoints and the public receipts
+  // feed hide the room's receipts from non-members.
+  publicReceiptsVisible(roomId) {
+    if (typeof roomId !== "string" || !roomId) return true;
+    this._ensureReceiptsColumn();
+    const row = this.db.prepare("SELECT public_receipts FROM room_directory_settings WHERE room_id=?").get(roomId);
+    return !row || row.public_receipts !== 0;
+  }
+
+  receiptsVisibility(roomId, memberId) {
+    const state = this._roomState(roomId);
+    this._requireOwner(state, memberId);
+    return { roomId, publicReceipts: this.publicReceiptsVisible(roomId) };
+  }
+
+  setReceiptsVisibility(roomId, memberId, enabled) {
+    if (typeof enabled !== "boolean") fail(422, "invalid_public_receipts", "publicReceipts (boolean) is the accepted field");
+    const state = this._roomState(roomId);
+    this._requireOwner(state, memberId);
+    return this.store.transaction(() => {
+      this._ensureReceiptsColumn();
+      // A room can go private before it is listed. Upsert preserves the
+      // existing listing bits on every subsequent owner change.
+      this.db.prepare(`INSERT INTO room_directory_settings
+          (room_id, discoverable, listed_at, updated_at, public_receipts)
+          VALUES (?, 0, NULL, ?, ?)
+          ON CONFLICT(room_id) DO UPDATE SET public_receipts=excluded.public_receipts,
+            updated_at=excluded.updated_at`)
+        .run(roomId, nowMs(), enabled ? 1 : 0);
+      return { roomId, publicReceipts: enabled };
     });
   }
 

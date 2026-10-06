@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { event, EVENT_TYPES as T, MEMBERSHIP_AUTHORITY_POLICY_VERSION } from "../src/events.js";
+import { event, EVENT_TYPES as T, MEMBERSHIP_AUTHORITY_POLICY_VERSION, DISPLAY_NAME_POLICY_VERSION } from "../src/events.js";
 import { canonicalInvitationData } from "./invitation-journal.mjs";
 
 // One complete receipt contract is shared by issuance of the joined event and audit.
@@ -20,7 +20,8 @@ export function invitationJoinedEvent(record) {
       invitedByMemberId: record.issuer_member_id,
       invitationId: record.id,
       rolePolicyVersion: record.role_policy_version,
-      authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION
+      authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION,
+      displayNamePolicyVersion: DISPLAY_NAME_POLICY_VERSION
     }
   });
 }
@@ -29,9 +30,15 @@ export function assertInvitationMembershipEvidence(record, linked, binding, room
   const member = room?.state.members[record.intended_member_id];
   const origin = { kind: "invitation", invitationId: record.id, invitedByMemberId: record.issuer_member_id };
   const joined = linked && JSON.parse(linked.body);
+  // W4-NEW-1 added displayNamePolicyVersion to newly issued joined events.
+  // Events written before that field existed are legitimate history: compare
+  // against the event shape their era produced rather than failing the
+  // upgrade integrity sweep.
+  const expected = invitationJoinedEvent(record);
+  if (joined?.data && !("displayNamePolicyVersion" in joined.data)) delete expected.data.displayNamePolicyVersion;
   if (!linked || linked.id !== record.joined_event_id || linked.room_id !== record.room_id
     || !Number.isSafeInteger(linked.sequence) || linked.sequence < 1 || linked.sequence > room.sequence
-    || canonicalInvitationData(joined) !== canonicalInvitationData(invitationJoinedEvent(record))
+    || canonicalInvitationData(joined) !== canonicalInvitationData(expected)
     || binding?.account_id !== record.intended_account_id || binding.origin !== `invitation:${record.id}`
     || member?.id !== record.intended_member_id || member.kind !== "human"
     || member.displayName !== record.intended_display_name || member.role !== record.intended_role

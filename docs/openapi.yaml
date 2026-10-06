@@ -7867,10 +7867,19 @@ paths:
         and `{ authenticated: false, account: null, csrf, sessionBinding }`.
         The slot grants nothing until `POST` signs in with an account access
         key; `POST` (sign in) and `DELETE` (sign out) below require the slot
-        cookie plus CSRF.
+        cookie plus CSRF. A `GET` carrying `X-Session-Binding` is a bound
+        confirmation of the named session: it never mints a slot, sets a
+        cookie, or replaces a newer sign-in. A matching binding returns the
+        session view; a rotated binding answers `409 session_binding_changed`;
+        a dead, anonymous, expired, or revoked session answers `401
+        unauthenticated`; a malformed binding answers `422
+        invalid_session_binding`.
       security: []
       responses:
         '200': { description: Account session view; never account data for an anonymous caller }
+        '401': { description: unauthenticated }
+        '409': { description: session_binding_changed }
+        '422': { description: invalid_session_binding }
         '429': { description: rate_limited }
     post:
       summary: Sign an account browser slot in
@@ -8404,6 +8413,26 @@ paths:
         '403': { description: origin_denied or csrf_denied }
         '422': { description: invalid_email_code }
         '429': { description: rate_limited }
+  /api/auth/email/verify/resend:
+    post:
+      summary: Re-issue the email verification code
+      description: >-
+        Requires the account session, Origin, and CSRF. Mints a fresh
+        6-digit verification code for the account's password-login email,
+        invalidating the previous code. Answers already_verified when the
+        address is already verified; 422 when the account has no email;
+        503 when mail delivery is not configured. Tight per-account budget
+        (5) so the endpoint is not a free oracle for someone else's inbox.
+      security:
+        - accountSession: []
+      responses:
+        '200': { description: "{status: resent|already_verified, email, expiresAt?}" }
+        '401': { description: account_session_required or invalid_session }
+        '403': { description: origin_denied or csrf_denied }
+        '405': { description: method_not_allowed }
+        '422': { description: invalid_email }
+        '429': { description: rate_limited }
+        '503': { description: mail_not_configured }
   /api/auth/password/login:
     post:
       summary: Sign a session slot in with email+password (slice 2)

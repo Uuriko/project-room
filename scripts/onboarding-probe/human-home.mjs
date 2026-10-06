@@ -3,7 +3,7 @@
 // The KLM figure is labeled est. on every human step.
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { elapsed, emptyCreated, klmEst, qaStamp, writeJson } from "./lib.mjs";
+import { elapsed, emptyCreated, klmEst, probePassword, qaStamp, writeJson } from "./lib.mjs";
 
 async function launch() {
   const { chromium } = await import("playwright");
@@ -26,7 +26,7 @@ async function journey(browser, origin, stamp, viewport, shots) {
     await form.locator('[data-password-mode="signup"]').click({ timeout: 8000 });
     clicks += 1;
     const email = `${stamp}@example.com`;
-    const password = "qa-probe-pw";
+    const password = probePassword();
     await form.locator('[name="email"]').fill(email);
     await form.locator('[name="password"]').fill(password);
     chars += email.length + password.length;

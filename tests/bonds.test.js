@@ -6,11 +6,15 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
+import { installFakeWebhookDns } from "./helpers/fake-webhook-dns.mjs";
 import { HEARTBEAT_STALE_AFTER_MS } from "../server/agent-heartbeats.mjs";
 import { peerEventVisible, visibleBonds } from "../server/bonds.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
 
 async function startServer(t, f) {
+  // Test-only DNS: fixture webhook URLs (https://*.test) go through the
+  // fully fail-closed production gate, so a fake resolver stands in.
+  installFakeWebhookDns(f.store);
   const server = createRoomServer({ store: f.store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => {

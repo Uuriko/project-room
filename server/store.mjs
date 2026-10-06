@@ -20,7 +20,7 @@ export { ServiceError };
 import {
   applyEvent, emptyRoomState, event, EVENT_TYPES as T, WORK_STATES, INVITATION_ROLE_POLICIES,
   INVITATION_ROLE_POLICY_VERSION, INVITATION_ROLES,
-  MEMBERSHIP_AUTHORITY_POLICY_VERSION, DISPLAY_NAME_POLICY_VERSION, validId, memberCan, ROOM_POLICY_FIELDS, DEFAULT_CHANNEL_ID,
+  MEMBERSHIP_AUTHORITY_POLICY_VERSION, DISPLAY_NAME_POLICY_VERSION, PIN_DM_PARTY_POLICY_VERSION, validId, memberCan, ROOM_POLICY_FIELDS, DEFAULT_CHANNEL_ID,
   TRUST_OFF_CODE, trustOffMessage, firstBlockedWakeTarget,
   MAX_MESSAGE_BODY_CHARS, MAX_MESSAGE_COMMAND_BYTES
 } from "../src/events.js";
@@ -28,10 +28,10 @@ import { PIN_COMMAND_SHAPES, isPinned } from "../src/events.js";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 import { buildReturnBrief, resolveHistoryWindow, RETURN_BRIEF_DEFAULT_LIMIT } from "./return-brief.mjs";
 import { enforceSpendAllowance } from "./spend-allowance.mjs";
-import { ensureAutonomyTiersSchema, enforceAutonomyTiers } from "./autonomy-tiers.mjs";
+import { ensureAutonomyTiersSchema, enforceAutonomyTiers, AUTONOMY_TIERS_SCHEMA } from "./autonomy-tiers.mjs";
 import { ensureOperatorActionsSchema, OPERATOR_ACTIONS_SCHEMA } from "./operator-actions.mjs"; // CP-ADMIN-0: append-only operator audit.
-import { ensureGrantsSchema } from "./grants.mjs";
-import { ensureSpendGrantsSchema } from "./spend-grants.mjs";
+import { ensureGrantsSchema, GRANTS_SCHEMA } from "./grants.mjs";
+import { ensureSpendGrantsSchema, SPEND_GRANTS_SCHEMA } from "./spend-grants.mjs";
 import { canonicalInvitationData, invitationJournalEntry, invitationJournalSchema, replayInvitationJournal } from "./invitation-journal.mjs";
 import { invitationJoinedEvent, assertInvitationMembershipEvidence } from "./invitation-evidence.mjs";
 import { STORE_SCHEMA_VERSION, fenceDefinitions, registerWriter, installWriterFence, verifyWriterFence } from "./writer-fence.mjs";
@@ -88,7 +88,7 @@ import { GuestAgentLinks, isRoomAccessToken, isGuestAgentMemberId } from "./gues
 import { GuestInvites, guestInviteSchema, guestSelfServeSchema } from "./guest-invites.mjs";
 import { WebFetch, webFetchSchema, migrateWebFetchLogColumns } from "./web-fetch.mjs";
 import { WebResearch, webResearchSchema } from "./web-research.mjs"; // RC-2026-09-24-310: knowledge router (additive)
-import { AgentIdentities, agentIdentitySchema, ensureIdentitySecretSchema, ensureIdentityCapacitySchema, ensureIdentityLinkCodeSchema, isIdentitySecret } from "./agent-identities.mjs";
+import { AgentIdentities, agentIdentitySchema, ensureIdentitySecretSchema, ensureIdentityCapacitySchema, ensureIdentityLinkCodeSchema, identityLinkCodeSchema, isIdentitySecret } from "./agent-identities.mjs";
 import { AgentKeyRegistry, agentKeyRegistrySchema } from "./agent-key-registry.mjs"; // Integration map slice 9: agent public-key registry.
 // Board v2 is retired. These tables stay so existing databases and the
 // recovery audit still see them. Nothing drops board_vtwo_*.
@@ -143,6 +143,7 @@ import { MembersDirectory, membersDirectorySchema } from "./members-directory.mj
 import {
   MENTION_TIMEOUT_MS_DEFAULT, MENTION_TIMEOUT_MS_MIN, MENTION_TIMEOUT_MS_MAX,
   assertTransitionMention, resolveMentionTargetsInText, mentionStateSchema,
+  mentionTargetWarnings,
 } from "./mention-lifecycle.mjs"; // #658: mention lifecycle state machine + schema.
 import { activitySchema, recordActivityEvents } from "./activity.mjs"; // Attention: activity feed, read horizons, saved messages, thread mutes.
 import { AgentInvites, agentInviteSchema } from "./agent-invites.mjs";
@@ -407,7 +408,11 @@ function applyProvenanceRepair(state, events) {
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 // F5: the bounded pilot caps in one place. The room write paths below enforce
 // them; server/usage-summary.mjs reports them with the remaining headroom.
-export const PILOT_LIMITS = Object.freeze({ eventsPerRoom: 10000, membersPerRoom: 100, workItemsPerRoom: 500, projectionBytes: 4 * 1024 * 1024 });
+// G11 (2026-10-06): muse-room reached 82% of the 4 MB projection and was
+// ~0.7 days from refusing writes, with the event cap ~10 days out. Raised per
+// the owner's word relayed at room seq 3425. Every event cap check reads
+// eventsPerRoom from here (tests/pilot-limits-single-source.test.js).
+export const PILOT_LIMITS = Object.freeze({ eventsPerRoom: 1_000_000, membersPerRoom: 100, workItemsPerRoom: 500, projectionBytes: 4 * 1024 * 1024 });
 // Inactive members retain their history, but do not occupy an admission seat.
 export const activeMemberCount = members => Object.values(members ?? {}).filter(member => member?.active !== false).length;
 const hash = text => createHash("sha256").update(text).digest("hex");
@@ -966,6 +971,27 @@ function agentWakeTargetIds(state, senderMemberId, data) {
   return [...agentWakeTargets(state, senderMemberId, data).keys()];
 }
 
+// ensure*Schema helpers the full schema pass runs (ALTER-based convergence
+// has no DDL constant to hash, so the function source stands in for it).
+// tests/schema-stamp-coverage.test.js fails if the pass calls one not listed.
+// Each entry is hashed by its "name@revision" label, never by fn.toString():
+// the Workers bundle rewrites function source, so a source hash gave the
+// Worker and Node different stamps for the same code (cloudflare CI, #1627).
+// tests/schema-stamp-coverage.test.js pins a digest of each helper's source
+// to its label, so changing a helper without bumping its revision fails CI.
+export const ADDITIVE_SCHEMA_ENSURES = [
+  [ensureIdentitySecretSchema, "ensureIdentitySecretSchema@1"],
+  [ensureIdentityCapacitySchema, "ensureIdentityCapacitySchema@1"],
+  [ensureIdentityLinkCodeSchema, "ensureIdentityLinkCodeSchema@1"],
+  [ensureAutonomyTiersSchema, "ensureAutonomyTiersSchema@1"],
+  [ensureOperatorActionsSchema, "ensureOperatorActionsSchema@1"],
+  [ensureGrantsSchema, "ensureGrantsSchema@1"],
+  [ensureSpendGrantsSchema, "ensureSpendGrantsSchema@1"],
+  [ensureAccountProfileSchema, "ensureAccountProfileSchema@1"],
+  [ensureVerifiedEmailSchema, "ensureVerifiedEmailSchema@1"],
+  [ensureAttachmentSchema, "ensureAttachmentSchema@1"]
+];
+
 // Hash of the DDL this process knows how to apply. A stored match means
 // schema setup and the writer fence already ran for this code, so a wake
 // can skip both. Fence SQL is included: a trigger change must reinstall.
@@ -993,9 +1019,15 @@ function roomSchemaStamp() {
     agentKeyRegistrySchema, INTEGRITY_SNAPSHOT_SCHEMA, OPERATOR_ACTIONS_SCHEMA,
     INTEGRITY_JOB_CURSOR_SCHEMA, INTEGRITY_ROOM_STATE_SCHEMA, INTEGRITY_SWEEP_COLUMN,
     ROOM_SCHEMA_STAMP_SCHEMA, LOOKUP_INDEXES, MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, WANTS_WORK_SCHEMA,
-    PUBLIC_READ_MODEL_SCHEMA
+    PUBLIC_READ_MODEL_SCHEMA,
+    // Additive tables converged outside the version bump. A warm wake whose
+    // stamp matches skips the whole schema pass, so any DDL the pass applies
+    // must be hashed here or a room stamped by an older deploy never gets it
+    // (the priced-tool 500: spend_authorizations missing on muse-room).
+    updatesSchema, GRANTS_SCHEMA, SPEND_GRANTS_SCHEMA, AUTONOMY_TIERS_SCHEMA, identityLinkCodeSchema
   ];
   for (const part of parts) hash.update("\0").update(part ?? "");
+  for (const [, label] of ADDITIVE_SCHEMA_ENSURES) hash.update("\0").update(label);
   for (const def of fenceDefinitions(STORE_SCHEMA_VERSION)) hash.update("\0").update(def.name).update(def.sql);
   return hash.digest("hex");
 }
@@ -3391,7 +3423,16 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (allowAccountSession && this.db.prepare("SELECT 1 FROM account_session_slots WHERE hash=?").get(hash(token))) return this.authenticateAccountSession(token, roomId ?? null, expectedSessionBinding);
       fail(401, "unauthenticated", "Session or key expired or revoked");
     }
-    if (row.revoked || row.expires_at <= this.now() || (row.parent_hash && (row.parent_revoked !== 0 || row.parent_expiry <= this.now()))) fail(401, "unauthenticated", "Session or key expired or revoked");
+    if (row.revoked || row.expires_at <= this.now() || (row.parent_hash && (row.parent_revoked !== 0 || row.parent_expiry <= this.now()))) {
+      // Guest-token expiry teaches the recovery instead of dead-ending: the
+      // credential is spent, not broken. Status and code stay identical so
+      // existing clients keep matching on them; only the message changes,
+      // and only for expired (never revoked) guest credentials.
+      if (!row.revoked && !row.parent_hash && row.expires_at <= this.now() && isGuestAgentMemberId(row.member_id)) {
+        fail(401, "unauthenticated", "Guest credential expired. It cannot be renewed \u2014 get a fresh pass: self-serve guests re-run POST /api/guest-invites/request with a fresh signed joinRequest (a new requestId); invited guests ask the owner for a fresh invite code, then POST /api/guest-invites/redeem with the saved identity secret.");
+      }
+      fail(401, "unauthenticated", "Session or key expired or revoked");
+    }
     if (roomId && row.room_id !== roomId) fail(403, "access_denied", "This credential does not grant access to that room");
     const members = this.roomAuthority(row.room_id).members;
     const member = Object.hasOwn(members, row.member_id) && members[row.member_id];
@@ -4432,6 +4473,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         }
       }
       const memberAuthorityEvent = [T.MEMBER_ADDED, T.MEMBER_ACCESS_CHANGED].includes(command.type);
+      // F-1 follow-up: stamp new pins with the DM-party policy version at
+      // live admission (both the pins route and direct /commands flow through
+      // here). The reducer enforces the party check only on stamped events,
+      // so pins recorded before the rule keep replaying.
+      const pinEvent = command.type === T.MESSAGE_PINNED;
       const incoming = event({
         type: bondEffect?.eventType ?? command.type, roomId, actorId: auth.member.id, at: new Date(this.now()).toISOString(),
         idempotencyKey: hash(`${auth.member.id}:${command.id}`), causationId: command.causationId,
@@ -4441,7 +4487,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
             authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION,
             ...(command.type === T.MEMBER_ADDED ? { displayNamePolicyVersion: DISPLAY_NAME_POLICY_VERSION } : {}),
           }
-          : requestMode ? { ...command.data, requestPolicyVersion: REPLY_POLICY_VERSION } : command.data
+          : requestMode ? { ...command.data, requestPolicyVersion: REPLY_POLICY_VERSION }
+          : pinEvent ? { ...command.data, pinDmPartyPolicyVersion: PIN_DM_PARTY_POLICY_VERSION }
+          : command.data
       });
       // A display name is checked before the reducer stores it. Exact
       // duplicates stay allowed: identity link already accepts two members
@@ -4609,7 +4657,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // message, and a post by a mentioned member marks their pending
       // mentions responded in the same transaction. Never throws for
       // unparseable input — an unresolvable mention is simply not tracked.
-      if (command.type === T.MESSAGE_POSTED) this.trackMentions(roomId, state, auth.member.id, command.data, incoming.id);
+      // COMMS-02: trackMentions also returns the poster's mention warnings
+      // (@handles whose target is ambiguous or unknown); they ride the response below.
+      let mentionWarnings = null;
+      if (command.type === T.MESSAGE_POSTED) mentionWarnings = this.trackMentions(roomId, state, auth.member.id, command.data, incoming.id);
       // Attention: write-time activity fan-out (mention/reply/thread_reply/
       // reaction). Runs in the same transaction as the triggering event.
       // Never throws: a fan-out failure must not fail the command.
@@ -4659,7 +4710,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         ? `Posted. Wake skipped for ${skippedWakes.map(id => room.state.members?.[id]?.displayName || id).join(", ")}: Room Trust is off, so that agent was not woken.`
         : null;
       syncRoomPublication(this, { roomId, state, previous: room.state, auth });
-      return { sequence, event: incoming, duplicate: false, ...(note ? { note } : {}) };
+      return { sequence, event: incoming, duplicate: false, ...(note ? { note } : {}),
+        ...((Array.isArray(mentionWarnings) && mentionWarnings.length > 0) ? { mentionWarnings } : {}) };
     });
   }
 
@@ -4794,7 +4846,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       ).run(nowMs, roomId, answered.eventId, senderMemberId);
     }
     const body = typeof data.body === "string" ? data.body : "";
-    if (!body.includes("@")) return;
+    if (!body.includes("@")) return [];
     const members = state?.members ?? {};
     let identityNames = {};
     try {
@@ -4809,10 +4861,19 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       `INSERT OR IGNORE INTO mention_states
        (room_id,message_event_id,mentioned_member_id,state,created_at,timeout_at,decided_at)
        VALUES(?,?,?,?,?,?,NULL)`);
+    const toMemberId = typeof data.toMemberId === "string" ? data.toMemberId : "";
     for (const memberId of resolveMentionTargetsInText(members, identityNames, body, senderMemberId)) {
-      if (data.toMemberId && data.toMemberId !== memberId) continue;
+      if (toMemberId && toMemberId !== memberId) continue;
       insert.run(roomId, eventId, memberId, "delivered", nowMs, nowMs + timeoutMs);
     }
+    // COMMS-02: warn the poster about @handles whose target is ambiguous
+    // (2+ members match) or unknown, naming the candidates so they can
+    // disambiguate. Delivery is unchanged — the post still lands; the
+    // warnings ride on the command response. In a targeted DM only handles
+    // naming the DM target are relevant; other handles never create rows.
+    let warnings = mentionTargetWarnings(members, identityNames, body, senderMemberId);
+    if (toMemberId) warnings = warnings.filter(w => w.candidates.some(c => c.memberId === toMemberId));
+    return warnings;
   }
 
   // #658: per-room mention timeout, defaulting to 30 minutes. Owner-

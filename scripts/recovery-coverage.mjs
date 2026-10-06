@@ -56,7 +56,9 @@ export async function seedRecoveryCoverage(f) {
   // writer; this fixture inserts directly so the audit row needs no identity.
   f.store.db.prepare(`INSERT INTO room_attachments(room_id,id,uploader_id,filename,media_type,byte_length,sha256,bytes,state,created_at,expires_at,message_id)
     VALUES('commons','recovery-attachment','recovery-uploader','recovery-note.txt','text/plain',11,?,?,'staged',?, ?,NULL)`)
-    .run("0".repeat(64), Buffer.from("hello world"), f.now(), f.now() + 1000);
+    // REL-14: the stored sha256 must be the real digest of the bytes; backups
+    // now refuse attachments whose bytes do not hash to their sha256 column.
+    .run(createHash("sha256").update("hello world").digest("hex"), Buffer.from("hello world"), f.now(), f.now() + 1000);
   // Seed one typed handoff envelope so the capture comparison covers
   // handoff_envelopes. The table arrived with the envelope journal and had no
   // fixture row, which the "every table has substantive data" assertion below

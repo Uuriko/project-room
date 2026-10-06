@@ -109,7 +109,7 @@ export function settlePullRequest(item, outcome, nowMs) {
   });
   const agentId = item.owner ?? "system";
   if (outcome === "merged") {
-    const note = `pull request merged: ${item.pullRequest.url}`;
+    const note = `pull request merged: ${current.url}`;
     return {
       action: "pr_merged",
       previousOwnerId: null,
@@ -123,7 +123,7 @@ export function settlePullRequest(item, outcome, nowMs) {
       }
     };
   }
-  const note = `pull request closed: ${item.pullRequest.url}`;
+  const note = `pull request closed: ${current.url}`;
   return {
     action: "pr_closed",
     previousOwnerId: item.owner ?? null,

@@ -10,7 +10,7 @@ import { EVENT_TYPES as T } from "../src/events.js";
 import {
   MENTION_STATES, isMentionState, isTerminalMentionState, canTransitionMention,
   assertTransitionMention, effectiveMentionState, resolveMentionTarget,
-  resolveMentionTargetsInText, MENTION_TIMEOUT_MS_DEFAULT,
+  resolveMentionTargetsInText, MENTION_TIMEOUT_MS_DEFAULT, mentionTargetWarnings,
 } from "../server/mention-lifecycle.mjs";
 import { extractAgentMentions } from "../server/inbox-agent-routing.mjs";
 
@@ -355,4 +355,73 @@ test("HTTP: list, ack, and settings routes", async t => {
   assert.ok(Array.isArray(mentioned.mentions), "chips ride on the message view");
   assert.equal(mentioned.mentions[0].memberId, "alice");
   assert.equal(mentioned.mentions[0].state, "acknowledged", "chip reflects the ack");
+});
+
+// --- COMMS-02: ambiguous-mention warnings -----------------------------------
+// A posted @mention that could resolve to several members (or to none)
+// silently reaches nobody. The message.posted response must warn the poster,
+// naming the candidates, without blocking the post. Unambiguous mentions
+// behave exactly as before (no warnings field).
+
+test("mentionTargetWarnings: ambiguous handle names every candidate", () => {
+  const members = {
+    a: { displayName: "Instinct", active: true },
+    b: { displayName: "Instinct", active: true },
+    poster: { displayName: "Poster", active: true },
+  };
+  const warnings = mentionTargetWarnings(members, {}, "hey @Instinct what do you think?", "poster");
+  assert.equal(warnings.length, 1);
+  assert.equal(warnings[0].handle, "Instinct");
+  assert.equal(warnings[0].reason, "ambiguous");
+  assert.deepEqual(warnings[0].candidates.map(c => c.memberId).sort(), ["a", "b"]);
+});
+
+test("mentionTargetWarnings: unknown handle reports not_member", () => {
+  const members = { a: { displayName: "Alice", active: true } };
+  const warnings = mentionTargetWarnings(members, {}, "hey @Zxqwv!", "a");
+  assert.equal(warnings.length, 1);
+  assert.equal(warnings[0].handle, "Zxqwv");
+  assert.equal(warnings[0].reason, "not_member");
+  assert.deepEqual(warnings[0].candidates, []);
+});
+
+test("mentionTargetWarnings: unique, self, and mention-free text warn nothing", () => {
+  const members = {
+    me: { displayName: "Me", active: true },
+    alice: { displayName: "Alice", active: true },
+  };
+  assert.deepEqual(mentionTargetWarnings(members, {}, "hey @Alice", "me"), []);
+  assert.deepEqual(mentionTargetWarnings(members, {}, "hi @me", "me"), []);
+  assert.deepEqual(mentionTargetWarnings(members, {}, "no mentions here", "me"), []);
+  assert.deepEqual(mentionTargetWarnings(members, {}, "email bob@example.com", "me"), []);
+  assert.deepEqual(mentionTargetWarnings(members, {}, "nothing @_silent here", "me"), []);
+});
+
+test("message.posted carries mentionWarnings for an ambiguous @mention", t => {
+  const f = setup(t);
+  // "Bobby Tables" and "Bobby Fisher" share the "Bobby" display-name prefix:
+  // @Bobby can reach either member, so delivery silently reaches nobody.
+  f.send("owner", T.MEMBER_ADDED, { memberId: "robert", displayName: "Bobby Fisher", kind: "human", permissions: [] });
+  const result = f.send("alice", T.MESSAGE_POSTED, { body: "hey @Bobby, thoughts?" });
+  assert.ok(result.event, "the post still lands");
+  assert.ok(Array.isArray(result.mentionWarnings), "warnings ride on the response");
+  assert.equal(result.mentionWarnings.length, 1);
+  const [warning] = result.mentionWarnings;
+  assert.equal(warning.reason, "ambiguous");
+  assert.deepEqual(warning.candidates.map(c => c.memberId).sort(), ["bob", "robert"]);
+});
+
+test("message.posted omits mentionWarnings when every @mention resolves", t => {
+  const f = setup(t);
+  const result = f.send("alice", T.MESSAGE_POSTED, { body: "hey @bob, thoughts?" });
+  assert.ok(result.event, "the post still lands");
+  assert.ok(!("mentionWarnings" in result), "unambiguous posts carry no warnings field");
+});
+
+test("message.posted warns not_member for an unknown handle", t => {
+  const f = setup(t);
+  const result = f.send("alice", T.MESSAGE_POSTED, { body: "hey @Zxqwv, thoughts?" });
+  assert.ok(result.event, "the post still lands");
+  assert.equal(result.mentionWarnings?.length, 1);
+  assert.equal(result.mentionWarnings[0].reason, "not_member");
 });

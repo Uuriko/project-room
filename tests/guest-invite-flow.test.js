@@ -34,7 +34,7 @@ async function serve(t) {
     },
     ...(data === undefined ? {} : { body: JSON.stringify(data) })
   });
-  return { store, origin, request, ownerKey, advance: ms => { clock += ms; } };
+  return { store, origin, request, ownerKey, advance: ms => { clock += ms; }, now: () => clock };
 }
 
 function mintBody(extras = {}) {
@@ -372,10 +372,12 @@ test("owner upgrades a guest to contributor explicitly; re-redemption cannot esc
 
 test("expiry stops the credential and the next owner mint sweeps the member", async t => {
   const s = await serve(t);
-  const { store, request, ownerKey, advance } = s;
+  const { store, request, ownerKey, advance, now } = s;
   const guest = await redeemGuest(t, s);
-  const ttl = guest.expiresAt - Date.now();
-  advance(ttl + 1000);
+  // expiresAt is on the store's injectable clock; advance past it on that
+  // same clock. (Using Date.now() here used to flake: real time spent
+  // minting/redeeming ate the 1s margin.)
+  advance(guest.expiresAt - now() + 1000);
   assert.throws(() => store.authenticate(guest.token, "commons"), { code: "unauthenticated" });
   // Minting again runs the existing sweep: the expired guest is deactivated.
   await mintInvite(request, ownerKey, { guestLabel: "after" });

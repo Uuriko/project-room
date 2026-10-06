@@ -19,12 +19,14 @@ const JOINING_MD = join(root, "docs", "JOINING.md");
 const V0 = join(root, "server", "guest-agent-links.mjs");
 const V1 = join(root, "server", "guest-invites.mjs");
 const HTTP = join(root, "server", "http.mjs");
+const STORE = join(root, "server", "store.mjs");
 
 const galMd = readFileSync(GAL_MD, "utf8");
 const joiningMd = readFileSync(JOINING_MD, "utf8");
 const v0Src = readFileSync(V0, "utf8");
 const v1Src = readFileSync(V1, "utf8");
 const httpSrc = readFileSync(HTTP, "utf8");
+const storeSrc = readFileSync(STORE, "utf8");
 
 // The recovery section: everything from its heading to the next ## heading.
 function recoverySection(md) {
@@ -122,6 +124,32 @@ test("recovery section keeps the invite vocabulary (no internal mechanism names)
   // recovery copy is user-facing, so `ga1.` and friends stay out of it.
   assert.ok(!recovery.includes("ga1."), "recovery must not leak the ga1. token prefix");
   assert.ok(!/self-mint/.test(recovery), "recovery must not leak self-mint");
+});
+
+test("token expiry 401 teaches the recovery: doc wording matches the store message", () => {
+  assert.ok(recovery.includes("401"), "recovery must name the 401 status");
+  assert.ok(recovery.includes("unauthenticated"), "recovery must name the unchanged error code");
+  assert.ok(recovery.includes("Guest credential expired"), "recovery must quote the teaching message");
+  assert.ok(recovery.includes("It cannot be renewed"), "recovery must say the credential cannot be renewed");
+  assert.ok(recovery.includes("Session or key expired or revoked"), "recovery must say revocation keeps the generic message");
+  // The message the server throws, guest-scoped, with status+code unchanged.
+  assert.ok(storeSrc.includes("Guest credential expired. It cannot be renewed"),
+    "store.mjs must throw the documented guest-expiry message");
+  assert.ok(/fail\(401, "unauthenticated", "Guest credential expired/.test(storeSrc),
+    "teaching failure keeps 401 + unauthenticated (backward compatible)");
+  assert.ok(storeSrc.includes("isGuestAgentMemberId(row.member_id)"),
+    "the teaching branch must be scoped to guest credentials");
+});
+
+test("self-serve expiry recovery is documented and matches code constants", () => {
+  assert.ok(/self-serve/i.test(recovery), "recovery must cover the self-serve path");
+  assert.ok(recovery.includes("24 hours"), "recovery must state the fixed 24h self-serve TTL");
+  assert.ok(recovery.includes("new") && recovery.includes("requestId"),
+    "recovery must say a fresh joinRequest needs a new requestId");
+  assert.ok(recovery.includes("renewed"), "recovery must name the renewed renewal marker");
+  assert.ok(recovery.includes("stale_card"), "recovery must say replaying the old requestId 422s");
+  assert.equal(exportedMs(v1Src, "GUEST_SELF_SERVE_TTL_MS"), 24 * 60 * 60 * 1000);
+  assert.ok(httpSrc.includes("/api/guest-invites/request"), "the self-serve route must exist");
 });
 
 test("JOINING.md points at the recovery decision tree with the corrected v1 wording", () => {

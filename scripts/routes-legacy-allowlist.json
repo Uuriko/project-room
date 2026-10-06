@@ -1,5 +1,5 @@
 {
-  "note": "Legacy routes still served outside server/routes/table.mjs. baseline is the RT-0 set plus routes main added after that cut, including the legal API routes, /security.txt, and /SKILL.md. routes is the set still in the legacy chain and only shrinks as groups move into the table.",
+  "note": "Legacy routes still served outside server/routes/table.mjs. baseline is the RT-0 set plus routes main added after that cut, including the legal API routes, /security.txt, and /SKILL.md, and /procedures. routes is the set still in the legacy chain and only shrinks as groups move into the table.",
   "baseline": [
     {
       "method": "GET",
@@ -380,6 +380,10 @@
     {
       "method": "POST",
       "path": "/api/auth/email/verify"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/email/verify/resend"
     },
     {
       "method": "GET",
@@ -3647,6 +3651,30 @@
     },
     {
       "method": "GET",
+      "path": "/procedures"
+    },
+    {
+      "method": "HEAD",
+      "path": "/procedures"
+    },
+    {
+      "method": "GET",
+      "path": "/room/procedures"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/procedures"
+    },
+    {
+      "method": "GET",
+      "path": "/project-room/procedures"
+    },
+    {
+      "method": "HEAD",
+      "path": "/project-room/procedures"
+    },
+    {
+      "method": "GET",
       "path": "/api/rooms/{id}/matchmaking/seeker"
     },
     {
@@ -4102,6 +4130,10 @@
     {
       "method": "POST",
       "path": "/api/auth/email/verify"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/email/verify/resend"
     },
     {
       "method": "GET",
@@ -7130,6 +7162,30 @@
     {
       "method": "HEAD",
       "path": "/project-room/SKILL.md"
+    },
+    {
+      "method": "GET",
+      "path": "/procedures"
+    },
+    {
+      "method": "HEAD",
+      "path": "/procedures"
+    },
+    {
+      "method": "GET",
+      "path": "/room/procedures"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/procedures"
+    },
+    {
+      "method": "GET",
+      "path": "/project-room/procedures"
+    },
+    {
+      "method": "HEAD",
+      "path": "/project-room/procedures"
     },
     {
       "method": "GET",

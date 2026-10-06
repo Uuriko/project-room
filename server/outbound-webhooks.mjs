@@ -231,9 +231,16 @@ export async function resolveWebhookTarget(url, options = {}) {
 // dns.lookup({ all: true }) and refuse when any address is loopback,
 // RFC1918, CGNAT, link-local, unique-local, or an IPv4-mapped form of
 // those. Callers await this before opening the write transaction. On Node
-// a lookup failure still returns the URL. On Workers a resolution failure
-// refuses the subscription; delivery retries that failure instead of
-// treating it as allowed.
+// a lookup failure or an empty answer refuses the subscription — the
+// registration gate agrees with the dispatcher's fail-closed re-check —
+// for every name, with no exemptions: a name that does not resolve cannot
+// be a real delivery target, and an exemption in production code is an
+// SSRF-shaped hole (Instinct-3 review, PR #1590 seq 4267). Tests that need
+// a fixture name to resolve inject a fake resolver through the `lookup`
+// option (dns.lookup-compatible); production wiring always passes the
+// real resolver. On Workers a resolution failure refuses the subscription
+// for every name; delivery retries that failure instead of treating it as
+// allowed.
 export async function assertAgentWebhookUrlPublic(url, options = {}) {
   const lookup = typeof options.lookup === "function" ? options.lookup : dns.lookup;
   // A non-public host or port already throws webhook_url_not_public here.
@@ -252,13 +259,19 @@ export async function assertAgentWebhookUrlPublic(url, options = {}) {
   }
   const bare = stripBrackets(host);
   if (parseIpv4(bare) !== null || parseIpv6(bare) !== null) return url;
+  // hw-sec-15-dns-failclosed: a name that does not resolve is refused —
+  // fully fail-closed, no reserved-name exemption in production.
   let records;
   try {
     records = await lookup(bare, { all: true, verbatim: true });
   } catch {
-    return url;
+    fail("webhook_url_not_public", "webhook hostname does not resolve to a public address");
   }
-  for (const answer of normalizeLookup(records)) {
+  const answers = normalizeLookup(records);
+  if (answers.length === 0) {
+    fail("webhook_url_not_public", "webhook hostname does not resolve to a public address");
+  }
+  for (const answer of answers) {
     if (answerIsBlocked(answer)) {
       fail("webhook_url_not_public", "webhook hostname resolves to a private or reserved IP address");
     }

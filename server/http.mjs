@@ -32,13 +32,14 @@ import { buildOpportunitiesFeed } from "./opportunities.mjs"; // Public opportun
 import { telegramConfig, TelegramLiveStatus } from "./channel-adapters/telegram-config.mjs";
 import { TelegramTransport } from "./channel-adapters/telegram-transport.mjs";
 import { SOURCE_REVISION, BUILD_ID } from "./version.mjs";
-import { agentErrorBody, errorCategory } from "../src/agent-error.mjs";
+import { agentErrorBody, errorCategory, ERROR_COMMAND_TYPE } from "../src/agent-error.mjs";
 import { DiagnosticsLog, supportExportBundle } from "./diagnostics.mjs";
 import { renderRoomExportHtml, EXPORT_HTML_CSP } from "./room-export-html.mjs";
 import { redactEventPage, redactEventRows, redactMessageTree, redactSnapshotState } from "./redact-read.mjs";
 import { messageInHistory, eventInHistory, indexMessages as indexHistoryMessages, requireExportOwner, recordRoomExport } from "./history-visibility.mjs"; // PRIV-2
 import { discoveryDoc, isHealthAliasPath, rewriteRoomApiPrefix, EDGE_DOOR_HOSTS, ROOM_ORIGIN } from "../deploy/agent-discovery.mjs";
 import { noteIdentityMint } from "./growth-loop.mjs";
+import { createWikiReadApi } from "./wiki-read-api.mjs"; // W009: read-only wiki API for agents (prefix-delegated, no route literals here)
 import { buildOpenApiJson, discoverabilityErrorOverride, nextActionsForAccessRequest, nextActionsForAccessRequestStatus, nextActionsForInviteRedeem } from "./discoverability.mjs";
 import { MCP_SERVER_CARD_PATH, MCP_DISCOVERY_CACHE_CONTROL, MCP_SERVER_CARD_CORS } from "../src/mcp-server-card.mjs";
 import { SKILLS_CATALOG_PATH } from "../deploy/agent-discovery.mjs";
@@ -98,7 +99,7 @@ import { listOpenQuestions } from "./open-questions.mjs";
 import { GoogleSignIn, GOOGLE_START_PATH, GOOGLE_CALLBACK_PATH, googlePostLoginPage } from "./google-oauth.mjs";
 import { createMagicLinkMailer } from "./magic-links.mjs";
 import { createRateLimiter } from "./identity-ratelimit.mjs";
-import { normalizeEmail } from "./account-login-methods.mjs";
+import { emailLookupHash, normalizeEmail } from "./account-login-methods.mjs";
 import { createPasskeyAuth, resolvePasskeyParams } from "./account-passkeys.mjs";
 import { createDeletionSecret, executeAccountDeletion, issueDeletionToken, planAccountDeletion, verifyDeletionToken, RETENTION_POLICY } from "./account-deletion.mjs"; // RC-2026-09-19-078: account-management surface
 import { createOperatorRoutes } from "./operator-routes.mjs"; // CP-ADMIN-0: operator purge, status, and audit. Paths stay in that module.
@@ -132,6 +133,9 @@ for (const name of ["favicon.svg", "icon.svg", "manifest.webmanifest"]) {
 }
 // GET/HEAD-only liveness paths; any other method is 405 with Allow (#1529).
 const LIVENESS_GET_ONLY_PATHS = new Set(["/api/health", "/api/health/", "/api/version"]);
+// W009: the wiki read API owns every /api/wiki/ template inside
+// server/wiki-read-api.mjs (reads are lazy per request; import is side-effect-free).
+const wikiReadApi = createWikiReadApi();
 const reject = (status, code, message, headers) => { throw new ServiceError(status, code, message, headers ?? null); };
 
 // RFC 9116. Contact comes from ROOM_SECURITY_CONTACT. A bare address becomes
@@ -418,6 +422,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     // answers the reuse attempt with a distinct invalid_grant.
     onSecurityEvent: event => {
       console.warn(`oauth security event: ${JSON.stringify(event)}`);
+    },
+    // Deleted/deactivated accounts lose connector access immediately: token
+    // verification fails closed even if a token row survived a purge.
+    isAccountActive: userId => {
+      try {
+        return store.db.prepare("SELECT active FROM accounts WHERE id=?").get(userId)?.active === 1;
+      } catch { return false; }
     },
   });
   for (const c of connectorClients) {
@@ -785,18 +796,20 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // so a client that finishes sending can read the 413. Aborts fail promptly.
   function readText(req, limit, tooLarge) {
     const declaredBytes = Number(req.headers["content-length"]);
-    if (declaredBytes > limit) { req.resume(); throw tooLarge(); }
+    if (declaredBytes > limit) { req.resume(); throw tooLarge(declaredBytes); }
     return new Promise((resolve, rejectPromise) => {
       let bytes = 0;
-      let oversize = declaredBytes > limit;
+      let oversize = false;
       const chunks = [];
       req.on("data", chunk => {
-        if (oversize) return;
+        // Keep counting past the limit without buffering, so the 413 names
+        // the actual size (G7); over-limit chunk buffers are still dropped.
         bytes += chunk.length;
+        if (oversize) return;
         if (bytes > limit) { oversize = true; chunks.length = 0; }
         else chunks.push(chunk);
       });
-      req.on("end", () => oversize ? rejectPromise(tooLarge()) : resolve(Buffer.concat(chunks).toString("utf8")));
+      req.on("end", () => oversize ? rejectPromise(tooLarge(bytes)) : resolve(Buffer.concat(chunks).toString("utf8")));
       req.on("error", rejectPromise);
       req.on("aborted", () => rejectPromise(new ServiceError(400, "aborted", "Request ended early")));
     });
@@ -806,7 +819,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // the replied-to message).
   async function body(req, { limit = JSON_BODY_BYTES } = {}) {
     if (!/^application\/json(?:\s*;|$)/i.test(req.headers["content-type"] || "")) reject(415, "json_required", "Use application/json");
-    const text = await readText(req, limit, () => new ServiceError(413, "too_large", "Request is too large"));
+    // G7 (#940): the body-cap rejection names the limit and the actual size.
+    // Code stays too_large; the AX layer adds the next step.
+    const text = await readText(req, limit, actualBytes => new ServiceError(413, "too_large", `Request body is ${actualBytes} bytes; the limit is ${limit} bytes`));
     try { const value = JSON.parse(text); if (!value || Array.isArray(value) || typeof value !== "object") throw new Error(); return value; }
     catch { reject(400, "invalid_json", "Expected a JSON object"); }
   }
@@ -1173,6 +1188,44 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const verified = store.accountLogins.consumeEmailVerifyCode({ accountId: session.account.id, code: data.code.trim() });
         return json(res, 200, { status: "verified", email: verified.email });
       }
+      if (url.pathname === "/api/auth/email/verify/resend") {
+        if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
+        checkOrigin(req, true);
+        // Delivery failures do not change the resend response: the fresh code
+        // is already issued and the client can retry.
+        const deliverSignupMail = async fn => { try { await fn(); } catch { /* noop */ } };
+        const slotToken = cookie(req, accountCookieName);
+        if (!slotToken) reject(401, "account_session_required", "Sign in before verifying your email");
+        let session;
+        try { session = store.authenticateAccountSession(slotToken); }
+        catch (error) {
+          if (error.status !== 401) throw error;
+          reject(401, "invalid_session", "That session is no longer valid; sign in again");
+        }
+        if (!session.account) reject(401, "account_session_required", "Sign in before verifying your email");
+        protectWrite(req, session, false);
+        // Tight per-account budget: a resend mints a fresh code, so this is
+        // not a free oracle for someone else's inbox.
+        rate(`email-verify-resend:${session.account.id}`, 5);
+        const emailRow = store.db.prepare(`SELECT email FROM account_login_methods
+          WHERE account_id=? AND type='password' AND disabled=0 AND email IS NOT NULL LIMIT 1`)
+          .get(session.account.id);
+        const normalized = emailRow ? normalizeEmail(emailRow.email) : null;
+        if (!normalized) reject(422, "invalid_email", "This account has no email to verify");
+        const pending = store.db.prepare(`SELECT 1 FROM account_login_methods
+          WHERE account_id=? AND email_hash=? AND disabled=0 AND verified_at IS NULL LIMIT 1`)
+          .get(session.account.id, emailLookupHash(normalized));
+        if (!pending) return json(res, 200, { status: "already_verified", email: normalized });
+        if (!magicMailer.isConfigured()) {
+          reject(503, "mail_not_configured", "Email delivery is not configured; contact the operator to verify this address");
+        }
+        const issued = store.accountLogins.issueEmailVerifyCode({ accountId: session.account.id, email: normalized });
+        await deliverSignupMail(() => magicMailer.sendMagicLink({
+          to: normalized, code: issued.code, expiresAt: issued.expiresAt, purpose: "email-verify"
+        }));
+        return json(res, 200, { status: "resent", email: normalized, expiresAt: issued.expiresAt });
+      }
+      // ---- end ID-SEC auth ----
       // ---- GitHub OAuth (slice 4, RC-2026-09-17-013) ----
       // GitHub sign-in (Clerk-free). The start route binds the browser's
       // account session slot (passed as ?sessionToken=) into a single-use
@@ -1551,6 +1604,15 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         } catch { return json(res, 503, { status: "unavailable", reason: "growth_unavailable" }); }
         if (growthReply) return json(res, growthReply.status, growthReply.body);
       }
+      // W009 — read-only wiki API for agents (procedures, lessons, runbooks).
+      // Prefix-delegated: server/wiki-read-api.mjs owns every /api/wiki/
+      // template and throws ServiceError for 4xx/503, so the canonical error
+      // envelope applies and a throwing plane fails closed to 503, never to a
+      // dropped connection. /room/api/wiki/* reaches here via the prefix rewrite.
+      if (url.pathname.startsWith("/api/wiki/")) {
+        const wikiReply = wikiReadApi.handle(url.pathname, req.method, url.searchParams);
+        if (wikiReply) return json(res, wikiReply.status, wikiReply.body, req.method === "HEAD");
+      }
       // Public Hosts (www / lobby / apex) reverse-proxy /room here. Browsers
       // get the getdasha HTML door. / stays the workspace app. Packets stay
       // at /llms.txt, /room/llms.txt, /skill.md, /room/skill, agent.json,
@@ -1663,12 +1725,28 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         rate(`public-work-read:${remoteAddress}`, 120);
         if (publicWorkReceiptMatch) {
           const receiptId = pathId(publicWorkReceiptMatch[1]);
+          // Owner-only public-receipts toggle: a room that turned receipts
+          // private still serves them to its members; everyone else gets 403.
+          // The credential is optional here — anonymous reads stay open for
+          // rooms that never flipped the toggle (current behavior).
+          const receiptRoomId = store.publicWorkClaims.receiptRoomId(receiptId);
+          let memberId = null;
+          if (receiptRoomId && !store.roomDirectory.publicReceiptsVisible(receiptRoomId)) {
+            const secret = bearer(req);
+            if (secret) {
+              try {
+                const viewerAuth = store.authenticate(secret, receiptRoomId);
+                if (viewerAuth?.member?.id) memberId = viewerAuth.member.id;
+              } catch { /* anonymous: the 403 below names the real problem */ }
+            }
+          }
+          const viewer = memberId ? { memberId } : {};
           if (publicWorkReceiptMatch[2]) {
-            const artifact = store.publicWorkClaims.artifact(receiptId);
+            const artifact = store.publicWorkClaims.artifact(receiptId, viewer);
             res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8", "Content-Disposition": "attachment; filename=contribution.txt", "X-Content-Type-Options": "nosniff", "Content-Security-Policy": "default-src 'none'; sandbox", "Cache-Control": "no-store" });
             return res.end(req.method === "HEAD" ? undefined : artifact.artifactText);
           }
-          return json(res, 200, store.publicWorkClaims.receipt(receiptId), req.method === "HEAD");
+          return json(res, 200, store.publicWorkClaims.receipt(receiptId, viewer), req.method === "HEAD");
         }
         return json(res, 200, publicWorkTaskMatch
           ? store.publicWorkClaims.read(pathId(publicWorkTaskMatch[1]))
@@ -1760,7 +1838,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         rate(`receipts:${remoteAddress}`, 120);
         const indexable = !url.search;
         if (indexable) res.setHeader("X-Robots-Tag", "all");
-        res.setHeader("Cache-Control", "public, max-age=60");
+        // Owner-only public-receipts toggle: these representations are
+        // toggle-controlled, so they must never sit in a shared cache — a
+        // response cached while public would keep disclosing a room's
+        // receipts after the owner switches privacy off.
+        res.setHeader("Cache-Control", "no-store");
         if (receiptDetail) {
           if (!PUBLIC_RECEIPT_ID.test(receiptDetail[1])) reject(404, "not_found", "Not found");
           const receipt = publicReceiptById(store, receiptDetail[1]);
@@ -1966,6 +2048,16 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (url.pathname === "/api/account-session") {
         const slotToken = cookie(req, accountCookieName);
         if (req.method === "GET") {
+          const binding = expectedBinding(req);
+          if (binding !== null) {
+            // Bound account confirmation: the read names the session it is
+            // checking and must never mint a recovery slot, rotate the
+            // cookie, or clobber a newer sign-in. A malformed binding was
+            // rejected as 422 above; authenticateAccountSession answers 401
+            // for a dead session and 409 when the binding rotated.
+            const confirmed = store.authenticateAccountSession(slotToken, null, binding);
+            return json(res, 200, sessionAccountView(confirmed));
+          }
           if (!slotToken) {
             rate(`account-slot:${remoteAddress}`, 20);
             const created = store.createAccountSessionSlot();
@@ -2800,7 +2892,22 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (url.pathname === "/api/agent-invites/redeem" && req.method === "POST") {
         rate(`invite-redeem:${remoteAddress}`, 20);
         const data = await body(req);
-        if (!exact(data, ["code", "displayName"]) || typeof data.code !== "string" || typeof data.displayName !== "string") reject(422, "invalid_invite", "Invite code and displayName are required");
+        // Colony round-2 (musespark-explorer, 2026-10-06): the static 422 here
+        // blamed the caller for sending *less* when the body carried an *extra*
+        // field — a recovery trap for a cold client. Port the access-request
+        // diagnoseArguments pattern so the 422 names the offending field.
+        const diagnosis = diagnoseArguments({
+          required: ["code", "displayName"],
+          properties: { code: { type: "string" }, displayName: { type: "string" } },
+          additionalProperties: false,
+        }, data);
+        if (diagnosis) {
+          const parts = [];
+          if (diagnosis.missing.length) parts.push(`missing required field${diagnosis.missing.length > 1 ? "s" : ""}: ${diagnosis.missing.join(", ")}`);
+          if (diagnosis.unexpected.length) parts.push(`unexpected field${diagnosis.unexpected.length > 1 ? "s" : ""}: ${diagnosis.unexpected.join(", ")}`);
+          for (const [field, reason] of Object.entries(diagnosis.invalid)) parts.push(`${field}: ${reason}`);
+          reject(422, "invalid_invite", `Invalid invite redeem (${parts.join("; ")}). Send exactly {code, displayName}.`);
+        }
         const redeemedInvite = store.invites.redeem(data.code, { displayName: data.displayName, identitySecret: bearer(req) });
         // Jev-harness admission gate, shadow mode (docs/JEV-GATES.md):
         // score the join, journal the would-be decision, admit anyway.
@@ -4552,11 +4659,22 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return json(res, 200, store.roomDirectory.status(roomId, auth.member.id));
       }
       if (route === "directory" && req.method === "POST") {
+        // Owner-only public-receipts toggle rides the directory route (the
+        // room's public-visibility controls). discoverable stays required;
+        // publicReceipts is an additive optional field. docs/openapi.yaml
+        // documents the original {discoverable} shape only.
         const data = await body(req);
-        if (!exact(data, ["discoverable"]) || typeof data.discoverable !== "boolean") {
-          reject(422, "invalid_directory", "discoverable (boolean) is the accepted field");
+        const hasDiscoverable = Object.hasOwn(data ?? {}, "discoverable");
+        const hasReceipts = Object.hasOwn(data ?? {}, "publicReceipts");
+        if ((!hasDiscoverable && !hasReceipts)
+          || Object.keys(data ?? {}).some(key => key !== "discoverable" && key !== "publicReceipts")
+          || (hasDiscoverable && typeof data.discoverable !== "boolean")
+          || (hasReceipts && typeof data.publicReceipts !== "boolean")) {
+          reject(422, "invalid_directory", "discoverable (boolean) is required; publicReceipts (boolean) is optional");
         }
-        return json(res, 200, store.roomDirectory.set(roomId, auth.member.id, data.discoverable));
+        if (hasDiscoverable) store.roomDirectory.set(roomId, auth.member.id, data.discoverable);
+        if (hasReceipts) store.roomDirectory.setReceiptsVisibility(roomId, auth.member.id, data.publicReceipts);
+        return json(res, 200, store.roomDirectory.status(roomId, auth.member.id));
       }
       // Owner-only opportunity-feed visibility, independent of directory
       // listing. The public feed reads the persisted bit, never this route.
@@ -4670,6 +4788,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           return json(res, result.duplicate ? 200 : 201, result);
         } catch (error) {
           inboundSpan.recordException(error);
+          // G7 (#940): hand the refused command's type to the AX layer via a
+          // symbol key (never serialized) so bond/dm field-shape errors can
+          // enumerate the expected data shape. Codes/messages unchanged.
+          if (error instanceof ServiceError && typeof command?.type === "string") error[ERROR_COMMAND_TYPE] = command.type;
           throw error;
         } finally {
           inboundSpan.end();
@@ -4771,7 +4893,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       } catch { /* base envelope keeps its shape on parse failure */ }
       const errorBody = errorOverride
         ? { error: { code, message }, ...errorOverride, operationId, category }
-        : { ...agentErrorBody({ httpStatus, code, message, roomId, workItemId }), operationId, category };
+        : { ...agentErrorBody({ httpStatus, code, message, roomId, workItemId, commandType: error[ERROR_COMMAND_TYPE] }), operationId, category };
       if (error.detail && typeof error.detail === "object" && !Array.isArray(error.detail)) {
         for (const [key, value] of Object.entries(error.detail)) {
           if (!["error", "status", "reason", "hint", "next", "operationId", "category"].includes(key)) errorBody[key] = value;

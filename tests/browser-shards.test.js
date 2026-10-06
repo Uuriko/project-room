@@ -94,3 +94,21 @@ test("canonical suite partition is complete and deterministic with bounded timin
   assert.throws(() => browserPlan("node --test scripts/*.mjs"), /explicit/);
   assert.throws(() => parseShard("1/4 trailing"), /Shard/);
 });
+
+test("browser shard plan is balanced on measured runtimes: full timing coverage, no shard over 30%", () => {
+  // The browser leg is the slowest CI leg and its wall time is the slowest
+  // shard. Balance is only real when every suite file carries measured timing
+  // data: an unmeasured file falls back to a 10s guess and the greedy
+  // partition optimizes fiction (28 of 123 files were unmeasured, and the two
+  // slowest measured shards ran ~1.5x their estimate).
+  const script = JSON.parse(readFileSync("package.json", "utf8")).scripts["test:browser"];
+  const measured = JSON.parse(readFileSync("scripts/browser-ci-durations.json", "utf8")).milliseconds;
+  const plan = browserPlan(script);
+  const unmeasured = plan.files.filter(file => !(Number.isFinite(measured[file]) && measured[file] > 0));
+  assert.deepEqual(unmeasured, [], `browser shard balance needs measured durations for: ${unmeasured.join(", ")}`);
+  const total = plan.shards.reduce((sum, shard) => sum + shard.estimatedMs, 0);
+  for (const shard of plan.shards) {
+    const share = shard.estimatedMs / total;
+    assert.ok(share <= 0.30, `browser shard ${shard.index} holds ${(100 * share).toFixed(1)}% of measured runtime (cap 30%)`);
+  }
+});

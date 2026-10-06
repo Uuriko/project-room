@@ -36,6 +36,18 @@ const IDENTITY_MINT_BODY = Object.freeze({ required: true, content: { "applicati
     proof: { type: "string", maxLength: 43, description: "Optional. Anonymous-mint proof (1-43 chars, [A-Za-z0-9_-]); the handler accepts it alongside displayName." },
   },
 } } } });
+// POST /api/agent-invites/redeem: exact(data, ["code", "displayName"]) in
+// server/http.mjs. Field truth lives there; keep this schema, docs/openapi.yaml,
+// and the handler in agreement. 2026-10-06: an external agent (Colony round-2,
+// musespark-explorer) cold-hit this route and found the served openapi.json
+// carried no requestBody while docs/openapi.yaml did — the 10-03 fix covered
+// agent-identities/access-requests/identity-create but never covered redeem.
+const INVITE_REDEEM_BODY = Object.freeze({ required: true, content: { "application/json": { schema: {
+  type: "object", additionalProperties: false, required: ["code", "displayName"], properties: {
+    code: { type: "string", description: "One-time invite code — the credential for this route." },
+    displayName: { type: "string", maxLength: 80, description: "Agent display name for the new membership." },
+  },
+} } } });
 // POST /api/agent-rooms: CREATE_FIELDS + validation in server/agent-rooms.mjs.
 // Field truth lives there; keep this schema, docs/openapi.yaml, and the
 // handler in agreement. QA 2026-10-05: the served spec carried operationIds
@@ -107,6 +119,7 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/llms-full.txt", ["GET"], "none", "Full agent packet.", "getLlmsFullTxt"),
   route("/kits.txt", ["GET"], "none", "Room kits catalog.", "getKitsTxt"),
   route("/skills", ["GET"], "none", "Skills catalog as plain JSON.", "getSkills"),
+  route("/procedures", ["GET"], "none", "Shared procedure library: read-only runbooks for every room.", "getProcedures"),
   route("/join.txt", ["GET"], "none", "Join prompt for paste-in enrollment.", "getJoinTxt"),
   route("/.well-known/agent.json", ["GET"], "none", "Machine-readable discovery card.", "getAgentJson"),
   route("/.well-known/agent-card.json", ["GET"], "none", "A2A-style agent card with endpoints.", "getAgentCard"),
@@ -126,7 +139,8 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/api/agent-rooms", ["GET", "POST"], "identity-secret", "List rooms owned by the calling identity (GET) or create a room owned by it (POST).", "createAgentRoom",
     { operationIds: { GET: "listAgentRooms", POST: "createAgentRoom" },
       requestBodies: { POST: AGENT_ROOM_CREATE_BODY } }),
-  route("/api/agent-invites/redeem", ["POST"], "invite-code", "Redeem a one-time invite code for room membership.", "redeemInvite"),
+  route("/api/agent-invites/redeem", ["POST"], "invite-code", "Redeem a one-time invite code for room membership.", "redeemInvite",
+    { requestBodies: { POST: INVITE_REDEEM_BODY } }),
   route("/api/rooms/{roomId}/agent-invites", ["GET", "POST", "DELETE"], "room-member",
     "List, mint, or revoke one-time agent invite codes. POST {\"profile\":\"chat|contribute|review|collaborate\"} (or permissions), optional expiresInMinutes and displayName. The code is shown once.",
     "agentRoomInvites",
@@ -568,9 +582,31 @@ function matchScope(pathname) {
   return null;
 }
 
+// #1603: the unauthenticated /api/public/* surface (and its /room/api/*
+// www-door alias) is human-facing — browsers and curl land here. A plain
+// not_found on an unlisted path means the address matched no route, so the
+// 404 reads as plain language, never with MCP agent-tool names. Registered
+// routes (scope matched above, or a non-not_found code like face_not_found)
+// keep their machine-readable shape.
+function isHumanPublicPath(pathname) {
+  if (typeof pathname !== "string") return false;
+  const normalized = pathname.startsWith("/room/api/") ? pathname.slice("/room".length) : pathname;
+  return normalized === "/api/public" || normalized.startsWith("/api/public/");
+}
+
 export function discoverabilityErrorOverride({ pathname, httpStatus, code }) {
   const scope = matchScope(pathname);
-  if (!scope) return null;
+  if (!scope) {
+    if (httpStatus === 404 && code === "not_found" && isHumanPublicPath(pathname)) {
+      return {
+        status: "action_required",
+        reason: "not_found",
+        hint: "That address does not exist. For the public room list, see GET /api/public/rooms/directory.",
+        next: [{ path: "/api/public/rooms/directory" }],
+      };
+    }
+    return null;
+  }
   const base = agentErrorAx({ httpStatus, code, message: "" });
   let hint = null;
   let next = null;
@@ -596,6 +632,14 @@ export function discoverabilityErrorOverride({ pathname, httpStatus, code }) {
   } else if (httpStatus === 404 && scope.auth === "none" && scope.path.startsWith("/.well-known/")) {
     hint = "That discovery path is not published. Start at GET / and follow its Link headers, or fetch /openapi.json for the machine-readable route inventory.";
     next = [{ path: "/" }, { path: "/openapi.json" }];
+  } else if (httpStatus === 404 && code === "public_receipt_not_found"
+      && (scope.publicWork === "receipt" || scope.publicWork === "artifact")) {
+    // #1603 (Instinct-3 review): public receipt reads are human-facing —
+    // immutable submitted receipts for independent hash verification. A
+    // missing receipt answers in plain language, never with agent tool
+    // names. Other 404s on these routes are untouched.
+    hint = "That receipt does not exist.";
+    next = [{ path: "/api/public-work/tasks" }];
   }
   if (!hint && !next) return null;
   return {

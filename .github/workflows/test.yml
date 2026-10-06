@@ -50,6 +50,25 @@ jobs:
           cache: npm
       - run: npm ci # `npm run check` now includes the lint gate, which needs the eslint devDependency.
       - run: npm run check
+  # Fo follow-up (Q003): the .refresh-requested marker is a branch-local
+  # refresh signal for the visual regression baselines. If it ever reaches
+  # main, every visual run silently re-baselines instead of comparing and
+  # the regression gate dies quietly. This job fails the run when the marker
+  # is present on main; on branches the marker stays legal (the refresh flow
+  # commits it there to capture CI-canonical baselines).
+  visual-refresh-guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Fail if the baseline refresh marker reached main
+        run: |
+          marker="scripts/visual-regression-baselines/.refresh-requested"
+          if [ "$GITHUB_REF" = "refs/heads/main" ] && [ -e "$marker" ]; then
+            echo "::error file=$marker::.refresh-requested must never be on main: it flips every visual regression run into silent re-baseline mode. Delete the marker and re-capture baselines on a branch instead."
+            exit 1
+          fi
+          echo "visual refresh marker check passed (ref=$GITHUB_REF)"
   lint:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -244,22 +263,65 @@ jobs:
   # the suite jobs above have succeeded. Default success() also fails when any
   # job in the graph was skipped, so an intentional browser-shard skip would
   # skip this required check. Evaluate the direct results instead.
+  coverage:
+    # Per-module coverage ratchet (backlog Q015): runs the root unit suite
+    # with V8 coverage and fails when any module in coverage-thresholds.json
+    # drops below its threshold. Zero dependencies; the script points TMPDIR
+    # at a worktree-local .tmp/ and writes coverage data to ./coverage/
+    # (both gitignored) by itself.
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0 # secret-scan-diff and room-lifecycle tests read the origin/main tree.
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Install Linux host isolation for automatic-run unit tests
+        run: sudo apt-get update -qq && sudo apt-get install -y bubblewrap
+      - name: Permit the sandbox launcher to create its isolated namespaces
+        # Same setup as the unit job (Ubuntu 24.04 denies capabilities inside
+        # unprivileged user namespaces without an application profile).
+        run: |
+          if [ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || true)" = "1" ]; then
+            if [ -f /etc/apparmor.d/bwrap ]; then
+              sudo apparmor_parser -r /etc/apparmor.d/bwrap
+            else
+              cat > "$RUNNER_TEMP/project-room-bwrap.apparmor" <<'PROFILE'
+          abi <abi/4.0>,
+          include <tunables/global>
+          /usr/bin/bwrap flags=(unconfined) {
+            userns,
+          }
+          PROFILE
+              sudo apparmor_parser -r "$RUNNER_TEMP/project-room-bwrap.apparmor"
+            fi
+          fi
+      - name: Verify automatic host namespace support without operator input
+        run: node scripts/host-isolation-preflight.mjs
+      - name: Enforce per-module coverage thresholds
+        run: node scripts/coverage-thresholds.mjs
   test:
-    needs: [contract, lint, unit, browser, cloudflare]
+    needs: [contract, lint, unit, browser, cloudflare, visual-refresh-guard, coverage]
     if: always() && !cancelled()
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Require contract, lint, unit, browser, and cloudflare
+      - name: Require contract, lint, unit, browser, cloudflare, visual-refresh-guard, and coverage
         env:
           CONTRACT: ${{ needs.contract.result }}
           LINT: ${{ needs.lint.result }}
           UNIT: ${{ needs.unit.result }}
           BROWSER: ${{ needs.browser.result }}
           CLOUDFLARE: ${{ needs.cloudflare.result }}
+          VISUAL_REFRESH_GUARD: ${{ needs.visual-refresh-guard.result }}
+          COVERAGE: ${{ needs.coverage.result }}
         run: |
           failed=0
-          for pair in "contract:$CONTRACT" "lint:$LINT" "unit:$UNIT" "browser:$BROWSER" "cloudflare:$CLOUDFLARE"; do
+          for pair in "contract:$CONTRACT" "lint:$LINT" "unit:$UNIT" "browser:$BROWSER" "cloudflare:$CLOUDFLARE" "visual-refresh-guard:$VISUAL_REFRESH_GUARD" "coverage:$COVERAGE"; do
             name=${pair%%:*}
             result=${pair#*:}
             echo "$name=$result"

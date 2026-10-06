@@ -28,6 +28,8 @@
 // transactions, auth, and the identities helper) and exports its schema for
 // store.mjs to apply, following the agent-identities.mjs pattern.
 
+// G11: read at call time; store.mjs imports this module, so no module-level copy.
+import { PILOT_LIMITS } from "./store.mjs";
 import { randomUUID, createHash } from "node:crypto";
 import { MemberPermissionRequests, permissionRequestContents } from "./member-permission-requests.mjs";
 import { createRateLimiter } from "./identity-ratelimit.mjs";
@@ -130,8 +132,6 @@ const rowToRequest = row => row ? Object.freeze({
 const compactState = state => ({ ...state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} });
 // Bounded pilot capacity, mirroring agent-invites.mjs (PILOT_LIMITS in
 // store.mjs cannot be imported here without a circular dependency).
-const MAX_ROOM_EVENTS = 10000;
-const MAX_PROJECTION_BYTES = 4 * 1024 * 1024;
 const MAX_MEMBERS_PER_ROOM = 100;
 const countActiveMembers = members =>
   Object.values(members ?? {}).filter(member => member?.active !== false).length;
@@ -311,7 +311,7 @@ export class AccessRequests {
   emitAccessRequested(roomId, { requestId, identityId, displayName, requestedPermissions, note, at, upgradeMember = null, identityScope = "global" }) {
     const room = this.store.room(roomId);
     if (isRoomArchived(room.state)) return;
-    if (room.sequence >= MAX_ROOM_EVENTS) fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
+    if (room.sequence >= PILOT_LIMITS.eventsPerRoom) fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
     const requestKey = createHash("sha256").update(`access-request:${requestId}`).digest("hex");
     if (upgradeMember && this.db.prepare("SELECT 1 FROM events WHERE id=?").get(requestKey)) {
       fail(409, "request_conflict", "requestId conflicts with an existing room event; use a new requestId");
@@ -347,7 +347,7 @@ export class AccessRequests {
     try { state = compactState(applyEventWithGrowth(room.state, incoming, growthCollector).state); }
     catch (error) { fail(409, "access_rejected", error.message); }
     const projection = JSON.stringify(state);
-    if (Buffer.byteLength(projection) > MAX_PROJECTION_BYTES) fail(409, "pilot_limit", "Room projection limit reached; no data was changed");
+    if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed");
     const sequence = room.sequence + 1;
     this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
     this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
@@ -484,7 +484,7 @@ export class AccessRequests {
       return { approved: false, pendingNote: "This room is archived; new admissions wait for an owner decision." };
     }
     // Bounded pilot capacity, mirroring the invite-redeem guard.
-    if (room.sequence + 1 >= MAX_ROOM_EVENTS || countActiveMembers(room.state.members) >= MAX_MEMBERS_PER_ROOM) {
+    if (room.sequence + 1 >= PILOT_LIMITS.eventsPerRoom || countActiveMembers(room.state.members) >= MAX_MEMBERS_PER_ROOM) {
       return { approved: false, pendingNote: "This room is at pilot capacity; the request waits for an owner decision." };
     }
     // Reserved, duplicate, confusable, and control-character names never
@@ -535,7 +535,7 @@ export class AccessRequests {
       return { approved: false, pendingNote: `Auto-approve was rejected (${error.message}); the request waits for an owner decision.` };
     }
     const projection = JSON.stringify(state);
-    if (Buffer.byteLength(projection) > MAX_PROJECTION_BYTES) {
+    if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) {
       return { approved: false, pendingNote: "Room projection limit reached; the request waits for an owner decision." };
     }
     const sequence = room.sequence + 1;

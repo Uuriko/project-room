@@ -190,7 +190,7 @@ async function findMatches(more = false) {
   try {
     const values = key => matchForm.elements[key].value.split(',').map(value => value.trim()).filter(Boolean);
     const input = more ? { ...lastPreferences, after: matchAfter } : { skills: values('skills'), interests: values('interests'), reward: matchForm.elements.reward.value, limit: 3 };
-    if (!more) { lastPreferences = input; matchAfter = null; }
+    if (!more) { lastPreferences = input; matchAfter = null; $('#more-matches').hidden = true; }
     const result = await read('/api/public-work/match', flight.signal, false, input);
     if (flight !== matchFlight) return;
     if (!result || result.claim !== null || !Array.isArray(result.recommendations) || result.recommendations.length > 3 || result.nextCursor !== null && !validId(result.nextCursor)) throw new Error('Unsupported recommendations');

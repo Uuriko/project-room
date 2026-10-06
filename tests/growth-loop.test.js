@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
-import { ACTIVATION_DWELL_MS, GROWTH_FUNDING, GROWTH_ROOM_ORIGIN, PAYOUT_DAILY_CAP, PAYOUT_WINDOW_MS, PERSONAL_INVITE_PREFIX, noteIdentityMint } from "../server/growth-loop.mjs";
+import { ACTIVATION_DWELL_MS, GROWTH_FUNDING, GROWTH_ROOM_ORIGIN, PAYOUT_DAILY_CAP, PAYOUT_WINDOW_MS, noteIdentityMint } from "../server/growth-loop.mjs";
 import { llmsTxt, agentsJson } from "../deploy/agent-discovery.mjs";
 import { AgentRooms } from "../server/agent-rooms.mjs";
 import { createRoomServer } from "../server/http.mjs";
@@ -97,27 +97,16 @@ test("a referral rewards a room only after a message and 24 hours", t => {
   assert.doesNotThrow(() => store.shareLinks.verify());
 });
 
-test("a member without invite administration gets one link that admits a person and an agent", t => {
+test("a member without invite administration gets no usable personal link (W2-H1)", t => {
+  // W2-H1: the owner-as-actor fallback is gone. Members without invite
+  // rights get no personal invite link (nothing to redeem), and a forged
+  // redemption against their member id fails closed.
   const { store, ownerKey } = openStore(t);
   const ownerInvite = store.referrals.board(ownerKey, "commons").invite;
   const ada = joinHuman(store, ownerInvite.token, "Ada");
-  const first = store.referrals.board(ada.slot.token, "commons", ada.binding());
-  const again = store.referrals.board(ada.slot.token, "commons", ada.binding());
-  assert.equal(again.invite.token, first.invite.token);
-  assert.equal(store.db.prepare("SELECT count(*) AS n FROM share_links WHERE request_id LIKE ?").get(`${PERSONAL_INVITE_PREFIX}%`).n, 2);
-  const preview = store.shareLinks.preview(first.invite.token);
-  assert.equal(preview.inviterDisplayName, "Ada");
-  assert.equal(preview.link.status, "active");
-  assert.equal(Object.hasOwn(preview, "issuerMemberId"), false);
-  const friend = joinHuman(store, first.invite.token, "Friend");
-  const agent = store.identities.create("Invited agent");
-  store.shareLinks.joinAgent(agent.secret, first.invite.token, "Invited agent");
   const board = store.referrals.board(ada.slot.token, "commons", ada.binding());
-  assert.equal(board.myReferralCount, 2);
-  assert.deepEqual(board.myReferrals.map(row => row.refereeMemberId).sort(), [agent.identityId, friend.memberId].sort());
-  const agentBoard = store.referrals.board(agent.secret, "commons");
-  assert.match(agentBoard.invite.token, /^[A-Za-z0-9_-]{43}$/);
-  assert.match(agentBoard.invite.message, /\{url\}/);
+  assert.equal(board.invite, null, "no personal link for a member who cannot invite");
+  assert.equal(board.myReferralCount, 0);
   assert.doesNotThrow(() => store.shareLinks.verify());
 });
 
@@ -152,6 +141,14 @@ test("an inviter's own agents do not earn credits, and other payouts stop at the
   const ownerInvite = store.referrals.board(ownerKey, "commons").invite;
   const ada = joinHuman(store, ownerInvite.token, "Ada");
   const adaAccount = accountIdFor(store, ada.memberId);
+  // W2-H1: personal invites require invite rights. Grant Ada invite_member
+  // so the payout flow (the subject of this test) can proceed.
+  {
+    const member = store.room("commons").state.members[ada.memberId];
+    store.command(ownerKey, "commons", { id: randomUUID(), type: "member.access_changed",
+      data: { memberId: ada.memberId, expectedMemberRevision: member.revision,
+        permissions: [...member.permissions, "invite_member"], active: true } });
+  }
   const adaInvite = store.referrals.board(ada.slot.token, "commons", ada.binding(), {
     address: "198.51.100.8", session: "ada-browser",
   }).invite;

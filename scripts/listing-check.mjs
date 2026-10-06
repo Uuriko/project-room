@@ -2,7 +2,7 @@
 // The one-liner is server.json's description, so a description edit does not
 // require a change here.
 import { createHash } from "node:crypto";
-import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { latestRegistryServer } from "./server-json-check.mjs";
@@ -298,7 +298,9 @@ if (isMain) {
     rows,
     post: { posted: post.posted, reason: post.reason }
   };
-  writeFileSync(outPath, `${JSON.stringify(report, null, 2)}\n`);
+  // W3-F1: atomic report write.
+  writeFileSync(`${outPath}.tmp`, `${JSON.stringify(report, null, 2)}\n`);
+  renameSync(`${outPath}.tmp`, outPath);
   if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${markdown}\n`);
   console.log(markdown);
   process.exit(listingExitCode(post));

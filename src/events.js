@@ -433,6 +433,11 @@ export const MEMBERSHIP_AUTHORITY_POLICY_VERSION = 2;
 // Live member.added commands stamp this. Events written before it omit the
 // field and keep replaying, including a bootstrap owner named "Room owner".
 export const DISPLAY_NAME_POLICY_VERSION = 1;
+// Live message.pinned commands stamp this (store.command injects it at
+// admission). Pin events written before the F-1 DM-party rule omit the field
+// and must keep replaying; the reducer only enforces the party check on
+// stamped events.
+export const PIN_DM_PARTY_POLICY_VERSION = 1;
 
 export function validId(value) {
   return typeof value === "string" && /^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127}$/.test(value) && !["constructor", "prototype", "__proto__"].includes(value);
@@ -963,6 +968,12 @@ function joinMemberViaInvitation(state, incoming) {
   if (authorityPolicyVersion !== MEMBERSHIP_AUTHORITY_POLICY_VERSION) throw new Error("Unsupported membership authority policy");
   validatePermissions(permissions, "human");
   requireScopedMemberAdministration(state, invitedByMemberId, memberId, null, permissions);
+  // Reserved, duplicate, confusable, and control-character names are refused
+  // on the invitation join path too. Older events omit the policy stamp, so
+  // replay never throws for already-admitted members.
+  if (incoming.data.displayNamePolicyVersion === DISPLAY_NAME_POLICY_VERSION) {
+    assertMemberDisplayNameAvailable(incoming.data.displayName, state.members);
+  }
   state.members[memberId] = {
     id: memberId,
     displayName: incoming.data.displayName,
@@ -2267,6 +2278,17 @@ function pinMessage(state, incoming) {
   const messageId = pinTarget(incoming);
   const message = state.messages.find(m => m.id === messageId);
   if (!message) throw new Error("Pin must reference a message in this Room");
+  // A DM can only be pinned by one of its parties; the read paths filter
+  // pins per viewer, but pinning a DM you cannot read is never legitimate.
+  // Pins recorded before the policy stamp existed are legitimate history:
+  // replay accepts them (the read paths still filter per viewer), while
+  // every new pin carries the stamp (injected at live admission) and is
+  // checked. Without this, one old non-party pin in a room log would make
+  // rebuildProjection / log replay throw.
+  if (message.toMemberId && message.authorId !== incoming.actorId && message.toMemberId !== incoming.actorId
+      && incoming.data?.pinDmPartyPolicyVersion === PIN_DM_PARTY_POLICY_VERSION) {
+    throw new Error("Cannot pin a direct message you are not a party to");
+  }
   // A redacted post keeps body null in the log before message.deleted. Replay
   // still has to accept the pin that happened while the text was readable.
   if (message.deletedAt || (message.body == null && message.redacted !== true)) throw new Error("A deleted message cannot be pinned");

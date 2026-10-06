@@ -108,9 +108,36 @@ GET    /api/rooms/:roomId/spend-pricing   → 200 { roomId, enabled, revision, s
   (every member may read it)
 ```
 
-When to pull it: any suspected accounting defect in the charge path — the
-switch guarantees no charge can occur while the defect is investigated, with
-no revert or deploy needed. Pulling it is a room event, so the decision is
+### What disable stops, and what it does not
+
+The switch is **admission-only** (Dot's acceptance of PR #1488, room seq
+2807). It acts at one point: `chargeSpendBeforeCall`, before a reservation
+is made.
+
+Disable stops:
+
+- New priced admissions. A priced tool called after disable forwards free.
+- New `spend_authorizations` rows and new room-allowance reservations.
+- Grant consultation for new calls. Issued grants sit idle.
+
+Disable does **not** stop:
+
+- Work admitted before disable. A call that reserved before the switch
+  moved still settles after it, and the charge is recorded. It can also
+  still void, and the lease reaper still voids it if its caller is gone.
+- Grant issuance, replacement and revocation. These routes do not read
+  the switch.
+- The room spend allowance. Its budget and report are unchanged.
+- Bounty escrow (`server/bounty-escrow.mjs`). Fund, release, dispute and
+  refund do not read the switch. Only the `bounty_post` tool price is
+  removed.
+- Tool permissions. Ordinary denials still apply.
+
+When to pull it: any suspected accounting defect in the charge path. From
+the disable event onward, no new charge can be admitted, with no revert or
+deploy needed. Charges already in flight at that moment can still settle;
+check `spend_authorizations` for rows with `status = 'reserved'` to see
+them. Pulling it is a room event, so the decision is
 auditable in the event log. (Promised to Dot's QA lane, room seq 2748, after
 the 2026-10-04 spend-race review.)
 

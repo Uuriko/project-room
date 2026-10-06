@@ -16,6 +16,8 @@ test("all CREATE TABLE tables in server modules are registered application table
   // requires the opening paren so comment lines like "CREATE TABLE IF NOT
   // EXISTS only." do not register phantom tables.
   const created = new Set();
+  // Recursive: nested modules (e.g. server/analytics/schema.mjs) own tables
+  // too, and the flat scan missed them (F-2).
   const walk = dir => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const full = join(dir, entry.name);

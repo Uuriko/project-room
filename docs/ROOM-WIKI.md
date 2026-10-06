@@ -32,7 +32,8 @@ never write a procedure change directly from a single trace.
   survive into the next iteration.
 
 **How to add an entry.** Append at the bottom, newest last. Follow the schema
-exactly — `node scripts/check-wiki.mjs` enforces it.
+exactly — `node scripts/check-wiki.mjs` enforces it. Then run
+`node scripts/wiki-build.mjs` so the read API's embedded data stays current.
 
 ```
 ## YYYY-MM-DD · <slice/id> · <agent>

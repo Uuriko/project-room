@@ -8,11 +8,15 @@ import { request as httpRequest } from "node:http";
 import assert from "node:assert/strict";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
+import { installFakeWebhookDns } from "./helpers/fake-webhook-dns.mjs";
 import { validatePluginManifest, WELL_KNOWN_PATH } from "../server/agent-plugin-manifest.mjs";
 import { generateKeyPair, signCard, signKeyRotation, verifyCardSignature } from "../server/agent-card-signing.mjs";
 import { signPayload } from "../server/agent-webhook-subscriptions.mjs";
 
 async function startServer(t, f, options = {}) {
+  // Test-only DNS: fixture webhook URLs (https://*.test) go through the
+  // fully fail-closed production gate, so a fake resolver stands in.
+  installFakeWebhookDns(f.store);
   const server = createRoomServer({ store: f.store, ...options });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => {

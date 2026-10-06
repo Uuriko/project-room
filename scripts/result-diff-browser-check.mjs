@@ -114,9 +114,17 @@ for (const width of [1440, 390]) {
     await owner.locator("#action-dialog").waitFor({ state: "hidden" });
     assert.equal(f.item().decision.decision, "approved");
     assert.equal(f.item().decision.completionEventId, second.event.id);
+    // Pin the slow ordering: the previous version's read lands after the current
+    // text, as it did on CI, so this journey cannot pass only on a fast runner.
+    await reviewer.route(url => new URL(url).searchParams.get("completionEventId") === f.first.event.id,
+      async route => { await new Promise(resolve => setTimeout(resolve, 250)); await route.continue(); });
     await reviewer.reload(); await reviewer.locator("#main").waitFor({ state: "visible" });
     await openResult(reviewer);
     assert.equal(await reviewer.locator("#result-body").textContent(), "Result B\nKeep this line\nOwner: Maya");
+    // The comparison is a second, independent read of the previous version that
+    // lands after #result-body; wait for its bytes instead of reading the box the
+    // moment the current text appears (that race failed CI at both widths).
+    await reviewer.locator("#result-diff").getByText(/- Result A/).waitFor();
     assert.match(await reviewer.locator("#result-diff").innerText(), /- Result A/);
     await reviewer.locator("#close-result").click();
     assert.equal(await card(reviewer).locator("[data-read-result]").evaluate(node => node === document.activeElement), true);

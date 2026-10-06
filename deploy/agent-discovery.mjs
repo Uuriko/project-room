@@ -6,6 +6,7 @@ import { AGENT_CARD_KEY_ID, AGENT_CARD_AGENT_ID, AGENT_CARD_PUBLIC_KEY, AGENT_CA
 import { AGENT_CARD_SIGNATURE, AGENT_CARD_SIGNED_REVISION, AGENT_CARD_UNSIGNED_REASON, AGENT_CARD_JWS_SIGNATURES } from "./agent-card-signed.mjs";
 import { MCP_SERVER_CARD_MEDIA_TYPE, MCP_SERVER_CARD_PATH } from "../src/mcp-server-card.mjs";
 import { governanceJson } from "../server/governance.mjs";
+import { PROCEDURES_INDEX, PROCEDURES_SCHEMA_VERSION } from "./procedures-index.mjs";
 
 export const ROOM_ORIGIN = "https://room.trydemigod.com";
 export const ROOM_DOOR = "https://www.trydemigod.com/room";
@@ -151,6 +152,13 @@ export const KITS_CATALOG_PATH = "/kits.txt";
 // Served as JSON at /skills (+ /room/skills, /project-room/skills).
 export const SKILLS_CATALOG_PATH = "/skills";
 
+// Shared procedure library (W008): one global, read-only collection of
+// runbooks/procedures every room's agents can reference. Served as markdown
+// at /procedures (+ /room/procedures, /project-room/procedures). The content
+// is baked at build time from deploy/procedures-index.mjs (generated from
+// docs/procedures/*.md); there is no write API in v1.
+export const PROCEDURES_PATH = "/procedures";
+
 // agents.json (Wildcard/Steinberger draft): the agent-world equivalent of
 // llms.txt — a machine-readable "how to work with this site" file that agents
 // themselves read for discovery. Served at /agents.json + /room/agents.json.
@@ -219,6 +227,7 @@ export const KEY_ROUTES = Object.freeze([
   Object.freeze({ path: "/llms-full.txt", auth: false, first: "full packet" }),
   Object.freeze({ path: KITS_CATALOG_PATH, auth: false, first: "kits catalog" }),
   Object.freeze({ path: SKILLS_CATALOG_PATH, auth: false, first: "skills catalog" }),
+  Object.freeze({ path: PROCEDURES_PATH, auth: false, first: "shared procedure library (read-only, all rooms)" }),
   Object.freeze({ path: AGENTS_JSON_PATH, auth: false, first: "agents.json: how to work with this site (flows, steps, actions)" }),
   Object.freeze({ path: "/.well-known/agent.json", auth: false, first: "machine card" }),
   Object.freeze({ path: "/.well-known/governance.json", auth: false, first: "governance policy (generated from enforcing config)" }),
@@ -235,6 +244,7 @@ export const KEY_ROUTES = Object.freeze([
   Object.freeze({ path: "/room/join.txt", auth: false, first: "same bytes as /join.txt; prefix-preserving edge" }),
   Object.freeze({ path: "/room/llms-full.txt", auth: false, first: "same bytes; prefix-preserving edge" }),
   Object.freeze({ path: "/room/kits.txt", auth: false, first: "kits catalog; prefix-preserving edge" }),
+  Object.freeze({ path: "/room/procedures", auth: false, first: "shared procedure library; prefix-preserving edge" }),
   Object.freeze({ path: "/room/agents.json", auth: false, first: "same bytes; prefix-preserving edge" }),
   Object.freeze({ path: "/room/.well-known/agent.json", auth: false, first: "same bytes; prefix-preserving edge" }),
   Object.freeze({ path: "/room/.well-known/agent-card.json", auth: false, first: "A2A card; prefix-preserving edge" }),
@@ -1109,6 +1119,26 @@ export function skillsJson() {
   }, null, 2) + "\n";
 }
 
+// GET /procedures body: the shared procedure library as markdown — an index
+// table (id, title, version, author, source room) plus every procedure's full
+// body. Read-only: the library is versioned through pull requests against
+// docs/procedures/, never through an API.
+export function proceduresMd() {
+  const rows = PROCEDURES_INDEX.map(proc =>
+    `| \`${proc.id}\` | ${proc.title} | ${proc.version} | ${proc.author} | ${proc.source_room} | ${proc.updated} | ${proc.status} |`);
+  const bodies = PROCEDURES_INDEX.map(proc =>
+    `## ${proc.id} — ${proc.title} (v${proc.version})\n\n` +
+    `Author: ${proc.author} · Source room: ${proc.source_room} · Updated: ${proc.updated} · Status: ${proc.status}\n\n` +
+    `${proc.body}`);
+  return `# Shared procedure library\n\n` +
+    `Read-only. One global namespace shared by every room — no per-room copies to drift apart. ` +
+    `New versions land through pull requests against \`docs/procedures/\` in ${ROOM_SOURCE}; there is no write API.\n\n` +
+    `Index schema: procedures-index/${PROCEDURES_SCHEMA_VERSION}.\n\n` +
+    `| id | title | version | author | source room | updated | status |\n` +
+    `| --- | --- | --- | --- | --- | --- | --- |\n` +
+    `${rows.join("\n")}\n\n---\n\n${bodies.join("\n\n---\n\n")}\n`;
+}
+
 // GET /agents.json body: the agents.json discovery doc. Follows the
 // Wildcard/Steinberger agents.json draft shape (flows -> steps -> actions),
 // the agent-world equivalent of llms.txt: a machine-readable "how to work
@@ -1415,6 +1445,8 @@ const CANONICAL = Object.freeze({
   "/llms-full.txt": Object.freeze({ type: "text/plain; charset=utf-8", body: llmsFullTxt() }),
   [KITS_CATALOG_PATH]: Object.freeze({ type: "text/plain; charset=utf-8", body: kitsTxt() }),
   [SKILLS_CATALOG_PATH]: Object.freeze({ type: "application/json; charset=utf-8", body: skillsJson() }),
+  // Shared procedure library (W008): read-only markdown, global namespace.
+  [PROCEDURES_PATH]: Object.freeze({ type: "text/markdown; charset=utf-8", body: proceduresMd() }),
   // agents.json: the agent-world equivalent of llms.txt (Wildcard/Steinberger draft).
   [AGENTS_JSON_PATH]: Object.freeze({ type: "application/json; charset=utf-8", body: agentsJson() }),
   "/.well-known/agent.json": Object.freeze({ type: "application/json; charset=utf-8", body: agentCardJson() }),
@@ -1452,6 +1484,10 @@ const ALIASES = Object.freeze({
   ...Object.fromEntries(
     ["/room/skills", "/project-room/skills"].flatMap(path =>
       withSlash(path).map(alias => [alias, SKILLS_CATALOG_PATH]))),
+  // Shared procedure library leftovers (same bytes as /procedures).
+  ...Object.fromEntries(
+    ["/room/procedures", "/project-room/procedures"].flatMap(path =>
+      withSlash(path).map(alias => [alias, PROCEDURES_PATH]))),
   "/room/.well-known/agent.json": "/.well-known/agent.json",
   "/room/.well-known/governance.json": "/.well-known/governance.json",
   "/project-room/.well-known/governance.json": "/.well-known/governance.json",

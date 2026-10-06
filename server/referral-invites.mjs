@@ -35,7 +35,7 @@
 // a forged token, since honest mints can never exceed the cap).
 
 import { createHash, createPrivateKey, createPublicKey, randomUUID, sign as edSign, verify as edVerify } from "node:crypto";
-import { ServiceError } from "./store.mjs";
+import { ServiceError, PILOT_LIMITS } from "./store.mjs";
 import { assertAdmissibleMemberName } from "./display-name-guard.mjs";
 import { generateKeyPair } from "./agent-card-signing.mjs";
 import { refuseArchivedWrite } from "./room-lifecycle.mjs";
@@ -403,7 +403,7 @@ export class ReferralInvites {
       const room = this.store.room(roomId);
       refuseArchivedWrite(room.state);
       const now = this.now();
-      if (room.sequence + 1 > 2000000) fail(409, "pilot_limit", "Room event limit reached; no data was changed");
+      if (room.sequence + 1 >= PILOT_LIMITS.eventsPerRoom) fail(409, "pilot_limit", "Room event limit reached; no data was changed");
       if (Object.keys(room.state.members).length > 5000) fail(409, "pilot_limit", "Room member limit reached; no data was changed");
 
       if (attached) {
@@ -452,7 +452,7 @@ export class ReferralInvites {
       try { state = compactState(applyEventWithGrowth(room.state, added, growthCollector).state); }
       catch (error) { fail(409, "invite_rejected", error.message); }
       const projection = JSON.stringify(state);
-      if (Buffer.byteLength(projection) > 4 * 1024 * 1024) fail(409, "pilot_limit", "Room projection limit reached; no data was changed");
+      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed");
       const sequence = room.sequence + 1;
       this.store.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, added.id, JSON.stringify(added));
       this.store.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);

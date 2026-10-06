@@ -46,3 +46,10 @@ To turn it on:
 4. Set `ROOM_BACKUP_TOKEN` on that same script if operators will also pull the export over HTTP. The daily job calls the Durable Object directly and does not need the token.
 
 Isolated staging has no cron, so it does not write this daily object. Its own export route works once `ROOM_BACKUP_TOKEN` is set on `project-room-stage`.
+
+## Byte equality (REL-14)
+
+- `backupRoom` writes content digests into the watermark (`digests.events`, `digests.attachments`): a sha256 over every event row and every `room_attachments` row, including a hash of each file's bytes. `scripts/backup-verify.mjs` recomputes them on the restored copy, so a same-count edit or a flipped file byte fails verification. Watermarks written before this carry counts only and still verify (the check says so).
+- The NDJSON export (the daily R2 backup's format) writes BLOB cells as `{"$base64": "..."}` and replay decodes them. Before this, any room holding a room file produced an export that replay refused.
+- The NDJSON export still scrubs token-shaped text in every cell, so an event whose body contains a token-shaped string does not restore byte-equal from NDJSON. The sqlite backup is byte-equal.
+- `node scripts/backup-drill.mjs` exercises this on a local room: messages, a work item, and a 512-byte room file holding every byte value.

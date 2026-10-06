@@ -131,7 +131,25 @@ export class AccountClient {
   }
   async confirm() {
     const session = this.currentSession("confirming access", { authenticated: true }), generation = this.generation;
-    const value = await this.request("/api/account-session");
+    let value;
+    try {
+      // Name the session this read is checking: a delayed confirmation must
+      // never mint a slot, rotate a cookie, or clobber a newer sign-in.
+      value = await this.request("/api/account-session", { session });
+    } catch (error) {
+      // A response that lands after a newer session replaced this one is
+      // obsolete: never let it touch the replacement, whatever it reports.
+      if (!this.owns(generation, session)) return null;
+      // Ownership ended (signed out, revoked, binding rotated): retire the
+      // view instead of throwing. Uncertain failures (5xx, offline) keep
+      // the session so the caller can retry.
+      if (error?.status === 401 || error?.status === 403 || error?.status === 409
+        || ["unauthenticated", "access_denied", "session_binding_changed"].includes(error?.code)) {
+        this.invalidate(generation, session);
+        return false;
+      }
+      throw error;
+    }
     if (!this.owns(generation, session)) return null;
     if (!value?.authenticated || !sameAccountSession(value, session)) { this.invalidate(generation, session); return false; }
     return true; // Keep object identity and generation: Room and Inbox own these.
@@ -537,8 +555,12 @@ export class RoomClient {
   // Ephemeral typing heartbeat. Client-throttled to one beat per 4s; the
   // server expires the beat after 10s, so no explicit stop is needed.
   // Failures are swallowed — typing is best-effort ambient signal.
-  sendTyping() {
+  // Instinct-3 (muse-room 3675): /typing is room-wide, so a beat while a
+  // private recipient is selected would tell every member who is writing a
+  // DM and when. A private draft sends no beat.
+  sendTyping({ toMemberId = "" } = {}) {
     if (!this.session) return Promise.resolve();
+    if (toMemberId) return Promise.resolve();
     const now = Date.now();
     if (now - this.lastTypingSent < 4000) return Promise.resolve();
     this.lastTypingSent = now;

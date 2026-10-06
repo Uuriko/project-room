@@ -23,8 +23,9 @@ function pinView({ messageId, pinnedById, pinnedAt, message }) {
 // Pin visibility follows message visibility (server/activity.mjs): a room
 // message is visible to every member, but a DM is visible only to its author
 // and its recipient. Filtering here (not just in the HTTP route wrapper)
-// protects every caller of the pin library.
-function pinVisibleToViewer(message, viewerId) {
+// protects every caller of the pin library. Exported for the activation
+// pack, which otherwise leaks pinned DM bodies to the whole room.
+export function pinVisibleToViewer(message, viewerId) {
   return !message.toMemberId || message.authorId === viewerId || message.toMemberId === viewerId;
 }
 
@@ -63,7 +64,10 @@ export function setPin(store, token, roomId, data, expectedSessionBinding = null
     const message = room.state.messages.find(m => m.id === messageId);
     if (!message) fail(404, "message_not_found", "No such message in this room");
     // 409 on both write paths: the same refusal through `commands` is 409 command_rejected (store.command maps the reducer message).
-    if (data.pinned && (message.deletedAt || message.body == null)) fail(409, "message_deleted", "A deleted message cannot be pinned");
+    // Mirrors the pinMessage reducer's condition: a redacted-but-live message
+    // (body null, redacted true, no deletedAt — e.g. after an account-deletion
+    // log scrub + projection rebuild) is pinnable, only a tombstone is not.
+    if (data.pinned && (message.deletedAt || (message.body == null && message.redacted !== true))) fail(409, "message_deleted", "A deleted message cannot be pinned");
     return { pinned: Boolean(room.state.pins?.some(pin => pin.messageId === messageId)), viewerId: auth.member?.id };
   });
   let receipt = null;

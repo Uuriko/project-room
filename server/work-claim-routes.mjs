@@ -44,6 +44,7 @@ import { findClaimCollisions } from "./claim-collisions.mjs";
 import { emitWorkClaimEvent, enqueueClaimWake } from "./work-claim-events.mjs";
 import { noteReadyWork } from "./work-wants.mjs"; // BOARD-WAKE-2
 import { isFirstContribution, retentionAck } from "./retention-response.mjs";
+import { requiredReadingFor, stampReadingAck } from "./required-reading.mjs"; // W012: per-lane required reading
 import { ROOM_GUIDE_ID } from "./room-guide.mjs";
 import { fileLeaseConflictBody, fileLeaseConflicts, holdForRateLimit, readyClaims } from "./claim-coordination.mjs";
 import { collectPullRequestLookups, commitPullRequestLookup, readClaimPullBudget, writeClaimPullBudget } from "./claim-pr-sync.mjs";
@@ -929,12 +930,20 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     const first = isFirstContribution(registry.list(roomId).filter(entry => entry.id !== item.id), caller);
     const acked = retentionAck(claimed, { now: nowMs, first, agentId: caller });
     commit(acked, "claimed");
-    return json(res, 200, { ...acked, fileWarnings: data.advisory === true ? fileWarningsFor(registry.list(roomId), acked) : [] });
+    // W012 required reading: every enrollment response presents the reading
+    // list for the claim's kind. Advisory only — enrollment never gates on
+    // it, so there is no bypass to learn and no existing flow can break.
+    return json(res, 200, { ...acked, fileWarnings: data.advisory === true ? fileWarningsFor(registry.list(roomId), acked) : [],
+      requiredReading: requiredReadingFor(item.kind) });
   }
   if (workClaimRoute === "update" && req.method === "POST") {
     const data = body(req);
-    if (!shape(data, { optional: ["state", "note", "deliveryMode", "reviewedBy", "tags", "blobs"] })) invalidInput(reject, "{state?, note?, deliveryMode?, reviewedBy?, tags?, blobs?}");
-    if (data.state === undefined && data.note === undefined) invalidInput(reject, "a state transition or a note");
+    if (!shape(data, { optional: ["state", "note", "deliveryMode", "reviewedBy", "tags", "blobs", "readingAck"] })) invalidInput(reject, "{state?, note?, deliveryMode?, reviewedBy?, tags?, blobs?, readingAck?}");
+    if (data.state === undefined && data.note === undefined && data.readingAck === undefined) invalidInput(reject, "a state transition, a note, or a reading ack");
+    // W012 required reading: the owner confirms they read the enrollment
+    // reading list. { docs: [...] } is validated by the pure machine; a
+    // malformed ack is a 422, never a silent drop.
+    if (data.readingAck !== undefined && !shape(data.readingAck, { required: ["docs"] })) invalidInput(reject, "readingAck: {docs: [...]}");
     const item = load(claimIdOf(reject, workClaimId));
     if (item.owner !== caller) reject(403, "work_not_owner", `Work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can change it`);
     requireWriter();
@@ -1001,9 +1010,13 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
           escalate: receiptDecision.escalate, signals: receiptDecision.signals, at: nowMs });
       } catch { /* shadow-only: never break the done transition */ }
     }
+    // W012 required reading: record the ack on the claim (who confirmed what,
+    // when) after the state/note write, in the same commit.
+    const acked = data.readingAck === undefined ? updated
+      : runPure(reject, () => stampReadingAck(updated, caller, { docs: data.readingAck.docs, now: nowMs }));
     // Q3-A: a note-only update coalesces with this claim's last room event.
-    commit(updated, "state_changed", { coalesce: data.state === undefined || data.state === item.state });
-    return json(res, 200, updated);
+    commit(acked, "state_changed", { coalesce: data.state === undefined || data.state === item.state });
+    return json(res, 200, acked);
   }
   if (workClaimRoute === "review" && req.method === "POST") {
     // A verdict review is a record from someone other than the owner who

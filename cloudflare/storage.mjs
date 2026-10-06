@@ -1,4 +1,5 @@
 import { STORE_SCHEMA_VERSION, fenceDefinitions, writerVersions } from '../server/writer-fence.mjs';
+import { ServiceError } from '../server/service-error.mjs';
 
 const marker = 'room_runtime_version';
 const permit = 'room_writer_permit';
@@ -44,6 +45,18 @@ const verifyPermit = (db, version, value) => {
 
 // A narrow adapter for the methods RoomStore actually uses. No SQL parsing,
 // arbitrary rewrites, filesystem emulation, or pretend user-defined functions.
+// G11b (2026-10-06): SQLite-backed Durable Objects refuse any string, BLOB
+// or row past the platform ceiling with SQLITE_TOOBIG (local workerd: 2 MB;
+// production holds a larger muse-room projection today, so the real ceiling
+// is above 3.48 MB and undocumented). Map it to the same typed 409 the
+// app-level PILOT_LIMITS checks return, so a write past the platform limit
+// is a clean "no data was changed" refusal, never an opaque 500. The
+// statement throws inside the write transaction, so nothing persists.
+export const isTooBig = error => /SQLITE_TOOBIG|string or blob too big/i.test(String(error?.message ?? error));
+const tooBig = error => isTooBig(error)
+  ? new ServiceError(409, "pilot_limit", "Room storage limit reached (platform row limit); no data was changed")
+  : error;
+
 export class DurableDatabase {
   constructor(storage) { this.storage = storage; this.isTransaction = false; this.rowsRead = 0; }
   #count(cursor) {
@@ -52,7 +65,8 @@ export class DurableDatabase {
   }
   exec(sql) {
     return durableStorage.transaction(this, () => {
-      const cursor = this.storage.sql.exec(sql);
+      let cursor;
+      try { cursor = this.storage.sql.exec(sql); } catch (error) { throw tooBig(error); }
       const rows = cursor.toArray();
       this.#count(cursor);
       return rows;
@@ -60,7 +74,8 @@ export class DurableDatabase {
   }
   prepare(sql) {
     const all = (...args) => {
-      const cursor = this.storage.sql.exec(sql, ...args);
+      let cursor;
+      try { cursor = this.storage.sql.exec(sql, ...args); } catch (error) { throw tooBig(error); }
       const rows = cursor.toArray();
       this.#count(cursor);
       return rows;

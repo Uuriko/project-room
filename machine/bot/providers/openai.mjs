@@ -1,4 +1,5 @@
 import { OPENAI_URL, openaiBody, openaiHeaders } from "./schemas.mjs";
+import { estimateCostUsd } from "./cost.mjs";
 
 const ACTIONS = Object.freeze({
   screenshot: "desktop.screenshot",
@@ -69,7 +70,7 @@ export function createOpenAiProvider({ key, model, fetchImpl }) {
           }
         }
       }
-      return { requestBody: body, actions, text, costUsd: 0 };
+      return { requestBody: body, actions, text, costUsd: estimateCostUsd("openai", value?.usage) };
     },
   };
 }

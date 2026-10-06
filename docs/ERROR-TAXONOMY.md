@@ -57,6 +57,29 @@ evidence no longer permits this action. Read current work before acting.
 **`halt_active`** — a member halted all work mutations. Only a steer/decide
 member can clear the exact halt.
 
+**`too_large`** (413) — the request body exceeded the size cap. The message
+names both numbers (`Request body is 20030 bytes; the limit is 16384 bytes`);
+the hint repeats them and the next step says to shrink the body and resend.
+JSON routes cap bodies at 16384 bytes; the `commands` route allows
+message.posted/message.edited commands up to 524288 bytes. A refused command
+that passed the HTTP cap but exceeds the command cap fails as `too_large`
+`Command is too large` — the hint names both caps.
+
+**Bond/DM field shapes** — a wrong data field on a bond/dm command fails as
+422 `invalid_command` (`Unexpected field: X`) or 422 `invalid_bond` /
+`invalid_dm`, and the hint enumerates the expected data shape so the next
+guess is not another round trip:
+
+| Command | `data` shape |
+|---|---|
+| `bond.propose` | `{ to, scopes?, note? }` |
+| `bond.accept` | `{ bondId, scopes? }` |
+| `bond.decline` / `bond.revoke` | `{ bondId }` |
+| `bond.list` | `{}` |
+| `dm.posted` | `{ to, body, messageId? }` (body: 4096 characters or fewer) |
+
+Every command envelope is `{ id, type, data, causationId? }`.
+
 ## Rules
 
 1. `error.code` is the contract; `message` is human detail and may change.

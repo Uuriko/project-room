@@ -216,3 +216,38 @@ test("HTTP: owner toggles directory; public listing serves it; unauthenticated t
   const relisted = await call("GET", "/api/public/rooms/directory");
   assert.deepEqual(relisted.body.rooms, []);
 });
+
+test("public receipts visibility defaults to public and is owner-only", () => {
+  const store = makeStore({ r1: stateFor("r1") });
+  const dir = new RoomDirectory(store);
+  // Default: current behavior — receipts are public until the owner says otherwise.
+  assert.equal(dir.publicReceiptsVisible("r1"), true);
+  assert.equal(dir.publicReceiptsVisible("missing-room"), true);
+  assert.equal(dir.status("r1", "owner").publicReceipts, true);
+  assert.equal(errOf(() => dir.receiptsVisibility("r1", "alice")).code, "owner_only");
+  assert.equal(errOf(() => dir.setReceiptsVisibility("r1", "alice", false)).code, "owner_only");
+  assert.equal(errOf(() => dir.setReceiptsVisibility("r1", "owner", "false")).code, "invalid_public_receipts");
+  assert.deepEqual(dir.setReceiptsVisibility("r1", "owner", false), { roomId: "r1", publicReceipts: false });
+  assert.equal(dir.publicReceiptsVisible("r1"), false);
+  assert.deepEqual(dir.receiptsVisibility("r1", "owner"), { roomId: "r1", publicReceipts: false });
+  assert.equal(dir.status("r1", "owner").publicReceipts, false);
+  // The directory listing bit is independent.
+  assert.equal(dir.status("r1", "owner").discoverable, false);
+  assert.deepEqual(dir.setReceiptsVisibility("r1", "owner", true), { roomId: "r1", publicReceipts: true });
+  assert.equal(dir.publicReceiptsVisible("r1"), true);
+  assert.equal(errOf(() => dir.receiptsVisibility("nope", "owner")).code, "room_not_found");
+});
+
+test("public receipts column migrates onto pre-existing directory tables", () => {
+  const store = makeStore({ r1: stateFor("r1") });
+  store.db.exec("ALTER TABLE room_directory_settings DROP COLUMN public_receipts");
+  const dir = new RoomDirectory(store);
+  // Reads on the old schema still work and default to public (current behavior).
+  assert.equal(dir.publicReceiptsVisible("r1"), true);
+  assert.equal(dir.status("r1", "owner").publicReceipts, true);
+  // The first write re-adds the column; the value sticks.
+  assert.deepEqual(dir.setReceiptsVisibility("r1", "owner", false), { roomId: "r1", publicReceipts: false });
+  assert.equal(dir.publicReceiptsVisible("r1"), false);
+  const columns = new Set(store.db.prepare("PRAGMA table_info(room_directory_settings)").all().map(c => c.name));
+  assert.ok(columns.has("public_receipts"));
+});

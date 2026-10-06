@@ -313,6 +313,23 @@ const attestationOf = value => {
   return Object.freeze({ memberId: value.memberId, at: value.at, note: value.note ?? null, ...(basis ? { basis } : {}) });
 };
 
+// W012 required reading: read-acknowledgments are a per-agent map of
+// { docs, at }. Latest ack per agent wins; entries without docs are dropped
+// so a row can never carry a meaningless ack.
+const readingAcksOf = value => {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return Object.freeze({});
+  const out = {};
+  for (const [agent, entry] of Object.entries(value)) {
+    if (typeof agent !== "string" || agent.length === 0) continue;
+    const docs = Array.isArray(entry?.docs)
+      ? entry.docs.filter(doc => typeof doc === "string" && doc.length > 0 && doc.length <= 256).slice(0, 20)
+      : [];
+    if (docs.length === 0) continue;
+    out[agent] = Object.freeze({ docs: Object.freeze(docs),
+      at: typeof entry?.at === "string" ? entry.at : null });
+  }
+  return Object.freeze(out);
+};
 const workOf = value => {
   check(value !== null && typeof value === "object" && !Array.isArray(value), "work must be an object");
   check(typeof value.id === "string" && value.id.length > 0 && value.id.length <= 256, "work id must be 1..256 characters");
@@ -341,8 +358,10 @@ const workOf = value => {
   const revision = revisionOf(value.revision);
   if (kind === "deploy") check(revision, "a deploy claim needs a revision");
   const historyOmitted = historyOmittedOf(value.historyOmitted);
+  const readingAcks = readingAcksOf(value.readingAcks);
   return { id: value.id, title: value.title ?? value.id, state: value.state ?? "unclaimed",
     owner: value.owner ?? null, history: Array.isArray(value.history) ? value.history : [],
+    readingAcks,
     ...(historyOmitted > 0 ? { historyOmitted } : {}),
     claimedAt: value.claimedAt ?? null, leaseStartAt: value.leaseStartAt ?? null, leaseExpiresAt: value.leaseExpiresAt ?? null,
     deliveryMode: value.deliveryMode ?? null, reviewPolicy: value.reviewPolicy ?? null,
@@ -372,6 +391,14 @@ const withHistory = (work, atMs, agentId, action, note) => {
     history: Object.freeze(dropped > 0 ? full.slice(dropped) : full),
     ...(omitted > 0 ? { historyOmitted: omitted } : {}) });
 };
+// Append one history stamp to a claim without a state transition (W012
+// required reading acks, and any future note-only stamps). Same trimming
+// rules as every other claim write.
+export function stampClaimHistory(work, agentId, { action, note, now } = {}) {
+  const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
+  if (typeof action !== "string" || action.length === 0) fail("invalid_claim_input", "history action is required");
+  return withHistory(item, atMs, agent, action, note);
+}
 // A copy of the claim that keeps only the newest `keep` history entries,
 // with the rest counted in historyOmitted. Board lists use it; the
 // single-claim read returns the stored history.

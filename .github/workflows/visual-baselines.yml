@@ -1,0 +1,36 @@
+# Visual regression baseline capture (Q003).
+#
+# Manual only: generates the CI-canonical baseline PNGs for the screenshot
+# diff gate and uploads them as an artifact. The screenshot comparator is
+# sensitive to system font rasterization, so baselines must come from the
+# same runner image that CI compares against — local captures drift by
+# 1-2% of pixels on text-heavy pages and fail the gate on environment,
+# not on UI changes.
+#
+# Usage: gh workflow run visual-baselines.yml --ref <branch>
+# Then download the `visual-baselines` artifact and commit the PNGs to
+# scripts/visual-regression-baselines/.
+name: visual-baselines
+
+on:
+  workflow_dispatch:
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Capture visual regression baselines
+        run: VISUAL_UPDATE_BASELINES=1 scripts/test-env.sh node --test scripts/visual-regression-browser-check.mjs
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: visual-baselines
+          path: scripts/visual-regression-baselines/
+          if-no-files-found: error

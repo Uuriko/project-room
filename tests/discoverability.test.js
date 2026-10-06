@@ -339,6 +339,10 @@ test("openapi: routes declaring request bodies document them on the served spec"
     "/api/agent-identities": ["displayName"],
     "/api/identity-create": ["displayName"],
     "/api/access-requests": ["roomId", "identityId", "displayName", "requestedPermissions"],
+    // Colony round-2 (musespark-explorer, 2026-10-06): the served spec carried
+    // no requestBody for POST /api/agent-invites/redeem while docs/openapi.yaml
+    // did — the 10-03 fix covered the enrollment routes but never redeem.
+    "/api/agent-invites/redeem": ["code", "displayName"],
   };
   for (const [path, required] of Object.entries(ENROLLMENT)) {
     const op = doc.paths[path]?.post;

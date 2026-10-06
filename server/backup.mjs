@@ -1,8 +1,36 @@
 import { backup, DatabaseSync } from "node:sqlite";
 import { chmodSync, mkdtempSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
 import { RoomStore } from "./store.mjs";
 import { auditRecovery } from "./recovery.mjs";
+
+// REL-14: content digests, so a restore proves byte equality instead of
+// matching row counts only. events: every row in (room_id, sequence) order.
+// attachments: every room_attachments row with a hash of its stored bytes;
+// `mismatched` counts rows whose bytes no longer hash to their sha256 column.
+export function backupDigests(db) {
+  const events = createHash("sha256");
+  let eventRows = 0;
+  for (const row of db.prepare("SELECT room_id, sequence, id, body FROM events ORDER BY room_id, sequence").iterate()) {
+    events.update(JSON.stringify([row.room_id, row.sequence, row.id, row.body]) + "\n");
+    eventRows++;
+  }
+  const files = createHash("sha256");
+  let fileRows = 0, fileBytes = 0, mismatched = 0;
+  const hasFiles = db.prepare("SELECT 1 AS ok FROM sqlite_master WHERE type='table' AND name='room_attachments'").get();
+  if (hasFiles) {
+    for (const row of db.prepare("SELECT room_id, id, state, byte_length, sha256, bytes FROM room_attachments ORDER BY room_id, id").iterate()) {
+      const content = row.bytes == null ? null : createHash("sha256").update(row.bytes).digest("hex");
+      if (content !== null && content !== row.sha256) mismatched++;
+      files.update(JSON.stringify([row.room_id, row.id, row.state, row.byte_length, row.sha256, content]) + "\n");
+      fileRows++;
+      fileBytes += row.bytes == null ? 0 : row.bytes.length;
+    }
+  }
+  return { events: { rows: eventRows, sha256: events.digest("hex") },
+    attachments: { rows: fileRows, bytes: fileBytes, mismatched, sha256: files.digest("hex") } };
+}
 
 // Fresh private destination only; never overwrite or restore into the live DB.
 export async function backupRoom(source, destinationDirectory) {
@@ -25,7 +53,9 @@ export async function backupRoom(source, destinationDirectory) {
     // resurrected by a restore and must be reconciled, never trusted silently.
     const rooms = restored.db.prepare("SELECT id, sequence FROM rooms ORDER BY id").all();
     const events = restored.db.prepare("SELECT count(*) AS n FROM events").get().n;
-    const watermark = { version: 1, backedUpAt: Date.now(), rooms, events };
+    const digests = backupDigests(restored.db);
+    if (digests.attachments.mismatched) throw new Error(`Backup holds ${digests.attachments.mismatched} attachment(s) whose bytes do not match their sha256`);
+    const watermark = { version: 1, backedUpAt: Date.now(), rooms, events, digests };
     const sidecar = join(destination, "room-backup.json");
     writeFileSync(sidecar, JSON.stringify(watermark, null, 2));
     chmodSync(sidecar, 0o600);

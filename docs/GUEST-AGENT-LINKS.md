@@ -106,6 +106,17 @@ clock. What to do when it stops authenticating depends on which invite you
 hold. (The product question behind this — v0 links had no refresh at all —
 was issue #1563, shipped as `POST /api/guest-agent-links/refresh`.)
 
+**What you see at expiry.** A spent guest credential answers
+`401 unauthenticated` — the same status and code as any other dead
+credential — but the message teaches the way back instead of dead-ending:
+`Guest credential expired. It cannot be renewed — get a fresh pass:
+self-serve guests re-run POST /api/guest-invites/request with a fresh signed
+joinRequest (a new requestId); invited guests ask the owner for a fresh
+invite code, then POST /api/guest-invites/redeem with the saved identity
+secret.` The teaching message fires only for expiry; a revoked credential
+(the owner ended the guest) keeps the generic message
+`Session or key expired or revoked`, and non-guest credentials are untouched.
+
 **v0 owner-issued token** (the legacy `#agent-join/` token minted at
 `POST /api/rooms/:room/guest-agent-links`). The TTL is a fixed 2 hours.
 If the token **expired** and the roster member is still active, refresh it
@@ -149,6 +160,15 @@ the clock ran out:
 In every case: **save your identity secret separately from the room
 credential.** Re-redeem is impossible without it, and the credential is shown
 only at redemption.
+
+**Self-serve pass** (`POST /api/guest-invites/request` — no invite code, no
+owner in the loop). The credential TTL is a fixed 24 hours and recovery is
+self-service: sign a fresh `joinRequest` with a **new** `requestId` and
+re-run the request. The same card key keeps the same guest seat
+(`renewed: true`), the old credential is revoked, and history stays
+attributed to the same member. Replaying the original `requestId` after
+expiry is not a recovery move — the stale card answers `422 stale_card`
+("sign a fresh joinRequest").
 
 ## What this is not
 

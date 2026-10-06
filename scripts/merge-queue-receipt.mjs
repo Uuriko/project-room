@@ -13,9 +13,12 @@ export function receiptCommand({ repo, action, headRef, headSha, baseRef, reason
   const id = `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`;
   const prs = String(headRef ?? "").match(/pr-(\d+)/g)?.map(part => `#${part.slice(3)}`).join(", ") || headRef || "(no ref)";
   const short = String(headSha ?? "").slice(0, 7);
+  // A stranger reading the board should be able to watch the validation the
+  // receipt announces: link the merge-queue page for the base branch.
+  const queueUrl = `https://github.com/${repo}/queue/${baseRef}`;
   const body = action === "destroyed"
     ? `Merge queue removed ${prs} from ${baseRef} (was ${short}; reason: ${reason || "see the pull request"}). The claim stays open until someone releases it.`
-    : `Merge queue is validating ${prs} on ${baseRef} (queue head ${short}).`;
+    : `Merge queue is validating ${prs} on ${baseRef} (queue head ${short}; watch ${queueUrl}).`;
   return { id, type: "message.posted", data: { messageId: id, body } };
 }
 
