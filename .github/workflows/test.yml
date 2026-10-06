@@ -263,13 +263,30 @@ jobs:
   # the suite jobs above have succeeded. Default success() also fails when any
   # job in the graph was skipped, so an intentional browser-shard skip would
   # skip this required check. Evaluate the direct results instead.
+  coverage:
+    # Per-module coverage ratchet (backlog Q015): runs the root unit suite
+    # with V8 coverage and fails when any module in coverage-thresholds.json
+    # drops below its threshold. Zero dependencies; the script points TMPDIR
+    # at a worktree-local .tmp/ and writes coverage data to ./coverage/
+    # (both gitignored) by itself.
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Enforce per-module coverage thresholds
+        run: node scripts/coverage-thresholds.mjs
   test:
-    needs: [contract, lint, unit, browser, cloudflare, visual-refresh-guard]
+    needs: [contract, lint, unit, browser, cloudflare, visual-refresh-guard, coverage]
     if: always() && !cancelled()
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Require contract, lint, unit, browser, cloudflare, and visual-refresh-guard
+      - name: Require contract, lint, unit, browser, cloudflare, visual-refresh-guard, and coverage
         env:
           CONTRACT: ${{ needs.contract.result }}
           LINT: ${{ needs.lint.result }}
@@ -277,9 +294,10 @@ jobs:
           BROWSER: ${{ needs.browser.result }}
           CLOUDFLARE: ${{ needs.cloudflare.result }}
           VISUAL_REFRESH_GUARD: ${{ needs.visual-refresh-guard.result }}
+          COVERAGE: ${{ needs.coverage.result }}
         run: |
           failed=0
-          for pair in "contract:$CONTRACT" "lint:$LINT" "unit:$UNIT" "browser:$BROWSER" "cloudflare:$CLOUDFLARE" "visual-refresh-guard:$VISUAL_REFRESH_GUARD"; do
+          for pair in "contract:$CONTRACT" "lint:$LINT" "unit:$UNIT" "browser:$BROWSER" "cloudflare:$CLOUDFLARE" "visual-refresh-guard:$VISUAL_REFRESH_GUARD" "coverage:$COVERAGE"; do
             name=${pair%%:*}
             result=${pair#*:}
             echo "$name=$result"

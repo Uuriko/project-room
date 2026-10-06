@@ -1,0 +1,18 @@
+{
+  "modules": {
+    "machine": {
+      "dir": "machine",
+      "threshold": 75.9
+    },
+    "server": {
+      "dir": "server",
+      "threshold": 79.6
+    },
+    "src": {
+      "dir": "src",
+      "threshold": 47.0
+    }
+  },
+  "note": "Per-module coverage ratchets (backlog Q015), enforced by scripts/coverage-thresholds.mjs in CI (test.yml `coverage` job, part of the required `test` check). Thresholds are set AT the measured line-coverage level on main on 2026-10-06: server 79.6, src 47.0, machine 75.9 (ratchet: prevent decay, do not demand improvement). Measurement: V8 coverage from the root `node --test` suite, merged across test processes by max count; a line is covered when its code span touches executed bytes minus zero-count ranges, and lines overlapped by a never-called function's own span are uncovered; blank/comment-only lines are not coverable; files never loaded by the suite count as 0 covered but still contribute coverable lines (so a new untested module file trips the gate). To re-baseline after legitimate coverage changes: run `node scripts/coverage-thresholds.mjs --baseline` on main and paste the numbers here (round DOWN to 1 decimal). Never lower a threshold to make a red build green without reviewer agreement \u2014 add tests instead.",
+  "version": 1
+}
