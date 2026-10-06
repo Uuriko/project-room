@@ -96,21 +96,3 @@ test('PR with no eligible lane lands in unrouted, not silently dropped', () => {
   assert.deepEqual(assignments, {});
   assert.deepEqual(unrouted, [101]);
 });
-
-test('claim-scope match compares PR files against the referenced claim', () => {
-  const prs = [{
-    ...PRS[0],
-    claimRef: 'lane-7',
-    files: ['server/a.mjs', 'server/b.mjs'],
-  }];
-  const claims = [{ id: 'lane-7', files: ['server/a.mjs', 'server/b.mjs'] }];
-  const [match] = analyzeReviewState({ prs, reviews: [], claims });
-  assert.equal(match.mechanical.claimScopeMatch, true);
-
-  const prsOut = [{ ...prs[0], files: [...prs[0].files, 'server/z.mjs'] }];
-  const [mismatch] = analyzeReviewState({ prs: prsOut, reviews: [], claims });
-  assert.equal(mismatch.mechanical.claimScopeMatch, false);
-
-  const [unknown] = analyzeReviewState({ prs: [{ ...PRS[0] }], reviews: [], claims });
-  assert.equal(unknown.mechanical.claimScopeMatch, null);
-});

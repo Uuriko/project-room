@@ -2,13 +2,20 @@
 // scripts/review-state.mjs — per-PR review-state surface + single-lane review
 // assignment routing.
 //
-// Problem: review lanes re-review stale heads (a verdict posted on head X
-// no longer covers head Y after a rebase) and duplicate each other's reviews.
-// This script computes, for every open PR in Uuriko/project-room:
-//   - which reviewer(s) posted verdicts and the head SHA each verdict covered,
-//   - whether each verdict is stale (head moved since),
-//   - the cheap-first mechanical pass (diff size, claim-scope match),
-// and routes each PR that still needs review to exactly one reviewer lane.
+// Companion to #1585's review-parallelization protocol
+// (docs/REVIEW-PARALLELISM.md): #1585 runs the cheap-first mechanical pass
+// per PR (diff size, claim-scope match via scripts/review-scope-check.mjs,
+// lint/test conclusions) and defines the clean-context judgment pass. This
+// module is the cross-PR coordination layer #1585 did not cover: for every
+// open PR, which reviewer(s) posted verdicts, the head SHA each verdict
+// covered, and whether each verdict is stale (head moved since) — plus
+// deterministic single-lane assignment routing so reviewers neither block
+// each other nor re-review stale heads.
+//
+// A verdict's provenance (reviewer + exact head SHA + timestamp) binds the
+// judgment to the version inspected, consistent with the claim-provenance
+// model in #1614 (parentClaimId/evidenceRefs freeze evidence onto a
+// version; here the version is the PR head).
 //
 // Pure analysis lives in analyzeReviewState() / routeReviews() so tests run
 // offline against fixtures. Live reads use the read-only gh CLI.
@@ -21,10 +28,9 @@
 //
 // Fixture shape (--input): {
 //   prs: [{ number, title, author, headSha, draft, additions, deletions,
-//           changedFiles, claimRef, files: [] }],
+//           changedFiles }],
 //   reviews: [{ prNumber, reviewer, verdict: APPROVE|CHANGES|COMMENT,
-//               headSha, at }],
-//   claims: [{ id, files: [] }] }
+//               headSha, at }] }
 
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -38,10 +44,9 @@ function argValue(name) {
 
 // --- pure analysis -----------------------------------------------------------
 
-// One verdict verdict-row per review; `stale` means the PR head moved since
-// the verdict was posted, so the verdict no longer covers the current head.
-export function analyzeReviewState({ prs, reviews = [], claims = [] }) {
-  const claimFiles = new Map((claims || []).map((c) => [c.id, c.files || []]));
+// One review row per verdict; `stale` means the PR head moved since the
+// verdict was posted, so the verdict no longer covers the current head.
+export function analyzeReviewState({ prs, reviews = [] }) {
   const byPr = new Map();
   for (const r of reviews || []) {
     if (!byPr.has(r.prNumber)) byPr.set(r.prNumber, []);
@@ -63,14 +68,8 @@ export function analyzeReviewState({ prs, reviews = [], claims = [] }) {
     else if (latest.verdict === "APPROVE") status = "approved_fresh";
     else status = "changes_requested";
 
-    // Cheap-first mechanical pass: diff size is free from the PR payload;
-    // claim-scope match needs the PR's file list (supplied via fixture).
-    const files = pr.claimRef ? claimFiles.get(pr.claimRef) : undefined;
-    const claimScopeMatch =
-      !pr.claimRef || files === undefined || !Array.isArray(pr.files)
-        ? null
-        : pr.files.every((f) => files.includes(f));
-
+    // Diff size is free from the PR payload; claim-scope match belongs to
+    // #1585's mechanical pass (scripts/review-scope-check.mjs), not here.
     return {
       number: pr.number,
       title: pr.title,
@@ -81,8 +80,6 @@ export function analyzeReviewState({ prs, reviews = [], claims = [] }) {
         additions: pr.additions ?? null,
         deletions: pr.deletions ?? null,
         changedFiles: pr.changedFiles ?? null,
-        claimRef: pr.claimRef ?? null,
-        claimScopeMatch,
       },
       reviews: prReviews,
       verdict: {
@@ -141,11 +138,6 @@ function ghApi(path, paginate = false) {
   }
 }
 
-function claimRefFromBody(body) {
-  const m = /claim[:\s]+([A-Za-z0-9][\w.-]*)/i.exec(body || "");
-  return m ? m[1] : null;
-}
-
 function fetchLive() {
   const pulls = ghApi(`repos/${REPO}/pulls?state=open&per_page=100`);
   const prs = pulls.map((p) => ({
@@ -157,7 +149,6 @@ function fetchLive() {
     additions: p.additions ?? null,
     deletions: p.deletions ?? null,
     changedFiles: p.changed_files ?? null,
-    claimRef: claimRefFromBody(p.body),
   }));
   const reviews = [];
   for (const p of pulls) {
@@ -176,7 +167,7 @@ function fetchLive() {
       });
     }
   }
-  return { prs, reviews, claims: [] };
+  return { prs, reviews };
 }
 
 // --- cli ---------------------------------------------------------------------
