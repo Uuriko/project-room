@@ -34,10 +34,20 @@ node scripts/i18n-harness.mjs --baseline  # regenerate strings/i18n-baseline.jso
 ## Baseline ratchet
 
 `strings/i18n-baseline.json` records violation counts at generation time.
-`--check` exits 1 only when a rule's count **grows** beyond the baseline — the
-current codebase is grandfathered in; new hardcoded strings get caught. When
-code is migrated into the catalog (counts drop), regenerate the baseline so
-the ratchet tightens:
+`--check` runs three gates and exits 1 if any fails:
+
+1. **Scope guard** — a fixed `REQUIRED_SCOPE` list (`src/app.js`, the email
+   templates, key HTML pages) must be covered by the scan. Shrinking the scan
+   scope fails closed instead of silently unscanning code.
+2. **Anti-inflation** — the committed baseline must not exceed the baseline at
+   the merge-base with `origin/main` (`I18N_BASE_REF` overrides the base ref).
+   Raising baseline counts to dodge the ratchet is itself a failure.
+3. **Ratchet** — current violation counts must not exceed the committed
+   baseline.
+
+The current codebase is grandfathered in; new hardcoded strings get caught.
+When code is migrated into the catalog (counts drop), regenerate the baseline
+so the ratchet tightens:
 
 ```sh
 node scripts/i18n-harness.mjs --baseline

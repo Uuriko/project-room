@@ -17,12 +17,56 @@
 //   - positional-placeholder : {0} / %s / %d style positional placeholders
 //     (named {name} placeholders are the readiness target)
 import { readdirSync, readFileSync, writeFileSync, existsSync, statSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const BASELINE_PATH = join(root, "strings", "i18n-baseline.json");
 const CATALOG_PATH = join(root, "strings", "en.json");
+
+// Scan-scope guard: these paths MUST be scanned. If a future change shrinks
+// UI_GLOBS / EMAIL_FILES so a required path drops out, --check fails closed
+// instead of silently unscanning most of the code.
+export const REQUIRED_SCOPE = [
+  "src/app.js",
+  "server/notify-email.mjs",
+  "server/email-envelope.mjs",
+  "index.html",
+  "join.html",
+];
+
+export function checkScope(scannedRels) {
+  const set = new Set(scannedRels);
+  return REQUIRED_SCOPE.filter((p) => !set.has(p));
+}
+
+// Baseline anti-inflation: the committed baseline must not exceed the
+// baseline at the merge base with main. Raising baseline counts to dodge the
+// ratchet is itself a failure. I18N_BASE_REF overrides the base ref (CI uses
+// the auto-detected merge-base; tests pin a known ref).
+function baseRef() {
+  if (process.env.I18N_BASE_REF) return process.env.I18N_BASE_REF;
+  const mb = spawnSync("git", ["merge-base", "HEAD", "origin/main"], { cwd: root, encoding: "utf8" });
+  if (mb.status === 0 && mb.stdout.trim()) return mb.stdout.trim();
+  return "origin/main";
+}
+
+function baselineAtRef(ref) {
+  const r = spawnSync("git", ["show", `${ref}:strings/i18n-baseline.json`], { cwd: root, encoding: "utf8" });
+  if (r.status !== 0) return null;
+  try { return JSON.parse(r.stdout); } catch { return null; }
+}
+
+export function findInflatedCounts(committed, base) {
+  const inflated = [];
+  for (const r of RULES) {
+    const c = committed?.counts?.[r] ?? 0;
+    const b = base?.counts?.[r] ?? 0;
+    if (c > b) inflated.push({ rule: r, base: b, committed: c });
+  }
+  return inflated;
+}
 
 // Files the harness READS but never modifies; everything else lives in
 // scripts/, tests/, strings/, docs/ (new files this lane owns).
@@ -259,9 +303,28 @@ if (mode === "--extract") {
     console.error("i18n-harness: no baseline (strings/i18n-baseline.json). Run `node scripts/i18n-harness.mjs --baseline`.");
     process.exit(2);
   }
+  let failed = false;
+  // 1. Scope guard: required paths must be scanned (fails closed).
+  const scannedRels = collectFiles().map((p) => relative(root, p).replace(/\\/g, "/"));
+  const missing = checkScope(scannedRels);
+  if (missing.length > 0) {
+    console.error(`i18n-harness FAIL: scan scope regressed, required paths not scanned: ${missing.join(", ")}`);
+    failed = true;
+  }
+  // 2. Anti-inflation: committed baseline must not exceed the merge-base baseline.
+  const ref = baseRef();
+  const baseBaseline = baselineAtRef(ref);
+  if (baseBaseline) {
+    for (const { rule, base, committed } of findInflatedCounts(baseline, baseBaseline)) {
+      console.error(`i18n-harness FAIL: baseline inflation on ${rule}: ${base} (at ${ref}) -> ${committed} (committed)`);
+      failed = true;
+    }
+  } else {
+    console.warn(`i18n-harness: no baseline at ${ref}; skipping inflation check (new baseline file)`);
+  }
+  // 3. Ratchet: current counts must not exceed the committed baseline.
   const violations = runExtraction();
   const s = summarize(violations);
-  let failed = false;
   for (const r of RULES) {
     const now = s.counts[r] ?? 0;
     const base = baseline.counts?.[r] ?? 0;

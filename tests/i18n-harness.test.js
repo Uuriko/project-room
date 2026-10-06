@@ -26,8 +26,13 @@ import {
   checkSource,
   runExtraction,
   summarize,
+  collectFiles,
+  checkScope,
+  findInflatedCounts,
+  REQUIRED_SCOPE,
   RULES,
 } from "../scripts/i18n-harness.mjs";
+import { relative } from "node:path";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const harness = join(root, "scripts", "i18n-harness.mjs");
@@ -112,6 +117,43 @@ test("--check ratchets: fails when a rule count grows beyond baseline", () => {
     if (had !== null) writeFileSync(baselinePath, had);
     const r2 = spawnSync(process.execPath, [harness, "--check"], { encoding: "utf8" });
     assert.equal(r2.status, 0, `--check should exit 0 within baseline; stderr: ${r2.stderr}`);
+  } finally {
+    if (had !== null) writeFileSync(baselinePath, had);
+  }
+});
+
+test("checkScope fails closed when a required path is unscanned", () => {
+  assert.deepEqual(checkScope(["src/other.js"]), REQUIRED_SCOPE);
+  assert.deepEqual(checkScope(REQUIRED_SCOPE), []);
+  const scanned = collectFiles().map((p) => relative(root, p).replace(/\\/g, "/"));
+  assert.deepEqual(checkScope(scanned), [], "current scope must cover every required path");
+});
+
+test("findInflatedCounts flags baseline inflation", () => {
+  const base = { counts: { "hardcoded-ui-string": 4728, "sentence-concatenation": 522, "positional-placeholder": 0 } };
+  assert.deepEqual(findInflatedCounts(base, base), []);
+  const inflated = { counts: { "hardcoded-ui-string": 100000, "sentence-concatenation": 522, "positional-placeholder": 0 } };
+  const hits = findInflatedCounts(inflated, base);
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].rule, "hardcoded-ui-string");
+  // Lowering the baseline (migration progress) is not inflation.
+  const lowered = { counts: { "hardcoded-ui-string": 4000, "sentence-concatenation": 522, "positional-placeholder": 0 } };
+  assert.deepEqual(findInflatedCounts(lowered, base), []);
+});
+
+test("--check rejects an inflated committed baseline (anti-gaming)", () => {
+  const had = (() => { try { return readFileSync(baselinePath, "utf8"); } catch { return null; } })();
+  try {
+    const baseline = JSON.parse(had);
+    const inflated = { ...baseline, counts: { ...baseline.counts, "hardcoded-ui-string": 100000 } };
+    writeFileSync(baselinePath, JSON.stringify(inflated));
+    // HEAD carries the honest committed baseline, so HEAD is the base ref.
+    const r = spawnSync(process.execPath, [harness, "--check"], {
+      encoding: "utf8",
+      env: { ...process.env, I18N_BASE_REF: "HEAD" },
+    });
+    assert.equal(r.status, 1, `--check should exit 1 on baseline inflation; stderr: ${r.stderr}`);
+    assert.match(r.stderr, /baseline inflation/);
   } finally {
     if (had !== null) writeFileSync(baselinePath, had);
   }
