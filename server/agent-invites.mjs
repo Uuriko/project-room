@@ -302,7 +302,7 @@ export class AgentInvites {
       try { state = compactState(applyEventWithGrowth(room.state, incoming, growthCollector).state); }
       catch (error) { fail(409, "invite_rejected", error.message); }
       const projection = JSON.stringify(state);
-      if (Buffer.byteLength(projection) > 4 * 1024 * 1024) fail(409, "pilot_limit", "Room projection limit reached; no data was changed");
+      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed");
       const sequence = room.sequence + 1;
       this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(row.room_id, sequence, incoming.id, JSON.stringify(incoming));
       this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, row.room_id);

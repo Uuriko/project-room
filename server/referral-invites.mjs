@@ -452,7 +452,7 @@ export class ReferralInvites {
       try { state = compactState(applyEventWithGrowth(room.state, added, growthCollector).state); }
       catch (error) { fail(409, "invite_rejected", error.message); }
       const projection = JSON.stringify(state);
-      if (Buffer.byteLength(projection) > 4 * 1024 * 1024) fail(409, "pilot_limit", "Room projection limit reached; no data was changed");
+      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed");
       const sequence = room.sequence + 1;
       this.store.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, added.id, JSON.stringify(added));
       this.store.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);

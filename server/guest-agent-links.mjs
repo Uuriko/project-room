@@ -2,6 +2,8 @@ import { createHash, randomBytes } from "node:crypto";
 import { EVENT_TYPES as T, event, validId } from "../src/events.js";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 import { assessMemberDisplayName } from "./display-name-guard.mjs";
+// Read at call time (store.mjs imports this module): one source for capacity.
+import { PILOT_LIMITS } from "./store.mjs";
 
 class GuestAgentLinkError extends Error {
   constructor(status, code, message) { super(message); this.status = status; this.code = code; }
@@ -234,7 +236,7 @@ export class GuestAgentLinks {
     }
     if (swept === 0) return;
     const projection = JSON.stringify(state);
-    if (Buffer.byteLength(projection) > 4 * 1024 * 1000) fail(409, "pilot_limit", "Room storage limit reached");
+    if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room storage limit reached");
     this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
   }
 

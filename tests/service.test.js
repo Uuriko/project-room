@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
-import { RoomStore } from "../server/store.mjs";
+import { RoomStore, PILOT_LIMITS } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
@@ -412,11 +412,11 @@ test("an exact-scope write claim can be released at event and projection capacit
   store.command(owner, "commons", command(T.CLAIM_ACQUIRED, { workItemId: "capacity-claim", expectedRevision: 1,
     repository: "Uuriko/project-room", ref: "main", paths: ["src/**"], expiresAt: "2099-01-01T00:00:00.000Z" }));
   const state = structuredClone(store.room("commons").state);
-  state.messages.push({ body: "x".repeat(4 * 1024 * 1024) });
-  store.db.prepare("UPDATE rooms SET sequence=10000,projection=? WHERE id='commons'").run(JSON.stringify(state));
+  state.messages.push({ body: "x".repeat(PILOT_LIMITS.projectionBytes) });
+  store.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id='commons'").run(PILOT_LIMITS.eventsPerRoom, JSON.stringify(state));
   assert.throws(() => store.command(owner, "commons", command(T.WORK_STARTED, { workItemId: "capacity-claim", expectedRevision: 2 })), { code: "pilot_limit" });
   const release = command(T.CLAIM_RELEASED, { workItemId: "capacity-claim", expectedRevision: 2 });
-  assert.equal(store.command(owner, "commons", release).sequence, 10001);
+  assert.equal(store.command(owner, "commons", release).sequence, PILOT_LIMITS.eventsPerRoom + 1);
   assert.equal(store.command(owner, "commons", release).duplicate, true);
   assert.equal(store.room("commons").state.workItems["capacity-claim"].claim.status, "released");
   assert.throws(() => store.command(owner, "commons", command(T.CLAIM_RELEASED, { workItemId: "capacity-claim", expectedRevision: 3 })), { code: "pilot_limit" });
@@ -434,15 +434,15 @@ test("open work can be completed, unblocked, and superseded at event and project
   store.command(owner, "commons", command(T.WORK_PROPOSED, { workItemId: "cap-old", title: "Retired at capacity", definitionOfDone: "Replaced", accountableMemberId: "owner" }));
   store.command(owner, "commons", command(T.WORK_PROPOSED, { workItemId: "cap-new", title: "Replacement", definitionOfDone: "Carries the goal", accountableMemberId: "owner" }));
   const state = structuredClone(store.room("commons").state);
-  state.messages.push({ body: "x".repeat(4 * 1024 * 1024) });
-  store.db.prepare("UPDATE rooms SET sequence=10000,projection=? WHERE id='commons'").run(JSON.stringify(state));
+  state.messages.push({ body: "x".repeat(PILOT_LIMITS.projectionBytes) });
+  store.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id='commons'").run(PILOT_LIMITS.eventsPerRoom, JSON.stringify(state));
   // Acquisition and ordinary progress remain capped.
   assert.throws(() => store.command(owner, "commons", command(T.WORK_PROPOSED, { workItemId: "cap-extra", title: "New work", definitionOfDone: "Not at capacity", accountableMemberId: "owner" })), { code: "pilot_limit" });
   assert.throws(() => store.command(owner, "commons", command(T.WORK_STARTED, { workItemId: "cap-blocked", expectedRevision: 2, resolvedBlocker: "skip" })), { code: "pilot_limit" });
   assert.throws(() => store.command(owner, "commons", command(T.MESSAGE_POSTED, { body: "still capped" })), { code: "pilot_limit" });
   // Completion is a terminal action and stays available exactly once per open item.
   const completion = command(T.WORK_COMPLETED, { workItemId: "cap-complete", expectedRevision: 2, summary: "Done", evidenceUrl: "https://example.com/evidence", evidenceVersion: "v1", nextAction: "Verify", signedEvidence: signEvidence() });
-  assert.equal(store.command(owner, "commons", completion).sequence, 10001);
+  assert.equal(store.command(owner, "commons", completion).sequence, PILOT_LIMITS.eventsPerRoom + 1);
   assert.equal(store.command(owner, "commons", completion).duplicate, true);
   assert.equal(store.room("commons").state.workItems["cap-complete"].state, "completed");
   assert.throws(() => store.command(owner, "commons", command(T.WORK_COMPLETED, { workItemId: "cap-complete", expectedRevision: 3, summary: "Again", evidenceUrl: "https://example.com/again", evidenceVersion: "v2", nextAction: "Verify" })), { code: "pilot_limit" });

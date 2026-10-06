@@ -34,7 +34,6 @@ class ServiceError extends Error {
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 // Mirrors the projection compaction in store.mjs: strip replay-only caches.
 const compactState = state => ({ ...state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} });
-const MAX_PROJECTION_BYTES = 4 * 1024 * 1024;
 
 export const referralSchema = `
   CREATE TABLE IF NOT EXISTS referrals (
@@ -98,7 +97,7 @@ export class Referrals {
     try { state = compactState(applyEventWithGrowth(room.state, incoming, growthCollector).state); }
     catch (error) { fail(409, "referral_rejected", error.message); }
     const projection = JSON.stringify(state);
-    if (Buffer.byteLength(projection) > MAX_PROJECTION_BYTES) fail(409, "pilot_limit", "Room projection limit reached; no data was changed");
+    if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed");
     const sequence = room.sequence + 1;
     this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
     this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
