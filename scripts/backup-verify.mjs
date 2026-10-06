@@ -15,7 +15,7 @@ import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RoomStore } from "../server/store.mjs";
-import { backupRoom, reconcileRestoredAuthority } from "../server/backup.mjs";
+import { backupRoom, backupDigests, reconcileRestoredAuthority } from "../server/backup.mjs";
 
 process.umask(0o077);
 
@@ -133,6 +133,19 @@ export async function verifyRestoredBackup({ backupFilename, watermarkPath, live
     const rooms = restored.db.prepare("SELECT id, sequence FROM rooms ORDER BY id").all();
     check("rooms-match-watermark", JSON.stringify(rooms) === JSON.stringify(watermark.rooms ?? null),
       `backup=${JSON.stringify(rooms)}`);
+    // REL-14: byte equality. Watermarks written before digests existed carry
+    // counts only; they still verify, and the detail says so.
+    const digests = backupDigests(restored.db);
+    check("attachment-bytes-intact", digests.attachments.mismatched === 0,
+      `${digests.attachments.mismatched} of ${digests.attachments.rows} attachment(s) do not hash to their sha256`);
+    if (watermark.digests) {
+      check("events-bytes-match-watermark", digests.events.sha256 === watermark.digests.events?.sha256,
+        `backup=${digests.events.sha256.slice(0, 12)} watermark=${String(watermark.digests.events?.sha256).slice(0, 12)}`);
+      check("attachments-bytes-match-watermark", digests.attachments.sha256 === watermark.digests.attachments?.sha256,
+        `backup=${digests.attachments.sha256.slice(0, 12)} watermark=${String(watermark.digests.attachments?.sha256).slice(0, 12)}`);
+    } else {
+      check("watermark-digests", true, "legacy watermark: counts only, byte equality not provable");
+    }
     let stale = [];
     if (liveDbPath) {
       const live = new RoomStore(liveDbPath, { readOnly: true });
