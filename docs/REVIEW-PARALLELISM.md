@@ -117,7 +117,39 @@ Baseline (recent merged PRs, measured 2026-10-05):
 Honesty rule: one paired PR is one sample. Report the numbers, do not
 generalize. The experiment earns a second crew only if the numbers move.
 
-## 5. What this does not change
+## 6. Review-state surface + single-lane routing
+
+Two lanes must never review the same PR, and no lane may trust a verdict
+posted on a head that has since moved. The machine-readable surface is
+`scripts/review-state.mjs` (unit-tested in `tests/review-state.test.js`):
+run it against open PRs to get, per PR, the assigned reviewer, every
+verdict's head SHA, and staleness flags.
+
+Routing rules:
+
+1. **One lane per PR.** Every non-draft PR that needs review routes to
+   exactly one reviewer lane. No qualifying PR sits unreviewed.
+2. **Assignment sticks across head moves.** When the author rebases or
+   pushes a fix, the assigned lane re-reviews — a new lane is not assigned.
+   This ends the re-review treadmill where each head move triggered a fresh,
+   duplicated judgment pass.
+3. **Author never reviews their own PR.** The deterministic slot skips the
+   author's lane.
+4. **A verdict covers one head.** Verdict provenance is
+   `{ reviewer, verdict, headSha, at }` — who judged what on which exact
+   commit, when. A verdict on a moved head is **stale** and does not gate a
+   merge, consistent with the provenance model in #1614 (evidence frozen onto
+   the version it describes; here the version is the PR head).
+5. **No silent drops.** A PR with no eligible lane lands in `unrouted` in
+   the state output; the coordinator re-routes from `unrouted` before merge.
+
+Routing is deterministic (PR number → lane slot), so independent
+coordinators compute the same assignment without negotiating. Persist the
+assignment file (`--assign-file`) between runs to keep stickiness. Drafts are
+never routed. The state surface reads GitHub PR reviews only; it changes no
+merge gate.
+
+## 7. What this does not change
 
 - `npm run check` / `npm run lint` / the `test` workflow remain the quality
   gates. The mechanical pass aggregates and adds scope; it duplicates no
