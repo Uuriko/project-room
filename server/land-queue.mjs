@@ -19,6 +19,7 @@
 // reset header and the tick skips until then. A missing token does not fail
 // the tick. No new secret is added.
 
+import { storedProjection } from "./projection-codec.mjs";
 import { randomBytes, randomUUID } from "node:crypto";
 import { ServiceError } from "./service-error.mjs";
 import { event, EVENT_TYPES, applyEvent, isRoomArchived, validId } from "../src/events.js";
@@ -860,7 +861,7 @@ export class LandQueue {
     const sequence = room.sequence + 1;
     this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
     const compact = { ...state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
-    this.db.prepare("UPDATE rooms SET sequence=?, projection=? WHERE id=?").run(sequence, JSON.stringify(compact), roomId);
+    this.db.prepare("UPDATE rooms SET sequence=?, projection=? WHERE id=?").run(sequence, storedProjection(this.db, roomId, compact), roomId);
     try {
       if (this.store.agentPlugin) this.store.agentPlugin.fanoutRoomEvent({ roomId, event: incoming });
     } catch (error) {

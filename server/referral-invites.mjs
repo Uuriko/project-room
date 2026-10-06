@@ -34,6 +34,7 @@
 // depth 0. Redeeming a token with depth > maxDepth fails (only reachable by
 // a forged token, since honest mints can never exceed the cap).
 
+import { storedProjection } from "./projection-codec.mjs";
 import { createHash, createPrivateKey, createPublicKey, randomUUID, sign as edSign, verify as edVerify } from "node:crypto";
 import { ServiceError } from "./store.mjs";
 import { assertAdmissibleMemberName } from "./display-name-guard.mjs";
@@ -451,7 +452,7 @@ export class ReferralInvites {
       let state;
       try { state = compactState(applyEventWithGrowth(room.state, added, growthCollector).state); }
       catch (error) { fail(409, "invite_rejected", error.message); }
-      const projection = JSON.stringify(state);
+      const projection = storedProjection(this.store.db, roomId, state);
       if (Buffer.byteLength(projection) > 4 * 1024 * 1024) fail(409, "pilot_limit", "Room projection limit reached; no data was changed");
       const sequence = room.sequence + 1;
       this.store.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, added.id, JSON.stringify(added));

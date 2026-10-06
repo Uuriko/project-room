@@ -57,8 +57,17 @@ export function readConversation(store, token, roomId, { limit = 50, cursor = nu
     const before = cursor !== null ? saved.before : Number.MAX_SAFE_INTEGER;
     // PRIV-2: a since_join reader pages only messages from their join onward.
     const floor = store.historyFloor(roomId, auth.member.id);
-    const rows = store.db.prepare(`SELECT CAST(m.key AS INTEGER) AS position, json_remove(m.value, '$.editHistory') AS body
-      FROM rooms r, json_each(r.projection, '$.messages') m
+    // Phase 1a: a body at rest lives in the messages table; refill it here
+    // (missing -> bodyUnavailable, never another room's or member's row).
+    const rows = store.db.prepare(`SELECT CAST(m.key AS INTEGER) AS position,
+        CASE WHEN json_extract(m.value,'$.bodyAtRest')=1 THEN
+          CASE WHEN t.body IS NULL
+            THEN json_set(json_remove(m.value, '$.editHistory', '$.bodyAtRest'), '$.bodyUnavailable', json('true'))
+            ELSE json_set(json_remove(m.value, '$.editHistory', '$.bodyAtRest'), '$.body', t.body) END
+        ELSE json_remove(m.value, '$.editHistory') END AS body
+      FROM rooms r JOIN json_each(r.projection, '$.messages') m
+        LEFT JOIN messages t ON t.room_id=r.id AND t.message_id=json_extract(m.value,'$.id')
+          AND json_extract(m.value,'$.bodyAtRest')=1
       WHERE r.id=? AND CAST(m.key AS INTEGER)<?
         AND (json_extract(m.value,'$.toMemberId') IS NULL OR json_extract(m.value,'$.toMemberId')=''
           OR json_extract(m.value,'$.authorId')=? OR json_extract(m.value,'$.toMemberId')=?)

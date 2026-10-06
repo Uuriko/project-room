@@ -2,6 +2,7 @@
 // table in one transaction. Read-time masking stays; this is the write that
 // makes the old text unreadable in storage.
 
+import { storedProjection } from "./projection-codec.mjs";
 import { applyEvent, event, EVENT_TYPES, isRoomArchived } from "../src/events.js";
 
 const compact = state => ({ ...state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} });
@@ -121,7 +122,7 @@ export function commitMessageRedaction(db, { roomId, state, actorId, at, message
 
   const stored = compact(next);
   if (!isRoomArchived(state)) {
-    db.prepare("UPDATE rooms SET sequence=?, projection=? WHERE id=?").run(sequence, JSON.stringify(stored), roomId);
+    db.prepare("UPDATE rooms SET sequence=?, projection=? WHERE id=?").run(sequence, storedProjection(db, roomId, stored), roomId);
   }
   return { state: stored, sequence, rewritten };
 }
@@ -143,5 +144,9 @@ export function redactRemainingMessageBodies(db, roomId) {
     update.run(JSON.stringify(entry), roomId, row.sequence);
     rewritten += 1;
   }
+  // Phase 1a: the messages table is a second home for message text (bodies at
+  // rest). A purged room keeps none there either (Instinct-3 3938 item 1).
+  try { db.prepare("UPDATE messages SET body=NULL WHERE room_id=? AND body IS NOT NULL").run(roomId); }
+  catch (error) { if (!/no such table/i.test(error?.message ?? "")) throw error; }
   return rewritten;
 }

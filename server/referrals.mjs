@@ -17,6 +17,7 @@
 // join; a member cannot refer themselves (the referee must be a different,
 // newly-joined member).
 
+import { storedProjection } from "./projection-codec.mjs";
 import { randomUUID } from "node:crypto";
 import { event, EVENT_TYPES as T, isRoomArchived } from "../src/events.js";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
@@ -96,7 +97,7 @@ export class Referrals {
     let state;
     try { state = compactState(applyEventWithGrowth(room.state, incoming, growthCollector).state); }
     catch (error) { fail(409, "referral_rejected", error.message); }
-    const projection = JSON.stringify(state);
+    const projection = storedProjection(this.db, roomId, state);
     if (Buffer.byteLength(projection) > MAX_PROJECTION_BYTES) fail(409, "pilot_limit", "Room projection limit reached; no data was changed");
     const sequence = room.sequence + 1;
     this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));

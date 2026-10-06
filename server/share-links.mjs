@@ -1,3 +1,4 @@
+import { storedProjection } from "./projection-codec.mjs";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { validId, event, EVENT_TYPES as T, MEMBERSHIP_AUTHORITY_POLICY_VERSION, INVITATION_ROLE_POLICY_VERSION, canInviteMembers } from "../src/events.js";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
@@ -198,7 +199,7 @@ export class ShareLinks {
           authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION,
           ...(actorId !== row.issuer_member_id ? { referredBy: row.issuer_member_id } : {}) } });
       const state = { ...applyEventWithGrowth(room.state, incoming, growthCollector).state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
-      const projection = JSON.stringify(state), sequence = room.sequence + 1;
+      const projection = storedProjection(this.db, row.room_id, state), sequence = room.sequence + 1;
       if (Buffer.byteLength(projection) > 4 * 1024 * 1024) fail(409, "pilot_limit", "Room storage limit reached");
       this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(row.room_id, sequence, id, JSON.stringify(incoming));
       this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, row.room_id);
@@ -404,7 +405,7 @@ export class ShareLinks {
       const incoming = invitationJoinedEvent({ ...record, joined_event_id: randomUUID(), accepted_at: now, redemption_id: redemptionId });
       refuseArchivedWrite(room.state);
       const state = { ...applyEventWithGrowth(room.state, incoming, growthCollector).state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
-      const projection = JSON.stringify(state), sequence = room.sequence + 1;
+      const projection = storedProjection(this.db, row.room_id, state), sequence = room.sequence + 1;
       if (Buffer.byteLength(projection) > 4 * 1024 * 1024) fail(409, "pilot_limit", "This room has reached its storage limit");
       this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(row.room_id, sequence, incoming.id, JSON.stringify(incoming));
       this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, row.room_id);

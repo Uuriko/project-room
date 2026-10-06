@@ -10,6 +10,7 @@
 // The ga1. token is never posted publicly. Storage is purely additive
 // (guest_invites + guest_members tables, IF NOT EXISTS, no schema version
 // bump), following the wake-queue / heartbeat additive pattern.
+import { storedProjection } from "./projection-codec.mjs";
 import { refuseArchivedWrite } from "./room-lifecycle.mjs";
 import { PILOT_LIMITS, activeMemberCount } from "./store.mjs";
 import { createHash, randomBytes } from "node:crypto";
@@ -330,7 +331,7 @@ export class GuestInvites {
     this.store.agentConnections.revokeMember(roomId, member.id);
     this.db.prepare("UPDATE credentials SET revoked=1 WHERE room_id=? AND member_id=?").run(roomId, member.id);
     this.store.reminders.retireMember(roomId, member.id);
-    const projection = JSON.stringify(state);
+    const projection = storedProjection(this.db, roomId, state);
     if (Buffer.byteLength(projection) > 4 * 1024 * 1024) fail(409, "pilot_limit", "Room storage limit reached");
     this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
     return { sequence, state };
@@ -417,7 +418,7 @@ export class GuestInvites {
     try {
       state = { ...applyEventWithGrowth(room.state, incoming, growthCollector).state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
     } catch (error) { fail(422, "command_rejected", error.message); }
-    const projection = JSON.stringify(state), sequence = room.sequence + 1;
+    const projection = storedProjection(this.db, roomId, state), sequence = room.sequence + 1;
     if (Buffer.byteLength(projection) > 4 * 1024 * 1024) fail(409, "pilot_limit", "Room storage limit reached");
     this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, eventId, JSON.stringify(incoming));
     this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
@@ -602,7 +603,7 @@ export class GuestInvites {
         try {
           state = { ...applyEventWithGrowth(room.state, incoming, growthCollector).state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
         } catch (error) { fail(422, "command_rejected", error.message); }
-        const projection = JSON.stringify(state), sequence = room.sequence + 1;
+        const projection = storedProjection(this.db, roomId, state), sequence = room.sequence + 1;
         if (Buffer.byteLength(projection) > 4 * 1024 * 1024) fail(409, "pilot_limit", "Room storage limit reached");
         this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, eventId, JSON.stringify(incoming));
         this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
@@ -789,7 +790,7 @@ export class GuestInvites {
         try {
           state = { ...applyEventWithGrowth(room.state, incoming, growthCollector).state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
         } catch (error) { fail(422, "command_rejected", error.message); }
-        const projection = JSON.stringify(state), sequence = room.sequence + 1;
+        const projection = storedProjection(this.db, roomId, state), sequence = room.sequence + 1;
         if (Buffer.byteLength(projection) > 4 * 1024 * 1024) fail(409, "pilot_limit", "Room storage limit reached");
         this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
         this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);

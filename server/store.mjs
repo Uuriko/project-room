@@ -1,3 +1,4 @@
+import { storedProjection, readProjection } from "./projection-codec.mjs";
 import { publicWorkClaimFenceSchema, verifyPublicWorkClaimFence } from "./public-work-claim-fence.mjs";
 import { PublicWorkClaims, publicWorkClaimsSchema } from "./public-work-claims.mjs";
 import { PublicWorkReviews, publicWorkReviewsSchema } from "./public-work-reviews.mjs";
@@ -2374,7 +2375,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (skipIds.has(row.id)) continue;
       const state = JSON.parse(row.projection);
       if (!ensureDefaultChannelState(state)) continue;
-      update.run(JSON.stringify(state), row.id);
+      update.run(storedProjection(this.db, row.id, state), row.id);
     }
     const linked = this.db.prepare(`
       SELECT rooms.id AS id, json_extract(rooms.projection, '$.workItems') AS workItems
@@ -2389,7 +2390,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (skipIds.has(row.id)) continue;
       if (!repairInvalidSupersessions({ workItems: parseStoredJson(row.workItems, {}) })) continue;
       const state = JSON.parse(this.db.prepare("SELECT projection FROM rooms WHERE id=?").get(row.id).projection);
-      if (repairInvalidSupersessions(state)) update.run(JSON.stringify(state), row.id);
+      if (repairInvalidSupersessions(state)) update.run(storedProjection(this.db, row.id, state), row.id);
     }
   }
   replayProvenance(rooms, { upgradeV1 }) {
@@ -2403,7 +2404,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (upgradeV1) {
         const state = JSON.parse(room.projection);
         const changed = applyProvenanceRepair(state, events);
-        if (changed) update.run(JSON.stringify(state), room.id);
+        if (changed) update.run(storedProjection(this.db, room.id, state), room.id);
         saveCheckpoint.run(room.id, room.sequence, JSON.stringify(state));
         continue;
       }
@@ -2415,7 +2416,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       };
       if (!applyProvenanceRepair(partial, events)) continue;
       const state = JSON.parse(this.db.prepare("SELECT projection FROM rooms WHERE id=?").get(room.id).projection);
-      if (applyProvenanceRepair(state, events)) update.run(JSON.stringify(state), room.id);
+      if (applyProvenanceRepair(state, events)) update.run(storedProjection(this.db, room.id, state), room.id);
     }
   }
   close() { this._projectionCache?.clear(); this.db.close(); }
@@ -2501,9 +2502,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     if (hit) return hit;
     const row = (this._roomProjectionStmt ??= this.db.prepare("SELECT projection FROM rooms WHERE id=?")).get(roomId);
     if (!row) fail(404, "room_not_found", "Room not found");
-    const state = deepFreeze(JSON.parse(row.projection));
+    const decoded = readProjection(this.db, roomId, row.projection);
+    // A slim row decodes to the full room; size the cache entry by what it holds.
+    const bytes = row.projection.includes('"bodyAtRest":1') ? Buffer.byteLength(JSON.stringify(decoded)) : Buffer.byteLength(row.projection);
+    const state = deepFreeze(decoded);
     const value = Object.freeze({ sequence: meta.sequence, state });
-    cache.insert(roomId, meta.sequence, value, Buffer.byteLength(row.projection));
+    cache.insert(roomId, meta.sequence, value, bytes);
     return value;
   }
   roomAuthority(roomId) {
@@ -2545,7 +2549,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     return this.transaction(() => {
       const state = events.reduce(applyEvent, emptyRoomState());
       const stored = compact(state);
-      this.db.prepare("INSERT INTO rooms(id,sequence,projection,archived_at) VALUES(?,?,?,?)").run(state.room.id, events.length, JSON.stringify(stored), archivedAtOf(stored));
+      this.db.prepare("INSERT INTO rooms(id,sequence,projection,archived_at) VALUES(?,?,?,?)").run(state.room.id, events.length, storedProjection(this.db, state.room.id, stored), archivedAtOf(stored));
       const insert = this.db.prepare("INSERT INTO events VALUES(?,?,?,?)");
       events.forEach((e, i) => insert.run(state.room.id, i + 1, e.id, JSON.stringify(e)));
       syncRoomPublication(this, { roomId: state.room.id, state: stored, previous: null, auth: null });
@@ -3238,7 +3242,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       let state;
       try { state = compact(applyEventWithGrowth(room.state, incoming, growthCollector).state); }
       catch (error) { fail(409, "invitation_rejected", error.message); }
-      const projection = JSON.stringify(state);
+      const projection = storedProjection(this.db, row.room_id, state);
       if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed");
       const sequence = room.sequence + 1;
       this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(row.room_id, sequence, incoming.id, JSON.stringify(incoming));
@@ -3896,7 +3900,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.db.prepare("DELETE FROM events WHERE room_id=?").run(roomId);
       const insert = this.db.prepare("INSERT INTO events VALUES(?,?,?,?)");
       events.forEach((e, i) => insert.run(roomId, i + 1, e.id, JSON.stringify(e)));
-      this.db.prepare("UPDATE rooms SET sequence=?,projection=?,archived_at=? WHERE id=?").run(events.length, JSON.stringify(state), archivedAtOf(state), roomId);
+      // The imported log replaces the messages table from scratch, so keep bodies inline here.
+      this.db.prepare("UPDATE rooms SET sequence=?,projection=?,archived_at=? WHERE id=?").run(events.length, storedProjection(this.db, roomId, state, { enabled: false }), archivedAtOf(state), roomId);
       this.db.prepare("INSERT INTO projection_checkpoints(room_id,sequence,projection) VALUES(?,?,?)").run(roomId, events.length, JSON.stringify(state));
       syncRoomPublication(this, { roomId, state, previous, auth: null });
       return { imported: events.length, sequence: events.length };
@@ -4513,7 +4518,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         const conflict = conflictingClaim(room.state.workItems, state.workItems[incoming.data.workItemId], Date.parse(incoming.at));
         if (conflict) fail(409, "claim_conflict", `Scope is reserved by work ${conflict.id}. Coordinate or release that reservation first; no new claim was saved.`);
       }
-      const projection = JSON.stringify(state);
+      const projection = storedProjection(this.db, roomId, state);
       if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes && !cleanup) fail(409, "pilot_limit", "Room projection limit reached; no data was changed");
       const sequence = room.sequence + 1;
       // R1 delivery-path tracing (RC-2026-09-26-966): delivery.log spans the
@@ -4726,14 +4731,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       let resumed;
       try { resumed = compact(applyEvent(next, incoming)); }
       catch { continue; }
-      const projection = JSON.stringify(resumed);
+      const projection = storedProjection(this.db, roomId, resumed);
       if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) continue;
       seq += 1;
       this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, seq, incoming.id, JSON.stringify(incoming));
       next = resumed;
     }
     if (seq !== sequence) {
-      this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(seq, JSON.stringify(next), roomId);
+      this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(seq, storedProjection(this.db, roomId, next), roomId);
     }
     return next;
   }

@@ -53,3 +53,48 @@ export function decodeProjection(db, roomId, text, { onMissing } = {}) {
   if (missing.length && typeof onMissing === "function") onMissing({ roomId, messageIds: missing });
   return state;
 }
+
+
+// Every rooms.projection write goes through storedProjection (ratchet:
+// tests/projection-writers.test.js). Flag off it returns exactly what the
+// writer used to store: the same string, or JSON.stringify of the state.
+export function storedProjection(db, roomId, value, { enabled = bodiesAtRestEnabled() } = {}) {
+  if (!enabled) return typeof value === "string" ? value : JSON.stringify(value);
+  const state = typeof value === "string" ? JSON.parse(value) : value;
+  return encodeProjection(db, roomId, state, { enabled: true });
+}
+
+let missingAlarm = null;
+export function setMissingBodyAlarm(fn) { missingAlarm = typeof fn === "function" ? fn : null; }
+function defaultMissing(event) {
+  if (missingAlarm) return missingAlarm(event);
+  console.error(`[projection-codec] body_unavailable room=${event.roomId} count=${event.messageIds.length}`);
+}
+
+// Every reader of rooms.projection that may see messages decodes through
+// here. A legacy inline row is parsed and returned as-is.
+export function readProjection(db, roomId, text, { onMissing = defaultMissing } = {}) {
+  return decodeProjection(db, roomId, text, { onMissing });
+}
+
+// Before anything deletes table bodies wholesale (backfill reset, a replaced
+// log), put the bodies back inline so the row never points at a gone body
+// (Instinct-3 3938 item 4: a lagging table never loses text).
+export function rehydrateRoomBodies(db, roomId) {
+  const row = db.prepare("SELECT projection FROM rooms WHERE id=?").get(roomId);
+  if (!row?.projection || !row.projection.includes(`"${BODY_AT_REST}":1`)) return false;
+  const state = decodeProjection(db, roomId, row.projection, { onMissing: defaultMissing });
+  db.prepare("UPDATE rooms SET projection=? WHERE id=?").run(JSON.stringify(state), roomId);
+  return true;
+}
+
+
+// The way back (Instinct-3 3938 item 6): before rolling back to code that
+// predates Phase 1a, inline every slim row. Returns how many rows changed.
+export function rehydrateAllRooms(db) {
+  let changed = 0;
+  for (const { id } of db.prepare(`SELECT id FROM rooms WHERE instr(projection, '"${BODY_AT_REST}":1') > 0`).all()) {
+    if (rehydrateRoomBodies(db, id)) changed += 1;
+  }
+  return changed;
+}

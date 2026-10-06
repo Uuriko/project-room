@@ -15,6 +15,7 @@
 //      plan_changed), then executeAccountDeletion runs the purge steps in
 //      order inside one transaction.
 
+import { storedProjection } from "./projection-codec.mjs";
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { EVENT_TYPES, applyEvent, event, isRoomArchived, roomKind } from "../src/events.js";
 import { commitMessageRedaction, redactRemainingMessageBodies } from "./message-redaction.mjs";
@@ -175,7 +176,7 @@ function saveRoomProjection(store, roomId, sequence, state) {
   const compact = compactState(state);
   const archivedAt = typeof compact.room?.archivedAt === "string" ? compact.room.archivedAt : null;
   const projection = JSON.stringify(compact);
-  store.db.prepare("UPDATE rooms SET sequence=?, projection=?, archived_at=? WHERE id=?").run(sequence, projection, archivedAt, roomId);
+  store.db.prepare("UPDATE rooms SET sequence=?, projection=?, archived_at=? WHERE id=?").run(sequence, storedProjection(store.db, roomId, compact), archivedAt, roomId);
   store.db.prepare(`INSERT INTO projection_checkpoints(room_id, sequence, projection) VALUES(?,?,?)
     ON CONFLICT(room_id) DO UPDATE SET sequence=excluded.sequence, projection=excluded.projection`).run(roomId, sequence, projection);
 }

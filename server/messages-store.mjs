@@ -3,6 +3,7 @@
 // same transaction as the event insert. MSG-2 replays events that landed
 // before the table, and events from importEvents and initialize, which still
 // do not double-write. The integrity cron runs that replay.
+import { rehydrateRoomBodies } from "./projection-codec.mjs";
 import { applyEvent, emptyRoomState } from "../src/events.js";
 
 export const MESSAGE_ROW_TYPES = Object.freeze([
@@ -207,6 +208,8 @@ function pruneMessages(db, roomId) {
 
 function resetRoom(store, roomId) {
   store.transaction(() => {
+    // Phase 1a: put at-rest bodies back inline before the table loses them.
+    rehydrateRoomBodies(store.db, roomId);
     store.db.prepare("DELETE FROM messages WHERE room_id=?").run(roomId);
     store.db.prepare("DELETE FROM messages_backfill_cursor WHERE room_id=?").run(roomId);
   });

@@ -9,6 +9,7 @@
 // Same append path as the land queue (server/land-queue.mjs #emit): the event
 // row and the projection update run inside the caller's claim transaction, so
 // a claim and its event commit or roll back together.
+import { storedProjection } from "./projection-codec.mjs";
 import { randomUUID } from "node:crypto";
 import { EVENT_TYPES, WORK_CLAIM_EVENT_ACTIONS, applyEvent, event, firstBlockedWakeTarget, isRoomArchived } from "../src/events.js";
 import { getTier } from "./autonomy-tiers.mjs";
@@ -171,7 +172,7 @@ export function emitWorkClaimEvent(store, roomId, { actorId, item, action, previ
   const sequence = room.sequence + 1;
   store.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
   const compact = { ...state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
-  store.db.prepare("UPDATE rooms SET sequence=?, projection=? WHERE id=?").run(sequence, JSON.stringify(compact), roomId);
+  store.db.prepare("UPDATE rooms SET sequence=?, projection=? WHERE id=?").run(sequence, storedProjection(store.db, roomId, compact), roomId);
   if (coalesce) noteClaimEvent(store, coalesceKey(roomId, item.id, action), stamp);
   try {
     if (store.agentPlugin) store.agentPlugin.fanoutRoomEvent({ roomId, event: incoming });

@@ -1,3 +1,4 @@
+import { storedProjection } from "./projection-codec.mjs";
 import { createHash, randomBytes } from "node:crypto";
 import { EVENT_TYPES as T, event, validId } from "../src/events.js";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
@@ -227,7 +228,7 @@ export class GuestAgentLinks {
       swept += 1;
     }
     if (swept === 0) return;
-    const projection = JSON.stringify(state);
+    const projection = storedProjection(this.db, roomId, state);
     if (Buffer.byteLength(projection) > 4 * 1024 * 1000) fail(409, "pilot_limit", "Room storage limit reached");
     this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
   }

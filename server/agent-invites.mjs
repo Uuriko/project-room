@@ -15,6 +15,7 @@
 // keep redeeming until they expire. Audit is the table: created_by/at,
 // expires_at, redeemed_at/by, revoked_at, all queryable through list().
 
+import { storedProjection } from "./projection-codec.mjs";
 import { createHash, randomBytes, randomUUID, scryptSync } from "node:crypto";
 import { ServiceError, PILOT_LIMITS, activeMemberCount } from "./store.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
@@ -301,7 +302,7 @@ export class AgentInvites {
       refuseArchivedWrite(room.state);
       try { state = compactState(applyEventWithGrowth(room.state, incoming, growthCollector).state); }
       catch (error) { fail(409, "invite_rejected", error.message); }
-      const projection = JSON.stringify(state);
+      const projection = storedProjection(this.db, row.room_id, state);
       if (Buffer.byteLength(projection) > 4 * 1024 * 1024) fail(409, "pilot_limit", "Room projection limit reached; no data was changed");
       const sequence = room.sequence + 1;
       this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(row.room_id, sequence, incoming.id, JSON.stringify(incoming));

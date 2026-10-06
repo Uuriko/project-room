@@ -5,6 +5,7 @@
 // ACT-1b renders the card. The Board done branch in work-claim-routes stays
 // untouched while BF (#1331, #1345) is open; emitWorkClaimEvent calls
 // postReceiptCard instead.
+import { storedProjection } from "./projection-codec.mjs";
 import { createHash } from "node:crypto";
 import { applyEvent, event, isRoomArchived } from "../src/events.js";
 
@@ -34,7 +35,7 @@ export function appendRoomEvent(store, roomId, { id, type, actorId, data, atMs }
   const sequence = room.sequence + 1;
   store.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
   const compact = { ...state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
-  store.db.prepare("UPDATE rooms SET sequence=?, projection=? WHERE id=?").run(sequence, JSON.stringify(compact), roomId);
+  store.db.prepare("UPDATE rooms SET sequence=?, projection=? WHERE id=?").run(sequence, storedProjection(store.db, roomId, compact), roomId);
   try {
     if (store.agentPlugin) store.agentPlugin.fanoutRoomEvent({ roomId, event: incoming });
   } catch (error) {

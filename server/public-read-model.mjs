@@ -3,6 +3,7 @@
 // as the change, and removed when they opt out. The cron backfill copies
 // rooms that opted in before the tables existed. It never runs from the
 // Durable Object constructor.
+import { readProjection } from "./projection-codec.mjs";
 import { createHash } from "node:crypto";
 import { publicPage, joinLink, publicName, publicTask, publicReceipts } from "../src/events.js";
 import { isUnpublished } from "./legal-store.mjs"; // operator unpublish hides a room or receipt from every public read
@@ -516,7 +517,7 @@ export function backfillPublicReadModel(store, { limit = PUBLIC_BACKFILL_BATCH, 
       last = row.id;
       rooms += 1;
       try {
-        const state = JSON.parse(row.projection);
+        const state = readProjection(store.db, row.id, row.projection);
         if (state?.room?.id) syncRoomPublication(store, { roomId: state.room.id, state, previous: null, auth: null });
       } catch { /* a corrupt projection is not a public page */ }
     }

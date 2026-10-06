@@ -1,3 +1,4 @@
+import { readProjection } from "./projection-codec.mjs";
 // Public opportunity feed (v2).
 //
 // Read-only discovery of open work across opt-in rooms. This is the safer
@@ -109,7 +110,7 @@ function roomProjection(db, roomId) {
   const row = db.prepare("SELECT projection FROM rooms WHERE id=?").get(roomId);
   if (!row?.projection) return null;
   try {
-    const projection = JSON.parse(row.projection);
+    const projection = readProjection(db, roomId, row.projection);
     if (!projection || typeof projection !== "object") return null;
     return projection;
   } catch {
