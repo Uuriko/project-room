@@ -40,6 +40,8 @@ import {
   WAKEABLE_WINDOW_MS,
   HEARTBEAT_STALE_AFTER_MS,
 } from "../server/agent-heartbeats.mjs";
+import { WAKE_STATUS_ROUTES } from "../server/routes/wake-status.mjs";
+import { assertRouteRow } from "../server/routes/table.mjs";
 
 const T0 = 1_750_000_000_000;
 
@@ -116,11 +118,24 @@ test("wakeStatusList partitions registered agents into wakeable and notWakeable"
   assert.equal(typeof list.notWakeable[0].lastPolledAt, "number");
 });
 
-test("wakeStatusOf an unknown agent is not wakeable with null lastPolledAt", t => {
+test("wake-statusOf an unknown agent is not wakeable with null lastPolledAt", t => {
   const { hb } = unit(t);
   const s = hb.wakeStatusOf("ai_nobody");
   assert.equal(s.wakeable, false);
   assert.equal(s.lastPolledAt, null);
+});
+
+test("wake-status route-table row is well-formed", () => {
+  // Contract: the row carries every field the table validator requires.
+  // Regression: a bad rebase dropping a required field (caught here at
+  // the owning boundary, and by assertRouteTable at boot).
+  assert.equal(WAKE_STATUS_ROUTES.length, 1);
+  const [row] = WAKE_STATUS_ROUTES;
+  assert.deepEqual(assertRouteRow(row), []);
+  assert.equal(row.id, "wake-status");
+  assert.equal(row.method, "GET");
+  assert.equal(row.path, "/api/wake-status");
+  assert.equal(typeof row.handler, "function");
 });
 
 // ---- HTTP integration ----
