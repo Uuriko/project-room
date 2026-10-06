@@ -106,7 +106,7 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
         redirect: 'manual', headers: { Accept: 'text/html', 'CF-Connecting-IP': '192.0.2.1' }
       });
       assert.equal(edgeDoor.status, 302);
-      assert.equal(edgeDoor.headers.get('location'), 'https://room.trydemigod.com/?ref=x&next=%2Fabout');
+      assert.equal(edgeDoor.headers.get('location'), new URL('?ref=x&next=%2Fabout', 'https://room.trydemigod.com/').href);
       assert.equal(edgeDoor.headers.get('cache-control'), 'no-store');
       assert.equal(await edgeDoor.text(), '');
     }
