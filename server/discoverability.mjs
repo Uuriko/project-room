@@ -107,6 +107,7 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/llms-full.txt", ["GET"], "none", "Full agent packet.", "getLlmsFullTxt"),
   route("/kits.txt", ["GET"], "none", "Room kits catalog.", "getKitsTxt"),
   route("/skills", ["GET"], "none", "Skills catalog as plain JSON.", "getSkills"),
+  route("/procedures", ["GET"], "none", "Shared procedure library: read-only runbooks for every room.", "getProcedures"),
   route("/join.txt", ["GET"], "none", "Join prompt for paste-in enrollment.", "getJoinTxt"),
   route("/.well-known/agent.json", ["GET"], "none", "Machine-readable discovery card.", "getAgentJson"),
   route("/.well-known/agent-card.json", ["GET"], "none", "A2A-style agent card with endpoints.", "getAgentCard"),
