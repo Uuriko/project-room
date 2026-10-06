@@ -183,7 +183,7 @@ export class ShareLinks {
       const plugin = this.store.agentPlugin;
       if (plugin?.roomVerificationPolicy(row.room_id).requireVerified && plugin.verificationLevel(identity.identityId) !== "verified")
         fail(403, "unverified_identity", "This room only admits verified agents");
-      if (room.sequence >= 10000 || activeMemberCount(room.state.members) >= PILOT_LIMITS.membersPerRoom) fail(409, "pilot_limit", "This room is full");
+      if (room.sequence >= PILOT_LIMITS.eventsPerRoom || activeMemberCount(room.state.members) >= PILOT_LIMITS.membersPerRoom) fail(409, "pilot_limit", "This room is full");
       assertAdmissibleMemberName(displayName.trim(), room.state.members); // Q3-D: roster check plus role names
       const id = agentJoinPrefix(row) + hash(identity.identityId).slice(0, 28), now = this.store.now();
       // A personal invite whose issuer cannot invite members is dead: the
@@ -201,7 +201,7 @@ export class ShareLinks {
           authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION } });
       const state = { ...applyEventWithGrowth(room.state, incoming, growthCollector).state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
       const projection = JSON.stringify(state), sequence = room.sequence + 1;
-      if (Buffer.byteLength(projection) > 4 * 1024 * 1024) fail(409, "pilot_limit", "Room storage limit reached");
+      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room storage limit reached");
       this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(row.room_id, sequence, id, JSON.stringify(incoming));
       this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, row.room_id);
       this.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)")
@@ -377,7 +377,7 @@ export class ShareLinks {
       }
       const room = this.store.room(row.room_id), now = this.store.now();
       assertAdmissibleMemberName(displayName.trim(), room.state.members); // Q3-D: roster check plus role names
-      if (room.sequence >= 10000 || activeMemberCount(room.state.members) >= PILOT_LIMITS.membersPerRoom) fail(409, "pilot_limit", "This room is full; ask its owner for help");
+      if (room.sequence >= PILOT_LIMITS.eventsPerRoom || activeMemberCount(room.state.members) >= PILOT_LIMITS.membersPerRoom) fail(409, "pilot_limit", "This room is full; ask its owner for help");
       if (!auth) {
         // An expired/revoked prior identity needs an explicit sign-out before a
         // fresh guest can be created. A link is never recovery for another account.
@@ -412,7 +412,7 @@ export class ShareLinks {
       refuseArchivedWrite(room.state);
       const state = { ...applyEventWithGrowth(room.state, incoming, growthCollector).state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
       const projection = JSON.stringify(state), sequence = room.sequence + 1;
-      if (Buffer.byteLength(projection) > 4 * 1024 * 1024) fail(409, "pilot_limit", "This room has reached its storage limit");
+      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "This room has reached its storage limit");
       this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(row.room_id, sequence, incoming.id, JSON.stringify(incoming));
       this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, row.room_id);
       this.db.prepare("INSERT INTO member_accounts(room_id,member_id,account_id,origin) VALUES(?,?,?,?)").run(row.room_id, memberId, auth.account.id, `invitation:${invitationId}`);

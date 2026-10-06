@@ -251,7 +251,7 @@ export class AgentInvites {
       // journal event written in the same transaction. A one-slot check would
       // admit the member at the last slot and then fail journaling the
       // referral, rolling the whole join back after the fact.
-      if (room.sequence + 1 >= 10000 || activeMemberCount(room.state.members) >= PILOT_LIMITS.membersPerRoom) {
+      if (room.sequence + 1 >= PILOT_LIMITS.eventsPerRoom || activeMemberCount(room.state.members) >= PILOT_LIMITS.membersPerRoom) {
         fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
       }
       const name = typeof displayName === "string" && displayName.trim() ? displayName.trim()
@@ -302,7 +302,7 @@ export class AgentInvites {
       try { state = compactState(applyEventWithGrowth(room.state, incoming, growthCollector).state); }
       catch (error) { fail(409, "invite_rejected", error.message); }
       const projection = JSON.stringify(state);
-      if (Buffer.byteLength(projection) > 4 * 1024 * 1024) fail(409, "pilot_limit", "Room projection limit reached; no data was changed");
+      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed");
       const sequence = room.sequence + 1;
       this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(row.room_id, sequence, incoming.id, JSON.stringify(incoming));
       this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, row.room_id);
