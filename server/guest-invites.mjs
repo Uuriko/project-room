@@ -453,6 +453,10 @@ export class GuestInvites {
     }
     return this.store.transaction(() => {
       const auth = this.ownerGate(token, roomId, binding);
+      // Invitation issuance carries the f520ca69 email-verification gate,
+      // same as agent-invites.create and share-link creation. Owner
+      // delegates are accountless by design (no account to verify).
+      if (auth.account) this.store.accountLogins.assertEmailVerified(auth.account.id);
       // The freshness check pins the OWNER's member revision: the minter
       // asserts they saw the current owner state. A delegate's own member
       // revision is irrelevant to their delegated authority, so the check
