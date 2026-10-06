@@ -202,7 +202,17 @@ export async function checkAgentCardDoor({
     }
     if (failures.length === 0) {
       streak += 1;
-      if (streak >= fetches) return done([], true);
+      if (streak >= fetches) {
+        // Instinct-3 (room seq 3465): the window binds a door that flapped. A
+        // streak completed after the deadline does not count once a stale card
+        // was seen. A door that never served a stale card is uniformly good,
+        // so slow fetches alone never roll back a healthy deploy.
+        if (staleFetches === 0 || now() <= deadline) return done([], true);
+        return done([...pending.slice(-8), `not converged: ${fetches} consecutive passing fetches completed after the ${waitMs}ms window, following ${staleFetches} failing fetches`], false);
+      }
+      if (staleFetches > 0 && now() > deadline) {
+        return done([...pending.slice(-8), `not converged: window of ${waitMs}ms closed at a streak of ${streak}/${fetches} after ${staleFetches} failing fetches`], false);
+      }
     } else {
       const labelled = failures.map(f => `fetch #${attempt}: ${f}`);
       // The target build itself served a bad card: no amount of waiting fixes it.

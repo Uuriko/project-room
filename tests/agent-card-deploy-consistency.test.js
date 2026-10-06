@@ -230,3 +230,28 @@ test("checkAgentCardDoor fails at once when the target build serves an unsigned 
   assert.equal(seq.count(), 1);
   assert.ok(failures.some(f => f.includes("signed:false")), `got: ${failures.join("; ")}`);
 });
+
+test("checkAgentCardDoor: a uniformly good but slow door still passes after the window (no false rollback)", async () => {
+  const fresh = JSON.stringify(buildSignedCard(REVISION, { deployed: true }));
+  const clock = fakeClock();
+  const seq = sequence(() => fresh);
+  const slowGet = async url => { await clock.sleep(15000); return seq.get(url); };
+  const stats = {};
+  const failures = await checkAgentCardDoor({ url: doorUrl, fetches: 10, gapMs: 1500, waitMs: 90000, get: slowGet, ...clock, ...opts, stats });
+  assert.deepEqual(failures, []);
+  assert.equal(stats.converged, true);
+  assert.ok(clock.now() > 90000);
+});
+
+test("checkAgentCardDoor: a streak that completes after the window following stale cards fails (room seq 3465)", async () => {
+  const fresh = JSON.stringify(buildSignedCard(REVISION, { deployed: true }));
+  const stale = JSON.stringify(buildSignedCard(PREVIOUS, { deployed: true }));
+  const clock = fakeClock();
+  const seq = sequence(n => (n <= 2 ? stale : fresh));
+  const slowGet = async url => { await clock.sleep(15000); return seq.get(url); };
+  const stats = {};
+  const failures = await checkAgentCardDoor({ url: doorUrl, fetches: 10, gapMs: 1500, waitMs: 90000, get: slowGet, ...clock, ...opts, stats });
+  assert.ok(failures.at(-1).startsWith("not converged"), `got: ${failures.at(-1)}`);
+  assert.equal(stats.converged, false);
+  assert.ok(seq.count() < 12, `stopped at the window, not after the streak: ${seq.count()}`);
+});
