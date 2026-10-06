@@ -82,7 +82,9 @@ test("default tools/list is the short core profile and every listed name is lega
   const coreBytes = Buffer.byteLength(JSON.stringify(body));
   const coreResultBytes = Buffer.byteLength(JSON.stringify(body.result));
   console.log(`core tools/list JSON-RPC bytes=${coreBytes} result bytes=${coreResultBytes}`);
-  assert.ok(coreBytes < 16 * 1024, `core tools/list is ${coreBytes} bytes`);
+  // QA7-04 added the latest flag to room_read_messages' schema: the core
+  // profile stays small for cold agents, with headroom for one more flag.
+  assert.ok(coreBytes < 17 * 1024, `core tools/list is ${coreBytes} bytes`);
 
   const aliased = await rpc(origin, "tools/list", { aliases: 1 }, ada.secret);
   const aliasBody = await aliased.json();

@@ -34,6 +34,94 @@ export class RoomClientError extends Error {
   }
 }
 export const validWorkSearchQuery = query => typeof query === "string" && query.length <= 200 && query.trim().length > 0;
+
+// Message-scoped pagination over the room event log. `limit` counts
+// messages, not scanned events: the scan fills each page with message.posted
+// events until `limit` messages are collected or the log ends, so a first
+// page is never empty while messages exist (user-testing m4: {limit:5} on a
+// room whose only message sat at seq 8 returned {messages:[],next:5,hasMore:true}).
+//
+// `latest:true` returns the latest `limit` messages in chronological order,
+// matching GET /conversation?limit=N (REST parity). When `end` (exclusive
+// upper bound) is known the scan walks backward from it and stops after
+// `limit` messages; otherwise it scans forward to the end of the log.
+//
+// `next`/`hasMore` keep the after-cursor contract: follow `next` while
+// `hasMore` is true. In latest mode `next` is the oldest returned message's
+// sequence (a bookmark, not a walk cursor) and `hasMore` says older messages
+// remain below it.
+//
+// fetchPage(after, pageLimit) resolves { events:[{sequence, event}], next, hasMore }.
+const MESSAGE_SCAN_PAGE = 100;
+const MESSAGE_SCAN_PAGES = 100; // hard bound: 10k scanned events per call
+const isPostedMessage = item => item?.event?.type === "message.posted";
+
+async function scanForward(fetchPage, after, limit, latest) {
+  const collected = [];
+  let cursor = after, pages = 0, reachedEnd = false, scanCursor = after;
+  const want = latest ? Number.POSITIVE_INFINITY : limit;
+  while (collected.length < want && !reachedEnd && pages < MESSAGE_SCAN_PAGES) {
+    const page = await fetchPage(cursor, MESSAGE_SCAN_PAGE);
+    pages += 1;
+    for (const item of page?.events ?? []) if (isPostedMessage(item)) collected.push(item);
+    scanCursor = Number.isSafeInteger(page?.next) ? page.next : cursor;
+    cursor = scanCursor;
+    if (!page?.hasMore) reachedEnd = true;
+  }
+  return { collected, scanCursor, reachedEnd, capped: !reachedEnd && pages >= MESSAGE_SCAN_PAGES };
+}
+
+async function scanBackward(fetchPage, after, end, limit) {
+  // Walk 100-event windows from `end` (exclusive) down toward `after`,
+  // newest windows first. Stops after `limit` messages or when the `after`
+  // bound is reached. Windows tile (after, end] with no gaps: each window is
+  // (lo, bound) with lo >= bound - 100, so fetchPage(lo, 100) covers it.
+  const collected = [];
+  let bound = end, pages = 0;
+  while (collected.length < limit && bound > after && pages < MESSAGE_SCAN_PAGES) {
+    const lo = Math.max(after, bound - MESSAGE_SCAN_PAGE);
+    const page = await fetchPage(lo, MESSAGE_SCAN_PAGE);
+    pages += 1;
+    const window = [];
+    for (const item of page?.events ?? []) {
+      if (!item || !Number.isSafeInteger(item.sequence)) continue;
+      if (item.sequence <= after || item.sequence >= bound) continue;
+      if (isPostedMessage(item)) window.push(item);
+    }
+    collected.unshift(...window);
+    bound = lo;
+  }
+  return { collected, reachedStart: bound <= after, capped: pages >= MESSAGE_SCAN_PAGES && bound > after };
+}
+
+export async function paginateRoomMessages(fetchPage, { after = 0, limit = 50, latest = false, end = null, mapMessage } = {}) {
+  const map = mapMessage ?? (item => item);
+  if (latest && Number.isSafeInteger(end) && end > after) {
+    const { collected, reachedStart, capped } = await scanBackward(fetchPage, after, end, limit);
+    const selected = collected.slice(-limit);
+    return {
+      messages: selected.map(map),
+      next: selected.length ? selected[0].sequence : after,
+      hasMore: collected.length > selected.length || !reachedStart || capped,
+    };
+  }
+  const { collected, scanCursor, reachedEnd, capped } = await scanForward(fetchPage, after, limit, latest);
+  if (latest) {
+    const selected = collected.slice(-limit);
+    return {
+      messages: selected.map(map),
+      next: selected.length ? selected[0].sequence : after,
+      hasMore: collected.length > selected.length || capped,
+    };
+  }
+  const selected = collected.slice(0, limit);
+  if (collected.length > selected.length) {
+    // The final scanned page held more messages than `limit`: resume right
+    // after the last returned message so the follow-up re-collects the rest.
+    return { messages: selected.map(map), next: selected.at(-1).sequence, hasMore: true };
+  }
+  return { messages: selected.map(map), next: scanCursor, hasMore: !reachedEnd || capped };
+}
 function checkedCharter(value, horizon) {
   try {
     const result = validateCharterContext(value);
@@ -461,21 +549,24 @@ export class RoomAgentClient {
   }
   // Room messages after a sequence, in order, as compact records. Other event
   // types are skipped; private messages appear only to their two parties
-  // (the service filters them). Follow next while hasMore is true.
-  async roomMessages({ after = 0, limit = 50, signal } = {}) {
-    const page = await this.#request(`/events?after=${after}&limit=${limit}`, undefined, signal);
-    const messages = (page?.events ?? []).filter(({ event }) => event?.type === "message.posted").map(({ sequence, event }) => ({
+  // (the service filters them). limit counts messages, not scanned events.
+  // latest:true returns the latest messages in chronological order
+  // (GET /conversation parity). Follow next while hasMore is true.
+  async roomMessages({ after = 0, limit = 50, latest = false, signal } = {}) {
+    const fetchPage = (cursor, pageLimit) => this.#request(`/events?after=${cursor}&limit=${pageLimit}`, undefined, signal);
+    const mapMessage = ({ sequence, event }) => ({
       sequence, eventId: event.id, messageId: event.data?.messageId ?? event.id, from: event.actorId, at: event.at,
       body: event.data?.body ?? "", replyToId: event.data?.replyToId ?? null, workItemId: event.data?.workItemId ?? null, private: Boolean(event.data?.toMemberId),
       ...(event.data?.toMemberId ? { toMemberId: event.data.toMemberId } : {}),
       ...(event.data?.requestKind === "reply" && event.data.requestPolicyVersion === 1
         && [event.actorId, event.data.toMemberId].includes(this.#memberId) ? { requestKind: "reply", nextRead: { tool: "room_read_request", arguments: { requestMessageId: event.data.messageId ?? event.id } } } : {}),
       ...(Array.isArray(event.mentions) && event.mentions.length ? { mentions: event.mentions.map(m => ({ memberId: m.memberId, displayName: m.displayName })) } : {})
-    }));
+    });
+    const { messages, next, hasMore } = await paginateRoomMessages(fetchPage, { after, limit, latest, mapMessage });
     return withContentTrust({
       roomId: this.#roomId,
       messages: messages.map(message => markIfOther(message, this.#memberId, message.from)),
-      next: page?.next ?? after, hasMore: Boolean(page?.hasMore)
+      next, hasMore
     });
   }
   async replyRead(name, args = {}, { signal } = {}) {
