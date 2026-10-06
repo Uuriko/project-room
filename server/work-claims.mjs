@@ -853,6 +853,15 @@ export const HARD_WORK_TAGS = Object.freeze(["hard", "hard-problem"]);
 export function isHardWork(item) {
   return (item?.tags ?? []).some(tag => HARD_WORK_TAGS.includes(String(tag).toLowerCase()));
 }
+// Named reviewers (tag rev-<memberId>, the hard lane's convention) and
+// whether a member's review still stands on the item's current basis (owner,
+// claim, revision, CI head sha). A new head or a re-claim makes it stale.
+export function namedReviewers(item) {
+  return (item?.tags ?? []).filter(tag => typeof tag === "string" && tag.startsWith("rev-")).map(tag => tag.slice(4));
+}
+export function hasCurrentReview(item, memberId) {
+  return (item?.reviews ?? []).some(review => review?.memberId === memberId && currentReviewBasis(review, item));
+}
 // Query helpers over a list.
 export function workOwnedBy(items, agentId) {
   check(Array.isArray(items), "items must be a list");
