@@ -227,9 +227,15 @@ export class AccountLoginMethods {
     return row ? row.accountId : null;
   }
 
+  // An account's email verification state. Disabled email methods still
+  // count: disabling an unverified method must not launder the account to
+  // "none" (which assertEmailVerified lets through). "verified" when any
+  // email method (active or disabled) is verified; "unverified" when the
+  // account holds email methods but none verified; "none" only when the
+  // account holds no email method at all.
   emailStatus(accountId) {
     const rows = this.db.prepare(`SELECT verified_at AS verifiedAt FROM account_login_methods
-      WHERE account_id=? AND disabled=0 AND email IS NOT NULL AND type IN ('password','magic','oauth')`).all(accountId);
+      WHERE account_id=? AND email IS NOT NULL AND type IN ('password','magic','oauth')`).all(accountId);
     if (rows.length === 0) return "none";
     return rows.some(row => row.verifiedAt != null) ? "verified" : "unverified";
   }
@@ -396,6 +402,21 @@ export class AccountLoginMethods {
       const row = this.#rawMethod(accountId, methodId);
       const active = this.db.prepare("SELECT count(*) AS n FROM account_login_methods WHERE account_id=? AND disabled=0").get(accountId).n;
       if (row.disabled === 0 && active <= 1) fail(409, "last_login_method", "Keep at least one active sign-in method");
+      // Email-verification gate: removing the last email-bearing method
+      // while none is verified would erase the "unverified" signal —
+      // emailStatus would flip to "none" and assertEmailVerified would pass
+      // for an account that never proved its email. Refuse; verify first,
+      // or disable (not remove) the method. Disabled methods count as
+      // remaining, matching emailStatus.
+      if (row.email !== null && (row.type === "password" || row.type === "magic" || row.type === "oauth")) {
+        const remaining = this.db.prepare(`SELECT count(*) AS n FROM account_login_methods
+          WHERE account_id=? AND id != ? AND email IS NOT NULL AND type IN ('password','magic','oauth')`).get(accountId, row.id).n;
+        const verified = this.db.prepare(`SELECT count(*) AS n FROM account_login_methods
+          WHERE account_id=? AND email IS NOT NULL AND type IN ('password','magic','oauth') AND verified_at IS NOT NULL`).get(accountId).n;
+        if (remaining === 0 && verified === 0) {
+          fail(409, "last_unverified_email", "Verify an email before removing your last email sign-in method");
+        }
+      }
       if (row.type === "passkey") {
         this.db.prepare("DELETE FROM account_passkey_credentials WHERE method_id=?").run(row.id);
       }
