@@ -10,7 +10,7 @@
     "05e73f00b3696af89eb50076bd2f81023b87afd9",
     "41cc5c5bca139ff028101e8927897adfff80bf39"
   ],
-  "note": "Per-file junit durations averaged over two Ubuntu CI runs (2026-10-06), rounded to whole ms; scripts/visual-regression-browser-check.mjs measured once (run 37499506413, 4.6s). Timing data rebalances shard membership only; it never selects which tests run.",
+  "note": "Per-file junit durations averaged over two Ubuntu CI runs (2026-10-06), rounded to whole ms; scripts/visual-regression-browser-check.mjs measured once (run 37499506413, 4.6s). Timing data rebalances shard membership only; it never selects which tests run. Added message-preview and human-experience owners measured on the integrated local Mac on 2026-10-06 (5319ms and15298ms); remeasure on Ubuntu CI after first combined run. These estimates do not select test membership.",
   "milliseconds": {
     "scripts/a11y-composer-browser-check.mjs": 3361,
     "scripts/a11y-login-browser-check.mjs": 4515,
@@ -60,6 +60,7 @@
     "scripts/help-contribution-browser-check.mjs": 15493,
     "scripts/help-invitation-browser-check.mjs": 14802,
     "scripts/help-offer-browser-check.mjs": 20156,
+    "scripts/human-experience-browser-check.mjs": 15298,
     "scripts/human-push-browser-check.mjs": 2401,
     "scripts/inbox-browser-check.mjs": 145352,
     "scripts/inbox-collaboration-check.mjs": 10868,
@@ -77,6 +78,7 @@
     "scripts/loop-warning-browser-check.mjs": 1119,
     "scripts/magic-link-browser-check.mjs": 3290,
     "scripts/member-perms-browser-check.mjs": 10336,
+    "scripts/message-preview-browser-check.mjs": 5319,
     "scripts/mobile-header-check.mjs": 16377,
     "scripts/mobile-signin-history-browser-check.mjs": 1209,
     "scripts/moderation-browser-check.mjs": 4633,
