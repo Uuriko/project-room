@@ -142,6 +142,16 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 .message-body details.md-spoiler { display: inline-block; margin: 0 .15rem; padding: .1rem .4rem; border: 1px solid var(--line); border-radius: .35rem; background: var(--panel-raised); cursor: pointer; }
 .message-body details.md-spoiler summary { display: inline; color: var(--muted); font-size: var(--text-xs); cursor: pointer; }
 .message-body details.md-spoiler[open] summary { display: none; }
+/* Long-message disclosure uses the same body rhythm in both themes. */
+.message-content > .message-body { margin-bottom: .4rem; color: var(--text); font-size: var(--text-md); line-height: 1.55; overflow-wrap: anywhere; white-space: pre-wrap; }
+.message-expansion > summary { display: block; cursor: pointer; list-style: none; }
+.message-expansion > summary::-webkit-details-marker { display: none; }
+.message-preview { display: block; max-height: 9.3em; overflow: hidden; }
+.message-show-more, .message-show-less { display: block; width: fit-content; min-height: 44px; padding: .6rem 0; color: var(--blue); font-size: var(--text-sm); font-weight: 650; }
+.message-show-less { display: none; }
+.message-expansion[open] > summary .message-preview, .message-expansion[open] > summary .message-show-more { display: none; }
+.message-expansion[open] > summary .message-show-less { display: block; }
+.message-expansion > summary:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; border-radius: .3rem; }
 .work-link { color: var(--muted); font-size: .72rem; text-decoration: none; }
 .work-link:hover { color: var(--blue); }
 .mention-list { position: absolute; right: 1rem; bottom: calc(100% - .35rem); left: 1rem; z-index: 5; margin: 0; padding: .25rem; border: 1px solid var(--line); border-radius: .5rem; background: var(--panel-raised); box-shadow: var(--shadow); list-style: none; }

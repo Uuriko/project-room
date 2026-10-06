@@ -198,6 +198,17 @@ export function insertMention(text, caret, start, member) {
 const mentionRegExpSpecial = new Set(".*+?^${}()|[]\\");
 const escapeMentionName = value => [...String(value)].map(ch => mentionRegExpSpecial.has(ch) ? `\\${ch}` : ch).join("");
 
+// Presentation only: the original body remains the source for copy, search and
+// message links. Native details keeps expansion usable without another handler.
+export function messageBodyHtml(body, members, esc, messageId) {
+  const text = String(body ?? "");
+  const lines = text.split("\n");
+  const full = mentionHtml(text, members, esc);
+  if (text.length <= 1200 && lines.length <= 12) return full;
+  const preview = renderEmojiShortcodes([...lines.slice(0, 6).join("\n")].slice(0, 600).join(""));
+  return `<details class="message-expansion"><summary data-focus-key="message-expand:${esc(messageId)}"><span class="message-preview" aria-hidden="true">${esc(preview)}…</span><span class="message-show-more">Show more · ${lines.length} ${lines.length === 1 ? "line" : "lines"}</span><span class="message-show-less">Show less</span></summary><div class="message-full">${full}</div></details>`;
+}
+
 export function mentionHtml(body, members, esc) {
   const text = renderEmojiShortcodes(body);
   const names = [...(members || [])].filter(m => m?.displayName).sort((a, b) => b.displayName.length - a.displayName.length);
