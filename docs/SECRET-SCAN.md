@@ -43,7 +43,7 @@ node scripts/secret-scan-diff.mjs --allowlist none # disable the path allowlist
 
 `tests/secret-scan.test.js` pins the detector; `tests/secret-scan-diff.test.js`
 pins the diff gate (10 tests): diff parsing (added-lines-only, line numbers,
-deleted/binary handling), all 11 seeded rule families flagging on added lines,
+deleted/binary handling), all 12 seeded rule families flagging on added lines,
 exit codes, the path-allowlist loader, the pre-commit `--staged` path, zero
 false positives against the current `origin/main` tree, and the gate's own
 new files not self-flagging. All example secrets are generated at runtime so

@@ -42,6 +42,12 @@ const PATTERNS = [
     name: "generic api-key/secret assignment",
     re: /\b(api[_-]?key|api[_-]?secret|secret[_-]?key|client[_-]?secret|auth[_-]?token|access[_-]?token)\b['"]?\s*[:=]\s*['"]([A-Za-z0-9\-._~+/=]{16,})['"]/i,
   },
+  // Wallet seed phrase: 12-24 lowercase words with explicit seed/mnemonic/
+  // recovery context, quoted. A committed mnemonic is a drained wallet.
+  {
+    name: "wallet seed phrase",
+    re: /\b(?:seed[_-]?phrase|mnemonic|recovery[_-]?phrase)\b["']?\s*[:=]\s*["']([a-z]+(?:\s+[a-z]+){11,23})["']/i,
+  },
 ];
 
 function getDiff(base, diffFile) {

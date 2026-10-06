@@ -1,14 +1,14 @@
 // Allocation for the sharded unit suite (CI-speed lane).
 //
-// The `unit` merge-gate job ran `npm test` (every tests/*.test.js file) in one
+// The `unit` merge-gate job ran `npm test` (Node default discovery) in one
 // job: ~625s on hosted CI, the long pole of every PR head. This module splits
 // the suite into SHARD_COUNT file shards with balanced estimated duration, so
 // the `unit-shards` matrix finishes in roughly 1/SHARD_COUNT of the time.
 //
 // Allocation follows Node24 default test discovery; timing data never selects
-// membership: every tests/*.test.js file is always in exactly one shard.
+// membership: every Node-discovered test file is in exactly one shard.
 // Per-file durations live in scripts/unit-ci-durations.json (milliseconds,
-// measured on hosted CI); files without a measurement get a conservative
+// measured on hosted CI, with documented local additions); files without a measurement get a conservative
 // default so a new test file lands in a shard instead of breaking the plan.
 import { createHash } from "node:crypto";
 import { readFileSync, globSync } from "node:fs";

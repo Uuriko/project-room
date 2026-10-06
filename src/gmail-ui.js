@@ -1,4 +1,23 @@
 // Gmail-native workspace; provider capabilities stay distinct from room sharing.
+
+// Pure helpers extracted from installGmailWorkspace for unit tests
+// (tests/gmail-ui.js). The installer below keeps using them internally, so
+// these are not test-only seams.
+
+// Email-address extraction used when building reply/recipient lists.
+export function extractEmailAddresses(value) {
+  return (value.match(/[A-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Z0-9-]+(?:\.[A-Z0-9-]+)+/gi) ?? []);
+}
+
+// Maps Gmail API error codes to the user-facing message shown in the workspace.
+export function gmailErrorText(error) {
+  return ['gmail_reconnect_required', 'gmail_write_permission_required'].includes(error.code)
+    ? 'Reconnect Gmail from All messages to allow sending and organizing email.'
+    : error.code === 'gmail_draft_changed'
+      ? 'This draft changed in Gmail. Close and reopen it before editing.'
+      : error.message || 'Gmail could not complete this request.';
+}
+
 export function installGmailWorkspace({ api, ownerKey, onConnectionsChanged = () => {} }) {
   const panel = document.querySelector('#inbox-panel');
   const root = document.createElement('section'); root.className = 'gmail-workspace'; root.hidden = true;
@@ -17,7 +36,7 @@ export function installGmailWorkspace({ api, ownerKey, onConnectionsChanged = ()
   const notice = value => { $('[data-notice]').textContent = value; };
   const call = data => api.request('/gmail/mailbox', { method: 'POST', data: { mailboxId: status?.id, ...data } });
   const fence = () => { const owner = ownerKey(), turn = generation; return () => owner && owner === ownerKey() && turn === generation; };
-  const emails = value => (value.match(/[A-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Z0-9-]+(?:\.[A-Z0-9-]+)+/gi) ?? []);
+  const emails = extractEmailAddresses;
   // 2026-09-30 (phase-2 gap audit H-P2-5): defense-in-depth HTML
   // cleaning before innerHTML. The server sanitize-html pass is the
   // active control; this runs again on the client so a server-side
@@ -46,7 +65,7 @@ export function installGmailWorkspace({ api, ownerKey, onConnectionsChanged = ()
     return doc.body.innerHTML;
   };
   const button = (text, fn, parent) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'button ghost'; b.textContent = text; b.addEventListener('click', fn); parent.append(b); return b; };
-  function errorText(error) { return ['gmail_reconnect_required', 'gmail_write_permission_required'].includes(error.code) ? 'Reconnect Gmail from All messages to allow sending and organizing email.' : error.code === 'gmail_draft_changed' ? 'This draft changed in Gmail. Close and reopen it before editing.' : error.message || 'Gmail could not complete this request.'; }
+  const errorText = gmailErrorText;
   async function list(older = false) {
     const current = fence(), turn = ++listTurn, search = $('[data-search]');
     const context = search.elements.folder.value + '\n' + search.elements.query.value;

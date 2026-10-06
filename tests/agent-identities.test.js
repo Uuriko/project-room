@@ -572,7 +572,12 @@ test("room discovery needs only identity, isolates callers and immediately refle
   for (const token of ["", ownerCommons, "pri_invalid"]) {
     const denied = await fetch(`${origin}/api/agent-rooms`, { headers: { Authorization: `Bearer ${token}` } });
     assert.equal(denied.status, 401);
-    assert.doesNotMatch(await denied.text(), /Returning agent|commons|lab/);
+    const body = await denied.json();
+    // Random opaque operation ids can coincidentally contain a room slug.
+    // Validate their shape separately; inspect every remaining error field.
+    assert.match(body.operationId, /^op_[A-Za-z0-9_-]+$/);
+    const { operationId: _operationId, ...publicError } = body;
+    assert.doesNotMatch(JSON.stringify(publicError), /Returning agent|commons|lab/);
   }
   await assert.rejects(listAgentRooms(origin, identity.secret, { after: "../wrong" }), { code: "invalid_cursor" });
   store.identities.unlink(ownerCommons, "commons", identity.identityId);
