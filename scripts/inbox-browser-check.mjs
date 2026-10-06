@@ -503,15 +503,22 @@ test("account-only confirmation preserves a newer login and retires a held priva
   phase = "second tab guest login";
   assert.equal(await p.locator("#auth-panel").isVisible(), false, "old account-only view awaits confirmation");
   const guest = f.store.accountForMember("commons", "guest");
+  const guestAccessKey = f.store.issueAccountAccessKey(guest.id);
   // Commit through the same real credential API and shared browser cookie jar
   // as signInFixture, but release the old read before unrelated reload/UI work.
   const slotResponse = await other.context().request.get(f.origin + "/api/account-session");
   assert.equal(slotResponse.status(), 200); const browserSlot = await slotResponse.json();
   const signedIn = await other.context().request.post(f.origin + "/api/account-session", {
     headers: { Origin: f.origin, "X-CSRF-Token": browserSlot.csrf, "X-Session-Binding": browserSlot.sessionBinding },
-    data: { accountAccessKey: f.store.issueAccountAccessKey(guest.id), expectedSessionRevision: browserSlot.sessionRevision }
+    data: { accountAccessKey: guestAccessKey, expectedSessionRevision: browserSlot.sessionRevision }
   });
   assert.equal(signedIn.status(), 201); assert.equal((await signedIn.json()).account.id, guest.id);
+  // Establish the guest's room session (as signInFixture does) so the
+  // reloaded tab can enter the room; the account login alone is not enough.
+  const roomSession = await other.context().request.post(f.origin + "/api/session", {
+    headers: { Origin: f.origin }, data: { accessKey: guestAccessKey }
+  });
+  assert.equal(roomSession.status(), 201);
   phase = "confirmation response";
   confirmationReleasedMs = Date.now() - confirmationAt;
   releaseConfirmation();
