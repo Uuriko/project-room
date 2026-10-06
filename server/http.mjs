@@ -4592,7 +4592,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (route === "share-links" && req.method === "GET") return json(res, 200, store.shareLinks.list(selected.token, roomId, fence));
       if (route === "share-links" && req.method === "POST") {
         const data = await body(req);
-        if (!exact(data, ["requestId", "linkToken", "expiresAt", "maxJoins", "expectedMemberRevision"])) reject(422, "invalid_link", "Supply the exact invitation link settings");
+        const linkFields = ["requestId", "linkToken", "expiresAt", "maxJoins", "expectedMemberRevision"];
+        if (!exact(data, linkFields) && !exact(data, [...linkFields, "access"])) reject(422, "invalid_link", "Supply the exact invitation link settings");
         const result = store.shareLinks.create(selected.token, roomId, data, fence);
         return json(res, result.duplicate ? 200 : 201, result);
       }

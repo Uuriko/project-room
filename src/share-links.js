@@ -429,6 +429,9 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     $("#share-local-note").hidden = !["localhost", "127.0.0.1", "[::1]"].includes(location.hostname);
     refreshPurposes();
     refreshAgentCode();
+    // Member and co-admin links are the room creator's to make.
+    $("#share-link-access-label").hidden = getState()?.room?.ownerId !== getSession()?.member?.id;
+    $("#share-link-access").value = "guest";
     manager.showModal(); $("#share-link-create").focus();
     // Link-list feedback never owns the newer creation/clipboard status.
     await Promise.all([list(version, generation).catch(() => {}), loadKit()]);
@@ -448,7 +451,8 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     if (!managementCurrent(version, generation)) return;
     const request = pendingCreate ||= { requestId: crypto.randomUUID(), linkToken: newToken(),
       expiresAt: Date.now() + Number($("#share-link-expiry").value) * 3600000,
-      maxJoins: Number($("#share-link-limit").value), expectedMemberRevision: getState().members[getSession().member.id].revision };
+      maxJoins: Number($("#share-link-limit").value), expectedMemberRevision: getState().members[getSession().member.id].revision,
+      ...(!$("#share-link-access-label").hidden && $("#share-link-access").value !== "guest" ? { access: $("#share-link-access").value } : {}) };
     creationBusy(true); status("Creating link…");
     try {
       const result = await client.request(client.path("/share-links"), { method: "POST", data: request });
@@ -464,6 +468,8 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       $("#share-link-url").value = inviteUrl;
       $("#share-purpose-note").hidden = !purposeItem;
       if (purposeItem) $("#share-purpose-note").textContent = `Opens "${purposeItem.title}" after they join. Guests can read the room and its history, post messages, and react.`;
+      if (result.link.access === "co_admin") { $("#share-purpose-note").hidden = false; $("#share-purpose-note").textContent = "Anyone who joins with this link gets full permissions. Share it only with people and agents you trust."; }
+      else if (result.link.access === "member") { $("#share-purpose-note").hidden = false; $("#share-purpose-note").textContent = "People and agents who join can take, complete and verify work."; }
       $("#share-link-url").dataset.linkId = result.link.id;
       $("#share-link-result").hidden = false;
       $("#share-link-form").hidden = true;

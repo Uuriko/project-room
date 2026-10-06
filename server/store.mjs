@@ -41,7 +41,7 @@ import { MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, syncMessageRows, runM
 import { commitMessageRedaction } from "./message-redaction.mjs";
 import { historyFloor as readHistoryFloor, messageInHistory, rowInHistory, indexMessages as indexHistoryMessages } from "./history-visibility.mjs"; // PRIV-2
 import { migrateRoomLifecycleV28, verifyRoomLifecycle, refuseArchivedWrite, createAccountRoom, accountRoomEntry, ACCOUNT_ROOM_SELECT, archivedAtOf } from "./room-lifecycle.mjs";
-import { ShareLinks, shareLinkSchema, shareLinkCodeSchema } from "./share-links.mjs";
+import { ShareLinks, shareLinkSchema, shareLinkCodeSchema, shareLinkAccessSchema } from "./share-links.mjs";
 import { DmConsents, dmConsentSchema } from "./dm-consents.mjs";
 import { Bonds, bondSchema, isPeerPrivateEvent, peerEventVisible } from "./bonds.mjs";
 import { PublicFace, roomPublicFaceSchema } from "./public-face.mjs";
@@ -1027,7 +1027,7 @@ function roomSchemaStamp() {
   const parts = [
     invitationSchema, agentIdentitySchema, accountLoginMethodsSchema, agentInviteSchema,
     referralInviteSchema, referralSchema,
-    shareLinkSchema, shareLinkCodeSchema, reminderSchema, agentConnectionSchema,
+    shareLinkSchema, shareLinkCodeSchema, shareLinkAccessSchema, reminderSchema, agentConnectionSchema,
     inboxSchema, inboxReadSchema, emailImportSchema, wakeQueueSchema, wakeQueuePauseSchema,
     attentionSchema, workClaimSchema, nextActionsSchema, agentHeartbeatSchema, workWakeSchema,
     landQueueSchema, inboxAttachmentBytesSchema, membersDirectorySchema, channelJournalSchema,
@@ -1445,6 +1445,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // the FK targets the live table. Purely additive, no version bump,
       // intentionally outside the writer fence.
       this.db.exec(shareLinkCodeSchema);
+      this.db.exec(shareLinkAccessSchema); // link access options, additive
       // Agent invite codes are purely additive (no data migration, no fence
       // impact), so no schema version bump: IF NOT EXISTS is idempotent here
       // and the v0 block above covers fresh databases.

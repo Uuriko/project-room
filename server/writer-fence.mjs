@@ -392,6 +392,8 @@ export const unfencedAdditiveTables = Object.freeze([
   // The bytes live in room_attachments. Older writers have no path to them.
   "room_code_drops",
   "room_code_checks",
+  // share_link_access: member / co-admin link options. A missing row is a guest link.
+  "share_link_access",
   // LEGAL: terms acceptance, public abuse reports, and operator unpublish.
   // Additive and unfenced. Older writers have no code path to them.
   "account_terms",

@@ -29,6 +29,8 @@ const EMPTY_UNTIL_CRON = new Set([
   // Code drops exist only after an agent shares a patch.
   "room_code_drops",
   "room_code_checks",
+  // Link access rows exist only once an owner mints a member or co-admin link.
+  "share_link_access",
   // Spend grants and authorizations exist only after an owner issues a grant.
   "spend_grant_terms",
   "spend_authorizations",
