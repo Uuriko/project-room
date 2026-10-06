@@ -3,7 +3,7 @@
 // Does not send SMS, mint identities, or hold a lease. The next hop is the
 // existing matcher or the existing work-claim route.
 
-const VERBS = new Set(["match", "claim", "pull", "done", "progress", "blocked", "handoff", "holders", "collisions"]);
+const VERBS = new Set(["match", "claim", "pull", "done", "progress", "blocked", "handoff", "holders", "collisions", "reply", "tags"]);
 const MOTIVES = new Set(["hobby", "credits", "cash", "any"]);
 
 function fail(code) {
@@ -30,8 +30,8 @@ function roomIdOf(value) {
   return value;
 }
 
-function noteOf(value) {
-  if (!value || value.length > 512) fail("invalid_text_plug");
+function noteOf(value, max = 512) {
+  if (!value || value.length > max) fail("invalid_text_plug");
   return value;
 }
 
@@ -67,7 +67,7 @@ function parseSegments(joined, allowed) {
       fields.leaseUntil = new Date(value).toISOString();
     } else if (key === "not touching") continue;
     else if (key === "room") fields.roomId = roomIdOf(value);
-    else if (key === "note") fields.note = noteOf(value);
+    else if (key === "note") fields.note = noteOf(value, allowed.has("reply-note") ? 900 : 512);
     else if (key === "to") fields.to = memberTokenOf(value);
     else fail("invalid_text_plug");
   }
@@ -93,6 +93,17 @@ export function parseRoomText(text) {
   if (verb === "pull") {
     if (restLower.length !== 0) fail("invalid_text_plug");
     return { verb };
+  }
+  if (verb === "tags") {
+    if (restRaw.length === 0) return { verb };
+    const { head, fields } = parseSegments(restRaw.join(" "), new Set(["room"]));
+    if (head) fail("invalid_text_plug");
+    return { verb, ...withRoom(fields) };
+  }
+  if (verb === "reply") {
+    const { head, fields } = parseSegments(restRaw.join(" "), new Set(["room", "note", "reply-note"]));
+    if (!fields.note) fail("invalid_text_plug");
+    return { verb, workItemId: workItemIdOf(head), note: fields.note, ...withRoom(fields) };
   }
   if (verb === "collisions") {
     if (restRaw.length === 0) return { verb };

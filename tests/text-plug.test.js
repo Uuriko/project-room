@@ -43,6 +43,11 @@ test("playbook progress, handoff, and holders name the claim route fields", () =
   assert.deepEqual(parseRoomText("holders scripts/runtime-package.mjs | room: muse-room"), {
     verb: "holders", path: "scripts/runtime-package.mjs", roomId: "muse-room",
   });
+  assert.deepEqual(parseRoomText("reply claude-round-1791248841352 | note: saw it | room: muse-room"), {
+    verb: "reply", workItemId: "claude-round-1791248841352", note: "saw it", roomId: "muse-room",
+  });
+  assert.deepEqual(parseRoomText("tags | room: muse-room"), { verb: "tags", roomId: "muse-room" });
+  assert.throws(() => parseRoomText("reply claude-round-1791248841352 | room: muse-room"), /invalid_text_plug/);
   assert.deepEqual(parseRoomText("done"), { verb: "done" });
   assert.equal(parseRoomText("DONE backlog-k004-kanban | room: muse-room").verb, "done");
   assert.throws(() => parseRoomText("HANDOFF plan-pr-autolink | mystery: yes"), /invalid_text_plug/);

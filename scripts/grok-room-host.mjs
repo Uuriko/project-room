@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { readFileSync, writeFileSync, mkdirSync, openSync, closeSync, fsyncSync, chmodSync, existsSync, renameSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
@@ -297,12 +297,19 @@ export async function pull({ env = process.env, fetchImpl = fetch, execute = fal
     ...(cursor && typeof cursor.rooms === "object" ? Object.keys(cursor.rooms) : []),
   ])].slice(0, 4);
   const swarm = [];
+  const tags = [];
   for (const roomId of rooms) {
     try {
       const listed = await listWorkClaims({ env, fetchImpl, roomId });
       swarm.push(swarmBriefFromClaims(roomId, listed.claims));
     } catch {
       swarm.push({ roomId, open: null, collisions: [], truncated: false, unavailable: true });
+    }
+    try {
+      const listed = await listTags({ env, fetchImpl, roomId });
+      tags.push(...listed.tags);
+    } catch {
+      tags.push({ roomId, unavailable: true });
     }
   }
   return {
@@ -319,7 +326,10 @@ export async function pull({ env = process.env, fetchImpl = fetch, execute = fal
     silent,
     kinds: countKinds(result.plans.map(plan => plan.item)),
     swarm,
-    next: silent ? emptyAttentionNext({ execute }) : "Review planned items; --execute starts Grok."
+    tags,
+    next: silent
+      ? (tags.some(tag => tag.messageId) ? "A tag is waiting. text reply <messageId> | note: ... | room: <room>" : emptyAttentionNext({ execute }))
+      : "Review planned items; --execute starts Grok."
   };
 }
 
@@ -507,6 +517,53 @@ function safeClaimResult(parsed, token, workItemId, room) {
   };
 }
 
+export function replyMessageId(roomId, replyToId, body) {
+  const digest = createHash("sha256").update(`${roomId}\0${replyToId}\0${body}`).digest("hex").slice(0, 30);
+  return `gr${digest}`;
+}
+
+export async function listTags({ env = process.env, fetchImpl = fetch, roomId } = {}) {
+  const connection = connectionFromEnv(env);
+  const room = claimRoom(connection, roomId);
+  const parsed = await jsonRequest(connection, `/api/rooms/${encodeURIComponent(room)}/agent-inbox?limit=20`, { fetchImpl });
+  const rows = Array.isArray(parsed.directMentions) ? parsed.directMentions : [];
+  const tags = rows.filter(row => row && row.from !== connection.memberId).slice(0, 8).map(row => ({
+    roomId: room,
+    messageId: typeof row.messageId === "string" ? row.messageId : typeof row.replyToId === "string" ? row.replyToId : null,
+    from: typeof row.from === "string" ? row.from : null,
+    state: typeof row.state === "string" ? row.state : null,
+    sequence: Number.isSafeInteger(row.sequence) ? row.sequence : null,
+    at: typeof row.at === "string" ? row.at : null,
+    excerpt: typeof row.body === "string" ? row.body.replace(/\s+/g, " ").slice(0, 180) : "",
+  })).filter(row => row.messageId);
+  if (JSON.stringify(tags).includes(connection.token)) fail("secret_in_plan");
+  return { roomId: room, tags };
+}
+
+export async function postRoomReply({ env = process.env, fetchImpl = fetch, roomId, replyToId, body } = {}) {
+  const connection = connectionFromEnv(env);
+  const room = claimRoom(connection, roomId);
+  if (typeof replyToId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(replyToId)) fail("invalid_text_plug");
+  if (typeof body !== "string" || body.length < 1 || body.length > 900) fail("invalid_text_plug");
+  if (body.includes(connection.token) || /pri_[A-Za-z0-9_-]{8,}/i.test(body)) fail("secret_in_plan");
+  const messageId = replyMessageId(room, replyToId, body);
+  const parsed = await jsonRequest(connection, `/api/rooms/${encodeURIComponent(room)}/commands`, {
+    fetchImpl, method: "POST",
+    body: { id: messageId, type: "message.posted", data: { messageId, body, replyToId } },
+  });
+  const blob = JSON.stringify(parsed);
+  if (blob.includes(connection.token)) fail("secret_in_plan");
+  const event = parsed.event ?? parsed.result?.event ?? null;
+  return {
+    ok: true,
+    roomId: room,
+    replyToId,
+    messageId,
+    sequence: event?.sequence ?? parsed.sequence ?? null,
+    type: event?.type ?? null,
+  };
+}
+
 export async function listWorkClaims({ env = process.env, fetchImpl = fetch, roomId } = {}) {
   const connection = connectionFromEnv(env);
   const room = claimRoom(connection, roomId);
@@ -602,6 +659,16 @@ export async function handleTextCommand({ env = process.env, fetchImpl = fetch, 
       env, fetchImpl, workItemId: parsed.workItemId, newOwner, note: parsed.note, roomId: room,
     });
     return { ok: true, verb: "handoff", workItemId: result.workItemId, roomId: result.roomId, owner: result.owner };
+  }
+  if (parsed.verb === "tags") {
+    const listed = await listTags({ env, fetchImpl, roomId: parsed.roomId });
+    return { ok: true, verb: "tags", roomId: listed.roomId, tags: listed.tags };
+  }
+  if (parsed.verb === "reply") {
+    const posted = await postRoomReply({
+      env, fetchImpl, roomId: parsed.roomId, replyToId: parsed.workItemId, body: parsed.note,
+    });
+    return { ok: true, verb: "reply", roomId: posted.roomId, replyToId: posted.replyToId, messageId: posted.messageId, sequence: posted.sequence };
   }
   if (parsed.verb === "holders" || parsed.verb === "collisions") {
     const listed = await listWorkClaims({ env, fetchImpl, roomId: parsed.roomId });

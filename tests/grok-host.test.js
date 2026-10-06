@@ -9,7 +9,7 @@ import {
   loadJournal, buildRunPlan, assertPlanSafe, parseAttentionItem, childEnvFor, emptyAttentionNext, countKinds,
   setCursor
 } from "../client/grok-host.mjs";
-import { pull, doctor, ingestWake, writeJournalFile, readJournalFile, loadPendingAccess, rememberPendingAccess, writePendingAccessFile, fileAccessRequest, claimWork as hostClaim, handleTextCommand } from "../scripts/grok-room-host.mjs";
+import { pull, doctor, ingestWake, writeJournalFile, readJournalFile, loadPendingAccess, rememberPendingAccess, writePendingAccessFile, fileAccessRequest, claimWork as hostClaim, handleTextCommand, replyMessageId } from "../scripts/grok-room-host.mjs";
 import { saveAgentConnection } from "../client/agent-connection.mjs";
 
 const secret = "pri_abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG";
@@ -446,8 +446,8 @@ test("pull follows needs-me hasMore for a bounded number of pages", async t => {
     if (path.includes("/api/agent-heartbeats")) {
       return new Response(JSON.stringify({ host: { hostId: "grok-build" }, pendingWakes: [], acknowledged: [] }), { status: 200 });
     }
-    if (path.includes("/work-claims")) {
-      return new Response(JSON.stringify({ claims: [] }), { status: 200 });
+    if (path.includes("/work-claims") || path.includes("/agent-inbox")) {
+      return new Response(JSON.stringify({ claims: [], directMentions: [] }), { status: 200 });
     }
     pages += 1;
     if (pages === 1) {
@@ -823,4 +823,37 @@ test("DONE posts the done transition and PROGRESS posts in_progress", async t =>
   assert.equal(posts[0].body.note, "tests kept");
   assert.equal(posts[1].body.state, "done");
   assert.ok(posts.every(post => post.url.includes("/api/rooms/muse-room/work-claims/qa-receipt-prose-2/update")));
+});
+
+test("a tag reply posts once on that message, and the same note keeps the same id", async t => {
+  const directory = fixtureDir();
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const posts = [];
+  const fetchImpl = async (url, init = {}) => {
+    const path = String(url);
+    if (path.includes("/agent-inbox") && (init.method || "GET") === "GET") {
+      return new Response(JSON.stringify({
+        directMentions: [{
+          messageId: "claude-round-1791248841352", from: "ai_other", state: "delivered",
+          sequence: 3489, at: "2026-10-06T01:07:21.416Z", body: "@Grok Build please check in",
+        }],
+      }), { status: 200 });
+    }
+    posts.push({ url: path, body: JSON.parse(init.body) });
+    return new Response(JSON.stringify({ event: { sequence: 5700, type: "message.posted" } }), { status: 201 });
+  };
+  const env = { ROOM_AGENT_CONFIG: directory };
+  const listed = await handleTextCommand({ env, fetchImpl, line: "tags | room: muse-room" });
+  assert.equal(listed.tags[0].messageId, "claude-round-1791248841352");
+  assert.equal(listed.tags[0].excerpt.includes(secret), false);
+  const line = "reply claude-round-1791248841352 | note: Grok Build here. Tag me on the message you want answered. | room: muse-room";
+  const first = await handleTextCommand({ env, fetchImpl, line });
+  const second = await handleTextCommand({ env, fetchImpl, line });
+  assert.equal(first.messageId, replyMessageId("muse-room", "claude-round-1791248841352", "Grok Build here. Tag me on the message you want answered."));
+  assert.equal(second.messageId, first.messageId);
+  assert.equal(posts.length, 2);
+  assert.ok(posts.every(post => post.url.endsWith("/api/rooms/muse-room/commands")));
+  assert.equal(posts[0].body.data.replyToId, "claude-round-1791248841352");
+  assert.equal(posts[0].body.id, first.messageId);
+  assert.equal(JSON.stringify(first).includes(secret), false);
 });
