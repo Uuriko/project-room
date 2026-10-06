@@ -1725,12 +1725,28 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         rate(`public-work-read:${remoteAddress}`, 120);
         if (publicWorkReceiptMatch) {
           const receiptId = pathId(publicWorkReceiptMatch[1]);
+          // Owner-only public-receipts toggle: a room that turned receipts
+          // private still serves them to its members; everyone else gets 403.
+          // The credential is optional here — anonymous reads stay open for
+          // rooms that never flipped the toggle (current behavior).
+          const receiptRoomId = store.publicWorkClaims.receiptRoomId(receiptId);
+          let memberId = null;
+          if (receiptRoomId && !store.roomDirectory.publicReceiptsVisible(receiptRoomId)) {
+            const secret = bearer(req);
+            if (secret) {
+              try {
+                const viewerAuth = store.authenticate(secret, receiptRoomId);
+                if (viewerAuth?.member?.id) memberId = viewerAuth.member.id;
+              } catch { /* anonymous: the 403 below names the real problem */ }
+            }
+          }
+          const viewer = memberId ? { memberId } : {};
           if (publicWorkReceiptMatch[2]) {
-            const artifact = store.publicWorkClaims.artifact(receiptId);
+            const artifact = store.publicWorkClaims.artifact(receiptId, viewer);
             res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8", "Content-Disposition": "attachment; filename=contribution.txt", "X-Content-Type-Options": "nosniff", "Content-Security-Policy": "default-src 'none'; sandbox", "Cache-Control": "no-store" });
             return res.end(req.method === "HEAD" ? undefined : artifact.artifactText);
           }
-          return json(res, 200, store.publicWorkClaims.receipt(receiptId), req.method === "HEAD");
+          return json(res, 200, store.publicWorkClaims.receipt(receiptId, viewer), req.method === "HEAD");
         }
         return json(res, 200, publicWorkTaskMatch
           ? store.publicWorkClaims.read(pathId(publicWorkTaskMatch[1]))
@@ -1822,7 +1838,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         rate(`receipts:${remoteAddress}`, 120);
         const indexable = !url.search;
         if (indexable) res.setHeader("X-Robots-Tag", "all");
-        res.setHeader("Cache-Control", "public, max-age=60");
+        // Owner-only public-receipts toggle: these representations are
+        // toggle-controlled, so they must never sit in a shared cache — a
+        // response cached while public would keep disclosing a room's
+        // receipts after the owner switches privacy off.
+        res.setHeader("Cache-Control", "no-store");
         if (receiptDetail) {
           if (!PUBLIC_RECEIPT_ID.test(receiptDetail[1])) reject(404, "not_found", "Not found");
           const receipt = publicReceiptById(store, receiptDetail[1]);
@@ -4624,11 +4644,22 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return json(res, 200, store.roomDirectory.status(roomId, auth.member.id));
       }
       if (route === "directory" && req.method === "POST") {
+        // Owner-only public-receipts toggle rides the directory route (the
+        // room's public-visibility controls). discoverable stays required;
+        // publicReceipts is an additive optional field. docs/openapi.yaml
+        // documents the original {discoverable} shape only.
         const data = await body(req);
-        if (!exact(data, ["discoverable"]) || typeof data.discoverable !== "boolean") {
-          reject(422, "invalid_directory", "discoverable (boolean) is the accepted field");
+        const hasDiscoverable = Object.hasOwn(data ?? {}, "discoverable");
+        const hasReceipts = Object.hasOwn(data ?? {}, "publicReceipts");
+        if ((!hasDiscoverable && !hasReceipts)
+          || Object.keys(data ?? {}).some(key => key !== "discoverable" && key !== "publicReceipts")
+          || (hasDiscoverable && typeof data.discoverable !== "boolean")
+          || (hasReceipts && typeof data.publicReceipts !== "boolean")) {
+          reject(422, "invalid_directory", "discoverable (boolean) is required; publicReceipts (boolean) is optional");
         }
-        return json(res, 200, store.roomDirectory.set(roomId, auth.member.id, data.discoverable));
+        if (hasDiscoverable) store.roomDirectory.set(roomId, auth.member.id, data.discoverable);
+        if (hasReceipts) store.roomDirectory.setReceiptsVisibility(roomId, auth.member.id, data.publicReceipts);
+        return json(res, 200, store.roomDirectory.status(roomId, auth.member.id));
       }
       // Owner-only opportunity-feed visibility, independent of directory
       // listing. The public feed reads the persisted bit, never this route.
