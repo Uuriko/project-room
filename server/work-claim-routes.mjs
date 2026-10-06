@@ -135,7 +135,24 @@ const WORK_CLAIM_PROFILES = Object.freeze({
 });
 const BOARD_LIMIT_DEFAULT = 50;
 const BOARD_LIMIT_MAX = 200;
-const BOARD_QUERY = new Set(["queue", "auth", "limit", "cursor", "state"]);
+const BOARD_QUERY = new Set(["queue", "auth", "limit", "cursor", "state", "view"]);
+
+// QA7-13: compact per-claim projection for ?view=summary — the fields a
+// board overview needs (id, title, state, owner, lease expiry) without the
+// heavy per-claim payload (history, description, notes, files, tags,
+// reviews, attestations, dependsOn). Trust markers stamped before the
+// projection survive, so member-authored titles stay marked untrusted.
+function summarizeBoardClaim(item) {
+  const summary = {
+    id: item.id,
+    title: item.title ?? item.id,
+    state: item.state,
+    owner: item.owner ?? null,
+    leaseExpiresAt: item.leaseExpiresAt ?? null,
+  };
+  if (item.untrusted === true) summary.untrusted = true;
+  return summary;
+}
 
 function resolveWorkClaimAccess(store, roomId, auth) {
   let authority = null;
@@ -675,21 +692,30 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     const params = url?.searchParams ?? new URLSearchParams();
     for (const key of params.keys()) {
       if (!BOARD_QUERY.has(key) || params.getAll(key).length !== 1) {
-        invalidInput(reject, "a single queue, state, limit, or cursor query parameter");
+        invalidInput(reject, "a single queue, state, limit, cursor, or view query parameter");
       }
     }
     const limit = boardLimitOf(reject, params.get("limit"));
     const cursor = params.has("cursor") ? boardCursorOf(reject, params.get("cursor")) : null;
+    const view = params.get("view");
+    if (view !== null && view !== "summary") invalidInput(reject, "view=summary");
     // SEC-2: list pages carry each claim's newest history entries, with the
     // rest counted in historyOmitted; the single-claim read has the stored
     // history. Member-authored text is marked untrusted for the reader.
     const present = page => stampClaimPage({ ...page, claims: page.claims.map(item => summarizeClaimHistory(item, LIST_HISTORY_ENTRIES)) }, caller);
+    // QA7-13: ?view=summary keeps the same items, paging envelope, and trust
+    // stamps as the default view, but projects each claim to the compact
+    // board shape. The stamps run before the projection so an
+    // undeterminable author still marks the summary untrusted.
+    const presentSummary = page => withContentTrust({ ...page, claims: page.claims.map(item =>
+      summarizeBoardClaim(stampClaim(summarizeClaimHistory(item, LIST_HISTORY_ENTRIES), caller))) });
+    const render = view === "summary" ? presentSummary : present;
     if (params.has("queue")) {
       if (params.get("queue") !== "ready") invalidInput(reject, "queue=ready");
       if (params.has("state")) invalidInput(reject, "either queue=ready or state, not both");
       if (cursor && cursor.q !== "ready") invalidInput(reject, "a cursor from a queue=ready page");
       const page = pageReady(readyClaims(registry.list(roomId)), limit, cursor);
-      return json(res, 200, { roomId, queue: "ready", swept: sweptIds, ...present(page) });
+      return json(res, 200, { roomId, queue: "ready", swept: sweptIds, ...render(page) });
     }
     if (cursor?.q === "ready") invalidInput(reject, "a cursor from a work-claims page");
     const items = registry.list(roomId);
@@ -697,7 +723,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       const state = params.get("state");
       if (!STATES.includes(state)) invalidInput(reject, `state one of ${STATES.join(", ")}`);
       const page = pageBoard(items.filter(item => item.state === state), limit, cursor);
-      return json(res, 200, { roomId, state, swept: sweptIds, ...present(page) });
+      return json(res, 200, { roomId, state, swept: sweptIds, ...render(page) });
     }
     // SEC-2: the default list shows done claims from the last 7 days (the
     // Landed column) and any done claim an open claim depends on. Older done
@@ -708,7 +734,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     const visible = items.filter(recent);
     const olderDone = items.length - visible.length;
     const page = pageBoard(visible, limit, cursor);
-    return json(res, 200, { roomId, swept: sweptIds, ...present(page), ...(olderDone > 0 ? { olderDone, olderDoneQuery: "state=done" } : {}) });
+    return json(res, 200, { roomId, swept: sweptIds, ...render(page), ...(olderDone > 0 ? { olderDone, olderDoneQuery: "state=done" } : {}) });
   }
   if (workClaimRoute === "receipts" && req.method === "GET") {
     // RC-2026-09-24-205: receipts search. The room block already rejected

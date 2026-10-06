@@ -1,4 +1,5 @@
 // AX next-step for agents. Existing { error.code, error.message } stays.
+import { createHash, randomBytes } from "node:crypto";
 export const AGENT_ERRORS = "code/message + status/reason/hint/next";
 
 const tool = (name, args) => args ? { tool: name, arguments: args } : { tool: name };
@@ -193,6 +194,53 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
         ? "Only the room owner can mint a guest invite or Add agent."
         : "This credential cannot do that. Check access; ask the owner if needed.",
       next: [tool("room_check_access"), path("/api/session"), command("Ask the owner to mint a guest invite or Add agent")]
+    };
+  }
+  // G4 (usage-burn): a raced public-work claim names its holder and lease
+  // expiry in the message — turn them into the hint/next the taxonomy
+  // promises, the way session_claimed names its holder.
+  if (reasonCode === "public_work_claim_conflict") {
+    const conflict = /^Task already claimed by (.+?) \(lease expires ([^)]+)\)$/.exec(String(message || ""));
+    const holder = conflict?.[1], expiry = conflict?.[2], self = holder === "you";
+    const hint = holder
+      ? self
+        ? `You already hold this claim until ${expiry}. Renew to extend the lease instead of claiming again.`
+        : `Held by ${holder} until ${expiry}. Wait for release or lease expiry, then claim again.`
+      : "This task is already claimed. Re-read the task, wait for release, or pick another task.";
+    return {
+      status: "action_required", reason: "public_work_claim_conflict",
+      hint: hint.length < 160 ? hint : "This task is already claimed. Re-read the task, wait for release, or pick another task.",
+      next: [
+        path("/api/public-work/tasks"),
+        command(self
+          ? "Renew your claim to extend the lease instead of claiming again."
+          : holder
+            ? `Wait for ${holder} to release, or for the lease to expire at ${expiry}, then claim the task again. Or claim a different task.`
+            : "Re-read the task to see who holds the claim; wait for release or pick another task.")
+      ]
+    };
+  }
+  // G5 (usage-burn): stale_public_claim must beat the generic stale_* branch
+  // below and say which — the generation changed, or the lease expired — with
+  // the re-read/re-claim recovery. The rejected artifact bytes were never
+  // stored (generation is checked before the receipt write), so the agent
+  // must keep them and re-submit.
+  if (reasonCode === "stale_public_claim") {
+    const text = String(message || "");
+    const changed = /generation changed/i.test(text);
+    const submitted = /submitted (\d+)/.exec(text)?.[1], current = /current (\d+)/.exec(text)?.[1];
+    const hint = changed
+      ? `The task moved to generation ${current ?? "?"} (you sent ${submitted ?? "?"}). Re-read the task and claim it again with the current generation.`
+      : "Your claim expired — the lease lapsed or it was released. Re-read the task and claim it again.";
+    return {
+      status: "action_required", reason: "stale_public_claim",
+      hint: hint.length < 160 ? hint : "Re-read the task and claim it again with the current generation.",
+      next: [
+        path("/api/public-work/tasks"),
+        command(changed
+          ? "Re-read the task for its current generation; claim it again if unclaimed, then re-submit your work. Your rejected artifact bytes were NOT saved — keep them and send them again."
+          : "Re-read the task; claim it again, then re-submit your work with the new generation. Your rejected artifact bytes were NOT saved — keep them and send them again.")
+      ]
     };
   }
   if (stale(reasonCode, message)) {
@@ -396,9 +444,62 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
   };
 }
 
+// T179 (johnstab-mcp-500-trace): quotable 5xx trace. Every server 500
+// response body built by agentErrorBody carries errorId (unique per
+// occurrence, stable eid_ format — NOT err_: the storage-failure tests assert
+// /ERR_/i never reaches the client, so err_ would trip the no-driver-text
+// guard case-insensitively) and fingerprint (stable per underlying failure
+// within this process, so retries of the same failure collapse to one id).
+// The fingerprint is salted with a per-process secret: it is deterministic
+// for identical failures (the bug-report use case) but not offline-guessable
+// and not correlatable across restarts. The errorId is also emitted on one
+// bounded console.warn line, so an id pasted into a bug report is greppable
+// in operator logs. Additive only: non-5xx envelopes are untouched.
+//
+// Scope note: this covers every 5xx that flows through the central HTTP
+// catch (server/http.mjs always takes the agentErrorBody branch for 5xx —
+// discoverabilityErrorOverride only fires for 401/403/404). Deterministic
+// config-state 503s written directly in server/http.mjs (Fo's file) and the
+// MCP -32603 JSON-RPC envelopes (Claude's lane's files) are out of reach by
+// file-claim ownership; errorTrace() is exported for those owners to reuse.
+// The salt is minted lazily on first use, never at module top level: workerd
+// forbids random-value generation in global scope, and this module also
+// ships in the Worker bundle.
+let fingerprintSalt = null;
+function salt() {
+  if (!fingerprintSalt) fingerprintSalt = randomBytes(16).toString("hex");
+  return fingerprintSalt;
+}
+
+function normalizeForFingerprint(value) {
+  // Bounded first: the regexes below must never run on an unbounded message.
+  return String(value ?? "").slice(0, 512)
+    .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, "#")
+    .replace(/\b0x[0-9a-f]+\b/gi, "#")
+    .replace(/\b\d[\d.,_-]*\b/g, "#");
+}
+
+export function errorTrace({ httpStatus = 0, code = "request_failed", message = "", roomId = "", workItemId = "" } = {}) {
+  if (!(httpStatus >= 500)) return null;
+  const fingerprint = createHash("sha256")
+    .update(
+      [salt(), httpStatus, publicCode(code), normalizeForFingerprint(message), roomId || "", workItemId || ""].join("\0"),
+      "utf8",
+    )
+    .digest("hex");
+  return { errorId: `eid_${randomBytes(9).toString("base64url")}`, fingerprint };
+}
+
 export function agentErrorBody({ httpStatus, code, message, roomId, workItemId } = {}) {
   const ax = agentErrorAx({ httpStatus, code, message, roomId, workItemId });
-  return { error: { code, message }, status: ax.status, reason: ax.reason, hint: ax.hint, next: ax.next };
+  const body = { error: { code, message }, status: ax.status, reason: ax.reason, hint: ax.hint, next: ax.next };
+  const trace = errorTrace({ httpStatus, code, message, roomId, workItemId });
+  if (trace) {
+    body.errorId = trace.errorId;
+    body.fingerprint = trace.fingerprint;
+    console.warn(`error-trace ${trace.errorId} fp=${trace.fingerprint.slice(0, 16)} status=${httpStatus} code=${publicCode(code)}`);
+  }
+  return body;
 }
 
 export function validAgentNext(next) {

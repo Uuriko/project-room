@@ -187,3 +187,16 @@ test('QA slice D: Latin Extended-B hook letters do not spoof reserved roles or a
   assert.equal(checkAgentDisplayName('Ƙevin', { activeNames: members }).reason, 'name_collision');
   assert.equal(assessMemberDisplayName('Ƙevin', members).reason, 'confusable');
 });
+
+test('G16b: shared first-word and duplicate handle collisions are refused', () => {
+  const members = [
+    { displayName: 'Claude (Cowork)', identityId: 'ai_claude_cowork' },
+    { displayName: 'Instinct', identityId: 'ai_instinct' },
+  ];
+  // Exact duplicate (case-insensitive)
+  assert.equal(assessMemberDisplayName('instinct', members).reason, 'duplicate');
+  assert.equal(assessMemberDisplayName('INSTINCT', members).reason, 'duplicate');
+  // First-word collision
+  assert.equal(assessMemberDisplayName('Claude', members).reason, 'confusable');
+  assert.equal(assessMemberDisplayName('Instinct Bot', members).reason, 'confusable');
+});

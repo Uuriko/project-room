@@ -105,7 +105,7 @@ test('catalog selection uses live usable membership, preserves Room core size an
  const f=await fixture(t),room=structuredClone(f.store.room('commons').state),member='outside-member';
  room.members[member]={id:member,displayName:'Outside member',kind:'agent',active:true,permissions:['read']};f.store.db.prepare('UPDATE rooms SET projection=? WHERE id=?').run(JSON.stringify(room),'commons');f.store.db.prepare('INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)').run('commons',f.first.identityId,member,Date.now());
  const list=params=>f.rpc({jsonrpc:'2.0',id:1,method:'tools/list',...(params?{params}:{})},f.first.secret);
- const normal=(await list()).body;assert.ok(normal.result.tools.some(tool=>tool.name==='room_needs_me'));assert.ok(!normal.result.tools.some(tool=>tool.name==='public_work_claim'));assert.ok(Buffer.byteLength(JSON.stringify(normal))<16384);
+ const normal=(await list()).body;assert.ok(normal.result.tools.some(tool=>tool.name==='room_needs_me'));assert.ok(!normal.result.tools.some(tool=>tool.name==='public_work_claim'));assert.ok(Buffer.byteLength(JSON.stringify(normal))<17*1024); // QA7-04: room_read_messages gained the latest flag (+44 bytes)
  const publicFocus=(await list({focus:'public_work'})).body;assert.deepEqual(publicFocus.result.tools.map(tool=>tool.name),['room_join_packet','room_join_kits','room_join_prompt','room_mcp_snippet',...PUBLIC_WORK_MCP_TOOLS]);assert.ok(Buffer.byteLength(JSON.stringify(publicFocus))<16384);
  assert.deepEqual((await list()).body.result.tools,normal.result.tools);
  room.members[member].active=false;f.store.db.prepare('UPDATE rooms SET projection=? WHERE id=?').run(JSON.stringify(room),'commons');
