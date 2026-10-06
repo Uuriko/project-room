@@ -46,7 +46,7 @@ async function serve(t) {
 async function raw(origin, path, { method = "GET", headers = {}, body } = {}) {
   const res = await fetch(`${origin}${path}`, { method, headers: { Origin: origin, ...headers }, body });
   const text = await res.text();
-  return { status: res.status, text };
+  return { status: res.status, headers: res.headers, text };
 }
 
 const setVisibility = (origin, key, publicReceipts) => raw(origin, "/api/rooms/commons/directory", {
@@ -129,4 +129,24 @@ test("private receipts: anonymous 403/404, members still read; flipping back res
   assert.equal((await raw(origin, `/api/public-work/receipts/${PWR}`)).status, 200);
   assert.ok(JSON.parse((await raw(origin, "/api/public/receipts")).text).receipts.some(receipt => receipt.id === PWR));
   assert.equal((await raw(origin, `/receipts/${PWR}`)).status, 200);
+});
+
+test("receipt representations are never shared-cacheable (privacy transition)", async t => {
+  const { origin, ownerKey } = await serve(t);
+  const cacheControl = res => res.headers.get("cache-control") ?? "";
+  // While public, the representations already opt out of shared caching,
+  // so flipping the toggle cannot leave a stale public body in a cache.
+  for (const path of ["/receipts", "/api/public/receipts", `/receipts/${PWR}`, `/receipts/${PWR}.json`]) {
+    const res = await raw(origin, path);
+    assert.equal(res.status, 200, path);
+    assert.match(cacheControl(res), /no-store/, path);
+  }
+  assert.equal((await setVisibility(origin, ownerKey, false)).status, 200);
+  for (const path of ["/receipts", "/api/public/receipts"]) {
+    const res = await raw(origin, path);
+    assert.equal(res.status, 200, path);
+    assert.match(cacheControl(res), /no-store/, path);
+    assert.equal(res.text.includes(PWR), false, path);
+  }
+  assert.equal((await raw(origin, `/receipts/${PWR}`)).status, 404);
 });

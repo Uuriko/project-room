@@ -1838,7 +1838,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         rate(`receipts:${remoteAddress}`, 120);
         const indexable = !url.search;
         if (indexable) res.setHeader("X-Robots-Tag", "all");
-        res.setHeader("Cache-Control", "public, max-age=60");
+        // Owner-only public-receipts toggle: these representations are
+        // toggle-controlled, so they must never sit in a shared cache — a
+        // response cached while public would keep disclosing a room's
+        // receipts after the owner switches privacy off.
+        res.setHeader("Cache-Control", "no-store");
         if (receiptDetail) {
           if (!PUBLIC_RECEIPT_ID.test(receiptDetail[1])) reject(404, "not_found", "Not found");
           const receipt = publicReceiptById(store, receiptDetail[1]);
