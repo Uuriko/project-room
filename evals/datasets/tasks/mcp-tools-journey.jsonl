@@ -1,0 +1,2 @@
+{"id":"mtj-01","solver":"mcp-tools-list-call","toolName":"work.search","args":{"query":"evals harness"},"notes":"list tools, then call a listed tool with valid args"}
+{"id":"mtj-02","solver":"mcp-tools-list-call","toolName":"work.claim","args":{"taskId":"task-evals-alpha"},"notes":"second pinned task, same contract"}
