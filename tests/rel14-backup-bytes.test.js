@@ -66,6 +66,21 @@ test("replay refuses an object cell that is not an encoded BLOB, by name", t => 
   assert.throws(() => replayNdjson(text, join(tempDir(t, "rel14-bad-"), "r.sqlite")), /not an encoded BLOB/);
 });
 
+// Instinct-3 4534: a tampered $base64 must not verify. Same length, one byte
+// flipped, so only the sha256 check can catch it; then a shorter BLOB, then junk.
+test("replay refuses a tampered BLOB by its stored sha256 and byte_length", t => {
+  const { filename } = roomWithFile(t);
+  const live = new RoomStore(filename, { readOnly: true });
+  const text = exportNdjsonText(live.db);
+  live.close();
+  const swap = bytes => text.replace(/\{"\$base64":"[^"]*"\}/, JSON.stringify({ $base64: bytes.toString("base64") }));
+  const flipped = Buffer.from(FILE_BYTES); flipped[7] ^= 0xff;
+  assert.throws(() => replayNdjson(swap(flipped), join(tempDir(t, "rel14-tamper-"), "r.sqlite")), /bytes do not match its sha256/);
+  assert.throws(() => replayNdjson(swap(FILE_BYTES.subarray(1)), join(tempDir(t, "rel14-short-"), "r.sqlite")), /bytes do not match its byte_length/);
+  const junk = text.replace(/\{"\$base64":"([^"]*)"\}/, (_, b) => JSON.stringify({ $base64: b.slice(0, 8) + "*" + b.slice(8) }));
+  assert.throws(() => replayNdjson(junk, join(tempDir(t, "rel14-junk-"), "r.sqlite")), /not canonical base64/);
+});
+
 async function backupOf(t, filename) {
   const result = await backupRoom(filename, tempDir(t, "rel14-dest-"));
   assert.equal(result.verified, true);

@@ -128,8 +128,23 @@ export function operatorExportResponse(request, token, db) {
 function cellOf(value) {
   if (value === null || typeof value !== "object") return value;
   const keys = Object.keys(value);
-  if (keys.length === 1 && keys[0] === "$base64" && typeof value.$base64 === "string") return Buffer.from(value.$base64, "base64");
+  if (keys.length === 1 && keys[0] === "$base64" && typeof value.$base64 === "string") {
+    // Buffer.from skips characters it cannot decode; only canonical base64 is a BLOB.
+    const bytes = Buffer.from(value.$base64, "base64");
+    if (bytes.toString("base64") !== value.$base64) throw new Error("Export BLOB cell is not canonical base64");
+    return bytes;
+  }
   throw new Error("Export cell is an object that is not an encoded BLOB");
+}
+
+// REL-14 (Instinct-3 4534): a file row carries its own byte_length and sha256;
+// replay proves the decoded bytes against both, so a tampered BLOB is refused.
+function checkStoredBytes(table, row) {
+  if (!(row.bytes instanceof Uint8Array)) return;
+  if (typeof row.byte_length === "number" && row.bytes.length !== row.byte_length)
+    throw new Error(`Export ${table} row ${row.id ?? "?"} bytes do not match its byte_length`);
+  if (typeof row.sha256 === "string" && sha256Hex(row.bytes) !== row.sha256)
+    throw new Error(`Export ${table} row ${row.id ?? "?"} bytes do not match its sha256`);
 }
 
 function parseExport(ndjson) {
@@ -186,8 +201,10 @@ export function replayNdjson(ndjson, filename) {
           const keys = Object.keys(row);
           if (keys.some(key => !known.has(key))) throw new Error("Export row does not match the store schema");
           if (!keys.length) continue;
+          const cells = Object.fromEntries(keys.map(key => [key, cellOf(row[key])]));
+          checkStoredBytes(table, cells);
           store.db.prepare(`INSERT INTO ${quoteIdent(table)} (${keys.map(quoteIdent).join(", ")}) VALUES (${keys.map(() => "?").join(", ")})`)
-            .run(...keys.map(key => cellOf(row[key])));
+            .run(...keys.map(key => cells[key]));
         }
       }
     });
