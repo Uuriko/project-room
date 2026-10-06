@@ -78,6 +78,12 @@ test("join errors name the problem and the next step", () => {
   assert.match(joinErrorMessage({ status: 410, code: "invite_revoked" }).title, /revoked/i);
   assert.match(joinErrorMessage({ status: 410, code: "invite_expired" }).title, /expired/i);
   assert.match(joinErrorMessage({ status: 409, code: "invite_authority_changed" }).title, /no longer valid/i);
+  const linked = joinErrorMessage({ status: 409, code: "identity_already_linked" });
+  assert.equal(linked.retry, false);
+  assert.equal(linked.title, "Already joined");
+  assert.match(linked.message, /sign-in/);
+  assert.match(linked.message, /saved agent credential/);
+  assert.doesNotMatch(linked.message, /This browser is already/);
   const name = joinErrorMessage({ status: 422, code: "invalid_invite_name", action: "join" });
   assert.equal(name.retry, true);
   assert.match(name.message, /1–80/);

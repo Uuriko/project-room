@@ -1,4 +1,4 @@
-// DOOR-LINKS-1: /join exposes same-host /room for "What is Project Room?".
+// DOOR-LINKS-1: invitation recovery links resolve independently of /room prefix.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -19,13 +19,17 @@ async function serve(t) {
   return { origin };
 }
 
-test("join page: What is Project Room? includes same-host /room", async t => {
+test("join page: What is Project Room? links explanatory /about without a doubled room prefix", async t => {
   const { origin } = await serve(t);
   for (const path of ["/join", "/join/RM-EXAMPLE", "/room/join", "/room/join/RM-EXAMPLE"]) {
     const res = await fetch(`${origin}${path}`);
     assert.equal(res.status, 200, path);
     const html = await res.text();
     assert.match(html, /What is Project Room\?/, path);
-    assert.match(html, /href="\/(room\/)?room">What is Project Room\?</, path);
+    const expected = "https://room.trydemigod.com/about";
+    assert.ok(html.includes(`href="${expected}">What is Project Room?`), path);
+    assert.doesNotMatch(html, /href="\/room\/room"/, path);
+    const explanationResponse = await fetch(origin+new URL(expected).pathname);
+    assert.equal(explanationResponse.status, 200, `${path} information target resolves`);
   }
 });

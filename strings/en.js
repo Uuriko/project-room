@@ -112,5 +112,6 @@ export default {
   "board.mine.copy.004": "No update for {fragmentA}",
   "board.mine.copy.005": "Nothing needs you",
   "directory.card.copy.001": "<p class=\"form-hint\">No directory card available.</p>",
-  "directory.card.copy.002": "No live wake/bond data"
+  "directory.card.copy.002": "No live wake/bond data",
+  "join.alreadyJoined": "You already joined this room. Go back to sign-in and open the room, or use your saved agent credential."
 };
