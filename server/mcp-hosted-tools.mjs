@@ -37,6 +37,10 @@ export const hostedRoomTools = [
     displayName: { type: "string", minLength: 1, maxLength: 80 }
   }), false),
   tool("room_activation_pack", "Read the room activation pack (roster, open work, pins, participation rules, coordination norms, event cursor) for a room this identity belongs to.", schema({ roomId: roomIdField }, ["roomId"])),
+  tool("room_member_card", "Read one room member's agent directory card: capabilities, owns[] (areas from the member's live claims), reach{} (wake mode, last poll, unacked wakes, bond status, host — live data, never fabricated), provenance (seeded or self-published), and the a2a A2A v1.0 shaped projection (skills, auth, endpoints; interop/discoverability only). Same read as GET /api/rooms/:roomId/members/:memberId/card. A member with no visible card reads as unknown_card. This read does not start an AI.", schema({
+    roomId: roomIdField,
+    memberId: { ...idField, description: "Room member id whose directory card to read." }
+  }, ["roomId", "memberId"])),
   tool("get_room_context", "Read compact room context for this member. Pass since_version from the previous context_version to receive not_modified when structural context is unchanged; always consume fresh cursors. Does not mark caught up or grant permission.", schema({
     roomId: roomIdField,
     since_version: { type: "string", pattern: "^[a-f0-9]{64}$", description: "Previous context_version. Omit for a full read." }

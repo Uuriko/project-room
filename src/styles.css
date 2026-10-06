@@ -381,6 +381,13 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 .member-profile-body summary { min-height: 36px; padding-block: .5rem; cursor: pointer; }
 .member-profile-body p { margin-bottom: .4rem; }
 .member-profile-body .member-status { white-space: normal; font-size: .8rem; }
+/* plan-dir-card: the member chip's directory card section. */
+.member-directory-card { margin-top: .5rem; }
+.member-directory-card > summary { min-height: 36px; padding-block: .5rem; cursor: pointer; }
+.member-card-badges { display: flex; flex-wrap: wrap; gap: .35rem; margin-bottom: .4rem; }
+.card-provenance, .card-visibility { font-size: .7rem; padding: .1rem .45rem; border: 1px solid var(--line); border-radius: 999px; }
+.card-provenance-seeded { border-style: dashed; }
+.member-card-body p { margin-bottom: .4rem; }
 .room-tools > summary { cursor: pointer; min-height: 44px; padding-block: .7rem; }
 @media (pointer: coarse) { .presence-member { min-height: 52px; } .member-profile > summary { width: 44px; height: 44px; } .member-head { padding-right: 2.25rem; } }
 

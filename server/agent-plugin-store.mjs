@@ -23,7 +23,7 @@
 // transaction.
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createAgentApiKeys, ApiKeyError, API_KEY_PREFIX } from "./agent-api-keys.mjs";
-import { createAgentDirectory, DirectoryError } from "./agent-directory.mjs";
+import { createAgentDirectory, DirectoryError, toA2ACard } from "./agent-directory.mjs";
 import { createIdentityVerification, VERIFIED, UNVERIFIED } from "./identity-verification.mjs";
 import { buildPluginManifest, ManifestError } from "./agent-plugin-manifest.mjs";
 import {
@@ -224,7 +224,12 @@ export class AgentPluginStore {
     };
     this.directory = createAgentDirectory({ store: this.cards, clock,
       trust: verificationTrust,
-      presence: agentId => this.presenceForCard(agentId) });
+      presence: agentId => this.presenceForCard(agentId),
+      // plan-dir-card: host-supplied reach (live wake + bond data) and
+      // owns (live claim-derived areas). Both are validated by the pure
+      // module and null when the host knows nothing — never fabricated.
+      reach: agentId => this.reachForCard(agentId),
+      owns: agentId => this.ownsForCard(agentId) });
     this.webhooks = createAgentWebhookSubscriptions({
       store: this.subs,
       clock,
@@ -250,6 +255,10 @@ export class AgentPluginStore {
     const cardColumns = new Set(this.db.prepare("PRAGMA table_info(agent_directory_cards)").all().map(c => c.name));
     if (!cardColumns.has("public_key")) this.db.exec("ALTER TABLE agent_directory_cards ADD COLUMN public_key TEXT");
     if (!cardColumns.has("signature")) this.db.exec("ALTER TABLE agent_directory_cards ADD COLUMN signature TEXT");
+    // plan-dir-card: provenance marks seeded vs self-published cards.
+    // Legacy rows backfill NULL and read as "self" (they were published
+    // through the signed publish path or predate seeding).
+    if (!cardColumns.has("provenance")) this.db.exec("ALTER TABLE agent_directory_cards ADD COLUMN provenance TEXT");
     // Event-push: target_url overrides the subscription URL for wakeUrl
     // pushes. Same additive backfill pattern as the card key envelope.
     const deliveryColumns = new Set(this.db.prepare("PRAGMA table_info(agent_webhook_deliveries)").all().map(c => c.name));
@@ -287,6 +296,8 @@ export class AgentPluginStore {
         // pin a key on their next owner-signed republish.
         publicKey: row.public_key ?? undefined,
         signature: row.signature ?? undefined,
+        // Legacy rows (no provenance column value) were self-published.
+        provenance: row.provenance ?? "self",
         visibility: row.visibility,
         publishedAt: row.published_at,
         updatedAt: row.updated_at,
@@ -565,11 +576,11 @@ export class AgentPluginStore {
       });
       const entry = this.cards.get(agentId);
       this.db.prepare(`INSERT INTO agent_directory_cards
-        (agent_id, card_json, visibility, owner_identity_id, published_at, updated_at, withdrawn, public_key, signature)
-        VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
+        (agent_id, card_json, visibility, owner_identity_id, published_at, updated_at, withdrawn, public_key, signature, provenance)
+        VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, 'self')
         ON CONFLICT(agent_id) DO UPDATE SET card_json=excluded.card_json, visibility=excluded.visibility,
           updated_at=excluded.updated_at, withdrawn=0,
-          public_key=excluded.public_key, signature=excluded.signature`)
+          public_key=excluded.public_key, signature=excluded.signature, provenance='self'`)
         .run(agentId, JSON.stringify(entry.card), entry.visibility, identityId,
           entry.publishedAt, entry.updatedAt, entry.publicKey, entry.signature);
       syncDirectoryCard(this.store, agentId);
@@ -677,6 +688,8 @@ export class AgentPluginStore {
         .map(agent => ({
           ...agent,
           cardUrl: `${serviceOrigin}/api/agents/directory/${agent.agentId}`,
+          // A2A v1.0 projection for outside-agent discoverability (interop only).
+          a2a: toA2ACard(agent, serviceOrigin),
         }));
       return Object.freeze({
         version: "1.0.0",
@@ -690,7 +703,7 @@ export class AgentPluginStore {
   // A single member-visible card (public, or room-visibility when the viewer
   // shares a room with the card's owner). Private, withdrawn, or
   // room-invisible cards read as 404, exactly like unknown cards: no oracle.
-  memberCard(agentId, viewerIdentityId) {
+  memberCard(agentId, viewerIdentityId, serviceOrigin = null) {
     return this.store.readTransaction(() => {
       const entry = this.cards.get(agentId);
       if (!entry || entry.withdrawn || entry.visibility === "private") {
@@ -705,7 +718,7 @@ export class AgentPluginStore {
         ).get(viewerIdentityId, owner.ownerIdentityId);
         if (!shared) throw new AgentPluginError(404, "unknown_card", `No member-visible card "${agentId}"`);
       }
-      return this.directory.get(agentId);
+      return { ...this.directory.get(agentId), a2a: toA2ACard(this.directory.get(agentId), serviceOrigin) };
     });
   }
 
@@ -716,6 +729,8 @@ export class AgentPluginStore {
       const agents = this.directory.list({ query, capability }).map(agent => ({
         ...agent,
         cardUrl: `${serviceOrigin}/api/agents/directory/${agent.agentId}`,
+        // A2A v1.0 projection for outside-agent discoverability (interop only).
+        a2a: toA2ACard(agent, serviceOrigin),
       }));
       return Object.freeze({
         version: "1.0.0",
@@ -728,13 +743,14 @@ export class AgentPluginStore {
 
   // A single public card (the cardUrl target in the directory document).
   // Non-public or withdrawn cards read as 404.
-  publicCard(agentId) {
+  publicCard(agentId, serviceOrigin = null) {
     return this.store.readTransaction(() => {
       const entry = this.cards.get(agentId);
       if (!entry || entry.withdrawn || entry.visibility !== "public") {
         throw new AgentPluginError(404, "unknown_card", `No public card "${agentId}"`);
       }
-      return this.directory.get(agentId);
+      const doc = this.directory.get(agentId);
+      return { ...doc, a2a: toA2ACard(doc, serviceOrigin) };
     });
   }
 
@@ -750,6 +766,176 @@ export class AgentPluginStore {
     if (!row) return null;
     const status = heartbeats.statusOf(row.ownerIdentityId);
     return { status: status.status, lastSeenAt: status.lastSeenAt, hosts: status.hosts.length };
+  }
+
+  // plan-dir-card: host-supplied reach for a directory card. Resolves the
+  // card's owner identity, then reads live wake + bond data. Returns null
+  // when the identity has no heartbeat registration and no bond footprint —
+  // reach is never fabricated. wakeUrl is never exposed (it is a secret
+  // delivery target); only the host id is carried.
+  reachForCard(agentId) {
+    const row = this.db.prepare("SELECT owner_identity_id AS ownerIdentityId FROM agent_directory_cards WHERE agent_id=?").get(agentId);
+    if (!row?.ownerIdentityId) return null;
+    const identityId = row.ownerIdentityId;
+    const heartbeats = this.store.agentHeartbeats;
+    let status = null;
+    try { status = heartbeats ? heartbeats.statusOf(identityId) : null; } catch { status = null; }
+    const registered = Boolean(status && status.hosts.length > 0);
+    let bondStatus = null;
+    try {
+      const active = this.db.prepare(
+        "SELECT 1 FROM agent_bonds WHERE state='active' AND (agent_a=? OR agent_b=?) LIMIT 1"
+      ).get(identityId, identityId);
+      const pending = active ? [] : this.store.bonds.pendingProposalsFor(identityId);
+      bondStatus = active ? "active" : pending.length > 0 ? "pending" : "none";
+    } catch { bondStatus = null; }
+    if (!registered && bondStatus === null) return null;
+    const modes = registered ? status.hosts.map(host => host.mode) : [];
+    let pendingUnacked = 0;
+    try { pendingUnacked = heartbeats.pendingWakes(identityId, { limit: 50 }).length; } catch { /* older DB */ }
+    return {
+      wakeMode: !registered ? null
+        : modes.includes("wakeable") ? "wakeable"
+        : modes.includes("pull-only") ? "pull-only" : "none",
+      lastPollAt: registered ? status.lastSeenAt : null,
+      pendingUnacked,
+      bondStatus,
+      host: registered && status.hosts[0] ? status.hosts[0].hostId : null,
+    };
+  }
+
+  // plan-dir-card: host-supplied areas/lanes from the agent's live claim
+  // data. Active (claimed/in_progress) claims owned by the card's identity —
+  // the owner may be the identity id or a member id linked to it —
+  // contribute their lane prefix (the leading alpha run of the task id:
+  // e.g. task id fo-sec06 yields prefix fo; qa7-01 yields qa). Deduped,
+  // sorted, capped.
+  // Null only when the host has no claim registry; [] when the agent
+  // currently owns nothing.
+  ownsForCard(agentId) {
+    const row = this.db.prepare("SELECT owner_identity_id AS ownerIdentityId FROM agent_directory_cards WHERE agent_id=?").get(agentId);
+    if (!row?.ownerIdentityId) return null;
+    const identityId = row.ownerIdentityId;
+    const workClaims = this.store.workClaims;
+    if (!workClaims) return null;
+    try {
+      const linkedRooms = this.db.prepare(
+        "SELECT DISTINCT room_id AS roomId FROM identity_links WHERE identity_id=?").all(identityId)
+        .map(r => r.roomId);
+      const owners = new Set([identityId]);
+      const memberOf = this.db.prepare("SELECT member_id AS memberId FROM identity_links WHERE room_id=? AND identity_id=?");
+      for (const roomId of linkedRooms) {
+        for (const m of memberOf.all(roomId, identityId)) owners.add(m.memberId);
+      }
+      const areas = new Set();
+      for (const roomId of linkedRooms) {
+        let claims = [];
+        try { claims = workClaims.list(roomId); } catch { continue; }
+        for (const claim of claims) {
+          if (claim.state !== "claimed" && claim.state !== "in_progress") continue;
+          if (!owners.has(claim.owner)) continue;
+          const lane = /^([a-z]+)/.exec(String(claim.id ?? claim.taskId ?? ""));
+          if (lane) areas.add(lane[1]);
+        }
+      }
+      return [...areas].sort().slice(0, 12);
+    } catch { return null; }
+  }
+
+  // plan-dir-card: the directory agentId linked to an identity, for the
+  // member chip. Private cards are never advertised (they are listed to
+  // their owner alone); withdrawn cards are skipped.
+  cardAgentIdForIdentity(identityId) {
+    if (!identityId) return null;
+    const row = this.db.prepare(
+      "SELECT agent_id AS agentId FROM agent_directory_cards WHERE owner_identity_id=? AND withdrawn=0 AND visibility IN ('public','room') LIMIT 1"
+    ).get(identityId);
+    return row?.agentId ?? null;
+  }
+
+  // plan-dir-card: the directory card for a room member, visibility-checked
+  // for the viewer. Public and room-visibility cards are returned to any
+  // room member (the route enforces membership); private cards only to the
+  // owning identity. Null when the member has no card or the viewer may
+  // not see it — never an existence oracle beyond the 404.
+  cardForMember({ roomId, memberId, viewerIdentityId = null, serviceOrigin = null }) {
+    const link = this.db.prepare(
+      "SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?").get(roomId, memberId);
+    if (!link) return null;
+    const row = this.db.prepare(
+      "SELECT agent_id AS agentId FROM agent_directory_cards WHERE owner_identity_id=? AND withdrawn=0 LIMIT 1"
+    ).get(link.identityId);
+    if (!row) return null;
+    let doc;
+    try { doc = this.directory.get(row.agentId); } catch { return null; }
+    if (doc.visibility === "private" && viewerIdentityId !== link.identityId) return null;
+    // A2A v1.0 projection for outside-agent discoverability (interop only).
+    return { ...doc, a2a: toA2ACard(doc, serviceOrigin) };
+  }
+
+  // plan-dir-card: owner-only seeding of directory cards for a room's
+  // agent members that have none. Each seeded card is an honest
+  // placeholder: name/description from the member record, capabilities
+  // mapped from the member's live room permissions, visibility "room"
+  // (never public — the agent did not consent to a public listing),
+  // provenance "seeded", no signature. Members without a linked identity,
+  // with an unusable display name, or with a live card are skipped with a
+  // reason. The agent replaces the seed by publishing (signed).
+  seedRoomDirectoryCards({ roomId, ownerMemberId }) {
+    const authority = this.store.roomAuthority(roomId);
+    if (!authority || authority.ownerId !== ownerMemberId) {
+      throw new AgentPluginError(403, "owner_required", "Only the room owner can seed directory cards");
+    }
+    return this.mutate(() => {
+      const members = authority.members ?? {};
+      const seeded = [], skipped = [];
+      const linkOf = this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?");
+      const liveCardOf = this.db.prepare("SELECT agent_id AS agentId FROM agent_directory_cards WHERE owner_identity_id=? AND withdrawn=0 LIMIT 1");
+      const taken = new Set(this.db.prepare("SELECT agent_id AS agentId FROM agent_directory_cards").all().map(r => r.agentId));
+      for (const member of Object.values(members)) {
+        if (!member || member.kind !== "agent" || member.active === false) continue;
+        const link = linkOf.get(roomId, member.id);
+        if (!link) { skipped.push({ memberId: member.id, reason: "no linked identity" }); continue; }
+        if (liveCardOf.get(link.identityId)) { skipped.push({ memberId: member.id, reason: "card already published" }); continue; }
+        let slug = String(member.displayName ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+        if (!/^[a-z][a-z0-9-]*$/.test(slug)) { skipped.push({ memberId: member.id, reason: "display name has no usable slug" }); continue; }
+        let agentId = slug, n = 2;
+        while (taken.has(agentId)) agentId = `${slug}-${n++}`;
+        const permissions = new Set(Array.isArray(member.permissions) ? member.permissions : []);
+        const capabilities = new Set();
+        if (permissions.has("accept_work") || permissions.has("complete_work")) capabilities.add("work-claims");
+        if (permissions.has("verify")) capabilities.add("review");
+        if (permissions.has("steer")) capabilities.add("steer");
+        if (permissions.has("write_external")) capabilities.add("external-posts");
+        if (permissions.has("manage_members") || permissions.has("invite_member")) capabilities.add("room-admin");
+        if (permissions.has("decide") || permissions.has("manage_claims")) capabilities.add("coordination");
+        if (capabilities.size === 0) capabilities.add("room-member");
+        const name = String(member.displayName ?? "").trim().slice(0, 120) || agentId;
+        const card = {
+          name,
+          description: `Seeded directory card for ${name}. This agent has not published a card yet; the room owner seeded this placeholder from live room data (name, permissions, claims, wake state). It is replaced when the agent publishes its own signed card.`,
+          url: null,
+          capabilities: [...capabilities],
+          version: "0.1.0-seeded",
+        };
+        try {
+          this.directory.seed({ agentId, card, visibility: "room" });
+        } catch {
+          skipped.push({ memberId: member.id, reason: "seed rejected" });
+          continue;
+        }
+        const entry = this.cards.get(agentId);
+        this.db.prepare(`INSERT INTO agent_directory_cards
+          (agent_id, card_json, visibility, owner_identity_id, published_at, updated_at, withdrawn, public_key, signature, provenance)
+          VALUES (?, ?, 'room', ?, ?, ?, 0, NULL, NULL, 'seeded')
+          ON CONFLICT(agent_id) DO UPDATE SET card_json=excluded.card_json, visibility='room',
+            updated_at=excluded.updated_at, withdrawn=0, provenance='seeded'`)
+          .run(agentId, JSON.stringify(entry.card), link.identityId, entry.publishedAt, entry.updatedAt);
+        taken.add(agentId);
+        seeded.push(agentId);
+      }
+      return Object.freeze({ roomId, seeded: Object.freeze(seeded), skipped: Object.freeze(skipped) });
+    });
   }
 
   // RC-2026-09-18-051: journal an agent.wake delivery for every enabled

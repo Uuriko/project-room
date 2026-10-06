@@ -3877,6 +3877,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
             isOwner: m.id === ownerId,
             scopes: Array.isArray(m.permissions) ? [...m.permissions] : [],
             ownerIdentityId: m.kind === "agent" ? host.identityId : null,
+            // plan-dir-card: the member's linked directory card id (the
+            // member chip lazy-loads the card from
+            // /api/rooms/{roomId}/members/{memberId}/card). Null when the
+            // member has no visible card.
+            cardAgentId: m.kind === "agent" && host.identityId
+              ? this.agentPlugin.cardAgentIdForIdentity(host.identityId)
+              : null,
           };
         })
         .sort((a, b) => a.memberId < b.memberId ? -1 : 1);
