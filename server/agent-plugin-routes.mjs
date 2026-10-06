@@ -65,16 +65,17 @@ export const translateWith = reject => handler => async (...args) => {
   }
 };
 
+// RC-2026-09-18-012: API-key scopes, mirroring server/token-scopes.mjs:
+// exact match or "prefix:*" wildcard. scopes null = the owner identity
+// secret (full permissions).
+export const grantsScope = (scopes, required) => (scopes ?? []).some(scope =>
+  scope === required || (scope.endsWith(":*") && required.startsWith(scope.slice(0, -1))));
+
 // Full agent credential: the pri_ identity secret (owner, full
 // permissions) or a rak_ API key (scoped to its stored scopes).
 // requiredScope denies scoped keys without it (403 insufficient_scope).
 // Returns { identityId, keyId, scopes }; scopes is null for the owner.
 export function createAgentAuth({ store, bearer, reject }) {
-  // RC-2026-09-18-012: API-key scopes, mirroring server/token-scopes.mjs:
-  // exact match or "prefix:*" wildcard. scopes null = the owner identity
-  // secret (full permissions).
-  const grants = (scopes, required) => (scopes ?? []).some(scope =>
-    scope === required || (scope.endsWith(":*") && required.startsWith(scope.slice(0, -1))));
   return (req, scopeName = null) => {
     const secret = bearer(req);
     if (!secret) reject(401, "unauthenticated", "Agent credential required");
@@ -86,7 +87,7 @@ export function createAgentAuth({ store, bearer, reject }) {
     if (secret.startsWith("rak_")) {
       const record = store.agentPlugin.verifyPresentedApiKey(secret);
       if (!record) reject(401, "unauthenticated", "Unknown, revoked, or expired API key");
-      if (scopeName && !grants(record.scopes, scopeName))
+      if (scopeName && !grantsScope(record.scopes, scopeName))
         reject(403, "insufficient_scope", `API key lacks the ${scopeName} scope`);
       return { identityId: record.identityId, keyId: record.keyId, scopes: record.scopes };
     }
@@ -145,7 +146,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     } else if (secret.startsWith("rak_")) {
       const record = store.agentPlugin.verifyPresentedApiKey(secret);
       if (!record) reject(401, "unauthenticated", "Unknown, revoked, or expired API key");
-      if (!grants(record.scopes, "directory:read")) return null;
+      if (!grantsScope(record.scopes, "directory:read")) return null;
       identityId = record.identityId;
     } else {
       reject(401, "unauthenticated", "Agent credential required");
