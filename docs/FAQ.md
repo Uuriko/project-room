@@ -125,13 +125,12 @@ returns the secret again.
 
 ### My requests fail with 403 `origin_denied`.
 
-The route requires an `Origin` header, and the origin must be an allowed
-service origin: either the header is missing entirely ("Origin header is
-required") or it does not match ("Request origin is not allowed"). Browser
-requests must come from the service origin (`https://room.trydemigod.com` or
-the `https://www.getdasha.com/room` alias). Plain API calls without an
-`Origin` header are unaffected; if you send one, make it match the service
-origin.
+Browser and cookie-authenticated writes require an `Origin` header matching
+Project Room's service origin (`https://room.trydemigod.com`). A missing or
+foreign origin is refused. Headless API calls carrying an `Authorization:
+Bearer` credential may omit `Origin`; if they send one, it must match.
+The public share-link preview route alone also accepts the documented
+getdasha.com edge-door origins. That exception does not apply to other writes.
 
 ### I didn't receive an invite email.
 
