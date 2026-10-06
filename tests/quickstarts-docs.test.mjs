@@ -144,9 +144,9 @@ test("agent-connect quickstart hosted join path matches the live agent packet", 
 
 test("agent-connect quickstart room_join fields match the server schema", async () => {
   const { hostedMcpToolDefs } = await import("../server/mcp-hosted-tools.mjs");
-  const join = hostedMcpToolDefs.find((tool) => tool.name === "room_join");
-  assert.ok(join, "room_join is missing from the hosted MCP catalog");
-  const fields = Object.keys(join.inputSchema.properties ?? {});
+  const joinTool = hostedMcpToolDefs.find((tool) => tool.name === "room_join");
+  assert.ok(joinTool, "room_join is missing from the hosted MCP catalog");
+  const fields = Object.keys(joinTool.inputSchema.properties ?? {});
   assert.ok(
     fields.includes("linkToken") && fields.includes("inviteCode"),
     `room_join schema fields drifted: ${fields.join(", ")}`,
