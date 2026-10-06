@@ -27,9 +27,12 @@ import ProjectRoomKit
         }
         let auth = view.addItem(withTitle: "Sign in with browser…", action: #selector(RoomWindow.signIn), keyEquivalent: "")
         auth.target = room
+        let mac = view.addItem(withTitle: "My Mac…", action: #selector(RoomWindow.showMyMac), keyEquivalent: ",")
+        mac.target = room
         NSApp.mainMenu = menu
         room?.show()
     }
+    func applicationWillTerminate(_ notification: Notification) { room?.stopLocalTools() }
     @objc func openRoom() { room?.show() }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { room?.show(); return true }
     func application(_ application: NSApplication, open urls: [URL]) {

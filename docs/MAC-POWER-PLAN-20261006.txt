@@ -178,3 +178,23 @@ Browser documentation:
 https://developer.mozilla.org/en-US/docs/Web/API/File_System_API
 https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/getDisplayMedia
 https://developer.chrome.com/docs/extensions/develop/concepts/native-messaging
+
+
+LOCAL IMPLEMENTATION CHECKPOINT — OCTOBER 6
+
+The app now includes a native My Mac pane, session enable/pause and a bundled stdio
+MCP adapter. The app process owns a private Unix socket broker with peer UID and nonce
+validation; no TCP listener or web execution bridge. Five real tools provide status,
+UTF-8 read/versioned write, user-authority process execution and process-group stop.
+Exact mutations are privately journaled and synchronized before executing; prepared
+operations after restart refuse automatic replay. Web/account-bound enrollment and
+persistent grants have not been implemented, so this is explicitly local-owner scope.
+
+The standalone native acceptance executable passes six groups: file/grant/retry/restart,
+actual process/recorded exit, timeout and pause, explicit cancellation/output limit,
+real stdio MCP through the native broker, and authenticated IPC/revocation. All work
+uses synthetic /tmp fixtures. Native setup was inspected in the rebuilt app while
+paused; no operating-system privacy permissions or personal-file tasks were enabled.
+
+Next: owner-account device enrollment and outbound web jobs, coordinator/host adoption,
+app/screen actions, private account connectors, durable grants, distribution qualification.

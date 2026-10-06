@@ -34,3 +34,11 @@ Post-checkpoint checks: CI-mode static check passes (syntax, lint, secret scan,
 route docs, wiki/docs links and contrast; intentionally does not rerun unit suite).
 Exact-commit cold runtime-package check passes after updating its tool-count contract
 for the two new assistant tools. Whole-suite limitations above remain unresolved.
+
+Native execution follow-up: six standalone native acceptance groups pass against
+synthetic fixtures and actual processes/MCP/Unix IPC. Mac candidate rebuilt; My Mac
+pane inspected while paused. Relevant sign-in, magic-link failure, landing and guide
+checks pass (34/34) after repairing incomplete fake DOM and obsolete hero expectations.
+Human group/recovery + accessibility checks passed again (2/2); lint has zero errors.
+Whole-repository failures are not all resolved. No broad OS grants or remote machine
+control were enabled by this development work.

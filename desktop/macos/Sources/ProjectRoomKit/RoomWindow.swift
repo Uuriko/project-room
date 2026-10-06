@@ -20,6 +20,7 @@ public enum RoomLocation {
     public let webView: WKWebView
     public let origin: URL
     private let status = NSTextField(labelWithString: "Connecting…")
+    private var localTools: LocalToolsWindow?
     private var authentication: ASWebAuthenticationSession?
     private var wakeObserver: NSObjectProtocol?
     private var pendingDestination: URL?
@@ -55,7 +56,7 @@ public enum RoomLocation {
         window.contentView = container
         let bar = NSStackView()
         bar.orientation = .horizontal; bar.spacing = 8
-        for (title, action) in [("Back", #selector(back)), ("Reload", #selector(reload)), ("Go to…", #selector(goTo))] {
+        for (title, action) in [("Back", #selector(back)), ("Reload", #selector(reload)), ("Go to…", #selector(goTo)), ("My Mac", #selector(showMyMac))] {
             let button = NSButton(title: title, target: self, action: action)
             button.bezelStyle = .rounded; bar.addArrangedSubview(button)
         }
@@ -174,6 +175,13 @@ public enum RoomLocation {
         } catch { tell("Couldn’t reach Project Room to finish sign-in. Start again when connected.") }
     }
     public func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor { window }
+    @objc public func showMyMac() {
+        do { if localTools == nil { localTools = try LocalToolsWindow() }; localTools?.show() }
+        catch let failure as LocalToolFailure {
+            tell(failure.code == "mac_tools_already_running" ? "Another Project Room instance owns this Mac connection. Use its My Mac window, or quit it and try again." : "Local tools could not open. Check that Project Room can write its Application Support folder, then try again.")
+        } catch { tell("Local tools could not open. Try again after restarting Project Room.") }
+    }
+    public func stopLocalTools() { localTools?.stop() }
     private func tell(_ message: String) {
         status.stringValue = message
         let alert = NSAlert(); alert.messageText = "Project Room"; alert.informativeText = message; alert.addButton(withTitle: "OK")
