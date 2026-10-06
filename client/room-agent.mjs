@@ -74,10 +74,13 @@ async function scanForward(fetchPage, after, limit, latest) {
 async function scanBackward(fetchPage, after, end, limit) {
   // Walk 100-event windows from `end` (exclusive) down toward `after`,
   // newest windows first. Stops after `limit` messages or when the `after`
-  // bound is reached. Windows tile (after, end] with no gaps: each window is
-  // (lo, bound) with lo >= bound - 100, so fetchPage(lo, 100) covers it.
+  // bound is reached. Windows tile (after, end) with no gaps and no overlap:
+  // the first window keeps sequences strictly below `end` (end is exclusive),
+  // and each later window keeps its seam sequence (the previous window's lo)
+  // because fetchPage is after-exclusive — the seam belongs to exactly one
+  // window.
   const collected = [];
-  let bound = end, pages = 0;
+  let bound = end, pages = 0, first = true;
   while (collected.length < limit && bound > after && pages < MESSAGE_SCAN_PAGES) {
     const lo = Math.max(after, bound - MESSAGE_SCAN_PAGE);
     const page = await fetchPage(lo, MESSAGE_SCAN_PAGE);
@@ -85,10 +88,11 @@ async function scanBackward(fetchPage, after, end, limit) {
     const window = [];
     for (const item of page?.events ?? []) {
       if (!item || !Number.isSafeInteger(item.sequence)) continue;
-      if (item.sequence <= after || item.sequence >= bound) continue;
+      if (item.sequence <= after || (first ? item.sequence >= bound : item.sequence > bound)) continue;
       if (isPostedMessage(item)) window.push(item);
     }
     collected.unshift(...window);
+    first = false;
     bound = lo;
   }
   return { collected, reachedStart: bound <= after, capped: pages >= MESSAGE_SCAN_PAGES && bound > after };
