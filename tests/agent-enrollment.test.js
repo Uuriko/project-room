@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { RoomStore } from "../server/store.mjs";
+import { RoomStore, PILOT_LIMITS } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { auditRecovery } from "../server/recovery.mjs";
@@ -145,7 +145,7 @@ test("capacity limits never prevent ending active access and do not permit react
   const room = f.store.room.bind(f.store);
   // A synthetic capped view isolates both limits; it is not a recovery fixture.
   f.store.room = id => { const result = room(id); return { sequence: Math.max(10000, result.sequence),
-    state: { ...result.state, capacityFixture: "x".repeat(4 * 1024 * 1024) } }; };
+    state: { ...result.state, capacityFixture: "x".repeat(PILOT_LIMITS.projectionBytes) } }; };
   const request = { action: "disconnect", requestId: randomUUID(), memberId: f.request.memberId,
     expectedOwnerRevision: 0, expectedGeneration: 1, expectedMemberRevision: 0 };
   assert.equal(f.apply(request).connection.status, "disconnected");
