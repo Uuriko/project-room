@@ -63,7 +63,8 @@ test("every OpenAPI path is a route template the server serves, and every served
 });
 
 test("documented error categories and codes exist in the implementation", () => {
-  const categories = [...taxonomy.matchAll(/^\| `([a-z_]+)` \|/gm)].map(m => m[1]);
+  const categoryTable = taxonomy.split("\n## ")[0];
+  const categories = [...categoryTable.matchAll(/^\| `([a-z_]+)` \|/gm)].map(m => m[1]);
   assert.deepEqual(categories.sort(), ["access", "conflict", "input", "internal", "not_found", "rate_limited", "unavailable"].sort());
   for (const category of categories) assert.ok(agentError.includes(`"${category}"`), `category ${category} missing from src/agent-error.mjs`);
   for (const code of ["session_claimed", "idempotency_conflict", "command_rejected", "halt_active"])
