@@ -344,3 +344,48 @@ test("PR link and event roll back together, and expiry or archived rooms cannot 
   assert.deepEqual(store.workClaims.get("commons", "atomic"), claimed);
   assert.deepEqual(claimEvents(store), eventsBefore);
 });
+
+// Authoring gate: re-linking a settled PR URL in a new claim round must
+// reset the link for re-polling. Round 1's "closed" outcome belongs to
+// round 1; a silent no-op would leave pullRequestDue false forever, so the
+// reopened PR is never re-polled and the new round can never settle via
+// it. No existing pr-link test covers a second round re-linking the same URL.
+test("re-linking a settled PR URL in a new round resets the link for re-polling", async t => {
+  const { store, call } = await room(t);
+  await call("create", null, { id: "relink-pr", title: "relink" });
+  const claimed = (await call("claim", "relink-pr", {})).value;
+  const linked = (await call("update", "relink-pr", {
+    appendPullRequest: URL_A,
+    expectedClaimedAt: claimed.claimedAt,
+    expectedHistoryLength: claimed.history.length,
+  })).value;
+  assert.equal(linked.pullRequests.length, 1);
+  assert.equal(linked.pullRequest.outcome, null);
+
+  // Round 1 ends: the PR closes unmerged, the claim is released (pr_closed).
+  applyPullRequestWebhook(store, {
+    action: "closed",
+    pull_request: { html_url: URL_A, merged: false, state: "closed" },
+  });
+  const released = store.workClaims.get("commons", "relink-pr");
+  assert.equal(released.state, "unclaimed");
+  assert.equal(released.pullRequests[0].outcome, "closed");
+
+  // Round 2: a new claim round re-links the same PR (it was reopened).
+  const round2 = (await call("claim", "relink-pr", {})).value;
+  assert.notEqual(round2.claimedAt, claimed.claimedAt);
+  const relinked = (await call("update", "relink-pr", {
+    appendPullRequest: URL_A,
+    expectedClaimedAt: round2.claimedAt,
+    expectedHistoryLength: round2.history.length,
+  })).value;
+  assert.equal(relinked.pullRequests.length, 1);
+  assert.equal(relinked.pullRequests[0].url, URL_A);
+  assert.equal(relinked.pullRequests[0].outcome, null,
+    "a re-link in a new round must drop the previous round's settled outcome so the poller re-reads the PR");
+  assert.equal(relinked.pullRequest.url, URL_A);
+  assert.equal(relinked.pullRequest.outcome, null);
+  assert.equal(relinked.history.at(-1).action, "pr_linked");
+  assert.match(relinked.history.at(-1).note, /pull\/7/);
+  assert.deepEqual(store.workClaims.get("commons", "relink-pr").pullRequests[0].outcome, null);
+});
