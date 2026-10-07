@@ -24,9 +24,10 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 // Modules other batches own, plus modules a script or the shipped asset
 // set loads that this walk would otherwise call unreachable.
 export const KEEP = [
-  // Other batches will wire these.
+  // Other batches will wire these. (src/design-tokens.js was dropped from
+  // this list 2026-10-06: server/receipts-page.mjs imports it now, so the
+  // walk reaches it from server/http.mjs.)
   "server/receipt-standard.mjs",
-  "src/design-tokens.js",
   // Scripts and workflows load these directly.
   "server/backup.mjs",
   "server/recovery.mjs",

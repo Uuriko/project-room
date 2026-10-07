@@ -19,30 +19,6 @@ class DeclarationError extends Error {
 const fail = (code, message) => { throw new DeclarationError(code, message); };
 const check = (condition, message, code = "invalid_input") => { if (!condition) fail(code, message); };
 
-export const workDeclarationSchema = `
-  CREATE TABLE IF NOT EXISTS seeker_declarations (
-    identity_id TEXT PRIMARY KEY,
-    motives TEXT NOT NULL,
-    capabilities TEXT NOT NULL,
-    appetite_minutes INTEGER NOT NULL,
-    trust_tier INTEGER NOT NULL DEFAULT 0,
-    created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
-  );
-  CREATE TABLE IF NOT EXISTS work_offer_terms (
-    work_id TEXT PRIMARY KEY,
-    room_id TEXT NOT NULL,
-    reward_kind TEXT NOT NULL,
-    reward_amount INTEGER NOT NULL DEFAULT 0,
-    requires TEXT NOT NULL DEFAULT '[]',
-    size_minutes INTEGER,
-    trust_floor INTEGER,
-    deadline TEXT,
-    updated_at INTEGER NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS work_offer_terms_room ON work_offer_terms(room_id, reward_kind);
-`;
-
 const asList = value => {
   if (Array.isArray(value)) return value;
   if (typeof value !== "string" || value.trim() === "") return [];

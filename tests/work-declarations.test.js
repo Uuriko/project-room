@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import * as declarations from "../server/work-declarations.mjs";
 import {
-  workDeclarationSchema, rowToSeeker, seekerToRow, rowToOpening, openingsFromRows, isMatchable,
+  rowToSeeker, seekerToRow, rowToOpening, openingsFromRows, isMatchable,
 } from "../server/work-declarations.mjs";
 import { declareSeeker, matchWork } from "../server/work-matchmaking.mjs";
 
@@ -17,13 +18,12 @@ const workRow = (over = {}) => ({
   requires: JSON.stringify(["javascript"]), size_minutes: 60, trust_floor: 0, deadline: null, ...over,
 });
 
-test("the schema declares both sides and indexes the board read", () => {
-  assert.match(workDeclarationSchema, /CREATE TABLE IF NOT EXISTS seeker_declarations/);
-  assert.match(workDeclarationSchema, /CREATE TABLE IF NOT EXISTS work_offer_terms/);
-  assert.match(workDeclarationSchema, /work_offer_terms_room/);
-  // size and trust floor stay nullable: undeclared work must keep working
-  assert.match(workDeclarationSchema, /size_minutes INTEGER,/);
-  assert.match(workDeclarationSchema, /trust_floor INTEGER,/);
+test("no dead schema export: declarations live in the in-memory registry, not sqlite", () => {
+  // The declarations DDL was retired: nothing applied it, and the row
+  // mappers below are the only live surface. This test fails if the dead
+  // export (or a CREATE TABLE for it) comes back.
+  assert.ok(!("workDeclarationSchema" in declarations), "workDeclarationSchema must stay deleted");
+  assert.ok(!Object.keys(declarations).some(k => /schema/i.test(k)), "no schema exports at all");
 });
 
 test("a stored declaration round-trips into the seeker the filter takes", () => {
