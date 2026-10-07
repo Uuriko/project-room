@@ -156,6 +156,25 @@ function ackedWakes(store, roomId, memberId, flags) {
   return wakes;
 }
 
+// Reply requests resolve their context message by id. Building the full id
+// map cost ~22ms per poll on a 10k-message room, and requests are usually
+// absent — so the lookup indexes only the ids a request can reference, and
+// builds nothing when there are none (#1872's syncMessageRows, same shape).
+// Exported so tests can pin the no-scan contract without duplicating logic.
+export function requestContextLookup(messages, requests) {
+  const ids = new Set();
+  for (const request of Object.values(requests ?? {})) {
+    if (typeof request?.contextMessageId === "string") ids.add(request.contextMessageId);
+    if (typeof request?.id === "string") ids.add(request.id);
+  }
+  if (ids.size === 0) return () => undefined;
+  const byId = new Map();
+  for (const message of messages ?? []) {
+    if (message && ids.has(message.id)) byId.set(message.id, message);
+  }
+  return id => byId.get(id);
+}
+
 function projectRoom(store, roomId, memberId, identityId) {
   const flags = { mentions: false, peerDms: false, claims: false, invites: false, accessRequests: false, wakes: false };
   const room = store.room(roomId);
@@ -168,11 +187,11 @@ function projectRoom(store, roomId, memberId, identityId) {
   const items = [];
   const requests = state.replyRequests ?? {};
   const messages = state.messages ?? [];
-  const byId = new Map(messages.map(message => [message.id, message]));
+  const contextById = requestContextLookup(messages, requests);
 
   for (const request of Object.values(requests)) {
     if (!request || request.recipientId !== memberId) continue;
-    const latest = byId.get(request.contextMessageId) ?? byId.get(request.id);
+    const latest = contextById(request.contextMessageId) ?? contextById(request.id);
     // Same rule as reply-context (server/reply-requests.mjs): a private message is
     // visible only to its author and recipient, so never echo it as the title.
     const context = latest?.toMemberId && latest.authorId !== memberId && latest.toMemberId !== memberId ? null : latest;

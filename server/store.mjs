@@ -2458,8 +2458,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // their join event. Callers already hold a transaction.
   // Reads only the authority and history fields, not the full projection, so
   // event polling stays cheap.
-  historyFloor(roomId, memberId, headSequence = null) {
-    const { sequence, ownerId, members } = this.roomAuthority(roomId);
+  historyFloor(roomId, memberId, headSequence = null, authority = null) {
+    // C2 read-path: callers that already hold the authority (eventsAfter)
+    // pass it in; otherwise this re-fetches it (a full-projection JSON
+    // parse, ~22-47ms on a 10k-message room) on every page.
+    const { sequence, ownerId, members } = authority ?? this.roomAuthority(roomId);
     const row = this.db.prepare("SELECT json_extract(projection,'$.room.historyVisibility') AS visibility, json_extract(projection,'$.room.historyDefaultsVersion') AS defaults FROM rooms WHERE id=?").get(roomId);
     let visibility = null;
     try { visibility = row?.visibility ? JSON.parse(row.visibility) : null; } catch { visibility = null; }
@@ -4103,10 +4106,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   messageThread(token, roomId, messageId, expectedSessionBinding = null) {
     return this.readTransaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
-      const { members } = this.roomAuthority(roomId);
+      const authority = this.roomAuthority(roomId);
+      const { members } = authority;
       const room = this.room(roomId);
       // PRIV-2: a since_join reader sees no thread rooted before their join.
-      const floor = this.historyFloor(roomId, auth.member.id);
+      const floor = this.historyFloor(roomId, auth.member.id, null, authority);
       const root = room.state.messages.find(m => m.id === messageId);
       if (!root || !messageInHistory(root, floor)) fail(404, "message_not_found", "Message not found");
       const byParent = new Map();
@@ -4315,7 +4319,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const identityId = this.bonds.identityForMember(roomId, viewerId);
       const isOwner = viewerId === authority.ownerId;
       // PRIV-2: since_join readers page past events from before their join.
-      const floor = this.historyFloor(roomId, viewerId, sequence);
+      const floor = this.historyFloor(roomId, viewerId, sequence, authority);
       const floorMessages = floor ? indexHistoryMessages(this.room(roomId).state.messages) : null;
       // SEC-19: thunk keeps the zero-decode polling optimization: the full
       // projection only decodes if the page actually holds a follow-up event.
@@ -4494,7 +4498,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const isOwner = auth.member.id === room.state.room.ownerId;
       // Derive continuation from scanned rows before removing private events:
       // an invisible page must still progress within its frozen horizon.
-      const floor = this.historyFloor(roomId, auth.member.id, room.sequence); // PRIV-2
+      // The authority is the live projection's own ownerId/members at its
+      // sequence: exactly what roomAuthority would read back.
+      const floor = this.historyFloor(roomId, auth.member.id, room.sequence, {
+        sequence: room.sequence,
+        ownerId: room.state.room?.ownerId ?? null,
+        members: room.state.members ?? {},
+      }); // PRIV-2
       const floorMessages = floor ? indexHistoryMessages(room.state.messages) : null;
       const dmVisible = dmEventVisibility(auth.member.id, room.state.messages, brief.history.items); // SEC-19
       brief.history.items = brief.history.items.filter(row => rowInHistory(row, floor, floorMessages) && dmVisible(row.event)
