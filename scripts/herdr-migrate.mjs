@@ -51,7 +51,7 @@
 
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
-import { readFileSync, appendFileSync, mkdirSync, existsSync } from "node:fs";
+import { readFileSync, appendFileSync, mkdirSync } from "node:fs";
 
 const TOOL_VERSION = "1";
 
@@ -846,22 +846,6 @@ async function scanRoom({ api, roomId, flagParsed, markers, hostClasses, hostCla
   return { claims, classified, flagCoversRoom };
 }
 
-function classifyForExecute({ claim, allClaims, roomId, flagParsed, markers, hostClasses, hostClassesProvided, bridge, nowMs }) {
-  const roomMarkers = (markers && typeof markers === "object" ? markers[roomId] : null) ?? {};
-  const optin = resolveOptinMarker(claim, roomMarkers);
-  return classifyClaim(claim, {
-    flagCoversRoom: effectiveFlagForRoom(flagParsed, roomId),
-    optin,
-    bridge,
-    bridgeRequired: true,
-    hostClass: hostClasses?.[claim.owner] ?? null,
-    hostClassInputProvided: true, // execute mode always enforces host class
-    allClaims,
-    existingHerdrSession: false,
-    nowMs,
-  });
-}
-
 // ---------------------------------------------------------------------------
 // Commands
 // ---------------------------------------------------------------------------
@@ -930,7 +914,6 @@ async function cmdPlan(flags, deps) {
     if (!linkedByRoom.has(roomId)) linkedByRoom.set(roomId, linkedClaimIds(readJournal(journalPath), roomId));
     return linkedByRoom.get(roomId);
   };
-  let total = 0;
   for (const roomId of flags.room) {
     const { classified } = await scanRoom({
       api, roomId, flagParsed, markers, hostClasses,
@@ -939,7 +922,6 @@ async function cmdPlan(flags, deps) {
       linkedClaims: linkedFor(roomId),
     });
     const { plan, skipped } = buildPlan(classified, { limit: flags.limit ?? null });
-    total += plan.length;
     if (!flags.execute) {
       const report = buildScanReport({ command: "plan", roomId, dryRun: true, eligible: plan, skipped });
       emit(flags, report, (r) => [
