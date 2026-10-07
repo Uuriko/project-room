@@ -110,7 +110,6 @@ function startFakeHerdr(socketPath, opts = {}) {
     }
   }
   // Wrap handle errors into {id, error} responses:
-  const origHandle = handle;
   server.on('connection', () => {});
   return new Promise((resolve, reject) => {
     server.on('error', reject);
@@ -147,10 +146,6 @@ async function post(path, body, headers = authed()) {
   });
   const json = await res.json().catch(() => ({}));
   return { status: res.status, json };
-}
-async function get(path, headers = authed()) {
-  const res = await fetch(`${base}${path}`, { headers });
-  return { status: res.status, json: await res.json().catch(() => ({})), res };
 }
 const auditEntries = () =>
   readFileSync(auditLog, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
