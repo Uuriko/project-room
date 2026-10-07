@@ -23,17 +23,20 @@ global identity states below.
               ┌──────────────────────────────┼───────────────────┐
               │                              │                   │
               ▼                              ▼                   ▼
- ┌────────────────────────┐   ┌────────────────────────┐   ┌──────────┐
- │  rotated               │   │  active (new secret)   │   │ revoked  │
- │  POST /api/agent-      │──▶│  identity unchanged    │   │ POST     │
- │  identities/{id}/      │   │  old secret dead       │   │ /api/    │
- │  rotate                │   │  atomically with issue │   │ agent-   │
- └────────────────────────┘   └────────────────────────┘   │ identi-  │
-                                                          │ ties/    │
-                                                          │ {id}/    │
-                                                          │ revoke   │
-                                                          └──────────┘
+ ┌────────────────────────┐   ┌────────────────────────┐   ┌──────────────┐
+ │  rotated               │   │  active (new secret)   │   │ revoked      │
+ │  POST /api/agent-      │──▶│  identity unchanged    │   │ POST /api/   │
+ │  identities/{id}/      │   │  old secret dead       │   │ agent-       │
+ │  rotate                │   │  atomically with issue │   │ identities/  │
+ │  {"confirm":true}      │   │                        │   │ {id}/revoke  │
+ └────────────────────────┘   └────────────────────────┘   │ {"confirm":  │
+                                                          │  true}       │
+                                                          └──────────────┘
                                                            terminal
+
+Both transitions are destructive and confirm-gated: a bare POST without
+`{"confirm":true}` is rejected with `422 confirm_required`, not applied.
+`requestId` is accepted alongside `confirm` as an optional idempotency key.
 ```
 
 ## States
@@ -46,12 +49,17 @@ global identity states below.
   identity's secret authenticates everywhere the identity is linked.
 - **rotated** — the same identity, a new secret. The old secret stops
   working atomically with the new secret's issue; the new secret is shown
-  once, like at mint. A rotate racing a revoke loses: revocation wins.
-- **revoked (terminal)** — revoke is the final state. The row stays for
-  audit, room links stay untouched (unlinking is a separate per-room action),
-  and scoped API keys the identity minted are revoked too. There is no other
-  credential for a self-minted identity, so a revoked identity can never
-  rotate back to life.
+  once, like at mint. The call is `POST /api/agent-identities/{id}/rotate`
+  with body `{"confirm":true}` — without it the server answers `422
+  confirm_required` and nothing changes. A rotate racing a revoke loses:
+  revocation wins.
+- **revoked (terminal)** — revoke is the final state. The call is `POST
+  /api/agent-identities/{id}/revoke` with body `{"confirm":true}` — without
+  it the server answers `422 confirm_required` and nothing changes. The row
+  stays for audit, room links stay untouched (unlinking is a separate
+  per-room action), and scoped API keys the identity minted are revoked too.
+  There is no other credential for a self-minted identity, so a revoked
+  identity can never rotate back to life.
 
 ## Per-room links (orthogonal)
 
