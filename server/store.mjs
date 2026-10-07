@@ -3639,7 +3639,16 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (!member || member.active === false) fail(403, "access_denied", "Room member required");
       if (member.kind !== "agent") fail(403, "access_denied", "Join sessions are for agent joins");
       const expiresAt = this.now() + 8 * 3600000;
-      const token = this.insertCredential(roomId, memberId, "session", null, expiresAt);
+      // #1522: bind the session to the identity's current secret hash when
+      // the member is identity-linked, so rotating or revoking the secret
+      // invalidates the session — the same binding createAgentSession uses
+      // (RC-2026-09-23-106). Members with no identity link keep the legacy
+      // null binding.
+      const linkRow = this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?").get(roomId, memberId);
+      const secretRow = linkRow
+        ? this.db.prepare("SELECT secret_hash AS secretHash FROM agent_identities WHERE identity_id=?").get(linkRow.identityId)
+        : null;
+      const token = this.insertCredential(roomId, memberId, "session", null, expiresAt, secretRow?.secretHash ?? null);
       return { token, expiresAt };
     });
   }
