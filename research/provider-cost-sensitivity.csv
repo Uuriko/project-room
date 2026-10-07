@@ -1,0 +1,41 @@
+input,change,margin_usd,margin_delta_usd,cost_per_job_usd,cost_per_job_delta_pct
+"electricity (wall power W)",-50%,37.97,2.43,0.0011,-3.9
+"electricity (wall power W)",+50%,33.11,-2.43,0.0012,3.9
+"electricity ($/kWh)",-50%,37.97,2.43,0.0011,-3.9
+"electricity ($/kWh)",+50%,33.11,-2.43,0.0012,3.9
+"tokens per job",-50%,35.54,0,0.0006,-50
+"tokens per job",+50%,35.54,0,0.0017,50
+"throughput (tok/s)",-50%,35.54,0,0.0022,100
+"throughput (tok/s)",+50%,35.54,0,0.0007,-33.3
+"orchestration overhead (ms/job)",-50%,35.54,0,0.0011,0
+"orchestration overhead (ms/job)",+50%,35.54,0,0.0011,0
+"jitter (p99/p50)",-50%,35.54,0,0.001,-12.8
+"jitter (p99/p50)",+50%,35.54,0,0.0012,5.1
+"serving hours/day",-50%,66.77,31.23,0.0011,0
+"serving hours/day",+50%,4.31,-31.23,0.0011,0
+"hardware amortization ($/h)",-50%,64.34,28.8,0.0006,-46.1
+"hardware amortization ($/h)",+50%,6.74,-28.8,0.0016,46.1
+"revenue ($/mo)",-50%,-13.46,-49,0.0011,0
+"revenue ($/mo)",+50%,84.54,49,0.0011,0
+
+rank,input,max_abs_margin_delta_usd
+1,"revenue ($/mo)",49.00
+2,"serving hours/day",31.23
+3,"hardware amortization ($/h)",28.80
+4,"electricity (wall power W)",2.43
+5,"electricity ($/kWh)",2.43
+6,"tokens per job",0.00
+7,"throughput (tok/s)",0.00
+8,"orchestration overhead (ms/job)",0.00
+9,"jitter (p99/p50)",0.00
+
+rank,input,max_abs_cost_per_job_delta_pct
+1,"throughput (tok/s)",100.0
+2,"tokens per job",50.0
+3,"hardware amortization ($/h)",46.1
+4,"jitter (p99/p50)",12.8
+5,"electricity (wall power W)",3.9
+6,"electricity ($/kWh)",3.9
+7,"orchestration overhead (ms/job)",0.0
+8,"serving hours/day",0.0
+9,"revenue ($/mo)",0.0
