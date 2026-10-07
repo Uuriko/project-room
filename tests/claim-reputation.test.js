@@ -394,6 +394,9 @@ test("ensureClaimReputationSchema creates the journal table", () => {
 function eventDb() {
   const db = new DatabaseSync(":memory:");
   db.exec("CREATE TABLE events (room_id TEXT, sequence INTEGER, id TEXT, body TEXT)");
+  // Mirrors production: the store maintains this expression index on every
+  // eager open, and the journal's per-room read pins it with INDEXED BY.
+  db.exec("CREATE INDEX events_room_type ON events(room_id, json_extract(body, '$.type'))");
   return db;
 }
 

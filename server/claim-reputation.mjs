@@ -98,6 +98,15 @@ CREATE INDEX IF NOT EXISTS claim_reputation_signals_agent ON claim_reputation_si
 
 export function ensureClaimReputationSchema(db) {
   db.exec(CLAIM_REPUTATION_SCHEMA);
+  // The per-room journal read pins events_room_type with INDEXED BY; ensure
+  // it here too, because the ops sync opens raw DB handles that bypass the
+  // store's eager-open index creation. Guarded: some callers ensure the
+  // journal schema on handles without an events table.
+  const hasEvents = db.prepare(
+    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='events'").get();
+  if (hasEvents) {
+    db.exec("CREATE INDEX IF NOT EXISTS events_room_type ON events(room_id, json_extract(body, '$.type'))");
+  }
 }
 
 const laneOf = value => typeof value === "string" && value.length > 0 ? value : null;
@@ -323,6 +332,19 @@ function parseEventRow(row) {
   }
 }
 
+// Room-scoped read of work_claim.updated events for the reputation fold.
+// The room_id + type equality rides the events_room_type expression index
+// (pinned with INDEXED BY: without it the planner prefers the room_id PK
+// slice and re-scans every event in the room), so the all-rooms fold
+// iterates rooms instead of scanning the events table with a json_extract
+// per row plus a global sort.
+export const CLAIM_UPDATED_EVENTS_SQL = `SELECT room_id, sequence, body FROM events INDEXED BY events_room_type
+   WHERE room_id=? AND json_extract(body,'$.type')='work_claim.updated'
+   ORDER BY sequence`;
+export function readRoomClaimUpdatedEvents(db, roomId) {
+  return db.prepare(CLAIM_UPDATED_EVENTS_SQL).all(roomId);
+}
+
 // Read work_claim.updated events from the durable events table and fold
 // them into the claim-reputation signal journal. Idempotent: re-running
 // changes nothing. The journal is the analytics surface the P1 measurement
@@ -340,16 +362,21 @@ export function syncClaimReputationJournal(db, { roomId: requestedRoomId = null 
   const legacyRowsRemoved = db.prepare(`DELETE FROM claim_reputation_signals WHERE ${legacyWhere}`).run().changes;
   const roomId = legacyRowsRemoved > 0 ? null : requestedRoomId;
   const widenedToAllRooms = Boolean(requestedRoomId) && roomId === null;
-  const rows = db.prepare(
-    `SELECT room_id, sequence, body FROM events
-     WHERE json_extract(body,'$.type')='work_claim.updated'
-     ${roomId ? "AND room_id=?" : ""}
-     ORDER BY sequence`
-  ).all(...(roomId ? [roomId] : []));
+  // Per-room reads: the fold below groups by room anyway (claim state is
+  // keyed by roomId), so the global sequence order of the old all-rooms
+  // query was irrelevant — and it scanned the whole events table. Each
+  // room-scoped read rides the events_room_type index instead. The room list
+  // comes from the events PK (covering index scan, no body reads); rooms
+  // without events cannot produce signals.
+  const targetRooms = roomId ? [roomId]
+    : db.prepare('SELECT DISTINCT room_id AS id FROM events ORDER BY id').all().map(row => row.id);
+  const readRoom = db.prepare(CLAIM_UPDATED_EVENTS_SQL);
   const parsed = [];
-  for (const row of rows) {
-    const event = parseEventRow(row);
-    if (event) parsed.push(event);
+  for (const targetRoomId of targetRooms) {
+    for (const row of readRoom.all(targetRoomId)) {
+      const event = parseEventRow(row);
+      if (event) parsed.push(event);
+    }
   }
   // Fold each room on its own: claim state is keyed by (roomId, claimId),
   // so the same claimId in two rooms never shares a position or a cap count.

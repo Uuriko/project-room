@@ -2435,7 +2435,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.db.exec("CREATE TABLE IF NOT EXISTS projection_checkpoints (room_id TEXT PRIMARY KEY REFERENCES rooms(id), sequence INTEGER NOT NULL, projection TEXT NOT NULL)");
       // The expression index cannot yield mid-build. Deferred wakes and the
       // integrity cron skip it; eager opens still create it inside this transaction.
-      if (ensureIndex) this.ensureEventTypeIndex();
+      if (ensureIndex) { this.ensureEventTypeIndex(); this.ensureEventDmIndex(); }
       if (upgradeV1) {
         const rooms = this.db.prepare("SELECT id, sequence, projection FROM rooms ORDER BY id").all();
         this.replayProvenance(rooms, { upgradeV1: true });
@@ -2471,6 +2471,16 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // Additive. Expression indexes do not fire writer triggers. Durable Object
     // SQL rejects SAVEPOINT, so this runs inside the open transaction itself.
     this.db.exec("CREATE INDEX IF NOT EXISTS events_room_type ON events(room_id, json_extract(body, '$.type'))");
+  }
+  ensureEventDmIndex() {
+    // Additive. Partial expression index for the needs-me DM poll
+    // (server/needs-me.mjs roomDmsOf): DMs are a sparse subset of
+    // message.posted events, so the poll runs at O(matching DMs) instead of
+    // scanning the room's event tail. Same lifecycle as ensureEventTypeIndex;
+    // the expression text must match the query's json_extract calls exactly.
+    this.db.exec(`CREATE INDEX IF NOT EXISTS events_dm_to_member
+      ON events(room_id, json_extract(body,'$.data.toMemberId'), sequence)
+      WHERE json_extract(body,'$.type')='message.posted'`);
   }
   roomsNeedingProvenanceReplay() {
     const ids = this.db.prepare(`
