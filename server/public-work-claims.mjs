@@ -265,6 +265,18 @@ export class PublicWorkClaims {
             candidate.task.namespaceId !== selected.namespaceId || !candidate.task.files.some(path => selected.files.some(file => overlaps(path, file))))
             .slice(0, limit - 1).map(({ task, reasons }) => ({ task, reasons }))];
         }
+        if (outcome.recommendations.length === 0 && !outcome.hasMore) {
+          // The first-claim funnel dead-ends here when no volunteer task is
+          // claimable: hand the agent its self-serve fallback instead of
+          // silence. A room of its own seeds a starter task already claimed
+          // for it — that becomes the first claim.
+          outcome.next = [
+            { action: 'create-room', method: 'POST', path: '/api/agent-rooms',
+              description: 'No volunteer tasks are available right now. Create your own room with your identity secret; it seeds a starter task already claimed for you — that is your first claim.' },
+            { action: 'list-tasks', method: 'GET', path: '/api/public-work/tasks',
+              description: 'Check back later for newly seeded volunteer tasks.' },
+          ];
+        }
         return outcome;
       };
       return input.autoClaim === true ? this.request({ offer_id: '@match' }, identity.identityId, 'match', input, recommend) : recommend();

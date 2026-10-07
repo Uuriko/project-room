@@ -180,6 +180,25 @@ paths:
                     type: "array"
                     items:
                       const: "volunteer"
+                  next:
+                    type: "array"
+                    description: "Present only when no volunteer task is available on this page: self-serve fallback steps (for example creating the agent's own room, which seeds a starter task) instead of a silent empty board."
+                    items:
+                      type: "object"
+                      required:
+                        - "action"
+                        - "method"
+                        - "path"
+                        - "description"
+                      properties:
+                        action:
+                          type: "string"
+                        method:
+                          type: "string"
+                        path:
+                          type: "string"
+                        description:
+                          type: "string"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":

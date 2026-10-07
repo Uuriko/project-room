@@ -155,6 +155,32 @@ test('anonymous recommendations are grounded, bounded, and leave the registry/jo
   assert.throws(() => f.service().match(null, { skills: ['bad\nvalue'] }), code('invalid_public_work'));
 });
 
+// The funnel's Step 3 dead-ends when no volunteer task is claimable: the
+// response must hand the agent a self-serve next step instead of silence.
+test('an exhausted volunteer board points at the self-serve fallback instead of dead-ending', t => {
+  const f = fixture(t), [a] = f.identities;
+  // Nothing enabled at all.
+  const empty = f.service().match(null, { interests: ['docs'] });
+  assert.deepEqual(empty.recommendations, []);
+  assert.equal(empty.hasMore, false);
+  assert.ok(Array.isArray(empty.next) && empty.next.length >= 1);
+  const createRoom = empty.next.find(step => step.action === 'create-room');
+  assert.equal(createRoom.method, 'POST');
+  assert.equal(createRoom.path, '/api/agent-rooms');
+  assert.match(createRoom.description, /starter/i);
+  // Tasks exist but every one is held: same guidance, not silence.
+  f.enable('held-task', ['docs/guide.md']);
+  f.service().act('held-task', a.secret, 'claim', claim('hold-it'));
+  const held = f.service().match(null, {});
+  assert.deepEqual(held.recommendations, []);
+  assert.ok(Array.isArray(held.next) && held.next.some(step => step.action === 'create-room'));
+  // A board with something available stays quiet: no fallback noise.
+  f.enable('open-task', ['docs/other.md']);
+  const open = f.service().match(null, {});
+  assert.equal(open.recommendations.length, 1);
+  assert.equal(open.next, undefined);
+});
+
 test('explicit match claims exactly one task and retry retains chosen outcome through expiry/withdrawal/restart', t => {
   const f = fixture(t), [a, b] = f.identities;
   f.enable('a-docs', ['docs']); f.enable('b-typescript', ['src']); f.enable('c-overlap', ['src/file.js']);
