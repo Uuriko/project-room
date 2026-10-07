@@ -1,5 +1,6 @@
-// One read for the landing path. Prints four identities and does not post,
-// claim, merge, or deploy. A chat line is not one of these facts.
+// One read for the landing path. Prints four identities and, when
+// ROOM_AGENT_CONFIG is set, lease holder and expiry for touched paths.
+// Does not post, claim, merge, deploy, or release a lease. A chat line is not one of these facts.
 import { spawnSync } from "node:child_process";
 
 const SHA = /^[0-9a-f]{40}$/;
@@ -109,12 +110,42 @@ function reviewBind(pr, localHead, localPatchId, execImpl, mainSha) {
   };
 }
 
+const LIVE_LEASE = new Set(["claimed", "in_progress", "blocked"]);
+
+function claimFiles(row) {
+  if (!Array.isArray(row?.files)) return [];
+  return row.files.map(file => typeof file === "string" ? file : file?.path).filter(path => typeof path === "string" && path.length > 0);
+}
+
+export function pathLeases(claims, paths, nowMs = Date.now()) {
+  if (!claims || claims.truncated === true || !Array.isArray(claims.claims)) {
+    return { unavailable: "claims_truncated", paths: [] };
+  }
+  const wanted = [...new Set(paths.filter(path => typeof path === "string" && path.length > 0))].sort();
+  return {
+    unavailable: false,
+    paths: wanted.map(path => ({
+      path,
+      holders: claims.claims.filter(row => LIVE_LEASE.has(row?.state) && claimFiles(row).includes(path)).map(row => ({
+        claimId: typeof row.id === "string" ? row.id : null,
+        owner: typeof row.owner === "string" ? row.owner : null,
+        leaseExpiresAt: typeof row.leaseExpiresAt === "string" ? row.leaseExpiresAt : null,
+        expired: typeof row.leaseExpiresAt === "string" && Number.isFinite(Date.parse(row.leaseExpiresAt))
+          ? Date.parse(row.leaseExpiresAt) <= nowMs
+          : null,
+      })),
+    })),
+  };
+}
+
 export async function landingFacts({
   fetchImpl = fetch,
   execImpl = defaultExec,
   origin = "https://room.trydemigod.com",
   pr = null,
   ghImpl = null,
+  claimsImpl = null,
+  nowMs = Date.now(),
 } = {}) {
   const localHead = textOf(execImpl, ["rev-parse", "HEAD"]);
   const mainSha = textOf(execImpl, ["rev-parse", "origin/main"]);
@@ -164,6 +195,15 @@ export async function landingFacts({
     if (!ghImpl) facts.pullRequest = { unavailable: true };
     else facts.pullRequest = reviewBind(await ghImpl(pr), localHead, patchId, execImpl, mainSha);
   }
+  if (claimsImpl) {
+    const names = textOf(execImpl, ["diff", "--name-only", `${mainSha}...${localHead}`]).split("\n").filter(Boolean);
+    facts.touchedPaths = names;
+    try {
+      facts.pathLeases = pathLeases(await claimsImpl(), names, nowMs);
+    } catch {
+      facts.pathLeases = { unavailable: "claims_unreadable", paths: [] };
+    }
+  }
   if (JSON.stringify(facts).includes("pri_")) {
     const error = new Error("secret_in_plan");
     error.code = "secret_in_plan";
@@ -181,24 +221,63 @@ function argPr(argv) {
   return null;
 }
 
+async function roomClaims() {
+  const { readFileSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const raw = JSON.parse(readFileSync(join(process.env.ROOM_AGENT_CONFIG, "connection.json"), "utf8"));
+  if (typeof raw.token !== "string" || typeof raw.origin !== "string" || typeof raw.roomId !== "string") {
+    const error = new Error("claims_unreadable");
+    error.code = "claims_unreadable";
+    throw error;
+  }
+  const claims = [];
+  let cursor = "";
+  for (let page = 0; page < 4; page++) {
+    const url = new URL(`/api/rooms/${encodeURIComponent(raw.roomId)}/work-claims`, raw.origin);
+    url.searchParams.set("limit", "50");
+    if (cursor) url.searchParams.set("cursor", cursor);
+    const response = await fetch(url, { headers: { authorization: `Bearer ${raw.token}` } });
+    if (!response.ok) {
+      const error = new Error("claims_unreadable");
+      error.code = "claims_unreadable";
+      throw error;
+    }
+    const body = await response.json();
+    if (!Array.isArray(body.claims)) {
+      const error = new Error("claims_unreadable");
+      error.code = "claims_unreadable";
+      throw error;
+    }
+    claims.push(...body.claims);
+    if (!body.hasMore) return { claims, truncated: false };
+    if (page === 3 || typeof body.nextCursor !== "string" || !body.nextCursor) return { claims, truncated: true };
+    cursor = body.nextCursor;
+  }
+  return { claims, truncated: true };
+}
+
 if (import.meta.url === `file://${process.argv[1]}`) {
   const parsed = argPr(process.argv);
   if (!parsed) {
     console.error("Usage: node scripts/landing-facts.mjs [facts] [--pr N]");
     process.exitCode = 2;
   } else {
-    landingFacts({ pr: parsed.pr, ghImpl: parsed.pr == null ? null : async (number) => {
-      const result = spawnSync("gh", ["pr", "view", String(number), "--json", "number,headRefOid,reviewDecision,author,reviews"], { encoding: "utf8" });
-      if (result.status !== 0) {
-        const error = new Error("gh_failed");
-        error.code = "gh_failed";
-        throw error;
-      }
-      const pr = JSON.parse(result.stdout);
-      const rest = spawnSync("gh", ["api", `repos/{owner}/{repo}/pulls/${number}/reviews`], { encoding: "utf8" });
-      if (rest.status !== 0) return pr;
-      return attachRestCommitIds(pr, JSON.parse(rest.stdout));
-    } }).then(facts => console.log(JSON.stringify(facts))).catch(error => {
+    landingFacts({
+      pr: parsed.pr,
+      claimsImpl: process.env.ROOM_AGENT_CONFIG ? roomClaims : null,
+      ghImpl: parsed.pr == null ? null : async (number) => {
+        const result = spawnSync("gh", ["pr", "view", String(number), "--json", "number,headRefOid,reviewDecision,author,reviews"], { encoding: "utf8" });
+        if (result.status !== 0) {
+          const error = new Error("gh_failed");
+          error.code = "gh_failed";
+          throw error;
+        }
+        const pr = JSON.parse(result.stdout);
+        const rest = spawnSync("gh", ["api", `repos/{owner}/{repo}/pulls/${number}/reviews`], { encoding: "utf8" });
+        if (rest.status !== 0) return pr;
+        return attachRestCommitIds(pr, JSON.parse(rest.stdout));
+      },
+    }).then(facts => console.log(JSON.stringify(facts))).catch(error => {
       console.error(error.code || "facts_failed");
       process.exitCode = 1;
     });

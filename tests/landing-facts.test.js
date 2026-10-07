@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { attachRestCommitIds, landingFacts } from "../scripts/landing-facts.mjs";
+import { attachRestCommitIds, landingFacts, pathLeases } from "../scripts/landing-facts.mjs";
 
 const MAIN = "a".repeat(40);
 const HEAD = "b".repeat(40);
@@ -153,6 +153,54 @@ test("a REST review commit id fills a GraphQL review that omitted it", async () 
     reviews: [{ author: { login: "Instinct-3" }, state: "APPROVED" }],
   }, [{ user: { login: "Instinct-3" }, state: "APPROVED", commit_id: REVIEWED }]);
   assert.equal(bound.reviews[0].commit_id, REVIEWED);
+});
+
+test("a live lease on a touched path names the holder and expiry", async () => {
+  const now = Date.parse("2026-10-07T04:00:00.000Z");
+  const leases = pathLeases({
+    truncated: false,
+    claims: [
+      { id: "land-johnstab-phase1a-draft", state: "in_progress", owner: "holder", leaseExpiresAt: "2026-10-07T08:00:00.000Z", files: ["server/store.mjs"] },
+      { id: "done-claim", state: "done", owner: "old", leaseExpiresAt: "2026-10-07T08:00:00.000Z", files: ["server/store.mjs"] },
+    ],
+  }, ["server/store.mjs", "scripts/landing-facts.mjs"], now);
+  assert.equal(leases.unavailable, false);
+  assert.equal(leases.paths[1].path, "server/store.mjs");
+  assert.deepEqual(leases.paths[1].holders, [{
+    claimId: "land-johnstab-phase1a-draft",
+    owner: "holder",
+    leaseExpiresAt: "2026-10-07T08:00:00.000Z",
+    expired: false,
+  }]);
+  assert.deepEqual(leases.paths[0].holders, []);
+});
+
+test("a truncated claim list is unavailable rather than an empty lease", () => {
+  const leases = pathLeases({ truncated: true, claims: [] }, ["server/store.mjs"]);
+  assert.equal(leases.unavailable, "claims_truncated");
+  assert.deepEqual(leases.paths, []);
+});
+
+test("facts include path leases only when a claim read is supplied", async () => {
+  const execImpl = (args) => {
+    const key = args.join(" ");
+    if (key === "rev-parse HEAD") return { status: 0, stdout: `${HEAD}\n`, stderr: "" };
+    if (key === "rev-parse origin/main") return { status: 0, stdout: `${MAIN}\n`, stderr: "" };
+    if (key.startsWith("rev-list")) return { status: 0, stdout: "0\n", stderr: "" };
+    if (key.startsWith("diff --name-only")) return { status: 0, stdout: "server/store.mjs\n", stderr: "" };
+    if (key.startsWith("diff ")) return { status: 0, stdout: "diff local\n", stderr: "" };
+    if (key.startsWith("patch-id")) return { status: 0, stdout: `${HEAD} x\n`, stderr: "" };
+    return { status: 1, stdout: "", stderr: key };
+  };
+  const fetchImpl = async () => ({ ok: true, json: async () => ({ sourceRevision: PROD, buildId: "t", deployment: "production" }) });
+  const claimsImpl = async () => ({
+    truncated: false,
+    claims: [{ id: "plan-pr-autolink", state: "claimed", owner: "fo", leaseExpiresAt: "2026-10-07T08:00:00.000Z", files: [{ path: "server/store.mjs" }] }],
+  });
+  const facts = await landingFacts({ fetchImpl, execImpl, claimsImpl, nowMs: Date.parse("2026-10-07T04:00:00.000Z") });
+  assert.deepEqual(facts.touchedPaths, ["server/store.mjs"]);
+  assert.equal(facts.pathLeases.paths[0].holders[0].claimId, "plan-pr-autolink");
+  assert.equal(facts.notMergeAuthorization, true);
 });
 
 test("an approval with no commit id is unverifiable and is not a carry", async () => {
