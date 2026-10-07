@@ -21,6 +21,13 @@ relicense dependencies, quoted source material or third-party artwork.
   Root and nested manifests/lockfiles identify exact packages. The Node service
   currently has no npm runtime dependencies; development and Workers build tools
   do. Redistributing a bundled runtime requires preserving its notices too.
+- **herdr:** the session-adapter layer (`server/session-adapter.mjs`) and any vendored
+  process-home code are derived from [herdrdev/herdr](https://github.com/herdrdev/herdr)
+  (Apache-2.0), forked to https://github.com/Uuriko/herdr for version pinning and
+  supply-chain stripping (remote manifest catalog disabled, telemetry/phone-home removed —
+  see the fork's `DEMIGOD-CHANGES.md`). Copyright (c) herdrdev (as published upstream).
+  Upstream NOTICE: none shipped; the Apache-2.0 LICENSE text is preserved in the fork.
+  Local changes: enumerated in the fork's `DEMIGOD-CHANGES.md` (strip lane: `demigod/strip-v1`).
 
 For a new dependency or imported asset, include its origin, version, license and
 required notices in the same PR. Do not copy competitor code or assets without
