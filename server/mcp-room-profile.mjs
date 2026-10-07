@@ -900,8 +900,29 @@ function mcpKeyGrantsScope(store, secret, requiredScope) {
   if (typeof secret !== "string" || !secret.startsWith(API_KEY_PREFIX)) return true;
   const record = store.agentPlugin.verifyPresentedApiKey(secret);
   if (!record) return false;
+  if (isLegacyOnboardingMcpKey(record) && (requiredScope === MCP_INBOX_SCOPE || requiredScope === MCP_WAKE_SCOPE)) return true;
   return (record.scopes ?? []).some(scope =>
     scope === requiredScope || (scope.endsWith(":*") && requiredScope.startsWith(scope.slice(0, -1))));
+}
+
+// Onboarding MCP tokens minted before W2-M1 (b42251c3) carry exactly
+// [mcp:room:<id>, rooms:read, rooms:write] with a 30-day expiry. W2-M1 gave
+// NEW onboarding tokens mcp:inbox + mcp:wake "so the MCP client flow keeps
+// its capabilities", but tokens already handed out kept the old scope list,
+// so every agent that joined before the gate shipped lost heartbeat/wake and
+// inbox overnight (heartbeat_set: "API key lacks the mcp:wake scope") and
+// shows as unreachable. Treat exactly that legacy shape, minted before the
+// gate's onboarding change could have produced it, as the onboarding token
+// it is. Expires on its own: those keys live 30 days at most.
+const ONBOARDING_KEY_TTL_MS = 30 * 86400000;
+const LEGACY_ONBOARDING_KEYS_BEFORE = Date.parse("2026-10-08T00:00:00Z");
+function isLegacyOnboardingMcpKey(record) {
+  const scopes = record.scopes ?? [];
+  return scopes.length === 3
+    && scopes.filter(scope => scope.startsWith("mcp:room:")).length === 1
+    && scopes.includes("rooms:read") && scopes.includes("rooms:write")
+    && Number.isSafeInteger(record.createdAt) && record.createdAt < LEGACY_ONBOARDING_KEYS_BEFORE
+    && record.expiresAt === record.createdAt + ONBOARDING_KEY_TTL_MS;
 }
 
 function mcpRoomAllowlist(store, secret) {  if (typeof secret !== "string" || !secret.startsWith(API_KEY_PREFIX)) return null;

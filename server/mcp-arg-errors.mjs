@@ -181,6 +181,27 @@ export function mcpCallError(id, { reason, tool, suggestion = null, missing = []
       }
     };
   }
+  if (reason === "insufficient_scope") {
+    // A credential problem, not an argument problem: nothing in the call can
+    // be "fixed and retried". Say which scope is missing and how to get it.
+    return {
+      jsonrpc: "2.0",
+      id,
+      error: {
+        code: -32001,
+        message: "insufficient_scope",
+        data: {
+          tool: tool ?? null,
+          ...canonicalData({
+            reason: "insufficient_scope",
+            category: "access",
+            hint: hint || "This API key lacks the scope this tool needs.",
+            next: [Object.freeze({ command: "Ask the identity owner to issue a key with the missing scope (POST /api/agent-keys with the identity secret), or call this tool with the identity secret." })],
+          }),
+        },
+      }
+    };
+  }
   if (reason === "unknown_tool") {
     return {
       jsonrpc: "2.0",
