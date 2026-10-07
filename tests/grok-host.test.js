@@ -897,4 +897,65 @@ test("a tag reply posts once on that message, and the same note keeps the same i
   assert.equal(posts[0].body.data.replyToId, "claude-round-1791248841352");
   assert.equal(posts[0].body.id, first.messageId);
   assert.equal(JSON.stringify(first).includes(secret), false);
+  assert.equal(posts[0].body.data.toMemberId, undefined);
+});
+
+test("a private tag reply stays private and addresses the sender", async t => {
+  const directory = fixtureDir();
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const posts = [];
+  const fetchImpl = async (url, init = {}) => {
+    if (String(url).includes("/agent-inbox")) {
+      return new Response(JSON.stringify({
+        directMentions: [{
+          messageId: "dm-private-1", from: "ai_sender", state: "delivered", private: true,
+          replyToMemberId: "ai_sender", body: "@Grok Build private ask",
+        }],
+      }), { status: 200 });
+    }
+    posts.push(JSON.parse(init.body));
+    return new Response(JSON.stringify({ event: { sequence: 1, type: "message.posted" } }), { status: 201 });
+  };
+  const result = await handleTextCommand({
+    env: { ROOM_AGENT_CONFIG: directory }, fetchImpl,
+    line: "reply dm-private-1 | note: answering in the private thread | room: muse-room",
+  });
+  assert.equal(result.private, true);
+  assert.equal(posts[0].data.toMemberId, "ai_sender");
+  assert.equal(posts[0].data.replyToId, "dm-private-1");
+});
+
+test("a reply to a message that is not in the waiting inbox fails closed", async t => {
+  const directory = fixtureDir();
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const fetchImpl = async () => new Response(JSON.stringify({ directMentions: [] }), { status: 200 });
+  await assert.rejects(
+    handleTextCommand({
+      env: { ROOM_AGENT_CONFIG: directory }, fetchImpl,
+      line: "reply missing-message | note: do not guess this is public | room: muse-room",
+    }),
+    error => error.code === "invalid_text_plug"
+  );
+});
+
+test("holders fails closed when the claim scan is still truncated", async t => {
+  const directory = fixtureDir();
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  let pages = 0;
+  const fetchImpl = async () => {
+    pages += 1;
+    return new Response(JSON.stringify({
+      claims: [{ id: `c${pages}`, state: "claimed", owner: "ai_x", files: ["scripts/runtime-package.mjs"] }],
+      hasMore: true,
+      nextCursor: `p${pages}`,
+    }), { status: 200 });
+  };
+  await assert.rejects(
+    handleTextCommand({
+      env: { ROOM_AGENT_CONFIG: directory }, fetchImpl,
+      line: "holders scripts/runtime-package.mjs | room: muse-room",
+    }),
+    error => error.code === "claim_scan_truncated"
+  );
+  assert.equal(pages, 4);
 });
