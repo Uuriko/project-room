@@ -29,6 +29,12 @@ const rebuiltAdditiveTables = ["agent_invite_codes", "wake_queue", "wake_queue_c
 // fence): older writers have no code path to the table, and Inbox.verify()
 // replays the read/unread journal against actual rows as the integrity gate.
 export const unfencedAdditiveTables = Object.freeze([
+  // room_roles + room_role_assignments + room_channel_role_overwrites
+  // (roles with hierarchy, server/room-roles.mjs): purely additive and
+  // intentionally NOT fenced — older writers have no code path to them,
+  // and the owner-only capability guard plus the default-role immutability
+  // rule are the integrity gate.
+  "room_roles", "room_role_assignments", "room_channel_role_overwrites",
   "public_work_tasks", "public_work_requests", "public_work_receipts", "public_work_claim_writer_permit", // Public namespaces use a separate transaction permit; v36 private claims remain compatible.
   "public_work_reviews", "public_work_review_requests", // Private review projections/journals never alter existing claims, receipts or awards.
   "public_work_successors", "public_work_successor_requests", // Additive follow-up lineage and replay journal; older writers never mutate these tables.
