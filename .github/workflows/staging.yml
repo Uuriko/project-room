@@ -85,6 +85,7 @@ jobs:
           '
       - name: Cold-start budget
         if: steps.gate.outputs.ready == 'true'
+        shell: bash
         run: node scripts/cold-start-probe.mjs --base https://project-room-stage.getdasha.workers.dev --max-ms 2000 | tee cold-start.json
       - if: steps.gate.outputs.ready == 'true'
         run: npx playwright install --with-deps chromium
@@ -92,6 +93,7 @@ jobs:
         run: npm i --no-save @axe-core/playwright@4.13.0
       - name: Smoke and browser checks
         if: steps.gate.outputs.ready == 'true'
+        shell: bash
         env:
           ROOM_SMOKE_ORIGIN: https://project-room-stage.getdasha.workers.dev
           GITHUB_TOKEN: ${{ github.token }}
