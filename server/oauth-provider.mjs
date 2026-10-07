@@ -162,6 +162,9 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
       createdAt: now(),
       expiresAt: now() + AUTH_CODE_TTL_MS,
       used: false,
+      // O1 (issue #941): the family minted from this code, recorded at
+      // exchange so a replayed code revokes its tokens (RFC 6749 §10.5).
+      familyId: null,
     };
     codeStore.set(record.codeHash, record);
     pruneLazy();
@@ -177,7 +180,25 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
       "code_verifier is required");
     const record = codeStore.get(sha256(code));
     check(record, "invalid authorization code");
-    check(!record.used, "authorization code already used");
+    if (record.used) {
+      // O1 (issue #941): a replayed code points to a leaked code
+      // (RFC 6749 §10.5) — kill every token the code already issued and
+      // signal it, instead of only rejecting the replay. invalid_grant
+      // (not invalid_request) so a legitimate client sees a theft-grade
+      // signal, matching the refresh-reuse response shape.
+      if (record.familyId) {
+        const revokedCount = revokeTokenFamily(record.familyId);
+        emitSecurityEvent({
+          type: "authorization_code_reuse_detected",
+          familyId: record.familyId,
+          userId: record.userId,
+          clientId: record.clientId,
+          revokedCount,
+          detectedAt: now(),
+        });
+      }
+      fail("invalid_grant", "authorization code already used: tokens issued from it were revoked");
+    }
     if (isExpired(record, now)) { codeStore.delete(record.codeHash); fail("invalid_request", "authorization code expired"); }
     check(record.clientId === clientId, "client_id mismatch");
     check(record.redirectUri === redirectUri, "redirect_uri mismatch");
@@ -186,9 +207,13 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
     const a = Buffer.from(expected);
     const b = Buffer.from(record.codeChallenge);
     check(a.length === b.length && timingSafeEqual(a, b), "PKCE verification failed");
+    // Bind the minted family to the code record BEFORE issuing, so the
+    // linkage survives even if the issuer throws after this point.
+    const familyId = `oarf_${newSecret(16)}`;
+    record.familyId = familyId;
     record.used = true;
 
-    return issueTokenPair({ clientId: record.clientId, userId: record.userId, scopes: [...record.scopes], session });
+    return issueTokenPair({ clientId: record.clientId, userId: record.userId, scopes: [...record.scopes], familyId, session });
   };
 
   // Session metadata attached at issuance (F-02): the IP and User-Agent
