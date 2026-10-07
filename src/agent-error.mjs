@@ -653,6 +653,25 @@ export function agentErrorBody({ httpStatus, code, message, roomId, workItemId, 
   return body;
 }
 
+// Merge a ServiceError's detail object onto a built error envelope.
+// Reserved envelope keys are never overwritten by detail: detail is
+// caller-supplied context (suggestions, reasons), never envelope shape.
+// #174 (error-leak audit): stack, message, code, cause, and the trace ids
+// stay reserved too — a detail carrying a stack trace or an internal
+// message must never reach the wire, and detail must not forge the 5xx
+// errorId/fingerprint the server mints.
+const RESERVED_DETAIL_KEYS = Object.freeze([
+  "error", "status", "reason", "hint", "next", "operationId", "category",
+  "message", "code", "stack", "cause", "errorId", "fingerprint", "trace",
+]);
+export function mergeErrorDetail(errorBody, detail) {
+  if (!detail || typeof detail !== "object" || Array.isArray(detail)) return errorBody;
+  for (const [key, value] of Object.entries(detail)) {
+    if (!RESERVED_DETAIL_KEYS.includes(key)) errorBody[key] = value;
+  }
+  return errorBody;
+}
+
 export function validAgentNext(next) {
   return Array.isArray(next) && next.length > 0 && next.every(step => {
     if (!step || typeof step !== "object" || Array.isArray(step)) return false;
