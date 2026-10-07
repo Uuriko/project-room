@@ -233,6 +233,11 @@ export class ReferralInvites {
   // --- mint --------------------------------------------------------------
   mint(token, roomId, { maxDepth: requestedMaxDepth } = {}) {
     const auth = this.store.authenticate(token, roomId);
+    // Invitation issuance carries the f520ca69 email-verification gate, same
+    // as agent-invites.create, guest-invites.mint, share-link creation, and
+    // membership-invitation issue. Accountless owners/delegates have no
+    // account to verify.
+    if (auth.account) this.store.accountLogins.assertEmailVerified(auth.account.id);
     if (!auth.member || auth.member.active === false) fail(403, "access_denied", "Join the room before sending referral invites");
     if (typeof auth.member.id !== "string" || !MEMBER_ID_PATTERN.test(auth.member.id)) fail(403, "access_denied", "Join the room before sending referral invites");
     // The inviter must still be an active member: outstanding tokens die
