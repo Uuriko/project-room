@@ -7495,7 +7495,7 @@ paths:
         '401':
           description: unauthenticated
         '403':
-          description: owner_required
+          description: owner_only
     post:
       summary: Toggle the public face (owner)
       description: >-
@@ -7527,7 +7527,7 @@ paths:
         '401':
           description: unauthenticated
         '403':
-          description: owner_required
+          description: owner_only
         '422':
           $ref: '#/components/responses/InvalidInput'
   /api/rooms/{roomId}/directory:
@@ -7550,17 +7550,21 @@ paths:
                 properties:
                   roomId: { type: string }
                   discoverable: { type: boolean }
+                  publicReceipts: { type: boolean }
                   listedAt: { type: [integer, 'null'] }
         '401':
           description: unauthenticated
         '403':
-          description: owner_required
+          description: owner_only
     post:
       summary: Toggle directory listing (owner)
       description: >-
-        Room owner only. Exactly { discoverable }. Enabling lists the room in
-        the public directory (title, purpose, member count only); disabling
-        removes it immediately.
+        Room owner only. Accepts { discoverable } and/or { publicReceipts }.
+        Enabling discoverable lists the room in the public directory (title,
+        purpose, member count only); disabling removes it immediately.
+        publicReceipts toggles whether this room's public receipts appear in
+        the public receipts feed. At least one field is required; any other
+        field is 422 invalid_directory.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       requestBody:
@@ -7569,9 +7573,9 @@ paths:
           application/json:
             schema:
               type: object
-              required: [discoverable]
               properties:
                 discoverable: { type: boolean }
+                publicReceipts: { type: boolean }
       responses:
         '200':
           description: New directory status
@@ -7582,11 +7586,12 @@ paths:
                 properties:
                   roomId: { type: string }
                   discoverable: { type: boolean }
+                  publicReceipts: { type: boolean }
                   listedAt: { type: [integer, 'null'] }
         '401':
           description: unauthenticated
         '403':
-          description: owner_required
+          description: owner_only
         '422':
           $ref: '#/components/responses/InvalidInput'
   /api/rooms/{roomId}/opportunities:
@@ -7664,7 +7669,7 @@ paths:
         '401':
           description: unauthenticated
         '403':
-          description: owner_required
+          description: owner_only
 
   /api/health:
     get:
