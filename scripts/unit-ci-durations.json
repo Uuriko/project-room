@@ -920,8 +920,10 @@
   "tests/seed-integrity.test.js": 97,
   "tests/share-links-email-gate.test.js": 434,
   "tests/sidebar-section-sync.test.js": 87,
-  "tests/updates-ui.test.js": 80
+  "tests/updates-ui.test.js": 80,
+  "tests/human-push-ui.test.js": 57
  },
  "_note": "Per-file wall-clock ms of `node --test <file>` measured 2026-10-06 on a 2-CPU host with 16-way parallelism (values are contention-inflated; used only as relative weights for shard balancing, never for membership). Files hitting the 300s measurement timeout are capped at 300000.",
- "releaseRecordMeasurement": "Eight record-rail files measured on macOS Node26, four concurrent real Node processes, 2026-10-06; all eight passed. Timing allocates files only."
+ "releaseRecordMeasurement": "Eight record-rail files measured on macOS Node26, four concurrent real Node processes, 2026-10-06; all eight passed. Timing allocates files only.",
+ "releasePushLifecycleMeasurement": "tests/human-push-ui.test.js: 57 wall-clock ms, macOS v24.19.0, solo real node --test process, 2026-10-07; all seven lifecycle tests passed. Timing allocates files only, not membership."
 }
