@@ -35,6 +35,7 @@
   "src/emoji-catalog.js",
   "src/emoji.js",
   "src/events.js",
+  "src/first-task.js",
   "src/friend-bond.js",
   "src/gmail-ui.js",
   "src/growth-alerts.js",

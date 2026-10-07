@@ -271,6 +271,7 @@
   "tests/feedback-scrub.test.js": 5825,
   "tests/feedback-store.test.js": 6109,
   "tests/first-paint.test.js": 6416,
+  "tests/first-task.test.js": 11487,
   "tests/flaky-detect.test.js": 52168,
   "tests/focused-orientation.test.js": 90075,
   "tests/friction-work.test.js": 31892,
