@@ -756,7 +756,12 @@ test("owners link a draft PR, reconcile held responses, and refresh a changed cl
     { id: "link-expired", owner: "owner", state: "claimed", leaseExpiresAt: new Date(Date.now() - 60000).toISOString() },
     { id: "link-blocked", owner: "owner", state: "blocked" }
   ]) seedClaim(fixture.store, { title: item.id, updatedAt, claimedAt: updatedAt, leaseExpiresAt: new Date(Date.now() + 3600000).toISOString(), ...item });
-  await page.locator("#tasks-board-open").click();
+  // Human chrome keeps the technical board out of the sidebar by default;
+  // the actual command finder remains an explicit way to open it.
+  await page.keyboard.press("Control+k");
+  await page.locator("#room-actions-query").fill("board");
+  await page.keyboard.press("Enter");
+  await page.locator("#board-dialog").waitFor({ state: "visible" });
   const card = page.locator("article[data-claim-id='link-draft']");
   const form = card.locator("[data-claim-link-pr]");
   const input = form.locator("input");
@@ -853,6 +858,7 @@ test("owners link a draft PR, reconcile held responses, and refresh a changed cl
     await input.press("Enter");
     assert.equal((await rejected).status(), 409);
     await page.waitForFunction(() => document.querySelector("#board-status")?.textContent.startsWith("Claim changed. The board is refreshed"));
+    await page.waitForFunction(() => document.querySelector("article[data-claim-id='link-draft'] [data-claim-link-pr] input") === document.activeElement);
     assert.equal(await input.evaluate(node => node === document.activeElement), true);
     await page.locator("#board-close").focus();
     const delivered = page.waitForResponse(response => response.request() === heldRefresh);
