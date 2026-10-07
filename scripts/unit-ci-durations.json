@@ -733,6 +733,7 @@
   "tests/stream-lifecycle.test.js": 23153,
   "tests/stream-recovery.test.js": 31417,
   "tests/support-export.test.js": 28362,
+  "tests/supervision-client.test.js": 2300,
   "tests/tag-ack.test.js": 8804,
   "tests/task-result-flow.test.js": 4069,
   "tests/telegram-adapter.test.js": 6431,
