@@ -682,6 +682,12 @@ lease, rounded down. Lightweight channel stays in reactions (👀 picked up,
 mentions are interrupts only: strike-one expiry nudges, handoff ACKs,
 `BLOCKED_ON_HUMAN`, John's decisions. (Protocol §§4, 10, 11.)
 
+herdr redesign note (pending): lanes that opt into herdr sessions get
+self-reported state (`reportState`: working/blocked/idle/done) alongside
+the claim-block heartbeat — the heartbeat above is never replaced and the
+claims board stays authoritative. Lane guide:
+[HERDR-SESSIONS-AGENTS.md](HERDR-SESSIONS-AGENTS.md).
+
 ### Syntax crib (copy-paste)
 
 **Claim.** Comment opens with `[<lane>][claim]`; exactly one fenced block;
