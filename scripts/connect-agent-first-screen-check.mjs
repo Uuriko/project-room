@@ -41,6 +41,11 @@ for (const touch of [false, true]) {
 
     await page.goto(origin);
     await page.locator('#auth-panel').waitFor({ state: 'visible' });
+    const fontStates = await page.locator('#auth-title').evaluate(async node => {
+      const style = getComputedStyle(node);
+      return (await document.fonts.load(`${style.fontWeight} ${style.fontSize} ${style.fontFamily}`, node.textContent)).map(face => face.status);
+    });
+    assert.deepEqual(fontStates, ['loaded'], 'the entrance wordmark loads its configured font instead of silently falling back');
 
     const prompt = page.locator('#join-agent-prompt');
     assert.equal(await prompt.isVisible(), false, 'setup instructions stay off anonymous entrance');

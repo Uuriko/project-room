@@ -37,7 +37,7 @@ test("visible entry choices open focused flows without hiding pending agent sign
     await page.locator("#agent-auth-back").click();
     assert.equal(await page.locator("#agent-auth-step").isVisible(), true, "pending request stays visible");
     await route.fulfill({ status: 401, contentType: "application/json", body: JSON.stringify({ message: "Test identity could not be verified." }) });
-    await page.locator('[data-agent-status]').filter({ hasText: "Test identity could not be verified." }).waitFor();
+    await page.locator('[data-agent-status]').filter({ hasText: "That agent ID and secret don’t match. Check both and try again." }).waitFor();
     await page.locator("#agent-auth-back").click();
     assert.equal(await page.locator("#google-signin").isVisible(), false);
     assert.equal(await page.evaluate(() => document.activeElement.id), "agent-signin-button");
@@ -118,14 +118,21 @@ for (const width of [1280, 390]) {
     page.on("pageerror", error => errors.push(error.message));
     await page.goto(`http://127.0.0.1:${server.address().port}/`);
     await page.locator("#agent-signin-button").click();
+    const otherIdentity = f.store.identities.create("Different fixture agent");
+    for (const bad of [{ identityId: identity.identityId, secret: crypto.randomUUID() }, { identityId: otherIdentity.identityId, secret: identity.secret }]) {
+      await page.locator('[name="identityId"]').fill(bad.identityId);
+      await page.locator('[name="secret"]').fill(bad.secret);
+      const refused = page.waitForResponse(response => new URL(response.url()).pathname === "/api/auth/agent/rooms");
+      await page.locator('[data-agent-form="credentials"] button[type="submit"]').click();
+      assert.equal((await refused).status(), 401,'real credential mismatch is rejected');
+      await page.locator('[data-agent-status].error').waitFor();
+      assert.equal(await page.locator('[data-agent-status]').textContent(), 'That agent ID and secret don’t match. Check both and try again.');
+      assert.equal(await page.locator('[name="identityId"]').inputValue(), bad.identityId, 'the ID remains editable for correction');
+      assert.equal(await page.locator('[name="secret"]').inputValue(), '', 'failed credential is not left rendered');
+      assert.equal(await page.locator('#main').isVisible(), false);
+      assert.equal(await page.evaluate(value=>Object.values(localStorage).concat(Object.values(sessionStorage)).some(entry=>entry.includes(value)), bad.secret),false);
+    }
     await page.locator('[name="identityId"]').fill(identity.identityId);
-    await page.locator('[name="secret"]').fill(crypto.randomUUID());
-    const refused = page.waitForResponse(response => new URL(response.url()).pathname === "/api/auth/agent/rooms");
-    await page.locator('[data-agent-form="credentials"] button[type="submit"]').click();
-    assert.equal((await refused).status(), 401);
-    await page.locator('[data-agent-status].error').waitFor();
-    assert.doesNotMatch(await page.locator('[data-agent-status]').textContent(), /\[object Object\]/);
-    assert.ok((await page.locator('[data-agent-status]').textContent()).trim());
     await page.locator('[name="secret"]').fill(identity.secret);
     await page.locator('[data-agent-form="credentials"] button[type="submit"]').click();
     await page.locator('[data-agent-create-room]').waitFor();

@@ -116,7 +116,7 @@ const tokenPattern = /^[A-Za-z0-9_-]{43}$/;
 const bindingPattern = /^[a-f0-9]{64}$/;
 const assetType = path => path.endsWith(".js") ? "text/javascript" : path.endsWith(".css") ? "text/css"
   : path.endsWith(".html") ? "text/html" : path.endsWith(".svg") ? "image/svg+xml"
-  : path.endsWith(".png") ? "image/png"
+  : path.endsWith(".png") ? "image/png" : path.endsWith(".ttf") ? "font/ttf" : path.endsWith(".txt") ? "text/plain"
   : path.endsWith(".webmanifest") ? "application/manifest+json" : "text/markdown; charset=utf-8";
 const assets = new Map([
   ["/", ["index.html", "text/html"]],
@@ -2012,7 +2012,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // GR1: marketing documents also name the canonical host.
         const linkPath = canonical && reviewedPublicSearchPaths.includes(canonical) ? canonical : (gr1Alias ? url.pathname : null);
         res.setHeader("Link", linkPath ? publicPageLinks(url, linkPath) : discoveryLinks(url));
-        const binary = type === "image/png";
+        const binary = type === "image/png" || type === "font/ttf";
         if (binary) res.setHeader("Cache-Control", "public, max-age=86400");
         res.writeHead(200, { "Content-Type": binary ? type : `${type}; charset=utf-8` });
         return res.end(req.method === "HEAD" ? undefined : data);
