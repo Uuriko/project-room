@@ -105,7 +105,7 @@ test("new-item note field is labeled and reaches the created claim", { timeout: 
   // A fresh board paint must complete before checking the retained values.
   await page.waitForFunction(() => document.querySelector("#work-board .live-chip")?.textContent === "Deploy status unknown");
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-  assert.equal(await noteInput.evaluate(node => node === document.activeElement), true, "refresh keeps the active draft field focused");
+  assert.equal(await page.evaluate(() => document.querySelector('#board-new-item input[name="note"]') === document.activeElement), true, "refresh keeps the active draft field focused");
   assert.deepEqual(await noteInput.evaluate(node => [node.selectionStart, node.selectionEnd]), [0, 1], "refresh preserves the selection");
   assert.equal(await page.locator('#board-new-item input[name="title"]').inputValue(), "Slice C probe claim", "late board data cannot erase the entered title");
   assert.equal(await noteInput.inputValue(), "context for whoever picks this up", "late board data cannot erase the note");
@@ -148,7 +148,7 @@ test("new-item note field is labeled and reaches the created claim", { timeout: 
     await page.locator("article h4", { hasText: title }).waitFor();
     assert.equal(await page.locator('#board-new-item input[name="title"]').inputValue(), next.title, "an older receipt cannot change newer editing");
     assert.equal(await noteInput.inputValue(), next.note);
-    assert.equal(await noteInput.evaluate(node => node === document.activeElement), true, "confirmation does not steal focus, including after clearing every field");
+    assert.equal(await page.evaluate(() => document.querySelector('#board-new-item input[name="note"]') === document.activeElement), true, "confirmation does not steal focus, including after clearing every field");
     await page.unroute("**/work-claims");
   }
   let releaseRefresh, reachedRefresh;
@@ -167,7 +167,7 @@ test("new-item note field is labeled and reaches the created claim", { timeout: 
   releaseRefresh();
   await page.locator("article h4", { hasText: "Fourth submitted item" }).waitFor();
   assert.equal(await noteInput.inputValue(), "Started after the successful receipt");
-  assert.equal(await noteInput.evaluate(node => node === document.activeElement), true, "editing after acknowledgment also keeps focus through refresh");
+  assert.equal(await page.evaluate(() => document.querySelector('#board-new-item input[name="note"]') === document.activeElement), true, "editing after acknowledgment also keeps focus through refresh");
 });
 
 // D-c: a malformed invite code renders the error screen with the sign-in
