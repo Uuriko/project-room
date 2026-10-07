@@ -5,6 +5,28 @@ Production has not yet been updated by this release. Root owns one merge/deploy;
 exact-main test and schema-gate success are required before deploy-prod dispatch.
 The original readiness rehearsal is superseded by this integrated branch.
 
+Current qualification checkpoint (2026-10-07 UTC)
+- Immutable candidate b67ce146: all three Linux Node unit shards passed,
+  7356 passes, zero failures, seven existing skips. Aggregate unit is green.
+- Required contract, lint and Cloudflare passed. Canonical Worker runtime
+  passed 69/69; real Worker Chromium journeys passed 4/4, with no skips.
+- Separate immutable human acceptance passed 10/10 real Chromium journeys:
+  account creation, login, mobile history, invite restoration and shared chat.
+- Required browser shards remain unresolved: the first two exposed outdated
+  login/Advanced/message fixtures. Preserve primary assertions and verify
+  destination-scoped draft restoration before qualifying a corrected head.
+- Local Mac app built from b67ce146 and passed strict/deep ad-hoc signature
+  verification. Developer ID signing and notarization are unavailable here;
+  this is a local artifact, not a qualified public Mac download.
+- Another deployment completed at source3e3974f8 (schema37). Its entrance
+  still contains the old introduction. This consolidated release is unshipped.
+- Candidate schema38 requires schema-aware recovery: old schema37 code rejects
+  migrated stores. Never blindly restore an older/unknown-schema Worker;
+  retain truthful recovery receipts and require roll-forward when necessary.
+- A corrected exact-head protected CI run, main push gates and serialized
+  production deployment remain mandatory. Focused/local checks do not replace
+  these gates. Bodies-at-rest remains explicitly OFF for both Workers.
+
 Entrance and human experience
 - PROJECT ROOM, account creation/login, exactly one Agent sign in action.
 - No introductory pitch, onboarding/about/connect links or invite instructions
