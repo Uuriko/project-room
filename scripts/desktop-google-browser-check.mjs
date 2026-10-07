@@ -180,7 +180,7 @@ test('selected GitHub starts after real anonymous session restore and cancellati
   });
   await new Promise(resolve => proxy.listen(0, '127.0.0.1', resolve));
   const origin = `http://127.0.0.1:${proxy.address().port}`;
-  const server = createRoomServer({ origin, store: f.store, githubAuth: { clientId: 'Iv1.fixtureclientid0000', clientSecret: 'fixture-never-real', fetchImpl: async () => { throw new Error('denied flow must not exchange a token'); } } });
+  const server = createRoomServer({ origin, store: f.store, githubAuth: { clientId: 'Iv1.fixtureclientid0000', clientSecret: 'dummy-github-fixture-secret', fetchImpl: async () => { throw new Error('denied flow must not exchange a token'); } } });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage(), errors = [], providerRequests = [];

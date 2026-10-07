@@ -2,7 +2,7 @@
 import { generateKeyPairSync, sign } from "node:crypto";
 import { GOOGLE_ISSUER, GOOGLE_SCOPES } from "../../server/google-oauth.mjs";
 export const clientId = "0-fixture.apps.googleusercontent.com";
-export const clientSecret = "GOCSPX-fixture-secret-never-real";
+export const clientSecret = "dummy-google-fixture-secret";
 export const sub = "123456789012345678901";
 const keys = generateKeyPairSync("rsa", { modulusLength: 2048 });
 const jwk = keys.publicKey.export({ format: "jwk" });
