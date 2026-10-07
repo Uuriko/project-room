@@ -1,0 +1,38 @@
+[Unit]
+Description=forked herdr server for tenant %i
+Documentation=https://github.com/Uuriko/project-room
+After=network.target
+# NOTE: the herdr fork binary is fully hermetic after launch (no network,
+# no remote catalog, no phone-home — verified by fork-audit B10). Pane child
+# processes are the only legitimate network users.
+
+[Service]
+Type=simple
+User=%i
+Group=%i
+# One server per tenant, distinct UID per tenant (risk-review §2 — the only
+# shape where the OS enforces the multi-tenant boundary).
+Environment=HERDR_SOCKET_PATH=/run/herdr/%i/herdr.sock
+Environment=TMPDIR=/var/lib/herdr/%i/tmp
+UMask=0077
+ExecStart=/opt/herdr/bin/herdr-server --socket /run/herdr/%i/herdr.sock
+ExecStartPre=/usr/bin/install -d -m 0700 -o %i -g %i /run/herdr/%i
+ExecStartPre=/usr/bin/install -d -m 0700 -o %i -g %i /var/lib/herdr/%i/tmp
+Restart=on-failure
+RestartSec=5
+
+# Resource isolation per risk-review §2.4 (herdr has no built-in limits).
+MemoryMax=2G
+CPUQuota=200%
+TasksMax=512
+
+# The tenant server needs its own dirs only.
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=false
+NoNewPrivileges=true
+RestrictSUIDSGID=true
+ReadWritePaths=/run/herdr/%i /var/lib/herdr/%i
+
+[Install]
+WantedBy=multi-user.target
