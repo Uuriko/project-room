@@ -553,7 +553,14 @@ test("identity create rejects C0 control chars in displayName (RC-2026-09-19-086
 });
 
 
-test("room discovery needs only identity, isolates callers and immediately reflects unlink and rotation", async t => {
+
+// Quarantined per tests/quarantine.json: the doesNotMatch leak assertion trips
+// when the random operationId (op_<base64url>) happens to contain "lab" as a
+// substring (seen 2026-10-06 on green main, op_TGlaby2u). Harness regex flake,
+// not a product leak — the 401 body was correct. Runs only in the non-blocking
+// lane (`npm run test:quarantined`, QUARANTINE_RUN=1).
+const QUARANTINED_ROOM_DISCOVERY_LEAK_REGEX = process.env.QUARANTINE_RUN !== "1";
+test("room discovery needs only identity, isolates callers and immediately reflects unlink and rotation", { skip: QUARANTINED_ROOM_DISCOVERY_LEAK_REGEX ? "quarantined: tests/quarantine.json (operationId substring trips leak regex; repair by 2026-10-20)" : false }, async t => {
   const { store, origin, ownerCommons, ownerLab } = await serve(t);
   const identity = store.identities.create("Returning agent");
   const other = store.identities.create("Other agent");

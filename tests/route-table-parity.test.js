@@ -20,6 +20,7 @@ import { EVENT_TYPES } from "../src/events.js";
 import { allowlistProblems, extractLegacyRoutes, loadRouteSources } from "../scripts/routes-inventory.mjs";
 import { methodCoverageProblems, openApiParseErrors } from "../scripts/openapi-gen.mjs";
 import { openapiOperations } from "../scripts/open-routes.mjs";
+import { parse as parseOpenApiYaml } from "yaml";
 
 const root = new URL("..", import.meta.url);
 
@@ -385,3 +386,75 @@ function probeRow() {
     scope: "public",
   };
 }
+
+// sweep-openapi-public-face-403: docs/openapi.yaml 403 descriptions must name
+// the error code the server actually returns for owner-gated room routes.
+// Agents branch on error.code, so a wrong code in docs is a wrong contract,
+// not a typo (real: public-face and directory documented owner_required while
+// the modules throw owner_only; reports correctly documents owner_required).
+//
+// Authoring-gate answers (.agents/skills/test-audit/SKILL.md):
+// 1. Protects the client-facing error-code contract for owner-gated routes.
+// 2. Credible regression: a lane copies a neighboring operation's 403
+//    description when documenting a new owner-gated route.
+// 3. Existing coverage: route-docs-check compares path templates,
+//    openapi-method-accuracy probes unauthenticated (401s), mcp-openapi-drift
+//    compares request shapes — none asserts served error codes against docs.
+// 4. No production seam: boots the real server on the acceptance fixture,
+//    mints a real identity, links it as a non-owner member, and reads
+//    docs/openapi.yaml off disk. No new exports, flags, or wrappers.
+test("docs 403 descriptions match the served error codes for owner-gated room routes", async t => {
+  const fixture = createAcceptanceFixture();
+  const store = fixture.store;
+  const server = createRoomServer({ store });
+  const origin = await listen(server);
+  t.after(async () => {
+    server.closeStreams();
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    fixture.store.close();
+  });
+  const ownerKey = store.issueAccessKey("commons", "owner");
+  const identity = store.identities.create("Docs parity prober");
+  store.identities.link(ownerKey, "commons", { identityId: identity.identityId, permissions: ["accept_work"] });
+  const probe = async (method, path, reqBody) => {
+    const res = await fetch(`${origin}${path}`, {
+      method,
+      headers: {
+        Origin: origin,
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${identity.secret}`,
+      },
+      body: reqBody === undefined ? undefined : JSON.stringify(reqBody),
+    });
+    const json = await res.json().catch(() => null);
+    return { status: res.status, code: json?.error?.code ?? null };
+  };
+
+  const doc = parseOpenApiYaml(readFileSync(new URL("docs/openapi.yaml", root), "utf8"));
+  const documented403 = (docsPath, method) => {
+    const item = doc.paths[docsPath];
+    assert.ok(item, `docs path ${docsPath} exists`);
+    const op = item[method.toLowerCase()];
+    assert.ok(op, `docs operation ${method} ${docsPath} exists`);
+    const desc = op.responses?.["403"]?.description;
+    assert.ok(typeof desc === "string", `docs ${method} ${docsPath} documents a 403`);
+    return desc;
+  };
+
+  // [method, served path, docs path, request body]
+  const cases = [
+    ["GET", "/api/rooms/commons/public-face", "/api/rooms/{roomId}/public-face", undefined],
+    ["POST", "/api/rooms/commons/public-face", "/api/rooms/{roomId}/public-face", { enabled: true }],
+    ["POST", "/api/rooms/commons/public-face/rotate", "/api/rooms/{roomId}/public-face/rotate", {}],
+    ["GET", "/api/rooms/commons/directory", "/api/rooms/{roomId}/directory", undefined],
+    ["POST", "/api/rooms/commons/directory", "/api/rooms/{roomId}/directory", { discoverable: false }],
+    ["GET", "/api/rooms/commons/reports", "/api/rooms/{roomId}/reports", undefined],
+  ];
+  for (const [method, servedPath, docsPath, reqBody] of cases) {
+    const { status, code } = await probe(method, servedPath, reqBody);
+    assert.equal(status, 403, `${method} ${servedPath} is owner-gated`);
+    assert.equal(documented403(docsPath, method), code,
+      `docs 403 for ${method} ${docsPath} names the served error code`);
+  }
+});

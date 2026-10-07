@@ -11,12 +11,12 @@
   setTimeout(function () {
     var loading = document.getElementById("join-loading");
     if (!loading || loading.hidden) return;
-    // The www door serves the room under /room; mirror the module's door
-    // logic without the {{ASSET_BASE}} template (static JS is not
-    // template-substituted).
+    // Door-relative: /room is the marketing page on both doors (the node
+    // server and the www door edge). {{ASSET_BASE}}/room 404'd as /room/room
+    // on the www door.
     var door = location.pathname.indexOf("/room/") === 0 ? "/room/" : "/";
     loading.innerHTML = "<h1>No invite found</h1>"
       + "<p>Ask a room owner for an invite link, or <a href=\"" + door + "\">sign in and request access</a>.</p>"
-      + "<p class=\"form-hint\"><a href=\"https://www.getdasha.com/room\">What is Project Room?</a></p>";
+      + "<p class=\"form-hint\"><a href=\"/room\">What is Project Room?</a></p>";
   }, 15000);
 })();
