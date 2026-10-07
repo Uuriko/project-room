@@ -16,6 +16,7 @@
 // The token (GITHUB_TOKEN or GH_TOKEN) is never logged or stored. Public
 // repositories still answer when it is absent.
 import { emitWorkClaimEvent, enqueueClaimWake, wakeNamedReviewers } from "./work-claim-events.mjs";
+import { noteReadyWork, claimIsReady, noteDependentsReady } from "./work-wants.mjs";
 import { closeWhenLive, notePullMerged, recordCi } from "./work-claims.mjs";
 import { SOURCE_REVISION } from "./version.mjs";
 import {
@@ -302,7 +303,7 @@ export function commitPullRequestLookup(store, registry, roomId, item, result, n
     const settled = settlePullRequest(recorded, batchPullOutcome(recorded), nowMs);
     if (!settled) return false;
     registry.set(roomId, settled.item);
-    emitWorkClaimEvent(store, roomId, {
+    const receipt = emitWorkClaimEvent(store, roomId, {
       actorId: settled.previousOwnerId ?? settled.item.owner ?? item.owner,
       item: settled.item,
       action: settled.action,
@@ -311,6 +312,29 @@ export function commitPullRequestLookup(store, registry, roomId, item, result, n
       paths: settled.paths,
       pullRequest: { url: item.pullRequest.url, outcome: result.kind }
     });
+    // A PR that closes unmerged releases the claim out from under its owner
+    // (owner, lease, files and reviews all clear). Wake the previous owner
+    // the way a lease expiry does, so the freed files and the lost round
+    // are not discovered by accident. The message id carries the receipt
+    // sequence: a replayed close settles nothing and wakes nothing, while a
+    // later claim round that closes again wakes again. pr_merged completes
+    // the claim as done and already posts a receipt card to the room.
+    if (settled.action === "pr_closed" && settled.previousOwnerId) {
+      enqueueClaimWake(store, roomId, settled.previousOwnerId,
+        `work-claim:${settled.item.id}:pr_closed:${receipt?.sequence ?? nowMs}`,
+        { reason: "pr_closed", actorId: settled.previousOwnerId });
+    }
+    if (settled.action === "pr_merged") {
+      // The completion unblocks dependents: wake opted-in agents about
+      // every dependent that just became ready.
+      noteDependentsReady(store, registry, roomId, settled.item,
+        { actorId: settled.previousOwnerId ?? settled.item.owner ?? item.owner, now: nowMs });
+    } else if (settled.action === "pr_closed" && claimIsReady(registry.list(roomId), settled.item)) {
+      // The released claim is new ready work for opted-in agents, the
+      // same as any other release.
+      noteReadyWork(store, roomId, settled.item,
+        { actorId: settled.previousOwnerId, now: nowMs });
+    }
     return true;
   }
   if (result.kind === "open" || result.kind === "notModified" || result.kind === "missing" || result.kind === "error" || result.kind === "unconfigured") {
@@ -482,6 +506,8 @@ function closeDeployedClaims(store, nowMs) {
       emitWorkClaimEvent(store, roomId, {
         actorId: item.owner ?? "system", item: closed, action: "state_changed", atMs: nowMs
       });
+      noteDependentsReady(store, store.workClaims, roomId, closed,
+        { actorId: item.owner ?? "system", now: nowMs });
     }
   }
 }

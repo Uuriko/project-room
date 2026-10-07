@@ -14,6 +14,7 @@
 // agent_wants_work is additive and unfenced (server/writer-fence.mjs): older
 // writers have no code path to it, and a missing row means "off".
 import { enqueueClaimWake } from "./work-claim-events.mjs";
+import { readyClaims } from "./claim-coordination.mjs";
 
 export const WANTS_WORK_SCHEMA = `
   CREATE TABLE IF NOT EXISTS agent_wants_work (
@@ -98,6 +99,38 @@ export function wantsWorkMatches(pref, item) {
   const kind = item?.kind ?? "work";
   const capabilitiesOk = pref.capabilities.length === 0 || pref.capabilities.includes(kind);
   return labelsOk && capabilitiesOk;
+}
+
+// The ready-queue predicate for one item: unclaimed, ownerless, every
+// dependency done. Reuses readyClaims from server/claim-coordination.mjs so
+// the wake path and the queue=ready board view agree on what "ready" means.
+export function claimIsReady(items, item) {
+  if (!item || typeof item.id !== "string") return false;
+  return readyClaims(items).some(entry => entry.id === item.id);
+}
+
+// A done transition unblocks dependents: wake opted-in agents about every
+// unclaimed, ownerless dependent whose dependencies are all done now. Only
+// items naming the completed claim in dependsOn can have become ready —
+// nothing else changed — so the scan is limited to those. Never throws:
+// like noteReadyWork, a preference problem must not roll back the Board.
+export function noteDependentsReady(store, registry, roomId, item, { actorId = null, now } = {}) {
+  if (!item || item.state !== "done") return [];
+  let items = [];
+  try { items = registry.list(roomId); } catch { return []; }
+  const ready = new Set(readyClaims(items).map(entry => entry.id));
+  const woken = [];
+  for (const entry of items) {
+    if (!entry || entry.id === item.id) continue;
+    if (!ready.has(entry.id)) continue;
+    if (!Array.isArray(entry.dependsOn) || !entry.dependsOn.includes(item.id)) continue;
+    try {
+      woken.push(...noteReadyWork(store, roomId, entry, { actorId, now }));
+    } catch (error) {
+      console.error("dependents-ready wake failed:", error?.message ?? error);
+    }
+  }
+  return woken;
 }
 
 // Called inside the claim transaction after a created (unassigned) or
