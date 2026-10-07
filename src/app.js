@@ -2847,7 +2847,11 @@ function navigateWorkRecord(kind, id, extra = {}) {
   const entry = history.state && typeof history.state === "object" ? history.state : {};
   history.replaceState({ ...entry, roomWorkOrigin: ticket }, "", location.href);
   history.pushState({ ...workHistoryState(), roomWorkTarget: ticket }, "", target);
-  activeWorkNavigation = ticket; workHistoryReplayKey = null;
+  activeWorkNavigation = ticket;
+  // Pre-seed the replay key so a late hashchange/popstate for this navigation
+  // dedupes instead of reprocessing stale state (which would close a board
+  // dialog the user reopened after navigating).
+  workHistoryReplayKey = `${new URL(target, location.href).href}|${ticket}||${workNavigationContext()}`;
   showWorkDestination(kind, id, presentation);
   return true;
 }

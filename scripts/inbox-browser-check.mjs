@@ -68,7 +68,7 @@ async function setup(t, mobile = false, simulate = false, accountOnly = false) {
   page.on("pageerror", e => errors.push(e.message));
   page.on("dialog", dialog => dialog.accept());
   await page.route("**/*", route => { if (new URL(route.request().url()).origin !== origin) { external.push(route.request().url()); return route.abort(); } return route.continue(); });
-  await page.goto(origin + (accountOnly ? "/?account=1#pr-view/rooms" : "/?room=commons"));
+  await page.goto(origin + (accountOnly ? "/?account=1#pr-view/rooms" : "/?room=commons"), { timeout: 30000 });
   await signInFixture(page, accountKey); await page.locator(accountOnly ? "#account-rooms-panel" : "#main").waitFor({ state: "visible" });
   // Opening the inbox lists the connections and opens the first message, two independent round
   // trips; on a phone the opened reader covers the sidebar. Settle both before any sidebar step:
@@ -431,13 +431,10 @@ test("provider preview cannot repopulate private content after another tab chang
   for (const id of ["inbox-reply-original-body", "inbox-reply-local-body"]) assert.equal(await p.locator("#" + id).textContent(), "");
   assert.equal(await p.evaluate(() => sessionStorage.getItem("project-room:pending-reply-review:v1")), null);
 });
-// Quarantined per tests/quarantine.json: this browser regression test for the
-// delayed account-confirmation race has never passed in hosted CI (original
-// PR #1401 or this rescue) — see the quarantine entry for the failure
-// signature. It stays out of the blocking suite and runs only in the
-// non-blocking lane (`npm run test:quarantined`, QUARANTINE_RUN=1).
-const QUARANTINED_DELAYED_CONFIRMATION = process.env.QUARANTINE_RUN !== "1";
-test("account-only confirmation preserves a newer login and retires a held private preview", { timeout: 35000, skip: QUARANTINED_DELAYED_CONFIRMATION ? "quarantined: tests/quarantine.json (delayed-confirmation harness flake; repair by 2026-10-20)" : false }, async t => {
+// Previously quarantined (tests/quarantine.json) for harness flakiness; the
+// root causes are fixed (member key for /api/session, second-tab boot moved
+// before the held-confirmation window). Runs in the normal blocking suite.
+test("account-only confirmation preserves a newer login and retires a held private preview", { timeout: 60000 }, async t => {
   let releasePreview = () => {}, releaseConfirmation = () => {};
   let previewSettled = Promise.resolve(), confirmationSettled = Promise.resolve();
   let phase = "fixture", held = false, confirmationState = "not captured", confirmationAt = null, confirmationReleasedMs = null;
@@ -449,6 +446,13 @@ test("account-only confirmation preserves a newer login and retires a held priva
   });
   // No Room stream exists in this tab: confirmation must retire its private view.
   const f = await reviewFixture(t, false, true), p = f.page;
+  // The second tab's room boot is slow (~7s); create it before any request
+  // holds so it cannot race the held confirmation's 10s client deadline.
+  // The API login below needs only the shared cookie jar, not the tab's JS,
+  // so don't wait for #main here.
+  phase = "second tab room";
+  const other = await p.context().newPage();
+  await other.goto(f.origin + "/?room=commons");
   phase = "private preview request";
   await p.setExtraHTTPHeaders({ "X-Fixture-Tab": "account-confirmation" });
   let previewStarted, confirmationStarted, confirmationFinished;
@@ -464,9 +468,6 @@ test("account-only confirmation preserves a newer login and retires a held priva
     await previewSettled;
   });
   await p.locator("#inbox-reply-open").click(); await previewReady;
-  phase = "second tab room";
-  const other = await p.context().newPage(); await other.goto(f.origin + "/?room=commons");
-  await other.locator("#main").waitFor();
   const handler = f.server.listeners("request")[0];
   f.server.removeListener("request", handler);
   f.server.on("request", async (request, response) => {
@@ -515,8 +516,11 @@ test("account-only confirmation preserves a newer login and retires a held priva
   assert.equal(JSON.parse(signedInBody).account.id, guest.id);
   // Establish the guest's room session (as signInFixture does) so the
   // reloaded tab can enter the room; the account login alone is not enough.
+  // NOTE: /api/session mints a room session and only accepts a room-scoped
+  // human member key — an account access key always 401s here (harness bug).
+  const guestMemberKey = f.store.issueAccessKey("commons", "guest");
   const roomSession = await other.context().request.post(f.origin + "/api/session", {
-    headers: { Origin: f.origin }, data: { accessKey: guestAccessKey }
+    headers: { Origin: f.origin }, data: { accessKey: guestMemberKey }
   });
   assert.equal(roomSession.status(), 201);
   phase = "confirmation response";
