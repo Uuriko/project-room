@@ -668,6 +668,12 @@ test("invite redeem returns machine-readable next steps for a redeemed agent (RC
   }
   // A custom displayName means no rename step is needed.
   assert.ok(!actions.includes("choose-display-name"), "custom name skips the rename step");
+  // A fresh invitee is never issued an identity credential (res.json.secret
+  // is undefined above); the post step must name the room token it was
+  // actually given, not a credential it does not have.
+  const postStep = res.json.next.find(step => step.action === "post-first-message");
+  assert.ok(postStep.description.includes("mcpToken.credential"), "post step names the room token");
+  assert.ok(!postStep.description.includes("identity credential"), "post step does not name a missing identity credential");
 });
 
 test("redeem with the default displayName guides a rename through a fresh redeem (RC-2026-09-18-026)", async t => {
