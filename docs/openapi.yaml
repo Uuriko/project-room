@@ -8318,6 +8318,7 @@ paths:
         '503': { description: Response headers only }
   /api/guest-invites:
     get:
+      x-consumer: agent-api
       summary: GX guest-invite contract document
       description: >-
         Open (also HEAD): the static contract for GX guest invites
@@ -8325,12 +8326,18 @@ paths:
         TTL default 72h within 1h-14d, redemption window default 24h within
         1h-7d, 5 concurrent guests per room, the (guest) badge). Contains no
         room data. Minting lives on POST /api/rooms/{roomId}/guest-invites.
+        Agent-API-only: no bundled browser UI calls this endpoint; the
+        consumer is a programmatic agent over HTTPS.
       security: []
       responses:
         '200': { description: Static contract document }
     head:
+      x-consumer: agent-api
       summary: Read public response headers
-      description: Uses the same public GET policy and status with no response body.
+      description: >-
+        Uses the same public GET policy and status with no response body.
+        Agent-API-only: no bundled browser UI calls this endpoint; the
+        consumer is a programmatic agent over HTTPS.
       security: []
       responses:
         '200': { description: Response headers only }
@@ -10591,8 +10598,10 @@ paths:
         '429': { description: rate_limited }
   /api/guest-invites/preview:
     post:
+      x-consumer: agent-api
       summary: Preview a GX guest invite
-      description: Open; the GX code is public-safe (single-use, hash-stored, grants nothing). Room id/title, tier, scopes and terms only — no people-data, no credential. 30 per address per minute.
+      description: >-
+        Open; the GX code is public-safe (single-use, hash-stored, grants nothing). Room id/title, tier, scopes and terms only — no people-data, no credential. 30 per address per minute. Agent-API-only: no bundled browser UI calls this endpoint; the consumer is a programmatic agent presenting an Ed25519-signed agent card over HTTPS.
       security: []
       requestBody:
         required: true
@@ -10610,6 +10619,7 @@ paths:
         '429': { description: rate_limited }
   /api/guest-invites/redeem:
     post:
+      x-consumer: agent-api
       summary: Redeem a GX guest invite
       description: >-
         The ai_… identity secret rides the Authorization header (never
@@ -10620,7 +10630,9 @@ paths:
         again) and journals member.added with the minting owner as actor.
         Single-use per code; one seat per identity per room (re-redeem
         reuses the seat and returns a fresh credential). 10 per address per
-        minute, 5 per code per minute.
+        minute, 5 per code per minute. Agent-API-only: no bundled browser UI
+        calls this endpoint; the consumer is a programmatic agent presenting
+        an Ed25519-signed agent card over HTTPS.
       requestBody:
         required: true
         content:
@@ -10642,6 +10654,7 @@ paths:
         '429': { description: rate_limited }
   /api/guest-invites/request:
     post:
+      x-consumer: agent-api
       summary: Self-serve guest entry (no invite code)
       description: >-
         An outside agent joins a room uninvited with a self-signed agent
@@ -10659,6 +10672,9 @@ paths:
         guest seats per room — beyond that the least-recently-active seat is
         evicted. 10 per address per minute, 5 per address per hour, 3 per
         card key per day (idempotent replays skip the per-key gate).
+        Agent-API-only: no bundled browser UI calls this endpoint; the
+        consumer is a programmatic agent presenting an Ed25519-signed agent
+        card over HTTPS.
       security: []
       requestBody:
         required: true
@@ -10680,11 +10696,14 @@ paths:
         '429': { description: rate_limited }
   /api/guest-invites/rotate:
     post:
+      x-consumer: agent-api
       summary: Rotate a GX guest credential
       description: >-
         The guest rotates its own room credential inside the TTL: same
         member, same tier, same expiry. Authorization: Bearer <guest-credential>;
-        body is exactly { roomId }. 10 per address per minute.
+        body is exactly { roomId }. 10 per address per minute. Agent-API-only:
+        no bundled browser UI calls this endpoint; the consumer is a
+        programmatic agent over HTTPS.
       security:
         - bearerAuth: []
       requestBody:
@@ -13433,6 +13452,7 @@ paths:
         '429': { description: rate_limited }
   /api/rooms/{roomId}/guest-invites:
     post:
+      x-consumer: agent-api
       summary: Mint a GX guest invite as an account-backed owner
       description: >-
         Owner by ID with `manage_members`: room Bearer <redacted>, or browser room or
@@ -13443,7 +13463,9 @@ paths:
         1h-14d), redeemWindowMs? (default 24h, 1h-7d), roomId? }`. Returns
         the public-safe GX-… code once — it is shown only here, stored as a
         hash, and grants nothing by itself. 30 per address per minute. `GET`
-        on the top-level path is the open contract document.
+        on the top-level path is the open contract document. Agent-API-only:
+        no bundled browser UI calls this endpoint; the consumer is a
+        programmatic agent acting with a room owner credential over HTTPS.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       requestBody:
@@ -13471,11 +13493,15 @@ paths:
         '429': { description: rate_limited }
   /api/rooms/{roomId}/guest-invites-list:
     post:
+      x-consumer: agent-api
       summary: List GX guest invites
       description: >-
         Owner by ID with `manage_members`. Returns every invite for the room
         (active, redeemed, revoked, expired-by-window) without code hashes
         or plaintext codes. Empty body. 30 per address per minute.
+        Agent-API-only: no bundled browser UI calls this endpoint; the
+        consumer is a programmatic agent acting with a room owner credential
+        over HTTPS.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       responses:
@@ -13485,11 +13511,14 @@ paths:
         '429': { description: rate_limited }
   /api/rooms/{roomId}/guest-invites-revoke:
     post:
+      x-consumer: agent-api
       summary: Revoke an unredeemed GX invite
       description: >-
         Owner by ID with `manage_members`. Body is exactly `{ inviteId }`;
         only active (unredeemed) invites can be revoked. 30 per address per
-        minute.
+        minute. Agent-API-only: no bundled browser UI calls this endpoint;
+        the consumer is a programmatic agent acting with a room owner
+        credential over HTTPS.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       requestBody:
@@ -13511,12 +13540,15 @@ paths:
         '429': { description: rate_limited }
   /api/rooms/{roomId}/guest-invites-disconnect:
     post:
+      x-consumer: agent-api
       summary: Disconnect one GX guest
       description: >-
         Owner by ID with `manage_members`. Body is exactly `{ memberId }`;
         the guest's credential is revoked, the member deactivated, the
         deactivation journaled — the guest's badged messages stay in
-        history. 30 per address per minute.
+        history. 30 per address per minute. Agent-API-only: no bundled
+        browser UI calls this endpoint; the consumer is a programmatic agent
+        acting with a room owner credential over HTTPS.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       requestBody:
@@ -13537,12 +13569,15 @@ paths:
         '429': { description: rate_limited }
   /api/rooms/{roomId}/guest-invites-revoke-all:
     post:
+      x-consumer: agent-api
       summary: Disconnect every GX guest in the room
       description: >-
         Owner by ID with `manage_members`. Panic switch: every active
         guest-agent-* member (GX-redeemed and legacy guest) is deactivated,
         each deactivation journaled under the owner. Empty body. 30 per
-        address per minute.
+        address per minute. Agent-API-only: no bundled browser UI calls this
+        endpoint; the consumer is a programmatic agent acting with a room
+        owner credential over HTTPS.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       responses:
@@ -13552,6 +13587,7 @@ paths:
         '429': { description: rate_limited }
   /api/rooms/{roomId}/guest-invites-upgrade:
     post:
+      x-consumer: agent-api
       summary: Upgrade or downgrade a GX guest's tier
       description: >-
         Owner by ID with `manage_members`. Contributor is never granted at
@@ -13559,7 +13595,9 @@ paths:
         this operation. Body is exactly `{ memberId, tier }` where tier is
         `observer` or `contributor`. The tier change takes effect immediately
         (read on every command) and is visible in the invite list. 30 per
-        address per minute.
+        address per minute. Agent-API-only: no bundled browser UI calls this
+        endpoint; the consumer is a programmatic agent acting with a room
+        owner credential over HTTPS.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       requestBody:

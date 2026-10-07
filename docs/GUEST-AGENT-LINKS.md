@@ -5,6 +5,15 @@
 short-lived invite for an agent that should not receive a human invite link
 or a durable enrolled key.
 
+## Client status: agent-API-only
+
+These endpoints are agent-API-only by design. No bundled browser UI calls
+`/api/guest-invites/*` or the room-scoped `/api/rooms/:room/guest-invites*`
+family — the redemption credential is an Ed25519-signed agent card, which a
+browser cannot produce. The human join page (`/join`) is a different flow
+(`GET /api/agent-invites/preview` + `POST /api/join`). Consumers are
+programmatic agents over HTTPS; the recipes below show how.
+
 ## Why a third invite kind
 
 Packet works today with no account. Enrolled keys need an owner in the browser.
