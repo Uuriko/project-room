@@ -83,7 +83,8 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
   }
   function focusView() {
     const node = surface();
-    const target = node?.querySelector('[name="email"]') || node?.querySelector('[name="newPassword"]') || node?.querySelector("[data-reset-password]") || node?.querySelector("button:not([data-signin-back]):not(:disabled)");
+    const candidates = node ? [...node.querySelectorAll('[name="email"], [name="newPassword"], [data-reset-password], button:not([data-signin-back]):not(:disabled)')] : [];
+    const target = candidates.find(element => !element.closest("[hidden]") && element.getClientRects().length > 0);
     target?.focus();
   }
   function back() { if (busy) return false; resetCode = ""; return showView("password-login"); }

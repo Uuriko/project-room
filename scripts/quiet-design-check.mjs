@@ -29,7 +29,7 @@ for (const touch of [false, true]) {
     await page.goto(`http://127.0.0.1:${server.address().port}`);
     await signInFixture(page, fixture.keys.owner);
     await page.locator("#main").waitFor({ state: "visible" });
-    assert.equal(await page.locator("#people-panel").evaluate(e => e.open), true, "people-panel starts open in the sidebar");
+    assert.equal(await page.locator("#people-panel").evaluate(e => e.open), false, "people-panel starts collapsed in the human sidebar");
     assert.equal(await page.locator("#composer-options").evaluate(node => node.open), false, "secondary composer options start closed");
     assert.equal(await page.locator("#work-options").evaluate(e => e.open), false, "work-options starts quiet");
     assert.equal(await page.locator(".work-details").first().evaluate(e => e.open), false);
@@ -128,7 +128,7 @@ for (const touch of [false, true]) {
     if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await clickChrome(page, "#signout-button");
     await page.locator("#auth-panel").waitFor({ state: "visible" });
     assert.equal(await page.locator("#work-dialog").evaluate(e => e.open), false);
-    assert.equal(await page.locator("#people-panel").evaluate(e => e.open), true);
+    assert.equal(await page.locator("#people-panel").evaluate(e => e.open), false, "sign-out restores the quiet human disclosure state");
     assert.equal(await page.locator("#composer-options").evaluate(node => node.open), false, "secondary composer options start closed");
     assert.equal(await page.locator("#work-options").evaluate(e => e.open), false);
     assert.deepEqual(errors, []);

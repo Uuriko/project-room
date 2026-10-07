@@ -465,6 +465,8 @@ test("composer failures stay discussion-scoped and keyboard sends preserve user 
   release.resolve();
   await page.locator("#auth-panel").waitFor({ state: "visible" });
   assert.equal(await form.getAttribute("aria-busy"), null);
+  assert.equal(await page.locator("#auth-signin-ui").evaluate(node => node.contains(document.activeElement)), true, "access loss moves focus into the authentication surface");
+  if (!await page.locator('#auth-signin-ui [data-signin-form="password"]').isVisible()) await page.getByRole("button", { name: "Log in", exact: true }).click();
   assert.equal(await page.locator('#auth-signin-ui [data-signin-form="password"] [name="email"]').evaluate(node => node === document.activeElement), true,
     "access termination focuses authentication, never the old composer");
   await enterRoom(page, owner, "Room owner");
@@ -576,7 +578,7 @@ test("a committed self-send is not re-announced as incoming after a delayed snap
   assert.equal(store.snapshot(owner, "commons").state.messages.filter(message => message.body === body).length, 1);
   allowSnapshot = true;
   await clickChrome(page, "#refresh-button");
-  await page.locator('[data-message-record-id] p').filter({ hasText: body }).waitFor();
+  await page.locator('[data-message-record-id] .message-body').filter({ hasText: body }).waitFor();
   assert.equal(await page.evaluate(() => window.delayedSelfAnnouncements.some(text => /new message/.test(text))), false);
   assert.equal(await page.locator("#conversation-announcement").textContent(), "");
 });
