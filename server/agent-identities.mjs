@@ -16,6 +16,7 @@ import { memberCan } from "../src/events.js";
 import { nextActionsForIdentityMint } from "./discoverability.mjs";
 import { checkAgentDisplayName, assertNotReservedRoleName } from "./display-name-guard.mjs";
 import { refreshDirectoryIdentity } from "./public-read-model.mjs";
+import { recordPluginFunnelStage } from "./plugin-funnel.mjs"; // Lane 10: plug-in funnel room_join stage
 
 const fail = (status, code, message, headers = null, detail = null) => {
   const error = new ServiceError(status, code, message, headers);
@@ -645,6 +646,9 @@ export class AgentIdentities {
         }
         this.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)")
           .run(roomId, identityId, resolvedMemberId, this.store.now());
+        // Plug-in funnel (lane 10): room_join. Runs inside the link
+        // transaction; the recorder never throws into the join path.
+        recordPluginFunnelStage(this.db, { identityId, stage: "room_join", atMs: this.store.now() });
         if (settleAccessRequests) this.closePendingAccessRequests(roomId, identityId, auth.member.id);
         this.noteActivated(identityId);
         refreshDirectoryIdentity(this.store, identityId);
@@ -669,6 +673,9 @@ export class AgentIdentities {
           ...(referredBy ? { referredBy } : {}) } }, expectedSessionBinding);
       this.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)")
         .run(roomId, identityId, resolvedMemberId, this.store.now());
+      // Plug-in funnel (lane 10): room_join (fresh link path). Same
+      // transaction, same never-throws recorder.
+      recordPluginFunnelStage(this.db, { identityId, stage: "room_join", atMs: this.store.now() });
       if (settleAccessRequests) this.closePendingAccessRequests(roomId, identityId, auth.member.id);
       this.noteActivated(identityId);
       refreshDirectoryIdentity(this.store, identityId);

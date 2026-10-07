@@ -40,6 +40,7 @@ import { redactEventPage, redactEventRows, redactMessageTree, redactSnapshotStat
 import { messageInHistory, eventInHistory, indexMessages as indexHistoryMessages, requireExportOwner, recordRoomExport } from "./history-visibility.mjs"; // PRIV-2
 import { discoveryDoc, isHealthAliasPath, rewriteRoomApiPrefix, EDGE_DOOR_HOSTS, ROOM_ORIGIN } from "../deploy/agent-discovery.mjs";
 import { noteIdentityMint } from "./growth-loop.mjs";
+import { recordPluginFunnelStage, recordPluginFunnelReader, handlePluginFunnelRequest } from "./plugin-funnel.mjs"; // Lane 10: plug-in funnel metrics
 import { createWikiReadApi } from "./wiki-read-api.mjs"; // W009: read-only wiki API for agents (prefix-delegated, no route literals here)
 import { buildOpenApiJson, discoverabilityErrorOverride, nextActionsForAccessRequest, nextActionsForAccessRequestStatus, nextActionsForInviteRedeem } from "./discoverability.mjs";
 import { MCP_SERVER_CARD_PATH, MCP_DISCOVERY_CACHE_CONTROL, MCP_SERVER_CARD_CORS } from "../src/mcp-server-card.mjs";
@@ -1644,6 +1645,18 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         } catch { return json(res, 503, { status: "unavailable", reason: "growth_unavailable" }); }
         if (growthReply) return json(res, growthReply.status, growthReply.body);
       }
+      // Plug-in funnel (lane 10): read-only aggregate of the agent plug-in
+      // funnel — doc read -> mint -> join -> first claim -> first receipt ->
+      // day-7 active, with drop-off rates and weekly mint cohorts. Aggregate
+      // counts only; no per-agent data leaves the server. Failure-isolated:
+      // a throwing query degrades to a 503, never to a dropped connection.
+      if (url.pathname === "/api/plugin-funnel" && req.method === "GET") {
+        try {
+          const funnelReply = handlePluginFunnelRequest(store, { method: req.method });
+          return json(res, funnelReply.status, funnelReply.body);
+        } catch { return json(res, 503, { status: "unavailable", reason: "plugin_funnel_unavailable" }); }
+      }
+      if (url.pathname === "/api/plugin-funnel") reject(405, "method_not_allowed", "Method not allowed");
       // W009 — read-only wiki API for agents (procedures, lessons, runbooks).
       // Prefix-delegated: server/wiki-read-api.mjs owns every /api/wiki/
       // template and throws ServiceError for 4xx/503, so the canonical error
@@ -1670,6 +1683,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         res.setHeader("Link", discoveryLinks(url));
         const packetBytes = Buffer.from(packet.body);
         res.writeHead(200, { "Content-Type": packet.type, "Content-Length": packetBytes.length });
+        // Plug-in funnel (lane 10): doc_read. Anonymous top-of-funnel count of
+        // discovery-packet readers; aggregate-only, never breaks the serve.
+        recordPluginFunnelReader(store.db, { address: remoteAddress, session: cookie(req, accountCookieName) });
         return res.end(req.method === "HEAD" ? undefined : packetBytes);
       }
       const discovery = discoveryDoc(url.pathname);
@@ -1701,6 +1717,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }
         const bytes = Buffer.from(docBody);
         res.writeHead(200, { "Content-Type": discovery.type, "Content-Length": bytes.length });
+        // Plug-in funnel (lane 10): doc_read for every served discovery doc
+        // (skill.md, agent.json, kits.txt, ...). Same aggregate-only recorder.
+        recordPluginFunnelReader(store.db, { address: remoteAddress, session: cookie(req, accountCookieName) });
         return res.end(req.method === "HEAD" ? undefined : bytes);
       }
       if (discovery) reject(405, "method_not_allowed", "Method not allowed");
@@ -2921,6 +2940,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           catch { /* an anonymous mint still records the address and browser session */ }
         }
         noteIdentityMint(store, created.identityId, { address: String(remoteAddress ?? ""), session: slotToken || null, accountId: mintAccountId });
+        // Plug-in funnel (lane 10): identity_mint stage. Aggregate-only, first
+        // reach wins; the recorder never throws into the mint path.
+        recordPluginFunnelStage(store.db, { identityId: created.identityId, stage: "identity_mint" });
         return json(res, 201, created);
       }
       // POST-only mint. GET must not look like a missing route (404) or an

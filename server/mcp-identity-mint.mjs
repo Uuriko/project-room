@@ -11,6 +11,7 @@ import { IDENTITY_MINT_MCP_TOOLS } from '../src/room-mcp-join.js';
 import { diagnoseArguments, mcpCallError } from './mcp-arg-errors.mjs';
 import { ServiceError } from './service-error.mjs';
 import { noteIdentityMint } from './growth-loop.mjs';
+import { recordPluginFunnelStage } from './plugin-funnel.mjs'; // Lane 10: plug-in funnel identity_mint stage
 
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const result = (id, value, isError = false) => ({
@@ -79,6 +80,9 @@ export function handleIdentityMintMcp(store, message, { remoteAddress } = {}) {
       anonymous: { address: String(remoteAddress ?? ''), proof: args.proof }
     });
     noteIdentityMint(store, created.identityId, { address: String(remoteAddress ?? ''), session: null, accountId: null });
+    // Plug-in funnel (lane 10): the MCP mint is the same mint as the HTTP
+    // door — record the same stage. The recorder never throws into the mint.
+    recordPluginFunnelStage(store.db, { identityId: created.identityId, stage: "identity_mint" });
     return result(requestId, created);
   } catch (error) {
     if (error instanceof ServiceError) {

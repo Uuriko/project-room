@@ -38,6 +38,10 @@ export const unfencedAdditiveTables = Object.freeze([
   "request_runs", // Permanent host reservations; older writers have no execution route.
   "private_inbox_reads",
   "access_requests",
+  // plugin_funnel_events (lane 10, plug-in funnel metrics): purely additive,
+  // first-reach-wins per (key, stage); older writers have no code path to it.
+  // Keys are domain-separated sha256 digests, never raw identity ids.
+  "plugin_funnel_events",
   // room_access_auto_approve (standing auto-approve rule, RC-2026-09-29-3603):
   // purely additive and intentionally NOT fenced — older writers have no code
   // path to it, and the manage_members-only config rule plus the

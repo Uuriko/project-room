@@ -134,6 +134,7 @@ optional.push("server/agent-invites.mjs");
 optional.push("server/routes/agent-connect.mjs"); // GET /a/<code> agent invite page (imported by server/http.mjs and server/agent-invites.mjs)
 optional.push("server/referrals.mjs"); // Referral attribution: joins via invite/access-request (imported by server/store.mjs)
 optional.push("server/growth-loop.mjs"); // Referral growth: activation, room credits, payout guard (imported by server/referrals.mjs and server/agent-rooms.mjs)
+optional.push("server/plugin-funnel.mjs"); // Lane 10: plug-in funnel metrics (imported by server/http.mjs, server/agent-identities.mjs, server/work-claim-events.mjs, server/mcp-identity-mint.mjs)
 optional.push("server/referral-invites.mjs"); // Signed agent-carried referral invites (imported by server/store.mjs and server/http.mjs)
 optional.push("src/work-item-session.js");
 optional.push("src/board.js");

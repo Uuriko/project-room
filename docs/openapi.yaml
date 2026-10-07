@@ -8157,6 +8157,19 @@ paths:
       security: []
       responses:
         '200': { description: Response headers only }
+  /api/plugin-funnel:
+    get:
+      summary: Agent plug-in funnel
+      description: >-
+        Open. Aggregate counts for the agent plug-in funnel: doc read ->
+        identity mint -> room join -> first claim -> first receipt -> day-7
+        active, with drop-off rates, median time-to-stage, and weekly mint
+        cohorts. Aggregate counts only; no per-agent data. See
+        docs/PLUGIN-FUNNEL.md.
+      security: []
+      responses:
+        '200': { description: "Funnel report (see docs/PLUGIN-FUNNEL.md for the shape)" }
+        '503': { description: "Funnel query unavailable" }
   /api/health/jobs:
     get:
       summary: Cron job heartbeat and open public-report count
