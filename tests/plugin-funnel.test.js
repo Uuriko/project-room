@@ -130,7 +130,8 @@ test("pluginFunnelReport computes the funnel with drop-offs", () => {
   assert.equal(cohort.day7Active, 1);
 
   // Definitions travel with the report so readers don't guess.
-  assert.ok(report.definitions.identity_mint.includes("POST /api/agent-identities"));
+  assert.ok(report.definitions.identity_mint.includes("mint door"),
+    "definition names the all-doors choke point, not just the two hooked doors");
 });
 
 test("pluginFunnelReport is empty-safe and JSON-safe", () => {
