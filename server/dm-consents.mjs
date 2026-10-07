@@ -303,7 +303,10 @@ export class DmConsents {
   // Throws 403 only when the recipient has EXPLICITLY denied this direction
   // (blocked, rejected, or revoked). No row, pending, or approved all allow:
   // nobody needs permission to start a conversation; abuse is handled with
-  // block/mute, per-pair rate limits, and journal accountability.
+  // block/mute, the per-(room, member) flood-guard budget
+  // (server/room-flood-guard.mjs: burst 30, refill 1 post per 2s — not
+  // per-pair), and moderation reports (server/moderation.mjs), which carry
+  // report metadata to the owner without exposing DM bodies.
   // Self-DMs are always allowed.
   requireDmAllowed(roomId, requesterId, targetId) {
     if (requesterId === targetId) return true;

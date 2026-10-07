@@ -128,7 +128,8 @@ const communications = () => ({
     // DMs are open by default (2026-09-24 standing rule): no consent gate
     // exists — requireDmAllowed only blocks explicitly denied directions.
     // Published honestly as false; abuse is handled with block/mute,
-    // per-pair rate limits, and journal accountability.
+    // the per-(room, member) flood-guard budget (not per-pair), and
+    // moderation reports (metadata to the owner, never DM bodies).
     dmConsentRequired: false,
     sendBudgets: "per-channel token bucket",
   },

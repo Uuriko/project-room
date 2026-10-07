@@ -9,6 +9,15 @@
 // Only the room owner can list reports; the reporter sees only their own
 // receipt. Nothing here leaves the room or spends anything.
 //
+// DM privacy (RC-2026-09-19-070 / SEC-19): a direct message is visible only
+// to its two parties, the room owner included. A report is filed against
+// what the reporter can see, so a non-party cannot report a DM (404, like a
+// missing message); and the owner's report list carries the report metadata
+// (reporter, author, reason, time) but never a DM body the owner could not
+// otherwise read. Reporting stays the accountability path for DM abuse —
+// block/mute stop it, the report tells the owner who and why — without
+// becoming a backdoor into DM contents.
+//
 // Mute is a per-member preference recorded on the muter's own member record
 // by the member.mute_set event (src/events.js). This module composes it with
 // derived feeds: `mutedEvent` says whether a viewer's feed should skip an
@@ -93,6 +102,11 @@ export class Moderation {
       const room = this.store.room(roomId);
       const message = room.state.messages.find(m => m.id === request.messageId);
       if (!message) fail(404, "message_not_found", "That message is not in this room");
+      // A report is filed against what the reporter can see. A DM is visible
+      // only to its two parties (RC-2026-09-19-070): a non-party can neither
+      // read it nor report it — 404, like a missing message.
+      if (message.toMemberId && message.toMemberId !== auth.member.id && message.authorId !== auth.member.id)
+        fail(404, "message_not_found", "That message is not in this room");
       if (message.authorId === auth.member.id) fail(422, "invalid_report", "You cannot report your own message; delete it instead");
       const prior = this.db.prepare("SELECT * FROM message_reports WHERE room_id=? AND reporter_id=? AND message_id=?").get(roomId, auth.member.id, request.messageId);
       if (prior) return { ...this.viewer(auth, roomId), report: receipt(prior), duplicate: true };
@@ -116,11 +130,16 @@ export class Moderation {
       // not the member kind; an agent owner may review reports. Owner-only.
       if (auth.member.id !== room.state.room.ownerId) fail(403, "owner_required", "Only the room owner can read reports");
       const messages = new Map(room.state.messages.map(m => [m.id, m]));
+      const viewerId = auth.member.id;
       const reports = this.db.prepare("SELECT * FROM message_reports WHERE room_id=? ORDER BY created_at DESC, report_id").all(roomId).map(row => {
         const message = messages.get(row.message_id);
+        // The report list never hands the viewer a body they could not read
+        // from the room itself. A DM stays with its two parties: the owner
+        // gets the actionable metadata (who, when, why) but not the contents.
+        const visible = message && (!message.toMemberId || message.toMemberId === viewerId || message.authorId === viewerId);
         return {
           ...receipt(row), reporterId: row.reporter_id, authorId: row.author_id,
-          message: message ? { authorId: message.authorId, body: message.deletedAt ? null : message.body, createdAt: message.createdAt, deletedAt: message.deletedAt ?? null } : null
+          message: message ? { authorId: message.authorId, body: visible ? (message.deletedAt ? null : message.body) : null, createdAt: message.createdAt, deletedAt: message.deletedAt ?? null } : null
         };
       });
       return { ...this.viewer(auth, roomId), reports };
