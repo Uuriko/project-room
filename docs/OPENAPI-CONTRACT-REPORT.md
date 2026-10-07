@@ -1,6 +1,6 @@
 # OpenAPI contract accuracy report
 
-Generated 2026-10-07T19:59:52.707Z by scripts/openapi-method-accuracy.mjs (TASKS.md task 16).
+Generated 2026-10-08T10:51:15.207Z by scripts/openapi-method-accuracy.mjs (TASKS.md task 16).
 Method: every operation in docs/openapi.yaml is probed against a scratch
 server with its documented method; 405 on the documented method (or a
 double-404 on an alternate method) is a contract mismatch. Path-template
@@ -8,8 +8,8 @@ coverage is enforced separately by scripts/route-docs-check.mjs.
 
 ## Summary
 
-- Documented operations: 510
-- Unique paths: 414
+- Documented operations: 512
+- Unique paths: 416
 - Served route templates (static): 286
 - Contract mismatches: 0
 
@@ -162,6 +162,8 @@ coverage is enforced separately by scripts/route-docs-check.mjs.
 | POST | `/api/rooms/{roomId}/work-claims/{claimId}/premise-invalid` | default | ok |
 | POST | `/api/rooms/{roomId}/work-claims/{claimId}/review` | default | ok |
 | POST | `/api/rooms/{roomId}/work-claims/{claimId}/release` | default | ok |
+| POST | `/api/rooms/{roomId}/work-claims/{claimId}/close` | default | ok |
+| POST | `/api/rooms/{roomId}/work-claims/{claimId}/cancel` | default | ok |
 | POST | `/api/rooms/{roomId}/work-claims/{claimId}/reassign` | default | ok |
 | GET | `/api/rooms/{roomId}/board/v2/claims` | default | ok |
 | POST | `/api/rooms/{roomId}/board/v2/claims` | default | ok |
