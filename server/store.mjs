@@ -3579,7 +3579,18 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // existing clients keep matching on them; only the message changes,
       // and only for expired (never revoked) guest credentials.
       if (!row.revoked && !row.parent_hash && row.expires_at <= this.now() && isGuestAgentMemberId(row.member_id)) {
-        fail(401, "unauthenticated", "Guest credential expired. It cannot be renewed \u2014 get a fresh pass: self-serve guests re-run POST /api/guest-invites/request with a fresh signed joinRequest (a new requestId); invited guests ask the owner for a fresh invite code, then POST /api/guest-invites/redeem with the saved identity secret.");
+        // Issue #1618: v0 guest-agent-link seats can self-refresh since #1576,
+        // so "cannot be renewed" is false for them. Branch the teaching text:
+        // v1 seats stay owner-mediated (fresh code path). The v1 family is
+        // both the invite-code seats (guest_members) and the self-serve seats
+        // (guest_selfserve) — only owner-minted v0 link seats (neither table)
+        // point at the self-service refresh endpoint.
+        const isV1 = this.db.prepare("SELECT 1 FROM guest_members WHERE member_id=?").get(row.member_id)
+          ?? this.db.prepare("SELECT 1 FROM guest_selfserve WHERE member_id=?").get(row.member_id);
+        if (isV1) {
+          fail(401, "unauthenticated", "Guest credential expired. It cannot be renewed \u2014 get a fresh pass: self-serve guests re-run POST /api/guest-invites/request with a fresh signed joinRequest (a new requestId); invited guests ask the owner for a fresh invite code, then POST /api/guest-invites/redeem with the saved identity secret.");
+        }
+        fail(401, "unauthenticated", "Guest credential expired. Refresh it self-service within 7 days of expiry: POST /api/guest-agent-links/refresh with {\"linkToken\": \"<the expired credential>\"}. Past the refresh window \u2014 or if the seat was removed \u2014 get a fresh pass: ask the room owner for a new guest-agent link.");
       }
       fail(401, "unauthenticated", "Session or key expired or revoked");
     }
