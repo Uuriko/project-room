@@ -1717,65 +1717,65 @@ body:has(#auth-panel:not([hidden])) .site-footer { display: none; }
    is on, so these rules are inert otherwise. */
 #triage-dialog { width: min(46rem, calc(100vw - 2rem)); max-height: calc(100dvh - 4rem); }
 .triage-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; margin-bottom: .75rem; }
-.triage-head h2 { margin: 0; font-size: 1.25rem; }
-.triage-sub { margin: .25rem 0 0; color: var(--muted); font-size: .85rem; }
+.triage-head h2 { margin: 0; font-size: var(--text-lg); }
+.triage-sub { margin: .25rem 0 0; color: var(--muted); font-size: var(--text-sm); }
 .triage-close { flex: none; }
 .triage-list { display: flex; flex-direction: column; gap: .6rem; }
 .triage-empty { text-align: center; color: var(--muted); padding: 3rem 1rem; border: 1px dashed var(--line); border-radius: .75rem; }
-.triage-empty-big { font-size: 1.05rem; color: var(--text); margin-bottom: .35rem; }
+.triage-empty-big { font-size: var(--text-md); color: var(--text); margin-bottom: .35rem; }
 .triage-card { border: 1px solid var(--line); border-radius: .75rem; padding: .8rem .9rem; background: var(--panel); }
 .triage-card-focused { border-color: var(--blue-strong); box-shadow: 0 0 0 1px var(--blue-strong); }
 .triage-card-top { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; margin-bottom: .4rem; }
-.triage-kind { font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
-.triage-urgent { font-size: .72rem; color: var(--amber); border: 1px solid var(--amber); border-radius: 999px; padding: 0 .45rem; }
-.triage-state-chip { font-size: .72rem; border: 1px solid var(--line); border-radius: 999px; padding: 0 .45rem; color: var(--muted); }
+.triage-kind { font-size: var(--text-xs); text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.triage-urgent { font-size: var(--text-xs); color: var(--amber); border: 1px solid var(--amber); border-radius: 999px; padding: 0 .45rem; }
+.triage-state-chip { font-size: var(--text-xs); border: 1px solid var(--line); border-radius: 999px; padding: 0 .45rem; color: var(--muted); }
 .triage-state-new { color: var(--blue); }
 .triage-state-pending_undo .triage-state-chip { color: var(--amber); border-color: var(--amber); }
 .triage-state-stale .triage-state-chip { color: var(--red); border-color: var(--red); }
 .triage-state-dispatched .triage-state-chip { color: var(--green); border-color: var(--green); }
-.triage-priority { margin-left: auto; font-size: .78rem; color: var(--muted); }
-.triage-summary { margin: 0 0 .3rem; font-size: 1rem; }
-.triage-actor { margin: 0 0 .4rem; color: var(--muted); font-size: .82rem; }
+.triage-priority { margin-left: auto; font-size: var(--text-xs); color: var(--muted); }
+.triage-summary { margin: 0 0 .3rem; font-size: var(--text-md); }
+.triage-actor { margin: 0 0 .4rem; color: var(--muted); font-size: var(--text-sm); }
 .triage-meta { display: flex; flex-wrap: wrap; gap: .35rem; margin-bottom: .45rem; }
-.triage-meta-chip { font-size: .72rem; font-family: ui-monospace, monospace; color: var(--muted); background: var(--panel-raised); border: 1px solid var(--line-soft); border-radius: .35rem; padding: .05rem .4rem; }
+.triage-meta-chip { font-size: var(--text-xs); font-family: ui-monospace, monospace; color: var(--muted); background: var(--panel-raised); border: 1px solid var(--line-soft); border-radius: .35rem; padding: .05rem .4rem; }
 .triage-why { display: flex; flex-wrap: wrap; gap: .35rem; margin-bottom: .45rem; }
-.triage-why-chip { font-size: .72rem; font-family: ui-monospace, monospace; color: var(--blue); border: 1px dashed var(--blue-strong); border-radius: .35rem; padding: .05rem .4rem; }
-.triage-seq { font-size: .78rem; color: var(--muted); margin-bottom: .45rem; }
-.triage-seq kbd, .triage-keys kbd, .triage-countdown-hint kbd, .triage-help-list kbd { font-family: ui-monospace, monospace; font-size: .72rem; background: var(--panel-raised); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: .3rem; padding: 0 .35rem; }
+.triage-why-chip { font-size: var(--text-xs); font-family: ui-monospace, monospace; color: var(--blue); border: 1px dashed var(--blue-strong); border-radius: .35rem; padding: .05rem .4rem; }
+.triage-seq { font-size: var(--text-xs); color: var(--muted); margin-bottom: .45rem; }
+.triage-seq kbd, .triage-keys kbd, .triage-countdown-hint kbd, .triage-help-list kbd { font-family: ui-monospace, monospace; font-size: var(--text-xs); background: var(--panel-raised); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: .3rem; padding: 0 .35rem; }
 .triage-deeplink { color: var(--blue); }
 .triage-checked { color: var(--muted); }
-.triage-stale { margin-bottom: .45rem; padding: .4rem .6rem; border: 1px solid var(--red); border-radius: .5rem; color: var(--red); font-size: .82rem; }
-.triage-receipt { margin-bottom: .45rem; font-family: ui-monospace, monospace; font-size: .78rem; color: var(--green); }
+.triage-stale { margin-bottom: .45rem; padding: .4rem .6rem; border: 1px solid var(--red); border-radius: .5rem; color: var(--red); font-size: var(--text-sm); }
+.triage-receipt { margin-bottom: .45rem; font-family: ui-monospace, monospace; font-size: var(--text-xs); color: var(--green); }
 .triage-suggestions { display: flex; flex-direction: column; gap: .4rem; margin-top: .2rem; }
-.triage-suggestion .triage-pick { display: flex; align-items: center; gap: .6rem; width: 100%; text-align: left; background: var(--panel-raised); color: var(--text); border: 1px solid var(--line); border-radius: .6rem; padding: .5rem .7rem; cursor: pointer; font-size: .88rem; }
+.triage-suggestion .triage-pick { display: flex; align-items: center; gap: .6rem; width: 100%; text-align: left; background: var(--panel-raised); color: var(--text); border: 1px solid var(--line); border-radius: .6rem; padding: .5rem .7rem; cursor: pointer; font-size: var(--text-sm); }
 .triage-suggestion .triage-pick:hover { border-color: var(--blue-strong); }
 .triage-sug-label { flex: 1; }
-.triage-gate { font-size: .72rem; border-radius: 999px; padding: .1rem .5rem; white-space: nowrap; }
+.triage-gate { font-size: var(--text-xs); border-radius: 999px; padding: .1rem .5rem; white-space: nowrap; }
 .triage-gate-retractable { color: var(--green); border: 1px solid var(--green); }
 .triage-gate-confirm { color: var(--amber); border: 1px solid var(--amber); }
-.triage-reason { margin: .25rem 0 0; font-size: .78rem; color: var(--muted); }
-.triage-draft { margin: .25rem 0 0; font-size: .78rem; color: var(--muted); }
-.triage-draft-edit { font-size: .72rem; }
+.triage-reason { margin: .25rem 0 0; font-size: var(--text-xs); color: var(--muted); }
+.triage-draft { margin: .25rem 0 0; font-size: var(--text-xs); color: var(--muted); }
+.triage-draft-edit { font-size: var(--text-xs); }
 .triage-countdown { margin-top: .6rem; background: rgb(255 191 105 / 6%); border: 1px solid var(--amber); border-radius: .6rem; padding: .6rem .75rem; }
-.triage-countdown-line { font-size: .85rem; margin-bottom: .45rem; }
-.triage-countdown-k { font-family: ui-monospace, monospace; font-size: .7rem; color: var(--amber); text-transform: uppercase; letter-spacing: .06em; margin-right: .5rem; }
+.triage-countdown-line { font-size: var(--text-sm); margin-bottom: .45rem; }
+.triage-countdown-k { font-family: ui-monospace, monospace; font-size: var(--text-xs); color: var(--amber); text-transform: uppercase; letter-spacing: .06em; margin-right: .5rem; }
 .triage-countdown-bar { height: .35rem; border-radius: 999px; background: rgb(255 255 255 / 8%); overflow: hidden; }
 .triage-countdown-fill { height: 100%; width: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--amber), var(--green)); }
-.triage-countdown-hint { margin-top: .45rem; font-size: .78rem; color: var(--muted); }
+.triage-countdown-hint { margin-top: .45rem; font-size: var(--text-xs); color: var(--muted); }
 .triage-sheet-wrap { position: sticky; bottom: 0; }
 .triage-sheet-card { border: 1px solid var(--line); border-radius: .75rem; background: var(--panel-raised); padding: 1rem; margin-top: .75rem; }
 .triage-sheet-card h3 { margin: 0 0 .6rem; }
 .triage-snooze-options { display: flex; gap: .5rem; flex-wrap: wrap; margin-bottom: .6rem; }
-.triage-custom-snooze { display: flex; align-items: center; gap: .6rem; margin-bottom: .6rem; font-size: .85rem; }
+.triage-custom-snooze { display: flex; align-items: center; gap: .6rem; margin-bottom: .6rem; font-size: var(--text-sm); }
 .triage-sheet-actions { display: flex; gap: .5rem; margin-top: .6rem; }
 .triage-confirm { border-color: var(--amber); }
 .triage-confirm-consequence { color: var(--text); }
 .triage-confirm-cost { color: var(--muted); }
-.triage-confirm-irreversible { color: var(--amber); font-size: .85rem; }
+.triage-confirm-irreversible { color: var(--amber); font-size: var(--text-sm); }
 .triage-confirm-yes { border-color: var(--amber); }
 .triage-help-list { display: flex; flex-direction: column; gap: .35rem; }
 .triage-help-list > div { display: flex; gap: .6rem; align-items: baseline; }
 .triage-help-list dt { flex: none; min-width: 7rem; }
-.triage-help-list dd { margin: 0; color: var(--muted); font-size: .85rem; }
-.triage-hint { font-size: .78rem; color: var(--muted); margin: .5rem 0 0; }
-.triage-keys { display: flex; flex-wrap: wrap; gap: .4rem 1rem; margin-top: .9rem; padding-top: .7rem; border-top: 1px solid var(--line-soft); font-size: .75rem; color: var(--muted); }
+.triage-help-list dd { margin: 0; color: var(--muted); font-size: var(--text-sm); }
+.triage-hint { font-size: var(--text-xs); color: var(--muted); margin: .5rem 0 0; }
+.triage-keys { display: flex; flex-wrap: wrap; gap: .4rem 1rem; margin-top: .9rem; padding-top: .7rem; border-top: 1px solid var(--line-soft); font-size: var(--text-xs); color: var(--muted); }
