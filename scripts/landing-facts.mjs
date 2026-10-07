@@ -28,6 +28,36 @@ function patchIdOf(execImpl, base, head) {
   return String(id.stdout).trim().split(/\s+/)[0] || null;
 }
 
+export function reviewCommitId(review) {
+  if (typeof review?.commit_id === "string" && SHA.test(review.commit_id)) return review.commit_id;
+  if (typeof review?.commit?.oid === "string" && SHA.test(review.commit.oid)) return review.commit.oid;
+  return null;
+}
+
+export function attachRestCommitIds(pr, restRows) {
+  const rows = (Array.isArray(restRows) ? restRows : []).filter(row => row && row.user?.login && row.state);
+  const reviews = Array.isArray(pr?.reviews) ? pr.reviews.map(review => ({ ...review })) : [];
+  const unused = rows.slice();
+  for (const review of reviews) {
+    if (reviewCommitId(review)) continue;
+    const index = unused.findIndex(row => row.user.login === review.author?.login && row.state === review.state);
+    if (index < 0) continue;
+    review.commit_id = unused[index].commit_id ?? null;
+    unused.splice(index, 1);
+  }
+  if (reviews.length === 0) {
+    return {
+      ...pr,
+      reviews: rows.map(row => ({
+        author: { login: row.user.login },
+        state: row.state,
+        commit_id: row.commit_id ?? null,
+      })),
+    };
+  }
+  return { ...pr, reviews };
+}
+
 function reviewBind(pr, localHead, localPatchId, execImpl, mainSha) {
   const author = pr.author?.login ?? null;
   const latest = new Map();
@@ -43,11 +73,12 @@ function reviewBind(pr, localHead, localPatchId, execImpl, mainSha) {
     if (review.state === "CHANGES_REQUESTED") changesRequested.push(login);
     if (review.state === "APPROVED" && login !== author) {
       nonAuthorApprovals.push(login);
-      if (review.commit_id && SHA.test(review.commit_id) && SHA.test(mainSha)) {
+      const commit = reviewCommitId(review);
+      if (commit && SHA.test(mainSha)) {
         approvalPatchIds.push({
           login,
-          commit: review.commit_id,
-          patchId: patchIdOf(execImpl, mainSha, review.commit_id),
+          commit,
+          patchId: patchIdOf(execImpl, mainSha, commit),
         });
       }
     }
@@ -55,6 +86,16 @@ function reviewBind(pr, localHead, localPatchId, execImpl, mainSha) {
   const carried = localPatchId && localPatchId !== "empty"
     ? approvalPatchIds.filter(row => row.patchId && row.patchId === localPatchId).map(row => row.login)
     : [];
+  const differed = approvalPatchIds.filter(row => row.patchId && row.patchId !== localPatchId).map(row => row.login);
+  const missingProof = nonAuthorApprovals.filter(login => !approvalPatchIds.some(row => row.login === login && row.patchId));
+  let status = "no_non_author_approval";
+  if (pr.headRefOid !== localHead) status = "head_mismatch";
+  else if (changesRequested.length > 0) status = "changes_requested";
+  else if (nonAuthorApprovals.length === 0) status = "no_non_author_approval";
+  else if (missingProof.length > 0) status = "unverifiable";
+  else if (differed.length > 0) status = "patch_id_differs";
+  else if (carried.length === nonAuthorApprovals.length) status = "patch_id_matches";
+  else status = "unverifiable";
   return {
     number: pr.number ?? null,
     head: pr.headRefOid ?? null,
@@ -63,7 +104,8 @@ function reviewBind(pr, localHead, localPatchId, execImpl, mainSha) {
     changesRequested,
     nonAuthorApprovals,
     approvalPatchMatches: carried,
-    ready: pr.headRefOid === localHead && changesRequested.length === 0 && (nonAuthorApprovals.length > 0) && (carried.length > 0 || approvalPatchIds.length === 0 && nonAuthorApprovals.length > 0),
+    status,
+    notMergeAuthorization: true,
   };
 }
 
@@ -116,6 +158,7 @@ export async function landingFacts({
     mainDeployed: production?.sourceRevision === mainSha,
     versionError,
     patchId,
+    notMergeAuthorization: true,
   };
   if (pr != null) {
     if (!ghImpl) facts.pullRequest = { unavailable: true };
@@ -151,7 +194,10 @@ if (import.meta.url === `file://${process.argv[1]}`) {
         error.code = "gh_failed";
         throw error;
       }
-      return JSON.parse(result.stdout);
+      const pr = JSON.parse(result.stdout);
+      const rest = spawnSync("gh", ["api", `repos/{owner}/{repo}/pulls/${number}/reviews`], { encoding: "utf8" });
+      if (rest.status !== 0) return pr;
+      return attachRestCommitIds(pr, JSON.parse(rest.stdout));
     } }).then(facts => console.log(JSON.stringify(facts))).catch(error => {
       console.error(error.code || "facts_failed");
       process.exitCode = 1;
