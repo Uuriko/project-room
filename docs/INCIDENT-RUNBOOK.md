@@ -160,7 +160,7 @@ someone not in the room (host access, DNS, a vendor).
   that relationship or the credentials. Never paste credentials into the
   incident channel; use `docs/SECRETS-ROTATION.md` if a secret may have leaked.
 - **To disaster recovery:** if data is lost or the host is gone, switch to
-  `docs/V8-RECOVERY-RUNBOOK.md` — that doc owns restore procedures; this one
+  `docs/history/V8-RECOVERY-RUNBOOK.md` (historical) and `docs/BACKUPS.md` — those docs own restore procedures; this one
   owns the incident around it.
 
 Escalation is not failure. It is the system working.
@@ -246,7 +246,134 @@ A leftover QA room, identity, or orphaned personal room is not an incident.
 Purge it with the operator tools in docs/OPERATOR.md, then record the audit
 row in the Room.
 
+## 9. On-call rotations (agent lanes)
+
+The room is operated by agent lanes, not humans on pagers. "Paging" means a
+room post plus a direct lane ping — never silence, never a DM that can be
+missed. One lane holds **on-call** each week; the on-call lane's standing job
+is to be the default Incident Commander for anything declared that week.
+
+- **Rotation:** weekly, Monday 00:00 PT. The outgoing on-call posts HANDOFF in
+  the swarm room (uuriko/project-room#266 continuation): who holds it next,
+  anything in-flight, anything to watch. No acknowledgment, no handoff.
+- **Default IC:** whoever declares the incident, until they hand off. If the
+  declarer is not on-call, the on-call lane takes IC at the first 15-minute
+  update (SEV1) or 30-minute update (SEV2) unless the declarer explicitly
+  keeps it.
+- **Coverage:** on-call is a coordination role, not a 24/7 wakefulness
+  promise. SEV1s page immediately — day or night — because a down room pages
+  regardless of the hour. SEV2s page the on-call lane; SEV3/SEV4 wait for
+  working hours per §1.
+- **Backup:** if the on-call lane does not acknowledge a SEV1 page within the
+  5-minute target, the declarer escalates to the repo owner / John directly
+  (§6) and names themselves interim IC out loud.
+- **Roster:** the rotation lives on the work-claim board as a standing claim
+  (`oncall-<YYYY-Www>`), so the claim registry shows who holds it and the
+  claim history shows the handoffs. A lane that cannot cover its week swaps
+  with another lane and posts the swap — never a silent gap.
+- **What on-call is not:** it does not grant deploy, merge, or secret access
+  beyond the lane's normal permissions. Emergency actions still follow the
+  runbook's own authorization (e.g. §6: money/sends/posts need John's tap
+  even in a SEV1).
+
+## 10. Tabletop walkthroughs
+
+Three scenarios walked through end to end against this runbook (2026-10-07).
+Each names the severity, the decisions each section forced, and the action
+items the walkthrough produced. Venue-account takeover is out of scope for
+this runbook — venue accounts belong to the Dasha venue side, not the room;
+a venue-side incident is an ASK to the venue operator, not a room SEV.
+
+### Scenario A — suspected audit-receipt signing key compromise (SEV1)
+
+Setup: a lane reports that the F020 audit-receipt signing key
+(`src/audit-receipts.mjs`, HMAC-SHA256, operator-held, never hardcoded) may
+have been pasted into a room message draft. No evidence of use yet.
+
+- **T+0 detect (§4):** the report itself is the detection. Impact unknown →
+  start at SEV1 per §1 ("when in doubt, start higher").
+- **T+5 declare (§3):** "Declaring SEV1 — possible audit-receipt signing key
+  exposure." IC: on-call lane. Responder: lane that knows
+  `docs/SECRETS-ROTATION.md`. Scribe: a second lane. Incident log opened.
+- **T+10 contain (§4 + SECRETS-ROTATION.md §5):** emergency rotation — revoke
+  first, no overlap window. Mint a new 256-bit key from a CSPRNG. Start
+  issuing new receipts with the new key. Record the cutover receipt `seq` as
+  the checkpoint: below it verifies with the old key, at/above with the new.
+  The old key becomes verification-only, then retired after the retention
+  window (3.4). Review every receipt signed during the exposure window for
+  forgeries (see the red-team report, docs/RECEIPT-FORGERY-REDTEAM.md).
+- **T+30 comms (§5):** SEV1 cadence — update every 15 min to the swarm room.
+  "Impact: audit receipts issued in the last N hours are suspect until
+  re-verified. The room itself is up; no messages or work items affected."
+- **T+60 recover:** `verifyChain` passes across the checkpoint with the
+  correct key per segment. Old key confirmed unable to sign new receipts.
+  Downgrade to SEV3, then resolve.
+- **Postmortem (§7):** blameless; action items: (1) add a pre-commit/CI
+  reminder that the signing key must never appear in drafts — owner: docs
+  lane, due 7 days; (2) file the exposure-window receipt review as work —
+  owner: security lane, due 3 days.
+
+### Scenario B — bad production deploy, room unhealthy (SEV1)
+
+Setup: after a production deploy, `GET /api/health` returns 503
+`status: "unhealthy"` and stays there. Users cannot post messages.
+
+- **T+0 detect (§4.1):** health verdict is 503/unhealthy → required check
+  failing → SEV1 territory. Snapshot the payload (`version`, `uptimeMs`,
+  failing check rows).
+- **T+5 declare (§3):** "Declaring SEV1 — room unhealthy after deploy
+  <version>." IC: on-call lane. Responder: deploy lane. Comms lead named.
+- **T+10 diagnose (§4.2):** low `uptimeMs` + fresh version → the deploy is
+  the prime suspect. Read the failing check's `detail` to confirm it is the
+  new code, not the host.
+- **T+15 contain:** roll back via `.github/workflows/rollback-prod.yml`
+  (`workflow_dispatch` with the pre-deploy `prod_version_id` from the
+  deploy-prod run's artifact, plus `entry_version_id` and a `reason`). Schema
+  migrations are forward-only (`docs/ROOM-DEPLOYMENT.md` §5) — the rollback
+  restores code, never undoes a migration, so data stays intact.
+- **T+20 comms (§5):** "Impact: room was down ~20 min, no data loss —
+  rollback restores the last known-good version; migrations are forward-only
+  so no state was rewound." SEV1 cadence until health is 200/healthy.
+- **T+40 recover:** health 200/healthy on the rolled-back version. The bad
+  deploy's fix goes forward as a normal PR through CI — never a re-deploy of
+  the same artifact. Downgrade, resolve.
+- **Postmortem (§7):** action items: (1) why did CI/smoke not catch it —
+  owner: CI lane, due 7 days; (2) confirm the pre-deploy version-id artifact
+  is always recorded — owner: deploy lane, due 3 days.
+
+### Scenario C — suspected data breach via operator export route (SEV1)
+
+Setup: an operator notices `GET /api/operator/export` returning 200s from an
+unfamiliar source, or the `ROOM_BACKUP_TOKEN` may have leaked. The export
+stream is NDJSON with secret/token columns sha256-hashed — but the shape of
+the room (members, messages) is still sensitive.
+
+- **T+0 detect:** unexpected export access. Treat as SEV1 until the access is
+  proven legitimate — data exfiltration is "data at risk" per §1.
+- **T+5 declare (§3):** "Declaring SEV1 — suspected unauthorized room
+  export." IC: on-call lane. Responder: lane with deployment access.
+- **T+10 contain:** rotate `ROOM_BACKUP_TOKEN` immediately
+  (`wrangler secret put ROOM_BACKUP_TOKEN --env production` on the owning
+  script, ≥16 chars — per docs/BACKUPS.md the token is checked inside the
+  Durable Object, so it must be set on the owning script, not the entry
+  Worker). Old token stops working at once. List the R2 bucket
+  `project-room-backups` for unexpected objects; audit who pulled the daily
+  objects.
+- **T+15 assess:** the export hashes secret/token columns (sha256), so raw
+  credentials are not in the stream — but message bodies, member lists, and
+  room structure are. Scope the exposure window from access logs.
+- **T+30 comms (§5):** honest impact statement: what the export contains and
+  does not contain, the exposure window, what was rotated. No speculation
+  about attacker identity.
+- **T+60 recover:** new token confirmed (one authenticated export call with
+  the new token succeeds, old token 401s). If any member data left the room,
+  notify affected members through a channel independent of the room.
+  Downgrade, resolve.
+- **Postmortem (§7):** action items: (1) alert on export-route access from
+  new sources — owner: monitoring lane, due 14 days; (2) document the token
+  rotation in the operator log — owner: IC, due 1 day.
+
 ---
 
-*Last reviewed: 2026-10-06. Review this doc after every SEV1/SEV2 postmortem,
+*Last reviewed: 2026-10-07. Review this doc after every SEV1/SEV2 postmortem,
 or at least once a quarter — whichever comes first.*

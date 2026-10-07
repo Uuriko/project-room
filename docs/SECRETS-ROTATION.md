@@ -214,7 +214,25 @@ closed.
       segment (old key for `seq` < checkpoint, new key at/above)
 - [ ] Old key can no longer sign (caller-side enforcement confirmed)
 
-## 7. Not covered / out of scope
+## 8. Dry-run log — audit-receipt signing key (2026-10-07, test keys)
+
+First dry-run rotation of section 3.4 on CSPRNG test keys (256-bit, never
+production). Scratch runner, not committed; procedure followed exactly:
+
+| Phase | Result |
+|---|---|
+| 1–2. Issue seq 0–4 with OLD key | `verifyChain(chain, OLD_KEY)` = -1 (clean) |
+| 3. Checkpoint seq 5; issue seq 5–7 with NEW key | Recorded; chain spans the checkpoint |
+| 4. Segmented verify (OLD key for seq < 5, NEW key for seq ≥ 5) | -1 (clean across the checkpoint) |
+| 5. Rogue receipt (seq ≥ 5 signed with OLD key) | Detected by the checkpoint rule |
+| Rollback: NEW key "lost" before first use | Chain still verifies; nothing references the lost key |
+| OLD key against new-segment receipts | Rejected (wrong-key per segment) |
+
+Conclusion: the 3.4 procedure works as written on test keys. Next dry-run
+due with the next scheduled rotation (annually per §2, or on operator
+roster change).
+
+## 9. Not covered / out of scope
 
 This runbook does not cover:
 
