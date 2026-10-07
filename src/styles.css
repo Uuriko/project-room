@@ -1612,6 +1612,7 @@ summary { overflow-wrap: anywhere; }
 #auth-signin-ui [data-signin-panel] { grid-template-columns: minmax(0, 1fr); margin-top: 0; }
 #auth-signin-ui [data-recovery-option] { width: 100%; min-height: 44px; margin: 0; }
 #auth-signin-ui [data-recovery-option="reset"].primary { font-size: 1rem; padding: .75rem 1rem; }
+#auth-signin-ui [data-signin-form="reset-request"] button.primary { font-size: var(--text-md); padding: .75rem 1rem; }
 #auth-signin-ui [data-recovery-option="magic"] { font-size: .9rem; justify-self: center; }
 
 #owner-results-list { overflow-wrap: anywhere; }

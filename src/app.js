@@ -671,6 +671,11 @@ const accountSettingsUI = createAccountSettingsUI({
     location.assign("/?account-deleted=1");
   }
 });
+const profileSettingsUI = createAccountSettingsUI({ accountClient, profileOnly: true,
+  onProfileSaved: () => $("#account-profile-dialog").close() });
+$("#account-profile-button").textContent = uiText("profile.title");
+$("#account-profile-title").textContent = uiText("profile.title");
+$("#account-profile-close").textContent = uiText("profile.close");
 // Multi-method sign-in / create-account (slice 7): mounts into the auth
 // panel next to the Google button. After a
 // browser sign-in the cookie changed, so restore the in-memory session and
@@ -804,6 +809,7 @@ function openAccountSettings() {
   details.scrollIntoView({ block: "nearest" });
 }
 function clearPrivateWorkspace(options) {
+  $("#account-profile-dialog").close(); profileSettingsUI.reset();
   inboxUI?.reset(options); roomListVersion++;
   $("#account-rooms-list").replaceChildren(); $("#account-rooms-status").textContent = "";
   $("#account-status").textContent = ""; $("#account-status").hidden = true;
@@ -1330,6 +1336,7 @@ function configureAuthPanel(roomId = selectedRoomFromLocation()) {
   syncSessionMenu();
 }
 function syncSessionMenu() {
+  $("#account-profile-button").hidden = !accountClient.session?.authenticated;
   const menu = $("#session-menu");
   const signedIn = Boolean(state || accountClient.session?.authenticated);
   const leftovers = Boolean(readLastRoom() || readAccountHint());
@@ -3728,6 +3735,18 @@ document.addEventListener("click", event => {
 });
 
 $("#account-settings-button").addEventListener("click", openAccountSettings);
+$("#account-profile-button").addEventListener("click", () => {
+  if (!accountClient.session?.authenticated) return;
+  setSessionMenuOpen(false);
+  $("#account-profile-dialog").showModal();
+  void profileSettingsUI.mount($("#account-profile-body"));
+});
+$("#account-profile-close").addEventListener("click", () => $("#account-profile-dialog").close());
+$("#account-profile-dialog").addEventListener("close", () => {
+  if ($("#account-profile-dialog").open) return;
+  profileSettingsUI.reset();
+  if (accountClient.session?.authenticated) $("#session-menu-button").focus();
+});
 $("#signout-button").addEventListener("click", async () => {
   if (!state && accountClient.session?.authenticated) {
     if (signoutLoading || busy || invitationIsCommitting()) return;

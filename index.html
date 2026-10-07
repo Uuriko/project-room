@@ -54,6 +54,7 @@
             <button id="session-menu-button" class="button ghost icon-button" type="button" aria-expanded="false" aria-controls="session-menu-panel" aria-label="Session and account actions" title="Account"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="8" r="3.5"/><path d="M5 21v-2a7 7 0 0 1 14 0v2"/></svg></button>
             <div id="session-menu-panel" class="session-menu-panel">
               <p id="session-expiry" class="form-hint" hidden></p>
+              <button id="account-profile-button" class="button ghost" type="button" hidden></button>
               <button id="account-settings-button" class="button ghost" type="button" hidden>Sign-in &amp; security</button>
               <button id="create-account-button" class="button ghost" type="button" hidden>Create an account</button>
               <button id="signout-button" class="button ghost" type="button" hidden>Sign out</button>
@@ -1052,6 +1053,7 @@
       <button id="join-link-retry" class="button primary" type="button" hidden>Retry</button>
       <button id="join-link-signout" class="button ghost" type="button" hidden>Sign out of expired guest session</button>
     </dialog>
+    <dialog id="account-profile-dialog" class="share-dialog" aria-labelledby="account-profile-title"><div class="panel-header"><h2 id="account-profile-title"></h2><button id="account-profile-close" class="button ghost" type="button"></button></div><div id="account-profile-body"></div></dialog>
     <footer class="site-footer"><p><a href="/terms">Terms</a> · <a href="/privacy">Privacy</a> · <a href="/subprocessors">Subprocessors</a> · <a href="/acceptable-use">Acceptable use</a> · <a href="/report">Report</a> · <a href="mailto:potter@trydemigod.com">Abuse</a></p></footer>
   </body>
 </html>
