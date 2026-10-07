@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 // CI wrapper for one shard of `npm test` (CI-speed lane).
 //
-// Runs the shard's tests/*.test.js files with `node --test` and writes a
+// Runs the shard's Node-discovered test files with `node --test` and writes a
 // receipt under test-results/ for scripts/unit-shards-check.mjs. The receipt
 // binds the shard to the exact plan (planHash), run, revision and attempt so
 // the `unit` merge gate can fail closed on stale or partial evidence.
 //
 // Usage: node scripts/unit-ci.mjs --shard=1/3   (run from the repo root)
-// TMPDIR must point at the worktree .tmp/ (never the shared /tmp tmpfs).
+// Use worktree-local scratch by default; create explicit TMPDIR before children.
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { unitPlan, parseShard } from "./unit-shards.mjs";
 
@@ -19,6 +19,13 @@ function main() {
     throw new Error("Usage: node scripts/unit-ci.mjs --shard=1/3");
   }
   const shard = parseShard(argv[0].slice("--shard=".length));
+  // Fresh checkouts do not contain ignored .tmp/. Initialize before both
+  // dependency preflight and test children, matching scripts/test-env.sh.
+  const worktreeScratch = resolve(".tmp");
+  mkdirSync(worktreeScratch, { recursive: true });
+  process.env.TMPDIR = resolve(process.env.TMPDIR || worktreeScratch);
+  mkdirSync(process.env.TMPDIR, { recursive: true });
+  if (!process.env.XDG_RUNTIME_DIR) process.env.XDG_RUNTIME_DIR = process.env.TMPDIR;
   const preflight = spawnSync(process.execPath, ["scripts/check-deps.mjs"], { stdio: "inherit" });
   if (preflight.error) throw preflight.error;
   if (preflight.status !== 0) process.exit(preflight.status ?? 1);

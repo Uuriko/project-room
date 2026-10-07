@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, cpSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, cpSync, rmSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
@@ -25,14 +25,15 @@ test("unit shards execute each test file once and aggregate only complete curren
   const durations = Object.fromEntries(files.map((f, i) => [f, (i + 1) * 1000]));
   writeFileSync(join(dir, "scripts/unit-ci-durations.json"), JSON.stringify({ milliseconds: durations }));
   for (const [i, file] of files.entries()) {
-    writeFileSync(join(dir, file), `import test from 'node:test'; import { appendFileSync } from 'node:fs'; test('unit case ${i}', () => { appendFileSync('executed.txt', '${i}\\n'); if (process.env.FAIL_CASE === '${i}') throw new Error('intentional child failure'); });\n`);
+    writeFileSync(join(dir, file), `import test from 'node:test'; import assert from 'node:assert/strict'; import { appendFileSync, mkdtempSync, rmSync, realpathSync } from 'node:fs'; import { tmpdir } from 'node:os'; import { join } from 'node:path'; test('unit case ${i}', () => { assert.equal(realpathSync(tmpdir()),realpathSync(process.env.EXPECT_TMP)); const scratch=mkdtempSync(join(tmpdir(),'probe-')); rmSync(scratch,{recursive:true,force:true}); appendFileSync('executed.txt', '${i}\\n'); if (process.env.FAIL_CASE === '${i}') throw new Error('intentional child failure'); });\n`);
   }
-  const env = { ...process.env, GITHUB_SHA: "fixture-revision", GITHUB_RUN_ID: "fixture-run", GITHUB_RUN_ATTEMPT: "1", UNIT_MATRIX_RESULT: "success" };
+  const env = { ...process.env, TMPDIR: "", EXPECT_TMP: join(dir, ".tmp"), GITHUB_SHA: "fixture-revision", GITHUB_RUN_ID: "fixture-run", GITHUB_RUN_ATTEMPT: "1", UNIT_MATRIX_RESULT: "success" };
   delete env.NODE_TEST_CONTEXT; // The fixture launches an independent test runner, not a nested test file.
   const invoke = (file, args = [], more = {}) => spawnSync(process.execPath, [file, ...args], { cwd: dir, env: { ...env, ...more }, encoding: "utf8", timeout: 30000 });
   for (const invalid of ["--shard=0/3", "--shard=4/3", "--shard=1/0", "--shard=1/4", "--shard=NaN/3", "--unknown"]) {
     assert.notEqual(invoke("scripts/unit-ci.mjs", [invalid]).status, 0, invalid);
   }
+  assert.equal(existsSync(join(dir, ".tmp")), false);
   for (let index = 1; index <= SHARD_COUNT; index++) {
     const run = invoke("scripts/unit-ci.mjs", [`--shard=${index}/${SHARD_COUNT}`]);
     assert.equal(run.status, 0, run.stdout + run.stderr);
@@ -54,6 +55,14 @@ test("unit shards execute each test file once and aggregate only complete curren
   writeFileSync(receiptPath, JSON.stringify(altered));
   assert.notEqual(gate().status, 0, "omitted file fails closed");
   writeFileSync(receiptPath, receipt);
+  rmSync(join(dir, ".tmp"), { recursive: true, force: true });
+  const customScratch = join(dir, "custom", "scratch");
+  assert.equal(existsSync(customScratch), false);
+  const customRun = invoke("scripts/unit-ci.mjs", ["--shard=1/3"], { TMPDIR: customScratch, EXPECT_TMP: customScratch });
+  assert.equal(customRun.status, 0, customRun.stdout + customRun.stderr);
+  assert.equal(existsSync(customScratch), true);
+  assert.equal(existsSync(join(dir, ".tmp")), true, "repository-local owners retain scratch with custom TMPDIR");
+  assert.equal(gate().status, 0, "scratch setup retains exact successful receipts");
 });
 
 test("unit shard plan is complete, deterministic, and balanced on measured runtimes", () => {
