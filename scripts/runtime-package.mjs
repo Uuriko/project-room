@@ -293,6 +293,7 @@ optional.push("server/access-requests.mjs", "server/identity-ratelimit.mjs");
 optional.push("server/member-permission-requests.mjs", "server/routes/member-permissions.mjs"); // reviewed member permissions and their RT aliases
 optional.push("server/agent-fleet.mjs", "server/routes/agents.mjs"); // CP-AGENTS-1: fleet read model and its RT route (imported by server/routes/table.mjs and server/orient.mjs)
 optional.push("server/work-wants.mjs", "server/routes/wants-work.mjs"); // BOARD-WAKE-2: ready-work preference and its RT route (imported by server/store.mjs, server/work-claim-routes.mjs and server/routes/table.mjs)
+optional.push("server/summons.mjs", "server/routes/summons.mjs"); // The Summons: the room calls the agent by name (imported by server/store.mjs and server/routes/table.mjs; imports server/receipt-cards.mjs and src/events.js)
 optional.push("server/routes/spend-grants.mjs"); // spend-primitive MVP: per-agent spend grant RT routes (imported by server/routes/table.mjs)
 optional.push("server/routes/typing.mjs"); // human UX: ephemeral typing heartbeat RT route (imported by server/routes/table.mjs)
 optional.push("server/code-drops.mjs", "server/routes/code-drops.mjs"); // code drops: room-native patch exchange (imported by server/store.mjs and server/routes/table.mjs)

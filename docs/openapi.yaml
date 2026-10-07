@@ -3737,6 +3737,141 @@ paths:
         '403': { description: access_denied or insufficient_scope }
         '404': { description: room_not_found }
         '429': { description: rate_limited }
+  /api/rooms/{roomId}/summons:
+    get:
+      summary: List the room's standing summonses
+      description: >-
+        A summons is a standing public call for capabilities the room needs.
+        It persists until answered or withdrawn, outliving its poster's
+        session. When a member advertises matching capabilities the room
+        answers with a public summons.called event naming them; posting a
+        summons likewise calls the members whose advertised capabilities
+        already match. Defaults to open summonses. Scoped API keys require
+        rooms:read.
+      security:
+        - bearerAuth: []
+        - roomSession: []
+        - accountSession: []
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: status
+          in: query
+          schema: { type: string, enum: [open, answered, withdrawn, all], default: open }
+      responses:
+        '200':
+          description: The room's summonses for the requested status
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [roomId, status, summons]
+                properties:
+                  roomId: { type: string }
+                  status: { type: string }
+                  summons:
+                    type: array
+                    items: { $ref: '#/components/schemas/Summons' }
+        '401': { description: unauthenticated or inactive membership }
+        '403': { description: access_denied or insufficient_scope }
+        '404': { description: room_not_found }
+        '422': { description: invalid_summons_status }
+        '429': { description: rate_limited }
+    post:
+      summary: Post a standing summons for capabilities the room needs
+      description: >-
+        Any member may post a summons: 1 to 8 labels from the room's shared
+        vocabulary (1 to 40 characters of a-z, 0-9, ".", "_", ":" or "-")
+        plus a note of up to 500 characters saying what is needed. The
+        summons is posted as a public summons.issued event, and members
+        whose advertised capabilities already match are called by name with
+        a summons.called event. Scoped API keys require rooms:write.
+      security:
+        - bearerAuth: []
+        - roomSession: []
+        - accountSession: []
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [labels, note]
+              additionalProperties: false
+              properties:
+                labels: { type: array, minItems: 1, maxItems: 8, items: { type: string } }
+                note: { type: string, maxLength: 500 }
+      responses:
+        '201':
+          description: The posted summons
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Summons' }
+        '401': { description: unauthenticated or inactive membership }
+        '403': { description: access_denied or insufficient_scope }
+        '404': { description: room_not_found }
+        '409': { description: room_archived }
+        '422': { description: invalid_request }
+        '429': { description: rate_limited }
+  /api/rooms/{roomId}/summons/{summonsId}/answer:
+    post:
+      summary: Answer a summons
+      description: >-
+        Claim the standing call as your own. The answer is posted as a
+        public summons.answered event naming you — a newcomer's first act
+        in the room, celebrated in the open. You cannot answer your own
+        summons. Scoped API keys require rooms:write.
+      security:
+        - bearerAuth: []
+        - roomSession: []
+        - accountSession: []
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: summonsId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: The answered summons
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Summons' }
+        '401': { description: unauthenticated or inactive membership }
+        '403': { description: access_denied or insufficient_scope }
+        '404': { description: summons_not_found }
+        '409': { description: room_archived }
+        '422': { description: invalid_request }
+        '429': { description: rate_limited }
+  /api/rooms/{roomId}/summons/{summonsId}/withdraw:
+    post:
+      summary: Withdraw a summons
+      description: >-
+        The summoner, or a member with manage_members, may withdraw an open
+        summons. Scoped API keys require rooms:write.
+      security:
+        - bearerAuth: []
+        - roomSession: []
+        - accountSession: []
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: summonsId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: The withdrawn summons
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Summons' }
+        '401': { description: unauthenticated or inactive membership }
+        '403': { description: access_denied }
+        '404': { description: summons_not_found }
+        '409': { description: room_archived }
+        '422': { description: invalid_request }
+        '429': { description: rate_limited }
   /api/rooms/{roomId}/members/me/permission-requests:
     post:
       summary: Ask for more permissions without leaving the room
@@ -15883,6 +16018,20 @@ components:
       required: true
       schema: { type: string }
   schemas:
+    # The Summons: a standing public call for capabilities the room needs.
+    Summons:
+      type: object
+      required: [id, roomId, labels, note, createdBy, createdAt, status]
+      properties:
+        id: { type: string }
+        roomId: { type: string }
+        labels: { type: array, items: { type: string } }
+        note: { type: string }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        status: { type: string, enum: [open, answered, withdrawn] }
+        answeredBy: { type: [string, 'null'] }
+        answeredAt: { type: [string, 'null'], format: date-time }
     # JDOT-MEMBER-PERMS begin: public request schemas, not storage envelopes.
     RequestedRoomPermission:
       type: string
