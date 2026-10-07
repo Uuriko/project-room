@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Write path: the parsed-projection cache no longer drops every room on every
+  write. Only rooms actually written lose their entry, and a committed write
+  leaves its room's projection cached, so the next write hits instead of
+  re-parsing the projection (~8% faster per write at 300 KiB of projection,
+  more as rooms grow; cross-room reads are no longer evicted by other rooms'
+  writes). Behavior is unchanged: entries stay sequence-keyed, rollbacks
+  still drop touched entries, unrecognized writes keep the old full clear.
 - Human browser push, mentions and direct messages only. One button asks the
   browser for permission. No notification-level picker and no quiet hours.
   Thread mutes and member mutes still suppress delivery. The push carries a

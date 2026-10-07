@@ -1111,12 +1111,26 @@ const LOOKUP_INDEXES = `
 
 // MSG-0: parsed projection cache. A hit reads sequence only, so a 64 MiB
 // room does not JSON.parse again until the sequence changes or a rooms
-// write drops the entry. Commit and rollback of a write transaction drop
-// the whole cache, including a parse of uncommitted bytes. Callers receive
-// a frozen snapshot; a rewrite clones it first.
+// write drops the entry. A rooms write evicts only the rooms it touched
+// (C1: previously every write transaction dropped the whole cache); commit
+// and rollback still drop the touched entries, so a parse of uncommitted
+// bytes cannot outlive the transaction. The command write path registers
+// its post-write state and the commit installs it, so the next write hits.
+// Callers receive a frozen snapshot; a rewrite clones it first.
 const PROJECTION_CACHE_MAX_ROOMS = 32;
 const PROJECTION_CACHE_MAX_BYTES = 64 * 1024 * 1024;
 const ROOMS_WRITE = /\b(?:insert\s+into|update|delete\s+from|replace\s+into)\s+rooms\b/i;
+// C1: which bound arg carries the rooms.id for a rooms-write statement, so
+// the projection cache can evict exactly the rooms written instead of the
+// whole cache. INSERT INTO rooms(id,...) carries it first; UPDATE/DELETE
+// ... WHERE id=? carries it last. Anything else (bulk migrations without an
+// id filter, exec() text) returns null: untracked, and the transaction end
+// falls back to the old full clear.
+function roomsWriteRoomArg(sql) {
+  if (/^\s*insert\s+into\s+rooms\s*\(\s*id\b/i.test(sql)) return 0;
+  if (/where\s+id\s*=\s*\?\s*;?\s*$/i.test(sql)) return -1;
+  return null;
+}
 
 function deepFreeze(value) {
   if (value === null || typeof value !== "object" || Object.isFrozen(value)) return value;
@@ -1128,6 +1142,13 @@ function deepFreeze(value) {
 class ProjectionCache {
   constructor() { this.entries = new Map(); this.bytes = 0; }
   clear() { this.entries.clear(); this.bytes = 0; }
+  // C1: surgical eviction of one room. Whole-cache clear() on every write
+  // transaction made the write path re-parse every room's projection on
+  // every write; only the rooms actually written need to lose their entry.
+  drop(roomId) {
+    const entry = this.entries.get(roomId);
+    if (entry) { this.entries.delete(roomId); this.bytes -= entry.weight; }
+  }
   lookup(roomId, sequence) {
     const entry = this.entries.get(roomId);
     if (!entry || entry.sequence !== sequence) return null;
@@ -2560,21 +2581,75 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     }
   }
   close() { this._projectionCache?.clear(); this.db.close(); }
-  // MSG-0: drop parsed projections when a write transaction commits or rolls
-  // back, so a parse of uncommitted bytes cannot outlive the transaction.
-  _dropProjectionCache() { this._projectionCache?.clear(); }
+  // C1: record one rooms-table write for the projection cache. The entry for
+  // the written room is evicted eagerly (no parse of uncommitted bytes can be
+  // served); other rooms' entries survive. A write whose room cannot be
+  // identified marks the transaction untracked, and the transaction end falls
+  // back to the old whole-cache clear. A later rooms write in the same
+  // transaction supersedes any pending post-commit refresh for that room.
+  _noteRoomsWrite(roomId) {
+    if (typeof roomId === "string" && roomId) {
+      (this._touchedRoomWrites ??= new Set()).add(roomId);
+      this._pendingProjectionRefresh?.delete(roomId);
+      this._projectionCache?.drop(roomId);
+    } else {
+      this._roomsWriteUntracked = true;
+    }
+  }
+  // C1: the write path hands its final in-memory state here after the rooms
+  // row is written. The outermost commit installs it in the cache (below);
+  // a rollback discards it. Only rooms this transaction actually wrote are
+  // eligible, so stale registrations are impossible.
+  _noteProjectionRefresh(roomId, state) {
+    if (!this._touchedRoomWrites?.has(roomId)) return;
+    (this._pendingProjectionRefresh ??= new Map()).set(roomId, state);
+  }
+  // C1: replaces the old drop-the-whole-cache on every write transaction.
+  // Only rooms actually written lose their entries. On commit, a registered
+  // post-write state repopulates the entry, so the next write to that room
+  // hits instead of re-parsing the projection; the sequence is re-read from
+  // the committed row so redaction/resume sub-writes that advanced it stay
+  // exact. Untracked writes keep the old full-clear behavior.
+  _settleProjectionCache(committed, { refresh = true } = {}) {
+    const cache = this._projectionCache;
+    const touched = this._touchedRoomWrites;
+    this._touchedRoomWrites = null;
+    const untracked = this._roomsWriteUntracked;
+    this._roomsWriteUntracked = false;
+    const refreshes = refresh ? this._pendingProjectionRefresh : null;
+    if (refresh) this._pendingProjectionRefresh = null;
+    if (!cache) return;
+    if (untracked) cache.clear();
+    else if (touched) for (const roomId of touched) cache.drop(roomId);
+    if (committed && refreshes?.size) {
+      const metaOf = this._refreshMetaStmt ??= this.db.prepare(
+        "SELECT sequence, length(projection) AS bytes FROM rooms WHERE id=?");
+      for (const [roomId, state] of refreshes) {
+        let meta = null;
+        try { meta = metaOf.get(roomId); } catch { meta = null; }
+        if (!meta) continue; // room deleted mid-transaction: entry stays dropped
+        const bodies = Array.isArray(state.messages)
+          ? state.messages.reduce((n, m) => n + (typeof m?.body === "string" ? m.body.length : 0), 0)
+          : 0;
+        cache.insert(roomId, meta.sequence,
+          Object.freeze({ sequence: meta.sequence, state: deepFreeze(state) }),
+          meta.bytes + bodies);
+      }
+    }
+  }
   _armProjectionWatch() {
     if (this._projectionWatch || typeof this.db?.prepare !== "function") return;
     this._projectionWatch = true;
-    const cache = () => this._projectionCache;
+    const store = this;
     const prepare = this.db.prepare.bind(this.db);
     this.db.prepare = sql => {
       const stmt = prepare(sql);
       if (typeof sql === "string" && ROOMS_WRITE.test(sql) && typeof stmt.run === "function") {
+        const roomArg = roomsWriteRoomArg(sql);
         const run = stmt.run.bind(stmt);
         stmt.run = (...args) => {
           const result = run(...args);
-          cache()?.clear();
+          store._noteRoomsWrite(roomArg === null ? null : roomArg === -1 ? args[args.length - 1] : args[roomArg]);
           return result;
         };
       }
@@ -2584,7 +2659,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const exec = this.db.exec.bind(this.db);
       this.db.exec = sql => {
         const result = exec(sql);
-        if (typeof sql === "string" && ROOMS_WRITE.test(sql)) cache()?.clear();
+        if (typeof sql === "string" && ROOMS_WRITE.test(sql)) store._noteRoomsWrite(null);
         return result;
       };
     }
@@ -2593,16 +2668,20 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // Nested startup helpers share the outer migration transaction and its rollback.
     const outermost = !this.db.isTransaction;
     this._armProjectionWatch();
+    const settles = outermost || isolated;
     // Only a commit that changed rows proves storage is writable again; an
     // idempotent replay commits nothing. Measured only while degraded.
     const before = outermost && this.storageFailures > 0 ? this.storagePlatform.changes?.(this.db) : null;
     let result;
     try { result = this.storagePlatform.transaction(this.db, fn, false, { isolated }); }
     catch (error) {
-      if (outermost || isolated) this._dropProjectionCache();
+      if (settles) this._settleProjectionCache(false);
       throw this.storageFailure(error, outermost);
     }
-    if (outermost || isolated) this._dropProjectionCache();
+    // C1: only the outermost commit installs post-write refreshes; a nested
+    // isolated unit (receipt cards) settles its own touches without
+    // consuming the outer write path's pending refresh.
+    if (settles) this._settleProjectionCache(true, { refresh: outermost });
     if (before !== null && (before === undefined || this.storagePlatform.changes(this.db) !== before)) this.storageRecovered();
     return result;
   }
@@ -2613,7 +2692,15 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     this.readTransactionDepth = (this.readTransactionDepth ?? 0) + 1;
     try { return this.storagePlatform.transaction(this.db, fn, true); }
     catch (error) { throw this.storageFailure(error, outermost); }
-    finally { this.readTransactionDepth -= 1; }
+    finally {
+      this.readTransactionDepth -= 1;
+      // C1: a rooms write inside a top-level read transaction still drops
+      // the touched entries (the old eager full-clear, now surgical). No
+      // refresh: reads never register one.
+      if (outermost && (this._touchedRoomWrites || this._roomsWriteUntracked)) {
+        this._settleProjectionCache(false, { refresh: false });
+      }
+    }
   }
   // Maps one storage failure to the typed refusal and counts it. Only the
   // outermost transaction counts, so one nested failure is one refusal;
@@ -4869,6 +4956,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         ? `Posted. Wake skipped for ${skippedWakes.map(id => room.state.members?.[id]?.displayName || id).join(", ")}: Room Trust is off, so that agent was not woken.`
         : null;
       syncRoomPublication(this, { roomId, state, previous: room.state, auth });
+      // C1: hand the just-persisted state to the projection cache. The
+      // outermost commit installs it (a rollback discards it), so the next
+      // write to this room hits instead of re-parsing the projection. Only
+      // rooms this transaction actually wrote are eligible; the guard is
+      // inside _noteProjectionRefresh.
+      this._noteProjectionRefresh(roomId, state);
       return { sequence, event: incoming, duplicate: false, ...(note ? { note } : {}),
         ...((Array.isArray(mentionWarnings) && mentionWarnings.length > 0) ? { mentionWarnings } : {}) };
     });
