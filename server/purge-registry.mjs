@@ -1552,6 +1552,56 @@ const ROWS = [
     }
   },
   {
+    // herdr redesign B5: room purge deletes the room's herdr sessions, their
+    // journal, lane opt-ins and backend state. Session member ids are
+    // room-scoped, so identity purge leaves them (room purge owns the rows).
+    "table": "herdr_sessions",
+    "key": "room_id",
+    "action": "delete",
+    "match": { "room": ["room_id"] }
+  },
+  {
+    "table": "herdr_session_journal",
+    "key": "room_id",
+    "action": "delete",
+    "match": { "room": ["room_id"] }
+  },
+  {
+    "table": "herdr_lane_optin",
+    "key": "room_id",
+    "action": "delete",
+    "match": { "room": ["room_id"] }
+  },
+  {
+    "table": "herdr_backend_state",
+    "key": "room_id",
+    "action": "delete",
+    "match": { "room": ["room_id"] }
+  },
+  {
+    // herdr redesign B5: room purge deletes the room's supervision cards.
+    "table": "private_supervision_cards",
+    "key": "room_id",
+    "action": "delete",
+    "match": { "room": ["room_id"] }
+  },
+  {
+    // Card transition journal has no room_id of its own; it purges via the
+    // parent card (membership_invitation_events precedent).
+    "table": "private_supervision_card_history",
+    "key": "card_id",
+    "action": "delete",
+    "match": {},
+    "via": {
+      "room": {
+        "parent": "private_supervision_cards",
+        "parentKey": "id",
+        "childKey": "card_id",
+        "scope": "room_id"
+      }
+    }
+  },
+  {
     "table": "stitch_identities",
     "key": "account_id",
     "action": "delete",
