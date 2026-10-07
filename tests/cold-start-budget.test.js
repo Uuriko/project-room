@@ -36,7 +36,9 @@ const EMPTY_UNTIL_CRON = new Set([
   // Spend grants and authorizations exist only after an owner issues a grant.
   "spend_grant_terms",
   "spend_authorizations",
-  "spend_room_reservations"
+  "spend_room_reservations",
+  // Affinity router journal rows exist only after the router journals a record.
+  "routing_records"
 ]);
 
 const EVENTS = 200_000;

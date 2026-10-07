@@ -1700,6 +1700,19 @@ const ROWS = [
         "room_id"
       ]
     }
+  },
+  {
+    // Lane B18 (herdr redesign, D6 router shadow): affinity router journal.
+    // Shadow-mode routing records are derived per-room data with no
+    // independent retention need; room purge deletes the room's records.
+    "table": "routing_records",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
   }
 ];
 
