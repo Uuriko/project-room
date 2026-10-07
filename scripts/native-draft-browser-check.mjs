@@ -179,7 +179,7 @@ for (const touch of [false, true]) test("draft feedback and revised result " + (
   await guest.card.locator(".work-drafts > summary").click();
   assert.equal(await guest.card.locator(".work-drafts [data-open-message]").count(), 2);
   await row(original).locator(".draft-state").focus();
-  await row(original).locator(".message-content > p").evaluate(node => { window.feedbackBody = node; });
+  await row(original).locator(".message-content > .message-body").evaluate(node => { window.feedbackBody = node; });
   await review("feedback-first"); await label(original, "Awaiting decision");
   assert.equal(await row(original).locator(".draft-state").evaluate(node => node === document.activeElement), true);
   const reason = "Name the reviewer. <img src=x onerror=alert(1)>";
@@ -188,7 +188,7 @@ for (const touch of [false, true]) test("draft feedback and revised result " + (
   await row(original).locator(".draft-feedback summary").click();
   assert.equal(await row(original).locator(".draft-feedback details p").textContent(), reason);
   assert.equal(await row(original).locator(".draft-feedback img").count(), 0);
-  assert.equal(await row(original).locator(".message-content > p").evaluate(node => node === window.feedbackBody), true);
+  assert.equal(await row(original).locator(".message-content > .message-body").evaluate(node => node === window.feedbackBody), true);
   await row(original).scrollIntoViewIfNeeded();
   const prefix = "test-results/feedback-" + (touch ? "mobile" : "desktop");
   mkdirSync("test-results", { recursive: true }); await guest.page.screenshot({ path: prefix + "-changes.png" });

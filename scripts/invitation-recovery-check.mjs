@@ -190,7 +190,7 @@ for (const failure of ['network', '429', '503']) {
     assert.equal(previews.every(token => token === fixture.links.valid), true, 'all preview attempts retain the original secret');
     assert.equal(new URL(page.url()).hash, '');
     assert.equal(joins, 0, 'successful preview needs a separate join submission');
-    assert.equal(await page.evaluate(() => document.activeElement.id), 'join-link-name');
+    assert.equal(await page.evaluate(() => document.activeElement.id), 'join-account-google', 'recovered signed-out preview starts with account sign-in choices');
     if (failure === 'network') await capture(page, 'preview-ready-touch');
     await page.locator('#join-link-name').fill('Recovery test guest');
     await page.locator('#join-link-submit').click();

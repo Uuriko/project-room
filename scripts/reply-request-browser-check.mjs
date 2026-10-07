@@ -185,7 +185,9 @@ for (const width of [1280, 390]) test(`coding result stays readable and escaped 
   await record(owner, "inspect-code").locator('[data-message-action="reply"]').click();
   const content = record(owner, "inspect-result").locator(".message-body");
   await content.waitFor();
-  assert.equal(await content.textContent(), body);
+  await content.locator('.message-expansion > summary').click();
+  await content.locator('.message-full').waitFor({ state: 'visible' });
+  assert.equal(await content.locator('.message-full').textContent(), body, "expanded code result preserves exact original bytes");
   assert.match(await record(owner, "inspect-result").locator(".audience-chip").textContent(), /private/);
   assert.equal(await content.locator("img").count(), 0);
   assert.equal(await owner.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
