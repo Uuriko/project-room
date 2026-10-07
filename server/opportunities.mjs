@@ -163,6 +163,17 @@ function bountyOpportunity(row, roomTitle) {
   };
 }
 
+// #1609: the feed's two signals can both be dry while the volunteer
+// public-work pool is non-empty. A stable seeAlso pointer means an empty
+// feed is never a dead end for a discovering stranger — the pool lives at
+// documented public endpoints with its own claim flow, so it is linked,
+// not re-materialized here.
+const FEED_SEE_ALSO = Object.freeze({
+  publicWorkTasks: "/api/public-work/tasks",
+  publicWorkMatch: "/api/public-work/match",
+  note: "volunteer public-work pool: unclaimed tasks (GET) and skill-matched recommendations (POST); read-only discovery, acting uses the normal task claim flow",
+});
+
 export function buildOpportunitiesFeed(store, { now = Date.now(), roomId = null, limit = null, since = null } = {}) {
   const db = store?.db;
   if (!db) fail(500, "opportunities_store_missing", "Opportunity feed requires a store with a db handle");
@@ -225,5 +236,6 @@ export function buildOpportunitiesFeed(store, { now = Date.now(), roomId = null,
   return {
     generatedAt: new Date(now).toISOString(),
     opportunities: visible.slice(0, pageSize),
+    seeAlso: FEED_SEE_ALSO,
   };
 }

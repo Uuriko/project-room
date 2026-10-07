@@ -2669,7 +2669,9 @@ paths:
         recency-only, never popularity/engagement. `since` is an ISO timestamp
         or epoch-ms cursor: only items opened/created after it are returned,
         and `generatedAt` is the cursor for the next poll (cheap resume for
-        agents). `limit` is capped at 100 (default 50).
+        agents). `limit` is capped at 100 (default 50). `seeAlso` carries stable
+        pointers to the volunteer public-work pool (`GET /api/public-work/tasks`,
+        `POST /api/public-work/match`) so an empty feed is never a dead end (#1609).
       security: []
       parameters:
         - name: room
@@ -2695,6 +2697,21 @@ paths:
                 type: object
                 properties:
                   generatedAt: { type: string, format: date-time }
+                  seeAlso:
+                    type: object
+                    description: >-
+                      Stable pointers so an empty feed is never a dead end
+                      (#1609). The volunteer public-work pool lives at these
+                      documented endpoints and is linked, not re-materialized
+                      in the feed.
+                    properties:
+                      publicWorkTasks:
+                        type: string
+                        description: GET unclaimed volunteer public-work tasks
+                      publicWorkMatch:
+                        type: string
+                        description: POST for skill-matched public-work recommendations
+                      note: { type: string }
                   opportunities:
                     type: array
                     items:

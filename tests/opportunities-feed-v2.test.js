@@ -101,6 +101,31 @@ test("feed is empty when no rooms are directory-listed", async t => {
   assert.deepEqual(body.opportunities, []);
 });
 
+test("the feed points at the public-work pool so an empty feed is not a dead end (#1609)", async t => {
+  const fixture = serve(t);
+  const { get } = await started(t, fixture);
+  const { store, ownerKey } = fixture;
+  // Non-empty feed: the pointer rides alongside the items.
+  store.roomDirectory.set(ROOM, "owner", true);
+  propose(store, ownerKey, ROOM, "w-open", "Write the guide");
+  openHelp(store, ownerKey, ROOM, "w-open", new Date(fixture.now() + 3600e3).toISOString());
+  let res = await get("/api/opportunities.json");
+  assert.equal(res.status, 200);
+  let body = await res.json();
+  assert.equal(body.opportunities.length, 1);
+  assert.equal(body.seeAlso.publicWorkTasks, "/api/public-work/tasks");
+  assert.equal(body.seeAlso.publicWorkMatch, "/api/public-work/match");
+  assert.ok(typeof body.seeAlso.note === "string" && body.seeAlso.note.length > 0);
+  // Empty feed: the pointer is still there, so a stranger lands somewhere useful.
+  store.roomDirectory.set(ROOM, "owner", false);
+  res = await get("/api/opportunities.json");
+  assert.equal(res.status, 200);
+  body = await res.json();
+  assert.deepEqual(body.opportunities, []);
+  assert.equal(body.seeAlso.publicWorkTasks, "/api/public-work/tasks");
+  assert.equal(body.seeAlso.publicWorkMatch, "/api/public-work/match");
+});
+
 test("open help-wanted work in a listed room appears with a strict shape", async t => {
   const fixture = serve(t);
   const { get } = await started(t, fixture);
