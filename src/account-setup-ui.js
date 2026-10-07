@@ -85,6 +85,7 @@ export function installAccountSetup({ api, owns, onInbox, onRoom = () => locatio
     async askName() {
       naming = true;
       await (flight ?? ui.check());
+      if (current && !current.completed && !dialog.open) render();
       if (!dialog.open) { naming = false; return; }
       if (!busy) render();
       await new Promise(done => waiters.push(done));
@@ -99,7 +100,7 @@ export function installAccountSetup({ api, owns, onInbox, onRoom = () => locatio
       try {
         const value = await api.request('/setup'); if (turn !== generation || !owns()) return;
         current = value.setup;
-        if (!force && current.completed) return;
+        if (!force && (current.completed || current.step === 0 && !naming)) return;
         const gmail = await api.request('/gmail').catch(() => null); if (turn !== generation || !owns()) return;
         emailOff = gmail?.state === 'unavailable';
         render();

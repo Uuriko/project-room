@@ -14,7 +14,12 @@ for (const width of [390, 1440]) test(`new account setup without Gmail is two st
   t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
   const page = await browser.newPage({ viewport: { width, height: 900 } }), errors = [];
   page.on('pageerror', error => errors.push(error.message));
-  await page.goto(origin + '/?account=1'); await signInFixture(page, key); const dialog = page.locator('#account-setup-dialog'); await dialog.waitFor({ state: 'visible' });
+  await page.goto(origin + '/?account=1'); await signInFixture(page, key);
+  const dialog = page.locator('#account-setup-dialog');
+  assert.equal(await dialog.isVisible(), false, 'optional setup waits for an explicit choice');
+  await page.locator('.inbox-gmail details > summary').click();
+  await page.locator('#inbox-setup').click();
+  await dialog.waitFor({ state: 'visible' });
   await dialog.getByText('Step 1 of 2', { exact: true }).waitFor();
   await page.locator('#setup-name').fill('Morgan'); await page.locator('#setup-purpose').selectOption('team');
   await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
@@ -64,7 +69,12 @@ test('Connect Gmail returns from Google into saved setup with real imported fixt
     const url = new URL(route.request().url()); assert.equal(url.searchParams.get('scope'), 'https://www.googleapis.com/auth/gmail.modify');
     return route.fulfill({ status: 302, headers: { Location: config.redirectUri + '?state=' + url.searchParams.get('state') + '&code=fixture-code' }, body: '' });
   });
-  await page.goto(origin + '/?account=1'); await signInFixture(page, key); const dialog = page.locator('#account-setup-dialog'); await dialog.waitFor({ state: 'visible' });
+  await page.goto(origin + '/?account=1'); await signInFixture(page, key);
+  const dialog = page.locator('#account-setup-dialog');
+  assert.equal(await dialog.isVisible(), false, 'optional setup waits for an explicit choice');
+  await page.locator('.inbox-gmail details > summary').click();
+  await page.locator('#inbox-setup').click();
+  await dialog.waitFor({ state: 'visible' });
   await page.locator('#setup-name').fill('Morgan'); await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
   for (const width of [390, 1440]) {
     await page.setViewportSize({ width, height: 900 });

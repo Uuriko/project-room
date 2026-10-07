@@ -653,7 +653,6 @@ let accountCheckFlight = null, roomListVersion = 0, roomListCursor = null;
 // (RC-2026-09-19-066): the redeem failed before any network call and the
 // user was left on the welcome screen.
 let accountRestoreFlight = null;
-let firstRoomNamePending = false;
 let humanAuthBusy = false;
 let signinView = "password-login", signinHistoryReplay = false, resetJourneyPending = false;
 let resumeResetJourney = false;
@@ -856,10 +855,7 @@ async function openPersonalRoomAfterSignup() {
     if (startRoomFlight) await startRoomFlight;
     return;
   }
-  firstRoomNamePending = true;
   showAccountWorkspace();
-  try { await inboxUI.askSetupName?.(); } catch { /* a name is optional; the room still opens */ }
-  finally { firstRoomNamePending = false; }
   if (accountClient.session !== owned || state) return;
   const body = await ensureDefaultRoom();
   if (accountClient.session !== owned || state) return;
@@ -1006,7 +1002,7 @@ async function loadAccountRooms(more = false) {
     // fresh account with no rooms and no pending invitation gets its default
     // room created and opened.
     if (!more && !$("#account-rooms-list").children.length && !roomListCursor
-      && !firstRoomNamePending && !startRoomIntent && !startRoomFlight) ensureDefaultRoom();
+      && !startRoomIntent && !startRoomFlight) ensureDefaultRoom();
   } catch (error) {
     if (version !== roomListVersion || (accountClient.session && accountClient.session !== owned)) return;
     if ([401, 403].includes(error.status) || !accountClient.session) endAccountAccess();

@@ -6,9 +6,10 @@ import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { hashPassword } from "../src/password-auth.mjs";
+import { clickChrome } from "./room-chrome.mjs";
 
 const password = "synthetic-email-password";
-async function setup(t) {
+async function setup(t, { login = true } = {}) {
   const f = createAcceptanceFixture();
   const server = createRoomServer({ store: f.store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
@@ -19,8 +20,10 @@ async function setup(t) {
   const errors = []; page.on("pageerror", error => errors.push(error.message)); t.after(() => assert.deepEqual(errors, []));
   await page.goto(origin);
   await page.locator('#auth-signin-ui [data-password-mode="signup"]').waitFor({ state: "visible" });
-  await page.getByRole("button", { name: "Log in", exact: true }).click();
-  assert.equal(await page.locator('#auth-signin-ui [name="email"]').evaluate(node => node === document.activeElement), true, "explicit Log in focuses the visible email field");
+  if (login) {
+    await page.getByRole("button", { name: "Log in", exact: true }).click();
+    assert.equal(await page.locator('#auth-signin-ui [name="email"]').evaluate(node => node === document.activeElement), true, "explicit Log in focuses the visible email field");
+  }
   return { ...f, page, origin };
 }
 
@@ -42,33 +45,49 @@ test("contextual email creation signs in using the actual password signup API", 
   assert.doesNotMatch(page.url(), /password=|new-email-password/);
 });
 
-test("password signup lands in the personal room", { timeout: 40000 }, async t => {
-  const { page } = await setup(t);
+test("password signup opens one personal room without optional setup, with profile editing available later", { timeout: 40000 }, async t => {
+  const { page, origin } = await setup(t, { login: false });
   const shots = "test-results/onboarding";
   mkdirSync(shots, { recursive: true });
-  const email = "room-landing@example.invalid";
+  await page.evaluate(() => {
+    window.signupButtonClicks = [];
+    document.addEventListener('click', event => {
+      const button = event.target.closest('button');
+      if (button) window.signupButtonClicks.push(button.textContent.trim());
+    });
+  });
+  await page.getByRole("button", { name: "Create account", exact: true }).click();
   const form = page.locator('#auth-signin-ui [data-signin-form="password"]');
-  await form.locator('[data-password-mode="signup"]').click();
-  assert.equal(await form.locator('[name="email"]').evaluate(node => node === document.activeElement), true, "explicit account creation preserves email focus");
-  await form.locator('[name="email"]').fill(email);
+  await form.locator('[name="email"]').fill("room-landing@example.invalid");
   await form.locator('[name="password"]').fill(password);
   await form.locator('button[type="submit"]').click();
-  const setupName = page.locator("#setup-name");
-  await setupName.waitFor({ state: "visible" });
-  const slot = await (await page.context().request.get(new URL("/api/account-session", page.url()).href)).json();
-  await page.waitForTimeout(100);
-  const beforeName = await page.context().request.get(new URL("/api/account-rooms", page.url()).href, { headers: { "X-Session-Binding": slot.sessionBinding } });
-  assert.deepEqual((await beforeName.json()).rooms, [], "the name step owns first-room creation");
-  await setupName.fill("Ada");
-  await page.getByRole("button", { name: "Done", exact: true }).click();
-  await page.waitForURL(/[?&]room=personal-/);
-  await page.locator("#main").waitFor({ state: "visible" });
+  await page.locator("#main").waitFor({ state: "visible", timeout: 3000 });
+  assert.equal(await page.locator('#account-setup-dialog').isVisible(), false, 'optional naming does not block the first conversation');
+  assert.deepEqual(await page.evaluate(() => window.signupButtonClicks), ['Create account', 'Create account']);
+  assert.match(page.url(), /[?&]room=personal-/);
   assert.equal(await page.locator("#inbox-panel").isVisible(), false);
-  assert.equal(await page.locator("#identity-label").textContent(), "Ada", "first room uses the chosen name");
+  assert.equal(await page.locator("#identity-label").textContent(), "Owner", 'the existing default identity remains intact');
+  const account = await (await page.context().request.get(origin + '/api/account-session')).json();
+  assert.equal(account.authenticated, true); assert.equal(account.terms.required, false);
+  const rooms = async () => (await (await page.context().request.get(origin + '/api/account-rooms', { headers: { 'X-Session-Binding': account.sessionBinding } })).json()).rooms;
+  assert.equal((await rooms()).length, 1, 'automatic first-room creation stays singular');
+  const initialRoom = new URL(page.url()).searchParams.get('room');
+  await page.reload(); await page.locator('#main').waitFor({ state: 'visible' });
+  assert.equal(await page.locator('#account-setup-dialog').isVisible(), false);
+  assert.equal(new URL(page.url()).searchParams.get('room'), initialRoom);
+  assert.equal((await rooms()).length, 1, 'reload cannot create another room');
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.screenshot({ path: `${shots}/first-run-1280.png` });
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.screenshot({ path: `${shots}/first-run-390.png` });
+  await clickChrome(page, '#account-settings-button');
+  await page.locator('#nav-inbox').click(); await page.locator('#inbox-panel').waitFor({ state: 'visible' });
+  await page.locator('.inbox-gmail details > summary').click();
+  await page.locator('#inbox-setup').click();
+  await page.locator('#setup-name').fill('Ada');
+  await page.getByRole('button', { name: 'Done', exact: true }).click();
+  await page.locator('#account-setup-dialog').waitFor({ state: 'hidden' });
+  const profile = await (await page.context().request.get(origin + '/api/account/profile', { headers: { 'X-Session-Binding': account.sessionBinding } })).json();
+  assert.equal(profile.displayName, 'Ada', 'explicit later personalization persists the account profile');
+  assert.equal((await rooms()).length, 1, 'profile editing cannot duplicate the workspace');
 });
 
 test("contextual email login reports a rejected password then signs into the existing account", { timeout: 25000 }, async t => {

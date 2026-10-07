@@ -135,8 +135,9 @@ for (const touch of [false, true]) test(`work search ${touch ? 'touch' : 'deskto
   await page.locator('#message-to-select').selectOption('producer');
   const threadDraft = 'Keep this thread request and its recipient.';
   await page.locator('#message-input').fill(threadDraft);
-  await page.locator('#message-input').press('Home');
+  await page.locator('#message-input').press(process.platform === 'darwin' ? 'Meta+ArrowLeft' : 'Home');
   for (let index = 0; index < 8; index++) await page.locator('#message-input').press('Shift+ArrowRight');
+  assert.deepEqual(await page.locator('#message-input').evaluate(node => [node.selectionStart, node.selectionEnd, node.selectionDirection]), [0, 8, 'forward'], 'the actual platform keyboard establishes the selection before navigation');
   const chatLink = page.locator('#message-list [data-message-record-id="search:same-id"] [data-open-work="search:same-id"]');
   const beforeChannelNavigation = auditRecovery(f.store).dataSha256;
   await chatLink.focus();
