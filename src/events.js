@@ -1,5 +1,5 @@
 import { canonicalReaction, foldedReactionMap, MAX_REACTIONS_PER_MESSAGE } from "./emoji.js";
-import { normalizePoll, pollOptionEmojis } from "./polls.js";
+import { normalizePoll, pollOptionEmojis, pollVoteKey } from "./polls.js";
 import { assertMemberDisplayNameAvailable } from "./display-name-guard.js";
 import { proposalContext, nativeTextEvidence, reportedProducer, validateResultSegments } from "./work-packet.js";
 import { CHARTER_TYPE, charterFromEvent } from "./room-charter.js";
@@ -1424,11 +1424,29 @@ function setMessageReaction(state, incoming) {
   const message = state.messages.find(m => m.id === messageId);
   if (!message) throw new Error("Reaction must reference a message in this Room");
   if (message.deletedAt) throw new Error("Message was deleted");
-  const key = canonicalReaction(reaction);
+  let key = canonicalReaction(reaction);
   if (!key || typeof active !== "boolean") throw new Error("Invalid reaction choice");
   // Replay and checkpoints may still carry like/heart/celebrate/thinking.
   // Fold those into the Unicode key before applying this choice.
   message.reactions = foldedReactionMap(message.reactions);
+  // Polls: normalize a vote to the poll's stored option emoji before recording
+  // it. Keycaps can arrive with or without the variation selector; recording
+  // the variant as its own key would hide the vote from the tally and break
+  // the single-choice move. Migrating an existing variant entry also heals
+  // votes recorded before this normalization, including on unvote.
+  if (message.kind === "poll") {
+    const target = pollVoteKey(message, key);
+    if (target && target !== key) {
+      const prior = message.reactions[key];
+      if (Array.isArray(prior) && prior.length) {
+        const merged = new Set([...(message.reactions[target] ?? []), ...prior]);
+        if (merged.size) message.reactions[target] = [...merged].sort();
+        else delete message.reactions[target];
+      }
+      delete message.reactions[key];
+      key = target;
+    }
+  }
   const members = new Set(message.reactions[key] || []);
   if (active) {
     if (!message.reactions[key] && Object.keys(message.reactions).length >= MAX_REACTIONS_PER_MESSAGE) {
