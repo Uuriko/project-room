@@ -15,7 +15,7 @@ const AUTH_SECRET = "BTBZMqHH6r4Tts7J_aSIgg";
 
 for (const mobile of [false, true]) {
   const label = mobile ? "mobile" : "desktop";
-  test(`human push ${label}: one mentions-and-DMs button, no settings panel`, { timeout: 90000 }, async t => {
+  test(`human push ${label}: mentions-and-DMs opt-in with simple per-kind preferences`, { timeout: 90000 }, async t => {
     const f = createAcceptanceFixture();
     const keys = await generateVapidKeys();
     const server = createRoomServer({
@@ -87,7 +87,10 @@ for (const mobile of [false, true]) {
     const button = page.locator("#human-push-button");
     await button.waitFor({ state: "visible" });
     assert.equal(await button.textContent(), "Notify me of mentions and DMs");
-    assert.equal(await page.locator("#notification-panel select, #notification-panel input").count(), 0);
+    assert.equal(await page.locator("#notification-panel select").count(), 0);
+    assert.equal(await page.locator("#notification-panel input").count(), 2);
+    assert.equal(await page.locator("#human-push-pref-mention").isChecked(), true);
+    assert.equal(await page.locator("#human-push-pref-dm").isChecked(), true);
     await button.click();
     await page.getByText("Mentions and DMs are on for this browser.", { exact: true }).waitFor();
     assert.equal(await button.isHidden(), true);

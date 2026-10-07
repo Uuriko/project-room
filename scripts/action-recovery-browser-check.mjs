@@ -1,4 +1,4 @@
-import { clickChrome, clickWorkAction } from "./room-chrome.mjs";
+import { clickChrome, clickWorkAction, enableHumanAdvanced } from "./room-chrome.mjs";
 // Simulated human flows in disposable loopback rooms. No external work or evidence is fetched.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -64,6 +64,7 @@ async function setup(t, { action = "complete", mobile = false, live = true } = {
     await page.locator("#auth-panel").waitFor({ state: "visible" });
     if (initialLogin) { await signInFixture(page, f.keys[role]); initialLogin = false; }
     else await signInFixtureInPlace(page, f.store, f.keys[role]); await page.locator("#main").waitFor({ state: "visible" });
+    await enableHumanAdvanced(page);
   };
   await login(action === "verify" ? "human-reviewer" : "owner");
   const card = page.locator(`[data-work-record-id="${workId}"]`), dialog = page.locator("#action-dialog"), form = page.locator("#action-form"), save = form.locator("button[type=submit]");

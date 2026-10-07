@@ -1,3 +1,5 @@
+import { signInFixture } from "./auth-signin.mjs";
+import { openSettings, closeSettings } from "./room-chrome.mjs";
 // Agent instructions stay discoverable behind one disclosure; direct links open it.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -10,7 +12,7 @@ import { createRoomServer } from '../server/http.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 
 for (const touch of [false, true]) {
-  test(`connect an agent ${touch ? 'touch' : 'desktop'}: instructions open on request and direct links`, { timeout: 60000 }, async t => {
+  test(`connect an agent ${touch ? 'touch' : 'desktop'}: sign-in stays minimal and connection guide opens post-login on request and deep link`, { timeout: 60000 }, async t => {
     const directory = mkdtempSync(join(tmpdir(), 'room-connect-agent-'));
     const store = new RoomStore(join(directory, 'room.sqlite'));
     store.initialize(initialRoom());
@@ -40,19 +42,21 @@ for (const touch of [false, true]) {
     await page.goto(origin);
     await page.locator('#auth-panel').waitFor({ state: 'visible' });
 
-    // Instructions are hidden until requested; the summary remains keyboard-accessible.
     const prompt = page.locator('#join-agent-prompt');
-    assert.equal(await prompt.isVisible(), false, 'setup instructions start collapsed');
-    assert.equal(await page.locator('#join-agent > summary').isVisible(), false);
+    assert.equal(await prompt.isVisible(), false, 'setup instructions stay off anonymous entrance');
+    assert.equal(await page.getByRole('button', { name: 'Agent sign in', exact: true }).count(), 1);
     await page.locator('#agent-signin-button').focus();
     await page.keyboard.press('Enter');
-    await page.locator('#join-agent > summary').focus();
-    await page.keyboard.press('Enter');
+    await page.locator('#agent-signin-ui [name=identityId]').waitFor({ state: 'visible' });
+    assert.equal(await prompt.isVisible(), false, 'agent credential entry does not show the human guide');
+    await page.locator('#agent-auth-back').click();
+    assert.equal(await page.locator('#agent-signin-button').evaluate(node => node === document.activeElement), true);
+    const owner = store.issueAccessKey('commons', 'owner');
+    await signInFixture(page, owner);
+    await openSettings(page, 'advanced-room-tools');
+    await page.locator('#connect-guide-open').click();
     await prompt.waitFor({ state: 'visible' });
-    assert.ok(await page.locator('#join-agent-title').isVisible(), 'agent instructions remain discoverable');
-
-    // The secondary disclosure contains the agent path.
-    assert.equal(await page.locator('#agent-signin-button').getAttribute('aria-expanded'), 'true');
+    assert.ok(await page.locator('#join-agent-title').isVisible());
 
     // 3. It names the host actually being served, not a written-down address.
     const text = await prompt.inputValue();
@@ -72,18 +76,19 @@ for (const touch of [false, true]) {
     await page.locator('#join-agent-status').filter({ hasText: 'Copied' }).waitFor();
     assert.equal(await page.evaluate(() => navigator.clipboard.readText()), text, 'the clipboard holds what was shown');
 
-    const instructions = page.locator('#agent-auth-step a[href="/llms.txt"]');
-    assert.equal(await instructions.isVisible(), true);
-    assert.equal(await instructions.getAttribute('href'), '/llms.txt');
+    assert.equal(await page.locator('#join-agent-card').getAttribute('href'), `${origin}/.well-known/agent.json`);
+    assert.equal(await page.locator('#join-agent-kits').getAttribute('href'), `${origin}/kits.txt`);
 
     // The packet the prompt sends an agent to has to actually answer.
     const response = await page.request.get(`${origin}/llms.txt`);
     assert.equal(response.status(), 200, 'the address in the prompt is a live door');
     assert.ok((await response.text()).length > 0);
 
+    await page.locator('#connect-guide-close').click();
+    await closeSettings(page);
     await page.goto(origin + '/#join-agent');
     await prompt.waitFor({ state: 'visible' });
-    assert.equal(await page.locator('#join-agent').evaluate(node => node.open), true, 'direct links reveal the setup');
+    assert.equal(await page.locator('#connect-guide-dialog').evaluate(node => node.open), true, 'signed-in direct links reveal the guide');
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
     assert.deepEqual(errors, [], 'no page errors');
   });

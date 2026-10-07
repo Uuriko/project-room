@@ -1,3 +1,4 @@
+import { openMemberProfile } from "./room-chrome.mjs";
 // Observable chat cost contract: ordinary arrivals leave historical DOM and
 // hidden logs untouched and do not poll unchanged request-run subscriptions.
 // Existing chat suites check focus/content, not redundant mutations or reads.
@@ -93,7 +94,7 @@ test('snapshot labels update duplicates while preserving focus and selection, an
   const original = page.locator('[data-message-record-id="test-welcome"]');
   assert.equal(await original.locator('.message-meta strong').textContent(), 'Room owner');
   const profile = page.locator('[data-member-record-id="owner"] .member-profile');
-  await profile.locator(':scope > summary').click();
+  await openMemberProfile(page, 'owner');
   await page.evaluate(() => {
     const body = document.querySelector('[data-message-record-id="test-welcome"] .message-body');
     globalThis.retainedAuditBody = body;

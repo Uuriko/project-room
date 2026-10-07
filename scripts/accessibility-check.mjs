@@ -4,7 +4,7 @@ import { emailContractFixture } from "./email-contract-fixture.mjs";
 import { normalizeGraphEmail } from "../server/graph-email.mjs";
 import { openMagicSignin } from "./signin-browser-journey.mjs";
 import { openComposerOptions } from "./room-chrome.mjs";
-import { clickChrome, clickWorkAction } from "./room-chrome.mjs";
+import { clickChrome, clickWorkAction, enableHumanAdvanced } from "./room-chrome.mjs";
 // Cross-session return-brief isolation and bounded accessibility regressions.
 // Real browser + disposable loopback service; no external identity or agent runtime.
 import test from "node:test";
@@ -89,6 +89,7 @@ test("stale return brief cannot cross a session; skip, local alerts, focus retur
 
   await signInFixture(page, owner);
   await page.locator("#main").waitFor({ state: "visible" });
+  await enableHumanAdvanced(page);
 
   const receipt = page.locator('[data-work-record-id="unknown-producer"] .receipt');
   assert.match(await receipt.textContent(), /Completion reporter\s*Room owner/);
@@ -117,10 +118,10 @@ test("stale return brief cannot cross a session; skip, local alerts, focus retur
   await page.locator("#cancel-work-button").click();
   await page.waitForFunction(() => document.activeElement.id === "composer-options-toggle");
 
-  // The primary action stays visible while secondary evidence uses keyboard More.
+  // Result sharing remains a visible primary action; Advanced exposes its protocol form.
   const producerCard = page.locator('[data-work-record-id="producer-choice"]');
   assert.equal(await producerCard.locator('.button.primary').isVisible(), true);
-  assert.equal(await producerCard.locator('[data-action="complete"]').isVisible(), false);
+  assert.equal(await producerCard.locator('[data-action="complete"]').isVisible(), true);
   // Completion requires a deliberate producer choice, including an explicit unknown option.
   await clickWorkAction(page.locator('[data-work-record-id="producer-choice"]'), "complete", { keyboard: true });
   const producerSelect = page.locator('#action-form select[name="producerId"]');
@@ -194,11 +195,12 @@ test("stale return brief cannot cross a session; skip, local alerts, focus retur
   holdOwnerBrief = false;
   if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await clickChrome(page, "#signout-button");
   await page.locator("#auth-panel").waitFor({ state: "visible" });
-  assert.equal(await page.locator('#auth-signin-ui [name="email"]').evaluate(node => node === document.activeElement), true, "access end moves focus to the visible sign-in email");
+  assert.equal(await page.getByRole("button", { name: "Create account", exact: true }).evaluate(node => node === document.activeElement), true, "access end moves focus to the first visible account entry");
   assert.match(await page.locator("#auth-error").textContent(), /Session ended; private drafts were cleared/);
   assert.equal(await page.locator("#status").textContent(), "", "sign-out has one local announcement owner");
   await signInFixture(page, maya);
   await page.locator("#main").waitFor({ state: "visible" });
+  await enableHumanAdvanced(page);
   assert.equal(await page.locator('[data-work-record-id="producer-choice"] [data-action="verify"]').textContent(), "Record independent check", "known distinct producer exposes independent verification");
   assert.equal(await page.locator('[data-work-record-id="producer-unknown-choice"] [data-action="verify"]').textContent(), "Record evidence check", "unknown producer exposes only a non-independent evidence check");
   assert.equal(await page.locator('[data-work-record-id="producer-conflict"] [data-action="verify"]').count(), 0, "verifier-as-producer does not expose a misleading independent-check action");
@@ -281,7 +283,9 @@ test("board, settings, and join error have no serious axe findings; pages do not
   await seriousAxe(page, "#account-settings");
   await page.goto(origin + "/?room=commons");
   await page.locator("#main").waitFor({ state: "visible" });
-  await page.locator("#tasks-board-open").click();
+  await page.keyboard.press("Control+k");
+  await page.locator("#room-actions-query").fill("board");
+  await page.keyboard.press("Enter");
   await page.locator("#board-dialog").waitFor({ state: "visible" });
   await seriousAxe(page, "#board-dialog");
   await page.locator("#board-close").click();
@@ -313,7 +317,9 @@ test("board dialog traps Tab in both directions (QA2-A11Y focus trap)", { timeou
   await signInFixture(page, accountKey);
   await page.goto(origin + "/?room=commons");
   await page.locator("#main").waitFor({ state: "visible" });
-  await page.locator("#tasks-board-open").click();
+  await page.keyboard.press("Control+k");
+  await page.locator("#room-actions-query").fill("board");
+  await page.keyboard.press("Enter");
   await page.locator("#board-dialog").waitFor({ state: "visible" });
   const focusEdge = async edge => page.evaluate(which => {
     const dialog = document.getElementById("board-dialog");
