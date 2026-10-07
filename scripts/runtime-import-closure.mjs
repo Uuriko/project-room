@@ -3,14 +3,19 @@
 // an entrypoint, so tests can assert every imported module is allowlisted
 // without humans hand-maintaining a file list.
 //
-// Only static `import`/`export ... from` with relative specifiers (./ or ../)
-// are followed. `node:` builtins, bare package specifiers, and dynamic
-// `import()` are ignored: the server tree uses static relative imports with
-// explicit extensions throughout.
+// Static `import`/`export ... from` AND dynamic `import()` with string-literal
+// relative specifiers (./ or ../) are followed. `node:` builtins, bare
+// package specifiers, and template-literal dynamic imports with ${...} are
+// ignored: the server tree uses static relative imports with explicit
+// extensions throughout, plus node:-only dynamic imports.
 import { readFileSync, existsSync } from "node:fs";
 import { dirname, join, normalize, sep } from "node:path";
 
 const IMPORT_RE = /(?:import\s+(?:[^"']*?\s+from\s+)?|export\s+(?:[^"']*?\s+from\s+)?)(["'])(\.[^"']*)\1/g;
+// Dynamic import() with a string-literal relative specifier: import("./x.mjs")
+// or import(`./x.mjs`). Template literals containing ${...} cannot be
+// resolved statically and are skipped. Bare/node: specifiers are ignored.
+const DYNAMIC_IMPORT_RE = /import\(\s*([`'"])(\.[^`'"]*)\1\s*\)/g;
 
 function relativeImports(source) {
   const specs = [];
@@ -18,6 +23,12 @@ function relativeImports(source) {
   IMPORT_RE.lastIndex = 0;
   while ((match = IMPORT_RE.exec(source)) !== null) {
     const spec = match[2];
+    if (spec.startsWith("./") || spec.startsWith("../")) specs.push(spec);
+  }
+  DYNAMIC_IMPORT_RE.lastIndex = 0;
+  while ((match = DYNAMIC_IMPORT_RE.exec(source)) !== null) {
+    const spec = match[2];
+    if (spec.includes("${")) continue; // not statically resolvable
     if (spec.startsWith("./") || spec.startsWith("../")) specs.push(spec);
   }
   return specs;
