@@ -319,6 +319,7 @@ optional.push("server/message-redaction.mjs"); // PRIV-1: rewrite deleted messag
 optional.push("server/history-visibility.mjs"); // PRIV-2: history visibility floor and export authority (imported by server/store.mjs and server/http.mjs)
 optional.push("server/pins.mjs");
 optional.push("server/squads.mjs"); // plan-squads: squad roster + thread channel (imported by server/http.mjs, server/store.mjs, server/mcp-room-profile.mjs, server/work-claim-routes.mjs)
+optional.push("server/supervision-sqlite.mjs"); // herdr redesign B5: herdr session + supervision-card storage (imported by server/store.mjs; pure, no imports of its own)
 optional.push("server/typing.mjs"); // ephemeral typing heartbeats (imported by server/http.mjs; pure, in-memory only)
 optional.push("server/notifications.mjs");
 optional.push("server/open-questions.mjs"); // F1: open-questions radar read (imported by server/http.mjs)

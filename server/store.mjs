@@ -160,6 +160,7 @@ import { ThreadMutes, threadMutesSchema } from "./thread-mutes.mjs"; // Per-thre
 import { HumanPush, humanPushSchema, humanPushPrefsSchema } from "./human-push.mjs";
 import { ensurePayoutColumns, ensureGrowthFundingColumn } from "./growth-loop.mjs";
 import { squadSchema, squadMentionTargets } from "./squads.mjs";
+import { herdrSessionSchema } from "./supervision-sqlite.mjs"; // Herdr redesign B5: herdr session + supervision-card storage, additive.
 import { Referrals, referralSchema } from "./referrals.mjs";
 import { AccountLoginMethods, accountLoginMethodsSchema, ensureVerifiedEmailSchema } from "./account-login-methods.mjs";
 import { verifyTextCompletion, selectedWorkResult } from "./text-results.mjs";
@@ -1064,7 +1065,8 @@ function roomSchemaStamp() {
     // stamp matches skips the whole schema pass, so any DDL the pass applies
     // must be hashed here or a room stamped by an older deploy never gets it
     // (the priced-tool 500: spend_authorizations missing on muse-room).
-    updatesSchema, GRANTS_SCHEMA, SPEND_GRANTS_SCHEMA, AUTONOMY_TIERS_SCHEMA, identityLinkCodeSchema
+    updatesSchema, GRANTS_SCHEMA, SPEND_GRANTS_SCHEMA, AUTONOMY_TIERS_SCHEMA, identityLinkCodeSchema,
+    herdrSessionSchema,
   ];
   for (const part of parts) hash.update("\0").update(part ?? "");
   for (const [, label] of ADDITIVE_SCHEMA_ENSURES) hash.update("\0").update(label);
@@ -1598,6 +1600,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // projection impact): IF NOT EXISTS is idempotent, no schema version
       // bump, registered in writer-fence unfencedAdditiveTables.
       this.db.exec(squadSchema);
+      // Herdr session + supervision-card tables (herdr redesign B5). Purely
+      // additive side tables (no events, no projection impact): IF NOT EXISTS
+      // is idempotent, no schema version bump, intentionally outside the writer
+      // fence (see unfencedAdditiveTables in server/writer-fence.mjs).
+      this.db.exec(herdrSessionSchema);
       // Human browser push subscriptions. Purely additive side table (no
       // events, no projection impact): IF NOT EXISTS is idempotent, no
       // schema version bump, intentionally outside the writer fence.

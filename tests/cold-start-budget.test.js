@@ -36,7 +36,15 @@ const EMPTY_UNTIL_CRON = new Set([
   // Spend grants and authorizations exist only after an owner issues a grant.
   "spend_grant_terms",
   "spend_authorizations",
-  "spend_room_reservations"
+  "spend_room_reservations",
+  // Herdr redesign B5: session + supervision-card rows exist only after a
+  // herdr session runs or a supervision card is triaged.
+  "herdr_sessions",
+  "herdr_session_journal",
+  "herdr_lane_optin",
+  "herdr_backend_state",
+  "private_supervision_cards",
+  "private_supervision_card_history"
 ]);
 
 const EVENTS = 200_000;
