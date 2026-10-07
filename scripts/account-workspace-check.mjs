@@ -63,6 +63,10 @@ for (const mobile of [false, true]) test(`account Inbox ${mobile ? "mobile" : "d
   // instead of landing in an empty void.
   await p.getByText("My first room", { exact: true }).waitFor();
   assert.equal(await p.locator("#account-rooms-list button").count(), 1); await f.capture(mobile ? "empty-rooms-mobile" : "empty-rooms-desktop");
+  await p.locator("#skip-link").focus(); await p.keyboard.press("Enter");
+  assert.equal(await p.evaluate(() => document.activeElement?.id), "account-rooms-title", "skip enters the visible Rooms chooser rather than connection status or navigation");
+  await p.keyboard.press("Tab");
+  assert.equal(await p.locator("#account-rooms-list button").evaluate(node => node === document.activeElement), true, "the next Tab reaches the first room without retracing navigation");
   await clickChrome(p, "#nav-inbox"); await p.reload(); await p.locator("#inbox-reader").waitFor();
   assert.equal(await p.locator("#inbox-draft").inputValue(), "Let’s start with one small idea.");
   if (await p.locator("#session-menu-button").isVisible()) await p.locator("#session-menu-button").click(); await clickChrome(p, "#signout-button"); await p.locator("#auth-panel").waitFor();
@@ -86,6 +90,10 @@ test("account room discovery and room revocation preserve a private draft, accou
   await p.locator("#inbox-reader").waitFor(); assert.equal(await p.locator("#inbox-draft").inputValue(), "Unsent private thought");
   await p.locator("#inbox-save").click(); await p.getByText("Saved · only you", { exact: true }).waitFor();
   await clickChrome(p, "#nav-rooms"); await p.getByText("No rooms yet.", { exact: true }).waitFor();
+  await p.locator("#skip-link").focus(); await p.keyboard.press("Enter");
+  assert.equal(await p.evaluate(() => document.activeElement?.id), "account-rooms-title", "empty Rooms chooser remains a reachable skip destination");
+  await p.keyboard.press("Tab");
+  assert.equal(await p.locator("#account-rooms-panel").evaluate(node => node.contains(document.activeElement)), true, "empty chooser's next action stays in its content");
   await clickChrome(p, "#nav-inbox"); await f.capture("room-revoked");
   f.store.changeAccountAccess(f.accountId, { expectedRevision: 0, active: false, reason: "Synthetic end" });
   // Account confirmation ends access automatically. Refresh can already be
