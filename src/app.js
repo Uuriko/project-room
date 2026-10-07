@@ -4239,7 +4239,7 @@ function renderEmoji() {
   list.hidden = false;
   list.innerHTML = choice.matches.map((item, i) => `<li role="option" id="emoji-option-${i}" class="mention-option${i === emojiIndex ? " active" : ""}" data-emoji="${esc(item.emoji)}" aria-selected="${i === emojiIndex}"><span class="emoji-glyph" aria-hidden="true">${item.emoji}</span> ${esc(item.name)}</li>`).join("");
   const input = $("#message-input");
-  input.removeAttribute("aria-expanded");
+  input.setAttribute("aria-expanded", "true");
   input.setAttribute("aria-controls", "emoji-list");
   input.setAttribute("aria-activedescendant", `emoji-option-${emojiIndex}`);
 }
@@ -4268,7 +4268,7 @@ function renderMentions() {
   // nested button). Focus stays in the textarea; aria-activedescendant names the row.
   list.innerHTML = matches.map((m, i) => `<li role="option" id="mention-option-${i}" class="mention-option${i === mentionIndex ? " active" : ""}" data-mention-id="${esc(m.id)}" aria-selected="${i === mentionIndex}">${esc(m.displayName)} <span>${esc(kindLabel(m.kind))}</span></li>`).join("");
   const input = $("#message-input");
-  input.removeAttribute("aria-expanded");
+  input.setAttribute("aria-expanded", "true");
   input.setAttribute("aria-activedescendant", `mention-option-${mentionIndex}`);
 }
 function applyMentionMember(member) {
