@@ -91,3 +91,23 @@ test('decision commands are idempotent by command id', t => {
   store.command(keys.owner, 'commons', once);
   assert.equal(decisions().length, 1);
 });
+
+test('an owner-delegated agent administrator can record a decision; a plain agent still cannot', t => {
+  const { store, keys, decisions } = fixture(t);
+  store.command(keys.owner, 'commons', command(T.MEMBER_ADDED, {
+    memberId: 'agent-b', displayName: 'agent-b', kind: 'agent', accountableHumanId: 'owner', permissions: ['decide'] }));
+  setTier(store.db, 'commons', 'agent-b', 't2_standard', { updatedBy: 'owner', nowMs: Date.now() });
+  keys['agent-b'] = store.issueAccessKey('commons', 'agent-b');
+  store.command(keys['agent-b'], 'commons', command(T.DECISION_RECORDED, {
+    sourceMessageId: 'msg-1', statement: 'Copy freezes on Fridays.' }));
+  assert.equal(decisions().length, 1);
+  assert.equal(decisions()[0].event.actorId, 'agent-b');
+  // Demoting the agent (owner removes decide) strips delegatedAdmin, and with it decision power.
+  const rev = store.room('commons').state.members['agent-b'].revision;
+  store.command(keys.owner, 'commons', command(T.MEMBER_ACCESS_CHANGED, {
+    memberId: 'agent-b', expectedMemberRevision: rev, permissions: ['accept_work'], active: true }));
+  assert.notEqual(store.room('commons').state.members['agent-b'].delegatedAdmin, true);
+  assert.throws(() => store.command(keys['agent-b'], 'commons', command(T.DECISION_RECORDED, {
+    sourceMessageId: 'msg-1', statement: 'Still deciding.' })), /lacks decide|may record a decision/);
+  assert.equal(decisions().length, 1);
+});

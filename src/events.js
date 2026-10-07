@@ -257,6 +257,15 @@ export function roomTrust(state) {
   };
 }
 
+// Decision authority: humans hold it by default. An agent holds it only when
+// the room owner delegated administration to it (#643 stamps delegatedAdmin on
+// the owner's grant and strips it on demotion), so the owner stays the source
+// of every agent's decision power. The decide permission is checked
+// separately by requirePermission.
+export function holdsDecisionAuthority(member) {
+  return Boolean(member) && (member.kind === "human" || (member.kind === "agent" && member.delegatedAdmin === true));
+}
+
 // Humans own themselves. An agent belongs to its accountable human, or to
 // the room owner when that sponsor was never recorded.
 export function memberOwnerId(state, memberId) {
@@ -1505,7 +1514,12 @@ function proposeWork(state, incoming) {
   if (incoming.data.verifierMemberId) requireMember(state, incoming.data.verifierMemberId);
   if (humanDecisionMakerId) {
     const decisionMaker = requireMember(state, humanDecisionMakerId);
-    if (decisionMaker.kind !== "human") throw new Error("Decision-maker must be a human member");
+    if (!holdsDecisionAuthority(decisionMaker)) throw new Error("Decision-maker must be a human member or an owner-delegated agent administrator");
+    // Two-person rule for delegated agents: an agent may not be the
+    // decision-maker on work it is itself accountable for.
+    if (decisionMaker.kind === "agent" && humanDecisionMakerId === incoming.data.accountableMemberId) {
+      throw new Error("An agent decision-maker must not be the accountable member");
+    }
   }
   if (independentVerificationRequired && incoming.data.accountableMemberId === incoming.data.verifierMemberId) {
     throw new Error("Independent verification requires a different accountable member and verifier");
@@ -2072,7 +2086,7 @@ function applySession(state, incoming) {
 function recordDecision(state, incoming) {
   const actor = requireMember(state, incoming.actorId);
   requirePermission(state, incoming.actorId, "decide");
-  if (actor.kind !== "human") throw new Error("Only a human member may record a decision");
+  if (!holdsDecisionAuthority(actor)) throw new Error("Only a human member or an owner-delegated agent administrator may record a decision");
   requireFields(incoming.data, ["sourceMessageId", "statement"]);
   requirePublicDecisionSource(state, incoming.data.sourceMessageId);
   const statement = String(incoming.data.statement);
@@ -2089,8 +2103,11 @@ function recordOwnerDecision(state, incoming) {
   const item = mutableWorkItem(state, incoming, [WORK_STATES.COMPLETED]);
   const actor = requireMember(state, incoming.actorId);
   requirePermission(state, incoming.actorId, "decide");
-  if (actor.kind !== "human" || actor.id !== item.humanDecisionMakerId) {
+  if (!holdsDecisionAuthority(actor) || actor.id !== item.humanDecisionMakerId) {
     throw new Error("Only the designated human decision-maker may decide");
+  }
+  if (actor.kind === "agent" && (actor.id === item.accountableMemberId || item.receipt?.producerId === actor.id)) {
+    throw new Error("An agent may not decide on work it is accountable for or produced");
   }
   requireFields(incoming.data, ["decision", "completionEventId", "evidenceVersion", "reason"]);
   if (!["approved", "changes_requested", "rejected"].includes(incoming.data.decision)) {

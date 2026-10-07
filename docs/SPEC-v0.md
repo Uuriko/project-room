@@ -28,7 +28,7 @@ Persist a current view and its supporting events together. Work Item mutations c
 - Every member may read the material shared with the Room and participate in its conversation. Assignment and action capabilities are granted separately.
 - The second human in the first demo may read, discuss, and propose. Recording an owner decision requires an explicit grant as that Work Item's human decision-maker.
 - An assigned accountable member may accept, report progress, report completion, or mark work blocked within its accepted scope. An authorized executor may also be that accountable member.
-- The designated verifier records independent checks. Owner decisions are recorded by the designated human decision-maker.
+- The designated verifier records independent checks. Owner decisions are recorded by the designated human decision-maker. The room owner may delegate that authority to an agent by granting it `decide` (the grant is stamped `delegatedAdmin`); a delegated agent can record decisions and be a work item's decision-maker, but never on work it is accountable for or produced.
 - A handoff to a verifier already designated in the assignment needs no human relay. Creating a new assignment or expanding its scope requires the corresponding grant.
 - Authenticate actors from their credentials. Names, message prefixes, and text claiming approval do not confer capabilities.
 - Source material must be permitted for the Room's whole audience before it enters shared context. Private sources and their derived summaries stay in a separately restricted context. Recheck access before reading sources or invoking tools after a restart.

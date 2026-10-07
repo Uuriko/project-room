@@ -1,5 +1,5 @@
 import { workProgress } from "./work-packet.js";
-import { EVENT_TYPES as T, WORK_STATES as S, validId, receiptHasKnownProducer, matchesReceipt, hasConfirmedIndependentPass } from "./events.js";
+import { EVENT_TYPES as T, WORK_STATES as S, validId, receiptHasKnownProducer, matchesReceipt, hasConfirmedIndependentPass, holdsDecisionAuthority } from "./events.js";
 
 // Reuse content, never a prior assignment, permission, result or source relationship.
 export function reusableWorkDefinition(work) {
@@ -201,7 +201,7 @@ export function workActions(item, member, now = Date.now()) {
     actions.push(["verify", item.verification ? "Review evidence again"
       : item.independentVerificationRequired && producerKnown(item) ? "Record independent check" : "Record evidence check"]);
   }
-  if (nextWorkStep(item, now).action === "decide" && member.id === item.humanDecisionMakerId && member.kind === "human" && can("decide")) actions.push(["decide", "Record decision"]);
+  if (nextWorkStep(item, now).action === "decide" && member.id === item.humanDecisionMakerId && holdsDecisionAuthority(member) && can("decide")) actions.push(["decide", "Record decision"]);
   if (activeClaim(item, now) && (claim || can("manage_claims"))) actions.push(["release", "Release scope"]);
   if (claim) actions.push(["renew", "Renew scope"]);
   return actions;
