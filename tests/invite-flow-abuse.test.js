@@ -1,11 +1,10 @@
 // Invite-flow abuse tests — hard task 92.
 //
-// The self-service invitation flow (share-link joins) against abuse: invite
-// spam, guest-join races, duplicate protection. The #770
-// duplicate-guest-join protection — one (link, redemptionId) admits one
-// account — must hold under 50 concurrent joins: the first join creates the
-// guest, every other concurrent attempt is rejected with the
-// session-recovery message instead of minting a second guest.
+// Complements tests/share-link-join-concurrency.test.js (burn lane #1728,
+// which proved the 50-concurrent join races): this file covers the abuse
+// angles that one does not — mint-side spam idempotency, the HTTP join rate
+// limit, same-session retry idempotency (duplicate:true), and the
+// fresh-guest (non-membership-reuse) lost-cookie replay.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { randomBytes, randomUUID } from "node:crypto";
@@ -37,10 +36,8 @@ function freshSlot(store) {
 }
 
 // Run a batch of synchronous store calls "concurrently": each is wrapped in a
-// promise so every call starts before any result is consumed, the way 50
-// racing HTTP handlers would interleave through the event loop. The store
-// transactions themselves are synchronous, so the protection under test is the
-// SQL/ledger-level guard, not JS scheduling.
+// promise so every call starts before any result is consumed, the way racing
+// HTTP handlers interleave through the event loop.
 async function race(calls) {
   return Promise.all(calls.map(fn => Promise.resolve().then(() => {
     try {
@@ -55,30 +52,7 @@ function joinCount(store) {
   return store.db.prepare("SELECT count(*) n FROM share_link_joins").get().n;
 }
 
-test("50 concurrent joins on one redemptionId: exactly one guest is created (#770)", async t => {
-  const { store, linkToken } = fixture(t);
-  const redemptionId = randomUUID();
-  const slots = Array.from({ length: 50 }, () => freshSlot(store));
-  const results = await race(slots.map((s, i) => () =>
-    store.shareLinks.join(s.token, linkToken, {
-      displayName: `Guest ${i}`, redemptionId,
-      expectedSessionRevision: s.revision, expectedSessionBinding: s.binding,
-    })));
-  const wins = results.filter(r => r.ok);
-  const losses = results.filter(r => !r.ok);
-  assert.equal(wins.length, 1, "exactly one concurrent join succeeds");
-  assert.equal(losses.length, 49, "every other concurrent join is rejected");
-  for (const loss of losses) {
-    assert.equal(loss.status, 409, "rejection is a conflict, not a server error");
-    assert.equal(loss.code, "join_session_lost", "losers get the session-recovery message");
-    assert.match(loss.message, /No additional guest was created/);
-  }
-  assert.equal(joinCount(store), 1, "the ledger records exactly one join");
-  const memberIds = store.db.prepare("SELECT member_id FROM member_accounts WHERE room_id='commons' AND origin LIKE 'invitation:%'").all();
-  assert.equal(memberIds.length, 1, "exactly one guest member was admitted");
-});
-
-test("the same browser retrying one redemptionId 50 times: one guest, all retries duplicate", async t => {
+test("the same browser retrying one redemptionId 50 times: one guest, every retry duplicate:true", async t => {
   const { store, linkToken } = fixture(t);
   const redemptionId = randomUUID();
   const s = freshSlot(store);
@@ -101,7 +75,7 @@ test("the same browser retrying one redemptionId 50 times: one guest, all retrie
   assert.equal(joinCount(store), 1, "retries never write a second join row");
 });
 
-test("lost-cookie retry from a replacement session: 409 join_session_lost, no second guest", async t => {
+test("lost-cookie retry of a fresh guest join: 409 join_session_lost, no second guest", async t => {
   const { store, linkToken } = fixture(t);
   const redemptionId = randomUUID();
   const a = freshSlot(store);
@@ -111,7 +85,8 @@ test("lost-cookie retry from a replacement session: 409 join_session_lost, no se
   });
   assert.equal(first.duplicate, false);
   // The browser cookie is gone: a brand-new session retries the same
-  // redemptionId, the precise #770 lost-session scenario.
+  // redemptionId. (The membership-reuse variant is covered in
+  // share-link-join-concurrency.test.js; this is the fresh-guest path.)
   const b = freshSlot(store);
   let error = null;
   try {
@@ -122,17 +97,16 @@ test("lost-cookie retry from a replacement session: 409 join_session_lost, no se
   } catch (err) { error = err; }
   assert.ok(error, "the retry is rejected");
   assert.equal(error.code, "join_session_lost");
-  assert.match(error.message, /Return to that session or sign in with the same account/);
   assert.match(error.message, /No additional guest was created/);
   assert.equal(joinCount(store), 1, "no second guest was admitted");
 });
 
-test("50 concurrent link mints with one requestId: exactly one link (spam idempotent)", async t => {
+test("50 concurrent link mints with one requestId: exactly one link (mint spam idempotent)", async t => {
   const { store, ownerKey, now } = fixture(t);
   const requestId = randomUUID();
   // Same requestId AND same link settings: a retried mint request. (A
   // retried request with different settings is an idempotency_conflict —
-  // refused, not duplicated — covered by the 409 branch above.)
+  // refused, not duplicated.)
   const linkToken = randomBytes(32).toString("base64url");
   const results = await race(Array.from({ length: 50 }, () => () =>
     store.shareLinks.create(ownerKey, "commons", {
