@@ -1,3 +1,4 @@
+import { uiText } from "./strings.js";
 // Account settings UI (slice 7, RC-2026-09-17-016).
 //
 // Renders the linked sign-in methods for the authenticated account and the
@@ -331,9 +332,10 @@ export function settingsHtml({ methods = [], providers = null, emailVerification
 }
 
 // --- Wired behavior ---
-export function createAccountSettingsUI({ accountClient, credentials = null, onAccountDeleted = null } = {}) {
+export function createAccountSettingsUI({ accountClient, credentials = null, onAccountDeleted = null, profileOnly = false, onProfileSaved = null } = {}) {
   if (!accountClient) throw new Error("accountClient is required");
   const webauthn = () => credentials ?? globalThis.navigator?.credentials ?? null;
+  let viewEpoch = 0;
   let container = null, state = { methods: [], providers: null }, deletionToken = null;
 
   const accountEmails = () => [...new Set(state.methods
@@ -366,7 +368,46 @@ export function createAccountSettingsUI({ accountClient, credentials = null, onA
     container.innerHTML = settingsHtml(state);
   };
 
+  const refreshProfile = async () => {
+    const epoch = ++viewEpoch;
+    const session = accountClient.currentSession(uiText("profile.editing"), { authenticated: true });
+    const generation = accountClient.generation;
+    const owns = () => epoch === viewEpoch && accountClient.owns(generation, session);
+    container.replaceChildren();
+    container.innerHTML = '<p data-settings-status role="status"></p>';
+    status(uiText("profile.loading"));
+    try {
+      const profile = await accountClient.request("/api/account/profile", { session });
+      if (!owns()) return;
+      container.innerHTML = uiText("profile.form", { name: escapeHtml(profile.displayName ?? "") })
+        + '<p data-settings-status role="status" hidden></p>';
+      container.querySelector('[name="displayName"]')?.focus();
+    } catch (error) {
+      if (owns()) status(error?.message || uiText("profile.failed"));
+    }
+  };
+
+  const submitProfile = async form => {
+    const session = accountClient.currentSession(uiText("profile.editing"), { authenticated: true });
+    const generation = accountClient.generation, epoch = viewEpoch;
+    const owns = () => epoch === viewEpoch && accountClient.owns(generation, session);
+    const button = form.querySelector('button[type="submit"]');
+    if (button.disabled) return;
+    button.disabled = true;
+    status(uiText("profile.saving"));
+    try {
+      await accountClient.request("/api/account/profile", { method: "POST", session,
+        data: { displayName: String(new FormData(form).get("displayName") ?? "").trim() } });
+      if (owns()) onProfileSaved?.();
+    } catch (error) {
+      if (owns()) status(error?.message || uiText("profile.save_failed"));
+    } finally {
+      if (owns()) button.disabled = false;
+    }
+  };
+
   const refresh = async () => {
+    if (profileOnly) return refreshProfile();
     const session = accountClient.currentSession("managing sign-in methods", { authenticated: true });
     status("Loading sign-in methods\u2026");
     try {
@@ -540,6 +581,7 @@ export function createAccountSettingsUI({ accountClient, credentials = null, onA
     const form = event.target?.closest?.("form[data-form]");
     if (!form || !container?.contains(form)) return;
     event.preventDefault();
+    if (form.dataset.form === "account-profile") return submitProfile(form);
     if (form.dataset.form === "delete-account") return submitDeletion(form);
     submitPasswordForm(form);
   };
@@ -583,5 +625,6 @@ export function createAccountSettingsUI({ accountClient, credentials = null, onA
     return refresh();
   };
 
-  return { mount, refresh, html: () => settingsHtml(state) };
+  const reset = () => { viewEpoch++; container?.replaceChildren(); };
+  return { mount, refresh, reset, html: () => settingsHtml(state) };
 }

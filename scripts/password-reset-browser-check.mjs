@@ -28,16 +28,11 @@ async function setup(t) {
 async function requestReset(f) {
   await f.page.locator('#auth-signin-ui [name="email"]').fill(email);
   await f.page.locator('[data-forgot-password]').click();
-  assert.equal(await f.page.locator('[data-reset-password]').evaluate(el => el === document.activeElement), true, 'Forgot moves keyboard focus to its first recovery choice');
-  await f.page.locator('[data-reset-password]').click();
-  assert.equal(await f.page.locator('[data-signin-form="reset-request"] [name="email"]').evaluate(el => el === document.activeElement), true, 'reset request focuses email after host placement');
-  await f.page.locator('[data-signin-back]').click();
-  await f.page.locator('[data-reset-password]').waitFor();
-  assert.equal(await f.page.locator('[data-reset-password]').evaluate(el => el === document.activeElement), true, 'Back restores recovery choice focus');
+  assert.equal(await f.page.locator('[data-signin-form="reset-request"] [name="email"]').evaluate(el => el === document.activeElement), true, 'Forgot password focuses the email in its request form');
   await f.page.locator('[data-signin-back]').click();
   await f.page.locator('[data-signin-form="password"]').waitFor();
   assert.equal(await f.page.locator('[data-signin-form="password"] [name="email"]').evaluate(el => el === document.activeElement), true, 'Back returns focus to the primary email field');
-  await f.page.locator('[data-forgot-password]').click(); await f.page.locator('[data-reset-password]').click();
+  await f.page.locator('[data-forgot-password]').click();
   const form = f.page.locator('[data-signin-form="reset-request"]');
   assert.equal(await form.locator('[name="email"]').inputValue(), email, 'recovery preserves typed email only');
   const response = f.page.waitForResponse(r => new URL(r.url()).pathname === '/api/auth/password/reset/request');
@@ -78,7 +73,6 @@ test('reset mailed from a shared invitation preserves review and blocks Back dur
   await f.page.locator('#join-account-auth').waitFor({ state: 'visible' });
   await f.page.locator('#join-account-auth [name="email"]').fill(email);
   await f.page.locator('#join-account-auth [data-forgot-password]').click();
-  await f.page.locator('#join-account-auth [data-reset-password]').click();
   const request = f.page.locator('[data-signin-form="reset-request"]');
   const sent = f.page.waitForResponse(r => new URL(r.url()).pathname === '/api/auth/password/reset/request');
   await request.locator('button[type="submit"]').click(); await sent;
@@ -140,7 +134,7 @@ test('targeted invitation survives mailed reset and still requires explicit acce
   const token = randomBytes(32).toString('base64url');
   const issued = f.store.issueInvitation(slot.token, 'commons', { requestId: 'issue-reset-browser-invitation', token, intendedAccountId: 'reset-browser-account', intendedMemberId: 'reset-browser-member', displayName: 'Reset browser human', role: 'member', expiresAt: Date.now() + 3600000, expectedIssuerMemberRevision: 0, expectedSessionBinding: owner.sessionBinding });
   await f.page.goto(`${f.origin}/#invite/${token}`); await f.page.locator('#invitation-email').click();
-  await f.page.locator('#invitation-methods [data-forgot-password]').click(); await f.page.locator('#invitation-methods [data-reset-password]').click();
+  await f.page.locator('#invitation-methods [data-forgot-password]').click();
   const request = f.page.locator('[data-signin-form="reset-request"]'); await request.locator('[name="email"]').fill(email);
   const sent = f.page.waitForResponse(r => new URL(r.url()).pathname === '/api/auth/password/reset/request'); await request.locator('button[type="submit"]').click(); await sent;
   const link = f.delivered[0].link; assert.equal(new URL(link).hash, `#invite/${token}`);
@@ -158,16 +152,16 @@ test('targeted invitation survives mailed reset and still requires explicit acce
   assert.equal(await page.locator('#main').isVisible(), false);
 });
 
-for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 }]) test(`recovery choices stack with quieter secondary action at ${viewport.width}px`, { timeout: 25000 }, async t => {
+for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 }]) test(`direct reset form retains a quieter secondary magic-link action at ${viewport.width}px`, { timeout: 25000 }, async t => {
   const f = await setup(t); await f.page.setViewportSize(viewport);
   await f.page.locator('[data-forgot-password]').click();
-  const primary = f.page.locator('[data-reset-password]'), secondary = f.page.locator('[data-email-method="magic"]');
+  const primary = f.page.locator('[data-signin-form="reset-request"] button[type="submit"]'), secondary = f.page.locator('[data-email-method="magic"]');
   const first = await primary.boundingBox(), second = await secondary.boundingBox();
   assert.ok(first && second);
   assert.ok(second.y >= first.y + first.height + 8, 'secondary recovery action is below primary with a real gap');
   assert.ok(Math.abs(first.x - second.x) < 1 && Math.abs(first.width - second.width) < 1, 'recovery choices occupy the same single column');
   assert.ok(first.height >= 44 && second.height >= 44, 'both remain usable touch targets');
-  const sizes = await f.page.evaluate(() => ['[data-reset-password]', '[data-email-method="magic"]'].map(selector => parseFloat(getComputedStyle(document.querySelector(selector)).fontSize)));
+  const sizes = await f.page.evaluate(() => ['[data-signin-form="reset-request"] button[type="submit"]', '[data-email-method="magic"]'].map(selector => parseFloat(getComputedStyle(document.querySelector(selector)).fontSize)));
   assert.ok(sizes[1] < sizes[0], `magic link must be smaller: primary=${sizes[0]}px secondary=${sizes[1]}px`);
   assert.equal(await f.page.locator('#auth-link-error').isVisible(), false, 'empty error block consumes no visible spacer');
 });
@@ -183,7 +177,7 @@ test('unconfigured Google button returns to usable sign-in with an announced una
   await f.page.locator('[data-forgot-password]').click();
   assert.equal(await f.page.locator('[data-signin-form="password"]').isVisible(), false);
   assert.doesNotMatch(await f.page.locator('#auth-error').innerText(), /below/i, 'provider failure does not point at fields hidden by recovery');
-  await f.page.locator('[data-reset-password]').click();
+
   const form = f.page.locator('[data-signin-form="reset-request"]');
   await form.locator('[name="email"]').fill(email);
   const recovery = f.page.waitForResponse(r => new URL(r.url()).pathname === '/api/auth/password/reset/request');
@@ -198,7 +192,7 @@ test('unconfigured Google button returns to usable sign-in with an announced una
 
 test('failed reset email request announces the network error and permits a real retry', { timeout: 25000 }, async t => {
   const f = await setup(t);
-  await f.page.locator('[data-forgot-password]').click(); await f.page.locator('[data-reset-password]').click();
+  await f.page.locator('[data-forgot-password]').click();
   const form = f.page.locator('[data-signin-form="reset-request"]'); await form.locator('[name="email"]').fill(email);
   await f.page.route('**/api/auth/password/reset/request', route => route.abort('failed'), { times: 1 });
   await form.locator('button[type="submit"]').click(); await f.page.locator('[data-signin-status].error').waitFor();
@@ -285,4 +279,25 @@ test('malformed email links scrub every proof, explain recovery and preserve roo
   assert.equal(await f.page.locator('#main').isVisible(), false);
   assert.equal(consumes, 0, 'incomplete, ambiguous and duplicate proofs never reach authentication');
   assert.equal(f.delivered.length, 0, 'recovery does not send mail automatically');
+});
+
+
+test('Forgot password opens the reset form directly: three essential buttons send the actual reset mail', { timeout: 25000 }, async t => {
+  const f = await setup(t);
+  await f.page.goto(f.origin);
+  await f.page.evaluate(() => { window.recoveryClicks = []; document.addEventListener('click', event => {
+    if (event.target.closest('button')) window.recoveryClicks.push(event.target.closest('button').textContent.trim());
+  }); });
+  await f.page.getByRole('button', { name: 'Log in', exact: true }).click();
+  await f.page.locator('[name="email"]').fill(email);
+  await f.page.locator('[data-forgot-password]').click();
+  const form = f.page.locator('[data-signin-form="reset-request"]');
+  assert.equal(await form.isVisible(), true, 'Forgot password opens its form without another recovery choice');
+  assert.equal(await form.locator('[name="email"]').inputValue(), email);
+  const sent = f.page.waitForResponse(r => new URL(r.url()).pathname === '/api/auth/password/reset/request');
+  await form.locator('button[type="submit"]').click();
+  assert.equal((await sent).status(), 200);
+  await f.page.locator('[data-signin-panel]').filter({ hasText: 'check your email' }).waitFor();
+  assert.equal(f.delivered.length, 1); assert.equal(f.delivered[0].purpose, 'password-reset');
+  assert.deepEqual(await f.page.evaluate(() => window.recoveryClicks), ['Log in', 'Forgot password?', 'Email password reset link']);
 });

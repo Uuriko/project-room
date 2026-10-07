@@ -72,7 +72,7 @@ test("primary entry exposes password sign-in and contextual recovery", async () 
   assert.match(container.innerHTML, /data-forgot-password/);
   assert.doesNotMatch(container.innerHTML, /passkey|GitHub|name="code"/i);
   await container.listeners.click[0](clickOnDataset("forgot-password"));
-  assert.match(container.innerHTML, /data-reset-password/);
+  assert.match(container.innerHTML, /data-signin-form="reset-request"/);
   assert.match(container.innerHTML, /data-email-method="magic"/);
 });
 test("default sign-in view offers a first-class magic-link CTA", async () => {

@@ -42,7 +42,7 @@
   "signin.copy.007": "<button type=\"button\" class=\"button primary\" data-recovery-option=\"reset\" data-reset-password>Reset password</button><button type=\"button\" class=\"text-button\" data-recovery-option=\"magic\" data-email-method=\"magic\">Email me a sign-in link</button>",
   "signin.copy.008": "<p class=\"form-hint\">If an account uses {fragmentA}, check your email for a password reset link.</p><button type=\"button\" class=\"text-button\" data-recovery-option=\"reset\" data-reset-password>Use a different email</button>",
   "signin.copy.009": "<form data-signin-form=\"reset-consume\"><label>New password <input name=\"newPassword\" type=\"password\" required autocomplete=\"new-password\" minlength=\"10\" maxlength=\"256\"></label><label>Confirm new password <input name=\"confirmPassword\" type=\"password\" required autocomplete=\"new-password\" minlength=\"10\" maxlength=\"256\"></label><button class=\"button primary\" type=\"submit\" {fragmentA}>Reset password</button></form>",
-  "signin.copy.010": "<form data-signin-form=\"reset-request\"><label>Email <input name=\"email\" type=\"email\" required autocomplete=\"email\" maxlength=\"254\" value=\"{fragmentA}\"></label><button class=\"button primary\" type=\"submit\" {fragmentB}>Email password reset link</button></form>",
+  "signin.copy.010": "<form data-signin-form=\"reset-request\"><label>Email <input name=\"email\" type=\"email\" required autocomplete=\"email\" maxlength=\"254\" value=\"{fragmentA}\"></label><button class=\"button primary\" type=\"submit\" {fragmentB}>Email password reset link</button></form><button type=\"button\" class=\"button ghost\" data-recovery-option=\"magic\" data-email-method=\"magic\">Email me a sign-in link instead</button>",
   "signin.copy.011": "<form data-signin-form=\"password\" autocomplete=\"on\">\n        <label>Email <input name=\"email\" type=\"email\" required autocomplete=\"email\" maxlength=\"254\" value=\"{fragmentA}\"></label>\n        <label>Password <input name=\"password\" type=\"password\" required autocomplete=\"{fragmentB}\" maxlength=\"256\" {fragmentC}></label>\n        <button type=\"button\" class=\"text-button\" data-password-visibility aria-pressed=\"false\">Show password</button>\n        {fragmentD}\n        <button class=\"button primary\" type=\"submit\" {fragmentE}>{fragmentF}</button>\n        <button type=\"button\" class=\"text-button\" data-password-mode=\"{fragmentG}\">{fragmentH}</button>\n        <button type=\"button\" class=\"text-button\" data-forgot-password>Forgot password?</button>\n        <details class=\"signin-more\"><summary>Other options</summary><button type=\"button\" class=\"text-button\" data-email-method=\"magic\">Email me a sign-in link</button></details>\n      </form>",
   "signin.copy.012": "<form data-signin-form=\"magic-code\" autocomplete=\"on\">\n      <p class=\"form-hint\">Check {fragmentA} for your sign-in link.</p>\n      {fragmentB}\n      <button type=\"button\" class=\"text-button\" data-magic-manual-code>{fragmentC}</button>\n      <button type=\"button\" class=\"text-button\" data-magic-restart>Use a different email</button>\n    </form>",
   "signin.copy.013": "<label>Sign-in code <input name=\"code\" required autocomplete=\"one-time-code\" maxlength=\"128\"></label><button class=\"button primary\" type=\"submit\" {fragmentA}>Sign in</button>",
@@ -112,5 +112,13 @@
   "board.mine.copy.005": "Nothing needs you",
   "directory.card.copy.001": "<p class=\"form-hint\">No directory card available.</p>",
   "directory.card.copy.002": "No live wake/bond data",
-  "join.alreadyJoined": "You already joined this room. Go back to sign-in and open the room, or use your saved agent credential."
+  "join.alreadyJoined": "You already joined this room. Go back to sign-in and open the room, or use your saved agent credential.",
+  "profile.title": "Profile",
+  "profile.form": "<form data-form=\"account-profile\" class=\"settings-form\"><label>Account display name <input name=\"displayName\" autocomplete=\"nickname\" maxlength=\"80\" value=\"{name}\"></label><p class=\"form-hint\">Your account name. Names you use in rooms stay the same.</p><button type=\"submit\" class=\"button primary\">Save</button></form>",
+  "profile.loading": "Loading profile…",
+  "profile.saving": "Saving profile…",
+  "profile.failed": "Could not load the profile.",
+  "profile.save_failed": "Could not save the profile.",
+  "profile.close": "Close",
+  "profile.editing": "editing your profile"
 }

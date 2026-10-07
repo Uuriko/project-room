@@ -168,10 +168,14 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
     if (event.target?.closest?.("[data-forgot-password]")) {
       const email = surface()?.querySelector('[name="email"]')?.value?.trim();
       if (email) passwordEmail = magicEmail = resetEmail = email;
-      showView("forgot"); return;
+      showView("reset-request"); return;
     }
     const recovery = event.target?.closest?.("[data-recovery-option]");
-    if (recovery) { showView(recovery.dataset.recoveryOption === "reset" ? "reset-request" : "magic-request"); return; }
+    if (recovery) {
+      const email = surface()?.querySelector('[name="email"]')?.value?.trim();
+      if (email) passwordEmail = magicEmail = resetEmail = email;
+      showView(recovery.dataset.recoveryOption === "reset" ? "reset-request" : "magic-request"); return;
+    }
     const method = event.target?.closest?.("[data-email-method]");
     const mode = event.target?.closest?.("[data-password-mode]");
     if (method || mode) {

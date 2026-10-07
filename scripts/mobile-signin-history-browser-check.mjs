@@ -39,7 +39,7 @@ test("mobile email taps and browser Back/Forward retain the room and fence a pen
   assert.equal(await page.locator("#email-signin").count(), 0);
   await page.evaluate(() => { window.historyEvents = 0; addEventListener("popstate", () => { window.historyEvents++; }); });
   await page.locator("[data-forgot-password]").tap();
-  await page.locator("[data-reset-password]").waitFor({ state: "visible" });
+  await page.locator('[data-signin-form="reset-request"]').waitFor({ state: "visible" });
   assert.equal(page.url(), destination);
   await page.evaluate(() => history.back());
   if (await page.locator('[data-password-mode="login"]').isVisible()) await page.locator('[data-password-mode="login"]').tap();
@@ -47,7 +47,8 @@ test("mobile email taps and browser Back/Forward retain the room and fence a pen
   assert.equal(await passwordForm.locator('[name="email"]').evaluate(element => element === document.activeElement), true);
   assert.equal(page.url(), destination, "browser Back stays on the intended sign-in page");
   await page.evaluate(() => history.forward());
-  await page.locator("[data-reset-password]").waitFor({ state: "visible" });
+  await page.locator('[data-signin-form="reset-request"]').waitFor({ state: "visible" });
+  await page.locator('[data-signin-form="reset-request"] [name="email"]').fill('mobile-navigation@example.invalid');
   await page.locator('[data-email-method="magic"]').tap();
   const form = page.locator('#auth-signin-ui [data-signin-form="magic-request"]');
   await form.waitFor({ state: "visible" });
@@ -55,7 +56,7 @@ test("mobile email taps and browser Back/Forward retain the room and fence a pen
   const email = await form.locator("label").first().boundingBox();
   assert.ok(back.height >= 44, "Back has a usable touch target");
   assert.ok(back.y + back.height <= email.y, "Back does not overlap the email label or input");
-  await form.locator('[name="email"]').fill("mobile-navigation@example.invalid");
+  assert.equal(await form.locator('[name="email"]').inputValue(), "mobile-navigation@example.invalid", "switching recovery methods keeps the edited email");
   let release;
   const held = new Promise(resolve => { release = resolve; });
   let requests = 0;
@@ -72,7 +73,7 @@ test("mobile email taps and browser Back/Forward retain the room and fence a pen
   await page.locator("#auth-signin-ui").getByText(/Check .* for your sign-in link/).waitFor();
   assert.equal(sent.length, 1, "one real request reaches the configured mail seam");
   await page.locator("[data-signin-back]").tap();
-  await page.locator("[data-reset-password]").waitFor({ state: "visible" });
+  await page.locator('[data-signin-form="reset-request"]').waitFor({ state: "visible" });
   await page.locator("[data-signin-back]").tap();
   await passwordForm.waitFor({ state: "visible" });
   assert.equal(page.url(), destination);
