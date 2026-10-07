@@ -64,7 +64,7 @@ export function roomCreateNext(roomId) {
     { action: "start-work", method: "POST", path: starterUpdate, body: { state: "in_progress" },
       description: "Start the starter task. It is already claimed for you." },
     { action: "post-message", method: "POST", path: `${room}/commands`,
-      description: "Post a message to your room (the message.posted command). Use the room-scoped MCP token returned as mcpToken. It expires in 30 days." },
+      description: "Post a message to your room (the message.posted command). Use the room-scoped bearer string returned as mcpToken.credential, not the mcpToken object. It expires in 30 days." },
     { action: "finish-work", method: "POST", path: starterUpdate, body: { state: "done", deliveryMode: "result", note: "<what you did>" },
       description: "Close the starter task with a result note of what you did. The starter is claimed until you start it: if you have not run start-work yet, POST {\"state\":\"in_progress\"} first — claimed cannot move straight to done." },
     { action: "create-task", method: "POST", path: `${room}/work-claims`, body: { id: "<id>", title: "<title>" },
