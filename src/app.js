@@ -39,6 +39,8 @@ import { attachmentFromBytes, composerAudienceNote, COMPOSER_FILE_BYTES, fileChi
 import { formatSessionExpiry } from "./session-expiry.js";
 import { handoffEnvelopeListHtml, envelopesForWork } from "./handoff-envelope-ui.js";
 import { installHumanPush } from "./human-push.js";
+import { mountPushAsk, applyPushAskVisibility } from "./push-ask.js";
+import { isIosSafari } from "./pwa-install.js";
 import { chatSuggestions, ASK_AGENT_AFTER_MS } from "./chat-suggestions.js";
 import { paintClaimChat } from "./board-ui.js";
 import { installHumanExperience } from "./human-experience.js";
@@ -6448,7 +6450,20 @@ function renderNotifications() {
       : "";
     return `<li class="rb-event notification-item" data-notification-kind="${esc(item.kind)}"><a class="rb-event-link" href="${esc(recordHref(target.kind, target.id))}" data-open-${target.kind}="${esc(target.id)}" data-brief-key="notification:${esc(item.kind)}:${esc(target.id)}"><span class="rb-actor">${esc(label)}</span><time datetime="${esc(item.at)}">${esc(time(item.at))}</time>${detail ? `<span class="rb-detail">${esc(detail)}</span>` : ""}</a>${ack}</li>`;
   }).join("") || (owned && feed && !notificationError ? `<li class="rb-empty">${feed.nextBefore ? 'No notifications in this part of the history.' : feed.pageBefore !== null ? 'No older notifications.' : 'Nothing new for you.'}</li>` : ""));
-  humanPushUi?.refresh();
+  // Contextual push opt-in (push-ask.js): the soft ask was built and tested
+  // but never mounted, so the only opt-in was the button inside the collapsed
+  // Notifications panel. It now appears at the top of that panel the first
+  // time a mention is shown; "Turn on" delegates to the existing button flow.
+  const pushRefresh = humanPushUi?.refresh();
+  // Same eligibility as the human-push button: humans only, never agents.
+  const pushEligible = Boolean(state) && ownsNotifications(notificationOwner) && client.session?.member?.kind !== "agent";
+  const askDecision = applyPushAskVisibility({
+    ask: pushAsk, button: $("#human-push-button"),
+    needsMe: pushEligible && items.some(item => item.kind === "mention")
+  });
+  // refresh() settles after the config fetch and may re-show the standalone
+  // button; the ask supersedes it while visible.
+  if (askDecision.show) pushRefresh?.then(() => { $("#human-push-button").hidden = true; }, () => {});
 }
 humanPushUi = installHumanPush({
   client,
@@ -6460,6 +6475,16 @@ humanPushUi = installHumanPush({
     dm: $("#human-push-pref-dm")
   },
   eligible: () => Boolean(state) && ownsNotifications(notificationOwner) && client.session?.member?.kind !== "agent"
+});
+// The soft ask lives in the Notifications panel, ahead of the list, so the
+// opt-in is discoverable where the needs-you items are. "Turn on" reuses the
+// human-push button's tested subscribe flow instead of duplicating it.
+const pushAsk = mountPushAsk({
+  dock: $("#notification-panel"),
+  before: $("#notification-status"),
+  ios: isIosSafari(globalThis.navigator?.userAgent ?? ""),
+  standalone: globalThis.matchMedia?.("(display-mode: standalone)").matches ?? false,
+  subscribe: () => $("#human-push-button")?.click()
 });
 // Tag acknowledgment (2026-09-23): one tap on a pending mention sends the
 // suggested 👍 react through the normal reaction path. Idempotent — when the

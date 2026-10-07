@@ -186,6 +186,11 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 .composer > label { display: block; margin-bottom: .45rem; }
 .form-hint { margin: .45rem 0 0; color: var(--muted); font-size: .69rem; }
 #human-push-button { margin-top: .45rem; }
+/* Contextual push opt-in (push-ask.js): appears at the top of the
+   Notifications panel the first time a mention is shown. */
+#push-soft-ask { margin: .6rem 0; padding: .65rem .75rem; border: 1px solid var(--line); border-radius: .6rem; background: var(--panel); }
+#push-soft-ask p { margin: 0 0 .55rem; font-size: .82rem; }
+#push-soft-ask .button { margin-right: .5rem; }
 .check input { flex: 0 0 20px; width: 20px; height: 20px; min-height: 20px; margin: 0; padding: 0; accent-color: var(--blue); }
 /* "Also send to channel" sits above the composer row, thread views only. */
 .also-send-toggle { display: flex; align-items: center; gap: .5rem; margin: 0 0 .45rem; min-height: 32px; }
@@ -355,7 +360,7 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 /* The .message-menu-open class is no longer needed (content-visibility removed).
    Kept for test helpers that add it manually; it has no visual effect. */
 .message-menu-open { position: relative; z-index: 40; }
-.message-more > summary { list-style: none; cursor: pointer; color: var(--blue); font-size: .78rem; font-weight: 700; padding: .1rem .3rem; border-radius: .35rem; }
+.message-more > summary { list-style: none; cursor: pointer; color: var(--blue); font-size: .78rem; font-weight: 700; padding: .1rem .3rem; border-radius: .35rem; min-width: 32px; min-height: 32px; display: inline-flex; align-items: center; justify-content: center; }
 .message-more > summary::-webkit-details-marker { display: none; }
 .message-more > summary:hover { background: rgb(255 255 255 / 6%); }
 .message-more > summary:focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; }
