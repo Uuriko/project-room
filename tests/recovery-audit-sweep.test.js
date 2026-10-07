@@ -105,6 +105,11 @@ function sweep() {
   step(T.MESSAGE_UNPINNED, "owner", { messageId: "chat-1" });
   step(T.MESSAGE_DELETED, "producer", { messageId: "chat-1", expectedMessageRevision: 1, reason: "tidy" });
 
+  // Polls: posting a poll and closing it must both replay through
+  // auditRecovery (the EVENT_TYPES tripwire below counts the close type).
+  step(T.MESSAGE_POSTED, "producer", { messageId: "poll-1", body: "lunch?", kind: "poll", poll: { question: "Lunch?", options: ["pizza", "sushi"] } });
+  step(T.MESSAGE_POLL_CLOSED, "producer", { messageId: "poll-1" });
+
   // An open reply request is what arms auditReplyRequests' whole-message-list
   // comparison, so every message event after this point is the regression that
   // took backups down.
@@ -338,6 +343,7 @@ test("the event surface has not grown without this sweep noticing", () => {
   // land.updated is exercised above via report_tip (it is not a command).
   // work_claim.updated is exercised above via emitWorkClaimEvent (it is not a command).
   // room.starter_seeded is exercised above via seedStarter (it is not a command).
-  assert.equal(Object.values(T).length, 65,
+  // message.poll_closed is exercised above via the poll post + close steps.
+  assert.equal(Object.values(T).length, 66,
     "EVENT_TYPES changed: add the new type to this sweep, then update this count");
 });

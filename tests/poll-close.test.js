@@ -48,7 +48,7 @@ test("a member without steer cannot close someone else's poll", () => {
 });
 
 test("closing a non-poll message is rejected", () => {
-  let state = applyEvent(members(), fixed("m1", T.MESSAGE_POSTED, "pv-a", { messageId: "m1", body: "plain" }));
+  const state = applyEvent(members(), fixed("m1", T.MESSAGE_POSTED, "pv-a", { messageId: "m1", body: "plain" }));
   assert.throws(() => close(state, "close-1", "pv-a", "m1"), /poll/i);
 });
 
