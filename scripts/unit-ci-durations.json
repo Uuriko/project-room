@@ -418,6 +418,7 @@
   "tests/journey-coverage.test.js": 8107,
   "tests/kb-index.test.js": 5716,
   "tests/land-queue.test.js": 54879,
+  "tests/lander-gate.test.js": 3502,
   "tests/lease-renewal.test.js": 40126,
   "tests/legal-pages.test.js": 36739,
   "tests/legal-templates-grounding.test.js": 7162,
