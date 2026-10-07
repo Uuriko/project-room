@@ -295,10 +295,6 @@ function basicManager(adapter, journal = []) {
   return m;
 }
 
-function occupantCalls(adapter) {
-  return adapter.calls.filter(([name]) => name === "getOccupant").length;
-}
-
 test("E1 registerSession fails closed on unknown kind or invalid stored resume command", () => {
   const m = createReattachManager({ adapter: fakeAdapter() });
   assert.throws(() => m.registerSession({
