@@ -10079,6 +10079,29 @@ paths:
         '403': { description: insufficient_scope }
         '404': { description: unknown_subscription }
         '429': { description: rate_limited }
+    patch:
+      summary: Enable or disable a webhook subscription
+      description: >-
+        Credential: the `pri_` identity secret or a `rak_` API key with the
+        `webhooks:manage` scope. Body is exactly `{ enabled: boolean }`.
+        This is the re-arm path after an auto-pause: a subscription whose
+        endpoint died is disabled after 3 consecutive dead-lettered
+        deliveries (see the delivery operations notes in
+        docs/WEBHOOK-WAKEUPS.md); PATCH `{ enabled: true }` resumes it and
+        clears the failure streak. Only the subscribing identity can change
+        its own subscription; cross-identity PATCHes are 404
+        `unknown_subscription`. 60 per identity per minute.
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: subscriptionId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: "{ subscription: { subscriptionId, agentId, secretRef, url, events, enabled, createdAt, deliveries } }" }
+        '401': { description: unauthenticated }
+        '403': { description: insufficient_scope }
+        '404': { description: unknown_subscription }
+        '422': { description: invalid_enabled }
+        '429': { description: rate_limited }
   /api/agent-webhooks/{subscriptionId}/deliveries:
     get:
       summary: Read a webhook subscription's delivery journal
@@ -10154,6 +10177,27 @@ paths:
         '401': { description: unauthenticated }
         '403': { description: insufficient_scope }
         '422': { description: invalid_state }
+        '429': { description: rate_limited }
+  /api/agent-webhooks/deliveries/{deliveryId}:
+    get:
+      summary: Read one delivery receipt
+      description: >-
+        Credential: the `pri_` identity secret or a `rak_` API key with the
+        `webhooks:manage` scope. Returns the journal row for one delivery —
+        the sender's confirmation for that deliveryId: state
+        (pending/delivered/failed/dead_letter), attempts, error, createdAt,
+        updatedAt, nextAttemptAt — without paging the journal. Identity-
+        scoped: another identity's delivery is 404 `unknown_delivery`.
+        120 per identity per minute.
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: deliveryId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: "{ delivery: { deliveryId, subscriptionId, eventType, state, attempts, error, createdAt, updatedAt, nextAttemptAt } }" }
+        '401': { description: unauthenticated }
+        '403': { description: insufficient_scope }
+        '404': { description: unknown_delivery }
         '429': { description: rate_limited }
   /api/agent-webhooks/dead-letter:
     get:

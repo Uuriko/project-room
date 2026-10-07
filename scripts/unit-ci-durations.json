@@ -769,6 +769,7 @@
   "tests/web-fetch.test.js": 47199,
   "tests/web-push.test.js": 4345,
   "tests/web-research.test.js": 20874,
+  "tests/webhook-autopause.test.js": 33000,
   "tests/webhook-delivery-load.test.js": 25879,
   "tests/webhook-dispatch-store.test.js": 149653,
   "tests/webhook-dispatch.test.js": 6999,

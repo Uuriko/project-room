@@ -105,6 +105,8 @@ export function createHeartbeatActor({ store, bearer, reject }) {
 const KEY_ACTION_ROUTE = /^\/api\/agent-keys\/(rak_[A-Za-z0-9_-]{1,64})\/(rotate|revoke)$/;
 const SUBSCRIPTION_ROUTE = /^\/api\/agent-webhooks\/([A-Za-z0-9_-]{1,64})$/;
 const SUBSCRIPTION_DELIVERIES_ROUTE = /^\/api\/agent-webhooks\/([A-Za-z0-9_-]{1,64})\/deliveries$/;
+// qa7-12-webhook-autopause: single-delivery receipt lookup.
+const DELIVERY_RECEIPT_ROUTE = /^\/api\/agent-webhooks\/deliveries\/([A-Za-z0-9_-]{1,64})$/;
 const VERIFY_DELIVERY_ROUTE = /^\/api\/agent-webhooks\/([A-Za-z0-9_-]{1,64})\/verify-delivery$/;
 const CARD_ROUTE = /^\/api\/agent-directory\/cards\/([A-Za-z0-9_-]{1,120})$/;
 const PUBLIC_CARD_ROUTE = /^\/api\/agents\/directory\/([a-z][a-z0-9-]{0,119})$/;
@@ -578,6 +580,31 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     });
   });
 
+  // qa7-12-webhook-autopause: enable/disable one subscription — the re-arm
+  // path after an auto-pause (and a manual pause switch). Body is exactly
+  // { enabled: boolean }. Identity-scoped; cross-identity PATCHes 404 like
+  // unsubscribe, never an oracle.
+  const setWebhookEnabled = translate(async (req, res, { subscriptionId }) => {
+    const auth = agentAuth(req, requiredScope("webhooks:manage"));
+    rate(`agent-webhooks-set-enabled:${auth.identityId}`, 60);
+    const data = await body(req);
+    if (!(data && exact(data, ["enabled"])))
+      reject(422, "invalid_enabled_request", "enabled is the accepted field");
+    return json(res, 200, store.agentPlugin.setWebhookEnabled({
+      identityId: auth.identityId, subscriptionId, enabled: data.enabled,
+    }));
+  });
+
+  // Single-delivery receipt: the sender confirms what happened to one
+  // delivery (pending/delivered/failed/dead_letter, attempts, error,
+  // nextAttemptAt) without paging the journal. Identity-scoped; cross-
+  // identity reads 404 like the journal.
+  const deliveryReceipt = translate(async (req, res, { deliveryId }) => {
+    const auth = agentAuth(req, requiredScope("webhooks:manage"));
+    rate(`agent-webhooks-receipt:${auth.identityId}`, 120);
+    return json(res, 200, store.agentPlugin.webhookDeliveryFor({ identityId: auth.identityId, deliveryId }));
+  });
+
   const deliveryMetrics = translate(async (req, res) => {
     const auth = agentAuth(req, requiredScope("webhooks:manage"));
     rate(`agent-webhooks-metrics:${auth.identityId}`, 120);
@@ -942,6 +969,9 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     if (pathname === "/api/agent-webhooks" && method === "POST") { await subscribeWebhook(req, res, { remoteAddress }); return true; }
     const subMatch = method === "DELETE" ? SUBSCRIPTION_ROUTE.exec(pathname) : null;
     if (subMatch) { await unsubscribeWebhook(req, res, { remoteAddress, subscriptionId: subMatch[1] }); return true; }
+    // qa7-12-webhook-autopause: PATCH re-arms an auto-paused subscription.
+    const subPatchMatch = method === "PATCH" ? SUBSCRIPTION_ROUTE.exec(pathname) : null;
+    if (subPatchMatch) { await setWebhookEnabled(req, res, { subscriptionId: subPatchMatch[1] }); return true; }
     const deliveriesMatch = method === "GET" ? SUBSCRIPTION_DELIVERIES_ROUTE.exec(pathname) : null;
     if (deliveriesMatch) { await webhookDeliveries(req, res, { remoteAddress, subscriptionId: deliveriesMatch[1] }); return true; }
     const verifyDeliveryMatch = method === "POST" ? VERIFY_DELIVERY_ROUTE.exec(pathname) : null;
@@ -954,6 +984,8 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     if (pathname === "/api/agent-webhooks/process" && method === "POST") { await processWebhooks(req, res); return true; }
     const redriveMatch = method === "POST" ? DELIVERY_REDRIVE_ROUTE.exec(pathname) : null;
     if (redriveMatch) { await redriveDelivery(req, res, { deliveryId: redriveMatch[1] }); return true; }
+    const receiptMatch = method === "GET" ? DELIVERY_RECEIPT_ROUTE.exec(pathname) : null;
+    if (receiptMatch) { await deliveryReceipt(req, res, { deliveryId: receiptMatch[1] }); return true; }
     const verifyMatch = method === "POST" ? VERIFY_ROUTE.exec(pathname) : null;
     if (verifyMatch) { await verifyIdentity(req, res, { remoteAddress, identityId: pathId(verifyMatch[1]) }); return true; }
     const unverifyMatch = method === "DELETE" ? VERIFY_ROUTE.exec(pathname) : null;
