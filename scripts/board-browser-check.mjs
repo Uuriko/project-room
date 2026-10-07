@@ -817,7 +817,9 @@ test("owners link a draft PR, reconcile held responses, and refresh a changed cl
     assert.equal(await card.evaluate(node => node.parentElement.getAttribute("aria-labelledby")), "board-col-review");
     assert.equal(await card.locator(".claim-pr a").getAttribute("href"), pullRequest);
     assert.match(await card.locator(".claim-reviews").innerText(), /previous approval.*does not qualify for current work/);
-    assert.equal(await input.evaluate(node => node === document.activeElement), true);
+    // Query the current input and active element in one browser turn: SSE
+    // refresh may replace an element handle while restoring focus correctly.
+    assert.equal(await page.evaluate(() => document.querySelector("article[data-claim-id='link-draft'] [data-claim-link-pr] input") === document.activeElement), true);
     assert.deepEqual(requests, [{ appendPullRequest: pullRequest, expectedClaimedAt: before.claimedAt, expectedHistoryLength: before.history.length }]);
     for (const width of [1280, 390]) {
       await page.setViewportSize({ width, height: width === 390 ? 844 : 800 });
@@ -859,7 +861,9 @@ test("owners link a draft PR, reconcile held responses, and refresh a changed cl
     assert.equal((await rejected).status(), 409);
     await page.waitForFunction(() => document.querySelector("#board-status")?.textContent.startsWith("Claim changed. The board is refreshed"));
     await page.waitForFunction(() => document.querySelector("article[data-claim-id='link-draft'] [data-claim-link-pr] input") === document.activeElement);
-    assert.equal(await input.evaluate(node => node === document.activeElement), true);
+    // A locator handle can retire between resolution and evaluation during
+    // an SSE paint. The current visible control must retain actual focus.
+    assert.equal(await page.evaluate(() => document.querySelector("article[data-claim-id='link-draft'] [data-claim-link-pr] input") === document.activeElement), true);
     await page.locator("#board-close").focus();
     const delivered = page.waitForResponse(response => response.request() === heldRefresh);
     refreshRelease.resolve();
