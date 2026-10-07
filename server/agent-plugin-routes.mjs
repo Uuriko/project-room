@@ -635,8 +635,9 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
   // another's. Rotate issues the new secret once and retires the old one
   // atomically; revoke is final — the secret stops authenticating
   // everywhere, the identity row stays for audit, and any scoped API keys
-  // the identity minted are revoked too. Neither response ever carries the
-  // old secret.
+  // the identity minted are revoked too (on rotate as well: rotation is
+  // the compromise response, so an attacker-minted key must not survive
+  // it). Neither response ever carries the old secret.
   const SECRET_ROTATE_ROUTE = /^\/api\/agent-identities\/([A-Za-z0-9_-]{1,64})\/rotate$/;
   const SECRET_REVOKE_ROUTE = /^\/api\/agent-identities\/([A-Za-z0-9_-]{1,64})\/revoke$/;
 

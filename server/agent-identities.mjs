@@ -848,6 +848,13 @@ export class AgentIdentities {
   // once (shown once, like the scoped-key rotation in RC-2026-09-18-050).
   // The old secret never appears in any response. Rotating a revoked
   // identity is rejected — revoke is the final state.
+  //
+  // Rotation is the compromise response ("Rotate instead when you need
+  // continuity"), so every scoped API key the identity minted is revoked
+  // with it: a key an attacker minted while holding the old secret must
+  // not survive the rotation. The same invariant revoke() enforces — a
+  // rotated identity must not keep operating through a key it minted
+  // earlier — holds here too.
   rotate(identityId, secret) {
     const identity = this.authenticateIdentitySecret(identityId, secret);
     forgetIdentityVerifier(secret);
@@ -864,7 +871,8 @@ export class AgentIdentities {
       const changed = this.db.prepare("UPDATE agent_identities SET secret_hash=?, fallback_secret_hash=?, revoked_at=NULL WHERE identity_id=? AND revoked_at IS NULL AND secret_hash=?")
         .run(next.secretHash, next.fallbackHash, identityId, row.secretHash);
       if (changed.changes !== 1) fail(409, "secret_changed", "The secret changed during rotation; re-read state and retry");
-      return { identityId, displayName: identity.displayName, secret: newSecret, rotatedAt: this.store.now() };
+      const revokedApiKeys = this.store.agentPlugin ? this.store.agentPlugin.revokeApiKeysForIdentity(identityId) : 0;
+      return { identityId, displayName: identity.displayName, secret: newSecret, rotatedAt: this.store.now(), revokedApiKeys };
     });
   }
 

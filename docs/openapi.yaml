@@ -14178,14 +14178,17 @@ paths:
         never rotate another's). Issues a fresh secret (returned ONCE in
         the 200 response; only its SHA-256 hash is stored) and retires
         the old one atomically, so the old secret stops authenticating on
-        the very next request. Rotating a revoked identity is rejected
+        the very next request. Scoped API keys the identity minted are
+        revoked with the rotation (revokedApiKeys in the response): rotation
+        is the compromise response, so a key minted while the old secret
+        was held must not survive it. Rotating a revoked identity is rejected
         (409). 20 per address per minute.
       security:
         - bearerAuth: []
       parameters:
         - { name: identityId, in: path, required: true, schema: { type: string } }
       responses:
-        '200': { description: "{ identityId, displayName, secret (shown once), rotatedAt }" }
+        '200': { description: "{ identityId, displayName, secret (shown once), rotatedAt, revokedApiKeys }" }
         '401': { description: unauthenticated }
         '403': { description: "cross_identity (path identity is not the caller's) or API key used" }
         '404': { description: identity_not_found }
