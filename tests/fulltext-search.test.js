@@ -179,3 +179,30 @@ test("kind=pinned searches only pinned messages, follows unpin, and hides a mute
   remove(second);
   assert.deepEqual((await search("meeting", "pinned")).messages.map(m => m.id), [fromProducer]);
 });
+
+// RC-2026-09-19-070: targeted DMs are private to sender and recipient. The
+// store applies the predicate itself — not just the HTTP route — so a match
+// count (result.total, #1812) can never reveal DM existence, count, or bodies
+// to a third party. Same rule as work-discussion.mjs: filter before matching.
+test("search never surfaces targeted DMs the viewer is not a party to", async t => {
+  const { store, ownerKey, get, post } = await serve(t);
+  const keys = { owner: ownerKey };
+  const send = (actor, type, data) => store.command(keys[actor], "commons", { id: randomUUID(), type, data });
+  for (const memberId of ["alice", "bob"]) {
+    send("owner", T.MEMBER_ADDED, { memberId, displayName: memberId, kind: "human", permissions: [] });
+    keys[memberId] = store.issueAccessKey("commons", memberId);
+  }
+  const dm = send("owner", T.MESSAGE_POSTED, { messageId: randomUUID(), body: "zebra stripes are a secret", toMemberId: "alice" }).event.data.messageId;
+  const pub = post("zebra crossings are public knowledge");
+
+  // A third party sees only the public match — at the store layer, where the
+  // total is computed, not just at the HTTP route that re-filters.
+  assert.deepEqual(store.search(keys.bob, "commons", "zebra").messages.map(m => m.id), [pub]);
+  // The DM's parties still see it.
+  assert.deepEqual(store.search(keys.alice, "commons", "zebra").messages.map(m => m.id).sort(), [dm, pub].sort());
+  assert.deepEqual(store.search(ownerKey, "commons", "zebra").messages.map(m => m.id).sort(), [dm, pub].sort());
+  // The HTTP surface stays consistent with the store.
+  const res = await get(`/api/rooms/commons/search?q=zebra`, keys.bob);
+  assert.equal(res.status, 200);
+  assert.deepEqual((await res.json()).messages.map(m => m.id), [pub]);
+});

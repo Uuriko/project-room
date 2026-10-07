@@ -1589,7 +1589,10 @@ paths:
         the `pins` route), in the same order as the other kinds. Messages whose
         author the caller has muted (`member.mute_set`, see docs/MODERATION.md)
         are excluded server-side for every `kind`; nobody else's results
-        change. Work items have no author and are never filtered by mute.
+        change. Targeted direct messages are excluded unless the caller is
+        their sender or recipient (RC-2026-09-19-070), before matching, so
+        neither the hits nor any match count can reveal them to a third party.
+        Work items have no author and are never filtered by mute.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: q

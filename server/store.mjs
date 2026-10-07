@@ -4144,6 +4144,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           if (!messageInHistory(m, floor)) continue; // PRIV-2: before the reader joined
           if (kind === "pinned" && !isPinned(room.state, m.id)) continue;
           if (mutedEvent(room.state, auth.member?.id, { actorId: m.authorId })) continue; // muted author (E4), every kind
+          // RC-2026-09-19-070: targeted DMs are private to sender and
+          // recipient. Filtered here, before matching, so neither the hits
+          // nor the match count (result.total, #1812) can reveal their
+          // existence, count, or bodies to a third party.
+          if (m.toMemberId && m.authorId !== auth.member?.id && m.toMemberId !== auth.member?.id) continue;
           if (m.body.toLowerCase().includes(needle)) {
             result.messages.push({ id: m.id, authorId: m.authorId, body: m.body, createdAt: m.createdAt, workItemId: m.workItemId });
           }
