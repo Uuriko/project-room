@@ -74,3 +74,7 @@ MCP to the socket/broker/process, nonce rejection, private connection permission
 revocation. It does not grant this app OS privacy permissions. `swift test` needs XCTest,
 which is absent from this Mac's Command Line Tools; the standalone executable runs the
 same production broker code without an XCTest dependency and is excluded from the app.
+
+### Native browser authentication acceptance
+
+Build `swift build -c release --product NativeAuthAcceptance` in `desktop/macos`, then run `node desktop/macos/auth-lifecycle-acceptance.mjs` from the repository root on macOS with Playwright Chromium installed. This isolated loopback owner activates the actual WK Google sign-in link, races a menu action, checks cancellation/startup failure/stale callbacks, and drives real Room Google callback/consent/PKCE redemption through to an authenticated WK account-session readback with an HttpOnly cookie. Only the external provider and ASWebAuthenticationSession UI are synthetic; no personal browser cookies or provider account are used. The acceptance executable and its loopback-only injection are excluded from the app bundle. Actual Google account/browser integration and Developer ID/notarization remain separate release qualifications.
