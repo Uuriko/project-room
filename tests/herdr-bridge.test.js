@@ -239,10 +239,10 @@ test('missing X-Bridge-Key-Id is 401', async () => {
 
 test('tenant is resolved from the verified token, never the body', async () => {
   // body claims tenant-b, token is tenant-a's: bridge must talk to tenant-a's socket
-  const before = fixtureA.callsFor('session.snapshot').length + fixtureB.callsFor('session.snapshot').length;
+  const callsBefore = fixtureA.callsFor('session.snapshot').length + fixtureB.callsFor('session.snapshot').length;
   const { status, json } = await post('/v1/snapshot', { tenant: TENANT_B, idempotencyKey: randomUUID() });
   assert.equal(status, 200);
-  assert.equal(fixtureA.callsFor('session.snapshot').length + fixtureB.callsFor('session.snapshot').length, before + 1);
+  assert.equal(fixtureA.callsFor('session.snapshot').length + fixtureB.callsFor('session.snapshot').length, callsBefore + 1);
   assert.equal(fixtureB.callsFor('session.snapshot').length, 0, 'must not touch tenant-b socket');
   assert.ok(json.panes.every((p) => p.paneId !== 'pane-b1'));
 });
@@ -421,14 +421,14 @@ test('write without idempotencyKey is 422', async () => {
 test('repeated idempotencyKey returns the original response without re-executing', async () => {
   const key = randomUUID();
   const sp = await post('/v1/spawn', { kind: 'claude', idempotencyKey: randomUUID() });
-  const before = fixtureA.callsFor('agent.prompt').length;
+  const callsBefore = fixtureA.callsFor('agent.prompt').length;
   const body = { handle: sp.json.handle, text: 'once', idempotencyKey: key };
   const r1 = await post('/v1/send', body);
   const r2 = await post('/v1/send', body);
   assert.equal(r1.status, 200);
   assert.equal(r2.status, 200);
   assert.deepEqual(r1.json, r2.json);
-  assert.equal(fixtureA.callsFor('agent.prompt').length, before + 1, 'second call must not re-execute');
+  assert.equal(fixtureA.callsFor('agent.prompt').length, callsBefore + 1, 'second call must not re-execute');
 });
 
 // ---------------------------------------------------------------------------
@@ -437,11 +437,11 @@ test('repeated idempotencyKey returns the original response without re-executing
 test('timed-out idempotent read retries 3 times then surfaces a timeout', async () => {
   fixtureA.state.delayMs = 500; // bridge read timeout is 120ms in this harness
   try {
-    const before = fixtureA.callsFor('session.snapshot').length;
+    const callsBefore = fixtureA.callsFor('session.snapshot').length;
     const { status, json } = await post('/v1/snapshot', {});
     assert.equal(status, 504);
     assert.equal(json.error.code, 'timeout');
-    assert.equal(fixtureA.callsFor('session.snapshot').length, before + 3);
+    assert.equal(fixtureA.callsFor('session.snapshot').length, callsBefore + 3);
   } finally {
     fixtureA.state.delayMs = 0;
   }
@@ -450,7 +450,7 @@ test('timed-out idempotent read retries 3 times then surfaces a timeout', async 
 test('write with no response retries once with the same key, then 504', async () => {
   const sp = await post('/v1/spawn', { kind: 'claude', idempotencyKey: randomUUID() });
   assert.equal(sp.status, 200);
-  const before = fixtureA.callsFor('agent.prompt').length;
+  const callsBefore = fixtureA.callsFor('agent.prompt').length;
   fixtureA.state.delayMs = 500; // bridge send timeout is 120ms in this harness
   try {
     const { status, json } = await post('/v1/send', {
@@ -458,7 +458,7 @@ test('write with no response retries once with the same key, then 504', async ()
     });
     assert.equal(status, 504);
     assert.equal(json.error.code, 'timeout');
-    assert.equal(fixtureA.callsFor('agent.prompt').length, before + 2,
+    assert.equal(fixtureA.callsFor('agent.prompt').length, callsBefore + 2,
       'exactly one retry, same idempotency key, then give up');
     // and the dedupe cache holds the (failed) outcome for the same key
   } finally {
@@ -516,13 +516,13 @@ test('report with mismatched pane binding is rejected', async () => {
 });
 
 test('report with matching binding reaches the socket', async () => {
-  const before = fixtureA.callsFor('pane.report_agent').length;
+  const callsBefore = fixtureA.callsFor('pane.report_agent').length;
   const { status } = await post('/v1/report', {
     kind: 'state', targetPaneId: 'pane-1', herdrPaneId: 'pane-1',
     state: 'done', idempotencyKey: randomUUID(),
   });
   assert.equal(status, 200);
-  assert.equal(fixtureA.callsFor('pane.report_agent').length, before + 1);
+  assert.equal(fixtureA.callsFor('pane.report_agent').length, callsBefore + 1);
 });
 
 test('validateReportBinding unit', () => {
@@ -534,10 +534,10 @@ test('validateReportBinding unit', () => {
 // Audit: every call logged, redacted, denies included
 // ---------------------------------------------------------------------------
 test('denied calls are audit-logged at the same level as allowed ones', async () => {
-  const before = auditEntries().length;
+  const callsBefore = auditEntries().length;
   await post('/v1/ping', {}, authed(TENANT_A, KEY_ID, 'bad'));
   await post('/v1/ping', {});
-  const entries = auditEntries().slice(before);
+  const entries = auditEntries().slice(callsBefore);
   assert.equal(entries.length, 2);
   assert.equal(entries[0].result, 'deny');
   assert.ok(entries[0].denyReason);
