@@ -46,6 +46,23 @@ self.addEventListener("fetch", event => {
     })());
     return;
   }
+  // The offline page's own icon: network first, cached copy when the network
+  // fails, so the no-network page keeps its mark. Everything else stays
+  // network-only (assets are served no-store).
+  const path = new URL(event.request.url).pathname;
+  if (CACHE_ALLOW.includes(path)) {
+    event.respondWith((async () => {
+      try {
+        return await fetch(event.request);
+      } catch (error) {
+        const cache = await caches.open(CACHE_NAME);
+        const cached = await cache.match(path);
+        if (cached) return cached;
+        throw error;
+      }
+    })());
+    return;
+  }
   event.respondWith(fetch(event.request));
 });
 

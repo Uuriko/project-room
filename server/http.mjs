@@ -128,6 +128,17 @@ const assets = new Map([
   ...["project-room-vs-slack", "project-room-vs-discord", "agent-collaboration-tool", "multi-agent-workspace", "ai-agent-coordination", "project-room-vs-agent-room"]
     .map(name => [`/compare/${name}`, [`compare/${name}.html`, "text/html"]]),
 ]);
+// Base document policy: Cloudflare Web Analytics injects its beacon at the
+// edge. The app does not add that script; this document policy is what lets
+// the beacon run.
+const BASE_DOCUMENT_CSP = "default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'";
+// offline.html ships one inline <style> (kept single-file so the service
+// worker caches exactly one document). style-src 'self' blocks it, so the
+// page that greets a phone with no network would render unstyled. This hash
+// allowlists the page's exact style block; tests/offline-csp.test.js fails
+// if the block and the hash drift apart.
+const OFFLINE_STYLE_SHA256 = "sha256-GKumk2K8tCpP5uubDu8HDCCqZEppwKwIvLUrJPalyV4=";
+const offlineDocumentCsp = () => BASE_DOCUMENT_CSP.replace("style-src 'self'", `style-src 'self' '${OFFLINE_STYLE_SHA256}'`);
 for (const [url, file] of publicSearchAssets(publicAssetPaths)) assets.set(url, [file, "text/html"]);
 for (const name of ["favicon.svg", "icon.svg", "manifest.webmanifest"]) {
   const asset = assets.get(`/${name}`);
@@ -927,7 +938,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     res.setHeader("Strict-Transport-Security", "max-age=31536000");
     // Cloudflare Web Analytics injects its beacon at the edge. The app does not
     // add that script; this document policy is what lets the beacon run.
-    res.setHeader("Content-Security-Policy", "default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'");
+    res.setHeader("Content-Security-Policy", BASE_DOCUMENT_CSP);
     // SEC-1: lock unused powerful features and cross-origin window access.
     res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()");
     res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
@@ -2019,6 +2030,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (assets.has(url.pathname) && ["GET", "HEAD"].includes(req.method)) {
         const [path, type] = assets.get(url.pathname);
         const data = await loadAsset(path);
+        // The offline page's inline style is hash-allowlisted (see
+        // OFFLINE_STYLE_SHA256): without the exception the page a phone sees
+        // with no network renders unstyled.
+        if (path === "offline.html") res.setHeader("Content-Security-Policy", offlineDocumentCsp());
         const canonical = publicSearchCanonical(url.pathname, publicAssetPaths);
         // JDOT-PUBLIC-CSP-RUM begin: public-page policy
         if (canonical && publicSearchMarketingPolicy(canonical)) res.setHeader("Content-Security-Policy", publicPageCsp(expectedOrigin(), PUBLIC_SEARCH_CSP));
