@@ -24,6 +24,7 @@ import { createNeedsAttentionCard, installMemberPermissions } from "./needs-atte
 import { mountUpdates } from "./updates-ui.js";
 import { installReminders } from "./reminders.js";
 import { installPortableWork, installResultCopy } from "./portable-work.js";
+import { registerPwaWorker, mountInstallPrompt } from "./pwa-boot.js";
 import { replyDraftKey, replyDraftData, validReplyDraft, replyFollowUp, creditQuestion, confirmsReplyCommand, REPLY_CANCELLED } from "./reply-requests.js";
 import { workHelpContext, validateHelpData } from "./work-help.js";
 import { workOffersContext, validateHelpOfferData } from "./help-offers.js";
@@ -88,6 +89,15 @@ function resumeOAuthConsent() {
 }
 
 const $ = selector => document.querySelector(selector);
+// PWA installability (hardwork-mobile-1, wave2-1606-pwa). The service worker
+// was only registered on push opt-in, so most visits never met the
+// installability criteria and beforeinstallprompt never fired. Register on
+// every load; fire-and-forget and never throws, so boot can't break.
+void registerPwaWorker();
+// The install prompt UI (pwa-install.js) was dead code: nothing mounted it.
+// It lives in the account menu and stays hidden until the browser fires
+// beforeinstallprompt AND the visitor's first moment of value.
+const pwaInstall = mountInstallPrompt({ account: $("#session-menu-panel") });
 applyStoredTheme();
 organizeRoomSettings($("#settings-dialog"));
 const accountSettingsButton = $("#account-settings-button");
@@ -3943,6 +3953,9 @@ $("#message-form").addEventListener("submit", e => {
     persistDrafts();
     await humanExperience.posted(data.messageId, askRoom);
     maybeShowGuestUpgradeHint();
+    // First moment of value for the PWA install prompt (hardwork-mobile-1):
+    // the install control appears only after beforeinstallprompt AND this.
+    pwaInstall?.markFirstValue();
   }, { failureHint: "Draft kept. Send again to retry." });
 });
 $("#composer-attach")?.addEventListener("click", () => $("#composer-file")?.click());

@@ -51,6 +51,7 @@ export function mountPwaInstall({
   const button = document.createElement("button");
   button.type = "button";
   button.id = "install-room-button";
+  button.className = "button ghost";
   button.textContent = "Install Room";
   button.hidden = true;
   const sheet = document.createElement("div");
@@ -60,6 +61,7 @@ export function mountPwaInstall({
   copy.textContent = "Add Room to your Home Screen. Open the Share menu, then choose Add to Home Screen.";
   const dismiss = document.createElement("button");
   dismiss.type = "button";
+  dismiss.className = "button ghost";
   dismiss.textContent = "Not now";
   sheet.append(copy, dismiss);
   account?.append(button, sheet);
