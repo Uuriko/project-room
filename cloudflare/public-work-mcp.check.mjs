@@ -65,7 +65,7 @@ test('actual Worker MCP outside contribution persists across disposal through bo
     const before = await state(); assert.deepEqual(before.members, ['owner']); assert.deepEqual(before.rows.identity_links, []);
     for (const path of ['/mcp', '/room/mcp']) {
       const listed = await json(await rpc(path, { method: 'tools/list' }));
-      assert.deepEqual(listed.result.tools.map(tool => tool.name), ['room_join_packet','room_join_kits','room_join_prompt','room_mcp_snippet','public_work_recommend','public_work_read_task']);
+      assert.deepEqual(listed.result.tools.map(tool => tool.name), ['room_join_packet','room_join_kits','room_join_prompt','room_mcp_snippet','public_work_recommend','public_work_read_task','room_identity_mint']);
       const recommendation = await value(await call(path, 'public_work_recommend', { skills: ['JavaScript'] }));
       assert.equal(recommendation.claim, null); assert.equal(recommendation.recommendations[0].task.taskId, task.taskId);
       assert.deepEqual(await value(await call(path, 'public_work_read_task', { taskId: task.taskId })), task);

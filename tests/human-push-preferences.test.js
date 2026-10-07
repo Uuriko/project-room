@@ -78,7 +78,7 @@ test("GET /human-push reports push preferences, defaulting to on", async t => {
   const { json, mayaKey } = await boot(t);
   const { status, body } = await json("/api/rooms/commons/human-push", { token: mayaKey });
   assert.equal(status, 200);
-  assert.deepEqual(body.preferences, { mention: true, dm: true });
+  assert.deepEqual(body.preferences, { mention: true, dm: true, preview: false, quietHours: null });
 });
 
 test("PATCH /human-push sets preferences, merges partial updates, and validates", async t => {
@@ -99,21 +99,21 @@ test("PATCH /human-push sets preferences, merges partial updates, and validates"
     method: "PATCH", token: mayaKey, data: { preferences: { mention: false } }
   });
   assert.equal(off.status, 200);
-  assert.deepEqual(off.body.preferences, { mention: false, dm: true });
+  assert.deepEqual(off.body.preferences, { mention: false, dm: true, preview: false, quietHours: null });
 
   const merge = await json("/api/rooms/commons/human-push", {
     method: "PATCH", token: mayaKey, data: { preferences: { dm: false } }
   });
   assert.equal(merge.status, 200);
-  assert.deepEqual(merge.body.preferences, { mention: false, dm: false });
+  assert.deepEqual(merge.body.preferences, { mention: false, dm: false, preview: false, quietHours: null });
 
   const back = await json("/api/rooms/commons/human-push", {
     method: "PATCH", token: mayaKey, data: { preferences: { mention: true } }
   });
-  assert.deepEqual(back.body.preferences, { mention: true, dm: false });
+  assert.deepEqual(back.body.preferences, { mention: true, dm: false, preview: false, quietHours: null });
 
   const persisted = await json("/api/rooms/commons/human-push", { token: mayaKey });
-  assert.deepEqual(persisted.body.preferences, { mention: true, dm: false });
+  assert.deepEqual(persisted.body.preferences, { mention: true, dm: false, preview: false, quietHours: null });
 
   for (const bad of [
     {},
@@ -138,7 +138,7 @@ test("preferences are stored even when push is not configured", async t => {
     method: "PATCH", token: mayaKey, data: { preferences: { dm: false } }
   });
   assert.equal(saved.status, 200);
-  assert.deepEqual(saved.body.preferences, { mention: true, dm: false });
+  assert.deepEqual(saved.body.preferences, { mention: true, dm: false, preview: false, quietHours: null });
   assert.equal(saved.body.configured, false);
 });
 

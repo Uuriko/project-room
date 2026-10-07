@@ -11,7 +11,7 @@ import { isMutedBy } from "../src/events.js";
 import { notificationFromPush } from "../src/human-push-display.js";
 import { resolveMentionTargetsInText } from "./mention-lifecycle.mjs";
 import { isQuietAt, normalizeQuietHours, NotifyError } from "./notify-prefs.mjs";
-import { deliverToSubscriptions, normaliseSubscription, pushPayloadFor, richPushPayloadFor } from "./push-subscriptions.mjs";
+import { deliverToSubscriptions, normaliseSubscription, richPushPayloadFor } from "./push-subscriptions.mjs";
 
 export const HUMAN_PUSH_DEFAULT = "mentions_and_dms";
 // The two event kinds the push channel actually delivers. Preferences switch
@@ -196,7 +196,7 @@ export class HumanPush {
         "SELECT mention_enabled, dm_enabled, preview_enabled, quiet_hours FROM human_push_preferences WHERE room_id=? AND member_id=?"
       ).get(roomId, memberId);
     } catch {
-      row = null;
+      return { mention: false, dm: false, preview: false, quietHours: null };
     }
     if (!row) return { ...HUMAN_PUSH_PREF_DEFAULTS, preview: false, quietHours: null };
     let quietHours = null;

@@ -127,6 +127,8 @@ export const ALLOWLIST = [
 // Exact non-secret tokens only. Unlike the line allowlist, these suppress
 // entropy noise without skipping credential-pattern checks or adjacent tokens.
 export const SAFE_ENTROPY_TOKENS = [
+  // Public operator runbook socket-path example; not an authentication token.
+  "HERDR_SOCKET_PATH=/srv/herdr/tenants/T/socket/herdr.sock",
   "ROOM_WATCH_WATERMARK:-$HOME/workspace/goals/agent-swarm-coordination/hidden_files/room-watch-watermark.txt",
   "REHEARSAL_SCRATCH:-$HOME/workspace/rotation-rehearsal",
   "ROTATION_CUTOVER:-$HOME/workspace/pr-board2/scripts/rotation-cutover.sh",

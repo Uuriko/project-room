@@ -69,7 +69,7 @@ test("wake tools stay behind a live identity secret", async t => {
   const owner = store.identities.create("Wake owner");
   const created = roomFor(store, rooms, owner);
   const listed = await rpc(origin, "tools/list");
-  assert.deepEqual((await listed.json()).result.tools.map(tool => tool.name), [...JOIN_TOOLS, "public_work_recommend", "public_work_read_task"]);
+  assert.deepEqual((await listed.json()).result.tools.map(tool => tool.name), [...JOIN_TOOLS, "public_work_recommend", "public_work_read_task", "room_identity_mint"]);
   const open = await call(origin, "wake.register", { hostId: "host-1", wakeUrl: WAKE_URL });
   assert.equal(open.status, 401);
   assert.equal(open.body.error.code, -32001);
@@ -312,7 +312,7 @@ test("a session cookie without a bearer secret gets the anonymous MCP catalog", 
     body: JSON.stringify({ jsonrpc: "2.0", id: "t", method: "tools/list" }),
   });
   const catalog = await listed.json();
-  assert.deepEqual(catalog.result.tools.map(tool => tool.name), [...JOIN_TOOLS, "public_work_recommend", "public_work_read_task"]);
+  assert.deepEqual(catalog.result.tools.map(tool => tool.name), [...JOIN_TOOLS, "public_work_recommend", "public_work_read_task", "room_identity_mint"]);
   const roomCall = await fetch(`${origin}/room/mcp`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Cookie: cookie },
