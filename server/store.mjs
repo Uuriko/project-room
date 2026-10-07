@@ -1118,6 +1118,16 @@ const PROJECTION_CACHE_MAX_ROOMS = 32;
 const PROJECTION_CACHE_MAX_BYTES = 64 * 1024 * 1024;
 const ROOMS_WRITE = /\b(?:insert\s+into|update|delete\s+from|replace\s+into)\s+rooms\b/i;
 
+// Direct-mention read: the member's mention_states rows drive the join (see
+// openDirectMentions). Exported so plan-shape tests can pin the join order
+// contract without duplicating the SQL.
+export const OPEN_DIRECT_MENTIONS_SQL =
+  `SELECT m.message_event_id AS eventId, m.state, m.timeout_at AS timeoutAt, e.sequence, e.body
+   FROM mention_states m CROSS JOIN events e ON e.room_id=m.room_id AND e.id=m.message_event_id
+   WHERE m.room_id=? AND m.mentioned_member_id=? AND m.state IN ('delivered','acknowledged','timed_out')
+     AND e.sequence>? AND e.sequence<=?
+   ORDER BY e.sequence DESC LIMIT ?`;
+
 function deepFreeze(value) {
   if (value === null || typeof value !== "object" || Object.isFrozen(value)) return value;
   if (Array.isArray(value)) { for (const item of value) deepFreeze(item); }
@@ -4434,16 +4444,16 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // inside a read-only transaction. A mention inside a private message is
   // shown only to that message's two parties. A database from before the
   // #658 schema has no mention_states table and simply has no mentions.
+  //
+  // CROSS JOIN pins the join order: the member's own mention rows (via
+  // mention_states_member) drive, events is probed by id. A plain JOIN lets
+  // the planner scan the room's whole event log per poll instead (measured
+  // 350ms+ on a 4k-event room with zero mentions). The SQL is exported so
+  // tests/lookup-indexes-style plan assertions pin the contract.
   openDirectMentions(roomId, memberId, limit = 50, nowMs = this.now(), window = null) {
     let rows;
     try {
-      rows = this.db.prepare(
-        `SELECT m.message_event_id AS eventId, m.state, m.timeout_at AS timeoutAt, e.sequence, e.body
-         FROM mention_states m JOIN events e ON e.room_id=m.room_id AND e.id=m.message_event_id
-         WHERE m.room_id=? AND m.mentioned_member_id=? AND m.state IN ('delivered','acknowledged','timed_out')
-           AND e.sequence>? AND e.sequence<=?
-         ORDER BY e.sequence DESC LIMIT ?`
-      ).all(roomId, memberId, window?.after ?? 0, window?.through ?? Number.MAX_SAFE_INTEGER, limit);
+      rows = this.db.prepare(OPEN_DIRECT_MENTIONS_SQL).all(roomId, memberId, window?.after ?? 0, window?.through ?? Number.MAX_SAFE_INTEGER, limit);
     } catch (error) {
       if (/no such table/i.test(error?.message ?? "")) return [];
       throw error;
@@ -4991,7 +5001,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     if (replyToId) {
       const pending = this.db.prepare(
         `SELECT m.message_event_id AS eventId, e.body
-         FROM mention_states m JOIN events e ON e.room_id=m.room_id AND e.id=m.message_event_id
+         -- CROSS JOIN: the member's mention rows drive (see openDirectMentions).
+         FROM mention_states m CROSS JOIN events e ON e.room_id=m.room_id AND e.id=m.message_event_id
          WHERE m.room_id=? AND m.mentioned_member_id=? AND m.state IN ('delivered','acknowledged')`
       ).all(roomId, senderMemberId);
       const answered = pending.find(row => {
@@ -5146,7 +5157,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const rows = this.db.prepare(
         `SELECT m.message_event_id AS messageEventId, m.mentioned_member_id AS memberId, m.state,
                 m.created_at AS createdAt, m.timeout_at AS timeoutAt, m.decided_at AS decidedAt
-         FROM mention_states m JOIN events e ON e.room_id=m.room_id AND e.id=m.message_event_id
+         -- CROSS JOIN: the member's mention rows drive (see openDirectMentions).
+         FROM mention_states m CROSS JOIN events e ON e.room_id=m.room_id AND e.id=m.message_event_id
          WHERE m.room_id=? AND m.mentioned_member_id=?
            AND (? IS NULL OR m.state=?) AND (? IS NULL OR m.created_at>=?)
            AND json_extract(e.body,'$.type')='message.posted'

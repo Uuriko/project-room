@@ -278,7 +278,8 @@ function mentionHorizon(store, roomId, memberId, after, through) {
   try {
     const rows = store.db.prepare(
       `SELECT e.sequence FROM mention_states m
-       JOIN events e ON e.room_id=m.room_id AND e.id=m.message_event_id
+       -- CROSS JOIN pins the join order: mention_states drives (see openDirectMentions in server/store.mjs).
+       CROSS JOIN events e ON e.room_id=m.room_id AND e.id=m.message_event_id
        WHERE m.room_id=? AND m.mentioned_member_id=? AND e.sequence>? AND e.sequence<=?
          AND m.state IN ('delivered','acknowledged','timed_out')
        ORDER BY e.sequence LIMIT ?`
