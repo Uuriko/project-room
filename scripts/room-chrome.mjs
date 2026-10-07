@@ -123,7 +123,13 @@ export async function clickChrome(page, selector) {
     if (await page.locator('#main').isVisible()) await ensureSidebarOpen(page);
     if (selector !== '#room-actions-open' && await page.locator('#invite-navigation').isVisible()
       && !(await page.locator('#invite-navigation').evaluate(node => node.open))) {
+      // Technical entry points require the human's explicit Advanced setting.
+      if (selector !== '#invite-people-button' && await page.locator('body').evaluate(node => node.classList.contains('human-experience') && !node.classList.contains('human-advanced'))) {
+        await enableHumanAdvanced(page);
+      }
       await page.locator('#invite-navigation > summary').click();
+      // Simple human Invite opens the dialog directly, without a nested button.
+      if (selector === '#invite-people-button' && await page.locator('#share-link-dialog').isVisible()) return;
     }
   }
   if (['#nav-inbox', '#nav-rooms', '#choose-room'].includes(selector) && await page.locator('#main').isVisible()) {

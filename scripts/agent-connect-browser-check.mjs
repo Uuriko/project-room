@@ -1,4 +1,4 @@
-import { clickChrome } from "./room-chrome.mjs";
+import { clickChrome, enableHumanAdvanced } from "./room-chrome.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, rmSync, readFileSync, statSync } from "node:fs";
@@ -29,6 +29,7 @@ async function setup(t, mobile = false) {
   });
   await page.goto(origin); await signInFixture(page, f.keys.owner);
   await page.locator("#main").waitFor({ state: "visible" });
+  await enableHumanAdvanced(page);
   const reveal = async () => {
     if (!(await page.locator("#room-sidebar").isVisible())) {
       await page.locator("#sidebar-toggle").click();
