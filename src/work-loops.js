@@ -9,7 +9,9 @@ function duplicateProposals(messages) {
   const seen = new Map();
   for (const message of messages) {
     if (!message.proposal || message.deletedAt) continue;
-    const body = message.body.trim().replace(/\s+/g, " ");
+    // A redacted-but-live body is null: skip it like empty text, never throw.
+    const raw = typeof message.body === "string" ? message.body : "";
+    const body = raw.trim().replace(/\s+/g, " ");
     if (!body) continue;
     const hit = seen.get(body);
     if (hit) { hit.count++; hit.messageIds.push(message.id); }
@@ -32,7 +34,9 @@ function ackChain(messages) {
   for (let i = messages.length - 1; i >= 0; i--) {
     const message = messages[i];
     if (message.deletedAt) continue;
-    if (message.proposal || message.body.trim().length > ACK_LIMIT) break;
+    // A redacted-but-live body is null: read it as empty text, never throw.
+    const text = typeof message.body === "string" ? message.body : "";
+    if (message.proposal || text.trim().length > ACK_LIMIT) break;
     tail.unshift(message);
     if (tail.length >= 2 && tail[0].authorId === tail[1].authorId) { tail.shift(); break; }
   }

@@ -6,7 +6,7 @@ import { EVENT_TYPES as T, MAX_MESSAGE_BODY_CHARS, WORK_STATES as S, roomPolicy,
 import { AccountClient, RoomClient, draftCommand, retryUnconfirmed } from "./client.js";
 import { ReturnBrief, groupBriefHistory } from "./return-brief.js";
 import { attentionPreview, needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult, roomOrientation } from "./work-selectors.js";
-import { conversationIndex, searchMessages, ConversationDrafts, channelDraftKey, DraftRecovery, draftRecoveryScope, shouldPreserveDrafts, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, messageBodyHtml, kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery, reactionPills } from "./conversation.js";
+import { conversationIndex, searchMessages, ConversationDrafts, channelDraftKey, DraftRecovery, draftRecoveryScope, shouldPreserveDrafts, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, messageBodyHtml, kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery, reactionPills, bodyText } from "./conversation.js";
 import { canonicalReaction, clipGraphemes, emojiCatalog, emojiMatches, emojiName, emojiQuery, foldedReactionMap, frequentEmoji, insertEmoji, renderEmojiShortcodes } from "./emoji.js";
 import { nextWorkStep, workStatus, workActions, renderWorkActions, activeClaim, terminalWork, doneChip, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, matchesReceipt, producerKnown as hasReportedProducer, changeDescription, diffResultLines, diffResultSummary, workRecipeOptions } from "./workflow.js";
 import { coordinationLoops } from "./work-loops.js";
@@ -4133,7 +4133,7 @@ function updateReply() {
   const author = target ? replyAuthorToAddress(session?.member?.id, state.members[target.authorId]) : null;
   const addressing = Boolean(author && messageMentionsMember($("#message-input").value, author));
   $("#reply-context").textContent = target
-    ? `Replying to ${name(target.authorId)}${addressing ? ` · addressing ${author.displayName}` : ""}: ${target.deletedAt ? "Message deleted" : target.body.slice(0, 100)}`
+    ? `Replying to ${name(target.authorId)}${addressing ? ` · addressing ${author.displayName}` : ""}: ${target.deletedAt ? "Message deleted" : bodyText(target).slice(0, 100)}`
     : "";
   const mention = $("#reply-mention");
   mention.hidden = !author;
@@ -4890,7 +4890,12 @@ function renderPinned() {
   panel.hidden = pins.length === 0;
   setText("#pinned-count", pins.length ? `${pins.length} of ${PIN_LIMIT}` : "");
   if (!pins.length) { list.innerHTML = ""; return; }
-  const html = pins.map(({ message: m, pinnedById }) => `<li class="pinned-item" data-pinned-message="${esc(m.id)}"><a class="source-link pinned-link" href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}">${esc(displayName(m.authorId))} · <time datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time></a><p class="pinned-body">${esc(m.body.length > 200 ? `${m.body.slice(0, 200)}…` : m.body)}</p><span class="pinned-meta">Pinned by ${esc(displayName(pinnedById))}</span><button type="button" class="text-button" data-message-action="pin" data-message-id="${esc(m.id)}" aria-label="Unpin message by ${esc(displayName(m.authorId))}">Unpin</button></li>`).join("");
+  const html = pins.map(({ message: m, pinnedById }) => {
+    // A redacted-but-live pin (body null, no deletedAt) renders empty text, never throws.
+    const pinnedBody = bodyText(m);
+    const pinnedPreview = pinnedBody.length > 200 ? `${pinnedBody.slice(0, 200)}…` : pinnedBody;
+    return `<li class="pinned-item" data-pinned-message="${esc(m.id)}"><a class="source-link pinned-link" href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}">${esc(displayName(m.authorId))} · <time datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time></a><p class="pinned-body">${esc(pinnedPreview)}</p><span class="pinned-meta">Pinned by ${esc(displayName(pinnedById))}</span><button type="button" class="text-button" data-message-action="pin" data-message-id="${esc(m.id)}" aria-label="Unpin message by ${esc(displayName(m.authorId))}">Unpin</button></li>`;
+  }).join("");
   if (list.innerHTML !== html) {
     // Keyboard users keep their place: the same item's control when it is still there,
     // otherwise the neighbouring item, otherwise the section heading. Focus never falls to the page body.
@@ -5092,7 +5097,7 @@ function openDecision(messageId) {
   if (!message) return;
   decisionSourceId = messageId;
   $("#decision-form").reset();
-  $("#decision-source").textContent = `Source: ${name(message.authorId)}: ${message.deletedAt ? "Message deleted" : message.body.slice(0, 200)}`;
+  $("#decision-source").textContent = `Source: ${name(message.authorId)}: ${message.deletedAt ? "Message deleted" : bodyText(message).slice(0, 200)}`;
   setFormStatus($("#decision-status"), "");
   $("#decision-dialog").showModal();
   $("#decision-statement-input").focus();
@@ -5201,7 +5206,7 @@ function openReport(messageId) {
   if (!message || message.deletedAt || message.authorId === session.member.id) return;
   reportSourceId = messageId;
   $("#report-form").reset();
-  $("#report-source").textContent = `Message from ${name(message.authorId)}: ${message.body.slice(0, 200)}`;
+  $("#report-source").textContent = `Message from ${name(message.authorId)}: ${bodyText(message).slice(0, 200)}`;
   setFormStatus($("#report-status"), "");
   $("#report-dialog").showModal();
   $("#report-reason-input").focus();
@@ -5295,7 +5300,7 @@ function renderReports(reports) {
   setText("#report-count", reports.length ? String(reports.length) : "");
   renderContent("#report-list", reports.map(report => {
     const message = report.message;
-    const excerpt = !message ? "Message no longer in this room" : message.deletedAt ? "Message deleted" : message.body.slice(0, 160);
+    const excerpt = !message ? "Message no longer in this room" : message.deletedAt ? "Message deleted" : bodyText(message).slice(0, 160);
     return `<li data-report-id="${esc(report.id)}"><strong>${esc(report.reason)}</strong> <span class="rb-detail">reported by ${esc(memberLabel(report.reporterId))} · ${esc(time(report.createdAt))}</span><br><a class="source-link" href="${esc(recordHref("message", report.messageId))}" data-open-message="${esc(report.messageId)}" data-focus-key="report-source:${esc(report.id)}">${esc(memberLabel(report.authorId))}: ${esc(excerpt)}</a></li>`;
   }).join("") || '<li class="rb-empty">No reports. Members report a message from its Report action; only you see them here.</li>');
 }
