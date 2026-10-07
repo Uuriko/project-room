@@ -750,6 +750,26 @@ function argumentFailure(requestId, name, args, schema) {
     for (const key of ["body", "query"]) {
       if (typeof args[key] === "string" && args[key].trim().length === 0 && !report.invalid[key]) report.invalid[key] = "empty";
     }
+    // Gate-only constraints: validRoomArgs/validInboxArgs/validWakeArgs reject
+    // inputs the JSON schema cannot express (fieldReason has no multi-type
+    // branch, and the schema intentionally leaves these loose). Name the
+    // field instead of falling through to the generic "does not match the
+    // tool input", so the caller knows what to fix.
+    if (name === "room_needs_me" && args.since !== undefined && !report.invalid.since) {
+      report.invalid.since = "since must be a non-negative integer or a cursor object";
+    }
+    if (name === "room_create_agent_invite" && args.profile === undefined && args.permissions === undefined) {
+      report.invalid.profile = "profile or permissions is required";
+    }
+    if (name === "room_join" && (args.linkToken === undefined) === (args.inviteCode === undefined)
+      && !report.invalid.linkToken && !report.invalid.inviteCode) {
+      report.invalid.linkToken = "pass exactly one of linkToken or inviteCode";
+    }
+    if (name === "room_create") {
+      for (const key of ["title", "purpose", "displayName"]) {
+        if (typeof args[key] === "string" && args[key].trim().length === 0 && !report.invalid[key]) report.invalid[key] = "must not be blank";
+      }
+    }
     if (name === "report_tip" && args.sourceRevision === undefined && args.buildId === undefined && !report.missing.length) {
       report.invalid.sourceRevision = "sourceRevision or buildId is required";
     }
