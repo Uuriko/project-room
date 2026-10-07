@@ -311,7 +311,6 @@ export function decideSuggestions(card, live = {}) {
   const claim = live.claim ?? null;
   const headSha = claim?.pullRequest?.headSha ?? claim?.headSha ?? ctx.headSha ?? null;
   const claimId = claim?.id ?? ctx.claimId ?? null;
-  const claimTitle = claim?.title ?? ctx.claimTitle ?? claimId ?? "the claim";
   const ciState = claim?.ciState ?? ctx.ciState ?? null;
   const failingChecks = asArray(claim?.failingChecks ?? ctx.failingChecks);
   const hint = live.routerHint ?? null;
