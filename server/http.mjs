@@ -4341,7 +4341,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // thread_mutes table for thread_reply suppression.
       if (route === "diagnostics" && req.method === "GET") {
         store.agentConnections.owner(selected.token, roomId, fence);
-        return json(res, 200, { diagnostics: diagnostics.list(roomId) });
+        // H1 relief valve: additive projection-cap health (thresholds, fired
+        // warnings, latest telemetry). Null until the first observed write.
+        return json(res, 200, { diagnostics: diagnostics.list(roomId), projectionHealth: store.projectionHealth(roomId) });
       }
       if (route === "diagnostics-export" && req.method === "GET") {
         // W4-57 M6: sanitized support-export bundle. Owner-only, but accepts the

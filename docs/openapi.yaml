@@ -12729,7 +12729,7 @@ paths:
         - $ref: '#/components/parameters/RoomId'
       responses:
         '401': { description: unauthenticated }
-        '200': { description: "{ diagnostics: [...] }" }
+        '200': { description: "{ diagnostics: [...], projectionHealth: { roomId, capBytes, bytes, ratio, thresholds, warnings, latest } | null }" }
         '403': { description: owner_required }
   /api/rooms/{roomId}/diagnostics-export:
     get:

@@ -297,6 +297,7 @@ optional.push("server/routes/spend-grants.mjs"); // spend-primitive MVP: per-age
 optional.push("server/routes/typing.mjs"); // human UX: ephemeral typing heartbeat RT route (imported by server/routes/table.mjs)
 optional.push("server/code-drops.mjs", "server/routes/code-drops.mjs"); // code drops: room-native patch exchange (imported by server/store.mjs and server/routes/table.mjs)
 optional.push("server/projection-at-rest.mjs"); // Phase1a stored body serializer
+optional.push("server/projection-relief.mjs"); // H1 relief valve: projection telemetry, cap warnings, archival paging (imported by server/store.mjs)
 optional.push("server/routes/wake-status.mjs"); // plan-wake-live: wakeable / not-wakeable list RT route (imported by server/routes/table.mjs)
 optional.push("server/routes/demo.mjs", "server/routes/human-push.mjs");
 optional.push("server/routes/squads.mjs"); // plan-squads: squad roster RT routes (imported by server/routes/table.mjs)

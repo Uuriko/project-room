@@ -117,6 +117,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/autonomy-tiers.mjs'); // Graduated autonomy tiers (imported by server/store.mjs and server/http.mjs)
   paths.add('server/grants.mjs'); // UFO-steal slice 1 (imported by server/store.mjs and server/http.mjs)
   paths.add('server/messages-store.mjs'); // MSG-1: messages table written with each message event (imported by server/store.mjs)
+  paths.add('server/projection-relief.mjs'); // H1 relief valve: projection telemetry, cap warnings, archival paging (imported by server/store.mjs)
   paths.add('server/abuse-rate-buckets.mjs'); // Durable abuse rate buckets (imported by server/http.mjs, server/writer-fence.mjs, and cloudflare/room.mjs)
   paths.add('server/receipt-cards.mjs'); // ACT-1a: in-room receipt cards (imported by server/work-claim-events.mjs and server/room-guide.mjs)
   paths.add('server/room-guide.mjs'); // ACT-1a: Room Guide (imported by cloudflare/room.mjs and server/starter-room.mjs)
