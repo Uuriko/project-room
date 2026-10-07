@@ -82,6 +82,7 @@ export const KEEP = [
   // herdr redesign: wired by the integration step (mount in http.mjs +
   // runtime-package registration). Not orphans; remove from KEEP when wired.
   "server/session-adapter.mjs",
+  "server/session-adapter/herdr-bridge-adapter.mjs",
 ];
 
 const KEEP_SET = new Set(KEEP);
