@@ -19,13 +19,20 @@ async function serve(t) {
   return { origin };
 }
 
-test("join page: What is Project Room? includes same-host /room", async t => {
+test("join page: What is Project Room? is a single door-relative /room link that resolves on both doors", async t => {
+  // BUG 2026-10-06: {{ASSET_BASE}}/room rendered as /room/room on the www
+  // door (/room/join/...) — a 404. /room is the marketing page on both
+  // doors (node server and www edge), so the link must be exactly /room
+  // and must resolve 200 wherever the join page was served from.
   const { origin } = await serve(t);
   for (const path of ["/join", "/join/RM-EXAMPLE", "/room/join", "/room/join/RM-EXAMPLE"]) {
     const res = await fetch(`${origin}${path}`);
     assert.equal(res.status, 200, path);
     const html = await res.text();
     assert.match(html, /What is Project Room\?/, path);
-    assert.match(html, /href="\/(room\/)?room">What is Project Room\?</, path);
+    assert.match(html, /href="\/room">What is Project Room\?</, `${path} links at exactly /room`);
+    assert.ok(!html.includes("/room/room"), `${path} has no /room/room 404 link`);
+    const marketing = await fetch(`${origin}/room`);
+    assert.equal(marketing.status, 200, `${path} marketing target resolves`);
   }
 });
