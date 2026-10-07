@@ -44,7 +44,7 @@ import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { evaluateReceipt } from "./jev-receipts.mjs";
 import { findClaimCollisions } from "./claim-collisions.mjs";
 import { emitWorkClaimEvent, enqueueClaimWake, wakeNamedReviewers } from "./work-claim-events.mjs";
-import { noteReadyWork } from "./work-wants.mjs"; // BOARD-WAKE-2
+import { noteReadyWork, claimIsReady, noteDependentsReady } from "./work-wants.mjs"; // BOARD-WAKE-2
 import { getActiveSquad } from "./squads.mjs"; // plan-squads: work offers target squads
 import { isFirstContribution, retentionAck } from "./retention-response.mjs";
 import { requiredReadingFor, stampReadingAck } from "./required-reading.mjs"; // W012: per-lane required reading
@@ -677,8 +677,19 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
         { reason: extra.wakeReason, actorId: extra.actorId ?? caller });
     }
     // BOARD-WAKE-2: an unassigned create or a release is new ready work for
-    // agents that opted in (server/work-wants.mjs). Default off; never throws.
-    if (action === "created" || action === "released") noteReadyWork(store, roomId, item, { actorId: extra.actorId ?? caller, now: nowMs });
+    // agents that opted in (server/work-wants.mjs) — but only when the item
+    // is actually ready. A create whose dependencies are not done yet is
+    // not ready; waking about it is a false signal, and the queue=ready
+    // view would not list it. The dependents scan below wakes watchers
+    // when the last dependency completes instead. Default off; never throws.
+    if ((action === "created" || action === "released") && claimIsReady(registry.list(roomId), item)) {
+      noteReadyWork(store, roomId, item, { actorId: extra.actorId ?? caller, now: nowMs });
+    }
+    // A done transition unblocks dependents: wake opted-in agents about
+    // every dependent that just became ready.
+    if (action === "state_changed" && item.state === "done") {
+      noteDependentsReady(store, registry, roomId, item, { actorId: extra.actorId ?? caller, now: nowMs });
+    }
     if (action === "state_changed" || action === "claimed") wakeNamedReviewers(store, roomId, item, { actorId: extra.actorId ?? caller });
     return item;
   };
@@ -704,6 +715,11 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     enqueueClaimWake(store, roomId, before.owner,
       `work-claim:${item.id}:lease_expired:${before.leaseExpiresAt ?? receipt?.sequence ?? nowMs}`,
       { reason: "lease_expired", actorId: before.owner });
+    // The freed claim is new ready work for opted-in agents, the same as
+    // any other release — but only when it is actually ready.
+    if (claimIsReady(registry.list(roomId), item)) {
+      noteReadyWork(store, roomId, item, { actorId: before.owner, now: nowMs });
+    }
   });
   const config = registry.configFor(roomId);
   const roomLike = { workClaims: registry.rawConfig(roomId) };
