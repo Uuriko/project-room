@@ -704,3 +704,27 @@ test("consent screen names the room, grant, profile and expiry before any prompt
     "consent names the expiry and the closed grant");
   assert.match(screen, /acts as itself, never as you/, "consent states no credential is shared");
 });
+
+test("preview also accepts POST with the code in the body, so the bearer credential never needs a query string", async t => {
+  const { origin, ownerKey } = await serve(t);
+  const minted = await mint(origin, ownerKey, { profile: "contribute", expiresInMinutes: 60, displayName: "Plug Bot" });
+  assert.equal(minted.status, 201, JSON.stringify(minted.json));
+  // The referral-invites/preview rule: POST so the Bearer <redacted> never
+  // lands in a query string or access log. GET stays for older clients.
+  const preview = await post(origin, "/api/agent-invites/preview", { code: minted.json.code });
+  assert.equal(preview.status, 200, JSON.stringify(preview.json));
+  assert.equal(preview.json.roomId, "commons");
+  assert.deepEqual(preview.json.permissions, ["accept_work", "complete_work"]);
+  assert.equal(preview.json.profile, "contribute");
+  // Nothing was consumed: the code still redeems.
+  const redeemed = await redeem(origin, minted.json.code);
+  assert.equal(redeemed.status, 201, JSON.stringify(redeemed.json));
+});
+
+test("POST preview rejects a missing or malformed code like GET does", async t => {
+  const { origin } = await serve(t);
+  const missing = await post(origin, "/api/agent-invites/preview", {});
+  assert.equal(missing.status, 422, JSON.stringify(missing.json));
+  const malformed = await post(origin, "/api/agent-invites/preview", { code: "not-a-code" });
+  assert.equal(malformed.status, 404, JSON.stringify(malformed.json));
+});
