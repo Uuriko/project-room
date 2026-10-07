@@ -869,6 +869,7 @@
   "tests/review-state.test.js": 104,
   "tests/magic-code-consume-race.test.js": 383,
   "tests/merge-queue.test.js": 477,
+  "tests/merge-queue-eject-budget.test.js": 9358,
   "tests/evals-llm-judge-compat.test.js": 84,
   "tests/share-link-access.test.js": 453,
   "tests/claim-autolink-http.test.js": 315,

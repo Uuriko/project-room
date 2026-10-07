@@ -1,0 +1,99 @@
+# INERT WITHOUT THE TAP — same gate as merge-queue-receipts.yml.
+#
+# Flake eject budget for the GitHub native merge queue (batch-then-eject).
+#
+# Trigger: `merge_group` `destroyed` (an entry left the queue — the eject) and
+# `pull_request` `closed` (drop the PR's counters; its loop is over). GitHub
+# dispatches merge_group events exclusively for merge-queue entries, so until
+# the queue is enabled this workflow can never run on the merge_group leg.
+#
+# Second gate: the job requires the repo variable MERGE_QUEUE_BOT == '1'
+# (unset by default).
+#
+# What it does when both gates are open:
+#   1. node scripts/merge-queue-eject-budget.mjs classifies the eject and
+#      updates tests/merge-queue-eject-budget.json (per-PR failure-eject
+#      counter, 24h rolling window, trip at 3). Lane pushes, manual dequeues,
+#      dirty-PR ejects and unknown reasons never burn budget.
+#   2. On a budget trip: posts one FRICTION room alert through the GitHub door
+#      (ROOM_DOOR_SECRET, the same secret as room-github-door.yml) naming the
+#      PR, with read-back verification — a PR is never silently dropped —
+#      appends a quarantine *proposal* to the ledger (auto-proposed, never
+#      auto-merged into tests/quarantine.json), and comments on the PR.
+#   3. Commits the ledger back to main, fail-closed: the only file that may
+#      change is tests/merge-queue-eject-budget.json (onboarding-probe
+#      pattern), with [skip ci] so ledger bookkeeping never burns a CI run.
+#      Runs serialize on a concurrency group; a rebase conflict on the ledger
+#      is resolved by union-merging both sides (mergeLedgers), never by
+#      dropping one side's ejects.
+#
+# It never merges, never enqueues, and never dequeues a PR.
+name: merge-queue-eject-budget
+
+on:
+  merge_group:
+    types: [destroyed]
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: write      # ledger commit back to main (fail-closed to one path)
+  pull-requests: write # over-budget comment on the tripped PR only
+
+# Serialize ledger commits; a queued run sees the previous run's push.
+concurrency:
+  group: merge-queue-eject-budget
+  cancel-in-progress: false
+
+jobs:
+  budget:
+    if: vars.MERGE_QUEUE_BOT == '1'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - id: budget
+        run: node scripts/merge-queue-eject-budget.mjs
+        env:
+          ROOM_ORIGIN: ${{ vars.ROOM_DOOR_ORIGIN }}
+          ROOM_DOOR_SECRET: ${{ secrets.ROOM_DOOR_SECRET }}
+          ROOM_DOOR_ROOM: ${{ vars.ROOM_DOOR_ROOM }}
+          ROOM_DOOR_MEMBER: ${{ vars.ROOM_DOOR_MEMBER }}
+      - name: Comment on the over-budget PR
+        if: steps.budget.outputs.over_budget_pr != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR='${{ steps.budget.outputs.over_budget_pr }}'
+          node -e 'const fs=require("fs");fs.writeFileSync("comment.json",JSON.stringify({body:fs.readFileSync(process.argv[2],"utf8")}))' "eject-budget-comment-$PR.md"
+          gh api "repos/${{ github.repository }}/issues/$PR/comments" --input comment.json
+      - name: Commit eject-budget ledger (fail-closed)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tests/merge-queue-eject-budget.json
+          git diff --cached --quiet && { echo "no ledger changes"; exit 0; }
+          git commit -m "merge-queue: record eject-budget ledger (run ${{ github.run_id }}) [skip ci]"
+          # Fail closed: the only change ever pushed to main is the ledger file.
+          if [ "$(git show --name-only --format= HEAD | tr '\n' ' ')" != "tests/merge-queue-eject-budget.json " ]; then
+            echo "refusing to push: ledger commit touches unexpected files"
+            git show --name-only --format= HEAD
+            exit 1
+          fi
+          git fetch origin main:refs/remotes/origin/main
+          if ! git rebase origin/main; then
+            # Concurrent run updated the ledger: union-merge both sides (dedupe
+            # by pr+sha), never drop one side's ejects. During a rebase,
+            # --theirs is the commit being replayed (our ledger).
+            git checkout --theirs -- tests/merge-queue-eject-budget.json
+            git show HEAD:tests/merge-queue-eject-budget.json > /tmp/eject-budget-base.json
+            node scripts/merge-queue-eject-budget.mjs --merge-ledgers \
+              /tmp/eject-budget-base.json tests/merge-queue-eject-budget.json tests/merge-queue-eject-budget.json
+            git add tests/merge-queue-eject-budget.json
+            git -c core.editor=true rebase --continue
+          fi
+          git push origin HEAD:main || { echo "ledger push failed; next eject event heals the ledger (dedupe by pr+sha)"; exit 0; }
