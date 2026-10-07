@@ -17,7 +17,6 @@ export class InboundWebhookError extends Error {
     this.code = code;
   }
 }
-const fail = (code, message) => { throw new InboundWebhookError(code, message); };
 
 export const MESSAGE_CARD_LIMITS = Object.freeze({
   title: 256,
