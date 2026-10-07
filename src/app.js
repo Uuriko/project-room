@@ -46,6 +46,7 @@ import { installHumanExperience } from "./human-experience.js";
 // Keep a connector/native consent journey through password or provider login.
 // Only our exact consent path is a return target; never follow arbitrary URLs.
 const oauthReturnKey = "project-room:oauth-return:v1";
+let initialDesktopProvider = null;
 function validatedOAuthReturn(value) {
   if (typeof value !== "string" || !value.startsWith("/oauth/authorize?") || value.length > 4096) return null;
   try {
@@ -57,7 +58,23 @@ function validatedOAuthReturn(value) {
 try {
   const params = new URLSearchParams(location.search);
   const target = params.get("oauth") === "login" ? validatedOAuthReturn(params.get("return")) : null;
-  if (target) sessionStorage.setItem(oauthReturnKey, target);
+  if (target) {
+    sessionStorage.setItem(oauthReturnKey, target);
+    const providers = params.getAll("provider"), consent = new URL(target, location.origin).searchParams;
+    const nativeConsent = consent.getAll("client_id").length === 1 && consent.get("client_id") === "project-room-macos"
+      && consent.getAll("redirect_uri").length === 1 && consent.get("redirect_uri") === location.origin + "/api/auth/desktop/callback"
+      && consent.getAll("state").length === 1 && /^[A-Za-z0-9_-]{43}$/.test(consent.get("state") || "")
+      && consent.getAll("code_challenge").length === 1 && /^[A-Za-z0-9_-]{43}$/.test(consent.get("code_challenge") || "")
+      && consent.getAll("code_challenge_method").length === 1 && consent.get("code_challenge_method") === "S256";
+    if (nativeConsent && params.getAll("return").length === 1 && params.getAll("oauth").length === 1
+      && providers.length === 1 && ["google", "github"].includes(providers[0])) initialDesktopProvider = providers[0];
+    // Consume intent in this document only, so refresh/cancel cannot restart it.
+    if (providers.length) {
+      const entrance = new URL(location.href);
+      entrance.searchParams.delete("provider");
+      history.replaceState(history.state, "", entrance.href);
+    }
+  }
 } catch { /* A blocked storage leaves ordinary sign-in available. */ }
 function resumeOAuthConsent() {
   if (!accountClient.session?.authenticated || accountClient.session.terms?.required) return false;
@@ -636,7 +653,6 @@ let accountCheckFlight = null, roomListVersion = 0, roomListCursor = null;
 // (RC-2026-09-19-066): the redeem failed before any network call and the
 // user was left on the welcome screen.
 let accountRestoreFlight = null;
-let firstRoomNamePending = false;
 let humanAuthBusy = false;
 let signinView = "password-login", signinHistoryReplay = false, resetJourneyPending = false;
 let resumeResetJourney = false;
@@ -839,10 +855,7 @@ async function openPersonalRoomAfterSignup() {
     if (startRoomFlight) await startRoomFlight;
     return;
   }
-  firstRoomNamePending = true;
   showAccountWorkspace();
-  try { await inboxUI.askSetupName?.(); } catch { /* a name is optional; the room still opens */ }
-  finally { firstRoomNamePending = false; }
   if (accountClient.session !== owned || state) return;
   const body = await ensureDefaultRoom();
   if (accountClient.session !== owned || state) return;
@@ -989,7 +1002,7 @@ async function loadAccountRooms(more = false) {
     // fresh account with no rooms and no pending invitation gets its default
     // room created and opened.
     if (!more && !$("#account-rooms-list").children.length && !roomListCursor
-      && !firstRoomNamePending && !startRoomIntent && !startRoomFlight) ensureDefaultRoom();
+      && !startRoomIntent && !startRoomFlight) ensureDefaultRoom();
   } catch (error) {
     if (version !== roomListVersion || (accountClient.session && accountClient.session !== owned)) return;
     if ([401, 403].includes(error.status) || !accountClient.session) endAccountAccess();
@@ -7414,6 +7427,12 @@ if (initialInvitationFragment && !initialPasswordReset) openInvitation(initialIn
     }
     const account = await ensureAccountSession();
     if (!account?.authenticated) {
+      if (initialDesktopProvider && !initialGoogleFailed && !initialGitHubFailed) {
+        const provider = initialDesktopProvider;
+        initialDesktopProvider = null;
+        location.assign(`/api/auth/${provider}/start`);
+        return;
+      }
       $("#identity-label").textContent = "Not signed in";
       setFormStatus($("#auth-error"), initialGoogleFailed
         ? googleSigninFailureMessage

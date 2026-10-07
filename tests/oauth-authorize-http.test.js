@@ -209,3 +209,29 @@ test("native Mac consent exchanges one PKCE code into an independent HttpOnly hu
   assert.equal((await fetch(origin + "/api/auth/desktop/callback?state=" + state + "&code=bad", { redirect: "manual" })).status, 422);
   assert.equal((await fetch(origin + "/api/auth/desktop/session")).status, 405);
 });
+
+
+test("native desktop provider intent is bounded and preserves the exact generic consent request", async t => {
+  const { origin } = await startServer(t);
+  const query = `state=${'s'.repeat(43)}&challenge=${CHALLENGE}`;
+  for (const suffix of ['provider=', 'provider=other', 'provider=https://evil.example', 'provider=google&provider=github', 'provider=google&provider=google']) {
+    const response = await fetch(`${origin}/api/auth/desktop/start?${query}&${suffix}`, { redirect: 'manual' });
+    assert.equal(response.status, 400);
+    assert.equal((await response.json()).error.code, 'invalid_desktop_provider');
+    assert.equal(response.headers.get('location'), null);
+    assert.equal(response.headers.get('set-cookie'), null);
+  }
+  const generic = await fetch(`${origin}/api/auth/desktop/start?${query}`, { redirect: 'manual' });
+  assert.equal(generic.status, 302);
+  const target = generic.headers.get('location');
+  assert.equal(new URL(target, origin).pathname, '/oauth/authorize');
+  for (const provider of ['google', 'github']) {
+    const selected = await fetch(`${origin}/api/auth/desktop/start?${query}&provider=${provider}`, { redirect: 'manual' });
+    assert.equal(selected.status, 302);
+    const entrance = new URL(selected.headers.get('location'), origin);
+    assert.equal(entrance.origin, origin); assert.equal(entrance.pathname, '/');
+    assert.equal(entrance.searchParams.get('oauth'), 'login');
+    assert.equal(entrance.searchParams.get('return'), target);
+    assert.equal(entrance.searchParams.get('provider'), provider);
+  }
+});

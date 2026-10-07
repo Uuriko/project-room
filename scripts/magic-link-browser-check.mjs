@@ -60,15 +60,10 @@ test("magic link: fresh visit with ?magic= signs straight in", { timeout: 60000 
     { waitUntil: "networkidle" });
   // Zero typing signs in; the account menu exposes the authenticated identity.
   await page.locator("#auth-panel").waitFor({ state: "hidden" });
-  const nameDialog = page.locator("#account-setup-dialog");
-  try {
-    await nameDialog.waitFor({ state: "visible", timeout: 4000 });
-    await page.keyboard.press("Escape");
-    await nameDialog.waitFor({ state: "hidden" });
-  } catch { /* the name step already finished */ }
   // A sign-in with no chosen room opens that account's room.
   await page.waitForURL(/[?&]room=personal-/);
   await page.locator("#main").waitFor({ state: "visible" });
+  assert.equal(await page.locator('#account-setup-dialog').isVisible(), false, 'optional setup never interrupts the direct email-link return');
   await page.locator("#session-menu-button").click();
   const label = page.locator("#identity-label");
   await label.waitFor({ state: "visible" });

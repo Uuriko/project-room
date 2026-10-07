@@ -1,6 +1,6 @@
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { readAgentConnection } from "../client/agent-connection.mjs";
 
 export function homeOf(env = process.env) {
@@ -48,8 +48,8 @@ export function readPointer(name, env = process.env) {
   privateFile(file);
   const value = JSON.parse(readFileSync(file, "utf8"));
   if (value?.version !== 1 || typeof value.configDirectory !== "string") throw new Error("Saved connection pointer is invalid");
-  const root = resolve(connectionsRoot(env));
-  const configDirectory = resolve(value.configDirectory);
+  const root = realpathSync(connectionsRoot(env));
+  const configDirectory = realpathSync(value.configDirectory);
   if (configDirectory !== root && !configDirectory.startsWith(root + "/")) throw new Error("Saved connection pointer is outside the connection directory");
   return { name: value.name, configDirectory };
 }

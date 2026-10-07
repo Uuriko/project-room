@@ -80,7 +80,10 @@ test("setup skips the email step when Gmail is unavailable (two steps, not three
   const ui = installAccountSetup({ api, owns: () => true, onInbox() {}, onRoom() {} });
   await ui.check();
   const dialog = dialogOf(body);
-  assert.ok(dialog.open, "dialog opens");
+  assert.equal(dialog.open, false, "untouched optional setup stays closed");
+  assert.equal(api.calls.includes("/gmail"), false, "deferred setup does not load an optional connector");
+  await ui.check(true);
+  assert.ok(dialog.open, "explicit personalization opens the dialog");
   assert.equal(progressOf(dialog).textContent, "Step 1 of 2");
   assert.equal(titleOf(dialog).textContent, "Make Project Room yours");
 });
@@ -94,6 +97,8 @@ test("setup shows three steps when Gmail is available", async (t) => {
   // installAccountSetup returns the ui; check() drives load().
   const ui = installAccountSetup({ api, owns: () => true, onInbox() {}, onRoom() {} });
   await ui.check();
+  assert.equal(dialogOf(body).open, false, "first use does not open optional setup");
+  await ui.check(true);
   assert.equal(progressOf(dialogOf(body)).textContent, "Step 1 of 3");
 });
 
@@ -134,13 +139,17 @@ test("reset() closes the dialog, clears the render, and allows a fresh check", a
   const ui = installAccountSetup({ api, owns: () => true, onInbox() {}, onRoom() {} });
   await ui.check();
   const dialog = dialogOf(body);
-  assert.ok(dialog.open, "dialog opens on first check");
+  assert.equal(dialog.open, false, "first check leaves optional setup closed");
+  await ui.check(true);
+  assert.ok(dialog.open, "explicit personalization opens before reset");
   ui.reset();
   assert.equal(dialog.open, false, "reset closes the dialog");
   assert.deepEqual(dialog.children, [], "reset clears the render");
   await ui.check();
-  assert.equal(api.calls.filter((c) => c === "/setup").length, 2, "reset allows a fresh check");
-  assert.ok(dialog.open, "fresh check re-renders");
+  assert.equal(api.calls.filter((c) => c === "/setup").length, 3, "reset allows a fresh check after explicit setup");
+  assert.equal(dialog.open, false, "reset does not reintroduce automatic optional setup");
+  await ui.check(true);
+  assert.ok(dialog.open, "explicit personalization re-renders after reset");
 });
 
 test("in-room setup asks for a name only: Done, no email detour, no set-up-later", async (t) => {
@@ -152,6 +161,8 @@ test("in-room setup asks for a name only: Done, no email detour, no set-up-later
   const ui = installAccountSetup({ api, owns: () => true, onInbox() {}, onRoom() {}, inRoom: () => true });
   await ui.check();
   const dialog = dialogOf(body);
+  assert.equal(dialog.open, false, "entering a room does not interrupt with optional setup");
+  await ui.check(true);
   assert.equal(progressOf(dialog), undefined, "no step progress shown for name-only setup");
   const labels = actionsOf(dialog).children.map((b) => b.textContent);
   assert.deepEqual(labels, ["Done"], "name-only setup offers Done, not Continue / Set up later");
@@ -169,4 +180,26 @@ test("completed setup never renders the dialog and never checks Gmail", async (t
   assert.equal(dialog.open, false, "dialog stays closed");
   assert.deepEqual(dialog.children, [], "nothing renders");
   assert.ok(!api.calls.includes("/gmail"), "Gmail is not consulted for completed setup");
+});
+
+
+test("an explicit room-name request opens deferred setup and resolves after saving", async t => {
+  const { body } = installDom(t);
+  const setup = { completed: false, step: 0, name: "Ava", purpose: "personal" };
+  const api = apiStub({ setup, gmail: { state: "unavailable" } });
+  let roomVisits = 0;
+  const ui = installAccountSetup({ api, owns: () => true, onInbox() {}, onRoom() { roomVisits++; } });
+  await ui.check();
+  const dialog = dialogOf(body);
+  assert.equal(dialog.open, false);
+  const naming = ui.askName();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(dialog.open, true, "a user-requested name prompt still opens after deferred first use");
+  assert.deepEqual(actionsOf(dialog).children.map(button => button.textContent), ["Done"]);
+  actionsOf(dialog).children[0].onclick();
+  await naming;
+  assert.equal(dialog.open, false);
+  assert.equal(setup.completed, true);
+  assert.equal(setup.name, "Ava");
+  assert.equal(roomVisits, 0, "name-only completion does not create or navigate another room");
 });

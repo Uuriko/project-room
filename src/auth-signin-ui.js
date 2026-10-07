@@ -91,8 +91,8 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
   function back() { if (busy) return false; resetCode = ""; return showView("password-login"); }
   const failureText = error => error?.message || uiText("signin.copy.003");
   function panelHtml() {
-    if (welcome) return uiText("signin.copy.004");
     if (pendingTerms) return uiText("signin.copy.005", { fragmentA: busy ? "disabled" : "" });
+    if (welcome) return uiText("signin.copy.004");
     if (pendingLink) return uiText("signin.copy.006", { fragmentA: busy ? "disabled" : "" });
     if (emailMethod === "forgot") return uiText("signin.copy.007");
     if (emailMethod === "reset") {

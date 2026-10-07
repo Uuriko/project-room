@@ -15,26 +15,39 @@ public enum RoomLocation {
     }
 }
 
+@MainActor public protocol RoomAuthenticationSession: AnyObject {
+    var presentationContextProvider: ASWebAuthenticationPresentationContextProviding? { get set }
+    func start() -> Bool
+    func cancel()
+}
+extension ASWebAuthenticationSession: RoomAuthenticationSession {}
+public typealias RoomAuthenticationFactory = @MainActor (URL, String, @escaping (URL?, Error?) -> Void) -> any RoomAuthenticationSession
+
 @MainActor public final class RoomWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate, ASWebAuthenticationPresentationContextProviding {
     public let window: NSWindow
     public let webView: WKWebView
     public let origin: URL
     private let status = NSTextField(labelWithString: "Connecting…")
     private var localTools: LocalToolsWindow?
-    private var authentication: ASWebAuthenticationSession?
+    private var authentication: (any RoomAuthenticationSession)?
+    private let acceptanceAuthenticationFactory: RoomAuthenticationFactory?
     private var wakeObserver: NSObjectProtocol?
     private var pendingDestination: URL?
     private var signInPending = false
+    private var signInAttempt: UUID?
+    private var authenticationCallbackPending = false
     private var signInSlot: String?
     private var cancelledDownloads = Set<ObjectIdentifier>()
     private let acceptanceDownloadDestination: ((String) -> URL?)?
     public private(set) var completedDownloadCount = 0
     public private(set) var failedDownloadCount = 0
 
-    public init(url: URL, isolated: Bool = false, acceptanceDownloadDestination: ((String) -> URL?)? = nil) {
+    public init(url: URL, isolated: Bool = false, acceptanceDownloadDestination: ((String) -> URL?)? = nil, acceptanceAuthenticationFactory: RoomAuthenticationFactory? = nil) {
         precondition(RoomLocation.allowed(url))
         // Destination overrides are restricted to isolated loopback acceptance.
         precondition(acceptanceDownloadDestination == nil || (isolated && url.scheme == "http" && ["localhost", "127.0.0.1"].contains(url.host ?? "")))
+        precondition(acceptanceAuthenticationFactory == nil || (isolated && url.scheme == "http" && ["localhost", "127.0.0.1"].contains(url.host ?? "")))
+        self.acceptanceAuthenticationFactory = acceptanceAuthenticationFactory
         self.acceptanceDownloadDestination = acceptanceDownloadDestination
         self.origin = URL(string: "\(url.scheme!)://\(url.host!)\(url.port.map { ":\($0)" } ?? "")")!
         let config = WKWebViewConfiguration()
@@ -93,63 +106,93 @@ public enum RoomLocation {
         guard let url = webView.url, RoomLocation.sameOrigin(url, origin) else { return }
         webView.evaluateJavaScript("document.querySelector('#room-actions-open')?.click()", completionHandler: nil)
     }
-    @objc public func signIn() {
+    @objc public func signIn() { signIn(provider: nil) }
+    private func signIn(provider: String?) {
         guard !signInPending else { return }
         guard let url = webView.url, RoomLocation.sameOrigin(url, origin) else { return }
+        // Reserve the attempt before either asynchronous WebKit call. A provider
+        // click and menu action must not launch competing browser sessions.
+        let attempt = UUID()
+        signInAttempt = attempt
+        signInPending = true
         webView.evaluateJavaScript("document.querySelector('#auth-panel')?.hidden === false && document.querySelector('#auth-signin-ui')?.getAttribute('aria-busy') !== 'true'") { [weak self] value, _ in
-            guard let self else { return }
-            guard value as? Bool == true else { self.tell("Open Account and sign out before signing in with a different account."); return }
+            guard let self, self.currentAuthentication(attempt) else { return }
+            guard value as? Bool == true else { self.endAuthentication(attempt); self.tell("Open Account and sign out before signing in with a different account."); return }
             Task { @MainActor in
                 do {
                     let slot = try await self.webView.callAsyncJavaScript("const s = await (await fetch('/api/account-session')).json(); if(s.authenticated) throw new Error('Already signed in'); return JSON.stringify([s.sessionBinding,s.sessionRevision]);", arguments: [:], in: nil, contentWorld: .page)
-                    guard let tuple = slot as? String else { return }
+                    guard self.currentAuthentication(attempt) else { return }
+                    guard let tuple = slot as? String else { self.endAuthentication(attempt); return }
                     self.signInSlot = tuple
-                    self.signInPending = true
                     self.webView.isHidden = true
-                    self.beginAuthentication()
-                } catch { self.tell("The account changed. Refresh before signing in.") }
+                    self.beginAuthentication(attempt, provider: provider)
+                } catch {
+                    guard self.currentAuthentication(attempt) else { return }
+                    self.endAuthentication(attempt)
+                    self.tell("The account changed. Refresh before signing in.")
+                }
             }
         }
+    }
+    private func currentAuthentication(_ attempt: UUID) -> Bool {
+        signInPending && signInAttempt == attempt
     }
     private func randomProof() -> String {
         var bytes = [UInt8](repeating: 0, count: 32)
         guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else { fatalError("Secure randomness unavailable") }
         return Data(bytes).base64EncodedString().replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
     }
-    private func beginAuthentication() {
+    private func beginAuthentication(_ attempt: UUID, provider: String?) {
         let state = randomProof(), verifier = randomProof()
         let challenge = Data(SHA256.hash(data: Data(verifier.utf8))).base64EncodedString().replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
         var components = URLComponents(url: origin.appendingPathComponent("api/auth/desktop/start"), resolvingAgainstBaseURL: false)!
         components.queryItems = [URLQueryItem(name: "state", value: state), URLQueryItem(name: "challenge", value: challenge)]
+        if let provider { components.queryItems?.append(URLQueryItem(name: "provider", value: provider)) }
         pendingDestination = webView.url
-        let session = ASWebAuthenticationSession(url: components.url!, callbackURLScheme: "projectroom") { [weak self] callback, error in
+        let completion: (URL?, Error?) -> Void = { [weak self] callback, error in
             Task { @MainActor in
-                guard let self else { return }
+                guard let self, self.currentAuthentication(attempt), self.authenticationCallbackPending else { return }
+                self.authenticationCallbackPending = false
                 self.authentication = nil
-                if error != nil { self.endAuthentication(); self.status.stringValue = "Sign-in cancelled. Your room is unchanged."; return }
+                if let error {
+                    self.endAuthentication(attempt)
+                    let failure = error as NSError
+                    if failure.domain == ASWebAuthenticationSessionErrorDomain && failure.code == ASWebAuthenticationSessionError.Code.canceledLogin.rawValue {
+                        self.status.stringValue = "Sign-in cancelled. Your room is unchanged."
+                    } else {
+                        self.status.stringValue = "Browser sign-in could not finish."
+                        self.tell("Browser sign-in couldn’t finish. Try again, or use email and password in this window.")
+                    }
+                    return
+                }
                 guard let callback, callback.scheme == "projectroom", callback.host == "auth", callback.path.isEmpty,
                       let parts = URLComponents(url: callback, resolvingAgainstBaseURL: false),
                       parts.queryItems?.filter({ $0.name == "state" }).count == 1,
                       parts.queryItems?.first(where: { $0.name == "state" })?.value == state else {
-                    self.endAuthentication(); self.tell("Sign-in did not match this app. Start again."); return
+                    self.endAuthentication(attempt); self.tell("Sign-in did not match this app. Start again."); return
                 }
-                if parts.queryItems?.first(where: { $0.name == "error" })?.value == "access_denied" { self.endAuthentication(); self.status.stringValue = "Sign-in cancelled."; return }
+                if parts.queryItems?.first(where: { $0.name == "error" })?.value == "access_denied" { self.endAuthentication(attempt); self.status.stringValue = "Sign-in cancelled."; return }
                 guard parts.queryItems?.filter({ $0.name == "code" }).count == 1,
                       let code = parts.queryItems?.first(where: { $0.name == "code" })?.value,
-                      code.count == 36 && code.hasPrefix("oac_") else { self.endAuthentication(); self.tell("Sign-in did not finish. Start again."); return }
-                await self.completeAuthentication(code: code, verifier: verifier)
+                      code.count == 36 && code.hasPrefix("oac_") else { self.endAuthentication(attempt); self.tell("Sign-in did not finish. Start again."); return }
+                await self.completeAuthentication(code: code, verifier: verifier, attempt: attempt)
             }
         }
+        let session = acceptanceAuthenticationFactory?(components.url!, "projectroom", completion)
+            ?? ASWebAuthenticationSession(url: components.url!, callbackURLScheme: "projectroom", completionHandler: completion)
         session.presentationContextProvider = self
         authentication = session
-        if !session.start() { authentication = nil; endAuthentication(); tell("The browser sign-in session could not open. Email and password sign-in are available in the window.") }
+        authenticationCallbackPending = true
+        if !session.start() { authentication = nil; endAuthentication(attempt); tell("The browser sign-in session could not open. Email and password sign-in are available in the window.") }
         else { status.stringValue = "Finish signing in in your browser…" }
     }
-    private func endAuthentication() {
-        signInPending = false; signInSlot = nil; webView.isHidden = false
+    private func endAuthentication(_ attempt: UUID) {
+        guard currentAuthentication(attempt) else { return }
+        signInPending = false; signInAttempt = nil; authenticationCallbackPending = false
+        signInSlot = nil; pendingDestination = nil; authentication = nil; webView.isHidden = false
     }
-    private func completeAuthentication(code: String, verifier: String) async {
-        defer { endAuthentication() }
+    private func completeAuthentication(code: String, verifier: String, attempt: UUID) async {
+        defer { endAuthentication(attempt) }
         var request = URLRequest(url: origin.appendingPathComponent("api/auth/desktop/session"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -161,18 +204,31 @@ public enum RoomLocation {
         defer { session.invalidateAndCancel() }
         do {
             let (_, response) = try await session.data(for: request)
+            guard currentAuthentication(attempt) else { return }
             guard let http = response as? HTTPURLResponse, http.statusCode == 201 else { tell("Sign-in expired or could not be confirmed. Start again."); return }
             let headers = http.allHeaderFields.reduce(into: [String: String]()) { result, entry in result[String(describing: entry.key)] = String(describing: entry.value) }
             let cookies = HTTPCookie.cookies(withResponseHeaderFields: headers, for: origin)
             guard let cookie = cookies.first(where: { $0.name == "account_session" || $0.name == "__Host-account_session" }), cookie.isHTTPOnly else { tell("Sign-in could not be installed securely. Start again."); return }
             let slot = try await webView.callAsyncJavaScript("const s = await (await fetch('/api/account-session')).json(); return s.authenticated ? null : JSON.stringify([s.sessionBinding,s.sessionRevision]);", arguments: [:], in: nil, contentWorld: .page)
+            guard currentAuthentication(attempt) else { return }
             guard let tuple = slot as? String, tuple == signInSlot else { tell("The account changed while signing in. Your current session was kept."); return }
             await webView.configuration.websiteDataStore.httpCookieStore.setCookie(cookie)
             status.stringValue = "Signed in"
             webView.isHidden = false
-            open(pendingDestination ?? origin)
+            // A new WK store has no browser account hint. Explicitly restore
+            // the freshly installed session while retaining the original room,
+            // invitation fragment and other destination parameters.
+            var destination = URLComponents(url: pendingDestination ?? origin, resolvingAgainstBaseURL: false)
+            var query = destination?.queryItems ?? []
+            query.removeAll { $0.name == "oauth" }
+            query.append(URLQueryItem(name: "oauth", value: "login"))
+            destination?.queryItems = query
+            open(destination?.url ?? origin)
             pendingDestination = nil
-        } catch { tell("Couldn’t reach Project Room to finish sign-in. Start again when connected.") }
+        } catch {
+            guard currentAuthentication(attempt) else { return }
+            tell("Couldn’t reach Project Room to finish sign-in. Start again when connected.")
+        }
     }
     public func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor { window }
     @objc public func showMyMac() {
@@ -202,7 +258,7 @@ public enum RoomLocation {
         }
         if RoomLocation.sameOrigin(url, origin) {
             if url.path == "/api/auth/google/start" || url.path == "/api/auth/github/start" {
-                decisionHandler(.cancel); signIn(); return
+                decisionHandler(.cancel); signIn(provider: url.path == "/api/auth/google/start" ? "google" : "github"); return
             }
             decisionHandler(.allow); return
         }

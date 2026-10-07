@@ -6,6 +6,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { request as httpRequest } from "node:http";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { GITHUB_START_PATH, GITHUB_CALLBACK_PATH, GITHUB_SCOPES, codeChallengeFor } from "../server/github-oauth.mjs";
@@ -323,4 +324,33 @@ test("callback with a provider denial is 401 and burns the state", async t => {
   // The burned state cannot be reused afterwards.
   const replay = await callback(origin, authorize);
   assert.equal(replay.status, 401);
+});
+
+
+test("cookie GitHub start rejects cross-site or unconfirmed requests and retains CSRF API initiation", async t => {
+  const f = createAcceptanceFixture(), origin = await startServer(t, f, { githubAuth: githubAuth() });
+  const slotResponse = await fetch(origin + '/api/account-session');
+  const slot = await slotResponse.json(), cookie = 'account_session=' + accountCookie(slotResponse);
+  for (const extra of [
+    {},
+    { 'Sec-Fetch-Site': 'cross-site', 'Sec-Fetch-Mode': 'navigate', Origin: origin },
+    { 'Sec-Fetch-Site': 'same-origin' },
+    { 'Sec-Fetch-Mode': 'navigate' },
+    { 'Sec-Fetch-Site': 'same-origin', 'Sec-Fetch-Mode': 'navigate', Origin: 'https://evil.example' }
+  ]) {
+    // Raw HTTP preserves exact Fetch Metadata; fetch implementations may
+    // replace Sec-Fetch-Mode with their own 'cors' mode.
+    const denied = await new Promise((resolve, reject) => {
+      const req = httpRequest(origin + GITHUB_START_PATH, { headers: { Cookie: cookie, ...extra } }, res => {
+        let body = ''; res.on('data', chunk => { body += chunk; });
+        res.on('end', () => resolve({ status: res.statusCode, location: res.headers.location, body: JSON.parse(body) }));
+      });
+      req.on('error', reject); req.end();
+    });
+    assert.equal(denied.status, 403); assert.equal(denied.location, undefined);
+    if (extra.Origin === 'https://evil.example') assert.equal(denied.body.error.code, 'origin_denied');
+  }
+  const api = await fetch(origin + GITHUB_START_PATH, { headers: { Cookie: cookie, Origin: origin, 'X-CSRF-Token': slot.csrf }, redirect: 'manual' });
+  assert.equal(api.status, 302);
+  assert.equal(new URL(api.headers.get('location')).origin, 'https://github.com');
 });

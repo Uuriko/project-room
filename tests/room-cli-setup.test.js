@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, statSync, utimesSync, rmSync, chmodSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, statSync, utimesSync, rmSync, chmodSync, realpathSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
@@ -8,6 +8,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { readAgentConnection } from "../client/agent-connection.mjs";
 import { main } from "../cli/main.mjs";
+import { readPointer } from "../cli/paths.mjs";
 import { nodeSatisfies } from "../cli/commands/doctor.mjs";
 
 const ORIGIN = "http://127.0.0.1:9";
@@ -279,4 +280,22 @@ test("login stores the connection as a private file and the printed result has n
   assert.equal(doctor.out.includes(saved.token), false);
   const token = await run(["token"], { env, cwd: project });
   assert.equal(token.out, saved.token + "\n");
+});
+
+
+test("saved connections accept a canonical home alias and reject symlinks escaping its root", t => {
+  const { root, home, cleanup } = layout();
+  t.after(cleanup);
+  const alias = join(root, "home-alias");
+  symlinkSync(home, alias, "dir");
+  const env = envFor(alias);
+  const directory = realpathSync(join(home, ".project-room", "connections", "room-agent"));
+  writeFileSync(join(directory, "pointer.json"), JSON.stringify({ version: 1, name: "room-agent", configDirectory: directory }), { mode: 0o600 });
+  assert.equal(readPointer("room-agent", env).configDirectory, directory);
+  const outside = join(root, "outside");
+  mkdirSync(outside);
+  const escaped = join(home, ".project-room", "connections", "escape");
+  symlinkSync(outside, escaped, "dir");
+  writeFileSync(join(directory, "pointer.json"), JSON.stringify({ version: 1, name: "room-agent", configDirectory: escaped }), { mode: 0o600 });
+  assert.throws(() => readPointer("room-agent", env), /outside the connection directory/);
 });
