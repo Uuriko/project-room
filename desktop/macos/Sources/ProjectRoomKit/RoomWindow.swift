@@ -154,7 +154,17 @@ public typealias RoomAuthenticationFactory = @MainActor (URL, String, @escaping 
                 guard let self, self.currentAuthentication(attempt), self.authenticationCallbackPending else { return }
                 self.authenticationCallbackPending = false
                 self.authentication = nil
-                if error != nil { self.endAuthentication(attempt); self.status.stringValue = "Sign-in cancelled. Your room is unchanged."; return }
+                if let error {
+                    self.endAuthentication(attempt)
+                    let failure = error as NSError
+                    if failure.domain == ASWebAuthenticationSessionErrorDomain && failure.code == ASWebAuthenticationSessionError.Code.canceledLogin.rawValue {
+                        self.status.stringValue = "Sign-in cancelled. Your room is unchanged."
+                    } else {
+                        self.status.stringValue = "Browser sign-in could not finish."
+                        self.tell("Browser sign-in couldn’t finish. Try again, or use email and password in this window.")
+                    }
+                    return
+                }
                 guard let callback, callback.scheme == "projectroom", callback.host == "auth", callback.path.isEmpty,
                       let parts = URLComponents(url: callback, resolvingAgainstBaseURL: false),
                       parts.queryItems?.filter({ $0.name == "state" }).count == 1,

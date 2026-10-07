@@ -9,11 +9,13 @@ import { googleAuth, clientId } from '../../scripts/helpers/google-oauth-fixture
 import { createAcceptanceFixture } from '../../scripts/acceptance-fixture.mjs';
 import { createRoomServer } from '../../server/http.mjs';
 if (process.platform !== 'darwin') throw new Error('Native WKWebView acceptance requires macOS');
+const selectedProvider = process.argv.includes('--selected-provider');
 const fixture = createAcceptanceFixture(), server = createRoomServer({ store: fixture.store, googleAuth: googleAuth() });
 const handler = server.listeners('request')[0];
-let origin, browser, provider, snapshots = 0, embeddedGoogleRequests = 0, desktopRedemptions = 0;
+let origin, browser, provider, snapshots = 0, embeddedGoogleRequests = 0, desktopRedemptions = 0, providerAuthorizations = 0;
 async function completeBrowser(start) {
   const target = new URL(start); assert.equal(target.origin, origin); assert.equal(target.pathname, '/api/auth/desktop/start');
+  assert.equal(target.searchParams.get('provider'), 'google');
   const page = await browser.newPage(); page.setDefaultTimeout(10000);
   try {
     await page.route(`${origin}/api/auth/google/start`, async route => {
@@ -24,8 +26,10 @@ async function completeBrowser(start) {
     // Keep OS custom-scheme handling isolated; obtain its real Location via the API client below.
     await page.route(`${origin}/api/auth/desktop/callback?**`, route => route.fulfill({ status: 200, contentType: 'text/html', body: 'Native callback captured' }));
     await page.goto(target.href);
-    await page.getByRole('button', { name: 'Log in', exact: true }).click();
-    await page.locator('#google-signin').click();
+    if (!selectedProvider) {
+      await page.getByRole('button', { name: 'Log in', exact: true }).click();
+      await page.locator('#google-signin').click();
+    }
     await page.waitForURL(url => url.pathname === '/oauth/authorize');
     assert.equal(new URL(page.url()).searchParams.get('state'), target.searchParams.get('state'));
     const allowed = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === '/oauth/authorize');
@@ -53,6 +57,7 @@ server.on('request', async (req, res) => {
 try {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); origin = `http://127.0.0.1:${server.address().port}`;
   provider = createServer((req, res) => {
+    providerAuthorizations++;
     const url = new URL(req.url, 'https://accounts.google.com');
     assert.equal(url.pathname, '/o/oauth2/v2/auth'); assert.equal(url.searchParams.get('client_id'), clientId);
     assert.equal(url.searchParams.get('redirect_uri'), `${origin}/api/auth/google/callback`);
@@ -64,8 +69,9 @@ try {
   child.stdout.pipe(process.stdout); child.stderr.pipe(process.stderr);
   const timer = setTimeout(() => child.kill('SIGTERM'), 30000);
   let status; try { status = await new Promise((resolve, reject) => { child.once('error', reject); child.once('close', (code, signal) => resolve({ code, signal })); }); } finally { clearTimeout(timer); }
-  console.log(JSON.stringify({ nativeStatus: status, actualAccountSnapshots: snapshots, embeddedGoogleRequests, desktopRedemptions }));
+  console.log(JSON.stringify({ nativeStatus: status, actualAccountSnapshots: snapshots, embeddedGoogleRequests, desktopRedemptions, providerAuthorizations, selectedProvider }));
   assert.deepEqual(status, { code: 0, signal: null }); assert.ok(snapshots > 0); assert.equal(embeddedGoogleRequests, 0);
+  assert.equal(providerAuthorizations, 1, 'exactly one external provider authorization');
   assert.equal(desktopRedemptions, 1, 'only successful current attempt redeems the real code');
 } finally {
   await browser?.close(); if (provider) { provider.closeAllConnections(); await new Promise(resolve => provider.close(resolve)); }

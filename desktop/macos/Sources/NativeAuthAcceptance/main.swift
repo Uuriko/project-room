@@ -33,7 +33,7 @@ import ProjectRoomKit
         }
         return startResult
     }
-    func cancel() { callback(nil, NSError(domain: "synthetic cancellation", code: 1)) }
+    func cancel() { callback(nil, NSError(domain: ASWebAuthenticationSessionErrorDomain, code: ASWebAuthenticationSessionError.Code.canceledLogin.rawValue)) }
 }
 @MainActor final class Acceptance: NSObject, NSApplicationDelegate {
     let url: URL
@@ -70,6 +70,8 @@ import ProjectRoomKit
                 sessions[0].cancel()
                 try await Task.sleep(nanoseconds: 100_000_000)
                 guard !room.webView.isHidden else { fatalError("Cancellation left the app hidden") }
+                @MainActor func labels(_ view: NSView) -> [String] { ((view as? NSTextField).map { [$0.stringValue] } ?? []) + view.subviews.flatMap(labels) }
+                guard let content = room.window.contentView, labels(content).contains("Sign-in cancelled. Your room is unchanged."), room.window.attachedSheet == nil else { fatalError("Actual canceledLogin must use cancellation copy without a failure dialog") }
                 print("NATIVE_AUTH_SINGLE_ATTEMPT passed; cancel restores visible app")
                 _ = try await room.webView.evaluateJavaScript("document.querySelector('#google-signin').click(); true")
                 try await Task.sleep(nanoseconds: 500_000_000)
@@ -88,7 +90,7 @@ import ProjectRoomKit
                 guard sessions.count == 3, sessions[2].provider == nil, !room.webView.isHidden else { fatalError("Browser startup failure did not restore the app") }
                 if let sheet = room.window.attachedSheet, let content = sheet.contentView {
                     @MainActor func findDefault(_ view: NSView) -> NSButton? {
-                        if let button = view as? NSButton, button.keyEquivalent == "\r" { return button }
+                        if let button = view as? NSButton, (button.keyEquivalent == "\r" || button.title == "OK") { return button }
                         return view.subviews.lazy.compactMap { findDefault($0) }.first
                     }
                     guard let button = findDefault(content) else { fatalError("Failure must offer a visible recovery acknowledgement") }
@@ -102,10 +104,22 @@ import ProjectRoomKit
                 try await Task.sleep(nanoseconds: 100_000_000)
                 guard !room.webView.isHidden else { fatalError("Final cancellation did not restore the original app") }
                 print("NATIVE_AUTH_START_FAILURE passed; visible explanation and new retry")
+                room.signIn()
+                try await Task.sleep(nanoseconds: 500_000_000)
+                guard sessions.count == 5, room.webView.isHidden else { fatalError("Browser error owner requires a current attempt") }
+                sessions[4].callback(nil, NSError(domain: "synthetic browser failure", code: 29, userInfo: [NSLocalizedDescriptionKey: "SECRET raw provider detail"]))
+                try await Task.sleep(nanoseconds: 100_000_000)
+                guard !room.webView.isHidden, let failure = room.window.attachedSheet?.contentView else { fatalError("Non-cancellation browser failure must restore app and explain retry") }
+                @MainActor func descendantViews(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendantViews) }
+                let failureText = descendantViews(failure).compactMap { ($0 as? NSTextField)?.stringValue }.joined(separator: " ")
+                guard failureText.contains("Try again"), failureText.contains("email and password"), !failureText.contains("cancelled"), !failureText.contains("SECRET") else { fatalError("Browser failure was mislabeled cancellation or leaked raw details") }
+                guard let acknowledgement = descendantViews(failure).compactMap({ $0 as? NSButton }).first(where: { $0.keyEquivalent == "\r" || $0.title == "OK" }) else { fatalError("Browser failure requires a visible acknowledgement") }
+                acknowledgement.performClick(nil)
+                print("NATIVE_AUTH_BROWSER_ERROR passed; failure distinguished from cancellation and app restored")
                 _ = try await room.webView.evaluateJavaScript("window.location.href = '/api/auth/github/start'; true")
                 try await Task.sleep(nanoseconds: 500_000_000)
-                guard sessions.count == 5, sessions[4].provider == "github", room.webView.isHidden else { fatalError("GitHub choice did not survive native handoff") }
-                sessions[4].cancel()
+                guard sessions.count == 6, sessions[5].provider == "github", room.webView.isHidden else { fatalError("GitHub choice did not survive native handoff") }
+                sessions[5].cancel()
                 try await Task.sleep(nanoseconds: 100_000_000)
                 guard !room.webView.isHidden else { fatalError("GitHub cancellation did not restore app") }
                 print("NATIVE_AUTH_PROVIDER_INTENT passed; Google/GitHub preserved; generic menu omits provider")
@@ -118,7 +132,7 @@ import ProjectRoomKit
                     let raw = try? await room.webView.callAsyncJavaScript("return await (await fetch('/api/account-session')).json();", arguments: [:], in: nil, contentWorld: .page)
                     if let result = raw as? [String: Any], result["authenticated"] as? Bool == true { nativeSession = result; break }
                 }
-                guard sessions.count == 6, sessions[5].provider == "google", !room.webView.isHidden,
+                guard sessions.count == 7, sessions[6].provider == "google", !room.webView.isHidden,
                       let account = nativeSession?["account"] as? [String: Any], account["id"] as? String == "google:123456789012345678901" else { fatalError("Native cookie installation did not produce the real Google account") }
                 let cookies = await withCheckedContinuation { continuation in
                     room.webView.configuration.websiteDataStore.httpCookieStore.getAllCookies { continuation.resume(returning: $0) }
