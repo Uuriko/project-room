@@ -12,9 +12,17 @@ Current qualification checkpoint (2026-10-07 UTC)
   passed 69/69; real Worker Chromium journeys passed 4/4, with no skips.
 - Separate immutable human acceptance passed 10/10 real Chromium journeys:
   account creation, login, mobile history, invite restoration and shared chat.
-- Required browser shards remain unresolved: the first two exposed outdated
-  login/Advanced/message fixtures. Preserve primary assertions and verify
-  destination-scoped draft restoration before qualifying a corrected head.
+- Required browser shards completed with109 failures, primarily outdated
+  login/Advanced/message fixtures and intentional entrance/room visuals.
+  First two repair packets pass60 distinct owner cases; destination-scoped
+  drafts and exact return navigation are preserved without product changes.
+- UI coverage51.5% missed the unchanged51.7% ratchet. Seven new notification
+  lifecycle owners cover157/160 previously unexecuted browser-push lines,
+  including deferred permission/registration and sign-out races. Combined
+  recovery/manifest/push owners pass43/43 on Node24. Hosted final proof remains.
+- New main eb0ae63d was reconciled explicitly: both private inbox account
+  retirement owners and the repaired privacy diagnostic stay blocking.
+  Broad quarantine skips introduced by PR1718 are not part of this release.
 - Local Mac app built from b67ce146 and passed strict/deep ad-hoc signature
   verification. Developer ID signing and notarization are unavailable here;
   this is a local artifact, not a qualified public Mac download.
