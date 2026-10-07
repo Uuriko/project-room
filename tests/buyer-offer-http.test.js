@@ -1,3 +1,7 @@
+// The real HTTP lifecycle below also executes server/demigod-offers.mjs,
+// server/demigod-contracts.mjs, and server/buyer-signoff.mjs: accepted offer
+// snapshots, worker acknowledgment, candidate submission, and buyer review.
+// Primary HTTP owner for server/routes/record-rails.mjs: real mounted routes, party authority, privacy, and exact retry outcomes through createRoomServer.
 import {submittedTrial,addRailMember} from "../scripts/record-rails-fixture.mjs";
 import test from 'node:test';
 import assert from 'node:assert/strict';

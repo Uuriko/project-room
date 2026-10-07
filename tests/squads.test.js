@@ -1,3 +1,4 @@
+// Primary HTTP owner for server/routes/squads.mjs: mounted squad creation, roster authority, and disband behavior through createRoomServer.
 // plan-squads: squad object {id,name,goal,members,channel}; the channel is a
 // room thread (thread-root message id); @squad/<name> fans out to members via
 // the mention lifecycle; work offers target a squad through claim.squadId.

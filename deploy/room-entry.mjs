@@ -138,8 +138,8 @@ export function wantsPublicDoorHtml(accept) {
 
 // No fragment in Location: browsers inherit the incoming invitation, legacy
 // code, or room fragment across this redirect. Keep query bytes unchanged.
-export function publicRoomAppUrl(requestUrl) {
-  return `${ROOM_ORIGIN}/${new URL(requestUrl).search}`;
+export function publicRoomAppUrl(requestUrl, appOrigin = ROOM_ORIGIN) {
+  return `${appOrigin}/${new URL(requestUrl).search}`;
 }
 
 export function publicRoomDoorHtml() {

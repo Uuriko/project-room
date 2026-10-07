@@ -1630,8 +1630,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!["GET", "HEAD"].includes(req.method)) reject(405, "method_not_allowed", "Method not allowed");
         if (wantsPublicDoorHtml(req.headers.accept)) {
           res.setHeader("Cache-Control", "no-store");
-          res.setHeader("Link", `${discoveryLinks(url)}, <${ROOM_ORIGIN}/>; rel="canonical"`);
-          res.writeHead(302, { Location: publicRoomAppUrl(url.href) });
+          res.setHeader("Link", `${discoveryLinks(url)}, <${expectedOrigin()}/>; rel="canonical"`);
+          res.writeHead(302, { Location: publicRoomAppUrl(url.href, expectedOrigin()) });
           return res.end();
         }
         const packet = discoveryDoc("/llms.txt");

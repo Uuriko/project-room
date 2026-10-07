@@ -254,7 +254,7 @@ test("HTTP public doors redirect HTML, preserve query, and retain plain packets 
     for (const method of ["GET", "HEAD"]) {
       const response = await fetch(`${origin}${path}?start=room&room=qa&next=%2Fabout`, {method, redirect:"manual", headers:{Accept:"text/html"}});
       assert.equal(response.status,302);
-      assert.equal(response.headers.get("Location"), `${ROOM_ORIGIN}/?start=room&room=qa&next=%2Fabout`);
+      assert.equal(response.headers.get("Location"), `${origin}/?start=room&room=qa&next=%2Fabout`);
       assert.equal(await response.text(), "");
     }
     const packet = await fetch(origin+path,{headers:{Accept:"text/plain"}});

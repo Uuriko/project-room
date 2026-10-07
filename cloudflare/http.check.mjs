@@ -96,7 +96,7 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     assert.match(await page.text(), /message-input/);
     const door = await call('/room', { redirect: 'manual', headers: { Accept: 'text/html' } });
     assert.equal(door.status, 302);
-    assert.equal(door.headers.get('location'), 'https://room.trydemigod.com/');
+    assert.equal(door.headers.get('location'), origin + '/');
     assert.equal(await door.text(), '', 'minimal app replaces the public wrapper');
     // Edge aliases preserve the query and redirect without a fragment so the
     // browser inherits invitation/room hashes. Never follow this to production.
@@ -106,7 +106,7 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
         redirect: 'manual', headers: { Accept: 'text/html', 'CF-Connecting-IP': '192.0.2.1' }
       });
       assert.equal(edgeDoor.status, 302);
-      assert.equal(edgeDoor.headers.get('location'), new URL('?ref=x&next=%2Fabout', 'https://room.trydemigod.com/').href);
+      assert.equal(edgeDoor.headers.get('location'), new URL('?ref=x&next=%2Fabout', origin + '/').href);
       assert.equal(edgeDoor.headers.get('cache-control'), 'no-store');
       assert.equal(await edgeDoor.text(), '');
     }

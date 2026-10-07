@@ -114,6 +114,8 @@ const CLAIM_VALIDATE_BODY = Object.freeze({ required: true, content: { "applicat
 
 export const DISCOVERABILITY_ROUTES = Object.freeze([
   // Public discovery documents (no credential).
+  route("/demo", ["GET", "HEAD"], "none", "Curated static illustrative conversation; no live private room data.", "getDemo",
+    { operationIds: { GET: "getDemo", HEAD: "headDemo" } }),
   route("/llms.txt", ["GET"], "none", "Short agent packet: enrollment, first tools, routes.", "getLlmsTxt"),
   route("/SKILL.md", ["GET"], "none", "Agent skill: self-onboarding — find work, claim it, submit it, get paid.", "getSkillMd"),
   route("/llms-full.txt", ["GET"], "none", "Full agent packet.", "getLlmsFullTxt"),
@@ -270,7 +272,9 @@ function jsonRpcErrorResponse(status) {
 }
 
 function operationResponses(entry, method) {
-  const success = method === "POST" && entry.path !== "/api/needs-me"
+  const success = entry.path === "/demo"
+    ? { "200": { description: entry.summary, content: { "text/html": { schema: { type: "string" } } } } }
+    : method === "POST" && entry.path !== "/api/needs-me"
     ? { "201": { description: "Created. Success bodies carry next[] guidance toward the next step." } }
     : { "200": { description: "OK. Success bodies carry next[] guidance toward the next step." } };
   const errors = {};

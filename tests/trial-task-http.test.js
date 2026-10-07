@@ -1,3 +1,6 @@
+// Primary HTTP persistence/authority owner for server/trial-task-store.mjs:
+// anonymous/non-party denial, bound-candidate writes, exact retries, receipts,
+// and backup/restart below execute the real store through createRoomServer.
 import {createRuntimePackage} from "../scripts/runtime-package.mjs";
 import {pathToFileURL} from "node:url";
 import {createOperatorPurge} from "../server/operator-purge.mjs";

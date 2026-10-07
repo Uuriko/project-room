@@ -466,7 +466,7 @@ test("advertised door root redirects to the app; packets stay at /room/llms.txt"
   for (const path of ["/room", "/room/"]) {
     const res = await fetch(`${base}${path}`, {redirect:"manual"});
     assert.equal(res.status, 302, path);
-    assert.equal(res.headers.get("Location"), "https://room.trydemigod.com/");
+    assert.equal(res.headers.get("Location"), `${base}/`);
     assert.equal(await res.text(), "");
     const head = await fetch(`${base}${path}`, { method: "HEAD", redirect:"manual" });
     assert.equal(head.status, 302, path);

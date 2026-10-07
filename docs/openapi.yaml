@@ -1697,9 +1697,11 @@ paths:
         '401':
           description: No room credential, or membership ended (unauthenticated)
     post:
+      x-room-permission: member
       summary: Create a squad
       description: |
-        plan-squads. Any active member may create a squad; the creator becomes
+        plan-squads. Any active non-guest member may create a squad in a
+        non-archived room; the creator becomes
         owner and is added to the roster automatically. `channelMessageId`,
         when given, must be a live message in this room (the squad's channel
         is the thread rooted at that message). Squad names are unique per
@@ -1757,6 +1759,7 @@ paths:
           description: No such squad in this room (squad_not_found)
   /api/rooms/{roomId}/squads/{squadId}/members:
     post:
+      x-room-permission: squad_owner|self
       summary: Update the squad roster
       description: |
         plan-squads. Only the squad owner may add members or remove other
@@ -1796,6 +1799,7 @@ paths:
           $ref: '#/components/responses/InvalidInput'
   /api/rooms/{roomId}/squads/{squadId}/disband:
     post:
+      x-room-permission: squad_owner
       summary: Disband a squad
       description: |
         plan-squads. Owner only. A disbanded squad stays listed with state
@@ -13138,6 +13142,7 @@ paths:
         '200': { description: "{ roomId, configured, default: mentions_and_dms, preferences: { mention, dm }, publicKey? } plus the viewer ownership envelope" }
         '403': { description: human_push_humans_only }
     patch:
+      x-room-permission: human_member
       summary: Set this member's push-channel preferences
       description: >-
         Body is `{ preferences: { mention?, dm? } }`, a partial merge over the
@@ -13152,6 +13157,7 @@ paths:
         '403': { description: human_push_humans_only }
         '422': { description: invalid_human_push_preferences }
     post:
+      x-room-permission: human_member
       summary: Store this browser's push subscription
       description: >-
         Body is the browser PushSubscription: endpoint, keys { p256dh, auth },
@@ -13168,6 +13174,7 @@ paths:
         '409': { description: human_push_device_limit }
         '422': { description: invalid_human_push }
     delete:
+      x-room-permission: human_member
       summary: Remove this browser's push subscription
       description: Body is `{ endpoint }`. Idempotent when the endpoint is already gone.
       parameters:
@@ -15217,9 +15224,10 @@ paths:
         '409': {description: Revision or exact retry conflict}
         '422': {description: Invalid input or receipt binding}
     post:
+      x-room-permission: owner
       summary: demigod-offers-create (private, record-only)
       operationId: demigod-offers-create
-      description: Active room membership and party authority required. No money moves. Writes require CSRF for browsers and rooms write scope for API keys. Trial verdict requires owner-configured receipt trust and exact signed binding.
+      description: Active room membership required; agent writes additionally require accept_work. No money moves. Browser writes require CSRF and API keys require rooms write scope. Only the room owner creates offers.
       parameters:
         - in: path
           name: roomId
@@ -15258,9 +15266,10 @@ paths:
         '422': {description: Invalid input or receipt binding}
   /api/rooms/{roomId}/demigod-offers/{recordId}/present:
     post:
+      x-room-permission: owner
       summary: demigod-offers-present (private, record-only)
       operationId: demigod-offers-present
-      description: Active room membership and party authority required. No money moves. Writes require CSRF for browsers and rooms write scope for API keys. Trial verdict requires owner-configured receipt trust and exact signed binding.
+      description: Active room membership required; agent writes additionally require accept_work. No money moves. Browser writes require CSRF and API keys require rooms write scope. Only the room owner may present an offer.
       parameters:
         - in: path
           name: roomId
@@ -15283,9 +15292,10 @@ paths:
         '422': {description: Invalid input or receipt binding}
   /api/rooms/{roomId}/demigod-offers/{recordId}/accept:
     post:
+      x-room-permission: owner|buyer
       summary: demigod-offers-accept (private, record-only)
       operationId: demigod-offers-accept
-      description: Active room membership and party authority required. No money moves. Writes require CSRF for browsers and rooms write scope for API keys. Trial verdict requires owner-configured receipt trust and exact signed binding.
+      description: Active room membership required; agent writes additionally require accept_work. No money moves. Browser writes require CSRF and API keys require rooms write scope. Only the named buyer or room owner may accept an offer.
       parameters:
         - in: path
           name: roomId
@@ -15308,9 +15318,10 @@ paths:
         '422': {description: Invalid input or receipt binding}
   /api/rooms/{roomId}/demigod-offers/{recordId}/decline:
     post:
+      x-room-permission: owner|buyer
       summary: demigod-offers-decline (private, record-only)
       operationId: demigod-offers-decline
-      description: Active room membership and party authority required. No money moves. Writes require CSRF for browsers and rooms write scope for API keys. Trial verdict requires owner-configured receipt trust and exact signed binding.
+      description: Active room membership required; agent writes additionally require accept_work. No money moves. Browser writes require CSRF and API keys require rooms write scope. Only the named buyer or room owner may decline an offer.
       parameters:
         - in: path
           name: roomId
@@ -15333,9 +15344,10 @@ paths:
         '422': {description: Invalid input or receipt binding}
   /api/rooms/{roomId}/demigod-offers/{recordId}/expire:
     post:
+      x-room-permission: owner
       summary: demigod-offers-expire (private, record-only)
       operationId: demigod-offers-expire
-      description: Active room membership and party authority required. No money moves. Writes require CSRF for browsers and rooms write scope for API keys. Trial verdict requires owner-configured receipt trust and exact signed binding.
+      description: Active room membership required; agent writes additionally require accept_work. No money moves. Browser writes require CSRF and API keys require rooms write scope. Only the room owner may expire an offer.
       parameters:
         - in: path
           name: roomId
@@ -15358,9 +15370,10 @@ paths:
         '422': {description: Invalid input or receipt binding}
   /api/rooms/{roomId}/demigod-offers/{recordId}/withdraw:
     post:
+      x-room-permission: owner
       summary: demigod-offers-withdraw (private, record-only)
       operationId: demigod-offers-withdraw
-      description: Active room membership and party authority required. No money moves. Writes require CSRF for browsers and rooms write scope for API keys. Trial verdict requires owner-configured receipt trust and exact signed binding.
+      description: Active room membership required; agent writes additionally require accept_work. No money moves. Browser writes require CSRF and API keys require rooms write scope. Only the room owner may withdraw an offer.
       parameters:
         - in: path
           name: roomId
@@ -15418,9 +15431,10 @@ paths:
         '409': {description: Revision or exact retry conflict}
         '422': {description: Invalid input or receipt binding}
     post:
+      x-room-permission: owner|buyer
       summary: demigod-contracts-create (private, record-only)
       operationId: demigod-contracts-create
-      description: Active room membership and party authority required. No money moves. Writes require CSRF for browsers and rooms write scope for API keys. Trial verdict requires owner-configured receipt trust and exact signed binding.
+      description: Active room membership required; agent writes additionally require accept_work. No money moves. Browser writes require CSRF and API keys require rooms write scope. Only the named buyer or room owner creates the contract from its accepted offer.
       parameters:
         - in: path
           name: roomId
@@ -15459,9 +15473,10 @@ paths:
         '422': {description: Invalid input or receipt binding}
   /api/rooms/{roomId}/demigod-contracts/{recordId}/acknowledge:
     post:
+      x-room-permission: worker|owner
       summary: demigod-contracts-acknowledge (private, record-only)
       operationId: demigod-contracts-acknowledge
-      description: Active room membership and party authority required. No money moves. Writes require CSRF for browsers and rooms write scope for API keys. Trial verdict requires owner-configured receipt trust and exact signed binding.
+      description: Active room membership required; agent writes additionally require accept_work. No money moves. Browser writes require CSRF and API keys require rooms write scope. Only the named worker acknowledges; the room owner may acknowledge only when no worker is assigned.
       parameters:
         - in: path
           name: roomId
@@ -15484,9 +15499,10 @@ paths:
         '422': {description: Invalid input or receipt binding}
   /api/rooms/{roomId}/demigod-contracts/{recordId}/complete:
     post:
+      x-room-permission: owner|buyer
       summary: demigod-contracts-complete (private, record-only)
       operationId: demigod-contracts-complete
-      description: Active room membership and party authority required. No money moves. Writes require CSRF for browsers and rooms write scope for API keys. Trial verdict requires owner-configured receipt trust and exact signed binding.
+      description: Active room membership required; agent writes additionally require accept_work. No money moves. Browser writes require CSRF and API keys require rooms write scope. Only the named buyer or room owner completes an active contract against an exactly bound verified receipt.
       parameters:
         - in: path
           name: roomId
@@ -15509,9 +15525,10 @@ paths:
         '422': {description: Invalid input or receipt binding}
   /api/rooms/{roomId}/demigod-contracts/{recordId}/terminate:
     post:
+      x-room-permission: owner|buyer
       summary: demigod-contracts-terminate (private, record-only)
       operationId: demigod-contracts-terminate
-      description: Active room membership and party authority required. No money moves. Writes require CSRF for browsers and rooms write scope for API keys. Trial verdict requires owner-configured receipt trust and exact signed binding.
+      description: Active room membership required; agent writes additionally require accept_work. No money moves. Browser writes require CSRF and API keys require rooms write scope. Only the named buyer or room owner terminates the contract.
       parameters:
         - in: path
           name: roomId
@@ -15549,9 +15566,10 @@ paths:
         '409': {description: Revision or exact retry conflict}
         '422': {description: Invalid input or receipt binding}
     post:
+      x-room-permission: owner|buyer
       summary: signoff-loops-create (private, record-only)
       operationId: signoff-loops-create
-      description: Active room membership and party authority required. No money moves. Writes require CSRF for browsers and rooms write scope for API keys. Trial verdict requires owner-configured receipt trust and exact signed binding.
+      description: Active room membership required; agent writes additionally require accept_work. No money moves. Browser writes require CSRF and API keys require rooms write scope. Only the trial buyer or room owner creates the loop, preserving trial and optional active contract party bindings.
       parameters:
         - in: path
           name: roomId
@@ -15590,9 +15608,10 @@ paths:
         '422': {description: Invalid input or receipt binding}
   /api/rooms/{roomId}/signoff-loops/{recordId}/submit:
     post:
+      x-room-permission: candidate
       summary: signoff-loops-submit (private, record-only)
       operationId: signoff-loops-submit
-      description: Active room membership and party authority required. No money moves. Writes require CSRF for browsers and rooms write scope for API keys. Trial verdict requires owner-configured receipt trust and exact signed binding.
+      description: Active room membership required; agent writes additionally require accept_work. No money moves. Browser writes require CSRF and API keys require rooms write scope. Only the bound trial candidate submits, and candidateId must match the caller.
       parameters:
         - in: path
           name: roomId
@@ -15615,9 +15634,10 @@ paths:
         '422': {description: Invalid input or receipt binding}
   /api/rooms/{roomId}/signoff-loops/{recordId}/review:
     post:
+      x-room-permission: buyer
       summary: signoff-loops-review (private, record-only)
       operationId: signoff-loops-review
-      description: Active room membership and party authority required. No money moves. Writes require CSRF for browsers and rooms write scope for API keys. Trial verdict requires owner-configured receipt trust and exact signed binding.
+      description: Active room membership required; agent writes additionally require accept_work. No money moves. Browser writes require CSRF and API keys require rooms write scope. Only the loop buyer reviews; room ownership does not bypass this check.
       parameters:
         - in: path
           name: roomId
@@ -15640,9 +15660,10 @@ paths:
         '422': {description: Invalid input or receipt binding}
   /api/rooms/{roomId}/signoff-loops/{recordId}/cancel:
     post:
+      x-room-permission: owner|buyer
       summary: signoff-loops-cancel (private, record-only)
       operationId: signoff-loops-cancel
-      description: Active room membership and party authority required. No money moves. Writes require CSRF for browsers and rooms write scope for API keys. Trial verdict requires owner-configured receipt trust and exact signed binding.
+      description: Active room membership required; agent writes additionally require accept_work. No money moves. Browser writes require CSRF and API keys require rooms write scope. Only the loop buyer or room owner cancels.
       parameters:
         - in: path
           name: roomId
@@ -15700,9 +15721,10 @@ paths:
         '409': {description: Revision or exact retry conflict}
         '422': {description: Invalid input or receipt binding}
     post:
+      x-room-permission: owner|buyer|candidate
       summary: trial-tasks-apply (private, record-only)
       operationId: trial-tasks-apply
-      description: Active room membership and party authority required. No money moves. Writes require CSRF for browsers and rooms write scope for API keys. Trial verdict requires owner-configured receipt trust and exact signed binding.
+      description: Active room membership required; agent writes additionally require accept_work. No money moves. Browser writes require CSRF and API keys require rooms write scope. Configure, quote policy, and create actions require room ownership. Claim and submit require the bound candidate; fund, verdict, receipt, block, resume, and release require the bound buyer or room owner. Verdict receipts require owner-configured trust and exact signed binding.
       parameters:
         - in: path
           name: roomId

@@ -69,10 +69,23 @@ test("served /openapi.json matches the routes the server actually serves", async
   assert.equal(doc.openapi, "3.1.0", "served document is OpenAPI 3.1");
   assert.ok(doc.paths && typeof doc.paths === "object", "served document has paths");
 
+  // /demo is the declarative public HTML exception to the API inventory.
+  // Its served documentation must describe the actual anonymous response.
+  for (const method of ["get", "head"]) {
+    const operation = doc.paths["/demo"]?.[method];
+    assert.ok(operation, `served inventory includes ${method.toUpperCase()} /demo`);
+    assert.deepEqual(operation.security ?? doc.security ?? [], []);
+    assert.equal(operation.responses["200"].content["text/html"].schema.type, "string");
+    const demo = await fetch(origin + "/demo", { method: method.toUpperCase() });
+    assert.equal(demo.status, 200);
+    assert.match(demo.headers.get("content-type"), /text\/html/);
+    if (method === "head") assert.equal(await demo.text(), "");
+  }
+
   const served = servedRouteTemplates(routeSources(ROOT + "/"));
   const specApi = new Map();
   for (const [path, item] of Object.entries(doc.paths)) {
-    if (!path.startsWith("/api/")) continue;
+    if (!path.startsWith("/api/") && !served.has(templateKey(path))) continue;
     assert.ok(item && typeof item === "object", `spec path ${path} has an operations object`);
     specApi.set(templateKey(path), path);
   }
