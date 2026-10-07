@@ -86,7 +86,7 @@ jobs:
       - name: Cold-start budget
         if: steps.gate.outputs.ready == 'true'
         shell: bash
-        run: node scripts/cold-start-probe.mjs --base https://project-room-stage.getdasha.workers.dev --max-ms 2000 | tee cold-start.json
+        run: node scripts/cold-start-probe.mjs --base https://project-room-stage.getdasha.workers.dev --max-ms 2000 --max-wall-ms 5000 | tee cold-start.json
       - if: steps.gate.outputs.ready == 'true'
         run: npx playwright install --with-deps chromium
       - if: steps.gate.outputs.ready == 'true'

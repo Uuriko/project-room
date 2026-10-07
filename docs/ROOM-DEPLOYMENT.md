@@ -36,11 +36,11 @@ Worker secrets on `project-room-stage` are optional for the public smoke. Set a 
 From the repo root, against the staging origin, before any other traffic so the first request is still a cold start:
 
 ```sh
-node scripts/cold-start-probe.mjs --base https://project-room-stage.getdasha.workers.dev --max-ms 2000
+node scripts/cold-start-probe.mjs --base https://project-room-stage.getdasha.workers.dev --max-ms 2000 --max-wall-ms 5000
 ROOM_SMOKE_ORIGIN=https://project-room-stage.getdasha.workers.dev node scripts/live-smoke.mjs --browser
 ```
 
-The cold-start probe fails when the first `/api/version` takes 2 seconds or more. The smoke checks public pages only. It does not sign in.
+The cold-start probe fails when the Worker's own `Server-Timing: total` for the first `/api/version` is 2 seconds or more (that covers the Durable Object cold start), or when the whole request takes 5 seconds or more from the runner. Without a Worker timing it falls back to 2 seconds of wall clock. The report splits Worker time from network and edge time. The smoke checks public pages only. It does not sign in.
 
 Also run the cross-worker identity check in `cloudflare/http.check.mjs` in CI (the `cloudflare` job). That check proves the entry and the canonical Worker still share one production namespace, and that staging's binding has no `script_name`.
 
