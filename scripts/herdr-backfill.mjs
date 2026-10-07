@@ -31,7 +31,6 @@
 import { DatabaseSync } from "node:sqlite";
 
 export const BACKFILL_PROTOCOL = "herdr-backfill/1";
-const TERMINAL_KINDS = new Set(["backfill_done", "backfill_aborted"]);
 const NO_HERDR_HOST_CLASSES = new Set(["paste-relay", "pull-only"]);
 
 export const idempotencyKey = (roomId, claimId) => `backfill:${roomId}:${claimId}`;
@@ -332,7 +331,7 @@ export function createBackfillExecutor(opts) {
 
   function execute(roomIds, runOpts = {}) {
     const { confirm = false, batch = ctx.batchSize, limit = Infinity,
-      resume = false, fromCursor = null, plan = null, json = false } = runOpts;
+      resume = false, fromCursor = null, plan = null } = runOpts;
     const fullPlan = loadPlan(roomIds, plan);
     if (!confirm) {
       // Dry-run: enumerate eligibility, write nothing.
