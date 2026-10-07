@@ -84,3 +84,23 @@ test("only the room creator mints elevated links, and elevated links need a real
   const slot = f.store.createAccountSessionSlot();
   assert.throws(() => f.joinHuman(elevated.linkToken, slot, "Passerby"), { code: "sign_in_required" });
 });
+
+test("join-agent tells the agent what its link granted", async t => {
+  const { createRoomServer } = await import("../server/http.mjs");
+  const f = fixture(t);
+  const server = createRoomServer({ store: f.store, streamInterval: 15 });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => { server.closeStreams(); server.closeAllConnections(); server.close(); });
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const say = async access => {
+    const { linkToken } = f.mint(access);
+    const identity = f.store.identities.create(`Agent ${access ?? "guest"}`);
+    const r = await fetch(`${origin}/api/share-links/join-agent`, { method: "POST",
+      headers: { Authorization: `Bearer ${identity.secret}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ linkToken, displayName: `Agent ${access ?? "guest"}` }) });
+    return (await r.json()).next.find(step => step.action === "say-hello").description;
+  };
+  assert.match(await say(undefined), /guest pass grants read\+chat/);
+  assert.match(await say("member"), /accept_work, complete_work, verify/);
+  assert.match(await say("co_admin"), /every room permission/);
+});
