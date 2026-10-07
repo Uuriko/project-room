@@ -150,11 +150,18 @@ export class AgentInvites {
   // permissions list or a standing profile name
   // (chat/contribute/review/collaborate); the profile maps server-side to
   // a fixed set, so editing the request cannot widen authority.
-  create(token, roomId, { permissions, profile, expiresInMinutes = DEFAULT_TTL_MINUTES, displayName } = {}, expectedSessionBinding = null) {
+  create(token, roomId, { permissions, profile, expiresInMinutes = DEFAULT_TTL_MINUTES, displayName } = {}, expectedSessionBinding = null,
+    { emailVerificationUnachievable = false } = {}) {
     // Owner delegates (server/owner-delegates.mjs) arrive via
     // store.authenticate with the delegate flag stamped on the member copy.
     const auth = this.store.authenticate(token, roomId, expectedSessionBinding);
-    if (auth.account) this.store.accountLogins.assertEmailVerified(auth.account.id);
+    // The email gate bites only when verification is achievable. A deployment
+    // whose mailer is unconfigured can never verify an account (the sign-in UI
+    // says so honestly: "this account stays unverified"), so blocking invite
+    // mint on it would deadlock the onboarding funnel permanently instead of
+    // nudging the owner to verify. The HTTP route passes
+    // emailVerificationUnachievable from the deployment mailer's isConfigured().
+    if (auth.account && !emailVerificationUnachievable) this.store.accountLogins.assertEmailVerified(auth.account.id);
     const authority = this.store.roomAuthority(roomId);
     if (!auth.delegate && !canInviteMembers(authority, auth.member.id)) fail(403, "access_denied", "Invite grant required");
     // Minting invites is a membership write: the read-only autonomy tier

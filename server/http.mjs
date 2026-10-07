@@ -4108,7 +4108,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           if ((!keys.includes("permissions") && !keys.includes("profile"))
             || keys.some(k => !["permissions", "profile", "expiresInMinutes", "displayName"].includes(k)))
             reject(422, "invalid_invite", "permissions or profile is required; optional: expiresInMinutes, displayName");
-          return json(res, 201, store.invites.create(selected.token, roomId, data, fence));
+          return json(res, 201, store.invites.create(selected.token, roomId, data, fence,
+            // Funnel: on a deployment without a configured mailer no account can
+            // ever complete email verification, so the email_unverified gate
+            // would deadlock invite mint permanently instead of nudging the
+            // owner to verify. Where mail is configured the gate still applies.
+            { emailVerificationUnachievable: !magicMailer.isConfigured() }));
         }
         if (req.method === "DELETE") {
           if (!exact(data, ["inviteId"]) || typeof data.inviteId !== "string") reject(422, "invalid_invite", "inviteId is required");
