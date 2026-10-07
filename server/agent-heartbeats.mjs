@@ -12,7 +12,12 @@
 // coalesces to one signal (agent plus message). POST /api/agent-heartbeats
 // returns that host's unacknowledged signals in pendingWakes, oldest
 // first, at most 50, with more:true when the page is truncated. The poll
-// does not acknowledge. The host acknowledges with ackWakes.
+// does not acknowledge. The host acknowledges with ackWakes. Signals are
+// doorbells, not archives: undelivered signals older than
+// WAKE_SIGNAL_TTL_MS (7d) never surface and are swept on heartbeat and
+// enqueue; acknowledged signals are purged after
+// WAKE_SIGNAL_DELIVERED_RETENTION_MS (2d). The message itself stays
+// readable via the room event log / return-brief.
 //
 // Push is a separate doorbell. An offline wakeable host with a usable
 // push subscription receives a pointer-only POST. Push does not decide
@@ -36,6 +41,15 @@ export const HEARTBEAT_STALE_AFTER_MS = 180000;
 // live listener from an idle agent whose queue merely looks empty.
 export const WAKEABLE_WINDOW_MS = 24 * 60 * 60 * 1000;
 const MAX_PENDING_WAKES = 50;
+// Wake-signal retention (2026-10-07, staying-plugged-in): an undelivered
+// signal is a doorbell, not an archive — the message itself stays readable
+// via the room event log / return-brief long after the ping stops mattering.
+// Signals older than WAKE_SIGNAL_TTL_MS never surface in pending pages, and
+// the sweep below deletes stale undelivered rows plus long-acknowledged
+// rows, so an agent that goes away for a week comes back to live doorbells,
+// not a flood of stale ones, and the table stays bounded.
+export const WAKE_SIGNAL_TTL_MS = 7 * 24 * 3600 * 1000;
+export const WAKE_SIGNAL_DELIVERED_RETENTION_MS = 2 * 24 * 3600 * 1000;
 const AGENT_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 const HOST_ID_PATTERN = /^[A-Za-z0-9._-]{1,128}$/;
 // Push wake path (RC-2026-09-24-203): token bounds, delivery timeout, and
@@ -185,12 +199,20 @@ const signalView = row => {
 };
 
 export class AgentHeartbeats {
-  constructor(store, { staleAfterMs = HEARTBEAT_STALE_AFTER_MS } = {}) {
+  constructor(store, { staleAfterMs = HEARTBEAT_STALE_AFTER_MS,
+    wakeTtlMs = WAKE_SIGNAL_TTL_MS,
+    deliveredRetentionMs = WAKE_SIGNAL_DELIVERED_RETENTION_MS } = {}) {
     this.store = store;
     this.db = store.db;
     check(Number.isFinite(staleAfterMs) && staleAfterMs > 0,
       500, "invalid_heartbeat_config", "staleAfterMs must be positive");
     this.staleAfterMs = staleAfterMs;
+    check(Number.isFinite(wakeTtlMs) && wakeTtlMs > 0,
+      500, "invalid_heartbeat_config", "wakeTtlMs must be positive");
+    this.wakeTtlMs = wakeTtlMs;
+    check(Number.isFinite(deliveredRetentionMs) && deliveredRetentionMs > 0,
+      500, "invalid_heartbeat_config", "deliveredRetentionMs must be positive");
+    this.deliveredRetentionMs = deliveredRetentionMs;
     // Push delivery transport (RC-2026-09-24-203). Production leaves both
     // null: postDelivery then uses the real fetch and real DNS. Tests inject
     // mocks via setPushTransport so the push path never touches the network.
@@ -357,6 +379,9 @@ export class AgentHeartbeats {
         : (effectiveMode === "wakeable" && pushConfigured && !pushSuspended ? "push" : "poller"),
       reachableUntil,
     });
+    // Staying-plugged-in: a returning agent's first heartbeat clears its
+    // stale doorbells first, so the resume page is live signals only.
+    this.sweepStaleWakes({ agentId });
     const page = this.pendingWakePage(agentId, { hostId, roomId: workScopeRoomId });
     return Object.freeze({
       host: { ...host, workWakes: this.store.workWakes?.hostEnabled(agentId, hostId) ?? false },
@@ -535,7 +560,30 @@ export class AgentHeartbeats {
     // RC-2026-09-28-3602: a genuinely new signal releases the room-hosted
     // poll waiter (coalesced duplicates don't — nothing new arrived).
     if (applied.changes > 0) this._releaseWakeWaiter(agentId, roomId);
+    // Staying-plugged-in: every new mention also sweeps this agent's stale
+    // doorbells, so the queue self-maintains without a scheduler.
+    this.sweepStaleWakes({ agentId });
     return Object.freeze({ enqueued: applied.changes > 0, signal: signalView(row) });
+  }
+
+  // Delete wake signals that no longer matter: undelivered signals older
+  // than the TTL (stale doorbells — the message itself is still reachable
+  // via the room event log / return-brief) and acknowledged signals past
+  // delivered retention. Scoped to one agent when agentId is given so the
+  // heartbeat path stays cheap; unscoped sweeps the whole table. The
+  // (agent_id, delivered_at) index covers the scoped deletes.
+  sweepStaleWakes({ agentId = null } = {}) {
+    if (agentId !== null) checkAgentId(agentId);
+    const at = this.now();
+    const scope = agentId === null ? "" : "AND agent_id=?";
+    const argsFor = value => (agentId === null ? [value] : [value, agentId]);
+    const stale = this.db.prepare(
+      `DELETE FROM agent_wake_signals WHERE delivered_at IS NULL AND created_at <= ? ${scope}`)
+      .run(...argsFor(at - this.wakeTtlMs)).changes;
+    const delivered = this.db.prepare(
+      `DELETE FROM agent_wake_signals WHERE delivered_at IS NOT NULL AND delivered_at <= ? ${scope}`)
+      .run(...argsFor(at - this.deliveredRetentionMs)).changes;
+    return Object.freeze({ sweptStale: stale, sweptDelivered: delivered });
   }
 
   // Undelivered wake signals, oldest first, capped at the caller's limit.
@@ -552,9 +600,11 @@ export class AgentHeartbeats {
     check(Number.isInteger(limit) && limit > 0 && limit <= MAX_PENDING_WAKES,
       422, "invalid_heartbeat", `limit must be 1..${MAX_PENDING_WAKES}`);
     const probe = limit + 1;
+    const cutoff = this.now() - this.wakeTtlMs;
     const messages = this.db.prepare(`SELECT * FROM agent_wake_signals
-      WHERE agent_id=? AND delivered_at IS NULL AND (? IS NULL OR room_id=?) ORDER BY created_at ASC LIMIT ?`)
-      .all(agentId, roomId, roomId, probe).map(signalView);
+      WHERE agent_id=? AND delivered_at IS NULL AND created_at > ?
+        AND (? IS NULL OR room_id=?) ORDER BY created_at ASC LIMIT ?`)
+      .all(agentId, cutoff, roomId, roomId, probe).map(signalView);
     const work = this.store.workWakes?.pending(agentId, { roomId, hostId, limit: probe }) ?? [];
     const combined = [...messages, ...work].sort((a, b) => a.createdAt - b.createdAt);
     return Object.freeze({
