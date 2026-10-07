@@ -42,6 +42,7 @@ import { installHumanPush } from "./human-push.js";
 import { chatSuggestions, ASK_AGENT_AFTER_MS } from "./chat-suggestions.js";
 import { paintClaimChat } from "./board-ui.js";
 import { installHumanExperience } from "./human-experience.js";
+import { createSpendPricingKillSwitch } from "./spend-pricing-ui.js";
 
 // Keep a connector/native consent journey through password or provider login.
 // Only our exact consent path is a return target; never follow arbitrary URLs.
@@ -5133,6 +5134,26 @@ function renderSpendAllowance() {
     $("#spend-allowance-input").value = allowance ? (allowance.allowanceCents / 100).toFixed(2) : "";
     $("#spend-period-input").value = String(allowance?.periodDays ?? 30);
   }
+  renderSpendPricingKillSwitch();
+}
+// Emergency spend-pricing kill switch (audit item 10): owner-only toggle in
+// the Billing / plan section, wired to the existing owner-gated POST
+// /api/rooms/:id/spend-pricing route. The toggle reads its state from the
+// SSE-carried projection (state.room.spendPricing); the server gate is the
+// real authorization. The container is created in JS so index.html stays
+// untouched.
+const spendPricingKillSwitch = createSpendPricingKillSwitch();
+function renderSpendPricingKillSwitch() {
+  const panel = $("#spend-panel");
+  if (!panel || !state?.room || !client) return;
+  let box = $("#spend-pricing-killswitch");
+  if (!box) {
+    box = document.createElement("div");
+    box.id = "spend-pricing-killswitch";
+    box.className = "spend-pricing-killswitch";
+    panel.appendChild(box);
+  }
+  spendPricingKillSwitch.sync(box, { session, state, client, roomId: state.room.id });
 }
 function submitSpendAllowance(data, done, failureHint) {
   const form = $("#spend-allowance-form");
