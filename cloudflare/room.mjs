@@ -95,7 +95,10 @@ export class ProjectRoom extends DurableObject {
     this.store = new RoomStore(null, { database: new DurableDatabase(ctx.storage), storagePlatform: durableStorage,
       stitch: stitchConfigFromEnv(env), identityHashKey: env.ROOM_IDENTITY_HASH_KEY ?? null, integrity: "deferred",
       // Phase 1a: large message bodies at rest outside the projection row.
-      bodiesAtRest: env.ROOM_BODIES_AT_REST === "1" });
+      bodiesAtRest: env.ROOM_BODIES_AT_REST === "1",
+      // B16: ROOM_HERDR_SESSIONS — wrangler var; absent/off keeps every herdr
+      // surface inert (fail-closed). B4 owns the rollout beyond this plumb.
+      herdrSessions: env.ROOM_HERDR_SESSIONS });
     // ACT-1a: one delimited call. Room Guide advances after commands. ACT-4 owns nudges.
     installGuideCommandHook(this.store);
     // Event-push dispatch: same fire-and-forget flush as the node entry
