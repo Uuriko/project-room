@@ -18,6 +18,7 @@ import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { publishBountyEvent } from "./bounty-escrow-routes.mjs";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
 import { buildWorkClaimPage, linkWorkClaimPullRequest } from "./work-claim-routes.mjs";
+import { dmTargetIds } from "./dm-rooms.mjs";
 
 import { prepareWork } from "../client/work-preparation.mjs";
 import { beginSelectedWork, findBeginReceipt } from "../client/begin-work.mjs";
@@ -96,10 +97,11 @@ async function roomMessages(store, secret, roomId, args, memberId) {
     redactEventPage(store.eventsAfter(secret, roomId, cursor, pageLimit), currentMessages);
   const mapMessage = ({ sequence, event }) => ({
     sequence, eventId: event.id, messageId: event.data?.messageId ?? event.id, from: event.actorId, at: event.at,
-    body: event.data?.body ?? "", replyToId: event.data?.replyToId ?? null, workItemId: event.data?.workItemId ?? null, private: Boolean(event.data?.toMemberId),
+    body: event.data?.body ?? "", replyToId: event.data?.replyToId ?? null, workItemId: event.data?.workItemId ?? null, private: dmTargetIds(event.data).length > 0,
     ...(event.data?.toMemberId ? { toMemberId: event.data.toMemberId } : {}),
+    ...(Array.isArray(event.data?.toMemberIds) ? { toMemberIds: [...event.data.toMemberIds] } : {}),
     ...(event.data?.requestKind === "reply" && event.data.requestPolicyVersion === 1
-      && [event.actorId, event.data.toMemberId].includes(memberId) ? { requestKind: "reply", nextRead: { tool: "room_read_request", arguments: { roomId, requestMessageId: event.data.messageId ?? event.id } } } : {}),
+      && [event.actorId, ...dmTargetIds(event.data)].includes(memberId) ? { requestKind: "reply", nextRead: { tool: "room_read_request", arguments: { roomId, requestMessageId: event.data.messageId ?? event.id } } } : {}),
     ...(Array.isArray(event.mentions) && event.mentions.length ? { mentions: event.mentions.map(mention => ({ memberId: mention.memberId, displayName: mention.displayName })) } : {})
   });
   const { messages, next, hasMore } = await paginateRoomMessages(fetchPage, {

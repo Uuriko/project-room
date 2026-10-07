@@ -13,6 +13,7 @@ import { ServiceError } from "./service-error.mjs";
 import { attachmentLimits } from "./attachment-schema.mjs";
 import { validateAttachment, AttachmentError } from "./attachments.mjs";
 import { validId } from "../src/events.js";
+import { dmTargetIds } from "./dm-rooms.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
 
@@ -145,14 +146,16 @@ export class RoomAttachmentBytes {
   }
 
   // Visibility rule (2026-09-24, #983): a staged file is visible only to
-  // its uploader; a file committed onto a DM (toMemberId) is visible only
-  // to the message author and recipient. Everything else stays room-wide.
+  // its uploader; a file committed onto a DM (toMemberId, or a group DM via
+  // toMemberIds) is visible only to the message author and recipients.
+  // Everything else stays room-wide.
   visibleTo(row, messages, memberId) {
     if (row.state === "staged") return row.uploader_id === memberId;
     if (row.message_id) {
       const message = messages.get(row.message_id);
-      if (message?.toMemberId) {
-        return message.authorId === memberId || message.toMemberId === memberId;
+      const targets = dmTargetIds(message);
+      if (targets.length > 0) {
+        return message.authorId === memberId || targets.includes(memberId);
       }
     }
     return true;

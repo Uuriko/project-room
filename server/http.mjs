@@ -80,6 +80,7 @@ import { readSpendAllowance, setSpendAllowance } from "./spend-allowance.mjs";
 import { getAgentAutonomyTier, setAgentAutonomyTier } from "./autonomy-tiers.mjs";
 import { listAgentGrants, getAgentCapabilities, issueAgentGrant, revokeAgentGrant } from "./grants.mjs";
 import { listPins, setPin } from "./pins.mjs";
+import { dmTargetIds } from "./dm-rooms.mjs";
 // (squad roster handlers moved to server/routes/squads.mjs, batch RT)
 import { currentTypists, typingBeats, typingKey } from "./typing.mjs";
 import { renderReceiptsHtml, renderReceiptDetailHtml, receiptsListJson, receiptJson, RECEIPTS_PAGE_CSP } from "./receipts-page.mjs";
@@ -3629,11 +3630,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         reject(405, "method_not_allowed", "Method not allowed");
       }
       // RC-2026-09-19-070: DM privacy. A targeted message (message.posted
-      // with data.toMemberId) is visible only to its sender and its addressed
-      // member — the room owner is not exempt. The /events and /stream routes
-      // already enforce this inside the store (RC-2026-09-18-012); the read
-      // surfaces below apply the same predicate at the HTTP layer so
-      // non-participants see no DM existence, count, or metadata.
+      // with data.toMemberId, or a group DM with data.toMemberIds) is visible
+      // only to its sender and its addressed members — the room owner is not
+      // exempt. The /events and /stream routes already enforce this inside
+      // the store (RC-2026-09-18-012); the read surfaces below apply the same
+      // predicate at the HTTP layer so non-participants see no DM existence,
+      // count, or metadata.
       const viewerId = auth.member.id;
       // --- PRIV-2 history visibility ---
       // A since_join reader also loses messages and events from before their
@@ -3641,7 +3643,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const historyFloor = store.historyFloor(roomId, viewerId);
       const historyMessages = historyFloor ? indexHistoryMessages(store.room(roomId).state.messages) : null;
       const dmMessageVisible = message => messageInHistory(message, historyFloor)
-        && (!message.toMemberId || message.authorId === viewerId || message.toMemberId === viewerId);
+        && (dmTargetIds(message).length === 0 || message.authorId === viewerId || dmTargetIds(message).includes(viewerId));
       // SEC-19: edits, deletes, redactions, reactions and pins of a DM follow
       // the DM's own visibility (server/dm-event-visibility.mjs).
       const dmPartyVisible = dmEventVisibility(viewerId, store.room(roomId).state.messages);

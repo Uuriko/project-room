@@ -31,6 +31,7 @@ import {
   assertSubscriptionWebhookUrl,
 } from "./agent-webhook-subscriptions.mjs";
 import { buildWakePing, WAKE_PING_EVENT, validateWebhookUrl } from "./outbound-webhooks.mjs"; // RC-2026-09-18-051: wake-ping payloads.
+import { dmTargetIds } from "./dm-rooms.mjs";
 import { syncDirectoryCard } from "./public-read-model.mjs";
 import {
   signDelivery, deliveryEnvelope, deliveryHeaders, postDelivery,
@@ -1170,15 +1171,16 @@ export class AgentPluginStore {
       if (!events.includes(event.type) && !events.includes("*")) continue;
       // Targeted-DM privacy: mirrors the store read-path predicate
       // (RC-2026-09-18-012, server/store.mjs). A message.posted event
-      // carrying data.toMemberId is a direct message, visible only to its
-      // sender and its addressed member — never to third-party push
-      // subscribers. The JOIN above already resolved the subscription's
-      // agent_id to this room's member id; apply the same rule the
-      // /events and /stream read paths use. (Every candidate row has a
-      // link by construction, so an unlinkable subscriber can never
-      // reach this branch as sender or addressee.)
-      if (event?.type === "message.posted" && event?.data?.toMemberId) {
-        if (event.actorId !== row.memberId && event.data.toMemberId !== row.memberId) continue;
+      // carrying data.toMemberId (or a group DM via data.toMemberIds) is a
+      // direct message, visible only to its sender and its addressed
+      // members — never to third-party push subscribers. The JOIN above
+      // already resolved the subscription's agent_id to this room's member
+      // id; apply the same rule the /events and /stream read paths use.
+      // (Every candidate row has a link by construction, so an unlinkable
+      // subscriber can never reach this branch as sender or addressee.)
+      if (event?.type === "message.posted") {
+        const targets = dmTargetIds(event?.data);
+        if (targets.length > 0 && event.actorId !== row.memberId && !targets.includes(row.memberId)) continue;
       }
       const delivery = this.buildWebhookDelivery(row.subscriptionId,
         { eventType: event.type, eventId: event.id, roomId,

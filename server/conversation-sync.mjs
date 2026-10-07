@@ -79,29 +79,36 @@ export function readConversation(store, token, roomId, { limit = 50, cursor = nu
     const exclusions = JSON.stringify([...(floor?.sameInstant ?? [])]);
     const rows = (indexed ? store.db.prepare(`SELECT seq AS position, message_id AS messageId, record_json AS body
       FROM messages WHERE room_id=? AND (seq<? OR (seq=? AND message_id<?))
-        AND (to_member_id IS NULL OR to_member_id='' OR author_id=? OR to_member_id=?)
-        AND (? IS NULL OR (COALESCE(NULLIF(channel_id,''),?)=? AND (to_member_id IS NULL OR to_member_id='')))
+        AND (((to_member_id IS NULL OR to_member_id='') AND json_extract(record_json,'$.toMemberIds') IS NULL)
+          OR author_id=? OR to_member_id=?
+          OR EXISTS (SELECT 1 FROM json_each(json_extract(record_json,'$.toMemberIds')) WHERE value=?))
+        AND (? IS NULL OR (COALESCE(NULLIF(channel_id,''),?)=?
+          AND (to_member_id IS NULL OR to_member_id='') AND json_extract(record_json,'$.toMemberIds') IS NULL))
         AND (? IS NULL OR message_id=?)
         AND (? IS NULL OR created_at>=?)
         AND (? IS NULL OR created_at>? OR message_id NOT IN (SELECT value FROM json_each(?)))
       ORDER BY seq DESC, message_id DESC LIMIT ?`)
-      .all(roomId, before, before, cursor !== null ? saved.beforeId : "", auth.member.id, auth.member.id,
+      .all(roomId, before, before, cursor !== null ? saved.beforeId : "", auth.member.id, auth.member.id, auth.member.id,
         channelId, DEFAULT_CHANNEL_ID, channelId, messageId, messageId, floor?.at ?? null, floor?.at ?? null,
         floor?.at ?? null, floor?.at ?? null, exclusions, messageId === null ? limit + 1 : 1)
       : store.db.prepare(`SELECT CAST(m.key AS INTEGER) AS position, json_remove(m.value, '$.editHistory') AS body
       FROM rooms r, json_each(r.projection, '$.messages') m
       WHERE r.id=? AND CAST(m.key AS INTEGER)<?
-        AND (json_extract(m.value,'$.toMemberId') IS NULL OR json_extract(m.value,'$.toMemberId')=''
-          OR json_extract(m.value,'$.authorId')=? OR json_extract(m.value,'$.toMemberId')=?)
+        AND (((json_extract(m.value,'$.toMemberId') IS NULL OR json_extract(m.value,'$.toMemberId')='')
+            AND json_extract(m.value,'$.toMemberIds') IS NULL)
+          OR json_extract(m.value,'$.authorId')=?
+          OR json_extract(m.value,'$.toMemberId')=?
+          OR EXISTS (SELECT 1 FROM json_each(json_extract(m.value,'$.toMemberIds')) WHERE value=?))
         AND (? IS NULL OR (
           COALESCE(NULLIF(json_extract(m.value,'$.channelId'),''),?)=?
-          AND (json_extract(m.value,'$.toMemberId') IS NULL OR json_extract(m.value,'$.toMemberId')='')))
+          AND (json_extract(m.value,'$.toMemberId') IS NULL OR json_extract(m.value,'$.toMemberId')='')
+          AND json_extract(m.value,'$.toMemberIds') IS NULL))
         AND (? IS NULL OR json_extract(m.value,'$.id')=?)
         AND (? IS NULL OR json_extract(m.value,'$.createdAt')>=?)
         AND (? IS NULL OR json_extract(m.value,'$.createdAt')>?
           OR json_extract(m.value,'$.id') NOT IN (SELECT value FROM json_each(?)))
       ORDER BY CAST(m.key AS INTEGER) DESC LIMIT ?`)
-      .all(roomId, before, auth.member.id, auth.member.id, channelId, DEFAULT_CHANNEL_ID, channelId,
+      .all(roomId, before, auth.member.id, auth.member.id, auth.member.id, channelId, DEFAULT_CHANNEL_ID, channelId,
         messageId, messageId, floor?.at ?? null, floor?.at ?? null,
         floor?.at ?? null, floor?.at ?? null, exclusions, messageId === null ? limit + 1 : 1))
       .map(row => indexed ? row : { ...row, body: hydrateRecordText(store.db, roomId, row.body,

@@ -193,7 +193,7 @@ export function installHumanExperience({ getState, getSession, client, notice, o
         try {
           const pending = JSON.parse(sessionStorage.getItem(pendingKey()) || 'null');
           if (pending && ['invoke','contribute','resolve','pause','resume','cancel'].includes(pending.action) && typeof pending.requestId === 'string' && typeof pending.runId === 'string'
-            && (['pause','resume','cancel'].includes(pending.action) || getState().messages.some(m => m.id === pending.sourceMessageId && m.authorId === getSession().member.id && !m.toMemberId))) { operation = pending; error = uiText("human.copy.023"); }
+            && (['pause','resume','cancel'].includes(pending.action) || getState().messages.some(m => m.id === pending.sourceMessageId && m.authorId === getSession().member.id && !m.toMemberId && !(m.toMemberIds?.length > 0)))) { operation = pending; error = uiText("human.copy.023"); }
         } catch { /* corrupt/unavailable saved state is not executed */ }
         let enabled = false; try { enabled = sessionStorage.getItem(`room-human-advanced:${boundary}`) === 'true'; } catch { /* defaults */ }
         $('#human-advanced').checked = enabled; document.body.classList.toggle('human-advanced', enabled);
@@ -202,7 +202,7 @@ export function installHumanExperience({ getState, getSession, client, notice, o
       // Message tombstones must hide cached activity even if assistant reads fail.
       paint(); void refresh();
     },
-    intent(content) { const solo = Object.values(getState()?.members ?? {}).filter(m => m.active !== false && m.kind === 'human').length === 1 && projection?.assistant.coordinatorMemberId; return !operation && human() && !content.toMemberId && (selected || /^@Room\b/i.test(content.body) || solo) ? { ...(contribution || { action: 'invoke' }) } : null; },
+    intent(content) { const solo = Object.values(getState()?.members ?? {}).filter(m => m.active !== false && m.kind === 'human').length === 1 && projection?.assistant.coordinatorMemberId; return !operation && human() && !content.toMemberId && !(content.toMemberIds?.length > 0) && (selected || /^@Room\b/i.test(content.body) || solo) ? { ...(contribution || { action: 'invoke' }) } : null; },
     shareResult(item) {
       if (!human() || document.body.classList.contains('human-advanced')) return false;
       if (!resultEntry?.command || resultEntry.workId !== item.id || resultEntry.boundary !== key()) {
@@ -210,7 +210,7 @@ export function installHumanExperience({ getState, getSession, client, notice, o
         resultDialog.querySelector('form').reset(); resultDialog.querySelector('textarea').disabled = false;
         resultDialog.querySelector('[type=submit]').textContent = 'Review result'; resultDialog.querySelector('[type=submit]').disabled = false; $('#human-share-refresh').hidden = true; $('#human-share-error').textContent = '';
       }
-      const drafts = getState().messages.filter(m => m.workItemId === item.id && !m.deletedAt && !m.toMemberId);
+      const drafts = getState().messages.filter(m => m.workItemId === item.id && !m.deletedAt && !m.toMemberId && !(m.toMemberIds?.length > 0));
       $('#human-existing-drafts').innerHTML = drafts.map(m => ["<button type=\"button\" class=\"text-button\" data-result-draft=\"", esc(m.id), "\">", esc(m.body.slice(0,100)), "</button>"].join('')).join('') || uiText("human.copy.024");
       resultDialog.showModal(); return true;
     },

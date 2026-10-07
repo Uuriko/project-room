@@ -4,6 +4,7 @@ import { charterContext } from "../src/room-charter.js";
 import { currentWorkRecord } from "./work-context.mjs";
 import { isDeepStrictEqual } from "node:util";
 import { Buffer } from "node:buffer";
+import { dmTargetIds } from "./dm-rooms.mjs";
 import { validId, MAX_MESSAGE_BODY_CHARS } from "../src/events.js";
 import { prepareReplyPost, recordReplyPost, cancelReplyRequest, replyContextOwners, REPLY_CANCELLED } from "../src/reply-requests.js";
 import { stampReplyRead } from "./content-trust.mjs";
@@ -119,7 +120,8 @@ export class ReplyRequests {
         if (requestMessageId === null && kind === "context" && terminal && row.sequence > terminal.sequence) continue;
         if (!message && row.type !== REPLY_CANCELLED) continue;
         // Match snapshot/event privacy before paging or returning message metadata.
-        if (message?.toMemberId && message.authorId !== auth.member.id && message.toMemberId !== auth.member.id) continue;
+        const replyTargets = dmTargetIds(message);
+        if (replyTargets.length > 0 && message.authorId !== auth.member.id && !replyTargets.includes(auth.member.id)) continue;
         relevant.push({ row, request, kind, message });
       }
       if (cursor !== null && !relevant.some(entry => entry.row.sequence === afterSequence)) fail("invalid_reply_cursor", "Continuation must follow a selected entry");
@@ -148,7 +150,8 @@ export class ReplyRequests {
           || owners.get(request.contextMessageId) !== request.id || byEvent.get(request.openingEventId)?.message_id !== request.id
           || request.terminalEventId && !byEvent.has(request.terminalEventId)) changed();
         const contextMessage = byMessage.get(request.contextMessageId);
-        if (contextMessage?.toMemberId && contextMessage.authorId !== auth.member.id && contextMessage.toMemberId !== auth.member.id)
+        const contextTargets = dmTargetIds(contextMessage);
+        if (contextTargets.length > 0 && contextMessage.authorId !== auth.member.id && !contextTargets.includes(auth.member.id))
           fail("reply_context_unavailable", "Latest request context is private to another exchange; ask the requester for a visible clarification", 409);
         const open = request.status === "open", recipient = auth.member.id === request.recipientId;
         const answerBasis = open && recipient && !hasMore && context.sequence <= horizonSequence
@@ -215,8 +218,8 @@ function previousExchanges(request, state, rows, byMessage, owners) {
     if (!terminal) changed();
     const messages = rows.filter(row => row.type === "message.posted" && row.sequence <= terminal.sequence)
       .map(row => byMessage.get(row.message_id || row.id)).filter(message => message && owners.get(message.id) === prior.id
-        && (!message.toMemberId || [request.requesterId, request.recipientId].every(memberId =>
-          memberId === message.authorId || memberId === message.toMemberId))).map(readMessage);
+        && (dmTargetIds(message).length === 0 || [request.requesterId, request.recipientId].every(memberId =>
+          memberId === message.authorId || dmTargetIds(message).includes(memberId)))).map(readMessage);
     if (!messages.some(message => message.id === prior.id) || !messages.some(message => message.id === prior.responseMessageId)
       || messages.some(message => message.body === null))
       fail("reply_follow_up_unavailable", "Earlier exchange contains withdrawn context; start a new request with the relevant context", 409);

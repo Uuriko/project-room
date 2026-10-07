@@ -7,6 +7,7 @@ import { EVENT_TYPES as T, defaultNotificationPreferences } from "../src/events.
 import { messageAddressesMember } from "../src/conversation.js";
 import { ServiceError } from "./store.mjs";
 import { mutedEvent } from "./moderation.mjs";
+import { dmTargetIds } from "./dm-rooms.mjs";
 import { permissionDecisionMessages } from "./member-permission-requests.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
@@ -86,8 +87,8 @@ export function deriveNotifications({ events, state, member, mutedThreadIds = nu
       // A muted thread's activity never reaches the feed — read per request,
       // so unmuting brings its items back on the next read.
       if (muted.has(threadRootOf(messageId))) continue;
-      const message = current ?? { id: messageId, body: event.data.body, replyToId: event.data.replyToId || null, toMemberId: event.data.toMemberId || null };
-      // RC-2026-09-19-070: a DM belongs to its two parties. Every other read
+      const message = current ?? { id: messageId, body: event.data.body, replyToId: event.data.replyToId || null, toMemberId: event.data.toMemberId || null, toMemberIds: event.data.toMemberIds ?? null };
+      // RC-2026-09-19-070: a DM belongs to its parties. Every other read
       // surface applies this filter at the HTTP layer; this feed derives its
       // own items from the raw event tail, so it has to apply it itself or it
       // becomes the one way to learn a DM exists. Two ways it leaked: a DM
@@ -95,8 +96,9 @@ export function deriveNotifications({ events, state, member, mutedThreadIds = nu
       // earned you a "reply" item, and an @name inside a DM notified someone
       // who cannot read it, which would make DMs a way to signal any member
       // from a conversation they have no access to. The sender is already
-      // skipped above; this leaves the recipient, who is owed their message.
-      if (message.toMemberId && message.toMemberId !== member.id) continue;
+      // skipped above; this leaves the recipients, who are owed their message.
+      const dmIds = dmTargetIds(message);
+      if (dmIds.length > 0 && !dmIds.includes(member.id)) continue;
       const addressed = messageAddressesMember(message, member);
       const parent = message.replyToId ? messages.get(message.replyToId) : null;
       const replyToMe = Boolean(parent) && parent.authorId === member.id;

@@ -11,6 +11,7 @@
 // the question.
 import { ServiceError } from "./store.mjs";
 import { messageInHistory } from "./history-visibility.mjs";
+import { dmTargetIds } from "./dm-rooms.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 
@@ -35,7 +36,7 @@ function threadRootOf(byId, messageId) {
 const excerptOf = body => String(body).replace(/\s+/g, " ").trim().slice(0, EXCERPT_LENGTH);
 
 // Pure derivation. `messages` is the room state's message list (plain
-// objects with id/authorId/body/replyToId/toMemberId/createdAt/deletedAt).
+// objects with id/authorId/body/replyToId/toMemberId/toMemberIds/createdAt/deletedAt).
 // `viewerId` scopes DMs; null means public messages only.
 export function findOpenQuestions({ messages, viewerId = null }) {
   if (!Array.isArray(messages)) throw new Error("messages must be an array");
@@ -46,9 +47,10 @@ export function findOpenQuestions({ messages, viewerId = null }) {
   const rootOf = id => threadRootOf(byId, id);
   const visible = message => {
     if (!message || message.deletedAt) return false;
-    if (!message.toMemberId) return true; // public
+    const targets = dmTargetIds(message);
+    if (targets.length === 0) return true; // public
     if (!viewerId) return false;
-    return message.toMemberId === viewerId || message.authorId === viewerId;
+    return targets.includes(viewerId) || message.authorId === viewerId;
   };
   const isQuestion = message => typeof message.body === "string" && message.body.includes("?");
   // True when someone other than the asker spoke in the question's thread at
@@ -60,8 +62,9 @@ export function findOpenQuestions({ messages, viewerId = null }) {
     for (const message of messages) {
       if (!message || message.id === question.id || message.deletedAt) continue;
       if (message.authorId === question.authorId) continue; // own follow-up
-      if (message.toMemberId && message.toMemberId !== question.authorId) continue; // unreadable answer
-      if (!visible(message) && !(message.toMemberId === question.authorId)) continue;
+      const targets = dmTargetIds(message);
+      if (targets.length > 0 && !targets.includes(question.authorId)) continue; // unreadable answer
+      if (!visible(message) && !(targets.length > 0 && targets.includes(question.authorId))) continue;
       if (message.replyToId === question.id) return true;
       if (rootOf(message.id) === root && (Date.parse(message.createdAt) || 0) >= askedAt) return true;
     }

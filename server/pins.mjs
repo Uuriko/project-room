@@ -7,6 +7,7 @@
 import { randomUUID } from "node:crypto";
 import { ServiceError } from "./store.mjs";
 import { EVENT_TYPES as T, PIN_LIMIT, pinnedMessages, validId } from "../src/events.js";
+import { dmTargetIds } from "./dm-rooms.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 
@@ -22,11 +23,13 @@ function pinView({ messageId, pinnedById, pinnedAt, message }) {
 
 // Pin visibility follows message visibility (server/activity.mjs): a room
 // message is visible to every member, but a DM is visible only to its author
-// and its recipient. Filtering here (not just in the HTTP route wrapper)
-// protects every caller of the pin library. Exported for the activation
-// pack, which otherwise leaks pinned DM bodies to the whole room.
+// and its recipients (one for a pair DM, all of them for a group DM).
+// Filtering here (not just in the HTTP route wrapper) protects every caller
+// of the pin library. Exported for the activation pack, which otherwise leaks
+// pinned DM bodies to the whole room.
 export function pinVisibleToViewer(message, viewerId) {
-  return !message.toMemberId || message.authorId === viewerId || message.toMemberId === viewerId;
+  const targets = dmTargetIds(message);
+  return targets.length === 0 || message.authorId === viewerId || targets.includes(viewerId);
 }
 
 function listView(store, roomId, viewerId) {

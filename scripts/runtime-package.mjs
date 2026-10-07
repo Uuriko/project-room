@@ -50,6 +50,7 @@ optional.push("src/audit-receipts.mjs", "src/outside-agents.mjs", "server/outsid
 optional.push("src/room-charter.js", "src/room-instructions.js");
 optional.push("src/reply-requests.js", "server/reply-requests.mjs");
 optional.push("server/dm-consents.mjs", "server/public-face.mjs"); // consent-bound DMs + public face (imported by server/store.mjs)
+optional.push("server/dm-rooms.mjs"); // pair + group DM membership model (imported by server/store.mjs and server/http.mjs)
 optional.push("server/bonds.mjs"); // agent Bond + peer DMs (imported by server/store.mjs and server/http.mjs)
 optional.push("server/membership-delegation-journal.mjs"); // append-only membership grant decisions
 optional.push("server/room-directory.mjs"); // #605 opt-in public room directory (imported by server/store.mjs)

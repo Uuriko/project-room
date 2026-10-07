@@ -663,7 +663,7 @@ function validateEnvelope(incoming) {
       || Object.keys(action).some(field => field !== "claimId" && field !== "label")))) throw new Error(`Invalid ${key}`);
     // work_claim.updated deletion receipts name stranded dependents: claim ids.
     if (key === "dependents" && (!Array.isArray(value) || value.length > 64 || value.some(v => typeof v !== "string" || !validId(v)))) throw new Error(`Invalid ${key}`);
-    if (!["string", "boolean", "number"].includes(typeof value) && !["permissions", "paths", "checksClaimed", "capabilities", "preferences", "budget", "outputs", "segments", "signedEvidence", "labels", "scopes", "acceptedScopes", "changed", "state", "pullRequest", "pullRequests", "blocks", "actions", "dependents"].includes(key)) throw new Error(`Invalid ${key}`);
+    if (!["string", "boolean", "number"].includes(typeof value) && !["permissions", "paths", "checksClaimed", "capabilities", "preferences", "budget", "outputs", "segments", "signedEvidence", "labels", "scopes", "acceptedScopes", "changed", "state", "pullRequest", "pullRequests", "blocks", "actions", "dependents", "toMemberIds"].includes(key)) throw new Error(`Invalid ${key}`);
   }
 }
 
@@ -1137,6 +1137,14 @@ function postMessage(state, incoming) {
   // --- end PRIV-1 message redaction ---
   const requestMode = prepareReplyPost(state, incoming);
   if (incoming.data.toMemberId) (requestMode === "respond" ? knownMember : requireMember)(state, incoming.data.toMemberId);
+  // Group DMs: every addressed member must be a (known/active) member, the
+  // same membership check pair DMs get. Shape and count were validated at
+  // the command boundary; the reducer re-checks membership so replay and
+  // imports cannot resurrect a DM to a removed member.
+  if (incoming.data.toMemberIds !== undefined && incoming.data.toMemberIds !== null) {
+    if (!Array.isArray(incoming.data.toMemberIds)) throw new Error("toMemberIds must be an array");
+    for (const id of incoming.data.toMemberIds) (requestMode === "respond" ? knownMember : requireMember)(state, id);
+  }
   if (!redacted && typeof incoming.data.body !== "string") throw new Error("Message body must be text");
   // ACT-1a: receipt cards and starter choice buttons. Absent on ordinary posts.
   if (incoming.data.kind != null && incoming.data.kind !== "receipt_card") throw new Error("Message kind must be receipt_card");
@@ -1172,6 +1180,7 @@ function postMessage(state, incoming) {
     workItemId: incoming.data.workItemId || null,
     replyToId: incoming.data.replyToId || null,
     toMemberId: incoming.data.toMemberId || null,
+    toMemberIds: Array.isArray(incoming.data.toMemberIds) ? [...incoming.data.toMemberIds] : null,
     createdAt: incoming.at,
     ...(proposal ? { proposal } : {}),
     ...(Array.isArray(incoming.data.actions) ? { actions: incoming.data.actions.map(action => ({ claimId: action.claimId, label: action.label })) } : {}),
@@ -1191,7 +1200,7 @@ function postMessage(state, incoming) {
   // idempotent. DMs and work proposals never copy — a DM copy would leak the
   // private body, and a proposal's work context doesn't survive as a plain
   // message.
-  if (incoming.data.alsoSendToChannel && incoming.data.replyToId && !incoming.data.toMemberId && !incoming.data.workItemId) {
+  if (incoming.data.alsoSendToChannel && incoming.data.replyToId && !incoming.data.toMemberId && !(incoming.data.toMemberIds?.length) && !incoming.data.workItemId) {
     const copyId = `${incoming.data.messageId || incoming.id}:channel`;
     if (state.messages.some(m => m.id === copyId)) throw new Error("Message already exists");
     state.messages.push({
@@ -1203,6 +1212,7 @@ function postMessage(state, incoming) {
       workItemId: null,
       replyToId: null,
       toMemberId: null,
+      toMemberIds: null,
       createdAt: incoming.at
     });
   }
@@ -1948,7 +1958,7 @@ function requireProgressCheckin(state, claim, holderId, progressMessageId) {
   if (!message || message.deletedAt) {
     throw new Error("Renewal needs a progress message in this room — post a progress update in the room first");
   }
-  if (message.toMemberId) {
+  if (message.toMemberId || (message.toMemberIds?.length ?? 0) > 0) {
     throw new Error("Renewal needs a public progress message — post the update in the room, not as a DM");
   }
   if (message.authorId !== holderId) {
@@ -2187,7 +2197,7 @@ function requirePublicDecisionSource(state, sourceMessageId) {
   if (!message || message.deletedAt) {
     throw new Error("Decision source must be a message in this Room — post the rationale in the room first");
   }
-  if (message.toMemberId) {
+  if (message.toMemberId || (message.toMemberIds?.length ?? 0) > 0) {
     throw new Error("Decision source must be a public room message — post the rationale in the room first");
   }
 }

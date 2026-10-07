@@ -141,7 +141,8 @@ export function briefHistoryGroup({ event }, viewerId) {
     case T.VERIFICATION_RECORDED:
       return "outcome";
     case T.MESSAGE_POSTED:
-      return event.data?.toMemberId && event.data.toMemberId === viewerId ? "question" : "other";
+      return (event.data?.toMemberId === viewerId
+        || (Array.isArray(event.data?.toMemberIds) && event.data.toMemberIds.includes(viewerId))) ? "question" : "other";
     case T.WORK_BLOCKED:
     case T.WORK_BLOCKER_RESOLVED:
       return "blocker";

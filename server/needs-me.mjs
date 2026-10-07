@@ -177,9 +177,10 @@ function roomDmsOf(store, roomId, memberId, after) {
   const rows = store.db.prepare(
     `SELECT sequence, body FROM events
      WHERE room_id=? AND sequence>? AND json_extract(body,'$.type')='message.posted'
-       AND json_extract(body,'$.data.toMemberId')=?
+       AND (json_extract(body,'$.data.toMemberId')=?
+         OR EXISTS (SELECT 1 FROM json_each(json_extract(body,'$.data.toMemberIds')) WHERE value=?))
      ORDER BY sequence ASC LIMIT ?`
-  ).all(roomId, after, memberId, MAX_PER_KIND + 1);
+  ).all(roomId, after, memberId, memberId, MAX_PER_KIND + 1);
   return rows.map(row => {
     const event = JSON.parse(row.body);
     const messageId = event.data?.messageId ?? event.id;

@@ -9,6 +9,7 @@
 
 import { randomUUID } from "node:crypto";
 import { EVENT_TYPES as T, memberHistoryVisibility, isRoomArchived } from "../src/events.js";
+import { dmTargetIds } from "./dm-rooms.mjs";
 
 const JOIN_TYPES = [T.MEMBER_ADDED, T.MEMBER_JOINED_VIA_INVITATION];
 
@@ -54,12 +55,14 @@ export function messageInHistory(message, floor) {
 
 // QA4 Q4-SEC-1: one predicate for summary surfaces (orient, activation pack)
 // that read projection messages directly instead of through the store's
-// filtered reads. A targeted message (data.toMemberId, a DM) is visible only to
-// its author and its addressee; the room owner is not exempt (RC-2026-09-19-070).
+// filtered reads. A targeted message (data.toMemberId, or a group DM via
+// data.toMemberIds) is visible only to its author and its addressees; the
+// room owner is not exempt (RC-2026-09-19-070).
 // The PRIV-2 floor applies on top. `floor` comes from store.historyFloor().
 export function messageVisibleToViewer(message, viewerId, floor) {
   if (!message || message.body == null || message.deletedAt) return false;
-  if (message.toMemberId && message.authorId !== viewerId && message.toMemberId !== viewerId) return false;
+  const targets = dmTargetIds(message);
+  if (targets.length > 0 && message.authorId !== viewerId && !targets.includes(viewerId)) return false;
   return messageInHistory(message, floor);
 }
 

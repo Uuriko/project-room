@@ -1,15 +1,17 @@
 // SEC-19: DM follow-up privacy.
 //
-// RC-2026-09-18-012 hides a targeted message.posted event (data.toMemberId)
-// from everyone except its sender and its addressed member. The events that
-// later change that message do not carry toMemberId: edits (with the new
-// body), deletes, redactions, reactions, pins and unpins. Before this module
-// they passed the filter, so a non-party (the Room owner included) could read
-// an edited DM body and see that a DM existed. These predicates hide those
-// follow-up events too. They look up the referenced message in the room
-// projection, and fall back to DMs seen in the same page of events.
+// RC-2026-09-18-012 hides a targeted message.posted event (data.toMemberId,
+// or a group DM via data.toMemberIds) from everyone except its sender and
+// its addressed members. The events that later change that message do not
+// carry the addressing: edits (with the new body), deletes, redactions,
+// reactions, pins and unpins. Before this module they passed the filter, so
+// a non-party (the Room owner included) could read an edited DM body and see
+// that a DM existed. These predicates hide those follow-up events too. They
+// look up the referenced message in the room projection, and fall back to
+// DMs seen in the same page of events.
 
 import { EVENT_TYPES as T } from "../src/events.js";
+import { dmTargetIds } from "./dm-rooms.mjs";
 
 export const DM_FOLLOW_UP_TYPES = new Set([
   T.MESSAGE_EDITED,
@@ -23,8 +25,9 @@ export const DM_FOLLOW_UP_TYPES = new Set([
 function partiesFromMessages(messages) {
   const parties = new Map();
   for (const message of messages ?? []) {
-    if (message && typeof message.id === "string" && typeof message.toMemberId === "string" && message.toMemberId) {
-      parties.set(message.id, [message.authorId, message.toMemberId]);
+    if (message && typeof message.id === "string") {
+      const targets = dmTargetIds(message);
+      if (targets.length > 0) parties.set(message.id, [message.authorId, ...targets]);
     }
   }
   return parties;
@@ -44,9 +47,12 @@ export function dmEventVisibility(viewerId, messagesOrThunk, rows = []) {
     parties = partiesFromMessages(messages);
     for (const row of rows) {
       const event = row?.event ?? row;
-      if (event?.type === T.MESSAGE_POSTED && typeof event?.data?.toMemberId === "string" && event.data.toMemberId) {
-        const id = typeof event.data.messageId === "string" ? event.data.messageId : event.id;
-        if (!parties.has(id)) parties.set(id, [event.actorId, event.data.toMemberId]);
+      if (event?.type === T.MESSAGE_POSTED) {
+        const targets = dmTargetIds(event?.data);
+        if (targets.length > 0) {
+          const id = typeof event.data.messageId === "string" ? event.data.messageId : event.id;
+          if (!parties.has(id)) parties.set(id, [event.actorId, ...targets]);
+        }
       }
     }
     return parties;
@@ -54,7 +60,8 @@ export function dmEventVisibility(viewerId, messagesOrThunk, rows = []) {
   return event => {
     if (!event || typeof event !== "object") return true;
     if (event.type === T.MESSAGE_POSTED) {
-      return !event.data?.toMemberId || event.actorId === viewerId || event.data.toMemberId === viewerId;
+      const targets = dmTargetIds(event?.data);
+      return targets.length === 0 || event.actorId === viewerId || targets.includes(viewerId);
     }
     if (!DM_FOLLOW_UP_TYPES.has(event.type)) return true;
     const pair = getParties().get(event.data?.messageId);

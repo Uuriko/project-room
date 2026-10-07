@@ -49,6 +49,7 @@ import { historyFloor as readHistoryFloor, messageInHistory, rowInHistory, index
 import { migrateRoomLifecycleV28, verifyRoomLifecycle, refuseArchivedWrite, createAccountRoom, accountRoomEntry, ACCOUNT_ROOM_SELECT, archivedAtOf } from "./room-lifecycle.mjs";
 import { ShareLinks, shareLinkSchema, shareLinkCodeSchema, shareLinkAccessSchema } from "./share-links.mjs";
 import { DmConsents, dmConsentSchema } from "./dm-consents.mjs";
+import { DmError, dmTargetIds, assertGroupDmMembers } from "./dm-rooms.mjs";
 import { Bonds, bondSchema, isPeerPrivateEvent, peerEventVisible } from "./bonds.mjs";
 import { PublicFace, roomPublicFaceSchema } from "./public-face.mjs";
 import { RoomDirectory, roomDirectorySchema } from "./room-directory.mjs";
@@ -708,7 +709,7 @@ const shapes = {
   [T.MEMBER_STATUS_UPDATED]: "memberId message",
   [T.NOTIFICATION_PREFERENCES_SET]: "preferences",
   [T.MEMBER_MUTE_SET]: "memberId muted",
-  [T.MESSAGE_POSTED]: `messageId body channelId workItemId replyToId toMemberId packetId basisRevision allowOlderBasis alsoSendToChannel ${REPLY_FIELDS.join(" ")}`,
+  [T.MESSAGE_POSTED]: `messageId body channelId workItemId replyToId toMemberId toMemberIds packetId basisRevision allowOlderBasis alsoSendToChannel ${REPLY_FIELDS.join(" ")}`,
   [T.MESSAGE_EDITED]: "messageId body expectedMessageRevision",
   [T.MESSAGE_DELETED]: "messageId expectedMessageRevision reason",
   [T.REPLY_REQUEST_CANCELLED]: "requestMessageId expectedRequestRevision reason",
@@ -794,7 +795,7 @@ export function validateCommand(command) {
   for (const [name, value] of Object.entries(command.data)) {
     if (!allowed.includes(name)) fail(422, "invalid_command", `Unexpected field: ${name}`);
     if (value === null) continue;
-    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents", "allowanceCents", "periodDays", "rounds", "toolCalls"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced", "muted", "resumeApproved", "alsoSendToChannel", "enabled", ...ROOM_POLICY_FIELDS].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities", "segments", "labels", "scopes", "pullRequests", "blocks"].includes(name) ? "array" : name === "outputs" ? "outputs" : ["preferences", "budget", "signedEvidence"].includes(name) ? "object" : "string";
+    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents", "allowanceCents", "periodDays", "rounds", "toolCalls"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced", "muted", "resumeApproved", "alsoSendToChannel", "enabled", ...ROOM_POLICY_FIELDS].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities", "segments", "labels", "scopes", "pullRequests", "blocks", "toMemberIds"].includes(name) ? "array" : name === "outputs" ? "outputs" : ["preferences", "budget", "signedEvidence"].includes(name) ? "object" : "string";
     if (type === "array" ? !Array.isArray(value) : type === "object" ? !(value && typeof value === "object" && !Array.isArray(value)) : type === "outputs" ? !(typeof value === "string" || (Array.isArray(value) && value.every(v => typeof v === "string"))) : typeof value !== type) fail(422, "invalid_command", `Invalid field: ${name}`);
   }
   if (command.type === T.MESSAGE_POSTED && (typeof command.data.body !== "string" || !command.data.body.trim())) fail(422, "invalid_command", messageBody);
@@ -988,21 +989,23 @@ function agentWakeTargets(state, senderMemberId, data, db = null, roomId = "") {
   const members = state?.members ?? {};
   const targets = new Map();
   const body = typeof data?.body === "string" ? data.body : "";
+  const dmIds = dmTargetIds(data);
   for (const memberId of resolveMentionTargetsInText(members, {}, body, senderMemberId)) {
     if (members[memberId]?.kind !== "agent") continue;
-    if (data?.toMemberId && data.toMemberId !== memberId) continue;
+    if (dmIds.length > 0 && !dmIds.includes(memberId)) continue;
     if (!targets.has(memberId)) targets.set(memberId, "mention");
   }
   if (db) {
-    for (const memberId of squadMentionTargets(db, roomId, body, senderMemberId, members, data?.toMemberId)) {
+    for (const memberId of squadMentionTargets(db, roomId, body, senderMemberId, members, dmIds.length > 0 ? dmIds[0] : data?.toMemberId)) {
       if (members[memberId]?.kind !== "agent") continue;
       if (!targets.has(memberId)) targets.set(memberId, "squad-mention");
     }
   }
-  const dmId = typeof data?.toMemberId === "string" ? data.toMemberId : "";
-  const dm = dmId ? members[dmId] : null;
-  if (dm && dm.active !== false && dm.kind === "agent" && dmId !== senderMemberId && !targets.has(dmId)) {
-    targets.set(dmId, "dm");
+  for (const dmId of dmIds) {
+    const dm = members[dmId];
+    if (dm && dm.active !== false && dm.kind === "agent" && dmId !== senderMemberId && !targets.has(dmId)) {
+      targets.set(dmId, "dm");
+    }
   }
   return targets;
 }
@@ -4339,9 +4342,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const memberId = auth.member.id;
       const directMessages = this.db.prepare(
         `SELECT sequence, body FROM events WHERE room_id=?
-         AND json_extract(body,'$.type')=? AND json_extract(body,'$.data.toMemberId')=?
+         AND json_extract(body,'$.type')=?
+         AND (json_extract(body,'$.data.toMemberId')=?
+           OR EXISTS (SELECT 1 FROM json_each(json_extract(body,'$.data.toMemberIds')) WHERE value=?))
          ORDER BY sequence DESC LIMIT ?`)
-        .all(roomId, T.MESSAGE_POSTED, memberId, limit)
+        .all(roomId, T.MESSAGE_POSTED, memberId, memberId, limit)
         .map(row => {
           const parsed = JSON.parse(row.body);
           return {
@@ -4352,7 +4357,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
             at: parsed.at,
             channel: "room",
             ...(parsed.data.requestKind === "reply" && parsed.data.requestPolicyVersion === 1
-              && [parsed.actorId, parsed.data.toMemberId].includes(memberId) ? {
+              && [parsed.actorId, ...dmTargetIds(parsed.data)].includes(memberId) ? {
                 requestKind: "reply", nextRead: { tool: "room_read_request", arguments: { requestMessageId: parsed.data.messageId ?? parsed.id } }
               } : {}),
           };
@@ -4436,7 +4441,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     }
     return rows.map(row => ({ row, event: JSON.parse(row.body) }))
       .filter(({ event }) => event?.type === T.MESSAGE_POSTED
-        && (!event.data?.toMemberId || event.data.toMemberId === memberId || event.actorId === memberId))
+        && (dmTargetIds(event.data).length === 0 || dmTargetIds(event.data).includes(memberId) || event.actorId === memberId))
       .filter(({ row, event }) => row.state !== "timed_out" || !answeredBy.get(event.data.messageId ?? row.eventId))
       .map(({ row, event }) => Object.freeze({
         sequence: row.sequence,
@@ -4448,10 +4453,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         at: event.at,
         state: row.state !== "timed_out" && row.timeoutAt <= nowMs ? "timed_out" : row.state,
         channel: event.data.channelId ?? "general",
-        private: Boolean(event.data.toMemberId),
-        ...(event.data.toMemberId ? { replyToMemberId: event.actorId } : {}),
+        private: dmTargetIds(event.data).length > 0,
+        ...(dmTargetIds(event.data).length > 0 ? { replyToMemberId: event.actorId } : {}),
         ...(event.data.requestKind === "reply" && event.data.requestPolicyVersion === 1
-          && [event.actorId, event.data.toMemberId].includes(memberId) ? {
+          && [event.actorId, ...dmTargetIds(event.data)].includes(memberId) ? {
             requestKind: "reply", nextRead: { tool: "room_read_request", arguments: { requestMessageId: event.data.messageId ?? event.id } }
           } : {}),
       }));
@@ -4535,6 +4540,22 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         // rejected / revoked) refuses. Runs before the event is built, so a
         // refused DM never persists and never wakes its target.
         this.dmConsents.requireDmAllowed(roomId, auth.member.id, command.data.toMemberId);
+      }
+      if (command.type === T.MESSAGE_POSTED && command.data.toMemberIds !== undefined && command.data.toMemberIds !== null) {
+        // Group DMs (3-8 members): the same consent gate as pair DMs, once
+        // per direction. One denied member refuses the whole send — a group
+        // DM never partially delivers.
+        if (typeof command.data.toMemberId === "string" && command.data.toMemberId) {
+          fail(422, "invalid_dm", "toMemberId and toMemberIds are mutually exclusive: use toMemberId for a pair DM, toMemberIds for a group DM");
+        }
+        let memberIds;
+        try {
+          memberIds = assertGroupDmMembers(command.data.toMemberIds, auth.member.id);
+        } catch (error) {
+          if (error instanceof DmError) fail(422, error.code, error.message);
+          throw error;
+        }
+        for (const memberId of memberIds) this.dmConsents.requireDmAllowed(roomId, auth.member.id, memberId);
       }
       // Room Trust off: a post that would wake a cross-owner agent still
       // lands. The wake is skipped and the result carries a note. Assign
@@ -4759,7 +4780,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         state = this.resumeRoundLimitPauses(roomId, state, auth.member.id, incoming, sequence);
         this.humanPush.notifyPosted({
           roomId, state, senderMemberId: auth.member.id,
-          body: command.data.body, toMemberId: command.data.toMemberId,
+          body: command.data.body, toMemberId: command.data.toMemberId, toMemberIds: command.data.toMemberIds,
           messageId: command.data.messageId || incoming.id, sequence, eventId: incoming.id
         });
       }
@@ -4892,7 +4913,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   resumeRoundLimitPauses(roomId, state, senderMemberId, messageEvent, sequence) {
     const body = typeof messageEvent?.data?.body === "string" ? messageEvent.data.body : "";
     const mentioned = new Set(resolveMentionTargetsInText(state.members ?? {}, {}, body, senderMemberId));
-    const dmId = typeof messageEvent?.data?.toMemberId === "string" ? messageEvent.data.toMemberId : "";
+    const dmIds = dmTargetIds(messageEvent?.data);
     let next = state;
     let seq = sequence;
     for (const item of Object.values(state.workItems ?? {})) {
@@ -4901,7 +4922,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (session.status !== "suspended" || session.suspended_by !== "round_limit") continue;
       const worker = session.worker_member_id;
       if (!worker) continue;
-      if (senderMemberId !== worker && !mentioned.has(worker) && dmId !== worker) continue;
+      if (senderMemberId !== worker && !mentioned.has(worker) && !dmIds.includes(worker)) continue;
       const actor = state.members?.[worker];
       const can = actor && actor.active !== false && (
         (worker === item.accountableMemberId && memberCan(state, worker, "accept_work"))
@@ -4998,15 +5019,18 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       `INSERT OR IGNORE INTO mention_states
        (room_id,message_event_id,mentioned_member_id,state,created_at,timeout_at,decided_at)
        VALUES(?,?,?,?,?,?,NULL)`);
-    const toMemberId = typeof data.toMemberId === "string" ? data.toMemberId : "";
+    const dmIds = dmTargetIds(data);
     for (const memberId of resolveMentionTargetsInText(members, identityNames, body, senderMemberId)) {
-      if (toMemberId && toMemberId !== memberId) continue;
+      // In a DM only handles naming a DM participant create rows; other
+      // handles never leak the DM's existence to non-participants.
+      if (dmIds.length > 0 && !dmIds.includes(memberId)) continue;
       insert.run(roomId, eventId, memberId, "delivered", nowMs, nowMs + timeoutMs);
     }
     // plan-squads: @squad/<name> fans out to one mention row per active
     // member (INSERT OR IGNORE dedupes against direct mentions). The
-    // mention lifecycle owns delivery/ack/timeout from here.
-    for (const memberId of squadMentionTargets(this.db, roomId, body, senderMemberId, members, data.toMemberId)) {
+    // mention lifecycle owns delivery/ack/timeout from here. DMs never fan
+    // out — a fanout could reach members outside the DM.
+    for (const memberId of squadMentionTargets(this.db, roomId, body, senderMemberId, members, dmIds.length > 0 ? dmIds[0] : data.toMemberId)) {
       insert.run(roomId, eventId, memberId, "delivered", nowMs, nowMs + timeoutMs);
     }
     // COMMS-02: warn the poster about @handles whose target is ambiguous
@@ -5015,7 +5039,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // warnings ride on the command response. In a targeted DM only handles
     // naming the DM target are relevant; other handles never create rows.
     let warnings = mentionTargetWarnings(members, identityNames, body, senderMemberId);
-    if (toMemberId) warnings = warnings.filter(w => w.candidates.some(c => c.memberId === toMemberId));
+    if (dmIds.length > 0) warnings = warnings.filter(w => w.candidates.some(c => dmIds.includes(c.memberId)));
     return warnings;
   }
 
@@ -5128,11 +5152,15 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
          WHERE m.room_id=? AND m.mentioned_member_id=?
            AND (? IS NULL OR m.state=?) AND (? IS NULL OR m.created_at>=?)
            AND json_extract(e.body,'$.type')='message.posted'
-           AND (COALESCE(json_extract(e.body,'$.data.toMemberId'),'')=''
+           AND ((COALESCE(json_extract(e.body,'$.data.toMemberId'),'')=''
+               AND json_extract(e.body,'$.data.toMemberIds') IS NULL)
              OR ((json_extract(e.body,'$.data.toMemberId')=? OR json_extract(e.body,'$.actorId')=?)
-               AND (json_extract(e.body,'$.data.toMemberId')=? OR json_extract(e.body,'$.actorId')=?)))
+               AND (json_extract(e.body,'$.data.toMemberId')=? OR json_extract(e.body,'$.actorId')=?))
+             OR (EXISTS (SELECT 1 FROM json_each(json_extract(e.body,'$.data.toMemberIds')) WHERE value=?)
+               AND (EXISTS (SELECT 1 FROM json_each(json_extract(e.body,'$.data.toMemberIds')) WHERE value=?)
+                 OR json_extract(e.body,'$.actorId')=?)))
          ORDER BY m.created_at DESC LIMIT 200`
-      ).all(roomId, target, state, state, after, after === null ? null : Date.parse(after), target, target, auth.member.id, auth.member.id);
+      ).all(roomId, target, state, state, after, after === null ? null : Date.parse(after), target, target, auth.member.id, auth.member.id, target, target, auth.member.id);
       const members = this.room(roomId).state.members ?? {};
       return {
         roomId, memberId: target,

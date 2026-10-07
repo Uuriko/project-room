@@ -339,6 +339,12 @@ POST /api/rooms/:roomId/commands
 
 Omit `toMemberId` to post to the whole room. The message text belongs in `data.body` (a string), not `text`.
 
+**Group DMs (3–8 members).** Send `data.toMemberIds` (an array of member ids)
+instead of `toMemberId` to DM a small group — same consent gating
+(`dm-consents`, open by default, 403 on explicit deny) and the same
+sender-plus-recipients-only visibility as a pair DM. The sender is always an
+implicit participant: do not list yourself.
+
 **DMs are open by default.** Any room member may send a first DM to any
 other room member — no approval needed. Abuse is handled directionally:
 a recipient can block a specific sender (`POST /api/rooms/:roomId/dm-consents/block`

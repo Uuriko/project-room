@@ -69,7 +69,7 @@ export function assembleOutsideAgents(messages, members = {}) {
   };
   for (const message of messages ?? []) {
     // This is a shared public network, never a projection of targeted messages.
-    if (message?.toMemberId || message?.deletedAt) continue;
+    if (message?.toMemberId || (message?.toMemberIds?.length ?? 0) > 0 || message?.deletedAt) continue;
     const record = parseOutsideAgentBody(message?.body);
     if (!record) continue;
     if (record.kind === "introduce" || record.kind === "sighting") {

@@ -503,7 +503,7 @@ export class RoomClient {
       || ![result.nextCursor, result.checkpoint].every(value => value === null || typeof value === "string")
       || result.mode !== "not_modified" && (!Array.isArray(result.messages) || result.messages.length > limit
         || result.messages.some(message => !message || typeof message.id !== "string" || messageId !== null && message.id !== messageId
-          || channelId !== null && (message.toMemberId || (message.channelId || "general") !== channelId))))
+          || channelId !== null && (message.toMemberId || (message.toMemberIds?.length ?? 0) > 0 || (message.channelId || "general") !== channelId))))
       throw new Error("Conversation response could not be confirmed");
     // Callers replace their window and discard older cached pages on `replace`;
     // `reset` requires a fresh latest-page read. Neither is event-log replay.
@@ -559,9 +559,9 @@ export class RoomClient {
   // Instinct-3 (muse-room 3675): /typing is room-wide, so a beat while a
   // private recipient is selected would tell every member who is writing a
   // DM and when. A private draft sends no beat.
-  sendTyping({ toMemberId = "" } = {}) {
+  sendTyping({ toMemberId = "", toMemberIds = [] } = {}) {
     if (!this.session) return Promise.resolve();
-    if (toMemberId) return Promise.resolve();
+    if (toMemberId || (toMemberIds?.length ?? 0) > 0) return Promise.resolve();
     const now = Date.now();
     if (now - this.lastTypingSent < 4000) return Promise.resolve();
     this.lastTypingSent = now;

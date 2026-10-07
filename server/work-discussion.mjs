@@ -2,6 +2,7 @@ import { Buffer } from "node:buffer";
 import { validId } from "../src/events.js";
 import { nextWorkStep } from "../src/workflow.js";
 import { stampDiscussion } from "./content-trust.mjs";
+import { dmTargetIds } from "./dm-rooms.mjs";
 
 const DISCUSSION_DEFAULT_LIMIT = 20;
 export const DISCUSSION_MAX_LIMIT = 50, DISCUSSION_BYTE_LIMIT = 65536;
@@ -48,12 +49,13 @@ export function selectedWorkDiscussion({ state, workItemId, viewerId, sequence, 
       : !message.workItemId && included.has(message.replyToId) ? "reply" : null;
     if (!relation) continue;
     included.add(message.id);
-    // RC-2026-09-19-070: targeted DMs are private to sender and recipient.
+    // RC-2026-09-19-070: targeted DMs are private to sender and recipients.
     // Exclude them from the visible selection BEFORE paging, so page
     // boundaries, hasMore, cursors, rowBytes and the participant roster
     // cannot reveal their existence, count, or metadata. They stay in
     // `included` so public descendants of a hidden DM remain selected.
-    if (message.toMemberId && message.toMemberId !== viewerId && message.authorId !== viewerId) continue;
+    const dmTargets = dmTargetIds(message);
+    if (dmTargets.length > 0 && !dmTargets.includes(viewerId) && message.authorId !== viewerId) continue;
     selected.push({ sequence: post.sequence, eventId: post.id, relation, message });
   }
   if (cursor !== null && !selected.some(row => row.sequence === window.after)) fail("invalid_discussion", "Continuation must follow a selected message");
@@ -61,7 +63,7 @@ export function selectedWorkDiscussion({ state, workItemId, viewerId, sequence, 
   for (const row of selected) {
     if (row.sequence <= window.after) continue;
     const result = { sequence: row.sequence, eventId: row.eventId, relation: row.relation,
-      message: pick(row.message, "id authorId body createdAt replyToId toMemberId workItemId") };
+      message: pick(row.message, "id authorId body createdAt replyToId toMemberId toMemberIds workItemId") };
     if (row.message.proposal) result.message.proposal = pick(row.message.proposal, "packetId basisRevision submittedAtRevision attribution");
     const size = Buffer.byteLength(JSON.stringify(result));
     if (items.length === window.limit || bytes + size > DISCUSSION_BYTE_LIMIT) {
@@ -72,7 +74,7 @@ export function selectedWorkDiscussion({ state, workItemId, viewerId, sequence, 
   }
   const nextCursor = hasMore ? encode({ version: 1, roomId: state.room.id, workItemId, viewerId,
     horizon: window.horizon, anchorId, since: window.since, after: items.at(-1).sequence }) : null;
-  const ids = new Set(items.flatMap(({ message }) => [message.authorId, message.toMemberId]).filter(Boolean));
+  const ids = new Set(items.flatMap(({ message }) => [message.authorId, ...dmTargetIds(message)]).filter(Boolean));
   const value = { contractVersion: 1, roomId: state.room.id, workItemId, viewerId,
     selection: { sourceMessageId: item.sourceMessageId ?? null, rule: "source-linked-descendants-v1" },
     discussion: { horizon: window.horizon, since: window.since, after: window.after, cursor, items, hasMore, nextCursor,

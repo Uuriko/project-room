@@ -97,7 +97,7 @@ function affectedMessageIds(event) {
   if (event?.type === "message.posted") {
     const id = typeof data.messageId === "string" && data.messageId ? data.messageId : event.id;
     const ids = [id];
-    if (data.alsoSendToChannel && data.replyToId && !data.toMemberId && !data.workItemId) ids.push(`${id}:channel`);
+    if (data.alsoSendToChannel && data.replyToId && !data.toMemberId && !(data.toMemberIds?.length) && !data.workItemId) ids.push(`${id}:channel`);
     return ids;
   }
   return typeof data.messageId === "string" && data.messageId ? [data.messageId] : [];

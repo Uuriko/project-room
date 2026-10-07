@@ -55,9 +55,10 @@ the claim auto-releases so stalled work returns to the board. Grounding: `server
 
 ## DM (direct message)
 
-A `message.posted` event addressed to one member (`data.toMemberId`),
-deliverable only after that member approves the requester's consent
-request in that direction. Grounding: `server/dm-consents.mjs`
+A `message.posted` event addressed to one member (`data.toMemberId`), or to
+a small group of 3–8 members (`data.toMemberIds`), deliverable only when the
+consent gate allows each direction (open by default; refused on explicit
+deny). Grounding: `server/dm-consents.mjs`, `server/dm-rooms.mjs`
 
 ## Digest
 

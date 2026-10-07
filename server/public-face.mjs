@@ -7,7 +7,7 @@
 // /api/public/rooms/{code}/feed).
 //
 // Sanitization is a strict field-by-field rebuild — never a passthrough:
-//   - DMs (messages with toMemberId) never appear: not counted, not hinted.
+//   - DMs (messages with toMemberId or toMemberIds) never appear: not counted, not hinted.
 //   - Members are handles (displayName) only: no emails, no member ids, no
 //     identity links, no permission lists.
 //   - Message bodies are shown as written (the owner opted in) but capped
@@ -155,7 +155,7 @@ export class PublicFace {
       // v1 channel caveat: the core projection has no channel field, so
       // every non-DM message is treated as public. Per-channel public
       // flags are explicitly out of v1 (see DESIGN.md).
-      .filter(m => m && m.toMemberId == null && typeof m.body === "string" && m.body.length > 0)
+      .filter(m => m && m.toMemberId == null && m.toMemberIds == null && typeof m.body === "string" && m.body.length > 0)
       .slice(-messageLimit)
       .map(m => {
         const body = m.body.length > MAX_BODY_CHARS ? m.body.slice(0, MAX_BODY_CHARS) + " …" : m.body;
@@ -194,7 +194,7 @@ export class PublicFace {
       // v1 channel caveat: the core projection has no channel field, so
       // every non-DM message is treated as public. Per-channel public
       // flags are explicitly out of v1 (see DESIGN.md).
-      .filter(m => m && m.toMemberId == null && typeof m.body === "string" && m.body.length > 0);
+      .filter(m => m && m.toMemberId == null && m.toMemberIds == null && typeof m.body === "string" && m.body.length > 0);
     // M-15: an unrecognized cursor fails closed — silently restarting from
     // the first message would make clients re-read from the top (duplicate
     // processing, potential infinite re-poll loop).

@@ -346,6 +346,7 @@ export function parseSearchQuery(query) {
 export function messageAddressesMember(message, member) {
   if (!member?.id) return false;
   if (message?.toMemberId === member.id) return true;
+  if (Array.isArray(message?.toMemberIds) && message.toMemberIds.includes(member.id)) return true;
   return messageMentionsMember(message?.body, member);
 }
 

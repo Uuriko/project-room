@@ -2,6 +2,7 @@ import { enforceAutonomyTierForAction } from './autonomy-tiers.mjs';
 import { validId } from '../src/events.js';
 import { isGuestAgentMemberId } from './guest-agent-links.mjs';
 import { historyFloor, messageInHistory, messageVisibleToViewer } from './history-visibility.mjs';
+import { dmTargetIds } from './dm-rooms.mjs';
 
 // Coordination records reserve one publisher. A host claim is an observation,
 // not a hosted execution service, and never grants that host additional rights.
@@ -22,7 +23,7 @@ const keys = {
 // Deleted prompts retain only a stop handle for their existing controllers.
 // The history floor still applies: deletion cannot reveal older work to newcomers.
 const controlsDeletedSource = (run, opening, actor, state, floor) => Boolean(
-  opening?.deletedAt && opening.body == null && !opening.toMemberId && messageInHistory(opening, floor)
+  opening?.deletedAt && opening.body == null && dmTargetIds(opening).length === 0 && messageInHistory(opening, floor)
   && (actor.kind === 'human' && (actor.id === run.initiatorId || actor.id === state.room.ownerId)
     || actor.kind === 'agent' && actor.id === run.coordinatorMemberId && run.attemptId && actor.permissions.includes('accept_work')));
 const deletedControl = run => Object.fromEntries([
@@ -87,7 +88,7 @@ export class RoomAssistant {
       }
       const source = id => {
         const message = state.messages.find(m => m.id === id);
-        if (!message || message.toMemberId || !messageVisibleToViewer(message, actor.id, floor) || message.authorId !== actor.id)
+        if (!message || dmTargetIds(message).length > 0 || !messageVisibleToViewer(message, actor.id, floor) || message.authorId !== actor.id)
           fail('assistant_source_denied', 'Choose your own visible shared message', 403);
         return message;
       };

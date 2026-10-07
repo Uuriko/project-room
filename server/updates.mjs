@@ -11,6 +11,7 @@ import { createHash } from "node:crypto";
 import { ServiceError } from "./store.mjs";
 import { nextWorkStep } from "../src/workflow.js";
 import { validId } from "../src/events.js";
+import { dmTargetIds } from "./dm-rooms.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 const ACTIONABLE = new Set(["unread", "read"]);
@@ -219,7 +220,7 @@ function projectRoom(store, roomId, memberId, identityId) {
 
   const replied = new Set(messages.filter(message => message.authorId === memberId && message.replyToId).map(message => message.replyToId));
   for (const message of messages) {
-    if (!message || message.toMemberId !== memberId || message.authorId === memberId) continue;
+    if (!message || !dmTargetIds(message).includes(memberId) || message.authorId === memberId) continue;
     if (requestIds.has(message.id)) continue;
     const at = iso(message.createdAt);
     items.push(draft({

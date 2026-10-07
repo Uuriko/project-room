@@ -157,6 +157,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/persisted-row.mjs'); // RC-2026-09-27-2730: replay-safe persisted-row envelope (imported by server/bounty-escrow.mjs, server/work-claim-sqlite.mjs, server/dispatch-journal.mjs; pure, no imports)
   paths.add('server/spam-shadow.mjs'); // Shadow-mode auto-quarantine instrumentation (imported by server/inbox.mjs)
   paths.add('server/dm-consents.mjs'); // Directional DM-consent journal (imported by server/store.mjs)
+  paths.add('server/dm-rooms.mjs'); // Pair + group DM membership model (imported by server/store.mjs and server/http.mjs)
   paths.add('src/dm-consents.js'); // DM consent browser view-model + API helpers (imported by src/app.js)
   paths.add('src/friend-bond.js'); // Friend / Bond People chrome (imported by src/app.js and src/client.js)
   paths.add('server/web-fetch.mjs'); // RC-2026-09-23-102: room-side web fetch (imported by server/http.mjs + server/store.mjs)

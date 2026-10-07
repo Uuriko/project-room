@@ -7753,8 +7753,8 @@ paths:
         names are not unique per room, so browser actions resolve by id).
         The room owner additionally sees pair metadata for moderation — never
         DM contents. DMs are open by default: a DM (message.posted with
-        toMemberId) posts without any consent row, and is rejected with 403
-        dm_consent_required (or dm_blocked) only when the target has
+        toMemberId, or a group DM with toMemberIds) posts without any consent row, and is rejected with 403
+        dm_consent_required (or dm_blocked) only when a target has
         explicitly denied the direction (rejected / revoked / blocked).
       parameters:
         - $ref: '#/components/parameters/RoomId'

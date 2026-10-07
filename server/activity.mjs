@@ -23,6 +23,7 @@
 import { resolveMentionTargetsInText } from "./mention-lifecycle.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { ServiceError } from "./store.mjs";
+import { dmTargetIds } from "./dm-rooms.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 
@@ -66,9 +67,11 @@ export const activitySchema = `
 // rejects a string whose trailing chunk after the final semicolon contains
 // no statement (e.g. a trailing -- comment).
 
-// A DM message is visible only to its author and its recipient.
-const dmVisible = (message, memberId) =>
-  !message?.toMemberId || message.authorId === memberId || message.toMemberId === memberId;
+// A DM message is visible only to its author and its recipients.
+const dmVisible = (message, memberId) => {
+  const targets = dmTargetIds(message);
+  return targets.length === 0 || message.authorId === memberId || targets.includes(memberId);
+};
 
 function threadRootOf(messages, replyToId) {
   const byId = new Map(messages.map(m => [m.id, m]));
@@ -150,14 +153,17 @@ export function recordActivityEvents(store, roomId, state, senderId, command, in
       }
     }
     // Consent-bound DMs: a DM addressed to you is the most direct attention
-    // signal, so the recipient always gets a mention event (mirroring the
-    // cursor-derived notifications feed). Events stay between the DM's two
+    // signal, so every recipient gets a mention event (mirroring the
+    // cursor-derived notifications feed). Events stay between the DM's
     // parties, so a mention of a third member in a DM never leaks the DM's
     // existence.
-    if (typeof data.toMemberId === "string" && data.toMemberId && data.toMemberId !== senderId) {
-      if (!recipients.has(data.toMemberId)) recipients.set(data.toMemberId, { type: "mention", threadId: "" });
+    const dmIds = dmTargetIds(data).filter(id => id !== senderId);
+    if (dmIds.length > 0) {
+      for (const dmId of dmIds) {
+        if (!recipients.has(dmId)) recipients.set(dmId, { type: "mention", threadId: "" });
+      }
       for (const userId of [...recipients.keys()]) {
-        if (userId !== data.toMemberId) recipients.delete(userId);
+        if (!dmIds.includes(userId)) recipients.delete(userId);
       }
     }
     const insert = db.prepare(

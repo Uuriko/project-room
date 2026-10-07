@@ -3,6 +3,7 @@ import { charterContext } from "../src/room-charter.js";
 import { validateHelp, workHelpContext } from "../src/work-help.js";
 import { workOffersContext } from "../src/help-offers.js";
 import { sessionRecord, budgetCard, presentedSessionStatus } from "../src/work-item-session.js";
+import { dmTargetIds } from "./dm-rooms.mjs";
 import { markIfOther, withContentTrust } from "./content-trust.mjs";
 
 // The exact omissions every selected read reports; the access summary repeats the same list.
@@ -90,7 +91,7 @@ export function selectedWorkContext({ state, workItemId, viewerId, sequence, now
   // Work assignment does not expand a targeted message's audience. Apply the
   // same participant boundary to delivered source, preview and inferred people.
   const linked = item.sourceMessageId ? state.messages.find(message => message.id === item.sourceMessageId
-    && (!message.toMemberId || message.authorId === viewerId || message.toMemberId === viewerId)) ?? null : null;
+    && (dmTargetIds(message).length === 0 || message.authorId === viewerId || dmTargetIds(message).includes(viewerId))) ?? null : null;
   const message = includeSource ? linked : null;
   const source = { status: !includeSource ? "not_requested" : !item.sourceMessageId ? "not_linked" : message ? "included" : "unavailable",
     message: message ? pick(message, "id authorId body createdAt") : null };

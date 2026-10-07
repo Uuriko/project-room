@@ -24,7 +24,8 @@ export function storedText(db, state, workItemId, messageId, messageEventId = nu
   check(message && post.type === "message.posted" && post.roomId === state.room.id && post.id === row.id
     && (post.data.messageId || post.id) === messageId && post.data.workItemId === workItemId && message.workItemId === workItemId
     && (withdrawn ? message.body === null : post.data.body === message.body) && post.actorId === message.authorId && post.at === message.createdAt
-    && (post.data.replyToId || null) === message.replyToId && (post.data.toMemberId || null) === message.toMemberId);
+    && (post.data.replyToId || null) === message.replyToId && (post.data.toMemberId || null) === message.toMemberId
+    && isDeepStrictEqual(post.data.toMemberIds ?? null, message.toMemberIds ?? null));
   let proposal = null;
   if (["packetId", "basisRevision", "allowOlderBasis"].some(key => Object.hasOwn(post.data, key))) {
     const prior = db.prepare(`SELECT body FROM events WHERE room_id=? AND sequence<? AND json_extract(body,'$.data.workItemId')=? AND (json_extract(body,'$.type')='work.proposed' OR (json_extract(body,'$.type') IN (${WORK_REVISION_TYPES.map(() => "?").join(",")}) AND json_type(body,'$.data.expectedRevision')='integer')) ORDER BY sequence DESC LIMIT 1`).get(state.room.id, row.sequence, workItemId, ...WORK_REVISION_TYPES);

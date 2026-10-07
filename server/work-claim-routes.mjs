@@ -40,6 +40,7 @@ import {
   walkProvenance, flagPremiseInvalid, clearPremiseFlag,
 } from "./work-claims.mjs";
 import { findDuplicates, DuplicateError } from "./work-duplicates.mjs";
+import { dmTargetIds } from "./dm-rooms.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { evaluateReceipt } from "./jev-receipts.mjs";
 import { findClaimCollisions } from "./claim-collisions.mjs";
@@ -1152,7 +1153,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
         reject(422, "claim_renewal_source_required",
           "Post a progress update in the room first, then renew the claim with its message id");
       }
-      if (message.toMemberId) {
+      if (dmTargetIds(message).length > 0) {
         reject(422, "claim_renewal_source_required",
           "The progress update must be a public room message, not a DM — post it in the room first");
       }

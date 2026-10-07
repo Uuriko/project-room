@@ -12,6 +12,7 @@ import { notificationFromPush } from "../src/human-push-display.js";
 import { resolveMentionTargetsInText } from "./mention-lifecycle.mjs";
 import { isQuietAt, normalizeQuietHours, NotifyError } from "./notify-prefs.mjs";
 import { deliverToSubscriptions, normaliseSubscription, pushPayloadFor, richPushPayloadFor } from "./push-subscriptions.mjs";
+import { dmTargetIds } from "./dm-rooms.mjs";
 
 export const HUMAN_PUSH_DEFAULT = "mentions_and_dms";
 // The two event kinds the push channel actually delivers. Preferences switch
@@ -106,17 +107,17 @@ export const humanPushPrefsSchema = `
 `;
 
 // Humans a message.posted should wake in the browser. A DM stays with its
-// recipient. An @mention fans out only in the room channel, and only to
-// humans. The sender is never a recipient. Agents are not: they already
-// have the heartbeat doorbell.
-export function humanPushRecipients({ members, senderMemberId, body, toMemberId }) {
+// recipients (one for a pair DM, all of them for a group DM). An @mention
+// fans out only in the room channel, and only to humans. The sender is never
+// a recipient. Agents are not: they already have the heartbeat doorbell.
+export function humanPushRecipients({ members, senderMemberId, body, toMemberId, toMemberIds }) {
   const roster = {};
   for (const [memberId, member] of Object.entries(members ?? {})) {
     if (!member || member.kind !== "human" || member.active === false || memberId === senderMemberId) continue;
     roster[memberId] = member;
   }
-  const dmId = typeof toMemberId === "string" ? toMemberId : "";
-  if (dmId) return roster[dmId] ? [{ memberId: dmId, kind: "dm" }] : [];
+  const dmIds = dmTargetIds({ toMemberId, toMemberIds });
+  if (dmIds.length > 0) return dmIds.filter(id => roster[id]).map(id => ({ memberId: id, kind: "dm" }));
   return resolveMentionTargetsInText(members, {}, typeof body === "string" ? body : "", senderMemberId)
     .filter(memberId => Object.hasOwn(roster, memberId))
     .map(memberId => ({ memberId, kind: "mention" }));
@@ -353,10 +354,10 @@ export class HumanPush {
   // Fire-and-forget. Called from the message.posted transaction after the
   // event is stored. A push failure never fails the post. With no VAPID
   // keys this returns before it looks anyone up.
-  notifyPosted({ roomId, state, senderMemberId, body, toMemberId, messageId, sequence, eventId }) {
+  notifyPosted({ roomId, state, senderMemberId, body, toMemberId, toMemberIds, messageId, sequence, eventId }) {
     try {
       if (!this.vapid) return;
-      for (const recipient of humanPushRecipients({ members: state?.members, senderMemberId, body, toMemberId })) {
+      for (const recipient of humanPushRecipients({ members: state?.members, senderMemberId, body, toMemberId, toMemberIds })) {
         if (this._suppressed(roomId, state, recipient.memberId, senderMemberId, messageId)) continue;
         // The member's own push switch. Default on: never touching
         // preferences keeps today's mentions-and-DMs behavior exactly.
@@ -393,7 +394,7 @@ export class HumanPush {
           const kindOn = recipient.kind === "mention" ? prefs.mention : prefs.dm;
           return kindOn && member?.kind === "human" && member.active !== false
             && message && !message.deletedAt
-            && (!message.toMemberId || message.toMemberId === recipient.memberId)
+            && (dmTargetIds(message).length === 0 || dmTargetIds(message).includes(recipient.memberId))
             && !this._suppressed(roomId, current, recipient.memberId, senderMemberId, messageId)
             && this._rows(roomId, recipient.memberId).some(row => row.endpoint === endpoint);
         };
