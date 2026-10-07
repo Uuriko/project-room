@@ -1278,6 +1278,16 @@ paths:
         thread's channel (same event; ignored for DMs and work proposals).
         Events: `channel.created`,
         `channel.renamed`, `channel.archived`.
+        Polls (missing-features #5): `message.posted` accepts `kind: "poll"`
+        with a validated `poll` payload `{ question, options: [label, ...] }`
+        (2-10 options; the server assigns digit-keycap vote emojis). Votes are
+        ordinary `message.reaction_set` commands on an option emoji —
+        single-choice polls move a member's vote between options; `allowMultiple:
+        true` polls allow one vote per option. The web client renders the
+        question, options and live tally with vote buttons. `message.poll_closed`
+        (data: `messageId`) closes voting: the poll author or a member with the
+        `steer` permission may close; later votes are rejected (422) and a
+        second close answers 409. Events: `message.poll_closed`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       requestBody:

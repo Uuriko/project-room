@@ -54,6 +54,7 @@ export const EVENT_TYPES = Object.freeze({
   MESSAGE_REACTION_SET: "message.reaction_set",
   MESSAGE_PINNED: "message.pinned",
   MESSAGE_UNPINNED: "message.unpinned",
+  MESSAGE_POLL_CLOSED: "message.poll_closed",
   CHANNEL_CREATED: "channel.created",
   CHANNEL_RENAMED: "channel.renamed",
   CHANNEL_ARCHIVED: "channel.archived",
@@ -546,6 +547,7 @@ export function applyEvent(current, incoming) {
     [EVENT_TYPES.MESSAGE_REACTION_SET]: setMessageReaction,
     [EVENT_TYPES.MESSAGE_PINNED]: pinMessage,
     [EVENT_TYPES.MESSAGE_UNPINNED]: unpinMessage,
+    [EVENT_TYPES.MESSAGE_POLL_CLOSED]: closePoll,
     [EVENT_TYPES.CHANNEL_CREATED]: createChannel,
     [EVENT_TYPES.CHANNEL_RENAMED]: renameChannel,
     [EVENT_TYPES.CHANNEL_ARCHIVED]: archiveChannel,
@@ -1424,6 +1426,7 @@ function setMessageReaction(state, incoming) {
   const message = state.messages.find(m => m.id === messageId);
   if (!message) throw new Error("Reaction must reference a message in this Room");
   if (message.deletedAt) throw new Error("Message was deleted");
+  if (message.kind === "poll" && message.poll?.closedAt) throw new Error("Poll is closed");
   const key = canonicalReaction(reaction);
   if (!key || typeof active !== "boolean") throw new Error("Invalid reaction choice");
   // Replay and checkpoints may still carry like/heart/celebrate/thinking.
@@ -1453,6 +1456,31 @@ function setMessageReaction(state, incoming) {
       }
     }
   }
+}
+
+// Polls (missing-features #5 follow-up): closing a poll. The poll author or a
+// member with the steer permission stamps poll.closedAt; later votes are
+// rejected by setMessageReaction above. Event-sourced: message.poll_closed
+// appends to the room log and the projection carries the stamp on the poll
+// record, so replay and the messages table agree. An exact duplicate of the
+// recorded close event is a no-op (same at); a second close command is
+// rejected so clients learn the poll already closed.
+function closePoll(state, incoming) {
+  const actor = requireMember(state, incoming.actorId);
+  const messageId = incoming.data?.messageId;
+  if (typeof messageId !== "string" || !messageId.trim()) throw new Error("Event data missing messageId");
+  const message = state.messages.find(m => m.id === messageId);
+  if (!message) throw new Error("Close must reference a message in this Room");
+  if (message.kind !== "poll" || !message.poll || !Array.isArray(message.poll.options)) throw new Error("Only a poll message can be closed");
+  if (message.deletedAt) throw new Error("Message was deleted");
+  if (message.poll.closedAt) {
+    if (message.poll.closedAt === incoming.at) return; // exact duplicate replay
+    throw new Error("Poll is already closed");
+  }
+  if (message.authorId !== actor.id && !hasPermission(state, actor.id, "steer")) {
+    throw new Error(`${actor.id} lacks permission to close this poll`);
+  }
+  message.poll = { ...message.poll, closedAt: incoming.at };
 }
 
 function proposeWork(state, incoming) {
@@ -2287,6 +2315,11 @@ export const PIN_LIMIT = 50;
 export const PIN_COMMAND_SHAPES = Object.freeze({
   [EVENT_TYPES.MESSAGE_PINNED]: "messageId",
   [EVENT_TYPES.MESSAGE_UNPINNED]: "messageId"
+});
+
+// Polls: closing a poll carries only the target message id.
+export const POLL_COMMAND_SHAPES = Object.freeze({
+  [EVENT_TYPES.MESSAGE_POLL_CLOSED]: "messageId"
 });
 
 function pinTarget(incoming) {
