@@ -18,7 +18,7 @@ import {railActor} from "./trial-task-store.mjs";
 // buyer sign-off loop (server/buyer-signoff.mjs), which overlays a trial
 // task's `submitted` state without editing the trial-task state machine.
 import { canonicalJson } from '../src/audit-receipts.mjs';
-import { validId } from '../src/events.js';
+import { validId, ownMember } from '../src/events.js';
 
 const fail = (status, code, message) => { throw Object.assign(new Error(message), { status, code }); };
 const check = (ok, message) => { if (!ok) fail(422, 'invalid_demigod_offer', message); };
@@ -115,7 +115,9 @@ export class DemigodOffers {
   }
 
   memberOf(state, memberId, what) {
-    const member = state.members[memberId];
+    // #1004 follow-up: own-property lookup — an inherited Object.prototype
+    // name must never satisfy "active room member".
+    const member = ownMember(state.members, memberId);
     check(member && member.active !== false, `${what} must be an active room member`);
     return member;
   }
