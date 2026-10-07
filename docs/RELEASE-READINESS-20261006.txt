@@ -31,6 +31,17 @@ Current qualification checkpoint (2026-10-07 UTC)
 - Candidate schema38 requires schema-aware recovery: old schema37 code rejects
   migrated stores. Never blindly restore an older/unknown-schema Worker;
   retain truthful recovery receipts and require roll-forward when necessary.
+- Final browser repair packets are assembled. All57 distinct browser-four
+  nonvisual owners pass; canonical Linux login/room baseline captures are
+  reviewed and updated with unchanged pixel thresholds. Final Linux visual
+  qualification remains required; Mac font differences are not re-baselined.
+- Actual product repairs preserve 320px/200% enlarged text, close People on
+  sign-out and focus visible account choices/fields with the original field
+  priority. The normal entrance still has only the wordmark and three actions.
+- Latest main bab1ffe2 is reconciled: documentation403/publicReceipts parity
+  and its real route owner are included; canonical alias recovery remains.
+  Focused entry/route owners pass32/32, and current auth/push/recovery/manifest
+  unit owners pass67/67 on Node24. Lint passes with124 existing warnings.
 - A corrected exact-head protected CI run, main push gates and serialized
   production deployment remain mandatory. Focused/local checks do not replace
   these gates. Bodies-at-rest remains explicitly OFF for both Workers.
