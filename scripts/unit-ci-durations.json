@@ -926,7 +926,8 @@
   "tests/updates-ui.test.js": 80,
   "tests/human-push-ui.test.js": 57,
   "tests/agent-onboarding-drift.test.mjs": 66,
-  "tests/landing-facts.test.js": 70
+  "tests/landing-facts.test.js": 70,
+  "tests/trace-entry-workflow.test.js": 947.654
  },
  "_note": "Per-file wall-clock ms of `node --test <file>` measured 2026-10-06 on a 2-CPU host with 16-way parallelism (values are contention-inflated; used only as relative weights for shard balancing, never for membership). Files hitting the 300s measurement timeout are capped at 300000.",
  "releaseRecordMeasurement": "Eight record-rail files measured on macOS Node26, four concurrent real Node processes, 2026-10-06; all eight passed. Timing allocates files only.",
@@ -943,6 +944,13 @@
   "runtime": "macOS solo real node --test",
   "file": "tests/landing-facts.test.js",
   "milliseconds": 70,
+  "purpose": "Measured allocation only; test discovery remains authoritative."
+ },
+ "traceWorkflowMeasurement": {
+  "date": "2026-10-07",
+  "runtime": "Node 24.19 Linux solo node --test",
+  "file": "tests/trace-entry-workflow.test.js",
+  "milliseconds": 947.654,
   "purpose": "Measured allocation only; test discovery remains authoritative."
  }
 }
