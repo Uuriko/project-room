@@ -75,4 +75,6 @@ test("room file routes stage a composer upload and commit it onto a message", as
   assert.equal((await request("/api/rooms/commons/files/nope-1")).status, 404);
   assert.equal((await request("/api/rooms/commons/files/file-1", { token: null })).status, 401);
   assert.equal((await request("/api/rooms/commons/files/file-1", { method: "DELETE" })).status, 405);
+  store.revokeRoomCredential("commons", "human", human);
+  assert.equal((await request("/api/rooms/commons/files/file-1")).status, 401, "revoked credentials cannot download committed bytes");
 });

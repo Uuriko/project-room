@@ -43,7 +43,7 @@ test('two humans share one durable run, host claims and publishes a real public 
   assert.equal((await api('owner')).runs[0].status, 'working');
   await api('producer', {action:'report', runId:'shared', attemptId:'host-a', expectedRevision:2, state:'done', summary:'Ready'},422);
   message('producer', 'public-answer', 'Here is the combined result.');
-  await api('producer', {action:'report', runId:'shared', attemptId:'host-a', expectedRevision:2, state:'done', summary:'Combined both inputs; result ready.', resultMessageId:'public-answer'});
+  await api('producer', {action:'report', runId:'shared', attemptId:'host-a', expectedRevision:2, state:'done', summary:'Combined both inputs; result ready.', resultMessageId:'public-answer', appliedInputMessageIds:['question','constraint']});
   const owner = await api('owner'), friend = await api('guest');
   assert.deepEqual(owner.runs, friend.runs);
   assert.equal(friend.runs[0].resultMessageId, 'public-answer');
@@ -53,6 +53,35 @@ test('two humans share one durable run, host claims and publishes a real public 
   f.store = new RoomStore(join(f.directory, 'room.sqlite'));
   const reopened = new RoomAssistant(f.store).list('commons', () => f.store.authenticate(f.keys.guest, 'commons'));
   assert.equal(reopened.runs[0].status, 'done');
+});
+
+test('completion accounts for late group contributions and refuses partial completion atomically', async t => {
+  const { api, message } = await setup(t);
+  await api('owner', {action:'configure',expectedRevision:0,name:'Room',coordinatorMemberId:'producer'});
+  message('owner','initial-goal');
+  await api('owner',{action:'invoke',runId:'late-input',sourceMessageId:'initial-goal'});
+  await api('producer',{action:'claim',runId:'late-input',attemptId:'host',expectedRevision:0});
+  await api('producer',{action:'report',runId:'late-input',attemptId:'host',expectedRevision:1,state:'working',summary:'Read the initial request.',appliedInputMessageIds:['initial-goal']});
+  message('guest','late-constraint','Also preserve the draft.');
+  await api('guest',{action:'contribute',runId:'late-input',sourceMessageId:'late-constraint',expectedRevision:2});
+  message('producer','late-answer','Result incorporating the shared request.');
+  const completion={action:'report',requestId:'finish-late-input',runId:'late-input',attemptId:'host',expectedRevision:3,state:'done',summary:'Ready.',resultMessageId:'late-answer'};
+  const rejected=await api('producer',completion,409);
+  assert.equal(rejected.error.code,'assistant_inputs_pending');
+  const unchanged=(await api('owner')).runs[0];
+  assert.equal(unchanged.revision,3);
+  assert.equal(unchanged.status,'working');
+  assert.equal(unchanged.resultMessageId,undefined);
+  assert.equal(unchanged.activity.length,1);
+  assert.deepEqual(unchanged.inputs.map(i=>i.status),['applied','pending']);
+  // A refused write has no successful retry receipt. Correcting the same request
+  // accounts for the new contribution without losing the earlier acknowledgment.
+  const corrected={...completion,appliedInputMessageIds:['late-constraint']};
+  const done=await api('producer',corrected);
+  assert.equal(done.result.status,'done');
+  assert.deepEqual(done.result.inputs.map(i=>i.status),['applied','applied']);
+  assert.deepEqual(await api('producer',corrected),done);
+  assert.equal((await api('guest')).runs[0].activity.length,2);
 });
 
 test('conflict is explicit, decision is authorized, and cancellation awaits host confirmation', async t => {
@@ -233,4 +262,92 @@ test('resume is requester/owner controlled, revision fenced and acknowledged by 
   await api('producer',{action:'report',runId:'resume',attemptId:'new-host',expectedRevision:6,state:'working',summary:'New host'},409);
   await api('producer',{action:'report',runId:'resume',attemptId:'original',expectedRevision:6,state:'working',summary:'Original host confirmed resume.'});
   assert.equal((await api('guest')).runs[0].status,'working');
+});
+
+for (const stopBeforeDelete of [false, true]) test(`deleted opening retains content-free authorized stop controls (stop before deletion: ${stopBeforeDelete})`, async t => {
+  const { f, api, message, origin } = await setup(t);
+  const erased = 'ERASED-OPENING-CONTENT';
+  await api('owner',{action:'configure',expectedRevision:0,name:'Room',coordinatorMemberId:'producer'});
+  message('guest','deleted-opening',erased);
+  await api('guest',{action:'invoke',runId:'deleted-run',sourceMessageId:'deleted-opening'});
+  await api('producer',{action:'claim',runId:'deleted-run',attemptId:'reserved-host',expectedRevision:0});
+  const earlier = { action:'report',requestId:'pre-delete-report',runId:'deleted-run',attemptId:'reserved-host',expectedRevision:1,state:'working',summary:erased };
+  await api('producer',earlier);
+  if (stopBeforeDelete) await api('guest',{action:'cancel',runId:'deleted-run',expectedRevision:2});
+  const deleted = await fetch(`${origin}/api/rooms/commons/commands`,{method:'POST',headers:{authorization:`Bearer ${f.keys.owner}`,'content-type':'application/json'},body:JSON.stringify({id:randomUUID(),type:'message.deleted',data:{messageId:'deleted-opening',expectedMessageRevision:0}})});
+  assert.equal(deleted.status,201,await deleted.text());
+  const storedMessage=f.store.room('commons').state.messages.find(m=>m.id==='deleted-opening');
+  assert.equal(storedMessage.body,null); assert.deepEqual(storedMessage.editHistory,[]);
+  for (const actor of ['owner','guest','producer']) {
+    const view=await api(actor); assert.equal(view.runs.length,1,'authorized participants retain a stop handle for the deleted request');
+    const control=view.runs[0]; assert.equal(control.sourceDeleted,true); assert.equal(control.attemptId,'reserved-host');
+    assert.deepEqual(control.inputs,[]); assert.deepEqual(control.activity,[]);
+    assert.doesNotMatch(JSON.stringify(view),new RegExp(erased));
+  }
+  const replay=await api('producer',earlier);
+  assert.equal(replay.result.revision,2,'retry preserves the original committed receipt');
+  assert.equal(replay.result.sourceDeleted,true); assert.doesNotMatch(JSON.stringify(replay),new RegExp(erased));
+  assert.equal((await api('reviewer')).runs.length,0,'unrelated member sees no deleted run handle');
+  let revision=stopBeforeDelete?3:2;
+  await api('reviewer',{action:'cancel',runId:'deleted-run',expectedRevision:revision},404);
+  await api('producer',{action:'report',runId:'deleted-run',attemptId:'reserved-host',expectedRevision:revision,state:'working',summary:'Not a stop'},404);
+  await api('producer',{action:'report',runId:'deleted-run',attemptId:'reserved-host',expectedRevision:revision,state:'done',summary:'Not a stop',resultMessageId:'test-welcome'},404);
+  await api('guest',{action:'resume',runId:'deleted-run',expectedRevision:revision},404);
+  if (!stopBeforeDelete) {
+    const paused=await api('guest',{action:'pause',runId:'deleted-run',expectedRevision:revision++});
+    assert.equal(paused.result.status,'pause_requested'); assert.deepEqual(paused.result.activity,[]);
+    await api('producer',{action:'report',runId:'deleted-run',attemptId:'wrong-host',expectedRevision:revision,state:'paused',summary:'Wrong attempt'},409);
+    const ack=await api('producer',{action:'report',runId:'deleted-run',attemptId:'reserved-host',expectedRevision:revision++,state:'paused',summary:'Stopped'});
+    assert.equal(ack.result.status,'paused');
+    await api('owner',{action:'cancel',runId:'deleted-run',expectedRevision:revision++});
+  }
+  const cancellation={action:'report',requestId:'deleted-stop-once',runId:'deleted-run',attemptId:'reserved-host',expectedRevision:revision,state:'cancelled',summary:'Cancellation acknowledged'};
+  const ack=await api('producer',cancellation); assert.equal(ack.result.status,'cancelled');
+  assert.deepEqual(await api('producer',cancellation),ack,'exact acknowledgment retry remains idempotent');
+  assert.deepEqual(ack.result.activity,[]); assert.doesNotMatch(JSON.stringify(ack),new RegExp(erased));
+  assert.equal(JSON.parse(f.store.db.prepare('SELECT value FROM room_assistant_runs WHERE run_id=?').get('deleted-run').value).status,'cancelled');
+  const member=f.store.room('commons').state.members.producer;
+  f.store.command(f.keys.owner,'commons',{id:randomUUID(),type:'member.access_changed',data:{memberId:'producer',expectedMemberRevision:member.revision??0,permissions:['accept_work','complete_work'],active:false}});
+  await api('producer',cancellation,401);
+});
+
+test('deleted stop handles and historical receipts remain behind the original history floor', async t => {
+  const { f, api, message, origin }=await setup(t);
+  const frozen=f.store.now(); f.store.now=()=>frozen;
+  message('owner','before-host','ERASED-HISTORY');
+  const command=(type,data)=>f.store.command(f.keys.owner,'commons',{id:randomUUID(),type,data});
+  command('member.added',{memberId:'late-host',displayName:'Late host',kind:'agent',permissions:['accept_work','complete_work'],accountableHumanId:'owner'});
+  f.keys['late-host']=f.store.issueAccessKey('commons','late-host');
+  await api('owner',{action:'configure',expectedRevision:0,name:'Room',coordinatorMemberId:'late-host'});
+  await api('owner',{action:'invoke',runId:'older-run',sourceMessageId:'before-host'});
+  const claim={action:'claim',requestId:'old-claim',runId:'older-run',attemptId:'late-attempt',expectedRevision:0};
+  await api('late-host',claim);
+  command('room.history_visibility_set',{historyVisibility:'since_join'});
+  const response=await fetch(`${origin}/api/rooms/commons/commands`,{method:'POST',headers:{authorization:`Bearer ${f.keys.owner}`,'content-type':'application/json'},body:JSON.stringify({id:randomUUID(),type:'message.deleted',data:{messageId:'before-host',expectedMessageRevision:0}})});
+  assert.equal(response.status,201,await response.text());
+  assert.equal((await api('late-host')).runs.length,0,'reserved host does not gain access to pre-join source metadata');
+  await api('late-host',claim,404);
+  const stopped=await api('owner',{action:'cancel',runId:'older-run',expectedRevision:1});
+  assert.equal(stopped.result.sourceDeleted,true); assert.doesNotMatch(JSON.stringify(stopped),/ERASED-HISTORY/);
+  await api('late-host',{action:'report',runId:'older-run',attemptId:'late-attempt',expectedRevision:2,state:'cancelled',summary:'Stopped'},404);
+});
+
+test('completed historical report replay after deletion strips result links and activity without reviving execution', async t => {
+  const {api,message,origin,f}=await setup(t);
+  await api('owner',{action:'configure',expectedRevision:0,name:'Room',coordinatorMemberId:'producer'});
+  message('owner','done-opening','ERASED-DONE-PROMPT');
+  await api('owner',{action:'invoke',runId:'done-deleted',sourceMessageId:'done-opening'});
+  await api('producer',{action:'claim',runId:'done-deleted',attemptId:'done-host',expectedRevision:0});
+  message('producer','done-result','ERASED-DONE-RESULT');
+  const completed={action:'report',requestId:'done-before-delete',runId:'done-deleted',attemptId:'done-host',expectedRevision:1,state:'done',summary:'ERASED-DONE-SUMMARY',resultMessageId:'done-result',appliedInputMessageIds:['done-opening']};
+  await api('producer',completed);
+  const deleted=await fetch(`${origin}/api/rooms/commons/commands`,{method:'POST',headers:{authorization:`Bearer ${f.keys.owner}`,'content-type':'application/json'},body:JSON.stringify({id:randomUUID(),type:'message.deleted',data:{messageId:'done-opening',expectedMessageRevision:0}})});
+  assert.equal(deleted.status,201,await deleted.text());
+  const replay=await api('producer',completed);
+  assert.equal(replay.result.status,'done');assert.equal(replay.result.revision,2);assert.equal(replay.result.attemptId,'done-host');
+  assert.equal(replay.result.sourceDeleted,true);assert.equal(Object.hasOwn(replay.result,'resultMessageId'),false);
+  assert.deepEqual(replay.result.inputs,[]);assert.deepEqual(replay.result.activity,[]);assert.doesNotMatch(JSON.stringify(replay),/ERASED-DONE/);
+  await api('producer',{...completed,requestId:'new-done',expectedRevision:2},404);
+  await api('owner',{action:'resume',runId:'done-deleted',expectedRevision:2},404);
+  assert.equal(JSON.parse(f.store.db.prepare('SELECT value FROM room_assistant_runs WHERE run_id=?').get('done-deleted').value).revision,2);
 });

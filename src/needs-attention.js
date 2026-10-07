@@ -11,6 +11,7 @@ const KIND_LABEL = {
   decision: "Decision",
   spend: "Spend",
   claim_lease: "Claim lease",
+  jev_escalation: "Shadow diagnostic",
 };
 
 export function createNeedsAttentionCard(options) {
@@ -102,7 +103,9 @@ export function createNeedsAttentionCard(options) {
   function actionControls(item) {
     const controls = item.actions.map((action, index) => {
       if (action.method === "GET" && item.kind !== "spend") {
-        return `<a class="button ghost" href="#pr-record/work/${esc(encodeURIComponent(item.id))}" data-open-work="${esc(item.id)}">Review</a>`;
+        const workId = item.kind === "jev_escalation" ? item.workItemId : item.id;
+        return workId ? `<a class="button ghost" href="#pr-record/work/${esc(encodeURIComponent(workId))}" data-open-work="${esc(workId)}">Review</a>`
+          : `<a class="button ghost" href="${esc(action.path)}">Diagnostics</a>`;
       }
       if (action.method === "POST" && action.body) {
         const label = action.action === "approve" ? "Approve" : action.action === "deny" ? (item.requestKind === "permissions" ? "Decline" : "Deny") : action.action;
@@ -200,6 +203,11 @@ export function createNeedsAttentionCard(options) {
     }
   }
 
+  const includeShadow = () => Boolean(globalThis.document?.body?.classList?.contains("human-advanced"));
+  globalThis.document?.addEventListener?.("change", event => {
+    if (event.target?.id === "human-advanced") queueMicrotask(() => refresh());
+  });
+
   async function refresh(cursor = null) {
     if (!client.session || !canReview()) { hide(); return; }
     if (hasRoomState && !client.ownsAccountSession()) { hide(); client.endAccess(); return; }
@@ -213,7 +221,7 @@ export function createNeedsAttentionCard(options) {
     setBusy(true);
     setStatus("Checking…");
     try {
-      let report = await client.needsAttention(cursor);
+      let report = await client.needsAttention(cursor, { includeShadow: includeShadow() });
       if (!owns(ticket, session, generation)) return;
       if (hasRoomState) {
         const queue = await client.request(client.path("/access-requests?status=pending"));
@@ -273,7 +281,7 @@ export function createNeedsAttentionCard(options) {
       setBusy(wasBusy);
     }
     authority = grants;
-    const next = `${identity}:${client.sequence}`;
+    const next = `${identity}:${client.sequence}:${includeShadow()}`;
     if (next === observed) return;
     observed = next;
     // Preserve the reader's selected page and unsent partial selection. Manual

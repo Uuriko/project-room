@@ -106,12 +106,12 @@ for (const width of [1440, 390]) {
     await card(owner).locator('[data-action="decide"]').click();
     await owner.locator("#action-result-diff").getByText(/Resubmitted result/).waitFor();
     assert.match(await owner.locator("#action-text-body").textContent(), /Result B/);
-    const rationale = f.send("owner", T.MESSAGE_POSTED, { messageId: randomUUID(), workItemId: "revision-journey", body: "I approve the named owner in result B." });
     await owner.locator('#action-fields [name="decision"]').selectOption("approved");
     await owner.locator('#action-fields [name="reason"]').fill("Named owner checked in result B");
-    await owner.locator('#action-fields [name="sourceMessageId"]').fill(rationale.event.data.messageId);
+    assert.equal(await owner.locator('#action-fields [name="sourceMessageId"]').count(),0);
     await owner.locator('#action-form button[type="submit"]').click();
     await owner.locator("#action-dialog").waitFor({ state: "hidden" });
+    assert.equal(f.store.room("commons").state.messages.find(m=>m.id===f.item().decision.sourceMessageId).body,"Named owner checked in result B");
     assert.equal(f.item().decision.decision, "approved");
     assert.equal(f.item().decision.completionEventId, second.event.id);
     // Pin the slow ordering: the previous version's read lands after the current

@@ -330,6 +330,7 @@ let recovery;
 let leavingPage = false;
 let composerFiles = [];
 let roomFilesByMessage = new Map();
+const messageFileDownloads = new Map();
 try { recovery = new DraftRecovery(navigator.userAgent.includes("ProjectRoomMac/") ? window.localStorage : window.sessionStorage); } catch { recovery = new DraftRecovery(null); }
 const draftScope = draftRecoveryScope;
 const client = new RoomClient({
@@ -504,6 +505,7 @@ const client = new RoomClient({
     clearStoredPasswords();
     composerFiles = [];
     roomFilesByMessage = new Map();
+    messageFileDownloads.clear();
     renderComposerFiles();
     $("#work-dialog").close();
     $("#room-overview-dialog").close();
@@ -1757,7 +1759,8 @@ function syncWorkForm() {
   $("#verifier-select").disabled = !reviewing;
   $("#verifier-select").required = reviewing;
   const checks = [reviewing && "Review", $("#require-decision").checked && "approval"].filter(Boolean);
-  $("#work-options-summary").textContent = `${checks.join(" + ") || "Evidence only"} · ${writing ? "external write" : "read only"}`;
+  $("#work-options-summary").textContent = !reviewing && active.length === 1 && active[0].kind === "human" && active[0].id === session.member.id
+    ? uiText("human.workNoReview") : `${checks.join(" + ") || "Evidence only"} · ${writing ? "external write" : "read only"}`;
   for (const id of ["assignee-select", "verifier-select"]) {
     const select = $(`#${id}`);
     select.setCustomValidity(!select.disabled && select.selectedOptions[0]?.disabled ? "This member is no longer eligible. Choose another member." : "");
@@ -2453,7 +2456,45 @@ function reactionButtonsFor(m) {
 function messageFileChips(messageId) {
   const files = roomFilesByMessage.get(messageId) ?? [];
   if (!files.length) return "";
-  return `<div class="message-files">${files.map(file => `<span class="file-chip">${esc(fileChipLabel(file.filename))}</span>`).join("")}</div>`;
+  return `<div class="message-files">${files.map(file => {
+    const download = messageFileDownloads.get(file.id);
+    return `<span class="file-chip"><button type="button" data-download-file="${esc(file.id)}" data-file-message="${esc(messageId)}" data-focus-key="file-download:${esc(file.id)}" aria-label="${esc(uiText("file.download.action", { filename: fileChipLabel(file.filename) }))}"${download?.busy ? ' aria-disabled="true" aria-busy="true"' : ""}>${esc(fileChipLabel(file.filename))}</button>${download?.status ? `<span role="status">${esc(download.status)}</span>` : ""}</span>`;
+  }).join("")}</div>`;
+}
+async function downloadMessageFile(id, messageId) {
+  const file = roomFilesByMessage.get(messageId)?.find(entry => entry.id === id);
+  const authSession = client.session, generation = client.generation, roomId = state?.room?.id;
+  const owns = () => Boolean(state && session === authSession && client.session === authSession
+    && client.generation === generation && state.room?.id === roomId && client.ownsAccountSession()
+    && conversation.byId.get(messageId) && !conversation.byId.get(messageId).deletedAt);
+  if (!file || file.state !== "committed" || !owns() || messageFileDownloads.get(id)?.busy) return;
+  const pending = { busy: true, status: uiText("file.download.pending") };
+  messageFileDownloads.set(id, pending); renderMessages();
+  try {
+    const result = await client.request(client.path(`/files/${encodeURIComponent(id)}`));
+    if (!owns() || messageFileDownloads.get(id) !== pending) return;
+    const attachment = result?.attachment;
+    if (result.roomId !== roomId || attachment?.id !== id || attachment.messageId !== messageId
+      || attachment.state !== "committed" || attachment.encoding !== "base64" || typeof attachment.data !== "string"
+      || attachment.sha256 !== file.sha256 || attachment.byteLength !== file.byteLength) throw new Error("attachment_unconfirmed");
+    const bytes = Uint8Array.from(atob(attachment.data), char => char.charCodeAt(0));
+    if (bytes.length !== file.byteLength || bytes.length > COMPOSER_FILE_BYTES) throw new Error("attachment_unconfirmed");
+    const digest = [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))].map(value => value.toString(16).padStart(2, "0")).join("");
+    if (digest !== file.sha256) throw new Error("attachment_unconfirmed");
+    if (!owns() || messageFileDownloads.get(id) !== pending) return;
+    const url = URL.createObjectURL(new Blob([bytes], { type: "application/octet-stream" }));
+    const link = document.createElement("a");
+    link.href = url; link.download = file.filename; link.hidden = true;
+    document.body.append(link); link.click(); link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    pending.status = uiText("file.download.started");
+  } catch (error) {
+    if (!owns() || messageFileDownloads.get(id) !== pending) return;
+    if ([401, 403].includes(error.status) || error.code === "session_binding_changed") { client.handleFailure(error); return; }
+    pending.status = [404, 410].includes(error.status) ? uiText("file.download.unavailable") : uiText("file.download.retry");
+  } finally {
+    if (owns() && messageFileDownloads.get(id) === pending) { pending.busy = false; renderMessages(); }
+  }
 }
 function renderComposerFiles() {
   const host = $("#composer-attachments");
@@ -4032,6 +4073,8 @@ function submitRequest(form) {
 // The menu lifting click listener is no longer needed (content-visibility
 // removed from .message). The menu positions correctly without it.
 $("#message-list").addEventListener("click", e => {
+  const file = e.target.closest("[data-download-file]");
+  if (file) { void downloadMessageFile(file.dataset.downloadFile, file.dataset.fileMessage); return; }
   if (e.target.closest("[data-empty-write]")) { $("#message-input").focus(); return; }
   if (e.target.closest("[data-empty-invite]")) { $("#invite-people-button")?.click(); return; }
   const chip = e.target.closest("[data-mention-id]");
@@ -5562,6 +5605,16 @@ function openWork(sourceId = null, reuseId = null) {
   $("#source-context").textContent = sourceId ? `Source: ${state.messages.find(m => m.id === sourceId)?.body || ""}` : "";
   $("#source-context").hidden = !sourceId; $("#work-title-input").focus();
   syncWorkForm();
+  // Only initial creation in a genuinely solo room has one valid assignee.
+  // Reused definitions and subsequent live edits retain their existing choices.
+  const active = Object.values(state.members).filter(member => member.active !== false);
+  const sole = active.length === 1 && active[0];
+  if (!definition && sole?.kind === "human" && sole.id === session.member.id
+    && WORK_PERMISSIONS.every(permission => sole.permissions.includes(permission))) {
+    $("#assignee-select").value = sole.id;
+    if (!roomPolicy(state).requireIndependentReview) $("#require-verification").checked = false;
+    syncWorkForm();
+  }
 }
 function closeWorkForm({ returnFocus = true } = {}) {
   const unconfirmed = workRetryLocked;
@@ -5912,13 +5965,18 @@ function openWorkAction(item, action, draftMessageId = null, offerId = null) {
   if (action === "complete" && !draftMessageId && humanExperience.shareResult(item)) return;
   const [type, , fields] = actionSpecs[action];
   actionEpoch++;
-  pendingAction = { type, action, workId: item.id, revision: item.revision, draftMessageId, receipt: item.receipt ? { completionEventId: item.receipt.eventId, evidenceVersion: item.receipt.evidenceVersion } : null, retry: null, uncertain: false, error: "" };
+  const publishRationale = action === "decide" && document.body.classList.contains("human-experience") && !document.body.classList.contains("human-advanced");
+  pendingAction = { type, action, workId: item.id, revision: item.revision, draftMessageId, publishRationale, receipt: item.receipt ? { completionEventId: item.receipt.eventId, evidenceVersion: item.receipt.evidenceVersion } : null, retry: null, uncertain: false, error: "" };
   if (isHelpAction(action)) {
     pendingAction.helpRevision = item.helpWanted?.revision ?? 0;
     pendingAction.accountableRevision = state.members[item.accountableMemberId]?.revision;
   }
   if (isOfferAction(action)) pinOffer(pendingAction, item, offerId);
   $("#action-fields").innerHTML = action === "complete" ? producerField() + (draftMessageId ? area("summary", "Summary") + area("nextAction", "Next step") : fields) : fields;
+  if (pendingAction.publishRationale) {
+    $("#action-fields [name=sourceMessageId]").closest("label").remove();
+    $("#action-fields").insertAdjacentHTML("beforeend", uiText("human.decisionRationaleNotice"));
+  }
   if (action === "help") {
     const keep = item.helpWanted?.status === "open" && Date.parse(item.helpWanted.expiresAt) > Date.now();
     $("#action-fields").innerHTML = '<label>What would help?<textarea name="scope" required rows="3" maxlength="600"></textarea></label><label>Available for<select name="duration" required>'
@@ -6109,6 +6167,8 @@ $("#refresh-action").addEventListener("click", () => {
         entry.helpExpiresAt = null;
       }
     }
+    entry.decisionDispatched = false;
+    if (changedResult) entry.rationale = null;
     if (changedResult) for (const field of $("#action-fields").querySelectorAll("select[name='result'],select[name='decision']")) field.value = "";
     renderActionContext(item, entry.action);
   }).then(() => {
@@ -6183,11 +6243,31 @@ $("#action-form").addEventListener("submit", e => {
       evidenceMessageEventId: entry.text.messageEventId, evidenceVersion: entry.text.evidenceVersion, previousCompletionEventId: entry.receipt?.completionEventId ?? null });
     if (entry.action === "claim") data.paths = fields.paths.split("\n").map(p => p.trim()).filter(Boolean);
     if (["verify", "decide"].includes(entry.action)) Object.assign(data, entry.receipt);
-    entry.retry = draftCommand(entry.retry, entry.type, data);
+    if (entry.publishRationale) {
+      data.reason = fields.reason.trim();
+      entry.rationale = draftCommand(entry.rationale, T.MESSAGE_POSTED, { messageId: entry.rationale?.command.data.body === data.reason ? entry.rationale.command.data.messageId : crypto.randomUUID(), body: data.reason });
+      data.sourceMessageId = entry.rationale.command.data.messageId;
+    }
+    const retry = draftCommand(entry.retry, entry.type, data);
+    if (retry !== entry.retry) entry.decisionDispatched = false;
+    entry.retry = retry;
   }
   submit(e.currentTarget, async current => {
     const owns = () => current() && pendingAction === entry && actionEpoch === epoch && sameSession(generation, roomId, memberId);
     try {
+      if (entry.rationale && !entry.rationale.confirmed) {
+        const receipt = await client.send(entry.rationale.command);
+        if (!owns()) return;
+        if (!await confirmsWorkAction(receipt, entry.rationale.command, roomId, memberId)) throw new Error(uiText("human.decisionReceiptUnknown"));
+        if (!owns()) return;
+        entry.rationale.confirmed = true;
+      }
+      // A rationale can settle after the result changed. Never silently rebase
+      // its verdict; uncertain decision retries still reconcile the original.
+      if (entry.publishRationale && !entry.decisionDispatched && actionChanged(entry)) {
+        entry.uncertain = false; entry.needsReview = true; entry.error = uiText("human.decisionRationaleChanged"); return;
+      }
+      entry.decisionDispatched = true;
       const receipt = await client.send(entry.retry.command);
       if (!owns()) return;
       if (!await confirmsWorkAction(receipt, entry.retry.command, roomId, memberId)) throw new Error("Save receipt could not be confirmed");

@@ -2,7 +2,7 @@ import { openMagicSignin, backToPasswordSignin } from "./signin-browser-journey.
 // Welcome, sign-out, and return-to-room checks for a new human account.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium } from "playwright";
@@ -110,6 +110,8 @@ test("email link sign-in returns to the last room, pending entry is guarded, and
   await page.locator("#composer-file").setInputFiles({ name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("hello from the composer") });
   const uploaded = await upload;
   assert.equal(uploaded.status(), 201);
+  assert.equal((await uploaded.json()).attachment.state, "staged");
+  assert.equal(await page.getByRole("button", { name: "Download notes.txt", exact: true }).count(), 0, "staged upload cannot masquerade as a committed message attachment");
   await page.waitForFunction(() => {
     const chip = document.querySelector("#composer-attachments .file-chip");
     const text = chip?.textContent ?? "";
@@ -120,10 +122,54 @@ test("email link sign-in returns to the last room, pending entry is guarded, and
   await page.locator("#message-form button[type=submit]").click();
   assert.equal((await commit).ok(), true);
   await page.locator("#message-list .file-chip", { hasText: "notes.txt" }).waitFor();
+  const fileButton = page.getByRole("button", { name: "Download notes.txt", exact: true });
+  assert.equal(await fileButton.count(), 1, "committed upload has a keyboard-accessible download action");
+  await fileButton.focus();
+  const downloaded = page.waitForEvent("download");
+  await page.keyboard.press("Enter");
+  const download = await downloaded;
+  assert.equal(download.suggestedFilename(), "notes.txt");
+  assert.equal(download.failure ? await download.failure() : null, null);
+  assert.deepEqual(readFileSync(await download.path()), Buffer.from("hello from the composer"), "actual downloaded bytes equal uploaded bytes");
+  await page.locator(".message-files [role=status]", { hasText: "Download started" }).waitFor();
+  assert.equal(await fileButton.evaluate(node => document.activeElement === node), true, "keyboard focus stays with the file action after asynchronous delivery");
 
+
+  const fileId = (await uploaded.json()).attachment.id;
+  const filePath = `**/api/rooms/*/files/${fileId}`;
+  let downloads = 1;
+  page.on("download", () => downloads++);
+  await page.route(filePath, route => route.fulfill({ status: 410, json: { error: { code: "attachment_unavailable", message: "Attachment bytes are no longer available" } } }));
+  await fileButton.click();
+  await page.locator(".message-files [role=status]", { hasText: "File unavailable" }).waitFor();
+  assert.equal(downloads, 1, "an unavailable file does not manufacture a download");
+  await page.unroute(filePath);
+  await page.route(filePath, async route => {
+    const response = await route.fetch(), json = await response.json();
+    json.attachment.data = Buffer.from("jello from the composer").toString("base64");
+    await route.fulfill({ response, json });
+  });
+  await fileButton.click();
+  await page.locator(".message-files [role=status]", { hasText: "Couldn’t download. Try again." }).waitFor();
+  assert.equal(downloads, 1, "unconfirmed bytes cannot be offered as a successful file");
+  await page.unroute(filePath);
+  let releaseFile, capturedFile;
+  const held = new Promise(resolve => { releaseFile = resolve; });
+  const captured = new Promise(resolve => { capturedFile = resolve; });
+  await page.route(filePath, async route => {
+    const response = await route.fetch();
+    capturedFile(); await held; await route.fulfill({ response });
+  });
+  await fileButton.click();
+  await captured;
   await page.locator("#session-menu-button").click();
   await page.locator("#signout-button").click();
   await page.locator("#auth-panel").waitFor({ state: "visible" });
+  const staleRead = page.waitForResponse(response => new URL(response.url()).pathname.endsWith(`/files/${fileId}`));
+  releaseFile(); await staleRead;
+  await page.waitForTimeout(100);
+  assert.equal(downloads, 1, "late authenticated bytes do not download after sign-out retired the account");
+  await page.unroute(filePath);
   assert.equal(await page.locator("#email-auth-panel input[type=password]").count(), 0);
   await page.goto(origin + "/");
   await requestAndRedeem();

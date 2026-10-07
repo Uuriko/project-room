@@ -101,20 +101,17 @@ test("work awaiting verification and owner decision surfaces with review links",
   proposeWork(f, "w-clean");
   completeWork(f, "w-verify"); completeWork(f, "w-decide"); completeWork(f, "w-clean");
   const report = f.report();
-  // The three thin shadow receipts (short summary, no recognized artifact
-  // URL) also surface as informational jev_escalation items: the Jev
-  // receipt gate journals every legacy work.completed completion.
-  assert.equal(report.itemCount, 5, "verification + decision + 3 escalated shadow receipts");
-  const kinds = report.items.map(i => i.kind).sort();
-  assert.deepEqual(kinds, ["decision", "jev_escalation", "jev_escalation", "jev_escalation", "verification"]);
+  assert.equal(report.itemCount, 2, "only verification and decision require attention");
+  assert.deepEqual(report.items.map(i => i.kind).sort(), ["decision", "verification"]);
+  const diagnostics = attentionReport({ store: f.store, accessRequests: f.accessRequests }, f.keys.owner, "commons", null, f.clock.now, { includeShadow: true });
+  const shadows = diagnostics.items.filter(item => item.kind === "jev_escalation");
+  assert.equal(shadows.length, 3, "shadow measurements remain available by explicit opt-in");
+  for (const item of shadows) {
+    assert.equal(item.severity, "info");
+    assert.ok(["w-verify", "w-decide", "w-clean"].includes(item.workItemId));
+    assert.ok(item.actions[0].path.startsWith("/api/rooms/commons/jev-shadow"));
+  }
   for (const item of report.items) {
-    if (item.kind === "jev_escalation") {
-      assert.equal(item.severity, "info");
-      assert.equal(item.actions.length, 1);
-      assert.equal(item.actions[0].method, "GET");
-      assert.ok(item.actions[0].path.startsWith("/api/rooms/commons/jev-shadow"), "shadow deep-link");
-      continue;
-    }
     assert.equal(item.severity, "action");
     assert.equal(item.actions.length, 1);
     assert.equal(item.actions[0].method, "GET");

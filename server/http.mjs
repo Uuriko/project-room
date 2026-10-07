@@ -4337,7 +4337,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (route === "needs-attention" && req.method === "GET") {
         // #662: owner-only rollup of everything awaiting an owner decision.
-        return json(res, 200, attentionReport({ store, accessRequests }, selected.token, roomId, fence, Date.now(), { cursor: url.searchParams.get("cursor") }));
+        const shadow = url.searchParams.getAll("includeShadow");
+        if (shadow.length > 1 || shadow.length === 1 && !["true", "false"].includes(shadow[0])) {
+          return json(res, 422, { error: "invalid_attention_query", message: "includeShadow must be a single true or false value" });
+        }
+        return json(res, 200, attentionReport({ store, accessRequests }, selected.token, roomId, fence, Date.now(), { cursor: url.searchParams.get("cursor"), includeShadow: shadow[0] === "true" }));
       }
       if (route === "jev-shadow" && req.method === "GET") {
         // Jev-harness shadow-review surface (docs/JEV-GATES.md): owner-only,

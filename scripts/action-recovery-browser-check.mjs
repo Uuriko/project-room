@@ -12,7 +12,7 @@ import { signInFixture } from "./auth-signin.mjs";
 import { signInFixtureInPlace } from "./in-place-fixture-signin.mjs";
 import { makeTestSigner } from "./helpers/signed-evidence.mjs";
 
-async function setup(t, { action = "complete", mobile = false, live = true } = {}) {
+async function setup(t, { action = "complete", mobile = false, live = true, advanced = true } = {}) {
   const f = createAcceptanceFixture(), workId = "action-recovery";
   const send = (type, data, actor = "owner") => f.store.command(f.keys[actor], "commons", { id: crypto.randomUUID(), type, data });
   const signEvidence = makeTestSigner(f.store);
@@ -64,7 +64,7 @@ async function setup(t, { action = "complete", mobile = false, live = true } = {
     await page.locator("#auth-panel").waitFor({ state: "visible" });
     if (initialLogin) { await signInFixture(page, f.keys[role]); initialLogin = false; }
     else await signInFixtureInPlace(page, f.store, f.keys[role]); await page.locator("#main").waitFor({ state: "visible" });
-    await enableHumanAdvanced(page);
+    if (advanced) await enableHumanAdvanced(page);
   };
   await login(action === "verify" ? "human-reviewer" : "owner");
   const card = page.locator(`[data-work-record-id="${workId}"]`), dialog = page.locator("#action-dialog"), form = page.locator("#action-form"), save = form.locator("button[type=submit]");
@@ -329,3 +329,80 @@ for (const mobile of [false, true]) {
     await page.keyboard.press("Escape"); await f.dialog.waitFor({ state: "hidden" }); await page.locator("#resume-action").click(); await f.unknown();
   });
 }
+
+for(const outcome of ['normal','rationale-lost','rationale-uncommitted','decision-lost','decision-uncommitted','wrong-rationale','empty-rationale']) test(`human approval ${outcome}: typed rationale and exact two-leg retries`,{timeout:30000},async t=>{
+  const f=await setup(t,{action:'decide',advanced:false,mobile:outcome==='normal'}),{page}=f;
+  await f.open();
+  assert.equal(await f.input('sourceMessageId').count(),0,'humans do not transcribe protocol IDs');
+  assert.equal(await page.getByText('Your reason will be posted to the room.',{exact:true}).isVisible(),true);
+  await f.input('decision').selectOption('approved');await f.input('reason').fill('Accept the checked result with café and 🪷.');
+  const before=f.snapshot().sequence,pinned=f.evidence(),attempts=[];
+  let lost=false;
+  await page.route('**/commands',async route=>{
+    const command=route.request().postDataJSON();attempts.push(command);
+    const selected=outcome.startsWith('decision-')?T.OWNER_DECISION_RECORDED:T.MESSAGE_POSTED;
+    if(!lost&&outcome!=='normal'&&command.type===selected) {
+      lost=true;if(outcome.endsWith('uncommitted'))return route.abort('failed');
+      const response=await route.fetch();
+      if(outcome==='empty-rationale')return route.fulfill({status:200,json:{}});
+      if(outcome==='wrong-rationale') {const receipt=await response.json();receipt.event.actorId='guest';return route.fulfill({status:200,json:receipt});}
+      return route.abort('failed');
+    }
+    return route.continue();
+  });
+  await f.save.click();
+  if(outcome!=='normal') {
+    await f.unknown();await page.locator('#cancel-action').click();await page.locator('#resume-action').click();
+    await f.input('reason').evaluate(n=>{n.value='Changed DOM must not replace the original rationale';});
+    await f.save.click();
+  }
+  await f.dialog.waitFor({state:'hidden'});
+  const messages=attempts.filter(c=>c.type===T.MESSAGE_POSTED),decisions=attempts.filter(c=>c.type===T.OWNER_DECISION_RECORDED);
+  assert.equal(messages.length,outcome!=='normal'&&!outcome.startsWith('decision-')?2:1);
+  assert.equal(decisions.length,outcome.startsWith('decision-')?2:1);
+  for(const message of messages)assert.deepEqual(message,messages[0]);for(const decision of decisions)assert.deepEqual(decision,decisions[0]);
+  const decision=f.item().decision,rationale=f.snapshot().state.messages.find(m=>m.id===decision.sourceMessageId);
+  assert.equal(rationale.body,'Accept the checked result with café and 🪷.');assert.equal(rationale.authorId,'owner');assert.equal(rationale.toMemberId,null);
+  assert.equal(decision.reason,rationale.body);assert.equal(decision.completionEventId,pinned.completionEventId);assert.equal(decision.evidenceVersion,pinned.evidenceVersion);
+  assert.equal(f.snapshot().sequence,before+2,'exact retries produce one ordinary rationale and one decision');
+  assert.equal(await page.locator('#resume-action').isVisible(),false);
+});
+
+for(const replacement of ['revision','session','account']) test(`human approval held rationale cannot cross the ${replacement} boundary`,{timeout:30000},async t=>{
+  const f=await setup(t,{action:'decide',advanced:false}),{page}=f;
+  await f.open();assert.equal(await f.input('sourceMessageId').count(),0);
+  await f.input('decision').selectOption('approved');await f.input('reason').fill('Original checked rationale.');
+  const attempts=[];let arrived,release;const held=new Promise(resolve=>arrived=resolve);
+  await page.route('**/commands',async route=>{
+    const command=route.request().postDataJSON();attempts.push(command);
+    if(command.type!==T.MESSAGE_POSTED)return route.continue();
+    const response=await route.fetch();await new Promise(resolve=>{release=resolve;arrived();});
+    return route.fulfill({response,headers:{...response.headers(),'x-test-held':'rationale'}});
+  });
+  await f.save.click();await held;
+  if(replacement==='revision') {
+    f.mutate(T.WORK_BLOCKED,{reason:'Rework',nextAction:'Revise'});f.mutate(T.WORK_BLOCKER_RESOLVED,{resolution:'Ready'});f.complete('v2');
+    f.mutate(T.VERIFICATION_RECORDED,{...f.evidence(),result:'pass',summary:'Checked v2'},'human-reviewer');
+    release();await page.locator('#refresh-action').waitFor({state:'visible'});
+    assert.equal(f.item().decision,null);assert.equal(attempts.filter(c=>c.type===T.OWNER_DECISION_RECORDED).length,0);
+    await page.locator('#refresh-action').click();await page.waitForFunction(()=>document.querySelector('#action-context').textContent.includes('evidence v2'));
+    assert.equal(await f.input('decision').inputValue(),'');assert.equal(await f.input('reason').inputValue(),'Original checked rationale.');
+    await page.unroute('**/commands');await f.input('decision').selectOption('approved');await f.save.click();await f.dialog.waitFor({state:'hidden'});
+    assert.equal(f.item().decision.evidenceVersion,'v2');
+  } else {
+    f.keys.owner=f.store.issueAccessKey('commons','owner');
+    if(replacement==='account') {
+      f.send(T.MEMBER_ACCESS_CHANGED,{memberId:'guest',expectedMemberRevision:0,permissions:['steer','accept_work','complete_work'],active:true});
+      f.send(T.WORK_PROPOSED,{workItemId:'replacement-work',title:'Replacement account task',definitionOfDone:'A note',accountableMemberId:'guest',independentVerificationRequired:false,ownerDecisionRequired:false,mode:'read'});
+      f.send(T.WORK_ACCEPTED,{workItemId:'replacement-work',expectedRevision:0},'guest');
+    }
+    await f.login(replacement==='account'?'guest':'owner');
+    if(replacement==='account') {await clickWorkAction(page.locator('[data-work-record-id="replacement-work"]'),'block');await f.dialog.waitFor({state:'visible'});}
+    else await f.open('block');
+    await f.input('reason').fill('Replacement session draft.');
+    release();await page.waitForFunction(()=>window.oldActionRead);await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(resolve)));
+    assert.equal(f.item().decision,null);assert.equal(attempts.filter(c=>c.type===T.OWNER_DECISION_RECORDED).length,0);
+    assert.equal(await f.input('reason').inputValue(),'Replacement session draft.');assert.equal(await f.input('reason').evaluate(n=>document.activeElement===n),true);
+    assert.equal(await page.locator('#action-error').textContent(),'');assert.equal(await page.locator('#resume-action').isVisible(),false);
+  }
+});

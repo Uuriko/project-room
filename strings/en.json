@@ -9,6 +9,7 @@
   "email.cta.open_in_room": "Open in Room",
   "email.cta.unsubscribe": "Unsubscribe",
   "email.row.fallback_head": "An update is waiting in Room",
+  "human.workNoReview": "No review · Advanced options",
   "human.copy.001": "<div class=\"assistant-heading\"><strong>Room</strong><span id=\"room-assistant-status\"></span><button type=\"button\" id=\"assistant-setup\" class=\"text-button\">Connect</button><button type=\"button\" id=\"human-project-open\" class=\"text-button\">Project</button></div><details id=\"assistant-activity\"><summary>Activity</summary><div id=\"assistant-runs\"></div></details><p id=\"assistant-error\" class=\"form-hint\" role=\"status\"></p><button type=\"button\" id=\"assistant-retry\" class=\"text-button\" hidden>Retry request</button><button type=\"button\" id=\"assistant-review\" class=\"text-button\" hidden>Review current request</button><button type=\"button\" id=\"assistant-discard\" class=\"text-button\" hidden>Dismiss</button>",
   "human.copy.002": "Ask the room assistant in this shared conversation",
   "human.copy.003": "<input id=\"human-advanced\" type=\"checkbox\"> Show advanced agent controls",
@@ -120,5 +121,15 @@
   "profile.failed": "Could not load the profile.",
   "profile.save_failed": "Could not save the profile.",
   "profile.close": "Close",
-  "profile.editing": "editing your profile"
+  "profile.editing": "editing your profile",
+  "file.download.action": "Download {filename}",
+  "file.download.pending": "Downloading…",
+  "file.download.started": "Download started",
+  "file.download.unavailable": "File unavailable",
+  "file.download.retry": "Couldn’t download. Try again.",
+  "human.decisionRationaleNotice": "<p class=\"form-hint\">Your reason will be posted to the room.</p>",
+  "human.decisionReceiptUnknown": "Save receipt could not be confirmed",
+  "human.decisionRationaleChanged": "Your reason was posted. Review the changed result before deciding.",
+  "human.cancelDeleted": "<button type=\"button\" class=\"text-button\" data-pause-run=\"{runId}\" data-cancel=\"true\" data-revision=\"{revision}\">Cancel</button>",
+  "human.deletedRequest": "Deleted request"
 }

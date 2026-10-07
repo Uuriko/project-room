@@ -58,7 +58,7 @@ function reviewAction(roomId, workItemId) {
     path: `/api/rooms/${roomId}/work-context?workItemId=${encodeURIComponent(workItemId)}` });
 }
 
-export function attentionReport(deps, token, roomId, expectedSessionBinding = null, nowMs = Date.now(), { cursor = null } = {}) {
+export function attentionReport(deps, token, roomId, expectedSessionBinding = null, nowMs = Date.now(), { cursor = null, includeShadow = false } = {}) {
   const { store, accessRequests } = deps;
   if (!store || !accessRequests) fail(500, "misconfigured", "Attention rollup is not wired");
   const auth = store.authenticate(token, roomId, expectedSessionBinding);
@@ -135,16 +135,15 @@ export function attentionReport(deps, token, roomId, expectedSessionBinding = nu
     }));
   }
 
-  // 5. Jev-harness shadow escalations (docs/JEV-GATES.md): receipt decisions
-  // the gate WOULD have escalated to a human, surfaced read-only. Shadow
-  // mode changes nothing — this is the human lane the escalate flag points
-  // at, not a new notification system.
-  if (store.jevShadow) {
+  // Shadow measurements never require an owner action. Keep them available
+  // only to an explicitly requested diagnostics view, separate from triage.
+  if (includeShadow && store.jevShadow) {
     for (const entry of store.jevShadow.list({ roomId, escalate: true, limit: 5 })) {
       const label = entry.gate === "receipt" && entry.subject ? `work "${entry.subject}"` : entry.path;
       items.push(Object.freeze({
         kind: "jev_escalation",
         id: entry.id,
+        ...(entry.gate === "receipt" && room.state.workItems?.[entry.subject] ? { workItemId: entry.subject } : {}),
         severity: "info",
         title: `Shadow gate would escalate: ${label}`,
         detail: `Jev ${entry.gate} gate scored ${(entry.score * 100).toFixed(0)}% (would-be: ${entry.decision}) — accepted anyway, shadow mode`,

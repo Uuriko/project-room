@@ -7,6 +7,7 @@ import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
+import { enableHumanAdvanced, openSettings, closeSettings } from "./room-chrome.mjs";
 import { signInFixture } from "./auth-signin.mjs";
 import { signInFixtureInPlace } from "./in-place-fixture-signin.mjs";
 import { AccessRequests } from "../server/access-requests.mjs";
@@ -175,5 +176,31 @@ test("late owner attention page cannot return after signing in as a different me
   assert.equal(await page.locator("#attention-count").textContent(), "");
   assert.equal(await page.locator("#attention-next").isVisible(), false);
   assert.equal(await page.getByText(/Paging applicant/).count(), 0, "previous owner's applicants never appear for the guest");
+  assert.deepEqual(f.errors, []);
+});
+
+
+test("human attention hides shadow diagnostics until Advanced and reviews the actual receipt work", { timeout: 60000 }, async t => {
+  const f = await setup(t, { pending: 1 }), { page } = f;
+  f.store.jevShadow.record({ gate: "receipt", roomId: "commons", subject: "test-handoff", path: "work-claim:done", score: 0.1, decision: "escalate", escalate: true });
+  await page.locator("#attention-refresh").click();
+  await page.waitForFunction(() => document.querySelector("#attention-status").textContent === "");
+  assert.equal(await page.locator(".attention-jev_escalation").count(), 0, "default human view has no shadow measurement");
+  assert.equal(await page.locator("#attention-count").textContent(), "1", "the genuine pending request remains actionable");
+  await enableHumanAdvanced(page);
+  const shadow = page.locator(".attention-jev_escalation");
+  await shadow.waitFor();
+  const review = shadow.getByRole("link", { name: "Review" });
+  assert.equal(await review.getAttribute("href"), "#pr-record/work/test-handoff", "receipt journal ID is not a work ID");
+  await review.click();
+  await page.waitForFunction(() => location.hash === "#pr-record/work/test-handoff");
+  await page.locator('[data-work-record-id="test-handoff"]').waitFor();
+  await openSettings(page, "advanced-room-tools");
+  await page.locator("#human-advanced").uncheck();
+  await closeSettings(page);
+  await page.waitForFunction(() => document.querySelectorAll(".attention-jev_escalation").length === 0);
+  await page.locator('.attention-access_request .attention-decide[data-action-index="0"]').click();
+  await page.locator("#needs-attention").waitFor({ state: "hidden" });
+  assert.equal(f.store.jevShadow.list({ roomId: "commons", escalate: true }).length, 1, "measurement retained for diagnostics after real request approval");
   assert.deepEqual(f.errors, []);
 });
