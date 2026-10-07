@@ -164,7 +164,7 @@ for (const corruption of ["scope", "helper", "helper-revision", "offer-revision"
 
 test("event/projection capacity allows only valid offer cleanup with exact receipts", t => {
   const f = setup(t); f.send("guest", f.open("selected")); f.send("owner", f.open("pending")); f.send("producer", f.update("selected"));
-  const state = structuredClone(f.store.room("commons").state); state.messages.push({ body: "x".repeat(4 * 1024 * 1024) });
+  const state = structuredClone(f.store.room("commons").state); state.messages.push({ body: "x".repeat(PILOT_LIMITS.projectionBytes) });
   // Synthetic capacity projection only; not evidence of recoverable history.
   // G11b: the event cap is PILOT_LIMITS.eventsPerRoom now, not a 10000 literal.
   f.store.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id='commons'").run(PILOT_LIMITS.eventsPerRoom, JSON.stringify(state));
