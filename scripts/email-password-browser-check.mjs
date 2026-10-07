@@ -46,7 +46,7 @@ test("contextual email creation signs in using the actual password signup API", 
 });
 
 test("password signup opens one personal room without optional setup, with profile editing available later", { timeout: 40000 }, async t => {
-  const { page, origin } = await setup(t, { login: false });
+  const { page, origin, store } = await setup(t, { login: false });
   const shots = "test-results/onboarding";
   mkdirSync(shots, { recursive: true });
   await page.evaluate(() => {
@@ -72,10 +72,19 @@ test("password signup opens one personal room without optional setup, with profi
   const rooms = async () => (await (await page.context().request.get(origin + '/api/account-rooms', { headers: { 'X-Session-Binding': account.sessionBinding } })).json()).rooms;
   assert.equal((await rooms()).length, 1, 'automatic first-room creation stays singular');
   const initialRoom = new URL(page.url()).searchParams.get('room');
+  assert.equal(await page.locator('#message-input').evaluate(node => node === document.activeElement), true, 'first personal room is ready to type without a composer click');
+  const firstMessage = 'Hello from my first room, typed without clicking the composer.';
+  await page.keyboard.type(firstMessage);
+  const posted = page.waitForResponse(response => new URL(response.url()).pathname === `/api/rooms/${initialRoom}/commands` && response.request().method() === 'POST');
+  await page.keyboard.press('Enter');
+  assert.equal((await posted).status(), 201);
+  await page.waitForFunction(() => document.querySelector('#message-input').value === '');
+  assert.equal(store.room(initialRoom).state.messages.filter(message => message.body === firstMessage).length, 1, 'keyboard-first message actually persisted once');
   await page.reload(); await page.locator('#main').waitFor({ state: 'visible' });
   assert.equal(await page.locator('#account-setup-dialog').isVisible(), false);
   assert.equal(new URL(page.url()).searchParams.get('room'), initialRoom);
   assert.equal((await rooms()).length, 1, 'reload cannot create another room');
+  assert.equal(store.room(initialRoom).state.messages.filter(message => message.body === firstMessage).length, 1, 'first message survives reload');
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.screenshot({ path: `${shots}/first-run-1280.png` });
   await clickChrome(page, '#account-settings-button');
