@@ -63,9 +63,10 @@ async function fixture(t) {
   // Multi-room agent identity linked into the room.
   const identity = store.identities.create("Roaming agent");
   store.identities.link(ownerKey, "commons", { identityId: identity.identityId, permissions: ["accept_work"] });
-  // Guest agent (2 h credential).
-  const guestAgentToken = GUEST_AGENT_TOKEN_PREFIX + randomBytes(32).toString("base64url");
-  const guestAgent = store.guestAgentLinks.mint(ownerKey, "commons", { requestId: randomUUID(), linkToken: guestAgentToken, expectedOwnerRevision: 0, displayName: "Scout" }, null);
+  // Guest agent (2 h credential). GA-1 (issue #941): the token is always
+  // server-issued; callers never supply linkToken.
+  const guestAgent = store.guestAgentLinks.mint(ownerKey, "commons", { requestId: randomUUID(), expectedOwnerRevision: 0, displayName: "Scout" }, null);
+  const guestAgentToken = guestAgent.token;
   // One-time agent invite codes: one pending (1 h), one revoked that must be absent.
   const invite = store.invites.create(ownerKey, "commons", { profile: "chat", expiresInMinutes: 60, displayName: "Scribe" }, null);
   const revokedInvite = store.invites.create(ownerKey, "commons", { permissions: ["steer"] }, null);

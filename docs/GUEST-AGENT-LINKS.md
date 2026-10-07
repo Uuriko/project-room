@@ -47,10 +47,12 @@ HTTP:
 
 `POST /api/share-links/preview` and `join` reject guest-invite tokens with `wrong_link_kind`.
 
-Mint body (exact known fields): `requestId`, `linkToken` (the guest invite
-token), `expectedOwnerRevision`, optional `displayName` (default `Guest
-agent`). The owner generates the secret; the server stores only its hash and
-returns the same token on an identical retry.
+Mint body (exact known fields): `requestId`, `expectedOwnerRevision`, optional `displayName` (default `Guest
+agent`). GA-1 (issue #941): the token is always issued by the server — a
+256-bit CSPRNG `ga1.` secret returned once, only its hash stored. A mint
+that supplies `linkToken` is rejected with `422 client_token_rejected`
+(the client must never pick the credential — a low-entropy caller token
+would become a live 2h room credential).
 
 The minted token **is** the access credential (`Authorization: Bearer <token>`).
 The Node client accepts it.
